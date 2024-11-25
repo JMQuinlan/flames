@@ -1,5 +1,5 @@
 
-#include "Hydro.H"
+#include "Flames.H"
 #include "IO/ParmParse.H"
 #include "BC/Constant.H"
 #include "BC/Nothing.H"
@@ -18,15 +18,15 @@
 namespace Integrator
 {
 
-Hydro::Hydro(IO::ParmParse& pp) : Hydro()
+Flames::Flames(IO::ParmParse& pp) : Flames()
 {
     pp.queryclass(*this);
 }
 
 void
-Hydro::Parse(Hydro& value, IO::ParmParse& pp)
+Flames::Parse(Flames& value, IO::ParmParse& pp)
 {
-    BL_PROFILE("Integrator::Hydro::Hydro()");
+    BL_PROFILE("Integrator::Flames::Flames()");
     {
         // pp.query_default("r_refinement_criterion",     value.r_refinement_criterion    , 0.01);
         // energy-based refinement
@@ -189,9 +189,9 @@ Hydro::Parse(Hydro& value, IO::ParmParse& pp)
 }
 
 
-void Hydro::Initialize(int lev)
+void Flames::Initialize(int lev)
 {
-    BL_PROFILE("Integrator::Hydro::Initialize");
+    BL_PROFILE("Integrator::Flames::Initialize");
  
     eta_ic           ->Initialize(lev, eta_mf,     0.0);
     eta_ic           ->Initialize(lev, eta_old_mf, 0.0);
@@ -219,7 +219,7 @@ void Hydro::Initialize(int lev)
     Mix(lev);
 }
 
-void Hydro::Mix(int lev)
+void Flames::Mix(int lev)
 {
     Util::Message(INFO, eta_mf[lev]->nComp());
 
@@ -264,17 +264,17 @@ void Hydro::Mix(int lev)
     vy_max = 0.0;
 }
 
-void Hydro::UpdateEta(int lev, Set::Scalar time)
+void Flames::UpdateEta(int lev, Set::Scalar time)
 {
     eta_ic->Initialize(lev, eta_mf, time);
 }
 
-void Hydro::TimeStepBegin(Set::Scalar, int /*iter*/)
+void Flames::TimeStepBegin(Set::Scalar, int /*iter*/)
 {
 
 }
 
-void Hydro::TimeStepComplete(Set::Scalar, int lev)
+void Flames::TimeStepComplete(Set::Scalar, int lev)
 {
     Integrator::DynamicTimestep_Update();
 
@@ -293,7 +293,7 @@ void Hydro::TimeStepComplete(Set::Scalar, int lev)
     SetTimestep(new_timestep);
 }
 
-void Hydro::Advance(int lev, Set::Scalar time, Set::Scalar dt)
+void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 {
 
     std::swap(eta_old_mf, eta_mf);
@@ -607,9 +607,9 @@ void Hydro::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
 }//end Advance
 
-void Hydro::Regrid(int lev, Set::Scalar /* time */)
+void Flames::Regrid(int lev, Set::Scalar /* time */)
 {
-    BL_PROFILE("Integrator::Hydro::Regrid");
+    BL_PROFILE("Integrator::Flames::Regrid");
     Source_mf[lev]->setVal(0.0);
     if (lev < finest_level) return;
 
@@ -617,7 +617,7 @@ void Hydro::Regrid(int lev, Set::Scalar /* time */)
 }//end regrid
 
 //void Hydro::TagCellsForRefinement(int lev, amrex::TagBoxArray &a_tags, Set::Scalar time, int ngrow)
-void Hydro::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Scalar, int)
+void Flames::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Scalar, int)
 {
     BL_PROFILE("Integrator::Flame::TagCellsForRefinement");
 

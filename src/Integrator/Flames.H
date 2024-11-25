@@ -1,5 +1,5 @@
-#ifndef INTEGRATOR_HYDRO_H
-#define INTEGRATOR_HYDRO_H
+#ifndef INTEGRATOR_FLAMES_H
+#define INTEGRATOR_FLAMES_H
 
 #include <string>
 #include <limits>
@@ -23,14 +23,14 @@
 
 namespace Integrator
 {
-class Hydro : virtual public AllenCahn, virtual public Integrator
+class Flames : virtual public AllenCahn, virtual public Integrator
 {
 public:
 
-    Hydro() {};
-    Hydro(IO::ParmParse& pp);
-    static void Parse(Hydro& value, IO::ParmParse& pp);
-    virtual ~Hydro()
+    Flames() {};
+    Flames(IO::ParmParse& pp);
+    static void Parse(Flames& value, IO::ParmParse& pp);
+    virtual ~Flames()
     {
         delete density_bc;
         delete momentum_bc;
