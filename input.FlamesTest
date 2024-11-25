@@ -3,7 +3,6 @@ alamo.program = flames
 ### OUTPUT ###
 
 plot_file = ./output
-#plot_file = /mmfs1/home/jquinlan/alamo_data/VonKarman_test
 
 ### MESHING ###
 
@@ -15,7 +14,7 @@ amr.regrid_int = 100
 amr.grid_eff = 0.8
 
 
-amr.max_level = 4
+amr.max_level = 2
 timestep  = 0.01
 #amr.n_cell = 256 128
 amr.n_cell = 64 32
@@ -34,7 +33,7 @@ geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
 
-stop_time = 10000.0
+stop_time = 100.0
 
 ### ETA IC ###
 
