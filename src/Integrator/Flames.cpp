@@ -233,35 +233,44 @@ void Flames::Mix(int lev)
     {
         const amrex::Box& bx = mfi.growntilebox();
 
-        Set::Patch<const Set::Scalar> eta       = eta_mf.Patch(lev,mfi);
+        Set::Patch<const Set::Scalar> eta_0       = eta_mf.Patch(lev,mfi);
+        Set::Patch<const Set::Scalar> eta_1       = eta_mf.Patch(lev,mfi);
 
-        Set::Patch<const Set::Scalar> v         = velocity_mf.Patch(lev,mfi);
-        Set::Patch<const Set::Scalar> p         = pressure_mf.Patch(lev,mfi);
-        Set::Patch<Set::Scalar>       rho       = density_mf.Patch(lev,mfi);
-        Set::Patch<Set::Scalar>       rho_old   = density_old_mf.Patch(lev,mfi);
-        Set::Patch<Set::Scalar>       M         = momentum_mf.Patch(lev,mfi);
-        Set::Patch<Set::Scalar>       M_old     = momentum_old_mf.Patch(lev,mfi);
-        Set::Patch<Set::Scalar>       E         = energy_mf.Patch(lev,mfi);
-        Set::Patch<Set::Scalar>       E_old     = energy_old_mf.Patch(lev,mfi);
-        Set::Patch<const Set::Scalar> rho_solid = solid.density_mf.Patch(lev,mfi);
-        Set::Patch<const Set::Scalar> M_solid   = solid.momentum_mf.Patch(lev,mfi);
-        Set::Patch<const Set::Scalar> E_solid   = solid.energy_mf.Patch(lev,mfi);
+        Set::Patch<const Set::Scalar> v_0         = velocity_0_mf.Patch(lev,mfi);
+        Set::Patch<const Set::Scalar> v_1         = velocity_1_mf.Patch(lev,mfi);
+        Set::Patch<const Set::Scalar> p           = pressure_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       rho_0       = density_0_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       rho_1       = density_1_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       rho_0_old   = density_0_old_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       rho_1_old   = density_1_old_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       M_0         = momentum_0_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       M_1         = momentum_1_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       M_0_old     = momentum_0_old_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       M_1_old     = momentum_1_old_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       E_0         = energy_0_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       E_1         = energy_1_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       E_0_old     = energy_0_old_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       E_1_old     = energy_1_old_mf.Patch(lev,mfi);
+        // Set::Patch<const Set::Scalar> rho_solid = solid.density_mf.Patch(lev,mfi);
+        // Set::Patch<const Set::Scalar> M_solid   = solid.momentum_mf.Patch(lev,mfi);
+        // Set::Patch<const Set::Scalar> E_solid   = solid.energy_mf.Patch(lev,mfi);
 
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
-            rho(i, j, k) = eta(i, j, k) * rho(i, j, k) + (1.0 - eta(i, j, k)) * rho_solid(i, j, k);
+            eta_1(i, j, k) = (1.0 - eta_0(i, j, k))
+            rho(i, j, k)   = eta_0(i, j, k) * rho_0(i, j, k) + eta_1(i, j, k) * rho_1(i, j, k);
             rho_old(i, j, k) = rho(i, j, k);
 
-            M(i, j, k, 0) = (rho(i, j, k)*v(i, j, k, 0))*eta(i, j, k)  +  M_solid(i, j, k, 0)*(1.0-eta(i, j, k));
-            M(i, j, k, 1) = (rho(i, j, k)*v(i, j, k, 1))*eta(i, j, k)  +  M_solid(i, j, k, 1)*(1.0-eta(i, j, k));
+            M(i, j, k, 0) = (rho_0(i, j, k)*v_0(i, j, k, 0))*eta_0(i, j, k)  +  (rho_1(i, j, k)*v_1(i, j, k, 0))*eta_1(i, j, k);
+            M(i, j, k, 1) = (rho_0(i, j, k)*v_0(i, j, k, 1))*eta_0(i, j, k)  +  (rho_1(i, j, k)*v_1(i, j, k, 1))*eta_1(i, j, k);
             M_old(i, j, k, 0) = M(i, j, k, 0);
             M_old(i, j, k, 1) = M(i, j, k, 1);
 
             E(i, j, k) =
-                (0.5 * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1)) * rho(i, j, k) + p(i, j, k) / (gamma - 1.0)) * eta(i, j, k)
+                (0.5 * (v_0(i, j, k, 0) * v_0(i, j, k, 0) + v_0(i, j, k, 1) * v_0(i, j, k, 1)) * rho_0(i, j, k) + p(i, j, k) / (gamma_0 - 1.0)) * eta_0(i, j, k)
                 +
-                E_solid(i, j, k) * (1.0 - eta(i, j, k));
+                (0.5 * (v_1(i, j, k, 0) * v_1(i, j, k, 0) + v_1(i, j, k, 1) * v_1(i, j, k, 1)) * rho_1(i, j, k) + p(i, j, k) / (gamma_1 - 1.0)) * eta_1(i, j, k);
             E_old(i, j, k) = E(i, j, k);
         });
     }
