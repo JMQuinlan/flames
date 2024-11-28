@@ -48,7 +48,7 @@ eta.ic.expression.constant.vel_x   = 0.0
 eta.ic.expression.constant.vel_y   = 0.0
 eta.ic.expression.constant.x0      = 0.0
 eta.ic.expression.constant.R       = 1.0
-# eta.ic.expression.region0          = "0.5*(1 + tanh((sqrt((x-x0)**2 + (y)**2) - R)/eps))"
+# eta.ic.expression.region0          = "0.5*(1 + tanh((sqrt((x-x0)**2 + (y)**2) - R)/epsilon))"
 eta.ic.expression.region0          = "0.5*(1 + tanh((x-x0)/epsilon))"
 
 ### HYDRO PARAM ###
@@ -66,11 +66,11 @@ phase0.velocity.ic.type = expression
 # velocity.ic.expression.constant.epsilon   = 0.1
 #velocity.ic.expression.constant.vel_x = 0.0
 #velocity.ic.expression.constant.vel_y = 0.0
-# velocity.ic.expression.constant.x0    = 0.0
+velocity.ic.expression.constant.x0    = -1.0
 # velocity.ic.expression.constant.R    = 1.0
 # velocity.ic.expression.region0 =  "1.0*0.5*(1 + tanh((sqrt((x-x0)**2 + (y)**2) - R)/eps))"
-# velocity.ic.expression.region0          = "0.5*(1 + tanh((x-x0)/epsilon))"
-phase0.velocity.ic.expression.region0 = "0.0"
+velocity.ic.expression.region0          = "0.5*(1 + tanh((x-x0)/epsilon))"
+# phase0.velocity.ic.expression.region0 = "0.0"
 phase0.velocity.ic.expression.region1 = "0.0"
 
 # Thermodynamic pressure = pressure + pref

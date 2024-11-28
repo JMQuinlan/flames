@@ -43,7 +43,11 @@ Flames::Parse(Flames& value, IO::ParmParse& pp)
         pp.query_default("p_refinement_criterion", value.p_refinement_criterion, 1e100);
         pp.query_default("rho_refinement_criterion", value.rho_refinement_criterion, 1e100);
 
-        pp_query_required("gamma", value.gamma); // gamma for gamma law
+        // pp_query_required("gamma", value.gamma); // gamma for gamma law
+        pp_query_required("phase0.gamma.region0", value.gamma_0_0); // gamma for gamma law
+        pp_query_required("phase0.gamma.region1", value.gamma_0_1); // gamma for gamma law
+        pp_query_required("phase1.gamma.region0", value.gamma_1_0); // gamma for gamma law
+        pp_query_required("phase1.gamma.region1", value.gamma_1_1); // gamma for gamma law
         pp_query_required("cfl", value.cfl); // cfl condition
         pp_query_default("cfl_v", value.cfl_v,1E100); // cfl condition
         pp_query_required("mu", value.mu); // linear viscosity coefficient
@@ -52,6 +56,8 @@ Flames::Parse(Flames& value, IO::ParmParse& pp)
         pp_forbid("Pfactor","replaced with mu");
         //pp_query_default("Pfactor", value.Pfactor,1.0); // (to be removed) test factor for viscous source
         pp_query_default("pref", value.pref,1.0); // reference pressure for Roe solver
+
+        pp_forbid("gamma","--> phase0.gamma.region0 and phase0.gamma.region1 and phase1.gamma.region0 and phase1.gamma.region1");
 
         pp_forbid("rho.bc","--> density.bc");
         pp_forbid("p.bc","--> pressure.bc");
@@ -82,7 +88,7 @@ Flames::Parse(Flames& value, IO::ParmParse& pp)
 
         value.RegisterNewFab(value.momentum_mf,     value.momentum_bc, 2, nghost, "momentum",     true );
         value.RegisterNewFab(value.momentum_old_mf, value.momentum_bc, 2, nghost, "momentum_old", false);
- 
+
         value.RegisterNewFab(value.pressure_mf,  &value.bc_nothing, 1, nghost, "pressure",  true);
         value.RegisterNewFab(value.velocity_mf,  &value.bc_nothing, 2, nghost, "velocity",  true);
         value.RegisterNewFab(value.vorticity_mf, &value.bc_nothing, 1, nghost, "vorticity", true);
@@ -192,7 +198,7 @@ Flames::Parse(Flames& value, IO::ParmParse& pp)
 void Flames::Initialize(int lev)
 {
     BL_PROFILE("Integrator::Flames::Initialize");
- 
+
     eta_ic           ->Initialize(lev, eta_mf,     0.0);
     eta_ic           ->Initialize(lev, eta_old_mf, 0.0);
     etadot_mf[lev]   ->setVal(0.0);
@@ -243,7 +249,7 @@ void Flames::Mix(int lev)
 
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
-        {  
+        {
             rho(i, j, k) = eta(i, j, k) * rho(i, j, k) + (1.0 - eta(i, j, k)) * rho_solid(i, j, k);
             rho_old(i, j, k) = rho(i, j, k);
 
@@ -253,8 +259,8 @@ void Flames::Mix(int lev)
             M_old(i, j, k, 1) = M(i, j, k, 1);
 
             E(i, j, k) =
-                (0.5 * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1)) * rho(i, j, k) + p(i, j, k) / (gamma - 1.0)) * eta(i, j, k) 
-                + 
+                (0.5 * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1)) * rho(i, j, k) + p(i, j, k) / (gamma - 1.0)) * eta(i, j, k)
+                +
                 E_solid(i, j, k) * (1.0 - eta(i, j, k));
             E_old(i, j, k) = E(i, j, k);
         });
@@ -301,7 +307,7 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     std::swap(momentum_old_mf[lev], momentum_mf[lev]);
     std::swap(energy_old_mf[lev],   energy_mf[lev]);
     Set::Scalar dt_max = std::numeric_limits<Set::Scalar>::max();
-    
+
     UpdateEta(lev, time);
 
     for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
@@ -379,7 +385,7 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Scalar *dt_max_handle = &dt_max;
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
-        {   
+        {
             //Diffuse Sources
             Set::Vector grad_eta     = Numeric::Gradient(eta, i, j, k, 0, DX);
             Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
@@ -403,7 +409,7 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar divu    = gradu.trace();
 
             //Set::Scalar divu         = 0.0;//Numeric::Divergence(v, i, j, k, 2, DX);
-            Set::Matrix T            = 0.5 * mu * (gradu + gradu.transpose());    
+            Set::Matrix T            = 0.5 * mu * (gradu + gradu.transpose());
             Set::Vector q0           = Set::Vector(q(i,j,k,0),q(i,j,k,1));
 
             //Boundary flux
@@ -420,13 +426,13 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             //Active Source Terms
             // Set::Scalar mdot0 = -1000.*grad_eta.dot(u); //-prescribed_boundary_flux.mass * grad_eta_mag;
             // Set::Vector Pdot0 = Set::Vector::Zero();; //-Set::Vector(prescribed_boundary_flux.momentum_normal * grad_eta(0), prescribed_boundary_flux.momentum_tangent * grad_eta(1)) - T*grad_eta;
-            // Set::Scalar qdot0 = 0.0; //-prescribed_boundary_flux.energy * grad_eta_mag - (T*u).dot(grad_eta) + q0.dot(grad_eta); 
+            // Set::Scalar qdot0 = 0.0; //-prescribed_boundary_flux.energy * grad_eta_mag - (T*u).dot(grad_eta) + q0.dot(grad_eta);
             //Set::Vector Ldot0 = rho(i, j, k) * (u*u.transpose() - u_applied*u_applied.transpose())*grad_eta;
 
             Set::Scalar mdot0 = 0.0; //-prescribed_boundary_flux.mass * grad_eta_mag;
             //Set::Vector Pdot0 = rho(i,j,k)*(u_applied - u)*grad_eta_mag; //-Set::Vector(prescribed_boundary_flux.momentum_normal * grad_eta(0), prescribed_boundary_flux.momentum_tangent * grad_eta(1)) - T*grad_eta;
             Set::Vector Pdot0 = Set::Vector::Zero(); //- Pfactor*(u.dot(grad_eta)) * grad_eta/(grad_eta_mag + small); //-Set::Vector(prescribed_boundary_flux.momentum_normal * grad_eta(0), prescribed_boundary_flux.momentum_tangent * grad_eta(1)) - T*grad_eta;
-            Set::Scalar qdot0 = 0.0; //-prescribed_boundary_flux.energy * grad_eta_mag - (T*u).dot(grad_eta) + q0.dot(grad_eta); 
+            Set::Scalar qdot0 = 0.0; //-prescribed_boundary_flux.energy * grad_eta_mag - (T*u).dot(grad_eta) + q0.dot(grad_eta);
 
 
 
@@ -443,7 +449,7 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 if (p==q && r==s) Mpqrs += 0.5 * mu;
                 Ldot0(p) += 0.5 * Mpqrs * (v(i, j, k, r) - u_applied(r)) * hess_eta(q, s);
             }
-            
+
             Source(i,j, k, 0) = mdot0;
             Source(i,j, k, 1) = Pdot0(0) - Ldot0(0);
             Source(i,j, k, 2) = Pdot0(1) - Ldot0(1);
@@ -456,7 +462,7 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             Set::Scalar lap_ux = (lapMx - laprho*u(0) - 2.0*gradrho(0)*gradu(0,0)) / rho(i,j,k);
             Set::Scalar lap_uy = (lapMy - laprho*u(1) - 2.0*gradrho(1)*gradu(1,1)) / rho(i,j,k);
-            
+
             // Set::Scalar lap_ux = Numeric::Laplacian(v, i, j, k, 0, DX);
             // Set::Scalar lap_uy = Numeric::Laplacian(v, i, j, k, 1, DX);
             //Set::Scalar div_u  = Numeric::Divergence(v, i, j, k, 2, DX); // currently causes error!
@@ -474,7 +480,7 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             Solver::Local::Riemann::Roe::State lo_statey(rho(i, j - 1, k), M(i, j - 1, k, 1), M(i, j - 1, k, 0), E(i, j - 1, k), eta(i, j - 1, k));
             Solver::Local::Riemann::Roe::State hi_statey(rho(i, j + 1, k), M(i, j + 1, k, 1), M(i, j + 1, k, 0), E(i, j + 1, k), eta(i, j + 1, k));
-            
+
             //states of solid fields
             Solver::Local::Riemann::Roe::State    statex_solid(rho_solid(i, j, k), M_solid(i, j, k, 0), M_solid(i, j, k, 1), E_solid(i, j, k), eta(i, j, k));
             Solver::Local::Riemann::Roe::State    statey_solid(rho_solid(i, j, k), M_solid(i, j, k, 1), M_solid(i, j, k, 0), E_solid(i, j, k), eta(i, j, k));
@@ -502,7 +508,7 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::ParallelMessage(INFO,"lev=",lev);
                 Util::ParallelMessage(INFO,"i=",i,"j=",j);
                 Util::Abort(INFO);
-                
+
             }
 
 
@@ -511,12 +517,12 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar smallmod = small; //(1.0 - eta(i,j,k))*0.001;
 
 
-            Set::Scalar drhof_dt = 
+            Set::Scalar drhof_dt =
                 (flux_xlo.mass - flux_xhi.mass) / DX[0] +
                 (flux_ylo.mass - flux_yhi.mass) / DX[1] +
                 Source(i, j, k, 0);
 
-            rho_new(i, j, k) = rho(i, j, k) + 
+            rho_new(i, j, k) = rho(i, j, k) +
                 (
                     drhof_dt +
                     // todo add drhos_dt term
@@ -549,7 +555,7 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::Exception(INFO);
             }
 
-                
+
             Set::Scalar dMxf_dt =
                 (flux_xlo.momentum_normal  - flux_xhi.momentum_normal ) / DX[0] +
                 (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / DX[1] +
@@ -557,21 +563,21 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Source(i, j, k, 1);
 
             M_new(i, j, k, 0) = M(i, j, k, 0) +
-                ( 
-                    dMxf_dt + 
+                (
+                    dMxf_dt +
                     // todo add dMs_dt term
                     etadot(i,j,k)*(M(i,j,k,0) - M_solid(i,j,k,0)) / (eta(i,j,k) + smallmod)
                 ) * dt;
-                
+
 
             Set::Scalar dMyf_dt =
                 (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / DX[0] +
                 (flux_ylo.momentum_normal  - flux_yhi.momentum_normal ) / DX[1] +
                 (mu * (lap_uy * eta(i, j, k))) +
                 Source(i, j, k, 2);
-                
+
             M_new(i, j, k, 1) = M(i, j, k, 1) +
-                ( 
+                (
                     dMyf_dt +
                     // todo add dMs_dt term
                     etadot(i,j,k)*(M(i,j,k,1) - M_solid(i,j,k,1)) / (eta(i,j,k)+smallmod)
@@ -581,9 +587,9 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 (flux_xlo.energy - flux_xhi.energy) / DX[0] +
                 (flux_ylo.energy - flux_yhi.energy) / DX[1] +
                 Source(i, j, k, 3);
-                
-            E_new(i, j, k) = E(i, j, k) + 
-                ( 
+
+            E_new(i, j, k) = E(i, j, k) +
+                (
                     dEf_dt +
                     // todo add dEs_dt term
                     etadot(i,j,k)*(E(i,j,k) - E_solid(i,j,k)) / (eta(i,j,k)+smallmod)
@@ -715,7 +721,7 @@ void Flames::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
 //      density_mf[lev] -> FillBoundary();
 //      energy_mf[lev] -> FillBoundary();
 //      Momentum[lev] -> FillBoundary();
-//      
+//
 //      for (MFIter mfi(*model_mf[lev], amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
 //      {
 //  amrex::Box bx = mfi.nodaltilebox();
