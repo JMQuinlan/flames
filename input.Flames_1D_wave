@@ -53,10 +53,8 @@ eta.ic.expression.region0          = "0.5*(1 + tanh((x-x0)/epsilon))"
 
 ### HYDRO PARAM ###
 ### Phase 0 ###
-phase0.gamma.region0 = 1.4
-phase0.gamma.region1 = 1.4
-phase0.mu.region0    = 1.
-phase0.mu.region1    = 1.
+phase0.gamma = 1.4
+phase0.mu    = 1.
 
 phase0.density.ic.type = expression
 phase0.density.ic.expression.region0 = "100.0"
@@ -80,10 +78,8 @@ phase0.pressure.ic.expression.region0 = "0.0"
 phase0.pressure.ic.expression.region1 = "0.0"
 
 ### Phase 1 ###
-phase1.gamma.region0 = 1.4
-phase1.gamma.region1 = 1.4
-phase1.mu.region0    = 1.
-phase1.mu.region1    = 1.
+phase1.gamma = 1.4
+phase1.mu    = 1.
 
 phase1.density.ic.type = expression
 phase1.density.ic.expression.region0 = "100.0"
