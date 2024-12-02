@@ -46,10 +46,13 @@ Flames::Parse(Flames& value, IO::ParmParse& pp)
         // pp_query_required("gamma", value.gamma); // gamma for gamma law
         pp_query_required("phase0.gamma", value.gamma_0); // gamma for gamma law
         pp_query_required("phase1.gamma", value.gamma_1); // gamma for gamma law
-        pp_query_required("phase1.gamma.region1", value.gamma_1_1); // gamma for gamma law
+        pp_forbid("gamma","replaced with phase0.gamma and phase1.gamma");
         pp_query_required("cfl", value.cfl); // cfl condition
         pp_query_default("cfl_v", value.cfl_v,1E100); // cfl condition
-        pp_query_required("mu", value.mu); // linear viscosity coefficient
+        // pp_query_required("mu", value.mu); // linear viscosity coefficient
+        pp_query_required("phase0.mu", value.mu_0); // linear viscosity coefficient
+        pp_query_required("phase1.mu", value.mu_1); // linear viscosity coefficient
+        pp_forbid("mu","replaced with phase0.mu and phase1.mu");
         pp_forbid("Lfactor","replaced with mu");
         //pp_query_default("Lfactor", value.Lfactor,1.0); // (to be removed) test factor for viscous source
         pp_forbid("Pfactor","replaced with mu");

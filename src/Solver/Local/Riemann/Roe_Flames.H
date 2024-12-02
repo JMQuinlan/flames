@@ -64,10 +64,10 @@ public:
     static Flux Solve(State lo_0, State hi_0, State lo_1, State hi_1, Set::Scalar gamma, Set::Scalar cell_eta, Set::Scalar p_ref, Set::Scalar small)
     {
         // STEP 0: Compute fluid fields
-        Set::Scalar rho_L = (lo.rho       - (1.0 - lo.eta) * solid_lo.rho)      /(lo.eta + small),  rho_R = (hi.rho       - (1.0 - hi.eta) * solid_hi.rho)      /(hi.eta + small) + small;
-        Set::Scalar Mn_L  = (lo.M_normal  - (1.0 - lo.eta) * solid_lo.M_normal) /(lo.eta + small),  Mn_R  = (hi.M_normal  - (1.0 - hi.eta) * solid_hi.M_normal) /(hi.eta + small);
-        Set::Scalar Mt_L  = (lo.M_tangent - (1.0 - lo.eta) * solid_lo.M_tangent)/(lo.eta + small),  Mt_R  = (hi.M_tangent - (1.0 - hi.eta) * solid_hi.M_tangent)/(hi.eta + small);
-        Set::Scalar E_L   = (lo.E         - (1.0 - lo.eta) * solid_lo.E)        /(lo.eta + small),  E_R   = (hi.E         - (1.0 - hi.eta) * solid_hi.E)        /(hi.eta + small);
+        Set::Scalar rho_L = (lo_0.rho       - (1.0 - lo_0.eta) * lo_1.rho)      /(lo_0.eta + small),  rho_R = (hi_0.rho       - (1.0 - hi_0.eta) * hi_1.rho)      /(hi_0.eta + small) + small;
+        Set::Scalar Mn_L  = (lo_0.M_normal  - (1.0 - lo_0.eta) * lo_1.M_normal) /(lo_0.eta + small),  Mn_R  = (hi_0.M_normal  - (1.0 - hi_0.eta) * hi_1.M_normal) /(hi_0.eta + small);
+        Set::Scalar Mt_L  = (lo_0.M_tangent - (1.0 - lo_0.eta) * lo_1.M_tangent)/(lo_0.eta + small),  Mt_R  = (hi_0.M_tangent - (1.0 - hi_0.eta) * hi_1.M_tangent)/(hi_0.eta + small);
+        Set::Scalar E_L   = (lo_0.E         - (1.0 - lo_0.eta) * lo_1.E)        /(lo_0.eta + small),  E_R   = (hi_0.E         - (1.0 - hi_0.eta) * hi_1.E)        /(hi_0.eta + small);
 
         // Ensure no negative densities
         rho_L = std::max(0.0,rho_L);
@@ -98,17 +98,22 @@ public:
         if ((a_RL_sq<0) || (a_RL_sq!=a_RL_sq))
         {
             Util::Message(INFO, "sound speed ", a_RL_sq);
-            Util::Message(INFO, lo.eta, " ", hi.eta);
+            Util::Message(INFO, lo_0.eta, " ", hi_0.eta);
 
-            Util::Message(INFO, "solid rho ", solid_lo.rho, " ",       solid_hi.rho);
-            Util::Message(INFO, "solid Mn ", solid_lo.M_normal, " ",  solid_hi.M_normal);
-            Util::Message(INFO, "solid Mt ", solid_lo.M_tangent, " ", solid_hi.M_tangent);
-            Util::Message(INFO, "solid E ", solid_lo.E, " ",         solid_hi.E);
+            // Util::Message(INFO, "phase 0 rho ", lo_0.rho, " ",       hi_0.rho);
+            // Util::Message(INFO, "phase 0 Mn ", lo_0.M_normal, " ",  hi_0.M_normal);
+            // Util::Message(INFO, "phase 0 Mt ", lo_0.M_tangent, " ", hi_0.M_tangent);
+            // Util::Message(INFO, "phase 0 E ", lo_0.E, " ",         hi_0.E);
 
-            Util::Message(INFO, "mixed rho ", lo.rho, " ", hi.rho);
-            Util::Message(INFO, "mixed Mn ", lo.M_normal, " ", hi.M_normal);
-            Util::Message(INFO, "mixed Mt ", lo.M_tangent, " ", hi.M_tangent);
-            Util::Message(INFO, "mixed E ", lo.E, " ", hi.E);
+            Util::Message(INFO, "phase 1 rho ", lo_1.rho, " ",       hi_1.rho);
+            Util::Message(INFO, "phase 1 Mn ", lo_1.M_normal, " ",  hi_1.M_normal);
+            Util::Message(INFO, "phase 1 Mt ", lo_1.M_tangent, " ", hi_1.M_tangent);
+            Util::Message(INFO, "phase 1 E ", lo_1.E, " ",         hi_1.E);
+
+            Util::Message(INFO, "mixed rho ", lo_0.rho, " ", hi_0.rho);
+            Util::Message(INFO, "mixed Mn ", lo_0.M_normal, " ", hi_0.M_normal);
+            Util::Message(INFO, "mixed Mt ", lo_0.M_tangent, " ", hi_0.M_tangent);
+            Util::Message(INFO, "mixed E ", lo_0.E, " ", hi_0.E);
 
             Util::Message(INFO, "fluid rho ", rho_L, " ", rho_R);
             Util::Message(INFO, "fluid Mn ", Mn_L, " ", Mn_R);
@@ -166,10 +171,10 @@ public:
             Util::ParallelMessage(INFO,u_R); // -0.01
 
 
-            Util::ParallelMessage(INFO,lo);
-            Util::ParallelMessage(INFO,hi);
-            Util::ParallelMessage(INFO,solid_lo);
-            Util::ParallelMessage(INFO,solid_hi);
+            Util::ParallelMessage(INFO,lo_0);
+            Util::ParallelMessage(INFO,hi_0);
+            Util::ParallelMessage(INFO,lo_1);
+            Util::ParallelMessage(INFO,hi_1);
 
             Util::ParallelMessage(INFO,rho_L);
             Util::ParallelMessage(INFO,u_L);
