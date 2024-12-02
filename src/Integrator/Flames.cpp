@@ -59,8 +59,6 @@ Flames::Parse(Flames& value, IO::ParmParse& pp)
         //pp_query_default("Pfactor", value.Pfactor,1.0); // (to be removed) test factor for viscous source
         pp_query_default("pref", value.pref,1.0); // reference pressure for Roe solver
 
-        pp_forbid("gamma","--> phase0.gamma.region0 and phase0.gamma.region1 and phase1.gamma.region0 and phase1.gamma.region1");
-
         pp_forbid("rho.bc","--> density.bc");
         pp_forbid("p.bc","--> pressure.bc");
         pp_forbid("v.bc","--> velocity.bc");
@@ -421,7 +419,7 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             //Boundary flux
             //states of solid/fluid boundary cells, eta = 1.0
-            Solver::Local::Riemann::Roe::State solid_state(rho_solid(i,j,k), M_solid(i,j,k,0), M_solid(i,j,k,1), E_solid(i,j,k), eta(i,j,k));
+            Solver::Local::Riemann::Roe_::State solid_state(rho_solid(i,j,k), M_solid(i,j,k,0), M_solid(i,j,k,1), E_solid(i,j,k), eta(i,j,k));
             //Solver::Local::Riemann::Roe::State boundary_state(rho_injected(i, j, k), mdot(i, j, k, 0), mdot(i, j, k, 1), boundary_energy, 1.0);
             Solver::Local::Riemann::Roe::State boundary_state(0.0,0.0,0.0,0.0, 1.0);
             Solver::Local::Riemann::Roe::State empty_state(small, 0.0, 0.0, 0.0, 1.0);
@@ -479,37 +477,37 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             //Godunov flux
             //states of total fields
-            Solver::Local::Riemann::Roe_Flames::State   state_x(rho(i, j, k), M(i, j, k, 0), M(i, j, k, 1), E(i, j, k), eta(i, j, k));
-            Solver::Local::Riemann::Roe_Flames::State   state_y(rho(i, j, k), M(i, j, k, 1), M(i, j, k, 0), E(i, j, k), eta(i, j, k));
+            Solver::Local::Riemann::Roe::State   state_x(rho(i, j, k), M(i, j, k, 0), M(i, j, k, 1), E(i, j, k), eta(i, j, k));
+            Solver::Local::Riemann::Roe::State   state_y(rho(i, j, k), M(i, j, k, 1), M(i, j, k, 0), E(i, j, k), eta(i, j, k));
 
-            Solver::Local::Riemann::Roe_Flames::State lo_statex(rho(i - 1, j, k), M(i - 1, j, k, 0), M(i - 1, j, k, 1), E(i - 1, j, k), eta(i - 1, j, k));
-            Solver::Local::Riemann::Roe_Flames::State hi_statex(rho(i + 1, j, k), M(i + 1, j, k, 0), M(i + 1, j, k, 1), E(i + 1, j, k), eta(i + 1, j, k));
+            Solver::Local::Riemann::Roe::State lo_statex(rho(i - 1, j, k), M(i - 1, j, k, 0), M(i - 1, j, k, 1), E(i - 1, j, k), eta(i - 1, j, k));
+            Solver::Local::Riemann::Roe::State hi_statex(rho(i + 1, j, k), M(i + 1, j, k, 0), M(i + 1, j, k, 1), E(i + 1, j, k), eta(i + 1, j, k));
 
-            Solver::Local::Riemann::Roe_Flames::State lo_statey(rho(i, j - 1, k), M(i, j - 1, k, 1), M(i, j - 1, k, 0), E(i, j - 1, k), eta(i, j - 1, k));
-            Solver::Local::Riemann::Roe_Flames::State hi_statey(rho(i, j + 1, k), M(i, j + 1, k, 1), M(i, j + 1, k, 0), E(i, j + 1, k), eta(i, j + 1, k));
+            Solver::Local::Riemann::Roe::State lo_statey(rho(i, j - 1, k), M(i, j - 1, k, 1), M(i, j - 1, k, 0), E(i, j - 1, k), eta(i, j - 1, k));
+            Solver::Local::Riemann::Roe::State hi_statey(rho(i, j + 1, k), M(i, j + 1, k, 1), M(i, j + 1, k, 0), E(i, j + 1, k), eta(i, j + 1, k));
 
             //states of solid fields
-            Solver::Local::Riemann::Roe_Flames::State    statex_solid(rho_solid(i, j, k), M_solid(i, j, k, 0), M_solid(i, j, k, 1), E_solid(i, j, k), eta(i, j, k));
-            Solver::Local::Riemann::Roe_Flames::State    statey_solid(rho_solid(i, j, k), M_solid(i, j, k, 1), M_solid(i, j, k, 0), E_solid(i, j, k), eta(i, j, k));
+            Solver::Local::Riemann::Roe::State    statex_solid(rho_solid(i, j, k), M_solid(i, j, k, 0), M_solid(i, j, k, 1), E_solid(i, j, k), eta(i, j, k));
+            Solver::Local::Riemann::Roe::State    statey_solid(rho_solid(i, j, k), M_solid(i, j, k, 1), M_solid(i, j, k, 0), E_solid(i, j, k), eta(i, j, k));
 
-            Solver::Local::Riemann::Roe_Flames::State lo_statex_solid(rho_solid(i - 1, j, k), M_solid(i - 1, j, k, 0), M_solid(i - 1, j, k, 1), E_solid(i - 1, j, k), eta(i - 1, j, k));
-            Solver::Local::Riemann::Roe_Flames::State hi_statex_solid(rho_solid(i + 1, j, k), M_solid(i + 1, j, k, 0), M_solid(i + 1, j, k, 1), E_solid(i + 1, j, k), eta(i + 1, j, k));
+            Solver::Local::Riemann::Roe::State lo_statex_solid(rho_solid(i - 1, j, k), M_solid(i - 1, j, k, 0), M_solid(i - 1, j, k, 1), E_solid(i - 1, j, k), eta(i - 1, j, k));
+            Solver::Local::Riemann::Roe::State hi_statex_solid(rho_solid(i + 1, j, k), M_solid(i + 1, j, k, 0), M_solid(i + 1, j, k, 1), E_solid(i + 1, j, k), eta(i + 1, j, k));
 
-            Solver::Local::Riemann::Roe_Flames::State lo_statey_solid(rho_solid(i, j - 1, k), M_solid(i, j - 1, k, 1), M_solid(i, j - 1, k, 0), E_solid(i, j - 1, k), eta(i, j - 1, k));
-            Solver::Local::Riemann::Roe_Flames::State hi_statey_solid(rho_solid(i, j + 1, k), M_solid(i, j + 1, k, 1), M_solid(i, j + 1, k, 0), E_solid(i, j + 1, k), eta(i, j + 1, k));
+            Solver::Local::Riemann::Roe::State lo_statey_solid(rho_solid(i, j - 1, k), M_solid(i, j - 1, k, 1), M_solid(i, j - 1, k, 0), E_solid(i, j - 1, k), eta(i, j - 1, k));
+            Solver::Local::Riemann::Roe::State hi_statey_solid(rho_solid(i, j + 1, k), M_solid(i, j + 1, k, 1), M_solid(i, j + 1, k, 0), E_solid(i, j + 1, k), eta(i, j + 1, k));
 
-            Solver::Local::Riemann::Roe_Flames::Flux flux_xlo_0, flux_ylo_0, flux_xhi_0, flux_yhi_0, flux_xlo_1, flux_ylo_1, flux_xhi_1, flux_yhi_1;
+            Solver::Local::Riemann::Roe::Flux flux_xlo_0, flux_ylo_0, flux_xhi_0, flux_yhi_0, flux_xlo_1, flux_ylo_1, flux_xhi_1, flux_yhi_1;
 
             try
             {
                 //Phase 0 fluxes
                 //lo interface fluxes
-                flux_xlo_0 = Solver::Local::Riemann::Roe_Flames::Solve(lo_statex_0, state_x_0, lo_statex_1, statex_1, gamma_0, eta_0(i, j, k), pref, small);
-                flux_ylo_0 = Solver::Local::Riemann::Roe_Flames::Solve(lo_statey_0, state_y_0, lo_statey_1, statey_1, gamma_0, eta_0(i, j, k), pref, small);
+                flux_xlo_0 = Solver::Local::Riemann::Roe::Solve(lo_statex_0, state_x_0, lo_statex_1, statex_1, gamma_0, eta_0(i, j, k), pref, small);
+                flux_ylo_0 = Solver::Local::Riemann::Roe::Solve(lo_statey_0, state_y_0, lo_statey_1, statey_1, gamma_0, eta_0(i, j, k), pref, small);
 
                 //hi interface fluxes
-                flux_xhi_0 = Solver::Local::Riemann::Roe_Flames::Solve(state_x_0, hi_statex_0, statex_1, hi_statex_1, gamma_0, eta_0(i, j, k), pref, small);
-                flux_yhi_0 = Solver::Local::Riemann::Roe_Flames::Solve(statey_0, hi_statey_0, statey_1, hi_statey_1, gamma_0, eta_0(i, j, k), pref, small);
+                flux_xhi_0 = Solver::Local::Riemann::Roe::Solve(state_x_0, hi_statex_0, statex_1, hi_statex_1, gamma_0, eta_0(i, j, k), pref, small);
+                flux_yhi_0 = Solver::Local::Riemann::Roe::Solve(statey_0, hi_statey_0, statey_1, hi_statey_1, gamma_0, eta_0(i, j, k), pref, small);
             }
             catch(...)
             {
@@ -522,12 +520,13 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 //Phase 1 fluxes
                 //lo interface fluxes
-                flux_xlo_1 = Solver::Local::Riemann::Roe_Flames::Solve(lo_statex_1, state_x_1, lo_statex_0, statex_0, gamma_1, eta_1(i, j, k), pref, small);
-                flux_ylo_1 = Solver::Local::Riemann::Roe_Flames::Solve(lo_statey_1, state_y_1, lo_statey_0, statey_0, gamma_1, eta_1(i, j, k), pref, small);
+                flux_xlo_1 = Solver::Local::Riemann::Roe::Solve(lo_statex_1, state_x_1, lo_statex_0, statex_0, gamma_1, eta_1(i, j, k), pref, small);
+                flux_ylo_1 = Solver::Local::Riemann::Roe::Solve(lo_statey_1, state_y_1, lo_statey_0, statey_0, gamma_1, eta_1(i, j, k), pref, small);
 
                 //hi interface fluxes
-                flux_xhi_1 = Solver::Local::Riemann::Roe_Flames::Solve(state_x_1, hi_statex_1, statex_0, hi_statex_0, gamma_1, eta_1(i, j, k), pref, small);
-                flux_yhi_1 = Solver::Local::Riemann::Roe_Flames::Solve(statey_1, hi_statey_1, statey_0, hi_statey_0, gamma_1, eta_1(i, j, k), pref, small);
+                flux_xhi_1 = Solver::Local::Riemann::Roe::Solve(state_x_1, hi_statex_1, statex_0, hi_statex_0, gamma_1, eta_1(i, j, k), pref, small);
+                flux_yhi_1 = Solver::Local::Riemann::Roe
+                ::Solve(statey_1, hi_statey_1, statey_0, hi_statey_0, gamma_1, eta_1(i, j, k), pref, small);
             }
             catch(...)
             {
