@@ -134,31 +134,59 @@ Flames::Parse(Flames& value, IO::ParmParse& pp)
     }
     {
         std::string type = "constant";
-        pp_forbid("SolidMomentum.ic", "--> solid.momentum.ic");
-        // solid momentum IC type
-        pp_query_validate("solid.momentum.ic.type", type, {"constant","expression"});
-        if (type == "constant") value.solid.momentum_ic = new IC::Constant(value.geom, pp, "solid.momentum.ic.constant");
-        else if (type == "expression") value.solid.momentum_ic = new IC::Expression(value.geom, pp, "solid.momentum.ic.expression");
-        else Util::Abort(INFO, "Invalid solid.momentum.ic: ", type);
+        pp_forbid("Momentum0.ic", "--> momentum0.ic");
+        // Fluid 0 momentum IC type
+        pp_query_validate("momentum0.ic.type", type, {"constant","expression"});
+        if (type == "constant") value.momentum0_ic = new IC::Constant(value.geom, pp, "momentum0.ic.constant");
+        else if (type == "expression") value.momentum0_ic = new IC::Expression(value.geom, pp, "momentum0.ic.expression");
+        else Util::Abort(INFO, "Invalid momentum0.ic: ", type);
     }
     {
         std::string type = "constant";
-        pp_forbid("SolidDensity.ic.type", "--> solid.density.ic.type");
-        // solid density IC type
-        pp_query_validate("solid.density.ic.type", type, {"constant","expression"});
-        if (type == "constant") value.solid.density_ic = new IC::Constant(value.geom, pp, "solid.density.ic.constant");
-        else if (type == "expression") value.solid.density_ic = new IC::Expression(value.geom, pp, "solid.density.ic.expression");
-        else Util::Abort(INFO, "Invalid solid.density.ic: ", type);
+        pp_forbid("Density0.ic.type", "--> density0.ic.type");
+        // Fluid 0 density IC type
+        pp_query_validate("density0.ic.type", type, {"constant","expression"});
+        if (type == "constant") value.density0_ic = new IC::Constant(value.geom, pp, "density0.ic.constant");
+        else if (type == "expression") value.density0_ic = new IC::Expression(value.geom, pp, "density0.ic.expression");
+        else Util::Abort(INFO, "Invalid density0.ic: ", type);
     }
     {
         std::string type = "constant";
-        pp_forbid("SolidEnergy.ic.type", "--> solid.energy.ic.type");
-        // solid energy IC type
-        pp_query_validate("solid.energy.ic.type", type, {"constant","expression"});
-        if (type == "constant") value.solid.energy_ic = new IC::Constant(value.geom, pp, "solid.energy.ic.constant");
-        else if (type == "expression") value.solid.energy_ic = new IC::Expression(value.geom, pp, "solid.energy.ic.expression");
-        else Util::Abort(INFO, "Invalid solid.energy.ic: ", type);
+        pp_forbid("Energy0.ic.type", "--> energy0.ic.type");
+        // Fluid 0 energy IC type
+        pp_query_validate("energy0.ic.type", type, {"constant","expression"});
+        if (type == "constant") value.energy0_ic = new IC::Constant(value.geom, pp, "energy0.ic.constant");
+        else if (type == "expression") value.energy0_ic = new IC::Expression(value.geom, pp, "energy0.ic.expression");
+        else Util::Abort(INFO, "Invalid energy0.ic: ", type);
     }
+    {	
+	std::string type = "constant";
+        pp_forbid("Momentum1.ic", "--> momentum1.ic");
+        // Fluid 1 momentum IC type
+        pp_query_validate("momentum1.ic.type", type, {"constant","expression"});
+        if (type == "constant") value.momentum1_ic = new IC::Constant(value.geom, pp, "momentum1.ic.constant");
+        else if (type == "expression") value.momentum1_ic = new IC::Expression(value.geom, pp, "momentum1.ic.expression");
+        else Util::Abort(INFO, "Invalid momentum1.ic: ", type);
+    }
+    {
+        std::string type = "constant";
+        pp_forbid("Density1.ic.type", "--> density1.ic.type");
+        // Fluid 1 density IC type
+        pp_query_validate("density1.ic.type", type, {"constant","expression"});
+        if (type == "constant") value.density1_ic = new IC::Constant(value.geom, pp, "density1.ic.constant");
+        else if (type == "expression") value.density1_ic = new IC::Expression(value.geom, pp, "density1.ic.expression");
+        else Util::Abort(INFO, "Invalid density1.ic: ", type);
+    }
+    {
+        std::string type = "constant";
+        pp_forbid("Energy1.ic.type", "--> energy1.ic.type");
+        // Fluid 1 energy IC type
+        pp_query_validate("energy1.ic.type", type, {"constant","expression"});
+        if (type == "constant") value.energy1_ic = new IC::Constant(value.geom, pp, "energy1.ic.constant");
+        else if (type == "expression") value.energy1_ic = new IC::Expression(value.geom, pp, "energy1.ic.expression");
+        else Util::Abort(INFO, "Invalid energy1.ic: ", type);
+    }
+
     {
         std::string type = "constant";
         pp_forbid("Density.ic.type", "--> density.ic.type");
@@ -212,9 +240,14 @@ void Flames::Initialize(int lev)
     density_ic       ->Initialize(lev, density_old_mf, 0.0);
 
 
-    solid.density_ic ->Initialize(lev, solid.density_mf, 0.0);
-    solid.momentum_ic->Initialize(lev, solid.momentum_mf, 0.0);
-    solid.energy_ic  ->Initialize(lev, solid.energy_mf, 0.0);
+    density0_ic ->Initialize(lev, density0_mf, 0.0);
+    momentum0_ic->Initialize(lev, momentum0_mf, 0.0);
+    energy0_ic  ->Initialize(lev, energy0_mf, 0.0);
+
+    density1_ic ->Initialize(lev, density1_mf, 0.0);
+    momentum1_ic->Initialize(lev, momentum1_mf, 0.0);
+    energy1_ic  ->Initialize(lev, energy1_mf, 0.0);
+
 
     ic_rho_injected  ->Initialize(lev, rho_injected_mf, 0.0);
     ic_mdot          ->Initialize(lev, mdot_mf,    0.0);
@@ -254,6 +287,7 @@ void Flames::Mix(int lev)
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
+	    eta_0(i,j,k) = eta(i,j,k)
             eta_1(i, j, k) = (1.0 - eta_0(i, j, k))
             rho(i, j, k)   = eta_0(i, j, k) * rho_0(i, j, k) + eta_1(i, j, k) * rho_1(i, j, k);
             rho_old(i, j, k) = rho(i, j, k);
@@ -326,9 +360,14 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> M         = momentum_old_mf.Patch(lev,mfi);
         Set::Patch<const Set::Scalar> E         = energy_old_mf.Patch(lev,mfi);
 
-        Set::Patch<const Set::Scalar> rho_solid = solid.density_mf.Patch(lev,mfi);
-        Set::Patch<const Set::Scalar> M_solid   = solid.momentum_mf.Patch(lev,mfi);
-        Set::Patch<const Set::Scalar> E_solid   = solid.energy_mf.Patch(lev,mfi);
+        Set::Patch<const Set::Scalar> rho_0 = density0_mf.Patch(lev,mfi);
+        Set::Patch<const Set::Scalar> M_0   = momentum0_mf.Patch(lev,mfi);
+        Set::Patch<const Set::Scalar> E_0   = energy0_mf.Patch(lev,mfi);
+
+        Set::Patch<const Set::Scalar> rho_1 = density1_mf.Patch(lev,mfi);
+        Set::Patch<const Set::Scalar> M_1   = momentum1_mf.Patch(lev,mfi);
+        Set::Patch<const Set::Scalar> E_1   = energy1_mf.Patch(lev,mfi);
+
 
         Set::Patch<Set::Scalar>       v         = velocity_mf.Patch(lev,mfi);
         Set::Patch<Set::Scalar>       p         = pressure_mf.Patch(lev,mfi);
@@ -337,11 +376,11 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         {
             etadot(i, j, k) = (eta_new(i, j, k) - eta(i, j, k)) / dt;
 
-            Set::Scalar etarho_fluid  = (rho(i,j,k) - (1.-eta(i,j,k)) * rho_solid(i,j,k));
-            Set::Scalar etaE_fluid    = E(i,j,k)   - (1.-eta(i,j,k)) * E_solid(i,j,k);
+            Set::Scalar etarho_fluid  = (eta(i,j,k)*rho_0(i,j,k) - (1.-eta(i,j,k)) * rho_1(i,j,k));
+            Set::Scalar etaE_fluid    = eta(i,j,k)*E_0(i,j,k)   - (1.-eta(i,j,k)) * E_1(i,j,k);
 
-            Set::Vector etaM_fluid( M(i,j,k,0) - (1.-eta(i,j,k)) * M_solid(i,j,k,0),
-                                    M(i,j,k,1) - (1.-eta(i,j,k)) * M_solid(i,j,k,1) );
+            Set::Vector etaM_fluid(eta(i,j,k)* M_0(i,j,k,0) - (1.-eta(i,j,k)) * M_1(i,j,k,0),
+                                    eta(i,k,k)*M_0(i,j,k,1) - (1.-eta(i,j,k)) * M_1(i,j,k,1) );
 
             //THESE ARE FLUID VELOCITY AND PRESSURE
 
@@ -367,9 +406,15 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         amrex::Array4<Set::Scalar> const& E_new   = (*energy_mf[lev]).array(mfi);
         amrex::Array4<Set::Scalar> const& M_new   = (*momentum_mf[lev]).array(mfi);
 
-        amrex::Array4<const Set::Scalar> const& rho_solid = (*solid.density_mf[lev]).array(mfi);
-        amrex::Array4<const Set::Scalar> const& M_solid   = (*solid.momentum_mf[lev]).array(mfi);
-        amrex::Array4<const Set::Scalar> const& E_solid   = (*solid.energy_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar> const& rho_0 = (*density0_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar> const& M_0   = (*momentum0_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar> const& E_0   = (*energy0_mf[lev]).array(mfi);
+
+	amrex::Array4<const Set::Scalar> const& rho_1 = (*density1_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar> const& M_1   = (*momentum1_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar> const& E_1   = (*energy1_mf[lev]).array(mfi);
+
+
 
         amrex::Array4<Set::Scalar> const& omega   = (*vorticity_mf[lev]).array(mfi);
 
@@ -419,8 +464,9 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             //Boundary flux
             //states of solid/fluid boundary cells, eta = 1.0
-            Solver::Local::Riemann::Roe::State solid_state(rho_solid(i,j,k), M_solid(i,j,k,0), M_solid(i,j,k,1), E_solid(i,j,k), eta(i,j,k));
-            //Solver::Local::Riemann::Roe::State boundary_state(rho_injected(i, j, k), mdot(i, j, k, 0), mdot(i, j, k, 1), boundary_energy, 1.0);
+            Solver::Local::Riemann::Roe::State state_0(rho_0(i,j,k), M_0(i,j,k,0), M_0(i,j,k,1), E_0(i,j,k), eta(i,j,k));
+            Solver::Local::Riemann::Roe::State state_1(rho_1(i,j,k), M_1(i,j,k,0), M_1(i,j,k,1), E_1(i,j,k), 1-eta(i,j,k));
+	    //Solver::Local::Riemann::Roe::State boundary_state(rho_injected(i, j, k), mdot(i, j, k, 0), mdot(i, j, k, 1), boundary_energy, 1.0);
             Solver::Local::Riemann::Roe::State boundary_state(0.0,0.0,0.0,0.0, 1.0);
             Solver::Local::Riemann::Roe::State empty_state(small, 0.0, 0.0, 0.0, 1.0);
             Solver::Local::Riemann::Roe::State current_state(rho(i,j,k), M(i,j,k,0), M(i,j,k,1), E(i,j,k), eta(i,j,k));
@@ -486,15 +532,26 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Solver::Local::Riemann::Roe::State lo_statey(rho(i, j - 1, k), M(i, j - 1, k, 1), M(i, j - 1, k, 0), E(i, j - 1, k), eta(i, j - 1, k));
             Solver::Local::Riemann::Roe::State hi_statey(rho(i, j + 1, k), M(i, j + 1, k, 1), M(i, j + 1, k, 0), E(i, j + 1, k), eta(i, j + 1, k));
 
-            //states of solid fields
-            Solver::Local::Riemann::Roe::State    statex_solid(rho_solid(i, j, k), M_solid(i, j, k, 0), M_solid(i, j, k, 1), E_solid(i, j, k), eta(i, j, k));
-            Solver::Local::Riemann::Roe::State    statey_solid(rho_solid(i, j, k), M_solid(i, j, k, 1), M_solid(i, j, k, 0), E_solid(i, j, k), eta(i, j, k));
+            //states of individual phases
+            Solver::Local::Riemann::Roe::State    statex_0(rho_0(i, j, k), M_0(i, j, k, 0), M_0(i, j, k, 1), E_0(i, j, k), eta(i, j, k));
+            Solver::Local::Riemann::Roe::State    statey_0(rho_0(i, j, k), M_0(i, j, k, 1), M_0(i, j, k, 0), E_0(i, j, k), eta(i, j, k));
 
-            Solver::Local::Riemann::Roe::State lo_statex_solid(rho_solid(i - 1, j, k), M_solid(i - 1, j, k, 0), M_solid(i - 1, j, k, 1), E_solid(i - 1, j, k), eta(i - 1, j, k));
-            Solver::Local::Riemann::Roe::State hi_statex_solid(rho_solid(i + 1, j, k), M_solid(i + 1, j, k, 0), M_solid(i + 1, j, k, 1), E_solid(i + 1, j, k), eta(i + 1, j, k));
+            Solver::Local::Riemann::Roe::State lo_statex_0(rho_0(i - 1, j, k), M_0(i - 1, j, k, 0), M_0(i - 1, j, k, 1), E_0(i - 1, j, k), eta(i - 1, j, k));
+            Solver::Local::Riemann::Roe::State hi_statex_0(rho_0(i + 1, j, k), M_0(i + 1, j, k, 0), M_0(i + 1, j, k, 1), E_0(i + 1, j, k), eta(i + 1, j, k));
 
-            Solver::Local::Riemann::Roe::State lo_statey_solid(rho_solid(i, j - 1, k), M_solid(i, j - 1, k, 1), M_solid(i, j - 1, k, 0), E_solid(i, j - 1, k), eta(i, j - 1, k));
-            Solver::Local::Riemann::Roe::State hi_statey_solid(rho_solid(i, j + 1, k), M_solid(i, j + 1, k, 1), M_solid(i, j + 1, k, 0), E_solid(i, j + 1, k), eta(i, j + 1, k));
+            Solver::Local::Riemann::Roe::State lo_statey_0(rho_0(i, j - 1, k), M_0(i, j - 1, k, 1), M_0(i, j - 1, k, 0), E_0(i, j - 1, k), eta(i, j - 1, k));
+            Solver::Local::Riemann::Roe::State hi_statey_0(rho_0(i, j + 1, k), M_0(i, j + 1, k, 1), M_0(i, j + 1, k, 0), E_0(i, j + 1, k), eta(i, j + 1, k));
+
+            Solver::Local::Riemann::Roe::State    statex_1(rho_1(i, j, k), M_1(i, j, k, 0), M_1(i, j, k, 1), E_1(i, j, k), 1-eta(i, j, k));
+            Solver::Local::Riemann::Roe::State    statey_1(rho_1(i, j, k), M_1(i, j, k, 1), M_1(i, j, k, 0), E_1(i, j, k), 1-eta(i, j, k));
+
+            Solver::Local::Riemann::Roe::State lo_statex_1(rho_1(i - 1, j, k), M_1(i - 1, j, k, 0), M_1(i - 1, j, k, 1), E_1(i - 1, j, k), 1-eta(i - 1, j, k));
+            Solver::Local::Riemann::Roe::State hi_statex_1(rho_1(i + 1, j, k), M_1(i + 1, j, k, 0), M_1(i + 1, j, k, 1), E_1(i + 1, j, k), 1-eta(i + 1, j, k));
+
+            Solver::Local::Riemann::Roe::State lo_statey_1(rho_1(i, j - 1, k), M_1(i, j - 1, k, 1), M_1(i, j - 1, k, 0), E_1(i, j - 1, k), 1-eta(i, j - 1, k));
+            Solver::Local::Riemann::Roe::State hi_statey_1(rho_1(i, j + 1, k), M_1(i, j + 1, k, 1), M_1(i, j + 1, k, 0), E_1(i, j + 1, k), 1-eta(i, j + 1, k));
+
+
 
             Solver::Local::Riemann::Roe::Flux flux_xlo_0, flux_ylo_0, flux_xhi_0, flux_yhi_0, flux_xlo_1, flux_ylo_1, flux_xhi_1, flux_yhi_1;
 
@@ -551,7 +608,7 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 (
                     drhof_dt +
                     // todo add drhos_dt term
-                    etadot(i,j,k) * (rho(i,j,k) - rho_solid(i,j,k)) / (eta(i,j,k) + smallmod)
+                    etadot(i,j,k) * (rho(i,j,k) - rho_1(i,j,k)) / (eta(i,j,k) + smallmod)
                 ) * dt;
 
             if (rho_new(i,j,k) != rho_new(i,j,k))
