@@ -81,17 +81,28 @@ velocity.ic.expression.region1 = "0.0"
 pressure.ic.type = expression
 pressure.ic.expression.region0 = "0.0" 
 
-### SOLID ###
+### PHASES  ###
 
-solid.density.ic.type = expression
-solid.density.ic.expression.region0 = "100.0"
+density0.ic.type = expression
+density0.ic.expression.region0 = "100.0"
 
-solid.momentum.ic.type = expression
-solid.momentum.ic.expression.region0 = "0.0"
-solid.momentum.ic.expression.region1 = "0.0"
+momentum0.ic.type = expression
+momentum0.ic.expression.region0 = "0.0"
+momentum0.ic.expression.region1 = "0.0"
 
-solid.energy.ic.type = expression
-solid.energy.ic.expression.region0 = "0.0" 
+energy0.ic.type = expression
+energy0.ic.expression.region0 = "0.0" 
+
+density1.ic.type = expression
+density1.ic.expression.region1 = "100.0"
+
+momentum1.ic.type = expression
+momentum1.ic.expression.region0 = "0.0"
+momentum1.ic.expression.region1 = "0.0"
+
+energy1.ic.type = expression
+energy1.ic.expression.region1 = "0.0"
+
 
 ### ETA BC  ###
 
