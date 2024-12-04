@@ -98,9 +98,15 @@ Flames::Parse(Flames& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.q_mf,            &value.bc_nothing, 2, 0, "q",            true);
         value.RegisterNewFab(value.flux_mf,         &value.bc_nothing, 1, 0, "flux",            true);
 
-        value.RegisterNewFab(value.solid.momentum_mf, &value.neumann_bc_D, 2, nghost, "solid.momentum", true);
-        value.RegisterNewFab(value.solid.density_mf,  &value.neumann_bc_1,  1, nghost, "solid.density", true);
-        value.RegisterNewFab(value.solid.energy_mf,   &value.neumann_bc_1, 1, nghost, "solid.energy",   true);
+        value.RegisterNewFab(value.momentum0_mf, &value.neumann_bc_D, 2, nghost, "momentum0", true);
+        value.RegisterNewFab(value.density0_mf,  &value.neumann_bc_1,  1, nghost, "density0", true);
+        value.RegisterNewFab(value.energy0_mf,   &value.neumann_bc_1, 1, nghost, "energy0",   true);
+
+	value.RegisterNewFab(value.momentum1_mf, &value.neumann_bc_D, 2, nghost, "momentum1", true);
+        value.RegisterNewFab(value.density1_mf,  &value.neumann_bc_1,  1, nghost, "density1", true);
+        value.RegisterNewFab(value.energy1_mf,   &value.neumann_bc_1, 1, nghost, "energy1",   true);
+
+
 
         value.RegisterNewFab(value.Source_mf, &value.bc_nothing, 4, 0, "Source", true);
     }
@@ -624,16 +630,16 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::ParallelMessage(INFO,"Source",Source(i,j,k,0));
                 Util::ParallelMessage(INFO,"state_x",state_x); // <<<<
                 Util::ParallelMessage(INFO,"state_y",state_y);
-                Util::ParallelMessage(INFO,"statex_solid",statex_solid); // <<<<
-                Util::ParallelMessage(INFO,"statey_solid",statey_solid);
+                Util::ParallelMessage(INFO,"statex_0",statex_0); // <<<<
+                Util::ParallelMessage(INFO,"statey_0",statey_0);
                 Util::ParallelMessage(INFO,"hi_statex",hi_statex); // <<<<
                 Util::ParallelMessage(INFO,"hi_statey",hi_statey);
-                Util::ParallelMessage(INFO,"hi_statex_solid",hi_statex_solid);
-                Util::ParallelMessage(INFO,"hi_statey_solids",hi_statey_solid);
+                Util::ParallelMessage(INFO,"hi_statex_0",hi_statex_0);
+                Util::ParallelMessage(INFO,"hi_statey_0",hi_statey_0);
                 Util::ParallelMessage(INFO,"lo_statex",lo_statex);
                 Util::ParallelMessage(INFO,"lo_statey",lo_statey);
-                Util::ParallelMessage(INFO,"lo_statex_solid",lo_statex_solid);
-                Util::ParallelMessage(INFO,"lo_statey_solid",lo_statey_solid);
+                Util::ParallelMessage(INFO,"lo_statex_0",lo_statex_0);
+                Util::ParallelMessage(INFO,"lo_statey_0",lo_statey_0);
                 Util::Exception(INFO);
             }
 
