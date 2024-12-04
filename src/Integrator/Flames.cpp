@@ -246,13 +246,13 @@ void Flames::Initialize(int lev)
     density_ic       ->Initialize(lev, density_old_mf, 0.0);
 
 
-    density0_ic ->Initialize(lev, density0_mf, 0.0);
-    momentum0_ic->Initialize(lev, momentum0_mf, 0.0);
-    energy0_ic  ->Initialize(lev, energy0_mf, 0.0);
+    //density0_ic ->Initialize(lev, density0_mf, 0.0);
+    //momentum0_ic->Initialize(lev, momentum0_mf, 0.0);
+    //energy0_ic  ->Initialize(lev, energy0_mf, 0.0);
 
-    density1_ic ->Initialize(lev, density1_mf, 0.0);
-    momentum1_ic->Initialize(lev, momentum1_mf, 0.0);
-    energy1_ic  ->Initialize(lev, energy1_mf, 0.0);
+    //density1_ic ->Initialize(lev, density1_mf, 0.0);
+    //momentum1_ic->Initialize(lev, momentum1_mf, 0.0);
+    //energy1_ic  ->Initialize(lev, energy1_mf, 0.0);
 
 
     ic_rho_injected  ->Initialize(lev, rho_injected_mf, 0.0);
@@ -275,21 +275,29 @@ void Flames::Mix(int lev)
         Set::Patch<const Set::Scalar> eta_0       = eta_mf.Patch(lev,mfi);
         Set::Patch<const Set::Scalar> eta_1       = eta_mf.Patch(lev,mfi);
 
-        Set::Patch<const Set::Scalar> v_0         = velocity_0_mf.Patch(lev,mfi);
-        Set::Patch<const Set::Scalar> v_1         = velocity_1_mf.Patch(lev,mfi);
+        Set::Patch<const Set::Scalar> v_0         = velocity0_mf.Patch(lev,mfi);
+        Set::Patch<const Set::Scalar> v_1         = velocity1_mf.Patch(lev,mfi);
         Set::Patch<const Set::Scalar> p           = pressure_mf.Patch(lev,mfi);
-        Set::Patch<Set::Scalar>       rho_0       = density_0_mf.Patch(lev,mfi);
-        Set::Patch<Set::Scalar>       rho_1       = density_1_mf.Patch(lev,mfi);
-        Set::Patch<Set::Scalar>       rho_0_old   = density_0_old_mf.Patch(lev,mfi);
-        Set::Patch<Set::Scalar>       rho_1_old   = density_1_old_mf.Patch(lev,mfi);
-        Set::Patch<Set::Scalar>       M_0         = momentum_0_mf.Patch(lev,mfi);
-        Set::Patch<Set::Scalar>       M_1         = momentum_1_mf.Patch(lev,mfi);
-        Set::Patch<Set::Scalar>       M_0_old     = momentum_0_old_mf.Patch(lev,mfi);
-        Set::Patch<Set::Scalar>       M_1_old     = momentum_1_old_mf.Patch(lev,mfi);
-        Set::Patch<Set::Scalar>       E_0         = energy_0_mf.Patch(lev,mfi);
-        Set::Patch<Set::Scalar>       E_1         = energy_1_mf.Patch(lev,mfi);
-        Set::Patch<Set::Scalar>       E_0_old     = energy_0_old_mf.Patch(lev,mfi);
-        Set::Patch<Set::Scalar>       E_1_old     = energy_1_old_mf.Patch(lev,mfi);
+       
+	
+	Set::Patch<Set::Scalar>       rho         = density_mf.Patch(lev,mfi);
+	Set::Patch<Set::Scalar>       rho_0       = density0_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       rho_1       = density1_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       rho_old     = density_old_mf.Patch(lev,mfi);
+	Set::Patch<Set::Scalar>       rho_0_old   = density0_old_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       rho_1_old   = density1_old_mf.Patch(lev,mfi);
+	Set::Patch<Set::Scalar>       M         = momentum_mf.Patch(lev,mfi);
+	Set::Patch<Set::Scalar>       M_0         = momentum0_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       M_1         = momentum1_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       M_old     = momentum_old_mf.Patch(lev,mfi);
+	Set::Patch<Set::Scalar>       M_0_old     = momentum0_old_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       M_1_old     = momentum1_old_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       E         = energy_mf.Patch(lev,mfi);
+	Set::Patch<Set::Scalar>       E_0         = energy0_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       E_1         = energy1_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       E_old     = energy_old_mf.Patch(lev,mfi);
+	Set::Patch<Set::Scalar>       E_0_old     = energy0_old_mf.Patch(lev,mfi);
+        Set::Patch<Set::Scalar>       E_1_old     = energy1_old_mf.Patch(lev,mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
@@ -412,13 +420,21 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         amrex::Array4<Set::Scalar> const& E_new   = (*energy_mf[lev]).array(mfi);
         amrex::Array4<Set::Scalar> const& M_new   = (*momentum_mf[lev]).array(mfi);
 
-        amrex::Array4<const Set::Scalar> const& rho_0 = (*density0_mf[lev]).array(mfi);
-        amrex::Array4<const Set::Scalar> const& M_0   = (*momentum0_mf[lev]).array(mfi);
-        amrex::Array4<const Set::Scalar> const& E_0   = (*energy0_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar> const& rho_0 = (*density0_old_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar> const& M_0   = (*momentum0_old_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar> const& E_0   = (*energy0_old_mf[lev]).array(mfi);
 
-	amrex::Array4<const Set::Scalar> const& rho_1 = (*density1_mf[lev]).array(mfi);
-        amrex::Array4<const Set::Scalar> const& M_1   = (*momentum1_mf[lev]).array(mfi);
-        amrex::Array4<const Set::Scalar> const& E_1   = (*energy1_mf[lev]).array(mfi);
+	amrex::Array4<const Set::Scalar> const& rho_0_new  = (*density0_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar> const& M_0_new    = (*momentum0_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar> const& E_0_new   = (*energy0_mf[lev]).array(mfi);
+
+
+	amrex::Array4<const Set::Scalar> const& rho_1 = (*density1_old_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar> const& M_1   = (*momentum1_old_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar> const& E_1   = (*energy1_old_mf[lev]).array(mfi);
+	amrex::Array4<const Set::Scalar> const& rho_1_new = (*density1_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar> const& M_1_new   = (*momentum1_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar> const& E_1_new   = (*energy1_mf[lev]).array(mfi);
 
 
 
@@ -565,11 +581,11 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 //Phase 0 fluxes
                 //lo interface fluxes
-                flux_xlo_0 = Solver::Local::Riemann::Roe::Solve(lo_statex_0, state_x_0, lo_statex_1, statex_1, gamma_0, eta_0(i, j, k), pref, small);
-                flux_ylo_0 = Solver::Local::Riemann::Roe::Solve(lo_statey_0, state_y_0, lo_statey_1, statey_1, gamma_0, eta_0(i, j, k), pref, small);
+                flux_xlo_0 = Solver::Local::Riemann::Roe::Solve(lo_statex_0, statex_0, lo_statex_1, statex_1, gamma_0, eta_0(i, j, k), pref, small);
+                flux_ylo_0 = Solver::Local::Riemann::Roe::Solve(lo_statey_0, statey_0, lo_statey_1, statey_1, gamma_0, eta_0(i, j, k), pref, small);
 
                 //hi interface fluxes
-                flux_xhi_0 = Solver::Local::Riemann::Roe::Solve(state_x_0, hi_statex_0, statex_1, hi_statex_1, gamma_0, eta_0(i, j, k), pref, small);
+                flux_xhi_0 = Solver::Local::Riemann::Roe::Solve(statex_0, hi_statex_0, statex_1, hi_statex_1, gamma_0, eta_0(i, j, k), pref, small);
                 flux_yhi_0 = Solver::Local::Riemann::Roe::Solve(statey_0, hi_statey_0, statey_1, hi_statey_1, gamma_0, eta_0(i, j, k), pref, small);
             }
             catch(...)
@@ -583,11 +599,11 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 //Phase 1 fluxes
                 //lo interface fluxes
-                flux_xlo_1 = Solver::Local::Riemann::Roe::Solve(lo_statex_1, state_x_1, lo_statex_0, statex_0, gamma_1, eta_1(i, j, k), pref, small);
-                flux_ylo_1 = Solver::Local::Riemann::Roe::Solve(lo_statey_1, state_y_1, lo_statey_0, statey_0, gamma_1, eta_1(i, j, k), pref, small);
+                flux_xlo_1 = Solver::Local::Riemann::Roe::Solve(lo_statex_1, statex_1, lo_statex_0, statex_0, gamma_1, eta_1(i, j, k), pref, small);
+                flux_ylo_1 = Solver::Local::Riemann::Roe::Solve(lo_statey_1, statey_1, lo_statey_0, statey_0, gamma_1, eta_1(i, j, k), pref, small);
 
                 //hi interface fluxes
-                flux_xhi_1 = Solver::Local::Riemann::Roe::Solve(state_x_1, hi_statex_1, statex_0, hi_statex_0, gamma_1, eta_1(i, j, k), pref, small);
+                flux_xhi_1 = Solver::Local::Riemann::Roe::Solve(statex_1, hi_statex_1, statex_0, hi_statex_0, gamma_1, eta_1(i, j, k), pref, small);
                 flux_yhi_1 = Solver::Local::Riemann::Roe
                 ::Solve(statey_1, hi_statey_1, statey_0, hi_statey_0, gamma_1, eta_1(i, j, k), pref, small);
             }

@@ -35,10 +35,23 @@ public:
         delete density_bc;
         delete momentum_bc;
         delete energy_bc;
-        delete eta_bc;
+      //  delete density0_bc;
+    //    delete momentum0_bc;
+  //      delete energy0_bc;
+//	delete density1_bc;
+       // delete momentum1_bc;
+      //  delete energy1_bc;
+
+
+	delete eta_bc;
 
         delete velocity_ic;
         delete pressure_ic;
+	//delete velocity0_ic;
+        //delete pressure0_ic;
+	//delete velocity1_ic;
+       // delete pressure1_ic;
+
 
         delete ic_rho_injected;
         delete ic_mdot;
@@ -71,6 +84,32 @@ private:
 
     Set::Field<Set::Scalar> velocity_mf;
     Set::Field<Set::Scalar> pressure_mf;
+
+    Set::Field<Set::Scalar> density0_mf;
+    Set::Field<Set::Scalar> density0_old_mf;
+
+    Set::Field<Set::Scalar> energy0_mf;
+    Set::Field<Set::Scalar> energy0_old_mf;
+
+    Set::Field<Set::Scalar> momentum0_mf;
+    Set::Field<Set::Scalar> momentum0_old_mf;
+
+    Set::Field<Set::Scalar> velocity0_mf;
+    Set::Field<Set::Scalar> pressure0_mf;
+	
+    Set::Field<Set::Scalar> density1_mf;
+    Set::Field<Set::Scalar> density1_old_mf;
+
+    Set::Field<Set::Scalar> energy1_mf;
+    Set::Field<Set::Scalar> energy1_old_mf;
+
+    Set::Field<Set::Scalar> momentum1_mf;
+    Set::Field<Set::Scalar> momentum1_old_mf;
+
+    Set::Field<Set::Scalar> velocity1_mf;
+    Set::Field<Set::Scalar> pressure1_mf;
+
+
 
     struct {
         Set::Field<Set::Scalar> density_mf;
@@ -121,9 +160,7 @@ private:
     Set::Scalar vy_max = 0.0;
 
     Set::Scalar r_refinement_criterion=NAN, e_refinement_criterion=NAN, m_refinement_criterion=NAN, eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion;
-    // Set::Scalar gamma=NAN, cfl=NAN, cfl_v=NAN, mu=NAN, Lfactor=NAN, Pfactor=NAN, pref=NAN;
-    Set::Scalar cfl=NAN, cfl_v=NAN, mu=NAN, Lfactor=NAN, Pfactor=NAN, pref=NAN;
-    Set::Scalar gamma_0=NAN, gamma_1=NAN, mu_0=NAN, mu_1=NAN;
+    Set::Scalar gamma=NAN, cfl=NAN, cfl_v=NAN, mu=NAN, Lfactor=NAN, Pfactor=NAN, pref=NAN;
 
     Set::Scalar small=NAN;
 };
