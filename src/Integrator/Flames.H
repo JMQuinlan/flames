@@ -85,29 +85,29 @@ private:
     Set::Field<Set::Scalar> velocity_mf;
     Set::Field<Set::Scalar> pressure_mf;
 
-    Set::Field<Set::Scalar> density0_mf;
-    Set::Field<Set::Scalar> density0_old_mf;
+    Set::Field<Set::Scalar> density_0_mf;
+    Set::Field<Set::Scalar> density_0_old_mf;
 
-    Set::Field<Set::Scalar> energy0_mf;
-    Set::Field<Set::Scalar> energy0_old_mf;
+    Set::Field<Set::Scalar> energy_0_mf;
+    Set::Field<Set::Scalar> energy_0_old_mf;
 
-    Set::Field<Set::Scalar> momentum0_mf;
-    Set::Field<Set::Scalar> momentum0_old_mf;
+    Set::Field<Set::Scalar> momentum_0_mf;
+    Set::Field<Set::Scalar> momentum_0_old_mf;
 
-    Set::Field<Set::Scalar> velocity0_mf;
-    Set::Field<Set::Scalar> pressure0_mf;
+    Set::Field<Set::Scalar> velocity_0_mf;
+    Set::Field<Set::Scalar> pressure_0_mf;
 	
-    Set::Field<Set::Scalar> density1_mf;
-    Set::Field<Set::Scalar> density1_old_mf;
+    Set::Field<Set::Scalar> density_1_mf;
+    Set::Field<Set::Scalar> density_1_old_mf;
 
-    Set::Field<Set::Scalar> energy1_mf;
-    Set::Field<Set::Scalar> energy1_old_mf;
+    Set::Field<Set::Scalar> energy_1_mf;
+    Set::Field<Set::Scalar> energy_1_old_mf;
 
-    Set::Field<Set::Scalar> momentum1_mf;
-    Set::Field<Set::Scalar> momentum1_old_mf;
+    Set::Field<Set::Scalar> momentum_1_mf;
+    Set::Field<Set::Scalar> momentum_1_old_mf;
 
-    Set::Field<Set::Scalar> velocity1_mf;
-    Set::Field<Set::Scalar> pressure1_mf;
+    Set::Field<Set::Scalar> velocity_1_mf;
+    Set::Field<Set::Scalar> pressure_1_mf;
 
 
 
@@ -122,7 +122,12 @@ private:
 
 protected:
     Set::Field<Set::Scalar> eta_mf;
+    Set::Field<Set::Scalar> eta_0_mf;
+    Set::Field<Set::Scalar> eta_1_mf;
     Set::Field<Set::Scalar> eta_old_mf;
+    Set::Field<Set::Scalar> eta_0_old_mf;
+    Set::Field<Set::Scalar> eta_1_old_mf;
+
 private:
     Set::Field<Set::Scalar> etadot_mf;
 
@@ -133,6 +138,15 @@ private:
     Set::Field<Set::Scalar> q_mf;
     Set::Field<Set::Scalar> Source_mf;
     Set::Field<Set::Scalar> flux_mf;
+    Set::Field<Set::Scalar> flux_0_mf;
+    Set::Field<Set::Scalar> flux_1_mf;
+   
+// Set::Field<Set::Scalar> flux_0_x_mf;
+   // Set::Field<Set::Scalar> flux_0_y_mf;
+   // Set::Field<Set::Scalar> flux_1_x_mf;
+    //Set::Field<Set::Scalar> flux_1_y_mf;
+
+
 
     BC::BC<Set::Scalar>* density_bc = nullptr;
     BC::BC<Set::Scalar>* momentum_bc = nullptr;
@@ -142,6 +156,7 @@ private:
     IC::IC* velocity_ic = nullptr;
     IC::IC* pressure_ic = nullptr;
     IC::IC* density_ic  = nullptr;
+
 
     IC::IC* ic_rho_injected = nullptr;
     IC::IC* ic_mdot = nullptr;
