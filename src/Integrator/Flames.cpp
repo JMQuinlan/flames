@@ -637,7 +637,7 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar smallmod = small; //(1.0 - eta(i,j,k))*0.001;
 
 
-            amrex::Array4<double> drhof_0_dt  =
+            amrex::Array4<Set::Scalar> drhof_0_dt  =
                 (flux_xlo_0.mass-flux_xhi_0.mass) / DX[0] +
                 (flux_ylo_0.mass-flux_yhi_0.mass) / DX[1] +
                 Source(i, j, k, 0);
@@ -646,8 +646,32 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 (
                     drhof_0_dt(i,j,k) +
                     // todo add drhos_dt term
-                    etadot(i,j,k) * (rho(i,j,k) - rho_1(i,j,k)) / (eta(i,j,k) + smallmod)
-                ) * dt;
+                    etadot(i,j,k) * (rho_1(i,j,k))
+                ) * dt;  
+		
+		amrex::Array4<Set::Scalar>  dMxf_0_dt =
+                (flux_xlo_0.momentum_normal  - flux_xhi_0.momentum_normal ) / DX[0] +
+                (flux_ylo_0.momentum_tangent - flux_yhi_0.momentum_tangent) / DX[1] +
+                (mu * (lap_ux * eta(i, j, k))) +
+                Source(i, j, k, 1);	
+		amrex::Array4<Set::Scalar>  dMxf_1_dt =
+                (flux_xlo_1.momentum_normal  - flux_xhi_1.momentum_normal ) / DX[0] +
+                (flux_ylo_1.momentum_tangent - flux_yhi_1.momentum_tangent) / DX[1] +
+                (mu * (lap_ux *(1.- eta(i, j, k)))) +
+                Source(i, j, k, 1);
+
+		amrex::Array4<Set::Scalar> M_0_new = M_0(i, j, k, 0) +
+                (
+                    dMxf_0_dt(i,j,k) +
+                    // todo add dMs_dt term
+                    etadot(i,j,k)*(M_0(i,j,k,0)));
+
+                amrex::Array4<Set::Scalar> M_1_new = M_1(i, j, k, 0) +
+                (
+                    dMxf_1_dt(i,j,k) +
+                    // todo add dMs_dt term
+                    etadot(i,j,k)*(M_1(i,j,k,0)));
+
 
 	    amrex::Array4<Set::Scalar>  drhof_1_dt  =
                 (flux_xlo_1.mass - flux_xhi_1.mass) / DX[0] +
@@ -658,18 +682,18 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 (
                     drhof_1_dt(i,j,k) +
                     // todo add drhos_dt term
-                    etadot(i,j,k) * (rho(i,j,k) - rho_0(i,j,k) / (1.-eta(i,j,k) + smallmod)
+                    etadot(i,j,k) * (rho_1(i,j,k))
                 ) * dt;
 
             if (rho_0_new(i,j,k) != rho_0_new(i,j,k))
             {
                 Util::ParallelMessage(INFO,"lev=",lev);
                 Util::ParallelMessage(INFO,"i=",i,"j=",j);
-                Util::ParallelMessage(INFO,"drhof_dt",drhof_dt); // dies
-                Util::ParallelMessage(INFO,"flux_xlo.mass",flux_xlo.mass);
-                Util::ParallelMessage(INFO,"flux_xhi.mass",flux_xhi.mass); // dies, depends on state_xx, hi_statex, statex_solid, hi_statex_solid, gamma, eta, pref, small
-                Util::ParallelMessage(INFO,"flux_ylo.mass",flux_ylo.mass);
-                Util::ParallelMessage(INFO,"flux_xhi.mass",flux_yhi.mass);
+                Util::ParallelMessage(INFO,"drhof_0_dt",drhof_0_dt); // dies
+                Util::ParallelMessage(INFO,"flux_xlo.mass",flux_xlo_0.mass);
+                Util::ParallelMessage(INFO,"flux_xhi.mass",flux_xhi_0.mass); // dies, depends on state_xx, hi_statex, statex_solid, hi_statex_solid, gamma, eta, pref, small
+                Util::ParallelMessage(INFO,"flux_ylo.mass",flux_ylo_0.mass);
+                Util::ParallelMessage(INFO,"flux_xhi.mass",flux_yhi_0.mass);
                 Util::ParallelMessage(INFO,"eta",eta(i,j,k));
                 Util::ParallelMessage(INFO,"Source",Source(i,j,k,0));
                 Util::ParallelMessage(INFO,"state_x",state_x); // <<<<
@@ -691,11 +715,11 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 Util::ParallelMessage(INFO,"lev=",lev);
                 Util::ParallelMessage(INFO,"i=",i,"j=",j);
-                Util::ParallelMessage(INFO,"drhof_dt",drhof_dt); // dies
-                Util::ParallelMessage(INFO,"flux_xlo.mass",flux_xlo.mass);
-                Util::ParallelMessage(INFO,"flux_xhi.mass",flux_xhi.mass); // dies, depends on state_xx, hi_statex, statex_solid, hi_statex_solid, gamma, eta, pref, small
-                Util::ParallelMessage(INFO,"flux_ylo.mass",flux_ylo.mass);
-                Util::ParallelMessage(INFO,"flux_xhi.mass",flux_yhi.mass);
+                Util::ParallelMessage(INFO,"drhof_1_dt",drhof_1_dt); // dies
+                Util::ParallelMessage(INFO,"flux_xlo.mass",flux_xlo_1.mass);
+                Util::ParallelMessage(INFO,"flux_xhi.mass",flux_xhi_1.mass); // dies, depends on state_xx, hi_statex, statex_solid, hi_statex_solid, gamma, eta, pref, small
+                Util::ParallelMessage(INFO,"flux_ylo.mass",flux_ylo_1.mass);
+                Util::ParallelMessage(INFO,"flux_xhi.mass",flux_yhi_1.mass);
                 Util::ParallelMessage(INFO,"eta",eta(i,j,k));
                 Util::ParallelMessage(INFO,"Source",Source(i,j,k,0));
                 Util::ParallelMessage(INFO,"state_x",state_x); // <<<<
@@ -715,44 +739,72 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
 	    rho_new(i,j,k) = eta(i,j,k)*rho_0_new(i,j,k) +  (1-eta(i,j,k)) * rho_1_new(i,j,k);
 
-            amrex::Array4<Set::Scalar>  dMxf_dt =
-                (flux_xlo.momentum_normal  - flux_xhi.momentum_normal ) / DX[0] +
-                (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / DX[1] +
-                (mu * (lap_ux * eta(i, j, k))) +
-                Source(i, j, k, 1);
-
-            M_new(i, j, k, 0) = M(i, j, k, 0) +
+            M_0_new(i, j, k, 0) = M_0(i, j, k, 0) +
                 (
-                    dMxf_dt(i,j,k) +
+                    dMxf_0_dt(i,j,k) +
                     // todo add dMs_dt term
-                    etadot(i,j,k)*(M(i,j,k,0) - M_solid(i,j,k,0)) / (eta(i,j,k) + smallmod)
+                    etadot(i,j,k)*(M_0(i,j,k,0))
                 ) * dt;
 
 
-            Set::Scalar dMyf_dt =
-                (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / DX[0] +
-                (flux_ylo.momentum_normal  - flux_yhi.momentum_normal ) / DX[1] +
+            M_1_new(i, j, k, 0) = M_1(i, j, k, 0) +
+                (
+                    dMxf_1_dt(i,j,k) +
+                    // todo add dMs_dt term
+                    etadot(i,j,k)*(M_1(i,j,k,0))
+                ) * dt;
+
+            Set::Scalar dMyf_0_dt =
+                (flux_xlo_0.momentum_tangent - flux_xhi_0.momentum_tangent) / DX[0] +
+                (flux_ylo_0.momentum_normal  - flux_yhi_0.momentum_normal ) / DX[1] +
                 (mu * (lap_uy * eta(i, j, k))) +
                 Source(i, j, k, 2);
 
-            M_new(i, j, k, 1) = M(i, j, k, 1) +
+  	    Set::Scalar dMyf_1_dt =
+                (flux_xlo_1.momentum_tangent - flux_xhi_1.momentum_tangent) / DX[0] +
+                (flux_ylo_1.momentum_normal  - flux_yhi_1.momentum_normal ) / DX[1] +
+                (mu * (lap_uy *(1.- eta(i, j, k)))) +
+                Source(i, j, k, 2);
+
+            M_0_new(i, j, k, 1) = M_0(i, j, k, 1) +
                 (
-                    dMyf_dt +
+                    dMyf_0_dt +
                     // todo add dMs_dt term
-                    etadot(i,j,k)*(eta(i,j,k)*M_0(i,j,k,1) - (1-eta(i,j,k))*M_1(i,j,k,1)) / (eta(i,j,k)+smallmod)
+                    etadot(i,j,k)*(eta(i,j,k)*M_0(i,j,k,1))
                 )*dt;
 
-            Set::Scalar dEf_dt =
-                (flux_xlo.energy - flux_xhi.energy) / DX[0] +
-                (flux_ylo.energy - flux_yhi.energy) / DX[1] +
+	    M_1_new(i, j, k, 1) = M_1(i, j, k, 1) +
+                (
+                    dMyf_1_dt +
+                    // todo add dMs_dt term
+                    etadot(i,j,k)*((1.-eta(i,j,k))*M_1(i,j,k,1))
+                )*dt;
+
+	    M_new(i,j,k,0) = eta(i,j,k) * M_0_new(i,j,k) + (1.-eta(i,j,k))*M_1_new(i,j,k);
+            
+	    Set::Scalar dEf_0_dt =
+                (flux_xlo_0.energy - flux_xhi_0.energy) / DX[0] +
+                (flux_ylo_0.energy - flux_yhi_0.energy) / DX[1] +
+                Source(i, j, k, 3);
+            Set::Scalar dEf_1_dt =
+                (flux_xlo_1.energy - flux_xhi_1.energy) / DX[0] +
+                (flux_ylo_1.energy - flux_yhi_1.energy) / DX[1] +
                 Source(i, j, k, 3);
 
-            E_new(i, j, k) = E(i, j, k) +
+            amrex::Array4<Set::Scalar> E_0_new = E_0(i, j, k) +
                 (
-                    dEf_dt +
+                    dEf_0_dt +
                     // todo add dEs_dt term
-                    etadot(i,j,k)*(E(i,j,k) - E_solid(i,j,k)) / (eta(i,j,k)+smallmod)
+                    etadot(i,j,k)*(E_0(i,j,k)))
                 ) * dt;
+
+            amrex::Array4<Set::Scalar> E_1_new = E_1(i, j, k) +
+                (
+                    dEf_1_dt +
+                    // todo add dEs_dt term
+                    etadot(i,j,k)*(E_1(i,j,k)))
+                ) * dt;
+	    E_new(i,j,k) = eta(i,j,k) * E_0_new(i,j,k) + (1.-eta(i,j,k)) * E_1_new(i,j,k);
 
             //Set::Vector grad_ux = Numeric::Gradient(v, i, j, k, 0, DX);
             //Set::Vector grad_uy = Numeric::Gradient(v, i, j, k, 1, DX);
