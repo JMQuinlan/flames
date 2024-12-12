@@ -429,29 +429,29 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     {
         const amrex::Box& bx = mfi.validbox();
 
-        amrex::Array4<const Set::Scalar> const& rho = (*density_old_mf[lev]).array(mfi);
-        amrex::Array4<const Set::Scalar> const& E   = (*energy_old_mf[lev]).array(mfi);
-        amrex::Array4<const Set::Scalar> const& M   = (*momentum_old_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar>  rho = (*density_old_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar>  E   = (*energy_old_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar>  M   = (*momentum_old_mf[lev]).array(mfi);
 
-        amrex::Array4<Set::Scalar> const& rho_new = (*density_mf[lev]).array(mfi);
-        amrex::Array4<Set::Scalar> const& E_new   = (*energy_mf[lev]).array(mfi);
-        amrex::Array4<Set::Scalar> const& M_new   = (*momentum_mf[lev]).array(mfi);
+        amrex::Array4<Set::Scalar>  rho_new = (*density_mf[lev]).array(mfi);
+        amrex::Array4<Set::Scalar>  E_new   = (*energy_mf[lev]).array(mfi);
+        amrex::Array4<Set::Scalar>  M_new   = (*momentum_mf[lev]).array(mfi);
 
         amrex::Array4<const Set::Scalar> const& rho_0 = (*density_0_old_mf[lev]).array(mfi);
         amrex::Array4<const Set::Scalar> const& M_0   = (*momentum_0_old_mf[lev]).array(mfi);
         amrex::Array4<const Set::Scalar> const& E_0   = (*energy_0_old_mf[lev]).array(mfi);
 
-	amrex::Array4<const Set::Scalar> const& rho_0_new  = (*density_0_mf[lev]).array(mfi);
-        amrex::Array4<const Set::Scalar> const& M_0_new    = (*momentum_0_mf[lev]).array(mfi);
-        amrex::Array4<const Set::Scalar> const& E_0_new   = (*energy_0_mf[lev]).array(mfi);
+	amrex::Array4<Set::Scalar> rho_0_new  = (*density_0_mf[lev]).array(mfi);
+        amrex::Array4<Set::Scalar> M_0_new    = (*momentum_0_mf[lev]).array(mfi);
+        amrex::Array4<Set::Scalar> E_0_new   = (*energy_0_mf[lev]).array(mfi);
 
 
 	amrex::Array4<const Set::Scalar> const& rho_1 = (*density_1_old_mf[lev]).array(mfi);
         amrex::Array4<const Set::Scalar> const& M_1   = (*momentum_1_old_mf[lev]).array(mfi);
         amrex::Array4<const Set::Scalar> const& E_1   = (*energy_1_old_mf[lev]).array(mfi);
-	amrex::Array4<const Set::Scalar> const& rho_1_new = (*density_1_mf[lev]).array(mfi);
-        amrex::Array4<const Set::Scalar> const& M_1_new   = (*momentum_1_mf[lev]).array(mfi);
-        amrex::Array4<const Set::Scalar> const& E_1_new   = (*energy_1_mf[lev]).array(mfi);
+	amrex::Array4<Set::Scalar> rho_1_new = (*density_1_mf[lev]).array(mfi);
+        amrex::Array4<Set::Scalar> M_1_new   = (*momentum_1_mf[lev]).array(mfi);
+        amrex::Array4<Set::Scalar> E_1_new   = (*energy_1_mf[lev]).array(mfi);
 
 
 
@@ -637,50 +637,39 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar smallmod = small; //(1.0 - eta(i,j,k))*0.001;
 
 
-            amrex::Array4<Set::Scalar> drhof_0_dt  =
+            Set::Scalar drhof_0_dt  =
                 (flux_xlo_0.mass-flux_xhi_0.mass) / DX[0] +
                 (flux_ylo_0.mass-flux_yhi_0.mass) / DX[1] +
                 Source(i, j, k, 0);
 
-	    amrex::Array4<Set::Scalar> rho_0_new = rho_0(i,j,k) +
+	    rho_0_new(i,j,k) = rho_0(i,j,k) +
                 (
-                    drhof_0_dt(i,j,k) +
+                    drhof_0_dt +
                     // todo add drhos_dt term
                     etadot(i,j,k) * (rho_1(i,j,k))
                 ) * dt;  
 		
-		amrex::Array4<Set::Scalar>  dMxf_0_dt =
+	    Set::Scalar dMxf_0_dt =
                 (flux_xlo_0.momentum_normal  - flux_xhi_0.momentum_normal ) / DX[0] +
                 (flux_ylo_0.momentum_tangent - flux_yhi_0.momentum_tangent) / DX[1] +
                 (mu * (lap_ux * eta(i, j, k))) +
                 Source(i, j, k, 1);	
-		amrex::Array4<Set::Scalar>  dMxf_1_dt =
+		
+	    Set::Scalar  dMxf_1_dt =
                 (flux_xlo_1.momentum_normal  - flux_xhi_1.momentum_normal ) / DX[0] +
                 (flux_ylo_1.momentum_tangent - flux_yhi_1.momentum_tangent) / DX[1] +
                 (mu * (lap_ux *(1.- eta(i, j, k)))) +
                 Source(i, j, k, 1);
 
-		amrex::Array4<Set::Scalar> M_0_new = M_0(i, j, k, 0) +
-                (
-                    dMxf_0_dt(i,j,k) +
-                    // todo add dMs_dt term
-                    etadot(i,j,k)*(M_0(i,j,k,0)));
-
-                amrex::Array4<Set::Scalar> M_1_new = M_1(i, j, k, 0) +
-                (
-                    dMxf_1_dt(i,j,k) +
-                    // todo add dMs_dt term
-                    etadot(i,j,k)*(M_1(i,j,k,0)));
-
-
-	    amrex::Array4<Set::Scalar>  drhof_1_dt  =
+	
+	    Set::Scalar drhof_1_dt  =
                 (flux_xlo_1.mass - flux_xhi_1.mass) / DX[0] +
                 (flux_ylo_1.mass - flux_yhi_1.mass) / DX[1] +
                 Source(i, j, k, 0);
 
-            amrex::Array4<Set::Scalar>  rho_1_new = rho_1(i,j,k) +
+            rho_1_new(i,j,k) = rho_1(i,j,k) +
                 (
-                    drhof_1_dt(i,j,k) +
+                    drhof_1_dt +
                     // todo add drhos_dt term
                     etadot(i,j,k) * (rho_1(i,j,k))
                 ) * dt;
@@ -741,7 +730,7 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             M_0_new(i, j, k, 0) = M_0(i, j, k, 0) +
                 (
-                    dMxf_0_dt(i,j,k) +
+                    dMxf_0_dt +
                     // todo add dMs_dt term
                     etadot(i,j,k)*(M_0(i,j,k,0))
                 ) * dt;
@@ -749,7 +738,7 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             M_1_new(i, j, k, 0) = M_1(i, j, k, 0) +
                 (
-                    dMxf_1_dt(i,j,k) +
+                    dMxf_1_dt +
                     // todo add dMs_dt term
                     etadot(i,j,k)*(M_1(i,j,k,0))
                 ) * dt;
@@ -791,18 +780,18 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 (flux_ylo_1.energy - flux_yhi_1.energy) / DX[1] +
                 Source(i, j, k, 3);
 
-            amrex::Array4<Set::Scalar> E_0_new = E_0(i, j, k) +
+            E_0_new(i,j,k) = E_0(i, j, k) +
                 (
                     dEf_0_dt +
                     // todo add dEs_dt term
-                    etadot(i,j,k)*(E_0(i,j,k)))
+                    etadot(i,j,k)*(E_0(i,j,k))
                 ) * dt;
 
-            amrex::Array4<Set::Scalar> E_1_new = E_1(i, j, k) +
+            E_1_new(i,j,k) = E_1(i, j, k) +
                 (
                     dEf_1_dt +
                     // todo add dEs_dt term
-                    etadot(i,j,k)*(E_1(i,j,k)))
+                    etadot(i,j,k)*(E_1(i,j,k))
                 ) * dt;
 	    E_new(i,j,k) = eta(i,j,k) * E_0_new(i,j,k) + (1.-eta(i,j,k)) * E_1_new(i,j,k);
 
