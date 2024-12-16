@@ -600,12 +600,12 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 //Phase 0 fluxes
                 //lo interface fluxes
-                flux_xlo_0 = Solver::Local::Riemann::Roe::Solve(lo_statex_0, statex_0, gamma, eta(i, j, k), pref, small);
-                flux_ylo_0 = Solver::Local::Riemann::Roe::Solve(lo_statey_0, statey_0, gamma, eta(i, j, k), pref, small);
+                flux_xlo_0 = Solver::Local::Riemann::Roe::Flux Solve(lo_statex_0, statex_0, gamma, eta(i, j, k), pref, small);
+                flux_ylo_0 = Solver::Local::Riemann::Roe::Flux Solve(lo_statey_0, statey_0, gamma, eta(i, j, k), pref, small);
 
                 //hi interface fluxes
-                flux_xhi_0 = Solver::Local::Riemann::Roe::Solve(statex_0, hi_statex_0, gamma, eta(i, j, k), pref, small);
-                flux_yhi_0 = Solver::Local::Riemann::Roe::Solve(statey_0, hi_statey_0, gamma, eta(i, j, k), pref, small);
+                flux_xhi_0 = Solver::Local::Riemann::Roe::Flux Solve(statex_0, hi_statex_0, gamma, eta(i, j, k), pref, small);
+                flux_yhi_0 = Solver::Local::Riemann::Roe::Flux Solve(statey_0, hi_statey_0, gamma, eta(i, j, k), pref, small);
             }
             catch(...)
             {
@@ -618,12 +618,12 @@ void Flames::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 //Phase 1 fluxes
                 //lo interface fluxes
-                flux_xlo_1 = Solver::Local::Riemann::Roe::Solve(lo_statex_1, statex_1, gamma, 1.-eta(i, j, k), pref, small);
-                flux_ylo_1 = Solver::Local::Riemann::Roe::Solve(lo_statey_1, statey_1, gamma, 1.-eta(i, j, k), pref, small);
+                flux_xlo_1 = Solver::Local::Riemann::Roe::Flux Solve(lo_statex_1, statex_1, gamma, 1.-eta(i, j, k), pref, small);
+                flux_ylo_1 = Solver::Local::Riemann::Roe::Flux Solve(lo_statey_1, statey_1, gamma, 1.-eta(i, j, k), pref, small);
 
                 //hi interface fluxes
-                flux_xhi_1 = Solver::Local::Riemann::Roe::Solve(statex_1, hi_statex_1, gamma, 1.-eta(i, j, k), pref, small);
-                flux_yhi_1 = Solver::Local::Riemann::Roe::Solve(statey_1, hi_statey_1, gamma, 1.-eta(i, j, k), pref, small);
+                flux_xhi_1 = Solver::Local::Riemann::Roe::Flux Solve(statex_1, hi_statex_1, gamma, 1.-eta(i, j, k), pref, small);
+                flux_yhi_1 = Solver::Local::Riemann::Roe::Flux Solve(statey_1, hi_statey_1, gamma, 1.-eta(i, j, k), pref, small);
             }
             catch(...)
             {
