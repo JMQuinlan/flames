@@ -61,13 +61,13 @@ public:
     };
 
     // todo: convert to static functor by replacing with static () when c++23 is released
-    static Flux Solve(State lo_0, State hi_0, State lo_1, State hi_1, Set::Scalar gamma, Set::Scalar cell_eta, Set::Scalar p_ref, Set::Scalar small)
+    static Flux Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar cell_eta, Set::Scalar p_ref, Set::Scalar small)
     {
         // STEP 0: Compute fluid fields
-        Set::Scalar rho_L = (lo_0.rho       - (1.0 - lo_0.eta) * lo_1.rho)      /(lo_0.eta + small),  rho_R = (hi_0.rho       - (1.0 - hi_0.eta) * hi_1.rho)      /(hi_0.eta + small) + small;
-        Set::Scalar Mn_L  = (lo_0.M_normal  - (1.0 - lo_0.eta) * lo_1.M_normal) /(lo_0.eta + small),  Mn_R  = (hi_0.M_normal  - (1.0 - hi_0.eta) * hi_1.M_normal) /(hi_0.eta + small);
-        Set::Scalar Mt_L  = (lo_0.M_tangent - (1.0 - lo_0.eta) * lo_1.M_tangent)/(lo_0.eta + small),  Mt_R  = (hi_0.M_tangent - (1.0 - hi_0.eta) * hi_1.M_tangent)/(hi_0.eta + small);
-        Set::Scalar E_L   = (lo_0.E         - (1.0 - lo_0.eta) * lo_1.E)        /(lo_0.eta + small),  E_R   = (hi_0.E         - (1.0 - hi_0.eta) * hi_1.E)        /(hi_0.eta + small);
+        Set::Scalar rho_L = (lo.rho),  rho_R = (hi.rho);
+        Set::Scalar Mn_L  = (lo.M_normal) ,  Mn_R  = (hi.M_normal);
+        Set::Scalar Mt_L  = (lo.M_tangent),  Mt_R  = (hi.M_tangent);
+        Set::Scalar E_L   = (lo.E) ,  E_R   = (hi.E);
 
         // Ensure no negative densities
         rho_L = std::max(0.0,rho_L);
@@ -98,22 +98,7 @@ public:
         if ((a_RL_sq<0) || (a_RL_sq!=a_RL_sq))
         {
             Util::Message(INFO, "sound speed ", a_RL_sq);
-            Util::Message(INFO, lo_0.eta, " ", hi_0.eta);
-
-            // Util::Message(INFO, "phase 0 rho ", lo_0.rho, " ",       hi_0.rho);
-            // Util::Message(INFO, "phase 0 Mn ", lo_0.M_normal, " ",  hi_0.M_normal);
-            // Util::Message(INFO, "phase 0 Mt ", lo_0.M_tangent, " ", hi_0.M_tangent);
-            // Util::Message(INFO, "phase 0 E ", lo_0.E, " ",         hi_0.E);
-
-            Util::Message(INFO, "phase 1 rho ", lo_1.rho, " ",       hi_1.rho);
-            Util::Message(INFO, "phase 1 Mn ", lo_1.M_normal, " ",  hi_1.M_normal);
-            Util::Message(INFO, "phase 1 Mt ", lo_1.M_tangent, " ", hi_1.M_tangent);
-            Util::Message(INFO, "phase 1 E ", lo_1.E, " ",         hi_1.E);
-
-            Util::Message(INFO, "mixed rho ", lo_0.rho, " ", hi_0.rho);
-            Util::Message(INFO, "mixed Mn ", lo_0.M_normal, " ", hi_0.M_normal);
-            Util::Message(INFO, "mixed Mt ", lo_0.M_tangent, " ", hi_0.M_tangent);
-            Util::Message(INFO, "mixed E ", lo_0.E, " ", hi_0.E);
+            Util::Message(INFO, lo.eta, " ", hi.eta);
 
             Util::Message(INFO, "fluid rho ", rho_L, " ", rho_R);
             Util::Message(INFO, "fluid Mn ", Mn_L, " ", Mn_R);
@@ -171,10 +156,8 @@ public:
             Util::ParallelMessage(INFO,u_R); // -0.01
 
 
-            Util::ParallelMessage(INFO,lo_0);
-            Util::ParallelMessage(INFO,hi_0);
-            Util::ParallelMessage(INFO,lo_1);
-            Util::ParallelMessage(INFO,hi_1);
+            Util::ParallelMessage(INFO,lo);
+            Util::ParallelMessage(INFO,hi);
 
             Util::ParallelMessage(INFO,rho_L);
             Util::ParallelMessage(INFO,u_L);
