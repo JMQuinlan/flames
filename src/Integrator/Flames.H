@@ -32,33 +32,33 @@ public:
     static void Parse(Flames& value, IO::ParmParse& pp);
     virtual ~Flames()
     {
-        delete density_bc;
-        delete momentum_bc;
-        delete energy_bc;
+    delete density_bc;
+    delete momentum_bc;
+    delete energy_bc;
       //  delete density0_bc;
     //    delete momentum0_bc;
   //      delete energy0_bc;
-//	delete density1_bc;
+//  delete density1_bc;
        // delete momentum1_bc;
       //  delete energy1_bc;
 
 
-	delete eta_bc;
+    delete eta_bc;
 
-        delete velocity_ic;
-        delete pressure_ic;
-	//delete velocity0_ic;
-        //delete pressure0_ic;
-	//delete velocity1_ic;
+    delete velocity_ic;
+    delete pressure_ic;
+    //delete velocity0_ic;
+    //delete pressure0_ic;
+    //delete velocity1_ic;
        // delete pressure1_ic;
 
 
-        delete ic_rho_injected;
-        delete ic_mdot;
-        delete ic_q;
+    delete ic_rho_injected;
+    delete ic_mdot;
+    delete ic_q;
 
-        delete eta_ic;
-        delete etadot_ic;
+    delete eta_ic;
+    delete etadot_ic;
     }
 
 protected:
@@ -96,7 +96,7 @@ private:
 
     Set::Field<Set::Scalar> velocity_0_mf;
     Set::Field<Set::Scalar> pressure_0_mf;
-	
+    
     Set::Field<Set::Scalar> density_1_mf;
     Set::Field<Set::Scalar> density_1_old_mf;
 
@@ -112,12 +112,12 @@ private:
 
 
     struct {
-        Set::Field<Set::Scalar> density_mf;
-        Set::Field<Set::Scalar> momentum_mf;
-        Set::Field<Set::Scalar> energy_mf;
-        IC::IC* density_ic   = nullptr;
-        IC::IC* momentum_ic  = nullptr;
-        IC::IC* energy_ic    = nullptr;
+    Set::Field<Set::Scalar> density_mf;
+    Set::Field<Set::Scalar> momentum_mf;
+    Set::Field<Set::Scalar> energy_mf;
+    IC::IC* density_ic   = nullptr;
+    IC::IC* momentum_ic  = nullptr;
+    IC::IC* energy_ic    = nullptr;
     } solid;
 
 protected:

@@ -217,8 +217,8 @@ public:
             State left  (1.0, 1.0, 0.0, 1.0, 1.0);
             State center(1.0, 1.0, 1.0, 1.0, 1.0);
             State right (1.0, 1.0, 2.0, 1.0, 1.0);
-            Flux fluxlo = Solve(center, right, solid, solid, gamma, cell_eta, pref, small);
-            Flux fluxhi = Solve(left, center,  solid, solid, gamma, cell_eta, pref, small);
+            Flux fluxlo = Solve(center, right,  gamma, cell_eta, pref, small);
+            Flux fluxhi = Solve(left, center,   gamma, cell_eta, pref, small);
 
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10
                 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10
@@ -242,8 +242,8 @@ public:
             State left  (1.0, 0.0, 0.0, 1.0, 1.0);
             State center(1.0, 0.0, 1.0, 1.0, 1.0);
             State right (1.0, 0.0, 2.0, 1.0, 1.0);
-            Flux fluxlo = Solve(left, center, leftsol, rightsol, gamma, cell_eta, pref, small);
-            Flux fluxhi = Solve(center, right, leftsol, rightsol, gamma, cell_eta, pref, small);
+            Flux fluxlo = Solve(left, center, gamma, cell_eta, pref, small);
+            Flux fluxhi = Solve(center, right, gamma, cell_eta, pref, small);
 
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10
                 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10
@@ -267,8 +267,8 @@ public:
             State left(1.0, 0.0, 0.0, 1.0, 1.0);
             State center(1.0, 0.0, 0.0, 1.0, 1.0);
             State right(1.0, 0.0, 0.0, 1.0, 1.0);
-            Flux fluxhi = Solve(center, right, solid, solid, gamma, cell_eta, pref, small);
-            Flux fluxlo = Solve(left, center, solid, solid, gamma, cell_eta, pref, small);
+            Flux fluxhi = Solve(center, right, gamma, cell_eta, pref, small);
+            Flux fluxlo = Solve(left, center, gamma, cell_eta, pref, small);
 
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 // no change in mass flux
                 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 // no change in momentum flux
@@ -294,8 +294,8 @@ public:
             State left (1.0, 1.0, 0.5, 1.0, 1.0);
             State center(1.0, 1.0, 0.5, 1.0, 1.0);
             State right (1.0, 1.0, 0.5, 1.0, 1.0);
-            Flux fluxhi = Solve(center, right, leftsol, rightsol, gamma, cell_eta, pref, small);
-            Flux fluxlo = Solve(left, center, leftsol, rightsol, gamma, cell_eta, pref, small);
+            Flux fluxhi = Solve(center, right, gamma, cell_eta, pref, small);
+            Flux fluxlo = Solve(left, center, gamma, cell_eta, pref, small);
 
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 ||
                 fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 ||
