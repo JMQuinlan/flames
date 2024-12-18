@@ -52,6 +52,30 @@ eta.ic.expression.constant.R       = 1.0
 eta.ic.expression.region0          = "0.5*(1 + tanh((x-x0)/epsilon))"
 
 ### HYDRO PARAM ###
+gamma = 1.4
+mu = 1.
+density.ic.type = expression
+density.ic.expression.region0 = "100.0"
+density.ic.expression.region1 = "100.0"
+
+velocity.ic.type = expression
+velocity.ic.expression.constant.epsilon   = 0.1
+#velocity.ic.expression.constant.vel_x = 0.0
+#velocity.ic.expression.constant.vel_y = 0.0
+velocity.ic.expression.constant.x0    = -1.0
+# velocity.ic.expression.constant.R    = 1.0
+# velocity.ic.expression.region0 =  "1.0*0.5*(1 + tanh((sqrt((x-x0)**2 + (y)**2) - R)/eps))"
+velocity.ic.expression.region0          = "0.5*(1 + tanh((x-x0)/epsilon))"
+# phase0.velocity.ic.expression.region0 = "0.0"
+velocity.ic.expression.region1 = "0.0"
+
+# Thermodynamic pressure = pressure + pref
+pref = 1000.0
+pressure.ic.type = expression
+pressure.ic.expression.region0 = "0.0"
+pressure.ic.expression.region1 = "0.0"
+
+
 ### Phase 0 ###
 phase0.gamma = 1.4
 phase0.mu    = 1.
@@ -161,11 +185,11 @@ gradu_refinement_criterion = 0.05
 
 #TODO
 
-amr.abort_on_nan = 0
+#amr.abort_on_nan = 0
 
-dynamictimestep.on = 1
-dynamictimestep.verbose = 1
-dynamictimestep.max  = 0.1
-dynamictimestep.min  = 0.0
-dynamictimestep.cfl = 0.05
+#dynamictimestep.on = 1
+#dynamictimestep.verbose = 1
+#dynamictimestep.max  = 0.1
+#dynamictimestep.min  = 0.0
+#dynamictimestep.cfl = 0.05
 #amr.nsubsteps = 4
