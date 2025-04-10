@@ -1,0 +1,172 @@
+#ifndef INTEGRATOR_Hydro2_H
+#define INTEGRATOR_Hydro2_H
+
+#include "Integrator/Integrator.H"
+#include "IO/ParmParse.H"
+
+#include "BC/BC.H"
+#include "BC/Constant.H"
+#include "BC/Nothing.H"
+#include "IC/IC.H"
+
+#include "Set/Base.H"
+#include "Solver/Local/Riemann/Roe.H"
+
+#if AMREX_SPACEDIM==2
+
+namespace Integrator
+{
+class Hydro2 : virtual public Integrator
+{
+public:
+
+    Hydro2() {};
+    Hydro2(IO::ParmParse& pp);
+    static void Parse(Hydro2& value, IO::ParmParse& pp);
+    virtual ~Hydro2()
+    {
+        delete density_bc;
+        delete momentum_bc;
+        delete energy_bc;
+        delete eta_bc;
+
+        /// Inital Conditions
+        // FLUID 0
+        delete density0_ic;
+        delete velocity0_ic;
+        delete pressure0_ic;
+
+        // FLUID 1
+        delete density1_ic;
+        delete velocity1_ic;
+        delete pressure1_ic;
+
+        delete ic_m0;
+        delete ic_u0;
+        delete ic_q;
+
+        delete eta_ic;
+        delete etadot_ic;
+
+        delete roesolver;
+    }
+
+protected:
+    void Initialize(int lev) override;
+    void Mix(int lev);
+    void TimeStepBegin(Set::Scalar a_time, int a_iter) override;
+    void TimeStepComplete(Set::Scalar time, int lev) override;
+    void Advance(int lev, Set::Scalar time, Set::Scalar dt) override;
+    void TagCellsForRefinement(int lev, amrex::TagBoxArray& tags, amrex::Real /*time*/, int /*ngrow*/) override;
+    void Regrid(int lev, Set::Scalar time) override;
+
+    virtual void UpdateEta(int lev, Set::Scalar time);
+private:
+    // FLUID 0
+    Set::Field<Set::Scalar> density0_mf;
+    Set::Field<Set::Scalar> density0_old_mf;
+
+    Set::Field<Set::Scalar> energy0_mf;
+    Set::Field<Set::Scalar> energy0_old_mf;
+
+    Set::Field<Set::Scalar> momentum0_mf;
+    Set::Field<Set::Scalar> momentum0_old_mf;
+
+    Set::Field<Set::Scalar> velocity0_mf;
+    Set::Field<Set::Scalar> pressure0_mf;
+    Set::Field<Set::Scalar> vorticity0_mf;
+
+    // FLUID 1
+    Set::Field<Set::Scalar> density1_mf;
+    Set::Field<Set::Scalar> density1_old_mf;
+
+    Set::Field<Set::Scalar> energy1_mf;
+    Set::Field<Set::Scalar> energy1_old_mf;
+
+    Set::Field<Set::Scalar> momentum1_mf;
+    Set::Field<Set::Scalar> momentum1_old_mf;
+
+    Set::Field<Set::Scalar> velocity1_mf;
+    Set::Field<Set::Scalar> pressure1_mf;
+    Set::Field<Set::Scalar> vorticity1_mf;
+
+    // Mixture
+    Set::Field<Set::Scalar> density_mf;
+    Set::Field<Set::Scalar> density_old_mf;
+    Set::Field<Set::Scalar> vorticity_mf;
+    Set::Field<Set::Scalar> momentum_mf;
+    Set::Field<Set::Scalar> momentum_old_mf;
+    Set::Field<Set::Scalar> energy_mf;
+    Set::Field<Set::Scalar> energy_old_mf;
+    Set::Field<Set::Scalar> velocity_mf;
+    Set::Field<Set::Scalar> pressure_mf;
+
+protected:
+    Set::Field<Set::Scalar> eta_mf;
+    Set::Field<Set::Scalar> eta_old_mf;
+private:
+    Set::Field<Set::Scalar> etadot_mf;
+
+    
+    Set::Field<Set::Scalar> m0_mf;
+    Set::Field<Set::Scalar> u0_mf;
+    Set::Field<Set::Scalar> q_mf;
+
+    //Set::Field<Set::Scalar> m1_mf;
+    //Set::Field<Set::Scalar> u1_mf;
+    //Set::Field<Set::Scalar> q1_mf;
+    
+
+    Set::Field<Set::Scalar> Source_mf;
+    Set::Field<Set::Scalar> flux_mf;
+
+    BC::BC<Set::Scalar>* density_bc = nullptr;
+    BC::BC<Set::Scalar>* momentum_bc = nullptr;
+    BC::BC<Set::Scalar>* energy_bc = nullptr;
+    BC::BC<Set::Scalar>* eta_bc = nullptr;
+
+    IC::IC<Set::Scalar>* velocity0_ic = nullptr;
+    IC::IC<Set::Scalar>* pressure0_ic = nullptr;
+    IC::IC<Set::Scalar>* density0_ic  = nullptr;
+
+    IC::IC<Set::Scalar>* velocity1_ic = nullptr;
+    IC::IC<Set::Scalar>* pressure1_ic = nullptr;
+    IC::IC<Set::Scalar>* density1_ic = nullptr;
+
+    IC::IC<Set::Scalar>* ic_m0 = nullptr;
+    IC::IC<Set::Scalar>* ic_u0 = nullptr;
+    IC::IC<Set::Scalar>* ic_q = nullptr;
+
+    IC::IC<Set::Scalar>* eta_ic = nullptr;
+    IC::IC<Set::Scalar>* etadot_ic = nullptr;
+
+    BC::Nothing bc_nothing;
+
+    BC::Constant neumann_bc_1 = BC::Constant::ZeroNeumann(1);
+    BC::Constant neumann_bc_D = BC::Constant::ZeroNeumann(AMREX_SPACEDIM);
+
+    Set::Scalar c_max = 0.0;
+    Set::Scalar vx_max = 0.0;
+    Set::Scalar vy_max = 0.0;
+
+    Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion;
+    // FLUID 0
+    Set::Scalar gamma0=NAN, mu0=NAN;
+
+    // FLUID 1
+    Set::Scalar gamma1=NAN, mu1=NAN;
+
+
+    Set::Scalar cfl=NAN, cfl_v=NAN,  pref=NAN;
+    
+    Set::Scalar small=NAN;
+    Set::Scalar cutoff=NAN;
+    Set::Scalar lagrange=NAN;
+
+    Solver::Local::Riemann::Roe *roesolver = nullptr;
+
+};
+}
+
+#endif
+#endif
