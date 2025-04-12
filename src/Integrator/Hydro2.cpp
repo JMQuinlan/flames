@@ -41,6 +41,7 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("small", value.small, 1E-8);  // small regularization value
         pp_query_default("cutoff", value.cutoff, -1E100);  // cutoff value
         pp_query_default("lagrange", value.lagrange, 0.0); // lagrange no-penetration factor
+        pp_query_default("apply_surface_tension", value.apply_surface_tension, 1); // Apply surface tension when solving, default: 1 --> "Apply Surface Tension"
         pp_forbid("roefix", "--> solver.roe.entropy_fix"); // Roe solver entropy fix
 
         // NEW SOLVER FORBIDS
@@ -50,10 +51,12 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // FLUID 0
         pp_query_required("gamma0", value.gamma0);  // gamma for gamma law
         pp_query_required("mu0", value.mu0);        // linear viscosity coefficient
+        pp_query_default("sigma0", value.sigma0, 0.07); // surface tension condition
 
         // FLUID 1
         pp_query_required("gamma1", value.gamma1); // gamma for gamma law
         pp_query_required("mu1", value.mu1);       // linear viscosity coefficient
+        pp_query_default("sigma1", value.sigma1, 0.07); // surface tension condition
         
         // Boundry Conditions
         pp_forbid("rho.bc","--> density.bc");
@@ -121,7 +124,8 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.m0_mf, &value.bc_nothing, 1, 0, "m0", true);
         value.RegisterNewFab(value.u0_mf, &value.bc_nothing, 2, 0, "u0", true, { "x", "y" });
         value.RegisterNewFab(value.q_mf, &value.bc_nothing, 2, 0, "q0", true, { "x", "y" });
-        value.RegisterNewFab(value.Source_mf, &value.bc_nothing, 4, 0, "Source", true); // Todo: What is this?
+        value.RegisterNewFab(value.Source_mf, &value.bc_nothing, 4, 0, "Source", true);
+        value.RegisterNewFab(value.Fsv_mf, &value.bc_nothing, 2, nghost, "Fsv", true, {"x","y"}); // To Track Surface Tension
     }
 
     // NEW SOLVER FORBIDS
@@ -188,6 +192,7 @@ void Hydro2::Initialize(int lev)
     ic_u0           ->Initialize(lev, u0_mf, 0.0);
     ic_q            ->Initialize(lev, q_mf, 0.0);
     Source_mf[lev]  ->setVal(0.0);
+    Fsv_mf[lev]     ->setVal(0.0); //->Initialize(lev, m0_mf, 0.0);
 
     // Calculate mixed variables based on individual fluid variables
     Mix(lev);
@@ -355,7 +360,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             press(i, j, k) = (E(i, j, k) - (0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k)+small))) * (gamma_eff - 1.0) - pref; // NEEDS Verification
 
             // DEBUG Tool
-            if (press(i, j, k) > 1000000.0)
+            if (press(i, j, k) > 1E1000)
             {
                 Util::ParallelMessage(INFO, "v=", v(i,j,k));
                 Util::ParallelMessage(INFO, "press=", press(i,j,k));
@@ -409,7 +414,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar>   q       = q_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   _u0     = u0_mf.Patch(lev, mfi);
 
-        amrex::Array4<Set::Scalar> const &Source = (*Source_mf[lev]).array(mfi);     
+        amrex::Array4<Set::Scalar> const &Source = (*Source_mf[lev]).array(mfi);
+        Set::Patch <Set::Scalar>       Fsv = Fsv_mf.Patch(lev, mfi);
 
         Set::Scalar *dt_max_handle = &dt_max;
         
@@ -428,6 +434,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Vector grad_eta        = Numeric::Gradient(eta, i, j, k, 0, DX);
             Set::Scalar grad_eta_mag    = grad_eta.lpNorm<2>();
             Set::Matrix hess_eta        = Numeric::Hessian(eta, i, j, k, 0, DX);
+            Set::Scalar lap_eta         = grad_eta(0) + grad_eta(1); // Todo: make it 3D compatiable
+
 
             // Extract velocity from momentum and density
             //Set::Vector u   = Set::Vector(M(i, j, k, 0) / rho(i, j, k), M(i, j, k, 1) / rho(i, j, k));
@@ -437,13 +445,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Matrix gradM    = Numeric::Gradient(M, i, j, k, DX);
             Set::Vector gradrho  = Numeric::Gradient(rho, i, j, k, 0, DX);
             Set::Matrix hess_rho = Numeric::Hessian(rho, i, j, k, 0, DX, sten);
-            //Set::Matrix gradu = gradM / rho(i, j, k);
             Set::Matrix gradu    = (gradM - u * gradrho.transpose()) / rho(i, j, k);
-            //Set::Matrix gradu = (gradM - u * gradrho) / rho(i, j, k);
 
             Set::Vector q0 = Set::Vector(q(i, j, k, 0), q(i, j, k, 1));
 
             // Calculate source terms
+            // Shear:
             Set::Scalar mdot0 = -m0(i, j, k) * grad_eta_mag;
             Set::Vector Pdot0 = Set::Vector::Zero();
             Set::Scalar qdot0 = q0.dot(grad_eta);
@@ -472,10 +479,42 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                             div_tau(p) += 2.0 * Mpqrs * hess_u(r, s, q);
                         }
 
+            // Surface Tension:
+            Fsv(i,j,k) = (0.0, 0.0);
+            //Set::Vector Fsv_vector = (0.0, 0.0);
+            #if (apply_surface_tension == 0)
+                Set::Scalar sigma_eff = eta(i, j, k) * sigma0 + (1.0 - eta(i, j, k)) * sigma1;
+                //Set::Matrix3 kappa = - ((hess_eta / (grad_eta_mag + small))); - (hess_eta.dot(grad_eta))/(grad_eta_mag)// -((grad_eta.dot(Numeric::Gradient(grad, i, j, k, DX))/(grad_eta_mag*grad_eta_mag)))
+                //Set::Matrix kappa = - ((hess_eta / (grad_eta_mag + small))) - ((hess_eta.dot(grad_eta))/(grad_eta_mag));
+                //Set::Matrix grad_mag_grad_eta = hess_eta.cast<double>().dot(grad_eta.cast<double>());
+                //Set::Matrix kappa = -((hess_eta.cast<double>() / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / (grad_eta_mag + small)));
+
+                Set::Vector grad_mag_grad_eta = lap_eta * grad_eta / (grad_eta_mag + small);
+                Set::Scalar kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / ((grad_eta_mag + small) * (grad_eta_mag + small))));
+                try
+                {
+                    //Fsv = sigma_eff * (kappa * grad_eta);
+                    //Fsv = sigma_eff * (kappa * grad_eta.cast<double>());
+                    Fsv(i,j,k,0) = sigma_eff * (kappa * grad_eta(0));
+                    Fsv(i,j,k,1) = sigma_eff * (kappa * grad_eta(1));
+                    //Fsv_vector = Set::Vector(Fsv(i, j, k, 0), Fsv(i, j, k, 1));
+                    
+                }
+                catch (...)
+                {
+                    Util::ParallelMessage(INFO, "hess_eta= ", hess_eta);
+                    Util::ParallelMessage(INFO, "grad_eta_mag= ", grad_eta_mag);
+                    Util::ParallelMessage(INFO, "kappa= ", kappa);
+                    Util::ParallelMessage(INFO, "grad_eta=", grad_eta);
+                    Util::Abort(INFO);
+                }
+                
+            #endif
+
             Source(i, j, k, 0) = mdot0;
-            Source(i, j, k, 1) = Pdot0(0) - Ldot0(0);
-            Source(i, j, k, 2) = Pdot0(1) - Ldot0(1);
-            Source(i, j, k, 3) = qdot0;// - Ldot0(0)*v(i,j,k,0) - Ldot0(1)*v(i,j,k,1);
+            Source(i, j, k, 1) = Pdot0(0) - Ldot0(0) + Fsv(i,j,k,0);
+            Source(i, j, k, 2) = Pdot0(1) - Ldot0(1) + Fsv(i,j,k,1);
+            Source(i, j, k, 3) = qdot0 + (Fsv(i, j, k, 0) * u[0] + Fsv(i, j, k, 1) * u[1]); // - Ldot0(0)*v(i,j,k,0) - Ldot0(1)*v(i,j,k,1);
 
             // Lagrange terms to enforce no-penetration
             Source(i, j, k, 1) -= lagrange * u.dot(grad_eta) * grad_eta(0);
