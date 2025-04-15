@@ -17,9 +17,9 @@ amr.blocking_factor = 2
 amr.regrid_int = 100
 amr.grid_eff = 0.8
 
-amr.max_level = 2
+amr.max_level = 0
 timestep  = 5e-4
-amr.n_cell = 32 32
+amr.n_cell = 64 64
 
 ### DIMENSIONS ###
 geometry.prob_lo = -12.0 -12.0 0.0 # [ m ]
@@ -27,14 +27,14 @@ geometry.prob_hi =  12.0  12.0 0.0 # [ m ]
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
-stop_time = 1.0
+stop_time = 0.2
 
 q.ic.type = expression
 q.ic.expression.region0 = "0.0"
 q.ic.expression.region1 = "0.0"
 
 eta.ic.type = expression
-eta.ic.expression.region0        = "(0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 1.5)/0.2)))"
+eta.ic.expression.region0        = "(0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 5)/0.2)))"
 #eta.ic.expression.region0 = "((x**2)+(y**2) < 4) * tanh((x+1)**2+(y+1)**2)"
 #eta.ic.expression.region0 = "0.0"
 
@@ -61,12 +61,12 @@ velocity1.ic.expression.region0 = "0.0"
 velocity1.ic.expression.region1 = "0.0"
 
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "103320.0 + (100000.0*(x<=-11.0 & t < 0.001))"
+pressure0.ic.expression.region0 = "1e5 + (1e5*(x<=-11.5))"
 
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "103320.0"
+pressure1.ic.expression.region0 = "1e5"
 
-pref = 103320.0
+pref = 1e5
 
 ### ETA BC  ###
 
