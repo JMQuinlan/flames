@@ -41,7 +41,7 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("small", value.small, 1E-8);  // small regularization value
         pp_query_default("cutoff", value.cutoff, -1E100);  // cutoff value
         pp_query_default("lagrange", value.lagrange, 0.0); // lagrange no-penetration factor
-        pp_query_default("apply_surface_tension", value.apply_surface_tension, 1); // Apply surface tension when solving, default: 1 --> "Apply Surface Tension"
+        pp_query_default("apply_surface_tension", value.apply_surface_tension, true); // Apply surface tension when solving, default: true --> "Apply Surface Tension"
         pp_forbid("roefix", "--> solver.roe.entropy_fix"); // Roe solver entropy fix
 
         // NEW SOLVER FORBIDS
@@ -390,19 +390,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar>         E_new   = energy_mf.Patch(lev,mfi);
         Set::Patch<Set::Scalar>         M_new   = momentum_mf.Patch(lev,mfi);
 
-        /*
-        // FLUID 0
-        Set::Patch<const Set::Scalar>   rho0    = density0_old_mf.Patch(lev,mfi);
-        Set::Patch<const Set::Scalar>   E0      = energy0_old_mf.Patch(lev,mfi);
-        Set::Patch<const Set::Scalar>   M0      = momentum0_old_mf.Patch(lev,mfi);
-
-        // FLUID 1
-        Set::Patch<const Set::Scalar>   rho1    = density1_old_mf.Patch(lev,mfi);
-        Set::Patch<const Set::Scalar>   E1      = energy1_old_mf.Patch(lev,mfi);
-        Set::Patch<const Set::Scalar>   M1      = momentum1_old_mf.Patch(lev,mfi);
-        */
-
-
         // SOURCES
         Set::Patch<Set::Scalar> omega = vorticity_mf.Patch(lev, mfi);
 
@@ -418,34 +405,26 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch <Set::Scalar>       Fsv = Fsv_mf.Patch(lev, mfi);
 
         Set::Scalar *dt_max_handle = &dt_max;
-        
-        /*
-        // Riemann solver pointer
-        auto roesolver_ptr = roesolver;
-        */
 
-
-        // Now use the extracted arrays in the lambda
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) 
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
             // Diffuse Sources
-            Set::Vector grad_eta        = Numeric::Gradient(eta, i, j, k, 0, DX);
-            Set::Scalar grad_eta_mag    = grad_eta.lpNorm<2>();
-            Set::Matrix hess_eta        = Numeric::Hessian(eta, i, j, k, 0, DX);
-            Set::Scalar lap_eta         = grad_eta(0) + grad_eta(1); // Todo: make it 3D compatiable
-
+            Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
+            Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
+            Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX);
+            Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
 
             // Extract velocity from momentum and density
-            //Set::Vector u   = Set::Vector(M(i, j, k, 0) / rho(i, j, k), M(i, j, k, 1) / rho(i, j, k));
+            // Set::Vector u   = Set::Vector(M(i, j, k, 0) / rho(i, j, k), M(i, j, k, 1) / rho(i, j, k));
             Set::Vector u = Set::Vector(v(i, j, k, 0), v(i, j, k, 1));
-            Set::Vector u0  = Set::Vector(_u0(i, j, k, 0), _u0(i, j, k, 1));
+            Set::Vector u0 = Set::Vector(_u0(i, j, k, 0), _u0(i, j, k, 1));
 
-            Set::Matrix gradM    = Numeric::Gradient(M, i, j, k, DX);
-            Set::Vector gradrho  = Numeric::Gradient(rho, i, j, k, 0, DX);
+            Set::Matrix gradM = Numeric::Gradient(M, i, j, k, DX);
+            Set::Vector gradrho = Numeric::Gradient(rho, i, j, k, 0, DX);
             Set::Matrix hess_rho = Numeric::Hessian(rho, i, j, k, 0, DX, sten);
-            Set::Matrix gradu    = (gradM - u * gradrho.transpose()) / rho(i, j, k);
+            Set::Matrix gradu = (gradM - u * gradrho.transpose()) / rho(i, j, k);
 
             Set::Vector q0 = Set::Vector(q(i, j, k, 0), q(i, j, k, 1));
 
@@ -473,32 +452,29 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         for (int s = 0; s < 2; s++)
                         {
                             Set::Scalar Mpqrs = 0.0;
-                            if (p == r && q == s) Mpqrs += 0.5 * (eta(i,j,k)*mu0 + ((1.0-eta(i,j,k))*mu1)); // TODO: Assumes Isotropic
+                            if (p == r && q == s) Mpqrs += 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
+                            if (p == s && q == r) Mpqrs += 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
+                            if (p == q && r == s) Mpqrs += 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
 
                             Ldot0(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
                             div_tau(p) += 2.0 * Mpqrs * hess_u(r, s, q);
                         }
 
             // Surface Tension:
-            Fsv(i,j,k) = (0.0, 0.0);
-            //Set::Vector Fsv_vector = (0.0, 0.0);
-            #if (apply_surface_tension == 0)
+            Fsv(i, j, k) = (0.0, 0.0);
+            // Set::Vector Fsv_vector = (0.0, 0.0);
+            if (apply_surface_tension)
+            {
                 Set::Scalar sigma_eff = eta(i, j, k) * sigma0 + (1.0 - eta(i, j, k)) * sigma1;
-                //Set::Matrix3 kappa = - ((hess_eta / (grad_eta_mag + small))); - (hess_eta.dot(grad_eta))/(grad_eta_mag)// -((grad_eta.dot(Numeric::Gradient(grad, i, j, k, DX))/(grad_eta_mag*grad_eta_mag)))
-                //Set::Matrix kappa = - ((hess_eta / (grad_eta_mag + small))) - ((hess_eta.dot(grad_eta))/(grad_eta_mag));
-                //Set::Matrix grad_mag_grad_eta = hess_eta.cast<double>().dot(grad_eta.cast<double>());
-                //Set::Matrix kappa = -((hess_eta.cast<double>() / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / (grad_eta_mag + small)));
-
                 Set::Vector grad_mag_grad_eta = lap_eta * grad_eta / (grad_eta_mag + small);
                 Set::Scalar kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / ((grad_eta_mag + small) * (grad_eta_mag + small))));
                 try
                 {
-                    //Fsv = sigma_eff * (kappa * grad_eta);
-                    //Fsv = sigma_eff * (kappa * grad_eta.cast<double>());
-                    Fsv(i,j,k,0) = sigma_eff * (kappa * grad_eta(0));
-                    Fsv(i,j,k,1) = sigma_eff * (kappa * grad_eta(1));
-                    //Fsv_vector = Set::Vector(Fsv(i, j, k, 0), Fsv(i, j, k, 1));
-                    
+                    // Fsv = sigma_eff * (kappa * grad_eta);
+                    // Fsv = sigma_eff * (kappa * grad_eta.cast<double>());
+                    Fsv(i, j, k, 0) = sigma_eff * (kappa * grad_eta(0));
+                    Fsv(i, j, k, 1) = sigma_eff * (kappa * grad_eta(1));
+                    // Fsv_vector = Set::Vector(Fsv(i, j, k, 0), Fsv(i, j, k, 1));
                 }
                 catch (...)
                 {
@@ -508,13 +484,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     Util::ParallelMessage(INFO, "grad_eta=", grad_eta);
                     Util::Abort(INFO);
                 }
-                
-            #endif
+            }
 
             Source(i, j, k, 0) = mdot0;
             Source(i, j, k, 1) = Pdot0(0) - Ldot0(0) + Fsv(i,j,k,0);
             Source(i, j, k, 2) = Pdot0(1) - Ldot0(1) + Fsv(i,j,k,1);
-            Source(i, j, k, 3) = qdot0 + (Fsv(i, j, k, 0) * u[0] + Fsv(i, j, k, 1) * u[1]); // - Ldot0(0)*v(i,j,k,0) - Ldot0(1)*v(i,j,k,1);
+            Source(i, j, k, 3) = qdot0 + (Fsv(i, j, k, 0) * u(0) + Fsv(i, j, k, 1) * u(1)); // - Ldot0(0)*v(i,j,k,0) - Ldot0(1)*v(i,j,k,1);
 
             // Lagrange terms to enforce no-penetration
             Source(i, j, k, 1) -= lagrange * u.dot(grad_eta) * grad_eta(0);
@@ -638,8 +613,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Set::Vector grad_ux = Numeric::Gradient(v, i, j, k, 0, DX);
             // Set::Vector grad_uy = Numeric::Gradient(v, i, j, k, 1, DX);
 
-            *dt_max_handle = std::fabs(cfl * DX[0] / (u(0)));
-            *dt_max_handle = std::min(*dt_max_handle, std::fabs(cfl * DX[1] / (u(1))));
+            *dt_max_handle = std::fabs(cfl * DX[0] / (u(0)+small));
+            *dt_max_handle = std::min(*dt_max_handle, std::fabs(cfl * DX[1] / (u(1)+small)));
             *dt_max_handle = std::min(*dt_max_handle, std::fabs(cfl_v * DX[0] * DX[0] / (Source(i, j, k, 1) + small)));
             *dt_max_handle = std::min(*dt_max_handle, std::fabs(cfl_v * DX[1] * DX[1] / (Source(i, j, k, 2) + small)));
 
