@@ -532,8 +532,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Update mixed fluid variables
             Set::Scalar drho_dt = 
-                (flux_xlo.mass - flux_xhi.mass) / DX[0] + 
-                (flux_ylo.mass - flux_yhi.mass) / DX[1] + 
+                (flux_xlo.mass - flux_xhi.mass)+// / DX[0] + 
+                (flux_ylo.mass - flux_yhi.mass)+// / DX[1] + 
                 Source(i, j, k, 0);
 
             rho_new(i, j, k) = rho(i, j, k) + (drho_dt) * dt; // Deleted Etadot
@@ -563,8 +563,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             }
 
             Set::Scalar dMx_dt = 
-                (flux_xlo.momentum_normal - flux_xhi.momentum_normal) / DX[0] + 
-                (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / DX[1] + 
+                (flux_xlo.momentum_normal - flux_xhi.momentum_normal)+// / DX[0] + 
+                (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent)+// / DX[1] + 
                 div_tau(0) +
                 //(mu * (lap_ux * eta(i, j, k))) +
                 Source(i, j, k, 1);
@@ -572,8 +572,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             M_new(i, j, k, 0) = M(i, j, k, 0) + dMx_dt * dt;
 
             Set::Scalar dMy_dt = 
-                (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / DX[0] + 
-                (flux_ylo.momentum_normal - flux_yhi.momentum_normal) / DX[1] + 
+                (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent)+// / DX[0] + 
+                (flux_ylo.momentum_normal - flux_yhi.momentum_normal)+// / DX[1] + 
                 div_tau(1) +
                 //(mu * (lap_uy * eta(i, j, k))) +
                 Source(i, j, k, 2);
@@ -581,8 +581,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             M_new(i, j, k, 1) = M(i, j, k, 1) + dMy_dt * dt;
 
             Set::Scalar dE_dt = 
-                (flux_xlo.energy - flux_xhi.energy) / DX[0] + 
-                (flux_ylo.energy - flux_yhi.energy) / DX[1] + 
+                (flux_xlo.energy - flux_xhi.energy)+// / DX[0] + 
+                (flux_ylo.energy - flux_yhi.energy)+// / DX[1] + 
                 Source(i, j, k, 3);
 
             E_new(i, j, k) = E(i, j, k) + dE_dt * dt;
