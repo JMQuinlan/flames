@@ -22,8 +22,8 @@ timestep  = 5e-4
 amr.n_cell = 256 256
 
 ### DIMENSIONS ###
-geometry.prob_lo = -12.0 -12.0 0.0 # [ m ]
-geometry.prob_hi =  12.0  12.0 0.0 # [ m ]
+geometry.prob_lo = -120.0 -120.0 0.0 # [ m ]
+geometry.prob_hi =  120.0  120.0 0.0 # [ m ]
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
@@ -34,7 +34,7 @@ q.ic.expression.region0 = "0.0"
 q.ic.expression.region1 = "0.0"
 
 eta.ic.type = expression
-eta.ic.expression.region0        = "(0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 5)/0.2)))"
+eta.ic.expression.region0        = "(0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 50)/0.2)))"
 #eta.ic.expression.region0 = "((x**2)+(y**2) < 4) * tanh((x+1)**2+(y+1)**2)"
 #eta.ic.expression.region0 = "0.0"
 
@@ -50,7 +50,7 @@ density0.ic.type = expression
 density0.ic.expression.region0 = "1.0"
 
 density1.ic.type = expression
-density1.ic.expression.region0 = "5.0"
+density1.ic.expression.region0 = "1.1"
 
 velocity0.ic.type = expression
 velocity0.ic.expression.region0 = "0.0"
@@ -61,7 +61,7 @@ velocity1.ic.expression.region0 = "0.0"
 velocity1.ic.expression.region1 = "0.0"
 
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "1e5 + (1e5*(x<=-11.5))"
+pressure0.ic.expression.region0 = "1e5 + (1e5*(x<=-115))"
 
 pressure1.ic.type = expression
 pressure1.ic.expression.region0 = "1e5"

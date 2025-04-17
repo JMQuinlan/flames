@@ -103,11 +103,10 @@ private:
 
 protected:
     Set::Field<Set::Scalar> eta_mf;
+    Set::Field<Set::Scalar> etadot_mf;
     Set::Field<Set::Scalar> eta_old_mf;
 private:
-    Set::Field<Set::Scalar> etadot_mf;
-
-    
+   
     Set::Field<Set::Scalar> m0_mf;
     Set::Field<Set::Scalar> u0_mf;
     Set::Field<Set::Scalar> q_mf;
