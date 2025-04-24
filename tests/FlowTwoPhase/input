@@ -34,7 +34,8 @@ q.ic.expression.region0 = "0.0"
 q.ic.expression.region1 = "0.0"
 
 eta.ic.type = expression
-eta.ic.expression.region0        = "(0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 50)/0.2)))"
+eta.ic.expression.region0 = "(0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x-50)**2 + (y)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x-50)**2 + (y-50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x)**2 + (y-50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x+50)**2 + (y)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x+50)**2 + (y+50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x)**2 + (y+50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x+50)**2 + (y-50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x-50)**2 + (y+50)**2) - 20)/0.8))) - 8"
+
 #eta.ic.expression.region0 = "((x**2)+(y**2) < 4) * tanh((x+1)**2+(y+1)**2)"
 #eta.ic.expression.region0 = "0.0"
 
@@ -50,7 +51,7 @@ density0.ic.type = expression
 density0.ic.expression.region0 = "1.0"
 
 density1.ic.type = expression
-density1.ic.expression.region0 = "1.1"
+density1.ic.expression.region0 = "10.0"
 
 velocity0.ic.type = expression
 velocity0.ic.expression.region0 = "0.0"
