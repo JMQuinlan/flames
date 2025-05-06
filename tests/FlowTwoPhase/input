@@ -34,7 +34,8 @@ q.ic.expression.region0 = "0.0"
 q.ic.expression.region1 = "0.0"
 
 eta.ic.type = expression
-eta.ic.expression.region0 = "(0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x-50)**2 + (y)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x-50)**2 + (y-50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x)**2 + (y-50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x+50)**2 + (y)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x+50)**2 + (y+50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x)**2 + (y+50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x+50)**2 + (y-50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x-50)**2 + (y+50)**2) - 20)/0.8))) - 8"
+#eta.ic.expression.region0 = "(0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x-50)**2 + (y)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x-50)**2 + (y-50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x)**2 + (y-50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x+50)**2 + (y)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x+50)**2 + (y+50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x)**2 + (y+50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x+50)**2 + (y-50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x-50)**2 + (y+50)**2) - 20)/0.8))) - 8"
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 50)/0.8))"
 
 #eta.ic.expression.region0 = "((x**2)+(y**2) < 4) * tanh((x+1)**2+(y+1)**2)"
 #eta.ic.expression.region0 = "0.0"
@@ -62,7 +63,7 @@ velocity1.ic.expression.region0 = "0.0"
 velocity1.ic.expression.region1 = "0.0"
 
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "1e5 + (1e5*(x<=-115))"
+pressure0.ic.expression.region0 = "1e5 + (10e5*(x<=-115))"
 
 pressure1.ic.type = expression
 pressure1.ic.expression.region0 = "1e5"

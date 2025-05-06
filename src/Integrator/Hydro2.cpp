@@ -36,10 +36,10 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // SOLVER AND REFRENCE CONDITIONS
         pp_query_required("cfl", value.cfl);           // cfl condition
-        pp_query_default("cfl_v", value.cfl_v, 1E100); // cfl condition
+        pp_query_default("cfl_v", value.cfl_v, 1E-100); // cfl condition
         pp_query_default("pref", value.pref, 1.0);     // reference pressure for Roe solver
         pp_query_default("small", value.small, 1E-8);  // small regularization value
-        pp_query_default("cutoff", value.cutoff, -1E100);  // cutoff value
+        pp_query_default("cutoff", value.cutoff, 1E-100);  // cutoff value
         pp_query_default("lagrange", value.lagrange, 0.0); // lagrange no-penetration factor
         pp_query_default("apply_surface_tension", value.apply_surface_tension, true); // Apply surface tension when solving, default: true --> "Apply Surface Tension"
         pp_forbid("roefix", "--> solver.roe.entropy_fix"); // Roe solver entropy fix
@@ -328,9 +328,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         const amrex::Box &bx = mfi.growntilebox();
 
         // Eta:
-        Set::Patch<Set::Scalar> &eta_new = (*eta_mf[lev]).array(mfi);
+        //Set::Patch<Set::Scalar> &eta_new = (*eta_mf[lev]).array(mfi);
         Set::Patch<const Set::Scalar> const &eta = (*eta_old_mf[lev]).array(mfi);
-        Set::Patch<Set::Scalar> &etadot = (*etadot_mf[lev]).array(mfi);
+        //Set::Patch<Set::Scalar> &etadot = (*etadot_mf[lev]).array(mfi);
 
         // Mixture
         Set::Patch<const Set::Scalar> rho = density_old_mf.Patch(lev, mfi);
@@ -346,7 +346,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar gamma_eff = eta(i, j, k) * gamma0 + (1.0 - eta(i, j, k)) * gamma1;
 
             // etadot
-            etadot(i, j, k) = (eta_new(i, j, k) - eta(i, j, k)) / dt;
+            //etadot(i, j, k) = (eta_new(i, j, k) - eta(i, j, k)) / dt;
 
             // Velocity = M ./ (DX*DY*rho)
             v(i, j, k, 0) = M(i, j, k, 0) / (rho(i, j, k));
@@ -364,7 +364,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::ParallelMessage(INFO, "M=", M(i, j, k));
                 Util::ParallelMessage(INFO, "E=", E(i, j, k));
                 Util::ParallelMessage(INFO, "eta=", eta(i, j, k));
-                Util::ParallelMessage(INFO, "etadot=", etadot(i, j, k));
+                //Util::ParallelMessage(INFO, "etadot=", etadot(i, j, k));
                 Util::Exception(INFO);
             }
         });
@@ -388,7 +388,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> omega = vorticity_mf.Patch(lev, mfi);
 
         Set::Patch<const Set::Scalar>   eta     = eta_old_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar>   etadot  = etadot_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar>         eta_new = eta_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   v       = velocity_mf.Patch(lev, mfi); 
 
         Set::Patch<const Set::Scalar>   m0      = m0_mf.Patch(lev, mfi);
@@ -575,6 +575,23 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Source(i, j, k, 3);
 
             E_new(i, j, k) = E(i, j, k) + dE_dt * dt;
+
+            // Evolving Eta:
+            //Set::Scalar deta_dt = -u(0) * u(1) * grad_eta_mag; // Dr. Quinlan
+            //Set::Scalar deta_dt = -u.dot(grad_eta); // My attempt
+            Set::Matrix gradu = (gradM - u * gradrho.transpose()) / rho(i, j, k);
+
+            Set::Scalar deta_dt = -; //https://www.sciencedirect.com/science/article/pii/S002199912100005X
+
+            eta_new(i, j, k) = eta(i, j, k) + deta_dt * dt;
+            if (eta_new(i, j, k) <= cutoff) 
+            {
+                eta_new(i, j, k) = 0.0;
+            }
+            else if (eta_new(i, j, k) >= (1.0 - cutoff))
+            {
+                eta_new(i, j, k) = 1.0;
+            }
 
             //Set::Scalar dMx_dt = (flux_xlo.momentum_normal - flux_xhi.momentum_normal) / DX[0] + (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / DX[1] + Source(i, j, k, 1);
             //Set::Scalar dMy_dt = (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / DX[0] + (flux_ylo.momentum_normal - flux_yhi.momentum_normal) / DX[1] + Source(i, j, k, 2);
