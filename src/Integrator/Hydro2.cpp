@@ -413,6 +413,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Extract velocity from momentum and density
             // Set::Vector u   = Set::Vector(M(i, j, k, 0) / rho(i, j, k), M(i, j, k, 1) / rho(i, j, k));
             Set::Vector u = Set::Vector(v(i, j, k, 0), v(i, j, k, 1));
+            //Set::Vector u_mag = u.lpNorm<2>();
             Set::Vector u0 = Set::Vector(_u0(i, j, k, 0), _u0(i, j, k, 1));
 
             Set::Matrix gradM = Numeric::Gradient(M, i, j, k, DX);
@@ -476,6 +477,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     Util::Abort(INFO);
                 }
             }
+            
 
             Source(i, j, k, 0) = mdot0;
             Source(i, j, k, 1) = Pdot0(0) - Ldot0(0) + Fsv(i,j,k,0);
@@ -577,11 +579,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             E_new(i, j, k) = E(i, j, k) + dE_dt * dt;
 
             // Evolving Eta:
-            //Set::Scalar deta_dt = -u(0) * u(1) * grad_eta_mag; // Dr. Quinlan
-            //Set::Scalar deta_dt = -u.dot(grad_eta); // My attempt
-            Set::Matrix gradu = (gradM - u * gradrho.transpose()) / rho(i, j, k);
+            Set::Scalar deta_dt = -u.dot(grad_eta); // Material Derivative
+            //Set::Matrix tmp = 
+            //Set::Scalar deta_dt = -1.0 / (rho(i, j, k) * (u_mag**2))
+            //Set::Matrix gradu = (gradM - u * gradrho.transpose()) / rho(i, j, k);
 
-            Set::Scalar deta_dt = -; //https://www.sciencedirect.com/science/article/pii/S002199912100005X
+            //Set::Scalar deta_dt = -; //https://www.sciencedirect.com/science/article/pii/S002199912100005X
 
             eta_new(i, j, k) = eta(i, j, k) + deta_dt * dt;
             if (eta_new(i, j, k) <= cutoff) 
