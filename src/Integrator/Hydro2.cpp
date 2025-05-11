@@ -51,12 +51,12 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // FLUID 0
         pp_query_required("gamma0", value.gamma0);  // gamma for gamma law
         pp_query_required("mu0", value.mu0);        // linear viscosity coefficient
-        pp_query_default("sigma0", value.sigma0, 0.07); // surface tension condition
+        pp_query_default("sigma0", value.sigma0, 70.0); // surface tension condition
 
         // FLUID 1
         pp_query_required("gamma1", value.gamma1); // gamma for gamma law
         pp_query_required("mu1", value.mu1);       // linear viscosity coefficient
-        pp_query_default("sigma1", value.sigma1, 0.07); // surface tension condition
+        pp_query_default("sigma1", value.sigma1, 70.0); // surface tension condition
         
         // Boundry Conditions
         pp_forbid("rho.bc","--> density.bc");
@@ -319,7 +319,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
     Set::Scalar dt_max = std::numeric_limits<Set::Scalar>::max();
 
-    UpdateEta(lev, time);
+    //UpdateEta(lev, time);
     const Set::Scalar *DX = geom[lev].CellSize();
 
     // Update etadot
@@ -411,7 +411,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
 
             // Extract velocity from momentum and density
-            // Set::Vector u   = Set::Vector(M(i, j, k, 0) / rho(i, j, k), M(i, j, k, 1) / rho(i, j, k));
+            //Set::Vector u  = Set::Vector(M(i, j, k, 0) / rho(i, j, k), M(i, j, k, 1) / rho(i, j, k));
             Set::Vector u = Set::Vector(v(i, j, k, 0), v(i, j, k, 1));
             //Set::Vector u_mag = u.lpNorm<2>();
             Set::Vector u0 = Set::Vector(_u0(i, j, k, 0), _u0(i, j, k, 1));
@@ -457,16 +457,22 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Surface Tension:
             Fsv(i, j, k) = (0.0, 0.0);
-            // Set::Vector Fsv_vector = (0.0, 0.0);
+            Set::Vector Fsv_vector = Set::Vector(0.0, 0.0);
             if (apply_surface_tension)
             {
                 Set::Scalar sigma_eff = eta(i, j, k) * sigma0 + (1.0 - eta(i, j, k)) * sigma1;
-                Set::Vector grad_mag_grad_eta = lap_eta * grad_eta / (grad_eta_mag + small);
+                //Set::Vector grad_mag_grad_eta = lap_eta * grad_eta / (grad_eta_mag + small);
+                //Set::Vector grad_mag_grad_eta = Set::Vector(grad_eta_mag * grad_eta(0) * hess_eta(0, 0), grad_eta_mag * grad_eta(1) * hess_eta(1, 1));
+                Set::Vector grad_mag_grad_eta = Set::Vector(1/(grad_eta_mag+small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)), 
+                                                            1/(grad_eta_mag+small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));
                 Set::Scalar kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / ((grad_eta_mag + small) * (grad_eta_mag + small))));
+
+
                 try
                 {
-                    Fsv(i, j, k, 0) = sigma_eff * (kappa * grad_eta(0));
-                    Fsv(i, j, k, 1) = sigma_eff * (kappa * grad_eta(1));
+                    Fsv(i, j, k, 0) = sigma_eff * (kappa * grad_eta(0));// / (DX[0] + small);
+                    Fsv(i, j, k, 1) = sigma_eff * (kappa * grad_eta(1));// / (DX[1] + small);
+                    Fsv_vector = Set::Vector(Fsv(i, j, k, 0), Fsv(i, j, k, 1));
                 }
                 catch (...)
                 {
@@ -482,7 +488,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Source(i, j, k, 0) = mdot0;
             Source(i, j, k, 1) = Pdot0(0) - Ldot0(0) + Fsv(i,j,k,0);
             Source(i, j, k, 2) = Pdot0(1) - Ldot0(1) + Fsv(i,j,k,1);
-            Source(i, j, k, 3) = qdot0 + (Fsv(i, j, k, 0) * u(0) + Fsv(i, j, k, 1) * u(1)); // - Ldot0(0)*v(i,j,k,0) - Ldot0(1)*v(i,j,k,1);
+            Source(i, j, k, 3) = qdot0  + u.dot(Fsv_vector); //(Fsv(i, j, k, 0) * u(0) + Fsv(i, j, k, 1) * u(1)); //+ u.dot(Ldot0)
 
             // Lagrange terms to enforce no-penetration
             Source(i, j, k, 1) -= lagrange * u.dot(grad_eta) * grad_eta(0);
@@ -527,7 +533,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 (flux_ylo.mass - flux_yhi.mass) / (DX[1]+small) + 
                 Source(i, j, k, 0);
 
-            rho_new(i, j, k) = rho(i, j, k) + (drho_dt) * dt; // Deleted Etadot
+            rho_new(i, j, k) = rho(i, j, k) + (drho_dt) * dt;
 
             if (rho_new(i, j, k) != rho_new(i, j, k))
             {
@@ -596,28 +602,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 eta_new(i, j, k) = 1.0;
             }
 
-            //Set::Scalar dMx_dt = (flux_xlo.momentum_normal - flux_xhi.momentum_normal) / DX[0] + (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / DX[1] + Source(i, j, k, 1);
-            //Set::Scalar dMy_dt = (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / DX[0] + (flux_ylo.momentum_normal - flux_yhi.momentum_normal) / DX[1] + Source(i, j, k, 2);
 
 
-            // Add Eta Cutoff
-            /*
-            if (eta(i, j, k) < cutoff)
-            {
-                rho_new(i, j, k) = rho0(i, j, k);
-                M_new(i, j, k, 0) = M0(i, j, k, 0);
-                M_new(i, j, k, 1) = M0(i, j, k, 1);
-                E_new(i, j, k) = E0(i, j, k);
-            }
-
-            if ((1.0 - eta(i, j, k)) < cutoff)
-            {
-                rho_new(i, j, k) = rho1(i, j, k);
-                M_new(i, j, k, 0) = M1(i, j, k, 0);
-                M_new(i, j, k, 1) = M1(i, j, k, 1);
-                E_new(i, j, k) = E1(i, j, k);
-            }
-            */
 
             // Set::Vector grad_ux = Numeric::Gradient(v, i, j, k, 0, DX);
             // Set::Vector grad_uy = Numeric::Gradient(v, i, j, k, 1, DX);
