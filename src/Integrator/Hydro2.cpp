@@ -328,9 +328,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         const amrex::Box &bx = mfi.growntilebox();
 
         // Eta:
-        //Set::Patch<Set::Scalar> &eta_new = (*eta_mf[lev]).array(mfi);
+        Set::Patch<Set::Scalar> &eta_new = (*eta_mf[lev]).array(mfi);
         Set::Patch<const Set::Scalar> const &eta = (*eta_old_mf[lev]).array(mfi);
-        //Set::Patch<Set::Scalar> &etadot = (*etadot_mf[lev]).array(mfi);
+        Set::Patch<Set::Scalar> &etadot = (*etadot_mf[lev]).array(mfi);
 
         // Mixture
         Set::Patch<const Set::Scalar> rho = density_old_mf.Patch(lev, mfi);
@@ -346,7 +346,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar gamma_eff = eta(i, j, k) * gamma0 + (1.0 - eta(i, j, k)) * gamma1;
 
             // etadot
-            //etadot(i, j, k) = (eta_new(i, j, k) - eta(i, j, k)) / dt;
+            etadot(i, j, k) = (eta_new(i, j, k) - eta(i, j, k)) / dt;
 
             // Velocity = M ./ (DX*DY*rho)
             v(i, j, k, 0) = M(i, j, k, 0) / (rho(i, j, k));
