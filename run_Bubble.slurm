@@ -29,8 +29,8 @@
 #----------------------------------------------------
 
 #SBATCH -J Bubble              # Job name
-#SBATCH -o runs/Bubble.o%j          # Name of stdout output file
-#SBATCH -e runs/Bubble.e%j          # Name of stderr error file
+#SBATCH -o logRuns/Bubble.o%j          # Name of stdout output file
+#SBATCH -e logRuns/Bubble.e%j          # Name of stderr error file
 #SBATCH -p compute             # Queue (partition) name
 #SBATCH --ntasks-per-node=128  # MPI tasks per node
 #SBATCH -N 4                   # Total # of nodes
