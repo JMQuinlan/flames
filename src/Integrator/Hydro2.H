@@ -119,6 +119,7 @@ private:
     Set::Field<Set::Scalar> Source_mf;
     Set::Field<Set::Scalar> flux_mf;
     Set::Field<Set::Scalar> Fsv_mf;
+    Set::Field<Set::Scalar> Fb_mf;
 
     BC::BC<Set::Scalar>* density_bc = nullptr;
     BC::BC<Set::Scalar>* momentum_bc = nullptr;
@@ -151,18 +152,25 @@ private:
 
     Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion;
     // FLUID 0
-    Set::Scalar gamma0=NAN, mu0=NAN, sigma0=NAN;
+    Set::Scalar gamma0 = NAN, mu0 = NAN; 
 
     // FLUID 1
-    Set::Scalar gamma1=NAN, mu1=NAN, sigma1=NAN;
+    Set::Scalar gamma1 = NAN, mu1 = NAN;
 
+    // Interaction Parameters
+    Set::Scalar sigma = NAN;
+    Set::Scalar g = 9.81; // m/s^2
 
-    Set::Scalar cfl=NAN, cfl_v=NAN,  pref=NAN;
-    
+    // CFD Properties
+    Set::Scalar cfl = NAN, cfl_v = NAN, pref = NAN;
     Set::Scalar small=NAN;
     Set::Scalar cutoff=NAN;
     Set::Scalar lagrange=NAN;
+
+    // Booleans
     int apply_surface_tension = 1;
+    int apply_buoyancy = 1;
+    int apply_weight = 0;
 
     Solver::Local::Riemann::Roe *roesolver = nullptr;
 

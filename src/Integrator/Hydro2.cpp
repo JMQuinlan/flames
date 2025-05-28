@@ -41,8 +41,13 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("small", value.small, 1E-8);  // small regularization value
         pp_query_default("cutoff", value.cutoff, 1E-100);  // cutoff value
         pp_query_default("lagrange", value.lagrange, 0.0); // lagrange no-penetration factor
-        pp_query_default("apply_surface_tension", value.apply_surface_tension, true); // Apply surface tension when solving, default: true --> "Apply Surface Tension"
+        pp_query_default("grav", value.g, 9.81); // Gravitational Acceletation
         pp_forbid("roefix", "--> solver.roe.entropy_fix"); // Roe solver entropy fix
+
+        // OPTIONAL SOURCE TERMS
+        pp_query_default("apply_surface_tension", value.apply_surface_tension, true); // Apply surface tension when solving, default: true --> "Apply Surface Tension"
+        pp_query_default("apply_buoyancy", value.apply_buoyancy, true);               // Apply buoyancy when solving, default: true --> "Apply Buoyancy"
+        pp_query_default("apply_weight", value.apply_weight, false);                   // Apply weight when solving, default: true --> "Apply Weight"
 
         // NEW SOLVER FORBIDS
         pp_forbid("gamma", "--> gamma0 and gamma1");
@@ -50,13 +55,14 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // FLUID 0
         pp_query_required("gamma0", value.gamma0);  // gamma for gamma law
-        pp_query_required("mu0", value.mu0);        // linear viscosity coefficient
-        pp_query_default("sigma0", value.sigma0, 70.0); // surface tension condition
+        pp_query_required("mu0", value.mu0);        // linear viscosity 
 
         // FLUID 1
         pp_query_required("gamma1", value.gamma1); // gamma for gamma law
         pp_query_required("mu1", value.mu1);       // linear viscosity coefficient
-        pp_query_default("sigma1", value.sigma1, 70.0); // surface tension condition
+
+        // INTERACTIONS
+        pp_query_default("sigma", value.sigma, 70.0); // surface tension condition
         
         // Boundry Conditions
         pp_forbid("rho.bc","--> density.bc");
@@ -68,11 +74,10 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.energy_bc = new BC::Constant(1, pp, "energy.bc");
         value.momentum_bc = new BC::Expression(2, pp, "momentum.bc");
         value.eta_bc = new BC::Constant(1, pp, "pf.eta.bc");
-
-        
-
     }
+
     // Register FabFields:
+    // Toggle the last boolean to true/false to track the variable or not.
     {
         int nghost = 2;
 
@@ -126,6 +131,7 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.q_mf, &value.bc_nothing, 2, 0, "q0", true, { "x", "y" });
         value.RegisterNewFab(value.Source_mf, &value.bc_nothing, 4, 0, "Source", true);
         value.RegisterNewFab(value.Fsv_mf, &value.bc_nothing, 2, nghost, "Fsv", true, {"x","y"}); // To Track Surface Tension
+        value.RegisterNewFab(value.Fb_mf, &value.bc_nothing, 2, nghost, "Fb", true, {"x","y"}); // To Track Bouyancy
     }
 
     // NEW SOLVER FORBIDS
@@ -136,10 +142,9 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
     // ORDER PARAMETER
 
-    // eta initial condition
+    // INITIAL CONDITIONS
+    // Eta
     pp.select_default<IC::Constant,IC::Laminate,IC::Expression,IC::BMP,IC::PNG>("eta.ic",value.eta_ic,value.geom);
-
-    // PRIMITIVE FIELD INITIAL CONDITIONS
     // Fluid 0
     pp.select_default<IC::Constant,IC::Expression>("velocity0.ic",value.velocity0_ic,value.geom);
     pp.select_default<IC::Constant,IC::Expression>("pressure0.ic",value.pressure0_ic,value.geom);
@@ -151,7 +156,6 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
 
     // DIFFUSE BOUNDARY SOURCES
-    // Todo: Do I need seperate boundry sources for two phase flow?
     // diffuse boundary prescribed mass flux 
     pp.select_default<IC::Constant,IC::Expression>("m0.ic",value.ic_m0,value.geom);
     // diffuse boundary prescribed velocity
@@ -159,6 +163,7 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     // diffuse boundary prescribed heat flux 
     pp.select_default<IC::Constant,IC::Expression>("q.ic",value.ic_q,value.geom);
 
+    // SOLVER
     // Riemann solver
     pp.select_default<Solver::Local::Riemann::Roe>("solver",value.roesolver);
 }
@@ -185,7 +190,6 @@ void Hydro2::Initialize(int lev)
     pressure1_ic    ->Initialize(lev, pressure1_mf, 0.0);
     density1_ic     ->Initialize(lev, density1_mf, 0.0);
     density1_ic     ->Initialize(lev, density1_old_mf, 0.0);
-
 
     // SOURCE
     ic_m0           ->Initialize(lev, m0_mf, 0.0);
@@ -355,6 +359,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Pressure
             press(i, j, k) = (E(i, j, k) - (0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k)+small))) * (gamma_eff - 1.0) - pref; // NEEDS Verification
 
+
             // DEBUG Tool
             if (press(i, j, k) > 1E1000)
             {
@@ -397,6 +402,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
         amrex::Array4<Set::Scalar> const &Source = (*Source_mf[lev]).array(mfi);
         Set::Patch <Set::Scalar>       Fsv = Fsv_mf.Patch(lev, mfi);
+        Set::Patch <Set::Scalar>       Fb = Fb_mf.Patch(lev, mfi);
 
         Set::Scalar *dt_max_handle = &dt_max;
 
@@ -439,17 +445,23 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                                           / rho(i, j, k);
                     }
 
+            
             Set::Vector Ldot0 = Set::Vector::Zero();
             Set::Vector div_tau = Set::Vector::Zero();
-            for (int p = 0; p < 2; p++)
-                for (int q = 0; q < 2; q++)
-                    for (int r = 0; r < 2; r++)
-                        for (int s = 0; s < 2; s++)
+            for (int p = 0; p < 2; p++) // Dimension Component
+                for (int q = 0; q < 2; q++) // X
+                    for (int r = 0; r < 2; r++) // Y
+                        for (int s = 0; s < 2; s++) // Z
                         {
                             Set::Scalar Mpqrs = 0.0;
+                            /*
                             if (p == r && q == s) Mpqrs += 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
                             if (p == s && q == r) Mpqrs += 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
                             if (p == q && r == s) Mpqrs += 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
+                            */
+                            if (p == r && q == s) Mpqrs = 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
+                            if (p == s && q == r) Mpqrs = 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
+                            if (p == q && r == s) Mpqrs = 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
 
                             Ldot0(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
                             div_tau(p) += 2.0 * Mpqrs * hess_u(r, s, q);
@@ -460,13 +472,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Vector Fsv_vector = Set::Vector(0.0, 0.0);
             if (apply_surface_tension)
             {
-                Set::Scalar sigma_eff = eta(i, j, k) * sigma0 + (1.0 - eta(i, j, k)) * sigma1;
-                //Set::Vector grad_mag_grad_eta = lap_eta * grad_eta / (grad_eta_mag + small);
-                //Set::Vector grad_mag_grad_eta = Set::Vector(grad_eta_mag * grad_eta(0) * hess_eta(0, 0), grad_eta_mag * grad_eta(1) * hess_eta(1, 1));
+                Set::Scalar sigma_eff = sigma;
                 Set::Vector grad_mag_grad_eta = Set::Vector(1/(grad_eta_mag+small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)), 
                                                             1/(grad_eta_mag+small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));
                 Set::Scalar kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / ((grad_eta_mag + small) * (grad_eta_mag + small))));
-
 
                 try
                 {
@@ -483,12 +492,34 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     Util::Abort(INFO);
                 }
             }
+
+            // Buoyancy:
+            Fb(i, j, k) = (0.0, 0.0);
+            Set::Vector Fb_vector = Set::Vector(0.0, 0.0);
+            if (apply_buoyancy)
+            {
+                Fb(i, j, k, 0) = 0.0;
+                Fb(i, j, k, 1) = -rho(i, j, k) * g;
+                Fb_vector = Set::Vector(Fb(i, j, k, 0), Fb(i, j, k, 1)); // or multiply by cell area if needed
+            }
+
+            // Weight:
+            Set::Vector Fw_vector = Set::Vector(0.0, 0.0);
+            if (apply_weight)
+            {
+                // Example: apply a downward weight force; modify as appropriate
+                Fw_vector = Set::Vector(0.0, 0.0*rho(i, j, k) * g); // replace mass with actual value if available
+            }
+
+            // Total:
+            Set::Vector Total_Force = Set::Vector(Fsv(i, j, k, 0) + Fb_vector(0) + Fw_vector(0),
+                                                  Fsv(i, j, k, 1) + Fb_vector(1) + Fw_vector(1));
             
 
             Source(i, j, k, 0) = mdot0;
-            Source(i, j, k, 1) = Pdot0(0) - Ldot0(0) + Fsv(i,j,k,0);
-            Source(i, j, k, 2) = Pdot0(1) - Ldot0(1) + Fsv(i,j,k,1);
-            Source(i, j, k, 3) = qdot0  + u.dot(Fsv_vector); //(Fsv(i, j, k, 0) * u(0) + Fsv(i, j, k, 1) * u(1)); //+ u.dot(Ldot0)
+            Source(i, j, k, 1) = Pdot0(0) - Ldot0(0) + Total_Force(0);
+            Source(i, j, k, 2) = Pdot0(1) - Ldot0(1) + Total_Force(1);
+            Source(i, j, k, 3) = qdot0 + u.dot(Total_Force); //(Fsv(i, j, k, 0) * u(0) + Fsv(i, j, k, 1) * u(1)); //+ u.dot(Ldot0)
 
             // Lagrange terms to enforce no-penetration
             Source(i, j, k, 1) -= lagrange * u.dot(grad_eta) * grad_eta(0);
