@@ -26,7 +26,6 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 {
     BL_PROFILE("Integrator::Hydro2::Hydro2()");
     {
-
         // REFINEMENT CRITERION
         pp.query_default("eta_refinement_criterion",   value.eta_refinement_criterion  , 0.01); // eta-based refinement
         pp.query_default("omega_refinement_criterion", value.omega_refinement_criterion, 0.01); // vorticity-based refinement
@@ -39,15 +38,15 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("cfl_v", value.cfl_v, 1E-100); // cfl condition
         pp_query_default("pref", value.pref, 1.0);     // reference pressure for Roe solver
         pp_query_default("small", value.small, 1E-8);  // small regularization value
-        pp_query_default("cutoff", value.cutoff, 1E-100);  // cutoff value
+        pp_query_default("cutoff", value.cutoff, 1E-100);  // eta cutoff value
         pp_query_default("lagrange", value.lagrange, 0.0); // lagrange no-penetration factor
         pp_query_default("grav", value.g, 9.81); // Gravitational Acceletation
         pp_forbid("roefix", "--> solver.roe.entropy_fix"); // Roe solver entropy fix
 
         // OPTIONAL SOURCE TERMS
         pp_query_default("apply_surface_tension", value.apply_surface_tension, true); // Apply surface tension when solving, default: true --> "Apply Surface Tension"
-        pp_query_default("apply_buoyancy", value.apply_buoyancy, true);               // Apply buoyancy when solving, default: true --> "Apply Buoyancy"
-        pp_query_default("apply_weight", value.apply_weight, false);                   // Apply weight when solving, default: true --> "Apply Weight"
+        pp_query_default("apply_buoyancy", value.apply_buoyancy, false);              // Apply buoyancy when solving, default: false --> "No Buoyancy"
+        pp_query_default("apply_weight", value.apply_weight, false);                  // Apply weight when solving, default: false --> "No Weight"
 
         // NEW SOLVER FORBIDS
         pp_forbid("gamma", "--> gamma0 and gamma1");
@@ -125,13 +124,14 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.momentum_mf, value.momentum_bc, 2, nghost, "momentum", true, { "x", "y" });
         value.RegisterNewFab(value.momentum_old_mf, value.momentum_bc, 2, nghost, "momentum_old", false);
 
-        // Source
+        // SOURCE
         value.RegisterNewFab(value.m0_mf, &value.bc_nothing, 1, 0, "m0", true);
         value.RegisterNewFab(value.u0_mf, &value.bc_nothing, 2, 0, "u0", true, { "x", "y" });
         value.RegisterNewFab(value.q_mf, &value.bc_nothing, 2, 0, "q0", true, { "x", "y" });
         value.RegisterNewFab(value.Source_mf, &value.bc_nothing, 4, 0, "Source", true);
         value.RegisterNewFab(value.Fsv_mf, &value.bc_nothing, 2, nghost, "Fsv", true, {"x","y"}); // To Track Surface Tension
         value.RegisterNewFab(value.Fb_mf, &value.bc_nothing, 2, nghost, "Fb", true, {"x","y"}); // To Track Bouyancy
+        value.RegisterNewFab(value.Fw_mf, &value.bc_nothing, 2, nghost, "Fw", true, { "x", "y" }); // To Track Weight
     }
 
     // NEW SOLVER FORBIDS
@@ -139,8 +139,6 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp_forbid("pressure.ic", "--> pressure0.ic or pressure1.ic");
     pp_forbid("density.ic.type", "--> density0.ic.type or density1.ic.type");
 
-
-    // ORDER PARAMETER
 
     // INITIAL CONDITIONS
     // Eta
@@ -401,8 +399,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar>   _u0     = u0_mf.Patch(lev, mfi);
 
         amrex::Array4<Set::Scalar> const &Source = (*Source_mf[lev]).array(mfi);
-        Set::Patch <Set::Scalar>       Fsv = Fsv_mf.Patch(lev, mfi);
-        Set::Patch <Set::Scalar>       Fb = Fb_mf.Patch(lev, mfi);
+        Set::Patch <Set::Scalar>        Fsv = Fsv_mf.Patch(lev, mfi);
+        Set::Patch <Set::Scalar>        Fb = Fb_mf.Patch(lev, mfi);
+        Set::Patch <Set::Scalar>        Fw = Fw_mf.Patch(lev, mfi);
 
         Set::Scalar *dt_max_handle = &dt_max;
 
@@ -468,29 +467,40 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         }
 
             // Surface Tension:
+            // Fsv =  simga * kappa * n_hat
             Fsv(i, j, k) = (0.0, 0.0);
             Set::Vector Fsv_vector = Set::Vector(0.0, 0.0);
             if (apply_surface_tension)
             {
-                Set::Scalar sigma_eff = sigma;
-                Set::Vector grad_mag_grad_eta = Set::Vector(1/(grad_eta_mag+small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)), 
-                                                            1/(grad_eta_mag+small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));
-                Set::Scalar kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / ((grad_eta_mag + small) * (grad_eta_mag + small))));
+                // Optimization, only calc surface tension if on interface
+                //if ((eta(i, j, k) <= cutoff / 10.0) or (eta(i, j, k) >= 1.0 - cutoff / 10.0))
+                if (((grad_eta(0) <= cutoff / 10.0) and (grad_eta(0) >= -cutoff / 10.0))
+                    and ((grad_eta(1) <= cutoff / 10.0) and (grad_eta(1) >= -cutoff / 10.0)))
+                {
+                    Fsv(i, j, k, 0) = 0.0;
+                    Fsv(i, j, k, 1) = 0.0;
+                }
+                else
+                {
+                    Set::Scalar sigma_eff = sigma;
+                    Set::Vector grad_mag_grad_eta = Set::Vector(1 / (grad_eta_mag + small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)),
+                                                                1 / (grad_eta_mag + small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));
+                    Set::Scalar kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / ((grad_eta_mag + small) * (grad_eta_mag + small))));
 
-                try
-                {
-                    Fsv(i, j, k, 0) = sigma_eff * (kappa * grad_eta(0));// / (DX[0] + small);
-                    Fsv(i, j, k, 1) = sigma_eff * (kappa * grad_eta(1));// / (DX[1] + small);
-                    Fsv_vector = Set::Vector(Fsv(i, j, k, 0), Fsv(i, j, k, 1));
+                    Fsv(i, j, k, 0) = sigma_eff * (kappa * grad_eta(0) / (grad_eta_mag + small)); // / (DX[0] + small);
+                    Fsv(i, j, k, 1) = sigma_eff * (kappa * grad_eta(1) / (grad_eta_mag + small)); // / (DX[1] + small);
                 }
-                catch (...)
-                {
-                    Util::ParallelMessage(INFO, "hess_eta= ", hess_eta);
-                    Util::ParallelMessage(INFO, "grad_eta_mag= ", grad_eta_mag);
-                    Util::ParallelMessage(INFO, "kappa= ", kappa);
-                    Util::ParallelMessage(INFO, "grad_eta=", grad_eta);
-                    Util::Abort(INFO);
-                }
+                Fsv_vector = Set::Vector(Fsv(i, j, k, 0), Fsv(i, j, k, 1));
+            }
+
+            // Weight:
+            Fw(i, j, k) = (0.0, 0.0);
+            Set::Vector Fw_vector = Set::Vector(0.0, 0.0);
+            if (apply_weight)
+            {
+                Fw(i, j, k, 0) = 0.0;
+                Fw(i, j, k, 1) = -rho(i, j, k) * g;
+                Fw_vector = Set::Vector(Fw(i, j, k, 0), Fw(i, j, k, 1)); // or multiply by cell area if needed
             }
 
             // Buoyancy:
@@ -498,17 +508,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Vector Fb_vector = Set::Vector(0.0, 0.0);
             if (apply_buoyancy)
             {
-                Fb(i, j, k, 0) = 0.0;
-                Fb(i, j, k, 1) = -rho(i, j, k) * g;
-                Fb_vector = Set::Vector(Fb(i, j, k, 0), Fb(i, j, k, 1)); // or multiply by cell area if needed
-            }
-
-            // Weight:
-            Set::Vector Fw_vector = Set::Vector(0.0, 0.0);
-            if (apply_weight)
-            {
                 // Example: apply a downward weight force; modify as appropriate
-                Fw_vector = Set::Vector(0.0, 0.0*rho(i, j, k) * g); // replace mass with actual value if available
+                Fb_vector = Set::Vector(0.0, 0.0); // replace mass with actual value if available
             }
 
             // Total:
@@ -558,7 +559,36 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::Abort(INFO);
             }
 
-            // Update mixed fluid variables
+            // UPDATE MIXED FLUID VARIABLES
+            /// Eta:
+            // Material Derivative
+            Set::Scalar deta_dt = -u.dot(grad_eta);
+            // Cahn-Hillard
+            // Set::Scalar deta_dt = -u.dot(grad_eta) + M.dot(grad_eta)
+            // Set::Matrix tmp =
+            // Set::Scalar deta_dt = -1.0 / (rho(i, j, k) * (u_mag**2))
+            // Set::Matrix gradu = (gradM - u * gradrho.transpose()) / rho(i, j, k);
+
+            // Set::Scalar deta_dt = -; //https://www.sciencedirect.com/science/article/pii/S002199912100005X
+            eta_new(i, j, k) = eta(i, j, k) + deta_dt * dt;
+            if (eta_new(i, j, k) <= cutoff)
+            {
+                eta_new(i, j, k) = 0.0;
+            }
+            else if (eta_new(i, j, k) >= (1.0 - cutoff))
+            {
+                eta_new(i, j, k) = 1.0;
+            }
+
+            // Update Source Terms to account for moving boundry
+            // Delete me if does not worky :(
+            Source(i, j, k, 0) = Source(i, j, k, 0) - rho(i, j, k) * deta_dt;
+            Source(i, j, k, 1) = Source(i, j, k, 1) - M(i, j, k, 0) * deta_dt;
+            Source(i, j, k, 2) = Source(i, j, k, 2) - M(i, j, k, 1) * deta_dt;
+            Source(i, j, k, 3) = Source(i, j, k, 3) - E(i, j, k) * deta_dt;
+
+
+            // Density
             Set::Scalar drho_dt = 
                 (flux_xlo.mass - flux_xhi.mass) / (DX[0]+small) + 
                 (flux_ylo.mass - flux_yhi.mass) / (DX[1]+small) + 
@@ -590,6 +620,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::Exception(INFO);
             }
 
+            // Momentum
             Set::Scalar dMx_dt = 
                 (flux_xlo.momentum_normal - flux_xhi.momentum_normal) / (DX[0]+small) + 
                 (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / (DX[1]+small) + 
@@ -608,6 +639,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             M_new(i, j, k, 1) = M(i, j, k, 1) + dMy_dt * dt;
 
+            // Energy
             Set::Scalar dE_dt = 
                 (flux_xlo.energy - flux_xhi.energy) / (DX[0] + small) + 
                 (flux_ylo.energy - flux_yhi.energy) / (DX[1] + small) + 
@@ -615,23 +647,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             E_new(i, j, k) = E(i, j, k) + dE_dt * dt;
 
-            // Evolving Eta:
-            Set::Scalar deta_dt = -u.dot(grad_eta); // Material Derivative
-            //Set::Matrix tmp = 
-            //Set::Scalar deta_dt = -1.0 / (rho(i, j, k) * (u_mag**2))
-            //Set::Matrix gradu = (gradM - u * gradrho.transpose()) / rho(i, j, k);
-
-            //Set::Scalar deta_dt = -; //https://www.sciencedirect.com/science/article/pii/S002199912100005X
-
-            eta_new(i, j, k) = eta(i, j, k) + deta_dt * dt;
-            if (eta_new(i, j, k) <= cutoff) 
-            {
-                eta_new(i, j, k) = 0.0;
-            }
-            else if (eta_new(i, j, k) >= (1.0 - cutoff))
-            {
-                eta_new(i, j, k) = 1.0;
-            }
+            
 
 
 

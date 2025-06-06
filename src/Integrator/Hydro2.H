@@ -120,6 +120,7 @@ private:
     Set::Field<Set::Scalar> flux_mf;
     Set::Field<Set::Scalar> Fsv_mf;
     Set::Field<Set::Scalar> Fb_mf;
+    Set::Field<Set::Scalar> Fw_mf;
 
     BC::BC<Set::Scalar>* density_bc = nullptr;
     BC::BC<Set::Scalar>* momentum_bc = nullptr;
@@ -169,7 +170,7 @@ private:
 
     // Booleans
     int apply_surface_tension = 1;
-    int apply_buoyancy = 1;
+    int apply_buoyancy = 0;
     int apply_weight = 0;
 
     Solver::Local::Riemann::Roe *roesolver = nullptr;
