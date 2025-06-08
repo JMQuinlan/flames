@@ -73,6 +73,8 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.energy_bc = new BC::Constant(1, pp, "energy.bc");
         value.momentum_bc = new BC::Expression(2, pp, "momentum.bc");
         value.eta_bc = new BC::Constant(1, pp, "pf.eta.bc");
+
+        
     }
 
     // Register FabFields:
@@ -132,6 +134,9 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.Fsv_mf, &value.bc_nothing, 2, nghost, "Fsv", true, {"x","y"}); // To Track Surface Tension
         value.RegisterNewFab(value.Fb_mf, &value.bc_nothing, 2, nghost, "Fb", true, {"x","y"}); // To Track Bouyancy
         value.RegisterNewFab(value.Fw_mf, &value.bc_nothing, 2, nghost, "Fw", true, { "x", "y" }); // To Track Weight
+
+        // DEBUGGING
+        value.RegisterNewFab(value.grad_eta_mf, &value.bc_nothing, 2, nghost, "grad_eta", true, { "x", "y" });
     }
 
     // NEW SOLVER FORBIDS
@@ -160,10 +165,16 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<IC::Constant,IC::Expression>("u0.ic",value.ic_u0,value.geom);
     // diffuse boundary prescribed heat flux 
     pp.select_default<IC::Constant,IC::Expression>("q.ic",value.ic_q,value.geom);
-
+    
     // SOLVER
     // Riemann solver
-    pp.select_default<Solver::Local::Riemann::Roe>("solver",value.roesolver);
+    pp_query_default("Riemann_Solver", value.Riemann_Solver, 0); // Type of solver
+    if (value.Riemann_Solver == 0)
+    {
+        pp.select_default<Solver::Local::Riemann::Roe>("solver", value.roesolver);
+    }
+    
+    
 }
 
 
@@ -403,6 +414,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch <Set::Scalar>        Fb = Fb_mf.Patch(lev, mfi);
         Set::Patch <Set::Scalar>        Fw = Fw_mf.Patch(lev, mfi);
 
+        // DEBUGGING
+        Set::Patch<Set::Scalar> grad_eta_ = grad_eta_mf.Patch(lev, mfi);
+
         Set::Scalar *dt_max_handle = &dt_max;
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) 
@@ -414,6 +428,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
             Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX);
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
+
+            // DEBUGGING
+            grad_eta_(i, j, k, 0) = grad_eta(0);
+            grad_eta_(i, j, k, 1) = grad_eta(1);
 
             // Extract velocity from momentum and density
             //Set::Vector u  = Set::Vector(M(i, j, k, 0) / rho(i, j, k), M(i, j, k, 1) / rho(i, j, k));
@@ -545,11 +563,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             try
             {
-                // Calculate fluxes for the mixed fluid
-                flux_xlo = roesolver->Solve(state_xlo, state_x, gamma_eff, pref, small); //  * eta(i,j,k)
-                flux_ylo = roesolver->Solve(state_ylo, state_y, gamma_eff, pref, small); //  * eta(i,j,k)
-                flux_xhi = roesolver->Solve(state_x, state_xhi, gamma_eff, pref, small); //  * eta(i,j,k)
-                flux_yhi = roesolver->Solve(state_y, state_yhi, gamma_eff, pref, small); //  * eta(i,j,k)
+                if (Riemann_Solver == 0)
+                {
+                    // Calculate fluxes for the mixed fluid
+                    flux_xlo = roesolver->Solve(state_xlo, state_x, gamma_eff, pref, small); //  * eta(i,j,k)
+                    flux_ylo = roesolver->Solve(state_ylo, state_y, gamma_eff, pref, small);     //  * eta(i,j,k)
+                    flux_xhi = roesolver->Solve(state_x, state_xhi, gamma_eff, pref, small);     //  * eta(i,j,k)
+                    flux_yhi = roesolver->Solve(state_y, state_yhi, gamma_eff, pref, small);     //  * eta(i,j,k)
+                }
             }
             catch (...)
             {

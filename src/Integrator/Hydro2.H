@@ -121,6 +121,7 @@ private:
     Set::Field<Set::Scalar> Fsv_mf;
     Set::Field<Set::Scalar> Fb_mf;
     Set::Field<Set::Scalar> Fw_mf;
+    Set::Field<Set::Scalar> grad_eta_mf;
 
     BC::BC<Set::Scalar>* density_bc = nullptr;
     BC::BC<Set::Scalar>* momentum_bc = nullptr;
@@ -172,6 +173,8 @@ private:
     int apply_surface_tension = 1;
     int apply_buoyancy = 0;
     int apply_weight = 0;
+    
+    int Riemann_Solver = 0;
 
     Solver::Local::Riemann::Roe *roesolver = nullptr;
 

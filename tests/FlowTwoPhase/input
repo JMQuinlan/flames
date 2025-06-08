@@ -122,3 +122,7 @@ apply_surface_tension = 1
 apply_buoyancy = 0;
 apply_weight = 0;
 grav = 9.81;
+
+### DEBUGGING ### 
+# Used for testing of the model
+Riemann_Solver = 0 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
