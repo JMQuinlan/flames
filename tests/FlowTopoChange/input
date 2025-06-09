@@ -1,0 +1,156 @@
+#@ exe=hydro2
+#@ dim=2
+#@
+
+alamo.program = hydro2
+
+### OUTPUT ###
+
+# plot_file = tests/FlowTopoChange/output
+# plot_file = tests/FlowTopoChange/TEMP_output
+plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output
+
+### MESHING ###
+
+amr.plot_dt = 5e-5
+#amr.plot_int = 1
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.regrid_int = 2
+amr.grid_eff = 0.8
+
+amr.max_level = 5
+timestep  = 2e-6
+#amr.n_cell = 256 256
+amr.n_cell = 256 32
+
+### DIMENSIONS ###
+# geometry.prob_lo = -120.0 -120.0 0.0 # [ m ]
+# geometry.prob_hi =  120.0  120.0 0.0 # [ m ]
+geometry.prob_lo = -64.0 -8.0 0.0 # [ m ]
+geometry.prob_hi =  64.0  8.0 0.0 # [ m ]
+geometry.is_periodic = 0 0 0
+
+### TIME STEP ###
+stop_time = 0.4
+
+q.ic.type = expression
+q.ic.expression.region0 = "0.0"
+q.ic.expression.region1 = "0.0"
+
+#eta.ic.type = expression
+##eta.ic.expression.region0 = "(0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x-50)**2 + (y)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x-50)**2 + (y-50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x)**2 + (y-50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x+50)**2 + (y)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x+50)**2 + (y+50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x)**2 + (y+50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x+50)**2 + (y-50)**2) - 20)/0.8))) + (0.5*(1 + tanh((sqrt((x-50)**2 + (y+50)**2) - 20)/0.8))) - 8"
+##eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 50)/0.8))"
+
+#eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x/2)**2 + (y)**2) - 30)/2))"
+
+##eta.ic.expression.region0 = "((x**2)+(y**2) < 4) * tanh((x+1)**2+(y+1)**2)"
+##eta.ic.expression.region0 = "0.0"
+
+eta.ic.type = expression
+eta.ic.expression.constant.eps   = 0.2
+eta.ic.expression.constant.A1    = 1.0
+eta.ic.expression.constant.A2    = 1.0
+eta.ic.expression.constant.x0    = 0.0
+eta.ic.expression.constant.y0    = 0.0
+eta.ic.expression.region0        = "(0.5*(1 + tanh((((x-x0)**2/A1**2 + (y-y0)**2/A2**2) - 1)/(0.1*eps))))"
+
+### HYDRO PARAM ###
+# New parameters
+gamma0 = 1.4
+gamma1 = 2.5
+cfl   = 0.4
+mu0   = 0.002
+mu1   = 0.04
+
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "15.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+# pressure0.ic.expression.region0 = "1e5" #" + (10e5*(x<=-115))"
+# pressure0.ic.expression.region0 = "1e5  + (10e5*(x<=-2))"
+pressure0.ic.expression.region0 = "1e5  + (10e5*(x<=-15))"
+
+pressure1.ic.type = expression
+# pressure1.ic.expression.region0 = "1e5"
+pressure1.ic.expression.constant.eps   = 0.2
+pressure1.ic.expression.constant.A1    = 1.0
+pressure1.ic.expression.constant.A2    = 1.0
+pressure1.ic.expression.constant.x0    = 0.0
+pressure1.ic.expression.constant.y0    = 0.0
+pressure1.ic.expression.constant.neg1  = -1.0
+# pressure1.ic.expression.region0        = "1e5+ (neg1*1000.0*1.1e3) *(neg1+(0.5*(1 + tanh((((x-x0)**2/A1**2 + (y-y0)**2/A2**2) - 1)/(0.1*eps)))))"
+pressure1.ic.expression.region0        = "1e5+ (neg1*1000.0*0.3e3) *(neg1+(0.5*(1 + tanh((((x-x0)**2/A1**2 + (y-y0)**2/A2**2) - 1)/(0.1*eps)))))"
+# Add pressure to the liquid phase to balance the surface tension ($\Delta p = \sigma (1/R_1 + 1/R_2)$)
+
+### Surface tension coefficient ###
+sigma0 = 1000;
+sigma1 = 1000;
+
+### Reference pressure ###
+# pref = 1e5
+pref = 0.0
+
+### Other adjustable parameters that may be needed
+# small  = 1e-8
+# cutoff = 1e-100
+# small  = 1e-5
+# cutoff = 1e-5
+
+### ETA BC  ###
+
+pf.eta.bc.type.xlo = neumann
+pf.eta.bc.type.xhi = neumann
+pf.eta.bc.type.ylo = neumann
+pf.eta.bc.type.yhi = neumann
+pf.eta.bc.type.zlo = neumann
+pf.eta.bc.type.zhi = neumann
+
+### HYDRO BC ###
+
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xhi = dirichlet dirichlet
+momentum.bc.type.xlo = dirichlet dirichlet
+momentum.bc.type.ylo = dirichlet dirichlet
+momentum.bc.type.yhi = dirichlet dirichlet
+momentum.bc.val.xhi = 0.0 0.0
+momentum.bc.val.xlo = 0.0 0.0
+momentum.bc.val.ylo = 0.0 0.0
+momentum.bc.val.yhi = 0.0 0.0
+
+### HYDRO REFINEMENT CRITERIA ###
+
+eta_refinement_criterion = 0.01
+omega_refinement_criterion = 100000.55
+gradu_refinement_criterion = 20000.0
+rho_refinement_criterion = 8.0 ## Not really doing anything in this case
+# p_refinement_criterion = 100.0
+# p_refinement_criterion = 1000.0
+# p_refinement_criterion = 10000.0
+p_refinement_criterion = 20000.0
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+apply_surface_tension = 1
+
+amr.abort_on_nan = 1

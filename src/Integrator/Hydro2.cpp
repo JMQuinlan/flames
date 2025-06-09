@@ -651,7 +651,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::ParallelMessage(INFO, "flux_xlo.mass=", flux_xlo.mass);
                 Util::ParallelMessage(INFO, "flux_xhi.mass=", flux_xhi.mass);
                 Util::ParallelMessage(INFO, "flux_ylo.mass=", flux_ylo.mass);
-                Util::ParallelMessage(INFO, "flux_xhi.mass=", flux_yhi.mass);
+                Util::ParallelMessage(INFO, "flux_yhi.mass=", flux_yhi.mass);
                 Util::ParallelMessage(INFO, "eta=", eta(i, j, k));
                 Util::ParallelMessage(INFO, "Source=", Source(i, j, k, 0));
                 Util::ParallelMessage(INFO, "state_x ", state_x); // <<<<
