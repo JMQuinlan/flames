@@ -10,6 +10,8 @@
 #include "IC/BMP.H"
 #include "IC/PNG.H"
 #include "Solver/Local/Riemann/Roe.H"
+#include "Solver/Local/Riemann/HLLC.H"
+#include "Solver/Local/Riemann/HLLE.H"
 
 #if AMREX_SPACEDIM == 2
 
@@ -172,6 +174,14 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     if (value.Riemann_Solver == 0)
     {
         pp.select_default<Solver::Local::Riemann::Roe>("solver", value.roesolver);
+    }
+    else if (value.Riemann_Solver == 1)
+    {
+        pp.select_default<Solver::Local::Riemann::HLLC>("solver", value.hllcsolver);
+    }
+    else if (value.Riemann_Solver == 2)
+    {
+        pp.select_default<Solver::Local::Riemann::HLLE>("solver", value.hllesolver);
     }
     
     
@@ -570,6 +580,22 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     flux_ylo = roesolver->Solve(state_ylo, state_y, gamma_eff, pref, small);     //  * eta(i,j,k)
                     flux_xhi = roesolver->Solve(state_x, state_xhi, gamma_eff, pref, small);     //  * eta(i,j,k)
                     flux_yhi = roesolver->Solve(state_y, state_yhi, gamma_eff, pref, small);     //  * eta(i,j,k)
+                }
+                else if (Riemann_Solver == 1)
+                {
+                    // Calculate fluxes for the mixed fluid
+                    flux_xlo = hllcsolver->Solve(state_xlo, state_x, gamma_eff, pref, small); //  * eta(i,j,k)
+                    flux_ylo = hllcsolver->Solve(state_ylo, state_y, gamma_eff, pref, small); //  * eta(i,j,k)
+                    flux_xhi = hllcsolver->Solve(state_x, state_xhi, gamma_eff, pref, small); //  * eta(i,j,k)
+                    flux_yhi = hllcsolver->Solve(state_y, state_yhi, gamma_eff, pref, small); //  * eta(i,j,k)
+                }
+                else if (Riemann_Solver == 2)
+                {
+                    // Calculate fluxes for the mixed fluid
+                    flux_xlo = hllesolver->Solve(state_xlo, state_x, gamma_eff, pref, small); //  * eta(i,j,k)
+                    flux_ylo = hllesolver->Solve(state_ylo, state_y, gamma_eff, pref, small); //  * eta(i,j,k)
+                    flux_xhi = hllesolver->Solve(state_x, state_xhi, gamma_eff, pref, small); //  * eta(i,j,k)
+                    flux_yhi = hllesolver->Solve(state_y, state_yhi, gamma_eff, pref, small); //  * eta(i,j,k)
                 }
             }
             catch (...)

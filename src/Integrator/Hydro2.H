@@ -11,6 +11,8 @@
 
 #include "Set/Base.H"
 #include "Solver/Local/Riemann/Roe.H"
+#include "Solver/Local/Riemann/HLLC.H"
+#include "Solver/Local/Riemann/HLLE.H"
 
 #if AMREX_SPACEDIM==2
 
@@ -49,6 +51,8 @@ public:
         delete etadot_ic;
 
         delete roesolver;
+        delete hllcsolver;
+        delete hllesolver;
     }
 
 protected:
@@ -177,6 +181,8 @@ private:
     int Riemann_Solver = 0;
 
     Solver::Local::Riemann::Roe *roesolver = nullptr;
+    Solver::Local::Riemann::HLLC *hllcsolver = nullptr;
+    Solver::Local::Riemann::HLLE *hllesolver = nullptr;
 
 };
 }
