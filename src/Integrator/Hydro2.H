@@ -158,10 +158,10 @@ private:
 
     Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion;
     // FLUID 0
-    Set::Scalar gamma0 = NAN, mu0 = NAN; 
+    Set::Scalar gamma0 = NAN, mu0 = NAN, mu0_b = NAN;
 
     // FLUID 1
-    Set::Scalar gamma1 = NAN, mu1 = NAN;
+    Set::Scalar gamma1 = NAN, mu1 = NAN, mu1_b = NAN;
 
     // Interaction Parameters
     Set::Scalar sigma = NAN;

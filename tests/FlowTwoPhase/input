@@ -47,6 +47,9 @@ gamma1 = 1.4
 mu0   = 0.89e-2
 mu1   = 0.000018 
 
+mu0_b   = 0
+mu1_b   = 0
+
 density0.ic.type = expression
 density0.ic.expression.region0 = "997.0"
 

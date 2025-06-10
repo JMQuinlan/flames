@@ -56,11 +56,13 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // FLUID 0
         pp_query_required("gamma0", value.gamma0);  // gamma for gamma law
-        pp_query_required("mu0", value.mu0);        // linear viscosity 
+        pp_query_required("mu0", value.mu0);        // linear viscosity coefficient
+        pp_query_default("mu0_b", value.mu0_b, 0.0);     // bulk viscosity coefficient
 
         // FLUID 1
         pp_query_required("gamma1", value.gamma1); // gamma for gamma law
         pp_query_required("mu1", value.mu1);       // linear viscosity coefficient
+        pp_query_default("mu1_b", value.mu1_b, 0.0);    // bulk viscosity coefficient
 
         // INTERACTIONS
         pp_query_default("sigma", value.sigma, 70.0); // surface tension condition
@@ -475,6 +477,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             
             Set::Vector Ldot0 = Set::Vector::Zero();
             Set::Vector div_tau = Set::Vector::Zero();
+            // Old formulation: Ignores bulk viscoity term
+            /*
+            Set::Vector div_tau = Set::Vector::Zero();
             for (int p = 0; p < 2; p++) // Dimension Component
                 for (int q = 0; q < 2; q++) // X
                     for (int r = 0; r < 2; r++) // Y
@@ -485,10 +490,37 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                             if (p == r && q == s) Mpqrs += 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
                             if (p == s && q == r) Mpqrs += 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
                             if (p == q && r == s) Mpqrs += 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
-                            */
+                            /
                             if (p == r && q == s) Mpqrs = 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
                             if (p == s && q == r) Mpqrs = 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
-                            if (p == q && r == s) Mpqrs = 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
+                            //if (p == q && r == s) Mpqrs = 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
+
+                            Ldot0(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
+                            div_tau(p) += 2.0 * Mpqrs * hess_u(r, s, q);
+                        }
+            */
+            
+            // NEW formulations
+            // Calculate divergence of velocity
+            Set::Scalar div_u = gradu(0, 0) + gradu(1, 1);
+
+            // Calculate effective viscosities
+            Set::Scalar mu_eff = eta(i, j, k) * mu0 + (1.0 - eta(i, j, k)) * mu1;       // Effective dynamic viscosity
+            Set::Scalar mu_b_eff = eta(i, j, k) * mu0_b + (1.0 - eta(i, j, k)) * mu1_b; // Effective bulk viscosity
+
+            for (int p = 0; p < 2; p++)             // Dimension Component
+                for (int q = 0; q < 2; q++)         // X
+                    for (int r = 0; r < 2; r++)     // Y
+                        for (int s = 0; s < 2; s++) // Z
+                        {
+                            Set::Scalar Mpqrs = 0.0;
+
+                            // Newtonian fluid terms (shear viscosity)
+                            if (p == r && q == s) Mpqrs += 0.5 * mu_eff;
+                            if (p == s && q == r) Mpqrs += 0.5 * mu_eff;
+
+                            // Bulk viscosity
+                            if (p == q && r == s) Mpqrs += (1.0 / 3.0) * mu_b_eff;
 
                             Ldot0(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
                             div_tau(p) += 2.0 * Mpqrs * hess_u(r, s, q);
