@@ -6,7 +6,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = tests/FlowTwoPhase/LargeBubbleRPE_4_Bar
+plot_file = tests/FlowTwoPhase/LargeBubbleRPE_2_Bar
 
 ### MESHING ###
 amr.plot_dt = 5e-4
@@ -16,7 +16,7 @@ amr.regrid_int = 100
 amr.grid_eff = 0.8
 
 amr.max_level = 4
-timestep  = 2e-6
+timestep  = 1e-7
 amr.n_cell = 50 50
 
 ### DIMENSIONS ###
@@ -31,7 +31,7 @@ stop_time = 0.05
 eta.ic.type = expression
 # Eqn: "0.5*(1+tanh((sqrt(((x-xc)/a)**2 + ((y-yc)/b)**2) - Diameter)/Boundry_Thickness))
 # RPE Verification
-eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 0.01)/0.0005))"
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 0.01)/0.0002))"
 
 
 ### HYDRO INITIAL CONDITIONS ###
@@ -114,4 +114,4 @@ grav = 9.81;
 
 ### DEBUGGING ### 
 # Used for testing of the model
-Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+Riemann_Solver = 2 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"

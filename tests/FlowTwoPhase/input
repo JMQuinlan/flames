@@ -6,7 +6,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = tests/FlowTwoPhase/MicroBubbleRPE_HLLCTEST
+plot_file = tests/FlowTwoPhase/MicroBubbleRPE_2Bar
 
 ### MESHING ###
 amr.plot_dt = 1e-6
@@ -65,7 +65,7 @@ pressure0.ic.type = expression
 pressure0.ic.expression.region0 = "1e5" #" + (1e5*(x<=-0.0007))"
 
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "1.5e5"
+pressure1.ic.expression.region0 = "2e5"
 
 sigma = 0.0728; # For Air/Water
 

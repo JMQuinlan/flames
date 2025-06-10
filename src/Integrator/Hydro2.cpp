@@ -515,8 +515,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                                                                 1 / (grad_eta_mag + small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));
                     Set::Scalar kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / ((grad_eta_mag + small) * (grad_eta_mag + small))));
 
-                    Fsv(i, j, k, 0) = sigma_eff * (kappa * grad_eta(0) / (grad_eta_mag + small)); // / (DX[0] + small);
-                    Fsv(i, j, k, 1) = sigma_eff * (kappa * grad_eta(1) / (grad_eta_mag + small)); // / (DX[1] + small);
+                    Fsv(i, j, k, 0) = sigma_eff * (kappa * grad_eta(0)); // / (grad_eta_mag + small)); // / (DX[0] + small);
+                    Fsv(i, j, k, 1) = sigma_eff * (kappa * grad_eta(1)); // / (grad_eta_mag + small)); // / (DX[1] + small);
                 }
                 Fsv_vector = Set::Vector(Fsv(i, j, k, 0), Fsv(i, j, k, 1));
             }

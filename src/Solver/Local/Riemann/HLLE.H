@@ -1,6 +1,17 @@
 // This implements the Riemann HLLE solver.
+//      HLLE only uses the fastest left and right wave speeds, ignoring contact waves
+//      As a result it very robust for near-vacuum (low density, pressure) problems
+//      More diffusive which caues a decrease in acuracy when compared to Roe and HLLC, especially around boundries, but it is also the fastest solver. 
 //
+// Source: Einfeldt, Bernd. (1988). On Godunov-Type Methods for Gas Dynamics. Siam Journal on Numerical Analysis - SIAM J NUMER ANAL. 25. 294-318. 10.1137/0725021. 
+//          URL: https://www.researchgate.net/publication/243786215_On_Godunov-Type_Methods_for_Gas_Dynamics
+// 
+// General Notes:
+//  RL Subscript denotes average for the roe averaged method HLLE uses. 
+// 
 //
+
+
 #ifndef SOLVER_LOCAL_RIEMANN_HLLE_H
 #define SOLVER_LOCAL_RIEMANN_HLLE_H
 

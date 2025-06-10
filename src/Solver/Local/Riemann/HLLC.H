@@ -1,6 +1,11 @@
 // This implements the Riemann HLLC solver.
+//      HLLC solver uses the fastest left and right wave speeds, along with the middle contact wave.
+//      Restores some accuracy when compared to HLLE with a slightly increased computational time, while providing same robustness. 
+// 
+// Source: V.A. Titarev, E.F. Toro, Finite-volume WENO schemes for three-dimensional conservation laws, Journal of Computational Physics, Volume 201, Issue 1, 2004, Pages 238-260, ISSN 0021-9991, https://doi.org/10.1016/j.jcp.2004.05.015.
+//          URL: https://www.sciencedirect.com/science/article/pii/S0021999104002281
 //
-//
+
 #ifndef SOLVER_LOCAL_RIEMANN_HLLC_H
 #define SOLVER_LOCAL_RIEMANN_HLLC_H
 
