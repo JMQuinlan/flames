@@ -509,9 +509,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar mu_b_eff = eta(i, j, k) * mu0_b + (1.0 - eta(i, j, k)) * mu1_b; // Effective bulk viscosity
 
             for (int p = 0; p < 2; p++)             // Dimension Component
-                for (int q = 0; q < 2; q++)         // X
-                    for (int r = 0; r < 2; r++)     // Y
-                        for (int s = 0; s < 2; s++) // Z
+                for (int q = 0; q < 2; q++)         // Dimension Component
+                    for (int r = 0; r < 2; r++)     // X
+                        for (int s = 0; s < 2; s++) // Y
                         {
                             Set::Scalar Mpqrs = 0.0;
 
@@ -534,8 +534,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 // Optimization, only calc surface tension if on interface
                 //if ((eta(i, j, k) <= cutoff / 10.0) or (eta(i, j, k) >= 1.0 - cutoff / 10.0))
-                if (((grad_eta(0) <= cutoff / 10.0) and (grad_eta(0) >= -cutoff / 10.0))
-                    and ((grad_eta(1) <= cutoff / 10.0) and (grad_eta(1) >= -cutoff / 10.0)))
+                //if (((grad_eta(0) <= cutoff / 10.0) and (grad_eta(0) >= -cutoff / 10.0))
+                if (grad_eta_mag == 0.0)
                 {
                     Fsv(i, j, k, 0) = 0.0;
                     Fsv(i, j, k, 1) = 0.0;
@@ -661,10 +661,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Update Source Terms to account for moving boundry
             // Delete me if does not worky :(
-            Source(i, j, k, 0) = Source(i, j, k, 0) - rho(i, j, k) * deta_dt;
-            Source(i, j, k, 1) = Source(i, j, k, 1) - M(i, j, k, 0) * deta_dt;
-            Source(i, j, k, 2) = Source(i, j, k, 2) - M(i, j, k, 1) * deta_dt;
-            Source(i, j, k, 3) = Source(i, j, k, 3) - E(i, j, k) * deta_dt;
+            //Source(i, j, k, 0) = Source(i, j, k, 0) - rho(i, j, k) * deta_dt;
+            //Source(i, j, k, 1) = Source(i, j, k, 1) - M(i, j, k, 0) * deta_dt;
+            //Source(i, j, k, 2) = Source(i, j, k, 2) - M(i, j, k, 1) * deta_dt;
+            //Source(i, j, k, 3) = Source(i, j, k, 3) - E(i, j, k) * deta_dt;
 
 
             // Density

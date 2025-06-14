@@ -6,7 +6,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = tests/FlowTwoPhase/LargeBubbleRPE_2_Bar
+plot_file = tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.3
 
 ### MESHING ###
 amr.plot_dt = 5e-4
@@ -15,13 +15,13 @@ amr.blocking_factor = 2
 amr.regrid_int = 100
 amr.grid_eff = 0.8
 
-amr.max_level = 4
-timestep  = 1e-7
-amr.n_cell = 50 50
+amr.max_level = 5
+timestep  = 2e-6
+amr.n_cell = 16 16
 
 ### DIMENSIONS ###
-geometry.prob_lo = -0.08 -0.08 0.0 # [ m ]
-geometry.prob_hi =  0.08  0.08 0.0 # [ m ]
+geometry.prob_lo = -0.025 -0.025 0.0 # [ m ]
+geometry.prob_hi =  0.025  0.025 0.0 # [ m ]
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
@@ -40,6 +40,9 @@ gamma1 = 1.4
 
 mu0   = 10
 mu1   = 0.000018 
+
+mu0_b   = 0
+mu1_b   = 0
 
 density0.ic.type = expression
 density0.ic.expression.region0 = "997.0"
