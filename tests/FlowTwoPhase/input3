@@ -6,7 +6,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.5NoSurfTension
+plot_file = tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.5
 
 ### MESHING ###
 amr.plot_dt = 5e-4
@@ -23,7 +23,7 @@ amr.n_cell = 16 16
 geometry.prob_lo = -0.0250 -0.0250 0.0 # [ m ]
 geometry.prob_hi =  0.0250  0.0250 0.0 # [ m ]
 geometry.is_periodic = 0 0 0
- 
+
 ### TIME STEP ###
 stop_time = 0.05
 
@@ -110,11 +110,12 @@ m0.ic.constant.value = 0.0
 u0.ic.constant.value = 0.0
 
 ### ADDITIONAL SOURCES ###
-apply_surface_tension = 0
-apply_buoyancy = 0
-apply_weight = 0
-grav = 9.81
+apply_surface_tension = 1
+apply_buoyancy = 0;
+apply_weight = 0;
+grav = 9.81;
 
 ### DEBUGGING ### 
 # Used for testing of the model
 Riemann_Solver = 2 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"

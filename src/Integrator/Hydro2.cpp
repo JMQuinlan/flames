@@ -66,6 +66,9 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // INTERACTIONS
         pp_query_default("sigma", value.sigma, 70.0); // surface tension condition
+
+        // CURVATURE
+        pp_query_default("kappa_method", value.kappa_method, 1); // Method to solve for curvature
         
         // Boundry Conditions
         pp_forbid("rho.bc","--> density.bc");
@@ -170,6 +173,7 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     // diffuse boundary prescribed heat flux 
     pp.select_default<IC::Constant,IC::Expression>("q.ic",value.ic_q,value.geom);
     
+
     // SOLVER
     // Riemann solver
     pp_query_default("Riemann_Solver", value.Riemann_Solver, 0); // Type of solver
@@ -535,18 +539,70 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 // Optimization, only calc surface tension if on interface
                 //if ((eta(i, j, k) <= cutoff / 10.0) or (eta(i, j, k) >= 1.0 - cutoff / 10.0))
                 //if (((grad_eta(0) <= cutoff / 10.0) and (grad_eta(0) >= -cutoff / 10.0))
-                if (grad_eta_mag == 0.0)
+                if (grad_eta_mag <= cutoff/10.0)
                 {
                     Fsv(i, j, k, 0) = 0.0;
                     Fsv(i, j, k, 1) = 0.0;
                 }
                 else
                 {
+                    
                     Set::Scalar sigma_eff = sigma;
-                    Set::Vector grad_mag_grad_eta = Set::Vector(1 / (grad_eta_mag + small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)),
-                                                                1 / (grad_eta_mag + small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));
-                    Set::Scalar kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / ((grad_eta_mag + small) * (grad_eta_mag + small))));
+                    Set::Scalar kappa = 0.0;
 
+                    if (kappa_method == 1)
+                    {
+                        Set::Vector grad_mag_grad_eta = Set::Vector(1 / (grad_eta_mag + small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)),
+                                                                    1 / (grad_eta_mag + small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));
+                        kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / ((grad_eta_mag + small) * (grad_eta_mag + small))));
+                    }
+                    else if (kappa_method == 2)
+                    {
+                        Set::Vector n_hat = grad_eta / (grad_eta_mag + small);
+                        // Orthogonal Basis
+                        Set::Vector t1, t2;
+                        if (std::abs(n_hat(0)) > std::abs(n_hat(1)))
+                        {
+                            t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0)*n_hat(0) + n_hat(1)*n_hat(1) + small);
+                        }
+                        else
+                        {
+                            t1 = Set::Vector(n_hat(1), -n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
+                        }
+                        // Transformation matrix Q: n_hat | t1
+                        //Set::Matrix Q(2, 2);
+                        //Q(0, 0) = n_hat(0); Q(0, 1) = t1(0);
+                        //Q(1, 0) = n_hat(1); Q(1, 1) = t1(1);
+                        // Hessian Projection
+                        //Set::Matrix H_projected = Q.transpose() * hess_eta * Q;
+                        // Principal Curvatures
+                        //Set::Scalar kappa1 = H_projected(0, 0); // Normal Curvature
+                        //Set::Scalar kappa2 = H_projected(1, 1); // Tangential Curvature
+                        Set::Scalar kappa1 = n_hat.dot(hess_eta * n_hat);   // Normal Curvature
+                        Set::Scalar kappa2 = t1.dot(hess_eta * t1);         // Tangential Curvature
+                        // Regularization
+                        Set::Scalar K23 = kappa2 * kappa2;                  // K23 Regularization
+                        Set::Scalar K_Gauss = kappa1 * kappa2;              // Gauss Regularization
+                        // Mean Curvature
+                        Set::Scalar K_mean = (kappa1 + kappa2) / 2.0;       // Mean Curvature
+                        //Set::Scalar K_mean = std::sqrt(std::abs((K23+K_Gauss) / 2.0));   // Mean Curvature
+                        kappa = K_mean * 1e-6;
+                        // Error Message, Uncomment when debugging:
+                        /*
+                        if (std::abs(kappa) < small)
+                        {
+                            Util::ParallelMessage(INFO, "lev=", lev);
+                            Util::ParallelMessage(INFO, "i=", i, "j=", j);
+                            Util::ParallelMessage(INFO, "kappa=", kappa);
+                            Util::ParallelMessage(INFO, "kappa1=", kappa1, "kappa2=", kappa2);
+                            Util::ParallelMessage(INFO, "t1=", t1, "t2=", t2);
+                            Util::ParallelMessage(INFO, "n_hat=", n_hat);
+                            Util::Abort(INFO);
+                        }
+                        */
+                    }
+
+                    
                     Fsv(i, j, k, 0) = sigma_eff * (kappa * grad_eta(0)); // / (grad_eta_mag + small)); // / (DX[0] + small);
                     Fsv(i, j, k, 1) = sigma_eff * (kappa * grad_eta(1)); // / (grad_eta_mag + small)); // / (DX[1] + small);
                 }

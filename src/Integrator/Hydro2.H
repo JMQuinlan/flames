@@ -50,6 +50,8 @@ public:
         delete eta_ic;
         delete etadot_ic;
 
+        
+
         delete roesolver;
         delete hllcsolver;
         delete hllesolver;
@@ -179,6 +181,7 @@ private:
     int apply_weight = 0;
     
     int Riemann_Solver = 0;
+    int kappa_method = 1;
 
     Solver::Local::Riemann::Roe *roesolver = nullptr;
     Solver::Local::Riemann::HLLC *hllcsolver = nullptr;
