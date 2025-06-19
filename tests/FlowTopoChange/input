@@ -55,6 +55,9 @@ eta.ic.expression.constant.x0    = 0.0
 eta.ic.expression.constant.y0    = 0.0
 eta.ic.expression.region0        = "(0.5*(1 + tanh((((x-x0)**2/A1**2 + (y-y0)**2/A2**2) - 1)/(0.1*eps))))"
 
+### Advection solver ###
+Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+
 ### HYDRO PARAM ###
 # New parameters
 gamma0 = 1.4

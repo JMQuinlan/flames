@@ -65,8 +65,8 @@ public:
         Set::Scalar E_L = lo.E, E_R = hi.E;
 
         // Ensure no negative densities
-        rho_L = std::max(0.0, rho_L);
-        rho_R = std::max(0.0, rho_R);
+        rho_L = std::max(0.0+small, rho_L);
+        rho_R = std::max(0.0+small, rho_R);
 
         // STEP 1: Compute fluid primitives
         Set::Scalar ke_L = 0.5 * (Mn_L * Mn_L /*+ Mt_L * Mt_L*/) / (rho_L + small); // KE per unit volume
@@ -144,10 +144,14 @@ public:
             {
                 Util::ParallelMessage(INFO, "hi ", hi);
                 Util::ParallelMessage(INFO, "lo ", lo);
-                Util::ParallelMessage(INFO, "rho_R ", rho_R);
                 Util::ParallelMessage(INFO, "rho_L ", rho_L);
-                Util::ParallelMessage(INFO, "u_R ", u_R);
+                Util::ParallelMessage(INFO, "rho_R ", rho_R);
                 Util::ParallelMessage(INFO, "u_L ", u_L);
+                Util::ParallelMessage(INFO, "u_R ", u_R);
+                Util::ParallelMessage(INFO, "p_L ", p_L);
+                Util::ParallelMessage(INFO, "p_R ", p_R);
+                Util::ParallelMessage(INFO, "a_L ", a_L);
+                Util::ParallelMessage(INFO, "a_R ", a_R);
                 Util::ParallelMessage(INFO, "S_L ", S_L);
                 Util::ParallelMessage(INFO, "S_R ", S_R);
             }

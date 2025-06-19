@@ -32,9 +32,10 @@
 #SBATCH -o logRuns/Droplet.o%j          # Name of stdout output file
 #SBATCH -e logRuns/Droplet.e%j          # Name of stderr error file
 ## #SBATCH -p compute-long             # Queue (partition) name
-#SBATCH -p bigmem             # Queue (partition) name
+## #SBATCH -p bigmem             # Queue (partition) name
+#SBATCH -p compute             # Queue (partition) name
 #SBATCH --ntasks-per-node=128  # MPI tasks per node
-#SBATCH -N 2                   # Total # of nodes
+#SBATCH -N 4                   # Total # of nodes
 #SBATCH -t 24:00:00            # Run time (hh:mm:ss)
 
 # Other commands must follow all #SBATCH directives...

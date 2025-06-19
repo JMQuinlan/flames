@@ -382,7 +382,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
 
             // DEBUG Tool
-            if (press(i, j, k) > 1E1000)
+            if (press(i, j, k) > 1E100)
             {
                 Util::ParallelMessage(INFO, "v=", v(i,j,k));
                 Util::ParallelMessage(INFO, "press=", press(i,j,k));
