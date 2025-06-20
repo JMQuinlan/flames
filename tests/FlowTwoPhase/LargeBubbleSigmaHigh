@@ -6,7 +6,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = tests/FlowTwoPhase/LargeBubbleRPE
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.SigmaHigh
 
 ### MESHING ###
 amr.plot_dt = 5e-4
@@ -15,15 +15,15 @@ amr.blocking_factor = 2
 amr.regrid_int = 100
 amr.grid_eff = 0.8
 
-amr.max_level = 4
-timestep  = 2e-6
-amr.n_cell = 50 50
+amr.max_level = 5
+timestep  = 1e-6
+amr.n_cell = 16 16
 
 ### DIMENSIONS ###
-geometry.prob_lo = -0.08 -0.08 0.0 # [ m ]
-geometry.prob_hi =  0.08  0.08 0.0 # [ m ]
+geometry.prob_lo = -0.0250 -0.0250 0.0 # [ m ]
+geometry.prob_hi =  0.0250  0.0250 0.0 # [ m ]
 geometry.is_periodic = 0 0 0
-
+ 
 ### TIME STEP ###
 stop_time = 0.05
 
@@ -31,15 +31,18 @@ stop_time = 0.05
 eta.ic.type = expression
 # Eqn: "0.5*(1+tanh((sqrt(((x-xc)/a)**2 + ((y-yc)/b)**2) - Diameter)/Boundry_Thickness))
 # RPE Verification
-eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 0.01)/0.0005))"
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 0.01)/0.0001))"
 
 
 ### HYDRO INITIAL CONDITIONS ###
-gamma0 = 1.33
+gamma0 = 1.4 
 gamma1 = 1.4
 
 mu0   = 10
 mu1   = 0.000018 
+
+mu0_b   = 0
+mu1_b   = 0
 
 density0.ic.type = expression
 density0.ic.expression.region0 = "997.0"
@@ -113,6 +116,11 @@ u0.ic.constant.value = 0.0
 
 ### ADDITIONAL SOURCES ###
 apply_surface_tension = 1
-apply_buoyancy = 0;
-apply_weight = 0;
-grav = 9.81;
+apply_buoyancy = 0
+apply_weight = 0
+grav = 9.81
+
+### DEBUGGING ### 
+# Used for testing of the model
+Riemann_Solver = 2 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+kappa_method = 1   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"

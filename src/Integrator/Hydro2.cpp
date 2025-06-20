@@ -141,6 +141,8 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.Fsv_mf, &value.bc_nothing, 2, nghost, "Fsv", true, {"x","y"}); // To Track Surface Tension
         value.RegisterNewFab(value.Fb_mf, &value.bc_nothing, 2, nghost, "Fb", true, {"x","y"}); // To Track Bouyancy
         value.RegisterNewFab(value.Fw_mf, &value.bc_nothing, 2, nghost, "Fw", true, { "x", "y" }); // To Track Weight
+        value.RegisterNewFab(value.kappas_mf, &value.bc_nothing, 3, nghost, "kappa", true, { "Avg","1", "2" }); // To Surface curvature
+
 
         // DEBUGGING
         value.RegisterNewFab(value.grad_eta_mf, &value.bc_nothing, 2, nghost, "grad_eta", true, { "x", "y" });
@@ -222,6 +224,10 @@ void Hydro2::Initialize(int lev)
     ic_q            ->Initialize(lev, q_mf, 0.0);
     Source_mf[lev]  ->setVal(0.0);
     Fsv_mf[lev]     ->setVal(0.0); //->Initialize(lev, m0_mf, 0.0);
+    Fb_mf[lev]      ->setVal(0.0); //->Initialize(lev, m0_mf, 0.0);
+    Fw_mf[lev]      ->setVal(0.0); //->Initialize(lev, m0_mf, 0.0);
+    kappas_mf[lev]  ->setVal(0.0);
+
 
     // Calculate mixed variables based on individual fluid variables
     Mix(lev);
@@ -429,6 +435,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch <Set::Scalar>        Fsv = Fsv_mf.Patch(lev, mfi);
         Set::Patch <Set::Scalar>        Fb = Fb_mf.Patch(lev, mfi);
         Set::Patch <Set::Scalar>        Fw = Fw_mf.Patch(lev, mfi);
+        Set::Patch <Set::Scalar>        kappas = kappas_mf.Patch(lev, mfi);
 
         // DEBUGGING
         Set::Patch<Set::Scalar> grad_eta_ = grad_eta_mf.Patch(lev, mfi);
@@ -555,6 +562,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         Set::Vector grad_mag_grad_eta = Set::Vector(1 / (grad_eta_mag + small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)),
                                                                     1 / (grad_eta_mag + small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));
                         kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / ((grad_eta_mag + small) * (grad_eta_mag + small))));
+                        // To Track Surface Curvature
+                        kappas(i, j, k, 0) = kappa; // Mean
+                        kappas(i, j, k, 1) = 0.0;   // 1
+                        kappas(i, j, k, 2) = 0.0;   // 2
+
                     }
                     else if (kappa_method == 2)
                     {
@@ -584,9 +596,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         Set::Scalar K23 = kappa2 * kappa2;                  // K23 Regularization
                         Set::Scalar K_Gauss = kappa1 * kappa2;              // Gauss Regularization
                         // Mean Curvature
-                        Set::Scalar K_mean = (kappa1 + kappa2) / 2.0;       // Mean Curvature
-                        //Set::Scalar K_mean = std::sqrt(std::abs((K23+K_Gauss) / 2.0));   // Mean Curvature
-                        kappa = K_mean * 1e-6;
+                        //Set::Scalar K_mean = (kappa1 + kappa2) / 2.0;       // Mean Curvature
+                        Set::Scalar K_mean = std::sqrt(std::abs((K23+K_Gauss) / 2.0));   // Mean Curvature
+                        kappa = -K_mean;
                         // Error Message, Uncomment when debugging:
                         /*
                         if (std::abs(kappa) < small)
@@ -600,6 +612,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                             Util::Abort(INFO);
                         }
                         */
+                        // To Track Surface Curvature
+                        kappas(i, j, k, 0) = kappa; // Mean
+                        kappas(i, j, k, 1) = kappa1; // 1
+                        kappas(i, j, k, 2) = kappa2; // 2
                     }
 
                     

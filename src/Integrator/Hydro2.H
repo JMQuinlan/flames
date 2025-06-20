@@ -27,6 +27,7 @@ public:
     static void Parse(Hydro2& value, IO::ParmParse& pp);
     virtual ~Hydro2()
     {
+        // Boundry Conditions
         delete density_bc;
         delete momentum_bc;
         delete energy_bc;
@@ -47,11 +48,11 @@ public:
         delete ic_u0;
         delete ic_q;
 
+        // ETA
         delete eta_ic;
         delete etadot_ic;
 
-        
-
+        // SOLVERS
         delete roesolver;
         delete hllcsolver;
         delete hllesolver;
@@ -128,6 +129,7 @@ private:
     Set::Field<Set::Scalar> Fb_mf;
     Set::Field<Set::Scalar> Fw_mf;
     Set::Field<Set::Scalar> grad_eta_mf;
+    Set::Field<Set::Scalar> kappas_mf;
 
     BC::BC<Set::Scalar>* density_bc = nullptr;
     BC::BC<Set::Scalar>* momentum_bc = nullptr;
