@@ -15,13 +15,13 @@ amr.blocking_factor = 2
 amr.regrid_int = 100
 amr.grid_eff = 0.8
 
-amr.max_level = 5
+amr.max_level = 6
 timestep  = 1e-6
 amr.n_cell = 16 16
 
 ### DIMENSIONS ###
-geometry.prob_lo = -0.0250 -0.0250 0.0 # [ m ]
-geometry.prob_hi =  0.0250  0.0250 0.0 # [ m ]
+geometry.prob_lo = -0.050 -0.050 0.0 # [ m ]
+geometry.prob_hi =  0.050  0.050 0.0 # [ m ]
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
