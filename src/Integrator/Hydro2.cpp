@@ -546,7 +546,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 // Optimization, only calc surface tension if on interface
                 //if ((eta(i, j, k) <= cutoff / 10.0) or (eta(i, j, k) >= 1.0 - cutoff / 10.0))
                 //if (((grad_eta(0) <= cutoff / 10.0) and (grad_eta(0) >= -cutoff / 10.0))
-                if (grad_eta_mag <= cutoff/10.0)
+                //if (grad_eta_mag <= cutoff/10.0)
+                if (grad_eta_mag <= 1)
                 {
                     Fsv(i, j, k, 0) = 0.0;
                     Fsv(i, j, k, 1) = 0.0;
@@ -582,23 +583,23 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                             t1 = Set::Vector(n_hat(1), -n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
                         }
                         // Transformation matrix Q: n_hat | t1
-                        //Set::Matrix Q(2, 2);
-                        //Q(0, 0) = n_hat(0); Q(0, 1) = t1(0);
-                        //Q(1, 0) = n_hat(1); Q(1, 1) = t1(1);
+                        Set::Matrix Q(2, 2);
+                        Q(0, 0) = n_hat(0); Q(0, 1) = t1(0);
+                        Q(1, 0) = n_hat(1); Q(1, 1) = t1(1);
                         // Hessian Projection
-                        //Set::Matrix H_projected = Q.transpose() * hess_eta * Q;
+                        Set::Matrix H_projected = Q.transpose() * hess_eta * Q;
                         // Principal Curvatures
-                        //Set::Scalar kappa1 = H_projected(0, 0); // Normal Curvature
-                        //Set::Scalar kappa2 = H_projected(1, 1); // Tangential Curvature
-                        Set::Scalar kappa1 = n_hat.dot(hess_eta * n_hat);   // Normal Curvature
-                        Set::Scalar kappa2 = t1.dot(hess_eta * t1);         // Tangential Curvature
+                        Set::Scalar kappa1 = H_projected(0, 0); // Normal Curvature
+                        Set::Scalar kappa2 = H_projected(1, 1); // Tangential Curvature
+                        //Set::Scalar kappa1 = n_hat.dot(hess_eta * n_hat);   // Normal Curvature
+                        //Set::Scalar kappa2 = t1.dot(hess_eta * t1);         // Tangential Curvature
                         // Regularization
                         Set::Scalar K23 = kappa2 * kappa2;                  // K23 Regularization
                         Set::Scalar K_Gauss = kappa1 * kappa2;              // Gauss Regularization
                         // Mean Curvature
-                        //Set::Scalar K_mean = (kappa1 + kappa2) / 2.0;       // Mean Curvature
-                        Set::Scalar K_mean = std::sqrt(std::abs((K23+K_Gauss) / 2.0));   // Mean Curvature
-                        kappa = -K_mean;
+                        Set::Scalar K_mean = (kappa1 + kappa2) / 2.0;       // Mean Curvature
+                        //Set::Scalar K_mean = std::sqrt(std::abs((K23+K_Gauss) / 2.0));   // Mean Curvature
+                        kappa = kappa2;
                         // Error Message, Uncomment when debugging:
                         /*
                         if (std::abs(kappa) < small)

@@ -6,17 +6,17 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.KmeanReg
+plot_file = tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.ogkappa_tighterconstraint
 
 ### MESHING ###
-amr.plot_dt = 1e-5
+amr.plot_dt = 1e-4
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 100
 amr.grid_eff = 0.8
 
 amr.max_level = 5
-timestep  = 1e-6
+timestep  = 2e-6
 amr.n_cell = 16 16
 
 ### DIMENSIONS ###
@@ -123,4 +123,4 @@ grav = 9.81;
 ### DEBUGGING ### 
 # Used for testing of the model
 Riemann_Solver = 2 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
-kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
+kappa_method = 1   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
