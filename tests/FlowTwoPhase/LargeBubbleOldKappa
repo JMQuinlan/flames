@@ -15,7 +15,7 @@ amr.blocking_factor = 2
 amr.regrid_int = 100
 amr.grid_eff = 0.8
 
-amr.max_level = 7
+amr.max_level = 6
 timestep  = 2e-7
 amr.n_cell = 16 16
 
