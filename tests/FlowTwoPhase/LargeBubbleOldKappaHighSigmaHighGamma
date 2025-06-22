@@ -6,7 +6,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.RPEVerify1
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.RPEVerify2
 
 ### MESHING ###
 amr.plot_dt = 5e-4
@@ -31,11 +31,11 @@ stop_time = 0.05
 eta.ic.type = expression
 # Eqn: "0.5*(1+tanh((sqrt(((x-xc)/a)**2 + ((y-yc)/b)**2) - Diameter)/Boundry_Thickness))
 # RPE Verification
-eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 0.015)/0.0001))"
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 0.01)/0.00015))"
 
 
 ### HYDRO INITIAL CONDITIONS ###
-gamma0 = 2
+gamma0 = 1.4
 gamma1 = 1.4
 
 mu0   = 10
