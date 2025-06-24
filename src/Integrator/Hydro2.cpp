@@ -571,52 +571,109 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     }
                     else if (kappa_method == 2)
                     {
+                        // Here are a few different ways of calculating principle curvatures. Approach 1 and 2 give much larger curvatures than the kappa_method==1 method described above from the divergence of the normal vector. This brought the need of approach 3.
+                        // To run any approach, uncomment your desired approach and run. 
+                        // 
+                        // Approach 1 uses the simplified dot product of the hessian matrix in the normal and tangent direction to extract principle curvatures
+                        // Approach 2 uses matrix projection of the hessian onto the normal and tangent plane and extracts principle curvatures
+                        // Approach 3 uses calculates the eigen values of the hessian to find the principle curvatures
+                        
+                        // /////////////////////////////////////////////////////////////////////////////////////
+                        // APPROACH 1: Dot product of Hessian and normal vector 
+                        /*
+                        // Normal Vector
                         Set::Vector n_hat = grad_eta / (grad_eta_mag + small);
                         // Orthogonal Basis
                         Set::Vector t1, t2;
                         if (std::abs(n_hat(0)) > std::abs(n_hat(1)))
                         {
-                            t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0)*n_hat(0) + n_hat(1)*n_hat(1) + small);
+                            t1 = Set::Vector(-n\_hat(1), n\_hat(0)) / std::sqrt(n\_hat(0)\* n\_hat(0) + n\_hat(1)\* n\_hat(1) + small);
                         }
                         else
                         {
-                            t1 = Set::Vector(n_hat(1), -n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
+                            t1 = Set::Vector(n\_hat(1), -n\_hat(0)) / std::sqrt(n\_hat(0) \* n\_hat(0) + n\_hat(1) \* n\_hat(1) + small);
+                        }
+                        Set::Scalar kappa1 = n_hat.dot(hess_eta * n_hat); // Normal Curvature
+                        Set::Scalar kappa2 = t1.dot(hess_eta * t1); // Tangential Curvature
+                        */
+
+                        // /////////////////////////////////////////////////////////////////////////////////////
+                        // APPROACH 2: Hessian Projection
+                        /*
+                        // Normal Vector
+                        Set::Vector n_hat = grad_eta / (grad_eta_mag + small);
+                        // Orthogonal Basis
+                        Set::Vector t1, t2;
+                        if (std::abs(n_hat(0)) > std::abs(n_hat(1)))
+                        {
+                            t1 = Set::Vector(-n\_hat(1), n\_hat(0)) / std::sqrt(n\_hat(0)\* n\_hat(0) + n\_hat(1)\* n\_hat(1) + small);
+                        }
+                        else
+                        {
+                            t1 = Set::Vector(n\_hat(1), -n\_hat(0)) / std::sqrt(n\_hat(0) \* n\_hat(0) + n\_hat(1) \* n\_hat(1) + small);
                         }
                         // Transformation matrix Q: n_hat | t1
                         Set::Matrix Q(2, 2);
                         Q(0, 0) = n_hat(0); Q(0, 1) = t1(0);
                         Q(1, 0) = n_hat(1); Q(1, 1) = t1(1);
+
                         // Hessian Projection
                         Set::Matrix H_projected = Q.transpose() * hess_eta * Q;
+
                         // Principal Curvatures
                         Set::Scalar kappa1 = H_projected(0, 0); // Normal Curvature
                         Set::Scalar kappa2 = H_projected(1, 1); // Tangential Curvature
-                        //Set::Scalar kappa1 = n_hat.dot(hess_eta * n_hat);   // Normal Curvature
-                        //Set::Scalar kappa2 = t1.dot(hess_eta * t1);         // Tangential Curvature
+                        */
+
+
+                        // /////////////////////////////////////////////////////////////////////////////////////
+                        // APPROACH 3: Eigen Values of Hessian
+                        // TODO: only works in 2D
+                        Set::Scalar trace = hess_eta(0, 0) + hess_eta(1, 1);
+                        Set::Scalar det = hess_eta(0, 0) * hess_eta(1, 1) - hess_eta(0, 1) * hess_eta(1, 0);
+                        Set::Scalar discriminant = std::sqrt(trace * trace - 4 * det);
+
+                        // Principal curvatures are eigenvalues
+                        Set::Scalar kappa1 = (trace + discriminant) / 2.0; // Larger eigenvalue
+                        Set::Scalar kappa2 = (trace - discriminant) / 2.0; // Smaller eigenvalue
+
+                        // Ensure kappa1 is the larger in magnitude if needed
+                        //if (std::abs(kappa2) > std::abs(kappa1))
+                        //{
+                        //    std::swap(kappa1, kappa2);
+                        //}
+
+
+                        // /////////////////////////////////////////////////////////////////////////////////////
+                        // Extracing method output to be used
                         // Regularization
-                        Set::Scalar K23 = kappa2 * kappa2;                  // K23 Regularization
-                        Set::Scalar K_Gauss = kappa1 * kappa2;              // Gauss Regularization
-                        // Mean Curvature
-                        Set::Scalar K_mean = (kappa1 + kappa2) / 2.0;       // Mean Curvature
-                        //Set::Scalar K_mean = std::sqrt(std::abs((K23+K_Gauss) / 2.0));   // Mean Curvature
-                        kappa = kappa2;
+                        Set::Scalar K23 = kappa2 * kappa2;            // K23 Regularization
+                        Set::Scalar K_Gauss = kappa1 * kappa2;        // Gauss Regularization
+                        // Mean
+                        Set::Scalar K_mean = (kappa1 + kappa2) / 2.0; // Mean Curvature
+                        //Set::Scalar K_mean = std::sqrt(std::abs((K23 + K_Gauss) / 2.0)); // Mean Curvature
+
+                        // Assign the curvature you want to use
+                        kappa = K_mean; // Or use another curvature measure as needed
+
+                        // Store curvature values
+                        kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
+                        kappas(i, j, k, 1) = kappa1; // First principal curvature
+                        kappas(i, j, k, 2) = kappa2; // Second principal curvature
+
                         // Error Message, Uncomment when debugging:
                         /*
                         if (std::abs(kappa) < small)
                         {
-                            Util::ParallelMessage(INFO, "lev=", lev);
-                            Util::ParallelMessage(INFO, "i=", i, "j=", j);
-                            Util::ParallelMessage(INFO, "kappa=", kappa);
-                            Util::ParallelMessage(INFO, "kappa1=", kappa1, "kappa2=", kappa2);
-                            Util::ParallelMessage(INFO, "t1=", t1, "t2=", t2);
-                            Util::ParallelMessage(INFO, "n_hat=", n_hat);
-                            Util::Abort(INFO);
+                        Util::ParallelMessage(INFO, "lev=", lev);
+                        Util::ParallelMessage(INFO, "i=", i, "j=", j);
+                        Util::ParallelMessage(INFO, "kappa=", kappa);
+                        Util::ParallelMessage(INFO, "kappa1=", kappa1, "kappa2=", kappa2);
+                        Util::ParallelMessage(INFO, "t1=", t1, "t2=", t2);
+                        Util::ParallelMessage(INFO, "n\_hat=", n\_hat);
+                        Util::Abort(INFO);
                         }
                         */
-                        // To Track Surface Curvature
-                        kappas(i, j, k, 0) = kappa; // Mean
-                        kappas(i, j, k, 1) = kappa1; // 1
-                        kappas(i, j, k, 2) = kappa2; // 2
                     }
 
                     
