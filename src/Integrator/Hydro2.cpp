@@ -563,6 +563,22 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         Set::Vector grad_mag_grad_eta = Set::Vector(1 / (grad_eta_mag + small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)),
                                                                     1 / (grad_eta_mag + small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));
                         kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / ((grad_eta_mag + small) * (grad_eta_mag + small))));
+
+                        // Density Scaling
+                        Set::Scalar a = 0.49; // Cutoff
+                        Set::Scalar x = eta(i, j, k) - 0.5; // Eta centered at 0
+                        Set::Scalar D = 0.0; // Dirac Delta Value
+                        Set::Scalar pi = 3.14159; // Add decimals as needed
+                        if ((-a < x) and (x < a))
+                        {
+                            D = 0.5 * (1 + x / a + 1 / pi * std::sin(pi * x / a));
+                        }
+                        else
+                        {
+                            D = 0.0;
+                        }
+                        kappa = D * kappa; // Smoothened Curvature
+
                         // To Track Surface Curvature
                         kappas(i, j, k, 0) = kappa; // Mean
                         kappas(i, j, k, 1) = 0.0;   // 1
@@ -652,9 +668,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         // Mean
                         Set::Scalar K_mean = (kappa1 + kappa2) / 2.0; // Mean Curvature
                         //Set::Scalar K_mean = std::sqrt(std::abs((K23 + K_Gauss) / 2.0)); // Mean Curvature
+                        //Set::Scalar K_mean = std::sqrt(std::abs((K23 + K_Gauss) / 2.0)) * kappa1/std::abs(kappa1); // Mean Curvature
 
                         // Assign the curvature you want to use
-                        kappa = K_mean; // Or use another curvature measure as needed
+                        kappa = kappa2; // Or use another curvature measure as needed
 
                         // Store curvature values
                         kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
