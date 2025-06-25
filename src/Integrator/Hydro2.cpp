@@ -673,6 +673,24 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         // Assign the curvature you want to use
                         kappa = kappa2; // Or use another curvature measure as needed
 
+                        // ///////////////
+                        // Density Scaling
+                        Set::Scalar a = 0.49;               // Cutoff
+                        Set::Scalar x = eta(i, j, k) - 0.5; // Eta centered at 0
+                        Set::Scalar D = 0.0;                // Dirac Delta Value
+                        Set::Scalar pi = 3.14159;           // Add decimals as needed
+                        if ((-a < x) and (x < a))
+                        {
+                            D = 0.5 * (1 + x / a + 1 / pi * std::sin(pi * x / a));
+                        }
+                        else
+                        {
+                            D = 0.0;
+                        }
+                        kappa = D * kappa * DX[0]; // Smoothened Curvature
+                        // ///////////////
+                        
+
                         // Store curvature values
                         kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
                         kappas(i, j, k, 1) = kappa1; // First principal curvature
