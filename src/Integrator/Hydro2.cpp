@@ -55,13 +55,15 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_forbid("mu", "--> mu0 and mu1");
 
         // FLUID 0
-        pp_query_required("gamma0", value.gamma0);  // gamma for gamma law
-        pp_query_required("mu0", value.mu0);        // linear viscosity coefficient
-        pp_query_default("mu0_b", value.mu0_b, 0.0);     // bulk viscosity coefficient
+        pp_query_required("gamma0", value.gamma0);      // gamma for gamma law
+        pp_query_required("p0_0", value.p0_0);          // p0 for Tammann EOS
+        pp_query_required("mu0", value.mu0);            // linear viscosity coefficient
+        pp_query_default("mu0_b", value.mu0_b, 0.0);    // bulk viscosity coefficient
 
         // FLUID 1
-        pp_query_required("gamma1", value.gamma1); // gamma for gamma law
-        pp_query_required("mu1", value.mu1);       // linear viscosity coefficient
+        pp_query_required("gamma1", value.gamma1);      // gamma for gamma law
+        pp_query_required("p0_1", value.p0_1);          // p0 for Tammann EOS
+        pp_query_required("mu1", value.mu1);            // linear viscosity coefficient
         pp_query_default("mu1_b", value.mu1_b, 0.0);    // bulk viscosity coefficient
 
         // INTERACTIONS
@@ -767,6 +769,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Calculate fluxes using the mixed fluid approach
             Solver::Local::Riemann::Flux flux_xlo, flux_ylo, flux_xhi, flux_yhi;
             Set::Scalar gamma_eff = eta(i, j, k) * gamma0 + (1.0 - eta(i, j, k)) * gamma1;
+            // Tamann EOS Refrense Pressure (P0)
+            Set::Scalar p0_eff = eta(i, j, k) * p0_0 + (1.0 - eta(i, j, k)) * p0_1;
 
             try
             {
@@ -781,10 +785,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 else if (Riemann_Solver == 1)
                 {
                     // Calculate fluxes for the mixed fluid
-                    flux_xlo = hllcsolver->Solve(state_xlo, state_x, gamma_eff, pref, small); //  * eta(i,j,k)
-                    flux_ylo = hllcsolver->Solve(state_ylo, state_y, gamma_eff, pref, small); //  * eta(i,j,k)
-                    flux_xhi = hllcsolver->Solve(state_x, state_xhi, gamma_eff, pref, small); //  * eta(i,j,k)
-                    flux_yhi = hllcsolver->Solve(state_y, state_yhi, gamma_eff, pref, small); //  * eta(i,j,k)
+                    flux_xlo = hllcsolver->Solve(state_xlo, state_x, gamma_eff, pref, p0_eff, small); //  * eta(i,j,k)
+                    flux_ylo = hllcsolver->Solve(state_ylo, state_y, gamma_eff, pref, p0_eff, small); //  * eta(i,j,k)
+                    flux_xhi = hllcsolver->Solve(state_x, state_xhi, gamma_eff, pref, p0_eff, small); //  * eta(i,j,k)
+                    flux_yhi = hllcsolver->Solve(state_y, state_yhi, gamma_eff, pref, p0_eff, small); //  * eta(i,j,k)
                 }
                 else if (Riemann_Solver == 2)
                 {

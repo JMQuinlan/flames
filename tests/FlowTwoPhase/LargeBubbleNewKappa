@@ -38,6 +38,9 @@ eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 0.01)/0.0001
 gamma0 = 1.33
 gamma1 = 1.4
 
+p0_0 = 0
+p0_0 = 0
+
 mu0   = 10
 mu1   = 0.000018 
 

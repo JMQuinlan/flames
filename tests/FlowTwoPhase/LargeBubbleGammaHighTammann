@@ -6,48 +6,42 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = tests/FlowTwoPhase/MicroBubbleRPE_2Bar
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHigh
 
 ### MESHING ###
-amr.plot_dt = 1e-6
+amr.plot_dt = 5e-4
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 100
 amr.grid_eff = 0.8
 
-amr.max_level = 4
-timestep  = 5e-9
-amr.n_cell = 32 32
+amr.max_level = 6
+timestep  = 1e-6
+amr.n_cell = 16 16
 
 ### DIMENSIONS ###
-geometry.prob_lo = -0.00008 -0.00008 0.0 # [ m ]
-geometry.prob_hi =  0.00008  0.00008 0.0 # [ m ]
+geometry.prob_lo = -0.050 -0.050 0.0 # [ m ]
+geometry.prob_hi =  0.050  0.050 0.0 # [ m ]
 geometry.is_periodic = 0 0 0
-
+ 
 ### TIME STEP ###
-stop_time = 1e-4
+stop_time = 0.05
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
 # Eqn: "0.5*(1+tanh((sqrt(((x-xc)/a)**2 + ((y-yc)/b)**2) - Diameter)/Boundry_Thickness))
-# Large Bubble (Debugging interface)
-#eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 4e-4)/4e-7))"
-# No bubble (Debugging fluid)
-#eta.ic.expression.region0 = "0.0"
-# Microbubble (Simulating Air/Water)
-#eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 1e-4)/9e-6))"
 # RPE Verification
-eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 1.85e-5)/1e-6))"
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 0.01)/0.0001))"
 
 
 ### HYDRO INITIAL CONDITIONS ###
-gamma0 = 1.33
+gamma0 = 7.15 
 gamma1 = 1.4
 
-p0_0 = 0
+p0_0 = 0.3*10**9
 p0_0 = 0
 
-mu0   = 0.89e-2
+mu0   = 10
 mu1   = 0.000018 
 
 mu0_b   = 0
@@ -125,10 +119,11 @@ u0.ic.constant.value = 0.0
 
 ### ADDITIONAL SOURCES ###
 apply_surface_tension = 1
-apply_buoyancy = 0;
-apply_weight = 0;
-grav = 9.81;
+apply_buoyancy = 0
+apply_weight = 0
+grav = 9.81
 
 ### DEBUGGING ### 
 # Used for testing of the model
 Riemann_Solver = 2 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+kappa_method = 1   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
