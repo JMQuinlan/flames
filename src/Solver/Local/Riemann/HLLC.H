@@ -54,8 +54,7 @@ public:
         pp.query_default("verbose", value.verbose, 1);
     }
 
-    Flux
-    Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar p_0, Set::Scalar small)
+    Flux Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0)
     {
         Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
         Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
@@ -173,7 +172,6 @@ public:
         Set::Scalar gamma = 1.4;
         Set::Scalar pref = 10.0;
         Set::Scalar small = 1E-10;
-        Set::Scalar p0 = 0.0;
 
         // Test 1: Tangential Velocity Difference - No Normal Flux
         try
@@ -181,8 +179,8 @@ public:
             State left(1.0, 1.0, 0.0, 1.0);
             State center(1.0, 1.0, 1.0, 1.0);
             State right(1.0, 1.0, 2.0, 1.0);
-            Flux fluxlo = solver.Solve(center, right, gamma, pref, p0, small);
-            Flux fluxhi = solver.Solve(left, center, gamma, pref, p0, small);
+            Flux fluxlo = solver.Solve(center, right, gamma, pref, small);
+            Flux fluxhi = solver.Solve(left, center, gamma, pref, small);
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10
                 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10
                 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
@@ -208,8 +206,8 @@ public:
             State left(1.0, 0.0, 0.0, 1.0);
             State center(1.0, 0.0, 1.0, 1.0);
             State right(1.0, 0.0, 2.0, 1.0);
-            Flux fluxlo = solver.Solve(left, center, gamma, pref, p0, small);
-            Flux fluxhi = solver.Solve(center, right, gamma, pref, p0, small);
+            Flux fluxlo = solver.Solve(left, center, gamma, pref, small);
+            Flux fluxhi = solver.Solve(center, right, gamma, pref, small);
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10
                 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10
                 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
@@ -235,8 +233,8 @@ public:
             State left(1.0, 0.0, 0.0, 1.0);
             State center(1.0, 0.0, 0.0, 1.0);
             State right(1.0, 0.0, 0.0, 1.0);
-            Flux fluxhi = solver.Solve(center, right, gamma, pref, p0, small);
-            Flux fluxlo = solver.Solve(left, center, gamma, pref, p0, small);
+            Flux fluxhi = solver.Solve(center, right, gamma, pref, small);
+            Flux fluxlo = solver.Solve(left, center, gamma, pref, small);
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10                          // no change in mass flux
                 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 // no change in momentum flux
                 || fabs(fluxhi.momentum_tangent) > 1E-10                         // zero tangent flux
@@ -264,8 +262,8 @@ public:
             State left(1.0, 1.0, 0.5, 1.0);
             State center(1.0, 1.0, 0.5, 1.0);
             State right(1.0, 1.0, 0.5, 1.0);
-            Flux fluxhi = solver.Solve(center, right, gamma, pref, p0, small);
-            Flux fluxlo = solver.Solve(left, center, gamma, pref, p0, small);
+            Flux fluxhi = solver.Solve(center, right, gamma, pref, small);
+            Flux fluxlo = solver.Solve(left, center, gamma, pref, small);
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
             {
                 Util::Warning(INFO, "left:   ", left);

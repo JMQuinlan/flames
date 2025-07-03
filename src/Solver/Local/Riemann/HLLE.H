@@ -57,7 +57,7 @@ public:
         pp.query_default("verbose", value.verbose, 1);
     }
 
-    Flux Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small)
+    Flux Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0)
     {
         Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
         Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
@@ -71,11 +71,11 @@ public:
         // STEP 1: Compute fluid primitives
         Set::Scalar ke_L = 0.5 * (Mn_L * Mn_L /*+ Mt_L * Mt_L*/) / (rho_L + small); // KE per unit volume
         Set::Scalar ue_L = E_L - ke_L;                                              // IE per unit volume
-        Set::Scalar p_L = (gamma - 1.0) * ue_L + p_ref;                             // pressure
+        Set::Scalar p_L = (gamma - 1.0) * ue_L - gamma * p_0 + p_ref;               // pressure Tammann EOS modification
 
         Set::Scalar ke_R = 0.5 * (Mn_R * Mn_R /*+ Mt_R * Mt_R*/) / (rho_R + small);
         Set::Scalar ue_R = E_R - ke_R;
-        Set::Scalar p_R = (gamma - 1.0) * ue_R + p_ref;
+        Set::Scalar p_R = (gamma - 1.0) * ue_R - gamma * p_0 + p_ref;
 
         Set::Scalar u_L = Mn_L / (rho_L + small), u_R = Mn_R / (rho_R + small);
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
