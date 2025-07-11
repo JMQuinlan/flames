@@ -32,8 +32,8 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp.query_default("eta_refinement_criterion",   value.eta_refinement_criterion  , 0.01); // eta-based refinement
         pp.query_default("omega_refinement_criterion", value.omega_refinement_criterion, 0.01); // vorticity-based refinement
         pp.query_default("gradu_refinement_criterion", value.gradu_refinement_criterion, 0.01); // velocity gradient-based refinement
-        pp.query_default("p_refinement_criterion", value.p_refinement_criterion, 1e3);        // pressure-based refinement
-        pp.query_default("rho_refinement_criterion", value.rho_refinement_criterion, 1e3);    // density-based refinement
+        pp.query_default("p_refinement_criterion", value.p_refinement_criterion, 1e-3);         // pressure-based refinement
+        pp.query_default("rho_refinement_criterion", value.rho_refinement_criterion, 1e-6);    // density-based refinement
 
         // SOLVER AND REFRENCE CONDITIONS
         pp_query_required("cfl", value.cfl);           // cfl condition
@@ -394,7 +394,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
 
             // DEBUG Tool
-            if (press(i, j, k) > 1E100)
+            if (press(i, j, k) > 1E1000)
             {
                 Util::ParallelMessage(INFO, "v=", v(i,j,k));
                 Util::ParallelMessage(INFO, "press=", press(i,j,k));
@@ -777,26 +777,26 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 if (Riemann_Solver == 0)
                 {
                     // Calculate fluxes for the mixed fluid
-                    flux_xlo = roesolver->Solve(state_xlo, state_x, gamma_eff, pref, small); //  * eta(i,j,k)
-                    flux_ylo = roesolver->Solve(state_ylo, state_y, gamma_eff, pref, small);     //  * eta(i,j,k)
-                    flux_xhi = roesolver->Solve(state_x, state_xhi, gamma_eff, pref, small);     //  * eta(i,j,k)
-                    flux_yhi = roesolver->Solve(state_y, state_yhi, gamma_eff, pref, small);     //  * eta(i,j,k)
+                    flux_xlo = roesolver->Solve(state_xlo, state_x, gamma_eff, pref, small, p0_eff); 
+                    flux_ylo = roesolver->Solve(state_ylo, state_y, gamma_eff, pref, small, p0_eff); 
+                    flux_xhi = roesolver->Solve(state_x, state_xhi, gamma_eff, pref, small, p0_eff); 
+                    flux_yhi = roesolver->Solve(state_y, state_yhi, gamma_eff, pref, small, p0_eff); 
                 }
                 else if (Riemann_Solver == 1)
                 {
                     // Calculate fluxes for the mixed fluid
-                    flux_xlo = hllcsolver->Solve(state_xlo, state_x, gamma_eff, pref, small, p0_eff); //  * eta(i,j,k)
-                    flux_ylo = hllcsolver->Solve(state_ylo, state_y, gamma_eff, pref, small, p0_eff); //  * eta(i,j,k)
-                    flux_xhi = hllcsolver->Solve(state_x, state_xhi, gamma_eff, pref, small, p0_eff); //  * eta(i,j,k)
-                    flux_yhi = hllcsolver->Solve(state_y, state_yhi, gamma_eff, pref, small, p0_eff); //  * eta(i,j,k)
+                    flux_xlo = hllcsolver->Solve(state_xlo, state_x, gamma_eff, pref, small, p0_eff); 
+                    flux_ylo = hllcsolver->Solve(state_ylo, state_y, gamma_eff, pref, small, p0_eff); 
+                    flux_xhi = hllcsolver->Solve(state_x, state_xhi, gamma_eff, pref, small, p0_eff); 
+                    flux_yhi = hllcsolver->Solve(state_y, state_yhi, gamma_eff, pref, small, p0_eff); 
                 }
                 else if (Riemann_Solver == 2)
                 {
                     // Calculate fluxes for the mixed fluid
-                    flux_xlo = hllesolver->Solve(state_xlo, state_x, gamma_eff, pref, small); //  * eta(i,j,k)
-                    flux_ylo = hllesolver->Solve(state_ylo, state_y, gamma_eff, pref, small); //  * eta(i,j,k)
-                    flux_xhi = hllesolver->Solve(state_x, state_xhi, gamma_eff, pref, small); //  * eta(i,j,k)
-                    flux_yhi = hllesolver->Solve(state_y, state_yhi, gamma_eff, pref, small); //  * eta(i,j,k)
+                    flux_xlo = hllesolver->Solve(state_xlo, state_x, gamma_eff, pref, small, p0_eff); 
+                    flux_ylo = hllesolver->Solve(state_ylo, state_y, gamma_eff, pref, small, p0_eff); 
+                    flux_xhi = hllesolver->Solve(state_x, state_xhi, gamma_eff, pref, small, p0_eff); 
+                    flux_yhi = hllesolver->Solve(state_y, state_yhi, gamma_eff, pref, small, p0_eff); 
                 }
             }
             catch (...)
@@ -808,25 +808,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             }
 
             // UPDATE MIXED FLUID VARIABLES
-            /// Eta:
-            // Material Derivative
-            Set::Scalar deta_dt = -u.dot(grad_eta);
-            // Cahn-Hillard
-            // Set::Scalar deta_dt = -u.dot(grad_eta) + M.dot(grad_eta)
-            // Set::Matrix tmp =
-            // Set::Scalar deta_dt = -1.0 / (rho(i, j, k) * (u_mag**2))
-            // Set::Matrix gradu = (gradM - u * gradrho.transpose()) / rho(i, j, k);
-
-            // Set::Scalar deta_dt = -; //https://www.sciencedirect.com/science/article/pii/S002199912100005X
-            eta_new(i, j, k) = eta(i, j, k) + deta_dt * dt;
-            if (eta_new(i, j, k) <= cutoff)
-            {
-                eta_new(i, j, k) = 0.0;
-            }
-            else if (eta_new(i, j, k) >= (1.0 - cutoff))
-            {
-                eta_new(i, j, k) = 1.0;
-            }
+            
 
             // Update Source Terms to account for moving boundry
             // Delete me if does not worky :(
@@ -869,13 +851,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             }
 
             // Momentum
+            
             Set::Scalar dMx_dt = 
                 (flux_xlo.momentum_normal - flux_xhi.momentum_normal) / (DX[0]+small) + 
                 (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / (DX[1]+small) + 
                 div_tau(0) +
                 //(mu * (lap_ux * eta(i, j, k))) +
                 Source(i, j, k, 1);
-
             M_new(i, j, k, 0) = M(i, j, k, 0) + dMx_dt * dt;
 
             Set::Scalar dMy_dt = 
@@ -884,8 +866,24 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 div_tau(1) +
                 //(mu * (lap_uy * eta(i, j, k))) +
                 Source(i, j, k, 2);
-
             M_new(i, j, k, 1) = M(i, j, k, 1) + dMy_dt * dt;
+            /*
+            Set::Scalar dMx_dt = 
+                (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / (DX[0] + small) + 
+                (flux_ylo.momentum_normal - flux_yhi.momentum_normal) / (DX[1] + small) + 
+                div_tau(0) +
+                //(mu * (lap_ux * eta(i, j, k))) +
+                Source(i, j, k, 1);
+            M_new(i, j, k, 0) = M(i, j, k, 0) + dMx_dt * dt;
+
+            Set::Scalar dMy_dt = 
+                (flux_xlo.momentum_normal - flux_xhi.momentum_normal) / (DX[0] + small) + 
+                (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / (DX[1] + small) + 
+                div_tau(1) +
+                //(mu * (lap_uy * eta(i, j, k))) +
+                Source(i, j, k, 2);
+            M_new(i, j, k, 1) = M(i, j, k, 1) + dMy_dt * dt;
+            */
 
             // Energy
             Set::Scalar dE_dt = 
@@ -896,7 +894,26 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             E_new(i, j, k) = E(i, j, k) + dE_dt * dt;
 
             
+            /// Eta:
+            // Material Derivative
+            Set::Vector u_new = Set::Vector(M_new(i, j, k, 0) / rho_new(i, j, k), M_new(i, j, k, 1) / rho_new(i, j, k));
+            Set::Scalar deta_dt = -u_new.dot(grad_eta);
+            // Cahn-Hillard
+            // Set::Scalar deta_dt = -u.dot(grad_eta) + M.dot(grad_eta)
+            // Set::Matrix tmp =
+            // Set::Scalar deta_dt = -1.0 / (rho(i, j, k) * (u_mag**2))
+            // Set::Matrix gradu = (gradM - u * gradrho.transpose()) / rho(i, j, k);
 
+            // Set::Scalar deta_dt = -; //https://www.sciencedirect.com/science/article/pii/S002199912100005X
+            eta_new(i, j, k) = eta(i, j, k) + deta_dt * dt;
+            if (eta_new(i, j, k) <= cutoff)
+            {
+                eta_new(i, j, k) = 0.0;
+            }
+            else if (eta_new(i, j, k) >= (1.0 - cutoff))
+            {
+                eta_new(i, j, k) = 1.0;
+            }
 
 
 
