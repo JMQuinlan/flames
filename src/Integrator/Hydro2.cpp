@@ -467,7 +467,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Matrix gradM = Numeric::Gradient(M, i, j, k, DX);
             Set::Vector gradrho = Numeric::Gradient(rho, i, j, k, 0, DX);
             Set::Matrix hess_rho = Numeric::Hessian(rho, i, j, k, 0, DX, sten);
-            Set::Matrix gradu = (gradM - u * gradrho.transpose()) / rho(i, j, k);
+            Set::Matrix gradu = (gradM - u * gradrho.transpose()) / (rho(i, j, k) + small);
 
             Set::Vector q0 = Set::Vector(q(i, j, k, 0), q(i, j, k, 1));
 
@@ -536,8 +536,19 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                             if (p == q && r == s) Mpqrs += (1.0 / 3.0) * mu_b_eff;
 
                             Ldot0(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
-                            div_tau(p) += 2.0 * Mpqrs * hess_u(r, s, q);
+                            //div_tau(p) += 2.0 * Mpqrs * hess_u(r, s, q);
                         }
+            // NEW Formulation of div_tau
+            // Calculate gradient of divergence
+            Set::Vector grad_div_u = Set::Vector::Zero();
+            grad_div_u[0] = hess_u(0, 0, 0) + hess_u(1, 0, 1);
+            grad_div_u[1] = hess_u(0, 1, 0) + hess_u(1, 1, 1);
+            // Calculate div_tau
+            div_tau(0) = mu_eff * (hess_u(0, 0, 0) + hess_u(0, 1, 1) + (1.0 / 3.0) * grad_div_u[0]);
+            div_tau(1) = mu_eff * (hess_u(1, 0, 0) + hess_u(1, 1, 1) + (1.0 / 3.0) * grad_div_u[1]);
+            // Add bulk viscosity contribution
+            //div_tau(0) += mu_b_eff * grad_div_u(0);
+            //div_tau(1) += mu_b_eff * grad_div_u(1);
 
             // Surface Tension:
             // Fsv =  simga * kappa * n_hat
