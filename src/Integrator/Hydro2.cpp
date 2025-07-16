@@ -560,7 +560,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 //if ((eta(i, j, k) <= cutoff / 10.0) or (eta(i, j, k) >= 1.0 - cutoff / 10.0))
                 //if (((grad_eta(0) <= cutoff / 10.0) and (grad_eta(0) >= -cutoff / 10.0))
                 //if (grad_eta_mag <= cutoff/10.0)
-                if (grad_eta_mag <= 1)
+                //if (grad_eta_mag <= 1.0)
+                if (grad_eta_mag <= 0.01)
                 {
                     Fsv(i, j, k, 0) = 0.0;
                     Fsv(i, j, k, 1) = 0.0;
@@ -609,22 +610,25 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         
                         // /////////////////////////////////////////////////////////////////////////////////////
                         // APPROACH 1: Dot product of Hessian and normal vector 
-                        /*
+                        // /*
                         // Normal Vector
                         Set::Vector n_hat = grad_eta / (grad_eta_mag + small);
                         // Orthogonal Basis
                         Set::Vector t1, t2;
                         if (std::abs(n_hat(0)) > std::abs(n_hat(1)))
                         {
-                            t1 = Set::Vector(-n\_hat(1), n\_hat(0)) / std::sqrt(n\_hat(0)\* n\_hat(0) + n\_hat(1)\* n\_hat(1) + small);
+                            t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1)* n_hat(1) + small);
                         }
                         else
                         {
-                            t1 = Set::Vector(n\_hat(1), -n\_hat(0)) / std::sqrt(n\_hat(0) \* n\_hat(0) + n\_hat(1) \* n\_hat(1) + small);
+                            t1 = Set::Vector(n_hat(1), -n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
                         }
                         Set::Scalar kappa1 = n_hat.dot(hess_eta * n_hat); // Normal Curvature
                         Set::Scalar kappa2 = t1.dot(hess_eta * t1); // Tangential Curvature
-                        */
+                        kappa1 = -kappa1;
+                        kappa2 = -kappa2;
+
+                        // */
 
                         // /////////////////////////////////////////////////////////////////////////////////////
                         // APPROACH 2: Hessian Projection
@@ -635,11 +639,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         Set::Vector t1, t2;
                         if (std::abs(n_hat(0)) > std::abs(n_hat(1)))
                         {
-                            t1 = Set::Vector(-n\_hat(1), n\_hat(0)) / std::sqrt(n\_hat(0)\* n\_hat(0) + n\_hat(1)\* n\_hat(1) + small);
+                            t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
                         }
                         else
                         {
-                            t1 = Set::Vector(n\_hat(1), -n\_hat(0)) / std::sqrt(n\_hat(0) \* n\_hat(0) + n\_hat(1) \* n\_hat(1) + small);
+                            t1 = Set::Vector(n_hat(1), -n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
                         }
                         // Transformation matrix Q: n_hat | t1
                         Set::Matrix Q(2, 2);
@@ -658,6 +662,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         // /////////////////////////////////////////////////////////////////////////////////////
                         // APPROACH 3: Eigen Values of Hessian
                         // TODO: only works in 2D
+                        /*
                         Set::Scalar trace = hess_eta(0, 0) + hess_eta(1, 1);
                         Set::Scalar det = hess_eta(0, 0) * hess_eta(1, 1) - hess_eta(0, 1) * hess_eta(1, 0);
                         Set::Scalar discriminant = std::sqrt(trace * trace - 4 * det);
@@ -671,6 +676,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         //{
                         //    std::swap(kappa1, kappa2);
                         //}
+                        */
 
 
                         // /////////////////////////////////////////////////////////////////////////////////////
@@ -700,7 +706,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         {
                             D = 0.0;
                         }
-                        kappa = D * kappa * DX[0]; // Smoothened Curvature
+                        kappa = D * kappa / 10; //*DX[0]; // Smoothened Curvature
                         // ///////////////
                         
 

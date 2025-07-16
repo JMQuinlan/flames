@@ -6,12 +6,12 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHighTammann
-plot_file = tests/LargeBubbleRPE_2_Bar.GammaHighTammann
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/UnitBubble.KappaTesting
+plot_file = tests/UnitBubble.KappaTesting
 
 
 ### MESHING ###
-amr.plot_dt = 1e-4
+amr.plot_dt = 1e-6
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 100
@@ -22,8 +22,8 @@ timestep  = 1e-6
 amr.n_cell = 32 32
 
 ### DIMENSIONS ###
-geometry.prob_lo = -0.050 -0.050 0.0 # [ m ]
-geometry.prob_hi =  0.050  0.050 0.0 # [ m ]
+geometry.prob_lo = -3.0 -3.0 0.0 # [ m ]
+geometry.prob_hi =  3.0  3.0 0.0 # [ m ]
 geometry.is_periodic = 0 0 0
  
 ### TIME STEP ###
@@ -33,7 +33,7 @@ stop_time = 0.05
 eta.ic.type = expression
 # Eqn: "0.5*(1+tanh((sqrt(((x-xc)/a)**2 + ((y-yc)/b)**2) - Diameter)/Boundry_Thickness))
 # RPE Verification
-eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 0.01)/0.001))"
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 1.0)/0.1))"
 
 
 ### HYDRO INITIAL CONDITIONS ###
@@ -67,7 +67,7 @@ pressure0.ic.type = expression
 pressure0.ic.expression.region0 = "1e5" #" + (1e5*(x<=-0.0007))"
 
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "2e5"
+pressure1.ic.expression.region0 = "1e5"
 
 sigma = 72.8; # 0.078 # For Air/Water
 
