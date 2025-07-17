@@ -68,6 +68,7 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // INTERACTIONS
         pp_query_default("sigma", value.sigma, 70.0); // surface tension condition
+        pp_query_required("epsilon", value.epsilon); // diffuse interface thickness
 
         // CURVATURE
         pp_query_default("kappa_method", value.kappa_method, 1); // Method to solve for curvature
@@ -626,7 +627,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         Set::Scalar kappa1 = n_hat.dot(hess_eta * n_hat); // Normal Curvature
                         Set::Scalar kappa2 = t1.dot(hess_eta * t1); // Tangential Curvature
                         kappa1 = -kappa1;
-                        kappa2 = -kappa2;
+                        kappa2 = -kappa2 * 2. * epsilon;
 
                         // */
 
@@ -692,23 +693,23 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         // Assign the curvature you want to use
                         kappa = kappa2; // Or use another curvature measure as needed
 
-                        // ///////////////
-                        // Density Scaling
-                        Set::Scalar a = 0.49;               // Cutoff
-                        Set::Scalar x = eta(i, j, k) - 0.5; // Eta centered at 0
-                        Set::Scalar D = 0.0;                // Dirac Delta Value
-                        Set::Scalar pi = 3.14159;           // Add decimals as needed
-                        if ((-a < x) and (x < a))
-                        {
-                            D = 0.5 * (1 + x / a + 1 / pi * std::sin(pi * x / a));
-                        }
-                        else
-                        {
-                            D = 0.0;
-                        }
-                        kappa = D * kappa;// / 10; //*DX[0]; // Smoothened Curvature
-                        // ///////////////
-                        
+                        // // ///////////////
+                        // // Density Scaling
+                        // Set::Scalar a = 0.49;               // Cutoff
+                        // Set::Scalar x = eta(i, j, k) - 0.5; // Eta centered at 0
+                        // Set::Scalar D = 0.0;                // Dirac Delta Value
+                        // Set::Scalar pi = 3.14159;           // Add decimals as needed
+                        // if ((-a < x) and (x < a))
+                        // {
+                        //     D = 0.5 * (1 + x / a + 1 / pi * std::sin(pi * x / a));
+                        // }
+                        // else
+                        // {
+                        //     D = 0.0;
+                        // }
+                        // kappa = D * kappa;// / 10; //*DX[0]; // Smoothened Curvature
+                        // // ///////////////
+                        // 
 
                         // Store curvature values
                         kappas(i, j, k, 0) = kappa;  // Mean or selected curvature

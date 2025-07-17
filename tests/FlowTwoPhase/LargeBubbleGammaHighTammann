@@ -6,24 +6,26 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHighTammann
+# plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHighTammann
 #plot_file = tests/LargeBubbleRPE_2_Bar.GammaHighTammann
+plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
+
 
 
 ### MESHING ###
-amr.plot_dt = 5e-4
+amr.plot_dt = 5e-6
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
-amr.regrid_int = 100
+amr.regrid_int = 2
 amr.grid_eff = 0.8
 
 amr.max_level = 5
-timestep  = 1e-6
-amr.n_cell = 32 32
+timestep  = 0.25e-6
+amr.n_cell = 64 64
 
 ### DIMENSIONS ###
-geometry.prob_lo = -0.050 -0.050 0.0 # [ m ]
-geometry.prob_hi =  0.050  0.050 0.0 # [ m ]
+geometry.prob_lo = -0.10 -0.10 0.0 # [ m ]
+geometry.prob_hi =  0.10  0.10 0.0 # [ m ]
 geometry.is_periodic = 0 0 0
  
 ### TIME STEP ###
@@ -31,9 +33,13 @@ stop_time = 0.05
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
+eta.ic.expression.constant.epsilon  = 0.001
+eta.ic.expression.constant.R0   = 0.01
 # Eqn: "0.5*(1+tanh((sqrt(((x-xc)/a)**2 + ((y-yc)/b)**2) - Diameter)/Boundry_Thickness))
 # RPE Verification
-eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 0.01)/0.001))"
+# eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 0.01)/0.001))"
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
 
 
 ### HYDRO INITIAL CONDITIONS ###
@@ -72,7 +78,8 @@ pressure1.ic.expression.region0 = "2e5"
 sigma = 72.8; # 0.078 # For Air/Water
 
 cfl = 0.4;
-pref = 1e5;
+# pref = 1e5;
+pref = 0.0
 
 ### ETA BC  ###
 pf.eta.bc.type.xlo = neumann
@@ -110,10 +117,10 @@ momentum.bc.type.yhi = neumann neumann
 ### HYDRO REFINEMENT CRITERIA ###
 eta_refinement_criterion = 0.1
 omega_refinement_criterion = 10.55
-p_refinement_criterion = 1e+3
+p_refinement_criterion = 1e+4
 rho_refinement_criterion = 1e+2
 gradu_refinement_criterion = 1e+2
-cutoff = 1e-6
+cutoff = 1e-16
 
 ### SOURCE TERMS ###
 q.ic.type = expression

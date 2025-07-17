@@ -7,7 +7,8 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 #plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/UnitBubble.KappaTesting
-plot_file = tests/UnitBubble.KappaTesting
+# plot_file = tests/UnitBubble.KappaTesting
+plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
 
 
 ### MESHING ###
@@ -30,11 +31,14 @@ geometry.is_periodic = 0 0 0
 stop_time = 0.05
 
 ### ETA INITIAL CONDITIONS ###
+
 eta.ic.type = expression
+eta.ic.expression.constant.epsilon  = 0.1
+eta.ic.expression.constant.R0   = 1.0
 # Eqn: "0.5*(1+tanh((sqrt(((x-xc)/a)**2 + ((y-yc)/b)**2) - Diameter)/Boundry_Thickness))
 # RPE Verification
-eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 1.0)/0.1))"
-
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
 
 ### HYDRO INITIAL CONDITIONS ###
 gamma0 = 1.63 # 7.15 
@@ -73,6 +77,7 @@ sigma = 72.8; # 0.078 # For Air/Water
 
 cfl = 0.4;
 pref = 1e5;
+# pref = 0.0
 
 ### ETA BC  ###
 pf.eta.bc.type.xlo = neumann

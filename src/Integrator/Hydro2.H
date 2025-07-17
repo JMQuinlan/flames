@@ -169,6 +169,7 @@ private:
 
     // Interaction Parameters
     Set::Scalar sigma = NAN;
+    Set::Scalar epsilon = NAN;
     Set::Scalar g = 9.81; // m/s^2
 
     // CFD Properties

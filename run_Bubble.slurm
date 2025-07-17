@@ -33,7 +33,7 @@
 #SBATCH -e logRuns/Bubble.e%j          # Name of stderr error file
 #SBATCH -p compute             # Queue (partition) name
 #SBATCH --ntasks-per-node=128  # MPI tasks per node
-#SBATCH -N 4                   # Total # of nodes
+#SBATCH -N 3                   # Total # of nodes
 #SBATCH -t 24:00:00            # Run time (hh:mm:ss)
 
 # Other commands must follow all #SBATCH directives...
@@ -42,7 +42,7 @@
 pwd
 date
 cat run_Bubble.slurm
-cat ./tests/FlowTwoPhase/input
+cat ./tests/FlowTwoPhase/LargeBubbleGammaHighTammann
 git --git-dir .git show
 
 # Set thread count (default value is 1)...
@@ -51,7 +51,7 @@ export OMP_NUM_THREADS=1
 
 # Launch MPI code...
 
-mpirun ./bin/hydro2-2d-g++ ./tests/FlowTwoPhase/input
+mpirun ./bin/hydro2-2d-g++ ./tests/FlowTwoPhase/LargeBubbleGammaHighTammann
 
 # ---------------------------------------------------
 
