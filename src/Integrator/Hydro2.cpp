@@ -706,7 +706,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         {
                             D = 0.0;
                         }
-                        kappa = D * kappa / 10; //*DX[0]; // Smoothened Curvature
+                        kappa = D * kappa;// / 10; //*DX[0]; // Smoothened Curvature
                         // ///////////////
                         
 
