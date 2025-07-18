@@ -7,13 +7,13 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHighTammann
-#plot_file = tests/LargeBubbleRPE_2_Bar.GammaHighTammann
-plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
+plot_file = tests/LargeBubbleRPE_2_Bar.GammaHighTammann
+#plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
 
 
 
 ### MESHING ###
-amr.plot_dt = 5e-6
+amr.plot_dt = 5e-4
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 2
@@ -43,10 +43,10 @@ epsilon = eta.ic.expression.constant.epsilon
 
 
 ### HYDRO INITIAL CONDITIONS ###
-gamma0 = 7.15  # 1.63 # 7.15 
+gamma0 = 1.65  # 1.63 # 7.15 
 gamma1 = 1.4
 
-p0_0 = 0.3*10**3 # 0.3*10**9
+p0_0 = 0 #0.3*10**3 # 0.3*10**9
 p0_1 = 0
 
 mu0   = 10

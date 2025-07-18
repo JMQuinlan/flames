@@ -627,7 +627,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         Set::Scalar kappa1 = n_hat.dot(hess_eta * n_hat); // Normal Curvature
                         Set::Scalar kappa2 = t1.dot(hess_eta * t1); // Tangential Curvature
                         kappa1 = -kappa1;
-                        kappa2 = -kappa2 * 2. * epsilon;
+                        kappa2 = -kappa2 * 2.0 * epsilon;
 
                         // */
 
