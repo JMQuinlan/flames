@@ -616,6 +616,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         Set::Vector n_hat = grad_eta / (grad_eta_mag + small);
                         // Orthogonal Basis
                         Set::Vector t1, t2;
+                        
+                        /*
                         if (std::abs(n_hat(0)) > std::abs(n_hat(1)))
                         {
                             t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1)* n_hat(1) + small);
@@ -624,10 +626,26 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         {
                             t1 = Set::Vector(n_hat(1), -n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
                         }
+                        */
+                        
+                        t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
                         Set::Scalar kappa1 = n_hat.dot(hess_eta * n_hat); // Normal Curvature
                         Set::Scalar kappa2 = t1.dot(hess_eta * t1); // Tangential Curvature
+
+                        /*
+                        if ((std::abs(kappa2) > std::abs(kappa1))
+                            and !( (eta(i,j,k) > 0.40) and (eta(i,j,k) < 0.60)))
+                        {
+                            std::swap(kappa1, kappa2);
+                        }
+                        */
+
                         kappa1 = -kappa1;
                         kappa2 = -kappa2 * 2.0 * epsilon;
+
+                        // TODO: Add check for normal vector
+
+
 
                         // */
 
@@ -672,11 +690,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         Set::Scalar kappa1 = (trace + discriminant) / 2.0; // Larger eigenvalue
                         Set::Scalar kappa2 = (trace - discriminant) / 2.0; // Smaller eigenvalue
 
-                        // Ensure kappa1 is the larger in magnitude if needed
-                        //if (std::abs(kappa2) > std::abs(kappa1))
-                        //{
-                        //    std::swap(kappa1, kappa2);
-                        //}
+                        // // Ensure kappa1 is the larger
+                        // if (std::abs(kappa2) > std::abs(kappa1))
+                        // {
+                        //     std::swap(kappa1, kappa2);
+                        // }
+
+                        // Scale kappa2 from boundry thickness
+                        kappa2 = kappa2; //*2.0 * epsilon;
                         */
 
 

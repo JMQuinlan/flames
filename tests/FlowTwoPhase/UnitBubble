@@ -7,8 +7,8 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 #plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/UnitBubble.KappaTesting
-# plot_file = tests/UnitBubble.KappaTesting
-plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
+plot_file = tests/UnitBubble.KappaTesting
+#plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
 
 
 ### MESHING ###
