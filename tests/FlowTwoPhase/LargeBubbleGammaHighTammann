@@ -13,7 +13,7 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Ba
 
 
 ### MESHING ###
-amr.plot_dt = 5e-4
+amr.plot_dt = 1e-5
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 2
