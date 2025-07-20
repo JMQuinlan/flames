@@ -12,6 +12,7 @@
 #include "Solver/Local/Riemann/Roe.H"
 #include "Solver/Local/Riemann/HLLC.H"
 #include "Solver/Local/Riemann/HLLE.H"
+#include "Solver/Local/Riemann/HLLCE.H"
 
 #if AMREX_SPACEDIM == 2
 
@@ -96,6 +97,8 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.eta_mf,     value.eta_bc, 1, nghost, "eta",     true );
         value.RegisterNewFab(value.eta_old_mf, value.eta_bc, 1, nghost, "eta_old", true);
         value.RegisterNewFab(value.etadot_mf,  value.eta_bc, 1, nghost, "etadot",  true );
+        value.RegisterNewFab(value.hess_eta_mf, &value.bc_nothing, 4, nghost, "hess_eta", true, { "00", "01", "10", "11" });
+        value.RegisterNewFab(value.n_hat_mf, &value.bc_nothing, 2, nghost, "n_hat", true, { "x", "y" });
 
         // FLUID 0
         value.RegisterNewFab(value.density0_mf,     value.density_bc, 1, nghost, "density0",     false );
@@ -193,6 +196,10 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     else if (value.Riemann_Solver == 2)
     {
         pp.select_default<Solver::Local::Riemann::HLLE>("solver", value.hllesolver);
+    }
+    else if (value.Riemann_Solver == 3)
+    {
+        pp.select_default<Solver::Local::Riemann::HLLCE>("solver", value.hllcesolver);
     }
     
     
@@ -369,6 +376,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> &eta_new = (*eta_mf[lev]).array(mfi);
         Set::Patch<const Set::Scalar> const &eta = (*eta_old_mf[lev]).array(mfi);
         Set::Patch<Set::Scalar> &etadot = (*etadot_mf[lev]).array(mfi);
+        
+
 
         // Mixture
         Set::Patch<const Set::Scalar> rho = density_old_mf.Patch(lev, mfi);
@@ -442,6 +451,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
         // DEBUGGING
         Set::Patch<Set::Scalar> grad_eta_ = grad_eta_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> hess_eta_ = hess_eta_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> n_hat_ = n_hat_mf.Patch(lev, mfi);
+
 
         Set::Scalar *dt_max_handle = &dt_max;
 
@@ -454,10 +466,19 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
             Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX);
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
+            Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
 
             // DEBUGGING
             grad_eta_(i, j, k, 0) = grad_eta(0);
             grad_eta_(i, j, k, 1) = grad_eta(1);
+
+            hess_eta_(i, j, k, 0) = hess_eta(0, 0);
+            hess_eta_(i, j, k, 1) = hess_eta(0, 1);
+            hess_eta_(i, j, k, 2) = hess_eta(1, 0);
+            hess_eta_(i, j, k, 3) = hess_eta(1, 1);
+
+            n_hat_(i, j, k, 0) = n_hat(0);
+            n_hat_(i, j, k, 1) = n_hat(1);
 
             // Extract velocity from momentum and density
             //Set::Vector u  = Set::Vector(M(i, j, k, 0) / rho(i, j, k), M(i, j, k, 1) / rho(i, j, k));
@@ -472,7 +493,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             Set::Vector q0 = Set::Vector(q(i, j, k, 0), q(i, j, k, 1));
 
-            // Calculate source terms
+            /// Calculate Source Terms
             // Shear:
             Set::Scalar mdot0 = -m0(i, j, k) * grad_eta_mag;
             Set::Vector Pdot0 = Set::Vector::Zero();
@@ -488,35 +509,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                                           / rho(i, j, k);
                     }
 
-            
+            //Stress Tensors:
             Set::Vector Ldot0 = Set::Vector::Zero();
             Set::Vector div_tau = Set::Vector::Zero();
-            // Old formulation: Ignores bulk viscoity term
-            /*
-            Set::Vector div_tau = Set::Vector::Zero();
-            for (int p = 0; p < 2; p++) // Dimension Component
-                for (int q = 0; q < 2; q++) // X
-                    for (int r = 0; r < 2; r++) // Y
-                        for (int s = 0; s < 2; s++) // Z
-                        {
-                            Set::Scalar Mpqrs = 0.0;
-                            /*
-                            if (p == r && q == s) Mpqrs += 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
-                            if (p == s && q == r) Mpqrs += 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
-                            if (p == q && r == s) Mpqrs += 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
-                            /
-                            if (p == r && q == s) Mpqrs = 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
-                            if (p == s && q == r) Mpqrs = 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
-                            //if (p == q && r == s) Mpqrs = 0.5 * (eta(i, j, k) * mu0 + ((1.0 - eta(i, j, k)) * mu1)); // TODO: Assumes Isotropic
-
-                            Ldot0(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
-                            div_tau(p) += 2.0 * Mpqrs * hess_u(r, s, q);
-                        }
-            */
-            
-            // NEW formulations
-            // Calculate divergence of velocity
-            Set::Scalar div_u = gradu(0, 0) + gradu(1, 1);
+            Set::Scalar div_u = gradu(0, 0) + gradu(1, 1);  // Divergence of velocity
 
             // Calculate effective viscosities
             Set::Scalar mu_eff = eta(i, j, k) * mu0 + (1.0 - eta(i, j, k)) * mu1;       // Effective dynamic viscosity
@@ -836,6 +832,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     flux_ylo = hllesolver->Solve(state_ylo, state_y, gamma_eff, pref, small, p0_eff); 
                     flux_xhi = hllesolver->Solve(state_x, state_xhi, gamma_eff, pref, small, p0_eff); 
                     flux_yhi = hllesolver->Solve(state_y, state_yhi, gamma_eff, pref, small, p0_eff); 
+                }
+                else if (Riemann_Solver == 3)
+                {
+                    // Calculate fluxes for the mixed fluid
+                    flux_xlo = hllcesolver->Solve(state_xlo, state_x, gamma_eff, pref, small, p0_eff);
+                    flux_ylo = hllcesolver->Solve(state_ylo, state_y, gamma_eff, pref, small, p0_eff);
+                    flux_xhi = hllcesolver->Solve(state_x, state_xhi, gamma_eff, pref, small, p0_eff);
+                    flux_yhi = hllcesolver->Solve(state_y, state_yhi, gamma_eff, pref, small, p0_eff);
                 }
             }
             catch (...)

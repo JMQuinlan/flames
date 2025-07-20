@@ -13,6 +13,7 @@
 #include "Solver/Local/Riemann/Roe.H"
 #include "Solver/Local/Riemann/HLLC.H"
 #include "Solver/Local/Riemann/HLLE.H"
+#include "Solver/Local/Riemann/HLLCE.H"
 
 #if AMREX_SPACEDIM==2
 
@@ -27,35 +28,34 @@ public:
     static void Parse(Hydro2& value, IO::ParmParse& pp);
     virtual ~Hydro2()
     {
-        // Boundry Conditions
+        /// Boundry Conditions
         delete density_bc;
         delete momentum_bc;
         delete energy_bc;
         delete eta_bc;
 
         /// Inital Conditions
+        // ETA
+        delete eta_ic;
+        delete etadot_ic;
         // FLUID 0
         delete density0_ic;
         delete velocity0_ic;
         delete pressure0_ic;
-
         // FLUID 1
         delete density1_ic;
         delete velocity1_ic;
         delete pressure1_ic;
-
+        // SOURCES
         delete ic_m0;
         delete ic_u0;
         delete ic_q;
 
-        // ETA
-        delete eta_ic;
-        delete etadot_ic;
-
-        // SOLVERS
+        /// SOLVERS
         delete roesolver;
         delete hllcsolver;
         delete hllesolver;
+        delete hllcesolver;
     }
 
 protected:
@@ -112,6 +112,9 @@ protected:
     Set::Field<Set::Scalar> eta_mf;
     Set::Field<Set::Scalar> etadot_mf;
     Set::Field<Set::Scalar> eta_old_mf;
+    Set::Field<Set::Scalar> hess_eta_mf;
+    Set::Field<Set::Scalar> n_hat_mf;
+
 private:
    
     Set::Field<Set::Scalar> m0_mf;
@@ -189,6 +192,7 @@ private:
     Solver::Local::Riemann::Roe *roesolver = nullptr;
     Solver::Local::Riemann::HLLC *hllcsolver = nullptr;
     Solver::Local::Riemann::HLLE *hllesolver = nullptr;
+    Solver::Local::Riemann::HLLCE *hllcesolver = nullptr;
 
 };
 }
