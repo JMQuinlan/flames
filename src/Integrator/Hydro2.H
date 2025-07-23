@@ -68,6 +68,8 @@ protected:
     void Regrid(int lev, Set::Scalar time) override;
 
     virtual void UpdateEta(int lev, Set::Scalar time);
+    void SmoothEta(int lev);
+
 private:
     // FLUID 0
     Set::Field<Set::Scalar> density0_mf;

@@ -6,14 +6,14 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHighTammann
-# plot_file = tests/LargeBubbleRPE_2_Bar.GammaHighTammann
+# plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHighTammann
+plot_file = tests/LargeBubbleRPE_2_Bar.GammaHighTammann
 #plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
 
 
 
 ### MESHING ###
-amr.plot_dt = 1e-5
+amr.plot_dt = 0.25e-6
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 2
@@ -115,7 +115,7 @@ momentum.bc.type.yhi = neumann neumann
 #momentum.bc.val.yhi = 0.0 0.0
 
 ### HYDRO REFINEMENT CRITERIA ###
-eta_refinement_criterion = 0.1
+eta_refinement_criterion = 0.0001
 omega_refinement_criterion = 10.55
 p_refinement_criterion = 1e+4
 rho_refinement_criterion = 1e+2

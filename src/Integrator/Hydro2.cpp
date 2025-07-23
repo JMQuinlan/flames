@@ -30,7 +30,7 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     BL_PROFILE("Integrator::Hydro2::Hydro2()");
     {
         // REFINEMENT CRITERION
-        pp.query_default("eta_refinement_criterion",   value.eta_refinement_criterion  , 0.01); // eta-based refinement
+        pp.query_default("eta_refinement_criterion", value.eta_refinement_criterion, 0.0001);   // eta-based refinement
         pp.query_default("omega_refinement_criterion", value.omega_refinement_criterion, 0.01); // vorticity-based refinement
         pp.query_default("gradu_refinement_criterion", value.gradu_refinement_criterion, 0.01); // velocity gradient-based refinement
         pp.query_default("p_refinement_criterion", value.p_refinement_criterion, 1e-3);         // pressure-based refinement
@@ -355,7 +355,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     std::swap(momentum1_old_mf[lev], momentum1_mf[lev]);
     std::swap(energy1_old_mf[lev], energy1_mf[lev]);
     */
-
+    // SmoothEta(lev);
     // MIX
     std::swap(density_old_mf[lev], density_mf[lev]);
     std::swap(momentum_old_mf[lev], momentum_mf[lev]);
@@ -464,7 +464,18 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Diffuse Sources
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
             Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
-            Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX);
+            Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
+            /*
+            Set::Matrix hess_eta = 0.6 * Numeric::Hessian(eta, i, j, k, 0, DX, sten) + 
+                0.075 * (Numeric::Hessian(eta, i + 1, j, k, 0, DX, sten) + Numeric::Hessian(eta, i, j + 1, k, 0, DX, sten) + Numeric::Hessian(eta, i - 1, j, k, 0, DX, sten) + Numeric::Hessian(eta, i, j - 1, k, 0, DX, sten)) + 
+                0.025 * (Numeric::Hessian(eta, i + 1, j + 1, k, 0, DX, sten) + Numeric::Hessian(eta, i + 1, j - 1, k, 0, DX, sten) + Numeric::Hessian(eta, i - 1, j + 1, k, 0, DX, sten) + Numeric::Hessian(eta, i - 1, j - 1, k, 0, DX, sten));
+            */
+            /*
+            Set::Matrix hess_eta = (Numeric::Hessian(eta, i, j, k, 0, DX, sten) + 
+                (Numeric::Hessian(eta, i + 1, j, k, 0, DX, sten) + Numeric::Hessian(eta, i, j + 1, k, 0, DX, sten) + Numeric::Hessian(eta, i - 1, j, k, 0, DX, sten) + Numeric::Hessian(eta, i, j - 1, k, 0, DX, sten)) +
+                (Numeric::Hessian(eta, i + 1, j + 1, k, 0, DX, sten) + Numeric::Hessian(eta, i + 1, j - 1, k, 0, DX, sten) + Numeric::Hessian(eta, i - 1, j + 1, k, 0, DX, sten) + Numeric::Hessian(eta, i - 1, j - 1, k, 0, DX, sten))) / 9.0;
+            */
+
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
             Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
 
@@ -726,26 +737,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         // }
                         // kappa = D * kappa;// / 10; //*DX[0]; // Smoothened Curvature
                         // // ///////////////
-                        // 
 
                         // Store curvature values
                         kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
                         kappas(i, j, k, 1) = kappa1; // First principal curvature
                         kappas(i, j, k, 2) = kappa2; // Second principal curvature
 
-                        // Error Message, Uncomment when debugging:
-                        /*
-                        if (std::abs(kappa) < small)
-                        {
-                        Util::ParallelMessage(INFO, "lev=", lev);
-                        Util::ParallelMessage(INFO, "i=", i, "j=", j);
-                        Util::ParallelMessage(INFO, "kappa=", kappa);
-                        Util::ParallelMessage(INFO, "kappa1=", kappa1, "kappa2=", kappa2);
-                        Util::ParallelMessage(INFO, "t1=", t1, "t2=", t2);
-                        Util::ParallelMessage(INFO, "n\_hat=", n\_hat);
-                        Util::Abort(INFO);
-                        }
-                        */
                     }
 
                     
@@ -957,8 +954,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 eta_new(i, j, k) = 1.0;
             }
-
-
+            
 
             // Set::Vector grad_ux = Numeric::Gradient(v, i, j, k, 0, DX);
             // Set::Vector grad_uy = Numeric::Gradient(v, i, j, k, 1, DX);
@@ -972,8 +968,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             omega(i, j, k) = (gradu(1, 0) - gradu(0, 1));
 
         });
-    }
 
+    }
+    // SmoothEta(lev);
     this->DynamicTimestep_SyncTimeStep(lev, dt_max);
 } // end Advance
 
@@ -1058,6 +1055,147 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
         });
     }
 
+}
+
+void
+Hydro2::SmoothEta(int lev)
+{
+    // Create a temporary multifab to hold smoothed values
+    amrex::MultiFab eta_smoothed(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), eta_mf[lev]->nComp(), eta_mf[lev]->nGrow());
+
+    // Fill ghost cells before smoothing
+    eta_mf[lev]->FillBoundary(geom[lev].periodicity());
+
+    /*
+    // First, check for NaN values in eta_mf and fix them
+    for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.growntilebox();
+        auto const &eta = eta_mf[lev]->array(mfi);
+
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            // Check for NaN or infinity
+            if (std::isnan(eta(i, j, k)) || std::isinf(eta(i, j, k)))
+            {
+                // Replace with a valid value (average of neighbors if possible)
+                Set::Scalar sum = 0.0;
+                int count = 0;
+
+                // Check each neighbor
+                if (i > 0 && !std::isnan(eta(i - 1, j, k)) && !std::isinf(eta(i - 1, j, k)))
+                {
+                    sum += eta(i - 1, j, k);
+                    count++;
+                }
+                if (i < bx.bigEnd(0) && !std::isnan(eta(i + 1, j, k)) && !std::isinf(eta(i + 1, j, k)))
+                {
+                    sum += eta(i + 1, j, k);
+                    count++;
+                }
+                if (j > 0 && !std::isnan(eta(i, j - 1, k)) && !std::isinf(eta(i, j - 1, k)))
+                {
+                    sum += eta(i, j - 1, k);
+                    count++;
+                }
+                if (j < bx.bigEnd(1) && !std::isnan(eta(i, j + 1, k)) && !std::isinf(eta(i, j + 1, k)))
+                {
+                    sum += eta(i, j + 1, k);
+                    count++;
+                }
+
+                // If we have valid neighbors, use their average
+                if (count > 0)
+                {
+                    eta(i, j, k) = sum / count;
+                }
+                else
+                {
+                    // If no valid neighbors, use a default value
+                    eta(i, j, k) = 0.5; // Assuming eta is between 0 and 1
+                }
+            }
+
+            // Ensure eta is within valid bounds (0 to 1)
+            eta(i, j, k) = std::max(0.0, std::min(1.0, eta(i, j, k)));
+        });
+    }
+    */
+
+    // Now apply smoothing
+    for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.growntilebox();
+        auto const &eta = eta_mf[lev]->array(mfi);
+        auto const &eta_smoothed_arr = eta_smoothed.array(mfi);
+
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            // Simple 9-point filter with weights
+            const Set::Scalar center_weight = 0.6;
+            const Set::Scalar side_weight = 0.075;
+            const Set::Scalar corner_weight = 0.025;
+
+            // Apply filter with bounds checking to avoid accessing invalid memory
+            Set::Scalar smoothed_value = center_weight * eta(i, j, k);
+
+            // Add side contributions with bounds checking
+            if (i > 0)
+                smoothed_value += side_weight * eta(i - 1, j, k);
+            else
+                smoothed_value += side_weight * eta(i, j, k);
+
+            if (i < bx.bigEnd(0))
+                smoothed_value += side_weight * eta(i + 1, j, k);
+            else
+                smoothed_value += side_weight * eta(i, j, k);
+
+            if (j > 0)
+                smoothed_value += side_weight * eta(i, j - 1, k);
+            else
+                smoothed_value += side_weight * eta(i, j, k);
+
+            if (j < bx.bigEnd(1))
+                smoothed_value += side_weight * eta(i, j + 1, k);
+            else
+                smoothed_value += side_weight * eta(i, j, k);
+
+            // Add corner contributions with bounds checking
+            if (i > 0 && j > 0)
+                smoothed_value += corner_weight * eta(i - 1, j - 1, k);
+            else
+                smoothed_value += corner_weight * eta(i, j, k);
+
+            if (i > 0 && j < bx.bigEnd(1))
+                smoothed_value += corner_weight * eta(i - 1, j + 1, k);
+            else
+                smoothed_value += corner_weight * eta(i, j, k);
+
+            if (i < bx.bigEnd(0) && j > 0)
+                smoothed_value += corner_weight * eta(i + 1, j - 1, k);
+            else
+                smoothed_value += corner_weight * eta(i, j, k);
+
+            if (i < bx.bigEnd(0) && j < bx.bigEnd(1))
+                smoothed_value += corner_weight * eta(i + 1, j + 1, k);
+            else
+                smoothed_value += corner_weight * eta(i, j, k);
+
+            // Ensure result is not NaN and is within valid bounds
+            if (std::isnan(smoothed_value) || std::isinf(smoothed_value))
+            {
+                eta_smoothed_arr(i, j, k) = eta(i, j, k); // Keep original if smoothed value is invalid
+            }
+            else
+            {
+                eta_smoothed_arr(i, j, k) = std::max(0.0, std::min(1.0, smoothed_value));
+            }
+        });
+    }
+
+    // Copy smoothed values back to eta_mf
+    amrex::MultiFab::Copy(*eta_mf[lev], eta_smoothed, 0, 0, eta_mf[lev]->nComp(), eta_mf[lev]->nGrow());
+
+    // Also update eta_old_mf to ensure consistency
+    amrex::MultiFab::Copy(*eta_old_mf[lev], *eta_mf[lev], 0, 0, eta_mf[lev]->nComp(), eta_mf[lev]->nGrow());
 }
 
 }
