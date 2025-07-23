@@ -13,7 +13,7 @@ plot_file = tests/LargeBubbleRPE_2_Bar.GammaHighTammann
 
 
 ### MESHING ###
-amr.plot_dt = 0.25e-6
+amr.plot_dt = 5e-4
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 2
