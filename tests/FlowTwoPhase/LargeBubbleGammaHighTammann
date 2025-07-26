@@ -6,8 +6,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-# plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHighTammann
-plot_file = tests/LargeBubbleRPE_2_Bar.GammaHighTammannMixed
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHighTammann2
+# plot_file = tests/LargeBubbleRPE_2_Bar.GammaHighTammannMixed
 #plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
 
 

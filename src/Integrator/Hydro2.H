@@ -68,7 +68,6 @@ protected:
     void Regrid(int lev, Set::Scalar time) override;
 
     virtual void UpdateEta(int lev, Set::Scalar time);
-    void SmoothEta(int lev);
 
 private:
     // FLUID 0
@@ -189,7 +188,7 @@ private:
     int apply_weight = 0;
     
     int Riemann_Solver = 0;
-    int kappa_method = 1;
+    int kappa_method = 2;
 
     Solver::Local::Riemann::Roe *roesolver = nullptr;
     Solver::Local::Riemann::HLLC *hllcsolver = nullptr;
