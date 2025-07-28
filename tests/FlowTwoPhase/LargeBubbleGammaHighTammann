@@ -46,7 +46,7 @@ epsilon = eta.ic.expression.constant.epsilon
 gamma0 = 1.65  # 1.63 # 7.15 
 gamma1 = 1.4
 
-p0_0 = 0 #0.3*10**3 # 0.3*10**9
+p0_0 = 0.3*10**3 # 0.3*10**9
 p0_1 = 0
 
 mu0   = 10

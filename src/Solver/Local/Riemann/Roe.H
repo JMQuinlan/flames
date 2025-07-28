@@ -215,6 +215,7 @@ public:
         {
             if (verbose)
             {
+                Util::ParallelMessage(INFO, "ERROR IN ROE SOLVER:");
                 Util::ParallelMessage(INFO, "hi ", hi);
                 Util::ParallelMessage(INFO, "lo ", lo);
                 Util::ParallelMessage(INFO, "rho_R ", rho_R);

@@ -920,12 +920,15 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             
 
             // ERROR CHECKING
-            if ((rho_new(i, j, k) != rho_new(i, j, k)) 
+            if (   (rho_new(i, j, k) != rho_new(i, j, k)) 
                 or (M_new(i, j, k, 0) != M_new(i, j, k, 0))
                 or (M_new(i, j, k, 1) != M_new(i, j, k, 1)) 
                 or (E_new(i, j, k) != E_new(i, j, k)) 
                 or (eta_new(i, j, k) != eta_new(i, j, k)))
             {
+                Util::ParallelMessage(INFO, "-------------------------------");
+                Util::ParallelMessage(INFO, "ERROR IN HYDRO2");
+                Util::ParallelMessage(INFO, "time=", time);
                 Util::ParallelMessage(INFO, "lev=", lev);
                 Util::ParallelMessage(INFO, "i=", i, ", j=", j);
                 Util::ParallelMessage(INFO, "drho_dt=", drho_dt); // dies
