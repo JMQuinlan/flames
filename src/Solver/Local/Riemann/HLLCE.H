@@ -150,22 +150,7 @@ public:
             fl = f_R;
         }
 
-        if (fl.mass != fl.mass)
-        {
-            if (verbose)
-            {
-                Util::ParallelMessage(INFO, "hi ", hi);
-                Util::ParallelMessage(INFO, "lo ", lo);
-                Util::ParallelMessage(INFO, "rho_R ", rho_R);
-                Util::ParallelMessage(INFO, "rho_L ", rho_L);
-                Util::ParallelMessage(INFO, "u_R ", u_R);
-                Util::ParallelMessage(INFO, "u_L ", u_L);
-                Util::ParallelMessage(INFO, "S_L ", S_L);
-                Util::ParallelMessage(INFO, "S_R ", S_R);
-                Util::ParallelMessage(INFO, "S_star ", S_star);
-            }
-            Util::Exception(INFO);
-        }
+        
         /// HLLE (ONLY for Energy)
         // STEP 3: Compute Roe-averaged quantities for wave speed estimates
         Set::Scalar rho_RL = std::sqrt(rho_L * rho_R);
@@ -203,6 +188,27 @@ public:
             // Subsonic flow - use HLLE formula
             Set::Scalar inv_SR_minus_SL = 1.0 / (S_R - S_L + small);
             fl.energy = (S_R * f_L.energy - S_L * f_R.energy + S_R * S_L * (E_R - E_L)) * inv_SR_minus_SL;
+        }
+
+        // ERROR CHECKING
+        if ((fl.mass != fl.mass)
+            or (fl.momentum_normal != fl.momentum_normal)
+            or (fl.momentum_tangent != fl.momentum_tangent)
+            or (fl.energy != fl.energy))
+        {
+            if (verbose)
+            {
+                Util::ParallelMessage(INFO, "hi ", hi);
+                Util::ParallelMessage(INFO, "lo ", lo);
+                Util::ParallelMessage(INFO, "rho_R ", rho_R);
+                Util::ParallelMessage(INFO, "rho_L ", rho_L);
+                Util::ParallelMessage(INFO, "u_R ", u_R);
+                Util::ParallelMessage(INFO, "u_L ", u_L);
+                Util::ParallelMessage(INFO, "S_L ", S_L);
+                Util::ParallelMessage(INFO, "S_R ", S_R);
+                Util::ParallelMessage(INFO, "S_star ", S_star);
+            }
+            Util::Exception(INFO);
         }
 
 

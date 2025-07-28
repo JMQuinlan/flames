@@ -442,7 +442,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar>   q       = q_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   _u0     = u0_mf.Patch(lev, mfi);
 
-        amrex::Array4<Set::Scalar> const &Source = (*Source_mf[lev]).array(mfi);
+        Set::Patch<Set::Scalar>         Source = Source_mf.Patch(lev, mfi);
+        // amrex::Array4<Set::Scalar> const &Source = (*Source_mf[lev]).array(mfi);
         Set::Patch <Set::Scalar>        Fsv = Fsv_mf.Patch(lev, mfi);
         Set::Patch <Set::Scalar>        Fb = Fb_mf.Patch(lev, mfi);
         Set::Patch <Set::Scalar>        Fw = Fw_mf.Patch(lev, mfi);
@@ -870,32 +871,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             rho_new(i, j, k) = rho(i, j, k) + (drho_dt) * dt;
 
-            if (rho_new(i, j, k) != rho_new(i, j, k))
-            {
-                Util::ParallelMessage(INFO, "lev=", lev);
-                Util::ParallelMessage(INFO, "i=", i, "j=", j);
-                Util::ParallelMessage(INFO, "drho_dt=", drho_dt); // dies
-                Util::ParallelMessage(INFO, "flux_xlo.mass=", flux_xlo.mass);
-                Util::ParallelMessage(INFO, "flux_xhi.mass=", flux_xhi.mass);
-                Util::ParallelMessage(INFO, "flux_ylo.mass=", flux_ylo.mass);
-                Util::ParallelMessage(INFO, "flux_yhi.mass=", flux_yhi.mass);
-                Util::ParallelMessage(INFO, "eta=", eta(i, j, k));
-                Util::ParallelMessage(INFO, "Source=", Source(i, j, k, 0));
-                Util::ParallelMessage(INFO, "state_x ", state_x); // <<<<
-                Util::ParallelMessage(INFO, "state_y ", state_y);
-                Util::ParallelMessage(INFO, "state_xhi ", state_xhi); // <<<<
-                Util::ParallelMessage(INFO, "state_yhi ", state_yhi);
-                Util::ParallelMessage(INFO, "state_xlo ", state_xlo);
-                Util::ParallelMessage(INFO, "state_ylo ", state_ylo);
-                Util::ParallelMessage(INFO, "gamma_eff=", gamma_eff);
-                Util::ParallelMessage(INFO, "rho=", rho(i, j, k));
-                Util::ParallelMessage(INFO, "M=", M(i, j, k));
-                Util::ParallelMessage(INFO, "E=", E(i, j, k));
-                Util::Exception(INFO);
-            }
-
             // Momentum
-            
             Set::Scalar dMx_dt = 
                 (flux_xlo.momentum_normal - flux_xhi.momentum_normal) / (DX[0]+small) + 
                 (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / (DX[1]+small) + 
@@ -911,23 +887,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 //(mu * (lap_uy * eta(i, j, k))) +
                 Source(i, j, k, 2);
             M_new(i, j, k, 1) = M(i, j, k, 1) + dMy_dt * dt;
-            /*
-            Set::Scalar dMx_dt = 
-                (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / (DX[0] + small) + 
-                (flux_ylo.momentum_normal - flux_yhi.momentum_normal) / (DX[1] + small) + 
-                div_tau(0) +
-                //(mu * (lap_ux * eta(i, j, k))) +
-                Source(i, j, k, 1);
-            M_new(i, j, k, 0) = M(i, j, k, 0) + dMx_dt * dt;
-
-            Set::Scalar dMy_dt = 
-                (flux_xlo.momentum_normal - flux_xhi.momentum_normal) / (DX[0] + small) + 
-                (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / (DX[1] + small) + 
-                div_tau(1) +
-                //(mu * (lap_uy * eta(i, j, k))) +
-                Source(i, j, k, 2);
-            M_new(i, j, k, 1) = M(i, j, k, 1) + dMy_dt * dt;
-            */
 
             // Energy
             Set::Scalar dE_dt = 
@@ -959,6 +918,35 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 eta_new(i, j, k) = 1.0;
             }
             
+
+            // ERROR CHECKING
+            if ((rho_new(i, j, k) != rho_new(i, j, k)) 
+                or (M_new(i, j, k, 0) != M_new(i, j, k, 0))
+                or (M_new(i, j, k, 1) != M_new(i, j, k, 1)) 
+                or (E_new(i, j, k) != E_new(i, j, k)) 
+                or (eta_new(i, j, k) != eta_new(i, j, k)))
+            {
+                Util::ParallelMessage(INFO, "lev=", lev);
+                Util::ParallelMessage(INFO, "i=", i, ", j=", j);
+                Util::ParallelMessage(INFO, "drho_dt=", drho_dt); // dies
+                Util::ParallelMessage(INFO, "flux_xlo.mass=", flux_xlo.mass);
+                Util::ParallelMessage(INFO, "flux_xhi.mass=", flux_xhi.mass);
+                Util::ParallelMessage(INFO, "flux_ylo.mass=", flux_ylo.mass);
+                Util::ParallelMessage(INFO, "flux_yhi.mass=", flux_yhi.mass);
+                Util::ParallelMessage(INFO, "Source=", Source(i, j, k, 0), ", ", Source(i, j, k, 1), ", ", Source(i, j, k, 2), ", ", Source(i, j, k, 3));
+                Util::ParallelMessage(INFO, "state_x ", state_x); // <<<<
+                Util::ParallelMessage(INFO, "state_y ", state_y);
+                Util::ParallelMessage(INFO, "state_xhi ", state_xhi); // <<<<
+                Util::ParallelMessage(INFO, "state_yhi ", state_yhi);
+                Util::ParallelMessage(INFO, "state_xlo ", state_xlo);
+                Util::ParallelMessage(INFO, "state_ylo ", state_ylo);
+                Util::ParallelMessage(INFO, "gamma_eff=", gamma_eff);
+                Util::ParallelMessage(INFO, "rho=", rho_new(i, j, k));
+                Util::ParallelMessage(INFO, "M=", M_new(i, j, k, 0), ", ", M_new(i, j, k, 1));
+                Util::ParallelMessage(INFO, "E=", E_new(i, j, k));
+                Util::ParallelMessage(INFO, "eta=", eta_new(i, j, k));
+                Util::Exception(INFO);
+            }
 
             // Set::Vector grad_ux = Numeric::Gradient(v, i, j, k, 0, DX);
             // Set::Vector grad_uy = Numeric::Gradient(v, i, j, k, 1, DX);

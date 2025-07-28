@@ -145,7 +145,11 @@ public:
             fl = f_R;
         }
 
-        if (fl.mass != fl.mass)
+        // ERROR CHECKING
+        if (   (fl.mass != fl.mass)
+            or (fl.momentum_normal != fl.momentum_normal)
+            or (fl.momentum_tangent != fl.momentum_tangent)
+            or (fl.energy != fl.energy) )
         {
             if (verbose)
             {

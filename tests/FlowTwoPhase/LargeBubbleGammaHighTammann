@@ -13,14 +13,14 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Ba
 
 
 ### MESHING ###
-amr.plot_dt = 1e-5
+amr.plot_dt = 1e-4
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 2
 amr.grid_eff = 0.8
 
 amr.max_level = 5
-timestep  = 0.25e-6
+timestep  = 2e-6
 amr.n_cell = 64 64
 
 ### DIMENSIONS ###
@@ -33,7 +33,7 @@ stop_time = 0.05
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon  = 0.001
+eta.ic.expression.constant.epsilon  = 0.0005
 eta.ic.expression.constant.R0   = 0.01
 # Eqn: "0.5*(1+tanh((sqrt(((x-xc)/a)**2 + ((y-yc)/b)**2) - Diameter)/Boundry_Thickness))
 # RPE Verification
@@ -137,5 +137,5 @@ grav = 9.81
 
 ### DEBUGGING ### 
 # Used for testing of the model
-Riemann_Solver = 3 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
 kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"

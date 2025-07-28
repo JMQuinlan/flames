@@ -140,7 +140,11 @@ public:
             fl.energy = (S_R * f_L.energy - S_L * f_R.energy + S_R * S_L * (E_R - E_L)) * inv_SR_minus_SL;
         }
 
-        if (fl.mass != fl.mass)
+        // ERROR CHECKING
+        if (   (fl.mass != fl.mass)
+            or (fl.momentum_normal != fl.momentum_normal)
+            or (fl.momentum_tangent != fl.momentum_tangent)
+            or (fl.energy != fl.energy) )
         {
             if (verbose)
             {

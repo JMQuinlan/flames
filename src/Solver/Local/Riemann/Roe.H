@@ -186,28 +186,7 @@ public:
                         r31*fabs(lambda3)*deltav3)
             );
         
-        if (fl.mass != fl.mass)
-        {
-            if (verbose)
-            {
-                Util::ParallelMessage(INFO,"hi ", hi);
-                Util::ParallelMessage(INFO,"lo ", lo);
-                Util::ParallelMessage(INFO,"rho_R ", rho_R);
-                Util::ParallelMessage(INFO,"rho_L ", rho_L);
-                Util::ParallelMessage(INFO,"rho_RL ", rho_RL); 
-                Util::ParallelMessage(INFO,"u_R ", u_R);
-                Util::ParallelMessage(INFO,"u_L ", u_L);
-                Util::ParallelMessage(INFO,"u_RL ", u_RL); 
-                Util::ParallelMessage(INFO,"a_RL ", a_RL);
-                Util::ParallelMessage(INFO,"lambda1 ", lambda1); 
-                Util::ParallelMessage(INFO,"lambda2 ", lambda2); 
-                Util::ParallelMessage(INFO,"lambda3 ", lambda3); 
-                Util::ParallelMessage(INFO,"deltav1 ", deltav1); 
-                Util::ParallelMessage(INFO,"deltav2 ", deltav2);
-                Util::ParallelMessage(INFO,"deltav3 ", deltav3);
-            }
-            Util::Exception(INFO);
-        }
+        
 
 
         fl.momentum_normal = ( 0.5*(rho_L*u_L*u_L + p_L + rho_R*u_R*u_R + p_R) - 0.5*(
@@ -215,6 +194,10 @@ public:
                                     r22*fabs(lambda2)*deltav2 +
                                     r32*fabs(lambda3)*deltav3)
             );
+        //
+        // (Update the tangential momentum flux)
+        // 
+        fl.momentum_tangent = 0.5 * (rho_L * u_L * v_L + rho_R * u_R * v_R);
 
 
         fl.energy = (   0.5*(u_L*(ke_L + p_L + ue_L) + u_R*(ke_R + p_R + ue_R)) - 0.5*
@@ -224,10 +207,32 @@ public:
                             r33*fabs(lambda3)*deltav3)
             );
 
-        //
-        // (Update the tangential momentum flux)
-        //
-        fl.momentum_tangent = 0.5 * (rho_L * u_L * v_L + rho_R * u_R * v_R);
+        // ERROR CHECKING
+        if ((fl.mass != fl.mass)
+            or (fl.momentum_normal != fl.momentum_normal)
+            or (fl.momentum_tangent != fl.momentum_tangent)
+            or (fl.energy != fl.energy))
+        {
+            if (verbose)
+            {
+                Util::ParallelMessage(INFO, "hi ", hi);
+                Util::ParallelMessage(INFO, "lo ", lo);
+                Util::ParallelMessage(INFO, "rho_R ", rho_R);
+                Util::ParallelMessage(INFO, "rho_L ", rho_L);
+                Util::ParallelMessage(INFO, "rho_RL ", rho_RL);
+                Util::ParallelMessage(INFO, "u_R ", u_R);
+                Util::ParallelMessage(INFO, "u_L ", u_L);
+                Util::ParallelMessage(INFO, "u_RL ", u_RL);
+                Util::ParallelMessage(INFO, "a_RL ", a_RL);
+                Util::ParallelMessage(INFO, "lambda1 ", lambda1);
+                Util::ParallelMessage(INFO, "lambda2 ", lambda2);
+                Util::ParallelMessage(INFO, "lambda3 ", lambda3);
+                Util::ParallelMessage(INFO, "deltav1 ", deltav1);
+                Util::ParallelMessage(INFO, "deltav2 ", deltav2);
+                Util::ParallelMessage(INFO, "deltav3 ", deltav3);
+            }
+            Util::Exception(INFO);
+        }
 
         return fl;
     }
