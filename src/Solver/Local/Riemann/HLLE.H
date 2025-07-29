@@ -148,6 +148,7 @@ public:
         {
             if (verbose)
             {
+                Util::ParallelMessage(INFO, "-------------------------------");
                 Util::ParallelMessage(INFO, "ERROR IN HLLE SOLVER:");
                 Util::ParallelMessage(INFO, "hi ", hi);
                 Util::ParallelMessage(INFO, "lo ", lo);

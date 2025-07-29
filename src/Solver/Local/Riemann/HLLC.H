@@ -153,6 +153,7 @@ public:
         {
             if (verbose)
             {
+                Util::ParallelMessage(INFO, "-------------------------------");
                 Util::ParallelMessage(INFO, "ERROR IN HLLC SOLVER:");
                 Util::ParallelMessage(INFO, "hi ", hi);
                 Util::ParallelMessage(INFO, "lo ", lo);
