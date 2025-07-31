@@ -11,6 +11,7 @@
 #include "IC/PNG.H"
 #include "Solver/Local/Riemann/Roe.H"
 #include "Solver/Local/Riemann/HLLC.H"
+#include "Solver/Local/Riemann/HLLC_WENO5.H"
 #include "Solver/Local/Riemann/HLLE.H"
 #include "Solver/Local/Riemann/HLLCE.H"
 
@@ -207,6 +208,10 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     {
         pp.select_default<Solver::Local::Riemann::HLLCE>("solver", value.hllcesolver);
     }
+    else if (value.Riemann_Solver == 35)
+    {
+        pp.select_default<Solver::Local::Riemann::HLLC_WENO5>("solver", value.hllc_weno5solver);
+    }
     
     
 }
@@ -373,9 +378,9 @@ void Hydro2::TimeStepComplete(Set::Scalar time, int lev)
     const Set::Scalar *DX = geom[lev].CellSize();
 
     // Reduce maximum values across all processors
-    c_max = amrex::ParallelDescriptor::ReduceRealMax(c_max);
-    vx_max = amrex::ParallelDescriptor::ReduceRealMax(vx_max);
-    vy_max = amrex::ParallelDescriptor::ReduceRealMax(vy_max);
+    amrex::ParallelDescriptor::ReduceRealMax(c_max);
+    amrex::ParallelDescriptor::ReduceRealMax(vx_max);
+    amrex::ParallelDescriptor::ReduceRealMax(vy_max);
 
     // Calculate minimum stable timestep based on CFL condition
     Set::Scalar dt_min_ = cfl / ((c_max + vx_max) / (DX[0] + small) + (c_max + vy_max) / (DX[1] + small) + small);
@@ -895,7 +900,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 if (Riemann_Solver == 0)
                 {
-                    // Calculate fluxes for the mixed fluid
+                    // Calculate fluxes for the mixed fluid using ROE
                     flux_xlo = roesolver->Solve(state_xlo, state_x, gamma_eff, pref, small, p0_eff); 
                     flux_ylo = roesolver->Solve(state_ylo, state_y, gamma_eff, pref, small, p0_eff); 
                     flux_xhi = roesolver->Solve(state_x, state_xhi, gamma_eff, pref, small, p0_eff); 
@@ -903,7 +908,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 }
                 else if (Riemann_Solver == 1)
                 {
-                    // Calculate fluxes for the mixed fluid
+                    // Calculate fluxes for the mixed fluid using HLLC
                     flux_xlo = hllcsolver->Solve(state_xlo, state_x, gamma_eff, pref, small, p0_eff); 
                     flux_ylo = hllcsolver->Solve(state_ylo, state_y, gamma_eff, pref, small, p0_eff); 
                     flux_xhi = hllcsolver->Solve(state_x, state_xhi, gamma_eff, pref, small, p0_eff); 
@@ -911,7 +916,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 }
                 else if (Riemann_Solver == 2)
                 {
-                    // Calculate fluxes for the mixed fluid
+                    // Calculate fluxes for the mixed fluid using HLLE
                     flux_xlo = hllesolver->Solve(state_xlo, state_x, gamma_eff, pref, small, p0_eff); 
                     flux_ylo = hllesolver->Solve(state_ylo, state_y, gamma_eff, pref, small, p0_eff); 
                     flux_xhi = hllesolver->Solve(state_x, state_xhi, gamma_eff, pref, small, p0_eff); 
@@ -919,11 +924,19 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 }
                 else if (Riemann_Solver == 3)
                 {
-                    // Calculate fluxes for the mixed fluid
+                    // Calculate fluxes for the mixed fluid using HLLCE
                     flux_xlo = hllcesolver->Solve(state_xlo, state_x, gamma_eff, pref, small, p0_eff);
                     flux_ylo = hllcesolver->Solve(state_ylo, state_y, gamma_eff, pref, small, p0_eff);
                     flux_xhi = hllcesolver->Solve(state_x, state_xhi, gamma_eff, pref, small, p0_eff);
                     flux_yhi = hllcesolver->Solve(state_y, state_yhi, gamma_eff, pref, small, p0_eff);
+                }
+                else if (Riemann_Solver == 35)
+                {
+                    // Calculate fluxes for the mixed fluid using HLLC_WENO5
+                    flux_xlo = hllc_weno5solver->Solve(state_xlo, state_x, gamma_eff, pref, small, p0_eff);
+                    flux_ylo = hllc_weno5solver->Solve(state_ylo, state_y, gamma_eff, pref, small, p0_eff);
+                    flux_xhi = hllc_weno5solver->Solve(state_x, state_xhi, gamma_eff, pref, small, p0_eff);
+                    flux_yhi = hllc_weno5solver->Solve(state_y, state_yhi, gamma_eff, pref, small, p0_eff);
                 }
             }
             catch (...)

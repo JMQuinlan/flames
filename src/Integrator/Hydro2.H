@@ -12,6 +12,7 @@
 #include "Set/Base.H"
 #include "Solver/Local/Riemann/Roe.H"
 #include "Solver/Local/Riemann/HLLC.H"
+#include "Solver/Local/Riemann/HLLC_WENO5.H"
 #include "Solver/Local/Riemann/HLLE.H"
 #include "Solver/Local/Riemann/HLLCE.H"
 
@@ -54,6 +55,7 @@ public:
         /// SOLVERS
         delete roesolver;
         delete hllcsolver;
+        delete hllc_weno5solver;
         delete hllesolver;
         delete hllcesolver;
     }
@@ -199,6 +201,7 @@ private:
     // Solvers
     Solver::Local::Riemann::Roe *roesolver = nullptr;
     Solver::Local::Riemann::HLLC *hllcsolver = nullptr;
+    Solver::Local::Riemann::HLLC_WENO5 *hllc_weno5solver = nullptr;
     Solver::Local::Riemann::HLLE *hllesolver = nullptr;
     Solver::Local::Riemann::HLLCE *hllcesolver = nullptr;
 
