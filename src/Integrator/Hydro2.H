@@ -67,7 +67,9 @@ protected:
     void TagCellsForRefinement(int lev, amrex::TagBoxArray& tags, amrex::Real /*time*/, int /*ngrow*/) override;
     void Regrid(int lev, Set::Scalar time) override;
 
-    virtual void UpdateEta(int lev, Set::Scalar time);
+    void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
+
+    // virtual void UpdateEta(int lev, Set::Scalar time);
 
 private:
     // FLUID 0
@@ -190,6 +192,11 @@ private:
     int Riemann_Solver = 0;
     int kappa_method = 2;
 
+    // Adaptive Timestep
+    bool adaptive_timestep = false;
+    Set::Scalar dt_min = NAN, dt_max = NAN, dt_growth = NAN;
+
+    // Solvers
     Solver::Local::Riemann::Roe *roesolver = nullptr;
     Solver::Local::Riemann::HLLC *hllcsolver = nullptr;
     Solver::Local::Riemann::HLLE *hllesolver = nullptr;

@@ -6,13 +6,13 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/UnitBubble.KappaTesting
-#plot_file = tests/UnitBubble.KappaTesting
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/UnitBubble.KappaTesting
+plot_file = tests/UnitBubble.KappaTesting
 #plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
 
 
 ### MESHING ###
-amr.plot_dt = 1e-4
+amr.plot_dt = 1e-6
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 100

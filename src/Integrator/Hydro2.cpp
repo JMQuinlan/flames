@@ -38,13 +38,19 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // SOLVER AND REFRENCE CONDITIONS
         pp_query_required("cfl", value.cfl);           // cfl condition
-        pp_query_default("cfl_v", value.cfl_v, 1E-100); // cfl condition
+        pp_query_default("cfl_v", value.cfl_v, 5E-1); // cfl condition
         pp_query_default("pref", value.pref, 1.0);     // reference pressure for Roe solver
         pp_query_default("small", value.small, 1E-8);  // small regularization value
         pp_query_default("cutoff", value.cutoff, 1E-100);  // eta cutoff value
         pp_query_default("lagrange", value.lagrange, 0.0); // lagrange no-penetration factor
         pp_query_default("grav", value.g, 9.81); // Gravitational Acceletation
         pp_forbid("roefix", "--> solver.roe.entropy_fix"); // Roe solver entropy fix
+
+        // ADAPTIVE TIMESTEP
+        pp_query_default("adaptive_timestep", value.adaptive_timestep, false); // Gravitational Acceletation
+        pp_query_default("dt_min", value.dt_min, 1E-9);
+        pp_query_default("dt_max", value.dt_max, 1E-3);
+        pp_query_default("dt_growth", value.dt_growth, 1.2);
 
         // OPTIONAL SOURCE TERMS
         pp_query_default("apply_surface_tension", value.apply_surface_tension, true); // Apply surface tension when solving, default: true --> "Apply Surface Tension"
@@ -72,7 +78,7 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_required("epsilon", value.epsilon); // diffuse interface thickness
 
         // CURVATURE
-        pp_query_default("kappa_method", value.kappa_method, 1); // Method to solve for curvature
+        pp_query_default("kappa_method", value.kappa_method, 2); // Method to solve for curvature
         
         // Boundry Conditions
         pp_forbid("rho.bc","--> density.bc");
@@ -144,10 +150,10 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.u0_mf, &value.bc_nothing, 2, 0, "u0", true, { "x", "y" });
         value.RegisterNewFab(value.q_mf, &value.bc_nothing, 2, 0, "q0", true, { "x", "y" });
         value.RegisterNewFab(value.Source_mf, &value.bc_nothing, 4, 0, "Source", true);
-        value.RegisterNewFab(value.Fsv_mf, &value.bc_nothing, 2, nghost, "Fsv", true, {"x","y"}); // To Track Surface Tension
-        value.RegisterNewFab(value.Fb_mf, &value.bc_nothing, 2, nghost, "Fb", true, {"x","y"}); // To Track Bouyancy
+        value.RegisterNewFab(value.Fsv_mf, &value.bc_nothing, 2, nghost, "Fsv", true, { "x", "y" }); // To Track Surface Tension
+        value.RegisterNewFab(value.Fb_mf, &value.bc_nothing, 2, nghost, "Fb", true, { "x", "y" }); // To Track Bouyancy
         value.RegisterNewFab(value.Fw_mf, &value.bc_nothing, 2, nghost, "Fw", true, { "x", "y" }); // To Track Weight
-        value.RegisterNewFab(value.kappas_mf, &value.bc_nothing, 3, nghost, "kappa", true, { "Avg","1", "2" }); // To Surface curvature
+        value.RegisterNewFab(value.kappas_mf, &value.bc_nothing, 3, nghost, "kappa", true, { "Avg", "1", "2" }); // To Surface curvature
 
 
         // DEBUGGING
@@ -238,6 +244,27 @@ void Hydro2::Initialize(int lev)
     Fw_mf[lev]      ->setVal(0.0); //->Initialize(lev, m0_mf, 0.0);
     kappas_mf[lev]  ->setVal(0.0);
 
+    // ADAPTIVE TIMESTEP
+    
+    if (adaptive_timestep)
+    {
+        dynamictimestep.on = true;
+        dynamictimestep.cfl = cfl;
+        dynamictimestep.min = dt_min;
+        dynamictimestep.max = dt_max;
+        dynamictimestep.nprevious = 3; // Use 3 previous timesteps for averaging
+
+        amrex::Print() << "Dynamic timestepping enabled with:\n"
+                       << "  CFL = " << dynamictimestep.cfl << "\n"
+                       << "  Min dt = " << dynamictimestep.min << "\n"
+                       << "  Max dt = " << dynamictimestep.max << "\n"
+                       << "  Growth factor = " << dt_growth << "\n"
+                       << "  History length = " << dynamictimestep.nprevious << std::endl;
+    }
+    else
+    {
+        dynamictimestep.on = false;
+    }
 
     // Calculate mixed variables based on individual fluid variables
     Mix(lev);
@@ -312,18 +339,18 @@ void Hydro2::Mix(int lev)
     vy_max = 0.0;
 }
 
-void Hydro2::UpdateEta(int lev, Set::Scalar time)
-{
-    eta_ic->Initialize(lev, eta_mf, time);
-}
+// Removed unused functions
+
 
 void Hydro2::TimeStepBegin(Set::Scalar, int /*iter*/)
 {
 
 }
 
-void Hydro2::TimeStepComplete(Set::Scalar, int lev)
+void Hydro2::TimeStepComplete(Set::Scalar time, int lev)
 {
+    // OLD METHOD
+    /*
     Integrator::DynamicTimestep_Update();
 
     return;
@@ -334,12 +361,67 @@ void Hydro2::TimeStepComplete(Set::Scalar, int lev)
     amrex::ParallelDescriptor::ReduceRealMax(vx_max);
     amrex::ParallelDescriptor::ReduceRealMax(vy_max);
 
-    Set::Scalar new_timestep = cfl / ((c_max + vx_max) / DX[0] + (c_max + vy_max) / DX[1]);
+    Set::Scalar new_timestep = cfl / ((c_max + vx_max) / (DX[0]+small) + (c_max + vy_max) / (DX[1]+small) + small);
 
     Util::Assert(INFO, TEST(AMREX_SPACEDIM == 2));
 
     SetTimestep(new_timestep);
+    */
+    
+    // NEW METHOD
+    // Calculate maximum wave speeds across all processors
+    const Set::Scalar *DX = geom[lev].CellSize();
+
+    // Reduce maximum values across all processors
+    c_max = amrex::ParallelDescriptor::ReduceRealMax(c_max);
+    vx_max = amrex::ParallelDescriptor::ReduceRealMax(vx_max);
+    vy_max = amrex::ParallelDescriptor::ReduceRealMax(vy_max);
+
+    // Calculate minimum stable timestep based on CFL condition
+    Set::Scalar dt_min_ = cfl / ((c_max + vx_max) / (DX[0] + small) + (c_max + vy_max) / (DX[1] + small) + small);
+    //Set::Scalar dt_min = cfl * std::sqrt(DX[0] * DX[0] + DX[1] * DX[1]) / (std::sqrt(vx_max * vx_max + vy_max * vy_max) + small);
+    
+    // Ensure dt_min is valid
+    if (std::isnan(dt_min_) || std::isinf(dt_min_) || dt_min_ <= 0.0)
+    {
+        amrex::Print() << "WARNING: Invalid dt_min calculated: " << dt_min_
+                       << " at time " << time << " on level " << lev << "\n";
+        amrex::Print() << "  c_max = " << c_max << ", vx_max = " << vx_max
+                       << ", vy_max = " << vy_max << "\n";
+        dt_min_ = dt_min; // Use the minimum timestep from parameters
+    }
+
+    // DEBUGGING VERBOSE:
+    //amrex::Print() << "  c_max = " << c_max << ", vx_max = " << vx_max << ", vy_max = " << vy_max << "\n";
+    amrex::Print() << "  Recommended dt_min = " << dt_min_ << "\n";
+
+    // Sync this minimum timestep with the dynamic timestep system
+    DynamicTimestep_SyncTimeStep(lev, dt_min_);
+
+    // Let the parent class handle the rest of the dynamic timestepping
+    Integrator::DynamicTimestep_Update();
+    
 }
+
+
+// Adaptive Timestep
+void Hydro2::SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive)
+{
+    cfl = cfl_val;
+    dt_min = min_dt;
+    dt_max = max_dt;
+    dt_growth = growth_factor_val;       // Changed from dt_growth_factor to dt_growth
+    adaptive_timestep = enable_adaptive; // Changed from use_adaptive_timestep to adaptive_timestep
+
+    amrex::Print() << "Adaptive timestepping parameters set: CFL = " << cfl
+                   << ", dt_min = " << dt_min
+                   << ", dt_max = " << dt_max
+                   << ", growth_factor = " << dt_growth                 // Changed from dt_growth_factor to dt_growth
+                   << ", enabled = " << adaptive_timestep << std::endl; // Changed from use_adaptive_timestep to adaptive_timestep
+}
+
+
+
 
 void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 {
@@ -363,7 +445,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
     Set::Scalar dt_max = std::numeric_limits<Set::Scalar>::max();
 
-    //UpdateEta(lev, time);
     const Set::Scalar *DX = geom[lev].CellSize();
 
     // Update etadot
@@ -437,6 +518,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar>   eta     = eta_old_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         eta_new = eta_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   v       = velocity_mf.Patch(lev, mfi); 
+        Set::Patch<const Set::Scalar>   press   = pressure_mf.Patch(lev, mfi);
 
         Set::Patch<const Set::Scalar>   m0      = m0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   q       = q_mf.Patch(lev, mfi);
@@ -953,6 +1035,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Set::Vector grad_ux = Numeric::Gradient(v, i, j, k, 0, DX);
             // Set::Vector grad_uy = Numeric::Gradient(v, i, j, k, 1, DX);
+
+            // Adaptive Timestep
+            Set::Scalar sound_speed = std::sqrt(gamma_eff * press(i, j, k) / (rho(i, j, k) + small));
+
+            c_max = std::max(c_max, sound_speed);
+            vx_max = std::max(vx_max, std::abs(v(i, j, k, 0)));
+            vy_max = std::max(vy_max, std::abs(v(i, j, k, 1)));
+
 
             *dt_max_handle = std::fabs(cfl * DX[0] / (u(0)+small));
             *dt_max_handle = std::min(*dt_max_handle, std::fabs(cfl * DX[1] / (u(1)+small)));
