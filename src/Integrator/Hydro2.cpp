@@ -793,7 +793,7 @@ Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::Multi
             Set::Vector Fb_vector = Set::Vector(0.0, 0.0);
             if (apply_buoyancy)
             {
-                // Example: apply a downward weight force; modify as appropriate
+                // WIP: set to use refrence density
                 Fb_vector = Set::Vector(0.0, 0.0);
             }
 
