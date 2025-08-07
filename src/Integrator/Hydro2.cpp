@@ -25,8 +25,10 @@ Hydro2::Hydro2(IO::ParmParse& pp) : Hydro2()
     pp.queryclass(*this);
 }
 
-void
-Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////// PARSE ////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 {
     BL_PROFILE("Integrator::Hydro2::Hydro2()");
     {
@@ -39,7 +41,7 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // SOLVER AND REFRENCE CONDITIONS
         pp_query_required("cfl", value.cfl);           // cfl condition
-        pp_query_default("cfl_v", value.cfl_v, 5E-1); // cfl condition
+        pp_query_default("cfl_v", value.cfl_v, value.cfl); // cfl condition
         pp_query_default("pref", value.pref, 1.0);     // reference pressure for Roe solver
         pp_query_default("small", value.small, 1E-8);  // small regularization value
         pp_query_default("cutoff", value.cutoff, 1E-100);  // eta cutoff value
@@ -190,7 +192,7 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<IC::Constant,IC::Expression>("q.ic",value.ic_q,value.geom);
     
 
-    // SOLVER
+    // SOLVERS
     // Riemann solver
     pp_query_default("Riemann_Solver", value.Riemann_Solver, 0); // Type of solver
     if (value.Riemann_Solver == 0)
@@ -217,7 +219,9 @@ Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     
 }
 
-
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////// INITIALIZE //////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 void Hydro2::Initialize(int lev)
 {
     BL_PROFILE("Integrator::Hydro2::Initialize");
@@ -251,7 +255,6 @@ void Hydro2::Initialize(int lev)
     kappas_mf[lev]  ->setVal(0.0);
 
     // ADAPTIVE TIMESTEP
-    
     if (adaptive_timestep)
     {
         dynamictimestep.on = true;
@@ -276,6 +279,9 @@ void Hydro2::Initialize(int lev)
     Mix(lev);
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////// MIX /////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 void Hydro2::Mix(int lev)
 {
     const Set::Scalar *DX = geom[lev].CellSize();
@@ -345,14 +351,18 @@ void Hydro2::Mix(int lev)
     vy_max = 0.0;
 }
 
-// Removed unused functions
 
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////// TIMESTEPBEGIN ////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 void Hydro2::TimeStepBegin(Set::Scalar, int /*iter*/)
 {
 
 }
-
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////// TIMESTEPCOMPLETE ///////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 void Hydro2::TimeStepComplete(Set::Scalar time, int lev)
 {
     // OLD METHOD
@@ -374,7 +384,8 @@ void Hydro2::TimeStepComplete(Set::Scalar time, int lev)
     SetTimestep(new_timestep);
     */
     
-    // NEW METHOD
+    /*
+    // OLD NEW METHOD
     // Calculate maximum wave speeds across all processors
     const Set::Scalar *DX = geom[lev].CellSize();
 
@@ -406,11 +417,46 @@ void Hydro2::TimeStepComplete(Set::Scalar time, int lev)
 
     // Let the parent class handle the rest of the dynamic timestepping
     Integrator::DynamicTimestep_Update();
+    */
+
+    // NEW NEW METHOD
+    // From Dr. Runnels
+    if (dynamictimestep.on)
+        Integrator::DynamicTimestep_Update();
+    return;
+
+    const Set::Scalar *DX = geom[lev].CellSize();
+
+    amrex::ParallelDescriptor::ReduceRealMax(c_max);
+    amrex::ParallelDescriptor::ReduceRealMax(vx_max);
+    amrex::ParallelDescriptor::ReduceRealMax(vy_max);
+
+    Set::Scalar new_timestep = cfl / ((c_max + vx_max) / (DX[0]) + (c_max + vy_max) / (DX[1]) + small);
+    new_timestep = new_timestep * 2.0; // Temp fix till root caust is found. new_timestep is double the lowest recommended time step
+
+    // DEBUGGING VERBOSE
+    // Ensure dt_min is valid
+    if (std::isnan(new_timestep) || std::isinf(new_timestep) || new_timestep <= 0.0)
+    {
+        amrex::Print() << "WARNING: Invalid new_timestep calculated: " << new_timestep
+                       << " at time " << time << " on level " << lev << "\n";
+        amrex::Print() << "  c_max = " << c_max << ", vx_max = " << vx_max
+                       << ", vy_max = " << vy_max << "\n";
+        new_timestep = dt_min; // Use the minimum timestep from parameters
+    }
+    Util::Message(INFO, "  CFL Timestep = ", new_timestep);
+    //amrex::Print() << "  CFL Timestep = " << new_timestep << "\n";
+
+    Util::Assert(INFO, TEST(AMREX_SPACEDIM == 2));
+
+    SetTimestep(new_timestep);
     
 }
 
 
-// Adaptive Timestep
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////// SETADAPTIVETIMESTEPPARAMS //////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 void Hydro2::SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive)
 {
     cfl = cfl_val;
@@ -426,9 +472,10 @@ void Hydro2::SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, 
                    << ", enabled = " << adaptive_timestep << std::endl; // Changed from use_adaptive_timestep to adaptive_timestep
 }
 
-// Add this function to implement the right-hand side calculation
-void
-Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::MultiFab &M_rhs_mf, amrex::MultiFab &E_rhs_mf, amrex::MultiFab &eta_rhs_mf, const amrex::MultiFab &rho_mf, const amrex::MultiFab &M_mf, const amrex::MultiFab &E_mf, const amrex::MultiFab &eta_mf_in)
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////// RHS /////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+void Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::MultiFab &M_rhs_mf, amrex::MultiFab &E_rhs_mf, amrex::MultiFab &eta_rhs_mf, const amrex::MultiFab &rho_mf, const amrex::MultiFab &M_mf, const amrex::MultiFab &E_mf, const amrex::MultiFab &eta_mf_in)
 {
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
@@ -437,7 +484,7 @@ Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::Multi
     {
         const amrex::Box &bx = mfi.growntilebox();
 
-        // Eta:
+        // Eta
         Set::Patch<const Set::Scalar> eta = eta_mf_in.array(mfi);
 
         // Mixture
@@ -447,7 +494,6 @@ Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::Multi
         Set::Patch<Set::Scalar> v = velocity_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> press = pressure_mf.Patch(lev, mfi);
 
-        // Capture only the arrays, not the MFIter
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             // gamma_eff
             Set::Scalar gamma_eff = eta(i, j, k) * gamma0 + (1.0 - eta(i, j, k)) * gamma1;
@@ -524,7 +570,7 @@ Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::Multi
             grad_eta_(i, j, k, 1) = grad_eta(1);
 
             // Debugging, would like to delete condition
-            if (grad_eta_mag < 1e-4)
+            if (grad_eta_mag < small)
             {
                 n_hat_(i, j, k, 0) = 0.0;
                 n_hat_(i, j, k, 1) = 0.0;
@@ -537,10 +583,31 @@ Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::Multi
             {
                 n_hat_(i, j, k, 0) = n_hat(0);
                 n_hat_(i, j, k, 1) = n_hat(1);
-                hess_eta_(i, j, k, 0) = hess_eta(0, 0);
-                hess_eta_(i, j, k, 1) = hess_eta(0, 1);
-                hess_eta_(i, j, k, 2) = hess_eta(1, 0);
-                hess_eta_(i, j, k, 3) = hess_eta(1, 1);
+
+                if ((hess_eta(0, 0) != hess_eta(0, 0))
+                    or (hess_eta(0, 1) != hess_eta(0, 1))
+                    or (hess_eta(1, 0) != hess_eta(1, 0))
+                    or (hess_eta(1, 1) != hess_eta(1, 1)))
+                {
+                    Util::ParallelMessage(INFO, "ERROR in Hydro2::RHS() : hess_eta");
+                    Util::ParallelMessage(INFO, "i=", i, ", j=", j);
+                    Util::ParallelMessage(INFO, "rho=", rho(i, j, k));
+                    Util::ParallelMessage(INFO, "M=", M(i, j, k));
+                    Util::ParallelMessage(INFO, "E=", E(i, j, k));
+                    Util::ParallelMessage(INFO, "eta=", eta(i, j, k));
+                    Util::ParallelMessage(INFO, "hess_eta(0,0)=", hess_eta(0, 0));
+                    Util::ParallelMessage(INFO, "hess_eta(0,1)=", hess_eta(0, 1));
+                    Util::ParallelMessage(INFO, "hess_eta(1,0)=", hess_eta(1, 0));
+                    Util::ParallelMessage(INFO, "hess_eta(1,1)=", hess_eta(1, 1));
+                    Util::Exception(INFO);
+                }
+                else
+                {
+                    hess_eta_(i, j, k, 0) = hess_eta(0, 0);
+                    hess_eta_(i, j, k, 1) = hess_eta(0, 1);
+                    hess_eta_(i, j, k, 2) = hess_eta(1, 0);
+                    hess_eta_(i, j, k, 3) = hess_eta(1, 1);
+                }
             }
 
             // Extract velocity from momentum and density
@@ -625,14 +692,7 @@ Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::Multi
                         Set::Scalar x = eta(i, j, k) - 0.5; // Eta centered at 0
                         Set::Scalar D = 0.0;                // Dirac Delta Value
                         Set::Scalar pi = 3.14159;           // Add decimals as needed
-                        if ((-a < x) and (x < a))
-                        {
-                            D = 0.5 * (1 + x / a + 1 / pi * std::sin(pi * x / a));
-                        }
-                        else
-                        {
-                            D = 0.0;
-                        }
+                        if ((-a < x) and (x < a)) D = 0.5 * (1 + x / a + 1 / pi * std::sin(pi * x / a)) else D = 0.0;
                         kappa = D * kappa; // Smoothened Curvature
                         */
 
@@ -737,7 +797,7 @@ Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::Multi
                         */
 
                         // /////////////////////////////////////////////////////////////////////////////////////
-                        // Extracing method output to be used
+                        // Extracting method output to be used
                         // Regularization
                         Set::Scalar K23 = kappa2 * kappa2;     // K23 Regularization
                         Set::Scalar K_Gauss = kappa1 * kappa2; // Gauss Regularization
@@ -749,22 +809,15 @@ Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::Multi
                         // Assign the curvature you want to use
                         kappa = kappa2; // Or use another curvature measure as needed
 
-                        // // ///////////////
-                        // // Density Scaling
-                        // Set::Scalar a = 0.49;               // Cutoff
-                        // Set::Scalar x = eta(i, j, k) - 0.5; // Eta centered at 0
-                        // Set::Scalar D = 0.0;                // Dirac Delta Value
-                        // Set::Scalar pi = 3.14159;           // Add decimals as needed
-                        // if ((-a < x) and (x < a))
-                        // {
-                        //     D = 0.5 * (1 + x / a + 1 / pi * std::sin(pi * x / a));
-                        // }
-                        // else
-                        // {
-                        //     D = 0.0;
-                        // }
-                        // kappa = D * kappa;// / 10; //*DX[0]; // Smoothened Curvature
-                        // // ///////////////
+                        // Density Scaling
+                        /*
+                        Set::Scalar a = 0.49;               // Cutoff
+                        Set::Scalar x = eta(i, j, k) - 0.5; // Eta centered at 0
+                        Set::Scalar D = 0.0;                // Dirac Delta Value
+                        Set::Scalar pi = 3.14159;           // Add decimals as needed
+                        if ((-a < x) and (x < a)) D = 0.5 * (1 + x / a + 1 / pi * std::sin(pi * x / a)) else D = 0.0;
+                        kappa = D * kappa; // Smoothened Curvature
+                        */
 
                         // Store curvature values
                         kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
@@ -910,7 +963,9 @@ Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::Multi
     }
 }
 
-// Modify the Advance function to use the time integration schemes
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////// ADVANCE ///////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 {
     // Swap pointers for old and new values
@@ -1272,7 +1327,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             vy_max = std::max(vy_max, std::abs(v(i, j, k, 1)));
 
             // Calculate dt_max for adaptive timestepping
-            *dt_max_handle = std::fabs(cfl * DX[0] / (v(i, j, k, 0) + small));
+            *dt_max_handle =                          std::fabs(cfl * DX[0] / (v(i, j, k, 0) + small));
             *dt_max_handle = std::min(*dt_max_handle, std::fabs(cfl * DX[1] / (v(i, j, k, 1) + small)));
             *dt_max_handle = std::min(*dt_max_handle, std::fabs(cfl_v * DX[0] * DX[0] / (Source(i, j, k, 1) + small)));
             *dt_max_handle = std::min(*dt_max_handle, std::fabs(cfl_v * DX[1] * DX[1] / (Source(i, j, k, 2) + small)));
@@ -1280,11 +1335,16 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     }
 
     // Update adaptive timestep
-    this->DynamicTimestep_SyncTimeStep(lev, dt_max);
+    if (dynamictimestep.on)
+    {
+        this->DynamicTimestep_SyncTimeStep(lev, dt_max);
+    }
 }
 
 
-
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////// REGRIDDING //////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 void Hydro2::Regrid(int lev, Set::Scalar /* time */)
 {
     BL_PROFILE("Integrator::Hydro2::Regrid");

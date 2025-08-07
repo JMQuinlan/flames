@@ -26,10 +26,10 @@ amr.n_cell = 64 64
 ## Static:
 timestep  = 1e-6
 ## Adaptive                # Can comment out dt params for default #
-adaptive_timestep = false
-dt_min = 2e-6
+adaptive_timestep = true
+dt_min = 1e-6
 dt_max = 5e-6
-dt_growth = 1.5
+dt_growth = 0.0
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.10 -0.10 0.0 # [ m ]
@@ -145,6 +145,6 @@ grav = 9.81
 
 ### DEBUGGING ### 
 # Used for testing of the model
-Riemann_Solver = 35 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+Riemann_Solver = 2 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
 kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
 scheme = 1 # Valid Entries: 0:"Forward Euler" / 1:"RK4" / 2:"SSPRK3"
