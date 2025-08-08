@@ -475,7 +475,8 @@ void Hydro2::SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////// RHS /////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-void Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::MultiFab &M_rhs_mf, amrex::MultiFab &E_rhs_mf, amrex::MultiFab &eta_rhs_mf, const amrex::MultiFab &rho_mf, const amrex::MultiFab &M_mf, const amrex::MultiFab &E_mf, const amrex::MultiFab &eta_mf_in)
+void
+Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::MultiFab &M_rhs_mf, amrex::MultiFab &E_rhs_mf, amrex::MultiFab &eta_rhs_mf, const amrex::MultiFab &rho_mf_in, const amrex::MultiFab &M_mf_in, const amrex::MultiFab &E_mf_in, const amrex::MultiFab &eta_mf_in)
 {
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
@@ -488,9 +489,9 @@ void Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::
         Set::Patch<const Set::Scalar> eta = eta_mf_in.array(mfi);
 
         // Mixture
-        Set::Patch<const Set::Scalar> rho = rho_mf.array(mfi);
-        Set::Patch<const Set::Scalar> E = E_mf.array(mfi);
-        Set::Patch<const Set::Scalar> M = M_mf.array(mfi);
+        Set::Patch<const Set::Scalar> rho = rho_mf_in.array(mfi);
+        Set::Patch<const Set::Scalar> E = E_mf_in.array(mfi);
+        Set::Patch<const Set::Scalar> M = M_mf_in.array(mfi);
         Set::Patch<Set::Scalar> v = velocity_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> press = pressure_mf.Patch(lev, mfi);
 
@@ -526,9 +527,9 @@ void Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::
 
         // MIXTURE
         Set::Patch<const Set::Scalar> eta = eta_mf_in.array(mfi);
-        Set::Patch<const Set::Scalar> rho = rho_mf.array(mfi);
-        Set::Patch<const Set::Scalar> E = E_mf.array(mfi);
-        Set::Patch<const Set::Scalar> M = M_mf.array(mfi);
+        Set::Patch<const Set::Scalar> rho = rho_mf_in.array(mfi);
+        Set::Patch<const Set::Scalar> E = E_mf_in.array(mfi);
+        Set::Patch<const Set::Scalar> M = M_mf_in.array(mfi);
         Set::Patch<Set::Scalar> eta_rhs = eta_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> rho_rhs = rho_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> E_rhs = E_rhs_mf.array(mfi);
@@ -537,8 +538,9 @@ void Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::
         // SOURCES
         Set::Patch<Set::Scalar> omega = vorticity_mf.Patch(lev, mfi);
 
-        Set::Patch<const Set::Scalar> v = velocity_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> press = pressure_mf.Patch(lev, mfi);
+
+        //Set::Patch<const Set::Scalar> v = velocity_mf.Patch(lev, mfi);
+        //Set::Patch<const Set::Scalar> press = pressure_mf.Patch(lev, mfi);
 
         Set::Patch<const Set::Scalar> m0 = m0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> q = q_mf.Patch(lev, mfi);
@@ -611,7 +613,8 @@ void Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::
             }
 
             // Extract velocity from momentum and density
-            Set::Vector u = Set::Vector(v(i, j, k, 0), v(i, j, k, 1));
+            //Set::Vector u = Set::Vector(v(i, j, k, 0), v(i, j, k, 1));
+            Set::Vector u = Set::Vector(M(i, j, k, 0) / rho(i, j, k), M(i, j, k, 1) / rho(i, j, k));
             Set::Vector u0 = Set::Vector(_u0(i, j, k, 0), _u0(i, j, k, 1));
             Set::Matrix gradM = Numeric::Gradient(M, i, j, k, DX);
             Set::Vector gradrho = Numeric::Gradient(rho, i, j, k, 0, DX);
@@ -925,7 +928,8 @@ void Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::
             }
 
             // Calculate RHS for eta
-            Set::Scalar deta_dt = -v(i, j, k, 0) * grad_eta(0) - v(i, j, k, 1) * grad_eta(1);
+            //Set::Scalar deta_dt = -v(i, j, k, 0) * grad_eta(0) - v(i, j, k, 1) * grad_eta(1);
+            Set::Scalar deta_dt = -u(0) * grad_eta(0) - u(1) * grad_eta(1);
             eta_rhs(i, j, k) = deta_dt;
 
             // Calculate RHS for density
