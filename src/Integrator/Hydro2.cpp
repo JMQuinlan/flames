@@ -614,7 +614,7 @@ Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::Multi
 
             // Extract velocity from momentum and density
             //Set::Vector u = Set::Vector(v(i, j, k, 0), v(i, j, k, 1));
-            Set::Vector u = Set::Vector(M(i, j, k, 0) / rho(i, j, k), M(i, j, k, 1) / rho(i, j, k));
+            Set::Vector u = Set::Vector(M(i, j, k, 0) / (rho(i, j, k) + small), M(i, j, k, 1) / (rho(i, j, k) + small));
             Set::Vector u0 = Set::Vector(_u0(i, j, k, 0), _u0(i, j, k, 1));
             Set::Matrix gradM = Numeric::Gradient(M, i, j, k, DX);
             Set::Vector gradrho = Numeric::Gradient(rho, i, j, k, 0, DX);
