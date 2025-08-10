@@ -14,7 +14,10 @@
 #include "Solver/Local/Riemann/HLLC.H"
 #include "Solver/Local/Riemann/HLLC_WENO5.H"
 #include "Solver/Local/Riemann/HLLE.H"
+//#include "Solver/Local/Riemann/HLLE_WENO5.H"
 #include "Solver/Local/Riemann/HLLCE.H"
+//#include "Solver/Local/Riemann/HLLCE_WENO5.H"
+
 
 #if AMREX_SPACEDIM==2
 
@@ -43,21 +46,24 @@ public:
         delete density0_ic;
         delete velocity0_ic;
         delete pressure0_ic;
+        delete temperature0_ic; // Temperature
         // FLUID 1
         delete density1_ic;
         delete velocity1_ic;
         delete pressure1_ic;
+        delete temperature1_ic; // Temperature
         // SOURCES
         delete ic_m0;
         delete ic_u0;
         delete ic_q;
-
         /// SOLVERS
         delete roesolver;
         delete hllcsolver;
         delete hllc_weno5solver;
         delete hllesolver;
+        //delete hlle_weno5solver;
         delete hllcesolver;
+        //delete hllce_weno5solver;
     }
 
 protected:
@@ -86,6 +92,8 @@ private:
     Set::Field<Set::Scalar> momentum0_mf;
     Set::Field<Set::Scalar> momentum0_old_mf;
 
+    Set::Field<Set::Scalar> T0_mf;
+
     Set::Field<Set::Scalar> velocity0_mf;
     Set::Field<Set::Scalar> pressure0_mf;
     Set::Field<Set::Scalar> vorticity0_mf;
@@ -99,6 +107,8 @@ private:
 
     Set::Field<Set::Scalar> momentum1_mf;
     Set::Field<Set::Scalar> momentum1_old_mf;
+
+    Set::Field<Set::Scalar> T1_mf;
 
     Set::Field<Set::Scalar> velocity1_mf;
     Set::Field<Set::Scalar> pressure1_mf;
@@ -114,6 +124,12 @@ private:
     Set::Field<Set::Scalar> energy_old_mf;
     Set::Field<Set::Scalar> velocity_mf;
     Set::Field<Set::Scalar> pressure_mf;
+
+    Set::Field<Set::Scalar> T_mf;   // Temperature
+    Set::Field<Set::Scalar> a_mf;   // Speed of sound
+    Set::Field<Set::Scalar> Ma_mf;  // Mach
+    Set::Field<Set::Scalar> UE_mf;  // Internal Energy
+    Set::Field<Set::Scalar> KE_mf;  // Kinetic Energy
 
 protected:
     Set::Field<Set::Scalar> eta_mf;
@@ -146,14 +162,17 @@ private:
     BC::BC<Set::Scalar>* momentum_bc = nullptr;
     BC::BC<Set::Scalar>* energy_bc = nullptr;
     BC::BC<Set::Scalar>* eta_bc = nullptr;
+    BC::BC<Set::Scalar>* temperature_bc = nullptr;
 
     IC::IC<Set::Scalar>* velocity0_ic = nullptr;
     IC::IC<Set::Scalar>* pressure0_ic = nullptr;
     IC::IC<Set::Scalar>* density0_ic  = nullptr;
+    IC::IC<Set::Scalar>* temperature0_ic  = nullptr;
 
     IC::IC<Set::Scalar>* velocity1_ic = nullptr;
     IC::IC<Set::Scalar>* pressure1_ic = nullptr;
     IC::IC<Set::Scalar>* density1_ic = nullptr;
+    IC::IC<Set::Scalar>* temperature1_ic = nullptr;
 
     IC::IC<Set::Scalar>* ic_m0 = nullptr;
     IC::IC<Set::Scalar>* ic_u0 = nullptr;
@@ -171,17 +190,19 @@ private:
     Set::Scalar vx_max = 0.0;
     Set::Scalar vy_max = 0.0;
 
-    Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion;
+    Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion=NAN;
     // FLUID 0
-    Set::Scalar gamma0 = NAN, p0_0 = NAN, mu0 = NAN, mu0_b = NAN;
+    Set::Scalar gamma0 = NAN, p0_0 = NAN, mu0 = NAN, mu0_b = NAN, MW0 = NAN;
 
     // FLUID 1
-    Set::Scalar gamma1 = NAN, p0_1 = NAN, mu1 = NAN, mu1_b = NAN;
+    Set::Scalar gamma1 = NAN, p0_1 = NAN, mu1 = NAN, mu1_b = NAN, MW1 = NAN;
 
     // Interaction Parameters
     Set::Scalar sigma = NAN;
     Set::Scalar epsilon = NAN;
     Set::Scalar g = 9.81; // m/s^2
+    // Set::Scalar R = 8.314; // [J]/[mol]-[K]
+    Set::Scalar R = 8314.; // [J]/[kmol]-[K] - Probably more common to use
 
     // CFD Properties
     Set::Scalar cfl = NAN, cfl_v = NAN, pref = NAN;
@@ -207,7 +228,9 @@ private:
     Solver::Local::Riemann::HLLC *hllcsolver = nullptr;
     Solver::Local::Riemann::HLLC_WENO5 *hllc_weno5solver = nullptr;
     Solver::Local::Riemann::HLLE *hllesolver = nullptr;
+    //Solver::Local::Riemann::HLLE_WENO5 *hlle_weno5solver = nullptr;
     Solver::Local::Riemann::HLLCE *hllcesolver = nullptr;
+    //Solver::Local::Riemann::HLLCE_WENO5 *hllce_weno5solver = nullptr;
 
 };
 }

@@ -7,14 +7,14 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 #plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHighTammann2
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHigh_SmallEta_HLLETamman_RK4
-#plot_file = tests/LargeBubbleRPE_2_Bar.GammaHighTammannMixed
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHigh_SmallEta_HLLETamman_RK4
+plot_file = tests/LargeBubbleRPE_2_Bar.GammaHigh
 #plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
 
 
 
 ### MESHING ###
-amr.plot_dt = 1e-4
+amr.plot_dt = 1e-6
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 2
@@ -25,12 +25,14 @@ amr.n_cell = 64 64
 
 ### TIME STEPING ###
 ## Static:
-timestep  = 1e-4
+timestep  = 1e-6
 ## Adaptive                # Can comment out dt params for default #
-adaptive_timestep = true
-dt_min = 1e-6
-dt_max = 5e-6
-dt_growth = 0.0
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.min  = 1e-7
+dynamictimestep.max  = 5e-6
+cfl = 0.8;
+
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.10 -0.10 0.0 # [ m ]
@@ -84,9 +86,14 @@ pressure0.ic.expression.region0 = "1e5" #" + (1e5*(x<=-0.0007))"
 pressure1.ic.type = expression
 pressure1.ic.expression.region0 = "2e5"
 
+temperature0.ic.type = expression
+temperature0.ic.expression.region0 = "294.0"
+
+temperature1.ic.type = expression
+temperature1.ic.expression.region0 = "294.0"
+
 sigma = 72.8; # 0.078 # For Air/Water
 
-cfl = 0.8;
 # pref = 1e5;
 pref = 0.0
 
@@ -148,4 +155,4 @@ grav = 9.81
 # Used for testing of the model
 Riemann_Solver = 2 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
 kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
-scheme = 1 # Valid Entries: 0:"Forward Euler" / 1:"RK4" / 2:"SSPRK3"
+scheme = 1 # Valid Entries: 0:"Forward Euler" / 1:"SSPRK3" / 2:"RK4"
