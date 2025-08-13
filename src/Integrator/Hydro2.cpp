@@ -118,12 +118,12 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     {
         int nghost = 2;
 
-        // DIFFUSSIVE PARAMETERS
+        // DIFFUSE PARAMETERS
         value.RegisterNewFab(value.eta_mf,          value.eta_bc,       1, nghost, "eta",     true );
         value.RegisterNewFab(value.eta_old_mf,      value.eta_bc,       1, nghost, "eta_old", true);
         value.RegisterNewFab(value.etadot_mf,       value.eta_bc,       1, nghost, "etadot",  true );
-        value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing,  4, nghost, "hess_eta", false, { "00", "01", "10", "11" });
-        value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing,  2, nghost, "n_hat", false, { "x", "y" });
+        value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing,  4, nghost, "hess_eta", true, { "00", "01", "10", "11" });
+        value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing,  2, nghost, "n_hat", true, { "x", "y" });
 
         // FLUID 0
         value.RegisterNewFab(value.density0_mf,     value.density_bc,   1, nghost, "density0",     false );
@@ -173,14 +173,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.u0_mf,           &value.bc_nothing,  2, 0, "u0", true, { "x", "y" });
         value.RegisterNewFab(value.q_mf,            &value.bc_nothing,  2, 0, "q0", true, { "x", "y" });
         value.RegisterNewFab(value.Source_mf,       &value.bc_nothing,  4, 0, "Source", true);
-        value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, nghost, "Fsv", true, { "x", "y" });    // Surface Tension
-        value.RegisterNewFab(value.Fb_mf,           &value.bc_nothing,  2, nghost, "Fb", true, { "x", "y" });      // Buoyancy
-        value.RegisterNewFab(value.Fw_mf,           &value.bc_nothing,  2, nghost, "Fw", true, { "x", "y" });      // Weight
-        value.RegisterNewFab(value.T_mf,            &value.bc_nothing,  1, nghost, "T", true);                      // Temperature ___TEMP___
-        value.RegisterNewFab(value.a_mf,            &value.bc_nothing,  1, nghost, "a", true);  // Speed of sound
-        value.RegisterNewFab(value.Ma_mf,           &value.bc_nothing,  2, nghost, "Ma", true, { "x", "y" }); // Mach
-        value.RegisterNewFab(value.UE_mf,           &value.bc_nothing,  1, nghost, "UE", true); // Internal Energy
-        value.RegisterNewFab(value.KE_mf,           &value.bc_nothing,  1, nghost, "KE", true); // Kinetic Energy
+        value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, nghost, "Fsv", true, { "x", "y" });  // Surface Tension
+        value.RegisterNewFab(value.Fb_mf,           &value.bc_nothing,  2, nghost, "Fb", true, { "x", "y" });   // Buoyancy
+        value.RegisterNewFab(value.Fw_mf,           &value.bc_nothing,  2, nghost, "Fw", true, { "x", "y" });   // Weight
+        value.RegisterNewFab(value.T_mf,            &value.bc_nothing,  1, nghost, "T", true);                  // Temperature
+        value.RegisterNewFab(value.a_mf,            &value.bc_nothing,  1, nghost, "a", true);                  // Speed of sound
+        value.RegisterNewFab(value.Ma_mf,           &value.bc_nothing,  2, nghost, "Ma", true, { "x", "y" });   // Mach
+        value.RegisterNewFab(value.UE_mf,           &value.bc_nothing,  1, nghost, "UE", true);                 // Internal Energy
+        value.RegisterNewFab(value.KE_mf,           &value.bc_nothing,  1, nghost, "KE", true);                 // Kinetic Energy
 
         // EXTRAS & DEBUGGING
         value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", true, { "x", "y" });
@@ -463,10 +463,15 @@ void Hydro2::SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////// RHS /////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-void Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::MultiFab &M_rhs_mf, amrex::MultiFab &E_rhs_mf, amrex::MultiFab &eta_rhs_mf, const amrex::MultiFab &rho_mf_in, const amrex::MultiFab &M_mf_in, const amrex::MultiFab &E_mf_in, const amrex::MultiFab &eta_mf_in)
+void
+Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::MultiFab &M_rhs_mf, amrex::MultiFab &E_rhs_mf, amrex::MultiFab &eta_rhs_mf, const amrex::MultiFab &rho_mf_in, const amrex::MultiFab &M_mf_in, const amrex::MultiFab &E_mf_in, const amrex::MultiFab &eta_mf_in) //, const amrex::MultiFab &velocity_mf_in, const amrex::MultiFab &pressure_mf_in, const amrex::MultiFab &T_mf_in)
 {
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
+
+    // Create local copies of velocity and pressure for this RHS evaluation
+    amrex::MultiFab velocity_local(rho_mf_in.boxArray(), rho_mf_in.DistributionMap(), 2, rho_mf_in.nGrow());
+    amrex::MultiFab pressure_local(rho_mf_in.boxArray(), rho_mf_in.DistributionMap(), 1, rho_mf_in.nGrow());
 
     for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
     {
@@ -479,8 +484,8 @@ void Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::
         Set::Patch<const Set::Scalar> rho = rho_mf_in.array(mfi);
         Set::Patch<const Set::Scalar> E = E_mf_in.array(mfi);
         Set::Patch<const Set::Scalar> M = M_mf_in.array(mfi);
-        Set::Patch<Set::Scalar> v = velocity_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> press = pressure_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> v = velocity_local.array(mfi);
+        Set::Patch<Set::Scalar> press = pressure_local.array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             // gamma_eff
@@ -507,6 +512,10 @@ void Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::
         });
     }
 
+    // Fill ghost cells for the local variables
+    velocity_local.FillBoundary(geom[lev].periodicity());
+    pressure_local.FillBoundary(geom[lev].periodicity());
+
     // Main calculation loop
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
@@ -526,8 +535,9 @@ void Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::
 
         // SOURCES
         Set::Patch<Set::Scalar> omega = vorticity_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> v = velocity_mf.Patch(lev, mfi);
-        //Set::Patch<const Set::Scalar> press = pressure_mf.Patch(lev, mfi);
+        // Local variables
+        Set::Patch<const Set::Scalar> v = velocity_local.array(mfi);
+        Set::Patch<const Set::Scalar> press = pressure_local.array(mfi);
 
         Set::Patch<const Set::Scalar> m0 = m0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> q = q_mf.Patch(lev, mfi);
@@ -633,7 +643,7 @@ void Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::
                     {
                         Set::Vector grad_mag_grad_eta = Set::Vector(1 / (grad_eta_mag + small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)),
                                                                     1 / (grad_eta_mag + small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));
-                        kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / ((grad_eta_mag + small) * (grad_eta_mag + small))));
+                        kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / (grad_eta_mag * grad_eta_mag + small)));
 
                         // Density Scaling
                         /*
@@ -776,8 +786,12 @@ void Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::
 
                     Fsv(i, j, k, 0) = sigma_eff * (kappa * grad_eta(0));
                     Fsv(i, j, k, 1) = sigma_eff * (kappa * grad_eta(1));
+                    //Fsv_vector = Set::Vector(sigma_eff * (kappa * grad_eta(0)), 
+                    //                         sigma_eff * (kappa * grad_eta(1)));
                 }
                 Fsv_vector = Set::Vector(Fsv(i, j, k, 0), Fsv(i, j, k, 1));
+                //Fsv(i, j, k, 0) = Fsv_vector(0);
+                //Fsv(i, j, k, 1) = Fsv_vector(1));
             }
 
             // Weight:
@@ -788,6 +802,7 @@ void Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::
                 Fw(i, j, k, 0) = 0.0;
                 Fw(i, j, k, 1) = -rho(i, j, k) * g;
                 Fw_vector = Set::Vector(Fw(i, j, k, 0), Fw(i, j, k, 1));
+                //Fw = Set::Vector(Fw_vector(0), Fw_vector(1));
             }
 
             // Buoyancy:
@@ -1309,11 +1324,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 }
             }
 
-
             // Mixtures
             Set::Scalar const gamma_eff = eta(i, j, k) * gamma0 + (1.0 - eta(i, j, k)) * gamma1;
             //Set::Scalar const MW_eff = eta(i, j, k) * MW0 + (1.0 - eta(i, j, k)) * MW1;
-
 
             // Initialize extra fields - (not directly used to solve)
             // Velocity

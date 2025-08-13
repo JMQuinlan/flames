@@ -7,8 +7,8 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 #plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHighTammann2
-#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHigh_SmallEta_HLLETamman_RK4
-plot_file = tests/LargeBubbleRPE_2_Bar.GammaHigh
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHigh_SmallEta_HLLETamman_RK4
+#plot_file = tests/LargeBubbleRPE_2_Bar.GammaHigh
 #plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
 
 
@@ -155,4 +155,4 @@ grav = 9.81
 # Used for testing of the model
 Riemann_Solver = 2 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
 kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
-scheme = 1 # Valid Entries: 0:"Forward Euler" / 1:"SSPRK3" / 2:"RK4"
+scheme = 0 # Valid Entries: 0:"Forward Euler" / 1:"SSPRK3" / 2:"RK4"
