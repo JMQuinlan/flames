@@ -17,6 +17,7 @@
 //#include "Solver/Local/Riemann/HLLE_WENO5.H"
 #include "Solver/Local/Riemann/HLLCE.H"
 //#include "Solver/Local/Riemann/HLLCE_WENO5.H"
+#include "Solver/Local/Riemann/PartiallyParabolic.H"
 
 
 #if AMREX_SPACEDIM==2
@@ -64,6 +65,8 @@ public:
         //delete hlle_weno5solver;
         delete hllcesolver;
         //delete hllce_weno5solver;
+        delete partiallyparabolicsolver;
+
     }
 
 protected:
@@ -240,6 +243,7 @@ private:
     //Solver::Local::Riemann::HLLE_WENO5 *hlle_weno5solver = nullptr;
     Solver::Local::Riemann::HLLCE *hllcesolver = nullptr;
     //Solver::Local::Riemann::HLLCE_WENO5 *hllce_weno5solver = nullptr;
+    Solver::Local::Riemann::PartiallyParabolic *partiallyparabolicsolver = nullptr;
 
 };
 }
