@@ -96,8 +96,8 @@ public:
         if (use_hyperbolic_flux)
         {
             // Calculate sound speeds
-            Set::Scalar a_L = std::sqrt(gamma * p_L / (rho_L + small));
-            Set::Scalar a_R = std::sqrt(gamma * p_R / (rho_R + small));
+            Set::Scalar a_L = std::sqrt(gamma * (p_L + p_ref) / (rho_L + small));
+            Set::Scalar a_R = std::sqrt(gamma * (p_R + p_ref) / (rho_R + small));
 
             // Compute wave speed estimates
             Set::Scalar S_L = std::min(u_L - a_L, u_R - a_R);

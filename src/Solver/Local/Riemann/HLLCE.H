@@ -84,8 +84,8 @@ public:
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
         // STEP 2: Compute sound speeds
-        Set::Scalar a_L = std::sqrt(gamma * p_L / (rho_L + small));
-        Set::Scalar a_R = std::sqrt(gamma * p_R / (rho_R + small));
+        Set::Scalar a_L = std::sqrt(gamma * (p_L + p_ref) / (rho_L + small));
+        Set::Scalar a_R = std::sqrt(gamma * (p_R + p_ref) / (rho_R + small));
 
         // STEP 3: Compute wave speed estimates
         // Use simple estimates for wave speeds
@@ -158,7 +158,7 @@ public:
         Set::Scalar h_TL = (E_L + p_L) / (rho_L + small);
         Set::Scalar h_TR = (E_R + p_R) / (rho_R + small);
         Set::Scalar h_RL = (std::sqrt(rho_L) * h_TL + std::sqrt(rho_R) * h_TR) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
-        Set::Scalar a_RL_sq = std::max(0.0, (gamma - 1.0) * (h_RL - 0.5 * u_RL * u_RL));
+        Set::Scalar a_RL_sq = std::max(0.0, (gamma - 1.0) * (h_RL - 0.5 * u_RL * u_RL) + (gamma * p_ref / (std::sqrt(rho_L) + std::sqrt(rho_R) + small)));
         Set::Scalar a_RL = std::sqrt(a_RL_sq) + small;
 
         // STEP 5: Compute physical fluxes
