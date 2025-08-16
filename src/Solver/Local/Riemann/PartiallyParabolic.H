@@ -77,11 +77,11 @@ public:
         // STEP 2: Compute primitive variables
         Set::Scalar ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small);
         Set::Scalar ue_L = E_L - ke_L;
-        Set::Scalar p_L = (gamma - 1.0) * ue_L - gamma * p_0 + p_ref;
+        Set::Scalar p_L = (gamma - 1.0) * ue_L - gamma * (p_0 + p_ref); // pressure Tammann EOS modification
 
         Set::Scalar ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
         Set::Scalar ue_R = E_R - ke_R;
-        Set::Scalar p_R = (gamma - 1.0) * ue_R - gamma * p_0 + p_ref;
+        Set::Scalar p_R = (gamma - 1.0) * ue_R - gamma * (p_0 + p_ref);
 
         Set::Scalar u_L = Mn_L / (rho_L + small), u_R = Mn_R / (rho_R + small);
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
@@ -227,14 +227,22 @@ public:
             {
                 Util::ParallelMessage(INFO, "-------------------------------");
                 Util::ParallelMessage(INFO, "ERROR IN PARTIALLY PARABOLIC SOLVER:");
-                Util::ParallelMessage(INFO, "hi ", hi);
-                Util::ParallelMessage(INFO, "lo ", lo);
-                Util::ParallelMessage(INFO, "rho_R ", rho_R);
-                Util::ParallelMessage(INFO, "rho_L ", rho_L);
-                Util::ParallelMessage(INFO, "u_R ", u_R);
-                Util::ParallelMessage(INFO, "u_L ", u_L);
-                Util::ParallelMessage(INFO, "p_R ", p_R);
-                Util::ParallelMessage(INFO, "p_L ", p_L);
+                Util::ParallelMessage(INFO, "hi:   ", hi);
+                Util::ParallelMessage(INFO, "lo:   ", lo);
+                Util::ParallelMessage(INFO, "rho_L=", rho_L);
+                Util::ParallelMessage(INFO, "rho_R=", rho_R);
+                Util::ParallelMessage(INFO, "u_L=  ", u_L);
+                Util::ParallelMessage(INFO, "u_R=  ", u_R);
+                Util::ParallelMessage(INFO, "ke_R= ", ke_R);
+                Util::ParallelMessage(INFO, "ke_L= ", ke_L);
+                Util::ParallelMessage(INFO, "ue_L= ", ue_L);
+                Util::ParallelMessage(INFO, "ue_R= ", ue_R);
+                Util::ParallelMessage(INFO, "p_L=  ", p_L);
+                Util::ParallelMessage(INFO, "p_R=  ", p_R);
+                //Util::ParallelMessage(INFO, "a_L=  ", a_L);
+                //Util::ParallelMessage(INFO, "a_R=  ", a_R);
+                //Util::ParallelMessage(INFO, "S_L=  ", S_L);
+                //Util::ParallelMessage(INFO, "S_R=  ", S_R);
                 Util::ParallelMessage(INFO, "mu ", mu);
                 Util::ParallelMessage(INFO, "dt ", dt);
                 Util::ParallelMessage(INFO, "dx ", dx);

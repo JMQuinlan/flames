@@ -54,7 +54,7 @@ epsilon = eta.ic.expression.constant.epsilon
 
 
 ### HYDRO INITIAL CONDITIONS ###
-gamma0 = 1.63  # 1.63 # 7.15 
+gamma0 = 7.15 #1.63  # 1.63 # 7.15 
 gamma1 = 1.4
 
 p0_0 = 0.3*10**3 # 0.3*10**9
@@ -153,6 +153,6 @@ grav = 9.81
 
 ### DEBUGGING ### 
 # Used for testing of the model
-Riemann_Solver = 36 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+Riemann_Solver = 2 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
 kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
 scheme = 0 # Valid Entries: 0:"Forward Euler" / 1:"SSPRK3" / 2:"RK4"
