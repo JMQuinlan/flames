@@ -229,6 +229,9 @@ public:
                 Util::ParallelMessage(INFO, "ERROR IN PARTIALLY PARABOLIC SOLVER:");
                 Util::ParallelMessage(INFO, "hi:   ", hi);
                 Util::ParallelMessage(INFO, "lo:   ", lo);
+                Util::ParallelMessage(INFO, "fluxT:", total_flux);
+                //Util::ParallelMessage(INFO, "fluxH:", total_flux);
+                //Util::ParallelMessage(INFO, "fluxP:", parabolic_flux);
                 Util::ParallelMessage(INFO, "rho_L=", rho_L);
                 Util::ParallelMessage(INFO, "rho_R=", rho_R);
                 Util::ParallelMessage(INFO, "u_L=  ", u_L);

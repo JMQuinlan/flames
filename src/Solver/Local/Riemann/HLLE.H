@@ -154,6 +154,7 @@ public:
                 Util::ParallelMessage(INFO, "ERROR IN HLLE SOLVER:");
                 Util::ParallelMessage(INFO, "hi:   ", hi);
                 Util::ParallelMessage(INFO, "lo:   ", lo);
+                Util::ParallelMessage(INFO, "flux: ", fl);
                 Util::ParallelMessage(INFO, "rho_L=", rho_L);
                 Util::ParallelMessage(INFO, "rho_R=", rho_R);
                 Util::ParallelMessage(INFO, "u_L=  ", u_L);
