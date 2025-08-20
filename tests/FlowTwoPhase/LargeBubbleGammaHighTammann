@@ -7,8 +7,8 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 #plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHighTammann2
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHigh_SmallEta_HLLETamman
-#plot_file = tests/LargeBubbleRPE_2_Bar.GammaHigh
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHigh_SmallEta_HLLETamman
+plot_file = tests/LargeBubbleRPE_2_Bar.GammaHigh
 #plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
 
 
@@ -29,9 +29,9 @@ timestep  = 1e-6
 ## Adaptive                # Can comment out dt params for default #
 dynamictimestep.on = 1
 dynamictimestep.verbose = 1
-dynamictimestep.min  = 0.2e-7
+dynamictimestep.min  = 1e-7
 dynamictimestep.max  = 5e-6
-cfl = 0.8e7;
+cfl = 0.8;
 
 
 ### DIMENSIONS ###
@@ -54,10 +54,10 @@ epsilon = eta.ic.expression.constant.epsilon
 
 
 ### HYDRO INITIAL CONDITIONS ###
-gamma0 = 7.15 #1.63  # 1.63 # 7.15 
+gamma0 = 1.63  # 1.63 # 7.15 
 gamma1 = 1.4
 
-p0_0 = 0.3*10**5 # 0.3*10**9
+p0_0 = 0.3*10**3 #0.3*10**5 # 0.3*10**9
 p0_1 = 0
 
 mu0   = 10
@@ -91,6 +91,31 @@ temperature0.ic.expression.region0 = "294.0"
 
 temperature1.ic.type = expression
 temperature1.ic.expression.region0 = "294.0"
+
+cp0.ic.type = expression
+cp0.ic.expression.region0 = "1.4"
+
+cp1.ic.type = expression
+cp1.ic.expression.region0 = "1.4"
+
+cv0.ic.type = expression
+cv0.ic.expression.region0 = "1.0"
+
+cv1.ic.type = expression
+cv1.ic.expression.region0 = "1.0"
+
+k0_thermal.ic.type = expression
+k0_thermal.ic.expression.region0 = "1.4"
+
+k1_thermal.ic.type = expression
+k1_thermal.ic.expression.region0 = "1.0"
+
+h0_thermal.ic.type = expression
+h0_thermal.ic.expression.region0 = "1.4"
+
+h1_thermal.ic.type = expression
+h1_thermal.ic.expression.region0 = "1.0"
+
 
 sigma = 72.8; # 0.078 # For Air/Water
 
@@ -155,4 +180,5 @@ grav = 9.81
 # Used for testing of the model
 Riemann_Solver = 2 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
 kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
-scheme = 0 # Valid Entries: 0:"Forward Euler" / 1:"SSPRK3" / 2:"RK4"
+scheme = 0		   # Valid Entries: 0:"Forward Euler" / 1:"SSPRK3" / 2:"RK4"
+Limiter = 0        # Valid Entries: 0:"None" / 1:"MinMod" / 2:"Van Leer"

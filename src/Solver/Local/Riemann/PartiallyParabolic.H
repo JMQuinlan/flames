@@ -1,4 +1,4 @@
-#ifndef SOLVER_LOCAL_RIEMANN_PARTIALLY_PARABOLIC_H
+﻿#ifndef SOLVER_LOCAL_RIEMANN_PARTIALLY_PARABOLIC_H
 #define SOLVER_LOCAL_RIEMANN_PARTIALLY_PARABOLIC_H
 
 #include "IO/ParmParse.H"
@@ -126,15 +126,31 @@ public:
             // Compute star state fluxes
             Flux f_star_L, f_star_R;
 
+            Set::Scalar E_star_L = rho_star_L * ((E_L / (rho_L + small)) + (S_star - u_L) * ((p_L / (rho_L * (S_L - u_L) + small)) + S_star));
+            Set::Scalar E_star_R = rho_star_R * ((E_R / (rho_R + small)) + (S_star - u_R) * ((p_R / (rho_R * (S_R - u_R) + small)) + S_star));
+
+            // Flux updates: F* = F + S (U* - U)
             f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
             f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
             f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
-            f_star_L.energy = f_L.energy + S_L * (rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - E_L);
+            f_star_L.energy = f_L.energy + S_L * (E_star_L - E_L);
 
             f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
             f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
             f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
-            f_star_R.energy = f_R.energy + S_R * (rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - E_R);
+            f_star_R.energy = f_R.energy + S_R * (E_star_R - E_R);
+
+            /*
+            f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
+            f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
+            f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
+            f_star_L.energy = f_L.energy + S_L * (rho_star_L * (E_L / (rho_L + small) + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - E_L);
+
+            f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
+            f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
+            f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
+            f_star_R.energy = f_R.energy + S_R * (rho_star_R * (E_R / (rho_R + small) + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - E_R);
+            */
 
             // Determine hyperbolic flux based on wave positions
             Flux hyperbolic_flux;

@@ -10,6 +10,8 @@
 #include "IC/IC.H"
 
 #include "Set/Base.H"
+
+// Solvers
 #include "Solver/Local/Riemann/Roe.H"
 #include "Solver/Local/Riemann/HLLC.H"
 #include "Solver/Local/Riemann/HLLC_WENO5.H"
@@ -18,6 +20,9 @@
 #include "Solver/Local/Riemann/HLLCE.H"
 //#include "Solver/Local/Riemann/HLLCE_WENO5.H"
 #include "Solver/Local/Riemann/PartiallyParabolic.H"
+// Limiters
+#include "Solver/Local/Limiter/Minmod.H"
+#include "Solver/Local/Limiter/VanLeer.H"
 
 
 #if AMREX_SPACEDIM==2
@@ -48,16 +53,27 @@ public:
         delete velocity0_ic;
         delete pressure0_ic;
         delete temperature0_ic; // Temperature
+        delete cp0_ic;          // Constant Pressure Specific heat
+        delete cv0_ic;          // Constant Volume Specific Heat
+        delete k0_thermal_ic;   // Thermal Conductivity
+        delete h0_thermal_ic;   // Thermal Convectivity
+        //delete gamma0_ic;       // Specific Heat Ratio
         // FLUID 1
         delete density1_ic;
         delete velocity1_ic;
         delete pressure1_ic;
         delete temperature1_ic; // Temperature
+        delete cp1_ic;          // Constant Pressure Specific heat
+        delete cv1_ic;          // Constant Volume Specific Heat
+        delete k1_thermal_ic;   // Thermal Conductivity
+        delete h1_thermal_ic;   // Thermal Convectivity
+        // delete gamma1_ic;       // Specific Heat Ratio
         // SOURCES
         delete ic_m0;
         delete ic_u0;
         delete ic_q;
         /// SOLVERS
+        // Riemann Solvers
         delete roesolver;
         delete hllcsolver;
         delete hllc_weno5solver;
@@ -66,7 +82,11 @@ public:
         delete hllcesolver;
         //delete hllce_weno5solver;
         delete partiallyparabolicsolver;
+        // Flux Limiters
+        delete limiter_minmod;
+        delete limiter_vanleer;
 
+        
     }
 
 protected:
@@ -105,6 +125,11 @@ private:
     Set::Field<Set::Scalar> momentum0_old_mf;
 
     Set::Field<Set::Scalar> T0_mf;
+    Set::Field<Set::Scalar> cp0_mf;
+    Set::Field<Set::Scalar> cv0_mf;
+    Set::Field<Set::Scalar> k0_thermal_mf;
+    Set::Field<Set::Scalar> h0_thermal_mf;
+    //Set::Field<Set::Scalar> gamma0_mf;
 
     Set::Field<Set::Scalar> velocity0_mf;
     Set::Field<Set::Scalar> pressure0_mf;
@@ -121,6 +146,11 @@ private:
     Set::Field<Set::Scalar> momentum1_old_mf;
 
     Set::Field<Set::Scalar> T1_mf;
+    Set::Field<Set::Scalar> cp1_mf;
+    Set::Field<Set::Scalar> cv1_mf;
+    Set::Field<Set::Scalar> k1_thermal_mf;
+    Set::Field<Set::Scalar> h1_thermal_mf;
+    //Set::Field<Set::Scalar> gamma1_mf;
 
     Set::Field<Set::Scalar> velocity1_mf;
     Set::Field<Set::Scalar> pressure1_mf;
@@ -137,11 +167,16 @@ private:
     Set::Field<Set::Scalar> velocity_mf;
     Set::Field<Set::Scalar> pressure_mf;
 
-    Set::Field<Set::Scalar> T_mf;   // Temperature
-    Set::Field<Set::Scalar> a_mf;   // Speed of sound
-    Set::Field<Set::Scalar> Ma_mf;  // Mach
-    Set::Field<Set::Scalar> UE_mf;  // Internal Energy
-    Set::Field<Set::Scalar> KE_mf;  // Kinetic Energy
+    Set::Field<Set::Scalar> T_mf;           // Temperature
+    Set::Field<Set::Scalar> cp_mf;          // Constant Pressure Specific Heat
+    Set::Field<Set::Scalar> cv_mf;          // Constant Volume Specific Heat
+    Set::Field<Set::Scalar> k_thermal_mf;   // Thermal Conductivity
+    Set::Field<Set::Scalar> h_thermal_mf;   // Thermal Convectivity
+    Set::Field<Set::Scalar> gamma_mf;       // Specific Heat Ratio
+    Set::Field<Set::Scalar> a_mf;           // Speed of sound
+    Set::Field<Set::Scalar> Ma_mf;          // Mach
+    Set::Field<Set::Scalar> UE_mf;          // Internal Energy
+    Set::Field<Set::Scalar> KE_mf;          // Kinetic Energy
 
 protected:
     Set::Field<Set::Scalar> eta_mf;
@@ -180,11 +215,21 @@ private:
     IC::IC<Set::Scalar>* pressure0_ic = nullptr;
     IC::IC<Set::Scalar>* density0_ic  = nullptr;
     IC::IC<Set::Scalar>* temperature0_ic  = nullptr;
+    IC::IC<Set::Scalar>* cp0_ic  = nullptr;
+    IC::IC<Set::Scalar>* cv0_ic  = nullptr;
+    IC::IC<Set::Scalar>* k0_thermal_ic  = nullptr;
+    IC::IC<Set::Scalar>* h0_thermal_ic  = nullptr;
+    //IC::IC<Set::Scalar>* gamma0_ic  = nullptr;
 
     IC::IC<Set::Scalar>* velocity1_ic = nullptr;
     IC::IC<Set::Scalar>* pressure1_ic = nullptr;
     IC::IC<Set::Scalar>* density1_ic = nullptr;
     IC::IC<Set::Scalar>* temperature1_ic = nullptr;
+    IC::IC<Set::Scalar>* cp1_ic  = nullptr;
+    IC::IC<Set::Scalar>* cv1_ic  = nullptr;
+    IC::IC<Set::Scalar>* k1_thermal_ic  = nullptr;
+    IC::IC<Set::Scalar>* h1_thermal_ic  = nullptr;
+    //IC::IC<Set::Scalar>* gamma1_ic  = nullptr;
 
     IC::IC<Set::Scalar>* ic_m0 = nullptr;
     IC::IC<Set::Scalar>* ic_u0 = nullptr;
@@ -244,6 +289,12 @@ private:
     Solver::Local::Riemann::HLLCE *hllcesolver = nullptr;
     //Solver::Local::Riemann::HLLCE_WENO5 *hllce_weno5solver = nullptr;
     Solver::Local::Riemann::PartiallyParabolic *partiallyparabolicsolver = nullptr;
+
+
+    // Limiters
+    int Limiter = 0;
+    Solver::Local::Limiter::Minmod *limiter_minmod = nullptr;
+    Solver::Local::Limiter::VanLeer *limiter_vanleer = nullptr;
 
 };
 }
