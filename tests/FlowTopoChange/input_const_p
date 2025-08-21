@@ -107,7 +107,8 @@ pressure1.ic.expression.constant.x0    = 0.0
 pressure1.ic.expression.constant.y0    = 0.0
 pressure1.ic.expression.constant.neg1  = -1.0
 # pressure1.ic.expression.region0        = "1e5+ (neg1*1000.0*1.1e3) *(neg1+(0.5*(1 + tanh((((x-x0)**2/A1**2 + (y-y0)**2/A2**2) - 1)/(0.1*eps)))))"
-pressure1.ic.expression.region0        = "1e5+ (neg1*6.5e5) *(neg1+(0.5*(1 + tanh((((x-x0)**2/A1**2 + (y-y0)**2/A2**2) - 1)/(0.1*eps)))))"
+pressure1.ic.expression.region0        = "1e5"
+# pressure1.ic.expression.region0        = "1e5+ (neg1*6.5e5) *(neg1+(0.5*(1 + tanh((((x-x0)**2/A1**2 + (y-y0)**2/A2**2) - 1)/(0.1*eps)))))"
 # Add pressure to the liquid phase to balance the surface tension ($\Delta p = \sigma (1/R_1 + 1/R_2)$)
 
 temperature0.ic.type = expression

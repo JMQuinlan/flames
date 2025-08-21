@@ -44,8 +44,12 @@
 pwd
 date
 cat run_Droplet.slurm
-cat ./tests/FlowTopoChange/input_short
-git --git-dir .git show
+# cat ./tests/FlowTopoChange/input_short
+cat ./tests/FlowTopoChange/input_const_p_rho_gamma
+git --git-dir .git show -s
+
+# insure output folder is read to be writen to
+mkdir -p /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250820/short_output
 
 # Set thread count (default value is 1)...
 
@@ -53,7 +57,8 @@ export OMP_NUM_THREADS=1
 
 # Launch MPI code...
 
-mpirun ./bin/hydro2-2d-g++ ./tests/FlowTopoChange/input_short
+# mpirun ./bin/hydro2-2d-g++ ./tests/FlowTopoChange/input_short
+mpirun ./bin/hydro2-2d-g++ ./tests/FlowTopoChange/input_const_p_rho_gamma
 
 # ---------------------------------------------------
 

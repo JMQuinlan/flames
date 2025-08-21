@@ -51,8 +51,8 @@ eta.ic.expression.constant.A1    = 1.0
 eta.ic.expression.constant.A2    = 1.0
 eta.ic.expression.constant.x0    = 0.0
 eta.ic.expression.constant.y0    = 0.0
-eta.ic.expression.region0        = "(0.5*(1 + tanh((((x-x0)**2/A1**2 + (y-y0)**2/A2**2) - 1)/(0.1*epsilon))))"
-# eta.ic.expression.region0        = 1.0
+# eta.ic.expression.region0        = "(0.5*(1 + tanh((((x-x0)**2/A1**2 + (y-y0)**2/A2**2) - 1)/(0.1*epsilon))))"
+eta.ic.expression.region0        = 1.0
 epsilon = eta.ic.expression.constant.epsilon
 
 ### Advection solver ###
@@ -75,16 +75,16 @@ p0_1 = 0
 
 density0.ic.type = expression
 # density0.ic.expression.region0 = "1.0"
-density0.ic.expression.region0 = "1.0+ (1.99*(x<=-2))"
-# density0.ic.expression.region0 = "1.0+ (1.99*(x<=200))"
+# density0.ic.expression.region0 = "1.0+ (1.99*(x<=-2))"
+density0.ic.expression.region0 = "1.0+ (1.99*(x<=200))"
 
 density1.ic.type = expression
 density1.ic.expression.region0 = "15.0"
 
 velocity0.ic.type = expression
 # velocity0.ic.expression.region0 = "0.0"
-velocity0.ic.expression.region0 = "0 + (558*(x<=-2))"
-# velocity0.ic.expression.region0 = "0 + (558*(x<=200))"
+# velocity0.ic.expression.region0 = "0 + (558*(x<=-2))"
+velocity0.ic.expression.region0 = "0 + (558*(x<=200))"
 velocity0.ic.expression.region1 = "0.0"
 
 velocity1.ic.type = expression
@@ -95,8 +95,8 @@ pressure0.ic.type = expression
 # pressure0.ic.expression.region0 = "1e5" #" + (10e5*(x<=-115))"
 # pressure0.ic.expression.region0 = "1e5  + (10e5*(x<=-2))"
 # pressure0.ic.expression.region0 = "1e5  + (10e5*(x<=-15))"
-pressure0.ic.expression.region0 = "1e5  + (5.1e5*(x<=-2))"
-# pressure0.ic.expression.region0 = "1e5  + (5.1e5*(x<=200))"
+# pressure0.ic.expression.region0 = "1e5  + (5.1e5*(x<=-2))"
+pressure0.ic.expression.region0 = "1e5  + (5.1e5*(x<=200))"
 
 pressure1.ic.type = expression
 # pressure1.ic.expression.region0 = "1e5"
@@ -120,8 +120,7 @@ temperature1.ic.expression.region0 = "294.0"
 ### Surface tension coefficient ###
 # sigma0 = 1000;
 # sigma1 = 1000;
-#sigma = 72.8; # 0.078 # For Air/Water
-sigma = 0.0
+sigma = 72.8; # 0.078 # For Air/Water
 
 ### Reference pressure ###
 # pref = 1e5
@@ -189,7 +188,7 @@ m0.ic.constant.value = 0.0
 u0.ic.constant.value = 0.0
 
 ### ADDITIONAL SOURCES ###
-apply_surface_tension = 0
+apply_surface_tension = 1
 apply_buoyancy = 0;
 apply_weight = 0;
 grav = 9.81;
