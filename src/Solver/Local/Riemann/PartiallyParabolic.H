@@ -59,16 +59,17 @@ public:
     }
 
     Flux
-    Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0, Set::Scalar mu = 0.0, Set::Scalar dt = 0.0, Set::Scalar dx = 0.0)
+    Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0, Set::Scalar mu = 0.0, Set::Scalar k_thermal = 0.0, Set::Scalar dt = 0.0, Set::Scalar dx = 0.0)
     {
         // Final flux will be the sum of hyperbolic and parabolic components
         Flux total_flux;
 
         // STEP 1: Extract state variables
-        Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
-        Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
-        Set::Scalar Mt_L = lo.M_tangent, Mt_R = hi.M_tangent;
-        Set::Scalar E_L = lo.E, E_R = hi.E;
+        Set::Scalar rho_L = lo.rho,         rho_R = hi.rho;
+        Set::Scalar Mn_L = lo.M_normal,     Mn_R = hi.M_normal;
+        Set::Scalar Mt_L = lo.M_tangent,    Mt_R = hi.M_tangent;
+        Set::Scalar E_L = lo.E,             E_R = hi.E;
+        Set::Scalar T_L = lo.T,             T_R = hi.T;
 
         // Ensure no negative densities
         rho_L = std::max(small, rho_L);
@@ -92,150 +93,144 @@ public:
         Set::Scalar v_interface = 0.5 * (v_L + v_R);
         Set::Scalar p_interface = 0.5 * (p_L + p_R);
 
+
+        // /////////////////////////////////////////////////////
         // PART I: HYPERBOLIC FLUX CALCULATION (similar to HLLC)
-        if (use_hyperbolic_flux)
+        // Calculate sound speeds
+        Set::Scalar a_L = std::sqrt(gamma * (p_L + p_ref) / (rho_L + small));
+        Set::Scalar a_R = std::sqrt(gamma * (p_R + p_ref) / (rho_R + small));
+
+        // Compute wave speed estimates
+        Set::Scalar S_L = std::min(u_L - a_L, u_R - a_R);
+        Set::Scalar S_R = std::max(u_L + a_L, u_R + a_R);
+
+        // Compute middle wave speed (contact discontinuity)
+        Set::Scalar S_star = (p_R - p_L + rho_L * u_L * (S_L - u_L) - rho_R * u_R * (S_R - u_R)) / (rho_L * (S_L - u_L) - rho_R * (S_R - u_R) + small);
+
+        // Compute physical fluxes for left and right states
+        Flux f_L, f_R;
+
+        f_L.mass = rho_L * u_L;
+        f_L.momentum_normal = rho_L * u_L * u_L + p_L;
+        f_L.momentum_tangent = rho_L * u_L * v_L;
+        f_L.energy = u_L * (E_L + p_L);
+
+        f_R.mass = rho_R * u_R;
+        f_R.momentum_normal = rho_R * u_R * u_R + p_R;
+        f_R.momentum_tangent = rho_R * u_R * v_R;
+        f_R.energy = u_R * (E_R + p_R);
+
+        // Compute star state values
+        Set::Scalar rho_star_L = rho_L * (S_L - u_L) / (S_L - S_star + small);
+        Set::Scalar rho_star_R = rho_R * (S_R - u_R) / (S_R - S_star + small);
+
+        // Compute star state fluxes
+        Flux f_star_L, f_star_R;
+
+        Set::Scalar E_star_L = rho_star_L * ((E_L / (rho_L + small)) + (S_star - u_L) * ((p_L / (rho_L * (S_L - u_L) + small)) + S_star));
+        Set::Scalar E_star_R = rho_star_R * ((E_R / (rho_R + small)) + (S_star - u_R) * ((p_R / (rho_R * (S_R - u_R) + small)) + S_star));
+
+        // Flux updates: F* = F + S (U* - U)
+        f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
+        f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
+        f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
+        f_star_L.energy = f_L.energy + S_L * (E_star_L - E_L);
+
+        f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
+        f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
+        f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
+        f_star_R.energy = f_R.energy + S_R * (E_star_R - E_R);
+
+        /*
+        f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
+        f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
+        f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
+        f_star_L.energy = f_L.energy + S_L * (rho_star_L * (E_L / (rho_L + small) + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - E_L);
+
+        f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
+        f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
+        f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
+        f_star_R.energy = f_R.energy + S_R * (rho_star_R * (E_R / (rho_R + small) + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - E_R);
+        */
+
+        // Determine hyperbolic flux based on wave positions
+        Flux hyperbolic_flux;
+
+        if (0 <= S_L)
         {
-            // Calculate sound speeds
-            Set::Scalar a_L = std::sqrt(gamma * (p_L + p_ref) / (rho_L + small));
-            Set::Scalar a_R = std::sqrt(gamma * (p_R + p_ref) / (rho_R + small));
-
-            // Compute wave speed estimates
-            Set::Scalar S_L = std::min(u_L - a_L, u_R - a_R);
-            Set::Scalar S_R = std::max(u_L + a_L, u_R + a_R);
-
-            // Compute middle wave speed (contact discontinuity)
-            Set::Scalar S_star = (p_R - p_L + rho_L * u_L * (S_L - u_L) - rho_R * u_R * (S_R - u_R)) / (rho_L * (S_L - u_L) - rho_R * (S_R - u_R) + small);
-
-            // Compute physical fluxes for left and right states
-            Flux f_L, f_R;
-
-            f_L.mass = rho_L * u_L;
-            f_L.momentum_normal = rho_L * u_L * u_L + p_L;
-            f_L.momentum_tangent = rho_L * u_L * v_L;
-            f_L.energy = u_L * (E_L + p_L);
-
-            f_R.mass = rho_R * u_R;
-            f_R.momentum_normal = rho_R * u_R * u_R + p_R;
-            f_R.momentum_tangent = rho_R * u_R * v_R;
-            f_R.energy = u_R * (E_R + p_R);
-
-            // Compute star state values
-            Set::Scalar rho_star_L = rho_L * (S_L - u_L) / (S_L - S_star + small);
-            Set::Scalar rho_star_R = rho_R * (S_R - u_R) / (S_R - S_star + small);
-
-            // Compute star state fluxes
-            Flux f_star_L, f_star_R;
-
-            Set::Scalar E_star_L = rho_star_L * ((E_L / (rho_L + small)) + (S_star - u_L) * ((p_L / (rho_L * (S_L - u_L) + small)) + S_star));
-            Set::Scalar E_star_R = rho_star_R * ((E_R / (rho_R + small)) + (S_star - u_R) * ((p_R / (rho_R * (S_R - u_R) + small)) + S_star));
-
-            // Flux updates: F* = F + S (U* - U)
-            f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
-            f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
-            f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
-            f_star_L.energy = f_L.energy + S_L * (E_star_L - E_L);
-
-            f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
-            f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
-            f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
-            f_star_R.energy = f_R.energy + S_R * (E_star_R - E_R);
-
-            /*
-            f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
-            f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
-            f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
-            f_star_L.energy = f_L.energy + S_L * (rho_star_L * (E_L / (rho_L + small) + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - E_L);
-
-            f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
-            f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
-            f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
-            f_star_R.energy = f_R.energy + S_R * (rho_star_R * (E_R / (rho_R + small) + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - E_R);
-            */
-
-            // Determine hyperbolic flux based on wave positions
-            Flux hyperbolic_flux;
-
-            if (0 <= S_L)
-            {
-                hyperbolic_flux = f_L;
-            }
-            else if (S_L <= 0 && 0 <= S_star)
-            {
-                hyperbolic_flux = f_star_L;
-            }
-            else if (S_star <= 0 && 0 <= S_R)
-            {
-                hyperbolic_flux = f_star_R;
-            }
-            else
-            {
-                hyperbolic_flux = f_R;
-            }
-
-            // Add hyperbolic flux to total flux
-            total_flux.mass = hyperbolic_flux.mass;
-            total_flux.momentum_normal = hyperbolic_flux.momentum_normal;
-            total_flux.momentum_tangent = hyperbolic_flux.momentum_tangent;
-            total_flux.energy = hyperbolic_flux.energy;
+            hyperbolic_flux = f_L;
+        }
+        else if (S_L <= 0 && 0 <= S_star)
+        {
+            hyperbolic_flux = f_star_L;
+        }
+        else if (S_star <= 0 && 0 <= S_R)
+        {
+            hyperbolic_flux = f_star_R;
+        }
+        else
+        {
+            hyperbolic_flux = f_R;
         }
 
+        // Add hyperbolic flux to total flux
+        total_flux.mass = hyperbolic_flux.mass;
+        total_flux.momentum_normal = hyperbolic_flux.momentum_normal;
+        total_flux.momentum_tangent = hyperbolic_flux.momentum_tangent;
+        total_flux.energy = hyperbolic_flux.energy;
+        
+        // /////////////////////////////////////////////////////
         // PART II: PARABOLIC FLUX CALCULATION (viscous terms)
-        if (use_parabolic_flux && mu > small && dx > small)
+        Flux parabolic_flux;
+
+        // Calculate velocity gradients at the interface
+        Set::Scalar du_dx = (u_R - u_L) / (dx + small);
+        Set::Scalar dv_dx = (v_R - v_L) / (dx + small);
+
+        // Calculate divergence of velocity (approximate)
+        Set::Scalar div_u = du_dx; // In 1D, this is just du/dx
+
+        // Calculate viscous stress components
+        Set::Scalar tau_xx = 2.0 * mu * (du_dx - div_u / 3.0);
+        Set::Scalar tau_xy = mu * dv_dx;
+
+        // No mass flux from viscous terms
+        parabolic_flux.mass = 0.0;
+
+        // Momentum flux from viscous stresses
+        parabolic_flux.momentum_normal = -tau_xx; // Negative because stress opposes gradient
+        parabolic_flux.momentum_tangent = -tau_xy;
+
+        // Energy flux from viscous work and heat conduction
+        // Work done by viscous forces: tau_ij * u_i
+        Set::Scalar viscous_work = tau_xx * u_interface + tau_xy * v_interface;
+
+        // Heat conduction (simplified, using temperature gradient approximation)
+        //Set::Scalar k_thermal = mu * gamma / (gamma - 1.0 + small); // Thermal conductivity (Prandtl number = 1)
+        //Set::Scalar T_L = p_L / (rho_L * (gamma - 1.0) + small);
+        //Set::Scalar T_R = p_R / (rho_R * (gamma - 1.0) + small);
+        Set::Scalar dT_dx = (T_R - T_L) / (dx + small);
+        Set::Scalar heat_flux = -k_thermal * dT_dx;
+
+        parabolic_flux.energy = -viscous_work + heat_flux;
+
+        // Apply implicitness parameter (theta-scheme)
+        // For theta=0: fully explicit, theta=1: fully implicit, theta=0.5: Crank-Nicolson
+        if (dt > small)
         {
-            Flux parabolic_flux;
-
-            // Calculate velocity gradients at the interface
-            Set::Scalar du_dx = (u_R - u_L) / dx;
-            Set::Scalar dv_dx = (v_R - v_L) / dx;
-
-            // Calculate divergence of velocity (approximate)
-            Set::Scalar div_u = du_dx; // In 1D, this is just du/dx
-
-            // Calculate viscous stress components
-            Set::Scalar tau_xx = 2.0 * mu * (du_dx - div_u / 3.0);
-            Set::Scalar tau_xy = mu * dv_dx;
-
-            // No mass flux from viscous terms
-            parabolic_flux.mass = 0.0;
-
-            // Momentum flux from viscous stresses
-            parabolic_flux.momentum_normal = -tau_xx; // Negative because stress opposes gradient
-            parabolic_flux.momentum_tangent = -tau_xy;
-
-            // Energy flux from viscous work and heat conduction
-            // Work done by viscous forces: tau_ij * u_i
-            Set::Scalar viscous_work = tau_xx * u_interface + tau_xy * v_interface;
-
-            // Heat conduction (simplified, using temperature gradient approximation)
-            Set::Scalar k_thermal = mu * gamma / (gamma - 1.0); // Thermal conductivity (Prandtl number = 1)
-            Set::Scalar T_L = p_L / (rho_L * (gamma - 1.0) + small);
-            Set::Scalar T_R = p_R / (rho_R * (gamma - 1.0) + small);
-            Set::Scalar dT_dx = (T_R - T_L) / dx;
-            Set::Scalar heat_flux = -k_thermal * dT_dx;
-
-            parabolic_flux.energy = -viscous_work + heat_flux;
-
-            // Apply implicitness parameter (theta-scheme)
-            // For theta=0: fully explicit, theta=1: fully implicit, theta=0.5: Crank-Nicolson
-            if (dt > small)
-            {
-                // Scale parabolic flux by theta for implicit treatment
-                parabolic_flux.momentum_normal *= theta;
-                parabolic_flux.momentum_tangent *= theta;
-                parabolic_flux.energy *= theta;
-            }
-
-            // Add parabolic flux to total flux
-            total_flux.mass += parabolic_flux.mass;
-            total_flux.momentum_normal += parabolic_flux.momentum_normal;
-            total_flux.momentum_tangent += parabolic_flux.momentum_tangent;
-            total_flux.energy += parabolic_flux.energy;
+            // Scale parabolic flux by theta for implicit treatment
+            parabolic_flux.momentum_normal *= theta;
+            parabolic_flux.momentum_tangent *= theta;
+            parabolic_flux.energy *= theta;
         }
 
-        // PART III: SURFACE TENSION CONTRIBUTION (if needed)
-        // This would be added here if surface tension is included in the flux calculation
-        // For now, we assume surface tension is handled separately as a source term
+        // Add parabolic flux to total flux
+        total_flux.mass += parabolic_flux.mass;
+        total_flux.momentum_normal += parabolic_flux.momentum_normal;
+        total_flux.momentum_tangent += parabolic_flux.momentum_tangent;
+        total_flux.energy += parabolic_flux.energy;
 
+        // /////////////////////////////////////////////////////
         // ERROR CHECKING
         if ((total_flux.mass != total_flux.mass) || (total_flux.momentum_normal != total_flux.momentum_normal) || (total_flux.momentum_tangent != total_flux.momentum_tangent) || (total_flux.energy != total_flux.energy))
         {

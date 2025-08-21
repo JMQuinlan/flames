@@ -712,6 +712,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> q = q_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> _u0 = u0_mf.Patch(lev, mfi);
 
+        Set::Patch<Set::Scalar> T = T_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
@@ -802,6 +803,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Vector Ldot0 = Set::Vector::Zero();
             Set::Vector div_tau = Set::Vector::Zero();
             Set::Scalar div_u = gradu(0, 0) + gradu(1, 1); // Divergence of velocity
+
+            // Calculate effective specific heat ratio
+            Set::Scalar gamma_eff = gammaf(i, j, k);
 
             // Calculate effective viscosities
             Set::Scalar mu_eff = eta(i, j, k) * mu0 + (1.0 - eta(i, j, k)) * mu1;       // Effective dynamic viscosity
@@ -1066,13 +1070,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             std::vector<Solver::Local::Riemann::State> y_states(3);
 
             // Fill the arrays with cell states
-            x_states[0] = Solver::Local::Riemann::State(rho, M, E, i - 1, j, k, X);  // x_lo
-            x_states[1] = Solver::Local::Riemann::State(rho, M, E, i, j, k, X);      // x
-            x_states[2] = Solver::Local::Riemann::State(rho, M, E, i + 1, j, k, X);  // x_hi
+            x_states[0] = Solver::Local::Riemann::State(rho, M, E, T, i - 1, j, k, X);  // x_lo
+            x_states[1] = Solver::Local::Riemann::State(rho, M, E, T, i, j, k, X);     // x
+            x_states[2] = Solver::Local::Riemann::State(rho, M, E, T, i + 1, j, k, X);  // x_hi
 
-            y_states[0] = Solver::Local::Riemann::State(rho, M, E, i, j - 1, k, Y); // y_lo
-            y_states[1] = Solver::Local::Riemann::State(rho, M, E, i, j, k, Y);     // y
-            y_states[2] = Solver::Local::Riemann::State(rho, M, E, i, j + 1, k, Y); // y_hi
+            y_states[0] = Solver::Local::Riemann::State(rho, M, E, T, i, j - 1, k, Y); // y_lo
+            y_states[1] = Solver::Local::Riemann::State(rho, M, E, T, i, j, k, Y);     // y
+            y_states[2] = Solver::Local::Riemann::State(rho, M, E, T, i, j + 1, k, Y); // y_hi
 
             // Variables to store reconstructed states at interfaces
             std::vector<Solver::Local::Riemann::State> x_leftStates(3), x_rightStates(3);
@@ -1107,13 +1111,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 // Minmod limiter
                 limiter_minmod->reconstructCharacteristicStates(x_states, x_leftStates, x_rightStates, gammaf(i ,j, k), pref, small, p0_eff);
-                limiter_minmod->reconstructCharacteristicStates(y_states, y_leftStates, y_rightStates, gammaf(i, j, k), pref, small, p0_eff);
+                limiter_minmod->reconstructCharacteristicStates(y_states, y_leftStates, y_rightStates, gamma_eff, pref, small, p0_eff);
             }
             else if (Limiter == 2)
             {
                 // Van Leer limiter
-                limiter_vanleer->reconstructCharacteristicStates(x_states, x_leftStates, x_rightStates, gammaf(i, j, k), pref, small, p0_eff);
-                limiter_vanleer->reconstructCharacteristicStates(y_states, y_leftStates, y_rightStates, gammaf(i, j, k), pref, small, p0_eff);
+                limiter_vanleer->reconstructCharacteristicStates(x_states, x_leftStates, x_rightStates, gamma_eff, pref, small, p0_eff);
+                limiter_vanleer->reconstructCharacteristicStates(y_states, y_leftStates, y_rightStates, gamma_eff, pref, small, p0_eff);
             }
 
             // Calculate fluxes using the mixed fluid approach
@@ -1124,50 +1128,53 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 if (Riemann_Solver == 0)
                 {
                     // Calculate fluxes for the mixed fluid using ROE
-                    flux_xlo = roesolver->Solve(x_leftStates[1], x_rightStates[1], gammaf(i, j, k), pref, small, p0_eff);
-                    flux_ylo = roesolver->Solve(y_leftStates[1], y_rightStates[1], gammaf(i, j, k), pref, small, p0_eff);
-                    flux_xhi = roesolver->Solve(x_leftStates[2], x_rightStates[2], gammaf(i, j, k), pref, small, p0_eff);
-                    flux_yhi = roesolver->Solve(y_leftStates[2], y_rightStates[2], gammaf(i, j, k), pref, small, p0_eff);
+                    flux_xlo = roesolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff);
+                    flux_ylo = roesolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff);
+                    flux_xhi = roesolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff);
+                    flux_yhi = roesolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff);
                 }
                 else if (Riemann_Solver == 1)
                 {
                     // Calculate fluxes for the mixed fluid using HLLC
-                    flux_xlo = hllcsolver->Solve(x_leftStates[1], x_rightStates[1], gammaf(i, j, k), pref, small, p0_eff);
-                    flux_ylo = hllcsolver->Solve(y_leftStates[1], y_rightStates[1], gammaf(i, j, k), pref, small, p0_eff);
-                    flux_xhi = hllcsolver->Solve(x_leftStates[2], x_rightStates[2], gammaf(i, j, k), pref, small, p0_eff);
-                    flux_yhi = hllcsolver->Solve(y_leftStates[2], y_rightStates[2], gammaf(i, j, k), pref, small, p0_eff);
+                    flux_xlo = hllcsolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff);
+                    flux_ylo = hllcsolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff);
+                    flux_xhi = hllcsolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff);
+                    flux_yhi = hllcsolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff);
                 }
                 else if (Riemann_Solver == 2)
                 {
                     // Calculate fluxes for the mixed fluid using HLLE
-                    flux_xlo = hllesolver->Solve(x_leftStates[1], x_rightStates[1], gammaf(i, j, k), pref, small, p0_eff);
-                    flux_ylo = hllesolver->Solve(y_leftStates[1], y_rightStates[1], gammaf(i, j, k), pref, small, p0_eff);
-                    flux_xhi = hllesolver->Solve(x_leftStates[2], x_rightStates[2], gammaf(i, j, k), pref, small, p0_eff);
-                    flux_yhi = hllesolver->Solve(y_leftStates[2], y_rightStates[2], gammaf(i, j, k), pref, small, p0_eff);
+                    flux_xlo = hllesolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff);
+                    flux_ylo = hllesolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff);
+                    flux_xhi = hllesolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff);
+                    flux_yhi = hllesolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff);
                 }
                 else if (Riemann_Solver == 3)
                 {
                     // Calculate fluxes for the mixed fluid using HLLCE
-                    flux_xlo = hllcesolver->Solve(x_leftStates[1], x_rightStates[1], gammaf(i, j, k), pref, small, p0_eff);
-                    flux_ylo = hllcesolver->Solve(y_leftStates[1], y_rightStates[1], gammaf(i, j, k), pref, small, p0_eff);
-                    flux_xhi = hllcesolver->Solve(x_leftStates[2], x_rightStates[2], gammaf(i, j, k), pref, small, p0_eff);
-                    flux_yhi = hllcesolver->Solve(y_leftStates[2], y_rightStates[2], gammaf(i, j, k), pref, small, p0_eff);
+                    flux_xlo = hllcesolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff);
+                    flux_ylo = hllcesolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff);
+                    flux_xhi = hllcesolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff);
+                    flux_yhi = hllcesolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff);
                 }
                 else if (Riemann_Solver == 35)
                 {
                     // Calculate fluxes for the mixed fluid using HLLC_WENO5
-                    flux_xlo = hllc_weno5solver->Solve(x_leftStates[1], x_rightStates[1], gammaf(i, j, k), pref, small, p0_eff);
-                    flux_ylo = hllc_weno5solver->Solve(y_leftStates[1], y_rightStates[1], gammaf(i, j, k), pref, small, p0_eff);
-                    flux_xhi = hllc_weno5solver->Solve(x_leftStates[2], x_rightStates[2], gammaf(i, j, k), pref, small, p0_eff);
-                    flux_yhi = hllc_weno5solver->Solve(y_leftStates[2], y_rightStates[2], gammaf(i, j, k), pref, small, p0_eff);
+                    flux_xlo = hllc_weno5solver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff);
+                    flux_ylo = hllc_weno5solver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff);
+                    flux_xhi = hllc_weno5solver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff);
+                    flux_yhi = hllc_weno5solver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff);
                 }
                 else if (Riemann_Solver == 36)
                 {
                     // Calculate fluxes for the mixed fluid using PPM
-                    flux_xlo = partiallyparabolicsolver->Solve(x_leftStates[1], x_rightStates[1], gammaf(i, j, k), pref, small, p0_eff, mu_eff);
-                    flux_ylo = partiallyparabolicsolver->Solve(y_leftStates[1], y_rightStates[1], gammaf(i, j, k), pref, small, p0_eff, mu_eff);
-                    flux_xhi = partiallyparabolicsolver->Solve(x_leftStates[2], x_rightStates[2], gammaf(i, j, k), pref, small, p0_eff, mu_eff);
-                    flux_yhi = partiallyparabolicsolver->Solve(y_leftStates[2], y_rightStates[2], gammaf(i, j, k), pref, small, p0_eff, mu_eff);
+                    flux_xlo = partiallyparabolicsolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff, mu_eff, k_thermal(i, j, k), dt, DX[0]);
+                    flux_ylo = partiallyparabolicsolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff, mu_eff, k_thermal(i, j, k), dt, DX[1]);
+                    flux_xhi = partiallyparabolicsolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff, mu_eff, k_thermal(i, j, k), dt, DX[0]);
+                    flux_yhi = partiallyparabolicsolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff, mu_eff, k_thermal(i, j, k), dt, DX[1]);
+
+                    //Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0, Set::Scalar mu = 0.0, Set::Scalar k_thermal = 0.0, Set:Scalar dt = 0.0, Set::Scalar dx = 0.0)
+
                 }
             }
             catch (...)
