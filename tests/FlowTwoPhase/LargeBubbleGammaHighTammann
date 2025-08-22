@@ -14,7 +14,7 @@ plot_file = tests/LargeBubbleRPE_2_Bar.GammaHigh
 
 
 ### MESHING ###
-amr.plot_dt = 1e-6
+amr.plot_dt = 1e-5
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 2
@@ -54,7 +54,7 @@ epsilon = eta.ic.expression.constant.epsilon
 
 
 ### HYDRO INITIAL CONDITIONS ###
-gamma0 = 1.63  # 1.63 # 7.15 
+gamma0 = 7.15  # 1.63 # 7.15 
 gamma1 = 1.4
 
 p0_0 = 0.3*10**5 #0.3*10**5 # 0.3*10**9
@@ -177,7 +177,7 @@ grav = 9.81
 
 ### DEBUGGING ### 
 # Used for testing of the model
-Riemann_Solver = 36 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+Riemann_Solver = 2 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
 kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
 scheme = 0		   # Valid Entries: 0:"Forward Euler" / 1:"SSPRK3" / 2:"RK4"
 Limiter = 0        # Valid Entries: 0:"None" / 1:"MinMod" / 2:"Van Leer"

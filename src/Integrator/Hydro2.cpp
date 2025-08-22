@@ -78,6 +78,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("apply_surface_tension", value.apply_surface_tension, true); // Apply surface tension when solving, default: true --> "Apply Surface Tension"
         pp_query_default("apply_buoyancy", value.apply_buoyancy, false);              // Apply buoyancy when solving, default: false --> "No Buoyancy"
         pp_query_default("apply_weight", value.apply_weight, false);                  // Apply weight when solving, default: false --> "No Weight"
+        pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
         // NEW SOLVER FORBIDS
         pp_forbid("gamma", "--> gamma0 and gamma1");
@@ -457,8 +458,8 @@ void Hydro2::Mix(int lev)
             M_old(i, j, k, 1) = M(i, j, k, 1);
 
             //  TODO: Get rid of thermally perfect assumption. Involve temperature
-            E(i, j, k) = (0.5 * ((v0(i, j, k, 0) * v0(i, j, k, 0)) + (v0(i, j, k, 1) * v0(i, j, k, 1))) * rho0(i, j, k) + p0(i, j, k) / (gamma0 - 1.0)) * eta(i, j, k)
-                       + (0.5 * ((v1(i, j, k, 0) * v1(i, j, k, 0)) + (v1(i, j, k, 1) * v1(i, j, k, 1))) * rho1(i, j, k) + p1(i, j, k) / (gamma1 - 1.0)) * (1.0 - eta(i, j, k));
+            E(i, j, k) = (0.5 * ((v0(i, j, k, 0) * v0(i, j, k, 0)) + (v0(i, j, k, 1) * v0(i, j, k, 1))) * rho0(i, j, k) + (p0(i, j, k) + p0_0) / ((gamma0 - 1.0) * rho0(i, j, k)) + small) * eta(i, j, k)
+                       + (0.5 * ((v1(i, j, k, 0) * v1(i, j, k, 0)) + (v1(i, j, k, 1) * v1(i, j, k, 1))) * rho1(i, j, k) + (p1(i, j, k) + p0_1) / ((gamma1 - 1.0) * rho0(i, j, k)) + small) * (1.0 - eta(i, j, k)); 
             E_old(i, j, k) = E(i, j, k);
 
 
@@ -669,7 +670,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             v(i, j, k, 1) = M(i, j, k, 1) / (rho(i, j, k) + small);
 
             // Pressure
-            press(i, j, k) = (E(i, j, k) - (0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small))) * (gammaf(i, j, k) - 1.0) - pref; // NEEDS Verification
+            ///press(i, j, k) = (E(i, j, k) - (0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small))) * (gammaf(i, j, k) - 1.0) - pref; // NEEDS Verification
+            Set::Scalar p0_eff = p0_0 * eta(i, j, k) * p0_1 * (1.0 - eta(i,j,k));
+            press(i, j, k) = rho(i,j,k) * (gammaf(i,j,k)-1.0) * (E(i,j,k) - 0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small)) - pref - p0_eff; // NEEDS Verification
 
             // DEBUG Tool
             if (press(i, j, k) > 1E1000)
@@ -1226,15 +1229,23 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Set::Matrix gradu = (gradM - u * gradrho.transpose()) / rho(i, j, k);
 
             // Set::Scalar deta_dt = -; //https://www.sciencedirect.com/science/article/pii/S002199912100005X
-            eta_new(i, j, k) = eta(i, j, k) + deta_dt * dt;
-            if (eta_new(i, j, k) <= cutoff)
+            if (static_eta)
             {
-                eta_new(i, j, k) = 0.0;
+                eta_new(i, j, k) = eta(i, j, k);
             }
-            else if (eta_new(i, j, k) >= (1.0 - cutoff))
+            else
             {
-                eta_new(i, j, k) = 1.0;
+                eta_new(i, j, k) = eta(i, j, k) + deta_dt * dt;
+                if (eta_new(i, j, k) <= cutoff)
+                {
+                    eta_new(i, j, k) = 0.0;
+                }
+                else if (eta_new(i, j, k) >= (1.0 - cutoff))
+                {
+                    eta_new(i, j, k) = 1.0;
+                }
             }
+            
 
             // ERROR CHECKING
             if ((rho_new(i, j, k) != rho_new(i, j, k))

@@ -7,7 +7,7 @@
 //#include <cmath>
 //#include <vector>
 
-/// Limiters for slope reconstruction
+/// Limiters for slope reconstruction 
 namespace Solver
 {
 /// Local solvers

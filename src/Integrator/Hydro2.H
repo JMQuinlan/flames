@@ -271,6 +271,7 @@ private:
     int apply_surface_tension = 1;
     int apply_buoyancy = 0;
     int apply_weight = 0;
+    int static_eta = 0;
     
     int Riemann_Solver = 0;
     int kappa_method = 2;
