@@ -459,7 +459,7 @@ void Hydro2::Mix(int lev)
 
             //  TODO: Get rid of thermally perfect assumption. Involve temperature
             E(i, j, k) = (0.5 * ((v0(i, j, k, 0) * v0(i, j, k, 0)) + (v0(i, j, k, 1) * v0(i, j, k, 1))) * rho0(i, j, k) + (p0(i, j, k) + p0_0) / ((gamma0 - 1.0) * rho0(i, j, k)) + small) * eta(i, j, k)
-                       + (0.5 * ((v1(i, j, k, 0) * v1(i, j, k, 0)) + (v1(i, j, k, 1) * v1(i, j, k, 1))) * rho1(i, j, k) + (p1(i, j, k) + p0_1) / ((gamma1 - 1.0) * rho0(i, j, k)) + small) * (1.0 - eta(i, j, k)); 
+                       + (0.5 * ((v1(i, j, k, 0) * v1(i, j, k, 0)) + (v1(i, j, k, 1) * v1(i, j, k, 1))) * rho1(i, j, k) + (p1(i, j, k) + p0_1) / ((gamma1 - 1.0) * rho1(i, j, k)) + small) * (1.0 - eta(i, j, k)); 
             E_old(i, j, k) = E(i, j, k);
 
 
