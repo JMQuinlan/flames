@@ -6,15 +6,11 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHighTammann2
-#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHigh_SmallEta_HLLETamman
-plot_file = tests/LargeBubbleRPE_2_Bar.GammaHigh
-#plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
-
-
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE.SAME
+plot_file = tests/LargeBubbleRPE_2_Bar.GammaHigh.SAME
 
 ### MESHING ###
-amr.plot_dt = 1e-6
+amr.plot_dt = 1e-9
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 2
@@ -54,23 +50,23 @@ epsilon = eta.ic.expression.constant.epsilon
 
 
 ### HYDRO INITIAL CONDITIONS ###
-gamma0 = 1.4
+gamma0 = 5.0
 gamma1 = 1.4
 
-p0_0 = 0
-p0_1 = 0
+p0_0 = 0.0
+p0_1 = 0.0
 
-mu0   = 10
-mu1   = 0.000018 
+mu0   = 0.0
+mu1   = 0 .0
 
-mu0_b   = 0.001
-mu1_b   = 0
+mu0_b   = 0.0
+mu1_b   = 0.0
 
 density0.ic.type = expression
-density0.ic.expression.region0 = "997.0"
+density0.ic.expression.region0 = "100.0"
 
 density1.ic.type = expression
-density1.ic.expression.region0 = "997.0"
+density1.ic.expression.region0 = "10.0"
 
 velocity0.ic.type = expression
 velocity0.ic.expression.region0 = "0.0"
@@ -177,7 +173,7 @@ grav = 9.81
 
 ### DEBUGGING ### 
 # Used for testing of the model
-Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+Riemann_Solver = 2 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
 kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
 scheme = 0		   # Valid Entries: 0:"Forward Euler" / 1:"SSPRK3" / 2:"RK4"
 Limiter = 0        # Valid Entries: 0:"None" / 1:"MinMod" / 2:"Van Leer"

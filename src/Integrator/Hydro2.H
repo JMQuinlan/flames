@@ -205,6 +205,10 @@ private:
     Set::Field<Set::Scalar> grad_eta_mf;
     Set::Field<Set::Scalar> kappas_mf;
 
+    Set::Field<Set::Scalar> rho_flux_mf;
+    Set::Field<Set::Scalar> M_flux_mf;
+    Set::Field<Set::Scalar> E_flux_mf;
+
     BC::BC<Set::Scalar>* density_bc = nullptr;
     BC::BC<Set::Scalar>* momentum_bc = nullptr;
     BC::BC<Set::Scalar>* energy_bc = nullptr;

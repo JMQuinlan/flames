@@ -73,13 +73,13 @@ public:
         Set::Scalar ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
         Set::Scalar ue_L = E_L - ke_L;                                          // IE per unit volume
         Set::Scalar p_L = (gamma - 1.0) * ue_L - gamma * (p_0 + p_ref);         // pressure Tammann EOS modification
-        p_L = std::max(0.0+small, p_L);
+        //p_L = std::max(0.0+small, p_L);
 
         //Set::Scalar ke_R = 0.5 * (Mn_R * Mn_R /*+ Mt_R * Mt_R*/) / (rho_R + small);
         Set::Scalar ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
         Set::Scalar ue_R = E_R - ke_R;
         Set::Scalar p_R = (gamma - 1.0) * ue_R - gamma * (p_0 + p_ref);
-        p_R = std::max(0.0+small, p_R);
+        //p_R = std::max(0.0+small, p_R);
 
         Set::Scalar u_L = Mn_L / (rho_L + small), u_R = Mn_R / (rho_R + small);
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
@@ -91,11 +91,12 @@ public:
         // STEP 3: Compute Roe-averaged quantities for wave speed estimates
         Set::Scalar rho_RL = std::sqrt(rho_L * rho_R);
         Set::Scalar u_RL = (std::sqrt(rho_L) * u_L + std::sqrt(rho_R) * u_R) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
+        Set::Scalar v_RL = (std::sqrt(rho_L) * v_L + std::sqrt(rho_R) * v_R) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
         Set::Scalar h_TL = (E_L + p_L) / (rho_L + small);
         Set::Scalar h_TR = (E_R + p_R) / (rho_R + small);
         Set::Scalar h_RL = (std::sqrt(rho_L) * h_TL + std::sqrt(rho_R) * h_TR) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
-        Set::Scalar a_RL_sq = std::max(0.0, (gamma - 1.0) * (h_RL - 0.5 * u_RL * u_RL) + (gamma * p_ref / (std::sqrt(rho_L) + std::sqrt(rho_R) + small)));
-        Set::Scalar a_RL = std::sqrt(a_RL_sq) + small;
+        Set::Scalar a_RL_sq = std::max(0.0, (gamma - 1.0) * (h_RL - 0.5 * (u_RL * u_RL + v_RL * v_RL)) + (gamma * p_ref / (std::sqrt(rho_L) + std::sqrt(rho_R) + small)));
+        Set::Scalar a_RL = std::sqrt(a_RL_sq);
 
         // STEP 4: Compute wave speed estimates (Einfeldt estimates)
         Set::Scalar S_L = std::min(u_L - a_L, u_RL - a_RL);

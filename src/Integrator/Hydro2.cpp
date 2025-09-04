@@ -209,6 +209,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // EXTRAS & DEBUGGING
         value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", true, { "x", "y" });
         value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, nghost, "kappa", true, { "Avg", "1", "2" }); // To Surface curvature
+        value.RegisterNewFab(value.rho_flux_mf,     &value.bc_nothing, 1, nghost, "rho_flux", true);                    // Density Flux
+        value.RegisterNewFab(value.M_flux_mf,       &value.bc_nothing, 2, nghost, "M_flux", true, { "x", "y" });        // Momentum Flux
+        value.RegisterNewFab(value.E_flux_mf,       &value.bc_nothing, 1, nghost, "E_flux", true);                      // Energy Fkux
     }
 
     // NEW SOLVER FORBIDS
@@ -457,9 +460,31 @@ void Hydro2::Mix(int lev)
             M_old(i, j, k, 0) = M(i, j, k, 0);
             M_old(i, j, k, 1) = M(i, j, k, 1);
 
+            // Kinetic Energy
+            KE(i, j, k) = (0.5 * ((v0(i, j, k, 0) * v0(i, j, k, 0)) + (v0(i, j, k, 1) * v0(i, j, k, 1))) * rho0(i, j, k)) * eta(i, j, k)
+                        + (0.5 * ((v1(i, j, k, 0) * v1(i, j, k, 0)) + (v1(i, j, k, 1) * v1(i, j, k, 1))) * rho1(i, j, k)) * (1.0 - eta(i, j, k));
+
+            // Internal Energy
+            //Set::Scalar gamma = gamma0 * eta(i, j, k) + gamma1 * (1.0 - eta(i, j, k));
+            //Set::Scalar gammasub1 = (gamma0 - 1.0) * eta(i, j, k) + (gamma1 - 1.0) * (1.0 - eta(i, j, k));
+            //Set::Scalar gamma = (gamma0 - 1.0) * eta(i, j, k) + (gamma1 - 1.0) * (1.0 - eta(i, j, k)) + 1.0; // 2018
+            //Set::Scalar gamma = 1.0 / ( eta(i, j, k) / gamma0 + (1.0 - eta(i, j, k))/ gamma1 );
+            //Set::Scalar gamma = gamma0 * std::sqrt(eta(i, j, k)) + gamma1 * std::sqrt((1.0 - eta(i, j, k)));
+            Set::Scalar invgammasub1 = eta(i, j, k) * 1.0 / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) * 1.0 / (gamma1 - 1.0); //gammaf(i, j, k);
+            Set::Scalar gamma = (1.0 / invgammasub1) + 1.0; 
+            //Set::Scalar invgamma = eta(i, j, k) * 1.0 / (gamma0) + (1.0 - eta(i, j, k)) * 1.0 / (gamma1);
+            //Set::Scalar gamma = (1.0 / invgamma);
+            //UE(i, j, k) = ((p0(i, j, k) + gamma0 * p0_0) / ((gamma0 - 1.0))) * eta(i, j, k) + ((p1(i, j, k) + gamma1 * p0_1) / ((gamma1 - 1.0))) * (1.0 - eta(i, j, k));
+            //UE(i, j, k) = ((p0(i, j, k) + gamma0 * p0_0) / (gammasub1)) * eta(i, j, k) + ((p1(i, j, k) + gamma1 * p0_1) / (gammasub1)) * (1.0 - eta(i, j, k));
+            UE(i, j, k) = ((p0(i, j, k) + gamma * p0_0) / ((gamma - 1.0))) * eta(i, j, k) + ((p1(i, j, k) + gamma * p0_1) / ((gamma - 1.0))) * (1.0 - eta(i, j, k));
+            //UE(i, j, k) = ((p0(i, j, k) + gamma * p0_0) / ((gamma - 1.0))) * std::sqrt(eta(i, j, k) * eta(i, j, k) * eta(i, j, k)) + ((p1(i, j, k) + gamma * p0_1) / ((gamma - 1.0))) * std::sqrt((1.0 - eta(i, j, k))*(1.0 - eta(i, j, k))*(1.0 - eta(i, j, k)));
+            //UE(i, j, k) = 1.0 / (eta(i, j, k) / ((p0(i, j, k) + gamma * p0_0) / ((gamma - 1.0))) + (1.0 - eta(i, j, k)) / ((p1(i, j, k) + gamma * p0_1) / ((gamma - 1.0))));
+
             //  TODO: Get rid of thermally perfect assumption. Involve temperature
-            E(i, j, k) = (0.5 * ((v0(i, j, k, 0) * v0(i, j, k, 0)) + (v0(i, j, k, 1) * v0(i, j, k, 1))) * rho0(i, j, k) + (p0(i, j, k) + p0_0) / ((gamma0 - 1.0) * rho0(i, j, k)) + small) * eta(i, j, k)
-                       + (0.5 * ((v1(i, j, k, 0) * v1(i, j, k, 0)) + (v1(i, j, k, 1) * v1(i, j, k, 1))) * rho1(i, j, k) + (p1(i, j, k) + p0_1) / ((gamma1 - 1.0) * rho1(i, j, k)) + small) * (1.0 - eta(i, j, k)); 
+            //E(i, j, k) = (0.5 * ((v0(i, j, k, 0) * v0(i, j, k, 0)) + (v0(i, j, k, 1) * v0(i, j, k, 1))) * rho0(i, j, k) + (p0(i, j, k) + gamma0 * p0_0) / ((gamma0 - 1.0))) * eta(i, j, 
+            // k)
+            //           + (0.5 * ((v1(i, j, k, 0) * v1(i, j, k, 0)) + (v1(i, j, k, 1) * v1(i, j, k, 1))) * rho1(i, j, k) + (p1(i, j, k) + gamma1 * p0_1) / ((gamma1 - 1.0))) * (1.0 - eta(i, j, k)); 
+            E(i, j, k) = KE(i, j, k) + UE(i, j, k);
             E_old(i, j, k) = E(i, j, k);
 
 
@@ -498,13 +523,7 @@ void Hydro2::Mix(int lev)
             Ma(i, j, k, 0) = v(i, j, k, 0) / a(i, j, k);
             Ma(i, j, k, 1) = v(i, j, k, 1) / a(i, j, k);
 
-            // Kinetic Energy
-            KE(i, j, k) = (0.5 * ((v0(i, j, k, 0) * v0(i, j, k, 0)) + (v0(i, j, k, 1) * v0(i, j, k, 1))) * rho0(i, j, k)) * eta(i, j, k)
-                          + (0.5 * ((v1(i, j, k, 0) * v1(i, j, k, 0)) + (v1(i, j, k, 1) * v1(i, j, k, 1))) * rho1(i, j, k)) * (1.0 - eta(i, j, k));
-
-            // Internal Energy
-            //UE(i, j, k) = E(i, j, k) - KE(i, j, k);
-            UE(i, j, k) = ((p0(i, j, k) / (gamma0 - 1.0)) * eta(i, j, k)) + ((p1(i, j, k) / (gamma1 - 1.0)) * (1.0 - eta(i, j, k)));
+            
 
         });
     }
@@ -672,7 +691,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Pressure
             ///press(i, j, k) = (E(i, j, k) - (0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small))) * (gammaf(i, j, k) - 1.0) - pref; // NEEDS Verification
             Set::Scalar p0_eff = p0_0 * eta(i, j, k) * p0_1 * (1.0 - eta(i,j,k));
-            press(i, j, k) = rho(i,j,k) * (gammaf(i,j,k)-1.0) * (E(i,j,k) - 0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small)) - pref - p0_eff; // NEEDS Verification
+            //press(i, j, k) = rho(i,j,k) * (gammaf(i,j,k)-1.0) * (E(i,j,k) - 0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small)) - pref - p0_eff; // NEEDS Verification
+            press(i, j, k) = (gammaf(i, j, k) - 1.0) * (E(i, j, k) - (0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small))) - pref - p0_eff; // NEEDS Verification
 
             // DEBUG Tool
             if (press(i, j, k) > 1E1000)
@@ -733,6 +753,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> grad_eta_ = grad_eta_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> hess_eta_ = hess_eta_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> n_hat_ = n_hat_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> rho_flux = rho_flux_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> M_flux = M_flux_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> E_flux = E_flux_mf.Patch(lev, mfi);
 
         Set::Scalar *dt_max_handle = &dt_max;
 
@@ -808,7 +831,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar div_u = gradu(0, 0) + gradu(1, 1); // Divergence of velocity
 
             // Calculate effective specific heat ratio
-            Set::Scalar gamma_eff = gammaf(i, j, k);
+            //Set::Scalar gamma_eff = eta(i, j, k) * gamma0 + (1.0 - eta(i, j, k)) * gamma1; //gammaf(i, j, k);
+            Set::Scalar invgammasub1 = eta(i, j, k) * 1.0 / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) * 1.0 / (gamma1 - 1.0); //gammaf(i, j, k);
+            Set::Scalar gamma_eff = (1.0 / invgammasub1) + 1.0;                                                               // gammaf(i, j, k);
+            gammaf(i, j, k) = gamma_eff;
 
             // Calculate effective viscosities
             Set::Scalar mu_eff = eta(i, j, k) * mu0 + (1.0 - eta(i, j, k)) * mu1;       // Effective dynamic viscosity
@@ -1074,7 +1100,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Fill the arrays with cell states
             x_states[0] = Solver::Local::Riemann::State(rho, M, E, T, i - 1, j, k, X);  // x_lo
-            x_states[1] = Solver::Local::Riemann::State(rho, M, E, T, i, j, k, X);     // x
+            x_states[1] = Solver::Local::Riemann::State(rho, M, E, T, i, j, k, X);      // x
             x_states[2] = Solver::Local::Riemann::State(rho, M, E, T, i + 1, j, k, X);  // x_hi
 
             y_states[0] = Solver::Local::Riemann::State(rho, M, E, T, i, j - 1, k, Y); // y_lo
@@ -1091,12 +1117,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             if (Limiter == 0)
             {
                 // No limiter - use cell-centered values directly
-                /*
-                x_leftStates.resize(3);
-                x_rightStates.resize(3);
-                y_leftStates.resize(3);
-                y_rightStates.resize(3);
-                */
+                //x_leftStates.resize(3);
+                //x_rightStates.resize(3);
+                //y_leftStates.resize(3);
+                //y_rightStates.resize(3);
 
                 // For x-direction
                 x_leftStates[1] = x_states[0];  // Left state at i-1/2
@@ -1113,7 +1137,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             else if (Limiter == 1)
             {
                 // Minmod limiter
-                limiter_minmod->reconstructCharacteristicStates(x_states, x_leftStates, x_rightStates, gammaf(i ,j, k), pref, small, p0_eff);
+                limiter_minmod->reconstructCharacteristicStates(x_states, x_leftStates, x_rightStates, gamma_eff, pref, small, p0_eff);
                 limiter_minmod->reconstructCharacteristicStates(y_states, y_leftStates, y_rightStates, gamma_eff, pref, small, p0_eff);
             }
             else if (Limiter == 2)
@@ -1188,6 +1212,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::Abort(INFO);
             }
 
+
             // UPDATE MIXED FLUID VARIABLES
 
             // Update Source Terms to account for moving boundry
@@ -1196,6 +1221,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Source(i, j, k, 1) = Source(i, j, k, 1) - M(i, j, k, 0) * deta_dt;
             // Source(i, j, k, 2) = Source(i, j, k, 2) - M(i, j, k, 1) * deta_dt;
             // Source(i, j, k, 3) = Source(i, j, k, 3) - E(i, j, k) * deta_dt;
+
+            // DEBUGGING:
+            rho_flux(i, j, k) = (flux_xlo.mass - flux_xhi.mass) / (DX[0] + small) + (flux_ylo.mass - flux_yhi.mass) / (DX[1] + small);
+            M_flux(i, j, k, 0) = (flux_xlo.momentum_normal - flux_xhi.momentum_normal) / (DX[0] + small) + (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / (DX[1] + small);
+            M_flux(i, j, k, 1) = (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / (DX[0] + small) + (flux_ylo.momentum_normal - flux_yhi.momentum_normal) / (DX[1] + small);
+            E_flux(i, j, k) = (flux_xlo.energy - flux_xhi.energy) / (DX[0] + small) + (flux_ylo.energy - flux_yhi.energy) / (DX[1] + small);
 
             // Density
             Set::Scalar drho_dt = (flux_xlo.mass - flux_xhi.mass) / (DX[0] + small) + (flux_ylo.mass - flux_yhi.mass) / (DX[1] + small) + Source(i, j, k, 0);
