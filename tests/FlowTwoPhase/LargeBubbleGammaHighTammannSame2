@@ -76,9 +76,10 @@ velocity1.ic.type = expression
 velocity1.ic.expression.region0 = "0.0"
 velocity1.ic.expression.region1 = "0.0"
 
+# Pressure initialization - adjusted for thermodynamic equilibrium
+# Inner fluid (gamma=5.0) has higher pressure to balance the interface forces
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "1e5"
-
+pressure0.ic.expression.region0 = "10e5"
 pressure1.ic.type = expression
 pressure1.ic.expression.region0 = "1e5"
 

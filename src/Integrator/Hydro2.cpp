@@ -283,6 +283,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     {
         pp.select_default<Solver::Local::Riemann::PartiallyParabolic>("solver", value.partiallyparabolicsolver);
     }
+    else if (value.Riemann_Solver == 99)
+    {
+        // DEBUG, Just a place holder
+    }
     else
     {
         Util::ParallelMessage(INFO, "-------------------------------");
@@ -295,6 +299,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         Util::ParallelMessage(INFO, "Under Testing:");
         Util::ParallelMessage(INFO, "HLLC_WENO5 : 35");
         Util::ParallelMessage(INFO, "PPM        : 36");
+        Util::ParallelMessage(INFO, "HLLE DEBUG : 99");
         Util::Exception(INFO);
     }
 
@@ -466,24 +471,14 @@ void Hydro2::Mix(int lev)
 
             // Internal Energy
             //Set::Scalar gamma = gamma0 * eta(i, j, k) + gamma1 * (1.0 - eta(i, j, k));
-            //Set::Scalar gammasub1 = (gamma0 - 1.0) * eta(i, j, k) + (gamma1 - 1.0) * (1.0 - eta(i, j, k));
             //Set::Scalar gamma = (gamma0 - 1.0) * eta(i, j, k) + (gamma1 - 1.0) * (1.0 - eta(i, j, k)) + 1.0; // 2018
-            //Set::Scalar gamma = 1.0 / ( eta(i, j, k) / gamma0 + (1.0 - eta(i, j, k))/ gamma1 );
-            //Set::Scalar gamma = gamma0 * std::sqrt(eta(i, j, k)) + gamma1 * std::sqrt((1.0 - eta(i, j, k)));
-            Set::Scalar invgammasub1 = eta(i, j, k) * 1.0 / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) * 1.0 / (gamma1 - 1.0); //gammaf(i, j, k);
-            Set::Scalar gamma = (1.0 / invgammasub1) + 1.0; 
-            //Set::Scalar invgamma = eta(i, j, k) * 1.0 / (gamma0) + (1.0 - eta(i, j, k)) * 1.0 / (gamma1);
-            //Set::Scalar gamma = (1.0 / invgamma);
-            //UE(i, j, k) = ((p0(i, j, k) + gamma0 * p0_0) / ((gamma0 - 1.0))) * eta(i, j, k) + ((p1(i, j, k) + gamma1 * p0_1) / ((gamma1 - 1.0))) * (1.0 - eta(i, j, k));
-            //UE(i, j, k) = ((p0(i, j, k) + gamma0 * p0_0) / (gammasub1)) * eta(i, j, k) + ((p1(i, j, k) + gamma1 * p0_1) / (gammasub1)) * (1.0 - eta(i, j, k));
-            UE(i, j, k) = ((p0(i, j, k) + gamma * p0_0) / ((gamma - 1.0))) * eta(i, j, k) + ((p1(i, j, k) + gamma * p0_1) / ((gamma - 1.0))) * (1.0 - eta(i, j, k));
-            //UE(i, j, k) = ((p0(i, j, k) + gamma * p0_0) / ((gamma - 1.0))) * std::sqrt(eta(i, j, k) * eta(i, j, k) * eta(i, j, k)) + ((p1(i, j, k) + gamma * p0_1) / ((gamma - 1.0))) * std::sqrt((1.0 - eta(i, j, k))*(1.0 - eta(i, j, k))*(1.0 - eta(i, j, k)));
-            //UE(i, j, k) = 1.0 / (eta(i, j, k) / ((p0(i, j, k) + gamma * p0_0) / ((gamma - 1.0))) + (1.0 - eta(i, j, k)) / ((p1(i, j, k) + gamma * p0_1) / ((gamma - 1.0))));
+            //Set::Scalar invgammasub1 = eta(i, j, k) * 1.0 / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) * 1.0 / (gamma1 - 1.0);
+            //Set::Scalar gamma = (1.0 / invgammasub1) + 1.0; 
+            
+            UE(i, j, k) = ((p0(i, j, k) + gamma0 * p0_0) / ((gamma0 - 1.0))) * eta(i, j, k) + ((p1(i, j, k) + gamma1 * p0_1) / ((gamma1 - 1.0))) * (1.0 - eta(i, j, k));
+            //UE(i, j, k) = ((p0(i, j, k) + gamma * p0_0) / ((gamma - 1.0))) * eta(i, j, k) + ((p1(i, j, k) + gamma * p0_1) / ((gamma - 1.0))) * (1.0 - eta(i, j, k));
 
             //  TODO: Get rid of thermally perfect assumption. Involve temperature
-            //E(i, j, k) = (0.5 * ((v0(i, j, k, 0) * v0(i, j, k, 0)) + (v0(i, j, k, 1) * v0(i, j, k, 1))) * rho0(i, j, k) + (p0(i, j, k) + gamma0 * p0_0) / ((gamma0 - 1.0))) * eta(i, j, 
-            // k)
-            //           + (0.5 * ((v1(i, j, k, 0) * v1(i, j, k, 0)) + (v1(i, j, k, 1) * v1(i, j, k, 1))) * rho1(i, j, k) + (p1(i, j, k) + gamma1 * p0_1) / ((gamma1 - 1.0))) * (1.0 - eta(i, j, k)); 
             E(i, j, k) = KE(i, j, k) + UE(i, j, k);
             E_old(i, j, k) = E(i, j, k);
 
@@ -517,7 +512,7 @@ void Hydro2::Mix(int lev)
 
             // Speed of Sound
             //a(i, j, k) = (std::sqrt(gamma0 * R * T0(i, j, k) / MW0) * eta(i, j, k)) + (std::sqrt(gamma1 * R * T1(i, j, k) / MW1) * (1.0 - eta(i, j, k)));
-            a(i, j, k) = (std::sqrt(gamma0 * p0(i, j, k) / (rho0(i, j, k) + small))) + (std::sqrt(gamma1 * p1(i, j, k) / (rho1(i, j, k) + small)));
+            a(i, j, k) = (std::sqrt(gamma0 * p0(i, j, k) / (rho0(i, j, k) + small))) * (eta(i, j, k)) + (std::sqrt(gamma1 * p1(i, j, k) / (rho1(i, j, k) + small))) * (1.0 - eta(i, j, k));
 
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / a(i, j, k);
@@ -613,18 +608,6 @@ Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::Multi
 void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 {
     // Swaping pointers
-    /*
-    // FLUID 0
-    std::swap(density0_old_mf[lev], density0_mf[lev]);
-    std::swap(momentum0_old_mf[lev], momentum0_mf[lev]);
-    std::swap(energy0_old_mf[lev], energy0_mf[lev]);
-
-    // FLUID 1
-    std::swap(density1_old_mf[lev], density1_mf[lev]);
-    std::swap(momentum1_old_mf[lev], momentum1_mf[lev]);
-    std::swap(energy1_old_mf[lev], energy1_mf[lev]);
-    */
-    // MIX
     std::swap(density_old_mf[lev], density_mf[lev]);
     std::swap(momentum_old_mf[lev], momentum_mf[lev]);
     std::swap(energy_old_mf[lev], energy_mf[lev]);
@@ -649,6 +632,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> E = energy_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> M = momentum_old_mf.Patch(lev, mfi);
 
+        Set::Patch<Set::Scalar> KE = KE_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> UE = UE_mf.Patch(lev, mfi);
+
         Set::Patch<Set::Scalar> v = velocity_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> press = pressure_mf.Patch(lev, mfi);
 
@@ -660,8 +646,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
         // Capture only the arrays, not the MFIter
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            // gamma_eff
-            gammaf(i, j, k) = eta(i, j, k) * gamma0 + (1.0 - eta(i, j, k)) * gamma1;
+            // gamma
+            Set::Scalar gamma_eff = 1.0 / ( eta(i, j, k) / (gamma0-1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0) ) + 1.0;
+            gammaf(i, j, k) = (eta(i, j, k)) * (gamma0) + (1.0 - eta(i, j, k)) * (gamma1);
 
             // etadot
             etadot(i, j, k) = (eta_new(i, j, k) - eta(i, j, k)) / dt;
@@ -688,11 +675,18 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             v(i, j, k, 0) = M(i, j, k, 0) / (rho(i, j, k) + small);
             v(i, j, k, 1) = M(i, j, k, 1) / (rho(i, j, k) + small);
 
+            // Kinetic Energy
+            KE(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
+
+            // Potential Energy
+            UE(i, j, k) = E(i, j, k) - KE(i, j, k);
+
             // Pressure
             ///press(i, j, k) = (E(i, j, k) - (0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small))) * (gammaf(i, j, k) - 1.0) - pref; // NEEDS Verification
             Set::Scalar p0_eff = p0_0 * eta(i, j, k) * p0_1 * (1.0 - eta(i,j,k));
             //press(i, j, k) = rho(i,j,k) * (gammaf(i,j,k)-1.0) * (E(i,j,k) - 0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small)) - pref - p0_eff; // NEEDS Verification
-            press(i, j, k) = (gammaf(i, j, k) - 1.0) * (E(i, j, k) - (0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small))) - pref - p0_eff; // NEEDS Verification
+            //press(i, j, k) = (gammaf(i, j, k) - 1.0) * (E(i, j, k) - (0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small))) - pref - p0_eff; // NEEDS Verification
+            press(i, j, k) = (gamma_eff - 1.0) * UE(i, j, k) - pref - p0_eff;
 
             // DEBUG Tool
             if (press(i, j, k) > 1E1000)
@@ -832,9 +826,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Calculate effective specific heat ratio
             //Set::Scalar gamma_eff = eta(i, j, k) * gamma0 + (1.0 - eta(i, j, k)) * gamma1; //gammaf(i, j, k);
-            Set::Scalar invgammasub1 = eta(i, j, k) * 1.0 / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) * 1.0 / (gamma1 - 1.0); //gammaf(i, j, k);
-            Set::Scalar gamma_eff = (1.0 / invgammasub1) + 1.0;                                                               // gammaf(i, j, k);
-            gammaf(i, j, k) = gamma_eff;
+            Set::Scalar gamma_eff = 1.0 / (eta(i, j, k) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0)) + 1.0;
+            Set::Scalar gamma_eff_alt = gammaf(i, j, k);
 
             // Calculate effective viscosities
             Set::Scalar mu_eff = eta(i, j, k) * mu0 + (1.0 - eta(i, j, k)) * mu1;       // Effective dynamic viscosity
@@ -869,8 +862,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             div_tau(0) = mu_eff * (hess_u(0, 0, 0) + hess_u(0, 1, 1) + (1.0 / 3.0) * grad_div_u[0]);
             div_tau(1) = mu_eff * (hess_u(1, 0, 0) + hess_u(1, 1, 1) + (1.0 / 3.0) * grad_div_u[1]);
             // Add bulk viscosity contribution
-            // div_tau(0) += mu_b_eff * grad_div_u(0);
-            // div_tau(1) += mu_b_eff * grad_div_u(1);
+            div_tau(0) += mu_b_eff * grad_div_u(0);
+            div_tau(1) += mu_b_eff * grad_div_u(1);
 
             // Surface Tension:
             // Fsv =  simga * kappa * n_hat
@@ -879,10 +872,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             if (apply_surface_tension)
             {
                 // Optimization, only calc surface tension if on interface
-                // if ((eta(i, j, k) <= cutoff / 10.0) or (eta(i, j, k) >= 1.0 - cutoff / 10.0))
-                // if (((grad_eta(0) <= cutoff / 10.0) and (grad_eta(0) >= -cutoff / 10.0))
-                // if (grad_eta_mag <= cutoff/10.0)
-                // if (grad_eta_mag <= 1.0)
                 if (grad_eta_mag <= 0.01)
                 {
                     Fsv(i, j, k, 0) = 0.0;
@@ -890,10 +879,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 }
                 else
                 {
-
                     Set::Scalar sigma_eff = sigma;
                     Set::Scalar kappa = 0.0;
-
                     if (kappa_method == 1)
                     {
                         Set::Vector grad_mag_grad_eta = Set::Vector(1 / (grad_eta_mag + small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)),
@@ -1024,29 +1011,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         Set::Scalar K_Gauss = kappa1 * kappa2; // Gauss Regularization
                         // Mean
                         Set::Scalar K_mean = (kappa1 + kappa2) / 2.0; // Mean Curvature
-                        // Set::Scalar K_mean = std::sqrt(std::abs((K23 + K_Gauss) / 2.0)); // Mean Curvature
-                        // Set::Scalar K_mean = std::sqrt(std::abs((K23 + K_Gauss) / 2.0)) * kappa1/std::abs(kappa1); // Mean Curvature
-
                         // Assign the curvature you want to use
                         kappa = kappa2; // Or use another curvature measure as needed
-
-                        // // ///////////////
-                        // // Density Scaling
-                        // Set::Scalar a = 0.49;               // Cutoff
-                        // Set::Scalar x = eta(i, j, k) - 0.5; // Eta centered at 0
-                        // Set::Scalar D = 0.0;                // Dirac Delta Value
-                        // Set::Scalar pi = 3.14159;           // Add decimals as needed
-                        // if ((-a < x) and (x < a))
-                        // {
-                        //     D = 0.5 * (1 + x / a + 1 / pi * std::sin(pi * x / a));
-                        // }
-                        // else
-                        // {
-                        //     D = 0.0;
-                        // }
-                        // kappa = D * kappa;// *DX[0]; // Smoothened Curvature
-                        // // ///////////////
-
                         // Store curvature values
                         kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
                         kappas(i, j, k, 1) = kappa1; // First principal curvature
@@ -1171,10 +1137,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 else if (Riemann_Solver == 2)
                 {
                     // Calculate fluxes for the mixed fluid using HLLE
-                    flux_xlo = hllesolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff);
-                    flux_ylo = hllesolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff);
-                    flux_xhi = hllesolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff);
-                    flux_yhi = hllesolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff);
+                    flux_xlo = hllesolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff, gamma_eff_alt);
+                    flux_ylo = hllesolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff, gamma_eff_alt);
+                    flux_xhi = hllesolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff, gamma_eff_alt);
+                    flux_yhi = hllesolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff, gamma_eff_alt);
                 }
                 else if (Riemann_Solver == 3)
                 {
@@ -1201,6 +1167,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     flux_yhi = partiallyparabolicsolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff, mu_eff, k_thermal(i, j, k), dt, DX[1]);
 
                     //Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0, Set::Scalar mu = 0.0, Set::Scalar k_thermal = 0.0, Set:Scalar dt = 0.0, Set::Scalar dx = 0.0)
+
+                }
+                else if (Riemann_Solver == 99)
+                {
+                    // Calculates fluxes using HLLE with debug tracking
 
                 }
             }

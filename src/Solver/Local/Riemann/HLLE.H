@@ -57,12 +57,17 @@ public:
         pp.query_default("verbose", value.verbose, 1);
     }
 
-    Flux Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0)
+    Flux Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0, Set::Scalar gamma_alt = 0.0)
     {
         Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
         Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
         Set::Scalar Mt_L = lo.M_tangent, Mt_R = hi.M_tangent;
         Set::Scalar E_L = lo.E, E_R = hi.E;
+
+        if (gamma_alt == 0.0)
+        {
+            gamma_alt = gamma;
+        }
 
         // Ensure no negative densities
         rho_L = std::max(0.0+small, rho_L);
@@ -85,8 +90,10 @@ public:
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
         // STEP 2: Compute sound speeds
-        Set::Scalar a_L = std::sqrt(gamma * (p_L + p_ref) / (rho_L + small));
-        Set::Scalar a_R = std::sqrt(gamma * (p_R + p_ref) / (rho_R + small));
+        //Set::Scalar a_L = std::sqrt(gamma * (p_L + p_ref) / (rho_L + small)); // MODIFIED
+        //Set::Scalar a_R = std::sqrt(gamma * (p_R + p_ref) / (rho_R + small)); // MODIFIED
+        Set::Scalar a_L = std::sqrt(gamma_alt * (p_L + p_ref) / (rho_L + small));
+        Set::Scalar a_R = std::sqrt(gamma_alt * (p_R + p_ref) / (rho_R + small));
 
         // STEP 3: Compute Roe-averaged quantities for wave speed estimates
         Set::Scalar rho_RL = std::sqrt(rho_L * rho_R);
@@ -95,7 +102,8 @@ public:
         Set::Scalar h_TL = (E_L + p_L) / (rho_L + small);
         Set::Scalar h_TR = (E_R + p_R) / (rho_R + small);
         Set::Scalar h_RL = (std::sqrt(rho_L) * h_TL + std::sqrt(rho_R) * h_TR) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
-        Set::Scalar a_RL_sq = std::max(0.0, (gamma - 1.0) * (h_RL - 0.5 * (u_RL * u_RL + v_RL * v_RL)) + (gamma * p_ref / (std::sqrt(rho_L) + std::sqrt(rho_R) + small)));
+        //Set::Scalar a_RL_sq = std::max(0.0, (gamma - 1.0) * (h_RL - 0.5 * (u_RL * u_RL + v_RL * v_RL)) + (gamma * p_ref / (std::sqrt(rho_L) + std::sqrt(rho_R) + small))); // MODIFIED
+        Set::Scalar a_RL_sq = std::max(0.0, (gamma_alt - 1.0) * (h_RL - 0.5 * (u_RL * u_RL + v_RL * v_RL)) + (gamma_alt * p_ref / (std::sqrt(rho_L) + std::sqrt(rho_R) + small)));
         Set::Scalar a_RL = std::sqrt(a_RL_sq);
 
         // STEP 4: Compute wave speed estimates (Einfeldt estimates)
