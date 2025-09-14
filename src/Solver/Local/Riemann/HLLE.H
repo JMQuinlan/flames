@@ -74,13 +74,11 @@ public:
         rho_R = std::max(0.0+small, rho_R);
 
         // STEP 1: Compute fluid primitives
-        //Set::Scalar ke_L = 0.5 * (Mn_L * Mn_L /*+ Mt_L * Mt_L*/) / (rho_L + small); // KE per unit volume
         Set::Scalar ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
         Set::Scalar ue_L = E_L - ke_L;                                          // IE per unit volume
         Set::Scalar p_L = (gamma - 1.0) * ue_L - gamma * (p_0 + p_ref);         // pressure Tammann EOS modification
         //p_L = std::max(0.0+small, p_L);
 
-        //Set::Scalar ke_R = 0.5 * (Mn_R * Mn_R /*+ Mt_R * Mt_R*/) / (rho_R + small);
         Set::Scalar ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
         Set::Scalar ue_R = E_R - ke_R;
         Set::Scalar p_R = (gamma - 1.0) * ue_R - gamma * (p_0 + p_ref);

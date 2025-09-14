@@ -209,9 +209,20 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // EXTRAS & DEBUGGING
         value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", true, { "x", "y" });
         value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, nghost, "kappa", true, { "Avg", "1", "2" }); // To Surface curvature
-        value.RegisterNewFab(value.rho_flux_mf,     &value.bc_nothing, 1, nghost, "rho_flux", true);                    // Density Flux
-        value.RegisterNewFab(value.M_flux_mf,       &value.bc_nothing, 2, nghost, "M_flux", true, { "x", "y" });        // Momentum Flux
-        value.RegisterNewFab(value.E_flux_mf,       &value.bc_nothing, 1, nghost, "E_flux", true);                      // Energy Fkux
+        value.RegisterNewFab(value.rho_flux_mf,     &value.bc_nothing,  1, nghost, "rho_flux", true);                    // Density Flux
+        value.RegisterNewFab(value.M_flux_mf,       &value.bc_nothing,  2, nghost, "M_flux", true, { "x", "y" });        // Momentum Flux
+        value.RegisterNewFab(value.E_flux_mf,       &value.bc_nothing,  1, nghost, "E_flux", true);                      // Energy Flux
+        value.RegisterNewFab(value.div_tau_mf,      &value.bc_nothing,  2, nghost, "div_tau", true, { "x", "y" });            // Energy Flux
+        value.RegisterNewFab(value.hess_u_mf,       &value.bc_nothing,  8, nghost, "hess_u", true, {
+                                                                                                     "000",
+                                                                                                     "001",
+                                                                                                     "010",
+                                                                                                     "011",
+                                                                                                     "100",
+                                                                                                     "101",
+                                                                                                     "110",
+                                                                                                     "111",
+                                                                                                    }); // hess_u Flux
     }
 
     // NEW SOLVER FORBIDS
@@ -448,7 +459,6 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar>         h_thermal   = h_thermal_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         gammaf      = gamma_mf.Patch(lev, mfi);
 
-
         // EXTRAS & DEBUGGING
         Set::Patch<Set::Scalar>         a           = a_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         Ma          = Ma_mf.Patch(lev, mfi);
@@ -552,7 +562,6 @@ void Hydro2::TimeStepComplete(Set::Scalar time, int lev)
     amrex::ParallelDescriptor::ReduceRealMax(vy_max);
 
     Set::Scalar new_timestep = cfl / ((c_max + vx_max) / (DX[0]) + (c_max + vy_max) / (DX[1]) + small);
-    //new_timestep = new_timestep * 2.0; // Temp fix till root caust is found. new_timestep is double the lowest recommended time step
 
     // DEBUGGING VERBOSE
     // Ensure dt_min is valid
@@ -632,6 +641,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> E = energy_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> M = momentum_old_mf.Patch(lev, mfi);
 
+        Set::Patch<Set::Scalar> a = a_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> Ma = Ma_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> KE = KE_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> UE = UE_mf.Patch(lev, mfi);
 
@@ -687,19 +698,39 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             //press(i, j, k) = rho(i,j,k) * (gammaf(i,j,k)-1.0) * (E(i,j,k) - 0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small)) - pref - p0_eff; // NEEDS Verification
             //press(i, j, k) = (gammaf(i, j, k) - 1.0) * (E(i, j, k) - (0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small))) - pref - p0_eff; // NEEDS Verification
             press(i, j, k) = (gamma_eff - 1.0) * UE(i, j, k) - pref - p0_eff;
+            //press(i, j, k) = std::max(0.0 + small, press(i,j,k)); // TEMP, WIP, DELETE
+
+            // Speed of sound:
+            a(i, j, k) = std::sqrt(gamma_eff * press(i, j, k) / (rho(i, j, k) + small));
+
+            // Mach Number
+            Ma(i, j, k, 0) = v(i, j, k, 0) / (a(i, j, k) + small);
+            Ma(i, j, k, 1) = v(i, j, k, 1) / (a(i, j, k) + small);
 
             // DEBUG Tool
-            if (press(i, j, k) > 1E1000)
+            if ((Ma(i, j, k, 0) != Ma(i, j, k, 0))
+                or (Ma(i, j, k, 1) != Ma(i, j, k, 1))
+                or (press(i, j, k) != press(i, j, k))
+                or (v(i, j, k) != v(i, j, k))
+                or (KE(i, j, k) != KE(i, j, k)) 
+                or (UE(i, j, k) != UE(i, j, k)) 
+                or (press(i, j, k) > 1E1000) )
             {
                 Util::ParallelMessage(INFO, "v=", v(i, j, k));
                 Util::ParallelMessage(INFO, "press=", press(i, j, k));
                 Util::ParallelMessage(INFO, "rho=", rho(i, j, k));
                 Util::ParallelMessage(INFO, "M=", M(i, j, k));
                 Util::ParallelMessage(INFO, "E=", E(i, j, k));
+                Util::ParallelMessage(INFO, "KE=", KE(i, j, k));
+                Util::ParallelMessage(INFO, "UE=", UE(i, j, k));
+                Util::ParallelMessage(INFO, "Ma=", Ma(i, j, k, 0), ', ', Ma(i, j, k, 1));
+                Util::ParallelMessage(INFO, "a=", a(i, j, k));
                 Util::ParallelMessage(INFO, "eta=", eta(i, j, k));
-                // Util::ParallelMessage(INFO, "etadot=", etadot(i, j, k));
+                Util::ParallelMessage(INFO, "etadot=", etadot(i, j, k));
                 Util::Exception(INFO);
             }
+
+            
         });
     }
 
@@ -750,6 +781,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> rho_flux = rho_flux_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> M_flux = M_flux_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> E_flux = E_flux_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
 
         Set::Scalar *dt_max_handle = &dt_max;
 
@@ -818,6 +851,15 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         hess_u(r, p, q) = (hess_M(r, p, q) - gradu(r, q) * gradrho(p) - gradu(r, p) * gradrho(q) - u(r) * hess_rho(p, q))
                                           / (rho(i, j, k) + small);
                     }
+            // WIP: Debugging feild for hess_u
+            hess_u_(i, j, k, 0) = hess_u(0, 0, 0);
+            hess_u_(i, j, k, 1) = hess_u(0, 0, 1);
+            hess_u_(i, j, k, 2) = hess_u(0, 1, 0);
+            hess_u_(i, j, k, 3) = hess_u(0, 1, 1);
+            hess_u_(i, j, k, 4) = hess_u(1, 0, 0);
+            hess_u_(i, j, k, 5) = hess_u(1, 0, 1);
+            hess_u_(i, j, k, 6) = hess_u(1, 1, 0);
+            hess_u_(i, j, k, 7) = hess_u(1, 1, 1);
 
             // Stress Tensors:
             Set::Vector Ldot0 = Set::Vector::Zero();
@@ -826,7 +868,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Calculate effective specific heat ratio
             //Set::Scalar gamma_eff = eta(i, j, k) * gamma0 + (1.0 - eta(i, j, k)) * gamma1; //gammaf(i, j, k);
-            Set::Scalar gamma_eff = 1.0 / (eta(i, j, k) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0)) + 1.0;
+            Set::Scalar gamma_eff = 1.0 / ( eta(i, j, k) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0) ) + 1.0;
             Set::Scalar gamma_eff_alt = gammaf(i, j, k);
 
             // Calculate effective viscosities
@@ -851,7 +893,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                                 Mpqrs += (1.0 / 3.0) * mu_b_eff;
 
                             Ldot0(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
-                            // div_tau(p) += 2.0 * Mpqrs * hess_u(r, s, q);
+                            div_tau(p) += 2.0 * Mpqrs * hess_u(r, s, q);
                         }
             // NEW Formulation of div_tau
             // Calculate gradient of divergence
@@ -859,11 +901,16 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             grad_div_u[0] = hess_u(0, 0, 0) + hess_u(1, 0, 1);
             grad_div_u[1] = hess_u(0, 1, 0) + hess_u(1, 1, 1);
             // Calculate div_tau
-            div_tau(0) = mu_eff * (hess_u(0, 0, 0) + hess_u(0, 1, 1) + (1.0 / 3.0) * grad_div_u[0]);
-            div_tau(1) = mu_eff * (hess_u(1, 0, 0) + hess_u(1, 1, 1) + (1.0 / 3.0) * grad_div_u[1]);
+            //div_tau(0) = mu_eff * (hess_u(0, 0, 0) + hess_u(0, 1, 1) + (1.0 / 3.0) * grad_div_u[0]);
+            //div_tau(1) = mu_eff * (hess_u(1, 0, 0) + hess_u(1, 1, 1) + (1.0 / 3.0) * grad_div_u[1]);
             // Add bulk viscosity contribution
             div_tau(0) += mu_b_eff * grad_div_u(0);
             div_tau(1) += mu_b_eff * grad_div_u(1);
+
+            // WIP: Debugging feild for div_tau
+            div_tau_(i, j, k, 0) = div_tau(0);
+            div_tau_(i, j, k, 1) = div_tau(1);
+
 
             // Surface Tension:
             // Fsv =  simga * kappa * n_hat
@@ -1203,6 +1250,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar drho_dt = (flux_xlo.mass - flux_xhi.mass) / (DX[0] + small) + (flux_ylo.mass - flux_yhi.mass) / (DX[1] + small) + Source(i, j, k, 0);
 
             rho_new(i, j, k) = rho(i, j, k) + (drho_dt)*dt;
+            if (rho_new(i, j, k) < (0.0 + small)) {
+                rho_new(i, j, k) = 0.0 + small;
+            }
 
             // Momentum
             Set::Scalar dMx_dt = (flux_xlo.momentum_normal - flux_xhi.momentum_normal) / (DX[0] + small) + (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / (DX[1] + small) + div_tau(0) +
@@ -1231,7 +1281,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Set::Matrix gradu = (gradM - u * gradrho.transpose()) / rho(i, j, k);
 
             // Set::Scalar deta_dt = -; //https://www.sciencedirect.com/science/article/pii/S002199912100005X
-            if (static_eta)
+            if (static_eta == 1)
             {
                 eta_new(i, j, k) = eta(i, j, k);
             }

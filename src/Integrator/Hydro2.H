@@ -185,7 +185,6 @@ protected:
     Set::Field<Set::Scalar> eta_old_mf;
     Set::Field<Set::Scalar> hess_eta_mf;
     Set::Field<Set::Scalar> n_hat_mf;
-
 private:
    
     Set::Field<Set::Scalar> m0_mf;
@@ -208,6 +207,11 @@ private:
     Set::Field<Set::Scalar> rho_flux_mf;
     Set::Field<Set::Scalar> M_flux_mf;
     Set::Field<Set::Scalar> E_flux_mf;
+
+    // Debugging
+    Set::Field<Set::Scalar> div_tau_mf;
+    Set::Field<Set::Scalar> hess_u_mf;
+
 
     BC::BC<Set::Scalar>* density_bc = nullptr;
     BC::BC<Set::Scalar>* momentum_bc = nullptr;
