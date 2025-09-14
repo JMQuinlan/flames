@@ -25,7 +25,7 @@
 #@ dim=2
 #@ args= solver.roe.entropy_fix=2
 
-# alamo.program = hydro
+# alamo.program = hydro2
 
 ### OUTPUT ###
 
@@ -34,7 +34,7 @@ plot_file = ./tests/FlowRiemannUnitTests/output
 ### MESHING ###
 
 #amr.plot_dt = 0.1
-amr.plot_int = 2
+amr.plot_int = 50
 amr.max_level = 0
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
@@ -81,10 +81,10 @@ Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
 ### HYDRO PARAM ###
 
 gamma0 = 1.4
-gamma1 = 2.5
+gamma1 = 1.4
 cfl   = 0.4
-mu0   = 0.002
-mu1   = 0.04
+mu0   = 0.0
+mu1   = 0.0
 
 ### Surface tension coefficient ###
 sigma0 = 1000;

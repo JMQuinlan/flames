@@ -57,17 +57,17 @@ eta.ic.expression.region0        = "(0.5*(1 + tanh((((x-x0)**2/A1**2 + (y-y0)**2
 epsilon = eta.ic.expression.constant.epsilon
 
 ### Advection solver ###
-Riemann_Solver = 2 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
-kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
+Riemann_Solver = 0 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+kappa_method = 1   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
 
 ### HYDRO PARAM ###
 # New parameters
 gamma0 = 1.4
 # gamma1 = 4.0 # 7.15
-gamma1 = 4 # 7.15
+gamma1 = 1.4 # 7.15
 cfl   = 0.4
-mu0   = 0.002
-mu1   = 0.04
+mu0   = 0.0 ## 02
+mu1   = 0.0 ## 4
 
 mu0_b   = 0
 mu1_b   = 0
