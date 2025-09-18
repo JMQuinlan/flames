@@ -32,11 +32,11 @@ public:
 
 
     static constexpr const char* name = "roe";
-    Roe (IO::ParmParse &pp, std::string name) 
+    Roe (IO::ParmParse &pp, std::string name)
     {pp_queryclass(name,*this);}
-    Roe (IO::ParmParse &pp) 
+    Roe (IO::ParmParse &pp)
     {pp_queryclass(*this);}
-    Roe () 
+    Roe ()
     {
         IO::ParmParse pp;
         pp_queryclass(*this);
@@ -69,30 +69,30 @@ public:
         rho_L = std::max(0.0,rho_L);
         rho_R = std::max(0.0,rho_R);
 
-        // STEP 1: Compute fluid primitives 
+        // STEP 1: Compute fluid primitives
         Set::Scalar ke_L = 0.5 * (Mn_L * Mn_L /*+ Mt_L * Mt_L*/) / (rho_L+small); // KE per unit volume
         Set::Scalar ue_L = E_L - ke_L;                                            // IE per unit volume
-        Set::Scalar p_L = (gamma - 1.0) * ue_L - gamma * (p_0 + p_ref);           // pressure Tammann EOS modification
-        Set::Scalar h_TL = (ke_L + ue_L + p_L) / (rho_L + small);                 // specific stagnation enthalpy (per unit mass)
+        Set::Scalar p_L = (gamma - 1.0) * rho_L*ue_L - gamma * (p_0 + p_ref);     // pressure Tammann EOS modification
+        Set::Scalar h_TL = ke_L + ue_L + (p_L) / (rho_L + small);                 // specific stagnation enthalpy (per unit mass)
 
         Set::Scalar ke_R = 0.5 * (Mn_R * Mn_R /*+ Mt_R * Mt_R*/) / (rho_R+small);
         Set::Scalar ue_R = E_R - ke_R;
-        Set::Scalar p_R = (gamma - 1.0) * ue_R - gamma * (p_0 + p_ref);
-        Set::Scalar h_TR = (ke_R + ue_R + p_R) / (rho_R+small);
+        Set::Scalar p_R = (gamma - 1.0) * rho_R*ue_R - gamma * (p_0 + p_ref);
+        Set::Scalar h_TR = ke_R + ue_R + (p_R) / (rho_R+small);
 
         Set::Scalar u_L   = Mn_L/(rho_L+small),  u_R   = Mn_R/(rho_R+small);
         Set::Scalar v_L   = Mt_L/(rho_L+small),  v_R   = Mt_R/(rho_R+small);
-        
+
         //
         // STEP 2: Compute Roe-averaged quantities
-        // 
+        //
         Set::Scalar rho_RL  = std::sqrt(rho_L * rho_R);
         Set::Scalar u_RL    = (std::sqrt(rho_L) * u_L  + std::sqrt(rho_R) * u_R ) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
         Set::Scalar h_RL    = (std::sqrt(rho_L) * h_TL + std::sqrt(rho_R) * h_TR) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
-        Set::Scalar a_RL_sq = std::max(0.0, (gamma - 1.0) * (h_RL - 0.5 * u_RL * u_RL) + (gamma * p_ref / (std::sqrt(rho_L) + std::sqrt(rho_R) + small)));
+        Set::Scalar a_RL_sq = std::max(0.0, (gamma - 1.0) * (h_RL - 0.5 * u_RL * u_RL) + (gamma * (p_0+p_ref) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small)));  // Not clear if the second term is correct
 
         if (verbose && ((a_RL_sq<0) || (a_RL_sq!=a_RL_sq)))
-        {   
+        {
             Util::Message(INFO, "sound speed ", a_RL_sq);
 
             Util::Message(INFO, "mixed rho ", lo.rho, " ", hi.rho);
@@ -179,14 +179,14 @@ public:
         // STEP 7: Compute fluxes
         //
         Flux fl;
-        
+
         fl.mass = (0.5*(rho_L*u_L + rho_R*u_R) - 0.5*(
                         r11*fabs(lambda1)*deltav1 +
                         r21*fabs(lambda2)*deltav2 +
                         r31*fabs(lambda3)*deltav3)
             );
-        
-        
+
+
 
 
         fl.momentum_normal = ( 0.5*(rho_L*u_L*u_L + p_L + rho_R*u_R*u_R + p_R) - 0.5*(
@@ -196,11 +196,11 @@ public:
             );
         //
         // (Update the tangential momentum flux)
-        // 
+        //
         fl.momentum_tangent = 0.5 * (rho_L * u_L * v_L + rho_R * u_R * v_R);
 
 
-        fl.energy = (   0.5*(u_L*(ke_L + p_L + ue_L) + u_R*(ke_R + p_R + ue_R)) - 0.5*
+        fl.energy = (   0.5*(u_L*(ke_L + p_L/rho_L + ue_L) + u_R*(ke_R + p_R/rho_R + ue_R)) - 0.5*
                         (
                             r13*fabs(lambda1)*deltav1 +
                             r23*fabs(lambda2)*deltav2 +
@@ -244,7 +244,7 @@ public:
     static int Test()
     {
         Roe solver;
-        
+
 
         int failed = 0;
 
