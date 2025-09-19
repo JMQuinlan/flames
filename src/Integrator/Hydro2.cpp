@@ -61,17 +61,17 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // ADAPTIVE TIMESTEP
         // Swtiched pointer names to fix weird time stepping issue
         /*
-        pp_query_default("adaptive_timestep", value.adaptive_timestep, false); 
+        pp_query_default("adaptive_timestep", value.adaptive_timestep, false);
         pp_query_default("dt_min", value.dt_min, 1E-9);
         pp_query_default("dt_max", value.dt_max, 1E-3);
         pp_query_default("dt_growth", value.dt_growth, 1.2);
         */
-        pp_forbid("adaptive_timestep", "--> dynamictimestep.on"); 
-        pp_forbid("dt_min", "--> dynamictimestep.min"); 
-        pp_forbid("dt_max", "--> dynamictimestep.max"); 
+        pp_forbid("adaptive_timestep", "--> dynamictimestep.on");
+        pp_forbid("dt_min", "--> dynamictimestep.min");
+        pp_forbid("dt_max", "--> dynamictimestep.max");
         pp_forbid("dt_growth", "--> REMOVED");
         pp_forbid("dt_nprev", "--> dynamictimestep.nprevious");
-        
+
 
 
         // OPTIONAL SOURCE TERMS
@@ -91,7 +91,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("mu0_b", value.mu0_b, 0.0);    // bulk viscosity coefficient
         // pp_query_required("R0", value.R0);              // Specific Gas Constant
         // pp_query_required("MW0", value.MW0);            // Molecular Weight
-        
+
         // FLUID 1
         pp_query_required("gamma1", value.gamma1);      // gamma for gamma law
         pp_query_default("p0_1", value.p0_1, 0.0);      // p0 for Tammann EOS
@@ -106,7 +106,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // CURVATURE
         pp_query_default("kappa_method", value.kappa_method, 2); // Method to solve for curvature
-        
+
         // Boundry Conditions
         pp_forbid("rho.bc","--> density.bc");
         pp_forbid("p.bc","--> pressure.bc");
@@ -119,7 +119,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.eta_bc = new BC::Constant(1, pp, "pf.eta.bc");
         value.temperature_bc = new BC::Constant(1, pp, "pf.eta.bc"); // Change to be different if needed? ___TEMP___
 
-        
+
     }
 
     // Register FabFields:
@@ -143,7 +143,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         value.RegisterNewFab(value.momentum0_mf,    value.momentum_bc,  2, nghost, "momentum0", false, { "x", "y" });
         value.RegisterNewFab(value.momentum0_old_mf,value.momentum_bc,  2, nghost, "momentum0_old", false);
- 
+
         value.RegisterNewFab(value.T0_mf,           value.temperature_bc, 1, nghost, "T0", false);
         value.RegisterNewFab(value.cp0_mf,          &value.bc_nothing, 1, nghost, "cp0", false);
         value.RegisterNewFab(value.cv0_mf,          &value.bc_nothing, 1, nghost, "cv0", false);
@@ -259,13 +259,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
 
     // DIFFUSE BOUNDARY SOURCES
-    // diffuse boundary prescribed mass flux 
+    // diffuse boundary prescribed mass flux
     pp.select_default<IC::Constant,IC::Expression>("m0.ic",value.ic_m0,value.geom);
     // diffuse boundary prescribed velocity
     pp.select_default<IC::Constant,IC::Expression>("u0.ic",value.ic_u0,value.geom);
-    // diffuse boundary prescribed heat flux 
+    // diffuse boundary prescribed heat flux
     pp.select_default<IC::Constant,IC::Expression>("q.ic",value.ic_q,value.geom);
-    
+
 
     // SOLVERS
     // Riemann solver
@@ -443,7 +443,7 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar>         h1_thermal  = h1_thermal_mf.Patch(lev, mfi);
         //Set::Patch<Set::Scalar>         gamma1f     = gamma1_mf.Patch(lev, mfi);
 
-        // MIXTURE 
+        // MIXTURE
         Set::Patch<Set::Scalar>         v           = velocity_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         press       = pressure_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         rho         = density_mf.Patch(lev, mfi);
@@ -466,9 +466,9 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar>         KE          = KE_mf.Patch(lev, mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            // Calculate State Variables 
+            // Calculate State Variables
             rho(i, j, k) = eta(i, j, k) * rho0(i, j, k) + (1.0 - eta(i, j, k)) * rho1(i, j, k);
-            rho_old(i, j, k) = rho(i, j, k);  
+            rho_old(i, j, k) = rho(i, j, k);
 
             M(i, j, k, 0) = (rho0(i, j, k) * v0(i, j, k, 0)) * eta(i, j, k) + (rho1(i, j, k) * v1(i, j, k, 0)) * (1.0 - eta(i, j, k));
             M(i, j, k, 1) = (rho0(i, j, k) * v0(i, j, k, 1)) * eta(i, j, k) + (rho1(i, j, k) * v1(i, j, k, 1)) * (1.0 - eta(i, j, k));
@@ -483,8 +483,8 @@ void Hydro2::Mix(int lev)
             //Set::Scalar gamma = gamma0 * eta(i, j, k) + gamma1 * (1.0 - eta(i, j, k));
             //Set::Scalar gamma = (gamma0 - 1.0) * eta(i, j, k) + (gamma1 - 1.0) * (1.0 - eta(i, j, k)) + 1.0; // 2018
             //Set::Scalar invgammasub1 = eta(i, j, k) * 1.0 / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) * 1.0 / (gamma1 - 1.0);
-            //Set::Scalar gamma = (1.0 / invgammasub1) + 1.0; 
-            
+            //Set::Scalar gamma = (1.0 / invgammasub1) + 1.0;
+
             UE(i, j, k) = ((p0(i, j, k) + gamma0 * p0_0) / ((gamma0 - 1.0))) * eta(i, j, k) + ((p1(i, j, k) + gamma1 * p0_1) / ((gamma1 - 1.0))) * (1.0 - eta(i, j, k));
             //UE(i, j, k) = ((p0(i, j, k) + gamma * p0_0) / ((gamma - 1.0))) * eta(i, j, k) + ((p1(i, j, k) + gamma * p0_1) / ((gamma - 1.0))) * (1.0 - eta(i, j, k));
 
@@ -528,7 +528,7 @@ void Hydro2::Mix(int lev)
             Ma(i, j, k, 0) = v(i, j, k, 0) / a(i, j, k);
             Ma(i, j, k, 1) = v(i, j, k, 1) / a(i, j, k);
 
-            
+
 
         });
     }
@@ -579,7 +579,7 @@ void Hydro2::TimeStepComplete(Set::Scalar time, int lev)
     Util::Assert(INFO, TEST(AMREX_SPACEDIM == 2));
 
     SetTimestep(new_timestep);
-    
+
 }
 
 /*
@@ -694,7 +694,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Pressure
             ///press(i, j, k) = (E(i, j, k) - (0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small))) * (gammaf(i, j, k) - 1.0) - pref; // NEEDS Verification
-            Set::Scalar p0_eff = p0_0 * eta(i, j, k) * p0_1 * (1.0 - eta(i,j,k));
+            Set::Scalar p0_eff = p0_0 * eta(i, j, k) + p0_1 * (1.0 - eta(i,j,k));
             //press(i, j, k) = rho(i,j,k) * (gammaf(i,j,k)-1.0) * (E(i,j,k) - 0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small)) - pref - p0_eff; // NEEDS Verification
             //press(i, j, k) = (gammaf(i, j, k) - 1.0) * (E(i, j, k) - (0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small))) - pref - p0_eff; // NEEDS Verification
             press(i, j, k) = (gamma_eff - 1.0) * UE(i, j, k) - pref - p0_eff;
@@ -712,8 +712,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 or (Ma(i, j, k, 1) != Ma(i, j, k, 1))
                 or (press(i, j, k) != press(i, j, k))
                 or (v(i, j, k) != v(i, j, k))
-                or (KE(i, j, k) != KE(i, j, k)) 
-                or (UE(i, j, k) != UE(i, j, k)) 
+                or (KE(i, j, k) != KE(i, j, k))
+                or (UE(i, j, k) != UE(i, j, k))
                 or (press(i, j, k) > 1E1000) )
             {
                 Util::ParallelMessage(INFO, "v=", v(i, j, k));
@@ -730,7 +730,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::Exception(INFO);
             }
 
-            
+
         });
     }
 
@@ -1297,7 +1297,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     eta_new(i, j, k) = 1.0;
                 }
             }
-            
+
 
             // ERROR CHECKING
             if ((rho_new(i, j, k) != rho_new(i, j, k))
@@ -1402,7 +1402,7 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
             if (grad_omega.lpNorm<2>() * dr * 2 > omega_refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
         });
     }
-    
+
     // Gradu criterion for refinement
     for (amrex::MFIter mfi(*velocity_mf[lev], true); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.tilebox();
