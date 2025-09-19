@@ -220,7 +220,7 @@ struct Flux
     friend Flux
     operator-(const Flux &a, const Flux &b)
     {
-        return Flux(a.mass - b.mass, a.momentum_normal - b.momentum_normal, a.momentum_tangent - b.momentum_tangent, a.energy - b.energy, a.temperature - b.temperature);
+        return Flux(a.mass - b.mass, a.momentum_normal - b.momentum_normal, a.momentum_tangent - b.momentum_tangent, a.energy - b.energy, a.temperature - b.temperature); // We can't "add" temperatures
     }
     friend Flux
     operator*(const Flux &a, const Set::Scalar beta)

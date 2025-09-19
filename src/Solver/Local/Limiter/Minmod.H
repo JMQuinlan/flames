@@ -7,7 +7,7 @@
 //#include <cmath>
 //#include <vector>
 
-/// Limiters for slope reconstruction 
+/// Limiters for slope reconstruction
 namespace Solver
 {
 /// Local solvers
@@ -224,7 +224,7 @@ public:
                 Set::Scalar rho_c = center.rho;
                 Set::Scalar u_c = center.M_normal / (rho_c + small);
                 Set::Scalar v_c = center.M_tangent / (rho_c + small);
-                Set::Scalar ke_c = 0.5 * (u_c * u_c + v_c * v_c) * rho_c;
+                Set::Scalar ke_c = 0.5 * (u_c * u_c + v_c * v_c) * rho_c;  // This is inconsistant with Riemann solvers (here kJ/m^3)
                 Set::Scalar p_c = (gamma - 1.0) * (center.E - ke_c) - gamma * (p_0 + p_ref);
                 Set::Scalar a_c = std::sqrt(gamma * (p_c + p_ref)/ (rho_c + small));
 
