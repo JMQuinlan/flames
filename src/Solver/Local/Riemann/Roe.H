@@ -72,17 +72,17 @@ public:
         // STEP 1: Compute fluid primitives
         Set::Scalar ke_L = 0.5 * (Mn_L * Mn_L /*+ Mt_L * Mt_L*/) / (rho_L+small); // KE per unit volume
         Set::Scalar ue_L = E_L - ke_L;                                            // IE per unit volume
-        //Set::Scalar p_L = (gamma - 1.0) * rho_L*ue_L - gamma * (p_0 + p_ref);     // pressure Tammann EOS modification
-        Set::Scalar p_L = (gamma - 1.0) * ue_L - gamma * (p_0 + p_ref);           // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
-        //Set::Scalar h_TL = ke_L + ue_L + (p_L) / (rho_L + small);                 // specific stagnation enthalpy (per unit mass)
-        Set::Scalar h_TL = (ke_L + ue_L + p_L) / (rho_L + small);                 // specific stagnation enthalpy (per unit mass) ( (J/m3 + J/m3 + N/m2) / (kg/m3) ==> (J/kg) )
+        Set::Scalar p_L = (gamma - 1.0) * rho_L*ue_L - gamma * (p_0 + p_ref);     // pressure Tammann EOS modification
+        //Set::Scalar p_L = (gamma - 1.0) * ue_L - gamma * (p_0 + p_ref);           // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
+        Set::Scalar h_TL = ke_L + ue_L + (p_L) / (rho_L + small);                 // specific stagnation enthalpy (per unit mass)
+        //Set::Scalar h_TL = (ke_L + ue_L + p_L); // / (rho_L + small);                 // specific stagnation enthalpy (per unit mass) ( (J/m3 + J/m3 + N/m2) / (kg/m3) ==> (J/kg) )
 
         Set::Scalar ke_R = 0.5 * (Mn_R * Mn_R /*+ Mt_R * Mt_R*/) / (rho_R+small);
         Set::Scalar ue_R = E_R - ke_R;
-        //Set::Scalar p_R = (gamma - 1.0) * rho_R*ue_R - gamma * (p_0 + p_ref);
-        Set::Scalar p_R = (gamma - 1.0) * ue_R - gamma * (p_0 + p_ref);
-        //Set::Scalar h_TR = ke_R + ue_R + (p_R) / (rho_R+small);
-        Set::Scalar h_TR = (ke_R + ue_R + p_R) / (rho_R+small);
+        Set::Scalar p_R = (gamma - 1.0) * rho_R*ue_R - gamma * (p_0 + p_ref);
+        //Set::Scalar p_R = (gamma - 1.0) * ue_R - gamma * (p_0 + p_ref);
+        Set::Scalar h_TR = ke_R + ue_R + (p_R) / (rho_R+small);
+        //Set::Scalar h_TR = (ke_R + ue_R + p_R); // / (rho_R+small);
 
         Set::Scalar u_L   = Mn_L/(rho_L+small),  u_R   = Mn_R/(rho_R+small);
         Set::Scalar v_L   = Mt_L/(rho_L+small),  v_R   = Mt_R/(rho_R+small);
@@ -204,8 +204,8 @@ public:
         fl.momentum_tangent = 0.5 * (rho_L * u_L * v_L + rho_R * u_R * v_R);
 
 
-        //fl.energy = (   0.5*(u_L*(ke_L + p_L/rho_L + ue_L) + u_R*(ke_R + p_R/rho_R + ue_R)) - 0.5*
-        fl.energy = (   0.5*(u_L*(ke_L + p_L + ue_L) + u_R*(ke_R + p_R + ue_R)) - 0.5*
+        fl.energy = (   0.5*(u_L*(ke_L + p_L/rho_L + ue_L) + u_R*(ke_R + p_R/rho_R + ue_R)) - 0.5*
+        //fl.energy = (   0.5*(u_L*(ke_L + p_L + ue_L) + u_R*(ke_R + p_R + ue_R)) - 0.5*
                         (
                             r13*fabs(lambda1)*deltav1 +
                             r23*fabs(lambda2)*deltav2 +
