@@ -166,6 +166,8 @@ private:
     Set::Field<Set::Scalar> energy_old_mf;
     Set::Field<Set::Scalar> velocity_mf;
     Set::Field<Set::Scalar> pressure_mf;
+    Set::Field<Set::Scalar> Schlieren_mf;
+    
 
     Set::Field<Set::Scalar> T_mf;           // Temperature
     Set::Field<Set::Scalar> cp_mf;          // Constant Pressure Specific Heat

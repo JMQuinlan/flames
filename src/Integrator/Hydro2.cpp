@@ -177,7 +177,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.vorticity1_mf,   &value.bc_nothing,  1, nghost, "vorticity1", false);
 
         // MIXTURE
-        value.RegisterNewFab(value.pressure_mf,     &value.bc_nothing,  1, nghost, "pressure", true);
+        value.RegisterNewFab(value.pressure_mf,     &value.bc_nothing, 1, nghost, "pressure", true);
+        value.RegisterNewFab(value.Schlieren_mf,    &value.bc_nothing, 1, nghost, "Schlieren", true);
         value.RegisterNewFab(value.velocity_mf,     &value.bc_nothing,  2, nghost, "velocity", true, { "x", "y" });
         value.RegisterNewFab(value.vorticity_mf,    &value.bc_nothing,  1, nghost, "vorticity", true);
         value.RegisterNewFab(value.density_mf,      value.density_bc,   1, nghost, "density", true);
@@ -446,6 +447,7 @@ void Hydro2::Mix(int lev)
         // MIXTURE 
         Set::Patch<Set::Scalar>         v           = velocity_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         press       = pressure_mf.Patch(lev, mfi);
+        // Set::Patch<Set::Scalar>         Schlieren   = Schlieren_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         rho         = density_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         rho_old     = density_old_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         M           = momentum_mf.Patch(lev, mfi);
@@ -527,8 +529,7 @@ void Hydro2::Mix(int lev)
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / a(i, j, k);
             Ma(i, j, k, 1) = v(i, j, k, 1) / a(i, j, k);
-
-            
+           
 
         });
     }
@@ -648,6 +649,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
         Set::Patch<Set::Scalar> v = velocity_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> press = pressure_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> Schlieren = Schlieren_mf.Patch(lev, mfi);
+        
 
         Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
@@ -706,6 +709,17 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / (a(i, j, k) + small);
             Ma(i, j, k, 1) = v(i, j, k, 1) / (a(i, j, k) + small);
+
+            // Schlieren Images
+            Set::Scalar s_cut = 0.5;
+            Set::Scalar k_s = 20; // Scalar to illuminate a solid
+            if (eta(i, j, k) < s_cut)
+            {
+                k_s = 100;
+            }
+            Set::Vector grad_press = Numeric::Gradient(press, i, j, k, 0, DX);
+            Set::Scalar grad_press_norm = grad_press.lpNorm<2>();
+            Schlieren(i, j, k) = std::exp(-k_s * grad_press_norm);
 
             // DEBUG Tool
             if ((Ma(i, j, k, 0) != Ma(i, j, k, 0))
@@ -1096,9 +1110,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                                                   Fsv(i, j, k, 1) + Fb_vector(1) + Fw_vector(1));
 
             Source(i, j, k, 0) = mdot0;
-            Source(i, j, k, 1) = Pdot0(0) - Ldot0(0) + Total_Force(0);
-            Source(i, j, k, 2) = Pdot0(1) - Ldot0(1) + Total_Force(1);
-            Source(i, j, k, 3) = qdot0 + u.dot(Total_Force); //(Fsv(i, j, k, 0) * u(0) + Fsv(i, j, k, 1) * u(1)); //+ u.dot(Ldot0)
+            Source(i, j, k, 1) = Pdot0(0) - Ldot0(0) + Total_Force(0) + div_tau(0);
+            Source(i, j, k, 2) = Pdot0(1) - Ldot0(1) + Total_Force(1) + div_tau(1);
+            Source(i, j, k, 3) = qdot0 + u.dot(Total_Force); // + u.dot(div_tau); //(Fsv(i, j, k, 0) * u(0) + Fsv(i, j, k, 1) * u(1)); //+ u.dot(Ldot0)
 
            // Lagrange terms to enforce no-penetration
             Source(i, j, k, 1) -= lagrange * u.dot(grad_eta) * grad_eta(0);
@@ -1255,12 +1269,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             }
 
             // Momentum
-            Set::Scalar dMx_dt = (flux_xlo.momentum_normal - flux_xhi.momentum_normal) / (DX[0] + small) + (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / (DX[1] + small) + div_tau(0) +
+            Set::Scalar dMx_dt = (flux_xlo.momentum_normal - flux_xhi.momentum_normal) / (DX[0] + small) + (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / (DX[1] + small) +
                                  //(mu * (lap_ux * eta(i, j, k))) +
                                  Source(i, j, k, 1);
             M_new(i, j, k, 0) = M(i, j, k, 0) + dMx_dt * dt;
 
-            Set::Scalar dMy_dt = (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / (DX[0] + small) + (flux_ylo.momentum_normal - flux_yhi.momentum_normal) / (DX[1] + small) + div_tau(1) +
+            Set::Scalar dMy_dt = (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / (DX[0] + small) + (flux_ylo.momentum_normal - flux_yhi.momentum_normal) / (DX[1] + small) +
                                  //(mu * (lap_uy * eta(i, j, k))) +
                                  Source(i, j, k, 2);
             M_new(i, j, k, 1) = M(i, j, k, 1) + dMy_dt * dt;
@@ -1271,22 +1285,30 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             E_new(i, j, k) = E(i, j, k) + dE_dt * dt;
 
             /// Eta:
-            // Material Derivative
-            Set::Vector u_new = Set::Vector(M_new(i, j, k, 0) / rho_new(i, j, k), M_new(i, j, k, 1) / rho_new(i, j, k));
-            Set::Scalar deta_dt = -u_new.dot(grad_eta);
-            // Cahn-Hillard
-            // Set::Scalar deta_dt = -u.dot(grad_eta) + M.dot(grad_eta)
-            // Set::Matrix tmp =
-            // Set::Scalar deta_dt = -1.0 / (rho(i, j, k) * (u_mag**2))
-            // Set::Matrix gradu = (gradM - u * gradrho.transpose()) / rho(i, j, k);
-
-            // Set::Scalar deta_dt = -; //https://www.sciencedirect.com/science/article/pii/S002199912100005X
+            // Another method: https://www.sciencedirect.com/science/article/pii/S002199912100005X
             if (static_eta == 1)
             {
                 eta_new(i, j, k) = eta(i, j, k);
             }
             else
             {
+                // Material Derivative
+                Set::Vector u_new = Set::Vector(M_new(i, j, k, 0) / rho_new(i, j, k), M_new(i, j, k, 1) / rho_new(i, j, k));
+                Set::Scalar deta_dt = -u_new.dot(grad_eta);
+
+                // Compressive Eta
+                /*
+                // https://www.sciencedirect.com/science/article/pii/S0021999122009330
+                // https://www.sciencedirect.com/science/article/pii/S0021999110003402
+                // Maintains Eta Thickness of 2-3 cells
+                //Set::Scalar phi = std::max(0.0, std::min(1.0, 2.0 * fabs(div_u) * dt)); \\ May Diverge for large gradients
+                Set::Scalar beta = 1.0; // Larger Beta --> Sharper Interface. Keep between [1,4]
+                Set::Scalar phi = std::min(beta * grad_eta_mag, 1.0);
+                Set::Scalar e_h = 0.5 * (DX[0] + DX[1]);
+                Set::Scalar compression = phi * e_h * (1.0 - 2.0 * eta(i, j, k)) * grad_eta_mag;
+                deta_dt += compression;
+                */
+
                 eta_new(i, j, k) = eta(i, j, k) + deta_dt * dt;
                 if (eta_new(i, j, k) <= cutoff)
                 {
