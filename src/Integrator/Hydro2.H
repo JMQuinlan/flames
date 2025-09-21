@@ -162,8 +162,10 @@ private:
     Set::Field<Set::Scalar> vorticity_mf;
     Set::Field<Set::Scalar> momentum_mf;
     Set::Field<Set::Scalar> momentum_old_mf;
-    Set::Field<Set::Scalar> energy_mf;
-    Set::Field<Set::Scalar> energy_old_mf;
+    Set::Field<Set::Scalar> energy_per_vol_mf;
+    Set::Field<Set::Scalar> energy_per_mas_mf;
+    Set::Field<Set::Scalar> energy_per_vol_old_mf;
+    Set::Field<Set::Scalar> energy_per_mas_old_mf;
     Set::Field<Set::Scalar> velocity_mf;
     Set::Field<Set::Scalar> pressure_mf;
 
