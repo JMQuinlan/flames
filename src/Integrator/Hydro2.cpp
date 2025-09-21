@@ -203,8 +203,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.gamma_mf,        &value.bc_nothing,  1, nghost, "gammaf", true);             // Specific Heat Ratio
         value.RegisterNewFab(value.a_mf,            &value.bc_nothing,  1, nghost, "a", true);                  // Speed of sound
         value.RegisterNewFab(value.Ma_mf,           &value.bc_nothing,  2, nghost, "Ma", true, { "x", "y" });   // Mach
-        value.RegisterNewFab(value.UE_mf,           &value.bc_nothing,  1, nghost, "UE", true);                 // Internal Energy
-        value.RegisterNewFab(value.KE_mf,           &value.bc_nothing,  1, nghost, "KE", true);                 // Kinetic Energy
+        value.RegisterNewFab(value.UE_per_vol_mf,   &value.bc_nothing,  1, nghost, "UE_per_vol", true);         // Internal Energy (per unit volume)
+        value.RegisterNewFab(value.UE_per_mas_mf,   &value.bc_nothing,  1, nghost, "UE_per_mass", true);        // Internal Energy (per unit mass)
+        value.RegisterNewFab(value.KE_per_vol_mf,   &value.bc_nothing,  1, nghost, "KE_per_vol", true);         // Kinetic Energy (per unit volume)
+        value.RegisterNewFab(value.KE_per_mas_mf,   &value.bc_nothing,  1, nghost, "KE_per_mass", true);        // Kinetic Energy (per unit mass)
 
         // EXTRAS & DEBUGGING
         value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", true, { "x", "y" });
@@ -389,8 +391,10 @@ void Hydro2::Initialize(int lev)
 
     a_mf[lev]       ->setVal(0.0);
     Ma_mf[lev]      ->setVal(0.0);
-    UE_mf[lev]      ->setVal(0.0);
-    KE_mf[lev]      ->setVal(0.0);
+    UE_per_vol_mf[lev]->setVal(0.0);
+    UE_per_mas_mf[lev]->setVal(0.0);
+    KE_per_vol_mf[lev]->setVal(0.0);
+    KE_per_mas_mf[lev]->setVal(0.0);
 
 
     // Calculate mixed variables based on individual fluid variables
@@ -462,8 +466,10 @@ void Hydro2::Mix(int lev)
         // EXTRAS & DEBUGGING
         Set::Patch<Set::Scalar>         a           = a_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         Ma          = Ma_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         UE          = UE_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         KE          = KE_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar>         UE          = UE_per_vol_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar>         UE_mas      = UE_per_mas_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar>         KE          = KE_per_vol_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar>         KE_mas      = KE_per_mas_mf.Patch(lev, mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             // Calculate State Variables 
@@ -478,6 +484,7 @@ void Hydro2::Mix(int lev)
             // Kinetic Energy
             KE(i, j, k) = (0.5 * ((v0(i, j, k, 0) * v0(i, j, k, 0)) + (v0(i, j, k, 1) * v0(i, j, k, 1))) * rho0(i, j, k)) * eta(i, j, k)
                         + (0.5 * ((v1(i, j, k, 0) * v1(i, j, k, 0)) + (v1(i, j, k, 1) * v1(i, j, k, 1))) * rho1(i, j, k)) * (1.0 - eta(i, j, k));
+            KE_mas(i, j, k) = KE(i, j, k) / (rho(i, j, k) + small);
 
             // Internal Energy
             //Set::Scalar gamma = gamma0 * eta(i, j, k) + gamma1 * (1.0 - eta(i, j, k));
@@ -487,6 +494,7 @@ void Hydro2::Mix(int lev)
             
             UE(i, j, k) = ((p0(i, j, k) + gamma0 * p0_0) / ((gamma0 - 1.0))) * eta(i, j, k) + ((p1(i, j, k) + gamma1 * p0_1) / ((gamma1 - 1.0))) * (1.0 - eta(i, j, k));
             //UE(i, j, k) = ((p0(i, j, k) + gamma * p0_0) / ((gamma - 1.0))) * eta(i, j, k) + ((p1(i, j, k) + gamma * p0_1) / ((gamma - 1.0))) * (1.0 - eta(i, j, k));
+            UE_mas(i, j, k) = UE(i, j, k) / (rho(i, j, k) + small);
 
             //  TODO: Get rid of thermally perfect assumption. Involve temperature
             E(i, j, k) = KE(i, j, k) + UE(i, j, k);
@@ -643,8 +651,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
         Set::Patch<Set::Scalar> a = a_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Ma = Ma_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> KE = KE_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> UE = UE_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> KE = KE_per_vol_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> KE_mas = KE_per_mas_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> UE = UE_per_vol_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> UE_mas = UE_per_mas_mf.Patch(lev, mfi);
 
         Set::Patch<Set::Scalar> v = velocity_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> press = pressure_mf.Patch(lev, mfi);
@@ -688,9 +698,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Kinetic Energy
             KE(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
+            KE_mas(i, j, k) = KE(i, j, k) / (rho(i, j, k) + small);
 
             // Potential Energy
             UE(i, j, k) = E(i, j, k) - KE(i, j, k);
+            UE_mas(i, j, k) = UE(i, j, k) / (rho(i, j, k) + small);
 
             // Pressure
             ///press(i, j, k) = (E(i, j, k) - (0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small))) * (gammaf(i, j, k) - 1.0) - pref; // NEEDS Verification

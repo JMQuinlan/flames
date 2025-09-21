@@ -175,8 +175,10 @@ private:
     Set::Field<Set::Scalar> gamma_mf;       // Specific Heat Ratio
     Set::Field<Set::Scalar> a_mf;           // Speed of sound
     Set::Field<Set::Scalar> Ma_mf;          // Mach
-    Set::Field<Set::Scalar> UE_mf;          // Internal Energy
-    Set::Field<Set::Scalar> KE_mf;          // Kinetic Energy
+    Set::Field<Set::Scalar> UE_per_vol_mf;  // Internal Energy (per unit volume)
+    Set::Field<Set::Scalar> UE_per_mas_mf;  // Internal Energy (per unit mass)
+    Set::Field<Set::Scalar> KE_per_vol_mf;  // Kinetic Energy (per unit volume)
+    Set::Field<Set::Scalar> KE_per_mas_mf;  // Kinetic Energy (per unit mass)
 
 protected:
     Set::Field<Set::Scalar> eta_mf;
