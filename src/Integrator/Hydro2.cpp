@@ -57,6 +57,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("grav", value.g, 9.81);            // Gravitational Acceletation
         pp_forbid("roefix", "--> solver.roe.entropy_fix");  // Roe solver entropy fix
         pp_query_default("scheme", value.scheme, 0);        // 0: Forward Euler | 1: RK4
+        pp_query_default("Spec_Vol", value.Spec_Vol, 1);    // 0: Solve Energy via specific mass | 1: Solve Energy bia specific volume
 
         // ADAPTIVE TIMESTEP
         // Swtiched pointer names to fix weird time stepping issue
@@ -894,9 +895,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar div_u = gradu(0, 0) + gradu(1, 1); // Divergence of velocity
 
             // Calculate effective specific heat ratio
-            //Set::Scalar gamma_eff = eta(i, j, k) * gamma0 + (1.0 - eta(i, j, k)) * gamma1; //gammaf(i, j, k);
+            // gamma_eff is the inverse interpolated gamma accross the boundry. It is off centered but ensures consistant pressure accross boundry
+            // gamma_eff_alt is the linear interpolated gamma from the gammaf(i,j,k_ field. It is centered but can cause uneven pressure
             Set::Scalar gamma_eff = 1.0 / ( eta(i, j, k) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0) ) + 1.0;
-            Set::Scalar gamma_eff_alt = gammaf(i, j, k);
+            Set::Scalar gamma_eff_alt = gammaf(i, j, k); //
 
             // Calculate effective viscosities
             Set::Scalar mu_eff = eta(i, j, k) * mu0 + (1.0 - eta(i, j, k)) * mu1;       // Effective dynamic viscosity
@@ -1139,13 +1141,27 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             std::vector<Solver::Local::Riemann::State> y_states(3);
 
             // Fill the arrays with cell states
-            x_states[0] = Solver::Local::Riemann::State(rho, M, E_vol, T, i - 1, j, k, X);  // x_lo
-            x_states[1] = Solver::Local::Riemann::State(rho, M, E_vol, T, i, j, k, X);      // x
-            x_states[2] = Solver::Local::Riemann::State(rho, M, E_vol, T, i + 1, j, k, X);  // x_hi
+            if (Spec_Vol == 1)
+            {
+                x_states[0] = Solver::Local::Riemann::State(rho, M, E_vol, T, i - 1, j, k, X); // x_lo
+                x_states[1] = Solver::Local::Riemann::State(rho, M, E_vol, T, i, j, k, X);     // x
+                x_states[2] = Solver::Local::Riemann::State(rho, M, E_vol, T, i + 1, j, k, X); // x_hi
 
-            y_states[0] = Solver::Local::Riemann::State(rho, M, E_vol, T, i, j - 1, k, Y); // y_lo
-            y_states[1] = Solver::Local::Riemann::State(rho, M, E_vol, T, i, j, k, Y);     // y
-            y_states[2] = Solver::Local::Riemann::State(rho, M, E_vol, T, i, j + 1, k, Y); // y_hi
+                y_states[0] = Solver::Local::Riemann::State(rho, M, E_vol, T, i, j - 1, k, Y); // y_lo
+                y_states[1] = Solver::Local::Riemann::State(rho, M, E_vol, T, i, j, k, Y);     // y
+                y_states[2] = Solver::Local::Riemann::State(rho, M, E_vol, T, i, j + 1, k, Y); // y_hi
+            }
+            else 
+            {
+                x_states[0] = Solver::Local::Riemann::State(rho, M, E_mas, T, i - 1, j, k, X); // x_lo
+                x_states[1] = Solver::Local::Riemann::State(rho, M, E_mas, T, i, j, k, X);     // x
+                x_states[2] = Solver::Local::Riemann::State(rho, M, E_mas, T, i + 1, j, k, X); // x_hi
+
+                y_states[0] = Solver::Local::Riemann::State(rho, M, E_mas, T, i, j - 1, k, Y); // y_lo
+                y_states[1] = Solver::Local::Riemann::State(rho, M, E_mas, T, i, j, k, Y);     // y
+                y_states[2] = Solver::Local::Riemann::State(rho, M, E_mas, T, i, j + 1, k, Y); // y_hi
+            }
+            
 
             // Variables to store reconstructed states at interfaces
             std::vector<Solver::Local::Riemann::State> x_leftStates(3), x_rightStates(3);
@@ -1195,26 +1211,26 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 if (Riemann_Solver == 0)
                 {
                     // Calculate fluxes for the mixed fluid using ROE
-                    flux_xlo = roesolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff);
-                    flux_ylo = roesolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff);
-                    flux_xhi = roesolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff);
-                    flux_yhi = roesolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff);
+                    flux_xlo = roesolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
+                    flux_ylo = roesolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
+                    flux_xhi = roesolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
+                    flux_yhi = roesolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
                 }
                 else if (Riemann_Solver == 1)
                 {
                     // Calculate fluxes for the mixed fluid using HLLC
-                    flux_xlo = hllcsolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff);
-                    flux_ylo = hllcsolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff);
-                    flux_xhi = hllcsolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff);
-                    flux_yhi = hllcsolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff);
+                    flux_xlo = hllcsolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
+                    flux_ylo = hllcsolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
+                    flux_xhi = hllcsolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
+                    flux_yhi = hllcsolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
                 }
                 else if (Riemann_Solver == 2)
                 {
                     // Calculate fluxes for the mixed fluid using HLLE
-                    flux_xlo = hllesolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff, gamma_eff_alt);
-                    flux_ylo = hllesolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff, gamma_eff_alt);
-                    flux_xhi = hllesolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff, gamma_eff_alt);
-                    flux_yhi = hllesolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff, gamma_eff_alt);
+                    flux_xlo = hllesolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
+                    flux_ylo = hllesolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
+                    flux_xhi = hllesolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
+                    flux_yhi = hllesolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
                 }
                 else if (Riemann_Solver == 3)
                 {
@@ -1294,9 +1310,18 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Energy
             Set::Scalar dE_dt = (flux_xlo.energy - flux_xhi.energy) / (DX[0] + small) + (flux_ylo.energy - flux_yhi.energy) / (DX[1] + small) + Source(i, j, k, 3);
+            if (Spec_Vol == 1)
+            {
+                E_vol_new(i, j, k) = E_vol(i, j, k) + dE_dt * dt;
+                E_mas_new(i, j, k) = E_vol_new(i, j, k) / (rho(i, j, k) + small);
+            }
+            else
+            {
+                E_mas_new(i, j, k) = E_vol_new(i, j, k) + dE_dt * dt;
+                E_vol_new(i, j, k) = E_vol(i, j, k) * (rho(i, j, k) + small);
 
-            E_vol_new(i, j, k) = E_vol(i, j, k) + dE_dt * dt;
-            E_mas_new(i, j, k) = E_vol_new(i, j, k) / (rho(i, j, k) + small);
+            }
+           
             
             /// Eta:
             // Material Derivative

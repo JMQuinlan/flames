@@ -284,6 +284,7 @@ private:
     int apply_buoyancy = 0;
     int apply_weight = 0;
     int static_eta = 0;
+    int Spec_Vol = 1;
     
     int Riemann_Solver = 0;
     int kappa_method = 2;

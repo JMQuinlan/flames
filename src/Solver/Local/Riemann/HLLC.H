@@ -54,7 +54,7 @@ public:
         pp.query_default("verbose", value.verbose, 1);
     }
 
-    Flux Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0)
+    Flux Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0, Set::Scalar gamma_alt = 0.0, Set::Scalar Spec_Vol = 0)
     {
         Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
         Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
@@ -66,18 +66,36 @@ public:
         rho_R = std::max(0.0, rho_R);
 
         // STEP 1: Compute fluid primitives
-        // Set::Scalar ke_L = 0.5 * (Mn_L * Mn_L /*+ Mt_L * Mt_L*/) / (rho_L + small); // KE per unit volume
-        Set::Scalar ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
-        Set::Scalar ue_L = E_L - ke_L;                                          // IE per unit volume
-        Set::Scalar p_L = (gamma - 1.0) * ue_L - gamma * (p_0 + p_ref);         // pressure Tammann EOS modification
-        p_L = std::max(0.0, p_L);
+        Set::Scalar ke_L, ke_R;
+        Set::Scalar ue_L, ue_R;
+        Set::Scalar p_L, p_R;
+        Set::Scalar h_TL, h_TR;
+        if (Spec_Vol == 0)
+        {
+            // With Respect to Specific Volume (energies are per unit volume)
+            ke_L = 0.5 * (Mn_L * Mn_L /* Mt_L * Mt_L*/);        // KE per unit volume
+            ue_L = E_L - ke_L;                                  // IE per unit volume
+            p_L = (gamma - 1.0) * ue_L - gamma * (p_0 + p_ref); // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
+            h_TL = (ke_L + ue_L + p_L);                         // / (rho_L + small);             // specific stagnation enthalpy (per unit volume) ( (J/m3 + J/m3 + N/m2) ==> (J/m3) )
 
-        // Set::Scalar ke_R = 0.5 * (Mn_R * Mn_R /*+ Mt_R * Mt_R*/) / (rho_R + small);
-        Set::Scalar ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
-        Set::Scalar ue_R = E_R - ke_R;
-        Set::Scalar p_R = (gamma - 1.0) * ue_R - gamma * (p_0 + p_ref);
-        p_R = std::max(0.0, p_R);
+            ke_R = 0.5 * (Mn_R * Mn_R /* Mt_R * Mt_R*/);
+            ue_R = E_R - ke_R;
+            p_R = (gamma - 1.0) * ue_R - gamma * (p_0 + p_ref);
+            h_TR = (ke_R + ue_R + p_R); // / (rho_R+small);
+        }
+        else
+        {
+            // With Respect to Specific Mass (energies are per unit mass)
+            ke_L = 0.5 * (Mn_L * Mn_L /*+ Mt_L * Mt_L*/) / (rho_L + small); // KE per unit mass
+            ue_L = E_L - ke_L;                                              // IE per unit mass
+            p_L = (gamma - 1.0) * rho_L * ue_L - gamma * (p_0 + p_ref);     // pressure Tammann EOS modification
+            h_TL = ke_L + ue_L + (p_L) / (rho_L + small);                   // specific stagnation enthalpy (per unit mass) ( (J/m3 + J/m3 + N/m2) / (kg/m3) ==> (J/kg) )
 
+            ke_R = 0.5 * (Mn_R * Mn_R /*+ Mt_R * Mt_R*/) / (rho_R + small);
+            ue_R = E_R - ke_R;
+            p_R = (gamma - 1.0) * rho_R * ue_R - gamma * (p_0 + p_ref);
+            h_TR = ke_R + ue_R + (p_R) / (rho_R + small);
+        }
         Set::Scalar u_L = Mn_L / (rho_L + small), u_R = Mn_R / (rho_R + small);
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
