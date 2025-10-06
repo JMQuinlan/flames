@@ -6,9 +6,9 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHighTammann2
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHighTammann3
 #plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHigh_SmallEta_HLLETamman
-plot_file = tests/LargeBubbleRPE_2_Bar.GammaHigh
+#plot_file = tests/LargeBubbleRPE_2_Bar.GammaHigh
 #plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
 
 
@@ -31,7 +31,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.min  = 2e-8
 dynamictimestep.max  = 1e-6
-cfl = 0.8;
+cfl = 0.8e7;
 
 
 ### DIMENSIONS ###
@@ -57,7 +57,7 @@ epsilon = eta.ic.expression.constant.epsilon
 gamma0 = 7.15  # 1.63 # 7.15 
 gamma1 = 1.4
 
-p0_0 = 0.3*10**5 #0.3*10**5 # 0.3*10**9
+p0_0 = 0.3*10**6 #0.3*10**5 # 0.3*10**9
 p0_1 = 0
 
 mu0   = 10
