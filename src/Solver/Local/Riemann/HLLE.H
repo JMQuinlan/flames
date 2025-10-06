@@ -78,7 +78,7 @@ public:
         Set::Scalar ue_L, ue_R;
         Set::Scalar p_L, p_R;
         Set::Scalar h_TL, h_TR;
-        if (Spec_Vol == 0)
+        if (Spec_Vol == 1)
         {
             // With Respect to Specific Volume (energies are per unit volume)
             ke_L = 0.5 * (Mn_L * Mn_L /* Mt_L * Mt_L*/); // KE per unit volume

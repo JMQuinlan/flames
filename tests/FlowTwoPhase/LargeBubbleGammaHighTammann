@@ -173,11 +173,12 @@ u0.ic.constant.value = 0.0
 apply_surface_tension = 1
 apply_buoyancy = 0
 apply_weight = 0
+Spec_Vol = 1
 grav = 9.81
 
 ### DEBUGGING ### 
 # Used for testing of the model
-Riemann_Solver = 2 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
 kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
 scheme = 0		   # Valid Entries: 0:"Forward Euler" / 1:"SSPRK3" / 2:"RK4"
 Limiter = 0        # Valid Entries: 0:"None" / 1:"MinMod" / 2:"Van Leer"

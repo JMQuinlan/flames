@@ -74,15 +74,15 @@ public:
         Set::Scalar ue_L, ue_R;
         Set::Scalar p_L, p_R;
         Set::Scalar h_TL, h_TR;
-        if (Spec_Vol == 0)
+        if (Spec_Vol == 1)
         {
             // With Respect to Specific Volume (energies are per unit volume)
-            ke_L = 0.5 * (Mn_L * Mn_L /* Mt_L * Mt_L*/);                    // KE per unit volume
-            ue_L = E_L - ke_L;                                  // IE per unit volume
-            p_L = (gamma - 1.0) * ue_L - gamma * (p_0 + p_ref); // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
-            h_TL = (ke_L + ue_L + p_L);                         // / (rho_L + small);             // specific stagnation enthalpy (per unit volume) ( (J/m3 + J/m3 + N/m2) ==> (J/m3) )
+            ke_L = 0.5 * (Mn_L * Mn_L /*+ Mt_L * Mt_L*/) / (rho_L + small); // KE per unit volume
+            ue_L = E_L - ke_L;                                              // IE per unit volume
+            p_L = (gamma - 1.0) * ue_L - gamma * (p_0 + p_ref);             // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
+            h_TL = (ke_L + ue_L + p_L);                                     // / (rho_L + small);             // specific stagnation enthalpy (per unit volume) ( (J/m3 + J/m3 + N/m2) ==> (J/m3) )
 
-            ke_R = 0.5 * (Mn_R * Mn_R /* Mt_R * Mt_R*/);
+            ke_R = 0.5 * (Mn_R * Mn_R /*+ Mt_R * Mt_R*/) / (rho_R + small);
             ue_R = E_R - ke_R;
             p_R = (gamma - 1.0) * ue_R - gamma * (p_0 + p_ref);
             h_TR = (ke_R + ue_R + p_R); // / (rho_R+small);
@@ -90,12 +90,12 @@ public:
         else
         {
             // With Respect to Specific Mass (energies are per unit mass)
-            ke_L = 0.5 * (Mn_L * Mn_L /*+ Mt_L * Mt_L*/) / (rho_L + small); // KE per unit mass
+            ke_L = 0.5 * (Mn_L * Mn_L /* Mt_L * Mt_L*/) / ((rho_L * rho_L) + small); // KE per unit mass
             ue_L = E_L - ke_L;                                              // IE per unit mass
             p_L = (gamma - 1.0) * rho_L * ue_L - gamma * (p_0 + p_ref);     // pressure Tammann EOS modification
             h_TL = ke_L + ue_L + (p_L) / (rho_L + small);                   // specific stagnation enthalpy (per unit mass) ( (J/m3 + J/m3 + N/m2) / (kg/m3) ==> (J/kg) )
 
-            ke_R = 0.5 * (Mn_R * Mn_R /*+ Mt_R * Mt_R*/) / (rho_R + small);
+            ke_R = 0.5 * (Mn_R * Mn_R /* Mt_R * Mt_R*/) / ((rho_R * rho_R) + small);
             ue_R = E_R - ke_R;
             p_R = (gamma - 1.0) * rho_R * ue_R - gamma * (p_0 + p_ref);
             h_TR = ke_R + ue_R + (p_R) / (rho_R + small);
@@ -107,11 +107,12 @@ public:
         // STEP 2: Compute Roe-averaged quantities
         //
         Set::Scalar rho_RL  = std::sqrt(rho_L * rho_R);
+        Set::Scalar rhor_RL = (std::sqrt(rho_L) * rho_L + std::sqrt(rho_R) * rho_R) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
         Set::Scalar u_RL    = (std::sqrt(rho_L) * u_L  + std::sqrt(rho_R) * u_R ) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
         Set::Scalar v_RL    = (std::sqrt(rho_L) * v_L + std::sqrt(rho_R) * v_R) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
         Set::Scalar h_RL    = (std::sqrt(rho_L) * h_TL + std::sqrt(rho_R) * h_TR) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
         Set::Scalar a_RL_sq;
-        if (Spec_Vol == 0)
+        if (Spec_Vol == 1)
         {
             // Speed of Sound With Respect to Specific Volume (energies are per unit volume)
             a_RL_sq = std::max(0.0, (gamma_alt - 1.0) * (h_RL - 0.5 * rho_RL * (u_RL * u_RL + v_RL * v_RL)) + (gamma_alt * (p_0 + p_ref) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small))); // Not clear if the second term is correct
@@ -119,7 +120,7 @@ public:
         else
         {
             // Speed of Sound With Respect to Specific Mass (energies are per unit mass)
-            a_RL_sq = std::max(0.0, (gamma_alt - 1.0) * (h_RL - 0.5 * (u_RL * u_RL + v_RL * v_RL)) + (gamma_alt * (p_0 + p_ref) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small))); // Not clear if the second term is correct
+            a_RL_sq = std::max(0.0, (gamma_alt - 1.0) * rho_RL * (h_RL - 0.5 * (u_RL * u_RL + v_RL * v_RL)) + (gamma_alt * (p_0 + p_ref) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small))); // Not clear if the second term is correct
         }
        // Set::Scalar a_RL_sq = std::max(0.0, (gamma - 1.0) * (h_RL - 0.5 * (u_RL * u_RL + v_RL * v_RL)) + (gamma * (p_0 + p_ref) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small))); // Not clear if the second term is correct
 

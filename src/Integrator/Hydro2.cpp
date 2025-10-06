@@ -500,7 +500,7 @@ void Hydro2::Mix(int lev)
             
             UE_vol(i, j, k) = ((p0(i, j, k) + gamma0 * p0_0) / ((gamma0 - 1.0))) * eta(i, j, k) + ((p1(i, j, k) + gamma1 * p0_1) / ((gamma1 - 1.0))) * (1.0 - eta(i, j, k));
             //UE_vol(i, j, k) = ((p0(i, j, k) + gamma * p0_0) / ((gamma - 1.0))) * eta(i, j, k) + ((p1(i, j, k) + gamma * p0_1) / ((gamma - 1.0))) * (1.0 - eta(i, j, k));
-            UE_mas(i, j, k) = UE_vol(i, j, k) / (rho(i, j, k) + small);
+            UE_mas(i, j, k) = ((p0(i, j, k) + gamma0 * p0_0) / ((gamma0 - 1.0) * rho0(i,j,k) + small)) * eta(i, j, k) + ((p1(i, j, k) + gamma1 * p0_1) / ((gamma1 - 1.0) * rho1(i,j,k) + small)) * (1.0 - eta(i, j, k));
 
             //  TODO: Get rid of thermally perfect assumption. Involve temperature
             E_vol(i, j, k) = KE_vol(i, j, k) + UE_vol(i, j, k);
@@ -1317,8 +1317,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             }
             else
             {
-                E_mas_new(i, j, k) = E_vol_new(i, j, k) + dE_dt * dt;
-                E_vol_new(i, j, k) = E_vol(i, j, k) * (rho(i, j, k) + small);
+                E_mas_new(i, j, k) = E_mas(i, j, k) + dE_dt * dt;
+                E_vol_new(i, j, k) = E_mas_new(i, j, k) * (rho(i, j, k));
 
             }
            

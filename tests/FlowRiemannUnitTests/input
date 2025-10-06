@@ -34,13 +34,13 @@ plot_file = ./tests/FlowRiemannUnitTests/output
 ### MESHING ###
 
 #amr.plot_dt = 0.1
-amr.plot_int = 50
+amr.plot_int = 500
 amr.max_level = 0
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.grid_eff = 0.8
 
-amr.n_cell = 200 4
+amr.n_cell = 800 4
 
 # Uncomment to test AMR
 #amr.max_level = 2
@@ -54,7 +54,7 @@ geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
 
-timestep  = 1.0e-3
+timestep  = 1.0e-4
 stop_time = 0.25
 
 ### ETA IC ###
@@ -193,3 +193,6 @@ rho_refinement_criterion   = 100000.0
 p_refinement_criterion     = 100000.0
 
 static_eta = 1
+Spec_Vol = 0
+
+Riemann_Solver=1
