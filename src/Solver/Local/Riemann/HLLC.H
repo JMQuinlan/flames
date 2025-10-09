@@ -56,6 +56,12 @@ public:
 
     Flux Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0, Set::Scalar gamma_alt = 0.0, int Spec_Vol = 1)
     {
+        // If not using an alternate gamma law, force it to use regular gamma
+        if (gamma_alt == 0.0)
+        {
+            gamma_alt = gamma;
+        }
+
         Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
         Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
         Set::Scalar Mt_L = lo.M_tangent, Mt_R = hi.M_tangent;
@@ -75,12 +81,12 @@ public:
             // With Respect to Specific Volume (energies are per unit volume)
             ke_L = 0.5 * (Mn_L * Mn_L /*+ Mt_L * Mt_L*/) / (rho_L + small); // KE per unit volume
             ue_L = E_L - ke_L;                                              // IE per unit volume
-            p_L = (gamma - 1.0) * ue_L - gamma * (p_0 + p_ref);             // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
+            p_L = (gamma - 1.0) * ue_L - gamma * p_0 + p_ref;               // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
             h_TL = (ke_L + ue_L + p_L);                                     // / (rho_L + small);             // specific stagnation enthalpy (per unit volume) ( (J/m3 + J/m3 + N/m2) ==> (J/m3) )
 
             ke_R = 0.5 * (Mn_R * Mn_R /*+ Mt_R * Mt_R*/) / (rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma - 1.0) * ue_R - gamma * (p_0 + p_ref);
+            p_R = (gamma - 1.0) * ue_R - gamma * p_0 + p_ref;
             h_TR = (ke_R + ue_R + p_R); // / (rho_R+small);
         }
         else
@@ -88,20 +94,20 @@ public:
             // With Respect to Specific Mass (energies are per unit mass)
             ke_L = 0.5 * (Mn_L * Mn_L /* Mt_L * Mt_L*/) / (rho_L * rho_L + small); // KE per unit volume
             ue_L = E_L - ke_L;                                              // IE per unit mass
-            p_L = (gamma - 1.0) * rho_L * ue_L - gamma * (p_0 + p_ref);     // pressure Tammann EOS modification
+            p_L = (gamma - 1.0) * rho_L * ue_L - gamma * p_0 + p_ref;              // pressure Tammann EOS modification
             h_TL = ke_L + ue_L + (p_L) / (rho_L + small);                   // specific stagnation enthalpy (per unit mass) ( (J/m3 + J/m3 + N/m2) / (kg/m3) ==> (J/kg) )
 
             ke_R = 0.5 * (Mn_R * Mn_R /* Mt_R * Mt_R*/) / (rho_R * rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma - 1.0) * rho_R * ue_R - gamma * (p_0 + p_ref);
+            p_R = (gamma - 1.0) * rho_R * ue_R - gamma * p_0 + p_ref;
             h_TR = ke_R + ue_R + (p_R) / (rho_R + small);
         }
         Set::Scalar u_L = Mn_L / (rho_L + small), u_R = Mn_R / (rho_R + small);
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
         // STEP 2: Compute sound speeds
-        Set::Scalar a_L = std::sqrt(gamma * (p_L + p_ref) / (rho_L + small));
-        Set::Scalar a_R = std::sqrt(gamma * (p_R + p_ref) / (rho_R + small));
+        Set::Scalar a_L = std::sqrt(gamma_alt * (p_L + p_0) / (rho_L + small));
+        Set::Scalar a_R = std::sqrt(gamma_alt * (p_R + p_0) / (rho_R + small));
 
         // STEP 3: Compute wave speed estimates
         // Use simple estimates for wave speeds
@@ -134,12 +140,12 @@ public:
             f_L.mass = rho_L * u_L;
             f_L.momentum_normal = rho_L * u_L * u_L + p_L;
             f_L.momentum_tangent = rho_L * u_L * v_L;
-            f_L.energy = u_L * (rho_L * E_L + p_L); // [J/kg/s]
+            f_L.energy = u_L * (E_L + p_L / (rho_L + small)); // [W/kg]
 
             f_R.mass = rho_R * u_R;
             f_R.momentum_normal = rho_R * u_R * u_R + p_R;
             f_R.momentum_tangent = rho_R * u_R * v_R;
-            f_R.energy = u_R * (rho_R * E_R + p_R);
+            f_R.energy = u_R * (E_R + p_R / (rho_R + small)); 
         }
 
         // STEP 6: Compute star state values
@@ -172,13 +178,18 @@ public:
             f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
             f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
             f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
-            f_star_L.energy = f_L.energy + S_L * (rho_star_L * (E_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - rho_L * E_L);
+            //f_star_L.energy = f_L.energy + S_L * (E_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small)) - E_L);
+            //f_star_L.energy = f_L.energy + S_L * (rho_star_L * (E_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - rho_L * E_L);
+            f_star_L.energy = f_L.energy + S_L * ((E_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - E_L);
             //f_star_L.energy = f_star_L.energy / (rho_L + small);
 
             f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
             f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
             f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
-            f_star_R.energy = f_R.energy + S_R * (rho_star_R * (E_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - rho_R * E_R);
+            //f_star_R.energy = f_R.energy + S_R * (E_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small)) - E_R);
+            //f_star_R.energy = f_R.energy + S_R * (rho_star_R * (E_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - rho_R * E_R);
+            //f_star_R.energy = f_R.energy + S_R / (rho_R + small) * (rho_star_R * (E_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - rho_R * E_R);
+            f_star_R.energy = f_R.energy + S_R * ((E_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - E_R);
             //f_star_R.energy = f_star_R.energy / (rho_R + small);
 
 

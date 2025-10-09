@@ -58,7 +58,7 @@ public:
             Util::Warning(INFO,"The entropy fix is experimental and should be used with caution. Has previously caused errors with FlowDrivenCavity regression test");
     }
 
-    Flux Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0, Set::Scalar gamma_alt = 0.0, Set::Scalar Spec_Vol = 0)
+    Flux Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0, Set::Scalar gamma_alt = 0.0, int Spec_Vol = 1)
     {
         Set::Scalar rho_L = lo.rho       ,  rho_R = hi.rho;
         Set::Scalar Mn_L  = lo.M_normal  ,  Mn_R  = hi.M_normal  ;
@@ -79,25 +79,25 @@ public:
             // With Respect to Specific Volume (energies are per unit volume)
             ke_L = 0.5 * (Mn_L * Mn_L /*+ Mt_L * Mt_L*/) / (rho_L + small); // KE per unit volume
             ue_L = E_L - ke_L;                                              // IE per unit volume
-            p_L = (gamma - 1.0) * ue_L - gamma * (p_0 + p_ref);             // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
+            p_L = (gamma - 1.0) * ue_L - gamma * p_0 - p_ref;               // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
             h_TL = (ke_L + ue_L + p_L);                                     // / (rho_L + small);             // specific stagnation enthalpy (per unit volume) ( (J/m3 + J/m3 + N/m2) ==> (J/m3) )
 
             ke_R = 0.5 * (Mn_R * Mn_R /*+ Mt_R * Mt_R*/) / (rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma - 1.0) * ue_R - gamma * (p_0 + p_ref);
+            p_R = (gamma - 1.0) * ue_R - gamma * p_0 - p_ref;
             h_TR = (ke_R + ue_R + p_R); // / (rho_R+small);
         }
         else
         {
             // With Respect to Specific Mass (energies are per unit mass)
-            ke_L = 0.5 * (Mn_L * Mn_L /* Mt_L * Mt_L*/) / ((rho_L * rho_L) + small); // KE per unit mass
-            ue_L = E_L - ke_L;                                              // IE per unit mass
-            p_L = (gamma - 1.0) * rho_L * ue_L - gamma * (p_0 + p_ref);     // pressure Tammann EOS modification
-            h_TL = ke_L + ue_L + (p_L) / (rho_L + small);                   // specific stagnation enthalpy (per unit mass) ( (J/m3 + J/m3 + N/m2) / (kg/m3) ==> (J/kg) )
+            ke_L = 0.5 * (Mn_L * Mn_L /* Mt_L * Mt_L*/) / (rho_L * rho_L + small); // KE per unit volume
+            ue_L = E_L - ke_L;                                                     // IE per unit mass
+            p_L = (gamma - 1.0) * rho_L * ue_L - gamma * p_0 + p_ref;              // pressure Tammann EOS modification
+            h_TL = ke_L + ue_L + (p_L) / (rho_L + small);                          // specific stagnation enthalpy (per unit mass) ( (J/m3 + J/m3 + N/m2) / (kg/m3) ==> (J/kg) )
 
-            ke_R = 0.5 * (Mn_R * Mn_R /* Mt_R * Mt_R*/) / ((rho_R * rho_R) + small);
+            ke_R = 0.5 * (Mn_R * Mn_R /* Mt_R * Mt_R*/) / (rho_R * rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma - 1.0) * rho_R * ue_R - gamma * (p_0 + p_ref);
+            p_R = (gamma - 1.0) * rho_R * ue_R - gamma * p_0 + p_ref;
             h_TR = ke_R + ue_R + (p_R) / (rho_R + small);
         }
         Set::Scalar u_L = Mn_L / (rho_L + small), u_R = Mn_R / (rho_R + small);
@@ -107,10 +107,12 @@ public:
         // STEP 2: Compute Roe-averaged quantities
         //
         Set::Scalar rho_RL  = std::sqrt(rho_L * rho_R);
-        Set::Scalar rhor_RL = (std::sqrt(rho_L) * rho_L + std::sqrt(rho_R) * rho_R) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
         Set::Scalar u_RL    = (std::sqrt(rho_L) * u_L  + std::sqrt(rho_R) * u_R ) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
         Set::Scalar v_RL    = (std::sqrt(rho_L) * v_L + std::sqrt(rho_R) * v_R) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
         Set::Scalar h_RL    = (std::sqrt(rho_L) * h_TL + std::sqrt(rho_R) * h_TR) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
+        Set::Scalar p_RL    = (std::sqrt(rho_L) * p_L + std::sqrt(rho_R) * p_R) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
+
+        /*
         Set::Scalar a_RL_sq;
         if (Spec_Vol == 1)
         {
@@ -122,6 +124,9 @@ public:
             // Speed of Sound With Respect to Specific Mass (energies are per unit mass)
             a_RL_sq = std::max(0.0, (gamma_alt - 1.0) * rho_RL * (h_RL - 0.5 * (u_RL * u_RL + v_RL * v_RL)) + (gamma_alt * (p_0 + p_ref) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small))); // Not clear if the second term is correct
         }
+        */
+        Set::Scalar a_RL_sq = gamma_alt * ((p_RL + p_0) / rho_RL);
+
        // Set::Scalar a_RL_sq = std::max(0.0, (gamma - 1.0) * (h_RL - 0.5 * (u_RL * u_RL + v_RL * v_RL)) + (gamma * (p_0 + p_ref) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small))); // Not clear if the second term is correct
 
         if (verbose && ((a_RL_sq<0) || (a_RL_sq!=a_RL_sq)))
@@ -171,13 +176,14 @@ public:
         //
         Set::Scalar r11 = 1.0;
         Set::Scalar r12 = u_RL;
-        Set::Scalar r13 = 0.5*u_RL*u_RL;
-        Set::Scalar r21 = 0.5*rho_RL/a_RL;
-        Set::Scalar r22 = 0.5*rho_RL/a_RL * ( u_RL + a_RL );
-        Set::Scalar r23 = 0.5*rho_RL/a_RL * ( h_RL + a_RL*u_RL );
-        Set::Scalar r31 = -0.5*rho_RL/a_RL;
-        Set::Scalar r32 = -0.5*rho_RL/a_RL * ( u_RL - a_RL );
-        Set::Scalar r33 = -0.5*rho_RL/a_RL * ( h_RL - a_RL*u_RL );
+        Set::Scalar r13 = 0.5 * u_RL * u_RL;
+        Set::Scalar r21 = 0.5 * rho_RL / a_RL;
+        Set::Scalar r22 = 0.5 * rho_RL / a_RL * (u_RL + a_RL);
+        Set::Scalar r23 = 0.5 * rho_RL / a_RL * (h_RL + a_RL * u_RL);
+        Set::Scalar r31 = -0.5 * rho_RL / a_RL;
+        Set::Scalar r32 = -0.5 * rho_RL / a_RL * (u_RL - a_RL);
+        Set::Scalar r33 = -0.5 * rho_RL / a_RL * (h_RL - a_RL * u_RL);
+
 
         //
         // STEP 6: Compute solution - not needed since fluxes will be computed in STEP 7
@@ -233,13 +239,20 @@ public:
         fl.momentum_tangent = 0.5 * (rho_L * u_L * v_L + rho_R * u_R * v_R);
 
 
-        fl.energy = (   0.5*(u_L*(ke_L + p_L/rho_L + ue_L) + u_R*(ke_R + p_R/rho_R + ue_R)) - 0.5*
-        //fl.energy = (   0.5*(u_L*(ke_L + p_L + ue_L) + u_R*(ke_R + p_R + ue_R)) - 0.5*
-                        (
-                            r13*fabs(lambda1)*deltav1 +
-                            r23*fabs(lambda2)*deltav2 +
-                            r33*fabs(lambda3)*deltav3)
-            );
+        if (Spec_Vol == 1)
+        {
+            // With Respect to Specific Volume (energies are per unit volume)
+            fl.energy = (0.5*(u_L*(ke_L + p_L + ue_L) + u_R*(ke_R + p_R + ue_R)) - 0.5*
+                    (r13 * fabs(lambda1) * deltav1 + r23 * fabs(lambda2) * deltav2 + r33 * fabs(lambda3) * deltav3));
+        }
+        else
+        {
+            // With Respect to Specific Mass (energies are per unit mass)
+            fl.energy = (0.5 * (u_L * (ke_L + p_L / (rho_L + small) + ue_L) + u_R * (ke_R + p_R / (rho_R + small) + ue_R)) - 0.5 *
+                    (r13 * fabs(lambda1) * deltav1 + r23 * fabs(lambda2) * deltav2 + r33 * fabs(lambda3) * deltav3));
+        }
+
+        
 
         // ERROR CHECKING
         if ((fl.mass != fl.mass)

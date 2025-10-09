@@ -195,4 +195,4 @@ p_refinement_criterion     = 100000.0
 static_eta = 1
 Spec_Vol = 0
 
-Riemann_Solver=1
+Riemann_Solver=0

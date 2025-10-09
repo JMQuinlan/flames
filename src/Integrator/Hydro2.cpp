@@ -57,7 +57,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("grav", value.g, 9.81);            // Gravitational Acceletation
         pp_forbid("roefix", "--> solver.roe.entropy_fix");  // Roe solver entropy fix
         pp_query_default("scheme", value.scheme, 0);        // 0: Forward Euler | 1: RK4
-        pp_query_default("Spec_Vol", value.Spec_Vol, 1);    // 0: Solve Energy via specific mass | 1: Solve Energy bia specific volume
+        pp_query_default("Spec_Vol", value.Spec_Vol, 1);    // 0: Solve Energy via specific mass | 1: Solve Energy via specific volume
 
         // ADAPTIVE TIMESTEP
         // Swtiched pointer names to fix weird time stepping issue
@@ -488,18 +488,12 @@ void Hydro2::Mix(int lev)
 
             // Kinetic Energy
             KE_vol(i, j, k) = (0.5 * ((v0(i, j, k, 0) * v0(i, j, k, 0)) + (v0(i, j, k, 1) * v0(i, j, k, 1))) * rho0(i, j, k)) * eta(i, j, k)
-                        + (0.5 * ((v1(i, j, k, 0) * v1(i, j, k, 0)) + (v1(i, j, k, 1) * v1(i, j, k, 1))) * rho1(i, j, k)) * (1.0 - eta(i, j, k));
+                            + (0.5 * ((v1(i, j, k, 0) * v1(i, j, k, 0)) + (v1(i, j, k, 1) * v1(i, j, k, 1))) * rho1(i, j, k)) * (1.0 - eta(i, j, k));
             KE_mas(i, j, k) = (0.5 * ((v0(i, j, k, 0) * v0(i, j, k, 0)) + (v0(i, j, k, 1) * v0(i, j, k, 1)))) * eta(i, j, k)
-                              + (0.5 * ((v1(i, j, k, 0) * v1(i, j, k, 0)) + (v1(i, j, k, 1) * v1(i, j, k, 1)))) * (1.0 - eta(i, j, k));
+                            + (0.5 * ((v1(i, j, k, 0) * v1(i, j, k, 0)) + (v1(i, j, k, 1) * v1(i, j, k, 1)))) * (1.0 - eta(i, j, k));
 
-            // Internal Energy
-            //Set::Scalar gamma = gamma0 * eta(i, j, k) + gamma1 * (1.0 - eta(i, j, k));
-            //Set::Scalar gamma = (gamma0 - 1.0) * eta(i, j, k) + (gamma1 - 1.0) * (1.0 - eta(i, j, k)) + 1.0; // 2018
-            //Set::Scalar invgammasub1 = eta(i, j, k) * 1.0 / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) * 1.0 / (gamma1 - 1.0);
-            //Set::Scalar gamma = (1.0 / invgammasub1) + 1.0; 
-            
+            // Internal Energy           
             UE_vol(i, j, k) = ((p0(i, j, k) + gamma0 * p0_0) / ((gamma0 - 1.0))) * eta(i, j, k) + ((p1(i, j, k) + gamma1 * p0_1) / ((gamma1 - 1.0))) * (1.0 - eta(i, j, k));
-            //UE_vol(i, j, k) = ((p0(i, j, k) + gamma * p0_0) / ((gamma - 1.0))) * eta(i, j, k) + ((p1(i, j, k) + gamma * p0_1) / ((gamma - 1.0))) * (1.0 - eta(i, j, k));
             UE_mas(i, j, k) = ((p0(i, j, k) + gamma0 * p0_0) / ((gamma0 - 1.0) * rho0(i,j,k) + small)) * eta(i, j, k) + ((p1(i, j, k) + gamma1 * p0_1) / ((gamma1 - 1.0) * rho1(i,j,k) + small)) * (1.0 - eta(i, j, k));
 
             //  TODO: Get rid of thermally perfect assumption. Involve temperature
@@ -714,20 +708,16 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Potential Energy
             UE_vol(i, j, k) = E_vol(i, j, k) - KE_vol(i, j, k);
             UE_mas(i, j, k) = E_mas(i, j, k) - KE_mas(i, j, k);
-            //UE_mas(i, j, k) = UE_vol(i, j, k) / (rho(i, j, k) + small);
-
             
-
             // Pressure
-            ///press(i, j, k) = (E_vol(i, j, k) - (0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small))) * (gammaf(i, j, k) - 1.0) - pref; // NEEDS Verification
-            Set::Scalar p0_eff = p0_0 * eta(i, j, k) * p0_1 * (1.0 - eta(i,j,k));
-            //press(i, j, k) = rho(i,j,k) * (gammaf(i,j,k)-1.0) * (E_vol(i,j,k) - 0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small)) - pref - p0_eff; // NEEDS Verification
-            //press(i, j, k) = (gammaf(i, j, k) - 1.0) * (E_vol(i, j, k) - (0.5 * ((M(i, j, k, 0) * M(i, j, k, 0)) + (M(i, j, k, 1) * M(i, j, k, 1))) / (rho(i, j, k) + small))) - pref - p0_eff; // NEEDS Verification
-            press(i, j, k) = (gamma_eff - 1.0) * UE_vol(i, j, k) - pref - p0_eff;
+            Set::Scalar p0_eff = p0_0 * eta(i, j, k) + p0_1 * (1.0 - eta(i, j, k));
+            //press(i, j, k) = (gamma_eff - 1.0) * UE_vol(i, j, k) - gamma_eff * p0_eff - pref;
+            press(i, j, k) = (gamma_eff - 1.0) * UE_vol(i, j, k) - gamma_eff * p0_eff - pref;
             //press(i, j, k) = std::max(0.0 + small, press(i,j,k)); // TEMP, WIP, DELETE
 
             // Speed of sound:
-            a(i, j, k) = std::sqrt(gamma_eff * press(i, j, k) / (rho(i, j, k) + small));
+            a(i, j, k) = std::sqrt(gamma_eff * (press(i, j, k) + p0_eff + pref) / (rho(i, j, k) + small));
+
 
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / (a(i, j, k) + small);
@@ -742,15 +732,16 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 or (UE_vol(i, j, k) != UE_vol(i, j, k)) 
                 or (press(i, j, k) > 1E1000) )
             {
-                Util::ParallelMessage(INFO, "v=", v(i, j, k));
+                Util::ParallelMessage(INFO, "v=", v(i, j, k, 0), ", ", v(i, j, k, 1));
                 Util::ParallelMessage(INFO, "press=", press(i, j, k));
                 Util::ParallelMessage(INFO, "rho=", rho(i, j, k));
-                Util::ParallelMessage(INFO, "M=", M(i, j, k));
+                Util::ParallelMessage(INFO, "M=", M(i, j, k, 0), ", ", M(i, j, k, 1));
                 Util::ParallelMessage(INFO, "E=", E_vol(i, j, k));
                 Util::ParallelMessage(INFO, "KE=", KE_vol(i, j, k));
                 Util::ParallelMessage(INFO, "UE=", UE_vol(i, j, k));
-                Util::ParallelMessage(INFO, "Ma=", Ma(i, j, k, 0), ', ', Ma(i, j, k, 1));
+                Util::ParallelMessage(INFO, "Ma=", Ma(i, j, k, 0), ", ", Ma(i, j, k, 1));
                 Util::ParallelMessage(INFO, "a=", a(i, j, k));
+                Util::ParallelMessage(INFO, "gamma=", gamma_eff, ", ", gammaf(i, j, k));
                 Util::ParallelMessage(INFO, "eta=", eta(i, j, k));
                 Util::ParallelMessage(INFO, "etadot=", etadot(i, j, k));
                 Util::Exception(INFO);
@@ -895,8 +886,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar div_u = gradu(0, 0) + gradu(1, 1); // Divergence of velocity
 
             // Calculate effective specific heat ratio
-            // gamma_eff is the inverse interpolated gamma accross the boundry. It is off centered but ensures consistant pressure accross boundry
-            // gamma_eff_alt is the linear interpolated gamma from the gammaf(i,j,k_ field. It is centered but can cause uneven pressure
+            // gamma_eff is the inverse interpolated gamma across the boundry. It is off centered but ensures consistant pressure across boundry
+            // gamma_eff_alt is the linear interpolated gamma from the gammaf(i,j,k) field. It is centered but can cause uneven pressure
             Set::Scalar gamma_eff = 1.0 / ( eta(i, j, k) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0) ) + 1.0;
             Set::Scalar gamma_eff_alt = gammaf(i, j, k); //
 
