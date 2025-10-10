@@ -188,7 +188,10 @@ public:
                                     int Spec_Vol = 1) const
     {
         // Use gamma_alt if provided, otherwise use gamma
-        Set::Scalar gamma_eff = (gamma_alt > 0.0) ? gamma_alt : gamma;
+        if (gamma_alt == 0.0)
+        {
+            gamma_alt = gamma;
+        }
 
         const int n = cellAverages.size();
         leftStates.resize(n + 1);
@@ -240,16 +243,16 @@ public:
                     // Volume-specific energy
                     ke_L = 0.5 * (u_L * u_L + v_L * v_L) * rho_L;
                     ke_R = 0.5 * (u_R * u_R + v_R * v_R) * rho_R;
-                    p_L = (gamma_eff - 1.0) * (E_L - ke_L) - gamma_eff * p_0 + p_ref;
-                    p_R = (gamma_eff - 1.0) * (E_R - ke_R) - gamma_eff * p_0 + p_ref;
+                    p_L = (gamma_alt - 1.0) * (E_L - ke_L) - gamma_alt * p_0 + p_ref;
+                    p_R = (gamma_alt - 1.0) * (E_R - ke_R) - gamma_alt * p_0 + p_ref;
                 }
                 else
                 {
                     // Mass-specific energy
                     ke_L = 0.5 * (u_L * u_L + v_L * v_L);
                     ke_R = 0.5 * (u_R * u_R + v_R * v_R);
-                    p_L = (gamma_eff - 1.0) * rho_L * (E_L - ke_L) - gamma_eff * p_0 + p_ref;
-                    p_R = (gamma_eff - 1.0) * rho_R * (E_R - ke_R) - gamma_eff * p_0 + p_ref;
+                    p_L = (gamma_alt - 1.0) * rho_L * (E_L - ke_L) - gamma_alt * p_0 + p_ref;
+                    p_R = (gamma_alt - 1.0) * rho_R * (E_R - ke_R) - gamma_alt * p_0 + p_ref;
                 }
 
                 // Calculate enthalpy based on Spec_Vol
@@ -275,7 +278,7 @@ public:
 
                 // Sound speed calculation for Tammann EOS
                 Set::Scalar p_roe = (sqrt_rho_L * p_L + sqrt_rho_R * p_R) / (sqrt_rho_L + sqrt_rho_R + small);
-                Set::Scalar a_roe = std::sqrt(gamma_eff * (p_roe + p_0) / rho_roe);
+                Set::Scalar a_roe = std::sqrt(gamma_alt * (p_roe + p_0) / rho_roe);
 
                 // 2. Compute eigenvectors
                 // For 1D Euler with tangential velocity, we have 4 characteristic fields
@@ -288,7 +291,7 @@ public:
                 };
 
                 // Left eigenvectors matrix (L = R^-1)
-                double b1 = (gamma_eff - 1.0) / (a_roe * a_roe);
+                double b1 = (gamma_alt - 1.0) / (a_roe * a_roe);
                 double b2 = 0.5 * (u_roe * u_roe + v_roe * v_roe);
                 double L[4][4] = {
                     { 0.5 * (b1 * b2 + u_roe / a_roe), -0.5 * (b1 * u_roe + 1.0 / a_roe), -0.5 * b1 * v_roe, 0.5 * b1 },
@@ -358,34 +361,34 @@ public:
                 {
                     // Volume-specific energy
                     Set::Scalar ke_left = 0.5 * (leftStates[i].M_normal * leftStates[i].M_normal + leftStates[i].M_tangent * leftStates[i].M_tangent) / (leftStates[i].rho + small);
-                    Set::Scalar p_left = (gamma_eff - 1.0) * (leftStates[i].E - ke_left) - gamma_eff * p_0 + p_ref;
+                    Set::Scalar p_left = (gamma_alt - 1.0) * (leftStates[i].E - ke_left) - gamma_alt * p_0 + p_ref;
                     if (p_left < small)
                     {
-                        leftStates[i].E = (small + gamma_eff * p_0 - p_ref) / (gamma_eff - 1.0) + ke_left;
+                        leftStates[i].E = (small + gamma_alt * p_0 - p_ref) / (gamma_alt - 1.0) + ke_left;
                     }
 
                     Set::Scalar ke_right = 0.5 * (rightStates[i].M_normal * rightStates[i].M_normal + rightStates[i].M_tangent * rightStates[i].M_tangent) / (rightStates[i].rho + small);
-                    Set::Scalar p_right = (gamma_eff - 1.0) * (rightStates[i].E - ke_right) - gamma_eff * p_0 + p_ref;
+                    Set::Scalar p_right = (gamma_alt - 1.0) * (rightStates[i].E - ke_right) - gamma_alt * p_0 + p_ref;
                     if (p_right < small)
                     {
-                        rightStates[i].E = (small + gamma_eff * p_0 - p_ref) / (gamma_eff - 1.0) + ke_right;
+                        rightStates[i].E = (small + gamma_alt * p_0 - p_ref) / (gamma_alt - 1.0) + ke_right;
                     }
                 }
                 else
                 {
                     // Mass-specific energy
                     Set::Scalar ke_left = 0.5 * (leftStates[i].M_normal * leftStates[i].M_normal + leftStates[i].M_tangent * leftStates[i].M_tangent) / (leftStates[i].rho * leftStates[i].rho + small);
-                    Set::Scalar p_left = (gamma_eff - 1.0) * leftStates[i].rho * (leftStates[i].E - ke_left) - gamma_eff * p_0 + p_ref;
+                    Set::Scalar p_left = (gamma_alt - 1.0) * leftStates[i].rho * (leftStates[i].E - ke_left) - gamma_alt * p_0 + p_ref;
                     if (p_left < small)
                     {
-                        leftStates[i].E = (small + gamma_eff * p_0 - p_ref) / ((gamma_eff - 1.0) * leftStates[i].rho) + ke_left;
+                        leftStates[i].E = (small + gamma_alt * p_0 - p_ref) / ((gamma_alt - 1.0) * leftStates[i].rho) + ke_left;
                     }
 
                     Set::Scalar ke_right = 0.5 * (rightStates[i].M_normal * rightStates[i].M_normal + rightStates[i].M_tangent * rightStates[i].M_tangent) / (rightStates[i].rho * rightStates[i].rho + small);
-                    Set::Scalar p_right = (gamma_eff - 1.0) * rightStates[i].rho * (rightStates[i].E - ke_right) - gamma_eff * p_0 + p_ref;
+                    Set::Scalar p_right = (gamma_alt - 1.0) * rightStates[i].rho * (rightStates[i].E - ke_right) - gamma_alt * p_0 + p_ref;
                     if (p_right < small)
                     {
-                        rightStates[i].E = (small + gamma_eff * p_0 - p_ref) / ((gamma_eff - 1.0) * rightStates[i].rho) + ke_right;
+                        rightStates[i].E = (small + gamma_alt * p_0 - p_ref) / ((gamma_alt - 1.0) * rightStates[i].rho) + ke_right;
                     }
                 }
             }
@@ -435,7 +438,10 @@ public:
     SolveInterface(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0, Set::Scalar gamma_alt = 0.0, int Spec_Vol = 1)
     {
         // Use gamma_alt if provided, otherwise use gamma
-        Set::Scalar gamma_eff = (gamma_alt > 0.0) ? gamma_alt : gamma;
+        if (gamma_alt == 0.0)
+        {
+            gamma_alt = gamma;
+        }
 
         Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
         Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
@@ -454,12 +460,12 @@ public:
             // With Respect to Specific Volume (energies are per unit volume)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
             ue_L = E_L - ke_L;                                          // IE per unit volume
-            p_L = (gamma_eff - 1.0) * ue_L - gamma_eff * p_0 + p_ref;   // pressure Tammann EOS modification
+            p_L = (gamma_alt - 1.0) * ue_L - gamma_alt * p_0 + p_ref;   // pressure Tammann EOS modification
             h_TL = (ke_L + ue_L + p_L);                                 // stagnation enthalpy (per unit volume)
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_eff - 1.0) * ue_R - gamma_eff * p_0 + p_ref;
+            p_R = (gamma_alt - 1.0) * ue_R - gamma_alt * p_0 + p_ref;
             h_TR = (ke_R + ue_R + p_R);
         }
         else
@@ -467,12 +473,12 @@ public:
             // With Respect to Specific Mass (energies are per unit mass)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small); // KE per unit mass
             ue_L = E_L - ke_L;                                                  // IE per unit mass
-            p_L = (gamma_eff - 1.0) * rho_L * ue_L - gamma_eff * p_0 + p_ref;   // pressure Tammann EOS modification
+            p_L = (gamma_alt - 1.0) * rho_L * ue_L - gamma_alt * p_0 + p_ref;   // pressure Tammann EOS modification
             h_TL = ke_L + ue_L + (p_L) / (rho_L + small);                       // specific stagnation enthalpy (per unit mass)
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_eff - 1.0) * rho_R * ue_R - gamma_eff * p_0 + p_ref;
+            p_R = (gamma_alt - 1.0) * rho_R * ue_R - gamma_alt * p_0 + p_ref;
             h_TR = ke_R + ue_R + (p_R) / (rho_R + small);
         }
 
@@ -480,8 +486,8 @@ public:
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
         // STEP 2: Compute sound speeds for Tammann EOS
-        Set::Scalar a_L = std::sqrt(gamma_eff * (p_L + p_0) / (rho_L + small));
-        Set::Scalar a_R = std::sqrt(gamma_eff * (p_R + p_0) / (rho_R + small));
+        Set::Scalar a_L = std::sqrt(gamma_alt * (p_L + p_0) / (rho_L + small));
+        Set::Scalar a_R = std::sqrt(gamma_alt * (p_R + p_0) / (rho_R + small));
 
         // Ensure sound speeds are positive
         a_L = std::max(small, a_L);

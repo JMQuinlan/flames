@@ -192,6 +192,6 @@ rho_refinement_criterion   = 100000.0
 p_refinement_criterion     = 100000.0
 
 static_eta = 1
-Spec_Vol = 1
+Spec_Vol = 0
 
-Riemann_Solver = 35 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"

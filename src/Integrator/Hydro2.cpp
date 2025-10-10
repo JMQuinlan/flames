@@ -1234,10 +1234,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 else if (Riemann_Solver == 35)
                 {
                     // Calculate fluxes for the mixed fluid using HLLC_WENO5
-                    flux_xlo = hllc_weno5solver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff);
-                    flux_ylo = hllc_weno5solver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff);
-                    flux_xhi = hllc_weno5solver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff);
-                    flux_yhi = hllc_weno5solver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff);
+                    flux_xlo = hllc_weno5solver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
+                    flux_ylo = hllc_weno5solver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
+                    flux_xhi = hllc_weno5solver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
+                    flux_yhi = hllc_weno5solver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
                 }
                 else if (Riemann_Solver == 36)
                 {

@@ -82,7 +82,7 @@ public:
         if (Spec_Vol == 1)
         {
             // With Respect to Specific Volume (energies are per unit volume)
-            ke_L = 0.5 * (Mn_L * Mn_L /*+ Mt_L * Mt_L*/) / (rho_L + small); // KE per unit volume
+            ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
             ue_L = E_L - ke_L;                                              // IE per unit volume
             p_L = (gamma - 1.0) * ue_L - gamma * p_0 + p_ref;               // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
             h_TL = (ke_L + ue_L + p_L);                                     // / (rho_L + small);             // specific stagnation enthalpy (per unit volume) ( (J/m3 + J/m3 + N/m2) ==> (J/m3) )
@@ -95,7 +95,7 @@ public:
         else
         {
             // With Respect to Specific Mass (energies are per unit mass)
-            ke_L = 0.5 * (Mn_L * Mn_L /* Mt_L * Mt_L*/) / (rho_L * rho_L + small); // KE per unit volume
+            ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small); // KE per unit volume
             ue_L = E_L - ke_L;                                                     // IE per unit mass
             p_L = (gamma - 1.0) * rho_L * ue_L - gamma * p_0 + p_ref;              // pressure Tammann EOS modification
             h_TL = ke_L + ue_L + (p_L) / (rho_L + small);                          // specific stagnation enthalpy (per unit mass) ( (J/m3 + J/m3 + N/m2) / (kg/m3) ==> (J/kg) )
