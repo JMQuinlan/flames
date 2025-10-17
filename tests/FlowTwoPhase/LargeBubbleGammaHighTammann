@@ -49,8 +49,8 @@ epsilon = eta.ic.expression.constant.epsilon
 
 ### HYDRO INITIAL CONDITIONS ###
 # Water properties (fluid 0)
-gamma0 = 7.15  # Water
-p0_0 = 3.0e8   # Tammann EOS parameter for water
+gamma0 = 4.4 # 7.15  # Water
+p0_0 = 600e6 # 3.0e8   # Tammann EOS parameter for water
 mu0 = 1.0e-3   # Water viscosity [Pa-s]
 mu0_b = 0.001
 

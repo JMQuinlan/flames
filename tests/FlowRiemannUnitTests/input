@@ -86,8 +86,7 @@ mu0   = 0.0
 mu1   = 0.0
 
 ### Surface tension coefficient ###
-sigma0 = 1000;
-sigma1 = 1000;
+sigma = 1000;
 
 ### Reference pressure ###
 pref = 0.0
@@ -192,6 +191,6 @@ rho_refinement_criterion   = 100000.0
 p_refinement_criterion     = 100000.0
 
 static_eta = 1
-Spec_Vol = 0
+Spec_Vol = 1
 
 Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"

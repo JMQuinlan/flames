@@ -243,16 +243,16 @@ public:
                     // Volume-specific energy
                     ke_L = 0.5 * (u_L * u_L + v_L * v_L) * rho_L;
                     ke_R = 0.5 * (u_R * u_R + v_R * v_R) * rho_R;
-                    p_L = (gamma_alt - 1.0) * (E_L - ke_L) - gamma_alt * p_0 + p_ref;
-                    p_R = (gamma_alt - 1.0) * (E_R - ke_R) - gamma_alt * p_0 + p_ref;
+                    p_L = (gamma - 1.0) * (E_L - ke_L) - gamma * p_0 + p_ref;
+                    p_R = (gamma - 1.0) * (E_R - ke_R) - gamma * p_0 + p_ref;
                 }
                 else
                 {
                     // Mass-specific energy
                     ke_L = 0.5 * (u_L * u_L + v_L * v_L);
                     ke_R = 0.5 * (u_R * u_R + v_R * v_R);
-                    p_L = (gamma_alt - 1.0) * rho_L * (E_L - ke_L) - gamma_alt * p_0 + p_ref;
-                    p_R = (gamma_alt - 1.0) * rho_R * (E_R - ke_R) - gamma_alt * p_0 + p_ref;
+                    p_L = (gamma - 1.0) * rho_L * (E_L - ke_L) - gamma * p_0 + p_ref;
+                    p_R = (gamma - 1.0) * rho_R * (E_R - ke_R) - gamma * p_0 + p_ref;
                 }
 
                 // Calculate enthalpy based on Spec_Vol
@@ -260,14 +260,18 @@ public:
                 if (Spec_Vol == 1)
                 {
                     // Volume-specific energy
-                    H_L = (E_L + p_L) / rho_L;
-                    H_R = (E_R + p_R) / rho_R;
+                    //H_L = (E_L + p_L) / rho_L;
+                    //H_R = (E_R + p_R) / rho_R;
+                    H_L = (E_L - ke_L + p_L) / rho_L;
+                    H_R = (E_R - ke_R + p_R) / rho_R;
                 }
                 else
                 {
                     // Mass-specific energy
-                    H_L = E_L + p_L / rho_L;
-                    H_R = E_R + p_R / rho_R;
+                    //H_L = E_L + p_L / rho_L;
+                    //H_R = E_R + p_R / rho_R;
+                    H_L = E_L - ke_L + p_L / rho_L;
+                    H_R = E_R - ke_R + p_R / rho_R;
                 }
 
                 // Roe averages
@@ -361,34 +365,34 @@ public:
                 {
                     // Volume-specific energy
                     Set::Scalar ke_left = 0.5 * (leftStates[i].M_normal * leftStates[i].M_normal + leftStates[i].M_tangent * leftStates[i].M_tangent) / (leftStates[i].rho + small);
-                    Set::Scalar p_left = (gamma_alt - 1.0) * (leftStates[i].E - ke_left) - gamma_alt * p_0 + p_ref;
+                    Set::Scalar p_left = (gamma - 1.0) * (leftStates[i].E - ke_left) - gamma * p_0 + p_ref;
                     if (p_left < small)
                     {
-                        leftStates[i].E = (small + gamma_alt * p_0 - p_ref) / (gamma_alt - 1.0) + ke_left;
+                        leftStates[i].E = (small + gamma * p_0 - p_ref) / (gamma - 1.0) + ke_left;
                     }
 
                     Set::Scalar ke_right = 0.5 * (rightStates[i].M_normal * rightStates[i].M_normal + rightStates[i].M_tangent * rightStates[i].M_tangent) / (rightStates[i].rho + small);
-                    Set::Scalar p_right = (gamma_alt - 1.0) * (rightStates[i].E - ke_right) - gamma_alt * p_0 + p_ref;
+                    Set::Scalar p_right = (gamma - 1.0) * (rightStates[i].E - ke_right) - gamma * p_0 + p_ref;
                     if (p_right < small)
                     {
-                        rightStates[i].E = (small + gamma_alt * p_0 - p_ref) / (gamma_alt - 1.0) + ke_right;
+                        rightStates[i].E = (small + gamma * p_0 - p_ref) / (gamma - 1.0) + ke_right;
                     }
                 }
                 else
                 {
                     // Mass-specific energy
                     Set::Scalar ke_left = 0.5 * (leftStates[i].M_normal * leftStates[i].M_normal + leftStates[i].M_tangent * leftStates[i].M_tangent) / (leftStates[i].rho * leftStates[i].rho + small);
-                    Set::Scalar p_left = (gamma_alt - 1.0) * leftStates[i].rho * (leftStates[i].E - ke_left) - gamma_alt * p_0 + p_ref;
+                    Set::Scalar p_left = (gamma - 1.0) * leftStates[i].rho * (leftStates[i].E - ke_left) - gamma * p_0 + p_ref;
                     if (p_left < small)
                     {
-                        leftStates[i].E = (small + gamma_alt * p_0 - p_ref) / ((gamma_alt - 1.0) * leftStates[i].rho) + ke_left;
+                        leftStates[i].E = (small + gamma * p_0 - p_ref) / ((gamma - 1.0) * leftStates[i].rho) + ke_left;
                     }
 
                     Set::Scalar ke_right = 0.5 * (rightStates[i].M_normal * rightStates[i].M_normal + rightStates[i].M_tangent * rightStates[i].M_tangent) / (rightStates[i].rho * rightStates[i].rho + small);
-                    Set::Scalar p_right = (gamma_alt - 1.0) * rightStates[i].rho * (rightStates[i].E - ke_right) - gamma_alt * p_0 + p_ref;
+                    Set::Scalar p_right = (gamma - 1.0) * rightStates[i].rho * (rightStates[i].E - ke_right) - gamma * p_0 + p_ref;
                     if (p_right < small)
                     {
-                        rightStates[i].E = (small + gamma_alt * p_0 - p_ref) / ((gamma_alt - 1.0) * rightStates[i].rho) + ke_right;
+                        rightStates[i].E = (small + gamma * p_0 - p_ref) / ((gamma - 1.0) * rightStates[i].rho) + ke_right;
                     }
                 }
             }
@@ -460,12 +464,12 @@ public:
             // With Respect to Specific Volume (energies are per unit volume)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
             ue_L = E_L - ke_L;                                          // IE per unit volume
-            p_L = (gamma_alt - 1.0) * ue_L - gamma_alt * p_0 + p_ref;   // pressure Tammann EOS modification
+            p_L = (gamma - 1.0) * ue_L - gamma * p_0 + p_ref;           // pressure Tammann EOS modification
             h_TL = (ke_L + ue_L + p_L);                                 // stagnation enthalpy (per unit volume)
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_alt - 1.0) * ue_R - gamma_alt * p_0 + p_ref;
+            p_R = (gamma - 1.0) * ue_R - gamma * p_0 + p_ref;
             h_TR = (ke_R + ue_R + p_R);
         }
         else
@@ -473,12 +477,12 @@ public:
             // With Respect to Specific Mass (energies are per unit mass)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small); // KE per unit mass
             ue_L = E_L - ke_L;                                                  // IE per unit mass
-            p_L = (gamma_alt - 1.0) * rho_L * ue_L - gamma_alt * p_0 + p_ref;   // pressure Tammann EOS modification
+            p_L = (gamma - 1.0) * rho_L * ue_L - gamma * p_0 + p_ref;           // pressure Tammann EOS modification
             h_TL = ke_L + ue_L + (p_L) / (rho_L + small);                       // specific stagnation enthalpy (per unit mass)
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_alt - 1.0) * rho_R * ue_R - gamma_alt * p_0 + p_ref;
+            p_R = (gamma - 1.0) * rho_R * ue_R - gamma * p_0 + p_ref;
             h_TR = ke_R + ue_R + (p_R) / (rho_R + small);
         }
 
