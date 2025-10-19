@@ -85,7 +85,7 @@ public:
             h_TL = (ue_L + p_L);                                        // / (rho_L + small);             // specific stagnation enthalpy (per unit volume) ( (J/m3 + J/m3 + N/m2) ==> (J/m3) )
             // h_TL = (ke_L + ue_L + p_L); // / (rho_R+small);
 
-            ke_R = 0.5 * (Mn_R * Mn_R /*+ Mt_R * Mt_R*/) / (rho_R + small);
+            ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
             ue_R = E_R - ke_R;
             p_R = (gamma - 1.0) * ue_R - gamma * p_0 - p_ref;
             h_TR = (ue_R + p_R); // / (rho_R+small);

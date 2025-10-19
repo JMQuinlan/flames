@@ -11,7 +11,7 @@ plot_file = tests/RT_Instability
 
 
 ### MESHING ###
-amr.plot_dt = 1e-3
+amr.plot_dt = 1e-6
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 2
@@ -53,7 +53,7 @@ epsilon = eta.ic.expression.constant.epsilon
 ### HYDRO INITIAL CONDITIONS ###
 # Water properties (bottom, eta=1)
 gamma0 = 7.15  # Water gamma
-p0_0 = 3.0e8   # Tammann EOS parameter for water
+p0_0 = 1e4 # 3.0e8   # Tammann EOS parameter for water
 mu0 = 1.0e-3   # Water viscosity [Pa-s]
 mu0_b = 0.001  # Water bulk viscosity
 

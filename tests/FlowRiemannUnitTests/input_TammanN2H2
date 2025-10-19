@@ -1,0 +1,176 @@
+#@ [case1]
+#@ exe=hydro2
+#@ dim=2
+#@ args = Riemann_Solver=1
+
+#@ [roe-rk4]
+#@ exe=hydro
+#@ dim=2
+#@ args = scheme=rk4
+#@ args = timestep=5.0e-5
+
+#@ [roe-ssprk3]
+#@ exe=hydro
+#@ dim=2
+#@ args = scheme=ssprk3
+#@ args = timestep=5.0e-5
+
+#@ [roe-fix1]
+#@ exe=hydro
+#@ dim=2
+#@ args= solver.roe.entropy_fix=1
+
+#@ [roe-fix2]
+#@ exe=hydro
+#@ dim=2
+#@ args= solver.roe.entropy_fix=2
+
+# alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/FlowRiemannUnitTests/output
+
+### MESHING ###
+amr.plot_int = 50
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.grid_eff = 0.8
+amr.n_cell = 800 4
+
+### DIMENSIONS ###
+geometry.prob_lo = -5.0  -0.02   0.0 # [ m ]
+geometry.prob_hi =  5.0   0.02   0.0 # [ m ]
+geometry.is_periodic = 0 0 0
+
+### TIME STEP ###
+timestep  = 1.0e-5
+stop_time = 0.25
+
+### ETA IC ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+# Set eta to 1 for N2 (left) and 0 for H2 (right)
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.05  # Interface thickness
+eta.ic.expression.region0 = "0.5 * (1.0 + tanh(-x/epsilon))"  # N2 on left, H2 on right
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO PARAM ###
+# N2 (left state)
+gamma0 = 1.4        # N2 gamma (diatomic gas)
+p0_0 = 0.0          # Ideal gas (no Tammann term)
+
+# H2 (right state)
+gamma1 = 7.15       # H2 gamma (diatomic gas)
+p0_1 = 1e5          # Ideal gas (no Tammann term)
+
+cfl = 0.4
+mu0 = 1.76e-5       # N2 viscosity at 293K [Pa·s]
+mu1 = 8.8e-6        # H2 viscosity at 293K [Pa·s]
+
+### Surface tension coefficient ###
+sigma = 0.0         # No surface tension between gases
+
+### Reference pressure ###
+pref = 0.0
+
+### IC State ###
+# Densities - N2 (1.25 kg/m³) on left, H2 (0.0899 kg/m³) on right at 1 atm, 293K
+density0.ic.type = expression
+density0.ic.expression.region0 = "2"    # N2 density [kg/m³]
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1000.0"  # H2 density [kg/m³]
+
+# Velocities - Initially at rest
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Pressures - Equal pressure on both sides (1 atm = 101325 Pa)
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "2e5"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "1e5"
+
+# Temperatures - Equal temperature on both sides (293.15K = 20°C)
+temperature0.ic.type = expression
+temperature0.ic.expression.region0 = "293.15"
+
+temperature1.ic.type = expression
+temperature1.ic.expression.region0 = "293.15"
+
+# Thermodynamic properties - N2
+cp0.ic.type = expression
+cp0.ic.expression.region0 = "1040.0"  # N2 specific heat [J/kg·K]
+
+cv0.ic.type = expression
+cv0.ic.expression.region0 = "742.86"  # N2 cv = cp/gamma
+
+# Thermodynamic properties - H2
+cp1.ic.type = expression
+cp1.ic.expression.region0 = "14300.0"  # H2 specific heat [J/kg·K]
+
+cv1.ic.type = expression
+cv1.ic.expression.region0 = "10141.84"  # H2 cv = cp/gamma
+
+# Thermal properties
+k0_thermal.ic.type = expression
+k0_thermal.ic.expression.region0 = "0.0259"  # N2 thermal conductivity [W/m·K]
+
+k1_thermal.ic.type = expression
+k1_thermal.ic.expression.region0 = "0.1805"  # H2 thermal conductivity [W/m·K]
+
+h0_thermal.ic.type = expression
+h0_thermal.ic.expression.region0 = "1040.0"  # N2 heat transfer coefficient
+
+h1_thermal.ic.type = expression
+h1_thermal.ic.expression.region0 = "14300.0"  # H2 heat transfer coefficient
+
+### ETA BC  ###
+pf.eta.bc.type.xlo = neumann
+pf.eta.bc.type.xhi = neumann
+pf.eta.bc.type.ylo = neumann
+pf.eta.bc.type.yhi = neumann
+
+### HYDRO BC ###
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### HYDRO REFINEMENT CRITERIA ###
+eta_refinement_criterion   = 0.01  # Enable refinement at interface
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 0  # Disable surface tension for gases
+apply_buoyancy = 0        # Not needed
+apply_weight = 0          # Disable gravity
+Spec_Vol = 1              # Using volume-specific energy
+static_eta = 0            # Allow interface to evolve
+
+### NUMERICAL METHODS ###
+Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
