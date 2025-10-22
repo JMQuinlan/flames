@@ -54,7 +54,7 @@ public:
         pp.query_default("verbose", value.verbose, 1);
     }
 
-    Flux Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0, Set::Scalar gamma_alt = 0.0, int Spec_Vol = 1)
+    Flux Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0, Set::Scalar gamma_alt = 0.0, int Spec_Vol = 1, Set::Scalar A = 1.0, Set::Scalar B = 1.0)
     {
         // If not using an alternate gamma law, force it to use regular gamma
         if (gamma_alt == 0.0)
@@ -93,6 +93,7 @@ public:
 
             //p_L = -gamma * p_0 + ((gamma - 1.0) + rho_L * (gamma - 1.0)) * (ue_L * (gamma - 1.0) - gamma * p_0) / (gamma - 1.0);
             //p_R = -gamma * p_0 + ((gamma - 1.0) + rho_R * (gamma - 1.0)) * (ue_R * (gamma - 1.0) - gamma * p_0) / (gamma - 1.0);
+            
 
         }
         else

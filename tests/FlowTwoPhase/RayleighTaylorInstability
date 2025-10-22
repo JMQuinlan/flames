@@ -6,12 +6,12 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = tests/RT_Instability
-#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/RT_Instability
+#plot_file = tests/RT_Instability
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/RT_Instability
 
 
 ### MESHING ###
-amr.plot_dt = 1e-6
+amr.plot_int = 50
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 2
@@ -41,11 +41,11 @@ stop_time = 1.0  # Run long enough to see instability growth
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = 0.01  # Interface thickness
 eta.ic.expression.constant.lambda = 0.5    # Wavelength of perturbation
-eta.ic.expression.constant.amp = 0.05      # Initial amplitude of perturbation
+eta.ic.expression.constant.amp = 0.10      # Initial amplitude of perturbation
 
 # Initial interface with single-mode perturbation
 # eta=1 is water (heavy fluid, bottom), eta=0 is air (light fluid, top)
-eta.ic.expression.region0 = "0.5 * (1.0 + tanh((y - amp * cos(2.0 * 3.14159 * x / lambda)) / epsilon))"
+eta.ic.expression.region0 = "0.5 * (1.0 + tanh((y + amp * cos(2.0 * 3.14159 * x / lambda)) / epsilon))"
 
 epsilon = eta.ic.expression.constant.epsilon
 
@@ -53,7 +53,7 @@ epsilon = eta.ic.expression.constant.epsilon
 ### HYDRO INITIAL CONDITIONS ###
 # Water properties (bottom, eta=1)
 gamma0 = 7.15  # Water gamma
-p0_0 = 1e4 # 3.0e8   # Tammann EOS parameter for water
+p0_0 = 3.0e8   # Tammann EOS parameter for water
 mu0 = 1.0e-3   # Water viscosity [Pa-s]
 mu0_b = 0.001  # Water bulk viscosity
 
@@ -81,10 +81,10 @@ velocity1.ic.expression.region1 = "0.0"
 
 # Pressures - hydrostatic pressure profile
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "101325.0 + 1000.0 * 9.81 * (1.0 - y)"  # Hydrostatic pressure in water
+pressure0.ic.expression.region0 = "101325.0" # " + 1000.0 * 9.81 * (1.0 - y)"  # Hydrostatic pressure in water
 
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "101325.0 + 1.2 * 9.81 * (1.0 - y)"     # Hydrostatic pressure in air
+pressure1.ic.expression.region0 = "101325.0" # "+ 1.2 * 9.81 * (1.0 - y)"     # Hydrostatic pressure in air
 
 # Temperatures
 temperature0.ic.type = expression

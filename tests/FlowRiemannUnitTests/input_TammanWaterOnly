@@ -85,11 +85,11 @@ cfl   = 0.4
 mu0   = 0.0
 mu1   = 0.0
 
-p0_0 = 3.0e8
-p0_1 = 3.0e8
+p0_0 = 1e5
+p0_1 = 1e5
 
 ### Surface tension coefficient ###
-sigma 1000;
+sigma = 1000
 
 ### Reference pressure ###
 pref = 0.0
