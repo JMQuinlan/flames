@@ -82,13 +82,13 @@ public:
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
             ue_L = E_L - ke_L;                                          // IE per unit volume
             p_L = (gamma - 1.0) * ue_L - gamma * p_0 - p_ref;           // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
-            h_TL = (ue_L + p_L);                                        // / (rho_L + small);             // specific stagnation enthalpy (per unit volume) ( (J/m3 + J/m3 + N/m2) ==> (J/m3) )
+            h_TL = (ue_L + ke_L + p_L);                                   // / (rho_L + small);             // specific stagnation enthalpy (per unit volume) ( (J/m3 + J/m3 + N/m2) ==> (J/m3) )
             // h_TL = (ke_L + ue_L + p_L); // / (rho_R+small);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
             ue_R = E_R - ke_R;
             p_R = (gamma - 1.0) * ue_R - gamma * p_0 - p_ref;
-            h_TR = (ue_R + p_R); // / (rho_R+small);
+            h_TR = (ue_R + ke_R + p_R); // / (rho_R+small);
             // h_TR = (ke_R + ue_R + p_R); // / (rho_R+small);
 
             //p_L = -gamma * p_0 + ((gamma - 1.0) + rho_L * (gamma - 1.0)) * (ue_L * (gamma - 1.0) - gamma * p_0) / (gamma - 1.0);

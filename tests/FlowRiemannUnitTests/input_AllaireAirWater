@@ -27,143 +27,123 @@
 
 # alamo.program = hydro2
 
-### OUTPUT ###
+### IMPORTANT: SEE https://www.sciencedirect.com/science/article/pii/S0021999102971433
+### Test 3
 
-plot_file = ./tests/FlowRiemannUnitTests/output
+### OUTPUT ###
+#plot_file = ./tests/FlowRiemannUnitTests/output
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/
 
 ### MESHING ###
-
-#amr.plot_dt = 0.1
-amr.plot_int = 500
+amr.plot_int = 50
 amr.max_level = 0
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.grid_eff = 0.8
-
-amr.n_cell = 800 4
-
-# Uncomment to test AMR
-#amr.max_level = 2
+amr.n_cell = 800 64
 
 ### DIMENSIONS ###
-
-geometry.prob_lo = -1.0  -0.02   0.0 # [ m ]
-geometry.prob_hi =  1.0   0.02   0.0 # [ m ]
-
+geometry.prob_lo = 0.0  -0.005   0.0 # [ m ]
+geometry.prob_hi = 1.0   0.005   0.0 # [ m ]
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
-
-timestep  = 1.0e-7
-stop_time = 0.0001
+timestep  = 1.0e-8
+stop_time = 2.4e-4  # Final time from paper
 
 ### ETA IC ###
-
-#Ldot_0 = 0.0
-
 m0.ic.constant.value = 0.0
 u0.ic.constant.value = 0.0
-
 q.ic.type = constant
 q.ic.constant.value = 0.0
 
-#deltapInterface.ic.type = expression
-#deltapInterface.ic.expression.region0 = "0.0"
+# Interface at x = 0.75 m: water on left, air on right
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.005  # Interface thickness
+eta.ic.expression.constant.x_interface = 0.75
+eta.ic.expression.region0 = "0.5 * (1.0 + tanh((x_interface - x)/epsilon))"
 
-eta.ic.type = constant
-eta.ic.expression.constant.epsilon  = 111111.0005
-eta.ic.constant.value  = 0.0
 epsilon = eta.ic.expression.constant.epsilon
-
-### Advection solver ###
+x_interface = eta.ic.expression.constant.x_interface
 
 ### HYDRO PARAM ###
+gamma0 = 1.4         # Air gamma
+p0_0 = 0.0           # Air (ideal gas)
+gamma1 = 4.4         # Water gamma
+p0_1 = 6.0e8         # Water Tammann parameter [Pa]
 
-gamma0 = 7.15
-gamma1 = 7.15
-cfl   = 0.4
-mu0   = 0.0
-mu1   = 0.0
-
-p0_0 = 1e5
-p0_1 = 1e5
+cfl = 0.4
+mu0 = 0.0
+mu1 = 0.0  # Inviscid
 
 ### Surface tension coefficient ###
-sigma = 1000
+sigma = 0.0
 
 ### Reference pressure ###
 pref = 0.0
 
-### Other adjustable parameters that may be needed
-# small  = 1e-8
-# cutoff = 1e-100
-# small  = 1e-5
-# cutoff = 1e-5
-
 ### IC State ###
+# Three regions: high pressure air (shock driver) | low pressure air | water
 
+# Air density: 50 kg/m³
 density0.ic.type = expression
-density0.ic.expression.region0 = "1000.0"
+density0.ic.expression.region0 = "50" 
 
+# Water density: 1000 kg/m³
 density1.ic.type = expression
 density1.ic.expression.region0 = "1000.0"
 
 velocity0.ic.type = expression
-velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region0 = "0.0" 
 velocity0.ic.expression.region1 = "0.0"
 
 velocity1.ic.type = expression
-velocity1.ic.expression.constant.v_L = "0.0"
-velocity1.ic.expression.constant.v_R = "0.0"
-velocity1.ic.expression.region0 = "v_L*(x<0) + v_R*(x>0)"
+velocity1.ic.expression.region0 = "0.0"
 velocity1.ic.expression.region1 = "0.0"
 
+# Pressures: High pressure driver | atmospheric | atmospheric
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "0.0"
+pressure0.ic.expression.region0 = "1.0e5"
 
 pressure1.ic.type = expression
-pressure1.ic.expression.constant.p_L = "1.0e9"
-pressure1.ic.expression.constant.p_R = "1.0e5"
-pressure1.ic.expression.region0 = "p_L*(x<0) + p_R*(x>0)"
+pressure1.ic.expression.region0 = "1.0e5"
 
+# Temperatures
 temperature0.ic.type = expression
-temperature0.ic.expression.region0 = "294.0"
+temperature0.ic.expression.region0 = "293.15"
 
 temperature1.ic.type = expression
-temperature1.ic.expression.region0 = "294.0"
+temperature1.ic.expression.region0 = "293.15"
 
+# Thermodynamic properties - Air
 cp0.ic.type = expression
-cp0.ic.expression.region0 = "1.4"
-
-cp1.ic.type = expression
-cp1.ic.expression.region0 = "1.4"
-
+cp0.ic.expression.region0 = "1005.0"
 cv0.ic.type = expression
-cv0.ic.expression.region0 = "1.0"
+cv0.ic.expression.region0 = "717.86"
 
+# Thermodynamic properties - Water
+cp1.ic.type = expression
+cp1.ic.expression.region0 = "4179.0"
 cv1.ic.type = expression
-cv1.ic.expression.region0 = "1.0"
+cv1.ic.expression.region0 = "1229.12"  # cp/gamma with gamma=4.4
 
+# Thermal properties
 k0_thermal.ic.type = expression
-k0_thermal.ic.expression.region0 = "0.6"
-
+k0_thermal.ic.expression.region0 = "0.026"  # Air
 k1_thermal.ic.type = expression
-k1_thermal.ic.expression.region0 = "0.6"
+k1_thermal.ic.expression.region0 = "0.6"  # Water
 
 h0_thermal.ic.type = expression
-h0_thermal.ic.expression.region0 = "1.4"
-
+h0_thermal.ic.expression.region0 = "1005.0"
 h1_thermal.ic.type = expression
-h1_thermal.ic.expression.region0 = "1.0"
+h1_thermal.ic.expression.region0 = "4179.0"
 
-### ETA BC  ###
-
+### BOUNDARY CONDITIONS ###
+# Transmissive boundaries for shock tube
 pf.eta.bc.type.xlo = neumann
 pf.eta.bc.type.xhi = neumann
 pf.eta.bc.type.ylo = neumann
 pf.eta.bc.type.yhi = neumann
-
-### HYDRO BC ###
 
 density.bc.type.xhi = neumann
 density.bc.type.xlo = neumann
@@ -185,14 +165,18 @@ momentum.bc.val.ylo = 0.0 0.0
 momentum.bc.val.yhi = 0.0 0.0
 
 ### HYDRO REFINEMENT CRITERIA ###
-
-eta_refinement_criterion   = 100000.1
+eta_refinement_criterion   = 0.01
 omega_refinement_criterion = 100000.1
 gradu_refinement_criterion = 100000.0
 rho_refinement_criterion   = 100000.0
 p_refinement_criterion     = 100000.0
 
-static_eta = 1
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 0
+apply_buoyancy = 0
+apply_weight = 0
 Spec_Vol = 1
+static_eta = 0
 
+### NUMERICAL METHODS ###
 Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"

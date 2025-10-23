@@ -768,6 +768,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 Util::ParallelMessage(INFO, "v=", v(i, j, k, 0), ", ", v(i, j, k, 1));
                 Util::ParallelMessage(INFO, "press=", press(i, j, k));
+                Util::ParallelMessage(INFO, "p_eff=", p0_eff);
                 Util::ParallelMessage(INFO, "rho=", rho(i, j, k));
                 Util::ParallelMessage(INFO, "M=", M(i, j, k, 0), ", ", M(i, j, k, 1));
                 Util::ParallelMessage(INFO, "E=", E_vol(i, j, k));
@@ -1245,30 +1246,25 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 else if (Riemann_Solver == 1)
                 {
                     // Calculate fluxes for the mixed fluid using HLLC
-                    // /*
+                    
                     Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
                     Set::Scalar B = (eta(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
                     gamma_eff = 1 + (1 / A);
                     p0_eff = (B / A) / gamma_eff;
-
+                    /*
                     flux_xlo = hllcsolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
                     flux_ylo = hllcsolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
                     flux_xhi = hllcsolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
                     flux_yhi = hllcsolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol);
-                    //*/
+                    */
                     // Debugging, has no other use :)
-                    /*
+                    // /*
                     flux_xlo = hllcsolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff);
                     flux_ylo = hllcsolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff);
                     flux_xhi = hllcsolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff);
                     flux_yhi = hllcsolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff);
-                    */
-                    /*
-                    flux_xlo = hllcsolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff_alt, pref, small, p0_eff);
-                    flux_ylo = hllcsolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff_alt, pref, small, p0_eff);
-                    flux_xhi = hllcsolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff_alt, pref, small, p0_eff);
-                    flux_yhi = hllcsolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff_alt, pref, small, p0_eff);
-                    */
+                    // */
+
                 }
                 else if (Riemann_Solver == 2)
                 {
