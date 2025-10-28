@@ -39,16 +39,16 @@ amr.max_level = 0
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.grid_eff = 0.8
-amr.n_cell = 800 4
+amr.n_cell = 800 32
 
 ### DIMENSIONS ###
-geometry.prob_lo = -5.0  -0.02   0.0 # [ m ]
-geometry.prob_hi =  5.0   0.02   0.0 # [ m ]
+geometry.prob_lo = -5.0  -0.2   0.0 # [ m ]
+geometry.prob_hi =  5.0   0.2   0.0 # [ m ]
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
-timestep  = 1.0e-7
-stop_time = 0.0007  # Adjusted to match LeVeque's test case
+timestep  = 1.0e-6
+stop_time = 0.007  # Adjusted to match LeVeque's test case
 
 ### ETA IC ###
 m0.ic.constant.value = 0.0
@@ -65,14 +65,17 @@ epsilon = eta.ic.expression.constant.epsilon
 
 ### HYDRO PARAM ###
 gamma0 = 1.4		 # Air gamma
-p0_0 = 0.0          # Air (ideal gas, no Tammann term)
+p0_0 = 0.0           # Air (ideal gas, no Tammann term)
+b0 = 0				 # Air Covolume
 
 gamma1 = 7.15        # Water gamma
-p0_1 = 3.0e8         # Water Tammann EOS parameter
+p0_1 = 3.31e8         # Water Tammann EOS parameter
+b1 = 6.61e-4		 # Water Covolume
+
 
 cfl = 0.4
 mu0 = 0.0
-mu1 = 1.0e-3
+mu1 = 0.0
 
 ### Surface tension coefficient ###
 sigma = 0.0
@@ -90,7 +93,7 @@ density1.ic.expression.region0 = "1000.0"
 
 # Velocities - Initially at rest
 velocity0.ic.type = expression
-velocity0.ic.expression.region0 = "0.0" # "350.0"
+velocity0.ic.expression.region0 = "350.0"
 velocity0.ic.expression.region1 = "0.0"
 
 velocity1.ic.type = expression
@@ -99,7 +102,7 @@ velocity1.ic.expression.region1 = "0.0"
 
 # Pressures - Equal pressure on both sides (1 bar = 10^5 Pa)
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "1e5"
+pressure0.ic.expression.region0 = "2.0e5"
 
 pressure1.ic.type = expression
 pressure1.ic.expression.region0 = "1.0e5"
@@ -144,6 +147,7 @@ pf.eta.bc.type.xhi = neumann
 pf.eta.bc.type.ylo = neumann
 pf.eta.bc.type.yhi = neumann
 
+
 ### HYDRO BC ###
 density.bc.type.xhi = neumann
 density.bc.type.xlo = neumann
@@ -159,6 +163,15 @@ momentum.bc.type.xhi = neumann neumann
 momentum.bc.type.xlo = neumann neumann
 momentum.bc.type.ylo = neumann neumann
 momentum.bc.type.yhi = neumann neumann
+
+#momentum.bc.type.xhi = dirichlet dirichlet
+#momentum.bc.type.xlo = dirichlet dirichlet
+#momentum.bc.type.ylo = dirichlet dirichlet
+#momentum.bc.type.yhi = dirichlet dirichlet
+#momentum.bc.val.xhi = 0.0 0.0
+#momentum.bc.val.xlo = 0.0 0.0
+#momentum.bc.val.ylo = 0.0 0.0
+#momentum.bc.val.yhi = 0.0 0.0
 
 ### HYDRO REFINEMENT CRITERIA ###
 eta_refinement_criterion   = 0.01  # Enable refinement at interface

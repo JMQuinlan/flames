@@ -42,7 +42,8 @@ public:
         delete density_bc;
         delete momentum_bc;
         delete energy_bc;
-        delete eta_bc;
+        //delete eta_bc;
+        delete temperature_bc;
 
         /// Inital Conditions
         // ETA
@@ -175,6 +176,7 @@ private:
     Set::Field<Set::Scalar> k_thermal_mf;   // Thermal Conductivity
     Set::Field<Set::Scalar> h_thermal_mf;   // Thermal Convectivity
     Set::Field<Set::Scalar> gamma_mf;       // Specific Heat Ratio
+    Set::Field<Set::Scalar> p0_mf;          // Tamman Pressure
     Set::Field<Set::Scalar> a_mf;           // Speed of sound
     Set::Field<Set::Scalar> Ma_mf;          // Mach
     Set::Field<Set::Scalar> UE_per_vol_mf;  // Internal Energy (per unit volume)
@@ -220,7 +222,7 @@ private:
     BC::BC<Set::Scalar>* density_bc = nullptr;
     BC::BC<Set::Scalar>* momentum_bc = nullptr;
     BC::BC<Set::Scalar>* energy_bc = nullptr;
-    BC::BC<Set::Scalar>* eta_bc = nullptr;
+    //BC::BC<Set::Scalar>* eta_bc = nullptr;
     BC::BC<Set::Scalar>* temperature_bc = nullptr;
 
     IC::IC<Set::Scalar>* velocity0_ic = nullptr;
@@ -262,9 +264,11 @@ private:
     Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion=NAN;
     // FLUID 0
     Set::Scalar gamma0 = NAN, p0_0 = NAN, mu0 = NAN, mu0_b = NAN, MW0 = NAN;
+    Set::Scalar b0 = NAN, q0EOS = NAN;
 
     // FLUID 1
     Set::Scalar gamma1 = NAN, p0_1 = NAN, mu1 = NAN, mu1_b = NAN, MW1 = NAN;
+    Set::Scalar b1 = NAN, q1EOS = NAN;
 
     // Interaction Parameters
     Set::Scalar sigma = NAN;

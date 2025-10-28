@@ -21,7 +21,7 @@ amr.n_cell = 128 512  # Higher resolution in y-direction for interface dynamics
 
 ### TIME STEPING ###
 ## Static:
-timestep  = 1e-6
+timestep  = 1e-7
 ## Adaptive
 dynamictimestep.on = 0
 dynamictimestep.verbose = 1
@@ -147,8 +147,11 @@ energy.bc.type.yhi = neumann
 
 momentum.bc.type.xhi = periodic periodic
 momentum.bc.type.xlo = periodic periodic
-momentum.bc.type.ylo = neumann neumann
-momentum.bc.type.yhi = neumann neumann
+momentum.bc.type.ylo = dirichlet dirichlet
+momentum.bc.val.ylo  = 0.0       0.0
+momentum.bc.type.yhi = dirichlet dirichlet
+momentum.bc.val.yhi  = 0.0       0.0
+
 
 ### REFINEMENT CRITERIA ###
 eta_refinement_criterion = 0.0001
