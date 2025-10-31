@@ -17,7 +17,7 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/RPE
 amr.plot_dt = 5e-5
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
-amr.regrid_int = 10
+amr.regrid_int = 100
 amr.grid_eff = 0.8
 amr.max_level = 5
 amr.n_cell = 64 64
@@ -26,11 +26,11 @@ amr.n_cell = 64 64
 ## Static:
 timestep  = 1e-6
 ## Adaptive
-dynamictimestep.on = 0
+dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.min = 2e-8
 dynamictimestep.max = 1e-6
-cfl = 0.4e7
+cfl = 0.8e7
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.10 -0.10 0.0 # [ m ]
@@ -43,7 +43,7 @@ stop_time = 0.05
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = 0.0005
-eta.ic.expression.constant.R0 = 0.02  # Increased bubble radius for better visibility
+eta.ic.expression.constant.R0 = 0.01  # Increased bubble radius for better visibility
 
 # Bubble shape definition
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/epsilon))"
@@ -125,14 +125,6 @@ sigma = 72.8  # Water-air surface tension [N/m]
 pref = 0.0
 
 ### BOUNDARY CONDITIONS ###
-# Eta boundary conditions
-pf.eta.bc.type.xlo = neumann
-pf.eta.bc.type.xhi = neumann
-pf.eta.bc.type.ylo = neumann
-pf.eta.bc.type.yhi = neumann
-pf.eta.bc.type.zlo = neumann
-pf.eta.bc.type.zhi = neumann
-
 # Hydro boundary conditions
 density.bc.type.xhi = neumann
 density.bc.type.xlo = neumann
@@ -150,7 +142,7 @@ momentum.bc.type.ylo = neumann neumann
 momentum.bc.type.yhi = neumann neumann
 
 ### REFINEMENT CRITERIA ###
-eta_refinement_criterion = 0.0001
+eta_refinement_criterion = 0.000001
 omega_refinement_criterion = 10.55
 p_refinement_criterion = 1e+4
 rho_refinement_criterion = 1e+2

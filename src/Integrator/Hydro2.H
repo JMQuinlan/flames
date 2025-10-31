@@ -12,17 +12,17 @@
 #include "Set/Base.H"
 
 // Solvers
-#include "Solver/Local/Riemann/Roe.H"
+//#include "Solver/Local/Riemann/Roe.H"
 #include "Solver/Local/Riemann/HLLC.H"
-#include "Solver/Local/Riemann/HLLC_WENO5.H"
-#include "Solver/Local/Riemann/HLLE.H"
+//#include "Solver/Local/Riemann/HLLC_WENO5.H"
+//#include "Solver/Local/Riemann/HLLE.H"
 //#include "Solver/Local/Riemann/HLLE_WENO5.H"
-#include "Solver/Local/Riemann/HLLCE.H"
+//#include "Solver/Local/Riemann/HLLCE.H"
 //#include "Solver/Local/Riemann/HLLCE_WENO5.H"
-#include "Solver/Local/Riemann/PartiallyParabolic.H"
+// #include "Solver/Local/Riemann/PartiallyParabolic.H"
 // Limiters
-#include "Solver/Local/Limiter/Minmod.H"
-#include "Solver/Local/Limiter/VanLeer.H"
+// #include "Solver/Local/Limiter/Minmod.H"
+// #include "Solver/Local/Limiter/VanLeer.H"
 
 
 #if AMREX_SPACEDIM==2
@@ -75,17 +75,17 @@ public:
         delete ic_q;
         /// SOLVERS
         // Riemann Solvers
-        delete roesolver;
+        //delete roesolver;
         delete hllcsolver;
-        delete hllc_weno5solver;
-        delete hllesolver;
+        //delete hllc_weno5solver;
+        // delete hllesolver;
         //delete hlle_weno5solver;
-        delete hllcesolver;
+        // delete hllcesolver;
         //delete hllce_weno5solver;
-        delete partiallyparabolicsolver;
+        // delete partiallyparabolicsolver;
         // Flux Limiters
-        delete limiter_minmod;
-        delete limiter_vanleer;
+        // delete limiter_minmod;
+        // delete limiter_vanleer;
 
         
     }
@@ -299,20 +299,20 @@ private:
 
     // Solvers
     int scheme = 0;
-    Solver::Local::Riemann::Roe *roesolver = nullptr;
+    //Solver::Local::Riemann::Roe *roesolver = nullptr;
     Solver::Local::Riemann::HLLC *hllcsolver = nullptr;
-    Solver::Local::Riemann::HLLC_WENO5 *hllc_weno5solver = nullptr;
-    Solver::Local::Riemann::HLLE *hllesolver = nullptr;
+    //Solver::Local::Riemann::HLLC_WENO5 *hllc_weno5solver = nullptr;
+    //Solver::Local::Riemann::HLLE *hllesolver = nullptr;
     //Solver::Local::Riemann::HLLE_WENO5 *hlle_weno5solver = nullptr;
-    Solver::Local::Riemann::HLLCE *hllcesolver = nullptr;
+    //Solver::Local::Riemann::HLLCE *hllcesolver = nullptr;
     //Solver::Local::Riemann::HLLCE_WENO5 *hllce_weno5solver = nullptr;
-    Solver::Local::Riemann::PartiallyParabolic *partiallyparabolicsolver = nullptr;
+    //Solver::Local::Riemann::PartiallyParabolic *partiallyparabolicsolver = nullptr;
 
 
     // Limiters
     int Limiter = 0;
-    Solver::Local::Limiter::Minmod *limiter_minmod = nullptr;
-    Solver::Local::Limiter::VanLeer *limiter_vanleer = nullptr;
+    //Solver::Local::Limiter::Minmod *limiter_minmod = nullptr;
+    //Solver::Local::Limiter::VanLeer *limiter_vanleer = nullptr;
 
 };
 }

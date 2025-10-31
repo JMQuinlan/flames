@@ -6,12 +6,12 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = tests/RT_Instability
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/RT_Instability
+plot_file = tests/RT_Instability
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/RT_Instability
 
 
 ### MESHING ###
-amr.plot_int = 50
+amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 2
@@ -81,10 +81,10 @@ velocity1.ic.expression.region1 = "0.0"
 
 # Pressures - hydrostatic pressure profile
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "101325.0" # " + 1000.0 * 9.81 * (1.0 - y)"  # Hydrostatic pressure in water
+pressure0.ic.expression.region0 = "101325.0 + 1000.0 * 9.81 * (1.0 - y)"  # Hydrostatic pressure in water
 
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "101325.0" # "+ 1.2 * 9.81 * (1.0 - y)"     # Hydrostatic pressure in air
+pressure1.ic.expression.region0 = "101325.0 + 1.2 * 9.81 * (1.0 - y)"     # Hydrostatic pressure in air
 
 # Temperatures
 temperature0.ic.type = expression
@@ -154,7 +154,7 @@ momentum.bc.val.yhi  = 0.0       0.0
 
 
 ### REFINEMENT CRITERIA ###
-eta_refinement_criterion = 0.0001
+eta_refinement_criterion = 0.000001
 omega_refinement_criterion = 10.55
 p_refinement_criterion = 1e+3
 rho_refinement_criterion = 1e+2

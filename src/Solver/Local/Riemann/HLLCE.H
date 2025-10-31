@@ -58,27 +58,52 @@ public:
         pp.query_default("verbose", value.verbose, 1);
     }
 
-    Flux Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0)
+    Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small)
     {
-        Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
-        Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
-        Set::Scalar Mt_L = lo.M_tangent, Mt_R = hi.M_tangent;
-        Set::Scalar E_L = lo.E, E_R = hi.E;
+        Set::Scalar rho_L = lo.rho       ,  rho_R = hi.rho       ;
+        Set::Scalar Mn_L  = lo.M_normal  ,  Mn_R  = hi.M_normal  ;
+        Set::Scalar Mt_L  = lo.M_tangent ,  Mt_R  = hi.M_tangent ;
+        Set::Scalar E_L   = lo.E         ,  E_R   = hi.E         ;
+        Set::Scalar gamma_L = lo.gam     ,  gamma_R = hi.gam     ;
+        Set::Scalar p0_L = lo.p0         ,  p0_R = hi.p0         ;
+
 
         // Ensure no negative densities
-        rho_L = std::max(0.0, rho_L);
-        rho_R = std::max(0.0, rho_R);
+        rho_L = std::max(small, rho_L);
+        rho_R = std::max(small, rho_R);
 
         // STEP 1: Compute fluid primitives
-        // Set::Scalar ke_L = 0.5 * (Mn_L * Mn_L /*+ Mt_L * Mt_L*/) / (rho_L + small); // KE per unit volume
-        Set::Scalar ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
-        Set::Scalar ue_L = E_L - ke_L;                                          // IE per unit volume
-        Set::Scalar p_L = (gamma - 1.0) * ue_L - gamma * (p_0 + p_ref);         // pressure Tammann EOS modification
+        Set::Scalar ke_L, ke_R;
+        Set::Scalar ue_L, ue_R;
+        Set::Scalar p_L, p_R;
+        Set::Scalar h_TL, h_TR;
+        if (Spec_Vol == 1)
+        {
+            // With Respect to Specific Volume (energies are per unit volume)
+            ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
+            ue_L = E_L - ke_L;                                          // IE per unit volume
+            p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;      // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
+            h_TL = (ke_L + ue_L + p_L);
 
-        // Set::Scalar ke_R = 0.5 * (Mn_R * Mn_R /*+ Mt_R * Mt_R*/) / (rho_R + small);
-        Set::Scalar ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
-        Set::Scalar ue_R = E_R - ke_R;
-        Set::Scalar p_R = (gamma - 1.0) * ue_R - gamma * (p_0 + p_ref);
+            ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
+            ue_R = E_R - ke_R;
+            p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;      // Tammann
+            h_TR = (ke_R + ue_R + p_R);
+
+        }
+        else
+        {
+            // With Respect to Specific Mass (energies are per unit mass)
+            ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small); // KE per unit volume
+            ue_L = E_L - ke_L;                                          // IE per unit volume
+            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;      // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
+            h_TL = ke_L + ue_L + (p_L / rho_L);
+
+            ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
+            ue_R = E_R - ke_R;
+            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R + p_ref; // Tammann
+            h_TR = ke_R + ue_R + (p_R / rho_R);
+        }
 
         Set::Scalar u_L = Mn_L / (rho_L + small), u_R = Mn_R / (rho_R + small);
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);

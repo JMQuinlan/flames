@@ -11,17 +11,17 @@
 #include "IC/BMP.H"
 #include "IC/PNG.H"
 // Solvers
-#include "Solver/Local/Riemann/Roe.H"
+//#include "Solver/Local/Riemann/Roe.H"
 #include "Solver/Local/Riemann/HLLC.H"
-#include "Solver/Local/Riemann/HLLC_WENO5.H"
-#include "Solver/Local/Riemann/HLLE.H"
+//#include "Solver/Local/Riemann/HLLC_WENO5.H"
+//#include "Solver/Local/Riemann/HLLE.H"
 //#include "Solver/Local/Riemann/HLLE_WENO5.H"
-#include "Solver/Local/Riemann/HLLCE.H"
+//#include "Solver/Local/Riemann/HLLCE.H"
 //#include "Solver/Local/Riemann/HLLCE_WENO5.H"
-#include "Solver/Local/Riemann/PartiallyParabolic.H"
+//#include "Solver/Local/Riemann/PartiallyParabolic.H"
 // Limiters
-#include "Solver/Local/Limiter/Minmod.H"
-#include "Solver/Local/Limiter/VanLeer.H"
+//#include "Solver/Local/Limiter/Minmod.H"
+//#include "Solver/Local/Limiter/VanLeer.H"
 
 #if AMREX_SPACEDIM == 2
 
@@ -92,9 +92,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("mu0_b", value.mu0_b, 0.0);    // bulk viscosity coefficient
         // pp_query_required("R0", value.R0);              // Specific Gas Constant
         // pp_query_required("MW0", value.MW0);            // Molecular Weight
-        /////// NASG Stuff :'(
-        pp_query_default("b0", value.b0, 0.0);
-        pp_query_default("q0EOS", value.q0EOS, 0.0); 
         
         // FLUID 1
         pp_query_required("gamma1", value.gamma1);      // gamma for gamma law
@@ -103,9 +100,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("mu1_b", value.mu1_b, 0.0);    // bulk viscosity coefficient
         // pp_query_required("R1", value.R1);              // Specific Gas Constant
         // pp_query_required("MW1", value.MW1);            // Molecular Weight
-        /////// NASG Stuff :'(
-        pp_query_default("b1", value.b1, 0.0);
-        pp_query_default("q1EOS", value.q1EOS, 0.0); 
 
 
         // INTERACTIONS
@@ -125,7 +119,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.energy_bc = new BC::Constant(1, pp, "energy.bc");
         value.momentum_bc = new BC::Expression(2, pp, "momentum.bc");
         //value.eta_bc = new BC::Constant(1, pp, "pf.eta.bc");
-        value.temperature_bc = new BC::Constant(1, pp, "pf.eta.bc"); // Change to be different if needed? ___TEMP___
+        value.temperature_bc = new BC::Constant(1, pp, "energy.bc"); // Change to be different if needed? ___TEMP___
 
         
     }
@@ -157,7 +151,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.cv0_mf,          &value.bc_nothing, 1, nghost, "cv0", false);
         value.RegisterNewFab(value.k0_thermal_mf,   &value.bc_nothing, 1, nghost, "k0_thermal", false);
         value.RegisterNewFab(value.h0_thermal_mf,   &value.bc_nothing, 1, nghost, "h0_thermal", false);
-        //value.RegisterNewFab(value.gamma0_mf,       &value.bc_nothing, 1, nghost, "gamma0f", false);
 
         value.RegisterNewFab(value.pressure0_mf,    &value.bc_nothing,  1, nghost, "pressure0", false);
         value.RegisterNewFab(value.velocity0_mf,    &value.bc_nothing,  2, nghost, "velocity0", false, { "x", "y" });
@@ -178,7 +171,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.cv1_mf,          &value.bc_nothing, 1, nghost, "cv1", false);
         value.RegisterNewFab(value.k1_thermal_mf,   &value.bc_nothing, 1, nghost, "k1_thermal", false);
         value.RegisterNewFab(value.h1_thermal_mf,   &value.bc_nothing, 1, nghost, "h1_thermal", false);
-        //value.RegisterNewFab(value.gamma1_mf,       &value.bc_nothing, 1, nghost, "gamma1f", false);
 
         value.RegisterNewFab(value.pressure1_mf,    &value.bc_nothing,  1, nghost, "pressure1", false);
         value.RegisterNewFab(value.velocity1_mf,    &value.bc_nothing,  2, nghost, "velocity1", false, { "x", "y" });
@@ -284,7 +276,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp_query_default("Riemann_Solver", value.Riemann_Solver, 0); // Type of solver
     if (value.Riemann_Solver == 0)
     {
-        pp.select_default<Solver::Local::Riemann::Roe>("solver", value.roesolver);
+        // pp.select_default<Solver::Local::Riemann::Roe>("solver", value.roesolver);
     }
     else if (value.Riemann_Solver == 1)
     {
@@ -292,19 +284,19 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     }
     else if (value.Riemann_Solver == 2)
     {
-        pp.select_default<Solver::Local::Riemann::HLLE>("solver", value.hllesolver);
+        // pp.select_default<Solver::Local::Riemann::HLLE>("solver", value.hllesolver);
     }
     else if (value.Riemann_Solver == 3)
     {
-        pp.select_default<Solver::Local::Riemann::HLLCE>("solver", value.hllcesolver);
+        // pp.select_default<Solver::Local::Riemann::HLLCE>("solver", value.hllcesolver);
     }
     else if (value.Riemann_Solver == 35)
     {
-        pp.select_default<Solver::Local::Riemann::HLLC_WENO5>("solver", value.hllc_weno5solver);
+        // pp.select_default<Solver::Local::Riemann::HLLC_WENO5>("solver", value.hllc_weno5solver);
     }
     else if (value.Riemann_Solver == 36)
     {
-        pp.select_default<Solver::Local::Riemann::PartiallyParabolic>("solver", value.partiallyparabolicsolver);
+        // pp.select_default<Solver::Local::Riemann::PartiallyParabolic>("solver", value.partiallyparabolicsolver);
     }
     else if (value.Riemann_Solver == 99)
     {
@@ -334,11 +326,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     }
     else if (value.Limiter == 1)
     {
-        pp.select_default<Solver::Local::Limiter::Minmod>("Limiter", value.limiter_minmod);
+        // pp.select_default<Solver::Local::Limiter::Minmod>("Limiter", value.limiter_minmod);
     }
     else if (value.Limiter == 2)
     {
-        pp.select_default<Solver::Local::Limiter::VanLeer>("Limiter", value.limiter_vanleer);
+        // pp.select_default<Solver::Local::Limiter::VanLeer>("Limiter", value.limiter_vanleer);
     }
     else
     {
@@ -375,7 +367,6 @@ void Hydro2::Initialize(int lev)
     cv0_ic          ->Initialize(lev, cv0_mf, 0.0);
     k0_thermal_ic   ->Initialize(lev, k0_thermal_mf, 0.0);
     h0_thermal_ic   ->Initialize(lev, h0_thermal_mf, 0.0);
-    //gamma0_ic       ->Initialize(lev, gamma0_mf, 0.0);
 
     // FLUID 1
     velocity1_ic    ->Initialize(lev, velocity1_mf, 0.0);
@@ -387,7 +378,6 @@ void Hydro2::Initialize(int lev)
     cv1_ic          ->Initialize(lev, cv1_mf, 0.0);
     k1_thermal_ic   ->Initialize(lev, k1_thermal_mf, 0.0);
     h1_thermal_ic   ->Initialize(lev, h1_thermal_mf, 0.0);
-    //gamma1_ic       ->Initialize(lev, gamma1_mf, 0.0);
 
     // SOURCE
     ic_m0           ->Initialize(lev, m0_mf, 0.0);
@@ -439,7 +429,6 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar>         cv0         = cv0_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         k0_thermal  = k0_thermal_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         h0_thermal  = h0_thermal_mf.Patch(lev, mfi);
-        //Set::Patch<Set::Scalar>         gamma0f     = gamma0_mf.Patch(lev, mfi);
 
         // FLUID 1
         Set::Patch<const Set::Scalar>   v1          = velocity1_mf.Patch(lev, mfi);
@@ -455,7 +444,6 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar>         cv1         = cv1_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         k1_thermal  = k1_thermal_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         h1_thermal  = h1_thermal_mf.Patch(lev, mfi);
-        //Set::Patch<Set::Scalar>         gamma1f     = gamma1_mf.Patch(lev, mfi);
 
         // MIXTURE 
         Set::Patch<Set::Scalar>         v           = velocity_mf.Patch(lev, mfi);
@@ -487,7 +475,6 @@ void Hydro2::Mix(int lev)
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             // Calculate State Variables 
             rho(i, j, k) = eta(i, j, k) * rho0(i, j, k) + (1.0 - eta(i, j, k)) * rho1(i, j, k);
-            //rho(i, j, k) = 1.0 / ( eta(i, j, k) / rho0(i, j, k) + (1.0 - eta(i, j, k)) / rho1(i, j, k));
             rho_old(i, j, k) = rho(i, j, k);  
 
             M(i, j, k, 0) = (rho0(i, j, k) * v0(i, j, k, 0)) * eta(i, j, k) + (rho1(i, j, k) * v1(i, j, k, 0)) * (1.0 - eta(i, j, k));
@@ -502,98 +489,31 @@ void Hydro2::Mix(int lev)
                             + (0.5 * ((v1(i, j, k, 0) * v1(i, j, k, 0)) + (v1(i, j, k, 1) * v1(i, j, k, 1)))) * (1.0 - eta(i, j, k));
 
             // Internal Energy   
-            // OLD METHOD:
-            /* 
-            Set::Scalar UE0_vol = ((p0(i, j, k) + gamma0 * p0_0) / ((gamma0 - 1.0)));
-            Set::Scalar UE1_vol = ((p1(i, j, k) + gamma1 * p0_1) / ((gamma1 - 1.0)));
-            UE_vol(i, j, k) = UE0_vol * eta(i, j, k) + UE1_vol * (1.0 - eta(i, j, k));           
-            UE_mas(i, j, k) = (UE0_vol / (rho0(i, j, k) + small)) * eta(i, j, k) + (UE1_vol / (rho1(i, j, k) + small)) * (1.0 - eta(i, j, k));
-            */
-            // NEW METHOD:
-            /*
-            Set::Scalar gamma_eff = (1.0 / (eta(i, j, k) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0))) + 1.0;
-            //Set::Scalar gamma_eff = eta(i, j, k) * (gamma0) + (1.0 - eta(i, j, k)) * (gamma1);
-            Set::Scalar p0_eff = p0_0 * (eta(i, j, k)) + p0_1 * (1.0 - eta(i, j, k));
-            Set::Scalar p_eff = p0(i, j, k) * (eta(i, j, k)) + p1(i, j, k) * (1.0 - eta(i, j, k));
-            UE_vol(i, j, k) = (p_eff + gamma_eff * p0_eff) / (gamma_eff - 1.0);
-            UE_mas(i, j, k) = (UE_vol(i, j, k)) / (rho(i, j, k) + small);
-            */
-            // NEW NEW METHOD: (just one more method guys, just one more method and all our problems will be solved)
-            // /*
-            //Set::Scalar gamma_eff = (1.0 / (eta(i, j, k) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0))) + 1.0;
             Set::Scalar p_eff = p0(i, j, k) * (eta(i, j, k)) + p1(i, j, k) * (1.0 - eta(i, j, k));
             Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0); 
             Set::Scalar B = (eta(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
-            Set::Scalar gamma_eff = 1.0 + (1.0 / A);
             UE_vol(i, j, k) = (p_eff + pref)*A + B;
             UE_mas(i, j, k) = (UE_vol(i, j, k)) / (rho(i, j, k) + small);
-            // */
-            // NASG EOS (haha, legit one more, perhaps this may be the one variable closure (ring))
-            /*
-            Set::Scalar eta_local = eta(i, j, k);
-            // Effective parameters
-            Set::Scalar b_eff = eta_local * b0 + (1.0 - eta_local) * b1;
-            Set::Scalar q_eff = eta_local * q0EOS + (1.0 - eta_local) * q1EOS;
-            // Individual phase internal energies: e = (p + gamma*p_0)(1 - b*rho)/((gamma-1)*rho) + q
-            Set::Scalar e0 = (p0(i, j, k) + gamma0 * p0_0) * (1.0 - b0 * rho0(i, j, k)) / ((gamma0 - 1.0) * rho0(i, j, k)) + q0EOS;
-            Set::Scalar e1 = (p1(i, j, k) + gamma1 * p0_1) * (1.0 - b1 * rho1(i, j, k)) / ((gamma1 - 1.0) * rho1(i, j, k)) + q1EOS;
-            // Mixed internal energy
-            UE_vol(i, j, k) = eta_local * rho0(i, j, k) * e0 + (1.0 - eta_local) * rho1(i, j, k) * e1;
-            UE_mas(i, j, k) = UE_vol(i, j, k) / (rho(i, j, k) + small);
-            */
-            /*
-            // Starting to seriously lose it now
-            Set::Scalar p0_calc = p0(i, j, k); // From initial conditions
-            Set::Scalar p1_calc = p1(i, j, k);
-
-            // Enforce pressure equilibrium (use volume-weighted average)
-            Set::Scalar p_interface = eta(i, j, k) * p0_calc + (1.0 - eta(i, j, k)) * p1_calc;
-
-            // Calculate internal energy for EACH phase at this equilibrium pressure
-            Set::Scalar UE0_vol = (p_interface + gamma0 * p0_0) / (gamma0 - 1.0);
-            Set::Scalar UE1_vol = (p_interface + gamma1 * p0_1) / (gamma1 - 1.0);
-
-            // Mix the internal energies
-            UE_vol(i, j, k) = eta(i, j, k) * UE0_vol + (1.0 - eta(i, j, k)) * UE1_vol;
-            UE_mas(i, j, k) = (UE_vol(i, j, k)) / (rho(i, j, k) + small);
-            */
-
-
-
+            
+            // Kinetic Energy
             //  TODO: Get rid of thermally perfect assumption. Involve temperature
             E_vol(i, j, k) = KE_vol(i, j, k) + UE_vol(i, j, k);
             E_vol_old(i, j, k) = E_vol(i, j, k);
             E_mas(i, j, k) = KE_mas(i, j, k) + UE_mas(i, j, k);
             E_mas_old(i, j, k) = E_mas(i, j, k);
 
-
             // Initialize extra fields - (not directly used to solve)
             // Velocity
             v(i, j, k, 0) = v0(i, j, k, 0) * eta(i, j, k) + v1(i, j, k, 0) * (1.0 - eta(i, j, k));
             v(i, j, k, 1) = v0(i, j, k, 1) * eta(i, j, k) + v1(i, j, k, 1) * (1.0 - eta(i, j, k));
 
+            // Specific Heat Ratio
+            Set::Scalar gamma_eff = 1.0 + (1.0 / A);
+            gammaf(i, j, k) = gamma_eff;
+
             // Pressure
-            //press(i, j, k) = (p0(i, j, k) - (gamma0 * p0_0)) * eta(i, j, k) + (p1(i, j, k) - (gamma1 * p0_1)) * (1.0 - eta(i, j, k));
-            //press(i, j, k) = (p0(i, j, k)) * eta(i, j, k) + (p1(i, j, k)) * (1.0 - eta(i, j, k));
-            // press(i, j, k) = ((gamma0 - 1.0) * UE0_vol - (gamma0 * p0_0)) * eta(i, j, k) + ((gamma1 - 1.0) * UE1_vol - (gamma1 * p0_1)) * (1.0 - eta(i, j, k));
-            // ^^^ Most up to date Pressure from OLD METHOD
-            // NEW METHOD:
-            // press(i, j, k) = (gamma_eff - 1.0) * UE_vol(i, j, k) - gamma_eff * p0_eff - pref;
-            // NEW NEW METHOD: (hold ya horses)
             press(i, j, k) = (UE_vol(i, j, k) - B) / A - pref;
             p0_eff(i, j, k) = (B / A) / gamma_eff;
-            gammaf(i, j, k) = gamma_eff;
-            /////// NASG Stuff :'(
-            // Set::Scalar b = eta(i, j, k) * b0 + (1.0 - eta(i, j, k)) * b1;
-            // press(i, j, k) = (UE_vol(i, j, k) - B + D) / (1 - (b * rho(i, j, k)) + small);
-            /*
-            Set::Scalar p0_eff = p0_0 * (eta(i, j, k)) + p0_1 * (1.0 - eta(i, j, k));
-            Set::Scalar denom_L = 1.0 - b_eff * rho(i,j,k) + small;
-            Set::Scalar gamma_eff = eta(i, j, k) * (gamma0) + (1.0 - eta(i, j, k)) * (gamma1);
-            gammaf(i, j, k) = gamma_eff;
-            press(i, j, k) = (gamma_eff - 1.0) * rho(i, j, k) * (UE_mas(i, j, k) - q_eff) / denom_L - gamma_eff * p0_eff + pref;
-            */
-
 
             // Temperature
             T(i, j, k) = T0(i, j, k) * eta(i, j, k) + T1(i, j, k) * (1.0 - eta(i, j, k));
@@ -610,19 +530,12 @@ void Hydro2::Mix(int lev)
             // Thermal Convectivity
             h_thermal(i, j, k) = eta(i, j, k) * h0_thermal(i, j, k) + (1.0 - eta(i, j, k)) * h1_thermal(i, j, k);
 
-            // Specific Heat Ratio
-            //gammaf(i, j, k) = eta(i, j, k) * gamma0f(i, j, k) + (1.0 - eta(i, j, k)) * gamma1f(i, j, k); // For dynamic specific heats in same fluid (ALSO CHANGE INITIAL CONDITIONS, SPEED OF SOUND, AND INTERNAL ENERGY INITIALIZATION TO USE FIELD)
-            //gammaf(i, j, k) = gamma_eff; // eta(i, j, k) * gamma0 + (1.0 - eta(i, j, k)) * gamma1; // For static specific heats
-
             // Speed of Sound
-            //a(i, j, k) = (std::sqrt(gamma0 * R * T0(i, j, k) / MW0) * eta(i, j, k)) + (std::sqrt(gamma1 * R * T1(i, j, k) / MW1) * (1.0 - eta(i, j, k)));
             a(i, j, k) = (std::sqrt(gamma0 * p0(i, j, k) / (rho0(i, j, k) + small))) * (eta(i, j, k)) + (std::sqrt(gamma1 * p1(i, j, k) / (rho1(i, j, k) + small))) * (1.0 - eta(i, j, k));
 
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / a(i, j, k);
             Ma(i, j, k, 1) = v(i, j, k, 1) / a(i, j, k);
-
-            
 
         });
     }
@@ -759,10 +672,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         // Capture only the arrays, not the MFIter
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             // gamma
-            Set::Scalar gamma_eff = 1.0 / ( eta(i, j, k) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0) ) + 1.0;
-            //Set::Scalar gamma_eff = (eta(i, j, k)) * (gamma0) + (1.0 - eta(i, j, k)) * (gamma1);
-            //gammaf(i, j, k) = (eta(i, j, k)) * (gamma0) + (1.0 - eta(i, j, k)) * (gamma1);
-            //gammaf(i, j, k) = 1.0 / ( (eta(i, j, k)) / (gamma0-1.0) + (1.0 - eta(i, j, k)) / (gamma1-1.0) ) + 1.0;
+            Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
+            Set::Scalar B = (eta(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
+            Set::Scalar gamma_eff = 1.0 + (1.0 / A);
+            gammaf(i, j, k) = gamma_eff;
+
             // etadot
             etadot(i, j, k) = (eta_new(i, j, k) - eta(i, j, k)) / dt;
 
@@ -784,8 +698,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::Exception(INFO);
             }
 
-
-
             // Velocity = M ./ (DX*DY*rho)
             v(i, j, k, 0) = M(i, j, k, 0) / (rho(i, j, k) + small);
             v(i, j, k, 1) = M(i, j, k, 1) / (rho(i, j, k) + small);
@@ -799,38 +711,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             UE_mas(i, j, k) = E_mas(i, j, k) - KE_mas(i, j, k);
             
             // Pressure
-            //Set::Scalar p0_eff = p0_0 * eta(i, j, k) + p0_1 * (1.0 - eta(i, j, k));
-            //press(i, j, k) = (gamma_eff - 1.0) * UE_vol(i, j, k) - gamma_eff * p0_eff - pref;
-            //press(i, j, k) = std::max(0.0 + small, press(i,j,k)); // TEMP, WIP, DELETE
-            // /*
-            Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
-            Set::Scalar B = (eta(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
             press(i, j, k) = (UE_vol(i, j, k) - B) / A;
-            gamma_eff = 1.0 + (1.0 / A);
             p0_eff(i,j,k) = (B / A) / gamma_eff;
-            gammaf(i, j, k) = gamma_eff;
-
-            // */
-            // NASG pressure recovery WITH q term: p = (gamma-1)*rho*(e-q)/(1-b*rho) - gamma*p_0
-            /*
-            Set::Scalar eta_local = eta(i, j, k);
-            Set::Scalar rho_local = rho(i, j, k);
-            Set::Scalar b_eff = eta_local * b0 + (1.0 - eta_local) * b1;
-            Set::Scalar q_eff = eta_local * q0EOS + (1.0 - eta_local) * q1EOS;
-            // Specific internal energy
-            Set::Scalar e_specific = UE_vol(i, j, k) / (rho_local + small);
-            // Effective EOS parameters
-            gamma_eff = eta_local * gamma0 + (1.0 - eta_local) * gamma1;
-            Set::Scalar p0_eff = eta_local * p0_0 + (1.0 - eta_local) * p0_1;
-            // Denominator with covolume
-            Set::Scalar denom = 1.0 - b_eff * rho_local + small;
-            // NASG pressure formula
-            press(i, j, k) = (gamma_eff - 1.0) * rho_local * (e_specific - q_eff) / denom - gamma_eff * p0_eff;
-            */
 
             // Speed of sound:
             a(i, j, k) = std::sqrt(gammaf(i,j,k) * (press(i, j, k) + p0_eff(i,j,k)) / (rho(i, j, k) + small));
-            //a(i, j, k) = std::sqrt(gamma_eff * (press(i, j, k) + p0_eff) / denom);
 
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / (a(i, j, k) + small);
@@ -855,7 +740,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::ParallelMessage(INFO, "UE=", UE_vol(i, j, k));
                 Util::ParallelMessage(INFO, "Ma=", Ma(i, j, k, 0), ", ", Ma(i, j, k, 1));
                 Util::ParallelMessage(INFO, "a=", a(i, j, k));
-                Util::ParallelMessage(INFO, "gamma=", gamma_eff, ", ", gammaf(i, j, k));
+                Util::ParallelMessage(INFO, "gamma=", gammaf(i, j, k));
                 Util::ParallelMessage(INFO, "eta=", eta(i, j, k));
                 Util::ParallelMessage(INFO, "etadot=", etadot(i, j, k));
                 Util::Exception(INFO);
@@ -902,7 +787,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
 
         Set::Patch<Set::Scalar> Source = Source_mf.Patch(lev, mfi);
-        // amrex::Array4<Set::Scalar> const &Source = (*Source_mf[lev]).array(mfi);
         Set::Patch<Set::Scalar> Fsv = Fsv_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fb = Fb_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fw = Fw_mf.Patch(lev, mfi);
@@ -958,9 +842,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             }
 
             // Extract velocity from momentum and density
-            // Set::Vector u  = Set::Vector(M(i, j, k, 0) / rho(i, j, k), M(i, j, k, 1) / rho(i, j, k));
             Set::Vector u = Set::Vector(v(i, j, k, 0), v(i, j, k, 1));
-            // Set::Vector u_mag = u.lpNorm<2>();
             Set::Vector u0 = Set::Vector(_u0(i, j, k, 0), _u0(i, j, k, 1));
 
             Set::Matrix gradM = Numeric::Gradient(M, i, j, k, DX);
@@ -999,13 +881,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Vector Ldot0 = Set::Vector::Zero();
             Set::Vector div_tau = Set::Vector::Zero();
             Set::Scalar div_u = gradu(0, 0) + gradu(1, 1); // Divergence of velocity
-
-            // Calculate effective specific heat ratio
-            // gamma_eff is the inverse interpolated gamma across the boundry. It is off centered but ensures consistant pressure across boundry
-            // gamma_eff_alt is the linear interpolated gamma from the gammaf(i,j,k) field. It is centered but can cause uneven pressure
-            //Set::Scalar gamma_eff = 1.0 / ( eta(i, j, k) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0) ) + 1.0;
-            Set::Scalar gamma_eff = gammaf(i, j, k);
-            Set::Scalar gamma_eff_alt = gammaf(i, j, k);
 
             // Calculate effective viscosities
             Set::Scalar mu_eff = eta(i, j, k) * mu0 + (1.0 - eta(i, j, k)) * mu1;       // Effective dynamic viscosity
@@ -1223,7 +1098,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Vector Fb_vector = Set::Vector(0.0, 0.0);
             if (apply_buoyancy)
             {
-                // Example: apply a downward weight force; modify as appropriate
                 Fb_vector = Set::Vector(0.0, 0.0); // replace mass with actual value if available
             }
 
@@ -1274,10 +1148,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             std::vector<Solver::Local::Riemann::State> x_leftStates(3), x_rightStates(3);
             std::vector<Solver::Local::Riemann::State> y_leftStates(3), y_rightStates(3);
 
-            // Apply limiters based on the selected limiter type
-            //Set::Scalar p0_eff = p0_0 * eta(i, j, k) + p0_1 * (1.0 - eta(i, j, k));
-            //Set::Scalar p0_eff = 0.0; // TEMP
-
             if (Limiter == 0)
             {
                 // No limiter - use cell-centered values directly
@@ -1301,16 +1171,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             else if (Limiter == 1)
             {
                 // Minmod limiter
-                limiter_minmod->reconstructCharacteristicStates(x_states, x_leftStates, x_rightStates, gamma_eff, pref, small, p0_eff(i, j, k));
-                limiter_minmod->reconstructCharacteristicStates(y_states, y_leftStates, y_rightStates, gamma_eff, pref, small, p0_eff(i, j, k));
-                Util::ParallelMessage(INFO, "BAD - L1");
+                //limiter_minmod->reconstructCharacteristicStates(x_states, x_leftStates, x_rightStates, pref, small);
+                //limiter_minmod->reconstructCharacteristicStates(y_states, y_leftStates, y_rightStates, pref, small);
             }
             else if (Limiter == 2)
             {
                 // Van Leer limiter
-                limiter_vanleer->reconstructCharacteristicStates(x_states, x_leftStates, x_rightStates, gamma_eff, pref, small, p0_eff(i, j, k));
-                limiter_vanleer->reconstructCharacteristicStates(y_states, y_leftStates, y_rightStates, gamma_eff, pref, small, p0_eff(i, j, k));
-                Util::ParallelMessage(INFO, "BAD - L2");
+                //limiter_vanleer->reconstructCharacteristicStates(x_states, x_leftStates, x_rightStates, pref, small);
+                //limiter_vanleer->reconstructCharacteristicStates(y_states, y_leftStates, y_rightStates, pref, small);
             }
 
             // Calculate fluxes using the mixed fluid approach
@@ -1321,126 +1189,52 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 if (Riemann_Solver == 0)
                 {
                     // Calculate fluxes for the mixed fluid using ROE
-                    flux_xlo = roesolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol);
-                    flux_ylo = roesolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol);
-                    flux_xhi = roesolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol);
-                    flux_yhi = roesolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol);
-                    Util::ParallelMessage(INFO, "BAD - 0");
-
+                    //flux_xlo = roesolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
+                    //flux_ylo = roesolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
+                    //flux_xhi = roesolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
+                    //flux_yhi = roesolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, Spec_Vol);
                 }
                 else if (Riemann_Solver == 1)
                 {
                     // Calculate fluxes for the mixed fluid using HLLC
-                    //Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
-                    //Set::Scalar B = (eta(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
-                    //gamma_eff = 1.0 + (1.0 / A);
-                    //p0_eff = (B / A) / gamma_eff;
-                    /*
-                    flux_xlo = hllcsolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol, i, j);
-                    flux_ylo = hllcsolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol, i, j);
-                    flux_xhi = hllcsolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol, i, j);
-                    flux_yhi = hllcsolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol, i, j);
-                    */
-                    gamma_eff_alt = eta(i, j, k) * gamma0 + (1.0 - eta(i, j, k)) * gamma1;
-                    flux_xlo = hllcsolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol, i, j);
-                    flux_ylo = hllcsolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol, i, j);
-                    flux_xhi = hllcsolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol, i, j);
-                    flux_yhi = hllcsolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol, i, j);
-                    // Debugging, has no other use :)
-                    /*
-                    flux_xlo = hllcsolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff);
-                    flux_ylo = hllcsolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff);
-                    flux_xhi = hllcsolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff);
-                    flux_yhi = hllcsolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff);
-                    */
-                    // NASG EOS
-                    /*
-                    B = eta(i, j, k) * gamma0 * p0_0 / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) * gamma1 * p0_1 / (gamma1 - 1.0);
-                    Set::Scalar D = eta(i, j, k) * b0 * p0_0 * rho(i, j, k) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) * b1 * p0_1 * rho(i, j, k) / (gamma1 - 1.0);
-                    Set::Scalar b = eta(i, j, k) * b0 + (1.0 - eta(i, j, k)) * b1;
-
-                    flux_xlo = hllcsolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol, B, D, b);
-                    flux_ylo = hllcsolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol, B, D, b);
-                    flux_xhi = hllcsolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol, B, D, b);
-                    flux_yhi = hllcsolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol, B, D, b);
-                    */
-                    /*
-                    // Calculate effective parameters at each interface
-                    Set::Scalar b_xlo = eta(i - 1, j, k) * b0 + (1.0 - eta(i - 1, j, k)) * b1;
-                    Set::Scalar b_x = eta(i, j, k) * b0 + (1.0 - eta(i, j, k)) * b1;
-                    Set::Scalar q_xlo = eta(i - 1, j, k) * q0EOS + (1.0 - eta(i - 1, j, k)) * q1EOS;
-                    Set::Scalar q_x = eta(i, j, k) * q0EOS + (1.0 - eta(i, j, k)) * q1EOS;
-
-                    Set::Scalar b_ylo = eta(i, j - 1, k) * b0 + (1.0 - eta(i, j - 1, k)) * b1;
-                    Set::Scalar b_y = eta(i, j, k) * b0 + (1.0 - eta(i, j, k)) * b1;
-                    Set::Scalar q_ylo = eta(i, j - 1, k) * q0EOS + (1.0 - eta(i, j - 1, k)) * q1EOS;
-                    Set::Scalar q_y = eta(i, j, k) * q0EOS + (1.0 - eta(i, j, k)) * q1EOS;
-
-                    Set::Scalar b_xhi = eta(i, j, k) * b0 + (1.0 - eta(i, j, k)) * b1;
-                    Set::Scalar b_xhi2 = eta(i + 1, j, k) * b0 + (1.0 - eta(i + 1, j, k)) * b1;
-                    Set::Scalar q_xhi = eta(i, j, k) * q0EOS + (1.0 - eta(i, j, k)) * q1EOS;
-                    Set::Scalar q_xhi2 = eta(i + 1, j, k) * q0EOS + (1.0 - eta(i + 1, j, k)) * q1EOS;
-
-                    Set::Scalar b_yhi = eta(i, j, k) * b0 + (1.0 - eta(i, j, k)) * b1;
-                    Set::Scalar b_yhi2 = eta(i, j + 1, k) * b0 + (1.0 - eta(i, j + 1, k)) * b1;
-                    Set::Scalar q_yhi = eta(i, j, k) * q0EOS + (1.0 - eta(i, j, k)) * q1EOS;
-                    Set::Scalar q_yhi2 = eta(i, j + 1, k) * q0EOS + (1.0 - eta(i, j + 1, k)) * q1EOS;
-
-                    // Call HLLC with all parameters
-                    Set::Scalar p0_eff = (eta(i, j, k) * p0_0) + ((1.0 - eta(i, j, k)) * p0_1);
-                    flux_xlo = hllcsolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol, b_xlo, b_x, q_xlo, q_x);
-                    flux_ylo = hllcsolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol, b_ylo, b_y, q_ylo, q_y);
-                    flux_xhi = hllcsolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol, b_xhi, b_xhi2, q_xhi, q_xhi2);
-                    flux_yhi = hllcsolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff, gamma_eff_alt, Spec_Vol, b_yhi, b_yhi2, q_yhi, q_yhi2);
-                    */
+                    flux_xlo = hllcsolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
+                    flux_ylo = hllcsolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
+                    flux_xhi = hllcsolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
+                    flux_yhi = hllcsolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, Spec_Vol);
                 }
                 else if (Riemann_Solver == 2)
                 {
                     // Calculate fluxes for the mixed fluid using HLLE
-                    flux_xlo = hllesolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol);
-                    flux_ylo = hllesolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol);
-                    flux_xhi = hllesolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol);
-                    flux_yhi = hllesolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol);
-                    Util::ParallelMessage(INFO, "BAD - 2");
-
+                    //flux_xlo = hllesolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
+                    //flux_ylo = hllesolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
+                    //flux_xhi = hllesolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
+                    //flux_yhi = hllesolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, Spec_Vol);
                 }
                 else if (Riemann_Solver == 3)
                 {
                     // Calculate fluxes for the mixed fluid using HLLCE
-                    flux_xlo = hllcesolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff(i, j, k));
-                    flux_ylo = hllcesolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff(i, j, k));
-                    flux_xhi = hllcesolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff(i, j, k));
-                    flux_yhi = hllcesolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff(i, j, k));
-                    Util::ParallelMessage(INFO, "BAD - 3");
-
+                    //flux_xlo = hllcesolver->Solve(x_leftStates[1], x_rightStates[1], pref, small);
+                    //flux_ylo = hllcesolver->Solve(y_leftStates[1], y_rightStates[1], pref, small);
+                    //flux_xhi = hllcesolver->Solve(x_leftStates[2], x_rightStates[2], pref, small);
+                    //flux_yhi = hllcesolver->Solve(y_leftStates[2], y_rightStates[2], pref, small);
                 }
                 else if (Riemann_Solver == 35)
                 {
                     // Calculate fluxes for the mixed fluid using HLLC_WENO5
-                    flux_xlo = hllc_weno5solver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol);
-                    flux_ylo = hllc_weno5solver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol);
-                    flux_xhi = hllc_weno5solver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol);
-                    flux_yhi = hllc_weno5solver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff(i, j, k), gamma_eff_alt, Spec_Vol);
-                    Util::ParallelMessage(INFO, "BAD - 35");
-
+                    /*
+                    flux_xlo = hllc_weno5solver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
+                    flux_ylo = hllc_weno5solver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
+                    flux_xhi = hllc_weno5solver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
+                    flux_yhi = hllc_weno5solver->Solve(y_leftStates[2], y_rightStates[2], pref, small, Spec_Vol);
+                    */
                 }
                 else if (Riemann_Solver == 36)
                 {
                     // Calculate fluxes for the mixed fluid using PPM
-                    flux_xlo = partiallyparabolicsolver->Solve(x_leftStates[1], x_rightStates[1], gamma_eff, pref, small, p0_eff(i, j, k), mu_eff, k_thermal(i, j, k), dt, DX[0]);
-                    flux_ylo = partiallyparabolicsolver->Solve(y_leftStates[1], y_rightStates[1], gamma_eff, pref, small, p0_eff(i, j, k), mu_eff, k_thermal(i, j, k), dt, DX[1]);
-                    flux_xhi = partiallyparabolicsolver->Solve(x_leftStates[2], x_rightStates[2], gamma_eff, pref, small, p0_eff(i, j, k), mu_eff, k_thermal(i, j, k), dt, DX[0]);
-                    flux_yhi = partiallyparabolicsolver->Solve(y_leftStates[2], y_rightStates[2], gamma_eff, pref, small, p0_eff(i, j, k), mu_eff, k_thermal(i, j, k), dt, DX[1]);
-
-                    //Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0, Set::Scalar mu = 0.0, Set::Scalar k_thermal = 0.0, Set:Scalar dt = 0.0, Set::Scalar dx = 0.0)
-                    Util::ParallelMessage(INFO, "BAD - 36");
-
-                }
-                else if (Riemann_Solver == 99)
-                {
-                    // Calculates fluxes using HLLE with debug tracking
-                    Util::ParallelMessage(INFO, "BAD - 99");
-
+                    //flux_xlo = partiallyparabolicsolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[0]);
+                    //flux_ylo = partiallyparabolicsolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[1]);
+                    //flux_xhi = partiallyparabolicsolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[0]);
+                    //flux_yhi = partiallyparabolicsolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[1]);
                 }
             }
             catch (...)

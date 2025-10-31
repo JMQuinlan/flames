@@ -54,31 +54,19 @@ public:
         pp.query_default("verbose", value.verbose, 1);
     }
 
-    Flux Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p0 = 0.0, Set::Scalar gamma_alt = 0.0, int Spec_Vol = 1, int i = 0, int j = 0) //, Set::Scalar B = 1.0, Set::Scalar D = 1.0, Set::Scalar b = 0.0)
-    /* Flux
-    Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, 
-        Set::Scalar p0 = 0.0, Set::Scalar gamma_alt = 0.0, int Spec_Vol = 1, 
-        Set::Scalar b_L = 0.0, Set::Scalar b_R = 0.0, Set::Scalar q_L = 0.0, Set::Scalar q_R = 0.0)
-    */
-
+    Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1)
     {
-        // If not using an alternate gamma law, force it to use regular gamma
-        if (gamma_alt == 0.0)
-        {
-            gamma_alt = gamma;
-        }
-
-        Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
-        Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
-        Set::Scalar Mt_L = lo.M_tangent, Mt_R = hi.M_tangent;
-        Set::Scalar E_L = lo.E, E_R = hi.E;
-        Set::Scalar gamma_L = lo.gam, gamma_R = hi.gam;
-        Set::Scalar p0_L = lo.p0, p0_R = hi.p0;
+        Set::Scalar rho_L = lo.rho       ,  rho_R = hi.rho       ;
+        Set::Scalar Mn_L  = lo.M_normal  ,  Mn_R  = hi.M_normal  ;
+        Set::Scalar Mt_L  = lo.M_tangent ,  Mt_R  = hi.M_tangent ;
+        Set::Scalar E_L   = lo.E         ,  E_R   = hi.E         ;
+        Set::Scalar gamma_L = lo.gam     ,  gamma_R = hi.gam     ;
+        Set::Scalar p0_L = lo.p0         ,  p0_R = hi.p0         ;
 
 
         // Ensure no negative densities
-        rho_L = std::max(0.0, rho_L);
-        rho_R = std::max(0.0, rho_R);
+        rho_L = std::max(small, rho_L);
+        rho_R = std::max(small, rho_R);
 
         // STEP 1: Compute fluid primitives
         Set::Scalar ke_L, ke_R;
@@ -91,54 +79,34 @@ public:
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
             ue_L = E_L - ke_L;                                          // IE per unit volume
             p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;      // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
-            //p_L = (ue_L - B + D) / (1 - (b * rho_L + small));           // NASG EOS
-            h_TL = (ke_L + ue_L + p_L); // / (rho_R+small);
+            h_TL = (ke_L + ue_L + p_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref; // Tammann
-            //p_R = (ue_R - B + D) / (1 - (b * rho_R + small));           // NASG EOS
-            h_TR = (ke_R + ue_R + p_R); // / (rho_R+small);
+            p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;      // Tammann
+            h_TR = (ke_R + ue_R + p_R);
 
-            //p_L = -gamma * p0 + ((gamma - 1.0) + rho_L * (gamma - 1.0)) * (ue_L * (gamma - 1.0) - gamma * p0) / (gamma - 1.0);
-            //p_R = -gamma * p0 + ((gamma - 1.0) + rho_R * (gamma - 1.0)) * (ue_R * (gamma - 1.0) - gamma * p0) / (gamma - 1.0);
-            
-            //  NASG
-            /*
-            Set::Scalar e_L = E_L / rho_L - ke_L / (rho_L+small);
-            Set::Scalar e_R = E_R / rho_R - ke_R / (rho_R + small);
-            Set::Scalar denom_L = 1.0 - b_L * rho_L + small;
-            Set::Scalar denom_R = 1.0 - b_R * rho_R + small;
-            Set::Scalar p_L = (gamma - 1.0) * rho_L * (e_L - q_L) / denom_L - gamma * p0 + p_ref;
-            Set::Scalar p_R = (gamma - 1.0) * rho_R * (e_R - q_R) / denom_R - gamma * p0 + p_ref;
-            h_TL = (ke_L + ue_L + p_L); // / (rho_R+small);
-            h_TR = (ke_R + ue_R + p_R); // / (rho_R+small);
-            */
         }
         else
         {
             // With Respect to Specific Mass (energies are per unit mass)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small); // KE per unit volume
-            ue_L = E_L - ke_L;                                                  // IE per unit mass
-            p_L = (gamma - 1.0) * rho_L * ue_L - gamma * p0 + p_ref;           // pressure Tammann EOS modification
-            h_TL = ue_L + (p_L) / (rho_L + small);                              // specific stagnation enthalpy (per unit mass) ( (J/m3 + J/m3 + N/m2) / (kg/m3) ==> (J/kg) )
-            // h_TL = ke_L + ue_L + (p_L) / (rho_L + small);
+            ue_L = E_L - ke_L;                                          // IE per unit volume
+            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;      // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
+            h_TL = ke_L + ue_L + (p_L / rho_L);
 
-            ke_R = 0.5 * (Mn_R * Mn_R /* Mt_R * Mt_R*/) / (rho_R * rho_R + small);
+            ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma - 1.0) * rho_R * ue_R - gamma * p0 + p_ref;
-            h_TR = ue_R + (p_R) / (rho_R + small);
-            // h_TR = ke_R + ue_R + (p_R) / (rho_R + small); 
+            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R + p_ref; // Tammann
+            h_TR = ke_R + ue_R + (p_R / rho_R);
         }
+
         Set::Scalar u_L = Mn_L / (rho_L + small), u_R = Mn_R / (rho_R + small);
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
         // STEP 2: Compute sound speeds
-        Set::Scalar a_L = std::sqrt(gamma_alt * (p_L + p0_L) / (rho_L + small)); // gamma_alt
-        Set::Scalar a_R = std::sqrt(gamma_alt * (p_R + p0_R) / (rho_R + small)); // gamma_alt
-        // NASG
-        //Set::Scalar a_L = std::sqrt(gamma * (p_L + p0) / (rho_L * (1.0 - b_L * rho_L) + small));
-        //Set::Scalar a_R = std::sqrt(gamma * (p_R + p0) / (rho_R * (1.0 - b_R * rho_R) + small));
+        Set::Scalar a_L = std::sqrt(gamma_L * (p_L + p0_L) / (rho_L + small));
+        Set::Scalar a_R = std::sqrt(gamma_R * (p_R + p0_R) / (rho_R + small));
 
         // STEP 3: Compute wave speed estimates
         Set::Scalar S_L = std::min(u_L - a_L, u_R - a_R);
@@ -274,33 +242,6 @@ public:
                 Util::ParallelMessage(INFO, "S_star ", S_star);
             }
             Util::Exception(INFO);
-        }
-
-        // Debug Verbose
-        if (false && i == 402 && j == 0)
-        { // First timestep, first cell
-            Util::ParallelMessage(INFO, "=== HLLCS DIAGNOSTICS ===");
-            Util::ParallelMessage(INFO, "time = ", time);
-            Util::ParallelMessage(INFO, "i = ", i);
-            Util::ParallelMessage(INFO, "j = ", j);
-            Util::ParallelMessage(INFO, "flux: ", fl);
-            Util::ParallelMessage(INFO, "rho_L=", rho_L);
-            Util::ParallelMessage(INFO, "rho_R=", rho_R);
-            Util::ParallelMessage(INFO, "u_L=  ", u_L);
-            Util::ParallelMessage(INFO, "u_R=  ", u_R);
-            Util::ParallelMessage(INFO, "ke_R= ", ke_R);
-            Util::ParallelMessage(INFO, "ke_L= ", ke_L);
-            Util::ParallelMessage(INFO, "ue_L= ", ue_L);
-            Util::ParallelMessage(INFO, "ue_R= ", ue_R);
-            Util::ParallelMessage(INFO, "gamma_L= ", gamma_L);
-            Util::ParallelMessage(INFO, "gamma_R= ", gamma_R);
-            Util::ParallelMessage(INFO, "p_L=  ", p_L);
-            Util::ParallelMessage(INFO, "p_R=  ", p_R);
-            Util::ParallelMessage(INFO, "a_L=  ", a_L);
-            Util::ParallelMessage(INFO, "a_R=  ", a_R);
-            Util::ParallelMessage(INFO, "S_L=  ", S_L);
-            Util::ParallelMessage(INFO, "S_R=  ", S_R);
-            Util::ParallelMessage(INFO, "S_star ", S_star);
         }
 
         return fl;
