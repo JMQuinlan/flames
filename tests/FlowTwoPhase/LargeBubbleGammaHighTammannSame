@@ -20,7 +20,7 @@ amr.n_cell = 64 64
 
 ### TIME STEPING ###
 ## Static:
-timestep  = 1e-7
+timestep  = 2e-8
 ## Adaptive
 dynamictimestep.on = 1
 dynamictimestep.verbose = 1
