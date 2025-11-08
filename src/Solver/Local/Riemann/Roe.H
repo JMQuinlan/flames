@@ -60,7 +60,7 @@ public:
 
     Flux Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small, Set::Scalar p_0 = 0.0, Set::Scalar gamma_alt = 0.0, int Spec_Vol = 1)
     {
-        Set::Scalar rho_L = lo.rho       ,  rho_R = hi.rho;
+        Set::Scalar rho_L = lo.rho       ,  rho_R = hi.rho       ;
         Set::Scalar Mn_L  = lo.M_normal  ,  Mn_R  = hi.M_normal  ;
         Set::Scalar Mt_L  = lo.M_tangent ,  Mt_R  = hi.M_tangent ;
         Set::Scalar E_L   = lo.E         ,  E_R   = hi.E         ;
