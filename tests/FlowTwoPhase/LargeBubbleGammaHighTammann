@@ -46,7 +46,7 @@ eta.ic.expression.constant.epsilon = 0.0005
 eta.ic.expression.constant.R0 = 0.01  # Increased bubble radius for better visibility
 
 # Bubble shape definition
-eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/epsilon))"
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(2*sqrt(2)*epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
 
 ### HYDRO INITIAL CONDITIONS ###

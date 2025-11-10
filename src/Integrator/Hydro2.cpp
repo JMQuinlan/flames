@@ -922,13 +922,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             div_tau_(i, j, k, 0) = div_tau(0);
             div_tau_(i, j, k, 1) = div_tau(1);
 
-            // Surface Tension Force using Diffuse Interface (Phase-Field Form)
-            Fsv(i, j, k, 0) = 0.0;
-            Fsv(i, j, k, 1) = 0.0;
+            // Surface Tension:
+            // Fsv =  simga * kappa * n_hat
+            Fsv(i, j, k) = (0.0, 0.0);
             Set::Vector Fsv_vector = Set::Vector(0.0, 0.0);
             if (apply_surface_tension)
             {
-                // Only compute if near interface
+                // Optimization, only calc surface tension if on interface
                 if (grad_eta_mag <= 0.01)
                 {
                     Fsv(i, j, k, 0) = 0.0;
@@ -936,37 +936,150 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 }
                 else
                 {
-                    // Physical parameters
-                    // epsilon = interface thickness (m)
-                    // sigma   = surface tension (N/m)
-                    // A sets double-well potential depth, linked to sigma and epsilon by:
-                    //     sigma = (2*sqrt(2)/3) * A * epsilon
-                    // --> A = (3 * sigma) / (2 * sqrt(2) * epsilon)
+                    Set::Scalar sigma_eff = sigma;
+                    Set::Scalar kappa = 0.0;
+                    if (kappa_method == 1)
+                    {
+                        Set::Vector grad_mag_grad_eta = Set::Vector(1 / (grad_eta_mag + small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)),
+                                                                    1 / (grad_eta_mag + small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));
+                        kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / (grad_eta_mag * grad_eta_mag + small)));
 
-                    Set::Scalar A = (3.0 * sigma) / (2.0 * std::sqrt(2.0) * epsilon);
-                    Set::Scalar eps2 = epsilon * epsilon;
+                        // // ///////////////
+                        // // Density Scaling
+                        // Set::Scalar a = 0.49;               // Cutoff
+                        // Set::Scalar x = eta(i, j, k) - 0.5; // Eta centered at 0
+                        // Set::Scalar D = 0.0;                // Dirac Delta Value
+                        // Set::Scalar pi = 3.14159;           // Add decimals as needed
+                        // if ((-a < x) and (x < a))
+                        // {
+                        //     D = 0.5 * (1 + x / a + 1 / pi * std::sin(pi * x / a));
+                        // }
+                        // else
+                        // {
+                        //     D = 0.0;
+                        // }
+                        // kappa = D * kappa;// *DX[0]; // Smoothened Curvature
+                        // // ///////////////
 
-                    // Local field values
-                    Set::Scalar eta_c = eta(i, j, k);
+                        // To Track Surface Curvature
+                        kappas(i, j, k, 0) = kappa; // Mean
+                        kappas(i, j, k, 1) = 0.0;   // 1
+                        kappas(i, j, k, 2) = 0.0;   // 2
+                    }
+                    else if (kappa_method == 2)
+                    {
+                        // Here are a few different ways of calculating principle curvatures. Approach 1 and 2 give much larger curvatures than the kappa_method==1 method described above from the divergence of the normal vector. This brought the need of approach 3.
+                        // To run any approach, uncomment your desired approach and run.
+                        //
+                        // Approach 1 uses the simplified dot product of the hessian matrix in the normal and tangent direction to extract principle curvatures
+                        // Approach 2 uses matrix projection of the hessian onto the normal and tangent plane and extracts principle curvatures
+                        // Approach 3 uses calculates the eigen values of the hessian to find the principle curvatures
 
-                    // Second derivative of double-well potential f''(eta)
-                    // For f(eta) = A/4 * (eta^2 - 1)^2
-                    Set::Scalar fpp = A * (3.0 * eta_c * eta_c - 1.0);
+                        // /////////////////////////////////////////////////////////////////////////////////////
+                        // APPROACH 1: Dot product of Hessian and normal vector
+                        // /*
+                        // Normal Vector
+                        Set::Vector n_hat = grad_eta / (grad_eta_mag + small);
+                        // Orthogonal Basis
+                        Set::Vector t1, t2;
 
-                    // Compute coefficient multiplying grad_eta
-                    Set::Scalar coeff = eta_c * fpp - eps2 * lap_eta;
+                        if (std::abs(n_hat(0)) > std::abs(n_hat(1)))
+                        {
+                            t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
+                        }
+                        else
+                        {
+                            t1 = Set::Vector(n_hat(1), -n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
+                        }
 
-                    // Capillary force (phase-field form)
-                    Fsv(i, j, k, 0) = coeff * grad_eta(0);
-                    Fsv(i, j, k, 1) = coeff * grad_eta(1);
+                        // t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
+                        Set::Scalar kappa1 = n_hat.dot(hess_eta * n_hat); // Normal Curvature
+                        Set::Scalar kappa2 = t1.dot(hess_eta * t1);       // Tangential Curvature
 
-                    // Optional: store mean curvature for diagnostics (not used directly here)
-                    kappas(i, j, k, 0) = 0.0; // mean curvature placeholder
-                    kappas(i, j, k, 1) = 0.0;
-                    kappas(i, j, k, 2) = 0.0;
+                        /*
+                        if ((std::abs(kappa2) > std::abs(kappa1))
+                            and !( (eta(i,j,k) > 0.40) and (eta(i,j,k) < 0.60)))
+                        {
+                            std::swap(kappa1, kappa2);
+                        }
+                        */
+
+                        kappa1 = -kappa1;
+                        kappa2 = -kappa2 * 2.0 * epsilon;
+
+                        // TODO: Add check for normal vector
+
+                        // */
+
+                        // /////////////////////////////////////////////////////////////////////////////////////
+                        // APPROACH 2: Hessian Projection
+                        /*
+                        // Normal Vector
+                        Set::Vector n_hat = grad_eta / (grad_eta_mag + small);
+                        // Orthogonal Basis
+                        Set::Vector t1, t2;
+                        if (std::abs(n_hat(0)) > std::abs(n_hat(1)))
+                        {
+                            t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
+                        }
+                        else
+                        {
+                            t1 = Set::Vector(n_hat(1), -n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
+                        }
+                        // Transformation matrix Q: n_hat | t1
+                        Set::Matrix Q(2, 2);
+                        Q(0, 0) = n_hat(0); Q(0, 1) = t1(0);
+                        Q(1, 0) = n_hat(1); Q(1, 1) = t1(1);
+
+                        // Hessian Projection
+                        Set::Matrix H_projected = Q.transpose() * hess_eta * Q;
+
+                        // Principal Curvatures
+                        Set::Scalar kappa1 = H_projected(0, 0); // Normal Curvature
+                        Set::Scalar kappa2 = H_projected(1, 1); // Tangential Curvature
+                        */
+
+                        // /////////////////////////////////////////////////////////////////////////////////////
+                        // APPROACH 3: Eigen Values of Hessian
+                        // TODO: only works in 2D
+                        /*
+                        Set::Scalar trace = hess_eta(0, 0) + hess_eta(1, 1);
+                        Set::Scalar det = hess_eta(0, 0) * hess_eta(1, 1) - hess_eta(0, 1) * hess_eta(1, 0);
+                        Set::Scalar discriminant = std::sqrt(trace * trace - 4 * det);
+
+                        // Principal curvatures are eigenvalues
+                        Set::Scalar kappa1 = (trace + discriminant) / 2.0; // Larger eigenvalue
+                        Set::Scalar kappa2 = (trace - discriminant) / 2.0; // Smaller eigenvalue
+
+                        // // Ensure kappa1 is the larger
+                        // if (std::abs(kappa2) > std::abs(kappa1))
+                        // {
+                        //     std::swap(kappa1, kappa2);
+                        // }
+
+                        // Scale kappa2 from boundry thickness
+                        kappa2 = kappa2; //*2.0 * epsilon;
+                        */
+
+                        // /////////////////////////////////////////////////////////////////////////////////////
+                        // Extracing method output to be used
+                        // Regularization
+                        Set::Scalar K23 = kappa2 * kappa2;     // K23 Regularization
+                        Set::Scalar K_Gauss = kappa1 * kappa2; // Gauss Regularization
+                        // Mean
+                        Set::Scalar K_mean = (kappa1 + kappa2) / 2.0; // Mean Curvature
+                        // Assign the curvature you want to use
+                        kappa = kappa2; // Or use another curvature measure as needed
+                        // Store curvature values
+                        kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
+                        kappas(i, j, k, 1) = kappa1; // First principal curvature
+                        kappas(i, j, k, 2) = kappa2; // Second principal curvature
+                    }
+                    Set::Scalar alpha = 6 * std::sqrt(2);
+                    Set::Scalar UFFDA = epsilon * alpha * grad_eta_mag * grad_eta_mag; 
+                    Fsv(i, j, k, 0) = sigma_eff * kappa * n_hat(0) * UFFDA; // / (grad_eta_mag + small)); // / (DX[0] + small);
+                    Fsv(i, j, k, 1) = sigma_eff * kappa * n_hat(1) * UFFDA; // / (grad_eta_mag + small)); // / (DX[1] + small);
                 }
-
-                // Vector form if you need it elsewhere
                 Fsv_vector = Set::Vector(Fsv(i, j, k, 0), Fsv(i, j, k, 1));
             }
 
