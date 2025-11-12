@@ -589,26 +589,6 @@ void Hydro2::TimeStepComplete(Set::Scalar time, int lev)
     
 }
 
-/*
-///////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////// SETADAPTIVETIMESTEPPARAMS //////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////
-void Hydro2::SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive)
-{
-    cfl = cfl_val;
-    dt_min = min_dt;
-    dt_max = max_dt;
-    dt_growth = growth_factor_val;       // Changed from dt_growth_factor to dt_growth
-    adaptive_timestep = enable_adaptive; // Changed from use_adaptive_timestep to adaptive_timestep
-
-    amrex::Print() << "Adaptive timestepping parameters set: CFL = " << cfl
-                   << ", dt_min = " << dt_min
-                   << ", dt_max = " << dt_max
-                   << ", growth_factor = " << dt_growth                 // Changed from dt_growth_factor to dt_growth
-                   << ", enabled = " << adaptive_timestep << std::endl; // Changed from use_adaptive_timestep to adaptive_timestep
-}
-*/
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////// RHS /////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -633,16 +613,30 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     Set::Scalar dt_max = std::numeric_limits<Set::Scalar>::max();
 
     const Set::Scalar *DX = geom[lev].CellSize();
+    amrex::Box domain = geom[lev].Domain();
 
-    // Update etadot
+
+    // First loop to show plotting fields and calculate intermediate items
     for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.growntilebox();
 
-        // Eta:
-        Set::Patch<Set::Scalar> &eta_new = (*eta_mf[lev]).array(mfi);
+        // Eta
+        Set::Patch<const Set::Scalar> eta = eta_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> eta_new = eta_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> etadot = etadot_mf.Patch(lev, mfi);
+
+        /*
         Set::Patch<const Set::Scalar> const &eta = (*eta_old_mf[lev]).array(mfi);
+        Set::Patch<const Set::Scalar> const &eta_new = (*eta_mf[lev]).array(mfi);
         Set::Patch<Set::Scalar> &etadot = (*etadot_mf[lev]).array(mfi);
+        */
+
+        Set::Patch<Set::Scalar> grad_eta_ = grad_eta_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> hess_eta_ = hess_eta_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> n_hat_ = n_hat_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
+
 
         // Mixture
         Set::Patch<const Set::Scalar> rho = density_old_mf.Patch(lev, mfi);
@@ -669,8 +663,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
         
 
-        // Capture only the arrays, not the MFIter
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            auto sten = Numeric::GetStencil(i, j, k, domain);
+
             // gamma
             Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
             Set::Scalar B = (eta(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
@@ -721,6 +716,89 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Ma(i, j, k, 0) = v(i, j, k, 0) / (a(i, j, k) + small);
             Ma(i, j, k, 1) = v(i, j, k, 1) / (a(i, j, k) + small);
 
+
+
+
+            // DEBUGGING
+            Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
+            Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
+            Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
+
+            Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
+            Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
+
+            grad_eta_(i, j, k, 0) = grad_eta(0);
+            grad_eta_(i, j, k, 1) = grad_eta(1);
+
+            // Debugging, would like to delete condition
+            if (grad_eta_mag < 1e-4)
+            {
+                n_hat_(i, j, k, 0) = 0.0;
+                n_hat_(i, j, k, 1) = 0.0;
+
+                hess_eta_(i, j, k, 0) = 0.0;
+                hess_eta_(i, j, k, 1) = 0.0;
+                hess_eta_(i, j, k, 2) = 0.0;
+                hess_eta_(i, j, k, 3) = 0.0;
+            }
+            else
+            {
+                n_hat_(i, j, k, 0) = n_hat(0);
+                n_hat_(i, j, k, 1) = n_hat(1);
+
+                hess_eta_(i, j, k, 0) = hess_eta(0, 0);
+                hess_eta_(i, j, k, 1) = hess_eta(0, 1);
+                hess_eta_(i, j, k, 2) = hess_eta(1, 0);
+                hess_eta_(i, j, k, 3) = hess_eta(1, 1);
+            }
+
+            Set::Vector grad_mag_grad_eta = Set::Vector(1 / (grad_eta_mag + small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)),
+                                                        1 / (grad_eta_mag + small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));    
+            
+            Set::Scalar kappa, kappa1, kappa2 = 0.0;
+            if (kappa_method == 1)
+            {
+                kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / (grad_eta_mag * grad_eta_mag + small)));
+
+
+                kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
+                kappas(i, j, k, 1) = kappa1; // First principal curvature
+                kappas(i, j, k, 2) = kappa2; // Second principal curvature
+            }
+            else if (kappa_method == 2)
+            {
+                // Orthogonal Basis
+                Set::Vector t1, t2;
+
+                if (std::abs(n_hat(0)) > std::abs(n_hat(1)))
+                {
+                    t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
+                }
+                else
+                {
+                    t1 = Set::Vector(n_hat(1), -n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
+                }
+
+                // t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
+                kappa1 = n_hat.dot(hess_eta * n_hat); // Normal Curvature
+                kappa2 = t1.dot(hess_eta * t1);       // Tangential Curvature
+
+                kappa1 = -kappa1;
+                kappa2 = -kappa2 * 2.0 * epsilon;
+
+                // Regularization
+                Set::Scalar K23 = kappa2 * kappa2;     // K23 Regularization
+                Set::Scalar K_Gauss = kappa1 * kappa2; // Gauss Regularization
+                // Mean
+                Set::Scalar K_mean = (kappa1 + kappa2) / 2.0; // Mean Curvature
+                // Assign the curvature you want to use
+                kappa = kappa2; // Or use another curvature measure as needed
+                // Store curvature values
+                kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
+                kappas(i, j, k, 1) = kappa1; // First principal curvature
+                kappas(i, j, k, 2) = kappa2; // Second principal curvature
+            }
+
             // DEBUG Tool
             if ((Ma(i, j, k, 0) != Ma(i, j, k, 0))
                 or (Ma(i, j, k, 1) != Ma(i, j, k, 1))
@@ -746,11 +824,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::Exception(INFO);
             }
 
-            
         });
     }
 
-    amrex::Box domain = geom[lev].Domain();
 
     // Main time integration loop
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
@@ -790,12 +866,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> Fsv = Fsv_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fb = Fb_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fw = Fw_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
 
-        // DEBUGGING
-        Set::Patch<Set::Scalar> grad_eta_ = grad_eta_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> hess_eta_ = hess_eta_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> n_hat_ = n_hat_mf.Patch(lev, mfi);
+        // DEBUGGING PLOTS
+        Set::Patch<const Set::Scalar> grad_eta_ = grad_eta_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> hess_eta_ = hess_eta_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> n_hat_ = n_hat_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> rho_flux = rho_flux_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> M_flux = M_flux_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> E_flux = E_flux_mf.Patch(lev, mfi);
@@ -815,6 +891,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
             Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
 
+            /*
             // DEBUGGING
             grad_eta_(i, j, k, 0) = grad_eta(0);
             grad_eta_(i, j, k, 1) = grad_eta(1);
@@ -840,6 +917,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 hess_eta_(i, j, k, 2) = hess_eta(1, 0);
                 hess_eta_(i, j, k, 3) = hess_eta(1, 1);
             }
+            */
+            // 
 
             // Extract velocity from momentum and density
             Set::Vector u = Set::Vector(v(i, j, k, 0), v(i, j, k, 1));
@@ -922,6 +1001,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             div_tau_(i, j, k, 0) = div_tau(0);
             div_tau_(i, j, k, 1) = div_tau(1);
 
+            // Curvature
+            Set::Scalar kappa = 0.0;
+            Set::Vector grad_mag_grad_eta = Set::Vector(1 / (grad_eta_mag + small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)),
+                                                        1 / (grad_eta_mag + small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));
+            kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / (grad_eta_mag * grad_eta_mag + small)));
+
+
             // Surface Tension:
             // Fsv =  simga * kappa * n_hat
             Fsv(i, j, k) = (0.0, 0.0);
@@ -937,30 +1023,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 else
                 {
                     Set::Scalar sigma_eff = sigma;
-                    Set::Scalar kappa = 0.0;
+                    /*
                     if (kappa_method == 1)
                     {
-                        Set::Vector grad_mag_grad_eta = Set::Vector(1 / (grad_eta_mag + small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)),
-                                                                    1 / (grad_eta_mag + small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));
-                        kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / (grad_eta_mag * grad_eta_mag + small)));
-
-                        // // ///////////////
-                        // // Density Scaling
-                        // Set::Scalar a = 0.49;               // Cutoff
-                        // Set::Scalar x = eta(i, j, k) - 0.5; // Eta centered at 0
-                        // Set::Scalar D = 0.0;                // Dirac Delta Value
-                        // Set::Scalar pi = 3.14159;           // Add decimals as needed
-                        // if ((-a < x) and (x < a))
-                        // {
-                        //     D = 0.5 * (1 + x / a + 1 / pi * std::sin(pi * x / a));
-                        // }
-                        // else
-                        // {
-                        //     D = 0.0;
-                        // }
-                        // kappa = D * kappa;// *DX[0]; // Smoothened Curvature
-                        // // ///////////////
-
                         // To Track Surface Curvature
                         kappas(i, j, k, 0) = kappa; // Mean
                         kappas(i, j, k, 1) = 0.0;   // 1
@@ -968,16 +1033,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     }
                     else if (kappa_method == 2)
                     {
-                        // Here are a few different ways of calculating principle curvatures. Approach 1 and 2 give much larger curvatures than the kappa_method==1 method described above from the divergence of the normal vector. This brought the need of approach 3.
-                        // To run any approach, uncomment your desired approach and run.
-                        //
-                        // Approach 1 uses the simplified dot product of the hessian matrix in the normal and tangent direction to extract principle curvatures
-                        // Approach 2 uses matrix projection of the hessian onto the normal and tangent plane and extracts principle curvatures
-                        // Approach 3 uses calculates the eigen values of the hessian to find the principle curvatures
-
-                        // /////////////////////////////////////////////////////////////////////////////////////
-                        // APPROACH 1: Dot product of Hessian and normal vector
-                        // /*
                         // Normal Vector
                         Set::Vector n_hat = grad_eta / (grad_eta_mag + small);
                         // Orthogonal Basis
@@ -996,73 +1051,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         Set::Scalar kappa1 = n_hat.dot(hess_eta * n_hat); // Normal Curvature
                         Set::Scalar kappa2 = t1.dot(hess_eta * t1);       // Tangential Curvature
 
-                        /*
-                        if ((std::abs(kappa2) > std::abs(kappa1))
-                            and !( (eta(i,j,k) > 0.40) and (eta(i,j,k) < 0.60)))
-                        {
-                            std::swap(kappa1, kappa2);
-                        }
-                        */
-
                         kappa1 = -kappa1;
                         kappa2 = -kappa2 * 2.0 * epsilon;
 
-                        // TODO: Add check for normal vector
-
-                        // */
-
-                        // /////////////////////////////////////////////////////////////////////////////////////
-                        // APPROACH 2: Hessian Projection
-                        /*
-                        // Normal Vector
-                        Set::Vector n_hat = grad_eta / (grad_eta_mag + small);
-                        // Orthogonal Basis
-                        Set::Vector t1, t2;
-                        if (std::abs(n_hat(0)) > std::abs(n_hat(1)))
-                        {
-                            t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
-                        }
-                        else
-                        {
-                            t1 = Set::Vector(n_hat(1), -n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
-                        }
-                        // Transformation matrix Q: n_hat | t1
-                        Set::Matrix Q(2, 2);
-                        Q(0, 0) = n_hat(0); Q(0, 1) = t1(0);
-                        Q(1, 0) = n_hat(1); Q(1, 1) = t1(1);
-
-                        // Hessian Projection
-                        Set::Matrix H_projected = Q.transpose() * hess_eta * Q;
-
-                        // Principal Curvatures
-                        Set::Scalar kappa1 = H_projected(0, 0); // Normal Curvature
-                        Set::Scalar kappa2 = H_projected(1, 1); // Tangential Curvature
-                        */
-
-                        // /////////////////////////////////////////////////////////////////////////////////////
-                        // APPROACH 3: Eigen Values of Hessian
-                        // TODO: only works in 2D
-                        /*
-                        Set::Scalar trace = hess_eta(0, 0) + hess_eta(1, 1);
-                        Set::Scalar det = hess_eta(0, 0) * hess_eta(1, 1) - hess_eta(0, 1) * hess_eta(1, 0);
-                        Set::Scalar discriminant = std::sqrt(trace * trace - 4 * det);
-
-                        // Principal curvatures are eigenvalues
-                        Set::Scalar kappa1 = (trace + discriminant) / 2.0; // Larger eigenvalue
-                        Set::Scalar kappa2 = (trace - discriminant) / 2.0; // Smaller eigenvalue
-
-                        // // Ensure kappa1 is the larger
-                        // if (std::abs(kappa2) > std::abs(kappa1))
-                        // {
-                        //     std::swap(kappa1, kappa2);
-                        // }
-
-                        // Scale kappa2 from boundry thickness
-                        kappa2 = kappa2; //*2.0 * epsilon;
-                        */
-
-                        // /////////////////////////////////////////////////////////////////////////////////////
-                        // Extracing method output to be used
                         // Regularization
                         Set::Scalar K23 = kappa2 * kappa2;     // K23 Regularization
                         Set::Scalar K_Gauss = kappa1 * kappa2; // Gauss Regularization
@@ -1075,6 +1066,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         kappas(i, j, k, 1) = kappa1; // First principal curvature
                         kappas(i, j, k, 2) = kappa2; // Second principal curvature
                     }
+                    */
+                    Set::Vector n_hat = Set::Vector(n_hat_(i, j, k, 0), n_hat_(i, j, k, 1));
+                    Set::Scalar kappa = kappas(i, j, k, 0);
+
                     Set::Scalar alpha = 6 * std::sqrt(2);
                     Set::Scalar UFFDA = epsilon * alpha * grad_eta_mag * grad_eta_mag; 
                     Fsv(i, j, k, 0) = sigma_eff * kappa * n_hat(0) * UFFDA; // / (grad_eta_mag + small)); // / (DX[0] + small);
@@ -1109,7 +1104,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Source(i, j, k, 0) = mdot0;
             Source(i, j, k, 1) = Pdot0(0) - Ldot0(0) + Total_Force(0);
             Source(i, j, k, 2) = Pdot0(1) - Ldot0(1) + Total_Force(1);
-            Source(i, j, k, 3) = qdot0 + u.dot(Total_Force); //(Fsv(i, j, k, 0) * u(0) + Fsv(i, j, k, 1) * u(1)); //+ u.dot(Ldot0)
+            Source(i, j, k, 3) = qdot0 + u.dot(Total_Force); //+ u.dot(Ldot0)
 
            // Lagrange terms to enforce no-penetration
             Source(i, j, k, 1) -= lagrange * u.dot(grad_eta) * grad_eta(0);
@@ -1306,6 +1301,16 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Set::Matrix gradu = (gradM - u * gradrho.transpose()) / rho(i, j, k);
 
             // Set::Scalar deta_dt = -; //https://www.sciencedirect.com/science/article/pii/S002199912100005X
+
+            //  Either Allen-Cahn or Cahn-Hillar
+            // IDK anymore, all are the same
+            // Please work
+            Set::Scalar Mob = 0.0; // Mobility
+            Set::Vector Ugly = Set::Vector(0.0, 0.0);
+            Ugly(0) = epsilon * grad_mag_grad_eta(0);
+            Ugly(1) = epsilon * grad_mag_grad_eta(1);
+            deta_dt = deta_dt + Mob * n_hat.dot(Ugly);
+
             if (static_eta == 1)
             {
                 eta_new(i, j, k) = eta(i, j, k);
