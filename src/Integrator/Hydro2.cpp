@@ -214,6 +214,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // EXTRAS & DEBUGGING
         value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", true, { "x", "y" });
         value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, nghost, "kappa", true, { "Avg", "1", "2" }); // To Surface curvature
+        value.RegisterNewFab(value.grad_mag_grad_eta_mf, &value.bc_nothing, 2, nghost, "grad_mag_grad_eta", true, { "x", "y" }); // grad( | grad(eta) | )
         value.RegisterNewFab(value.rho_flux_mf,     &value.bc_nothing,  1, nghost, "rho_flux", true);                    // Density Flux
         value.RegisterNewFab(value.M_flux_mf,       &value.bc_nothing,  2, nghost, "M_flux", true, { "x", "y" });        // Momentum Flux
         value.RegisterNewFab(value.E_flux_mf,       &value.bc_nothing,  1, nghost, "E_flux", true);                      // Energy Flux
@@ -388,6 +389,7 @@ void Hydro2::Initialize(int lev)
     Fb_mf[lev]      ->setVal(0.0); //->Initialize(lev, m0_mf, 0.0);
     Fw_mf[lev]      ->setVal(0.0); //->Initialize(lev, m0_mf, 0.0);
     kappas_mf[lev]  ->setVal(0.0);
+    grad_mag_grad_eta_mf[lev]->setVal(0.0);
 
     a_mf[lev]       ->setVal(0.0);
     Ma_mf[lev]      ->setVal(0.0);
@@ -636,6 +638,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> hess_eta_ = hess_eta_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> n_hat_ = n_hat_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> grad_mag_grad_eta_ = grad_mag_grad_eta_mf.Patch(lev, mfi);
+        
 
 
         // Mixture
@@ -755,6 +759,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Vector grad_mag_grad_eta = Set::Vector(1 / (grad_eta_mag + small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)),
                                                         1 / (grad_eta_mag + small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));    
             
+            grad_mag_grad_eta_(i, j, k, 0) = grad_mag_grad_eta(0);
+            grad_mag_grad_eta_(i, j, k, 1) = grad_mag_grad_eta(1);
+
             Set::Scalar kappa, kappa1, kappa2 = 0.0;
             if (kappa_method == 1)
             {
@@ -872,6 +879,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> hess_eta_ = hess_eta_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> n_hat_ = n_hat_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> grad_mag_grad_eta_ = grad_mag_grad_eta_mf.Patch(lev, mfi);
+
         Set::Patch<Set::Scalar> rho_flux = rho_flux_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> M_flux = M_flux_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> E_flux = E_flux_mf.Patch(lev, mfi);
@@ -890,35 +899,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
             Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
-
-            /*
-            // DEBUGGING
-            grad_eta_(i, j, k, 0) = grad_eta(0);
-            grad_eta_(i, j, k, 1) = grad_eta(1);
-
-            // Debugging, would like to delete condition
-            if (grad_eta_mag < 1e-4)
-            {
-                n_hat_(i, j, k, 0) = 0.0;
-                n_hat_(i, j, k, 1) = 0.0;
-
-                hess_eta_(i, j, k, 0) = 0.0;
-                hess_eta_(i, j, k, 1) = 0.0;
-                hess_eta_(i, j, k, 2) = 0.0;
-                hess_eta_(i, j, k, 3) = 0.0;
-            }
-            else
-            {
-                n_hat_(i, j, k, 0) = n_hat(0);
-                n_hat_(i, j, k, 1) = n_hat(1);
-
-                hess_eta_(i, j, k, 0) = hess_eta(0, 0);
-                hess_eta_(i, j, k, 1) = hess_eta(0, 1);
-                hess_eta_(i, j, k, 2) = hess_eta(1, 0);
-                hess_eta_(i, j, k, 3) = hess_eta(1, 1);
-            }
-            */
-            // 
 
             // Extract velocity from momentum and density
             Set::Vector u = Set::Vector(v(i, j, k, 0), v(i, j, k, 1));
@@ -1002,12 +982,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             div_tau_(i, j, k, 1) = div_tau(1);
 
             // Curvature
-            Set::Scalar kappa = 0.0;
-            Set::Vector grad_mag_grad_eta = Set::Vector(1 / (grad_eta_mag + small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)),
-                                                        1 / (grad_eta_mag + small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));
-            kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / (grad_eta_mag * grad_eta_mag + small)));
-
-
+            Set::Scalar kappa = kappas(i, j, k, 0);
+            Set::Vector grad_mag_grad_eta = Set::Vector(grad_mag_grad_eta_(i, j, k, 0), grad_mag_grad_eta_(i, j, k, 1));
+            
             // Surface Tension:
             // Fsv =  simga * kappa * n_hat
             Fsv(i, j, k) = (0.0, 0.0);
@@ -1023,53 +1000,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 else
                 {
                     Set::Scalar sigma_eff = sigma;
-                    /*
-                    if (kappa_method == 1)
-                    {
-                        // To Track Surface Curvature
-                        kappas(i, j, k, 0) = kappa; // Mean
-                        kappas(i, j, k, 1) = 0.0;   // 1
-                        kappas(i, j, k, 2) = 0.0;   // 2
-                    }
-                    else if (kappa_method == 2)
-                    {
-                        // Normal Vector
-                        Set::Vector n_hat = grad_eta / (grad_eta_mag + small);
-                        // Orthogonal Basis
-                        Set::Vector t1, t2;
-
-                        if (std::abs(n_hat(0)) > std::abs(n_hat(1)))
-                        {
-                            t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
-                        }
-                        else
-                        {
-                            t1 = Set::Vector(n_hat(1), -n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
-                        }
-
-                        // t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
-                        Set::Scalar kappa1 = n_hat.dot(hess_eta * n_hat); // Normal Curvature
-                        Set::Scalar kappa2 = t1.dot(hess_eta * t1);       // Tangential Curvature
-
-                        kappa1 = -kappa1;
-                        kappa2 = -kappa2 * 2.0 * epsilon;
-
-                        // Regularization
-                        Set::Scalar K23 = kappa2 * kappa2;     // K23 Regularization
-                        Set::Scalar K_Gauss = kappa1 * kappa2; // Gauss Regularization
-                        // Mean
-                        Set::Scalar K_mean = (kappa1 + kappa2) / 2.0; // Mean Curvature
-                        // Assign the curvature you want to use
-                        kappa = kappa2; // Or use another curvature measure as needed
-                        // Store curvature values
-                        kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
-                        kappas(i, j, k, 1) = kappa1; // First principal curvature
-                        kappas(i, j, k, 2) = kappa2; // Second principal curvature
-                    }
-                    */
-                    Set::Vector n_hat = Set::Vector(n_hat_(i, j, k, 0), n_hat_(i, j, k, 1));
-                    Set::Scalar kappa = kappas(i, j, k, 0);
-
                     Set::Scalar alpha = 6 * std::sqrt(2);
                     Set::Scalar UFFDA = epsilon * alpha * grad_eta_mag * grad_eta_mag; 
                     Fsv(i, j, k, 0) = sigma_eff * kappa * n_hat(0) * UFFDA; // / (grad_eta_mag + small)); // / (DX[0] + small);

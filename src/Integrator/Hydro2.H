@@ -209,6 +209,7 @@ private:
     Set::Field<Set::Scalar> Fw_mf;
     Set::Field<Set::Scalar> grad_eta_mf;
     Set::Field<Set::Scalar> kappas_mf;
+    Set::Field<Set::Scalar> grad_mag_grad_eta_mf;
 
     Set::Field<Set::Scalar> rho_flux_mf;
     Set::Field<Set::Scalar> M_flux_mf;
