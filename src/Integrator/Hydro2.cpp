@@ -621,19 +621,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // First loop to show plotting fields and calculate intermediate items
     for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
     {
-        const amrex::Box &bx = mfi.growntilebox();
+        //const amrex::Box &bx = mfi.growntilebox(); // Will return NaNs for Eta
+        const amrex::Box &bx = mfi.validbox(); 
+
 
         // Eta
-        Set::Patch<const Set::Scalar> eta = eta_old_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> eta_new = eta_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> eta = eta_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> eta_new = eta_old_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> etadot = etadot_mf.Patch(lev, mfi);
-
-        /*
-        Set::Patch<const Set::Scalar> const &eta = (*eta_old_mf[lev]).array(mfi);
-        Set::Patch<const Set::Scalar> const &eta_new = (*eta_mf[lev]).array(mfi);
-        Set::Patch<Set::Scalar> &etadot = (*etadot_mf[lev]).array(mfi);
-        */
-
         Set::Patch<Set::Scalar> grad_eta_ = grad_eta_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> hess_eta_ = hess_eta_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> n_hat_ = n_hat_mf.Patch(lev, mfi);
@@ -834,6 +829,41 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         });
     }
 
+    // ============= SYNCHRONIZATION =============
+    // Eta
+    (*hess_eta_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*kappas_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*grad_mag_grad_eta_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*n_hat_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*grad_eta_mf[lev]).FillBoundary(geom[lev].periodicity());
+    // Mixutre
+    (*a_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*Ma_mf[lev]).FillBoundary(geom[lev].periodicity());
+    /*
+    (*KE_vol_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*KE_mas_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*UE_vol_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*UE_mas_mf[lev]).FillBoundary(geom[lev].periodicity());
+    */
+
+
+    (*velocity_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*pressure_mf[lev]).FillBoundary(geom[lev].periodicity());
+
+    // Not adding to yet so we can leave these our
+    /*
+    Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
+    Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
+    Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
+    Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
+    Set::Patch<Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
+    Set::Patch<Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
+    */
+
+
+    // Ensure all MPI ranks complete
+    amrex::ParallelDescriptor::Barrier();
+
 
     // Main time integration loop
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
@@ -992,12 +1022,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             if (apply_surface_tension)
             {
                 // Optimization, only calc surface tension if on interface
-                if (grad_eta_mag <= 0.01)
-                {
-                    Fsv(i, j, k, 0) = 0.0;
-                    Fsv(i, j, k, 1) = 0.0;
-                }
-                else
+                if (grad_eta_mag > 0.01)
                 {
                     Set::Scalar sigma_eff = sigma;
                     Set::Scalar alpha = 6 * std::sqrt(2);

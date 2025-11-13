@@ -28,9 +28,9 @@ timestep  = 1e-6
 ## Adaptive
 dynamictimestep.on = 1
 dynamictimestep.verbose = 1
-dynamictimestep.min = 2e-8
 dynamictimestep.max = 1e-6
-cfl = 0.8e7
+dynamictimestep.min = 1e-12
+cfl = 0.8
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.10 -0.10 0.0 # [ m ]
@@ -38,7 +38,7 @@ geometry.prob_hi =  0.10  0.10 0.0 # [ m ]
 geometry.is_periodic = 0 0 0
  
 ### TIME STEP ###
-stop_time = 0.05
+stop_time = 0.002
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression

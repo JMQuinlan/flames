@@ -32,7 +32,7 @@
 plot_file = ./tests/FlowBoundryMovementTests/output_AirAir
 
 ### MESHING ###
-amr.plot_int = 50
+amr.plot_int = 1
 amr.max_level = 0
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
