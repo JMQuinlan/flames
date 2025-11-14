@@ -190,9 +190,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.momentum_old_mf, value.momentum_bc,  2, nghost, "momentum_old", false, { "x", "y" });
 
         // SOURCES
-        value.RegisterNewFab(value.m0_mf,           &value.bc_nothing,  1, 0, "m0", true);
-        value.RegisterNewFab(value.u0_mf,           &value.bc_nothing,  2, 0, "u0", true, { "x", "y" });
-        value.RegisterNewFab(value.q_mf,            &value.bc_nothing,  2, 0, "q0", true, { "x", "y" });
+        value.RegisterNewFab(value.m0_mf,           &value.bc_nothing,  1, nghost, "m0", true);
+        value.RegisterNewFab(value.u0_mf,           &value.bc_nothing,  2, nghost, "u0", true, { "x", "y" });
+        value.RegisterNewFab(value.q_mf,            &value.bc_nothing,  2, nghost, "q0", true, { "x", "y" });
         value.RegisterNewFab(value.Source_mf,       &value.bc_nothing,  4, nghost, "Source", true);
         value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, nghost, "Fsv", true, { "x", "y" });  // Surface Tension
         value.RegisterNewFab(value.Fb_mf,           &value.bc_nothing,  2, nghost, "Fb", true, { "x", "y" });   // Buoyancy
@@ -924,7 +924,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> press = pressure_mf.Patch(lev, mfi);
 
         Set::Patch<const Set::Scalar> m0 = m0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> q = q_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> q0 = q_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> _u0 = u0_mf.Patch(lev, mfi);
 
         Set::Patch<Set::Scalar> T = T_mf.Patch(lev, mfi);
@@ -977,13 +977,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Matrix hess_rho = Numeric::Hessian(rho, i, j, k, 0, DX, sten);
             Set::Matrix gradu = (gradM - u * gradrho.transpose()) / (rho(i, j, k) + small);
 
-            Set::Vector q0 = Set::Vector(q(i, j, k, 0), q(i, j, k, 1));
+            Set::Vector q0_ = Set::Vector(q0(i, j, k, 0), q0(i, j, k, 1));
 
             /// Calculate Source Terms
             // Shear:
             Set::Scalar mdot0 = -m0(i, j, k) * grad_eta_mag;
             Set::Vector Pdot0 = Set::Vector::Zero();
-            Set::Scalar qdot0 = q0.dot(grad_eta);
+            Set::Scalar qdot0 = q0_.dot(grad_eta);
 
             Set::Matrix3 hess_M = Numeric::Hessian(M, i, j, k, DX);
             Set::Matrix3 hess_u = Set::Matrix3::Zero();

@@ -8,8 +8,8 @@ alamo.program = hydro2
 ### OUTPUT ###
 #plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/AirBubble_2Bar_in_Water_1Bar
 #plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHigh_SmallEta_HLLETamman
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/RPE
-#plot_file = tests/LargeBubbleRPE_2_Bar.GammaHigh
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/RPE
+plot_file = tests/LargeBubbleRPE_2_Bar.GammaHigh
 #plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
 
 
@@ -152,7 +152,6 @@ cutoff = 1e-16
 ### SOURCE TERMS ###
 m0.ic.constant.value = 0.0
 u0.ic.constant.value = 0.0 0.0
-q.ic.type = constant
 q.ic.constant.value = 0.0 0.0
 
 ### ADDITIONAL SOURCES ###
