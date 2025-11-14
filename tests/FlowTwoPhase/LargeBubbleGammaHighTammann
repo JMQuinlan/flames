@@ -8,18 +8,18 @@ alamo.program = hydro2
 ### OUTPUT ###
 #plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/AirBubble_2Bar_in_Water_1Bar
 #plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHigh_SmallEta_HLLETamman
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/RPE
-#plot_file = tests/LargeBubbleRPE_2_Bar.GammaHigh
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/RPE
+plot_file = tests/LargeBubbleRPE_2_Bar.GammaHigh
 #plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
 
 
 ### MESHING ###
-amr.plot_dt = 5e-5
+amr.plot_dt = 5e-6
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 100
 amr.grid_eff = 0.8
-amr.max_level = 5
+amr.max_level = 4
 amr.n_cell = 64 64
 
 ### TIME STEPING ###
