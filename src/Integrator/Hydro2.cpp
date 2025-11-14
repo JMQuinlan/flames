@@ -1300,7 +1300,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Allen-Cahn equation: d(eta)/dt = -u·grad(eta) + Mob * laplacian(mu)
             Set::Scalar advection = -u_new.dot(grad_eta);
-            Set::Scalar diffusion = Mob * lap_mu_chem;
+            Set::Scalar diffusion = 0.0 //Mob * lap_mu_chem;
             Set::Scalar deta_dt = advection + diffusion;
 
 
