@@ -204,6 +204,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.h_thermal_mf,    &value.bc_nothing,  1, nghost, "h_thermal", false);         // Thermal Convectivity
         value.RegisterNewFab(value.gamma_mf,        value.energy_bc, 1, nghost, "gamma", true);                 // Specific Heat Ratio
         value.RegisterNewFab(value.p0_mf,           value.energy_bc, 1, nghost, "p0", true);                    // Tamman Pressure
+        value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc, 1, nghost, "mu_chem", true);                    // Tamman Pressure
         value.RegisterNewFab(value.a_mf,            &value.bc_nothing,  1, nghost, "a", true);                  // Speed of sound
         value.RegisterNewFab(value.Ma_mf,           &value.bc_nothing,  2, nghost, "Ma", true, { "x", "y" });   // Mach
         value.RegisterNewFab(value.UE_per_vol_mf,   &value.bc_nothing,  1, nghost, "UE_per_vol", true);         // Internal Energy (per unit volume)
@@ -409,6 +410,9 @@ void Hydro2::Initialize(int lev)
 void Hydro2::Mix(int lev)
 {
     const Set::Scalar *DX = geom[lev].CellSize();
+    amrex::Box domain = geom[lev].Domain();
+
+
     // Function is for the diffusive mixing terms. I.E: rho = eta*rho0 + (1-eta)*rho1
     for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
     {
@@ -465,6 +469,7 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar>         h_thermal   = h_thermal_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         gammaf      = gamma_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         p0_eff      = p0_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar>         mu_chem_    = mu_chem_mf.Patch(lev, mfi);
 
         // EXTRAS & DEBUGGING
         Set::Patch<Set::Scalar>         a           = a_mf.Patch(lev, mfi);
@@ -475,6 +480,12 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar>         KE_mas      = KE_per_mas_mf.Patch(lev, mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            auto sten = Numeric::GetStencil(i, j, k, domain);
+
+            Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
+
+
+
             // Calculate State Variables 
             rho(i, j, k) = eta(i, j, k) * rho0(i, j, k) + (1.0 - eta(i, j, k)) * rho1(i, j, k);
             rho_old(i, j, k) = rho(i, j, k);  
@@ -516,6 +527,11 @@ void Hydro2::Mix(int lev)
             // Pressure
             press(i, j, k) = (UE_vol(i, j, k) - B) / A - pref;
             p0_eff(i, j, k) = (B / A) / gamma_eff;
+
+            // Chemical Potential
+            Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
+            Set::Scalar mu_chem = -epsilon * epsilon * lap_eta + f_prime;
+            mu_chem_(i, j, k) = mu_chem;
 
             // Temperature
             T(i, j, k) = T0(i, j, k) * eta(i, j, k) + T1(i, j, k) * (1.0 - eta(i, j, k));
@@ -660,10 +676,19 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
 
+        Set::Patch<Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
+
+
         
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
+
+            // Derivatice Function Calls
+            Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
+            Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
+            Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
+            Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
 
             // gamma
             Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
@@ -708,6 +733,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             press(i, j, k) = (UE_vol(i, j, k) - B) / A;
             p0_eff(i,j,k) = (B / A) / gamma_eff;
 
+            // Chemical Potential
+            Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
+            Set::Scalar mu_chem = -epsilon * epsilon * lap_eta + f_prime;
+            mu_chem_(i, j, k) = mu_chem;
+
             // Speed of sound:
             a(i, j, k) = std::sqrt(gammaf(i,j,k) * (press(i, j, k) + p0_eff(i,j,k)) / (rho(i, j, k) + small));
 
@@ -716,14 +746,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Ma(i, j, k, 1) = v(i, j, k, 1) / (a(i, j, k) + small);
 
 
-
-
-            // DEBUGGING
-            Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
-            Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
-            Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
-
-            Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
+            // Curvature
             Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
 
             grad_eta_(i, j, k, 0) = grad_eta(0);
@@ -829,6 +852,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         });
     }
 
+    /*
     // ============= SYNCHRONIZATION =============
     // Eta
     (*hess_eta_mf[lev]).FillBoundary(geom[lev].periodicity());
@@ -839,25 +863,23 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // Mixutre
     (*a_mf[lev]).FillBoundary(geom[lev].periodicity());
     (*Ma_mf[lev]).FillBoundary(geom[lev].periodicity());
-    /*
-    (*KE_vol_mf[lev]).FillBoundary(geom[lev].periodicity());
-    (*KE_mas_mf[lev]).FillBoundary(geom[lev].periodicity());
-    (*UE_vol_mf[lev]).FillBoundary(geom[lev].periodicity());
-    (*UE_mas_mf[lev]).FillBoundary(geom[lev].periodicity());
-    */
+    
+    //(*KE_vol_mf[lev]).FillBoundary(geom[lev].periodicity());
+    //(*KE_mas_mf[lev]).FillBoundary(geom[lev].periodicity());
+    //(*UE_vol_mf[lev]).FillBoundary(geom[lev].periodicity());
+    //(*UE_mas_mf[lev]).FillBoundary(geom[lev].periodicity());
 
 
     (*velocity_mf[lev]).FillBoundary(geom[lev].periodicity());
     (*pressure_mf[lev]).FillBoundary(geom[lev].periodicity());
 
     // Not adding to yet so we can leave these our
-    /*
-    Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
-    Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
-    Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
-    Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
-    Set::Patch<Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
-    Set::Patch<Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
+    //Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
+    //Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
+    //Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
+    //Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
+    //Set::Patch<Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
+    //Set::Patch<Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
     */
 
 
@@ -898,6 +920,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
+
 
         Set::Patch<Set::Scalar> Source = Source_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fsv = Fsv_mf.Patch(lev, mfi);
@@ -1246,25 +1270,26 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
            
             
             /// Eta:
-            // Material Derivative
-            Set::Vector u_new = Set::Vector(M_new(i, j, k, 0) / rho_new(i, j, k), M_new(i, j, k, 1) / rho_new(i, j, k));
-            Set::Scalar deta_dt = -u_new.dot(grad_eta);
-            // Cahn-Hillard
-            // Set::Scalar deta_dt = -u.dot(grad_eta) + M.dot(grad_eta)
-            // Set::Matrix tmp =
-            // Set::Scalar deta_dt = -1.0 / (rho(i, j, k) * (u_mag**2))
-            // Set::Matrix gradu = (gradM - u * gradrho.transpose()) / rho(i, j, k);
+            //Set::Scalar Mob = epsilon * epsilon / dt; // Mobility
+            //Set::Scalar mu_chem = -epsilon * epsilon * lap_eta + 4.0 * eta(i,j,k) * (eta(i,j,k) - 0.5) * (eta(i,j,k) - 1.0);
+            //Set::Vector u_new = Set::Vector(M_new(i, j, k, 0) / (rho_new(i, j, k) + small), M_new(i, j, k, 1) / (rho_new(i, j, k) + small));
+            //Set::Scalar deta_dt = -u_new.dot(grad_eta) + Mob * lap_eta; // Advection + diffusion // Maybe u new?
 
-            // Set::Scalar deta_dt = -; //https://www.sciencedirect.com/science/article/pii/S002199912100005X
+            Set::Scalar Mob = 0.01 * DX[0] * DX[0];
 
-            //  Either Allen-Cahn or Cahn-Hillar
-            // IDK anymore, all are the same
-            // Please work
-            Set::Scalar Mob = 0.0; // Mobility
-            Set::Vector Ugly = Set::Vector(0.0, 0.0);
-            Ugly(0) = epsilon * grad_mag_grad_eta(0);
-            Ugly(1) = epsilon * grad_mag_grad_eta(1);
-            deta_dt = deta_dt + Mob * n_hat.dot(Ugly);
+            // Compute Laplacian of chemical potential (conservative form)
+            Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
+
+            // Velocity for advection
+            Set::Vector u_new = Set::Vector(M_new(i, j, k, 0) / (rho_new(i, j, k) + small),
+                                            M_new(i, j, k, 1) / (rho_new(i, j, k) + small));
+
+            // Allen-Cahn equation: d(eta)/dt = -u·grad(eta) + Mob * laplacian(mu)
+            Set::Scalar advection = -u_new.dot(grad_eta);
+            Set::Scalar diffusion = Mob * lap_mu_chem;
+            Set::Scalar deta_dt = advection + diffusion;
+
+
 
             if (static_eta == 1)
             {

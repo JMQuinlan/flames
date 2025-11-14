@@ -6,11 +6,11 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/RPESame
-#plot_file = tests/LargeBubbleRPE_2_Bar.GammaHighSame
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/RPESame
+plot_file = tests/LargeBubbleRPE_2_Bar.GammaHighSame
 
 ### MESHING ###
-amr.plot_int = 50
+amr.plot_int = 5
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 100
@@ -22,7 +22,7 @@ amr.n_cell = 64 64
 ## Static:
 timestep  = 2e-8
 ## Adaptive
-dynamictimestep.on = 1
+dynamictimestep.on = 0
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-6
 dynamictimestep.min = 2e-8
@@ -38,7 +38,7 @@ stop_time = 0.05
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 5.0e-5
+eta.ic.expression.constant.epsilon = 1.0e-5
 eta.ic.expression.constant.R0 = 1.0e-3  # Increased bubble radius for better visibility
 
 # Bubble shape definition

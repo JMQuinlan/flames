@@ -177,6 +177,7 @@ private:
     Set::Field<Set::Scalar> h_thermal_mf;   // Thermal Convectivity
     Set::Field<Set::Scalar> gamma_mf;       // Specific Heat Ratio
     Set::Field<Set::Scalar> p0_mf;          // Tamman Pressure
+    Set::Field<Set::Scalar> mu_chem_mf;          // Tamman Pressure
     Set::Field<Set::Scalar> a_mf;           // Speed of sound
     Set::Field<Set::Scalar> Ma_mf;          // Mach
     Set::Field<Set::Scalar> UE_per_vol_mf;  // Internal Energy (per unit volume)
