@@ -560,6 +560,8 @@ void Hydro2::Mix(int lev)
     c_max = 0.0;
     vx_max = 0.0;
     vy_max = 0.0;
+    F_max = 0.0;
+    rho_min = 1e10;
 }
 
 
@@ -571,15 +573,19 @@ void Hydro2::TimeStepBegin(Set::Scalar, int /*iter*/)
 {
 
 }
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////// TIMESTEPCOMPLETE ///////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 void Hydro2::TimeStepComplete(Set::Scalar time, int lev)
 {
     if (dynamictimestep.on)
+    {
         Integrator::DynamicTimestep_Update();
+    }
+    /*
     return;
-
+    
     const Set::Scalar *DX = geom[lev].CellSize();
 
     amrex::ParallelDescriptor::ReduceRealMax(c_max);
@@ -604,6 +610,7 @@ void Hydro2::TimeStepComplete(Set::Scalar time, int lev)
     Util::Assert(INFO, TEST(AMREX_SPACEDIM == 2));
 
     SetTimestep(new_timestep);
+    */
     
 }
 
@@ -628,8 +635,15 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     std::swap(energy_per_mas_old_mf[lev], energy_per_mas_mf[lev]);
     std::swap(eta_old_mf, eta_mf);
 
+    // Dynamic Timesteping
     Set::Scalar dt_max = std::numeric_limits<Set::Scalar>::max();
+    c_max = 0.0;
+    vx_max = 0.0;
+    vy_max = 0.0;
+    F_max = 0.0;
+    rho_min = 1e10;
 
+    // Geometry
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
 
@@ -1367,6 +1381,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Set::Vector grad_uy = Numeric::Gradient(v, i, j, k, 1, DX);
 
             // Adaptive Timestep
+            /*
             Set::Scalar sound_speed = std::sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) + small));
 
             c_max = std::max(c_max, sound_speed);
@@ -1377,12 +1392,78 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             *dt_max_handle = std::min(*dt_max_handle, std::fabs(cfl * DX[1] / (u(1) + small)));
             *dt_max_handle = std::min(*dt_max_handle, std::fabs(cfl_v * DX[0] * DX[0] / (Source(i, j, k, 1) + small)));
             *dt_max_handle = std::min(*dt_max_handle, std::fabs(cfl_v * DX[1] * DX[1] / (Source(i, j, k, 2) + small)));
+            */
+
+            Set::Scalar sound_speed = std::sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) + small));
+            c_max = std::max(c_max, sound_speed);
+            vx_max = std::max(vx_max, std::abs(v(i, j, k, 0)));
+            vy_max = std::max(vy_max, std::abs(v(i, j, k, 1)));
+
+            // Track maximum force magnitude (not acceleration yet)
+            Set::Scalar F_mag = std::sqrt(Source(i, j, k, 1) * Source(i, j, k, 1) + Source(i, j, k, 2) * Source(i, j, k, 2));
+            F_max = std::max(F_max, F_mag);
+            rho_min = std::min(rho_min, rho(i, j, k));
+
 
             // Calculate vorticity for visualization
             omega(i, j, k) = (gradu(1, 0) - gradu(0, 1));
         });
     }
     // Update adaptive timestep
+    // Reduce maximums across all processors (if parallel)
+    amrex::ParallelDescriptor::ReduceRealMax(c_max);
+    amrex::ParallelDescriptor::ReduceRealMax(vx_max);
+    amrex::ParallelDescriptor::ReduceRealMax(vy_max);
+    amrex::ParallelDescriptor::ReduceRealMax(F_max);
+    amrex::ParallelDescriptor::ReduceRealMin(rho_min);
+
+    // Compute timestep constraints
+    Set::Scalar dx_min = std::min(DX[0], DX[1]);
+
+    // 1. Acoustic CFL (most important)
+    Set::Scalar wave_speed = c_max + std::max(vx_max, vy_max);
+    Set::Scalar dt_acoustic = cfl * dx_min / (wave_speed + small);
+
+    // 2. Viscous CFL
+    Set::Scalar mu_max = std::max(mu0, mu1);
+    Set::Scalar dt_viscous = cfl_v * rho_min * dx_min * dx_min / (mu_max + small);
+
+    // 3. Force CFL (only if forces are significant)
+    Set::Scalar dt_force = 1e10;
+    if (F_max > rho_min * 1.0)
+    {                                        // Force > 1 N/kg threshold
+        Set::Scalar a_max = F_max / rho_min; // Maximum acceleration
+        dt_force = cfl_v * std::sqrt(dx_min / a_max);
+    }
+
+    // 4. Allen-Cahn diffusion CFL
+    Set::Scalar Mob = 0.01 * dx_min * dx_min;
+    Set::Scalar dt_allen_cahn = 0.5 * dx_min * dx_min / (Mob + small);
+
+    // Take minimum
+    dt_max = std::min({ dt_acoustic, dt_viscous, dt_force, dt_allen_cahn });
+
+    // Safety factor
+    dt_max *= 0.9;
+
+    // Print diagnostics (first timestep only)
+    if (time < 1e-10)
+    {
+        Util::ParallelMessage(INFO, "\n=== CFL TIMESTEP DIAGNOSTICS ===");
+        Util::ParallelMessage(INFO, "Grid spacing: ", dx_min, " m");
+        Util::ParallelMessage(INFO, "Sound speed max: ", c_max, " m/s");
+        Util::ParallelMessage(INFO, "Velocity max: ", std::max(vx_max, vy_max), " m/s");
+        Util::ParallelMessage(INFO, "Force max: ", F_max, " N/m^3");
+        Util::ParallelMessage(INFO, "Density min: ", rho_min, " kg/m^3");
+        Util::ParallelMessage(INFO, "");
+        Util::ParallelMessage(INFO, "dt_acoustic: ", dt_acoustic, " s");
+        Util::ParallelMessage(INFO, "dt_viscous: ", dt_viscous, " s");
+        Util::ParallelMessage(INFO, "dt_force: ", dt_force, " s");
+        Util::ParallelMessage(INFO, "dt_allen_cahn: ", dt_allen_cahn, " s");
+        Util::ParallelMessage(INFO, "");
+        Util::ParallelMessage(INFO, "Final dt_max: ", dt_max, " s");
+        Util::ParallelMessage(INFO, "================================\n");
+    }
     if (dynamictimestep.on)
     {
         this->DynamicTimestep_SyncTimeStep(lev, dt_max);

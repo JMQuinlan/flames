@@ -112,8 +112,6 @@ protected:
 
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
 
-    // virtual void UpdateEta(int lev, Set::Scalar time);
-
 private:
     // FLUID 0
     Set::Field<Set::Scalar> density0_mf;
@@ -262,6 +260,8 @@ private:
     Set::Scalar c_max = 0.0;
     Set::Scalar vx_max = 0.0;
     Set::Scalar vy_max = 0.0;
+    Set::Scalar F_max = 0.0;
+    Set::Scalar rho_min = 1e10;
 
     Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion=NAN;
     // FLUID 0
