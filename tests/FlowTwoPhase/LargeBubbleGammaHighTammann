@@ -151,9 +151,9 @@ cutoff = 1e-16
 
 ### SOURCE TERMS ###
 m0.ic.constant.value = 0.0
-u0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
 q.ic.type = constant
-q.ic.constant.value = 0.0
+q.ic.constant.value = 0.0 0.0
 
 ### ADDITIONAL SOURCES ###
 apply_surface_tension = 1
