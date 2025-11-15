@@ -190,9 +190,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.momentum_old_mf, value.momentum_bc,  2, nghost, "momentum_old", false, { "x", "y" });
 
         // SOURCES
-        value.RegisterNewFab(value.m0_mf,           &value.bc_nothing,  1, 0, "m0", true);
-        value.RegisterNewFab(value.u0_mf,           &value.bc_nothing, 2, 0, "u0", true, { "x", "y" });
-        value.RegisterNewFab(value.q_mf,            &value.bc_nothing, 2, 0, "q0", true, { "x", "y" });
+        value.RegisterNewFab(value.m0_mf,           &value.bc_nothing,  1, nghost, "m0", true);
+        value.RegisterNewFab(value.u0_mf,           &value.bc_nothing, 2, nghost, "u0", true, { "x", "y" });
+        value.RegisterNewFab(value.q_mf,            &value.bc_nothing, 2, nghost, "q0", true, { "x", "y" });
         value.RegisterNewFab(value.Source_mf,       &value.bc_nothing,  4, nghost, "Source", true);
         value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, nghost, "Fsv", true, { "x", "y" });  // Surface Tension
         value.RegisterNewFab(value.Fb_mf,           &value.bc_nothing,  2, nghost, "Fb", true, { "x", "y" });   // Buoyancy
@@ -654,6 +654,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
 
+    // AI Made me do it - q_ic is acting up and it recomended this
+    m0_mf[lev]->FillBoundary(geom[lev].periodicity());
+    u0_mf[lev]->FillBoundary(geom[lev].periodicity());
+    q_mf[lev]->FillBoundary(geom[lev].periodicity());
 
     // First loop to show plotting fields and calculate intermediate items
     for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
