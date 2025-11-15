@@ -190,9 +190,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.momentum_old_mf, value.momentum_bc,  2, nghost, "momentum_old", false, { "x", "y" });
 
         // SOURCES
-        value.RegisterNewFab(value.m0_mf,           &value.bc_nothing,  1, 0, "m0", false);
-        value.RegisterNewFab(value.u0_mf,           &value.bc_nothing,  2, 0, "u0", false, { "x", "y" });
-        value.RegisterNewFab(value.q_mf,            &value.bc_nothing,  2, 0, "q0", false, { "x", "y" });
+        value.RegisterNewFab(value.m0_mf,           &value.bc_nothing,  1, 0, "m0", true);
+        value.RegisterNewFab(value.u0_mf,           &value.bc_nothing, 2, 0, "u0", true, { "x", "y" });
+        value.RegisterNewFab(value.q_mf,            &value.bc_nothing, 2, 0, "q0", true, { "x", "y" });
         value.RegisterNewFab(value.Source_mf,       &value.bc_nothing,  4, nghost, "Source", true);
         value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, nghost, "Fsv", true, { "x", "y" });  // Surface Tension
         value.RegisterNewFab(value.Fb_mf,           &value.bc_nothing,  2, nghost, "Fb", true, { "x", "y" });   // Buoyancy
@@ -381,14 +381,21 @@ void Hydro2::Initialize(int lev)
     k1_thermal_ic   ->Initialize(lev, k1_thermal_mf, 0.0);
     h1_thermal_ic   ->Initialize(lev, h1_thermal_mf, 0.0);
 
-    // SOURCE
+    // FORCED SOURCE
     ic_m0           ->Initialize(lev, m0_mf, 0.0);
     ic_u0           ->Initialize(lev, u0_mf, 0.0);
     ic_q            ->Initialize(lev, q_mf, 0.0);
+
+    m0_mf[lev]->FillBoundary(geom[lev].periodicity());
+    u0_mf[lev]->FillBoundary(geom[lev].periodicity());
+    q_mf[lev]->FillBoundary(geom[lev].periodicity());
+
+
+    // NATURAL SOURCE
     Source_mf[lev]  ->setVal(0.0);
-    Fsv_mf[lev]     ->setVal(0.0); //->Initialize(lev, m0_mf, 0.0);
-    Fb_mf[lev]      ->setVal(0.0); //->Initialize(lev, m0_mf, 0.0);
-    Fw_mf[lev]      ->setVal(0.0); //->Initialize(lev, m0_mf, 0.0);
+    Fsv_mf[lev]     ->setVal(0.0);
+    Fb_mf[lev]      ->setVal(0.0);
+    Fw_mf[lev]      ->setVal(0.0); 
     kappas_mf[lev]  ->setVal(0.0);
     grad_mag_grad_eta_mf[lev]->setVal(0.0);
 
@@ -424,32 +431,32 @@ void Hydro2::Mix(int lev)
         // FLUID 0
         Set::Patch<const Set::Scalar>   v0          = velocity0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   p0          = pressure0_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         rho0        = density0_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         rho0_old    = density0_old_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         M0          = momentum0_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         M0_old      = momentum0_old_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         E0          = energy0_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         E0_old      = energy0_old_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         T0          = T0_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         cp0         = cp0_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         cv0         = cv0_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         k0_thermal  = k0_thermal_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         h0_thermal  = h0_thermal_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   rho0        = density0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   rho0_old    = density0_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   M0          = momentum0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   M0_old      = momentum0_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   E0          = energy0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   E0_old      = energy0_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   T0          = T0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   cp0         = cp0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   cv0         = cv0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   k0_thermal  = k0_thermal_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   h0_thermal  = h0_thermal_mf.Patch(lev, mfi);
 
         // FLUID 1
         Set::Patch<const Set::Scalar>   v1          = velocity1_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   p1          = pressure1_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         rho1        = density1_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         rho1_old    = density1_old_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         M1          = momentum1_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         M1_old      = momentum1_old_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         E1          = energy1_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         E1_old      = energy1_old_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         T1          = T1_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         cp1         = cp1_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         cv1         = cv1_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         k1_thermal  = k1_thermal_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar>         h1_thermal  = h1_thermal_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   rho1        = density1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   rho1_old    = density1_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   M1          = momentum1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   M1_old      = momentum1_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   E1          = energy1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   E1_old      = energy1_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   T1          = T1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   cp1         = cp1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   cv1         = cv1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   k1_thermal  = k1_thermal_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   h1_thermal  = h1_thermal_mf.Patch(lev, mfi);
 
         // MIXTURE 
         Set::Patch<Set::Scalar>         v           = velocity_mf.Patch(lev, mfi);
@@ -935,7 +942,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
-
 
         Set::Patch<Set::Scalar> Source = Source_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fsv = Fsv_mf.Patch(lev, mfi);
