@@ -670,8 +670,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
 
         // Eta
-        Set::Patch<const Set::Scalar> eta = eta_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> eta_new = eta_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> eta_new = eta_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> eta = eta_old_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> etadot = etadot_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> grad_eta_ = grad_eta_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> hess_eta_ = hess_eta_mf.Patch(lev, mfi);
