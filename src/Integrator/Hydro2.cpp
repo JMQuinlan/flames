@@ -133,7 +133,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.eta_mf,          value.energy_bc, 1, nghost, "eta", true);
         value.RegisterNewFab(value.eta_old_mf,      value.energy_bc, 1, nghost, "eta_old", true);
         value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing, 1, nghost, "etadot", true);
-        value.RegisterNewFab(value.hess_eta_mf,     value.energy_bc, 4, nghost, "hess_eta", true, { "00", "01", "10", "11" });
+        value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing, 4, nghost, "hess_eta", true, { "00", "01", "10", "11" });
         value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing,  2, nghost, "n_hat", true, { "x", "y" });
 
         // FLUID 0
@@ -384,7 +384,8 @@ void Hydro2::Initialize(int lev)
     // FORCED SOURCE
     ic_m0           ->Initialize(lev, m0_mf, 0.0);
     ic_u0           ->Initialize(lev, u0_mf, 0.0);
-    ic_q            ->Initialize(lev, q_mf, 0.0);
+    //ic_q->Initialize(lev, q_mf, 0.0);
+    q_mf[lev]->setVal(0.0);
 
     /*
     m0_mf[lev]->FillBoundary(geom[lev].periodicity());
