@@ -38,7 +38,7 @@ geometry.prob_hi =  0.10  0.10 0.0 # [ m ]
 geometry.is_periodic = 0 0 0
  
 ### TIME STEP ###
-stop_time = 0.002
+stop_time = 0.05
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression

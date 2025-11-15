@@ -386,10 +386,13 @@ void Hydro2::Initialize(int lev)
     ic_u0           ->Initialize(lev, u0_mf, 0.0);
     ic_q            ->Initialize(lev, q_mf, 0.0);
 
+    /*
     m0_mf[lev]->FillBoundary(geom[lev].periodicity());
     u0_mf[lev]->FillBoundary(geom[lev].periodicity());
     q_mf[lev]->FillBoundary(geom[lev].periodicity());
-
+    amrex::ParallelDescriptor::Barrier();
+    */
+    
 
     // NATURAL SOURCE
     Source_mf[lev]  ->setVal(0.0);
@@ -909,7 +912,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
 
     // Ensure all MPI ranks complete
-    amrex::ParallelDescriptor::Barrier();
+    //amrex::ParallelDescriptor::Barrier();
 
 
     // Main time integration loop
