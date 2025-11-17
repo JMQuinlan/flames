@@ -19,7 +19,7 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 100
 amr.grid_eff = 0.8
-amr.max_level = 6
+amr.max_level = 5
 amr.n_cell = 32 32
 
 ### TIME STEPING ###
@@ -131,15 +131,25 @@ density.bc.type.xlo = neumann
 density.bc.type.ylo = neumann
 density.bc.type.yhi = neumann
 
-energy.bc.type.xhi = neumann
-energy.bc.type.xlo = neumann
-energy.bc.type.ylo = neumann
-energy.bc.type.yhi = neumann
+energy.bc.type.xhi = dirchlet
+energy.bc.type.xlo = dirchlet
+energy.bc.type.ylo = dirchlet
+energy.bc.type.yhi = dirchlet
 
-momentum.bc.type.xhi = neumann neumann
-momentum.bc.type.xlo = neumann neumann
-momentum.bc.type.ylo = neumann neumann
-momentum.bc.type.yhi = neumann neumann
+energy.bc.type.xhi.value = 1e5
+energy.bc.type.xlo.value = 1e5
+energy.bc.type.ylo.value = 1e5
+energy.bc.type.yhi.value = 1e5
+
+momentum.bc.type.xhi = dirchlet dirchlet
+momentum.bc.type.xlo = dirchlet dirchlet
+momentum.bc.type.ylo = dirchlet dirchlet
+momentum.bc.type.yhi = dirchlet dirchlet
+
+momentum.bc.type.xhi.value = 0.0 0.0
+momentum.bc.type.xlo.value = 0.0 0.0
+momentum.bc.type.ylo.value = 0.0 0.0
+momentum.bc.type.yhi.value = 0.0 0.0
 
 ### REFINEMENT CRITERIA ###
 eta_refinement_criterion = 0.000001
