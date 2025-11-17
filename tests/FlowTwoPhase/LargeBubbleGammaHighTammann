@@ -131,25 +131,25 @@ density.bc.type.xlo = neumann
 density.bc.type.ylo = neumann
 density.bc.type.yhi = neumann
 
-energy.bc.type.xhi = dirchlet
-energy.bc.type.xlo = dirchlet
-energy.bc.type.ylo = dirchlet
-energy.bc.type.yhi = dirchlet
+energy.bc.type.xhi = dirichlet
+energy.bc.type.xlo = dirichlet
+energy.bc.type.ylo = dirichlet
+energy.bc.type.yhi = dirichlet
 
-energy.bc.type.xhi.value = 1e5
-energy.bc.type.xlo.value = 1e5
-energy.bc.type.ylo.value = 1e5
-energy.bc.type.yhi.value = 1e5
+energy.bc.val.xhi = 1e5
+energy.bc.val.xlo = 1e5
+energy.bc.val.ylo = 1e5
+energy.bc.val.yhi = 1e5
 
-momentum.bc.type.xhi = dirchlet dirchlet
-momentum.bc.type.xlo = dirchlet dirchlet
-momentum.bc.type.ylo = dirchlet dirchlet
-momentum.bc.type.yhi = dirchlet dirchlet
+momentum.bc.type.xhi = dirichlet dirichlet
+momentum.bc.type.xlo = dirichlet dirichlet
+momentum.bc.type.ylo = dirichlet dirichlet
+momentum.bc.type.yhi = dirichlet dirichlet
 
-momentum.bc.type.xhi.value = 0.0 0.0
-momentum.bc.type.xlo.value = 0.0 0.0
-momentum.bc.type.ylo.value = 0.0 0.0
-momentum.bc.type.yhi.value = 0.0 0.0
+momentum.bc.val.xhi.value = 0.0 0.0
+momentum.bc.val.xlo.value = 0.0 0.0
+momentum.bc.val.ylo.value = 0.0 0.0
+momentum.bc.val.yhi.value = 0.0 0.0
 
 ### REFINEMENT CRITERIA ###
 eta_refinement_criterion = 0.000001
