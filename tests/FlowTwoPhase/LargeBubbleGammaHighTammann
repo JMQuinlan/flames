@@ -146,10 +146,10 @@ momentum.bc.type.xlo = dirichlet dirichlet
 momentum.bc.type.ylo = dirichlet dirichlet
 momentum.bc.type.yhi = dirichlet dirichlet
 
-momentum.bc.val.xhi.value = 0.0 0.0
-momentum.bc.val.xlo.value = 0.0 0.0
-momentum.bc.val.ylo.value = 0.0 0.0
-momentum.bc.val.yhi.value = 0.0 0.0
+momentum.bc.val.xhi = 0.0 0.0
+momentum.bc.val.xlo = 0.0 0.0
+momentum.bc.val.ylo = 0.0 0.0
+momentum.bc.val.yhi = 0.0 0.0
 
 ### REFINEMENT CRITERIA ###
 eta_refinement_criterion = 0.000001
