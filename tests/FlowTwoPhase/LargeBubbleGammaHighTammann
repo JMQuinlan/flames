@@ -42,7 +42,7 @@ stop_time = 0.05
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.0005
+eta.ic.expression.constant.epsilon = 0.0002
 eta.ic.expression.constant.R0 = 0.01  # Increased bubble radius for better visibility
 
 # Bubble shape definition
