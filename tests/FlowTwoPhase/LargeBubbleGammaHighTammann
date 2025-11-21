@@ -136,15 +136,11 @@ energy.bc.type.xlo = neumann
 energy.bc.type.ylo = neumann
 energy.bc.type.yhi = neumann
 
-momentum.bc.type.xhi = dirichlet dirichlet
-momentum.bc.type.xlo = dirichlet dirichlet
-momentum.bc.type.ylo = dirichlet dirichlet
-momentum.bc.type.yhi = dirichlet dirichlet
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
 
-momentum.bc.val.xhi = 0.0 0.0
-momentum.bc.val.xlo = 0.0 0.0
-momentum.bc.val.ylo = 0.0 0.0
-momentum.bc.val.yhi = 0.0 0.0
 
 ### REFINEMENT CRITERIA ###
 eta_refinement_criterion = 0.000001
