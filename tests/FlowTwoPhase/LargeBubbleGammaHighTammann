@@ -19,7 +19,7 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 100
 amr.grid_eff = 0.8
-amr.max_level = 5
+amr.max_level = 7
 amr.n_cell = 32 32
 
 ### TIME STEPING ###
@@ -30,7 +30,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-6
 dynamictimestep.min = 1e-12
-cfl = 0.8
+cfl = 0.5
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.10 -0.10 0.0 # [ m ]
@@ -42,7 +42,7 @@ stop_time = 0.05
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.0002
+eta.ic.expression.constant.epsilon = 0.0001
 eta.ic.expression.constant.R0 = 0.01  # Increased bubble radius for better visibility
 
 # Bubble shape definition
