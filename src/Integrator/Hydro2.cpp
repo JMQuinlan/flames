@@ -80,6 +80,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("apply_buoyancy", value.apply_buoyancy, false);              // Apply buoyancy when solving, default: false --> "No Buoyancy"
         pp_query_default("apply_weight", value.apply_weight, false);                  // Apply weight when solving, default: false --> "No Weight"
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
+        pp_query_default("apply_vaporization", value.apply_vaporization, false);      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
         // NEW SOLVER FORBIDS
         pp_forbid("gamma", "--> gamma0 and gamma1");
@@ -103,7 +104,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
 
         // INTERACTIONS
-        pp_query_default("sigma", value.sigma, 70.0);   // surface tension condition
+        pp_query_default("sigma", value.sigma, 0.0);   // surface tension condition
+        pp_query_default("Dv", value.Dv, 0.0);   // Vapor Diffusivity
         pp_query_required("epsilon", value.epsilon);    // diffuse interface thickness
 
         // CURVATURE
@@ -204,13 +206,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.h_thermal_mf,    &value.bc_nothing,  1, nghost, "h_thermal", false);         // Thermal Convectivity
         value.RegisterNewFab(value.gamma_mf,        value.energy_bc, 1, nghost, "gamma", true);                 // Specific Heat Ratio
         value.RegisterNewFab(value.p0_mf,           value.energy_bc, 1, nghost, "p0", true);                    // Tamman Pressure
-        value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc, 1, nghost, "mu_chem", true);                    // Tamman Pressure
+        value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc, 1, nghost, "mu_chem", true);               // Tammann Pressure
         value.RegisterNewFab(value.a_mf,            &value.bc_nothing,  1, nghost, "a", true);                  // Speed of sound
         value.RegisterNewFab(value.Ma_mf,           &value.bc_nothing,  2, nghost, "Ma", true, { "x", "y" });   // Mach
         value.RegisterNewFab(value.UE_per_vol_mf,   &value.bc_nothing,  1, nghost, "UE_per_vol", true);         // Internal Energy (per unit volume)
         value.RegisterNewFab(value.UE_per_mas_mf,   &value.bc_nothing,  1, nghost, "UE_per_mass", true);        // Internal Energy (per unit mass)
         value.RegisterNewFab(value.KE_per_vol_mf,   &value.bc_nothing,  1, nghost, "KE_per_vol", true);         // Kinetic Energy (per unit volume)
         value.RegisterNewFab(value.KE_per_mas_mf,   &value.bc_nothing,  1, nghost, "KE_per_mass", true);        // Kinetic Energy (per unit mass)
+        value.RegisterNewFab(value.Bm_mf,           &value.bc_nothing,  1, nghost, "Spadling_Number", true);    // Spalding Number
 
         // EXTRAS & DEBUGGING
         value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", true, { "x", "y" });
@@ -400,15 +403,19 @@ void Hydro2::Initialize(int lev)
     Fsv_mf[lev]     ->setVal(0.0);
     Fb_mf[lev]      ->setVal(0.0);
     Fw_mf[lev]      ->setVal(0.0); 
+
+    // BOUNDRY CURVATURE AND THINGS
     kappas_mf[lev]  ->setVal(0.0);
     grad_mag_grad_eta_mf[lev]->setVal(0.0);
+    Bm_mf[lev]      ->setVal(0.0);  // Spalding Number
 
-    a_mf[lev]       ->setVal(0.0);
-    Ma_mf[lev]      ->setVal(0.0);
-    UE_per_vol_mf[lev]->setVal(0.0);
-    UE_per_mas_mf[lev]->setVal(0.0);
-    KE_per_vol_mf[lev]->setVal(0.0);
-    KE_per_mas_mf[lev]->setVal(0.0);
+    // MIXED PROPERTIES
+    a_mf[lev]           ->setVal(0.0);
+    Ma_mf[lev]          ->setVal(0.0);
+    UE_per_vol_mf[lev]  ->setVal(0.0);
+    UE_per_mas_mf[lev]  ->setVal(0.0);
+    KE_per_vol_mf[lev]  ->setVal(0.0);
+    KE_per_mas_mf[lev]  ->setVal(0.0);
 
 
     // Calculate mixed variables based on individual fluid variables
@@ -481,6 +488,7 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar>         gammaf      = gamma_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         p0_eff      = p0_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         mu_chem_    = mu_chem_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar>         Bm          = Bm_mf.Patch(lev, mfi);
 
         // EXTRAS & DEBUGGING
         Set::Patch<Set::Scalar>         a           = a_mf.Patch(lev, mfi);
@@ -494,8 +502,6 @@ void Hydro2::Mix(int lev)
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
-
-
 
             // Calculate State Variables 
             rho(i, j, k) = eta(i, j, k) * rho0(i, j, k) + (1.0 - eta(i, j, k)) * rho1(i, j, k);
@@ -544,6 +550,9 @@ void Hydro2::Mix(int lev)
             Set::Scalar mu_chem = -epsilon * epsilon * lap_eta + f_prime;
             mu_chem_(i, j, k) = mu_chem;
 
+            // Spalding Number
+            Bm(i, j, k) = eta(i, j, k) / (1.0 - eta(i, j, k) + small);
+            
             // Temperature
             T(i, j, k) = T0(i, j, k) * eta(i, j, k) + T1(i, j, k) * (1.0 - eta(i, j, k));
 
@@ -565,6 +574,7 @@ void Hydro2::Mix(int lev)
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / a(i, j, k);
             Ma(i, j, k, 1) = v(i, j, k, 1) / a(i, j, k);
+
 
         });
     }
@@ -593,36 +603,7 @@ void Hydro2::TimeStepComplete(Set::Scalar time, int lev)
     if (dynamictimestep.on)
     {
         Integrator::DynamicTimestep_Update();
-    }
-    /*
-    return;
-    
-    const Set::Scalar *DX = geom[lev].CellSize();
-
-    amrex::ParallelDescriptor::ReduceRealMax(c_max);
-    amrex::ParallelDescriptor::ReduceRealMax(vx_max);
-    amrex::ParallelDescriptor::ReduceRealMax(vy_max);
-
-    Set::Scalar new_timestep = cfl / ((c_max + vx_max) / (DX[0]) + (c_max + vy_max) / (DX[1]) + small);
-
-    // DEBUGGING VERBOSE
-    // Ensure dt_min is valid
-    if (std::isnan(new_timestep) || std::isinf(new_timestep) || new_timestep <= 0.0)
-    {
-        amrex::Print() << "WARNING: Invalid new_timestep calculated: " << new_timestep
-                       << " at time " << time << " on level " << lev << "\n";
-        amrex::Print() << "  c_max = " << c_max << ", vx_max = " << vx_max
-                       << ", vy_max = " << vy_max << "\n";
-        new_timestep = dynamictimestep.min; // Use the minimum timestep from parameters
-    }
-    Util::Message(INFO, "  CFL Timestep = ", new_timestep);
-    //amrex::Print() << "  CFL Timestep = " << new_timestep << "\n";
-
-    Util::Assert(INFO, TEST(AMREX_SPACEDIM == 2));
-
-    SetTimestep(new_timestep);
-    */
-    
+    }    
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -706,6 +687,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
 
         Set::Patch<Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
+
 
 
         
@@ -766,6 +749,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
             Set::Scalar mu_chem = -epsilon * epsilon * lap_eta + f_prime;
             mu_chem_(i, j, k) = mu_chem;
+
+            // Spalding Number
+            Bm(i, j, k) = eta(i, j, k) / (1.0 - eta(i, j, k) + small);
 
             // Speed of sound:
             a(i, j, k) = std::sqrt(gammaf(i,j,k) * (press(i, j, k) + p0_eff(i,j,k)) / (rho(i, j, k) + small));
@@ -913,13 +899,44 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
 
     // Ensure all MPI ranks complete
-    amrex::ParallelDescriptor::Barrier();
+    //amrex::ParallelDescriptor::Barrier();
 
 
     // Main time integration loop
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
+        // PRIMARY FLUIDS
+        // FLUID 0
+        Set::Patch<const Set::Scalar> v0 = velocity0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> p0 = pressure0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> rho0 = density0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> rho0_old = density0_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> M0 = momentum0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> M0_old = momentum0_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> E0 = energy0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> E0_old = energy0_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> T0 = T0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> cp0 = cp0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> cv0 = cv0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> k0_thermal = k0_thermal_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> h0_thermal = h0_thermal_mf.Patch(lev, mfi);
+        // FLUID 1
+        Set::Patch<const Set::Scalar> v1 = velocity1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> p1 = pressure1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> rho1 = density1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> rho1_old = density1_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> M1 = momentum1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> M1_old = momentum1_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> E1 = energy1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> E1_old = energy1_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> T1 = T1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> cp1 = cp1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> cv1 = cv1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> k1_thermal = k1_thermal_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> h1_thermal = h1_thermal_mf.Patch(lev, mfi);
+
+
         // MIXTURE
         Set::Patch<const Set::Scalar> rho = density_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> E_vol = energy_per_vol_old_mf.Patch(lev, mfi);
@@ -950,6 +967,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
 
         Set::Patch<Set::Scalar> Source = Source_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fsv = Fsv_mf.Patch(lev, mfi);
@@ -1059,7 +1077,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             div_tau(0) += mu_b_eff * grad_div_u(0);
             div_tau(1) += mu_b_eff * grad_div_u(1);
 
-            // WIP: Debugging feild for div_tau
+            // Debugging feild for div_tau
             div_tau_(i, j, k, 0) = div_tau(0);
             div_tau_(i, j, k, 1) = div_tau(1);
 
@@ -1317,6 +1335,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar diffusion = Mob * lap_mu_chem;
             Set::Scalar deta_dt = advection + diffusion;
 
+            // Spalding Evaporization
+            if (apply_vaporization == 1) {
+                deta_dt = deta_dt + (1.0 / (rho(i, j, k) * epsilon)) * ( rho0*Dv*(Bm(i,j,k) / (1.0 + Bm(i,j,k) + small)) * grad_eta_mag ) 
+            }
+
 
 
             if (static_eta == 1)
@@ -1391,23 +1414,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::ParallelMessage(INFO, "dE_dt = ", dE_dt);
             }
 
-            // Set::Vector grad_ux = Numeric::Gradient(v, i, j, k, 0, DX);
-            // Set::Vector grad_uy = Numeric::Gradient(v, i, j, k, 1, DX);
-
-            // Adaptive Timestep
-            /*
-            Set::Scalar sound_speed = std::sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) + small));
-
-            c_max = std::max(c_max, sound_speed);
-            vx_max = std::max(vx_max, std::abs(v(i, j, k, 0)));
-            vy_max = std::max(vy_max, std::abs(v(i, j, k, 1)));
-
-            *dt_max_handle = std::fabs(cfl * DX[0] / (u(0) + small));
-            *dt_max_handle = std::min(*dt_max_handle, std::fabs(cfl * DX[1] / (u(1) + small)));
-            *dt_max_handle = std::min(*dt_max_handle, std::fabs(cfl_v * DX[0] * DX[0] / (Source(i, j, k, 1) + small)));
-            *dt_max_handle = std::min(*dt_max_handle, std::fabs(cfl_v * DX[1] * DX[1] / (Source(i, j, k, 2) + small)));
-            */
-
+            
             Set::Scalar sound_speed = std::sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) + small));
             c_max = std::max(c_max, sound_speed);
             vx_max = std::max(vx_max, std::abs(v(i, j, k, 0)));
