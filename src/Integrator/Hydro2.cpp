@@ -1303,7 +1303,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             //Set::Vector u_new = Set::Vector(M_new(i, j, k, 0) / (rho_new(i, j, k) + small), M_new(i, j, k, 1) / (rho_new(i, j, k) + small));
             //Set::Scalar deta_dt = -u_new.dot(grad_eta) + Mob * lap_eta; // Advection + diffusion // Maybe u new?
 
-            Set::Scalar Mob = 0.0; // 0.01 * DX[0] * DX[0];
+            Set::Scalar Mob = 0.01 * DX[0] * DX[0];
 
             // Compute Laplacian of chemical potential (conservative form)
             Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
@@ -1315,7 +1315,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Allen-Cahn equation: d(eta)/dt = -u·grad(eta) + Mob * laplacian(mu)
             Set::Scalar advection = -u_new.dot(grad_eta);
             Set::Scalar diffusion = Mob * lap_mu_chem;
-            Set::Scalar deta_dt = advection + diffusion;
+            Set::Scalar deta_dt = advection; // +diffusion;
 
 
 
