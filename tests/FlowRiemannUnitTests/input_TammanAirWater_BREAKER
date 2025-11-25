@@ -171,7 +171,7 @@ rho_refinement_criterion   = 100000.0
 p_refinement_criterion     = 100000.0
 
 ### ADDITIONAL SOURCES ###
-apply_surface_tension = 0  # Enable surface tension
+apply_surface_tension = 1  # Enable surface tension
 apply_buoyancy = 0        # Not needed, using gravity instead
 apply_weight = 1          # Enable gravity
 Spec_Vol = 1              # Using volume-specific energy
