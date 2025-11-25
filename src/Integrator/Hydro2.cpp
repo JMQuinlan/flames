@@ -540,7 +540,8 @@ void Hydro2::Mix(int lev)
             p0_eff(i, j, k) = (B / A) / gamma_eff;
 
             // Chemical Potential
-            Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
+            // Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
+            Set::Scalar f_prime = 4.0 * eta(i, j, k) * (0.5 - eta(i, j, k)) * (1.0 - eta(i, j, k)); // Flipped Sign?
             Set::Scalar mu_chem = -epsilon * epsilon * lap_eta + f_prime;
             mu_chem_(i, j, k) = mu_chem;
 
@@ -1268,8 +1269,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar drho_dt = (flux_xlo.mass - flux_xhi.mass) / (DX[0]) + (flux_ylo.mass - flux_yhi.mass) / (DX[1]) + Source(i, j, k, 0);
 
             rho_new(i, j, k) = rho(i, j, k) + (drho_dt)*dt;
-            if (rho_new(i, j, k) < (0.0 + small)) {
-                rho_new(i, j, k) = 0.0 + small;
+            if (rho_new(i, j, k) < (small)) {
+                rho_new(i, j, k) = small;
             }
 
             // Momentum
@@ -1298,24 +1299,22 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
            
             
             /// Eta:
-            //Set::Scalar Mob = epsilon * epsilon / dt; // Mobility
-            //Set::Scalar mu_chem = -epsilon * epsilon * lap_eta + 4.0 * eta(i,j,k) * (eta(i,j,k) - 0.5) * (eta(i,j,k) - 1.0);
-            //Set::Vector u_new = Set::Vector(M_new(i, j, k, 0) / (rho_new(i, j, k) + small), M_new(i, j, k, 1) / (rho_new(i, j, k) + small));
-            //Set::Scalar deta_dt = -u_new.dot(grad_eta) + Mob * lap_eta; // Advection + diffusion // Maybe u new?
+            Set::Scalar Mob = 0.01 * DX[0] * DX[0]; // OLD METHOD: Diffusion does absolutely nothing
+            //Set::Scalar Mob = 0.1 * epsilon * DX[0]; // 0.01 * DX[0] * DX[0];
 
-            Set::Scalar Mob = 0.01 * DX[0] * DX[0];
-
-            // Compute Laplacian of chemical potential (conservative form)
+            // Laplacian of Chemical Potential (conservative form)
             Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
 
             // Velocity for advection
-            Set::Vector u_new = Set::Vector(M_new(i, j, k, 0) / (rho_new(i, j, k) + small),
-                                            M_new(i, j, k, 1) / (rho_new(i, j, k) + small));
+            Set::Vector u_new = Set::Vector(M(i, j, k, 0) / (rho(i, j, k) + small),
+                                            M(i, j, k, 1) / (rho(i, j, k) + small));
 
-            // Allen-Cahn equation: d(eta)/dt = -u·grad(eta) + Mob * laplacian(mu)
+            // Cahn-Hillard equation: d(eta)/dt = -u·grad(eta) + Mob * laplacian(mu)
             Set::Scalar advection = -u_new.dot(grad_eta);
-            Set::Scalar diffusion = Mob * lap_mu_chem;
-            Set::Scalar deta_dt = advection; // +diffusion;
+            // Set::Scalar diffusion = Mob * lap_mu_chem;
+            Set::Scalar phi = eta(i, j, k); // Dummy Variable bc it gets UGGGLLLYYYYY
+            Set::Scalar diffusion = Mob * ( lap_mu_chem - ((phi * (1.0-phi) * (1.0-2.0*phi)) / (epsilon*epsilon + small)) - (grad_eta_mag * kappa) ); // Chiu & Lin (2011) URL: https://www.sciencedirect.com/science/article/pii/S0021999110005243
+            Set::Scalar deta_dt = advection + diffusion;
 
 
 

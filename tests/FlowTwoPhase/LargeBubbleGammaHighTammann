@@ -28,7 +28,7 @@ timestep  = 1e-6
 ## Adaptive
 dynamictimestep.on = 1
 dynamictimestep.verbose = 1
-dynamictimestep.max = 1e-6
+dynamictimestep.max = 1e-5
 dynamictimestep.min = 1e-12
 cfl = 0.5
 
