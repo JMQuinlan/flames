@@ -938,6 +938,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> eta_new = eta_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> v = velocity_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> press = pressure_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> a = a_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> Ma = Ma_mf.Patch(lev, mfi);
 
         Set::Patch<const Set::Scalar> m0 = m0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> q0 = q_mf.Patch(lev, mfi);
@@ -1299,8 +1301,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
            
             
             /// Eta:
-            Set::Scalar Mob = 0.01 * DX[0] * DX[0]; // OLD METHOD: Diffusion does absolutely nothing
-            //Set::Scalar Mob = 0.1 * epsilon * DX[0]; // 0.01 * DX[0] * DX[0];
+            //Set::Scalar Mob = 0.01 * DX[0] * DX[0]; // OLD METHOD: Diffusion does absolutely nothing
+            //Set::Scalar Mob = 0.1 * epsilon * DX[0]; // What AI recommends but its very dumb
+            Set::Scalar Mob = c_max * epsilon; // Mob = u_max * epsilon,  (epsilon = 0.7*DX) Chiu & Lin (2011)
 
             // Laplacian of Chemical Potential (conservative form)
             Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
@@ -1369,7 +1372,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             }
 
             if (time <= 1e-7 && i == 0 && j == 0)
-            { // First timestep, first cell
+            { // First timestep~ish~, first cell
                 Util::ParallelMessage(INFO, "=== FIRST CELL DIAGNOSTICS ===");
                 Util::ParallelMessage(INFO, "eta = ", eta(i, j, k));
                 Util::ParallelMessage(INFO, "rho = ", rho(i, j, k));
@@ -1390,24 +1393,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::ParallelMessage(INFO, "dE_dt = ", dE_dt);
             }
 
-            // Set::Vector grad_ux = Numeric::Gradient(v, i, j, k, 0, DX);
-            // Set::Vector grad_uy = Numeric::Gradient(v, i, j, k, 1, DX);
-
             // Adaptive Timestep
-            /*
-            Set::Scalar sound_speed = std::sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) + small));
-
-            c_max = std::max(c_max, sound_speed);
-            vx_max = std::max(vx_max, std::abs(v(i, j, k, 0)));
-            vy_max = std::max(vy_max, std::abs(v(i, j, k, 1)));
-
-            *dt_max_handle = std::fabs(cfl * DX[0] / (u(0) + small));
-            *dt_max_handle = std::min(*dt_max_handle, std::fabs(cfl * DX[1] / (u(1) + small)));
-            *dt_max_handle = std::min(*dt_max_handle, std::fabs(cfl_v * DX[0] * DX[0] / (Source(i, j, k, 1) + small)));
-            *dt_max_handle = std::min(*dt_max_handle, std::fabs(cfl_v * DX[1] * DX[1] / (Source(i, j, k, 2) + small)));
-            */
-
-            Set::Scalar sound_speed = std::sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) + small));
+            Set::Scalar sound_speed = a(i, j, k); // std::sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) + small));
             c_max = std::max(c_max, sound_speed);
             vx_max = std::max(vx_max, std::abs(v(i, j, k, 0)));
             vy_max = std::max(vy_max, std::abs(v(i, j, k, 1)));
