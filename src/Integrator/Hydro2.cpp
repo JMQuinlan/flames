@@ -1303,7 +1303,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             /// Eta:
             //Set::Scalar Mob = 0.01 * DX[0] * DX[0]; // OLD METHOD: Diffusion does absolutely nothing
             //Set::Scalar Mob = 0.1 * epsilon * DX[0]; // What AI recommends but its very dumb
-            Set::Scalar Mob = c_max * epsilon; // Mob = u_max * epsilon,  (epsilon = 0.7*DX) Chiu & Lin (2011)
+            Set::Scalar Mob = a(i,j,k) * 0.7*DX[0]; // Mob = u_max * epsilon,  (epsilon = 0.7*DX) Chiu & Lin (2011)
 
             // Laplacian of Chemical Potential (conservative form)
             Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
@@ -1318,6 +1318,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar phi = eta(i, j, k); // Dummy Variable bc it gets UGGGLLLYYYYY
             Set::Scalar diffusion = Mob * ( lap_eta - ((phi * (1.0-phi) * (1.0-2.0*phi)) / (epsilon*epsilon + small)) - (grad_eta_mag * kappa) ); // Chiu & Lin (2011) URL: https://www.sciencedirect.com/science/article/pii/S0021999110005243
             Set::Scalar deta_dt = advection + diffusion;
+
+
+            //Util::ParallelMessage(INFO, "Mob=", Mob);
+            //Util::ParallelMessage(INFO, "deta_dt=", deta_dt);
+            //Util::Exception(INFO);
 
 
 
