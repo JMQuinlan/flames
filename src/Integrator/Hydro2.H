@@ -92,22 +92,14 @@ public:
 
 protected:
     void Initialize(int lev) override;
-    void Mix(int lev);
+    void Mix(int lev) override;
     void TimeStepBegin(Set::Scalar a_time, int a_iter) override;
     void TimeStepComplete(Set::Scalar time, int lev) override;
     void Advance(int lev, Set::Scalar time, Set::Scalar dt) override;
     void TagCellsForRefinement(int lev, amrex::TagBoxArray& tags, amrex::Real /*time*/, int /*ngrow*/) override;
     void Regrid(int lev, Set::Scalar time) override;
-    void RHS(int lev, 
-        Set::Scalar time, 
-        amrex::MultiFab &rho_rhs_mf, 
-        amrex::MultiFab &M_rhs_mf, 
-        amrex::MultiFab &E_rhs_mf, 
-        amrex::MultiFab &eta_rhs_mf, 
-        const amrex::MultiFab &rho_mf, 
-        const amrex::MultiFab &M_mf, 
-        const amrex::MultiFab &E_mf, 
-        const amrex::MultiFab &eta_mf_in );
+    void RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs, amrex::MultiFab &M_rhs, amrex::MultiFab &E_mas_rhs, amrex::MultiFab &E_vol_rhs, amrex::MultiFab &eta_rhs, const amrex::MultiFab &rho, const amrex::MultiFab &M, const amrex::MultiFab &E_mas, const amrex::MultiFab &E_vol, const amrex::MultiFab &eta);
+
 
 
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
