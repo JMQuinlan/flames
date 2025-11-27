@@ -628,11 +628,12 @@ Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::Multi
     E_vol_temp.FillBoundary(geom[lev].periodicity());
     eta_temp.FillBoundary(geom[lev].periodicity());
 
-    density_bc->FillBoundary(rho_temp, geom[lev], time);
-    momentum_bc->FillBoundary(M_temp, geom[lev], time);
-    energy_bc->FillBoundary(E_mas_temp, geom[lev], time);
-    energy_bc->FillBoundary(E_vol_temp, geom[lev], time);
-    eta_bc->FillBoundary(eta_temp, geom[lev], time);
+    density_bc->FillBoundary(rho_temp, 0, 1, time, 0);
+    momentum_bc->FillBoundary(M_temp, 0, 2, time, 0);
+    energy_bc->FillBoundary(E_mas_temp, 0, 1, time, 0);
+    energy_bc->FillBoundary(E_vol_temp, 0, 1, time, 0);
+    energy_bc->FillBoundary(eta_temp, 0, 1, time, 0);
+
 
     // Zero out RHS arrays
     rho_rhs_mf.setVal(0.0);
@@ -797,61 +798,44 @@ Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::Multi
             // RECONSTRUCT STATES (lines 1188-1220)
             // ============================================
 
-            Set::Vector4D<Numeric::StencilType, 3> x_leftStates, x_rightStates;
+            Solver::Local::Riemann::State x_states[3];
+            Solver::Local::Riemann::State y_states[3];
 
             for (int s = 0; s < 3; s++)
             {
                 int ii = i + s - 1;
 
-                x_leftStates[s].density = rho(ii, j, k);
-                x_leftStates[s].momentum_x = M(ii, j, k, 0);
-                x_leftStates[s].momentum_y = M(ii, j, k, 1);
-                x_leftStates[s].velocity_x = v(ii, j, k, 0);
-                x_leftStates[s].velocity_y = v(ii, j, k, 1);
-                x_leftStates[s].pressure = press(ii, j, k);
-
                 if (Spec_Vol == 1)
                 {
-                    x_leftStates[s].energy = E_vol(ii, j, k);
+                    x_states[s] = Solver::Local::Riemann::State(rho, M, E_vol, gamma_eff, p0_eff, T, ii, j, k, X);
                 }
                 else
                 {
-                    x_leftStates[s].energy = rho(ii, j, k) * E_mas(ii, j, k);
+                    // For mass-specific, need to convert
+                    x_states[s] = Solver::Local::Riemann::State(rho, M, E_vol, gamma_eff, p0_eff, T, ii, j, k, X);
                 }
-
-                x_rightStates[s] = x_leftStates[s];
             }
-
-            Set::Vector4D<Numeric::StencilType, 3> y_leftStates, y_rightStates;
 
             for (int s = 0; s < 3; s++)
             {
                 int jj = j + s - 1;
 
-                y_leftStates[s].density = rho(i, jj, k);
-                y_leftStates[s].momentum_x = M(i, jj, k, 0);
-                y_leftStates[s].momentum_y = M(i, jj, k, 1);
-                y_leftStates[s].velocity_x = v(i, jj, k, 0);
-                y_leftStates[s].velocity_y = v(i, jj, k, 1);
-                y_leftStates[s].pressure = press(i, jj, k);
-
                 if (Spec_Vol == 1)
                 {
-                    y_leftStates[s].energy = E_vol(i, jj, k);
+                    y_states[s] = Solver::Local::Riemann::State(rho, M, E_vol, gamma_eff, p0_eff, T, i, jj, k, Y);
                 }
                 else
                 {
-                    y_leftStates[s].energy = rho(i, jj, k) * E_mas(i, jj, k);
+                    y_states[s] = Solver::Local::Riemann::State(rho, M, E_vol, gamma_eff, p0_eff, T, i, jj, k, Y);
                 }
-
-                y_rightStates[s] = y_leftStates[s];
             }
+
 
             // ============================================
             // COMPUTE FLUXES (lines 1222-1228)
             // ============================================
 
-            Numeric::StencilType flux_xlo, flux_xhi, flux_ylo, flux_yhi;
+            Solver::Local::Riemann::Flux flux_xlo, flux_xhi, flux_ylo, flux_yhi;
 
             if (Riemann_Solver == 1) // HLLC
             {
@@ -887,17 +871,47 @@ Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::Multi
 
             // Divergence of stress tensor
             Set::Vector div_tau;
-            div_tau(0) = Numeric::Gradient(tau_xx, tau_xy, i, j, k, DX, sten)(0) + Numeric::Gradient(tau_xy, tau_yy, i, j, k, DX, sten)(1);
-            div_tau(1) = Numeric::Gradient(tau_xy, tau_xx, i, j, k, DX, sten)(0) + Numeric::Gradient(tau_yy, tau_xy, i, j, k, DX, sten)(1);
+            Set::Scalar tau_xx_arr[3][3]; // Local stencil storage
+            Set::Scalar tau_xy_arr[3][3];
+            Set::Scalar tau_yy_arr[3][3];
 
-            // Bulk viscosity contribution
-            Set::Vector grad_div_u = Numeric::Gradient(div_u, div_u, i, j, k, DX, sten);
-            div_tau(0) += mu_b_eff * grad_div_u(0);
-            div_tau(1) += mu_b_eff * grad_div_u(1);
+            // Fill stencil
+            for (int di = -1; di <= 1; di++)
+            {
+                for (int dj = -1; dj <= 1; dj++)
+                {
+                    int ii = i + di;
+                    int jj = j + dj;
 
-            // Store for debugging
-            grad_div_u_(i, j, k, 0) = grad_div_u(0);
-            grad_div_u_(i, j, k, 1) = grad_div_u(1);
+                    // Compute velocity gradients at (ii, jj)
+                    auto sten_local = Numeric::GetStencil(ii, jj, k, bx);
+                    Set::Scalar rho_local = std::max(rho(ii, jj, k), small);
+                    Set::Vector grad_u_local = Numeric::Gradient(M, ii, jj, k, 0, DX, sten_local) / rho_local;
+                    Set::Vector grad_v_local = Numeric::Gradient(M, ii, jj, k, 1, DX, sten_local) / rho_local;
+                    Set::Scalar div_u_local = grad_u_local(0) + grad_v_local(1);
+
+                    Set::Scalar eta_local = eta(ii, jj, k);
+                    Set::Scalar mu_eff_local = eta_local * mu0 + (1.0 - eta_local) * mu1;
+                    Set::Scalar mu_b_eff_local = eta_local * mu0_b + (1.0 - eta_local) * mu1_b;
+
+                    tau_xx_arr[di + 1][dj + 1] = 2.0 * mu_eff_local * (grad_u_local(0) - div_u_local / 3.0);
+                    tau_yy_arr[di + 1][dj + 1] = 2.0 * mu_eff_local * (grad_v_local(1) - div_u_local / 3.0);
+                    tau_xy_arr[di + 1][dj + 1] = 2.0 * mu_eff_local * 0.5 * (grad_u_local(1) + grad_v_local(0));
+                }
+            }
+
+            // Now compute divergence using finite differences
+            Set::Scalar dtau_xx_dx = (tau_xx_arr[2][1] - tau_xx_arr[0][1]) / (2.0 * DX[0]);
+            Set::Scalar dtau_xy_dy = (tau_xy_arr[1][2] - tau_xy_arr[1][0]) / (2.0 * DX[1]);
+            Set::Vector div_tau;
+            div_tau(0) = dtau_xx_dx + dtau_xy_dy;
+
+            Set::Scalar dtau_xy_dx = (tau_xy_arr[2][1] - tau_xy_arr[0][1]) / (2.0 * DX[0]);
+            Set::Scalar dtau_yy_dy = (tau_yy_arr[1][2] - tau_yy_arr[1][0]) / (2.0 * DX[1]);
+            div_tau(1) = dtau_xy_dx + dtau_yy_dy;
+            //div_tau(0) += mu_b_eff * ddiv_u_dx;
+            //div_tau(1) += mu_b_eff * ddiv_u_dy;
+
             div_tau_(i, j, k, 0) = div_tau(0);
             div_tau_(i, j, k, 1) = div_tau(1);
 
@@ -968,9 +982,9 @@ Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::Multi
 
             Set::Scalar drho_dt = (flux_xlo.mass - flux_xhi.mass) / DX[0] + (flux_ylo.mass - flux_yhi.mass) / DX[1];
 
-            Set::Scalar dMx_dt = (flux_xlo.momentum_x - flux_xhi.momentum_x) / DX[0] + (flux_ylo.momentum_x - flux_yhi.momentum_x) / DX[1];
+            Set::Scalar dMx_dt = (flux_xlo.momentum_normal - flux_xhi.momentum_normal) / DX[0] + (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / DX[1];
 
-            Set::Scalar dMy_dt = (flux_xlo.momentum_y - flux_xhi.momentum_y) / DX[0] + (flux_ylo.momentum_y - flux_yhi.momentum_y) / DX[1];
+            Set::Scalar dMy_dt = (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / DX[0] + (flux_ylo.momentum_normal - flux_yhi.momentum_normal) / DX[1];
 
             Set::Scalar dE_dt = (flux_xlo.energy - flux_xhi.energy) / DX[0] + (flux_ylo.energy - flux_yhi.energy) / DX[1];
 

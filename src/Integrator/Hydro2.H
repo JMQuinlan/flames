@@ -92,7 +92,7 @@ public:
 
 protected:
     void Initialize(int lev) override;
-    void Mix(int lev) override;
+    void Mix(int lev);
     void TimeStepBegin(Set::Scalar a_time, int a_iter) override;
     void TimeStepComplete(Set::Scalar time, int lev) override;
     void Advance(int lev, Set::Scalar time, Set::Scalar dt) override;
@@ -307,6 +307,15 @@ private:
     //Solver::Local::Limiter::Minmod *limiter_minmod = nullptr;
     //Solver::Local::Limiter::VanLeer *limiter_vanleer = nullptr;
 
+
+    // AI RECOMENDATIONS
+    // Proceed with caution
+    amrex::Vector<std::unique_ptr<amrex::MultiFab> > E_mas_mf;
+    amrex::Vector<std::unique_ptr<amrex::MultiFab> > E_mas_old_mf;
+    amrex::Vector<std::unique_ptr<amrex::MultiFab> > E_vol_mf;
+    amrex::Vector<std::unique_ptr<amrex::MultiFab> > E_vol_old_mf;
+    int time_integration_scheme = 0; // 0=Forward Euler, 1=RK4
+    amrex::Vector<std::unique_ptr<amrex::MultiFab> > grad_div_u_mf;
 };
 }
 
