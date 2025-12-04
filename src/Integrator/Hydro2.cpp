@@ -451,7 +451,7 @@ void Hydro2::Mix(int lev)
         Set::Patch<const Set::Scalar>   T0          = T0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   cp0         = cp0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   cv0         = cv0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar>   k0_thermal  = k0_thermal_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar>   k0_thermal  = k0_thermal_mf.Patch(lev, mfi);``
         Set::Patch<const Set::Scalar>   h0_thermal  = h0_thermal_mf.Patch(lev, mfi);
 
         // FLUID 1
