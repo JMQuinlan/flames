@@ -1441,7 +1441,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // Compute timestep constraints
     Set::Scalar dx_min = std::min(DX[0], DX[1]);
 
-    // 1. Acoustic CFL (most important)
+    // 1. Acoustic CFL 
     Set::Scalar wave_speed = c_max + std::max(vx_max, vy_max);
     Set::Scalar dt_acoustic = cfl * dx_min / (wave_speed + small);
 
