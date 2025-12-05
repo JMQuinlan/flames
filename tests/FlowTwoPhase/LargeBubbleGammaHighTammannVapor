@@ -6,12 +6,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/AirBubble_2Bar_in_Water_1Bar
-#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHigh_SmallEta_HLLETamman
-#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/RPE
-plot_file = tests/LargeBubbleRPE_2_Bar.GammaHigh
-#plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
-
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/BubbleEvap
+#plot_file = tests/BubbleEvap
 
 ### MESHING ###
 amr.plot_dt = 5e-5
@@ -80,10 +76,10 @@ velocity1.ic.expression.region1 = "0.0"
 
 # Pressures
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "1.0e5"  # Water at 1 bar [Pa]
+pressure0.ic.expression.region0 = "100000"  # Water at 1 bar [Pa]
 
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "2.0e5"  # Air at 2 bar [Pa]
+pressure1.ic.expression.region0 = "107280"  # Air at Equiulibrium
 
 # Temperatures
 temperature0.ic.type = expression
@@ -120,6 +116,9 @@ h1_thermal.ic.expression.region0 = "1005.0"  # Air heat transfer coefficient
 
 # Surface tension
 sigma = 72.8  # Water-air surface tension [N/m]
+
+# Vapor Diffusivity
+Dv = "2.3e-5" # m^2/s
 
 # Reference pressure
 pref = 0.0
