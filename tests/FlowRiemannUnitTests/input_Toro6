@@ -1,38 +1,12 @@
 #@ [case1]
 #@ exe=hydro2
 #@ dim=2
-#@ args = Riemann_Solver=1
-
-#@ [roe-rk4]
-#@ exe=hydro
-#@ dim=2
-#@ args = scheme=rk4
-#@ args = timestep=5.0e-5
-
-#@ [roe-ssprk3]
-#@ exe=hydro
-#@ dim=2
-#@ args = scheme=ssprk3
-#@ args = timestep=5.0e-5
-
-#@ [roe-fix1]
-#@ exe=hydro
-#@ dim=2
-#@ args= solver.roe.entropy_fix=1
-
-#@ [roe-fix2]
-#@ exe=hydro
-#@ dim=2
-#@ args= solver.roe.entropy_fix=2
-
 # alamo.program = hydro2
 
 ### OUTPUT ###
-
-plot_file = ./tests/FlowRiemannUnitTests/output
+plot_file = ./tests/FlowRiemannUnitTests/output_Toro6
 
 ### MESHING ###
-
 #amr.plot_dt = 0.1
 amr.plot_int = 500
 amr.max_level = 0
@@ -54,8 +28,8 @@ geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
 
-timestep  = 1.0e-4
-stop_time = 0.25
+timestep  = 1.0e-3
+stop_time = 2.0
 
 ### ETA IC ###
 
@@ -103,8 +77,8 @@ density0.ic.type = expression
 density0.ic.expression.region0 = "1.0"
 
 density1.ic.type = expression
-density1.ic.expression.constant.rho_L = 1.0
-density1.ic.expression.constant.rho_R = 0.125
+density1.ic.expression.constant.rho_L = 1.4
+density1.ic.expression.constant.rho_R = 1
 density1.ic.expression.region0 = "rho_L*(x<0) + rho_R*(x>0)"
 #density1.ic.expression.constant.halfdx = 1.25e-3 #0.00625 / 20;
 #density1.ic.expression.region0 = "rho_L*(x<-0) + ((rho_R-rho_L)/(2*halfdx)*x + (rho_L+halfdx*((rho_R-rho_L)/(2*halfdx))))*((x>-0)*(x<halfdx)) + rho_R*(x>halfdx)"
@@ -125,7 +99,7 @@ pressure0.ic.expression.region0 = "0.0"
 
 pressure1.ic.type = expression
 pressure1.ic.expression.constant.p_L = "1.0"
-pressure1.ic.expression.constant.p_R = "0.1"
+pressure1.ic.expression.constant.p_R = "1.0"
 pressure1.ic.expression.region0 = "p_L*(x<0) + p_R*(x>0)"
 
 temperature0.ic.type = expression
