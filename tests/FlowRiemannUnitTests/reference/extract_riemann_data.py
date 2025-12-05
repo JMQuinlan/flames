@@ -12,10 +12,26 @@ import os
 yt.funcs.mylog.setLevel(40)
 
 # Configuration
-case_name = 'Toro1a'
-group_name = 'Toro_case_1_a'
+case_name = 'Toro7'
+#group_name = 'Toro_case_1_a'
 hdf5_file = f'{case_name}.hdf5'
 amrex_output_dir = fr'..\..\..\bin\tests\FlowRiemannUnitTests\output_{case_name}'
+
+# Case name mapping
+case_to_group = {
+    'Toro1a': 'Toro_case_1_a',
+    'Toro1b': 'Toro_case_1_b',
+    'Toro1r': 'Toro_case_1_r',
+    'Toro2': 'Toro_case_2',
+    'Toro3': 'Toro_case_3',
+    'Toro4a': 'Toro_case_4a',
+    'Toro4b': 'Toro_case_4b',
+    'Toro5': 'Toro_case_5',
+    'Toro6': 'Toro_case_6',
+    'Toro7': 'Toro_case_7',
+}
+group_name = case_to_group.get(case_name, case_name)
+
 
 print("="*60)
 print("EXTRACTING DATA FROM AMReX OUTPUT USING YT")
@@ -114,43 +130,44 @@ print("="*60)
 # Create comparison plots
 fig, axes = plt.subplots(3, 1, figsize=(12, 14))
 
-# Velocity
-axes[0].plot(x_exact, velocity_exact, 'b-', linewidth=2, label='Exact Solution', zorder=1)
-axes[0].plot(x_numerical, velocity_numerical, 'r--', linewidth=1.5, 
+# Density
+axes[0].set_title(f'{case_name} at t={float(ds.current_time):.6f}s', 
+                  fontsize=14, fontweight='bold')
+axes[0].plot(x_exact, density_exact, 'b-', linewidth=2, label='Exact Solution', zorder=1)
+axes[0].plot(x_numerical, density_numerical, 'r--', linewidth=1.5,
              label='Numerical Solution', zorder=2, alpha=0.7)
 axes[0].set_xlabel('Position (x)', fontsize=12)
-axes[0].set_ylabel('Velocity (m/s)', fontsize=12)
-axes[0].set_title(f'Velocity Comparison - {case_name} at t={float(ds.current_time):.6f}s', 
-                  fontsize=14, fontweight='bold')
+axes[0].set_ylabel('Density (kg/m$^3$)', fontsize=12)
 axes[0].legend(fontsize=10)
 axes[0].grid(True, alpha=0.3)
 axes[0].set_xlim([x_exact[0], x_exact[-1]])
 
-# Pressure
-axes[1].plot(x_exact, pressure_exact, 'b-', linewidth=2, label='Exact Solution', zorder=1)
-axes[1].plot(x_numerical, pressure_numerical, 'r--', linewidth=1.5,
+# Velocity
+axes[1].plot(x_exact, velocity_exact, 'b-', linewidth=2, label='Exact Solution', zorder=1)
+axes[1].plot(x_numerical, velocity_numerical, 'r--', linewidth=1.5, 
              label='Numerical Solution', zorder=2, alpha=0.7)
 axes[1].set_xlabel('Position (x)', fontsize=12)
-axes[1].set_ylabel('Pressure (Pa)', fontsize=12)
-axes[1].set_title('Pressure Comparison', fontsize=14, fontweight='bold')
+axes[1].set_ylabel('Velocity (m/s)', fontsize=12)
 axes[1].legend(fontsize=10)
 axes[1].grid(True, alpha=0.3)
 axes[1].set_xlim([x_exact[0], x_exact[-1]])
 
-# Density
-axes[2].plot(x_exact, density_exact, 'b-', linewidth=2, label='Exact Solution', zorder=1)
-axes[2].plot(x_numerical, density_numerical, 'r--', linewidth=1.5,
+# Pressure
+axes[2].plot(x_exact, pressure_exact, 'b-', linewidth=2, label='Exact Solution', zorder=1)
+axes[2].plot(x_numerical, pressure_numerical, 'r--', linewidth=1.5,
              label='Numerical Solution', zorder=2, alpha=0.7)
 axes[2].set_xlabel('Position (x)', fontsize=12)
-axes[2].set_ylabel('Density (kg/m3)', fontsize=12)
-axes[2].set_title('Density Comparison', fontsize=14, fontweight='bold')
+axes[2].set_ylabel('Pressure (Pa)', fontsize=12)
 axes[2].legend(fontsize=10)
 axes[2].grid(True, alpha=0.3)
 axes[2].set_xlim([x_exact[0], x_exact[-1]])
 
+
+
 plt.tight_layout()
-output_filename = f'{case_name}_comparison_yt.png'
-plt.savefig(output_filename, dpi=300, bbox_inches='tight')
+output_filename = f'./Images/{case_name}_comparison'
+plt.savefig(output_filename+'.png', format='png', dpi=300, bbox_inches='tight')
+plt.savefig(output_filename+'.eps', format='eps', bbox_inches='tight')
 print(f"\nPlot saved: {output_filename}")
 plt.show()
 
