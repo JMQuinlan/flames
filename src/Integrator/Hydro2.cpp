@@ -1421,13 +1421,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::ParallelMessage(INFO, "dE_dt = ", dE_dt);
             }
 
-<<<<<<< HEAD
             // Adaptive Timestep
             Set::Scalar sound_speed = a(i, j, k); // std::sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) + small));
-=======
-            
-            Set::Scalar sound_speed = std::sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) + small));
->>>>>>> Vaporization
             c_max = std::max(c_max, sound_speed);
             vx_max = std::max(vx_max, std::abs(v(i, j, k, 0)));
             vy_max = std::max(vy_max, std::abs(v(i, j, k, 1)));
