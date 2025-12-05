@@ -1339,7 +1339,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Spalding Evaporization
             if (apply_vaporization == 1) {
-                deta_dt = deta_dt + (1.0 / (rho(i, j, k) * epsilon)) * ( rho0(i,j,k)*Dv*(Bm(i,j,k) / (1.0 + Bm(i,j,k) + small)) * grad_eta_mag ) 
+                deta_dt = deta_dt + (1.0 / (rho(i, j, k) * epsilon)) * (rho0(i, j, k) * Dv * (Bm(i, j, k) / (1.0 + Bm(i, j, k) + small)) * grad_eta_mag);
             }
 
 
