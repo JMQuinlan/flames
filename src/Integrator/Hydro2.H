@@ -200,11 +200,12 @@ private:
     //Set::Field<Set::Scalar> q1_mf;
     
 
-    Set::Field<Set::Scalar> Source_mf;
-    Set::Field<Set::Scalar> flux_mf;
-    Set::Field<Set::Scalar> Fsv_mf;
-    Set::Field<Set::Scalar> Fb_mf;
-    Set::Field<Set::Scalar> Fw_mf;
+    Set::Field<Set::Scalar> Source_mf;      // Sumation of Source Terms
+    Set::Field<Set::Scalar> flux_mf;        // Riemann Solver Fluxes
+    Set::Field<Set::Scalar> Fsv_mf;         // Surface Tension
+    Set::Field<Set::Scalar> Fb_mf;          // Boyancy Force (INOP)
+    Set::Field<Set::Scalar> Fw_mf;          // Weight Force
+    Set::Field<Set::Scalar> Bm_mf;          // Spalding Number
     Set::Field<Set::Scalar> grad_eta_mf;
     Set::Field<Set::Scalar> kappas_mf;
     Set::Field<Set::Scalar> grad_mag_grad_eta_mf;
@@ -277,6 +278,7 @@ private:
     Set::Scalar g = 9.81; // m/s^2
     // Set::Scalar R = 8.314; // [J]/[mol]-[K]
     Set::Scalar R = 8314.; // [J]/[kmol]-[K] - Probably more common to use
+    Set::Scalar Dv = NAN; // Vapor Diffusivity
 
     // CFD Properties
     Set::Scalar cfl = NAN, cfl_v = NAN, pref = NAN;
@@ -289,6 +291,7 @@ private:
     int apply_buoyancy = 0;
     int apply_weight = 0;
     int static_eta = 0;
+    int apply_vaporization = 0;
     int Spec_Vol = 1;
     
     int Riemann_Solver = 0;

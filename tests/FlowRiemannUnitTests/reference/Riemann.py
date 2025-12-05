@@ -218,7 +218,7 @@ if args.case:
             t = 2.0
 
         case _:
-            Error
+            raise ValueError("Unknown case requested")
 
 
 print('Running case: '+conditions)
