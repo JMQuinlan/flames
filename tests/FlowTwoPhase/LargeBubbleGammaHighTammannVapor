@@ -6,11 +6,11 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/BubbleEvap
-#plot_file = tests/BubbleEvap
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/BubbleEvap
+plot_file = tests/BubbleEvap
 
 ### MESHING ###
-amr.plot_dt = 5e-5
+amr.plot_dt = 5e-7
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 100
@@ -46,24 +46,25 @@ eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(2*sqrt(
 epsilon = eta.ic.expression.constant.epsilon
 
 ### HYDRO INITIAL CONDITIONS ###
-# Water properties (fluid 0)
-gamma0 = 7.15  # Water
-p0_0 = 3.0e8   # Tammann EOS parameter for water
-mu0 = 1.0e-3   # Water viscosity [Pa-s]
-mu0_b = 0.001
+# Air properties (fluid 0)
+gamma0 = 1.4   # Air
+p0_0 = 0       # Ideal gas
+mu0 = 0.0 # 1.8e-5   # Air viscosity [Pa-s]
+mu0_b = 0.0
 
-# Air properties (fluid 1)
-gamma1 = 1.4   # Air
-p0_1 = 0       # Ideal gas
-mu1 = 1.8e-5   # Air viscosity [Pa-s]
-mu1_b = 0
+# Water properties (fluid 1)
+gamma1 = 7.15  # Water
+p0_1 = 3.0e8   # Tammann EOS parameter for water
+mu1 = 0.0 # 1.0e-3   # Water viscosity [Pa-s]
+mu1_b = 0.0 # 0.001
+
 
 # Densities
 density0.ic.type = expression
-density0.ic.expression.region0 = "997.0"  # Water density [kg/m3]
+density0.ic.expression.region0 ="2.377"  # Air density at 2 bar [kg/m3] 
 
 density1.ic.type = expression
-density1.ic.expression.region0 = "2.377"  # Air density at 2 bar [kg/m3]
+density1.ic.expression.region0 = "997.0"  # Water density [kg/m3]
 
 # Velocities (initially at rest)
 velocity0.ic.type = expression
@@ -76,10 +77,10 @@ velocity1.ic.expression.region1 = "0.0"
 
 # Pressures
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "100000"  # Water at 1 bar [Pa]
+pressure0.ic.expression.region0 = "107280"  # Air at Equiulibrium
 
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "107280"  # Air at Equiulibrium
+pressure1.ic.expression.region0 = "100000"  # Water at 1 bar [Pa]
 
 # Temperatures
 temperature0.ic.type = expression
