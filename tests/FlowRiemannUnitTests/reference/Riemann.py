@@ -199,22 +199,22 @@ if args.case:
         case 'Toro_case_5' | 'c5':
             # Toro test # 5 -
             conditions = 'Toro_case_5'
-            left_state =  State(Density = 1, Velocity = -19.59745, Pressure = 1000.0)
-            right_state = State(Density = 1, Velocity = -19.59745, Pressure = 0.01)
+            left_state =  State(Density = 1.0, Velocity = -19.59745, Pressure = 1000.0)
+            right_state = State(Density = 1.0, Velocity = -19.59745, Pressure = 0.01)
             t = 0.035
 
         case 'Toro_case_6' | 'c6':
             # Toro test # 6 -
             conditions = 'Toro_case_6'
             left_state =  State(Density = 1.4, Velocity = 0.0, Pressure = 1.0)
-            right_state = State(Density = 1,   Velocity = 0.0, Pressure = 1.0)
+            right_state = State(Density = 1.0,   Velocity = 0.0, Pressure = 1.0)
             t = 2.0
 
         case 'Toro_case_7' | 'c7':
             # Toro test # 7 -
             conditions = 'Toro_case_7'
             left_state =  State(Density = 1.4, Velocity = 0.1, Pressure = 1.0)
-            right_state = State(Density = 1,   Velocity = 0.1, Pressure = 1.0)
+            right_state = State(Density = 1.0,   Velocity = 0.1, Pressure = 1.0)
             t = 2.0
 
         case _:
