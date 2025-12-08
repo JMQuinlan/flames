@@ -10,7 +10,7 @@ alamo.program = hydro2
 plot_file = tests/BubbleEvap
 
 ### MESHING ###
-amr.plot_dt = 5e-7
+amr.plot_dt = 5e-5
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 100
