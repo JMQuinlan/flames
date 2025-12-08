@@ -12,13 +12,15 @@ import os
 yt.funcs.mylog.setLevel(40)
 
 # Configuration
-case_name = 'Toro7'
-#group_name = 'Toro_case_1_a'
-hdf5_file = f'{case_name}.hdf5'
+case_name = 'cavitation'
+Tammann = 'TammannEOS' # Change to "." for not Tammann and "TammannEOS" for Tamman
+#Tammann = '.' # Change to "." for not Tammann and "TammannEOS" for Tamman
+hdf5_file = fr'{Tammann}\{case_name}.hdf5'
 amrex_output_dir = fr'..\..\..\bin\tests\FlowRiemannUnitTests\output_{case_name}'
 
 # Case name mapping
 case_to_group = {
+    # Regular
     'Toro1a': 'Toro_case_1_a',
     'Toro1b': 'Toro_case_1_b',
     'Toro1r': 'Toro_case_1_r',
@@ -29,6 +31,12 @@ case_to_group = {
     'Toro5': 'Toro_case_5',
     'Toro6': 'Toro_case_6',
     'Toro7': 'Toro_case_7',
+    # Tammann
+    'Tammann_water_air' : 'water_air',
+    'Tammann_water_shock' : 'water_shock',
+    'Tammann_cavitation' : 'cavitation',
+    'Tammann_bubble_expansion' : 'bubble_expansion',
+    'Tammann_bubble_collapse' : 'bubble_collapse',
 }
 group_name = case_to_group.get(case_name, case_name)
 
