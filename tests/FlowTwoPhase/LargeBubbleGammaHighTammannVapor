@@ -6,8 +6,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/BubbleEvap
-plot_file = tests/BubbleEvap
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/BubbleEvap
+#plot_file = tests/BubbleEvap
 
 ### MESHING ###
 amr.plot_dt = 5e-5
