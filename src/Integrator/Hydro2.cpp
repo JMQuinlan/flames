@@ -703,6 +703,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
 
+            
+
             // gamma
             Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
             Set::Scalar B = (eta(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
@@ -1022,6 +1024,22 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             Set::Matrix3 hess_M = Numeric::Hessian(M, i, j, k, DX);
             Set::Matrix3 hess_u = Set::Matrix3::Zero();
+
+            Set::Scalar inv_rho = 1.0 / (rho(i, j, k) + small);
+            Set::Scalar inv_rho2 = inv_rho * inv_rho;
+            Set::Scalar inv_rho3 = inv_rho2 * inv_rho;
+
+            for (int r = 0; r < 2; ++r)
+                for (int p = 0; p < 2; ++p)
+                    for (int q = 0; q < 2; ++q)
+                    {
+                        hess_u(r, p, q) = inv_rho * hess_M(r, p, q)
+                                          - inv_rho2 * (gradM(r, p) * gradrho(q) 
+                                          + gradM(r, q) * gradrho(p) 
+                                          + M(i, j, k, r) * hess_rho(p, q))
+                                          + 2.0 * inv_rho3 * M(i, j, k, r) * gradrho(p) * gradrho(q);
+                    }
+            /*
             for (int p = 0; p < 2; p++)
                 for (int q = 0; q < 2; q++)
                     for (int r = 0; r < 2; r++)
@@ -1029,6 +1047,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         hess_u(r, p, q) = (hess_M(r, p, q) - gradu(r, q) * gradrho(p) - gradu(r, p) * gradrho(q) - u(r) * hess_rho(p, q))
                                           / (rho(i, j, k) + small);
                     }
+            */
             // WIP: Debugging feild for hess_u
             hess_u_(i, j, k, 0) = hess_u(0, 0, 0);
             hess_u_(i, j, k, 1) = hess_u(0, 0, 1);
@@ -1045,9 +1064,82 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar div_u = gradu(0, 0) + gradu(1, 1); // Divergence of velocity
 
             // Calculate effective viscosities
-            Set::Scalar mu_eff = eta(i, j, k) * mu0 + (1.0 - eta(i, j, k)) * mu1;       // Effective dynamic viscosity
-            Set::Scalar mu_b_eff = eta(i, j, k) * mu0_b + (1.0 - eta(i, j, k)) * mu1_b; // Effective bulk viscosity
+            //Set::Scalar mu_eff = eta(i, j, k) * mu0 + (1.0 - eta(i, j, k)) * mu1;       // Effective dynamic viscosity
+            //Set::Scalar mu_b_eff =  eta(i, j, k) * mu0_b + (1.0 - eta(i, j, k)) * mu1_b; // Effective bulk viscosity
+                                                                                        // Gradient of viscosity
+            //Set::Vector grad_mu = (mu0 - mu1) * grad_eta;
 
+
+            // ------------------------------------------------------------
+            // Strain Rate Tensor
+            // ------------------------------------------------------------
+            Set::Vector eps = Set::Vector::Zero();
+            Set::Scalar div_u = gradu(0, 0) + gradu(1, 1);
+            for (int p = 0; p < 2; ++p)
+                for (int q = 0; q < 2; ++q)
+                    eps(p, q) = 0.5 * (gradu(p, q) + gradu(q, p));
+
+            // ------------------------------------------------------------
+            // Effective Viscosities
+            // ------------------------------------------------------------
+            Set::Scalar mu_eff = eta(i, j, k) * mu0 + (1.0 - eta(i, j, k)) * mu1;
+            Set::Scalar lambda_eff = eta(i, j, k) * mu0_b + (1.0 - eta(i, j, k)) * mu1_b;
+            Set::Vector grad_mu = (mu0 - mu1) * grad_eta;
+            Set::Vector grad_lambda = (mu0_b - mu1_b) * grad_eta;
+
+            // ------------------------------------------------------------
+            // Stress Tensor
+            // ------------------------------------------------------------
+            Set::Vector tau = Set::Vector::Zero();
+            for (int p = 0; p < 2; ++p)
+                for (int q = 0; q < 2; ++q)
+                    tau(p, q) = 2.0 * mu_eff * eps(p, q)
+                                + lambda_eff * div_u * (p == q);
+
+            // ------------------------------------------------------------
+            // Divergence of Stress
+            // ------------------------------------------------------------
+            Set::Vector div_tau = Set::Vector::Zero();
+            for (int p = 0; p < 2; ++p)
+                for (int q = 0; q < 2; ++q)
+                    div_tau(p) += grad_tau(p, q, q);
+
+            // ------------------------------------------------------------
+            // Grad(mu) Coupling
+            // ------------------------------------------------------------
+            Set::Vector Ldot = Set::Vector::Zero();
+            for (int p = 0; p < 2; ++p)
+                for (int q = 0; q < 2; ++q)
+                    Ldot(p) += grad_mu(q) * (gradu(p, q) + gradu(q, p))
+                               + grad_lambda(p) * div_u;
+
+            /*
+            // ------------------------------------------------------------
+            // Explicit 4th-order viscosity tensor contraction
+            // ------------------------------------------------------------
+            for (int p = 0; p < 2; ++p)             // output index
+                for (int q = 0; q < 2; ++q)         // divergence index
+                    for (int r = 0; r < 2; ++r)     // velocity component
+                        for (int s = 0; s < 2; ++s) // derivative direction
+                        {
+                            // 4D isotropic Newtonian viscosity tensor
+                            Set::Scalar Mpqrs = mu_eff * ((p == r && q == s) + (p == s && q == r))
+                                                + mu_b_eff * (p == q && r == s);
+
+                            div_tau(p) += Mpqrs * hess_u(r, s, q);
+                        }
+
+            // ------------------------------------------------------------
+            // Ldot term: viscosity-gradient coupling
+            // ------------------------------------------------------------
+            for (int p = 0; p < 2; ++p)
+                for (int q = 0; q < 2; ++q)
+                {
+                    Ldot0(p) += 0.0;  // grad_mu(q) * (gradu(p, q) + gradu(q, p));
+                }
+            */
+
+            /*
             for (int p = 0; p < 2; p++)             // Dimension Component
                 for (int q = 0; q < 2; q++)         // Dimension Component
                     for (int r = 0; r < 2; r++)     // X
@@ -1073,6 +1165,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Vector grad_div_u = Set::Vector::Zero();
             grad_div_u[0] = hess_u(0, 0, 0) + hess_u(1, 0, 1);
             grad_div_u[1] = hess_u(0, 1, 0) + hess_u(1, 1, 1);
+            
             // Calculate div_tau
             //div_tau(0) = mu_eff * (hess_u(0, 0, 0) + hess_u(0, 1, 1) + (1.0 / 3.0) * grad_div_u[0]);
             //div_tau(1) = mu_eff * (hess_u(1, 0, 0) + hess_u(1, 1, 1) + (1.0 / 3.0) * grad_div_u[1]);
@@ -1080,6 +1173,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             div_tau(0) += mu_b_eff * grad_div_u(0);
             div_tau(1) += mu_b_eff * grad_div_u(1);
 
+            */
             // Debugging feild for div_tau
             div_tau_(i, j, k, 0) = div_tau(0);
             div_tau_(i, j, k, 1) = div_tau(1);
@@ -1475,7 +1569,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     dt_max *= 0.9;
 
     // Print diagnostics (first timestep only)
-    if (time < 1e-10)
+    if  (time < 1)
     {
         Util::ParallelMessage(INFO, "\n=== CFL TIMESTEP DIAGNOSTICS ===");
         Util::ParallelMessage(INFO, "Grid spacing: ", dx_min, " m");
