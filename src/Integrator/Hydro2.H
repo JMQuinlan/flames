@@ -206,6 +206,10 @@ private:
     Set::Field<Set::Scalar> Fb_mf;          // Boyancy Force (INOP)
     Set::Field<Set::Scalar> Fw_mf;          // Weight Force
     Set::Field<Set::Scalar> Bm_mf;          // Spalding Number
+    Set::Field<Set::Scalar> tau_xx_mf;         // Stress Tensor (xx)
+    Set::Field<Set::Scalar> tau_xy_mf;         // Stress Tensor (xy)
+    Set::Field<Set::Scalar> tau_yy_mf;         // Stress Tensor (yy)
+    Set::Field<Set::Scalar> Ldot_mf;        // Ldot
     Set::Field<Set::Scalar> grad_eta_mf;
     Set::Field<Set::Scalar> kappas_mf;
     Set::Field<Set::Scalar> grad_mag_grad_eta_mf;
