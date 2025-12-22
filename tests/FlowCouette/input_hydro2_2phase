@@ -10,7 +10,8 @@ alamo.program = hydro2
 plot_file = tests/CouetteFlow/CouetteFlow2Phase
 
 ### MESHING ###
-amr.plot_dt = 1e-5
+#amr.plot_dt = 1e-5
+amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 100
@@ -24,9 +25,9 @@ timestep  = 1e-8
 ## Adaptive
 dynamictimestep.on = 1
 dynamictimestep.verbose = 1
-dynamictimestep.max = 1e-8
+dynamictimestep.max = 1e-3
 dynamictimestep.min = 1e-12
-cfl = 0.9
+cfl = 0.8
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.05 -0.005 0.0 # [ m ]

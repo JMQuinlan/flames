@@ -1673,20 +1673,31 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::ParallelMessage(INFO, "dE_dt = ", dE_dt);
             }
 
-            // Adaptive Timestep
-            Set::Scalar sound_speed = a(i, j, k); // std::sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) + small));
-            c_max = std::max(c_max, sound_speed);
-            vx_max = std::max(vx_max, std::abs(v(i, j, k, 0)));
-            vy_max = std::max(vy_max, std::abs(v(i, j, k, 1)));
+            // Calculate vorticity for visualization
+            omega(i, j, k) = (gradu(1, 0) - gradu(0, 1));
+
+            // ------------------------------------------------------------
+            // Adaptive Timestepping
+            // ------------------------------------------------------------
+            // Solving for new states
+            Set::Scalar A_new = (eta_new(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta_new(i, j, k)) / (gamma1 - 1.0);
+            Set::Scalar B_new = (eta_new(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta_new(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
+            Set::Scalar gamma_eff_new = 1.0 + (1.0 / A_new);
+            Set::Vector v_new = Set::Vector(M_new(i, j, k, 0) / (rho_new(i, j, k) + small), M_new(i, j, k, 1) / (rho_new(i, j, k) + small));
+            Set::Scalar KE_vol_new = 0.5 * rho_new(i, j, k) * (v_new(0) * v_new(0) + v_new(1) * v_new(1));
+            Set::Scalar UE_vol_new = E_vol_new(i, j, k) - KE_vol_new;
+            Set::Scalar press_new = (UE_vol_new - B_new) / A_new;
+            Set::Scalar p0_eff_new = (B_new / A_new) / gamma_eff_new;
+            Set::Scalar sound_speed_new = std::sqrt(gamma_eff_new * (press_new + p0_eff_new) / (rho_new(i, j, k) + small));
+
+            c_max = std::max(c_max, sound_speed_new);
+            vx_max = std::max(vx_max, std::abs(v_new(0))); // vx
+            vy_max = std::max(vy_max, std::abs(v_new(1))); // vy
 
             // Track maximum force magnitude (not acceleration yet)
             Set::Scalar F_mag = std::sqrt(Source(i, j, k, 1) * Source(i, j, k, 1) + Source(i, j, k, 2) * Source(i, j, k, 2));
             F_max = std::max(F_max, F_mag);
-            rho_min = std::min(rho_min, rho(i, j, k));
-
-
-            // Calculate vorticity for visualization
-            omega(i, j, k) = (gradu(1, 0) - gradu(0, 1));
+            rho_min = std::min(rho_min, rho_new(i, j, k));
         });
     }
     // Update adaptive timestep
@@ -1698,23 +1709,19 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     amrex::ParallelDescriptor::ReduceRealMin(rho_min);
 
     // Compute timestep constraints
-    Set::Scalar dx_min = std::min(DX[0], DX[1]);
+    Set::Scalar dx_min = std::min(DX[0], DX[1]) / 4.0;
 
     // 1. Acoustic CFL 
-    Set::Scalar wave_speed = c_max + std::max(vx_max, vy_max);
+    Set::Scalar wave_speed = c_max + std::sqrt(vx_max * vx_max + vy_max * vy_max);
     Set::Scalar dt_acoustic = cfl * dx_min / (wave_speed + small);
 
     // 2. Viscous CFL
     Set::Scalar mu_max = std::max(mu0, mu1);
     Set::Scalar dt_viscous = cfl_v * rho_min * dx_min * dx_min / (mu_max + small);
 
-    // 3. Force CFL (only if forces are significant)
-    Set::Scalar dt_force = 1e10;
-    if (F_max > rho_min * 1.0)
-    {                                        // Force > 1 N/kg threshold
-        Set::Scalar a_max = F_max / rho_min; // Maximum acceleration
-        dt_force = cfl_v * std::sqrt(dx_min / a_max);
-    }
+    // 3. Force CFL
+    Set::Scalar a_max = F_max / rho_min; // Maximum acceleration
+    Set::Scalar dt_force = cfl_v * std::sqrt(dx_min / a_max);
 
     // 4. Allen-Cahn diffusion CFL
     Set::Scalar Mob = 0.01 * dx_min * dx_min;
@@ -1726,7 +1733,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // Safety factor
     dt_max *= 0.9;
 
-    // Print diagnostics (first timestep only)
+    // Timestep diagnostics
     if  (time < 1)
     {
         Util::ParallelMessage(INFO, "\n=== CFL TIMESTEP DIAGNOSTICS ===");
