@@ -150,6 +150,9 @@ public:
         Set::Scalar rho_star_L = rho_L * (S_L - u_L) / (S_L - S_star + small);
         Set::Scalar rho_star_R = rho_R * (S_R - u_R) / (S_R - S_star + small);
 
+        Set::Scalar E_star_L = rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L))));
+        Set::Scalar E_star_R = rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R))));
+
         // STEP 7: Compute star state fluxes
         Flux f_star_L, f_star_R;
 
@@ -159,12 +162,16 @@ public:
             f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
             f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
             f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
-            f_star_L.energy = f_L.energy + S_L * (rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - E_L);
+            //f_star_L.energy = f_L.energy + S_L * (rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - E_L);
+            f_star_L.energy = f_L.energy + S_L * (E_star_L - E_L); // CORRECTED
+
 
             f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
             f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
             f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
-            f_star_R.energy = f_R.energy + S_R * (rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - E_R);
+            //f_star_R.energy = f_R.energy + S_R * (rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - E_R);
+            f_star_R.energy = f_R.energy + S_R * (E_star_R - E_R); // CORRECTED
+
         }
         else
         {
