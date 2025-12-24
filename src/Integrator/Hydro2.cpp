@@ -1400,23 +1400,23 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Fill the arrays with cell states
             if (Spec_Vol == 1)
             {
-                x_states[0] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, press, p0_eff, T, i - 1, j, k, X);      // x_lo
-                x_states[1] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, press, p0_eff, T, i, j, k, X);          // x
-                x_states[2] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, press, p0_eff, T, i + 1, j, k, X);      // x_hi
+                x_states[0] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, p0_eff, T, i - 1, j, k, X);      // x_lo
+                x_states[1] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j, k, X);          // x
+                x_states[2] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, p0_eff, T, i + 1, j, k, X);      // x_hi
 
-                y_states[0] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, press, p0_eff, T, i, j - 1, k, Y);      // y_lo
-                y_states[1] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, press, p0_eff, T, i, j, k, Y);          // y
-                y_states[2] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, press, p0_eff, T, i, j + 1, k, Y);      // y_hi
+                y_states[0] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j - 1, k, Y);      // y_lo
+                y_states[1] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j, k, Y);          // y
+                y_states[2] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j + 1, k, Y);      // y_hi
             }
             else 
             {
-                x_states[0] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, press, p0_eff, T, i - 1, j, k, X);      // x_lo
-                x_states[1] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, press, p0_eff, T, i, j, k, X);          // x
-                x_states[2] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, press, p0_eff, T, i + 1, j, k, X);      // x_hi
+                x_states[0] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, p0_eff, T, i - 1, j, k, X);      // x_lo
+                x_states[1] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, p0_eff, T, i, j, k, X);          // x
+                x_states[2] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, p0_eff, T, i + 1, j, k, X);      // x_hi
 
-                y_states[0] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, press, p0_eff, T, i, j - 1, k, Y);      // y_lo
-                y_states[1] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, press, p0_eff, T, i, j, k, Y);          // y
-                y_states[2] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, press, p0_eff, T, i, j + 1, k, Y);      // y_hi
+                y_states[0] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, p0_eff, T, i, j - 1, k, Y);      // y_lo
+                y_states[1] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, p0_eff, T, i, j, k, Y);          // y
+                y_states[2] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, p0_eff, T, i, j + 1, k, Y);      // y_hi
             }
             
 
