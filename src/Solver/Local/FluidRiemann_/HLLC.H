@@ -54,7 +54,7 @@ public:
         pp.query_default("verbose", value.verbose, 1);
     }
 
-    Flux Solve(State lo, State hi, Set::Scalar p, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1)
+    Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1)
     {
         Set::Scalar rho_L = lo.rho       ,  rho_R = hi.rho       ;
         Set::Scalar Mn_L  = lo.M_normal  ,  Mn_R  = hi.M_normal  ;

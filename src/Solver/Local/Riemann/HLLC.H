@@ -54,7 +54,7 @@ public:
         pp.query_default("verbose", value.verbose, 1);
     }
 
-    Flux Solve(State lo, State hi, Set::Scalar p, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1)
+    Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1)
     {
         Set::Scalar rho_L = lo.rho       ,  rho_R = hi.rho       ;
         Set::Scalar Mn_L  = lo.M_normal  ,  Mn_R  = hi.M_normal  ;
@@ -152,12 +152,8 @@ public:
         Set::Scalar rho_star_R = rho_R * (S_R - u_R) / (S_R - S_star + small);
         
         // OG
-        //Set::Scalar E_star_L = rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L))));
-        //Set::Scalar E_star_R = rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R))));
-
-        // GPT (probably wrong lol)
-        Set::Scalar E_star_L = (S_L - u_L) / (S_L - S_star) * (E_L + (S_star - u_L) * (rho_L * S_star + p_L / (S_L - u_L)));
-        Set::Scalar E_star_R = (S_R - u_R) / (S_R - S_star) * (E_R + (S_star - u_R) * (rho_R * S_star + p_R / (S_R - u_R)));
+        Set::Scalar E_star_L = rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L))));
+        Set::Scalar E_star_R = rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R))));
 
         // STEP 7: Compute star state fluxes
         Flux f_star_L, f_star_R;

@@ -253,6 +253,7 @@ struct Flux
         momentum_tangent /= alpha;
         energy /= alpha;
         Gam /= alpha;
+        P /= alpha;
         P0 /= alpha;
         temperature /= alpha;
     }
@@ -286,6 +287,7 @@ struct Flux
 class Riemann
 {
 public:
+    //virtual Flux Solve(State lo, State hi, Set::Scalar gam, Set::Scalar p_ref, Set::Scalar small) = 0;
     virtual Flux Solve(State lo, State hi, Set::Scalar gam, Set::Scalar p_ref, Set::Scalar small) = 0;
     virtual ~Riemann() = default;
 };
