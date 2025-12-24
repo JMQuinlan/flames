@@ -550,8 +550,8 @@ void Hydro2::Mix(int lev)
             gammaf(i, j, k) = gamma_eff;
 
             // Pressure
-            press(i, j, k) = (UE_vol(i, j, k) - B) / A - pref;
             p0_eff(i, j, k) = (B / A) / gamma_eff;
+            press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE_vol(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) - pref;
 
             // Chemical Potential
             // Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
@@ -578,7 +578,7 @@ void Hydro2::Mix(int lev)
             h_thermal(i, j, k) = eta(i, j, k) * h0_thermal(i, j, k) + (1.0 - eta(i, j, k)) * h1_thermal(i, j, k);
 
             // Speed of Sound
-            a(i, j, k) = (std::sqrt(gamma0 * p0(i, j, k) / (rho0(i, j, k) + small))) * (eta(i, j, k)) + (std::sqrt(gamma1 * p1(i, j, k) / (rho1(i, j, k) + small))) * (1.0 - eta(i, j, k));
+            a(i, j, k) = std::sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) + small));
 
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / a(i, j, k);
@@ -749,8 +749,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             UE_mas(i, j, k) = E_mas(i, j, k) - KE_mas(i, j, k);
             
             // Pressure
-            press(i, j, k) = (UE_vol(i, j, k) - B) / A;
-            p0_eff(i,j,k) = (B / A) / gamma_eff;
+            p0_eff(i, j, k) = (B / A) / gamma_eff;
+            press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE_vol(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) - pref;
+
 
             // Chemical Potential
             Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
@@ -761,7 +762,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Bm(i, j, k) = eta(i, j, k) / (1.0 - eta(i, j, k) + small);
 
             // Speed of sound:
-            a(i, j, k) = std::sqrt(gammaf(i,j,k) * (press(i, j, k) + p0_eff(i,j,k)) / (rho(i, j, k) + small));
+            a(i, j, k) = std::sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) + small));
 
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / (a(i, j, k) + small);

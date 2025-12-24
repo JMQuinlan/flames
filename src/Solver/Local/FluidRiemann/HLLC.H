@@ -234,8 +234,8 @@ public:
                 Util::ParallelMessage(INFO, "ke_L= ", ke_L);
                 Util::ParallelMessage(INFO, "ue_L= ", ue_L);
                 Util::ParallelMessage(INFO, "ue_R= ", ue_R);
-                Util::ParallelMessage(INFO, "gamma_L= ", gamma_L);
-                Util::ParallelMessage(INFO, "gamma_R= ", gamma_R);
+                //Util::ParallelMessage(INFO, "gamma_L= ", gamma_L);
+                //Util::ParallelMessage(INFO, "gamma_R= ", gamma_R);
                 Util::ParallelMessage(INFO, "p_L=  ", p_L);
                 Util::ParallelMessage(INFO, "p_R=  ", p_R);
                 Util::ParallelMessage(INFO, "a_L=  ", a_L);
