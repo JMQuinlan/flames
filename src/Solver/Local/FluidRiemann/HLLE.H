@@ -57,41 +57,84 @@ public:
         pp.query_default("verbose", value.verbose, 1);
     }
 
-    Flux Solve(State lo, State hi, Set::Scalar gamma, Set::Scalar p_ref, Set::Scalar small)
+    Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1)
     {
-        Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
-        Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
-        Set::Scalar Mt_L = lo.M_tangent, Mt_R = hi.M_tangent;
-        Set::Scalar E_L = lo.E, E_R = hi.E;
+        Set::Scalar rho_L = lo.rho        , rho_R = hi.rho      ;
+        Set::Scalar Mn_L = lo.M_normal   , Mn_R = hi.M_normal   ;
+        Set::Scalar Mt_L = lo.M_tangent  , Mt_R = hi.M_tangent  ;
+        Set::Scalar E_L = lo.E           , E_R = hi.E           ;
+        Set::Scalar gamma_L = lo.gam     ,  gamma_R = hi.gam    ;
+        Set::Scalar p0_L = lo.p0         ,  p0_R = hi.p0        ;
+
 
         // Ensure no negative densities
-        rho_L = std::max(0.0+small, rho_L);
-        rho_R = std::max(0.0+small, rho_R);
+        rho_L = std::max(small, rho_L);
+        rho_R = std::max(small, rho_R);
 
         // STEP 1: Compute fluid primitives
-        Set::Scalar ke_L = 0.5 * (Mn_L * Mn_L /*+ Mt_L * Mt_L*/) / (rho_L + small); // KE per unit volume
-        Set::Scalar ue_L = E_L - ke_L;                                              // IE per unit volume
-        Set::Scalar p_L = (gamma - 1.0) * ue_L + p_ref;                             // pressure
+        Set::Scalar ke_L, ke_R;
+        Set::Scalar ue_L, ue_R;
+        Set::Scalar p_L, p_R;
+        Set::Scalar h_TL, h_TR;
+        if (Spec_Vol == 1)
+        {
+            // With Respect to Specific Volume (energies are per unit volume)
+            ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
+            ue_L = E_L - ke_L;                                          // IE per unit volume
+            p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;      // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
+            h_TL = (ke_L + ue_L + p_L);
 
-        Set::Scalar ke_R = 0.5 * (Mn_R * Mn_R /*+ Mt_R * Mt_R*/) / (rho_R + small);
-        Set::Scalar ue_R = E_R - ke_R;
-        Set::Scalar p_R = (gamma - 1.0) * ue_R + p_ref;
+            ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
+            ue_R = E_R - ke_R;
+            p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref; // Tammann
+            h_TR = (ke_R + ue_R + p_R);
+        }
+        else
+        {
+            // With Respect to Specific Mass (energies are per unit mass)
+            ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small); // KE per unit volume
+            ue_L = E_L - ke_L;                                                  // IE per unit volume
+            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;      // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
+            h_TL = ke_L + ue_L + (p_L / rho_L);
+
+            ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
+            ue_R = E_R - ke_R;
+            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R + p_ref; // Tammann
+            h_TR = ke_R + ue_R + (p_R / rho_R);
+        }
 
         Set::Scalar u_L = Mn_L / (rho_L + small), u_R = Mn_R / (rho_R + small);
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
         // STEP 2: Compute sound speeds
-        Set::Scalar a_L = std::sqrt(gamma * p_L / (rho_L + small));
-        Set::Scalar a_R = std::sqrt(gamma * p_R / (rho_R + small));
+        //Set::Scalar a_L = std::sqrt(gamma * (p_L + p_ref) / (rho_L + small)); // MODIFIED
+        //Set::Scalar a_R = std::sqrt(gamma * (p_R + p_ref) / (rho_R + small)); // MODIFIED
+        Set::Scalar a_L = std::sqrt(gamma_alt * (p_L + p_0) / (rho_L + small));
+        Set::Scalar a_R = std::sqrt(gamma_alt * (p_R + p_0) / (rho_R + small));
 
         // STEP 3: Compute Roe-averaged quantities for wave speed estimates
         Set::Scalar rho_RL = std::sqrt(rho_L * rho_R);
         Set::Scalar u_RL = (std::sqrt(rho_L) * u_L + std::sqrt(rho_R) * u_R) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
-        Set::Scalar h_TL = (E_L + p_L) / (rho_L + small);
-        Set::Scalar h_TR = (E_R + p_R) / (rho_R + small);
+        Set::Scalar v_RL = (std::sqrt(rho_L) * v_L + std::sqrt(rho_R) * v_R) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
         Set::Scalar h_RL = (std::sqrt(rho_L) * h_TL + std::sqrt(rho_R) * h_TR) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
-        Set::Scalar a_RL_sq = std::max(0.0, (gamma - 1.0) * (h_RL - 0.5 * u_RL * u_RL));
-        Set::Scalar a_RL = std::sqrt(a_RL_sq) + small;
+        Set::Scalar p_RL = (std::sqrt(rho_L) * p_L + std::sqrt(rho_R) * p_R) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
+        
+        /*
+        Set::Scalar a_RL_sq;
+        if (Spec_Vol == 0)
+        {
+            // Speed of Sound With Respect to Specific Volume (energies are per unit volume)
+            a_RL_sq = std::max(0.0, (gamma_alt - 1.0) * (h_RL - 0.5 * rho_RL * (u_RL * u_RL + v_RL * v_RL)) + (gamma_alt * (p_0+p_ref) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small)));  // Not clear if the second term is correct
+        }
+        else
+        {
+            // Speed of Sound With Respect to Specific Mass (energies are per unit mass)
+            a_RL_sq = std::max(0.0, (gamma_alt - 1.0) * (h_RL - 0.5 * (u_RL * u_RL + v_RL * v_RL)) + (gamma_alt * (p_0 + p_ref) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small))); // Not clear if the second term is correct
+        }
+        */
+        Set::Scalar a_RL_sq = gamma_alt * ((p_RL + p_0 + p_ref) / rho_RL);
+
+        Set::Scalar a_RL = std::sqrt(a_RL_sq);
 
         // STEP 4: Compute wave speed estimates (Einfeldt estimates)
         Set::Scalar S_L = std::min(u_L - a_L, u_RL - a_RL);
@@ -138,22 +181,33 @@ public:
             fl.energy = (S_R * f_L.energy - S_L * f_R.energy + S_R * S_L * (E_R - E_L)) * inv_SR_minus_SL;
         }
 
-        if (fl.mass != fl.mass)
+        // ERROR CHECKING
+        if (   (fl.mass != fl.mass)
+            or (fl.momentum_normal != fl.momentum_normal)
+            or (fl.momentum_tangent != fl.momentum_tangent)
+            or (fl.energy != fl.energy) )
         {
             if (verbose)
             {
-                Util::ParallelMessage(INFO, "hi ", hi);
-                Util::ParallelMessage(INFO, "lo ", lo);
-                Util::ParallelMessage(INFO, "rho_L ", rho_L);
-                Util::ParallelMessage(INFO, "rho_R ", rho_R);
-                Util::ParallelMessage(INFO, "u_L ", u_L);
-                Util::ParallelMessage(INFO, "u_R ", u_R);
-                Util::ParallelMessage(INFO, "p_L ", p_L);
-                Util::ParallelMessage(INFO, "p_R ", p_R);
-                Util::ParallelMessage(INFO, "a_L ", a_L);
-                Util::ParallelMessage(INFO, "a_R ", a_R);
-                Util::ParallelMessage(INFO, "S_L ", S_L);
-                Util::ParallelMessage(INFO, "S_R ", S_R);
+                Util::ParallelMessage(INFO, "-------------------------------");
+                Util::ParallelMessage(INFO, "ERROR IN HLLE SOLVER:");
+                Util::ParallelMessage(INFO, "hi:   ", hi);
+                Util::ParallelMessage(INFO, "lo:   ", lo);
+                Util::ParallelMessage(INFO, "flux: ", fl);
+                Util::ParallelMessage(INFO, "rho_L=", rho_L);
+                Util::ParallelMessage(INFO, "rho_R=", rho_R);
+                Util::ParallelMessage(INFO, "u_L=  ", u_L);
+                Util::ParallelMessage(INFO, "u_R=  ", u_R);
+                Util::ParallelMessage(INFO, "ke_R= ", ke_R);
+                Util::ParallelMessage(INFO, "ke_L= ", ke_L);
+                Util::ParallelMessage(INFO, "ue_L= ", ue_L);
+                Util::ParallelMessage(INFO, "ue_R= ", ue_R);
+                Util::ParallelMessage(INFO, "p_L=  ", p_L);
+                Util::ParallelMessage(INFO, "p_R=  ", p_R);
+                Util::ParallelMessage(INFO, "a_L=  ", a_L);
+                Util::ParallelMessage(INFO, "a_R=  ", a_R);
+                Util::ParallelMessage(INFO, "S_L=  ", S_L);
+                Util::ParallelMessage(INFO, "S_R=  ", S_R);
             }
             Util::Exception(INFO);
         }

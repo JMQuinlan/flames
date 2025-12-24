@@ -51,8 +51,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_required("cfl", value.cfl);                // cfl condition
         pp_query_default("cfl_v", value.cfl_v, value.cfl);  // cfl condition
         pp_query_default("pref", value.pref, 0.0);          // reference pressure for Roe solver
-        pp_query_default("small", value.small, 1E-8);       // small regularization value
-        pp_query_default("cutoff", value.cutoff, 1E-100);   // eta cutoff value
+        pp_query_default("small", value.small, 1.0E-8);       // small regularization value
+        pp_query_default("cutoff", value.cutoff, 1.0E-8);   // eta cutoff value
         pp_query_default("lagrange", value.lagrange, 0.0);  // lagrange no-penetration factor
         pp_query_default("grav", value.g, 9.81);            // Gravitational Acceletation
         pp_forbid("roefix", "--> solver.roe.entropy_fix");  // Roe solver entropy fix
@@ -1400,23 +1400,23 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Fill the arrays with cell states
             if (Spec_Vol == 1)
             {
-                x_states[0] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, p0_eff, T, i - 1, j, k, X); // x_lo
-                x_states[1] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j, k, X);     // x
-                x_states[2] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, p0_eff, T, i + 1, j, k, X); // x_hi
+                x_states[0] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, press, p0_eff, T, i - 1, j, k, X);      // x_lo
+                x_states[1] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, press, p0_eff, T, i, j, k, X);          // x
+                x_states[2] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, press, p0_eff, T, i + 1, j, k, X);      // x_hi
 
-                y_states[0] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j - 1, k, Y); // y_lo
-                y_states[1] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j, k, Y);     // y
-                y_states[2] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j + 1, k, Y); // y_hi
+                y_states[0] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, press, p0_eff, T, i, j - 1, k, Y);      // y_lo
+                y_states[1] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, press, p0_eff, T, i, j, k, Y);          // y
+                y_states[2] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, press, p0_eff, T, i, j + 1, k, Y);      // y_hi
             }
             else 
             {
-                x_states[0] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, p0_eff, T, i - 1, j, k, X); // x_lo
-                x_states[1] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, p0_eff, T, i, j, k, X);     // x
-                x_states[2] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, p0_eff, T, i + 1, j, k, X); // x_hi
+                x_states[0] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, press, p0_eff, T, i - 1, j, k, X);      // x_lo
+                x_states[1] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, press, p0_eff, T, i, j, k, X);          // x
+                x_states[2] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, press, p0_eff, T, i + 1, j, k, X);      // x_hi
 
-                y_states[0] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, p0_eff, T, i, j - 1, k, Y); // y_lo
-                y_states[1] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, p0_eff, T, i, j, k, Y);     // y
-                y_states[2] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, p0_eff, T, i, j + 1, k, Y); // y_hi
+                y_states[0] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, press, p0_eff, T, i, j - 1, k, Y);      // y_lo
+                y_states[1] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, press, p0_eff, T, i, j, k, Y);          // y
+                y_states[2] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, press, p0_eff, T, i, j + 1, k, Y);      // y_hi
             }
             
 
@@ -1538,7 +1538,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             E_flux(i, j, k) = (flux_xlo.energy - flux_xhi.energy) / (DX[0]) + (flux_ylo.energy - flux_yhi.energy) / (DX[1]);
 
             // Density
-            Set::Scalar drho_dt = (flux_xlo.mass - flux_xhi.mass) / (DX[0]) + (flux_ylo.mass - flux_yhi.mass) / (DX[1]) + Source(i, j, k, 0);
+            Set::Scalar drho_dt = rho_flux(i, j, k) + Source(i, j, k, 0);
 
             rho_new(i, j, k) = rho(i, j, k) + (drho_dt)*dt;
             if (rho_new(i, j, k) < (small)) {
@@ -1546,18 +1546,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             }
 
             // Momentum
-            Set::Scalar dMx_dt = (flux_xlo.momentum_normal - flux_xhi.momentum_normal) / (DX[0]) + (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / (DX[1]) +
-                                 //(mu * (lap_ux * eta(i, j, k))) +
-                                 Source(i, j, k, 1);
+            Set::Scalar dMx_dt = M_flux(i, j, k, 0) + Source(i, j, k, 1); //(mu * (lap_ux * eta(i, j, k))) +           
             M_new(i, j, k, 0) = M(i, j, k, 0) + dMx_dt * dt;
 
-            Set::Scalar dMy_dt = (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / (DX[0]) + (flux_ylo.momentum_normal - flux_yhi.momentum_normal) / (DX[1]) +
-                                 //(mu * (lap_uy * eta(i, j, k))) +
-                                 Source(i, j, k, 2);
+            Set::Scalar dMy_dt = M_flux(i, j, k, 1) + Source(i, j, k, 2); //(mu * (lap_uy * eta(i, j, k))) +
             M_new(i, j, k, 1) = M(i, j, k, 1) + dMy_dt * dt;
 
             // Energy
-            Set::Scalar dE_dt = (flux_xlo.energy - flux_xhi.energy) / (DX[0]) + (flux_ylo.energy - flux_yhi.energy) / (DX[1]) + Source(i, j, k, 3);
+            Set::Scalar dE_dt = E_flux(i, j, k) + Source(i, j, k, 3);
             if (Spec_Vol == 1)
             {
                 E_vol_new(i, j, k) = E_vol(i, j, k) + dE_dt * dt;

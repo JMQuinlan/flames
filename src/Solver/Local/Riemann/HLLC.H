@@ -54,13 +54,14 @@ public:
         pp.query_default("verbose", value.verbose, 1);
     }
 
-    Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1)
+    Flux Solve(State lo, State hi, Set::Scalar p, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1)
     {
         Set::Scalar rho_L = lo.rho       ,  rho_R = hi.rho       ;
         Set::Scalar Mn_L  = lo.M_normal  ,  Mn_R  = hi.M_normal  ;
         Set::Scalar Mt_L  = lo.M_tangent ,  Mt_R  = hi.M_tangent ;
         Set::Scalar E_L   = lo.E         ,  E_R   = hi.E         ;
         Set::Scalar gamma_L = lo.gam     ,  gamma_R = hi.gam     ;
+        Set::Scalar p_L = lo.p           ,  p_R = hi.p           ;
         Set::Scalar p0_L = lo.p0         ,  p0_R = hi.p0         ;
 
 
@@ -71,19 +72,19 @@ public:
         // STEP 1: Compute fluid primitives
         Set::Scalar ke_L, ke_R;
         Set::Scalar ue_L, ue_R;
-        Set::Scalar p_L, p_R;
+        //Set::Scalar p_L, p_R;
         Set::Scalar h_TL, h_TR;
         if (Spec_Vol == 1)
         {
             // With Respect to Specific Volume (energies are per unit volume)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
             ue_L = E_L - ke_L;                                          // IE per unit volume
-            p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;      // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
+            //p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;      // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
             h_TL = (ke_L + ue_L + p_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;      // Tammann
+            //p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;      // Tammann
             h_TR = (ke_R + ue_R + p_R);
 
         }
@@ -149,9 +150,14 @@ public:
         // STEP 6: Compute star state values
         Set::Scalar rho_star_L = rho_L * (S_L - u_L) / (S_L - S_star + small);
         Set::Scalar rho_star_R = rho_R * (S_R - u_R) / (S_R - S_star + small);
+        
+        // OG
+        //Set::Scalar E_star_L = rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L))));
+        //Set::Scalar E_star_R = rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R))));
 
-        Set::Scalar E_star_L = rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L))));
-        Set::Scalar E_star_R = rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R))));
+        // GPT (probably wrong lol)
+        Set::Scalar E_star_L = (S_L - u_L) / (S_L - S_star) * (E_L + (S_star - u_L) * (rho_L * S_star + p_L / (S_L - u_L)));
+        Set::Scalar E_star_R = (S_R - u_R) / (S_R - S_star) * (E_R + (S_star - u_R) * (rho_R * S_star + p_R / (S_R - u_R)));
 
         // STEP 7: Compute star state fluxes
         Flux f_star_L, f_star_R;
@@ -223,31 +229,28 @@ public:
             or (a_L != a_L) 
             or (a_R != a_R) )
         {
-            if (verbose)
-            {
-                Util::ParallelMessage(INFO, "-------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN HLLC SOLVER:");
-                Util::ParallelMessage(INFO, "hi:   ", hi);
-                Util::ParallelMessage(INFO, "lo:   ", lo);
-                Util::ParallelMessage(INFO, "flux: ", fl);
-                Util::ParallelMessage(INFO, "rho_L=", rho_L);
-                Util::ParallelMessage(INFO, "rho_R=", rho_R);
-                Util::ParallelMessage(INFO, "u_L=  ", u_L);
-                Util::ParallelMessage(INFO, "u_R=  ", u_R);
-                Util::ParallelMessage(INFO, "ke_R= ", ke_R);
-                Util::ParallelMessage(INFO, "ke_L= ", ke_L);
-                Util::ParallelMessage(INFO, "ue_L= ", ue_L);
-                Util::ParallelMessage(INFO, "ue_R= ", ue_R);
-                Util::ParallelMessage(INFO, "gamma_L= ", gamma_L);
-                Util::ParallelMessage(INFO, "gamma_R= ", gamma_R);
-                Util::ParallelMessage(INFO, "p_L=  ", p_L);
-                Util::ParallelMessage(INFO, "p_R=  ", p_R);
-                Util::ParallelMessage(INFO, "a_L=  ", a_L);
-                Util::ParallelMessage(INFO, "a_R=  ", a_R);
-                Util::ParallelMessage(INFO, "S_L=  ", S_L);
-                Util::ParallelMessage(INFO, "S_R=  ", S_R);
-                Util::ParallelMessage(INFO, "S_star ", S_star);
-            }
+            Util::ParallelMessage(INFO, "-------------------------------");
+            Util::ParallelMessage(INFO, "ERROR IN HLLC SOLVER:");
+            Util::ParallelMessage(INFO, "hi:   ", hi);
+            Util::ParallelMessage(INFO, "lo:   ", lo);
+            Util::ParallelMessage(INFO, "flux: ", fl);
+            Util::ParallelMessage(INFO, "rho_L=", rho_L);
+            Util::ParallelMessage(INFO, "rho_R=", rho_R);
+            Util::ParallelMessage(INFO, "u_L=  ", u_L);
+            Util::ParallelMessage(INFO, "u_R=  ", u_R);
+            Util::ParallelMessage(INFO, "ke_R= ", ke_R);
+            Util::ParallelMessage(INFO, "ke_L= ", ke_L);
+            Util::ParallelMessage(INFO, "ue_L= ", ue_L);
+            Util::ParallelMessage(INFO, "ue_R= ", ue_R);
+            Util::ParallelMessage(INFO, "gamma_L= ", gamma_L);
+            Util::ParallelMessage(INFO, "gamma_R= ", gamma_R);
+            Util::ParallelMessage(INFO, "p_L=  ", p_L);
+            Util::ParallelMessage(INFO, "p_R=  ", p_R);
+            Util::ParallelMessage(INFO, "a_L=  ", a_L);
+            Util::ParallelMessage(INFO, "a_R=  ", a_R);
+            Util::ParallelMessage(INFO, "S_L=  ", S_L);
+            Util::ParallelMessage(INFO, "S_R=  ", S_R);
+            Util::ParallelMessage(INFO, "S_star ", S_star);
             Util::Exception(INFO);
         }
 

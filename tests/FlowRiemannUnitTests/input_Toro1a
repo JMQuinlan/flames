@@ -27,8 +27,7 @@ geometry.prob_hi =  1.0   0.02   0.0 # [ m ]
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
-
-timestep  = 1.0e-4
+timestep  = 1.0e-5
 stop_time = 0.25
 
 ### ETA IC ###
