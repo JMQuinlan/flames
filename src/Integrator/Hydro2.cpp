@@ -11,14 +11,14 @@
 #include "IC/BMP.H"
 #include "IC/PNG.H"
 // Solvers
-//#include "Solver/Local/Riemann/Roe.H"
-#include "Solver/Local/Riemann/HLLC.H"
-//#include "Solver/Local/Riemann/HLLC_WENO5.H"
-//#include "Solver/Local/Riemann/HLLE.H"
-//#include "Solver/Local/Riemann/HLLE_WENO5.H"
-//#include "Solver/Local/Riemann/HLLCE.H"
-//#include "Solver/Local/Riemann/HLLCE_WENO5.H"
-//#include "Solver/Local/Riemann/PartiallyParabolic.H"
+//#include "Solver/Local/FluidRiemann/Roe.H"
+#include "Solver/Local/FluidRiemann/HLLC.H"
+//#include "Solver/Local/FluidRiemann/HLLC_WENO5.H"
+//#include "Solver/Local/FluidRiemann/HLLE.H"
+//#include "Solver/Local/FluidRiemann/HLLE_WENO5.H"
+//#include "Solver/Local/FluidRiemann/HLLCE.H"
+//#include "Solver/Local/FluidRiemann/HLLCE_WENO5.H"
+//#include "Solver/Local/FluidRiemann/PartiallyParabolic.H"
 // Limiters
 //#include "Solver/Local/Limiter/Minmod.H"
 //#include "Solver/Local/Limiter/VanLeer.H"
@@ -179,7 +179,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.vorticity1_mf,   &value.bc_nothing,  1, nghost, "vorticity1", false);
 
         // MIXTURE
-        value.RegisterNewFab(value.pressure_mf,     &value.bc_nothing,  1, nghost, "pressure", true);
+        value.RegisterNewFab(value.pressure_mf,     value.energy_bc, 1, nghost, "pressure", true);
         value.RegisterNewFab(value.velocity_mf,     &value.bc_nothing,  2, nghost, "velocity", true, { "x", "y" });
         value.RegisterNewFab(value.vorticity_mf,    &value.bc_nothing,  1, nghost, "vorticity", true);
         value.RegisterNewFab(value.density_mf,      value.density_bc,   1, nghost, "density", true);
@@ -211,7 +211,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.gamma_mf,        value.energy_bc, 1, nghost, "gamma", true);                 // Specific Heat Ratio
         value.RegisterNewFab(value.p0_mf,           value.energy_bc, 1, nghost, "p0", true);                    // Tamman Pressure
         value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc, 1, nghost, "mu_chem", true);               // Tammann Pressure
-        value.RegisterNewFab(value.a_mf,            &value.bc_nothing,  1, nghost, "a", true);                  // Speed of sound
+        value.RegisterNewFab(value.a_mf,            &value.bc_nothing,  1, nghost, "a", true);                    // Speed of sound
         value.RegisterNewFab(value.Ma_mf,           &value.bc_nothing,  2, nghost, "Ma", true, { "x", "y" });   // Mach
         value.RegisterNewFab(value.UE_per_vol_mf,   &value.bc_nothing,  1, nghost, "UE_per_vol", true);         // Internal Energy (per unit volume)
         value.RegisterNewFab(value.UE_per_mas_mf,   &value.bc_nothing,  1, nghost, "UE_per_mass", true);        // Internal Energy (per unit mass)
@@ -285,27 +285,27 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp_query_default("Riemann_Solver", value.Riemann_Solver, 0); // Type of solver
     if (value.Riemann_Solver == 0)
     {
-        // pp.select_default<Solver::Local::Riemann::Roe>("solver", value.roesolver);
+        // pp.select_default<Solver::Local::FluidRiemann::Roe>("solver", value.roesolver);
     }
     else if (value.Riemann_Solver == 1)
     {
-        pp.select_default<Solver::Local::Riemann::HLLC>("solver", value.hllcsolver);
+        pp.select_default<Solver::Local::FluidRiemann::HLLC>("solver", value.hllcsolver);
     }
     else if (value.Riemann_Solver == 2)
     {
-        // pp.select_default<Solver::Local::Riemann::HLLE>("solver", value.hllesolver);
+        // pp.select_default<Solver::Local::FluidRiemann::HLLE>("solver", value.hllesolver);
     }
     else if (value.Riemann_Solver == 3)
     {
-        // pp.select_default<Solver::Local::Riemann::HLLCE>("solver", value.hllcesolver);
+        // pp.select_default<Solver::Local::FluidRiemann::HLLCE>("solver", value.hllcesolver);
     }
     else if (value.Riemann_Solver == 35)
     {
-        // pp.select_default<Solver::Local::Riemann::HLLC_WENO5>("solver", value.hllc_weno5solver);
+        // pp.select_default<Solver::Local::FluidRiemann::HLLC_WENO5>("solver", value.hllc_weno5solver);
     }
     else if (value.Riemann_Solver == 36)
     {
-        // pp.select_default<Solver::Local::Riemann::PartiallyParabolic>("solver", value.partiallyparabolicsolver);
+        // pp.select_default<Solver::Local::FluidRiemann::PartiallyParabolic>("solver", value.partiallyparabolicsolver);
     }
     else if (value.Riemann_Solver == 99)
     {
@@ -550,8 +550,8 @@ void Hydro2::Mix(int lev)
             gammaf(i, j, k) = gamma_eff;
 
             // Pressure
-            press(i, j, k) = (UE_vol(i, j, k) - B) / A - pref;
             p0_eff(i, j, k) = (B / A) / gamma_eff;
+            press(i, j, k) = (gammaf(i, j, k) - 1.0) * rho(i, j, k) * UE_vol(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // pressure Tammann EOS modification
 
             // Chemical Potential
             // Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
@@ -578,7 +578,7 @@ void Hydro2::Mix(int lev)
             h_thermal(i, j, k) = eta(i, j, k) * h0_thermal(i, j, k) + (1.0 - eta(i, j, k)) * h1_thermal(i, j, k);
 
             // Speed of Sound
-            a(i, j, k) = (std::sqrt(gamma0 * p0(i, j, k) / (rho0(i, j, k) + small))) * (eta(i, j, k)) + (std::sqrt(gamma1 * p1(i, j, k) / (rho1(i, j, k) + small))) * (1.0 - eta(i, j, k));
+            a(i, j, k) = std::sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) + small));
 
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / a(i, j, k);
@@ -749,8 +749,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             UE_mas(i, j, k) = E_mas(i, j, k) - KE_mas(i, j, k);
             
             // Pressure
-            press(i, j, k) = (UE_vol(i, j, k) - B) / A;
             p0_eff(i,j,k) = (B / A) / gamma_eff;
+            press(i, j, k) = (gammaf(i, j, k) - 1.0) * rho(i, j, k) * UE_vol(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // pressure Tammann EOS modification
 
             // Chemical Potential
             Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
@@ -1394,35 +1394,35 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             const int X = 0, Y = 1;
 
             // Create arrays to store cell states for reconstruction
-            std::vector<Solver::Local::Riemann::State> x_states(3);
-            std::vector<Solver::Local::Riemann::State> y_states(3);
+            std::vector<Solver::Local::FluidRiemann::State> x_states(3);
+            std::vector<Solver::Local::FluidRiemann::State> y_states(3);
 
             // Fill the arrays with cell states
             if (Spec_Vol == 1)
             {
-                x_states[0] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, press, p0_eff, T, i - 1, j, k, X);      // x_lo
-                x_states[1] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, press, p0_eff, T, i, j, k, X);          // x
-                x_states[2] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, press, p0_eff, T, i + 1, j, k, X);      // x_hi
+                x_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_vol, a, press, T, i - 1, j, k, X);      // x_lo
+                x_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_vol, a, press, T, i, j, k, X);          // x
+                x_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_vol, a, press, T, i + 1, j, k, X);      // x_hi
 
-                y_states[0] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, press, p0_eff, T, i, j - 1, k, Y);      // y_lo
-                y_states[1] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, press, p0_eff, T, i, j, k, Y);          // y
-                y_states[2] = Solver::Local::Riemann::State(rho, M, E_vol, gammaf, press, p0_eff, T, i, j + 1, k, Y);      // y_hi
+                y_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_vol, a, press, T, i, j - 1, k, Y);      // y_lo
+                y_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_vol, a, press, T, i, j, k, Y);          // y
+                y_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_vol, a, press, T, i, j + 1, k, Y);      // y_hi
             }
             else 
             {
-                x_states[0] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, press, p0_eff, T, i - 1, j, k, X);      // x_lo
-                x_states[1] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, press, p0_eff, T, i, j, k, X);          // x
-                x_states[2] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, press, p0_eff, T, i + 1, j, k, X);      // x_hi
+                x_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_mas, a, press, T, i - 1, j, k, X);      // x_lo
+                x_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_mas, a, press, T, i, j, k, X);          // x
+                x_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_mas, a, press, T, i + 1, j, k, X);      // x_hi
 
-                y_states[0] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, press, p0_eff, T, i, j - 1, k, Y);      // y_lo
-                y_states[1] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, press, p0_eff, T, i, j, k, Y);          // y
-                y_states[2] = Solver::Local::Riemann::State(rho, M, E_mas, gammaf, press, p0_eff, T, i, j + 1, k, Y);      // y_hi
+                y_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_mas, a, press, T, i, j - 1, k, Y);      // y_lo
+                y_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_mas, a, press, T, i, j, k, Y);          // y
+                y_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_mas, a, press, T, i, j + 1, k, Y);      // y_hi
             }
             
 
             // Variables to store reconstructed states at interfaces
-            std::vector<Solver::Local::Riemann::State> x_leftStates(3), x_rightStates(3);
-            std::vector<Solver::Local::Riemann::State> y_leftStates(3), y_rightStates(3);
+            std::vector<Solver::Local::FluidRiemann::State> x_leftStates(3), x_rightStates(3);
+            std::vector<Solver::Local::FluidRiemann::State> y_leftStates(3), y_rightStates(3);
 
             if (Limiter == 0)
             {
@@ -1458,7 +1458,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             }
 
             // Calculate fluxes using the mixed fluid approach
-            Solver::Local::Riemann::Flux flux_xlo, flux_ylo, flux_xhi, flux_yhi;
+            Solver::Local::FluidRiemann::Flux flux_xlo, flux_ylo, flux_xhi, flux_yhi;
 
             try
             {

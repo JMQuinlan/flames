@@ -60,9 +60,8 @@ public:
         Set::Scalar Mn_L  = lo.M_normal  ,  Mn_R  = hi.M_normal  ;
         Set::Scalar Mt_L  = lo.M_tangent ,  Mt_R  = hi.M_tangent ;
         Set::Scalar E_L   = lo.E         ,  E_R   = hi.E         ;
-        Set::Scalar gamma_L = lo.gam     ,  gamma_R = hi.gam     ;
-        Set::Scalar p_L = lo.p           ,  p_R = hi.p           ;
-        Set::Scalar a_L = lo.soundspeed  ,  a_R = hi.soundspeed  ;
+        Set::Scalar a_L   = lo.soundspeed,  a_R   = hi.soundspeed;
+        Set::Scalar p_L   = lo.press     ,  p_R   = hi.press     ;
 
 
         // Ensure no negative densities
@@ -224,8 +223,6 @@ public:
             Util::ParallelMessage(INFO, "ke_L= ", ke_L);
             Util::ParallelMessage(INFO, "ue_L= ", ue_L);
             Util::ParallelMessage(INFO, "ue_R= ", ue_R);
-            Util::ParallelMessage(INFO, "gamma_L= ", gamma_L);
-            Util::ParallelMessage(INFO, "gamma_R= ", gamma_R);
             Util::ParallelMessage(INFO, "p_L=  ", p_L);
             Util::ParallelMessage(INFO, "p_R=  ", p_R);
             Util::ParallelMessage(INFO, "a_L=  ", a_L);

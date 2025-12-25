@@ -12,14 +12,14 @@
 #include "Set/Base.H"
 
 // Solvers
-//#include "Solver/Local/Riemann/Roe.H"
-#include "Solver/Local/Riemann/HLLC.H"
-//#include "Solver/Local/Riemann/HLLC_WENO5.H"
-//#include "Solver/Local/Riemann/HLLE.H"
-//#include "Solver/Local/Riemann/HLLE_WENO5.H"
-//#include "Solver/Local/Riemann/HLLCE.H"
-//#include "Solver/Local/Riemann/HLLCE_WENO5.H"
-// #include "Solver/Local/Riemann/PartiallyParabolic.H"
+//#include "Solver/Local/FluidRiemann/Roe.H"
+#include "Solver/Local/FluidRiemann/HLLC.H"
+//#include "Solver/Local/FluidRiemann/HLLC_WENO5.H"
+//#include "Solver/Local/FluidRiemann/HLLE.H"
+//#include "Solver/Local/FluidRiemann/HLLE_WENO5.H"
+//#include "Solver/Local/FluidRiemann/HLLCE.H"
+//#include "Solver/Local/FluidRiemann/HLLCE_WENO5.H"
+// #include "Solver/Local/FluidRiemann/PartiallyParabolic.H"
 // Limiters
 // #include "Solver/Local/Limiter/Minmod.H"
 // #include "Solver/Local/Limiter/VanLeer.H"
@@ -307,14 +307,14 @@ private:
 
     // Solvers
     int scheme = 0;
-    //Solver::Local::Riemann::Roe *roesolver = nullptr;
-    Solver::Local::Riemann::HLLC *hllcsolver = nullptr;
-    //Solver::Local::Riemann::HLLC_WENO5 *hllc_weno5solver = nullptr;
-    //Solver::Local::Riemann::HLLE *hllesolver = nullptr;
-    //Solver::Local::Riemann::HLLE_WENO5 *hlle_weno5solver = nullptr;
-    //Solver::Local::Riemann::HLLCE *hllcesolver = nullptr;
-    //Solver::Local::Riemann::HLLCE_WENO5 *hllce_weno5solver = nullptr;
-    //Solver::Local::Riemann::PartiallyParabolic *partiallyparabolicsolver = nullptr;
+    //Solver::Local::FluidRiemann::Roe *roesolver = nullptr;
+    Solver::Local::FluidRiemann::HLLC *hllcsolver = nullptr;
+    //Solver::Local::FluidRiemann::HLLC_WENO5 *hllc_weno5solver = nullptr;
+    //Solver::Local::FluidRiemann::HLLE *hllesolver = nullptr;
+    //Solver::Local::FluidRiemann::HLLE_WENO5 *hlle_weno5solver = nullptr;
+    //Solver::Local::FluidRiemann::HLLCE *hllcesolver = nullptr;
+    //Solver::Local::FluidRiemann::HLLCE_WENO5 *hllce_weno5solver = nullptr;
+    //Solver::Local::FluidRiemann::PartiallyParabolic *partiallyparabolicsolver = nullptr;
 
 
     // Limiters
