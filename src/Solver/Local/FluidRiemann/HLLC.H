@@ -69,22 +69,19 @@ public:
         rho_L = std::max(small, rho_L);
         rho_R = std::max(small, rho_R);
 
-        // STEP 1: Compute fluid primitives
+        // Fluid primitives
         Set::Scalar ke_L, ke_R;
         Set::Scalar ue_L, ue_R;
-        // Set::Scalar p_L, p_R;
         Set::Scalar h_TL, h_TR;
         if (Spec_Vol == 1)
         {
             // With Respect to Specific Volume (energies are per unit volume)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
             ue_L = E_L - ke_L;                                          // IE per unit volume
-            // p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;      // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
             h_TL = (ke_L + ue_L + p_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
             ue_R = E_R - ke_R;
-            // p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref; // Tammann
             h_TR = (ke_R + ue_R + p_R);
         }
         else
@@ -92,50 +89,56 @@ public:
             // With Respect to Specific Mass (energies are per unit mass)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small); // KE per unit volume
             ue_L = E_L - ke_L;                                                  // IE per unit volume
-            // p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;      // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
             h_TL = ke_L + ue_L + (p_L / rho_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
             ue_R = E_R - ke_R;
-            // p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R + p_ref; // Tammann
             h_TR = ke_R + ue_R + (p_R / rho_R);
         }
 
-        // WIP: TEMP DELETE ME
-        if (   (std::abs(p_L - T_L) > 1.0E-4)
-            or (std::abs(p_R - T_R) > 1.0E-4) )
-        {
-            Util::ParallelMessage(INFO, "LEFT:  HLLC, Field = ", p_L, ", ", T_L);
-            Util::ParallelMessage(INFO, "RIGHT: HLLC, Field = ", p_R, ", ", T_R);
-        }
-
-
+        // Speeds
         Set::Scalar u_L = Mn_L / (rho_L + small), u_R = Mn_R / (rho_R + small);
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
-        // STEP 2: Compute sound speeds
-        // Set::Scalar a_L = std::sqrt(gamma_L * (p_L + p0_L) / (rho_L + small));
-        // Set::Scalar a_R = std::sqrt(gamma_R * (p_R + p0_R) / (rho_R + small));
-
-        // STEP 3: Compute wave speed estimates
+        // Wave speed estimates
         Set::Scalar S_L = std::min(u_L - a_L, u_R - a_R);
         Set::Scalar S_R = std::max(u_L + a_L, u_R + a_R);
 
-        // STEP 4: Compute middle wave speed (contact discontinuity)
+        // Middle wave speed (contact discontinuity)
         Set::Scalar S_star = (p_R - p_L + rho_L * u_L * (S_L - u_L) - rho_R * u_R * (S_R - u_R)) / (rho_L * (S_L - u_L) - rho_R * (S_R - u_R) + small);
 
-        // STEP 5: Compute physical fluxes for left and right states
-        Flux f_L, f_R;
+        // Fluxes for left and right states
+        Flux f_L,f_R;
+        Flux f_star_L, f_star_R;
 
-        // STEP 5: Compute left/right fluxes
+        // star states for condensed view
+        Set::Scalar rho_star_L = rho_L * (S_L - u_L) / (S_L - S_star + small);
+        Set::Scalar rho_star_R = rho_R * (S_R - u_R) / (S_R - S_star + small);
+        Set::Scalar E_star_L = rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L))));
+        Set::Scalar E_star_R = rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R))));
+
         if (Spec_Vol == 1)
         {
             // Energies per unit volume [J/m^3]
+            // ---- Left ----
             f_L.mass = rho_L * u_L;
             f_L.momentum_normal = rho_L * u_L * u_L + p_L;
             f_L.momentum_tangent = rho_L * u_L * v_L;
             f_L.energy = u_L * (E_L + p_L); // [W/m^2]
 
+            // - Left Star --
+            f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
+            f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
+            f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
+            f_star_L.energy = f_L.energy + S_L * (E_star_L - E_L);
+
+            // - Right Star --
+            f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
+            f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
+            f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
+            f_star_R.energy = f_R.energy + S_R * (E_star_R - E_R);
+
+            // ---- Right ----
             f_R.mass = rho_R * u_R;
             f_R.momentum_normal = rho_R * u_R * u_R + p_R;
             f_R.momentum_tangent = rho_R * u_R * v_R;
@@ -144,64 +147,32 @@ public:
         else
         {
             // Energies per unit mass [J/kg]
+            // ---- Left ----
             f_L.mass = rho_L * u_L;
             f_L.momentum_normal = rho_L * u_L * u_L + p_L;
             f_L.momentum_tangent = rho_L * u_L * v_L;
             f_L.energy = u_L * (E_L + p_L / (rho_L + small)); // [W/kg]
 
+            // - Left Star --
+            f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
+            f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
+            f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
+            f_star_L.energy = f_L.energy + S_L * ((E_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - E_L);
+
+            // - Right Star --
+            f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
+            f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
+            f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
+            f_star_R.energy = f_R.energy + S_R * ((E_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - E_R);
+
+            // ---- Right ----
             f_R.mass = rho_R * u_R;
             f_R.momentum_normal = rho_R * u_R * u_R + p_R;
             f_R.momentum_tangent = rho_R * u_R * v_R;
             f_R.energy = u_R * (E_R + p_R / (rho_R + small));
         }
 
-        // STEP 6: Compute star state values
-        Set::Scalar rho_star_L = rho_L * (S_L - u_L) / (S_L - S_star + small);
-        Set::Scalar rho_star_R = rho_R * (S_R - u_R) / (S_R - S_star + small);
-
-        Set::Scalar E_star_L = rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L))));
-        Set::Scalar E_star_R = rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R))));
-
-        // STEP 7: Compute star state fluxes
-        Flux f_star_L, f_star_R;
-
-        if (Spec_Vol == 1)
-        {
-            // Volumetric star fluxes [J/m^3]
-            f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
-            f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
-            f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
-            // f_star_L.energy = f_L.energy + S_L * (rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - E_L);
-            f_star_L.energy = f_L.energy + S_L * (E_star_L - E_L); // CORRECTED
-
-            f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
-            f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
-            f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
-            // f_star_R.energy = f_R.energy + S_R * (rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - E_R);
-            f_star_R.energy = f_R.energy + S_R * (E_star_R - E_R); // CORRECTED
-        }
-        else
-        {
-            // Specific star fluxes [J/kg]
-            f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
-            f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
-            f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
-            // f_star_L.energy = f_L.energy + S_L * (E_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small)) - E_L);
-            // f_star_L.energy = f_L.energy + S_L * (rho_star_L * (E_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - rho_L * E_L);
-            f_star_L.energy = f_L.energy + S_L * ((E_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - E_L);
-            // f_star_L.energy = f_star_L.energy / (rho_L + small);
-
-            f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
-            f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
-            f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
-            // f_star_R.energy = f_R.energy + S_R * (E_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small)) - E_R);
-            // f_star_R.energy = f_R.energy + S_R * (rho_star_R * (E_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - rho_R * E_R);
-            // f_star_R.energy = f_R.energy + S_R / (rho_R + small) * (rho_star_R * (E_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - rho_R * E_R);
-            f_star_R.energy = f_R.energy + S_R * ((E_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - E_R);
-            // f_star_R.energy = f_star_R.energy / (rho_R + small);
-        }
-
-        // STEP 8: Compute HLLC flux based on wave positions
+        // Compute HLLC flux based on wave positions
         Flux fl;
 
         if (0.0 <= S_L)
