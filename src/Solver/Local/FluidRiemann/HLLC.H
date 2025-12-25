@@ -1,7 +1,7 @@
 // This implements a modified Riemann HLLC solver for weakly incompressible flow using the Tammann EOS.
 //      HLLC solver uses the fastest left and right wave speeds, along with the middle contact wave.
-//      Restores some accuracy when compared to HLLE with a slightly increased computational time, while providing same robustness. 
-// 
+//      Restores some accuracy when compared to HLLE with a slightly increased computational time, while providing same robustness.
+//
 // Source: V.A. Titarev, E.F. Toro, Finite-volume WENO schemes for three-dimensional conservation laws, Journal of Computational Physics, Volume 201, Issue 1, 2004, Pages 238-260, ISSN 0021-9991, https://doi.org/10.1016/j.jcp.2004.05.015.
 //          URL: https://www.sciencedirect.com/science/article/pii/S0021999104002281
 //
@@ -54,97 +54,100 @@ public:
         pp.query_default("verbose", value.verbose, 1);
     }
 
-    Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1)
+    Flux
+    Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1)
     {
-        Set::Scalar rho_L = lo.rho       ,  rho_R = hi.rho       ;
-        Set::Scalar Mn_L  = lo.M_normal  ,  Mn_R  = hi.M_normal  ;
-        Set::Scalar Mt_L  = lo.M_tangent ,  Mt_R  = hi.M_tangent ;
-        Set::Scalar E_L   = lo.E         ,  E_R   = hi.E         ;
-        Set::Scalar a_L   = lo.soundspeed,  a_R   = hi.soundspeed;
-        Set::Scalar p_L   = lo.press     ,  p_R   = hi.press     ;
-
+        Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
+        Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
+        Set::Scalar Mt_L = lo.M_tangent, Mt_R = hi.M_tangent;
+        Set::Scalar E_L = lo.E, E_R = hi.E;
+        Set::Scalar gamma_L = lo.gam, gamma_R = hi.gam;
+        Set::Scalar p0_L = lo.p0, p0_R = hi.p0;
+        Set::Scalar T_L = lo.T, T_R = hi.T;
 
         // Ensure no negative densities
         rho_L = std::max(small, rho_L);
         rho_R = std::max(small, rho_R);
 
-        // Compute fluid primitives
+        // Fluid primitives
         Set::Scalar ke_L, ke_R;
         Set::Scalar ue_L, ue_R;
+        Set::Scalar p_L,  p_R;
         Set::Scalar h_TL, h_TR;
         if (Spec_Vol == 1)
         {
             // With Respect to Specific Volume (energies are per unit volume)
-            ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small);         // KE per unit volume
-            ue_L = E_L - ke_L;                                                  // UE per unit volume
+            ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
+            ue_L = E_L - ke_L;                                          // IE per unit volume
+            p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;
             h_TL = (ke_L + ue_L + p_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
             ue_R = E_R - ke_R;
+            p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;
             h_TR = (ke_R + ue_R + p_R);
-
         }
         else
         {
             // With Respect to Specific Mass (energies are per unit mass)
-            ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small); // KE per unit mass
-            ue_L = E_L - ke_L;                                                  // UE per unit mass
+            ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small); // KE per unit volume
+            ue_L = E_L - ke_L;                                                  // IE per unit volume
+            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;
             h_TL = ke_L + ue_L + (p_L / rho_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
             ue_R = E_R - ke_R;
+            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R + p_ref;
             h_TR = ke_R + ue_R + (p_R / rho_R);
         }
 
+        // Acoustic Speeds
         Set::Scalar u_L = Mn_L / (rho_L + small), u_R = Mn_R / (rho_R + small);
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
-        // Compute sound speeds
-        //Set::Scalar a_L = std::sqrt(gamma_L * (p_L + p0_L) / (rho_L + small));
-        //Set::Scalar a_R = std::sqrt(gamma_R * (p_R + p0_R) / (rho_R + small));
+        // Sound Speeds
+        Set::Scalar a_L = std::sqrt(gamma_L * (p_L + p0_L) / (rho_L));
+        Set::Scalar a_R = std::sqrt(gamma_R * (p_R + p0_R) / (rho_R));
 
-        // Compute wave speed estimates
+        // Wave speed estimates
         Set::Scalar S_L = std::min(u_L - a_L, u_R - a_R);
         Set::Scalar S_R = std::max(u_L + a_L, u_R + a_R);
 
-        // Compute middle wave speed (contact discontinuity)
+        // Middle wave speed (contact discontinuity)
         Set::Scalar S_star = (p_R - p_L + rho_L * u_L * (S_L - u_L) - rho_R * u_R * (S_R - u_R)) / (rho_L * (S_L - u_L) - rho_R * (S_R - u_R) + small);
 
-        // Compure Roe Star Average for Contact
+        // Fluxes for left and right states
+        Flux f_L,f_R;
+        Flux f_star_L, f_star_R;
+
+        // star states for condensed view
         Set::Scalar rho_star_L = rho_L * (S_L - u_L) / (S_L - S_star + small);
         Set::Scalar rho_star_R = rho_R * (S_R - u_R) / (S_R - S_star + small);
+        Set::Scalar E_star_L = rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L))));
+        Set::Scalar E_star_R = rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R))));
 
-        // Compute physical fluxes for left and right states
-        Flux f_L, f_star_L, f_star_R, f_R;
-        Set::Scalar E_star_L, E_star_R;
-
-
-        // Compute  fluxes
         if (Spec_Vol == 1)
         {
             // Energies per unit volume [J/m^3]
-            E_star_L = rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L))));
-            E_star_R = rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R))));
-
-            // ------ LEFT ------
+            // ---- Left ----
             f_L.mass = rho_L * u_L;
             f_L.momentum_normal = rho_L * u_L * u_L + p_L;
             f_L.momentum_tangent = rho_L * u_L * v_L;
-            f_L.energy = u_L * (E_L + p_L); // [W/m^3]
+            f_L.energy = u_L * (E_L + p_L); // [W/m^2]
 
-            // --- LEFT STAR ----
+            // - Left Star --
             f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
             f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
             f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
             f_star_L.energy = f_L.energy + S_L * (E_star_L - E_L);
 
-            // --- RIGHT STAR ---
+            // - Right Star --
             f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
             f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
             f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
             f_star_R.energy = f_R.energy + S_R * (E_star_R - E_R);
 
-            // ------ RIGHT -----
+            // ---- Right ----
             f_R.mass = rho_R * u_R;
             f_R.momentum_normal = rho_R * u_R * u_R + p_R;
             f_R.momentum_tangent = rho_R * u_R * v_R;
@@ -153,34 +156,30 @@ public:
         else
         {
             // Energies per unit mass [J/kg]
-            E_star_L = E_L / rho_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L)));
-            E_star_R = E_R / rho_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R)));
-
-            // ------ LEFT ------
+            // ---- Left ----
             f_L.mass = rho_L * u_L;
             f_L.momentum_normal = rho_L * u_L * u_L + p_L;
             f_L.momentum_tangent = rho_L * u_L * v_L;
             f_L.energy = u_L * (E_L + p_L / (rho_L + small)); // [W/kg]
 
-            // --- LEFT STAR ----
+            // - Left Star --
             f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
             f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
             f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
-            f_star_L.energy = f_L.energy + S_L * (rho_star_L * E_star_L - rho_L * E_L / (rho_L + small));
+            f_star_L.energy = f_L.energy + S_L * ((E_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - E_L);
 
-            // --- RIGHT STAR ---
+            // - Right Star --
             f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
             f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
             f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
-            f_star_R.energy = f_R.energy + S_R * (rho_star_R * E_star_R - rho_R * E_R / (rho_R + small));
+            f_star_R.energy = f_R.energy + S_R * ((E_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - E_R);
 
-            // ------ RIGHT -----
+            // ---- Right ----
             f_R.mass = rho_R * u_R;
             f_R.momentum_normal = rho_R * u_R * u_R + p_R;
             f_R.momentum_tangent = rho_R * u_R * v_R;
-            f_R.energy = u_R * (E_R + p_R / (rho_R + small)); 
+            f_R.energy = u_R * (E_R + p_R / (rho_R + small));
         }
-
 
         // Compute HLLC flux based on wave positions
         Flux fl;
@@ -203,12 +202,12 @@ public:
         }
 
         // ERROR CHECKING
-        if (   (fl.mass != fl.mass)
+        if ((fl.mass != fl.mass)
             or (fl.momentum_normal != fl.momentum_normal)
             or (fl.momentum_tangent != fl.momentum_tangent)
-            or (fl.energy != fl.energy) 
-            or (a_L != a_L) 
-            or (a_R != a_R) )
+            or (fl.energy != fl.energy)
+            or (a_L != a_L)
+            or (a_R != a_R))
         {
             Util::ParallelMessage(INFO, "-------------------------------");
             Util::ParallelMessage(INFO, "ERROR IN HLLC SOLVER:");

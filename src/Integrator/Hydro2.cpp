@@ -154,7 +154,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.k0_thermal_mf,   &value.bc_nothing, 1, nghost, "k0_thermal", false);
         value.RegisterNewFab(value.h0_thermal_mf,   &value.bc_nothing, 1, nghost, "h0_thermal", false);
 
-        value.RegisterNewFab(value.pressure0_mf,    &value.bc_nothing,  1, nghost, "pressure0", false);
+        value.RegisterNewFab(value.pressure0_mf,    value.energy_bc,  1, nghost, "pressure0", false);
         value.RegisterNewFab(value.velocity0_mf,    &value.bc_nothing,  2, nghost, "velocity0", false, { "x", "y" });
         value.RegisterNewFab(value.vorticity0_mf,   &value.bc_nothing,  1, nghost, "vorticity0", false);
 
@@ -174,7 +174,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.k1_thermal_mf,   &value.bc_nothing, 1, nghost, "k1_thermal", false);
         value.RegisterNewFab(value.h1_thermal_mf,   &value.bc_nothing, 1, nghost, "h1_thermal", false);
 
-        value.RegisterNewFab(value.pressure1_mf,    &value.bc_nothing,  1, nghost, "pressure1", false);
+        value.RegisterNewFab(value.pressure1_mf,    value.energy_bc,  1, nghost, "pressure1", false);
         value.RegisterNewFab(value.velocity1_mf,    &value.bc_nothing,  2, nghost, "velocity1", false, { "x", "y" });
         value.RegisterNewFab(value.vorticity1_mf,   &value.bc_nothing,  1, nghost, "vorticity1", false);
 
@@ -268,8 +268,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<IC::Constant, IC::Expression>("cv1.ic",           value.cv1_ic, value.geom);
     pp.select_default<IC::Constant, IC::Expression>("k1_thermal.ic",    value.k1_thermal_ic, value.geom);
     pp.select_default<IC::Constant, IC::Expression>("h1_thermal.ic",    value.h1_thermal_ic, value.geom);
-    //pp.select_default<IC::Constant, IC::Expression>("gamma1.ic",        value.gamma1_ic, value.geom);
-
 
     // DIFFUSE BOUNDARY SOURCES
     // diffuse boundary prescribed mass flux 
@@ -531,7 +529,7 @@ void Hydro2::Mix(int lev)
             Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0); 
             Set::Scalar B = (eta(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
             UE_vol(i, j, k) = (p_eff + pref)*A + B;
-            UE_mas(i, j, k) = (UE_vol(i, j, k)) / (rho(i, j, k) + small);
+            UE_mas(i, j, k) = (UE_vol(i, j, k)) / (rho(i, j, k));
             
             // Kinetic Energy
             //  TODO: Get rid of thermally perfect assumption. Involve temperature
@@ -546,12 +544,11 @@ void Hydro2::Mix(int lev)
             v(i, j, k, 1) = v0(i, j, k, 1) * eta(i, j, k) + v1(i, j, k, 1) * (1.0 - eta(i, j, k));
 
             // Specific Heat Ratio
-            Set::Scalar gamma_eff = 1.0 + (1.0 / A);
-            gammaf(i, j, k) = gamma_eff;
+            gammaf(i, j, k) = 1.0 + (1.0 / A);
 
             // Pressure
-            p0_eff(i, j, k) = (B / A) / gamma_eff;
-            press(i, j, k) = (gammaf(i, j, k) - 1.0) * rho(i, j, k) * UE_vol(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // pressure Tammann EOS modification
+            p0_eff(i, j, k) = (B / A) / gammaf(i, j, k);
+            press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE_vol(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // pressure Tammann EOS modification
 
             // Chemical Potential
             // Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
@@ -578,7 +575,7 @@ void Hydro2::Mix(int lev)
             h_thermal(i, j, k) = eta(i, j, k) * h0_thermal(i, j, k) + (1.0 - eta(i, j, k)) * h1_thermal(i, j, k);
 
             // Speed of Sound
-            a(i, j, k) = std::sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) + small));
+            a(i, j, k) = std::sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k)));
 
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / a(i, j, k);
@@ -712,8 +709,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // gamma
             Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
             Set::Scalar B = (eta(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
-            Set::Scalar gamma_eff = 1.0 + (1.0 / A);
-            gammaf(i, j, k) = gamma_eff;
+            gammaf(i, j, k) = 1.0 + (1.0 / A);
 
             // etadot
             etadot(i, j, k) = (eta_new(i, j, k) - eta(i, j, k)) / dt;
@@ -737,8 +733,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             }
 
             // Velocity = M ./ (DX*DY*rho)
-            v(i, j, k, 0) = M(i, j, k, 0) / (rho(i, j, k) + small);
-            v(i, j, k, 1) = M(i, j, k, 1) / (rho(i, j, k) + small);
+            v(i, j, k, 0) = M(i, j, k, 0) / (rho(i, j, k));
+            v(i, j, k, 1) = M(i, j, k, 1) / (rho(i, j, k));
 
             // Kinetic Energy
             KE_vol(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
@@ -749,8 +745,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             UE_mas(i, j, k) = E_mas(i, j, k) - KE_mas(i, j, k);
             
             // Pressure
-            p0_eff(i,j,k) = (B / A) / gamma_eff;
-            press(i, j, k) = (gammaf(i, j, k) - 1.0) * rho(i, j, k) * UE_vol(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // pressure Tammann EOS modification
+            p0_eff(i,j,k) = (B / A) / gammaf(i, j, k);
+            press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE_vol(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // pressure Tammann EOS modification
 
             // Chemical Potential
             Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
@@ -761,7 +757,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Bm(i, j, k) = eta(i, j, k) / (1.0 - eta(i, j, k) + small);
 
             // Speed of sound:
-            a(i, j, k) = std::sqrt(gammaf(i,j,k) * (press(i, j, k) + p0_eff(i,j,k)) / (rho(i, j, k) + small));
+            a(i, j, k) = std::sqrt(gammaf(i,j,k) * (press(i, j, k) + p0_eff(i,j,k)) / (rho(i, j, k)));
 
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / (a(i, j, k) + small);
@@ -944,7 +940,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Matrix gradM = Numeric::Gradient(M, i, j, k, DX);
             Set::Vector gradrho = Numeric::Gradient(rho, i, j, k, 0, DX);
             Set::Matrix hess_rho = Numeric::Hessian(rho, i, j, k, 0, DX, sten);
-            Set::Matrix gradu = (gradM - u * gradrho.transpose()) / (rho(i, j, k) + small);
+            Set::Matrix gradu = (gradM - u * gradrho.transpose()) / (rho(i, j, k));
             // ------------------------------------------------------------
             // Strain Rate Tensor
             // ------------------------------------------------------------
@@ -1173,7 +1169,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Matrix gradM = Numeric::Gradient(M, i, j, k, DX);
             Set::Vector gradrho = Numeric::Gradient(rho, i, j, k, 0, DX);
             Set::Matrix hess_rho = Numeric::Hessian(rho, i, j, k, 0, DX, sten);
-            Set::Matrix gradu = (gradM - u * gradrho.transpose()) / (rho(i, j, k) + small);
+            Set::Matrix gradu = (gradM - u * gradrho.transpose()) / (rho(i, j, k));
 
             Set::Vector q0_ = Set::Vector(q0(i, j, k, 0), q0(i, j, k, 1));
 
@@ -1186,7 +1182,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Matrix3 hess_M = Numeric::Hessian(M, i, j, k, DX);
             Set::Matrix3 hess_u = Set::Matrix3::Zero();
 
-            Set::Scalar inv_rho = 1.0 / (rho(i, j, k) + small);
+            Set::Scalar inv_rho = 1.0 / (rho(i, j, k));
             Set::Scalar inv_rho2 = inv_rho * inv_rho;
             Set::Scalar inv_rho3 = inv_rho2 * inv_rho;
 
@@ -1206,7 +1202,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     for (int r = 0; r < 2; r++)
                     {
                         hess_u(r, p, q) = (hess_M(r, p, q) - gradu(r, q) * gradrho(p) - gradu(r, p) * gradrho(q) - u(r) * hess_rho(p, q))
-                                          / (rho(i, j, k) + small);
+                                          / (rho(i, j, k));
                     }
             */
             // WIP: Debugging feild for hess_u
@@ -1398,27 +1394,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             std::vector<Solver::Local::FluidRiemann::State> y_states(3);
 
             // Fill the arrays with cell states
-            if (Spec_Vol == 1)
-            {
-                x_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_vol, a, press, T, i - 1, j, k, X);      // x_lo
-                x_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_vol, a, press, T, i, j, k, X);          // x
-                x_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_vol, a, press, T, i + 1, j, k, X);      // x_hi
+            x_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i - 1, j, k, X);      // x_lo
+            x_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j, k, X);          // x
+            x_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i + 1, j, k, X);      // x_hi
 
-                y_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_vol, a, press, T, i, j - 1, k, Y);      // y_lo
-                y_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_vol, a, press, T, i, j, k, Y);          // y
-                y_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_vol, a, press, T, i, j + 1, k, Y);      // y_hi
-            }
-            else 
-            {
-                x_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_mas, a, press, T, i - 1, j, k, X);      // x_lo
-                x_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_mas, a, press, T, i, j, k, X);          // x
-                x_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_mas, a, press, T, i + 1, j, k, X);      // x_hi
-
-                y_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_mas, a, press, T, i, j - 1, k, Y);      // y_lo
-                y_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_mas, a, press, T, i, j, k, Y);          // y
-                y_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_mas, a, press, T, i, j + 1, k, Y);      // y_hi
-            }
-            
+            y_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j - 1, k, Y);      // y_lo
+            y_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j, k, Y);          // y
+            y_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j + 1, k, Y);      // y_hi
 
             // Variables to store reconstructed states at interfaces
             std::vector<Solver::Local::FluidRiemann::State> x_leftStates(3), x_rightStates(3);
@@ -1539,11 +1521,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Density
             Set::Scalar drho_dt = rho_flux(i, j, k) + Source(i, j, k, 0);
-
             rho_new(i, j, k) = rho(i, j, k) + (drho_dt)*dt;
-            if (rho_new(i, j, k) < (small)) {
-                rho_new(i, j, k) = small;
-            }
+            rho_new(i, j, k) = std::max(rho_new(i, j, k), small);
 
             // Momentum
             Set::Scalar dMx_dt = M_flux(i, j, k, 0) + Source(i, j, k, 1); //(mu * (lap_ux * eta(i, j, k))) +           
@@ -1557,7 +1536,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             if (Spec_Vol == 1)
             {
                 E_vol_new(i, j, k) = E_vol(i, j, k) + dE_dt * dt;
-                E_mas_new(i, j, k) = E_vol_new(i, j, k) / (rho(i, j, k) + small);
+                E_mas_new(i, j, k) = E_vol_new(i, j, k) / (rho(i, j, k));
             }
             else
             {
@@ -1575,8 +1554,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
 
             // Velocity for advection
-            Set::Vector u_new = Set::Vector(M(i, j, k, 0) / (rho(i, j, k) + small),
-                                            M(i, j, k, 1) / (rho(i, j, k) + small));
+            Set::Vector u_new = Set::Vector(M(i, j, k, 0) / (rho(i, j, k)),
+                                            M(i, j, k, 1) / (rho(i, j, k)));
 
             // Cahn-Hillard equation: d(eta)/dt = -u·grad(eta) + Mob * laplacian(mu)
             Set::Scalar advection = -u_new.dot(grad_eta);
@@ -1679,12 +1658,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar A_new = (eta_new(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta_new(i, j, k)) / (gamma1 - 1.0);
             Set::Scalar B_new = (eta_new(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta_new(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
             Set::Scalar gamma_eff_new = 1.0 + (1.0 / A_new);
-            Set::Vector v_new = Set::Vector(M_new(i, j, k, 0) / (rho_new(i, j, k) + small), M_new(i, j, k, 1) / (rho_new(i, j, k) + small));
+            Set::Vector v_new = Set::Vector(M_new(i, j, k, 0) / (rho_new(i, j, k)), M_new(i, j, k, 1) / (rho_new(i, j, k)));
             Set::Scalar KE_vol_new = 0.5 * rho_new(i, j, k) * (v_new(0) * v_new(0) + v_new(1) * v_new(1));
             Set::Scalar UE_vol_new = E_vol_new(i, j, k) - KE_vol_new;
             Set::Scalar press_new = (UE_vol_new - B_new) / A_new;
             Set::Scalar p0_eff_new = (B_new / A_new) / gamma_eff_new;
-            Set::Scalar sound_speed_new = std::sqrt(gamma_eff_new * (press_new + p0_eff_new) / (rho_new(i, j, k) + small));
+            Set::Scalar sound_speed_new = std::sqrt(gamma_eff_new * (press_new + p0_eff_new) / (rho_new(i, j, k)));
 
             c_max = std::max(c_max, sound_speed_new);
             vx_max = std::max(vx_max, std::abs(v_new(0))); // vx

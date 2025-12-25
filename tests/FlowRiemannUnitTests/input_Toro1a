@@ -14,7 +14,7 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.grid_eff = 0.8
 
-amr.n_cell = 800 4
+amr.n_cell = 800 16
 
 # Uncomment to test AMR
 #amr.max_level = 2
