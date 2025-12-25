@@ -12,7 +12,7 @@
 #include "Set/Base.H"
 
 // Solvers
-//#include "Solver/Local/FluidRiemann/Roe.H"
+#include "Solver/Local/FluidRiemann/Roe.H"
 #include "Solver/Local/FluidRiemann/HLLC.H"
 //#include "Solver/Local/FluidRiemann/HLLC_WENO5.H"
 #include "Solver/Local/FluidRiemann/HLLE.H"
@@ -75,7 +75,7 @@ public:
         delete ic_q;
         /// SOLVERS
         // Riemann Solvers
-        //delete roesolver;
+        delete roesolver;
         delete hllcsolver;
         //delete hllc_weno5solver;
         delete hllesolver;
@@ -307,7 +307,7 @@ private:
 
     // Solvers
     int scheme = 0;
-    //Solver::Local::FluidRiemann::Roe *roesolver = nullptr;
+    Solver::Local::FluidRiemann::Roe *roesolver = nullptr;
     Solver::Local::FluidRiemann::HLLC *hllcsolver = nullptr;
     //Solver::Local::FluidRiemann::HLLC_WENO5 *hllc_weno5solver = nullptr;
     Solver::Local::FluidRiemann::HLLE *hllesolver = nullptr;

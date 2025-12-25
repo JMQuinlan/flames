@@ -166,4 +166,4 @@ p_refinement_criterion     = 100000.0
 static_eta = 1
 Spec_Vol = 1
 
-Riemann_Solver = 2 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+Riemann_Solver = 0 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
