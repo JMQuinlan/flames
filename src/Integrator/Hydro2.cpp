@@ -179,7 +179,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.vorticity1_mf,   &value.bc_nothing,  1, nghost, "vorticity1", false);
 
         // MIXTURE
-        value.RegisterNewFab(value.pressure_mf,     &value.bc_nothing,  1, nghost, "pressure", true);
+        value.RegisterNewFab(value.pressure_mf,     value.energy_bc,  1, nghost, "pressure", true);
         value.RegisterNewFab(value.velocity_mf,     &value.bc_nothing,  2, nghost, "velocity", true, { "x", "y" });
         value.RegisterNewFab(value.vorticity_mf,    &value.bc_nothing,  1, nghost, "vorticity", true);
         value.RegisterNewFab(value.density_mf,      value.density_bc,   1, nghost, "density", true);
@@ -1401,23 +1401,23 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Fill the arrays with cell states
             if (Spec_Vol == 1)
             {
-                x_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i - 1, j, k, X);      // x_lo
-                x_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j, k, X);          // x
-                x_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i + 1, j, k, X);      // x_hi
+                x_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_vol, a, press, press, i - 1, j, k, X);      // x_lo
+                x_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_vol, a, press, press, i, j, k, X);          // x
+                x_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_vol, a, press, press, i + 1, j, k, X);      // x_hi
 
-                y_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j - 1, k, Y);      // y_lo
-                y_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j, k, Y);          // y
-                y_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j + 1, k, Y);      // y_hi
+                y_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_vol, a, press, press, i, j - 1, k, Y);      // y_lo
+                y_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_vol, a, press, press, i, j, k, Y);          // y
+                y_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_vol, a, press, press, i, j + 1, k, Y);      // y_hi
             }
             else 
             {
-                x_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_mas, gammaf, p0_eff, T, i - 1, j, k, X);      // x_lo
-                x_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_mas, gammaf, p0_eff, T, i, j, k, X);          // x
-                x_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_mas, gammaf, p0_eff, T, i + 1, j, k, X);      // x_hi
+                x_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_mas, a, press, press, i - 1, j, k, X);      // x_lo
+                x_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_mas, a, press, press, i, j, k, X);          // x
+                x_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_mas, a, press, press, i + 1, j, k, X);      // x_hi
 
-                y_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_mas, gammaf, p0_eff, T, i, j - 1, k, Y);      // y_lo
-                y_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_mas, gammaf, p0_eff, T, i, j, k, Y);          // y
-                y_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_mas, gammaf, p0_eff, T, i, j + 1, k, Y);      // y_hi
+                y_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_mas, a, press, press, i, j - 1, k, Y);      // y_lo
+                y_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_mas, a, press, press, i, j, k, Y);          // y
+                y_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_mas, a, press, press, i, j + 1, k, Y);      // y_hi
             }
             
 
@@ -1474,10 +1474,21 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 else if (Riemann_Solver == 1)
                 {
                     // Calculate fluxes for the mixed fluid using HLLC
+                    // Util::ParallelMessage(INFO, "x_lo ");
                     flux_xlo = hllcsolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
+
+                    // Util::ParallelMessage(INFO, "y_lo ");
                     flux_ylo = hllcsolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
+
+                    // Util::ParallelMessage(INFO, "x_hi ");
                     flux_xhi = hllcsolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
+
+                    // Util::ParallelMessage(INFO, "y_hi ");
                     flux_yhi = hllcsolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, Spec_Vol);
+
+                    // WIP: DELETE ME
+                    
+
                 }
                 else if (Riemann_Solver == 2)
                 {

@@ -61,8 +61,9 @@ public:
         Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
         Set::Scalar Mt_L = lo.M_tangent, Mt_R = hi.M_tangent;
         Set::Scalar E_L = lo.E, E_R = hi.E;
-        Set::Scalar gamma_L = lo.gam, gamma_R = hi.gam;
-        Set::Scalar p0_L = lo.p0, p0_R = hi.p0;
+        Set::Scalar a_L = lo.soundspeed, a_R = hi.soundspeed;
+        Set::Scalar p_L = lo.press, p_R = hi.press;
+        Set::Scalar T_L = lo.T, T_R = hi.T;
 
         // Ensure no negative densities
         rho_L = std::max(small, rho_L);
@@ -71,19 +72,19 @@ public:
         // STEP 1: Compute fluid primitives
         Set::Scalar ke_L, ke_R;
         Set::Scalar ue_L, ue_R;
-        Set::Scalar p_L, p_R;
+        // Set::Scalar p_L, p_R;
         Set::Scalar h_TL, h_TR;
         if (Spec_Vol == 1)
         {
             // With Respect to Specific Volume (energies are per unit volume)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
             ue_L = E_L - ke_L;                                          // IE per unit volume
-            p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;      // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
+            // p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;      // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
             h_TL = (ke_L + ue_L + p_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref; // Tammann
+            // p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref; // Tammann
             h_TR = (ke_R + ue_R + p_R);
         }
         else
@@ -91,21 +92,30 @@ public:
             // With Respect to Specific Mass (energies are per unit mass)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small); // KE per unit volume
             ue_L = E_L - ke_L;                                                  // IE per unit volume
-            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;      // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
+            // p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;      // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
             h_TL = ke_L + ue_L + (p_L / rho_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R + p_ref; // Tammann
+            // p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R + p_ref; // Tammann
             h_TR = ke_R + ue_R + (p_R / rho_R);
         }
+
+        // WIP: TEMP DELETE ME
+        if (   (std::abs(p_L - T_L) > 1.0E-4)
+            or (std::abs(p_R - T_R) > 1.0E-4) )
+        {
+            Util::ParallelMessage(INFO, "LEFT:  HLLC, Field = ", p_L, ", ", T_L);
+            Util::ParallelMessage(INFO, "RIGHT: HLLC, Field = ", p_R, ", ", T_R);
+        }
+
 
         Set::Scalar u_L = Mn_L / (rho_L + small), u_R = Mn_R / (rho_R + small);
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
         // STEP 2: Compute sound speeds
-        Set::Scalar a_L = std::sqrt(gamma_L * (p_L + p0_L) / (rho_L + small));
-        Set::Scalar a_R = std::sqrt(gamma_R * (p_R + p0_R) / (rho_R + small));
+        // Set::Scalar a_L = std::sqrt(gamma_L * (p_L + p0_L) / (rho_L + small));
+        // Set::Scalar a_R = std::sqrt(gamma_R * (p_R + p0_R) / (rho_R + small));
 
         // STEP 3: Compute wave speed estimates
         Set::Scalar S_L = std::min(u_L - a_L, u_R - a_R);
