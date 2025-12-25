@@ -14,7 +14,7 @@
 //#include "Solver/Local/FluidRiemann/Roe.H"
 #include "Solver/Local/FluidRiemann/HLLC.H"
 //#include "Solver/Local/FluidRiemann/HLLC_WENO5.H"
-//#include "Solver/Local/FluidRiemann/HLLE.H"
+#include "Solver/Local/FluidRiemann/HLLE.H"
 //#include "Solver/Local/FluidRiemann/HLLE_WENO5.H"
 //#include "Solver/Local/FluidRiemann/HLLCE.H"
 //#include "Solver/Local/FluidRiemann/HLLCE_WENO5.H"
@@ -291,7 +291,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     }
     else if (value.Riemann_Solver == 2)
     {
-        // pp.select_default<Solver::Local::FluidRiemann::HLLE>("solver", value.hllesolver);
+        pp.select_default<Solver::Local::FluidRiemann::HLLE>("solver", value.hllesolver);
     }
     else if (value.Riemann_Solver == 3)
     {
@@ -1463,10 +1463,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 else if (Riemann_Solver == 2)
                 {
                     // Calculate fluxes for the mixed fluid using HLLE
-                    //flux_xlo = hllesolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
-                    //flux_ylo = hllesolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
-                    //flux_xhi = hllesolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
-                    //flux_yhi = hllesolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, Spec_Vol);
+                    flux_xlo = hllesolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
+                    flux_ylo = hllesolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
+                    flux_xhi = hllesolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
+                    flux_yhi = hllesolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, Spec_Vol);
                 }
                 else if (Riemann_Solver == 3)
                 {
