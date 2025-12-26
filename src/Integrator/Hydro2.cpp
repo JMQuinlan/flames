@@ -13,6 +13,7 @@
 // Solvers
 #include "Solver/Local/FluidRiemann/Roe.H"
 #include "Solver/Local/FluidRiemann/HLLC.H"
+#include "Solver/Local/FluidRiemann/HLLC_All_Mach.H"
 //#include "Solver/Local/FluidRiemann/HLLC_WENO5.H"
 #include "Solver/Local/FluidRiemann/HLLE.H"
 //#include "Solver/Local/FluidRiemann/HLLE_WENO5.H"
@@ -305,6 +306,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     {
         // pp.select_default<Solver::Local::FluidRiemann::PartiallyParabolic>("solver", value.partiallyparabolicsolver);
     }
+    else if (value.Riemann_Solver == 37)
+    {
+        pp.select_default<Solver::Local::FluidRiemann::HLLC_All_Mach>("solver", value.hllc_All_Machsolver);
+    }
     else if (value.Riemann_Solver == 99)
     {
         // DEBUG, Just a place holder
@@ -321,6 +326,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         Util::ParallelMessage(INFO, "Under Testing:");
         Util::ParallelMessage(INFO, "HLLC_WENO5 : 35");
         Util::ParallelMessage(INFO, "PPM        : 36");
+        Util::ParallelMessage(INFO, "HLLC_All_Mach : 37");
         Util::ParallelMessage(INFO, "HLLE DEBUG : 99");
         Util::Exception(INFO);
     }
@@ -1493,6 +1499,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     //flux_ylo = partiallyparabolicsolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[1]);
                     //flux_xhi = partiallyparabolicsolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[0]);
                     //flux_yhi = partiallyparabolicsolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[1]);
+                }
+                else if (Riemann_Solver == 37)
+                {
+                    // Calculate fluxes for the mixed fluid using PPM
+                    flux_xlo = hllc_All_Machsolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
+                    flux_ylo = hllc_All_Machsolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
+                    flux_xhi = hllc_All_Machsolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
+                    flux_yhi = hllc_All_Machsolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, Spec_Vol);
                 }
             }
             catch (...)

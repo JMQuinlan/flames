@@ -14,6 +14,7 @@
 // Solvers
 #include "Solver/Local/FluidRiemann/Roe.H"
 #include "Solver/Local/FluidRiemann/HLLC.H"
+#include "Solver/Local/FluidRiemann/HLLC_All_Mach.H"
 //#include "Solver/Local/FluidRiemann/HLLC_WENO5.H"
 #include "Solver/Local/FluidRiemann/HLLE.H"
 //#include "Solver/Local/FluidRiemann/HLLE_WENO5.H"
@@ -77,9 +78,10 @@ public:
         // Riemann Solvers
         delete roesolver;
         delete hllcsolver;
+        delete hllc_All_Machsolver;
         //delete hllc_weno5solver;
         delete hllesolver;
-        //delete hlle_weno5solver;
+        //delete hlle_weno5solver; 
         // delete hllcesolver;
         //delete hllce_weno5solver;
         // delete partiallyparabolicsolver;
@@ -309,7 +311,8 @@ private:
     int scheme = 0;
     Solver::Local::FluidRiemann::Roe *roesolver = nullptr;
     Solver::Local::FluidRiemann::HLLC *hllcsolver = nullptr;
-    //Solver::Local::FluidRiemann::HLLC_WENO5 *hllc_weno5solver = nullptr;
+    Solver::Local::FluidRiemann::HLLC_All_Mach *hllc_All_Machsolver = nullptr;
+    //Solver::Local::FluidRiemann::HLLC_WENO5 *hllc_weno5solver = nullptr; 
     Solver::Local::FluidRiemann::HLLE *hllesolver = nullptr;
     //Solver::Local::FluidRiemann::HLLE_WENO5 *hlle_weno5solver = nullptr;
     //Solver::Local::FluidRiemann::HLLCE *hllcesolver = nullptr;
