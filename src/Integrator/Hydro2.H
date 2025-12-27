@@ -15,6 +15,7 @@
 #include "Solver/Local/FluidRiemann/Roe.H"
 #include "Solver/Local/FluidRiemann/HLLC.H"
 #include "Solver/Local/FluidRiemann/HLLC_All_Mach.H"
+#include "Solver/Local/FluidRiemann/HLLC_All_Mach_Furfaro.H"
 //#include "Solver/Local/FluidRiemann/HLLC_WENO5.H"
 #include "Solver/Local/FluidRiemann/HLLE.H"
 //#include "Solver/Local/FluidRiemann/HLLE_WENO5.H"
@@ -79,6 +80,7 @@ public:
         delete roesolver;
         delete hllcsolver;
         delete hllc_All_Machsolver;
+        delete hllc_All_Mach_Furfarosolver;
         //delete hllc_weno5solver;
         delete hllesolver;
         //delete hlle_weno5solver; 
@@ -312,6 +314,7 @@ private:
     Solver::Local::FluidRiemann::Roe *roesolver = nullptr;
     Solver::Local::FluidRiemann::HLLC *hllcsolver = nullptr;
     Solver::Local::FluidRiemann::HLLC_All_Mach *hllc_All_Machsolver = nullptr;
+    Solver::Local::FluidRiemann::HLLC_All_Mach_Furfaro *hllc_All_Mach_Furfarosolver = nullptr;
     //Solver::Local::FluidRiemann::HLLC_WENO5 *hllc_weno5solver = nullptr; 
     Solver::Local::FluidRiemann::HLLE *hllesolver = nullptr;
     //Solver::Local::FluidRiemann::HLLE_WENO5 *hlle_weno5solver = nullptr;

@@ -14,6 +14,7 @@
 #include "Solver/Local/FluidRiemann/Roe.H"
 #include "Solver/Local/FluidRiemann/HLLC.H"
 #include "Solver/Local/FluidRiemann/HLLC_All_Mach.H"
+#include "Solver/Local/FluidRiemann/HLLC_All_Mach_Furfaro.H"
 //#include "Solver/Local/FluidRiemann/HLLC_WENO5.H"
 #include "Solver/Local/FluidRiemann/HLLE.H"
 //#include "Solver/Local/FluidRiemann/HLLE_WENO5.H"
@@ -310,6 +311,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     {
         pp.select_default<Solver::Local::FluidRiemann::HLLC_All_Mach>("solver", value.hllc_All_Machsolver);
     }
+    else if (value.Riemann_Solver == 38)
+    {
+        pp.select_default<Solver::Local::FluidRiemann::HLLC_All_Mach_Furfaro>("solver", value.hllc_All_Mach_Furfarosolver);
+    }
     else if (value.Riemann_Solver == 99)
     {
         // DEBUG, Just a place holder
@@ -327,6 +332,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         Util::ParallelMessage(INFO, "HLLC_WENO5 : 35");
         Util::ParallelMessage(INFO, "PPM        : 36");
         Util::ParallelMessage(INFO, "HLLC_All_Mach : 37");
+        Util::ParallelMessage(INFO, "HLLC_All_Mach_Furfaro : 38");
         Util::ParallelMessage(INFO, "HLLE DEBUG : 99");
         Util::Exception(INFO);
     }
@@ -1508,6 +1514,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     flux_xhi = hllc_All_Machsolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
                     flux_yhi = hllc_All_Machsolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, Spec_Vol);
                 }
+                else if (Riemann_Solver == 38)
+                {
+                    // Calculate fluxes for the mixed fluid using PPM
+                    flux_xlo = hllc_All_Mach_Furfarosolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
+                    flux_ylo = hllc_All_Mach_Furfarosolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
+                    flux_xhi = hllc_All_Mach_Furfarosolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
+                    flux_yhi = hllc_All_Mach_Furfarosolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, Spec_Vol);
+                }
             }
             catch (...)
             {
@@ -1575,20 +1589,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar advection = -u_new.dot(grad_eta);
             // Set::Scalar diffusion = Mob * lap_mu_chem;
             Set::Scalar phi = eta(i, j, k); // Dummy Variable bc it gets UGGGLLLYYYYY
-            Set::Scalar diffusion = Mob * ( lap_eta - ((phi * (1.0-phi) * (1.0-2.0*phi)) / (epsilon*epsilon + small)) - (grad_eta_mag * kappa) ); // Chiu & Lin (2011) URL: https://www.sciencedirect.com/science/article/pii/S0021999110005243
+            Set::Scalar diffusion = 0.0; // Mob * ( lap_eta - ((phi * (1.0-phi) * (1.0-2.0*phi)) / (epsilon*epsilon + small)) - (grad_eta_mag * kappa) ); // Chiu & Lin (2011) URL: https://www.sciencedirect.com/science/article/pii/S0021999110005243
             Set::Scalar deta_dt = advection + diffusion;
 
             // Spalding Evaporization
             if (apply_vaporization == 1) {
                 deta_dt = deta_dt + (1.0 / (rho(i, j, k) * epsilon)) * (rho0(i, j, k) * Dv * (Bm(i, j, k) / (1.0 + Bm(i, j, k) + small)) * grad_eta_mag);
             }
-
-
-            //Util::ParallelMessage(INFO, "Mob=", Mob);
-            //Util::ParallelMessage(INFO, "deta_dt=", deta_dt);
-            //Util::Exception(INFO);
-
-
 
             if (static_eta == 1)
             {
@@ -1698,7 +1705,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     amrex::ParallelDescriptor::ReduceRealMin(rho_min);
 
     // Compute timestep constraints
-    Set::Scalar dx_min = std::min(DX[0], DX[1]) / 4.0;
+    Set::Scalar dx_min = std::min(DX[0], DX[1]); // / 4.0;
 
     // 1. Acoustic CFL 
     Set::Scalar wave_speed = c_max + std::sqrt(vx_max * vx_max + vy_max * vy_max);

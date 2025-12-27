@@ -138,8 +138,7 @@ public:
         Set::Scalar S_R = std::max(u_L + a_L, u_R + a_R);
 
         // Middle wave speed (contact discontinuity) - STANDARD HLLC
-        Set::Scalar S_star = (p_R - p_L + rho_L * u_L * (S_L - u_L) - rho_R * u_R * (S_R - u_R)) 
-                           / (rho_L * (S_L - u_L) - rho_R * (S_R - u_R) + small);
+        Set::Scalar S_star = (p_R - p_L + rho_L * u_L * (S_L - u_L) - rho_R * u_R * (S_R - u_R)) / (rho_L * (S_L - u_L) - rho_R * (S_R - u_R) + small);
 
         // ========================================
         // GUILLARD-VIOZAT ALL-MACH MODIFICATION

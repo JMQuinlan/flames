@@ -11,7 +11,7 @@ plot_file = tests/CouetteFlow/CouetteFlow2Phase
 
 ### MESHING ###
 #amr.plot_dt = 1e-5
-amr.plot_int = 1
+amr.plot_int = 100
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 100
@@ -41,7 +41,7 @@ stop_time = 10.0
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = 0.0004
-eta.ic.expression.region0 = "1.0 - 0.5 * (1.0 + tanh((y) / epsilon))"
+eta.ic.expression.region0 = "1.0 - 0.5 * (1.0 + tanh((x) / epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
 
 ### HYDRO INITIAL CONDITIONS ###
