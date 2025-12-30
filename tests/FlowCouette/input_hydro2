@@ -10,14 +10,14 @@ alamo.program = hydro2
 plot_file = tests/CouetteFlow/CouetteFlow
 
 ### MESHING ###
-#amr.plot_dt = 1e-5
-amr.plot_int = 100
+amr.plot_dt = 1e-3
+#amr.plot_int = 1000
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 100
 amr.grid_eff = 0.8
 amr.max_level = 0
-amr.n_cell = 160 32
+amr.n_cell = 160 64
 
 ### TIME STEPING ###
 ## Static:
@@ -30,13 +30,13 @@ dynamictimestep.min = 1e-12
 cfl = 0.8
 
 ### DIMENSIONS ###
-geometry.prob_lo = -0.05 -0.005 0.0 # [ m ]
-geometry.prob_hi =  0.05  0.005 0.0 # [ m ]
+geometry.prob_lo = -0.05  0.00 0.0 # [ m ]
+geometry.prob_hi =  0.05  0.01 0.0 # [ m ]
 geometry.is_periodic = 1 0 0
 
  
 ### TIME STEP ###
-stop_time = 10.0
+stop_time = 2e-3
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
@@ -60,10 +60,10 @@ mu1_b = 0.001
 
 # Densities
 density0.ic.type = expression
-density0.ic.expression.region0 = "2.377"  # Air density at 2 bar [kg/m3] 
+density0.ic.expression.region0 = "1.0"  # Air density at 2 bar [kg/m3] 
 
 density1.ic.type = expression
-density1.ic.expression.region0 = "997.0"  # Water density [kg/m3]
+density1.ic.expression.region0 = "1000.0"  # Water density [kg/m3]
 
 # Velocities (initially at rest)
 velocity0.ic.type = expression
@@ -76,7 +76,7 @@ velocity1.ic.expression.region1 = "0.0"
 
 # Pressures
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "107280"  # Air at Equiulibrium
+pressure0.ic.expression.region0 = "100000"  # Air at Equiulibrium
 
 pressure1.ic.type = expression
 pressure1.ic.expression.region0 = "100000"  # Water at 1 bar [Pa]
@@ -175,7 +175,7 @@ grav = 9.81
 
 ### DEBUGGING ### 
 # Used for testing of the model
-Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+Riemann_Solver = 0 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
 kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
 scheme = 0		   # Valid Entries: 0:"Forward Euler" / 1:"SSPRK3" / 2:"RK4"
 Limiter = 0        # Valid Entries: 0:"None" / 1:"MinMod" / 2:"Van Leer"

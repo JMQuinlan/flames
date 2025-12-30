@@ -1,6 +1,125 @@
 """
-Extract 1D slice from AMReX data using yt and compare with exact solution
-Supports multiple Riemann solvers and interface thicknesses
+===============================================================================
+RIEMANN SOLVER COMPARISON ANALYSIS SCRIPT
+===============================================================================
+
+PURPOSE:
+    Compare numerical solutions from multiple Riemann solvers and interface
+    thicknesses against exact solutions for shock tube problems. Generates
+    comprehensive comparison plots and error analysis.
+
+REQUIRED INPUTS:
+    1. Test case name (case_name variable)
+    2. HDF5 file with exact solution
+    3. AMReX output directories following naming convention
+
+DIRECTORY NAMING CONVENTION:
+    The script expects output directories in the following formats:
+    
+    - Sharp Interface:
+      output_{TestCase}_{RiemannSolver}_Sharp_Interface
+      Example: output_Toro1a_HLLC_Sharp_Interface
+    
+    - Diffuse Interface (decimal notation):
+      output_{TestCase}_{RiemannSolver}_epsilon_{value}
+      Example: output_Toro1a_HLLC_epsilon_0.01
+    
+    - Diffuse Interface (scientific notation):
+      output_{TestCase}_{RiemannSolver}_epsilon_{value}e{exponent}
+      Examples: output_Toro1a_HLLC_epsilon_1e-4
+                output_Toro1a_HLLC_epsilon_1.0e-4
+                output_Toro1a_HLLC_epsilon_5e-05
+
+RIEMANN SOLVER NAMING:
+    - Dashes in Riemann solver names are converted to spaces in plots
+    - Example: "HLLC-Weno5" displays as "HLLC Weno5"
+    - Dashes in epsilon values are NOT converted (scientific notation preserved)
+
+CONFIGURATION VARIABLES (lines 32-48):
+    
+    Font Sizes:
+        TITLE_FONTSIZE          - Plot title font size (default: 16)
+        AXIS_LABEL_FONTSIZE     - Axis label font size (default: 14)
+        LEGEND_FONTSIZE         - Legend font size (default: 10)
+        TICK_FONTSIZE           - Tick label font size (default: 12)
+    
+    Line Weights:
+        EXACT_SOLUTION_LINEWIDTH        - Exact solution in individual plots (default: 2.5)
+        SHARP_INTERFACE_LINEWIDTH       - Sharp interface in individual plots (default: 2.0)
+        EPSILON_LINEWIDTH               - Epsilon variants in individual plots (default: 1.5)
+        AGGREGATED_EXACT_LINEWIDTH      - Exact solution in aggregated plot (default: 3.0)
+        AGGREGATED_SHARP_LINEWIDTH      - Sharp interface in aggregated plot (default: 1.8)
+        AGGREGATED_EPSILON_LINEWIDTH    - Epsilon variants in aggregated plot (default: 1.3)
+        ERROR_SHARP_LINEWIDTH           - Sharp interface in error plots (default: 2.0)
+        ERROR_EPSILON_LINEWIDTH         - Epsilon variants in error plots (default: 1.5)
+    
+    Test Case:
+        case_name               - Name of test case (e.g., 'Toro1a', 'Toro2')
+        Tammann                 - '.' for regular EOS, 'TammannEOS' for Tammann
+        hdf5_file               - Path to exact solution HDF5 file
+        base_output_dir         - Path to directory containing output folders
+
+HDF5 FILE STRUCTURE:
+    The exact solution HDF5 file must contain groups with datasets:
+        - xvec              : x-coordinates
+        - velocity          : velocity field
+        - pressure          : pressure field
+        - density           : density field
+        - internal_energy   : internal energy field
+
+OUTPUTS:
+    The script generates the following plots in ./Images/ directory:
+    
+    1. Individual Solver Comparisons (per Riemann solver):
+       - {case}__{solver}_comparison.png/eps
+       - Shows exact solution, sharp interface, and all epsilon variants
+       - {case}_{solver}_error.png/eps
+       - Semi-log error plot for that solver
+    
+    2. Sharp Interface Comparison:
+       - {case}_sharp_comparison.png/eps
+       - Compares all sharp interfaces against exact solution
+       - {case}_sharp_error.png/eps
+       - Semi-log error plot for all sharp interfaces
+    
+    3. Aggregated Comparison:
+       - {case}_aggregated_comparison.png/eps
+       - All solvers and interface thicknesses on one plot
+       - {case}_aggregated_error.png/eps
+       - Semi-log error plot for all data
+
+COLOR SCHEME:
+    - Each Riemann solver gets a unique base color
+    - Sharp interface uses the base color
+    - Epsilon variants use gradient from dark to light:
+      * Smallest epsilon = darkest shade (closest to sharp interface)
+      * Largest epsilon = lightest shade (most diffuse)
+
+FILTERING:
+    - Script automatically detects maximum stop time across all simulations
+    - Excludes any simulation that stopped before max time (tolerance: 1e-10)
+    - Only compares simulations that completed to the same final time
+
+ERROR METRICS:
+    Calculates and reports for each solver/interface combination:
+        - L2 norm error (density, velocity, pressure)
+        - L-infinity norm error (density, velocity, pressure)
+
+USAGE:
+    1. Set case_name, Tammann, and file paths in configuration section
+    2. Ensure output directories follow naming convention
+    3. Run script: python RiemannCompareAGGREGATED.py
+    4. Check ./Images/ for generated plots
+    5. Review console output for error metrics
+
+DEPENDENCIES:
+    - yt (for AMReX data loading)
+    - numpy
+    - h5py
+    - matplotlib
+    - re, os, collections, matplotlib.colors
+
+===============================================================================
 """
 
 import yt
@@ -19,13 +138,13 @@ yt.funcs.mylog.setLevel(40)
 # CONFIGURATION
 # ============================================================================
 
-# Font sizes for plots (easily adjustable)
+# Font sizes for plots
 TITLE_FONTSIZE = 16
 AXIS_LABEL_FONTSIZE = 14
 LEGEND_FONTSIZE = 10
 TICK_FONTSIZE = 12
 
-# Line weights for plots (easily adjustable)
+# Line weights for plots
 EXACT_SOLUTION_LINEWIDTH = 2.5
 SHARP_INTERFACE_LINEWIDTH = 2.0
 EPSILON_LINEWIDTH = 1.5
@@ -37,7 +156,7 @@ ERROR_EPSILON_LINEWIDTH = 1.5
 
 # Test case configuration
 case_name = 'Toro1a'
-Tammann = '.'  # Change to "." for not Tammann and "TammannEOS" for Tammann
+Tammann = '.'  # Change to "." for CPG and "TammannEOS" for Tammann
 
 # File paths
 hdf5_file = fr'{Tammann}\{case_name}.hdf5'
@@ -261,7 +380,6 @@ def get_color_shade(base_color, epsilon_value, epsilon_values):
     rgb_adjusted = tuple(c * alpha + (1 - alpha) for c in rgb)
     
     return rgb_adjusted
-
 
 # ============================================================================
 # MAIN SCRIPT

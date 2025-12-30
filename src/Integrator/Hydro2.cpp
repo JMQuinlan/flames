@@ -1726,7 +1726,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     dt_max *= 0.9;
 
     // Timestep diagnostics
-    if  (time < 1)
+    bool timestep_verbose = false;
+    if (timestep_verbose == true)
     {
         Util::ParallelMessage(INFO, "\n=== CFL TIMESTEP DIAGNOSTICS ===");
         Util::ParallelMessage(INFO, "Grid spacing: ", dx_min, " m");
