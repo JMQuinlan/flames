@@ -135,6 +135,12 @@ public:
             f_L.momentum_tangent = rho_L * u_L * v_L;
             f_L.energy = u_L * (E_L + p_L); // [W/m^2]
 
+            // ---- Right ----
+            f_R.mass = rho_R * u_R;
+            f_R.momentum_normal = rho_R * u_R * u_R + p_R;
+            f_R.momentum_tangent = rho_R * u_R * v_R;
+            f_R.energy = u_R * (E_R + p_R);
+
             // - Left Star --
             f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
             f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
@@ -146,12 +152,6 @@ public:
             f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
             f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
             f_star_R.energy = f_R.energy + S_R * (E_star_R - E_R);
-
-            // ---- Right ----
-            f_R.mass = rho_R * u_R;
-            f_R.momentum_normal = rho_R * u_R * u_R + p_R;
-            f_R.momentum_tangent = rho_R * u_R * v_R;
-            f_R.energy = u_R * (E_R + p_R);
         }
         else
         {
@@ -161,6 +161,12 @@ public:
             f_L.momentum_normal = rho_L * u_L * u_L + p_L;
             f_L.momentum_tangent = rho_L * u_L * v_L;
             f_L.energy = u_L * (E_L + p_L / (rho_L + small)); // [W/kg]
+
+            // ---- Right ----
+            f_R.mass = rho_R * u_R;
+            f_R.momentum_normal = rho_R * u_R * u_R + p_R;
+            f_R.momentum_tangent = rho_R * u_R * v_R;
+            f_R.energy = u_R * (E_R + p_R / (rho_R + small));
 
             // - Left Star --
             f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
@@ -173,12 +179,6 @@ public:
             f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
             f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
             f_star_R.energy = f_R.energy + S_R * ((E_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - E_R);
-
-            // ---- Right ----
-            f_R.mass = rho_R * u_R;
-            f_R.momentum_normal = rho_R * u_R * u_R + p_R;
-            f_R.momentum_tangent = rho_R * u_R * v_R;
-            f_R.energy = u_R * (E_R + p_R / (rho_R + small));
         }
 
         // Compute HLLC flux based on wave positions

@@ -11,7 +11,7 @@ plot_file = tests/CouetteFlow/CouetteFlow
 
 ### MESHING ###
 amr.plot_dt = 1e-3
-#amr.plot_int = 1000
+#amr.plot_int = 100
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 100
@@ -175,7 +175,7 @@ grav = 9.81
 
 ### DEBUGGING ### 
 # Used for testing of the model
-Riemann_Solver = 0 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+Riemann_Solver = 37 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
 kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
 scheme = 0		   # Valid Entries: 0:"Forward Euler" / 1:"SSPRK3" / 2:"RK4"
 Limiter = 0        # Valid Entries: 0:"None" / 1:"MinMod" / 2:"Van Leer"

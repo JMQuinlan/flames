@@ -189,17 +189,17 @@ public:
             f_L.momentum_tangent = rho_L * u_L * v_L;
             f_L.energy = u_L * (E_L + p_L);
 
-            // - Left Star --
-            f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
-            f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
-            f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
-            f_star_L.energy = f_L.energy + S_L * (E_star_L - E_L);
-
             // ---- Right ----
             f_R.mass = rho_R * u_R;
             f_R.momentum_normal = rho_R * u_R * u_R + p_R;
             f_R.momentum_tangent = rho_R * u_R * v_R;
             f_R.energy = u_R * (E_R + p_R);
+
+            // - Left Star --
+            f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
+            f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
+            f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
+            f_star_L.energy = f_L.energy + S_L * (E_star_L - E_L);
 
             // - Right Star --
             f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
@@ -217,17 +217,17 @@ public:
             f_L.momentum_tangent = rho_L * u_L * v_L;
             f_L.energy = u_L * (E_L + p_L / (rho_L + small));
 
-            // - Left Star --
-            f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
-            f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
-            f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
-            f_star_L.energy = f_L.energy + S_L * ((E_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - E_L);
-
             // ---- Right ----
             f_R.mass = rho_R * u_R;
             f_R.momentum_normal = rho_R * u_R * u_R + p_R;
             f_R.momentum_tangent = rho_R * u_R * v_R;
             f_R.energy = u_R * (E_R + p_R / (rho_R + small));
+
+            // - Left Star --
+            f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
+            f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
+            f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
+            f_star_L.energy = f_L.energy + S_L * ((E_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - E_L);
 
             // - Right Star --
             f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
