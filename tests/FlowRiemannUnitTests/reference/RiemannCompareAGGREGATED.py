@@ -25,6 +25,16 @@ AXIS_LABEL_FONTSIZE = 14
 LEGEND_FONTSIZE = 10
 TICK_FONTSIZE = 12
 
+# Line weights for plots (easily adjustable)
+EXACT_SOLUTION_LINEWIDTH = 2.5
+SHARP_INTERFACE_LINEWIDTH = 2.0
+EPSILON_LINEWIDTH = 1.5
+AGGREGATED_EXACT_LINEWIDTH = 3.0
+AGGREGATED_SHARP_LINEWIDTH = 1.8
+AGGREGATED_EPSILON_LINEWIDTH = 1.3
+ERROR_SHARP_LINEWIDTH = 2.0
+ERROR_EPSILON_LINEWIDTH = 1.5
+
 # Test case configuration
 case_name = 'Toro1a'
 Tammann = '.'  # Change to "." for not Tammann and "TammannEOS" for Tammann
@@ -60,14 +70,28 @@ case_to_group = {
 
 def format_label(text):
     """Convert naming convention to display format with LaTeX"""
-    # Replace dashes with spaces
-    text = text.replace('-', ' ')
+    # Replace dashes with spaces (but not in epsilon values)
+    # First, protect epsilon values
+    epsilon_pattern = r'epsilon[_\s]*([\d.eE+-]+)'
+    epsilon_matches = list(re.finditer(epsilon_pattern, text))
     
-    # Handle epsilon values
-    epsilon_match = re.search(r'epsilon[_\s]*([\d.]+)', text)
-    if epsilon_match:
-        epsilon_val = epsilon_match.group(1)
-        text = re.sub(r'epsilon[_\s]*[\d.]+', f'$\\epsilon = {epsilon_val}$', text)
+    # Replace dashes with spaces in non-epsilon parts
+    if epsilon_matches:
+        parts = []
+        last_end = 0
+        for match in epsilon_matches:
+            # Process text before epsilon
+            before_text = text[last_end:match.start()].replace('-', ' ')
+            parts.append(before_text)
+            # Keep epsilon part as-is for now
+            epsilon_val = match.group(1)
+            parts.append(f'$\\epsilon = {epsilon_val}$')
+            last_end = match.end()
+        # Process remaining text
+        parts.append(text[last_end:].replace('-', ' '))
+        text = ''.join(parts)
+    else:
+        text = text.replace('-', ' ')
     
     # Handle Sharp Interface
     text = text.replace('Sharp Interface', 'Sharp Interface')
@@ -80,26 +104,49 @@ def parse_output_directory(dir_name, case_name):
     Expected formats:
     - output_{TestCase}_{RiemannSolver}_Sharp_Interface
     - output_{TestCase}_{RiemannSolver}_epsilon_{value}
-    """
-    pattern = rf'output_{re.escape(case_name)}_(.+?)_(Sharp_Interface|epsilon_[\d.]+)'
-    match = re.match(pattern, dir_name)
+    - output_{TestCase}_{RiemannSolver}_epsilon_{value}e{exponent}
     
-    if match:
-        riemann_solver = match.group(1)
-        interface_type = match.group(2)
+    Supports scientific notation: epsilon_1e-4, epsilon_1.0e-4, epsilon_5e-05, etc.
+    """
+    # Remove the prefix
+    prefix = f'output_{case_name}_'
+    if not dir_name.startswith(prefix):
+        return None
+    
+    remainder = dir_name[len(prefix):]
+    
+    # Check for Sharp_Interface
+    if 'Sharp_Interface' in remainder:
+        riemann_solver = remainder.split('_Sharp_Interface')[0]
+        return {
+            'riemann_solver': riemann_solver,
+            'interface_type': 'Sharp_Interface',
+            'epsilon_value': None,
+            'is_sharp': True
+        }
+    
+    # Check for epsilon pattern - supports both decimal and scientific notation
+    # Pattern matches: epsilon_0.01, epsilon_1e-4, epsilon_1.0e-4, epsilon_5e-05
+    epsilon_pattern = r'_epsilon_([\d.]+(?:[eE][+-]?\d+)?)'
+    epsilon_match = re.search(epsilon_pattern, remainder)
+    
+    if epsilon_match:
+        epsilon_str = epsilon_match.group(1)
+        try:
+            epsilon_value = float(epsilon_str)
+        except ValueError:
+            print(f"Warning: Could not parse epsilon value '{epsilon_str}' in '{dir_name}'")
+            return None
         
-        # Extract epsilon value if present
-        epsilon_value = None
-        if interface_type.startswith('epsilon'):
-            epsilon_match = re.search(r'epsilon_([\d.]+)', interface_type)
-            if epsilon_match:
-                epsilon_value = float(epsilon_match.group(1))
+        # Extract riemann solver (everything before _epsilon_)
+        riemann_solver = remainder.split('_epsilon_')[0]
+        interface_type = f'epsilon_{epsilon_str}'
         
         return {
             'riemann_solver': riemann_solver,
             'interface_type': interface_type,
             'epsilon_value': epsilon_value,
-            'is_sharp': interface_type == 'Sharp_Interface'
+            'is_sharp': False
         }
     
     return None
@@ -190,7 +237,7 @@ def generate_color_palette(riemann_solvers):
     return color_map
 
 def get_color_shade(base_color, epsilon_value, epsilon_values):
-    """Get color shade based on epsilon value (lighter to darker)"""
+    """Get color shade based on epsilon value (darker to lighter)"""
     if epsilon_value is None:  # Sharp interface
         return base_color
     
@@ -203,15 +250,18 @@ def get_color_shade(base_color, epsilon_value, epsilon_values):
     # Find position in sorted list
     idx = sorted_epsilons.index(epsilon_value)
     
-    # Create gradient from light (0.4) to dark (1.0)
-    alpha = 0.4 + (0.6 * idx / max(len(sorted_epsilons) - 1, 1))
+    # Create gradient from dark (1.0) to light (0.4)
+    # Smallest epsilon (idx=0) gets alpha=1.0 (darkest)
+    # Largest epsilon gets alpha=0.4 (lightest)
+    alpha = 1.0 - (0.6 * idx / max(len(sorted_epsilons) - 1, 1))
     
     # Convert color name to RGB and adjust brightness
     rgb = mcolors.to_rgb(base_color)
-    # Darken the color
+    # Darken the color based on alpha
     rgb_adjusted = tuple(c * alpha + (1 - alpha) for c in rgb)
     
     return rgb_adjusted
+
 
 # ============================================================================
 # MAIN SCRIPT
@@ -233,6 +283,7 @@ print(f"Exact solution loaded: {len(exact_data['x'])} points")
 # Scan for all output directories matching the pattern
 print(f"\nScanning for output directories...")
 all_data = defaultdict(lambda: {'sharp': None, 'epsilon': {}})
+all_stop_times = []
 
 for item in os.listdir(base_output_dir):
     item_path = os.path.join(base_output_dir, item)
@@ -250,12 +301,15 @@ for item in os.listdir(base_output_dir):
             data = load_amrex_data(item_path)
             
             if data:
+                stop_time = data['time']
+                all_stop_times.append(stop_time)
+                
                 if parsed['is_sharp']:
                     all_data[riemann_solver]['sharp'] = data
-                    print(f"  Loaded sharp interface data: {len(data['x'])} points")
+                    print(f"  Loaded sharp interface data: {len(data['x'])} points, t={stop_time:.6e}s")
                 else:
                     all_data[riemann_solver]['epsilon'][parsed['epsilon_value']] = data
-                    print(f"  Loaded epsilon={parsed['epsilon_value']} data: {len(data['x'])} points")
+                    print(f"  Loaded epsilon={parsed['epsilon_value']} data: {len(data['x'])} points, t={stop_time:.6e}s")
 
 if not all_data:
     print("\nERROR: No matching output directories found!")
@@ -263,10 +317,47 @@ if not all_data:
     print(f"                  output_{case_name}_{{RiemannSolver}}_epsilon_{{value}}")
     exit(1)
 
+# Determine maximum stop time
+if all_stop_times:
+    max_stop_time = max(all_stop_times)
+    print(f"\n{'=' * 80}")
+    print(f"Maximum stop time found: {max_stop_time:.6e}s")
+    print(f"Filtering out simulations that stopped early...")
+    
+    # Filter out data that didn't reach max stop time (with small tolerance)
+    tolerance = 1e-10
+    filtered_data = defaultdict(lambda: {'sharp': None, 'epsilon': {}})
+    
+    for solver in all_data.keys():
+        solver_data = all_data[solver]
+        
+        # Check sharp interface
+        if solver_data['sharp'] and abs(solver_data['sharp']['time'] - max_stop_time) < tolerance:
+            filtered_data[solver]['sharp'] = solver_data['sharp']
+        elif solver_data['sharp']:
+            print(f"  Excluding {solver} Sharp Interface (stopped at t={solver_data['sharp']['time']:.6e}s)")
+        
+        # Check epsilon variants
+        for eps_val, eps_data in solver_data['epsilon'].items():
+            if abs(eps_data['time'] - max_stop_time) < tolerance:
+                filtered_data[solver]['epsilon'][eps_val] = eps_data
+            else:
+                print(f"  Excluding {solver} epsilon={eps_val} (stopped at t={eps_data['time']:.6e}s)")
+    
+    # Replace all_data with filtered data
+    all_data = filtered_data
+    
+    # Remove solvers with no data left
+    all_data = {k: v for k, v in all_data.items() if v['sharp'] or v['epsilon']}
+    
+    if not all_data:
+        print("\nERROR: No simulations reached the maximum stop time!")
+        exit(1)
+
 print(f"\n{'=' * 80}")
-print(f"Found {len(all_data)} Riemann solver(s)")
+print(f"Found {len(all_data)} Riemann solver(s) with complete simulations")
 for solver in all_data.keys():
-    sharp_status = "Y" if all_data[solver]['sharp'] else "N"
+    sharp_status = "YES" if all_data[solver]['sharp'] else "NO"
     epsilon_count = len(all_data[solver]['epsilon'])
     print(f"  {solver}: Sharp={sharp_status}, Epsilon variants={epsilon_count}")
 
@@ -274,14 +365,7 @@ for solver in all_data.keys():
 os.makedirs('./Images', exist_ok=True)
 
 # Get simulation time (from first available dataset)
-sim_time = None
-for solver_data in all_data.values():
-    if solver_data['sharp']:
-        sim_time = solver_data['sharp']['time']
-        break
-    elif solver_data['epsilon']:
-        sim_time = list(solver_data['epsilon'].values())[0]['time']
-        break
+sim_time = max_stop_time if all_stop_times else None
 
 # Generate color palette
 riemann_solvers = sorted(all_data.keys())
@@ -321,14 +405,14 @@ for solver in riemann_solvers:
         ax = axes[idx]
         
         # Plot exact solution
-        ax.plot(exact_data['x'], exact_data[var], 'k-', linewidth=2.5, 
+        ax.plot(exact_data['x'], exact_data[var], 'k-', linewidth=EXACT_SOLUTION_LINEWIDTH, 
                 label='Exact Solution', zorder=10)
         
         # Plot sharp interface
         if solver_data['sharp']:
             color = get_color_shade(color_map[solver], None, epsilon_values)
             ax.plot(solver_data['sharp']['x'], solver_data['sharp'][var], 
-                   '--', color=color, linewidth=2, 
+                   '--', color=color, linewidth=SHARP_INTERFACE_LINEWIDTH, 
                    label='Sharp Interface', zorder=5, alpha=0.8)
         
         # Plot epsilon variants (light to dark)
@@ -337,7 +421,7 @@ for solver in riemann_solvers:
             color = get_color_shade(color_map[solver], eps_val, epsilon_values)
             label = f'$\\epsilon = {eps_val}$'
             ax.plot(eps_data['x'], eps_data[var], 
-                   '-', color=color, linewidth=1.5, 
+                   '-', color=color, linewidth=EPSILON_LINEWIDTH, 
                    label=label, zorder=3, alpha=0.7)
         
         ax.set_xlabel('Position (x)', fontsize=AXIS_LABEL_FONTSIZE)
@@ -374,7 +458,7 @@ for solver in riemann_solvers:
                 error = np.abs(sharp_data[var] - exact_interp)
                 color = get_color_shade(color_map[solver], None, epsilon_values)
                 ax.semilogy(sharp_data['x'], error, '--', color=color, 
-                           linewidth=2, label='Sharp Interface', alpha=0.8)
+                           linewidth=ERROR_SHARP_LINEWIDTH, label='Sharp Interface', alpha=0.8)
             
             # Epsilon variant errors
             for eps_val in epsilon_values:
@@ -384,7 +468,7 @@ for solver in riemann_solvers:
                 color = get_color_shade(color_map[solver], eps_val, epsilon_values)
                 label = f'$\\epsilon = {eps_val}$'
                 ax.semilogy(eps_data['x'], error, '-', color=color, 
-                           linewidth=1.5, label=label, alpha=0.7)
+                           linewidth=ERROR_EPSILON_LINEWIDTH, label=label, alpha=0.7)
             
             ax.set_xlabel('Position (x)', fontsize=AXIS_LABEL_FONTSIZE)
             ax.set_ylabel(f'{ylabel.split("(")[0].strip()} Error', fontsize=AXIS_LABEL_FONTSIZE)
@@ -422,14 +506,14 @@ if sharp_solvers:
         ax = axes[idx]
         
         # Plot exact solution
-        ax.plot(exact_data['x'], exact_data[var], 'k-', linewidth=2.5, 
+        ax.plot(exact_data['x'], exact_data[var], 'k-', linewidth=EXACT_SOLUTION_LINEWIDTH, 
                 label='Exact Solution', zorder=10)
         
         # Plot each sharp interface
         for solver in sharp_solvers:
             sharp_data = all_data[solver]['sharp']
             ax.plot(sharp_data['x'], sharp_data[var], '--', 
-                   color=color_map[solver], linewidth=2, 
+                   color=color_map[solver], linewidth=SHARP_INTERFACE_LINEWIDTH, 
                    label=format_label(solver), alpha=0.7)
         
         ax.set_xlabel('Position (x)', fontsize=AXIS_LABEL_FONTSIZE)
@@ -463,7 +547,7 @@ if sharp_solvers:
             exact_interp = np.interp(sharp_data['x'], exact_data['x'], exact_data[var])
             error = np.abs(sharp_data[var] - exact_interp)
             ax.semilogy(sharp_data['x'], error, '--', color=color_map[solver], 
-                       linewidth=2, label=format_label(solver), alpha=0.7)
+                       linewidth=ERROR_SHARP_LINEWIDTH, label=format_label(solver), alpha=0.7)
         
         ax.set_xlabel('Position (x)', fontsize=AXIS_LABEL_FONTSIZE)
         ax.set_ylabel(f'{ylabel.split("(")[0].strip()} Error', fontsize=AXIS_LABEL_FONTSIZE)
@@ -498,7 +582,7 @@ for idx, (var, ylabel) in enumerate(zip(variables, ylabels)):
     ax = axes[idx]
     
     # Plot exact solution
-    ax.plot(exact_data['x'], exact_data[var], 'k-', linewidth=3, 
+    ax.plot(exact_data['x'], exact_data[var], 'k-', linewidth=AGGREGATED_EXACT_LINEWIDTH, 
             label='Exact Solution', zorder=10)
     
     # Plot all solvers and variants
@@ -512,7 +596,7 @@ for idx, (var, ylabel) in enumerate(zip(variables, ylabels)):
             color = get_color_shade(color_map[solver], None, epsilon_values)
             label = f'{format_label(solver)} - Sharp'
             ax.plot(sharp_data['x'], sharp_data[var], '--', 
-                   color=color, linewidth=1.8, label=label, alpha=0.7)
+                   color=color, linewidth=AGGREGATED_SHARP_LINEWIDTH, label=label, alpha=0.7)
         
         # Epsilon variants
         for eps_val in epsilon_values:
@@ -520,7 +604,7 @@ for idx, (var, ylabel) in enumerate(zip(variables, ylabels)):
             color = get_color_shade(color_map[solver], eps_val, epsilon_values)
             label = f'{format_label(solver)} - $\\epsilon = {eps_val}$'
             ax.plot(eps_data['x'], eps_data[var], '-', 
-                   color=color, linewidth=1.3, label=label, alpha=0.6)
+                   color=color, linewidth=AGGREGATED_EPSILON_LINEWIDTH, label=label, alpha=0.6)
     
     ax.set_xlabel('Position (x)', fontsize=AXIS_LABEL_FONTSIZE)
     ax.set_ylabel(ylabel, fontsize=AXIS_LABEL_FONTSIZE)
@@ -560,7 +644,7 @@ for idx, (var, ylabel) in enumerate(zip(variables, ylabels)):
             color = get_color_shade(color_map[solver], None, epsilon_values)
             label = f'{format_label(solver)} - Sharp'
             ax.semilogy(sharp_data['x'], error, '--', color=color, 
-                       linewidth=1.8, label=label, alpha=0.7)
+                       linewidth=AGGREGATED_SHARP_LINEWIDTH, label=label, alpha=0.7)
         
         # Epsilon variants
         for eps_val in epsilon_values:
@@ -570,7 +654,7 @@ for idx, (var, ylabel) in enumerate(zip(variables, ylabels)):
             color = get_color_shade(color_map[solver], eps_val, epsilon_values)
             label = f'{format_label(solver)} - $\\epsilon = {eps_val}$'
             ax.semilogy(eps_data['x'], error, '-', color=color, 
-                       linewidth=1.3, label=label, alpha=0.6)
+                       linewidth=AGGREGATED_EPSILON_LINEWIDTH, label=label, alpha=0.6)
     
     ax.set_xlabel('Position (x)', fontsize=AXIS_LABEL_FONTSIZE)
     ax.set_ylabel(f'{ylabel.split("(")[0].strip()} Error', fontsize=AXIS_LABEL_FONTSIZE)
@@ -604,17 +688,17 @@ for solver in riemann_solvers:
     if solver_data['sharp']:
         errors = calculate_errors(solver_data['sharp'], exact_data)
         print(f"  Sharp Interface:")
-        print(f"    Density  - L2: {errors['density_l2']:.6e}, L_inf: {errors['density_linf']:.6e}")
-        print(f"    Velocity - L2: {errors['velocity_l2']:.6e}, L_inf: {errors['velocity_linf']:.6e}")
-        print(f"    Pressure - L2: {errors['pressure_l2']:.6e}, L_inf: {errors['pressure_linf']:.6e}")
+        print(f"    Density  - L2: {errors['density_l2']:.6e}, Linf: {errors['density_linf']:.6e}")
+        print(f"    Velocity - L2: {errors['velocity_l2']:.6e}, Linf: {errors['velocity_linf']:.6e}")
+        print(f"    Pressure - L2: {errors['pressure_l2']:.6e}, Linf: {errors['pressure_linf']:.6e}")
     
     # Epsilon variants
     for eps_val in sorted(solver_data['epsilon'].keys()):
         errors = calculate_errors(solver_data['epsilon'][eps_val], exact_data)
         print(f"  epsilon = {eps_val}:")
-        print(f"    Density  - L2: {errors['density_l2']:.6e}, L_inf: {errors['density_linf']:.6e}")
-        print(f"    Velocity - L2: {errors['velocity_l2']:.6e}, L_inf: {errors['velocity_linf']:.6e}")
-        print(f"    Pressure - L2: {errors['pressure_l2']:.6e}, L_inf: {errors['pressure_linf']:.6e}")
+        print(f"    Density  - L2: {errors['density_l2']:.6e}, Linf: {errors['density_linf']:.6e}")
+        print(f"    Velocity - L2: {errors['velocity_l2']:.6e}, Linf: {errors['velocity_linf']:.6e}")
+        print(f"    Pressure - L2: {errors['pressure_l2']:.6e}, Linf: {errors['pressure_linf']:.6e}")
 
 print(f"\n{'=' * 80}")
 print("ANALYSIS COMPLETE!")

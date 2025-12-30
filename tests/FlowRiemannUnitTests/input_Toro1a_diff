@@ -3,7 +3,7 @@
 #@ dim=2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Toro1a_HLLC_epsilon_0.005
+plot_file = ./tests/FlowRiemannUnitTests/output_Toro1a_Roe_epsilon_1e-3
 amr.plot_int = 100
 
 ### MESHING ###
@@ -19,15 +19,15 @@ geometry.prob_hi =  1.0   0.02   0.0 # [ m ]
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
-timestep  = 1.0e-4
+timestep  = 4.0e-4
 stop_time = 0.25
 
 ### ETA IC - Hyperbolic Tangent Profile ###
-epsilon = 0.05  # Interface thickness parameter
-
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.005
-eta.ic.expression.region0 = "0.5 * (1.0 + tanh(x / epsilon))"
+eta.ic.expression.constant.epsilon = "1e-3"
+eta.ic.expression.region0 = "1.0 - (0.5 * (1.0 + tanh(x / epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon  # Interface thickness parameter
+
 
 m0.ic.constant.value = 0.0
 u0.ic.constant.value = 0.0
@@ -138,4 +138,4 @@ rho_refinement_criterion   = 100000.0
 p_refinement_criterion     = 100000.0
 
 Spec_Vol = 1
-Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+Riemann_Solver = 0 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
