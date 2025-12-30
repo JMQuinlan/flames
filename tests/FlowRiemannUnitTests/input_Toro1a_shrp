@@ -4,7 +4,7 @@
 # alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Toro1a_HLLC-All-Mach_Sharp_Interface
+plot_file = ./tests/FlowRiemannUnitTests/output_Toro1a_HLLC-All-Mach-Furfaro_Sharp_Interface
 
 ### MESHING ###
 #amr.plot_dt = 0.1
@@ -163,4 +163,4 @@ p_refinement_criterion     = 100000.0
 static_eta = 1
 Spec_Vol = 1
 
-Riemann_Solver = 37 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+Riemann_Solver = 38 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"

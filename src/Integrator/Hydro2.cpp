@@ -230,14 +230,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.E_flux_mf,       &value.bc_nothing,  1, nghost, "E_flux", true);                      // Energy Flux
         value.RegisterNewFab(value.div_tau_mf,      &value.bc_nothing,  2, nghost, "div_tau", true, { "x", "y" });            // Energy Flux
         value.RegisterNewFab(value.hess_u_mf,       &value.bc_nothing,  8, nghost, "hess_u", true, {
-                                                                                                     "000",
-                                                                                                     "001",
-                                                                                                     "010",
-                                                                                                     "011",
-                                                                                                     "100",
-                                                                                                     "101",
-                                                                                                     "110",
-                                                                                                     "111",
+                                                                                                     "000","001",
+                                                                                                     "010","011",
+                                                                                                     "100","101",
+                                                                                                     "110","111",
                                                                                                     }); // hess_u Flux
     }
 
