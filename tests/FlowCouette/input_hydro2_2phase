@@ -60,10 +60,10 @@ mu1_b = 0.001
 
 # Densities
 density0.ic.type = expression
-density0.ic.expression.region0 = "2.377"  # Air density at 2 bar [kg/m3] 
+density0.ic.expression.region0 = "1.0"  # Air density [kg/m3] 
 
 density1.ic.type = expression
-density1.ic.expression.region0 = "997.0"  # Water density [kg/m3]
+density1.ic.expression.region0 = "1000.0"  # Water density [kg/m3]
 
 # Velocities (initially at rest)
 velocity0.ic.type = expression
