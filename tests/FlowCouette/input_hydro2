@@ -10,7 +10,7 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/CouetteFlow/CouetteFlow_Single_R
 #plot_file = tests/CouetteFlow/CouetteFlow_Single
 
 ### MESHING ###
-amr.plot_dt = 1e-2
+amr.plot_dt = 1000e-3
 #amr.plot_int = 100
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
