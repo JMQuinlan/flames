@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 import os
 from PIL import Image
 import glob
+import re
 
 # Suppress yt's verbose output
 yt.funcs.mylog.setLevel(40)
@@ -86,6 +87,21 @@ def analytical_couette_velocity(y, U_top, H):
     return U_top * (y / H)
 
 # ============================================================================
+# HELPER FUNCTION TO EXTRACT TIMESTEP NUMBER
+# ============================================================================
+
+def extract_timestep_number(filename):
+    """
+    Extract the timestep number from a plot file name.
+    Handles formats like: 00000cell, 00100cell, plt00000, etc.
+    """
+    # Try to find a number in the filename
+    match = re.search(r'(\d+)', os.path.basename(filename))
+    if match:
+        return int(match.group(1))
+    return 0
+
+# ============================================================================
 # SETUP
 # ============================================================================
 
@@ -124,11 +140,12 @@ if not plot_files:
     print("Looking for directories like: 00000cell, 00100cell, etc.")
     exit(1)
 
-# Sort plot files
-plot_files.sort()
+# Sort plot files by timestep number (not alphabetically)
+plot_files.sort(key=extract_timestep_number)
+
 print(f"\nFound {len(plot_files)} plot files")
-print(f"First: {os.path.basename(plot_files[0])}")
-print(f"Last:  {os.path.basename(plot_files[-1])}")
+print(f"First: {os.path.basename(plot_files[0])} (timestep {extract_timestep_number(plot_files[0])})")
+print(f"Last:  {os.path.basename(plot_files[-1])} (timestep {extract_timestep_number(plot_files[-1])})")
 
 # ============================================================================
 # EXTRACT DATA FROM LAST TIMESTEP
@@ -139,6 +156,7 @@ print("\n" + "=" * 70)
 print("EXTRACTING DATA FROM LAST TIMESTEP")
 print("=" * 70)
 print(f"Using: {os.path.basename(last_plot)}")
+print(f"Timestep number: {extract_timestep_number(last_plot)}")
 
 # Load the dataset
 ds = yt.load(last_plot)
