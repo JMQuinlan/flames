@@ -45,7 +45,7 @@ tube_height = 0.01               # Height of the tube (m)
 top_plate_velocity = 1.0         # Velocity of the top plate (m/s)
 
 # File paths
-amrex_output_dir = r'..\..\..\bin\tests\CouetteFlow\CouetteFlow_Single'
+amrex_output_dir = r'..\..\..\bin\tests\CouetteFlow\CouetteFlow_Single_HLLC'
 
 # Plotting customization
 FONT_SIZE_TITLE = 16

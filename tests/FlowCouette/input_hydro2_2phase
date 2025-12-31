@@ -6,8 +6,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/CouetteFlow/CouetteFlow_2Phase_Roe
-#plot_file = tests/CouetteFlow/CouetteFlow_2Phase
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/CouetteFlow/CouetteFlow_2Phase_HLLC
+plot_file = tests/CouetteFlow/CouetteFlow_2Phase_HLLC
 
 ### MESHING ###
 amr.plot_dt = 1000e-3
@@ -41,7 +41,7 @@ stop_time = 5000e-3
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = 0.0002
-eta.ic.expression.region0 = "0.5 * (1.0 + tanh((y) / epsilon))"
+eta.ic.expression.region0 = "0.5 * (1.0 + tanh((y - 0.005) / epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
 
 ### HYDRO INITIAL CONDITIONS ###

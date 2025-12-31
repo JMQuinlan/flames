@@ -6,8 +6,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/CouetteFlow/CouetteFlow_Single_Roe
-#plot_file = tests/CouetteFlow/CouetteFlow_Single
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/CouetteFlow/CouetteFlow_Single_HLLC
+plot_file = tests/CouetteFlow/CouetteFlow_Single_HLLC
 
 ### MESHING ###
 amr.plot_dt = 1000e-3
@@ -175,7 +175,7 @@ grav = 9.81
 
 ### DEBUGGING ### 
 # Used for testing of the model
-Riemann_Solver = 0 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
 kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
 scheme = 0		   # Valid Entries: 0:"Forward Euler" / 1:"SSPRK3" / 2:"RK4"
 Limiter = 0        # Valid Entries: 0:"None" / 1:"MinMod" / 2:"Van Leer"

@@ -60,7 +60,7 @@ top_plate_velocity = 1.0         # Velocity of the top plate (m/s)
 bottom_plate_velocity = 0.0      # Velocity of the bottom plate (m/s)
 
 # File paths
-amrex_output_dir = r'..\..\..\bin\tests\CouetteFlow\CouetteFlow_2Phase'
+amrex_output_dir = r'..\..\..\bin\tests\CouetteFlow\CouetteFlow_2Phase_HLLC'
 
 # Plotting customization
 FONT_SIZE_TITLE = 16
