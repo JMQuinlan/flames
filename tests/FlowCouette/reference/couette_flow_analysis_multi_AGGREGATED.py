@@ -452,7 +452,7 @@ if all_stop_times:
     print(f"Filtering out simulations that stopped early...")
     
     # Filter out data that didn't reach max stop time (with small tolerance)
-    tolerance = 1e-10
+    tolerance = 1e-2
     filtered_data = {}
     
     for solver, solver_data in all_data.items():

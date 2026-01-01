@@ -878,7 +878,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         });
     }
 
-    //amrex::ParallelDescriptor::Barrier();
+    amrex::ParallelDescriptor::Barrier();
 
 
     // Second Time Loop for intermediate values
@@ -1062,7 +1062,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     */
 
     // Ensure all MPI ranks complete
-    //amrex::ParallelDescriptor::Barrier();
+    amrex::ParallelDescriptor::Barrier();
 
 
     // Main time integration loop
