@@ -6,8 +6,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = /mmfs1/home/ttryon/flames/bin/tests/CouetteFlow/CouetteFlow_2Phase_HLLC
-plot_file = tests/CouetteFlow/CouetteFlow_2Phase_HLLC
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/CouetteFlow/CouetteFlow_2Phase_HLLC
+#plot_file = tests/CouetteFlow/CouetteFlow_2Phase_HLLC
 
 ### MESHING ###
 amr.plot_dt = 1000e-3
