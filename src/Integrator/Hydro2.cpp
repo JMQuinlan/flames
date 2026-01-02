@@ -997,9 +997,9 @@ Hydro2::NaturalCalc(int lev, Set::Scalar dt, const Set::Scalar *DX)
             {
                 for (int q = 0; q < 2; ++q)
                 {
-                    Ldot(p) += grad_mu(q) * (gradu(p, q) + gradu(q, p));
+                    Ldot(p) = Ldot(p) + grad_mu(q) * (gradu(p, q) + gradu(q, p));
                 }
-                Ldot(p) += grad_lambda(p) * div_u;
+                Ldot(p) = Ldot(p) + grad_lambda(p) * div_u;
                 Ldot_(i, j, k, p) = Ldot(p);
             }
 
@@ -1222,8 +1222,8 @@ Hydro2::ForcedCalc(int lev, Set::Scalar dt, const Set::Scalar *DX)
             Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force);
 
             // Lagrange terms to enforce no-penetration
-            Source(i, j, k, 1) -= lagrange * u.dot(grad_eta) * grad_eta(0);
-            Source(i, j, k, 2) -= lagrange * u.dot(grad_eta) * grad_eta(1);
+            Source(i, j, k, 1) = Source(i, j, k, 1) - lagrange * u.dot(grad_eta) * grad_eta(0);
+            Source(i, j, k, 2) = Source(i, j, k, 2) - lagrange * u.dot(grad_eta) * grad_eta(1);
         });
     }
 }
@@ -1654,7 +1654,7 @@ Hydro2::RiemannFlux(int lev, Set::Scalar time, Set::Scalar dt, const Set::Scalar
     dt_max = std::min({ dt_acoustic, dt_viscous, dt_force, dt_allen_cahn });
 
     // Safety factor
-    dt_max *= 0.9;
+    dt_max = dt_max*0.9;
 
     // Timestep diagnostics
     bool timestep_verbose = false;
