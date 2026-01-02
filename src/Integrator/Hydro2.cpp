@@ -651,7 +651,7 @@ Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // Geometry
     const Set::Scalar *DX = geom[lev].CellSize();
 
-    // Ensure boundary sources are synchronized (AI workaround for q_ic issue)
+    // Ensure boundary sources are synchronized
     m0_mf[lev]->FillBoundary(geom[lev].periodicity());
     u0_mf[lev]->FillBoundary(geom[lev].periodicity());
     q_mf[lev]->FillBoundary(geom[lev].periodicity());
@@ -661,15 +661,38 @@ Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // ============================================================
     PrimitiveFieldCalc(lev, dt, DX);
 
+    // Synchronize primitive fields before next phase
+    (*velocity_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*pressure_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*gamma_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*p0_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*a_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*Ma_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*grad_eta_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*hess_eta_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*n_hat_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*kappas_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*mu_chem_mf[lev]).FillBoundary(geom[lev].periodicity());
+
     // ============================================================
     // PHASE 2: Calculate natural/intermediate quantities
     // ============================================================
     NaturalCalc(lev, dt, DX);
 
+    // Synchronize stress tensor and viscous terms before next phase
+    (*tau_xx_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*tau_xy_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*tau_yy_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*Ldot_mf[lev]).FillBoundary(geom[lev].periodicity());
+
     // ============================================================
     // PHASE 3: Calculate forced source terms
     // ============================================================
     ForcedCalc(lev, dt, DX);
+
+    // Synchronize source terms before flux calculation
+    (*Source_mf[lev]).FillBoundary(geom[lev].periodicity());
+    (*div_tau_mf[lev]).FillBoundary(geom[lev].periodicity());
 
     // ============================================================
     // PHASE 4: Calculate Riemann fluxes and update state
