@@ -405,8 +405,6 @@ void Hydro2::Initialize(int lev)
     u0_mf[lev]->FillBoundary(geom[lev].periodicity());
     q_mf[lev]->FillBoundary(geom[lev].periodicity());
     */
-    amrex::ParallelDescriptor::Barrier();
-
 
     // NATURAL SOURCE
     Source_mf[lev]  ->setVal(0.0);
@@ -878,6 +876,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         });
     }
 
+    amrex::Gpu::synchronize();
     amrex::ParallelDescriptor::Barrier();
 
 
@@ -1062,6 +1061,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     */
 
     // Ensure all MPI ranks complete
+    amrex::Gpu::synchronize();
     amrex::ParallelDescriptor::Barrier();
 
 
@@ -1748,6 +1748,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     {
         this->DynamicTimestep_SyncTimeStep(lev, dt_max);
     }
+
+    amrex::Gpu::synchronize();
+    amrex::ParallelDescriptor::Barrier();
 }
 
 

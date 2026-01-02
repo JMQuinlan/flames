@@ -74,7 +74,7 @@ PLOT_TITLE = 'Two-Phase Couette Flow: Velocity Profile'
 
 # Output settings
 output_folder = './Images'
-create_gif = False               # Set to True to generate GIF animation
+create_gif = True               # Set to True to generate GIF animation
 gif_duration = 200               # Duration per frame in milliseconds
 gif_filename = 'couette_twophase_evolution.gif'
 
