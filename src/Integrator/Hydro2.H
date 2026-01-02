@@ -100,6 +100,11 @@ protected:
     void TimeStepBegin(Set::Scalar a_time, int a_iter) override;
     void TimeStepComplete(Set::Scalar time, int lev) override;
     void Advance(int lev, Set::Scalar time, Set::Scalar dt) override;
+    void PrimitiveFieldCalc(int lev, Set::Scalar dt, const Set::Scalar *DX);
+    void NaturalCalc(int lev, Set::Scalar dt, const Set::Scalar *DX);
+    void ForcedCalc(int lev, Set::Scalar dt, const Set::Scalar *DX);
+    void RiemannFlux(int lev, Set::Scalar time, Set::Scalar dt, const Set::Scalar *DX, Set::Scalar &dt_max);
+
     void TagCellsForRefinement(int lev, amrex::TagBoxArray& tags, amrex::Real /*time*/, int /*ngrow*/) override;
     void Regrid(int lev, Set::Scalar time) override;
     void RHS(int lev, 

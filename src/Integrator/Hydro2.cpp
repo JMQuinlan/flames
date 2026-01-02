@@ -630,16 +630,17 @@ Hydro2::RHS(int lev, Set::Scalar time, amrex::MultiFab &rho_rhs_mf, amrex::Multi
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////// ADVANCE ///////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
+void
+Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 {
-    // Swaping pointers
+    // Swap pointers to prepare for new timestep
     std::swap(density_old_mf[lev], density_mf[lev]);
     std::swap(momentum_old_mf[lev], momentum_mf[lev]);
     std::swap(energy_per_vol_old_mf[lev], energy_per_vol_mf[lev]);
     std::swap(energy_per_mas_old_mf[lev], energy_per_mas_mf[lev]);
     std::swap(eta_old_mf, eta_mf);
 
-    // Dynamic Timesteping
+    // Initialize dynamic timestep tracking
     Set::Scalar dt_max = std::numeric_limits<Set::Scalar>::max();
     c_max = 0.0;
     vx_max = 0.0;
@@ -649,19 +650,59 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
     // Geometry
     const Set::Scalar *DX = geom[lev].CellSize();
-    amrex::Box domain = geom[lev].Domain();
 
-    // AI Made me do it - q_ic is acting up and it recomended this
+    // Ensure boundary sources are synchronized (AI workaround for q_ic issue)
     m0_mf[lev]->FillBoundary(geom[lev].periodicity());
     u0_mf[lev]->FillBoundary(geom[lev].periodicity());
     q_mf[lev]->FillBoundary(geom[lev].periodicity());
 
-    // First loop to show plotting fields and primative feilds
-    for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
-    {
-        //const amrex::Box &bx = mfi.growntilebox(); // Will return NaNs for Eta
-        const amrex::Box &bx = mfi.validbox(); 
+    // ============================================================
+    // PHASE 1: Calculate primitive fields and derived quantities
+    // ============================================================
+    PrimitiveFieldCalc(lev, dt, DX);
 
+    // ============================================================
+    // PHASE 2: Calculate natural/intermediate quantities
+    // ============================================================
+    NaturalCalc(lev, dt, DX);
+
+    // ============================================================
+    // PHASE 3: Calculate forced source terms
+    // ============================================================
+    ForcedCalc(lev, dt, DX);
+
+    // ============================================================
+    // PHASE 4: Calculate Riemann fluxes and update state
+    // ============================================================
+    RiemannFlux(lev, time, dt, DX, dt_max);
+
+    // ============================================================
+    // Update adaptive timestep if enabled
+    // ============================================================
+    if (dynamictimestep.on)
+    {
+        this->DynamicTimestep_SyncTimeStep(lev, dt_max);
+    }
+
+    // Final synchronization
+    amrex::Gpu::synchronize();
+    amrex::ParallelDescriptor::Barrier();
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////// PrimitiveFieldCalc //////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+void
+Hydro2::PrimitiveFieldCalc(int lev, Set::Scalar dt, const Set::Scalar *DX)
+{
+    BL_PROFILE("Integrator::Hydro2::PrimitiveFieldCalc");
+
+    amrex::Box domain = geom[lev].Domain();
+
+    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
 
         // Eta
         Set::Patch<const Set::Scalar> eta_new = eta_mf.Patch(lev, mfi);
@@ -672,45 +713,37 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> n_hat_ = n_hat_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> grad_mag_grad_eta_ = grad_mag_grad_eta_mf.Patch(lev, mfi);
-        
-
 
         // Mixture
         Set::Patch<const Set::Scalar> rho = density_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> E_vol = energy_per_vol_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> E_mas = energy_per_mas_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> M = momentum_old_mf.Patch(lev, mfi);
-
         Set::Patch<Set::Scalar> a = a_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Ma = Ma_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> KE_vol = KE_per_vol_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> KE_mas = KE_per_mas_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> UE_vol = UE_per_vol_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> UE_mas = UE_per_mas_mf.Patch(lev, mfi);
-
         Set::Patch<Set::Scalar> v = velocity_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> press = pressure_mf.Patch(lev, mfi);
-
         Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
-
         Set::Patch<Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
-            // Derivatice Function Calls
+            // Derivative Function Calls
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
             Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
             Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
-
-            
 
             // gamma
             Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
@@ -720,25 +753,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // etadot
             etadot(i, j, k) = (eta_new(i, j, k) - eta(i, j, k)) / dt;
 
-            // /////////////////////////////////////////////////////
-            // INTEGRATOR METHODS:
-            // 0: Forward Euler
-            // 1: Runge-Kutta 4th Order (RK4)
-
-            if (scheme == 0)
-            {
-            }
-            else if (scheme == 1)
-            {
-            }
-            else
-            {
-                Util::ParallelMessage(INFO, "ERROR in Hydro2::Advance() : Integrator Methods");
-                Util::ParallelMessage(INFO, "Method ", scheme, " is unknown.");
-                Util::Exception(INFO);
-            }
-
-            // Velocity = M ./ (DX*DY*rho)
+            // Velocity = M ./ rho
             v(i, j, k, 0) = M(i, j, k, 0) / (rho(i, j, k));
             v(i, j, k, 1) = M(i, j, k, 1) / (rho(i, j, k));
 
@@ -749,26 +764,25 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Potential Energy
             UE_vol(i, j, k) = E_vol(i, j, k) - KE_vol(i, j, k);
             UE_mas(i, j, k) = E_mas(i, j, k) - KE_mas(i, j, k);
-            
+
             // Pressure
-            p0_eff(i,j,k) = (B / A) / gammaf(i, j, k);
-            press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE_vol(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // pressure Tammann EOS modification
+            p0_eff(i, j, k) = (B / A) / gammaf(i, j, k);
+            press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE_vol(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref;
 
             // Chemical Potential
-            Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
+            Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0);
             Set::Scalar mu_chem = -epsilon * epsilon * lap_eta + f_prime;
             mu_chem_(i, j, k) = mu_chem;
 
             // Spalding Number
             Bm(i, j, k) = eta(i, j, k) / (1.0 - eta(i, j, k) + small);
 
-            // Speed of sound:
-            a(i, j, k) = std::sqrt(gammaf(i,j,k) * (press(i, j, k) + p0_eff(i,j,k)) / (rho(i, j, k)));
+            // Speed of sound
+            a(i, j, k) = std::sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k)));
 
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / (a(i, j, k) + small);
             Ma(i, j, k, 1) = v(i, j, k, 1) / (a(i, j, k) + small);
-
 
             // Curvature
             Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
@@ -781,7 +795,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 n_hat_(i, j, k, 0) = 0.0;
                 n_hat_(i, j, k, 1) = 0.0;
-
                 hess_eta_(i, j, k, 0) = 0.0;
                 hess_eta_(i, j, k, 1) = 0.0;
                 hess_eta_(i, j, k, 2) = 0.0;
@@ -791,34 +804,33 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 n_hat_(i, j, k, 0) = n_hat(0);
                 n_hat_(i, j, k, 1) = n_hat(1);
-
                 hess_eta_(i, j, k, 0) = hess_eta(0, 0);
                 hess_eta_(i, j, k, 1) = hess_eta(0, 1);
                 hess_eta_(i, j, k, 2) = hess_eta(1, 0);
                 hess_eta_(i, j, k, 3) = hess_eta(1, 1);
             }
 
-            Set::Vector grad_mag_grad_eta = Set::Vector(1 / (grad_eta_mag + small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)),
-                                                        1 / (grad_eta_mag + small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));    
-            
+            Set::Vector grad_mag_grad_eta = Set::Vector(
+                1 / (grad_eta_mag + small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)),
+                1 / (grad_eta_mag + small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));
+
             grad_mag_grad_eta_(i, j, k, 0) = grad_mag_grad_eta(0);
             grad_mag_grad_eta_(i, j, k, 1) = grad_mag_grad_eta(1);
 
             Set::Scalar kappa, kappa1, kappa2 = 0.0;
+
             if (kappa_method == 1)
             {
                 kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / (grad_eta_mag * grad_eta_mag + small)));
 
-
-                kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
-                kappas(i, j, k, 1) = kappa1; // First principal curvature
-                kappas(i, j, k, 2) = kappa2; // Second principal curvature
+                kappas(i, j, k, 0) = kappa;
+                kappas(i, j, k, 1) = kappa1;
+                kappas(i, j, k, 2) = kappa2;
             }
             else if (kappa_method == 2)
             {
                 // Orthogonal Basis
-                Set::Vector t1, t2;
-
+                Set::Vector t1;
                 if (std::abs(n_hat(0)) > std::abs(n_hat(1)))
                 {
                     t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
@@ -828,24 +840,18 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     t1 = Set::Vector(n_hat(1), -n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
                 }
 
-                // t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
                 kappa1 = n_hat.dot(hess_eta * n_hat); // Normal Curvature
                 kappa2 = t1.dot(hess_eta * t1);       // Tangential Curvature
-
                 kappa1 = -kappa1;
                 kappa2 = -kappa2 * 2.0 * epsilon;
 
-                // Regularization
-                Set::Scalar K23 = kappa2 * kappa2;     // K23 Regularization
-                Set::Scalar K_Gauss = kappa1 * kappa2; // Gauss Regularization
-                // Mean
-                Set::Scalar K_mean = (kappa1 + kappa2) / 2.0; // Mean Curvature
                 // Assign the curvature you want to use
-                kappa = kappa2; // Or use another curvature measure as needed
+                kappa = kappa2;
+
                 // Store curvature values
-                kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
-                kappas(i, j, k, 1) = kappa1; // First principal curvature
-                kappas(i, j, k, 2) = kappa2; // Second principal curvature
+                kappas(i, j, k, 0) = kappa;
+                kappas(i, j, k, 1) = kappa1;
+                kappas(i, j, k, 2) = kappa2;
             }
 
             // DEBUG Tool
@@ -853,13 +859,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 or (Ma(i, j, k, 1) != Ma(i, j, k, 1))
                 or (press(i, j, k) != press(i, j, k))
                 or (v(i, j, k) != v(i, j, k))
-                or (KE_vol(i, j, k) != KE_vol(i, j, k)) 
-                or (UE_vol(i, j, k) != UE_vol(i, j, k)) 
-                or (press(i, j, k) > 1E1000) )
+                or (KE_vol(i, j, k) != KE_vol(i, j, k))
+                or (UE_vol(i, j, k) != UE_vol(i, j, k))
+                or (press(i, j, k) > 1E1000))
             {
                 Util::ParallelMessage(INFO, "v=", v(i, j, k, 0), ", ", v(i, j, k, 1));
                 Util::ParallelMessage(INFO, "press=", press(i, j, k));
-                Util::ParallelMessage(INFO, "p_eff=", p0_eff(i,j,k));
+                Util::ParallelMessage(INFO, "p_eff=", p0_eff(i, j, k));
                 Util::ParallelMessage(INFO, "rho=", rho(i, j, k));
                 Util::ParallelMessage(INFO, "M=", M(i, j, k, 0), ", ", M(i, j, k, 1));
                 Util::ParallelMessage(INFO, "E=", E_vol(i, j, k));
@@ -872,52 +878,52 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::ParallelMessage(INFO, "etadot=", etadot(i, j, k));
                 Util::Exception(INFO);
             }
-
         });
     }
-
-    amrex::Gpu::synchronize();
-    amrex::ParallelDescriptor::Barrier();
+}
 
 
-    // Second Time Loop for intermediate values
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////// NaturalCalc /////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+void
+Hydro2::NaturalCalc(int lev, Set::Scalar dt, const Set::Scalar *DX)
+{
+    BL_PROFILE("Integrator::Hydro2::NaturalCalc");
+
+    amrex::Box domain = geom[lev].Domain();
+
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
-        // PRIMARY FLUIDS
-        // MIXTURE
+
+        // PRIMARY FLUIDS - MIXTURE
         Set::Patch<const Set::Scalar> rho = density_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> E_vol = energy_per_vol_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> E_mas = energy_per_mas_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> M = momentum_old_mf.Patch(lev, mfi);
 
         // SOURCES
-        //Set::Patch<Set::Scalar> omega = vorticity_mf.Patch(lev, mfi);
-
         Set::Patch<const Set::Scalar> eta = eta_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> v = velocity_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> press = pressure_mf.Patch(lev, mfi);
-        
+
         Set::Patch<const Set::Scalar> m0 = m0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> q0 = q_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> _u0 = u0_mf.Patch(lev, mfi);
-
         Set::Patch<Set::Scalar> T = T_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
-
         Set::Patch<const Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
-
         Set::Patch<Set::Scalar> tau_xx = tau_xx_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> tau_xy = tau_xx_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> tau_xy = tau_xy_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> tau_yy = tau_yy_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Ldot_ = Ldot_mf.Patch(lev, mfi);
-
 
         // DEBUGGING PLOTS
         Set::Patch<const Set::Scalar> grad_eta_ = grad_eta_mf.Patch(lev, mfi);
@@ -926,9 +932,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> grad_mag_grad_eta_ = grad_mag_grad_eta_mf.Patch(lev, mfi);
 
-
-        Set::Scalar *dt_max_handle = &dt_max;
-
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
@@ -936,23 +939,23 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
             Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
             Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
-
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
             Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
 
             // Extract velocity from momentum and density
             Set::Vector u = Set::Vector(v(i, j, k, 0), v(i, j, k, 1));
             Set::Vector u0 = Set::Vector(_u0(i, j, k, 0), _u0(i, j, k, 1));
-
             Set::Matrix gradM = Numeric::Gradient(M, i, j, k, DX);
             Set::Vector gradrho = Numeric::Gradient(rho, i, j, k, 0, DX);
             Set::Matrix hess_rho = Numeric::Hessian(rho, i, j, k, 0, DX, sten);
             Set::Matrix gradu = (gradM - u * gradrho.transpose()) / (rho(i, j, k));
+
             // ------------------------------------------------------------
             // Strain Rate Tensor
             // ------------------------------------------------------------
-            Set::Vector eps = Set::Vector::Zero();
+            Set::Matrix eps = Set::Matrix::Zero();
             Set::Scalar div_u = gradu(0, 0) + gradu(1, 1); // Divergence of velocity
+
             for (int p = 0; p < 2; ++p)
             {
                 for (int q = 0; q < 2; ++q)
@@ -972,19 +975,19 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // ------------------------------------------------------------
             // Stress Tensor
             // ------------------------------------------------------------
-            Set::Vector tau = Set::Vector::Zero();
+            Set::Matrix tau = Set::Matrix::Zero();
             for (int p = 0; p < 2; ++p)
             {
                 for (int q = 0; q < 2; ++q)
                 {
                     tau(p, q) = 2.0 * mu_eff * eps(p, q)
                                 + lambda_eff * div_u * (p == q);
-                    
                 }
             }
-            tau_xx(i, j, k) = tau(0,0);
-            tau_xy(i, j, k) = tau(0,1);
-            tau_yy(i, j, k) = tau(1,1);
+
+            tau_xx(i, j, k) = tau(0, 0);
+            tau_xy(i, j, k) = tau(0, 1);
+            tau_yy(i, j, k) = tau(1, 1);
 
             // ------------------------------------------------------------
             // Grad(mu) Coupling
@@ -1000,14 +1003,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Ldot_(i, j, k, p) = Ldot(p);
             }
 
-
-
             // DEBUG Tool
             if ((Ldot_(i, j, k, 0) != Ldot_(i, j, k, 0))
                 or (Ldot_(i, j, k, 1) != Ldot_(i, j, k, 1))
                 or (tau_xx(i, j, k) != tau_xx(i, j, k))
                 or (tau_xy(i, j, k) != tau_xy(i, j, k))
-                or (tau_yy(i, j, k) != tau_yy(i, j, k)) )
+                or (tau_yy(i, j, k) != tau_yy(i, j, k)))
             {
                 Util::ParallelMessage(INFO, "------------------------------------------------------------");
                 Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Intermediate time step loop:");
@@ -1016,114 +1017,41 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::ParallelMessage(INFO, "tau_xx=", tau_xx(i, j, k));
                 Util::ParallelMessage(INFO, "tau_xy=", tau_xy(i, j, k));
                 Util::ParallelMessage(INFO, "tau_yy=", tau_yy(i, j, k));
-             
                 Util::Exception(INFO);
             }
-
-
-
         });
     }
+}
 
-    /*
-    // ============= SYNCHRONIZATION =============
-    // Eta
-    (*hess_eta_mf[lev]).FillBoundary(geom[lev].periodicity());
-    (*kappas_mf[lev]).FillBoundary(geom[lev].periodicity());
-    (*grad_mag_grad_eta_mf[lev]).FillBoundary(geom[lev].periodicity());
-    (*n_hat_mf[lev]).FillBoundary(geom[lev].periodicity());
-    (*grad_eta_mf[lev]).FillBoundary(geom[lev].periodicity());
-    // Mixutre
-    (*a_mf[lev]).FillBoundary(geom[lev].periodicity());
-    (*Ma_mf[lev]).FillBoundary(geom[lev].periodicity());
-    
-    //(*KE_vol_mf[lev]).FillBoundary(geom[lev].periodicity());
-    //(*KE_mas_mf[lev]).FillBoundary(geom[lev].periodicity());
-    //(*UE_vol_mf[lev]).FillBoundary(geom[lev].periodicity());
-    //(*UE_mas_mf[lev]).FillBoundary(geom[lev].periodicity());
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////// ForcedCalc //////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+void
+Hydro2::ForcedCalc(int lev, Set::Scalar dt, const Set::Scalar *DX)
+{
+    BL_PROFILE("Integrator::Hydro2::ForcedCalc");
 
+    amrex::Box domain = geom[lev].Domain();
 
-    (*velocity_mf[lev]).FillBoundary(geom[lev].periodicity());
-    (*pressure_mf[lev]).FillBoundary(geom[lev].periodicity());
-
-    // Not adding to yet so we can leave these our
-    //Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
-    //Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
-    //Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
-    //Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
-    //Set::Patch<Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
-    //Set::Patch<Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
-    
-
-    (*tau_xx_mf[lev]).FillBoundary(geom[lev].periodicity());
-    (*tau_xy_mf[lev]).FillBoundary(geom[lev].periodicity());
-    (*tau_yy_mf[lev]).FillBoundary(geom[lev].periodicity());
-    */
-
-    // Ensure all MPI ranks complete
-    amrex::Gpu::synchronize();
-    amrex::ParallelDescriptor::Barrier();
-
-
-    // Main time integration loop
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
-        // PRIMARY FLUIDS
-        // FLUID 0
-        Set::Patch<const Set::Scalar> v0 = velocity0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> p0 = pressure0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> rho0 = density0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> rho0_old = density0_old_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> M0 = momentum0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> M0_old = momentum0_old_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> E0 = energy0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> E0_old = energy0_old_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> T0 = T0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> cp0 = cp0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> cv0 = cv0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> k0_thermal = k0_thermal_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> h0_thermal = h0_thermal_mf.Patch(lev, mfi);
-        // FLUID 1
-        Set::Patch<const Set::Scalar> v1 = velocity1_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> p1 = pressure1_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> rho1 = density1_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> rho1_old = density1_old_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> M1 = momentum1_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> M1_old = momentum1_old_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> E1 = energy1_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> E1_old = energy1_old_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> T1 = T1_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> cp1 = cp1_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> cv1 = cv1_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> k1_thermal = k1_thermal_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> h1_thermal = h1_thermal_mf.Patch(lev, mfi);
-
 
         // MIXTURE
         Set::Patch<const Set::Scalar> rho = density_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> E_vol = energy_per_vol_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> E_mas = energy_per_mas_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> M = momentum_old_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> rho_new = density_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> E_vol_new = energy_per_vol_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> E_mas_new = energy_per_mas_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> M_new = momentum_mf.Patch(lev, mfi);
 
         // SOURCES
-        Set::Patch<Set::Scalar> omega = vorticity_mf.Patch(lev, mfi);
-
         Set::Patch<const Set::Scalar> eta = eta_old_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> eta_new = eta_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> v = velocity_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> press = pressure_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> a = a_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> Ma = Ma_mf.Patch(lev, mfi);
-
         Set::Patch<const Set::Scalar> m0 = m0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> q0 = q_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> _u0 = u0_mf.Patch(lev, mfi);
-
         Set::Patch<Set::Scalar> T = T_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
@@ -1133,7 +1061,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
-
         Set::Patch<Set::Scalar> Source = Source_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fsv = Fsv_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fb = Fb_mf.Patch(lev, mfi);
@@ -1143,45 +1070,36 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> tau_yy = tau_yy_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> Ldot_ = Ldot_mf.Patch(lev, mfi);
 
-
         // DEBUGGING PLOTS
         Set::Patch<const Set::Scalar> grad_eta_ = grad_eta_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> hess_eta_ = hess_eta_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> n_hat_ = n_hat_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> grad_mag_grad_eta_ = grad_mag_grad_eta_mf.Patch(lev, mfi);
-
-        Set::Patch<Set::Scalar> rho_flux = rho_flux_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> M_flux = M_flux_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> E_flux = E_flux_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
 
-        Set::Scalar *dt_max_handle = &dt_max;
-
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
-            
+
             // Diffuse Sources
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
             Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
             Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
-
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
             Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
 
             // Extract velocity from momentum and density
             Set::Vector u = Set::Vector(v(i, j, k, 0), v(i, j, k, 1));
             Set::Vector u0 = Set::Vector(_u0(i, j, k, 0), _u0(i, j, k, 1));
-
             Set::Matrix gradM = Numeric::Gradient(M, i, j, k, DX);
             Set::Vector gradrho = Numeric::Gradient(rho, i, j, k, 0, DX);
             Set::Matrix hess_rho = Numeric::Hessian(rho, i, j, k, 0, DX, sten);
             Set::Matrix gradu = (gradM - u * gradrho.transpose()) / (rho(i, j, k));
-
             Set::Vector q0_ = Set::Vector(q0(i, j, k, 0), q0(i, j, k, 1));
 
             /// Calculate Source Terms
+
             // Shear:
             Set::Scalar mdot0 = -m0(i, j, k) * grad_eta_mag;
             Set::Vector Pdot0 = Set::Vector::Zero();
@@ -1189,7 +1107,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             Set::Matrix3 hess_M = Numeric::Hessian(M, i, j, k, DX);
             Set::Matrix3 hess_u = Set::Matrix3::Zero();
-
             Set::Scalar inv_rho = 1.0 / (rho(i, j, k));
             Set::Scalar inv_rho2 = inv_rho * inv_rho;
             Set::Scalar inv_rho3 = inv_rho2 * inv_rho;
@@ -1199,21 +1116,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     for (int q = 0; q < 2; ++q)
                     {
                         hess_u(r, p, q) = inv_rho * hess_M(r, p, q)
-                                          - inv_rho2 * (gradM(r, p) * gradrho(q) 
-                                          + gradM(r, q) * gradrho(p) 
-                                          + M(i, j, k, r) * hess_rho(p, q))
+                                          - inv_rho2 * (gradM(r, p) * gradrho(q) + gradM(r, q) * gradrho(p) + M(i, j, k, r) * hess_rho(p, q))
                                           + 2.0 * inv_rho3 * M(i, j, k, r) * gradrho(p) * gradrho(q);
                     }
-            /*
-            for (int p = 0; p < 2; p++)
-                for (int q = 0; q < 2; q++)
-                    for (int r = 0; r < 2; r++)
-                    {
-                        hess_u(r, p, q) = (hess_M(r, p, q) - gradu(r, q) * gradrho(p) - gradu(r, p) * gradrho(q) - u(r) * hess_rho(p, q))
-                                          / (rho(i, j, k));
-                    }
-            */
-            // WIP: Debugging feild for hess_u
+
+            // WIP: Debugging field for hess_u
             hess_u_(i, j, k, 0) = hess_u(0, 0, 0);
             hess_u_(i, j, k, 1) = hess_u(0, 0, 1);
             hess_u_(i, j, k, 2) = hess_u(0, 1, 0);
@@ -1223,129 +1130,54 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             hess_u_(i, j, k, 6) = hess_u(1, 1, 0);
             hess_u_(i, j, k, 7) = hess_u(1, 1, 1);
 
-          
-           
-
             // ------------------------------------------------------------
             // Divergence of Stress
             // ------------------------------------------------------------
             Set::Matrix grad_tau_xx = Numeric::Gradient(tau_xx, i, j, k, DX);
-            Set::Matrix grad_tau_xy = Numeric::Gradient(tau_xx, i, j, k, DX);
+            Set::Matrix grad_tau_xy = Numeric::Gradient(tau_xy, i, j, k, DX);
             Set::Matrix grad_tau_yy = Numeric::Gradient(tau_yy, i, j, k, DX);
-            
+
             Set::Vector div_tau = Set::Vector::Zero();
-            /*
-            for (int p = 0; p < 2; ++p)
-                for (int q = 0; q < 2; ++q)
-                {
-                    div_tau(p) += grad_tau(p, q, q);
-                }
-            */
+
             // Component 0 (x-direction)
             div_tau(0) = grad_tau_xx(0, 0) + grad_tau_xy(0, 1);
             // Component 1 (y-direction)
             div_tau(1) = grad_tau_xy(1, 0) + grad_tau_yy(1, 1);
-                    
+
             Set::Vector Ldot = Set::Vector(Ldot_(i, j, k, 0), Ldot_(i, j, k, 1));
-            
+
             // DEBUG Tool
             if ((Ldot_(i, j, k, 0) != Ldot_(i, j, k, 0))
                 or (Ldot_(i, j, k, 1) != Ldot_(i, j, k, 1))
                 or (div_tau(0) != div_tau(0))
-                or (div_tau(1) != div_tau(1)) )
+                or (div_tau(1) != div_tau(1)))
             {
                 Util::ParallelMessage(INFO, "------------------------------------------------------------");
                 Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Viscosity solving:");
                 Util::ParallelMessage(INFO, "lev=", lev);
                 Util::ParallelMessage(INFO, "i=", i, "j=", j);
                 Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
-
                 Util::ParallelMessage(INFO, "Ldot=", Ldot_(i, j, k, 0), ", ", Ldot_(i, j, k, 1));
                 Util::ParallelMessage(INFO, "tau_xx=", tau_xx(i, j, k));
                 Util::ParallelMessage(INFO, "tau_xy=", tau_xy(i, j, k));
                 Util::ParallelMessage(INFO, "tau_yy=", tau_yy(i, j, k));
-
                 Util::ParallelMessage(INFO, "grad_tau_xx=", grad_tau_xx(0, 0), ", ", grad_tau_xx(0, 1), "; ", grad_tau_xx(1, 0), ", ", grad_tau_xx(1, 1));
                 Util::ParallelMessage(INFO, "grad_tau_xy=", grad_tau_xy(0, 0), ", ", grad_tau_xy(0, 1), "; ", grad_tau_xy(1, 0), ", ", grad_tau_xy(1, 1));
                 Util::ParallelMessage(INFO, "grad_tau_yy=", grad_tau_yy(0, 0), ", ", grad_tau_yy(0, 1), "; ", grad_tau_yy(1, 0), ", ", grad_tau_yy(1, 1));
-
                 Util::ParallelMessage(INFO, "div_tau=", div_tau(0), ", ", div_tau(1));
-
-
                 Util::Exception(INFO);
             }
 
-            /*
-            // ------------------------------------------------------------
-            // Explicit 4th-order viscosity tensor contraction
-            // ------------------------------------------------------------
-            for (int p = 0; p < 2; ++p)             // output index
-                for (int q = 0; q < 2; ++q)         // divergence index
-                    for (int r = 0; r < 2; ++r)     // velocity component
-                        for (int s = 0; s < 2; ++s) // derivative direction
-                        {
-                            // 4D isotropic Newtonian viscosity tensor
-                            Set::Scalar Mpqrs = mu_eff * ((p == r && q == s) + (p == s && q == r))
-                                                + mu_b_eff * (p == q && r == s);
-
-                            div_tau(p) += Mpqrs * hess_u(r, s, q);
-                        }
-
-            // ------------------------------------------------------------
-            // Ldot term: viscosity-gradient coupling
-            // ------------------------------------------------------------
-            for (int p = 0; p < 2; ++p)
-                for (int q = 0; q < 2; ++q)
-                {
-                    Ldot0(p) += 0.0;  // grad_mu(q) * (gradu(p, q) + gradu(q, p));
-                }
-            */
-
-            /*
-            for (int p = 0; p < 2; p++)             // Dimension Component
-                for (int q = 0; q < 2; q++)         // Dimension Component
-                    for (int r = 0; r < 2; r++)     // X
-                        for (int s = 0; s < 2; s++) // Y
-                        {
-                            Set::Scalar Mpqrs = 0.0;
-
-                            // Newtonian fluid terms (shear viscosity)
-                            if (p == r && q == s)
-                                Mpqrs += 0.5 * mu_eff;
-                            if (p == s && q == r)
-                                Mpqrs += 0.5 * mu_eff;
-
-                            // Bulk viscosity
-                            if (p == q && r == s)
-                                Mpqrs += (1.0 / 3.0) * mu_b_eff;
-
-                            Ldot0(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
-                            div_tau(p) += 2.0 * Mpqrs * hess_u(r, s, q);
-                        }
-            // NEW Formulation of div_tau
-            // Calculate gradient of divergence
-            Set::Vector grad_div_u = Set::Vector::Zero();
-            grad_div_u[0] = hess_u(0, 0, 0) + hess_u(1, 0, 1);
-            grad_div_u[1] = hess_u(0, 1, 0) + hess_u(1, 1, 1);
-            
-            // Calculate div_tau
-            //div_tau(0) = mu_eff * (hess_u(0, 0, 0) + hess_u(0, 1, 1) + (1.0 / 3.0) * grad_div_u[0]);
-            //div_tau(1) = mu_eff * (hess_u(1, 0, 0) + hess_u(1, 1, 1) + (1.0 / 3.0) * grad_div_u[1]);
-            // Add bulk viscosity contribution
-            div_tau(0) += mu_b_eff * grad_div_u(0);
-            div_tau(1) += mu_b_eff * grad_div_u(1);
-
-            */
-            // Debugging feild for div_tau
+            // Debugging field for div_tau
             div_tau_(i, j, k, 0) = div_tau(0);
             div_tau_(i, j, k, 1) = div_tau(1);
 
             // Curvature
             Set::Scalar kappa = kappas(i, j, k, 0);
             Set::Vector grad_mag_grad_eta = Set::Vector(grad_mag_grad_eta_(i, j, k, 0), grad_mag_grad_eta_(i, j, k, 1));
-            
+
             // Surface Tension:
-            // Fsv =  simga * kappa * n_hat
+            // Fsv = sigma * kappa * n_hat
             Fsv(i, j, k) = (0.0, 0.0);
             Set::Vector Fsv_vector = Set::Vector(0.0, 0.0);
             if (apply_surface_tension)
@@ -1355,10 +1187,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 {
                     Set::Scalar sigma_eff = sigma;
                     Set::Scalar alpha = 6 * std::sqrt(2);
-                    Set::Scalar UFFDA = epsilon * alpha * grad_eta_mag * grad_eta_mag; 
-                    Fsv(i, j, k, 0) = sigma_eff * kappa * n_hat(0) * UFFDA; // / (grad_eta_mag + small)); // / (DX[0] + small);
-                    Fsv(i, j, k, 1) = sigma_eff * kappa * n_hat(1) * UFFDA; // / (grad_eta_mag + small)); // / (DX[1] + small);
-
+                    Set::Scalar UFFDA = epsilon * alpha * grad_eta_mag * grad_eta_mag;
+                    Fsv(i, j, k, 0) = sigma_eff * kappa * n_hat(0) * UFFDA;
+                    Fsv(i, j, k, 1) = sigma_eff * kappa * n_hat(1) * UFFDA;
                 }
                 Fsv_vector = Set::Vector(Fsv(i, j, k, 0), Fsv(i, j, k, 1));
             }
@@ -1370,7 +1201,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 Fw(i, j, k, 0) = 0.0;
                 Fw(i, j, k, 1) = -rho(i, j, k) * g;
-                Fw_vector = Set::Vector(Fw(i, j, k, 0), Fw(i, j, k, 1)); // or multiply by cell area if needed
+                Fw_vector = Set::Vector(Fw(i, j, k, 0), Fw(i, j, k, 1));
             }
 
             // Buoyancy:
@@ -1388,11 +1219,130 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Source(i, j, k, 0) = mdot0;
             Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0);
             Source(i, j, k, 2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1);
-            Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force); //
+            Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force);
 
-           // Lagrange terms to enforce no-penetration
+            // Lagrange terms to enforce no-penetration
             Source(i, j, k, 1) -= lagrange * u.dot(grad_eta) * grad_eta(0);
             Source(i, j, k, 2) -= lagrange * u.dot(grad_eta) * grad_eta(1);
+        });
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////// RiemannFlux /////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+void
+Hydro2::RiemannFlux(int lev, Set::Scalar time, Set::Scalar dt, const Set::Scalar *DX, Set::Scalar &dt_max)
+{
+    BL_PROFILE("Integrator::Hydro2::RiemannFlux");
+
+    amrex::Box domain = geom[lev].Domain();
+
+    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
+
+        // PRIMARY FLUIDS
+        // FLUID 0
+        Set::Patch<const Set::Scalar> v0 = velocity0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> p0 = pressure0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> rho0 = density0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> rho0_old = density0_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> M0 = momentum0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> M0_old = momentum0_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> E0 = energy0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> E0_old = energy0_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> T0 = T0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> cp0 = cp0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> cv0 = cv0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> k0_thermal = k0_thermal_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> h0_thermal = h0_thermal_mf.Patch(lev, mfi);
+
+        // FLUID 1
+        Set::Patch<const Set::Scalar> v1 = velocity1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> p1 = pressure1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> rho1 = density1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> rho1_old = density1_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> M1 = momentum1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> M1_old = momentum1_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> E1 = energy1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> E1_old = energy1_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> T1 = T1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> cp1 = cp1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> cv1 = cv1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> k1_thermal = k1_thermal_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> h1_thermal = h1_thermal_mf.Patch(lev, mfi);
+
+        // MIXTURE
+        Set::Patch<const Set::Scalar> rho = density_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> E_vol = energy_per_vol_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> E_mas = energy_per_mas_old_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> M = momentum_old_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> rho_new = density_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> E_vol_new = energy_per_vol_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> E_mas_new = energy_per_mas_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> M_new = momentum_mf.Patch(lev, mfi);
+
+        // SOURCES
+        Set::Patch<Set::Scalar> omega = vorticity_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> eta = eta_old_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> eta_new = eta_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> v = velocity_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> press = pressure_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> a = a_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> Ma = Ma_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> m0 = m0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> q0 = q_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> _u0 = u0_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> T = T_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> Source = Source_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> Fsv = Fsv_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> Fb = Fb_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> Fw = Fw_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> tau_xx = tau_xx_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> tau_xy = tau_xy_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> tau_yy = tau_yy_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> Ldot_ = Ldot_mf.Patch(lev, mfi);
+
+        // DEBUGGING PLOTS
+        Set::Patch<const Set::Scalar> grad_eta_ = grad_eta_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> hess_eta_ = hess_eta_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> n_hat_ = n_hat_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> grad_mag_grad_eta_ = grad_mag_grad_eta_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> rho_flux = rho_flux_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> M_flux = M_flux_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> E_flux = E_flux_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
+
+        Set::Scalar *dt_max_handle = &dt_max;
+
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            auto sten = Numeric::GetStencil(i, j, k, domain);
+
+            // Diffuse Sources
+            Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
+            Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
+            Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
+            Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
+            Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
+
+            // Extract velocity from momentum and density
+            Set::Vector u = Set::Vector(v(i, j, k, 0), v(i, j, k, 1));
+            Set::Vector u0 = Set::Vector(_u0(i, j, k, 0), _u0(i, j, k, 1));
+            Set::Matrix gradM = Numeric::Gradient(M, i, j, k, DX);
+            Set::Vector gradrho = Numeric::Gradient(rho, i, j, k, 0, DX);
+            Set::Matrix hess_rho = Numeric::Hessian(rho, i, j, k, 0, DX, sten);
+            Set::Matrix gradu = (gradM - u * gradrho.transpose()) / (rho(i, j, k));
 
             // Riemann solver for mixed fluid
             const int X = 0, Y = 1;
@@ -1402,13 +1352,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             std::vector<Solver::Local::FluidRiemann::State> y_states(3);
 
             // Fill the arrays with cell states
-            x_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i - 1, j, k, X);      // x_lo
-            x_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j, k, X);          // x
-            x_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i + 1, j, k, X);      // x_hi
-
-            y_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j - 1, k, Y);      // y_lo
-            y_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j, k, Y);          // y
-            y_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j + 1, k, Y);      // y_hi
+            x_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i - 1, j, k, X); // x_lo
+            x_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j, k, X);     // x
+            x_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i + 1, j, k, X); // x_hi
+            y_states[0] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j - 1, k, Y); // y_lo
+            y_states[1] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j, k, Y);     // y
+            y_states[2] = Solver::Local::FluidRiemann::State(rho, M, E_vol, gammaf, p0_eff, T, i, j + 1, k, Y); // y_hi
 
             // Variables to store reconstructed states at interfaces
             std::vector<Solver::Local::FluidRiemann::State> x_leftStates(3), x_rightStates(3);
@@ -1417,11 +1366,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             if (Limiter == 0)
             {
                 // No limiter - use cell-centered values directly
-                //x_leftStates.resize(3);
-                //x_rightStates.resize(3);
-                //y_leftStates.resize(3);
-                //y_rightStates.resize(3);
-
                 // For x-direction
                 x_leftStates[1] = x_states[0];  // i-1/2
                 x_rightStates[1] = x_states[1]; // i
@@ -1437,14 +1381,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             else if (Limiter == 1)
             {
                 // Minmod limiter
-                //limiter_minmod->reconstructCharacteristicStates(x_states, x_leftStates, x_rightStates, pref, small);
-                //limiter_minmod->reconstructCharacteristicStates(y_states, y_leftStates, y_rightStates, pref, small);
+                // limiter_minmod->reconstructCharacteristicStates(x_states, x_leftStates, x_rightStates, pref, small);
+                // limiter_minmod->reconstructCharacteristicStates(y_states, y_leftStates, y_rightStates, pref, small);
             }
             else if (Limiter == 2)
             {
                 // Van Leer limiter
-                //limiter_vanleer->reconstructCharacteristicStates(x_states, x_leftStates, x_rightStates, pref, small);
-                //limiter_vanleer->reconstructCharacteristicStates(y_states, y_leftStates, y_rightStates, pref, small);
+                // limiter_vanleer->reconstructCharacteristicStates(x_states, x_leftStates, x_rightStates, pref, small);
+                // limiter_vanleer->reconstructCharacteristicStates(y_states, y_leftStates, y_rightStates, pref, small);
             }
 
             // Calculate fluxes using the mixed fluid approach
@@ -1479,10 +1423,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 else if (Riemann_Solver == 3)
                 {
                     // Calculate fluxes for the mixed fluid using HLLCE
-                    //flux_xlo = hllcesolver->Solve(x_leftStates[1], x_rightStates[1], pref, small);
-                    //flux_ylo = hllcesolver->Solve(y_leftStates[1], y_rightStates[1], pref, small);
-                    //flux_xhi = hllcesolver->Solve(x_leftStates[2], x_rightStates[2], pref, small);
-                    //flux_yhi = hllcesolver->Solve(y_leftStates[2], y_rightStates[2], pref, small);
+                    // flux_xlo = hllcesolver->Solve(x_leftStates[1], x_rightStates[1], pref, small);
+                    // flux_ylo = hllcesolver->Solve(y_leftStates[1], y_rightStates[1], pref, small);
+                    // flux_xhi = hllcesolver->Solve(x_leftStates[2], x_rightStates[2], pref, small);
+                    // flux_yhi = hllcesolver->Solve(y_leftStates[2], y_rightStates[2], pref, small);
                 }
                 else if (Riemann_Solver == 35)
                 {
@@ -1497,14 +1441,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 else if (Riemann_Solver == 36)
                 {
                     // Calculate fluxes for the mixed fluid using PPM
-                    //flux_xlo = partiallyparabolicsolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[0]);
-                    //flux_ylo = partiallyparabolicsolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[1]);
-                    //flux_xhi = partiallyparabolicsolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[0]);
-                    //flux_yhi = partiallyparabolicsolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[1]);
+                    // flux_xlo = partiallyparabolicsolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[0]);
+                    // flux_ylo = partiallyparabolicsolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[1]);
+                    // flux_xhi = partiallyparabolicsolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[0]);
+                    // flux_yhi = partiallyparabolicsolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[1]);
                 }
                 else if (Riemann_Solver == 37)
                 {
-                    // Calculate fluxes for the mixed fluid using PPM
+                    // Calculate fluxes for the mixed fluid using HLLC All Mach
                     flux_xlo = hllc_All_Machsolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
                     flux_ylo = hllc_All_Machsolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
                     flux_xhi = hllc_All_Machsolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
@@ -1512,7 +1456,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 }
                 else if (Riemann_Solver == 38)
                 {
-                    // Calculate fluxes for the mixed fluid using PPM
+                    // Calculate fluxes for the mixed fluid using HLLC All Mach Furfaro
                     flux_xlo = hllc_All_Mach_Furfarosolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
                     flux_ylo = hllc_All_Mach_Furfarosolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
                     flux_xhi = hllc_All_Mach_Furfarosolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
@@ -1527,15 +1471,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::Abort(INFO);
             }
 
-
             // UPDATE MIXED FLUID VARIABLES
-
-            // Update Source Terms to account for moving boundry
-            // Delete me if does not worky :(
-            // Source(i, j, k, 0) = Source(i, j, k, 0) - rho(i, j, k) * deta_dt;
-            // Source(i, j, k, 1) = Source(i, j, k, 1) - M(i, j, k, 0) * deta_dt;
-            // Source(i, j, k, 2) = Source(i, j, k, 2) - M(i, j, k, 1) * deta_dt;
-            // Source(i, j, k, 3) = Source(i, j, k, 3) - E_vol(i, j, k) * deta_dt;
 
             // DEBUGGING:
             rho_flux(i, j, k) = (flux_xlo.mass - flux_xhi.mass) / (DX[0]) + (flux_ylo.mass - flux_yhi.mass) / (DX[1]);
@@ -1549,10 +1485,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             rho_new(i, j, k) = std::max(rho_new(i, j, k), small);
 
             // Momentum
-            Set::Scalar dMx_dt = M_flux(i, j, k, 0) + Source(i, j, k, 1); //(mu * (lap_ux * eta(i, j, k))) +           
+            Set::Scalar dMx_dt = M_flux(i, j, k, 0) + Source(i, j, k, 1);
             M_new(i, j, k, 0) = M(i, j, k, 0) + dMx_dt * dt;
 
-            Set::Scalar dMy_dt = M_flux(i, j, k, 1) + Source(i, j, k, 2); //(mu * (lap_uy * eta(i, j, k))) +
+            Set::Scalar dMy_dt = M_flux(i, j, k, 1) + Source(i, j, k, 2);
             M_new(i, j, k, 1) = M(i, j, k, 1) + dMy_dt * dt;
 
             // Energy
@@ -1567,12 +1503,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 E_mas_new(i, j, k) = E_mas(i, j, k) + dE_dt * dt;
                 E_vol_new(i, j, k) = E_mas_new(i, j, k) * (rho(i, j, k));
             }
-           
-            
+
             /// Eta:
-            //Set::Scalar Mob = 0.01 * DX[0] * DX[0]; // OLD METHOD: Diffusion does absolutely nothing
-            //Set::Scalar Mob = 0.1 * epsilon * DX[0]; // What AI recommends but its very dumb
-            Set::Scalar Mob = a(i,j,k) * 0.7*DX[0]; // Mob = u_max * epsilon,  (epsilon = 0.7*DX) Chiu & Lin (2011)
+            Set::Scalar Mob = a(i, j, k) * 0.7 * DX[0]; // Mob = u_max * epsilon, (epsilon = 0.7*DX) Chiu & Lin (2011)
 
             // Laplacian of Chemical Potential (conservative form)
             Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
@@ -1583,13 +1516,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Cahn-Hillard equation: d(eta)/dt = -u·grad(eta) + Mob * laplacian(mu)
             Set::Scalar advection = -u_new.dot(grad_eta);
-            // Set::Scalar diffusion = Mob * lap_mu_chem;
-            Set::Scalar phi = eta(i, j, k); // Dummy Variable bc it gets UGGGLLLYYYYY
-            Set::Scalar diffusion = 0.0; // Mob * ( lap_eta - ((phi * (1.0-phi) * (1.0-2.0*phi)) / (epsilon*epsilon + small)) - (grad_eta_mag * kappa) ); // Chiu & Lin (2011) URL: https://www.sciencedirect.com/science/article/pii/S0021999110005243
+            Set::Scalar phi = eta(i, j, k); // Dummy Variable bc it gets UGLY
+            Set::Scalar diffusion = 0.0;    // Mob * ( lap_eta - ((phi * (1.0-phi) * (1.0-2.0*phi)) / (epsilon*epsilon + small)) - (grad_eta_mag * kappa) ); // Chiu & Lin (2011)
+
             Set::Scalar deta_dt = advection + diffusion;
 
             // Spalding Evaporization
-            if (apply_vaporization == 1) {
+            if (apply_vaporization == 1)
+            {
                 deta_dt = deta_dt + (1.0 / (rho(i, j, k) * epsilon)) * (rho0(i, j, k) * Dv * (Bm(i, j, k) / (1.0 + Bm(i, j, k) + small)) * grad_eta_mag);
             }
 
@@ -1609,7 +1543,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     eta_new(i, j, k) = 1.0;
                 }
             }
-            
 
             // ERROR CHECKING
             if ((rho_new(i, j, k) != rho_new(i, j, k))
@@ -1623,18 +1556,18 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::ParallelMessage(INFO, "time=", time);
                 Util::ParallelMessage(INFO, "lev=", lev);
                 Util::ParallelMessage(INFO, "i=", i, ", j=", j);
-                Util::ParallelMessage(INFO, "drho_dt=", drho_dt); // dies
+                Util::ParallelMessage(INFO, "drho_dt=", drho_dt);
                 Util::ParallelMessage(INFO, "flux_xlo.mass=", flux_xlo.mass);
                 Util::ParallelMessage(INFO, "flux_xhi.mass=", flux_xhi.mass);
                 Util::ParallelMessage(INFO, "flux_ylo.mass=", flux_ylo.mass);
                 Util::ParallelMessage(INFO, "flux_yhi.mass=", flux_yhi.mass);
                 Util::ParallelMessage(INFO, "Source=", Source(i, j, k, 0), ", ", Source(i, j, k, 1), ", ", Source(i, j, k, 2), ", ", Source(i, j, k, 3));
-                Util::ParallelMessage(INFO, "x_states[1] ", x_states[1]);           // Center cell in x-direction
-                Util::ParallelMessage(INFO, "y_states[1] ", y_states[1]);           // Center cell in y-direction
-                Util::ParallelMessage(INFO, "x_rightStates[2] ", x_rightStates[2]); // Right interface in x-direction
-                Util::ParallelMessage(INFO, "y_rightStates[2] ", y_rightStates[2]); // Right interface in y-direction
-                Util::ParallelMessage(INFO, "x_rightStates[1] ", x_rightStates[1]); // Left interface in x-direction
-                Util::ParallelMessage(INFO, "y_rightStates[1] ", y_rightStates[1]); // Left interface in y-direction
+                Util::ParallelMessage(INFO, "x_states[1] ", x_states[1]);
+                Util::ParallelMessage(INFO, "y_states[1] ", y_states[1]);
+                Util::ParallelMessage(INFO, "x_rightStates[2] ", x_rightStates[2]);
+                Util::ParallelMessage(INFO, "y_rightStates[2] ", y_rightStates[2]);
+                Util::ParallelMessage(INFO, "x_rightStates[1] ", x_rightStates[1]);
+                Util::ParallelMessage(INFO, "y_rightStates[1] ", y_rightStates[1]);
                 Util::ParallelMessage(INFO, "gamma_eff=", gammaf(i, j, k));
                 Util::ParallelMessage(INFO, "rho=", rho_new(i, j, k));
                 Util::ParallelMessage(INFO, "M=", M_new(i, j, k, 0), ", ", M_new(i, j, k, 1));
@@ -1651,15 +1584,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::ParallelMessage(INFO, "M = ", M(i, j, k, 0), ", ", M(i, j, k, 1));
                 Util::ParallelMessage(INFO, "E_vol = ", E_vol(i, j, k));
                 Util::ParallelMessage(INFO, "press = ", press(i, j, k));
-
-                // Check flux calculation
                 Util::ParallelMessage(INFO, "flux_xlo.mass = ", flux_xlo.mass);
                 Util::ParallelMessage(INFO, "flux_xhi.mass = ", flux_xhi.mass);
                 Util::ParallelMessage(INFO, "flux_xlo.momentum_normal = ", flux_xlo.momentum_normal);
                 Util::ParallelMessage(INFO, "flux_xhi.momentum_normal = ", flux_xhi.momentum_normal);
                 Util::ParallelMessage(INFO, "flux_xlo.energy = ", flux_xlo.energy);
                 Util::ParallelMessage(INFO, "flux_xhi.energy = ", flux_xhi.energy);
-
                 Util::ParallelMessage(INFO, "drho_dt = ", drho_dt);
                 Util::ParallelMessage(INFO, "dMx_dt = ", dMx_dt);
                 Util::ParallelMessage(INFO, "dE_dt = ", dE_dt);
@@ -1683,15 +1613,16 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar sound_speed_new = std::sqrt(gamma_eff_new * (press_new + p0_eff_new) / (rho_new(i, j, k)));
 
             c_max = std::max(c_max, sound_speed_new);
-            vx_max = std::max(vx_max, std::abs(v_new(0))); // vx
-            vy_max = std::max(vy_max, std::abs(v_new(1))); // vy
+            vx_max = std::max(vx_max, std::abs(v_new(0)));
+            vy_max = std::max(vy_max, std::abs(v_new(1)));
 
-            // Track maximum force magnitude (not acceleration yet)
+            // Track maximum force magnitude
             Set::Scalar F_mag = std::sqrt(Source(i, j, k, 1) * Source(i, j, k, 1) + Source(i, j, k, 2) * Source(i, j, k, 2));
             F_max = std::max(F_max, F_mag);
             rho_min = std::min(rho_min, rho_new(i, j, k));
         });
     }
+
     // Update adaptive timestep
     // Reduce maximums across all processors (if parallel)
     amrex::ParallelDescriptor::ReduceRealMax(c_max);
@@ -1701,9 +1632,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     amrex::ParallelDescriptor::ReduceRealMin(rho_min);
 
     // Compute timestep constraints
-    Set::Scalar dx_min = std::min(DX[0], DX[1]); // / 4.0;
+    Set::Scalar dx_min = std::min(DX[0], DX[1]);
 
-    // 1. Acoustic CFL 
+    // 1. Acoustic CFL
     Set::Scalar wave_speed = c_max + std::sqrt(vx_max * vx_max + vy_max * vy_max);
     Set::Scalar dt_acoustic = cfl * dx_min / (wave_speed + small);
 
@@ -1713,7 +1644,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
     // 3. Force CFL
     Set::Scalar a_max = F_max / rho_min; // Maximum acceleration
-    Set::Scalar dt_force = cfl_v * std::sqrt(dx_min / a_max);
+    Set::Scalar dt_force = cfl_v * std::sqrt(dx_min / (a_max + small));
 
     // 4. Allen-Cahn diffusion CFL
     Set::Scalar Mob = 0.01 * dx_min * dx_min;
@@ -1744,15 +1675,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Util::ParallelMessage(INFO, "Final dt_max: ", dt_max, " s");
         Util::ParallelMessage(INFO, "================================\n");
     }
-    if (dynamictimestep.on)
-    {
-        this->DynamicTimestep_SyncTimeStep(lev, dt_max);
-    }
-
-    amrex::Gpu::synchronize();
-    amrex::ParallelDescriptor::Barrier();
 }
-
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////// REGRIDDING //////////////////////////////////////////////
