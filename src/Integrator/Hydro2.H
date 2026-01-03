@@ -100,23 +100,24 @@ protected:
     void TimeStepBegin(Set::Scalar a_time, int a_iter) override;
     void TimeStepComplete(Set::Scalar time, int lev) override;
     void Advance(int lev, Set::Scalar time, Set::Scalar dt) override;
-    void PrimitiveFieldCalc(int lev, Set::Scalar dt, const Set::Scalar *DX);
-    void NaturalCalc(int lev, Set::Scalar dt, const Set::Scalar *DX);
-    void ForcedCalc(int lev, Set::Scalar dt, const Set::Scalar *DX);
-    void RiemannFlux(int lev, Set::Scalar time, Set::Scalar dt, const Set::Scalar *DX, Set::Scalar &dt_max);
+    void PrimitiveFieldCalc(int lev, Set::Scalar dt, const Set::Scalar *DX, bool use_stage);
+    void NaturalCalc(int lev, Set::Scalar dt, const Set::Scalar *DX, bool use_stage);
+    void ForcedCalc(int lev, Set::Scalar dt, const Set::Scalar *DX, bool use_stage);
+    void RiemannFlux(int lev, Set::Scalar time, Set::Scalar dt, const Set::Scalar *DX, amrex::MultiFab *drho_dt_mf, amrex::MultiFab *dM_dt_mf, amrex::MultiFab *dE_dt_mf, amrex::MultiFab *deta_dt_mf, Set::Scalar &dt_max, bool use_stage);
 
     void TagCellsForRefinement(int lev, amrex::TagBoxArray& tags, amrex::Real /*time*/, int /*ngrow*/) override;
     void Regrid(int lev, Set::Scalar time) override;
-    void RHS(int lev, 
-        Set::Scalar time, 
-        amrex::MultiFab &rho_rhs_mf, 
-        amrex::MultiFab &M_rhs_mf, 
-        amrex::MultiFab &E_rhs_mf, 
-        amrex::MultiFab &eta_rhs_mf, 
-        const amrex::MultiFab &rho_mf, 
-        const amrex::MultiFab &M_mf, 
-        const amrex::MultiFab &E_mf, 
-        const amrex::MultiFab &eta_mf_in );
+    void RHS(int lev,
+             Set::Scalar time,
+             Set::Scalar dt,
+             const Set::Scalar *DX,
+             amrex::MultiFab &drho_dt_mf,
+             amrex::MultiFab &dM_dt_mf,
+             amrex::MultiFab &dE_dt_mf,
+             amrex::MultiFab &deta_dt_mf,
+             Set::Scalar &dt_max,
+             bool use_stage);
+
 
 
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
@@ -190,6 +191,73 @@ private:
     Set::Field<Set::Scalar> UE_per_mas_mf;  // Internal Energy (per unit mass)
     Set::Field<Set::Scalar> KE_per_vol_mf;  // Kinetic Energy (per unit volume)
     Set::Field<Set::Scalar> KE_per_mas_mf;  // Kinetic Energy (per unit mass)
+
+
+
+
+    // Stage storage for RK schemes
+    Set::Field<Set::Scalar> density_stage_mf;
+    Set::Field<Set::Scalar> momentum_stage_mf;
+    Set::Field<Set::Scalar> energy_per_vol_stage_mf;
+    Set::Field<Set::Scalar> energy_per_mas_stage_mf;
+    Set::Field<Set::Scalar> eta_stage_mf;
+
+    // Stage-specific primitive/derived fields
+    Set::Field<Set::Scalar> velocity_stage_mf;
+    Set::Field<Set::Scalar> pressure_stage_mf;
+    Set::Field<Set::Scalar> gamma_stage_mf;
+    Set::Field<Set::Scalar> p0_stage_mf;
+    Set::Field<Set::Scalar> a_stage_mf;
+    Set::Field<Set::Scalar> Ma_stage_mf;
+    Set::Field<Set::Scalar> mu_chem_stage_mf;
+    Set::Field<Set::Scalar> Bm_stage_mf;
+    Set::Field<Set::Scalar> T_stage_mf;
+    Set::Field<Set::Scalar> cp_stage_mf;
+    Set::Field<Set::Scalar> cv_stage_mf;
+    Set::Field<Set::Scalar> k_thermal_stage_mf;
+    Set::Field<Set::Scalar> h_thermal_stage_mf;
+    Set::Field<Set::Scalar> tau_xx_stage_mf;
+    Set::Field<Set::Scalar> tau_xy_stage_mf;
+    Set::Field<Set::Scalar> tau_yy_stage_mf;
+    Set::Field<Set::Scalar> Ldot_stage_mf;
+    Set::Field<Set::Scalar> Source_stage_mf;
+    Set::Field<Set::Scalar> Fsv_stage_mf;
+    Set::Field<Set::Scalar> Fb_stage_mf;
+    Set::Field<Set::Scalar> Fw_stage_mf;
+    Set::Field<Set::Scalar> div_tau_stage_mf;
+    Set::Field<Set::Scalar> hess_u_stage_mf;
+    Set::Field<Set::Scalar> grad_eta_stage_mf;
+    Set::Field<Set::Scalar> hess_eta_stage_mf;
+    Set::Field<Set::Scalar> n_hat_stage_mf;
+    Set::Field<Set::Scalar> kappas_stage_mf;
+    Set::Field<Set::Scalar> grad_mag_grad_eta_stage_mf;
+    Set::Field<Set::Scalar> etadot_stage_mf;
+    Set::Field<Set::Scalar> KE_per_vol_stage_mf;
+    Set::Field<Set::Scalar> KE_per_mas_stage_mf;
+    Set::Field<Set::Scalar> UE_per_vol_stage_mf;
+    Set::Field<Set::Scalar> UE_per_mas_stage_mf;
+
+    // RK stage derivatives (k1, k2, k3, k4)
+    Set::Field<Set::Scalar> k1_rho_mf;
+    Set::Field<Set::Scalar> k1_M_mf;
+    Set::Field<Set::Scalar> k1_E_mf;
+    Set::Field<Set::Scalar> k1_eta_mf;
+
+    Set::Field<Set::Scalar> k2_rho_mf;
+    Set::Field<Set::Scalar> k2_M_mf;
+    Set::Field<Set::Scalar> k2_E_mf;
+    Set::Field<Set::Scalar> k2_eta_mf;
+
+    Set::Field<Set::Scalar> k3_rho_mf;
+    Set::Field<Set::Scalar> k3_M_mf;
+    Set::Field<Set::Scalar> k3_E_mf;
+    Set::Field<Set::Scalar> k3_eta_mf;
+
+    Set::Field<Set::Scalar> k4_rho_mf;
+    Set::Field<Set::Scalar> k4_M_mf;
+    Set::Field<Set::Scalar> k4_E_mf;
+    Set::Field<Set::Scalar> k4_eta_mf;
+
 
 protected:
     Set::Field<Set::Scalar> eta_mf;

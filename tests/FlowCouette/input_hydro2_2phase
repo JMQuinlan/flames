@@ -6,8 +6,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/CouetteFlow/CouetteFlow_2Phase_HLLC
-#plot_file = tests/CouetteFlow/CouetteFlow_2Phase_HLLC
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/CouetteFlow/CouetteFlow_2Phase_HLLC
+plot_file = tests/CouetteFlow/CouetteFlow_2Phase_HLLC
 
 ### MESHING ###
 amr.plot_dt = 1000e-3
@@ -27,7 +27,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-3
 dynamictimestep.min = 1e-12
-cfl = 0.6
+cfl = 0.8
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.01  0.00 0.0 # [ m ]
