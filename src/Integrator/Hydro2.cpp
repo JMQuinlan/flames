@@ -577,8 +577,9 @@ Hydro2::RHS(int lev,
 
     amrex::Box domain = geom[lev].Domain();
 
-    // Create temporary MultiFabs for primitive and derived quantities
+    // Create temporary MultiFabs (NOT Set::Field) for primitive and derived quantities
     int nghost = 4;
+
     amrex::MultiFab velocity_tmp(rho_mf_in.boxArray(), rho_mf_in.DistributionMap(), 2, nghost);
     amrex::MultiFab pressure_tmp(rho_mf_in.boxArray(), rho_mf_in.DistributionMap(), 1, nghost);
     amrex::MultiFab gamma_tmp(rho_mf_in.boxArray(), rho_mf_in.DistributionMap(), 1, nghost);
@@ -614,26 +615,29 @@ Hydro2::RHS(int lev,
     {
         const amrex::Box &bx = mfi.tilebox();
 
+        // Input state using array()
         amrex::Array4<const Set::Scalar> const &rho = rho_mf_in.array(mfi);
         amrex::Array4<const Set::Scalar> const &M = M_mf_in.array(mfi);
         amrex::Array4<const Set::Scalar> const &E_vol = E_mf_in.array(mfi);
         amrex::Array4<const Set::Scalar> const &eta = eta_mf_in.array(mfi);
 
+        // Temporary fields using array()
         amrex::Array4<Set::Scalar> const &v = velocity_tmp.array(mfi);
         amrex::Array4<Set::Scalar> const &press = pressure_tmp.array(mfi);
         amrex::Array4<Set::Scalar> const &gammaf = gamma_tmp.array(mfi);
         amrex::Array4<Set::Scalar> const &p0_eff = p0_eff_tmp.array(mfi);
         amrex::Array4<Set::Scalar> const &a = a_tmp.array(mfi);
         amrex::Array4<Set::Scalar> const &T = T_tmp.array(mfi);
-        amrex::Array4<Set::Scalar> const &grad_eta = grad_eta_tmp.array(mfi);
-        amrex::Array4<Set::Scalar> const &hess_eta = hess_eta_tmp.array(mfi);
-        amrex::Array4<Set::Scalar> const &n_hat = n_hat_tmp.array(mfi);
+        amrex::Array4<Set::Scalar> const &grad_eta_ = grad_eta_tmp.array(mfi);
+        amrex::Array4<Set::Scalar> const &hess_eta_ = hess_eta_tmp.array(mfi);
+        amrex::Array4<Set::Scalar> const &n_hat_ = n_hat_tmp.array(mfi);
         amrex::Array4<Set::Scalar> const &kappa = kappa_tmp.array(mfi);
-        amrex::Array4<Set::Scalar> const &mu_chem = mu_chem_tmp.array(mfi);
+        amrex::Array4<Set::Scalar> const &mu_chem_ = mu_chem_tmp.array(mfi);
 
-        amrex::Array4<const Set::Scalar> const &m0 = (*m0_mf[lev]).array(mfi);
-        amrex::Array4<const Set::Scalar> const &u0 = (*u0_mf[lev]).array(mfi);
-        amrex::Array4<const Set::Scalar> const &q0 = (*q_mf[lev]).array(mfi);
+        // Source terms from member fields
+        Set::Patch<const Set::Scalar> m0 = m0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> u0 = u0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> q0 = q_mf.Patch(lev, mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
@@ -656,46 +660,46 @@ Hydro2::RHS(int lev,
             p0_eff(i, j, k) = (B / A) / gammaf(i, j, k);
             press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE_vol - gammaf(i, j, k) * p0_eff(i, j, k) + pref;
 
-            // Temperature (placeholder - adjust based on your EOS)
+            // Temperature (placeholder - using ideal gas approximation)
             T(i, j, k) = press(i, j, k) / (rho(i, j, k) * R + small);
 
             // Speed of sound
             a(i, j, k) = std::sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) + small));
 
             // Eta gradients and curvature
-            Set::Vector grad_eta_vec = Numeric::Gradient(eta, i, j, k, 0, DX);
-            Set::Scalar grad_eta_mag = grad_eta_vec.lpNorm<2>();
-            Set::Matrix hess_eta_mat = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
+            Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
+            Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
+            Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
 
-            grad_eta(i, j, k, 0) = grad_eta_vec(0);
-            grad_eta(i, j, k, 1) = grad_eta_vec(1);
+            grad_eta_(i, j, k, 0) = grad_eta(0);
+            grad_eta_(i, j, k, 1) = grad_eta(1);
 
-            hess_eta(i, j, k, 0) = hess_eta_mat(0, 0);
-            hess_eta(i, j, k, 1) = hess_eta_mat(0, 1);
-            hess_eta(i, j, k, 2) = hess_eta_mat(1, 0);
-            hess_eta(i, j, k, 3) = hess_eta_mat(1, 1);
+            hess_eta_(i, j, k, 0) = hess_eta(0, 0);
+            hess_eta_(i, j, k, 1) = hess_eta(0, 1);
+            hess_eta_(i, j, k, 2) = hess_eta(1, 0);
+            hess_eta_(i, j, k, 3) = hess_eta(1, 1);
 
             // Normal vector
-            Set::Vector n_hat_vec = grad_eta_vec / (grad_eta_mag + small);
-            n_hat(i, j, k, 0) = n_hat_vec(0);
-            n_hat(i, j, k, 1) = n_hat_vec(1);
+            Set::Vector n_hat = grad_eta / (grad_eta_mag + small);
+            n_hat_(i, j, k, 0) = n_hat(0);
+            n_hat_(i, j, k, 1) = n_hat(1);
 
             // Curvature
             if (kappa_method == 2 && grad_eta_mag > 0.01)
             {
                 Set::Vector t1;
-                if (std::abs(n_hat_vec(0)) > std::abs(n_hat_vec(1)))
+                if (std::abs(n_hat(0)) > std::abs(n_hat(1)))
                 {
-                    t1 = Set::Vector(-n_hat_vec(1), n_hat_vec(0)) / std::sqrt(n_hat_vec(0) * n_hat_vec(0) + n_hat_vec(1) * n_hat_vec(1) + small);
+                    t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
                 }
                 else
                 {
-                    t1 = Set::Vector(n_hat_vec(1), -n_hat_vec(0)) / std::sqrt(n_hat_vec(0) * n_hat_vec(0) + n_hat_vec(1) * n_hat_vec(1) + small);
+                    t1 = Set::Vector(n_hat(1), -n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
                 }
 
-                Set::Scalar kappa1 = -n_hat_vec.dot(hess_eta_mat * n_hat_vec);
-                Set::Scalar kappa2 = -t1.dot(hess_eta_mat * t1) * 2.0 * epsilon;
+                Set::Scalar kappa1 = -n_hat.dot(hess_eta * n_hat);
+                Set::Scalar kappa2 = -t1.dot(hess_eta * t1) * 2.0 * epsilon;
                 kappa(i, j, k) = kappa2;
             }
             else
@@ -705,7 +709,7 @@ Hydro2::RHS(int lev,
 
             // Chemical potential
             Set::Scalar f_prime = 4.0 * eta(i, j, k) * (0.5 - eta(i, j, k)) * (1.0 - eta(i, j, k));
-            mu_chem(i, j, k) = -epsilon * epsilon * lap_eta + f_prime;
+            mu_chem_(i, j, k) = -epsilon * epsilon * lap_eta + f_prime;
         });
     }
 
@@ -732,13 +736,14 @@ Hydro2::RHS(int lev,
         amrex::Array4<const Set::Scalar> const &rho = rho_mf_in.array(mfi);
         amrex::Array4<const Set::Scalar> const &M = M_mf_in.array(mfi);
         amrex::Array4<const Set::Scalar> const &eta = eta_mf_in.array(mfi);
+
         amrex::Array4<const Set::Scalar> const &v = velocity_tmp.array(mfi);
-        amrex::Array4<const Set::Scalar> const &grad_eta = grad_eta_tmp.array(mfi);
+        amrex::Array4<const Set::Scalar> const &grad_eta_ = grad_eta_tmp.array(mfi);
 
         amrex::Array4<Set::Scalar> const &tau_xx = tau_xx_tmp.array(mfi);
         amrex::Array4<Set::Scalar> const &tau_xy = tau_xy_tmp.array(mfi);
         amrex::Array4<Set::Scalar> const &tau_yy = tau_yy_tmp.array(mfi);
-        amrex::Array4<Set::Scalar> const &Ldot = Ldot_tmp.array(mfi);
+        amrex::Array4<Set::Scalar> const &Ldot_ = Ldot_tmp.array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             // Velocity gradient
@@ -762,8 +767,9 @@ Hydro2::RHS(int lev,
             // Effective viscosities
             Set::Scalar mu_eff = eta(i, j, k) * mu0 + (1.0 - eta(i, j, k)) * mu1;
             Set::Scalar lambda_eff = eta(i, j, k) * mu0_b + (1.0 - eta(i, j, k)) * mu1_b;
-            Set::Vector grad_mu = (mu0 - mu1) * Set::Vector(grad_eta(i, j, k, 0), grad_eta(i, j, k, 1));
-            Set::Vector grad_lambda = (mu0_b - mu1_b) * Set::Vector(grad_eta(i, j, k, 0), grad_eta(i, j, k, 1));
+            Set::Vector grad_eta = Set::Vector(grad_eta_(i, j, k, 0), grad_eta_(i, j, k, 1));
+            Set::Vector grad_mu = (mu0 - mu1) * grad_eta;
+            Set::Vector grad_lambda = (mu0_b - mu1_b) * grad_eta;
 
             // Stress tensor
             Set::Matrix tau = Set::Matrix::Zero();
@@ -780,18 +786,18 @@ Hydro2::RHS(int lev,
             tau_yy(i, j, k) = tau(1, 1);
 
             // Ldot term (viscosity gradient coupling)
-            Set::Vector Ldot_vec = Set::Vector::Zero();
+            Set::Vector Ldot = Set::Vector::Zero();
             for (int p = 0; p < 2; ++p)
             {
                 for (int q = 0; q < 2; ++q)
                 {
-                    Ldot_vec(p) += grad_mu(q) * (gradu(p, q) + gradu(q, p));
+                    Ldot(p) += grad_mu(q) * (gradu(p, q) + gradu(q, p));
                 }
-                Ldot_vec(p) += grad_lambda(p) * div_u;
+                Ldot(p) += grad_lambda(p) * div_u;
             }
 
-            Ldot(i, j, k, 0) = Ldot_vec(0);
-            Ldot(i, j, k, 1) = Ldot_vec(1);
+            Ldot_(i, j, k, 0) = Ldot(0);
+            Ldot_(i, j, k, 1) = Ldot(1);
         });
     }
 
@@ -808,30 +814,34 @@ Hydro2::RHS(int lev,
     {
         const amrex::Box &bx = mfi.validbox();
 
+        // Input state
         amrex::Array4<const Set::Scalar> const &rho = rho_mf_in.array(mfi);
         amrex::Array4<const Set::Scalar> const &M = M_mf_in.array(mfi);
         amrex::Array4<const Set::Scalar> const &E_vol = E_mf_in.array(mfi);
         amrex::Array4<const Set::Scalar> const &eta = eta_mf_in.array(mfi);
 
+        // Temporary fields
         amrex::Array4<const Set::Scalar> const &v = velocity_tmp.array(mfi);
         amrex::Array4<const Set::Scalar> const &press = pressure_tmp.array(mfi);
         amrex::Array4<const Set::Scalar> const &gammaf = gamma_tmp.array(mfi);
         amrex::Array4<const Set::Scalar> const &p0_eff = p0_eff_tmp.array(mfi);
         amrex::Array4<const Set::Scalar> const &T = T_tmp.array(mfi);
-        amrex::Array4<const Set::Scalar> const &grad_eta = grad_eta_tmp.array(mfi);
-        amrex::Array4<const Set::Scalar> const &n_hat = n_hat_tmp.array(mfi);
+        amrex::Array4<const Set::Scalar> const &grad_eta_ = grad_eta_tmp.array(mfi);
+        amrex::Array4<const Set::Scalar> const &n_hat_ = n_hat_tmp.array(mfi);
         amrex::Array4<const Set::Scalar> const &kappa = kappa_tmp.array(mfi);
-        amrex::Array4<const Set::Scalar> const &mu_chem = mu_chem_tmp.array(mfi);
+        amrex::Array4<const Set::Scalar> const &mu_chem_ = mu_chem_tmp.array(mfi);
         amrex::Array4<const Set::Scalar> const &tau_xx = tau_xx_tmp.array(mfi);
         amrex::Array4<const Set::Scalar> const &tau_xy = tau_xy_tmp.array(mfi);
         amrex::Array4<const Set::Scalar> const &tau_yy = tau_yy_tmp.array(mfi);
-        amrex::Array4<const Set::Scalar> const &Ldot = Ldot_tmp.array(mfi);
-        amrex::Array4<const Set::Scalar> const &a = a_tmp.array(mfi); // ADD THIS
+        amrex::Array4<const Set::Scalar> const &Ldot_ = Ldot_tmp.array(mfi);
+        amrex::Array4<const Set::Scalar> const &a = a_tmp.array(mfi);
 
-        amrex::Array4<const Set::Scalar> const &m0 = (*m0_mf[lev]).array(mfi);
-        amrex::Array4<const Set::Scalar> const &u0 = (*u0_mf[lev]).array(mfi);
-        amrex::Array4<const Set::Scalar> const &q0 = (*q_mf[lev]).array(mfi);
+        // Source terms
+        Set::Patch<const Set::Scalar> m0 = m0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> u0 = u0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> q0 = q_mf.Patch(lev, mfi);
 
+        // Output RHS
         amrex::Array4<Set::Scalar> const &rho_rhs = rho_rhs_mf.array(mfi);
         amrex::Array4<Set::Scalar> const &M_rhs = M_rhs_mf.array(mfi);
         amrex::Array4<Set::Scalar> const &E_rhs = E_rhs_mf.array(mfi);
@@ -913,7 +923,7 @@ Hydro2::RHS(int lev,
             // SOURCE TERMS
             // ============================================================
 
-            Set::Vector grad_eta_vec = Set::Vector(grad_eta(i, j, k, 0), grad_eta(i, j, k, 1));
+            Set::Vector grad_eta_vec = Set::Vector(grad_eta_(i, j, k, 0), grad_eta_(i, j, k, 1));
             Set::Scalar grad_eta_mag = grad_eta_vec.lpNorm<2>();
             Set::Vector u = Set::Vector(v(i, j, k, 0), v(i, j, k, 1));
             Set::Vector u0_vec = Set::Vector(u0(i, j, k, 0), u0(i, j, k, 1));
@@ -933,7 +943,7 @@ Hydro2::RHS(int lev,
             div_tau(0) = grad_tau_xx(0, 0) + grad_tau_xy(0, 1);
             div_tau(1) = grad_tau_xy(1, 0) + grad_tau_yy(1, 1);
 
-            Set::Vector Ldot_vec = Set::Vector(Ldot(i, j, k, 0), Ldot(i, j, k, 1));
+            Set::Vector Ldot_vec = Set::Vector(Ldot_(i, j, k, 0), Ldot_(i, j, k, 1));
 
             // Surface tension
             Set::Vector Fsv_vector = Set::Vector::Zero();
@@ -942,13 +952,13 @@ Hydro2::RHS(int lev,
                 Set::Scalar sigma_eff = sigma;
                 Set::Scalar alpha = 6 * std::sqrt(2);
                 Set::Scalar UFFDA = epsilon * alpha * grad_eta_mag * grad_eta_mag;
-                Set::Vector n_hat_vec = Set::Vector(n_hat(i, j, k, 0), n_hat(i, j, k, 1));
+                Set::Vector n_hat_vec = Set::Vector(n_hat_(i, j, k, 0), n_hat_(i, j, k, 1));
                 Fsv_vector = sigma_eff * kappa(i, j, k) * n_hat_vec * UFFDA;
             }
 
             // Weight
             Set::Vector Fw_vector = Set::Vector::Zero();
-            if (apply_buoyancy)
+            if (apply_weight)
             {
                 Fw_vector(1) = -rho(i, j, k) * g;
             }
@@ -989,10 +999,8 @@ Hydro2::RHS(int lev,
             }
             else
             {
-                Set::Scalar Mob = a(i, j, k) * 0.7 * DX[0];
-                Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem, i, j, k, 0, DX);
                 Set::Scalar advection = -u.dot(grad_eta_vec);
-                Set::Scalar diffusion = 0.0; // Mob * lap_mu_chem; // Can enable if needed
+                Set::Scalar diffusion = 0.0;
 
                 eta_rhs(i, j, k) = advection + diffusion;
 
@@ -1000,7 +1008,7 @@ Hydro2::RHS(int lev,
                 if (apply_vaporization == 1)
                 {
                     Set::Scalar Bm = eta(i, j, k) / (1.0 - eta(i, j, k) + small);
-                    Set::Scalar rho0_local = eta(i, j, k) * rho(i, j, k); // Approximate
+                    Set::Scalar rho0_local = eta(i, j, k) * rho(i, j, k);
                     eta_rhs(i, j, k) += (1.0 / (rho(i, j, k) * epsilon + small)) * (rho0_local * Dv * (Bm / (1.0 + Bm + small)) * grad_eta_mag);
                 }
             }
