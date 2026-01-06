@@ -25,6 +25,9 @@
 //#include "Solver/Local/Limiter/Minmod.H"
 //#include "Solver/Local/Limiter/VanLeer.H"
 
+#include <AMReX_Math.H>
+
+
 #if AMREX_SPACEDIM == 2
 
 namespace Integrator
@@ -330,7 +333,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         Util::ParallelMessage(INFO, "HLLC_All_Mach : 37");
         Util::ParallelMessage(INFO, "HLLC_All_Mach_Furfaro : 38");
         Util::ParallelMessage(INFO, "HLLE DEBUG : 99");
-        Util::Exception(INFO);
+        Util::Abort(INFO);
     }
 
     // LIMITERS
@@ -355,7 +358,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         Util::ParallelMessage(INFO, "None       : 0");
         Util::ParallelMessage(INFO, "MinMod     : 1");
         Util::ParallelMessage(INFO, "Van Leer   : 2");
-        Util::Exception(INFO);
+        Util::Abort(INFO);
     }
 }
 
@@ -581,7 +584,7 @@ void Hydro2::Mix(int lev)
             h_thermal(i, j, k) = eta(i, j, k) * h0_thermal(i, j, k) + (1.0 - eta(i, j, k)) * h1_thermal(i, j, k);
 
             // Speed of Sound
-            a(i, j, k) = std::sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k)));
+            a(i, j, k) = sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k)));
 
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / a(i, j, k);
@@ -735,7 +738,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 Util::ParallelMessage(INFO, "ERROR in Hydro2::Advance() : Integrator Methods");
                 Util::ParallelMessage(INFO, "Method ", scheme, " is unknown.");
-                Util::Exception(INFO);
+                Util::Abort(INFO);
             }
 
             // Velocity = M ./ (DX*DY*rho)
@@ -763,7 +766,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Bm(i, j, k) = eta(i, j, k) / (1.0 - eta(i, j, k) + small);
 
             // Speed of sound:
-            a(i, j, k) = std::sqrt(gammaf(i,j,k) * (press(i, j, k) + p0_eff(i,j,k)) / (rho(i, j, k)));
+            a(i, j, k) = sqrt(gammaf(i,j,k) * (press(i, j, k) + p0_eff(i,j,k)) / (rho(i, j, k)));
 
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / (a(i, j, k) + small);
@@ -819,16 +822,16 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 // Orthogonal Basis
                 Set::Vector t1, t2;
 
-                if (std::abs(n_hat(0)) > std::abs(n_hat(1)))
+                if (abs(n_hat(0)) > abs(n_hat(1)))
                 {
-                    t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
+                    t1 = Set::Vector(-n_hat(1), n_hat(0)) / sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
                 }
                 else
                 {
-                    t1 = Set::Vector(n_hat(1), -n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
+                    t1 = Set::Vector(n_hat(1), -n_hat(0)) / sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
                 }
 
-                // t1 = Set::Vector(-n_hat(1), n_hat(0)) / std::sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
+                // t1 = Set::Vector(-n_hat(1), n_hat(0)) / sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
                 kappa1 = n_hat.dot(hess_eta * n_hat); // Normal Curvature
                 kappa2 = t1.dot(hess_eta * t1);       // Tangential Curvature
 
@@ -870,7 +873,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::ParallelMessage(INFO, "gamma=", gammaf(i, j, k));
                 Util::ParallelMessage(INFO, "eta=", eta(i, j, k));
                 Util::ParallelMessage(INFO, "etadot=", etadot(i, j, k));
-                Util::Exception(INFO);
+                Util::Abort(INFO);
             }
 
         });
@@ -977,9 +980,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 for (int q = 0; q < 2; ++q)
                 {
-                    tau(p, q) = 2.0 * mu_eff * eps(p, q)
-                                + lambda_eff * div_u * (p == q);
-                    
+                    Set::Scalar Comp = 0.0; // Boolean if p == q
+                    if (p == q)
+                    {
+                        Comp = 1.0;
+                    }
+                    tau(p, q) = 2.0 * mu_eff * eps(p, q) + lambda_eff * div_u * Comp;
                 }
             }
             tau_xx(i, j, k) = tau(0,0);
@@ -994,9 +1000,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 for (int q = 0; q < 2; ++q)
                 {
-                    Ldot(p) += grad_mu(q) * (gradu(p, q) + gradu(q, p));
+                    Ldot(p) = Ldot(p) + grad_mu(q) * (gradu(p, q) + gradu(q, p));
                 }
-                Ldot(p) += grad_lambda(p) * div_u;
+                Ldot(p) = Ldot(p) + grad_lambda(p) * div_u;
                 Ldot_(i, j, k, p) = Ldot(p);
             }
 
@@ -1012,12 +1018,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::ParallelMessage(INFO, "------------------------------------------------------------");
                 Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Intermediate time step loop:");
                 Util::ParallelMessage(INFO, "eps=", eps(0, 0), ", ", eps(0, 1), "; ", eps(1, 0), ", ", eps(1, 1));
+                Util::ParallelMessage(INFO, "mu_eff=", mu_eff);
+                Util::ParallelMessage(INFO, "lambda_eff=", lambda_eff);
+                Util::ParallelMessage(INFO, "grad_lambda=", grad_lambda);
                 Util::ParallelMessage(INFO, "Ldot=", Ldot_(i, j, k, 0), ", ", Ldot_(i, j, k, 1));
                 Util::ParallelMessage(INFO, "tau_xx=", tau_xx(i, j, k));
                 Util::ParallelMessage(INFO, "tau_xy=", tau_xy(i, j, k));
                 Util::ParallelMessage(INFO, "tau_yy=", tau_yy(i, j, k));
-             
-                Util::Exception(INFO);
+                Util::Abort(INFO);
             }
 
 
@@ -1271,8 +1279,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
                 Util::ParallelMessage(INFO, "div_tau=", div_tau(0), ", ", div_tau(1));
 
-
-                Util::Exception(INFO);
+                Util::Abort(INFO);
             }
 
             /*
@@ -1354,7 +1361,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 if (grad_eta_mag > 0.01)
                 {
                     Set::Scalar sigma_eff = sigma;
-                    Set::Scalar alpha = 6 * std::sqrt(2);
+                    Set::Scalar alpha = 6 * sqrt(2);
                     Set::Scalar UFFDA = epsilon * alpha * grad_eta_mag * grad_eta_mag; 
                     Fsv(i, j, k, 0) = sigma_eff * kappa * n_hat(0) * UFFDA; // / (grad_eta_mag + small)); // / (DX[0] + small);
                     Fsv(i, j, k, 1) = sigma_eff * kappa * n_hat(1) * UFFDA; // / (grad_eta_mag + small)); // / (DX[1] + small);
@@ -1390,9 +1397,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Source(i, j, k, 2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1);
             Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force); //
 
-           // Lagrange terms to enforce no-penetration
-            Source(i, j, k, 1) -= lagrange * u.dot(grad_eta) * grad_eta(0);
-            Source(i, j, k, 2) -= lagrange * u.dot(grad_eta) * grad_eta(1);
+            // Lagrange terms to enforce no-penetration
+            Source(i, j, k, 1) = Source(i, j, k, 1) - lagrange * u.dot(grad_eta) * grad_eta(0);
+            Source(i, j, k, 2) = Source(i, j, k, 2) - lagrange * u.dot(grad_eta) * grad_eta(1);
 
             // Riemann solver for mixed fluid
             const int X = 0, Y = 1;
@@ -1640,7 +1647,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::ParallelMessage(INFO, "M=", M_new(i, j, k, 0), ", ", M_new(i, j, k, 1));
                 Util::ParallelMessage(INFO, "E=", E_vol_new(i, j, k));
                 Util::ParallelMessage(INFO, "eta=", eta_new(i, j, k));
-                Util::Exception(INFO);
+                Util::Abort(INFO);
             }
 
             if (time <= 1e-7 && i == 0 && j == 0)
@@ -1680,14 +1687,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar UE_vol_new = E_vol_new(i, j, k) - KE_vol_new;
             Set::Scalar press_new = (UE_vol_new - B_new) / A_new;
             Set::Scalar p0_eff_new = (B_new / A_new) / gamma_eff_new;
-            Set::Scalar sound_speed_new = std::sqrt(gamma_eff_new * (press_new + p0_eff_new) / (rho_new(i, j, k)));
+            Set::Scalar sound_speed_new = sqrt(gamma_eff_new * (press_new + p0_eff_new) / (rho_new(i, j, k)));
 
             c_max = std::max(c_max, sound_speed_new);
-            vx_max = std::max(vx_max, std::abs(v_new(0))); // vx
-            vy_max = std::max(vy_max, std::abs(v_new(1))); // vy
+            vx_max = std::max(vx_max, abs(v_new(0))); // vx
+            vy_max = std::max(vy_max, abs(v_new(1))); // vy
 
             // Track maximum force magnitude (not acceleration yet)
-            Set::Scalar F_mag = std::sqrt(Source(i, j, k, 1) * Source(i, j, k, 1) + Source(i, j, k, 2) * Source(i, j, k, 2));
+            Set::Scalar F_mag = sqrt(Source(i, j, k, 1) * Source(i, j, k, 1) + Source(i, j, k, 2) * Source(i, j, k, 2));
             F_max = std::max(F_max, F_mag);
             rho_min = std::min(rho_min, rho_new(i, j, k));
         });
@@ -1704,7 +1711,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     Set::Scalar dx_min = std::min(DX[0], DX[1]); // / 4.0;
 
     // 1. Acoustic CFL 
-    Set::Scalar wave_speed = c_max + std::sqrt(vx_max * vx_max + vy_max * vy_max);
+    Set::Scalar wave_speed = c_max + sqrt(vx_max * vx_max + vy_max * vy_max);
     Set::Scalar dt_acoustic = cfl * dx_min / (wave_speed + small);
 
     // 2. Viscous CFL
@@ -1713,7 +1720,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
     // 3. Force CFL
     Set::Scalar a_max = F_max / rho_min; // Maximum acceleration
-    Set::Scalar dt_force = cfl_v * std::sqrt(dx_min / a_max);
+    Set::Scalar dt_force = cfl_v * sqrt(dx_min / a_max);
 
     // 4. Allen-Cahn diffusion CFL
     Set::Scalar Mob = 0.01 * dx_min * dx_min;
@@ -1723,7 +1730,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     dt_max = std::min({ dt_acoustic, dt_viscous, dt_force, dt_allen_cahn });
 
     // Safety factor
-    dt_max *= 0.9;
+    dt_max = dt_max * 0.9;
 
     // Timestep diagnostics
     bool timestep_verbose = false;
