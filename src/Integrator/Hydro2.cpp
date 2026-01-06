@@ -922,7 +922,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
 
         Set::Patch<Set::Scalar> tau_xx = tau_xx_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> tau_xy = tau_xx_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> tau_xy = tau_xy_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> tau_yy = tau_yy_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Ldot_ = Ldot_mf.Patch(lev, mfi);
 
@@ -1022,6 +1022,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 Util::ParallelMessage(INFO, "------------------------------------------------------------");
                 Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Intermediate time step loop:");
+                Util::ParallelMessage(INFO, "lev=", lev);
+                Util::ParallelMessage(INFO, "i=", i, "j=", j);
+                Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
+
                 Util::ParallelMessage(INFO, "eps=", eps(0, 0), ", ", eps(0, 1), "; ", eps(1, 0), ", ", eps(1, 1));
                 Util::ParallelMessage(INFO, "mu_eff=", mu_eff);
                 Util::ParallelMessage(INFO, "lambda_eff=", lambda_eff);
