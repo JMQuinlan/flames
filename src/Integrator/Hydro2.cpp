@@ -134,7 +134,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     // Register FabFields:
     // Toggle the last boolean to true/false to track the variable or not.
     {
-        int nghost = 3;
+        int nghost = 4;
 
         // DIFFUSE PARAMETERS
         value.RegisterNewFab(value.eta_mf,          value.energy_bc, 1, nghost, "eta", true);
