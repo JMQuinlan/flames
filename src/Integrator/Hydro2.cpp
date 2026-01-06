@@ -891,7 +891,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // Second Time Loop for intermediate values
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
-        const amrex::Box &bx = mfi.validbox();
+        amrex::Box bx = mfi.validbox(); // copy the box
+        bx.grow(1);                     // now safe
+
         // PRIMARY FLUIDS
         // MIXTURE
         Set::Patch<const Set::Scalar> rho = density_old_mf.Patch(lev, mfi);
