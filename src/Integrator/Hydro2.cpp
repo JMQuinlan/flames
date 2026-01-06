@@ -213,9 +213,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.cv_mf,           &value.bc_nothing,  1, nghost, "cv", false);                // Constant Volume Specific Heat
         value.RegisterNewFab(value.k_thermal_mf,    &value.bc_nothing,  1, nghost, "k_thermal", false);         // Thermal Conductivity
         value.RegisterNewFab(value.h_thermal_mf,    &value.bc_nothing,  1, nghost, "h_thermal", false);         // Thermal Convectivity
-        value.RegisterNewFab(value.gamma_mf,        value.energy_bc, 1, nghost, "gamma", true);                 // Specific Heat Ratio
-        value.RegisterNewFab(value.p0_mf,           value.energy_bc, 1, nghost, "p0", true);                    // Tamman Pressure
-        value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc, 1, nghost, "mu_chem", true);               // Tammann Pressure
+        value.RegisterNewFab(value.gamma_mf, &value.bc_nothing, 1, nghost, "gamma", true);                      // Specific Heat Ratio
+        value.RegisterNewFab(value.p0_mf, &value.bc_nothing, 1, nghost, "p0", true);                            // Tamman Pressure
+        value.RegisterNewFab(value.mu_chem_mf, &value.bc_nothing, 1, nghost, "mu_chem", true);                  // Tammann Pressure
         value.RegisterNewFab(value.a_mf,            &value.bc_nothing,  1, nghost, "a", true);                    // Speed of sound
         value.RegisterNewFab(value.Ma_mf,           &value.bc_nothing,  2, nghost, "Ma", true, { "x", "y" });   // Mach
         value.RegisterNewFab(value.UE_per_vol_mf,   &value.bc_nothing,  1, nghost, "UE_per_vol", true);         // Internal Energy (per unit volume)
@@ -891,8 +891,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // Second Time Loop for intermediate values
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
-        amrex::Box bx = mfi.validbox(); // copy the box
-        bx.grow(1);                     // now safe
+        amrex::Box bx = mfi.validbox();
+        bx.grow(1);
 
         // PRIMARY FLUIDS
         // MIXTURE
