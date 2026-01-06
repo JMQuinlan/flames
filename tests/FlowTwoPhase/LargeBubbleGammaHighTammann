@@ -19,7 +19,7 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 250
 amr.grid_eff = 0.8
-amr.max_level = 0
+amr.max_level = 6
 amr.n_cell = 32 32
 
 ### TIME STEPING ###

@@ -204,9 +204,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, nghost, "Fsv", true, { "x", "y" });  // Surface Tension
         value.RegisterNewFab(value.Fb_mf,           &value.bc_nothing,  2, nghost, "Fb", true, { "x", "y" });   // Buoyancy
         value.RegisterNewFab(value.Fw_mf,           &value.bc_nothing,  2, nghost, "Fw", true, { "x", "y" });   // Weight
-        value.RegisterNewFab(value.tau_xx_mf, value.density_bc, 1, nghost, "tau_xx", true, { "xx" });           // Stress Tensor
-        value.RegisterNewFab(value.tau_xy_mf, value.density_bc, 1, nghost, "tau_xy", true, { "xy" });           // Stress Tensor
-        value.RegisterNewFab(value.tau_yy_mf, value.density_bc, 1, nghost, "tau_yy", true, { "yy" });           // Stress Tensor
+        value.RegisterNewFab(value.tau_xx_mf, value.energy_bc, 1, nghost, "tau_xx", true, { "xx" });            // Stress Tensor
+        value.RegisterNewFab(value.tau_xy_mf, value.energy_bc, 1, nghost, "tau_xy", true, { "xy" });            // Stress Tensor
+        value.RegisterNewFab(value.tau_yy_mf, value.energy_bc, 1, nghost, "tau_yy", true, { "yy" });            // Stress Tensor
         value.RegisterNewFab(value.Ldot_mf,         &value.bc_nothing,  2, nghost, "Ldot", true, { "x", "y" });  // Ldot
         value.RegisterNewFab(value.T_mf,            &value.bc_nothing,  1, nghost, "T", true);                  // Temperature
         value.RegisterNewFab(value.cp_mf,           &value.bc_nothing,  1, nghost, "cp", false);                // Constant Pressure Specific Heat
