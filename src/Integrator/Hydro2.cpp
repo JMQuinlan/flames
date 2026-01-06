@@ -1248,21 +1248,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // ------------------------------------------------------------
             // Divergence of Stress
             // ------------------------------------------------------------
+            /*
             Set::Matrix grad_tau_xx = Numeric::Gradient(tau_xx, i, j, k, DX);
             Set::Matrix grad_tau_xy = Numeric::Gradient(tau_xx, i, j, k, DX);
             Set::Matrix grad_tau_yy = Numeric::Gradient(tau_yy, i, j, k, DX);
             
             Set::Vector div_tau = Set::Vector::Zero();
-            /*
-            for (int p = 0; p < 2; ++p)
-                for (int q = 0; q < 2; ++q)
-                {
-                    div_tau(p) += grad_tau(p, q, q);
-                }
-            */
-            // Component 0 (x-direction)
+
             div_tau(0) = grad_tau_xx(0, 0) + grad_tau_xy(0, 1);
-            // Component 1 (y-direction)
             div_tau(1) = grad_tau_xy(1, 0) + grad_tau_yy(1, 1);
                     
             Set::Vector Ldot = Set::Vector(Ldot_(i, j, k, 0), Ldot_(i, j, k, 1));
@@ -1292,34 +1285,19 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
                 Util::Abort(INFO);
             }
+            */
 
-            /*
             // ------------------------------------------------------------
             // Explicit 4th-order viscosity tensor contraction
             // ------------------------------------------------------------
-            for (int p = 0; p < 2; ++p)             // output index
-                for (int q = 0; q < 2; ++q)         // divergence index
-                    for (int r = 0; r < 2; ++r)     // velocity component
-                        for (int s = 0; s < 2; ++s) // derivative direction
-                        {
-                            // 4D isotropic Newtonian viscosity tensor
-                            Set::Scalar Mpqrs = mu_eff * ((p == r && q == s) + (p == s && q == r))
-                                                + mu_b_eff * (p == q && r == s);
+            // /*
+            Set::Vector Ldot = Set::Vector::Zero();
+            Set::Vector div_tau = Set::Vector::Zero();
+            Set::Scalar div_u = gradu(0, 0) + gradu(1, 1); // Divergence of velocity
 
-                            div_tau(p) += Mpqrs * hess_u(r, s, q);
-                        }
-
-            // ------------------------------------------------------------
-            // Ldot term: viscosity-gradient coupling
-            // ------------------------------------------------------------
-            for (int p = 0; p < 2; ++p)
-                for (int q = 0; q < 2; ++q)
-                {
-                    Ldot0(p) += 0.0;  // grad_mu(q) * (gradu(p, q) + gradu(q, p));
-                }
-            */
-
-            /*
+            // Calculate effective viscosities
+            Set::Scalar mu_eff = eta(i, j, k) * mu0 + (1.0 - eta(i, j, k)) * mu1;       // Effective dynamic viscosity
+            Set::Scalar mu_b_eff = eta(i, j, k) * mu0_b + (1.0 - eta(i, j, k)) * mu1_b; // Effective bulk viscosity
             for (int p = 0; p < 2; p++)             // Dimension Component
                 for (int q = 0; q < 2; q++)         // Dimension Component
                     for (int r = 0; r < 2; r++)     // X
@@ -1337,7 +1315,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                             if (p == q && r == s)
                                 Mpqrs += (1.0 / 3.0) * mu_b_eff;
 
-                            Ldot0(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
+                            Ldot(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
                             div_tau(p) += 2.0 * Mpqrs * hess_u(r, s, q);
                         }
             // NEW Formulation of div_tau
@@ -1346,17 +1324,15 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             grad_div_u[0] = hess_u(0, 0, 0) + hess_u(1, 0, 1);
             grad_div_u[1] = hess_u(0, 1, 0) + hess_u(1, 1, 1);
             
-            // Calculate div_tau
-            //div_tau(0) = mu_eff * (hess_u(0, 0, 0) + hess_u(0, 1, 1) + (1.0 / 3.0) * grad_div_u[0]);
-            //div_tau(1) = mu_eff * (hess_u(1, 0, 0) + hess_u(1, 1, 1) + (1.0 / 3.0) * grad_div_u[1]);
             // Add bulk viscosity contribution
             div_tau(0) += mu_b_eff * grad_div_u(0);
             div_tau(1) += mu_b_eff * grad_div_u(1);
-
-            */
             // Debugging feild for div_tau
             div_tau_(i, j, k, 0) = div_tau(0);
             div_tau_(i, j, k, 1) = div_tau(1);
+
+
+            // */
 
             // Curvature
             Set::Scalar kappa = kappas(i, j, k, 0);
