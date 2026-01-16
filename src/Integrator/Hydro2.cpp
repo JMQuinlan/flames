@@ -1158,10 +1158,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> Fsv = Fsv_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fb = Fb_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fw = Fw_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> tau_xx = tau_xx_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> tau_xy = tau_xy_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> tau_yy = tau_yy_mf.Patch(lev, mfi);
-        //Set::Patch<const Set::Scalar> Ldot_ = Ldot_mf.Patch(lev, mfi);
+        //Set::Patch<const Set::Scalar> tau_xx = tau_xx_mf.Patch(lev, mfi);
+        //Set::Patch<const Set::Scalar> tau_xy = tau_xy_mf.Patch(lev, mfi);
+        //Set::Patch<const Set::Scalar> tau_yy = tau_yy_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> Ldot_ = Ldot_mf.Patch(lev, mfi);
 
 
         // DEBUGGING PLOTS
@@ -1174,7 +1174,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> rho_flux = rho_flux_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> M_flux = M_flux_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> E_flux = E_flux_mf.Patch(lev, mfi);
-        //Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
         //Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
 
         Set::Scalar *dt_max_handle = &dt_max;
@@ -1249,28 +1249,32 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // ------------------------------------------------------------
             // Divergence of Stress
             // ------------------------------------------------------------
-            Set::Matrix grad_tau_xx = Numeric::Gradient(tau_xx, i, j, k, DX);
-            Set::Matrix grad_tau_xy = Numeric::Gradient(tau_xx, i, j, k, DX);
-            Set::Matrix grad_tau_yy = Numeric::Gradient(tau_yy, i, j, k, DX);
-            
+            Set::Vector Ldot = Set::Vector::Zero();
             Set::Vector div_tau = Set::Vector::Zero();
-            /*
-            for (int p = 0; p < 2; ++p)
-                for (int q = 0; q < 2; ++q)
-                {
-                    div_tau(p) += grad_tau(p, q, q);
-                }
-            */
-            // Component 0 (x-direction)
-            div_tau(0) = grad_tau_xx(0, 0) + grad_tau_xy(0, 1);
-            // Component 1 (y-direction)
-            div_tau(1) = grad_tau_xy(1, 0) + grad_tau_yy(1, 1);
+
+            for (int p = 0; p < 2; p++)             // i
+                for (int q = 0; q < 2; q++)         // j
+                    for (int r = 0; r < 2; r++)     // r
+                        for (int s = 0; s < 2; s++) // s
+                        {
+                            Set::Scalar mu_b = (2.0 / 3.0) * mu; // Stokes Hypothesis
+                            Set::Scalar Mpqrs = mu * ((p==r)?(1.0):(0.0) * (q==s)?(1.0):(0.0) + (p==s)?(1.0):(0.0) * (q==r)?(1.0):(0.0));
+                                       + (mu_b) * (p==q)?(1.0):(0.0) * (r==s)?(1.0):(0.0) * (p==r)?(1.0):(0.0) ;
+
+                            div_tau(p) += Mpqrs * hess_u(r, q, s);
+                            Ldot(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
+
+                        }
                     
-            Set::Vector Ldot = Set::Vector(Ldot_(i, j, k, 0), Ldot_(i, j, k, 1));
+            // Debugging feild for div_tau and Ldot
+            div_tau_(i, j, k, 0) = div_tau(0);
+            div_tau_(i, j, k, 1) = div_tau(1);
+            Ldot_(i, j, k, 0) = Ldot(0);
+            Ldot_(i, j, k, 1) = Ldot(1);
             
             // DEBUG Tool
-            if ((Ldot_(i, j, k, 0) != Ldot_(i, j, k, 0))
-                or (Ldot_(i, j, k, 1) != Ldot_(i, j, k, 1))
+            if ((Ldot(0) != Ldot(0))
+                or (Ldot(1) != Ldot(1))
                 or (div_tau(0) != div_tau(0))
                 or (div_tau(1) != div_tau(1)) )
             {
@@ -1280,23 +1284,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::ParallelMessage(INFO, "i=", i, "j=", j);
                 Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
 
-                Util::ParallelMessage(INFO, "Ldot=", Ldot_(i, j, k, 0), ", ", Ldot_(i, j, k, 1));
-                Util::ParallelMessage(INFO, "tau_xx=", tau_xx(i, j, k));
-                Util::ParallelMessage(INFO, "tau_xy=", tau_xy(i, j, k));
-                Util::ParallelMessage(INFO, "tau_yy=", tau_yy(i, j, k));
-
-                Util::ParallelMessage(INFO, "grad_tau_xx=", grad_tau_xx(0, 0), ", ", grad_tau_xx(0, 1), "; ", grad_tau_xx(1, 0), ", ", grad_tau_xx(1, 1));
-                Util::ParallelMessage(INFO, "grad_tau_xy=", grad_tau_xy(0, 0), ", ", grad_tau_xy(0, 1), "; ", grad_tau_xy(1, 0), ", ", grad_tau_xy(1, 1));
-                Util::ParallelMessage(INFO, "grad_tau_yy=", grad_tau_yy(0, 0), ", ", grad_tau_yy(0, 1), "; ", grad_tau_yy(1, 0), ", ", grad_tau_yy(1, 1));
-
+                Util::ParallelMessage(INFO, "Ldot=", Ldot(0), ", ", Ldot(1));
                 Util::ParallelMessage(INFO, "div_tau=", div_tau(0), ", ", div_tau(1));
 
                 Util::Abort(INFO);
             }
 
-            // Debugging feild for div_tau
-            div_tau_(i, j, k, 0) = div_tau(0);
-            div_tau_(i, j, k, 1) = div_tau(1);
+            
 
             // Curvature
             Set::Scalar kappa = kappas(i, j, k, 0);
