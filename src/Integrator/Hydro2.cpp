@@ -887,7 +887,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     amrex::Gpu::synchronize();
     amrex::ParallelDescriptor::Barrier();
 
-
+    /*
     // Second Time Loop for intermediate values
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
@@ -1043,6 +1043,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
         });
     }
+    */
 
     /*
     // ============= SYNCHRONIZATION =============
