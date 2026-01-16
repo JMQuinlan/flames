@@ -1293,67 +1293,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Util::Abort(INFO);
             }
 
-            /*
-            // ------------------------------------------------------------
-            // Explicit 4th-order viscosity tensor contraction
-            // ------------------------------------------------------------
-            for (int p = 0; p < 2; ++p)             // output index
-                for (int q = 0; q < 2; ++q)         // divergence index
-                    for (int r = 0; r < 2; ++r)     // velocity component
-                        for (int s = 0; s < 2; ++s) // derivative direction
-                        {
-                            // 4D isotropic Newtonian viscosity tensor
-                            Set::Scalar Mpqrs = mu_eff * ((p == r && q == s) + (p == s && q == r))
-                                                + mu_b_eff * (p == q && r == s);
-
-                            div_tau(p) += Mpqrs * hess_u(r, s, q);
-                        }
-
-            // ------------------------------------------------------------
-            // Ldot term: viscosity-gradient coupling
-            // ------------------------------------------------------------
-            for (int p = 0; p < 2; ++p)
-                for (int q = 0; q < 2; ++q)
-                {
-                    Ldot0(p) += 0.0;  // grad_mu(q) * (gradu(p, q) + gradu(q, p));
-                }
-            */
-
-            /*
-            for (int p = 0; p < 2; p++)             // Dimension Component
-                for (int q = 0; q < 2; q++)         // Dimension Component
-                    for (int r = 0; r < 2; r++)     // X
-                        for (int s = 0; s < 2; s++) // Y
-                        {
-                            Set::Scalar Mpqrs = 0.0;
-
-                            // Newtonian fluid terms (shear viscosity)
-                            if (p == r && q == s)
-                                Mpqrs += 0.5 * mu_eff;
-                            if (p == s && q == r)
-                                Mpqrs += 0.5 * mu_eff;
-
-                            // Bulk viscosity
-                            if (p == q && r == s)
-                                Mpqrs += (1.0 / 3.0) * mu_b_eff;
-
-                            Ldot0(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
-                            div_tau(p) += 2.0 * Mpqrs * hess_u(r, s, q);
-                        }
-            // NEW Formulation of div_tau
-            // Calculate gradient of divergence
-            Set::Vector grad_div_u = Set::Vector::Zero();
-            grad_div_u[0] = hess_u(0, 0, 0) + hess_u(1, 0, 1);
-            grad_div_u[1] = hess_u(0, 1, 0) + hess_u(1, 1, 1);
-            
-            // Calculate div_tau
-            //div_tau(0) = mu_eff * (hess_u(0, 0, 0) + hess_u(0, 1, 1) + (1.0 / 3.0) * grad_div_u[0]);
-            //div_tau(1) = mu_eff * (hess_u(1, 0, 0) + hess_u(1, 1, 1) + (1.0 / 3.0) * grad_div_u[1]);
-            // Add bulk viscosity contribution
-            div_tau(0) += mu_b_eff * grad_div_u(0);
-            div_tau(1) += mu_b_eff * grad_div_u(1);
-
-            */
             // Debugging feild for div_tau
             div_tau_(i, j, k, 0) = div_tau(0);
             div_tau_(i, j, k, 1) = div_tau(1);
