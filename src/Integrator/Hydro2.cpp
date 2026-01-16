@@ -1701,7 +1701,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     amrex::ParallelDescriptor::ReduceRealMin(rho_min);
 
     // Compute timestep constraints
-    Set::Scalar dx_min = std::min(DX[0], DX[1]); // / 4.0;
+    Set::Scalar dx_min = std::min(DX[0], DX[1]);
 
     // 1. Acoustic CFL 
     Set::Scalar wave_speed = c_max + std::sqrt(vx_max * vx_max + vy_max * vy_max);
