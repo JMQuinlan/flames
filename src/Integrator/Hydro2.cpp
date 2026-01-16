@@ -1161,7 +1161,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> tau_xx = tau_xx_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> tau_xy = tau_xy_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> tau_yy = tau_yy_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> Ldot_ = Ldot_mf.Patch(lev, mfi);
+        //Set::Patch<const Set::Scalar> Ldot_ = Ldot_mf.Patch(lev, mfi);
 
 
         // DEBUGGING PLOTS
@@ -1174,8 +1174,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> rho_flux = rho_flux_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> M_flux = M_flux_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> E_flux = E_flux_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
+        //Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
+        //Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
 
         Set::Scalar *dt_max_handle = &dt_max;
 
