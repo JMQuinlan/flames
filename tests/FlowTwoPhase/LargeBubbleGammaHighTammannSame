@@ -6,8 +6,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/RPESame
-plot_file = tests/LargeBubbleRPE_2_Bar.GammaHighSame
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/RPESame
+#plot_file = tests/LargeBubbleRPE_2_Bar.GammaHighSame
 
 ### MESHING ###
 amr.plot_int = 5
@@ -157,6 +157,7 @@ u0.ic.constant.value = 0.0
 apply_surface_tension = 1
 apply_buoyancy = 0
 apply_weight = 0
+apply_vaporization = 0
 Spec_Vol = 1
 grav = 9.81
 

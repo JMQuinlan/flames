@@ -884,167 +884,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         });
     }
 
-    amrex::Gpu::synchronize();
-    amrex::ParallelDescriptor::Barrier();
-
-    /*
-    // Second Time Loop for intermediate values
-    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
-    {
-        amrex::Box bx = mfi.validbox(); // copy the box
-        bx.grow(1);                     // now safe
-
-        // PRIMARY FLUIDS
-        // MIXTURE
-        Set::Patch<const Set::Scalar> rho = density_old_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> E_vol = energy_per_vol_old_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> E_mas = energy_per_mas_old_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> M = momentum_old_mf.Patch(lev, mfi);
-
-        // SOURCES
-        //Set::Patch<Set::Scalar> omega = vorticity_mf.Patch(lev, mfi);
-
-        Set::Patch<const Set::Scalar> eta = eta_old_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> v = velocity_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> press = pressure_mf.Patch(lev, mfi);
-        
-        Set::Patch<const Set::Scalar> m0 = m0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> q0 = q_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> _u0 = u0_mf.Patch(lev, mfi);
-
-        Set::Patch<Set::Scalar> T = T_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
-
-        Set::Patch<const Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
-
-        Set::Patch<Set::Scalar> tau_xx = tau_xx_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> tau_xy = tau_xy_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> tau_yy = tau_yy_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> Ldot_ = Ldot_mf.Patch(lev, mfi);
-
-
-        // DEBUGGING PLOTS
-        Set::Patch<const Set::Scalar> grad_eta_ = grad_eta_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> hess_eta_ = hess_eta_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> n_hat_ = n_hat_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> grad_mag_grad_eta_ = grad_mag_grad_eta_mf.Patch(lev, mfi);
-
-
-        Set::Scalar *dt_max_handle = &dt_max;
-
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            auto sten = Numeric::GetStencil(i, j, k, domain);
-
-            // Diffuse Sources
-            Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
-            Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
-            Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
-
-            Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
-            Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
-
-            // Extract velocity from momentum and density
-            Set::Vector u = Set::Vector(v(i, j, k, 0), v(i, j, k, 1));
-            Set::Vector u0 = Set::Vector(_u0(i, j, k, 0), _u0(i, j, k, 1));
-
-            Set::Matrix gradM = Numeric::Gradient(M, i, j, k, DX);
-            Set::Vector gradrho = Numeric::Gradient(rho, i, j, k, 0, DX);
-            Set::Matrix hess_rho = Numeric::Hessian(rho, i, j, k, 0, DX, sten);
-            Set::Matrix gradu = (gradM - u * gradrho.transpose()) / (rho(i, j, k));
-            // ------------------------------------------------------------
-            // Strain Rate Tensor
-            // ------------------------------------------------------------
-            Set::Vector eps = Set::Vector::Zero();
-            Set::Scalar div_u = gradu(0, 0) + gradu(1, 1); // Divergence of velocity
-            for (int p = 0; p < 2; ++p)
-            {
-                for (int q = 0; q < 2; ++q)
-                {
-                    eps(p, q) = 0.5 * (gradu(p, q) + gradu(q, p));
-                }
-            }
-
-            // ------------------------------------------------------------
-            // Effective Viscosities
-            // ------------------------------------------------------------
-            Set::Scalar mu_eff = eta(i, j, k) * mu0 + (1.0 - eta(i, j, k)) * mu1;
-            Set::Scalar lambda_eff = eta(i, j, k) * mu0_b + (1.0 - eta(i, j, k)) * mu1_b;
-            Set::Vector grad_mu = (mu0 - mu1) * grad_eta;
-            Set::Vector grad_lambda = (mu0_b - mu1_b) * grad_eta;
-
-            // ------------------------------------------------------------
-            // Stress Tensor
-            // ------------------------------------------------------------
-            Set::Vector tau = Set::Vector::Zero();
-            for (int p = 0; p < 2; ++p)
-            {
-                for (int q = 0; q < 2; ++q)
-                {
-                    Set::Scalar Comp = 0.0; // Boolean if p == q
-                    if (p == q)
-                    {
-                        Comp = 1.0;
-                    }
-                    tau(p, q) = 2.0 * mu_eff * eps(p, q) + lambda_eff * div_u * Comp;
-                }
-            }
-            tau_xx(i, j, k) = tau(0,0);
-            tau_xy(i, j, k) = tau(0,1);
-            tau_yy(i, j, k) = tau(1,1);
-
-            // ------------------------------------------------------------
-            // Grad(mu) Coupling
-            // ------------------------------------------------------------
-            Set::Vector Ldot = Set::Vector::Zero();
-            for (int p = 0; p < 2; ++p)
-            {
-                for (int q = 0; q < 2; ++q)
-                {
-                    Ldot(p) = Ldot(p) + grad_mu(q) * (gradu(p, q) + gradu(q, p));
-                }
-                Ldot(p) = Ldot(p) + grad_lambda(p) * div_u;
-                Ldot_(i, j, k, p) = Ldot(p);
-            }
-
-
-
-            // DEBUG Tool
-            if ((Ldot_(i, j, k, 0) != Ldot_(i, j, k, 0))
-                or (Ldot_(i, j, k, 1) != Ldot_(i, j, k, 1))
-                or (tau_xx(i, j, k) != tau_xx(i, j, k))
-                or (tau_xy(i, j, k) != tau_xy(i, j, k))
-                or (tau_yy(i, j, k) != tau_yy(i, j, k)) )
-            {
-                Util::ParallelMessage(INFO, "------------------------------------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Intermediate time step loop:");
-                Util::ParallelMessage(INFO, "lev=", lev);
-                Util::ParallelMessage(INFO, "i=", i, "j=", j);
-                Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
-
-                Util::ParallelMessage(INFO, "eps=", eps(0, 0), ", ", eps(0, 1), "; ", eps(1, 0), ", ", eps(1, 1));
-                Util::ParallelMessage(INFO, "mu_eff=", mu_eff);
-                Util::ParallelMessage(INFO, "lambda_eff=", lambda_eff);
-                Util::ParallelMessage(INFO, "grad_lambda=", grad_lambda);
-                Util::ParallelMessage(INFO, "Ldot=", Ldot_(i, j, k, 0), ", ", Ldot_(i, j, k, 1));
-                Util::ParallelMessage(INFO, "tau_xx=", tau_xx(i, j, k));
-                Util::ParallelMessage(INFO, "tau_xy=", tau_xy(i, j, k));
-                Util::ParallelMessage(INFO, "tau_yy=", tau_yy(i, j, k));
-                Util::Abort(INFO);
-            }
-
-
-
-        });
-    }
-    */
-
     /*
     // ============= SYNCHRONIZATION =============
     // Eta
@@ -1158,9 +997,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> Fsv = Fsv_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fb = Fb_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fw = Fw_mf.Patch(lev, mfi);
-        //Set::Patch<const Set::Scalar> tau_xx = tau_xx_mf.Patch(lev, mfi);
-        //Set::Patch<const Set::Scalar> tau_xy = tau_xy_mf.Patch(lev, mfi);
-        //Set::Patch<const Set::Scalar> tau_yy = tau_yy_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Ldot_ = Ldot_mf.Patch(lev, mfi);
 
 
@@ -1214,6 +1050,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar inv_rho2 = inv_rho * inv_rho;
             Set::Scalar inv_rho3 = inv_rho2 * inv_rho;
 
+            /*
             for (int r = 0; r < 2; ++r)
                 for (int p = 0; p < 2; ++p)
                     for (int q = 0; q < 2; ++q)
@@ -1224,7 +1061,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                                           + M(i, j, k, r) * hess_rho(p, q))
                                           + 2.0 * inv_rho3 * M(i, j, k, r) * gradrho(p) * gradrho(q);
                     }
-            /*
+            */
+            
+            // /*
             for (int p = 0; p < 2; p++)
                 for (int q = 0; q < 2; q++)
                     for (int r = 0; r < 2; r++)
@@ -1232,7 +1071,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                         hess_u(r, p, q) = (hess_M(r, p, q) - gradu(r, q) * gradrho(p) - gradu(r, p) * gradrho(q) - u(r) * hess_rho(p, q))
                                           / (rho(i, j, k));
                     }
-            */
+            // */
             // WIP: Debugging feild for hess_u
             hess_u_(i, j, k, 0) = hess_u(0, 0, 0);
             hess_u_(i, j, k, 1) = hess_u(0, 0, 1);
@@ -1264,14 +1103,17 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     for (int r = 0; r < 2; r++)     // r
                         for (int s = 0; s < 2; s++) // s
                         {
-                            Set::Scalar Mpqrs = mu_eff * ((p==r)?(1.0):(0.0) * (q==s)?(1.0):(0.0) + (p==s)?(1.0):(0.0) * (q==r)?(1.0):(0.0));
-                                       + (lambda_eff) * (p==q)?(1.0):(0.0) * (r==s)?(1.0):(0.0) * (p==r)?(1.0):(0.0) ;
+                            Set::Scalar Mpqrs = 0.0;
+                            if ((p == r) and (q == s))
+                                Mpqrs += mu_eff;
+                            if ((p == s) and (q == r))
+                                Mpqrs += mu_eff;
 
+                            if ((p == q) and (r == s))
+                                Mpqrs += lambda_eff - (2.0 / 3.0) * mu_eff;
 
-                                       //TODO: Add grad_mu, grad_lambda components
                             div_tau(p) += Mpqrs * hess_u(r, q, s);
                             Ldot(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
-
                         }
                     
             // Debugging feild for div_tau and Ldot
