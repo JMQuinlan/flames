@@ -1,0 +1,180 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+alamo.program = hydro2
+
+### OUTPUT ###
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE.SAME
+plot_file = tests/LargeBubbleRPE_2_Bar.GammaHigh.SAME
+
+### MESHING ###
+amr.plot_dt = 1e-9
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.regrid_int = 2
+amr.grid_eff = 0.8
+
+amr.max_level = 5
+amr.n_cell = 64 64
+
+### TIME STEPING ###
+## Static:
+timestep  = 1e-6
+## Adaptive                # Can comment out dt params for default #
+dynamictimestep.on = 0
+dynamictimestep.verbose = 1
+dynamictimestep.min  = 2e-8
+dynamictimestep.max  = 1e-6
+cfl = 0.8;
+
+
+### DIMENSIONS ###
+geometry.prob_lo = -0.10 -0.10 0.0 # [ m ]
+geometry.prob_hi =  0.10  0.10 0.0 # [ m ]
+geometry.is_periodic = 0 0 0
+ 
+### TIME STEP ###
+stop_time = 0.05
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon  = 0.0005
+eta.ic.expression.constant.R0   = 0.01
+# Eqn: "0.5*(1+tanh((sqrt(((x-xc)/a)**2 + ((y-yc)/b)**2) - Diameter)/Boundry_Thickness))
+# RPE Verification
+# eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - 0.01)/0.001))"
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+
+### HYDRO INITIAL CONDITIONS ###
+gamma0 = 5.0
+gamma1 = 1.4
+
+p0_0 = 0.0
+p0_1 = 0.0
+
+mu0   = 0.0
+mu1   = 0.0
+
+mu0_b   = 0.0
+mu1_b   = 0.0
+
+density0.ic.type = expression
+density0.ic.expression.region0 = "10.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Pressure initialization - adjusted for thermodynamic equilibrium
+# Inner fluid (gamma=5.0) has higher pressure to balance the interface forces
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "10e5"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "1e5"
+
+temperature0.ic.type = expression
+temperature0.ic.expression.region0 = "294.0"
+
+temperature1.ic.type = expression
+temperature1.ic.expression.region0 = "294.0"
+
+cp0.ic.type = expression
+cp0.ic.expression.region0 = "1.4"
+
+cp1.ic.type = expression
+cp1.ic.expression.region0 = "1.4"
+
+cv0.ic.type = expression
+cv0.ic.expression.region0 = "1.0"
+
+cv1.ic.type = expression
+cv1.ic.expression.region0 = "1.0"
+
+k0_thermal.ic.type = expression
+k0_thermal.ic.expression.region0 = "0.6"
+
+k1_thermal.ic.type = expression
+k1_thermal.ic.expression.region0 = "0.6"
+
+h0_thermal.ic.type = expression
+h0_thermal.ic.expression.region0 = "1.4"
+
+h1_thermal.ic.type = expression
+h1_thermal.ic.expression.region0 = "1.0"
+
+sigma = 72.8; # 0.078 # For Air/Water
+
+# pref = 1e5;
+pref = 0.0
+
+### ETA BC  ###
+pf.eta.bc.type.xlo = neumann
+pf.eta.bc.type.xhi = neumann
+pf.eta.bc.type.ylo = neumann
+pf.eta.bc.type.yhi = neumann
+pf.eta.bc.type.zlo = neumann
+pf.eta.bc.type.zhi = neumann
+
+### HYDRO BC ###
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+#momentum.bc.type.xhi = dirichlet dirichlet
+#momentum.bc.type.xlo = dirichlet dirichlet
+#momentum.bc.type.ylo = dirichlet dirichlet
+#momentum.bc.type.yhi = dirichlet dirichlet
+#momentum.bc.val.xhi = 0.0 0.0
+#momentum.bc.val.xlo = 0.0 0.0
+#momentum.bc.val.ylo = 0.0 0.0
+#momentum.bc.val.yhi = 0.0 0.0
+
+### HYDRO REFINEMENT CRITERIA ###
+eta_refinement_criterion = 0.0001
+omega_refinement_criterion = 10.55
+p_refinement_criterion = 1e+4
+rho_refinement_criterion = 1e+2
+gradu_refinement_criterion = 1e+2
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+q.ic.type = expression
+q.ic.expression.region0 = "0.0"
+q.ic.expression.region1 = "0.0"
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 0
+apply_buoyancy = 0
+apply_weight = 0
+grav = 9.81
+
+### DEBUGGING ### 
+# Used for testing of the model
+Riemann_Solver = 2 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
+scheme = 0		   # Valid Entries: 0:"Forward Euler" / 1:"SSPRK3" / 2:"RK4"
+Limiter = 0        # Valid Entries: 0:"None" / 1:"MinMod" / 2:"Van Leer"

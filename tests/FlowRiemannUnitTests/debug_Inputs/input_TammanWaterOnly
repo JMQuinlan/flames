@@ -1,0 +1,198 @@
+#@ [case1]
+#@ exe=hydro2
+#@ dim=2
+#@ args = Riemann_Solver=1
+
+#@ [roe-rk4]
+#@ exe=hydro
+#@ dim=2
+#@ args = scheme=rk4
+#@ args = timestep=5.0e-5
+
+#@ [roe-ssprk3]
+#@ exe=hydro
+#@ dim=2
+#@ args = scheme=ssprk3
+#@ args = timestep=5.0e-5
+
+#@ [roe-fix1]
+#@ exe=hydro
+#@ dim=2
+#@ args= solver.roe.entropy_fix=1
+
+#@ [roe-fix2]
+#@ exe=hydro
+#@ dim=2
+#@ args= solver.roe.entropy_fix=2
+
+# alamo.program = hydro2
+
+### OUTPUT ###
+
+plot_file = ./tests/FlowRiemannUnitTests/output
+
+### MESHING ###
+
+#amr.plot_dt = 0.1
+amr.plot_int = 500
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.grid_eff = 0.8
+
+amr.n_cell = 800 4
+
+# Uncomment to test AMR
+#amr.max_level = 2
+
+### DIMENSIONS ###
+
+geometry.prob_lo = -1.0  -0.02   0.0 # [ m ]
+geometry.prob_hi =  1.0   0.02   0.0 # [ m ]
+
+geometry.is_periodic = 0 0 0
+
+### TIME STEP ###
+
+timestep  = 1.0e-7
+stop_time = 0.0001
+
+### ETA IC ###
+
+#Ldot_0 = 0.0
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+#deltapInterface.ic.type = expression
+#deltapInterface.ic.expression.region0 = "0.0"
+
+eta.ic.type = constant
+eta.ic.expression.constant.epsilon  = 111111.0005
+eta.ic.constant.value  = 0.0
+epsilon = eta.ic.expression.constant.epsilon
+
+### Advection solver ###
+
+### HYDRO PARAM ###
+
+gamma0 = 7.15
+gamma1 = 7.15
+cfl   = 0.4
+mu0   = 0.0
+mu1   = 0.0
+
+p0_0 = 1e5
+p0_1 = 1e5
+
+### Surface tension coefficient ###
+sigma = 1000
+
+### Reference pressure ###
+pref = 0.0
+
+### Other adjustable parameters that may be needed
+# small  = 1e-8
+# cutoff = 1e-100
+# small  = 1e-5
+# cutoff = 1e-5
+
+### IC State ###
+
+density0.ic.type = expression
+density0.ic.expression.region0 = "1000.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1000.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.v_L = "0.0"
+velocity1.ic.expression.constant.v_R = "0.0"
+velocity1.ic.expression.region0 = "v_L*(x<0) + v_R*(x>0)"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "0.0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_L = "1.0e9"
+pressure1.ic.expression.constant.p_R = "1.0e5"
+pressure1.ic.expression.region0 = "p_L*(x<0) + p_R*(x>0)"
+
+temperature0.ic.type = expression
+temperature0.ic.expression.region0 = "294.0"
+
+temperature1.ic.type = expression
+temperature1.ic.expression.region0 = "294.0"
+
+cp0.ic.type = expression
+cp0.ic.expression.region0 = "1.4"
+
+cp1.ic.type = expression
+cp1.ic.expression.region0 = "1.4"
+
+cv0.ic.type = expression
+cv0.ic.expression.region0 = "1.0"
+
+cv1.ic.type = expression
+cv1.ic.expression.region0 = "1.0"
+
+k0_thermal.ic.type = expression
+k0_thermal.ic.expression.region0 = "0.6"
+
+k1_thermal.ic.type = expression
+k1_thermal.ic.expression.region0 = "0.6"
+
+h0_thermal.ic.type = expression
+h0_thermal.ic.expression.region0 = "1.4"
+
+h1_thermal.ic.type = expression
+h1_thermal.ic.expression.region0 = "1.0"
+
+### ETA BC  ###
+
+pf.eta.bc.type.xlo = neumann
+pf.eta.bc.type.xhi = neumann
+pf.eta.bc.type.ylo = neumann
+pf.eta.bc.type.yhi = neumann
+
+### HYDRO BC ###
+
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xhi = dirichlet dirichlet
+momentum.bc.type.xlo = dirichlet dirichlet
+momentum.bc.type.ylo = dirichlet dirichlet
+momentum.bc.type.yhi = dirichlet dirichlet
+momentum.bc.val.xhi = 0.0 0.0
+momentum.bc.val.xlo = 0.0 0.0
+momentum.bc.val.ylo = 0.0 0.0
+momentum.bc.val.yhi = 0.0 0.0
+
+### HYDRO REFINEMENT CRITERIA ###
+
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+static_eta = 1
+Spec_Vol = 1
+
+Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"

@@ -1,0 +1,187 @@
+#@ [case1]
+#@ exe=hydro2
+#@ dim=2
+#@ args = Riemann_Solver=1
+
+#@ [roe-rk4]
+#@ exe=hydro
+#@ dim=2
+#@ args = scheme=rk4
+#@ args = timestep=5.0e-5
+
+#@ [roe-ssprk3]
+#@ exe=hydro
+#@ dim=2
+#@ args = scheme=ssprk3
+#@ args = timestep=5.0e-5
+
+#@ [roe-fix1]
+#@ exe=hydro
+#@ dim=2
+#@ args= solver.roe.entropy_fix=1
+
+#@ [roe-fix2]
+#@ exe=hydro
+#@ dim=2
+#@ args= solver.roe.entropy_fix=2
+
+# alamo.program = hydro2
+
+### IMPORTANT: SEE https://www.sciencedirect.com/science/article/pii/S0021999102971433
+### Test 3
+
+### OUTPUT ###
+plot_file = ./tests/FlowRiemannUnitTests/output
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/
+
+### MESHING ###
+amr.plot_int = 1
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.grid_eff = 0.8
+amr.n_cell = 1600 64
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0  -0.02   0.0 # [ m ]
+geometry.prob_hi = 1.0   0.02   0.0 # [ m ]
+geometry.is_periodic = 0 0 0
+
+### TIME STEP ###
+timestep  = 1.0e-8
+stop_time = 2.7e-4  # Final time from paper
+
+### ETA IC ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+# Interface at x = 0.4 m: water on right, air on left
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.01  # Interface thickness
+eta.ic.expression.constant.x_interface = 0.75
+eta.ic.expression.region0 = "0.5 * (1.0 + tanh((x_interface - x)/epsilon))"
+
+epsilon = eta.ic.expression.constant.epsilon
+x_interface = eta.ic.expression.constant.x_interface
+
+### HYDRO PARAM ###
+gamma0 = 1.4         # Air gamma
+p0_0 = 0.0           # Air (ideal gas)
+b0 = 0.0
+q0EOS = 0.0
+
+gamma1 = 4.4         # Water gamma
+p0_1 = 6.0e8         # Water Tammann parameter [Pa]
+b1 = 0.0 # 6.61e-4
+q1EOS = 0.0 # -1.167e6
+
+cfl = 0.4
+mu0 = 0.0
+mu1 = 0.0  # Inviscid
+
+### Surface tension coefficient ###
+sigma = 0.0
+
+### Reference pressure ###
+pref = 0.0
+
+### IC State ###
+# Three regions: high pressure air (shock driver) | low pressure air | water
+
+# Air density: 50 kg/m³
+density0.ic.type = expression
+density0.ic.expression.region0 = "50" 
+
+# Water density: 1000 kg/m³
+density1.ic.type = expression
+density1.ic.expression.region0 = "997.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0" 
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Pressures: High pressure driver | atmospheric | atmospheric
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "10.0e5"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "1.0e5"
+
+# Temperatures
+temperature0.ic.type = expression
+temperature0.ic.expression.region0 = "293.15"
+
+temperature1.ic.type = expression
+temperature1.ic.expression.region0 = "293.15"
+
+# Thermodynamic properties - Air
+cp0.ic.type = expression
+cp0.ic.expression.region0 = "1005.0"
+cv0.ic.type = expression
+cv0.ic.expression.region0 = "717.86"
+
+# Thermodynamic properties - Water
+cp1.ic.type = expression
+cp1.ic.expression.region0 = "4179.0"
+cv1.ic.type = expression
+cv1.ic.expression.region0 = "1229.12"  # cp/gamma with gamma=4.4
+
+# Thermal properties
+k0_thermal.ic.type = expression
+k0_thermal.ic.expression.region0 = "0.026"  # Air
+k1_thermal.ic.type = expression
+k1_thermal.ic.expression.region0 = "0.6"  # Water
+
+h0_thermal.ic.type = expression
+h0_thermal.ic.expression.region0 = "1005.0"
+h1_thermal.ic.type = expression
+h1_thermal.ic.expression.region0 = "4179.0"
+
+### BOUNDARY CONDITIONS ###
+# Transmissive boundaries for shock tube
+pf.eta.bc.type.xlo = neumann
+pf.eta.bc.type.xhi = neumann
+pf.eta.bc.type.ylo = neumann
+pf.eta.bc.type.yhi = neumann
+
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xhi = dirichlet dirichlet
+momentum.bc.type.xlo = dirichlet dirichlet
+momentum.bc.type.ylo = dirichlet dirichlet
+momentum.bc.type.yhi = dirichlet dirichlet
+momentum.bc.val.xhi = 0.0 0.0
+momentum.bc.val.xlo = 0.0 0.0
+momentum.bc.val.ylo = 0.0 0.0
+momentum.bc.val.yhi = 0.0 0.0
+
+### HYDRO REFINEMENT CRITERIA ###
+eta_refinement_criterion   = 0.01
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 0
+apply_buoyancy = 0
+apply_weight = 0
+Spec_Vol = 1
+static_eta = 0
+
+### NUMERICAL METHODS ###
+Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"

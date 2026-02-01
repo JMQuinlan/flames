@@ -1,0 +1,184 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = tests/RT_Instability
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/RT_Instability
+
+
+### MESHING ###
+amr.plot_dt = 5e-5
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.regrid_int = 2
+amr.grid_eff = 0.8
+amr.max_level = 3
+amr.n_cell = 128 512  # Higher resolution in y-direction for interface dynamics
+
+### TIME STEPING ###
+## Static:
+timestep  = 1e-7
+## Adaptive
+dynamictimestep.on = 0
+dynamictimestep.verbose = 1
+dynamictimestep.min = 1e-6
+dynamictimestep.max = 1e-4
+cfl = 0.5
+
+### DIMENSIONS ###
+geometry.prob_lo = -0.25 -1.0 0.0 # [ m ]
+geometry.prob_hi =  0.25  1.0 0.0 # [ m ]
+geometry.is_periodic = 1 0 0  # Periodic in x, non-periodic in y
+ 
+### TIME STEP ###
+stop_time = 1.0  # Run long enough to see instability growth
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.01  # Interface thickness
+eta.ic.expression.constant.lambda = 0.5    # Wavelength of perturbation
+eta.ic.expression.constant.amp = 0.10      # Initial amplitude of perturbation
+
+# Initial interface with single-mode perturbation
+# eta=1 is water (heavy fluid, bottom), eta=0 is air (light fluid, top)
+eta.ic.expression.region0 = "0.5 * (1.0 + tanh((y + amp * cos(2.0 * 3.14159 * x / lambda)) / epsilon))"
+
+epsilon = eta.ic.expression.constant.epsilon
+
+
+### HYDRO INITIAL CONDITIONS ###
+# Water properties (bottom, eta=1)
+gamma0 = 7.15  # Water gamma
+p0_0 = 3.0e8   # Tammann EOS parameter for water
+mu0 = 1.0e-3   # Water viscosity [Pa-s]
+mu0_b = 0.001  # Water bulk viscosity
+
+# Air properties (top, eta=0)
+gamma1 = 1.4   # Air gamma
+p0_1 = 0.0     # Ideal gas (no Tammann term)
+mu1 = 1.8e-5   # Air viscosity [Pa-s]
+mu1_b = 0.0    # Air bulk viscosity
+
+# Densities
+density0.ic.type = expression
+density0.ic.expression.region0 = "1000.0"  # Water density [kg/m3]
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.2"     # Air density [kg/m3]
+
+# Velocities - initially at rest
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Pressures - hydrostatic pressure profile
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "101325.0 + 1000.0 * 9.81 * (1.0 - y)"  # Hydrostatic pressure in water
+
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "101325.0 + 1.2 * 9.81 * (1.0 - y)"     # Hydrostatic pressure in air
+
+# Temperatures
+temperature0.ic.type = expression
+temperature0.ic.expression.region0 = "293.15"  # 20°C
+
+temperature1.ic.type = expression
+temperature1.ic.expression.region0 = "293.15"  # 20°C
+
+# Thermodynamic properties
+cp0.ic.type = expression
+cp0.ic.expression.region0 = "4179.0"  # Water specific heat [J/kg-K]
+
+cp1.ic.type = expression
+cp1.ic.expression.region0 = "1005.0"  # Air specific heat [J/kg-K]
+
+cv0.ic.type = expression
+cv0.ic.expression.region0 = "4179.0/7.15"  # Water cv = cp/gamma
+
+cv1.ic.type = expression
+cv1.ic.expression.region0 = "717.86"  # Air cv = cp/gamma
+
+# Thermal conductivities
+k0_thermal.ic.type = expression
+k0_thermal.ic.expression.region0 = "0.6"  # Water [W/m-K]
+
+k1_thermal.ic.type = expression
+k1_thermal.ic.expression.region0 = "0.026"  # Air [W/m-K]
+
+h0_thermal.ic.type = expression
+h0_thermal.ic.expression.region0 = "4179.0"  # Water heat transfer coefficient
+
+h1_thermal.ic.type = expression
+h1_thermal.ic.expression.region0 = "1005.0"  # Air heat transfer coefficient
+
+# Surface tension
+sigma = 72.8e-3  # Water-air surface tension [N/m]
+
+# Reference pressure
+pref = 0.0
+
+### BOUNDARY CONDITIONS ###
+# Eta boundary conditions
+pf.eta.bc.type.xlo = periodic
+pf.eta.bc.type.xhi = periodic
+pf.eta.bc.type.ylo = neumann
+pf.eta.bc.type.yhi = neumann
+pf.eta.bc.type.zlo = neumann
+pf.eta.bc.type.zhi = neumann
+
+# Hydro boundary conditions
+density.bc.type.xhi = periodic
+density.bc.type.xlo = periodic
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+energy.bc.type.xhi = periodic
+energy.bc.type.xlo = periodic
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xhi = periodic periodic
+momentum.bc.type.xlo = periodic periodic
+momentum.bc.type.ylo = dirichlet dirichlet
+momentum.bc.val.ylo  = 0.0       0.0
+momentum.bc.type.yhi = dirichlet dirichlet
+momentum.bc.val.yhi  = 0.0       0.0
+
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion = 0.000001
+omega_refinement_criterion = 10.55
+p_refinement_criterion = 1e+3
+rho_refinement_criterion = 1e+2
+gradu_refinement_criterion = 1e+2
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+q.ic.type = expression
+q.ic.expression.region0 = "0.0"
+q.ic.expression.region1 = "0.0"
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 1  # Enable surface tension
+apply_buoyancy = 0        # Not needed, using gravity instead
+apply_weight = 1          # Enable gravity
+Spec_Vol = 1              # Using volume-specific energy
+
+grav = 9.81               # Gravity [m/s2]
+
+### NUMERICAL METHODS ###
+Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
+scheme = 0		   # Valid Entries: 0:"Forward Euler" / 1:"SSPRK3" / 2:"RK4"
+Limiter = 0        # Valid Entries: 0:"None" / 1:"MinMod" / 2:"Van Leer"
