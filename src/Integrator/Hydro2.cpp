@@ -64,32 +64,12 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("scheme", value.scheme, 0);        // 0: Forward Euler | 1: RK4
         pp_query_default("Spec_Vol", value.Spec_Vol, 1);    // 0: Solve Energy via specific mass | 1: Solve Energy via specific volume
 
-        // ADAPTIVE TIMESTEP
-        // Swtiched pointer names to fix weird time stepping issue
-        /*
-        pp_query_default("adaptive_timestep", value.adaptive_timestep, false); 
-        pp_query_default("dt_min", value.dt_min, 1E-9);
-        pp_query_default("dt_max", value.dt_max, 1E-3);
-        pp_query_default("dt_growth", value.dt_growth, 1.2);
-        */
-        pp_forbid("adaptive_timestep", "--> dynamictimestep.on"); 
-        pp_forbid("dt_min", "--> dynamictimestep.min"); 
-        pp_forbid("dt_max", "--> dynamictimestep.max"); 
-        pp_forbid("dt_growth", "--> REMOVED");
-        pp_forbid("dt_nprev", "--> dynamictimestep.nprevious");
-        
-
-
         // OPTIONAL SOURCE TERMS
         pp_query_default("apply_surface_tension", value.apply_surface_tension, true); // Apply surface tension when solving, default: true --> "Apply Surface Tension"
         pp_query_default("apply_buoyancy", value.apply_buoyancy, false);              // Apply buoyancy when solving, default: false --> "No Buoyancy"
         pp_query_default("apply_weight", value.apply_weight, false);                  // Apply weight when solving, default: false --> "No Weight"
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
         pp_query_default("apply_vaporization", value.apply_vaporization, false);      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
-
-        // NEW SOLVER FORBIDS
-        pp_forbid("gamma", "--> gamma0 and gamma1");
-        pp_forbid("mu", "--> mu0 and mu1");
 
         // FLUID 0
         pp_query_required("gamma0", value.gamma0);      // gamma for gamma law
@@ -109,26 +89,19 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
 
         // INTERACTIONS
-        pp_query_default("sigma", value.sigma, 0.0);   // surface tension condition
-        pp_query_default("Dv", value.Dv, 0.0);   // Vapor Diffusivity
+        pp_query_default("sigma", value.sigma, 0.0);    // Surface tension condition
+        pp_query_default("Dv", value.Dv, 0.0);          // Vapor Diffusivity
         pp_query_required("epsilon", value.epsilon);    // diffuse interface thickness
 
         // CURVATURE
         pp_query_default("kappa_method", value.kappa_method, 2); // Method to solve for curvature
         
         // Boundry Conditions
-        pp_forbid("rho.bc","--> density.bc");
-        pp_forbid("p.bc","--> pressure.bc");
-        pp_forbid("v.bc","--> velocity.bc");
-        pp_forbid("pressure.bc", "--> energy.bc");
-        pp_forbid("velocity.bc", "--> momentum.bc");
         value.density_bc = new BC::Expression(1, pp, "density.bc");
         value.energy_bc = new BC::Constant(1, pp, "energy.bc");
         value.momentum_bc = new BC::Expression(2, pp, "momentum.bc");
         //value.eta_bc = new BC::Constant(1, pp, "pf.eta.bc");
         value.temperature_bc = new BC::Constant(1, pp, "energy.bc"); // Change to be different if needed? ___TEMP___
-
-        
     }
 
     // Register FabFields:
@@ -236,12 +209,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                                                                                                      "110","111",
                                                                                                     }); // hess_u Flux
     }
-
-    // NEW SOLVER FORBIDS
-    pp_forbid("velocity.ic.type", "--> velocity0.ic.type or velocity1.ic.type");
-    pp_forbid("pressure.ic", "--> pressure0.ic or pressure1.ic");
-    pp_forbid("density.ic.type", "--> density0.ic.type or density1.ic.type");
-
 
     // INITIAL CONDITIONS
     // Eta
@@ -589,8 +556,6 @@ void Hydro2::Mix(int lev)
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / a(i, j, k);
             Ma(i, j, k, 1) = v(i, j, k, 1) / a(i, j, k);
-
-
         });
     }
     c_max = 0.0;
