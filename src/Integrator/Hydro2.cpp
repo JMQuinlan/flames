@@ -137,99 +137,99 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         int nghost = 4;
 
         // DIFFUSE PARAMETERS
-        value.RegisterNewFab(value.eta_mf,          value.energy_bc, 1, nghost, "eta", true);
-        value.RegisterNewFab(value.eta_old_mf,      value.energy_bc, 1, nghost, "eta_old", false);
-        value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing, 1, nghost, "etadot", true);
-        value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing, 4, nghost, "hess_eta", false, { "00", "01", "10", "11" });
-        value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing,  2, nghost, "n_hat", false, { "x", "y" });
+        value.RegisterNewFab(value.eta_mf,          value.energy_bc, 1, nghost, "eta", true, true);
+        value.RegisterNewFab(value.eta_old_mf,      value.energy_bc, 1, nghost, "eta_old", false, true);
+        value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing, 1, nghost, "etadot", true, true);
+        value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing, 4, nghost, "hess_eta", false, true, { "00", "01", "10", "11" });
+        value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing,  2, nghost, "n_hat", false, true, { "x", "y" });
 
         // FLUID 0
-        value.RegisterNewFab(value.density0_mf,     value.density_bc,   1, nghost, "density0",     false );
-        value.RegisterNewFab(value.density0_old_mf, value.density_bc,   1, nghost, "density0_old", false);
+        value.RegisterNewFab(value.density0_mf,     value.density_bc,   1, nghost, "density0",     false, true );
+        value.RegisterNewFab(value.density0_old_mf, value.density_bc,   1, nghost, "density0_old", false, true);
 
-        value.RegisterNewFab(value.energy0_mf,      value.energy_bc,    1, nghost, "energy0", false);
-        value.RegisterNewFab(value.energy0_old_mf,  value.energy_bc,    1, nghost, "energy0_old" , false);
+        value.RegisterNewFab(value.energy0_mf,      value.energy_bc,    1, nghost, "energy0", false, true);
+        value.RegisterNewFab(value.energy0_old_mf,  value.energy_bc,    1, nghost, "energy0_old" , false, true);
 
-        value.RegisterNewFab(value.momentum0_mf,    value.momentum_bc,  2, nghost, "momentum0", false, { "x", "y" });
-        value.RegisterNewFab(value.momentum0_old_mf,value.momentum_bc,  2, nghost, "momentum0_old", false);
+        value.RegisterNewFab(value.momentum0_mf,    value.momentum_bc,  2, nghost, "momentum0", false, true, { "x", "y" });
+        value.RegisterNewFab(value.momentum0_old_mf,value.momentum_bc,  2, nghost, "momentum0_old", false, true);
  
-        value.RegisterNewFab(value.T0_mf,           value.temperature_bc, 1, nghost, "T0", false);
-        value.RegisterNewFab(value.cp0_mf,          &value.bc_nothing, 1, nghost, "cp0", false);
-        value.RegisterNewFab(value.cv0_mf,          &value.bc_nothing, 1, nghost, "cv0", false);
-        value.RegisterNewFab(value.k0_thermal_mf,   &value.bc_nothing, 1, nghost, "k0_thermal", false);
-        value.RegisterNewFab(value.h0_thermal_mf,   &value.bc_nothing, 1, nghost, "h0_thermal", false);
+        value.RegisterNewFab(value.T0_mf,           value.temperature_bc, 1, nghost, "T0", false, true);
+        value.RegisterNewFab(value.cp0_mf,          &value.bc_nothing, 1, nghost, "cp0", false, true);
+        value.RegisterNewFab(value.cv0_mf,          &value.bc_nothing, 1, nghost, "cv0", false, true);
+        value.RegisterNewFab(value.k0_thermal_mf,   &value.bc_nothing, 1, nghost, "k0_thermal", false, true);
+        value.RegisterNewFab(value.h0_thermal_mf,   &value.bc_nothing, 1, nghost, "h0_thermal", false, true);
 
-        value.RegisterNewFab(value.pressure0_mf,    value.energy_bc,  1, nghost, "pressure0", false);
-        value.RegisterNewFab(value.velocity0_mf,    &value.bc_nothing,  2, nghost, "velocity0", false, { "x", "y" });
-        value.RegisterNewFab(value.vorticity0_mf,   &value.bc_nothing,  1, nghost, "vorticity0", false);
+        value.RegisterNewFab(value.pressure0_mf,    value.energy_bc,  1, nghost, "pressure0", false, true);
+        value.RegisterNewFab(value.velocity0_mf,    &value.bc_nothing,  2, nghost, "velocity0", false, true, { "x", "y" });
+        value.RegisterNewFab(value.vorticity0_mf,   &value.bc_nothing,  1, nghost, "vorticity0", false, true);
 
         // FLUID 1
-        value.RegisterNewFab(value.density1_mf,     value.density_bc,   1, nghost, "density1", false);
-        value.RegisterNewFab(value.density1_old_mf, value.density_bc,   1, nghost, "density1_old", false);
+        value.RegisterNewFab(value.density1_mf,     value.density_bc,   1, nghost, "density1", false, true);
+        value.RegisterNewFab(value.density1_old_mf, value.density_bc,   1, nghost, "density1_old", false, true);
 
-        value.RegisterNewFab(value.energy1_mf,      value.energy_bc,    1, nghost, "energy1", false);
-        value.RegisterNewFab(value.energy1_old_mf,  value.energy_bc,    1, nghost, "energy1_old", false);
+        value.RegisterNewFab(value.energy1_mf,      value.energy_bc,    1, nghost, "energy1", false, true);
+        value.RegisterNewFab(value.energy1_old_mf,  value.energy_bc,    1, nghost, "energy1_old", false, true);
 
-        value.RegisterNewFab(value.momentum1_mf,    value.momentum_bc,  2, nghost, "momentum1", false, { "x", "y" });
-        value.RegisterNewFab(value.momentum1_old_mf,value.momentum_bc,  2, nghost, "momentum1_old", false);
+        value.RegisterNewFab(value.momentum1_mf,    value.momentum_bc,  2, nghost, "momentum1", false, true, { "x", "y" });
+        value.RegisterNewFab(value.momentum1_old_mf,value.momentum_bc,  2, nghost, "momentum1_old", false, true);
 
-        value.RegisterNewFab(value.T1_mf,           value.temperature_bc, 1, nghost, "T1", false);
-        value.RegisterNewFab(value.cp1_mf,          &value.bc_nothing, 1, nghost, "cp1", false);
-        value.RegisterNewFab(value.cv1_mf,          &value.bc_nothing, 1, nghost, "cv1", false);
-        value.RegisterNewFab(value.k1_thermal_mf,   &value.bc_nothing, 1, nghost, "k1_thermal", false);
-        value.RegisterNewFab(value.h1_thermal_mf,   &value.bc_nothing, 1, nghost, "h1_thermal", false);
+        value.RegisterNewFab(value.T1_mf,           value.temperature_bc, 1, nghost, "T1", false, true);
+        value.RegisterNewFab(value.cp1_mf,          &value.bc_nothing, 1, nghost, "cp1", false, true);
+        value.RegisterNewFab(value.cv1_mf,          &value.bc_nothing, 1, nghost, "cv1", false, true);
+        value.RegisterNewFab(value.k1_thermal_mf,   &value.bc_nothing, 1, nghost, "k1_thermal", false, true);
+        value.RegisterNewFab(value.h1_thermal_mf,   &value.bc_nothing, 1, nghost, "h1_thermal", false, true);
 
-        value.RegisterNewFab(value.pressure1_mf,    value.energy_bc,  1, nghost, "pressure1", false);
-        value.RegisterNewFab(value.velocity1_mf,    &value.bc_nothing,  2, nghost, "velocity1", false, { "x", "y" });
-        value.RegisterNewFab(value.vorticity1_mf,   &value.bc_nothing,  1, nghost, "vorticity1", false);
+        value.RegisterNewFab(value.pressure1_mf,    value.energy_bc,  1, nghost, "pressure1", false, true);
+        value.RegisterNewFab(value.velocity1_mf,    &value.bc_nothing,  2, nghost, "velocity1", false, true, { "x", "y" });
+        value.RegisterNewFab(value.vorticity1_mf,   &value.bc_nothing,  1, nghost, "vorticity1", false, true);
 
         // MIXTURE
-        value.RegisterNewFab(value.pressure_mf,     value.energy_bc, 1, nghost, "pressure", true);
-        value.RegisterNewFab(value.velocity_mf,     &value.bc_nothing,  2, nghost, "velocity", true, { "x", "y" });
-        value.RegisterNewFab(value.vorticity_mf,    &value.bc_nothing,  1, nghost, "vorticity", true);
-        value.RegisterNewFab(value.density_mf,      value.density_bc,   1, nghost, "density", true);
-        value.RegisterNewFab(value.density_old_mf,  value.density_bc,   1, nghost, "density_old", false);
-        value.RegisterNewFab(value.energy_per_vol_mf,       value.energy_bc,    1, nghost, "energy_per_vol", true);
-        value.RegisterNewFab(value.energy_per_mas_mf,       value.energy_bc,    1, nghost, "energy_per_mass", true);
-        value.RegisterNewFab(value.energy_per_vol_old_mf,   value.energy_bc,    1, nghost, "energy_vol_old", false);
-        value.RegisterNewFab(value.energy_per_mas_old_mf,   value.energy_bc,    1, nghost, "energy_mas_old", false);
-        value.RegisterNewFab(value.momentum_mf,     value.momentum_bc,  2, nghost, "momentum", true, { "x", "y" });
-        value.RegisterNewFab(value.momentum_old_mf, value.momentum_bc,  2, nghost, "momentum_old", false, { "x", "y" });
+        value.RegisterNewFab(value.pressure_mf,     value.energy_bc, 1, nghost, "pressure", true, true);
+        value.RegisterNewFab(value.velocity_mf,     &value.bc_nothing,  2, nghost, "velocity", true, true, { "x", "y" });
+        value.RegisterNewFab(value.vorticity_mf,    &value.bc_nothing,  1, nghost, "vorticity", true, true);
+        value.RegisterNewFab(value.density_mf,      value.density_bc,   1, nghost, "density", true, true);
+        value.RegisterNewFab(value.density_old_mf,  value.density_bc,   1, nghost, "density_old", false, true);
+        value.RegisterNewFab(value.energy_per_vol_mf,       value.energy_bc,    1, nghost, "energy_per_vol", true, true);
+        value.RegisterNewFab(value.energy_per_mas_mf,       value.energy_bc,    1, nghost, "energy_per_mass", true, true);
+        value.RegisterNewFab(value.energy_per_vol_old_mf,   value.energy_bc,    1, nghost, "energy_vol_old", false, true);
+        value.RegisterNewFab(value.energy_per_mas_old_mf,   value.energy_bc,    1, nghost, "energy_mas_old", false, true);
+        value.RegisterNewFab(value.momentum_mf,     value.momentum_bc,  2, nghost, "momentum", true, true, { "x", "y" });
+        value.RegisterNewFab(value.momentum_old_mf, value.momentum_bc,  2, nghost, "momentum_old", false, true, { "x", "y" });
 
         // SOURCES
-        value.RegisterNewFab(value.m0_mf,           &value.bc_nothing,  1, nghost, "m0", true);
-        value.RegisterNewFab(value.u0_mf,           &value.bc_nothing, 2, nghost, "u0", true, { "x", "y" });
-        value.RegisterNewFab(value.q_mf,            &value.bc_nothing, 2, nghost, "q0", true, { "x", "y" });
-        value.RegisterNewFab(value.Source_mf,       &value.bc_nothing,  4, nghost, "Source", true);
-        value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, nghost, "Fsv", true, { "x", "y" });  // Surface Tension
-        value.RegisterNewFab(value.Fb_mf,           &value.bc_nothing,  2, nghost, "Fb", true, { "x", "y" });   // Buoyancy
-        value.RegisterNewFab(value.Fw_mf,           &value.bc_nothing,  2, nghost, "Fw", true, { "x", "y" });   // Weight
-        value.RegisterNewFab(value.Ldot_mf,         &value.bc_nothing,  2, nghost, "Ldot", true, { "x", "y" });  // Ldot
-        value.RegisterNewFab(value.T_mf,            &value.bc_nothing,  1, nghost, "T", true);                  // Temperature
-        value.RegisterNewFab(value.cp_mf,           &value.bc_nothing,  1, nghost, "cp", false);                // Constant Pressure Specific Heat
-        value.RegisterNewFab(value.cv_mf,           &value.bc_nothing,  1, nghost, "cv", false);                // Constant Volume Specific Heat
-        value.RegisterNewFab(value.k_thermal_mf,    &value.bc_nothing,  1, nghost, "k_thermal", false);         // Thermal Conductivity
-        value.RegisterNewFab(value.h_thermal_mf,    &value.bc_nothing,  1, nghost, "h_thermal", false);         // Thermal Convectivity
-        value.RegisterNewFab(value.gamma_mf,        value.energy_bc, 1, nghost, "gamma", true);                 // Specific Heat Ratio
-        value.RegisterNewFab(value.p0_mf,           value.energy_bc, 1, nghost, "p0", true);                    // Tamman Pressure
-        value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc, 1, nghost, "mu_chem", false);               // Tammann Pressure
-        value.RegisterNewFab(value.a_mf,            &value.bc_nothing,  1, nghost, "a", true);                    // Speed of sound
-        value.RegisterNewFab(value.Ma_mf,           &value.bc_nothing,  2, nghost, "Ma", true, { "x", "y" });   // Mach
-        value.RegisterNewFab(value.UE_per_vol_mf,   &value.bc_nothing,  1, nghost, "UE_per_vol", true);         // Internal Energy (per unit volume)
-        value.RegisterNewFab(value.UE_per_mas_mf,   &value.bc_nothing,  1, nghost, "UE_per_mass", true);        // Internal Energy (per unit mass)
-        value.RegisterNewFab(value.KE_per_vol_mf,   &value.bc_nothing,  1, nghost, "KE_per_vol", true);         // Kinetic Energy (per unit volume)
-        value.RegisterNewFab(value.KE_per_mas_mf,   &value.bc_nothing,  1, nghost, "KE_per_mass", true);        // Kinetic Energy (per unit mass)
-        value.RegisterNewFab(value.Bm_mf,           &value.bc_nothing,  1, nghost, "Spadling_Number", true);    // Spalding Number
+        value.RegisterNewFab(value.m0_mf,           &value.bc_nothing,  1, nghost, "m0", true, true);
+        value.RegisterNewFab(value.u0_mf,           &value.bc_nothing, 2, nghost, "u0", true, true, { "x", "y" });
+        value.RegisterNewFab(value.q_mf,            &value.bc_nothing, 2, nghost, "q0", true, true, { "x", "y" });
+        value.RegisterNewFab(value.Source_mf,       &value.bc_nothing,  4, nghost, "Source", true, true);
+        value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, nghost, "Fsv", true, true, { "x", "y" });  // Surface Tension
+        value.RegisterNewFab(value.Fb_mf,           &value.bc_nothing,  2, nghost, "Fb", true, true, { "x", "y" });   // Buoyancy
+        value.RegisterNewFab(value.Fw_mf,           &value.bc_nothing,  2, nghost, "Fw", true, true, { "x", "y" });   // Weight
+        value.RegisterNewFab(value.Ldot_mf,         &value.bc_nothing,  2, nghost, "Ldot", true, true, { "x", "y" });  // Ldot
+        value.RegisterNewFab(value.T_mf,            &value.bc_nothing,  1, nghost, "T", true, true);                  // Temperature
+        value.RegisterNewFab(value.cp_mf,           &value.bc_nothing,  1, nghost, "cp", false, true);                // Constant Pressure Specific Heat
+        value.RegisterNewFab(value.cv_mf,           &value.bc_nothing,  1, nghost, "cv", false, true);                // Constant Volume Specific Heat
+        value.RegisterNewFab(value.k_thermal_mf,    &value.bc_nothing,  1, nghost, "k_thermal", false, true);         // Thermal Conductivity
+        value.RegisterNewFab(value.h_thermal_mf,    &value.bc_nothing,  1, nghost, "h_thermal", false, true);         // Thermal Convectivity
+        value.RegisterNewFab(value.gamma_mf,        value.energy_bc, 1, nghost, "gamma", true, true);                 // Specific Heat Ratio
+        value.RegisterNewFab(value.p0_mf,           value.energy_bc, 1, nghost, "p0", true, true);                    // Tamman Pressure
+        value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc, 1, nghost, "mu_chem", false, true);               // Tammann Pressure
+        value.RegisterNewFab(value.a_mf,            &value.bc_nothing,  1, nghost, "a", true, true);                    // Speed of sound
+        value.RegisterNewFab(value.Ma_mf,           &value.bc_nothing,  2, nghost, "Ma", true, true, { "x", "y" });   // Mach
+        value.RegisterNewFab(value.UE_per_vol_mf,   &value.bc_nothing,  1, nghost, "UE_per_vol", true, true);         // Internal Energy (per unit volume)
+        value.RegisterNewFab(value.UE_per_mas_mf,   &value.bc_nothing,  1, nghost, "UE_per_mass", true, true);        // Internal Energy (per unit mass)
+        value.RegisterNewFab(value.KE_per_vol_mf,   &value.bc_nothing,  1, nghost, "KE_per_vol", true, true);         // Kinetic Energy (per unit volume)
+        value.RegisterNewFab(value.KE_per_mas_mf,   &value.bc_nothing,  1, nghost, "KE_per_mass", true, true);        // Kinetic Energy (per unit mass)
+        value.RegisterNewFab(value.Bm_mf,           &value.bc_nothing,  1, nghost, "Spadling_Number", true, true);    // Spalding Number
 
         // EXTRAS & DEBUGGING
-        value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", false, { "x", "y" });
-        value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, nghost, "kappa", false, { "Avg", "1", "2" }); // To Surface curvature
-        value.RegisterNewFab(value.grad_mag_grad_eta_mf, &value.bc_nothing, 2, nghost, "grad_mag_grad_eta", false, { "x", "y" }); // grad( | grad(eta) | )
-        value.RegisterNewFab(value.rho_flux_mf,     &value.bc_nothing,  1, nghost, "rho_flux", true);                    // Density Flux
-        value.RegisterNewFab(value.M_flux_mf,       &value.bc_nothing,  2, nghost, "M_flux", true, { "x", "y" });        // Momentum Flux
-        value.RegisterNewFab(value.E_flux_mf,       &value.bc_nothing,  1, nghost, "E_flux", true);                      // Energy Flux
-        value.RegisterNewFab(value.div_tau_mf,      &value.bc_nothing,  2, nghost, "div_tau", true, { "x", "y" });            // Energy Flux
-        value.RegisterNewFab(value.hess_u_mf,       &value.bc_nothing,  8, nghost, "hess_u", false, {
+        value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", false, true, { "x", "y" });
+        value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, nghost, "kappa", false, true, { "Avg", "1", "2" }); // To Surface curvature
+        value.RegisterNewFab(value.grad_mag_grad_eta_mf, &value.bc_nothing, 2, nghost, "grad_mag_grad_eta", false, true, { "x", "y" }); // grad( | grad(eta) | )
+        value.RegisterNewFab(value.rho_flux_mf,     &value.bc_nothing,  1, nghost, "rho_flux", true, true);                    // Density Flux
+        value.RegisterNewFab(value.M_flux_mf,       &value.bc_nothing,  2, nghost, "M_flux", true, true, { "x", "y" });        // Momentum Flux
+        value.RegisterNewFab(value.E_flux_mf,       &value.bc_nothing,  1, nghost, "E_flux", true, true);                      // Energy Flux
+        value.RegisterNewFab(value.div_tau_mf,      &value.bc_nothing,  2, nghost, "div_tau", true, true, { "x", "y" });            // Energy Flux
+        value.RegisterNewFab(value.hess_u_mf,       &value.bc_nothing,  8, nghost, "hess_u", false, true, {
                                                                                                      "000","001",
                                                                                                      "010","011",
                                                                                                      "100","101",
