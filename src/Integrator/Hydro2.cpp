@@ -1048,26 +1048,29 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar mu_eff = eta(i, j, k) * mu0 + (1.0 - eta(i, j, k)) * mu1;       // Effective dynamic viscosity
             Set::Scalar mu_b_eff = eta(i, j, k) * mu0_b + (1.0 - eta(i, j, k)) * mu1_b; // Effective bulk viscosity
 
-            for (int p = 0; p < 2; p++)             // Dimension Component
-                for (int q = 0; q < 2; q++)         // Dimension Component
-                    for (int r = 0; r < 2; r++)     // X
-                        for (int s = 0; s < 2; s++) // Y
+            for (int p = 0; p < 2; p++)             // i
+                for (int q = 0; q < 2; q++)         // j
+                    for (int r = 0; r < 2; r++)     // k
+                        for (int s = 0; s < 2; s++) // l
                         {
                             Set::Scalar Mpqrs = 0.0;
+                            if ((p == r) and (q == s))
+                            {
+                                Mpqrs += mu_eff;
+                            }
+                            if ((p == s) and (q == r))
+                            {
+                                Mpqrs += mu_eff;
+                            }
+                            if ((p == q) and (r == s))
+                            {
+                                Mpqrs += mu_b_eff - (2.0 / 3.0) * mu_eff;
+                            }
 
-                            // Newtonian fluid terms (shear viscosity)
-                            if (p == r && q == s)
-                                Mpqrs += 0.5 * mu_eff;
-                            if (p == s && q == r)
-                                Mpqrs += 0.5 * mu_eff;
-
-                            // Bulk viscosity
-                            if (p == q && r == s)
-                                Mpqrs += (1.0 / 3.0) * mu_b_eff;
-
+                            div_tau(p) += Mpqrs * hess_u(r, s, q);
                             Ldot0(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
-                            div_tau(p) += 2.0 * Mpqrs * hess_u(r, s, q);
                         }
+
             // NEW Formulation of div_tau
             // Calculate gradient of divergence
             Set::Vector grad_div_u = Set::Vector::Zero();
