@@ -21,6 +21,7 @@
 
 #include "IO/ParmParse.H"
 #include "Solver/Local/FluidRiemann/Riemann.H"
+#include "Util/Util.H"
 
 namespace Solver
 {
@@ -29,42 +30,30 @@ namespace Local
 namespace FluidRiemann
 {
 
-class HLLC_All_Mach_Furfaro
+class HLLC_All_Mach_Furfaro : public FluidRiemann
 {
 public:
     static constexpr const char *name = "hllc_all_mach_furfaro";
 
-    HLLC_All_Mach_Furfaro(IO::ParmParse &pp, std::string name)
-    {
-        pp_queryclass(name, *this);
-    }
-
-    HLLC_All_Mach_Furfaro(IO::ParmParse &pp)
-    {
-        pp_queryclass(*this);
-    }
-
+    HLLC_All_Mach_Furfaro(IO::ParmParse &pp, std::string name) { pp_queryclass(name, *this); }
+    HLLC_All_Mach_Furfaro(IO::ParmParse &pp) { pp_queryclass(*this); }
     HLLC_All_Mach_Furfaro()
     {
         IO::ParmParse pp;
         pp_queryclass(*this);
     }
 
-    int verbose = 0;
     Set::Scalar interface_pressure_relaxation = 1.0; // β parameter (0=no relax, 1=full relax)
 
-    static void
-    Parse(HLLC_All_Mach_Furfaro &value, IO::ParmParse &pp)
+    static void Parse(HLLC_All_Mach_Furfaro &value, IO::ParmParse &pp)
     {
-        pp.query_default("verbose", value.verbose, 1);
         pp.query_default("interface_pressure_relaxation", value.interface_pressure_relaxation, 1.0);
     }
 
     // -------------------------------------------------------------------------
     // Solve two-phase Riemann problem
     // -------------------------------------------------------------------------
-    Flux
-    Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1)
+    virtual Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1) override
     {
         // =====================================================================
         // 1. EXTRACT & SANITIZE STATES
@@ -80,7 +69,9 @@ public:
         Set::Scalar gamma_L = lo.gam;
         Set::Scalar gamma_R = hi.gam;
         Set::Scalar p0_L = lo.p0;
-        Set::Scalar p0_R = lo.p0;
+        Set::Scalar p0_R = hi.p0;
+        Set::Scalar T_L = lo.T;
+        Set::Scalar T_R = hi.T;
 
         // =====================================================================
         // 2. COMPUTE PRIMITIVES & THERMODYNAMICS
@@ -120,7 +111,6 @@ public:
         // =====================================================================
         // 3. WAVE SPEED ESTIMATES (5-wave structure)
         // =====================================================================
-
         // Outer acoustic waves (same as standard HLLC)
         Set::Scalar S_L = std::min(u_L - a_L, u_R - a_R);
         Set::Scalar S_R = std::max(u_L + a_L, u_R + a_R);
@@ -138,12 +128,11 @@ public:
         // =====================================================================
         // 4. STAR STATES (per phase, no equilibrium)
         // =====================================================================
-
         // Left star region
         Set::Scalar rho_star_L = rho_L * (S_L - u_L) / (S_L - S_star_L + small);
         Set::Scalar p_star_L = p_L + rho_L * (S_L - u_L) * (S_star_L - u_L);
-
         Set::Scalar E_star_L;
+
         if (Spec_Vol == 1)
         {
             E_star_L = rho_star_L * (E_L / rho_L + (S_star_L - u_L) * (S_star_L + p_L / (rho_L * (S_L - u_L) + small)));
@@ -156,8 +145,8 @@ public:
         // Right star region
         Set::Scalar rho_star_R = rho_R * (S_R - u_R) / (S_R - S_star_R + small);
         Set::Scalar p_star_R = p_R + rho_R * (S_R - u_R) * (S_star_R - u_R);
-
         Set::Scalar E_star_R;
+
         if (Spec_Vol == 1)
         {
             E_star_R = rho_star_R * (E_R / rho_R + (S_star_R - u_R) * (S_star_R + p_R / (rho_R * (S_R - u_R) + small)));
@@ -173,8 +162,8 @@ public:
 
         Set::Scalar rho_star_I_L = rho_star_L; // density continuous across contact
         Set::Scalar rho_star_I_R = rho_star_R;
-
         Set::Scalar E_star_I_L, E_star_I_R;
+
         if (Spec_Vol == 1)
         {
             E_star_I_L = E_star_L + (p_I - p_star_L) / (gamma_L - 1.0);
@@ -232,8 +221,6 @@ public:
         else
         {
             // ---- Energies per unit mass [J/kg] ----
-            // (Similar structure, adjusted for specific energy)
-
             // Left physical
             f_L.mass = rho_L * u_L;
             f_L.momentum_normal = rho_L * u_L * u_L + p_L;
@@ -275,7 +262,6 @@ public:
         // 6. SELECT FLUX BASED ON WAVE STRUCTURE
         // =====================================================================
         Flux fl;
-
         if (0.0 <= S_L)
         {
             fl = f_L;
@@ -306,6 +292,7 @@ public:
         // =====================================================================
         if ((fl.mass != fl.mass) || (fl.momentum_normal != fl.momentum_normal) || (fl.momentum_tangent != fl.momentum_tangent) || (fl.energy != fl.energy) || (a_L != a_L) || (a_R != a_R))
         {
+            bool verbose = false;
             if (verbose)
             {
                 Util::ParallelMessage(INFO, "-------------------------------");

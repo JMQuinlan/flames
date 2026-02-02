@@ -8,13 +8,13 @@
 //      2. Mach-dependent wave speed scaling
 //      3. Modified star state pressure with reduced acoustic dissipation
 //
-// Source: M. Oomar and R. Jaiman, "An All-Mach Number HLLC-Based Scheme for Multi-Phase Flow with Interface Sharpening," 
+// Source: M. Oomar and R. Jaiman, "An All-Mach Number HLLC-Based Scheme for Multi-Phase Flow with Interface Sharpening,"
 //         Computers & Fluids, vol. 224, 2021, doi: 10.1016/j.compfluid.2021.104937
 //
-// Source: V.A. Titarev, E.F. Toro, Finite-volume WENO schemes for three-dimensional conservation laws, 
+// Source: V.A. Titarev, E.F. Toro, Finite-volume WENO schemes for three-dimensional conservation laws,
 //         Journal of Computational Physics, Volume 201, Issue 1, 2004, Pages 238-260
 //
-// Source: M. J. Del Razo and R. J. LeVeque, "Numerical Methods for Interface Coupling of Compressible and Almost Incompressible Media," 
+// Source: M. J. Del Razo and R. J. LeVeque, "Numerical Methods for Interface Coupling of Compressible and Almost Incompressible Media,"
 //         SIAM Journal on Scientific Computing, vol. 39, no. 3, pp. B486–B507, Jan. 2017
 
 #ifndef SOLVER_LOCAL_FLUIDRIEMANN_HLLC_OOMAR_JAIMAN_H
@@ -22,54 +22,40 @@
 
 #include "IO/ParmParse.H"
 #include "Solver/Local/FluidRiemann/Riemann.H"
+#include "Util/Util.H"
 
-/// A bunch of solvers
 namespace Solver
 {
-/// Local solvers
 namespace Local
 {
 namespace FluidRiemann
 {
+
 /// Oomar-Jaiman All-Mach HLLC Riemann Solver
-class HLLC_Oomar_Jaiman
+class HLLC_Oomar_Jaiman : public FluidRiemann
 {
 public:
     static constexpr const char *name = "hllc_oomar_jaiman";
 
-    HLLC_Oomar_Jaiman(IO::ParmParse &pp, std::string name)
-    {
-        pp_queryclass(name, *this);
-    }
-
-    HLLC_Oomar_Jaiman(IO::ParmParse &pp)
-    {
-        pp_queryclass(*this);
-    }
-
+    HLLC_Oomar_Jaiman(IO::ParmParse &pp, std::string name) { pp_queryclass(name, *this); }
+    HLLC_Oomar_Jaiman(IO::ParmParse &pp) { pp_queryclass(*this); }
     HLLC_Oomar_Jaiman()
     {
         IO::ParmParse pp;
         pp_queryclass(*this);
     }
 
-    int verbose = 0;
     Set::Scalar epsilon = 0.01; // Low-Mach regularization parameter
 
-    static void
-    Parse(HLLC_Oomar_Jaiman &value, IO::ParmParse &pp)
+    static void Parse(HLLC_Oomar_Jaiman &value, IO::ParmParse &pp)
     {
-        // Enable to dump diagnostic data if the solver fails
-        pp.query_default("verbose", value.verbose, 1);
-        
         // Low-Mach regularization parameter (typical range: 0.001 - 0.1)
         // Smaller values = more aggressive low-Mach treatment
         // Larger values = smoother transition to high-Mach
         pp.query_default("epsilon", value.epsilon, 0.01);
     }
 
-    Flux
-    Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1)
+    virtual Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1) override
     {
         Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
         Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
@@ -127,7 +113,6 @@ public:
         // ========================================
         // OOMAR-JAIMAN ALL-MACH MODIFICATIONS
         // ========================================
-
         // Compute Mach number including pressure effects
         Set::Scalar Ma_L = std::abs(u_L) / (a_L + small);
         Set::Scalar Ma_R = std::abs(u_R) / (a_R + small);
@@ -157,32 +142,37 @@ public:
         Set::Scalar S_star = (p_R - p_L + rho_L * u_L * (S_L - u_L) - rho_R * u_R * (S_R - u_R))
                              / (rho_L * (S_L - u_L) - rho_R * (S_R - u_R) + small);
 
-        // Alternative formulation (should give same result, use for verification):
-        // Set::Scalar S_star_alt = (p_star - p_R + rho_R * u_R * (S_R - u_R)) / (rho_R * (S_R - u_R) + small);
-
         // ========================================
         // STANDARD HLLC STAR STATES
         // ========================================
-
         // Star state densities
         Set::Scalar rho_star_L = rho_L * (S_L - u_L) / (S_L - S_star + small);
         Set::Scalar rho_star_R = rho_R * (S_R - u_R) / (S_R - S_star + small);
 
         // Star state energies
-        Set::Scalar E_star_L = rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small)));
-        Set::Scalar E_star_R = rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small)));
+        Set::Scalar E_star_L, E_star_R;
+
+        if (Spec_Vol == 1)
+        {
+            E_star_L = rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small)));
+            E_star_R = rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small)));
+        }
+        else
+        {
+            E_star_L = E_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small));
+            E_star_R = E_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small));
+        }
 
         // ========================================
         // FLUX CALCULATIONS
         // ========================================
-
         Flux f_L, f_R;
         Flux f_star_L, f_star_R;
 
         if (Spec_Vol == 1)
         {
             // Energies per unit volume [J/m^3]
-            
+
             // ---- Left ----
             f_L.mass = rho_L * u_L;
             f_L.momentum_normal = rho_L * u_L * u_L + p_L;
@@ -210,7 +200,7 @@ public:
         else
         {
             // Energies per unit mass [J/kg]
-            
+
             // ---- Left ----
             f_L.mass = rho_L * u_L;
             f_L.momentum_normal = rho_L * u_L * u_L + p_L;
@@ -258,9 +248,9 @@ public:
         // ========================================
         // ERROR CHECKING
         // ========================================
-
         if ((fl.mass != fl.mass) || (fl.momentum_normal != fl.momentum_normal) || (fl.momentum_tangent != fl.momentum_tangent) || (fl.energy != fl.energy) || (a_L != a_L) || (a_R != a_R))
         {
+            bool verbose = false;
             if (verbose)
             {
                 Util::ParallelMessage(INFO, "-------------------------------");
@@ -291,13 +281,10 @@ public:
         return fl;
     }
 
-    static int
-    Test()
+    static int Test()
     {
         HLLC_Oomar_Jaiman solver;
         int failed = 0;
-
-        Set::Scalar gamma = 1.4;
         Set::Scalar pref = 10.0;
         Set::Scalar small = 1E-10;
 
@@ -306,11 +293,11 @@ public:
         {
             // Water-like properties on left, air-like on right
             // Should show minimal flux despite large sound speed difference
-            State left(1000.0, 0.0, 0.0, 10.0);   // High density (water-like)
-            State right(1.0, 0.0, 0.0, 10.0);     // Low density (air-like)
-            
-            Flux flux = solver.Solve(left, right, gamma, pref, small);
-            
+            State left(1000.0, 0.0, 0.0, 10.0); // High density (water-like)
+            State right(1.0, 0.0, 0.0, 10.0);   // Low density (air-like)
+
+            Flux flux = solver.Solve(left, right, pref, small);
+
             // For static interface, mass flux should be near zero
             if (std::abs(flux.mass) > 1E-8)
             {
@@ -333,9 +320,8 @@ public:
             State left(1.0, 1.0, 0.0, 1.0);
             State center(1.0, 1.0, 1.0, 1.0);
             State right(1.0, 1.0, 2.0, 1.0);
-
-            Flux fluxlo = solver.Solve(center, right, gamma, pref, small);
-            Flux fluxhi = solver.Solve(left, center, gamma, pref, small);
+            Flux fluxlo = solver.Solve(center, right, pref, small);
+            Flux fluxhi = solver.Solve(left, center, pref, small);
 
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
             {
@@ -360,9 +346,8 @@ public:
             State left(1.0, 0.0, 0.0, 1.0);
             State center(1.0, 0.0, 1.0, 1.0);
             State right(1.0, 0.0, 2.0, 1.0);
-
-            Flux fluxlo = solver.Solve(left, center, gamma, pref, small);
-            Flux fluxhi = solver.Solve(center, right, gamma, pref, small);
+            Flux fluxlo = solver.Solve(left, center, pref, small);
+            Flux fluxhi = solver.Solve(center, right, pref, small);
 
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
             {
@@ -387,9 +372,8 @@ public:
             State left(1.0, 0.0, 0.0, 1.0);
             State center(1.0, 0.0, 0.0, 1.0);
             State right(1.0, 0.0, 0.0, 1.0);
-
-            Flux fluxhi = solver.Solve(center, right, gamma, pref, small);
-            Flux fluxlo = solver.Solve(left, center, gamma, pref, small);
+            Flux fluxhi = solver.Solve(center, right, pref, small);
+            Flux fluxlo = solver.Solve(left, center, pref, small);
 
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 || fabs(fluxhi.momentum_tangent) > 1E-10 || fabs(fluxlo.momentum_tangent) > 1E-10 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
             {
@@ -413,9 +397,8 @@ public:
             State left(1.0, 1.0, 0.5, 1.0);
             State center(1.0, 1.0, 0.5, 1.0);
             State right(1.0, 1.0, 0.5, 1.0);
-
-            Flux fluxhi = solver.Solve(center, right, gamma, pref, small);
-            Flux fluxlo = solver.Solve(left, center, gamma, pref, small);
+            Flux fluxhi = solver.Solve(center, right, pref, small);
+            Flux fluxlo = solver.Solve(left, center, pref, small);
 
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
             {

@@ -14,48 +14,35 @@
 
 #include "IO/ParmParse.H"
 #include "Solver/Local/FluidRiemann/Riemann.H"
+#include "Util/Util.H"
 
-/// A bunch of solvers
 namespace Solver
 {
-/// Local solvers
 namespace Local
 {
 namespace FluidRiemann
 {
+
 /// HLLC Riemann Solver
-class HLLC
+class HLLC : public FluidRiemann
 {
 public:
     static constexpr const char *name = "hllc";
 
-    HLLC(IO::ParmParse &pp, std::string name)
-    {
-        pp_queryclass(name, *this);
-    }
-
-    HLLC(IO::ParmParse &pp)
-    {
-        pp_queryclass(*this);
-    }
-
+    HLLC(IO::ParmParse &pp, std::string name) { pp_queryclass(name, *this); }
+    HLLC(IO::ParmParse &pp) { pp_queryclass(*this); }
     HLLC()
     {
         IO::ParmParse pp;
         pp_queryclass(*this);
     }
 
-    int verbose = 0;
-
-    static void
-    Parse(HLLC &value, IO::ParmParse &pp)
+    static void Parse(HLLC & /*value*/, IO::ParmParse & /*pp*/)
     {
-        // enable to dump diagnostic data if the hllc solver fails
-        pp.query_default("verbose", value.verbose, 1);
+        // No parameters to parse
     }
 
-    Flux
-    Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1)
+    virtual Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1) override
     {
         Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
         Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
@@ -72,8 +59,9 @@ public:
         // Fluid primitives
         Set::Scalar ke_L, ke_R;
         Set::Scalar ue_L, ue_R;
-        Set::Scalar p_L,  p_R;
+        Set::Scalar p_L, p_R;
         Set::Scalar h_TL, h_TR;
+
         if (Spec_Vol == 1)
         {
             // With Respect to Specific Volume (energies are per unit volume)
@@ -117,7 +105,7 @@ public:
         Set::Scalar S_star = (p_R - p_L + rho_L * u_L * (S_L - u_L) - rho_R * u_R * (S_R - u_R)) / (rho_L * (S_L - u_L) - rho_R * (S_R - u_R) + small);
 
         // Fluxes for left and right states
-        Flux f_L,f_R;
+        Flux f_L, f_R;
         Flux f_star_L, f_star_R;
 
         // star states for condensed view
@@ -183,7 +171,6 @@ public:
 
         // Compute HLLC flux based on wave positions
         Flux fl;
-
         if (0.0 <= S_L)
         {
             fl = f_L;
@@ -209,26 +196,30 @@ public:
             or (a_L != a_L)
             or (a_R != a_R))
         {
-            Util::ParallelMessage(INFO, "-------------------------------");
-            Util::ParallelMessage(INFO, "ERROR IN HLLC SOLVER:");
-            Util::ParallelMessage(INFO, "hi:   ", hi);
-            Util::ParallelMessage(INFO, "lo:   ", lo);
-            Util::ParallelMessage(INFO, "flux: ", fl);
-            Util::ParallelMessage(INFO, "rho_L=", rho_L);
-            Util::ParallelMessage(INFO, "rho_R=", rho_R);
-            Util::ParallelMessage(INFO, "u_L=  ", u_L);
-            Util::ParallelMessage(INFO, "u_R=  ", u_R);
-            Util::ParallelMessage(INFO, "ke_R= ", ke_R);
-            Util::ParallelMessage(INFO, "ke_L= ", ke_L);
-            Util::ParallelMessage(INFO, "ue_L= ", ue_L);
-            Util::ParallelMessage(INFO, "ue_R= ", ue_R);
-            Util::ParallelMessage(INFO, "p_L=  ", p_L);
-            Util::ParallelMessage(INFO, "p_R=  ", p_R);
-            Util::ParallelMessage(INFO, "a_L=  ", a_L);
-            Util::ParallelMessage(INFO, "a_R=  ", a_R);
-            Util::ParallelMessage(INFO, "S_L=  ", S_L);
-            Util::ParallelMessage(INFO, "S_R=  ", S_R);
-            Util::ParallelMessage(INFO, "S_star ", S_star);
+            bool verbose = false;
+            if (verbose)
+            {
+                Util::ParallelMessage(INFO, "-------------------------------");
+                Util::ParallelMessage(INFO, "ERROR IN HLLC SOLVER:");
+                Util::ParallelMessage(INFO, "hi:   ", hi);
+                Util::ParallelMessage(INFO, "lo:   ", lo);
+                Util::ParallelMessage(INFO, "flux: ", fl);
+                Util::ParallelMessage(INFO, "rho_L=", rho_L);
+                Util::ParallelMessage(INFO, "rho_R=", rho_R);
+                Util::ParallelMessage(INFO, "u_L=  ", u_L);
+                Util::ParallelMessage(INFO, "u_R=  ", u_R);
+                Util::ParallelMessage(INFO, "ke_R= ", ke_R);
+                Util::ParallelMessage(INFO, "ke_L= ", ke_L);
+                Util::ParallelMessage(INFO, "ue_L= ", ue_L);
+                Util::ParallelMessage(INFO, "ue_R= ", ue_R);
+                Util::ParallelMessage(INFO, "p_L=  ", p_L);
+                Util::ParallelMessage(INFO, "p_R=  ", p_R);
+                Util::ParallelMessage(INFO, "a_L=  ", a_L);
+                Util::ParallelMessage(INFO, "a_R=  ", a_R);
+                Util::ParallelMessage(INFO, "S_L=  ", S_L);
+                Util::ParallelMessage(INFO, "S_R=  ", S_R);
+                Util::ParallelMessage(INFO, "S_star ", S_star);
+            }
             Util::Exception(INFO);
         }
 
@@ -239,9 +230,7 @@ public:
     Test()
     {
         HLLC solver;
-
         int failed = 0;
-        Set::Scalar gamma = 1.4;
         Set::Scalar pref = 10.0;
         Set::Scalar small = 1E-10;
 
@@ -251,8 +240,9 @@ public:
             State left(1.0, 1.0, 0.0, 1.0);
             State center(1.0, 1.0, 1.0, 1.0);
             State right(1.0, 1.0, 2.0, 1.0);
-            Flux fluxlo = solver.Solve(center, right, gamma, pref, small);
-            Flux fluxhi = solver.Solve(left, center, gamma, pref, small);
+            Flux fluxlo = solver.Solve(center, right, pref, small);
+            Flux fluxhi = solver.Solve(left, center, pref, small);
+
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10
                 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10
                 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
@@ -278,8 +268,9 @@ public:
             State left(1.0, 0.0, 0.0, 1.0);
             State center(1.0, 0.0, 1.0, 1.0);
             State right(1.0, 0.0, 2.0, 1.0);
-            Flux fluxlo = solver.Solve(left, center, gamma, pref, small);
-            Flux fluxhi = solver.Solve(center, right, gamma, pref, small);
+            Flux fluxlo = solver.Solve(left, center, pref, small);
+            Flux fluxhi = solver.Solve(center, right, pref, small);
+
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10
                 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10
                 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
@@ -305,8 +296,9 @@ public:
             State left(1.0, 0.0, 0.0, 1.0);
             State center(1.0, 0.0, 0.0, 1.0);
             State right(1.0, 0.0, 0.0, 1.0);
-            Flux fluxhi = solver.Solve(center, right, gamma, pref, small);
-            Flux fluxlo = solver.Solve(left, center, gamma, pref, small);
+            Flux fluxhi = solver.Solve(center, right, pref, small);
+            Flux fluxlo = solver.Solve(left, center, pref, small);
+
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10                          // no change in mass flux
                 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 // no change in momentum flux
                 || fabs(fluxhi.momentum_tangent) > 1E-10                         // zero tangent flux
@@ -334,8 +326,9 @@ public:
             State left(1.0, 1.0, 0.5, 1.0);
             State center(1.0, 1.0, 0.5, 1.0);
             State right(1.0, 1.0, 0.5, 1.0);
-            Flux fluxhi = solver.Solve(center, right, gamma, pref, small);
-            Flux fluxlo = solver.Solve(left, center, gamma, pref, small);
+            Flux fluxhi = solver.Solve(center, right, pref, small);
+            Flux fluxlo = solver.Solve(left, center, pref, small);
+
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
             {
                 Util::Warning(INFO, "left:   ", left);
@@ -356,7 +349,9 @@ public:
         return failed;
     }
 };
+
 }
 }
 }
+
 #endif

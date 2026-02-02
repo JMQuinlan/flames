@@ -61,7 +61,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("lagrange", value.lagrange, 0.0);  // lagrange no-penetration factor
         pp_query_default("grav", value.g, 9.81);            // Gravitational Acceletation
         pp_forbid("roefix", "--> solver.roe.entropy_fix");  // Roe solver entropy fix
-        pp_query_default("scheme", value.scheme, 0);        // 0: Forward Euler | 1: RK4
         pp_query_default("Spec_Vol", value.Spec_Vol, 1);    // 0: Solve Energy via specific mass | 1: Solve Energy via specific volume
 
         // OPTIONAL SOURCE TERMS
@@ -245,60 +244,16 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
     // SOLVERS
     // Riemann solver
-    pp_query_default("Riemann_Solver", value.Riemann_Solver, 0); // Type of solver
-    if (value.Riemann_Solver == 0)
-    {
-        pp.select_default<Solver::Local::FluidRiemann::Roe>("solver", value.roesolver);
-    }
-    else if (value.Riemann_Solver == 1)
-    {
-        pp.select_default<Solver::Local::FluidRiemann::HLLC>("solver", value.hllcsolver);
-    }
-    else if (value.Riemann_Solver == 2)
-    {
-        pp.select_default<Solver::Local::FluidRiemann::HLLE>("solver", value.hllesolver);
-    }
-    else if (value.Riemann_Solver == 3)
-    {
-        // pp.select_default<Solver::Local::FluidRiemann::HLLCE>("solver", value.hllcesolver);
-    }
-    else if (value.Riemann_Solver == 35)
-    {
-        // pp.select_default<Solver::Local::FluidRiemann::HLLC_WENO5>("solver", value.hllc_weno5solver);
-    }
-    else if (value.Riemann_Solver == 36)
-    {
-        // pp.select_default<Solver::Local::FluidRiemann::PartiallyParabolic>("solver", value.partiallyparabolicsolver);
-    }
-    else if (value.Riemann_Solver == 37)
-    {
-        pp.select_default<Solver::Local::FluidRiemann::HLLC_All_Mach>("solver", value.hllc_All_Machsolver);
-    }
-    else if (value.Riemann_Solver == 38)
-    {
-        pp.select_default<Solver::Local::FluidRiemann::HLLC_All_Mach_Furfaro>("solver", value.hllc_All_Mach_Furfarosolver);
-    }
-    else if (value.Riemann_Solver == 99)
-    {
-        // DEBUG, Just a place holder
-    }
-    else
-    {
-        Util::ParallelMessage(INFO, "-------------------------------");
-        Util::ParallelMessage(INFO, "Invalid solver method: ", value.Riemann_Solver);
-        Util::ParallelMessage(INFO, "Acceptable Methods: ");
-        Util::ParallelMessage(INFO, "Roe        : 0");
-        Util::ParallelMessage(INFO, "HLLC       : 1");
-        Util::ParallelMessage(INFO, "HLLE       : 2");
-        Util::ParallelMessage(INFO, "HLLCE      : 3");
-        Util::ParallelMessage(INFO, "Under Testing:");
-        Util::ParallelMessage(INFO, "HLLC_WENO5 : 35");
-        Util::ParallelMessage(INFO, "PPM        : 36");
-        Util::ParallelMessage(INFO, "HLLC_All_Mach : 37");
-        Util::ParallelMessage(INFO, "HLLC_All_Mach_Furfaro : 38");
-        Util::ParallelMessage(INFO, "HLLE DEBUG : 99");
-        Util::Abort(INFO);
-    }
+    pp.select_default<Solver::Local::FluidRiemann::Roe,
+                      Solver::Local::FluidRiemann::HLLE,
+                      Solver::Local::FluidRiemann::HLLC,
+                      //Solver::Local::FluidRiemann::HLLCE, // WIP - Need to update
+                      //Solver::Local::FluidRiemann::HLLCE_WENO5, // WIP - very outdated - never verified
+                      //Solver::Local::FluidRiemann::PartiallyParabolic, // WIP - very outdated - never verified
+                      //Solver::Local::FluidRiemann::HLLC_Oomar_Jainman, // Can't remember if this has been verified
+                      Solver::Local::FluidRiemann::HLLC_All_Mach,
+                      Solver::Local::FluidRiemann::HLLC_All_Mach_Furfaro
+    >("Riemann_Solver", value.riemannsolver);
 
     // LIMITERS
     pp_query_default("Limiter", value.Limiter, 0); // Type of solver
@@ -682,24 +637,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // etadot
             etadot(i, j, k) = (eta_new(i, j, k) - eta(i, j, k)) / dt;
-
-            // /////////////////////////////////////////////////////
-            // INTEGRATOR METHODS:
-            // 0: Forward Euler
-            // 1: Runge-Kutta 4th Order (RK4)
-
-            if (scheme == 0)
-            {
-            }
-            else if (scheme == 1)
-            {
-            }
-            else
-            {
-                Util::ParallelMessage(INFO, "ERROR in Hydro2::Advance() : Integrator Methods");
-                Util::ParallelMessage(INFO, "Method ", scheme, " is unknown.");
-                Util::Abort(INFO);
-            }
 
             // Velocity = M ./ (DX*DY*rho)
             v(i, j, k, 0) = M(i, j, k, 0) / (rho(i, j, k));
@@ -1245,72 +1182,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             try
             {
-                if (Riemann_Solver == 0)
-                {
-                    // Calculate fluxes for the mixed fluid using ROE
-                    flux_xlo = roesolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
-                    flux_ylo = roesolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
-                    flux_xhi = roesolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
-                    flux_yhi = roesolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, Spec_Vol);
-                }
-                else if (Riemann_Solver == 1)
-                {
-                    // Calculate fluxes for the mixed fluid using HLLC
-                    flux_xlo = hllcsolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
-                    flux_ylo = hllcsolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
-                    flux_xhi = hllcsolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
-                    flux_yhi = hllcsolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, Spec_Vol);
-                }
-                else if (Riemann_Solver == 2)
-                {
-                    // Calculate fluxes for the mixed fluid using HLLE
-                    flux_xlo = hllesolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
-                    flux_ylo = hllesolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
-                    flux_xhi = hllesolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
-                    flux_yhi = hllesolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, Spec_Vol);
-                }
-                else if (Riemann_Solver == 3)
-                {
-                    // Calculate fluxes for the mixed fluid using HLLCE
-                    //flux_xlo = hllcesolver->Solve(x_leftStates[1], x_rightStates[1], pref, small);
-                    //flux_ylo = hllcesolver->Solve(y_leftStates[1], y_rightStates[1], pref, small);
-                    //flux_xhi = hllcesolver->Solve(x_leftStates[2], x_rightStates[2], pref, small);
-                    //flux_yhi = hllcesolver->Solve(y_leftStates[2], y_rightStates[2], pref, small);
-                }
-                else if (Riemann_Solver == 35)
-                {
-                    // Calculate fluxes for the mixed fluid using HLLC_WENO5
-                    /*
-                    flux_xlo = hllc_weno5solver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
-                    flux_ylo = hllc_weno5solver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
-                    flux_xhi = hllc_weno5solver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
-                    flux_yhi = hllc_weno5solver->Solve(y_leftStates[2], y_rightStates[2], pref, small, Spec_Vol);
-                    */
-                }
-                else if (Riemann_Solver == 36)
-                {
-                    // Calculate fluxes for the mixed fluid using PPM
-                    //flux_xlo = partiallyparabolicsolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[0]);
-                    //flux_ylo = partiallyparabolicsolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[1]);
-                    //flux_xhi = partiallyparabolicsolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[0]);
-                    //flux_yhi = partiallyparabolicsolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, mu_eff, k_thermal(i, j, k), dt, DX[1]);
-                }
-                else if (Riemann_Solver == 37)
-                {
-                    // Calculate fluxes for the mixed fluid using HLLC_All_Mach
-                    flux_xlo = hllc_All_Machsolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
-                    flux_ylo = hllc_All_Machsolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
-                    flux_xhi = hllc_All_Machsolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
-                    flux_yhi = hllc_All_Machsolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, Spec_Vol);
-                }
-                else if (Riemann_Solver == 38)
-                {
-                    // Calculate fluxes for the mixed fluid using HLLC_All_Mach_Furfaro
-                    flux_xlo = hllc_All_Mach_Furfarosolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
-                    flux_ylo = hllc_All_Mach_Furfarosolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
-                    flux_xhi = hllc_All_Mach_Furfarosolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
-                    flux_yhi = hllc_All_Mach_Furfarosolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, Spec_Vol);
-                }
+                flux_xlo = riemannsolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
+                flux_ylo = riemannsolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
+                flux_xhi = riemannsolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
+                flux_yhi = riemannsolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, Spec_Vol);
             }
             catch (...)
             {

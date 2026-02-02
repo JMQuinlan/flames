@@ -77,6 +77,7 @@ public:
         delete ic_q;
         /// SOLVERS
         // Riemann Solvers
+        /*
         delete roesolver;
         delete hllcsolver;
         delete hllc_All_Machsolver;
@@ -87,6 +88,7 @@ public:
         // delete hllcesolver;
         //delete hllce_weno5solver;
         // delete partiallyparabolicsolver;
+        */
         // Flux Limiters
         // delete limiter_minmod;
         // delete limiter_vanleer;
@@ -307,6 +309,7 @@ private:
     Set::Scalar dt_min = NAN, dt_max = NAN, dt_growth = NAN;
 
     // Solvers
+    /*
     int scheme = 0;
     Solver::Local::FluidRiemann::Roe *roesolver = nullptr;
     Solver::Local::FluidRiemann::HLLC *hllcsolver = nullptr;
@@ -318,12 +321,25 @@ private:
     //Solver::Local::FluidRiemann::HLLCE *hllcesolver = nullptr;
     //Solver::Local::FluidRiemann::HLLCE_WENO5 *hllce_weno5solver = nullptr;
     //Solver::Local::FluidRiemann::PartiallyParabolic *partiallyparabolicsolver = nullptr;
-
+    */
 
     // Limiters
     int Limiter = 0;
     //Solver::Local::Limiter::Minmod *limiter_minmod = nullptr;
     //Solver::Local::Limiter::VanLeer *limiter_vanleer = nullptr;
+
+    // Solvers
+    Solver::Local::FluidRiemann::FluidRiemann *riemannsolver = nullptr;
+
+    // IntegrationScheme
+    enum IntegrationScheme
+    {
+        ForwardEuler,
+        SSPRK3,
+        RK4
+    };
+    IntegrationScheme scheme;
+
 
 };
 }

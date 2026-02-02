@@ -1,11 +1,11 @@
 // This implements a mixed Riemann HLLC/HLLE solver for weakly incompressible flow using the Tammann EOS.
 //      HLLC solver uses the fastest left and right wave speeds, along with the middle contact wave.
-//          Restores some accuracy when compared to HLLE with a slightly increased computational time, while providing same robustness. 
+//          Restores some accuracy when compared to HLLE with a slightly increased computational time, while providing same robustness.
 //      HLLE solver uses a less diffusive energy model.
-// 
+//
 // State variables of density and momentum are calculated via 3-wave HLLC, energy is calculated via 2-wave HLLE.
 //      This will give a more accurate model than HLLC for energy, and the same accuracy of rho, M, as HLLC. Best of two worlds (hopefully :) )
-// 
+//
 // Source: V.A. Titarev, E.F. Toro, Finite-volume WENO schemes for three-dimensional conservation laws, Journal of Computational Physics, Volume 201, Issue 1, 2004, Pages 238-260, ISSN 0021-9991, https://doi.org/10.1016/j.jcp.2004.05.015.
 //          URL: https://www.sciencedirect.com/science/article/pii/S0021999104002281
 //
@@ -13,60 +13,48 @@
 //          URL: https://arxiv.org/abs/1604.08544
 //          If you wish to use the regular gas HLLCE sovler and not the stiffened gas modeled by the Tammann EOS, set P0 = 0
 
-#ifndef SOLVER_LOCAL_RIEMANN_HLLCE_H
-#define SOLVER_LOCAL_RIEMANN_HLLCE_H
+#ifndef SOLVER_LOCAL_FLUIDRIEMANN_HLLCE_H
+#define SOLVER_LOCAL_FLUIDRIEMANN_HLLCE_H
 
 #include "IO/ParmParse.H"
-#include "Solver/Local/Riemann/Riemann.H"
+#include "Solver/Local/FluidRiemann/Riemann.H"
+#include "Util/Util.H"
 
-/// A bunch of solvers
 namespace Solver
 {
-/// Local solvers
 namespace Local
 {
-namespace Riemann
+namespace FluidRiemann
 {
-/// HLLCE Riemann Solver
-class HLLCE
+
+/// HLLCE Riemann Solver (Hybrid HLLC/HLLE)
+class HLLCE : public FluidRiemann
 {
 public:
     static constexpr const char *name = "hllce";
 
-    HLLCE(IO::ParmParse &pp, std::string name)
-    {
-        pp_queryclass(name, *this);
-    }
-
-    HLLCE(IO::ParmParse &pp)
-    {
-        pp_queryclass(*this);
-    }
-
+    HLLCE(IO::ParmParse &pp, std::string name) { pp_queryclass(name, *this); }
+    HLLCE(IO::ParmParse &pp) { pp_queryclass(*this); }
     HLLCE()
     {
         IO::ParmParse pp;
         pp_queryclass(*this);
     }
 
-    int verbose = 0;
-
-    static void
-    Parse(HLLCE &value, IO::ParmParse &pp)
+    static void Parse(HLLCE & /*value*/, IO::ParmParse & /*pp*/)
     {
-        // enable to dump diagnostic data if the hllce solver fails
-        pp.query_default("verbose", value.verbose, 1);
+        // No parameters to parse
     }
 
-    Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small)
+    virtual Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1) override
     {
-        Set::Scalar rho_L = lo.rho       ,  rho_R = hi.rho       ;
-        Set::Scalar Mn_L  = lo.M_normal  ,  Mn_R  = hi.M_normal  ;
-        Set::Scalar Mt_L  = lo.M_tangent ,  Mt_R  = hi.M_tangent ;
-        Set::Scalar E_L   = lo.E         ,  E_R   = hi.E         ;
-        Set::Scalar gamma_L = lo.gam     ,  gamma_R = hi.gam     ;
-        Set::Scalar p0_L = lo.p0         ,  p0_R = hi.p0         ;
-
+        Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
+        Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
+        Set::Scalar Mt_L = lo.M_tangent, Mt_R = hi.M_tangent;
+        Set::Scalar E_L = lo.E, E_R = hi.E;
+        Set::Scalar gamma_L = lo.gam, gamma_R = hi.gam;
+        Set::Scalar p0_L = lo.p0, p0_R = hi.p0;
+        Set::Scalar T_L = lo.T, T_R = hi.T;
 
         // Ensure no negative densities
         rho_L = std::max(small, rho_L);
@@ -77,6 +65,7 @@ public:
         Set::Scalar ue_L, ue_R;
         Set::Scalar p_L, p_R;
         Set::Scalar h_TL, h_TR;
+
         if (Spec_Vol == 1)
         {
             // With Respect to Specific Volume (energies are per unit volume)
@@ -87,15 +76,14 @@ public:
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;      // Tammann
+            p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref; // Tammann
             h_TR = (ke_R + ue_R + p_R);
-
         }
         else
         {
             // With Respect to Specific Mass (energies are per unit mass)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small); // KE per unit volume
-            ue_L = E_L - ke_L;                                          // IE per unit volume
+            ue_L = E_L - ke_L;                                                  // IE per unit volume
             p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;      // pressure Tammann EOS modification ( e[J/m3] = P[N/m2]/(gamma-1) )
             h_TL = ke_L + ue_L + (p_L / rho_L);
 
@@ -109,11 +97,10 @@ public:
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
         // STEP 2: Compute sound speeds
-        Set::Scalar a_L = std::sqrt(gamma * (p_L + p_ref) / (rho_L + small));
-        Set::Scalar a_R = std::sqrt(gamma * (p_R + p_ref) / (rho_R + small));
+        Set::Scalar a_L = std::sqrt(gamma_L * (p_L + p0_L) / (rho_L + small));
+        Set::Scalar a_R = std::sqrt(gamma_R * (p_R + p0_R) / (rho_R + small));
 
         // STEP 3: Compute wave speed estimates
-        // Use simple estimates for wave speeds
         Set::Scalar S_L = std::min(u_L - a_L, u_R - a_R);
         Set::Scalar S_R = std::max(u_L + a_L, u_R + a_R);
 
@@ -124,40 +111,67 @@ public:
         // STEP 5: Compute physical fluxes for left and right states
         Flux f_L, f_R;
 
-        f_L.mass = rho_L * u_L;
-        f_L.momentum_normal = rho_L * u_L * u_L + p_L;
-        f_L.momentum_tangent = rho_L * u_L * v_L;
-        f_L.energy = u_L * (E_L + p_L);
+        if (Spec_Vol == 1)
+        {
+            // Energies per unit volume [J/m^3]
+            f_L.mass = rho_L * u_L;
+            f_L.momentum_normal = rho_L * u_L * u_L + p_L;
+            f_L.momentum_tangent = rho_L * u_L * v_L;
+            f_L.energy = u_L * (E_L + p_L);
 
-        f_R.mass = rho_R * u_R;
-        f_R.momentum_normal = rho_R * u_R * u_R + p_R;
-        f_R.momentum_tangent = rho_R * u_R * v_R;
-        f_R.energy = u_R * (E_R + p_R);
+            f_R.mass = rho_R * u_R;
+            f_R.momentum_normal = rho_R * u_R * u_R + p_R;
+            f_R.momentum_tangent = rho_R * u_R * v_R;
+            f_R.energy = u_R * (E_R + p_R);
+        }
+        else
+        {
+            // Energies per unit mass [J/kg]
+            f_L.mass = rho_L * u_L;
+            f_L.momentum_normal = rho_L * u_L * u_L + p_L;
+            f_L.momentum_tangent = rho_L * u_L * v_L;
+            f_L.energy = u_L * (E_L + p_L / (rho_L + small));
+
+            f_R.mass = rho_R * u_R;
+            f_R.momentum_normal = rho_R * u_R * u_R + p_R;
+            f_R.momentum_tangent = rho_R * u_R * v_R;
+            f_R.energy = u_R * (E_R + p_R / (rho_R + small));
+        }
 
         // STEP 6: Compute star state values
         Set::Scalar rho_star_L = rho_L * (S_L - u_L) / (S_L - S_star + small);
         Set::Scalar rho_star_R = rho_R * (S_R - u_R) / (S_R - S_star + small);
 
-        Set::Scalar p_star = rho_L * (S_L - u_L) * (S_star - u_L) + p_L;
-        // Alternative p_star calculation
-        // Set::Scalar p_star = rho_R * (S_R - u_R) * (S_star - u_R) + p_R;
-
         // STEP 7: Compute star state fluxes
         Flux f_star_L, f_star_R;
 
-        f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
-        f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
-        f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
-        f_star_L.energy = f_L.energy + S_L * (rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - E_L);
+        if (Spec_Vol == 1)
+        {
+            f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
+            f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
+            f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
+            f_star_L.energy = f_L.energy + S_L * (rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - E_L);
 
-        f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
-        f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
-        f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
-        f_star_R.energy = f_R.energy + S_R * (rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - E_R);
+            f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
+            f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
+            f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
+            f_star_R.energy = f_R.energy + S_R * (rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - E_R);
+        }
+        else
+        {
+            f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
+            f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
+            f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
+            f_star_L.energy = f_L.energy + S_L * ((E_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L) + small))) - E_L);
 
-        // STEP 8: Compute HLLCE flux based on wave positions
+            f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
+            f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
+            f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
+            f_star_R.energy = f_R.energy + S_R * ((E_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R) + small))) - E_R);
+        }
+
+        // STEP 8: Compute HLLC flux based on wave positions
         Flux fl;
-
         if (0 <= S_L)
         {
             fl = f_L;
@@ -175,29 +189,7 @@ public:
             fl = f_R;
         }
 
-        
         /// HLLE (ONLY for Energy)
-        // STEP 3: Compute Roe-averaged quantities for wave speed estimates
-        Set::Scalar rho_RL = std::sqrt(rho_L * rho_R);
-        Set::Scalar u_RL = (std::sqrt(rho_L) * u_L + std::sqrt(rho_R) * u_R) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
-        Set::Scalar h_TL = (E_L + p_L) / (rho_L + small);
-        Set::Scalar h_TR = (E_R + p_R) / (rho_R + small);
-        Set::Scalar h_RL = (std::sqrt(rho_L) * h_TL + std::sqrt(rho_R) * h_TR) / (std::sqrt(rho_L) + std::sqrt(rho_R) + small);
-        Set::Scalar a_RL_sq = std::max(0.0, (gamma - 1.0) * (h_RL - 0.5 * u_RL * u_RL) + (gamma * p_ref / (std::sqrt(rho_L) + std::sqrt(rho_R) + small)));
-        Set::Scalar a_RL = std::sqrt(a_RL_sq) + small;
-
-        // STEP 5: Compute physical fluxes
-        f_L.mass = rho_L * u_L;
-        f_L.momentum_normal = rho_L * u_L * u_L + p_L;
-        f_L.momentum_tangent = rho_L * u_L * v_L;
-        f_L.energy = u_L * (E_L + p_L);
-
-        f_R.mass = rho_R * u_R;
-        f_R.momentum_normal = rho_R * u_R * u_R + p_R;
-        f_R.momentum_tangent = rho_R * u_R * v_R;
-        f_R.energy = u_R * (E_R + p_R);
-
-        // STEP 6: Compute HLLE flux
         if (0 <= S_L)
         {
             // Supersonic flow to the right
@@ -219,8 +211,11 @@ public:
         if ((fl.mass != fl.mass)
             or (fl.momentum_normal != fl.momentum_normal)
             or (fl.momentum_tangent != fl.momentum_tangent)
-            or (fl.energy != fl.energy))
+            or (fl.energy != fl.energy)
+            or (a_L != a_L)
+            or (a_R != a_R))
         {
+            bool verbose = false;
             if (verbose)
             {
                 Util::ParallelMessage(INFO, "-------------------------------");
@@ -247,7 +242,6 @@ public:
             Util::Exception(INFO);
         }
 
-
         return fl;
     }
 
@@ -255,9 +249,7 @@ public:
     Test()
     {
         HLLCE solver;
-
         int failed = 0;
-        Set::Scalar gamma = 1.4;
         Set::Scalar pref = 10.0;
         Set::Scalar small = 1E-10;
 
@@ -267,8 +259,9 @@ public:
             State left(1.0, 1.0, 0.0, 1.0);
             State center(1.0, 1.0, 1.0, 1.0);
             State right(1.0, 1.0, 2.0, 1.0);
-            Flux fluxlo = solver.Solve(center, right, gamma, pref, small);
-            Flux fluxhi = solver.Solve(left, center, gamma, pref, small);
+            Flux fluxlo = solver.Solve(center, right, pref, small);
+            Flux fluxhi = solver.Solve(left, center, pref, small);
+
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10
                 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10
                 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
@@ -294,8 +287,9 @@ public:
             State left(1.0, 0.0, 0.0, 1.0);
             State center(1.0, 0.0, 1.0, 1.0);
             State right(1.0, 0.0, 2.0, 1.0);
-            Flux fluxlo = solver.Solve(left, center, gamma, pref, small);
-            Flux fluxhi = solver.Solve(center, right, gamma, pref, small);
+            Flux fluxlo = solver.Solve(left, center, pref, small);
+            Flux fluxhi = solver.Solve(center, right, pref, small);
+
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10
                 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10
                 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
@@ -321,8 +315,9 @@ public:
             State left(1.0, 0.0, 0.0, 1.0);
             State center(1.0, 0.0, 0.0, 1.0);
             State right(1.0, 0.0, 0.0, 1.0);
-            Flux fluxhi = solver.Solve(center, right, gamma, pref, small);
-            Flux fluxlo = solver.Solve(left, center, gamma, pref, small);
+            Flux fluxhi = solver.Solve(center, right, pref, small);
+            Flux fluxlo = solver.Solve(left, center, pref, small);
+
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10                          // no change in mass flux
                 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 // no change in momentum flux
                 || fabs(fluxhi.momentum_tangent) > 1E-10                         // zero tangent flux
@@ -350,8 +345,9 @@ public:
             State left(1.0, 1.0, 0.5, 1.0);
             State center(1.0, 1.0, 0.5, 1.0);
             State right(1.0, 1.0, 0.5, 1.0);
-            Flux fluxhi = solver.Solve(center, right, gamma, pref, small);
-            Flux fluxlo = solver.Solve(left, center, gamma, pref, small);
+            Flux fluxhi = solver.Solve(center, right, pref, small);
+            Flux fluxlo = solver.Solve(left, center, pref, small);
+
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
             {
                 Util::Warning(INFO, "left:   ", left);
@@ -372,7 +368,9 @@ public:
         return failed;
     }
 };
+
 }
 }
 }
+
 #endif

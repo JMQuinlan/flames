@@ -1,8 +1,8 @@
-// This implements an All-Mach HLLC Riemann solver based on the Guillard-Viozat approach
+// This implements an All - Mach HLLC Riemann solver based on the Guillard - Viozat approach
 // for weakly incompressible two-phase flow using the Tammann EOS.
 //
-//      This solver addresses low-Mach number issues at material interfaces with large 
-//      sound speed mismatches (e.g., water/air interfaces) while maintaining exact 
+//      This solver addresses low-Mach number issues at material interfaces with large
+//      sound speed mismatches (e.g., water/air interfaces) while maintaining exact
 //      accuracy for high-Mach phenomena like shocks and detonation waves.
 //
 //      Key principle: Modify ONLY the pressure dissipation at low Mach numbers.
@@ -12,11 +12,11 @@
 //         Computers & Fluids, vol. 28, no. 1, pp. 63-86, 1999.
 //         doi: 10.1016/S0045-7930(98)00017-6
 //
-// Source: V.A. Titarev, E.F. Toro, Finite-volume WENO schemes for three-dimensional conservation laws, 
+// Source: V.A. Titarev, E.F. Toro, Finite-volume WENO schemes for three-dimensional conservation laws,
 //         Journal of Computational Physics, Volume 201, Issue 1, 2004, Pages 238-260
 //
-// Source: M. J. Del Razo and R. J. LeVeque, "Numerical Methods for Interface Coupling of Compressible 
-//         and Almost Incompressible Media," SIAM Journal on Scientific Computing, vol. 39, no. 3, 
+// Source: M. J. Del Razo and R. J. LeVeque, "Numerical Methods for Interface Coupling of Compressible
+//         and Almost Incompressible Media," SIAM Journal on Scientific Computing, vol. 39, no. 3,
 //         pp. B486–B507, Jan. 2017
 
 #ifndef SOLVER_LOCAL_FLUIDRIEMANN_HLLC_ALL_MACH_H
@@ -24,451 +24,417 @@
 
 #include "IO/ParmParse.H"
 #include "Solver/Local/FluidRiemann/Riemann.H"
+#include "Util/Util.H"
 
-/// A bunch of solvers
-namespace Solver
+    namespace Solver
 {
-/// Local solvers
-namespace Local
-{
-namespace FluidRiemann
-{
-/// All-Mach HLLC Riemann Solver (Guillard-Viozat approach)
-class HLLC_All_Mach
-{
-public:
-    static constexpr const char *name = "hllc_all_mach";
-
-    HLLC_All_Mach(IO::ParmParse &pp, std::string name)
+    namespace Local
     {
-        pp_queryclass(name, *this);
-    }
-
-    HLLC_All_Mach(IO::ParmParse &pp)
+    namespace FluidRiemann
     {
-        pp_queryclass(*this);
-    }
 
-    HLLC_All_Mach()
+    /// All-Mach HLLC Riemann Solver (Guillard-Viozat approach)
+    class HLLC_All_Mach : public FluidRiemann
     {
-        IO::ParmParse pp;
-        pp_queryclass(*this);
-    }
+    public:
+        static constexpr const char *name = "hllc_all_mach";
 
-    int verbose = 0;
-    Set::Scalar Ma_cutoff = 0.3;  // Mach number below which low-Mach treatment activates
-    Set::Scalar alpha_min = 0.0;  // Minimum pressure scaling (0 = full low-Mach, 1 = standard HLLC)
-
-    static void
-    Parse(HLLC_All_Mach &value, IO::ParmParse &pp)
-    {
-        // Enable to dump diagnostic data if the solver fails
-        pp.query_default("verbose", value.verbose, 1);
-        
-        // Mach number cutoff for low-Mach treatment (typical: 0.1 - 0.5)
-        pp.query_default("ma_cutoff", value.Ma_cutoff, 0.3);
-        
-        // Minimum pressure scaling factor (typical: 0.0 - 0.1)
-        // 0.0 = aggressive low-Mach treatment
-        // 1.0 = standard HLLC (no modification)
-        pp.query_default("alpha_min", value.alpha_min, 0.0);
-    }
-
-    Flux
-    Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1)
-    {
-        Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
-        Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
-        Set::Scalar Mt_L = lo.M_tangent, Mt_R = hi.M_tangent;
-        Set::Scalar E_L = lo.E, E_R = hi.E;
-        Set::Scalar gamma_L = lo.gam, gamma_R = hi.gam;
-        Set::Scalar p0_L = lo.p0, p0_R = hi.p0;
-        Set::Scalar T_L = lo.T, T_R = hi.T;
-
-        // Ensure no negative densities
-        rho_L = std::max(small, rho_L);
-        rho_R = std::max(small, rho_R);
-
-        // Fluid primitives
-        Set::Scalar ke_L, ke_R;
-        Set::Scalar ue_L, ue_R;
-        Set::Scalar p_L, p_R;
-        Set::Scalar h_TL, h_TR;
-
-        if (Spec_Vol == 1)
+        HLLC_All_Mach(IO::ParmParse &pp, std::string name) { pp_queryclass(name, *this); }
+        HLLC_All_Mach(IO::ParmParse &pp) { pp_queryclass(*this); }
+        HLLC_All_Mach()
         {
-            // With Respect to Specific Volume (energies are per unit volume)
-            ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small);
-            ue_L = E_L - ke_L;
-            p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;
-            h_TL = (ke_L + ue_L + p_L);
-
-            ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
-            ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;
-            h_TR = (ke_R + ue_R + p_R);
-        }
-        else
-        {
-            // With Respect to Specific Mass (energies are per unit mass)
-            ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small);
-            ue_L = E_L - ke_L;
-            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;
-            h_TL = ke_L + ue_L + (p_L / rho_L);
-
-            ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
-            ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R + p_ref;
-            h_TR = ke_R + ue_R + (p_R / rho_R);
+            IO::ParmParse pp;
+            pp_queryclass(*this);
         }
 
-        // Velocities
-        Set::Scalar u_L = Mn_L / (rho_L + small), u_R = Mn_R / (rho_R + small);
-        Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
+        Set::Scalar Ma_cutoff = 0.3; // Mach number below which low-Mach treatment activates
+        Set::Scalar alpha_min = 0.0; // Minimum pressure scaling (0 = full low-Mach, 1 = standard HLLC)
 
-        // Sound speeds (Tammann EOS)
-        Set::Scalar a_L = std::sqrt(gamma_L * (p_L + p0_L) / (rho_L + small));
-        Set::Scalar a_R = std::sqrt(gamma_R * (p_R + p0_R) / (rho_R + small));
-
-        // ========================================
-        // STANDARD HLLC WAVE SPEEDS (UNCHANGED)
-        // ========================================
-
-        Set::Scalar S_L = std::min(u_L - a_L, u_R - a_R);
-        Set::Scalar S_R = std::max(u_L + a_L, u_R + a_R);
-
-        // Middle wave speed (contact discontinuity) - STANDARD HLLC
-        Set::Scalar S_star = (p_R - p_L + rho_L * u_L * (S_L - u_L) - rho_R * u_R * (S_R - u_R)) / (rho_L * (S_L - u_L) - rho_R * (S_R - u_R) + small);
-
-        // ========================================
-        // GUILLARD-VIOZAT ALL-MACH MODIFICATION
-        // ========================================
-
-        // Compute local Mach numbers
-        Set::Scalar Ma_L = std::abs(u_L) / (a_L + small);
-        Set::Scalar Ma_R = std::abs(u_R) / (a_R + small);
-        Set::Scalar Ma_interface = std::max(Ma_L, Ma_R);
-
-        // Pressure dissipation scaling factor
-        // alpha = 1 for Ma > Ma_cutoff (standard HLLC)
-        // alpha -> alpha_min for Ma -> 0 (reduced pressure dissipation)
-        Set::Scalar alpha;
-        if (Ma_interface >= Ma_cutoff)
+        static void Parse(HLLC_All_Mach &value, IO::ParmParse &pp)
         {
-            alpha = 1.0;
-        }
-        else
-        {
-            // Smooth transition: alpha = alpha_min + (1 - alpha_min) * (Ma / Ma_cutoff)
-            alpha = alpha_min + (1.0 - alpha_min) * (Ma_interface / Ma_cutoff);
+            // Mach number cutoff for low-Mach treatment (typical: 0.1 - 0.5)
+            pp.query_default("ma_cutoff", value.Ma_cutoff, 0.3);
+
+            // Minimum pressure scaling factor (typical: 0.0 - 0.1)
+            // 0.0 = aggressive low-Mach treatment
+            // 1.0 = standard HLLC (no modification)
+            pp.query_default("alpha_min", value.alpha_min, 0.0);
         }
 
-        // ========================================
-        // MODIFIED STAR STATES
-        // ========================================
-
-        // Star state densities (UNCHANGED from standard HLLC)
-        Set::Scalar rho_star_L = rho_L * (S_L - u_L) / (S_L - S_star + small);
-        Set::Scalar rho_star_R = rho_R * (S_R - u_R) / (S_R - S_star + small);
-
-        // Star state pressures with Mach-dependent scaling
-        // At high Mach (alpha=1): recovers standard HLLC
-        // At low Mach (alpha->0): reduces pressure jumps
-        Set::Scalar p_star_L = p_L + alpha * rho_L * (S_L - u_L) * (S_star - u_L);
-        Set::Scalar p_star_R = p_R + alpha * rho_R * (S_R - u_R) * (S_star - u_R);
-
-        // Star state energies with modified pressure
-        Set::Scalar E_star_L, E_star_R;
-        
-        if (Spec_Vol == 1)
+        virtual Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1) override
         {
-            // Energies per unit volume
-            E_star_L = rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_star_L / (rho_L * (S_L - u_L) + small)));
-            E_star_R = rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_star_R / (rho_R * (S_R - u_R) + small)));
-        }
-        else
-        {
-            // Energies per unit mass
-            E_star_L = E_L + (S_star - u_L) * (S_star + p_star_L / (rho_L * (S_L - u_L) + small));
-            E_star_R = E_R + (S_star - u_R) * (S_star + p_star_R / (rho_R * (S_R - u_R) + small));
-        }
+            Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
+            Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
+            Set::Scalar Mt_L = lo.M_tangent, Mt_R = hi.M_tangent;
+            Set::Scalar E_L = lo.E, E_R = hi.E;
+            Set::Scalar gamma_L = lo.gam, gamma_R = hi.gam;
+            Set::Scalar p0_L = lo.p0, p0_R = hi.p0;
+            Set::Scalar T_L = lo.T, T_R = hi.T;
 
-        // ========================================
-        // FLUX CALCULATIONS
-        // ========================================
+            // Ensure no negative densities
+            rho_L = std::max(small, rho_L);
+            rho_R = std::max(small, rho_R);
 
-        Flux f_L, f_R;
-        Flux f_star_L, f_star_R;
+            // Fluid primitives
+            Set::Scalar ke_L, ke_R;
+            Set::Scalar ue_L, ue_R;
+            Set::Scalar p_L, p_R;
+            Set::Scalar h_TL, h_TR;
 
-        if (Spec_Vol == 1)
-        {
-            // Energies per unit volume [J/m^3]
-            
-            // ---- Left ----
-            f_L.mass = rho_L * u_L;
-            f_L.momentum_normal = rho_L * u_L * u_L + p_L;
-            f_L.momentum_tangent = rho_L * u_L * v_L;
-            f_L.energy = u_L * (E_L + p_L);
-
-            // ---- Right ----
-            f_R.mass = rho_R * u_R;
-            f_R.momentum_normal = rho_R * u_R * u_R + p_R;
-            f_R.momentum_tangent = rho_R * u_R * v_R;
-            f_R.energy = u_R * (E_R + p_R);
-
-            // - Left Star --
-            f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
-            f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
-            f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
-            f_star_L.energy = f_L.energy + S_L * (E_star_L - E_L);
-
-            // - Right Star --
-            f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
-            f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
-            f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
-            f_star_R.energy = f_R.energy + S_R * (E_star_R - E_R);
-        }
-        else
-        {
-            // Energies per unit mass [J/kg]
-            
-            // ---- Left ----
-            f_L.mass = rho_L * u_L;
-            f_L.momentum_normal = rho_L * u_L * u_L + p_L;
-            f_L.momentum_tangent = rho_L * u_L * v_L;
-            f_L.energy = u_L * (E_L + p_L / (rho_L + small));
-
-            // ---- Right ----
-            f_R.mass = rho_R * u_R;
-            f_R.momentum_normal = rho_R * u_R * u_R + p_R;
-            f_R.momentum_tangent = rho_R * u_R * v_R;
-            f_R.energy = u_R * (E_R + p_R / (rho_R + small));
-
-            // - Left Star --
-            f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
-            f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
-            f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
-            f_star_L.energy = f_L.energy + S_L * (E_star_L - E_L);
-
-            // - Right Star --
-            f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
-            f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
-            f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
-            f_star_R.energy = f_R.energy + S_R * (E_star_R - E_R);
-        }
-
-        // Compute HLLC flux based on wave positions
-        Flux fl;
-        if (0.0 <= S_L)
-        {
-            fl = f_L;
-        }
-        else if (S_L <= 0.0 && 0.0 <= S_star)
-        {
-            fl = f_star_L;
-        }
-        else if (S_star <= 0.0 && 0.0 <= S_R)
-        {
-            fl = f_star_R;
-        }
-        else
-        {
-            fl = f_R;
-        }
-
-        // ========================================
-        // ERROR CHECKING
-        // ========================================
-
-        if ((fl.mass != fl.mass) || (fl.momentum_normal != fl.momentum_normal) || 
-            (fl.momentum_tangent != fl.momentum_tangent) || (fl.energy != fl.energy) || 
-            (a_L != a_L) || (a_R != a_R))
-        {
-            if (verbose)
+            if (Spec_Vol == 1)
             {
-                Util::ParallelMessage(INFO, "-------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN ALL-MACH HLLC SOLVER:");
-                Util::ParallelMessage(INFO, "hi:        ", hi);
-                Util::ParallelMessage(INFO, "lo:        ", lo);
-                Util::ParallelMessage(INFO, "flux:      ", fl);
-                Util::ParallelMessage(INFO, "rho_L=     ", rho_L);
-                Util::ParallelMessage(INFO, "rho_R=     ", rho_R);
-                Util::ParallelMessage(INFO, "u_L=       ", u_L);
-                Util::ParallelMessage(INFO, "u_R=       ", u_R);
-                Util::ParallelMessage(INFO, "p_L=       ", p_L);
-                Util::ParallelMessage(INFO, "p_R=       ", p_R);
-                Util::ParallelMessage(INFO, "a_L=       ", a_L);
-                Util::ParallelMessage(INFO, "a_R=       ", a_R);
-                Util::ParallelMessage(INFO, "Ma_L=      ", Ma_L);
-                Util::ParallelMessage(INFO, "Ma_R=      ", Ma_R);
-                Util::ParallelMessage(INFO, "Ma_int=    ", Ma_interface);
-                Util::ParallelMessage(INFO, "alpha=     ", alpha);
-                Util::ParallelMessage(INFO, "S_L=       ", S_L);
-                Util::ParallelMessage(INFO, "S_R=       ", S_R);
-                Util::ParallelMessage(INFO, "S_star=    ", S_star);
-                Util::ParallelMessage(INFO, "p_star_L=  ", p_star_L);
-                Util::ParallelMessage(INFO, "p_star_R=  ", p_star_R);
+                // With Respect to Specific Volume (energies are per unit volume)
+                ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small);
+                ue_L = E_L - ke_L;
+                p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;
+                h_TL = (ke_L + ue_L + p_L);
+
+                ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
+                ue_R = E_R - ke_R;
+                p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;
+                h_TR = (ke_R + ue_R + p_R);
             }
-            Util::Exception(INFO);
-        }
-
-        return fl;
-    }
-
-    static int
-    Test()
-    {
-        HLLC_All_Mach solver;
-        int failed = 0;
-
-        Set::Scalar gamma = 1.4;
-        Set::Scalar pref = 10.0;
-        Set::Scalar small = 1E-10;
-
-        // Test 1: High-Mach Shock Tube (should match standard HLLC exactly)
-        try
-        {
-            // Toro1a-like conditions
-            State left(1.0, 0.0, 0.0, 1.0);
-            State right(0.125, 0.0, 0.0, 0.1);
-            
-            Flux flux = solver.Solve(left, right, gamma, pref, small);
-            
-            // Should produce valid flux without NaN
-            if (flux.mass != flux.mass || flux.energy != flux.energy)
+            else
             {
-                Util::Warning(INFO, "left:  ", left);
-                Util::Warning(INFO, "right: ", right);
-                Util::Warning(INFO, "Flux:  ", flux);
-                Util::Exception(INFO, "High-Mach shock tube producing NaN.");
-            }
-            Util::Test::SubMessage("Test 1: High-Mach shock tube (Toro1a-like)", 0);
-        }
-        catch (const std::runtime_error &e)
-        {
-            failed++;
-            Util::Test::SubMessage("Test 1: High-Mach shock tube (Toro1a-like)", 1);
-        }
+                // With Respect to Specific Mass (energies are per unit mass)
+                ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small);
+                ue_L = E_L - ke_L;
+                p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;
+                h_TL = ke_L + ue_L + (p_L / rho_L);
 
-        // Test 2: Static Low-Mach Interface
-        try
-        {
-            // Water-like properties on left, air-like on right
-            State left(1000.0, 0.0, 0.0, 10.0);
-            State right(1.0, 0.0, 0.0, 10.0);
-            
-            Flux flux = solver.Solve(left, right, gamma, pref, small);
-            
-            // For static interface, mass flux should be near zero
-            if (std::abs(flux.mass) > 1E-6)
+                ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
+                ue_R = E_R - ke_R;
+                p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R + p_ref;
+                h_TR = ke_R + ue_R + (p_R / rho_R);
+            }
+
+            // Velocities
+            Set::Scalar u_L = Mn_L / (rho_L + small), u_R = Mn_R / (rho_R + small);
+            Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
+
+            // Sound speeds (Tammann EOS)
+            Set::Scalar a_L = std::sqrt(gamma_L * (p_L + p0_L) / (rho_L + small));
+            Set::Scalar a_R = std::sqrt(gamma_R * (p_R + p0_R) / (rho_R + small));
+
+            // ========================================
+            // STANDARD HLLC WAVE SPEEDS (UNCHANGED)
+            // ========================================
+            Set::Scalar S_L = std::min(u_L - a_L, u_R - a_R);
+            Set::Scalar S_R = std::max(u_L + a_L, u_R + a_R);
+
+            // Middle wave speed (contact discontinuity) - STANDARD HLLC
+            Set::Scalar S_star = (p_R - p_L + rho_L * u_L * (S_L - u_L) - rho_R * u_R * (S_R - u_R)) / (rho_L * (S_L - u_L) - rho_R * (S_R - u_R) + small);
+
+            // ========================================
+            // GUILLARD-VIOZAT ALL-MACH MODIFICATION
+            // ========================================
+            // Compute local Mach numbers
+            Set::Scalar Ma_L = std::abs(u_L) / (a_L + small);
+            Set::Scalar Ma_R = std::abs(u_R) / (a_R + small);
+            Set::Scalar Ma_interface = std::max(Ma_L, Ma_R);
+
+            // Pressure dissipation scaling factor
+            // alpha = 1 for Ma > Ma_cutoff (standard HLLC)
+            // alpha -> alpha_min for Ma -> 0 (reduced pressure dissipation)
+            Set::Scalar alpha;
+            if (Ma_interface >= Ma_cutoff)
             {
-                Util::Warning(INFO, "left:  ", left);
-                Util::Warning(INFO, "right: ", right);
-                Util::Warning(INFO, "Flux:  ", flux);
-                Util::Exception(INFO, "Static low-Mach interface showing spurious mass flux.");
+                alpha = 1.0;
             }
-            Util::Test::SubMessage("Test 2: Static low-Mach interface (water/air)", 0);
-        }
-        catch (const std::runtime_error &e)
-        {
-            failed++;
-            Util::Test::SubMessage("Test 2: Static low-Mach interface (water/air)", 1);
-        }
-
-        // Test 3: Tangential Velocity Difference - No Normal Flux
-        try
-        {
-            State left(1.0, 1.0, 0.0, 1.0);
-            State center(1.0, 1.0, 1.0, 1.0);
-            State right(1.0, 1.0, 2.0, 1.0);
-
-            Flux fluxlo = solver.Solve(center, right, gamma, pref, small);
-            Flux fluxhi = solver.Solve(left, center, gamma, pref, small);
-
-            if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 || 
-                fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 || 
-                fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
+            else
             {
-                Util::Warning(INFO, "left:    ", left);
-                Util::Warning(INFO, "center:  ", center);
-                Util::Warning(INFO, "right:   ", right);
-                Util::Warning(INFO, "Fluxlo:  ", fluxlo);
-                Util::Warning(INFO, "Fluxhi:  ", fluxhi);
-                Util::Exception(INFO, "Tangential velocity difference incorrectly affecting normal flux.");
+                // Smooth transition: alpha = alpha_min + (1 - alpha_min) * (Ma / Ma_cutoff)
+                alpha = alpha_min + (1.0 - alpha_min) * (Ma_interface / Ma_cutoff);
             }
-            Util::Test::SubMessage("Test 3: Tangential velocity should induce no normal flux", 0);
-        }
-        catch (const std::runtime_error &e)
-        {
-            failed++;
-            Util::Test::SubMessage("Test 3: Tangential velocity should induce no normal flux", 1);
-        }
 
-        // Test 4: Symmetry Test (no flux across identical states)
-        try
-        {
-            State left(1.0, 0.0, 0.0, 1.0);
-            State center(1.0, 0.0, 0.0, 1.0);
-            State right(1.0, 0.0, 0.0, 1.0);
+            // ========================================
+            // MODIFIED STAR STATES
+            // ========================================
+            // Star state densities (UNCHANGED from standard HLLC)
+            Set::Scalar rho_star_L = rho_L * (S_L - u_L) / (S_L - S_star + small);
+            Set::Scalar rho_star_R = rho_R * (S_R - u_R) / (S_R - S_star + small);
 
-            Flux fluxhi = solver.Solve(center, right, gamma, pref, small);
-            Flux fluxlo = solver.Solve(left, center, gamma, pref, small);
+            // Star state pressures with Mach-dependent scaling
+            // At high Mach (alpha=1): recovers standard HLLC
+            // At low Mach (alpha->0): reduces pressure jumps
+            Set::Scalar p_star_L = p_L + alpha * rho_L * (S_L - u_L) * (S_star - u_L);
+            Set::Scalar p_star_R = p_R + alpha * rho_R * (S_R - u_R) * (S_star - u_R);
 
-            if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 || 
-                fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 || 
-                fabs(fluxhi.momentum_tangent) > 1E-10 || 
-                fabs(fluxlo.momentum_tangent) > 1E-10 || 
-                fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
+            // Star state energies with modified pressure
+            Set::Scalar E_star_L, E_star_R;
+
+            if (Spec_Vol == 1)
             {
-                Util::Warning(INFO, "left:  ", left);
-                Util::Warning(INFO, "right: ", right);
-                Util::Warning(INFO, "Fluxhi:  ", fluxhi);
-                Util::Warning(INFO, "Fluxlo:  ", fluxlo);
-                Util::Exception(INFO, "Symmetric states should result in zero flux.");
+                // Energies per unit volume
+                E_star_L = rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + p_star_L / (rho_L * (S_L - u_L) + small)));
+                E_star_R = rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + p_star_R / (rho_R * (S_R - u_R) + small)));
             }
-            Util::Test::SubMessage("Test 4: Constant states induces no flux difference", 0);
-        }
-        catch (const std::runtime_error &e)
-        {
-            failed++;
-            Util::Test::SubMessage("Test 4: Constant states induces no flux difference", 1);
-        }
-
-        // Test 5: Uniform Flow Test
-        try
-        {
-            State left(1.0, 1.0, 0.5, 1.0);
-            State center(1.0, 1.0, 0.5, 1.0);
-            State right(1.0, 1.0, 0.5, 1.0);
-
-            Flux fluxhi = solver.Solve(center, right, gamma, pref, small);
-            Flux fluxlo = solver.Solve(left, center, gamma, pref, small);
-
-            if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 || 
-                fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 || 
-                fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
+            else
             {
-                Util::Warning(INFO, "left:   ", left);
-                Util::Warning(INFO, "center: ", center);
-                Util::Warning(INFO, "right:  ", right);
-                Util::Warning(INFO, "Fluxlo: ", fluxlo);
-                Util::Warning(INFO, "Fluxhi: ", fluxhi);
-                Util::Exception(INFO, "Uniform flow should result in constant flux.");
+                // Energies per unit mass
+                E_star_L = E_L + (S_star - u_L) * (S_star + p_star_L / (rho_L * (S_L - u_L) + small));
+                E_star_R = E_R + (S_star - u_R) * (S_star + p_star_R / (rho_R * (S_R - u_R) + small));
             }
-            Util::Test::SubMessage("Test 5: Uniform flow should maintain constant flux", 0);
+
+            // ========================================
+            // FLUX CALCULATIONS
+            // ========================================
+            Flux f_L, f_R;
+            Flux f_star_L, f_star_R;
+
+            if (Spec_Vol == 1)
+            {
+                // Energies per unit volume ,[J/m^3]
+
+                // ---- Left ----
+                f_L.mass = rho_L * u_L;
+                f_L.momentum_normal = rho_L * u_L * u_L + p_L;
+                f_L.momentum_tangent = rho_L * u_L * v_L;
+                f_L.energy = u_L * (E_L + p_L);
+
+                // ---- Right ----
+                f_R.mass = rho_R * u_R;
+                f_R.momentum_normal = rho_R * u_R * u_R + p_R;
+                f_R.momentum_tangent = rho_R * u_R * v_R;
+                f_R.energy = u_R * (E_R + p_R);
+
+                // - Left Star --
+                f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
+                f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
+                f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
+                f_star_L.energy = f_L.energy + S_L * (E_star_L - E_L);
+
+                // - Right Star --
+                f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
+                f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
+                f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
+                f_star_R.energy = f_R.energy + S_R * (E_star_R - E_R);
+            }
+            else
+            {
+                // Energies per unit mass ,[J/kg]
+
+                // ---- Left ----
+                f_L.mass = rho_L * u_L;
+                f_L.momentum_normal = rho_L * u_L * u_L + p_L;
+                f_L.momentum_tangent = rho_L * u_L * v_L;
+                f_L.energy = u_L * (E_L + p_L / (rho_L + small));
+
+                // ---- Right ----
+                f_R.mass = rho_R * u_R;
+                f_R.momentum_normal = rho_R * u_R * u_R + p_R;
+                f_R.momentum_tangent = rho_R * u_R * v_R;
+                f_R.energy = u_R * (E_R + p_R / (rho_R + small));
+
+                // - Left Star --
+                f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
+                f_star_L.momentum_normal = f_L.momentum_normal + S_L * (rho_star_L * S_star - rho_L * u_L);
+                f_star_L.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - rho_L * v_L);
+                f_star_L.energy = f_L.energy + S_L * (E_star_L - E_L);
+
+                // - Right Star --
+                f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
+                f_star_R.momentum_normal = f_R.momentum_normal + S_R * (rho_star_R * S_star - rho_R * u_R);
+                f_star_R.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - rho_R * v_R);
+                f_star_R.energy = f_R.energy + S_R * (E_star_R - E_R);
+            }
+
+            // Compute HLLC flux based on wave positions
+            Flux fl;
+            if (0.0 <= S_L)
+            {
+                fl = f_L;
+            }
+            else if (S_L <= 0.0 && 0.0 <= S_star)
+            {
+                fl = f_star_L;
+            }
+            else if (S_star <= 0.0 && 0.0 <= S_R)
+            {
+                fl = f_star_R;
+            }
+            else
+            {
+                fl = f_R;
+            }
+
+            // ========================================
+            // ERROR CHECKING
+            // ========================================
+            if ((fl.mass != fl.mass) || (fl.momentum_normal != fl.momentum_normal) || (fl.momentum_tangent != fl.momentum_tangent) || (fl.energy != fl.energy) || (a_L != a_L) || (a_R != a_R))
+            {
+                bool verbose = false;
+                if (verbose)
+                {
+                    Util::ParallelMessage(INFO, "-------------------------------");
+                    Util::ParallelMessage(INFO, "ERROR IN ALL-MACH HLLC SOLVER:");
+                    Util::ParallelMessage(INFO, "hi:        ", hi);
+                    Util::ParallelMessage(INFO, "lo:        ", lo);
+                    Util::ParallelMessage(INFO, "flux:      ", fl);
+                    Util::ParallelMessage(INFO, "rho_L=     ", rho_L);
+                    Util::ParallelMessage(INFO, "rho_R=     ", rho_R);
+                    Util::ParallelMessage(INFO, "u_L=       ", u_L);
+                    Util::ParallelMessage(INFO, "u_R=       ", u_R);
+                    Util::ParallelMessage(INFO, "p_L=       ", p_L);
+                    Util::ParallelMessage(INFO, "p_R=       ", p_R);
+                    Util::ParallelMessage(INFO, "a_L=       ", a_L);
+                    Util::ParallelMessage(INFO, "a_R=       ", a_R);
+                    Util::ParallelMessage(INFO, "Ma_L=      ", Ma_L);
+                    Util::ParallelMessage(INFO, "Ma_R=      ", Ma_R);
+                    Util::ParallelMessage(INFO, "Ma_int=    ", Ma_interface);
+                    Util::ParallelMessage(INFO, "alpha=     ", alpha);
+                    Util::ParallelMessage(INFO, "S_L=       ", S_L);
+                    Util::ParallelMessage(INFO, "S_R=       ", S_R);
+                    Util::ParallelMessage(INFO, "S_star=    ", S_star);
+                    Util::ParallelMessage(INFO, "p_star_L=  ", p_star_L);
+                    Util::ParallelMessage(INFO, "p_star_R=  ", p_star_R);
+                }
+                Util::Exception(INFO);
+            }
+
+            return fl;
         }
-        catch (const std::runtime_error &e)
+
+        static int Test()
         {
-            failed++;
-            Util::Test::SubMessage("Test 5: Uniform flow should maintain constant flux", 1);
+            HLLC_All_Mach solver;
+            int failed = 0;
+            Set::Scalar pref = 10.0;
+            Set::Scalar small = 1E-10;
+
+            // Test 1: High-Mach Shock Tube (should match standard HLLC exactly)
+            try
+            {
+                // Toro1a-like conditions
+                State left(1.0, 0.0, 0.0, 1.0);
+                State right(0.125, 0.0, 0.0, 0.1);
+
+                Flux flux = solver.Solve(left, right, pref, small);
+
+                // Should produce valid flux without NaN
+                if (flux.mass != flux.mass || flux.energy != flux.energy)
+                {
+                    Util::Warning(INFO, "left:  ", left);
+                    Util::Warning(INFO, "right: ", right);
+                    Util::Warning(INFO, "Flux:  ", flux);
+                    Util::Exception(INFO, "High-Mach shock tube producing NaN.");
+                }
+                Util::Test::SubMessage("Test 1: High-Mach shock tube (Toro1a-like)", 0);
+            }
+            catch (const std::runtime_error &e)
+            {
+                failed++;
+                Util::Test::SubMessage("Test 1: High-Mach shock tube (Toro1a-like)", 1);
+            }
+
+            // Test 2: Static Low-Mach Interface
+            try
+            {
+                // Water-like properties on left, air-like on right
+                State left(1000.0, 0.0, 0.0, 10.0);
+                State right(1.0, 0.0, 0.0, 10.0);
+
+                Flux flux = solver.Solve(left, right, pref, small);
+
+                // For static interface, mass flux should be near zero
+                if (std::abs(flux.mass) > 1E-6)
+                {
+                    Util::Warning(INFO, "left:  ", left);
+                    Util::Warning(INFO, "right: ", right);
+                    Util::Warning(INFO, "Flux:  ", flux);
+                    Util::Exception(INFO, "Static low-Mach interface showing spurious mass flux.");
+                }
+                Util::Test::SubMessage("Test 2: Static low-Mach interface (water/air)", 0);
+            }
+            catch (const std::runtime_error &e)
+            {
+                failed++;
+                Util::Test::SubMessage("Test 2: Static low-Mach interface (water/air)", 1);
+            }
+
+            // Test 3: Tangential Velocity Difference - No Normal Flux
+            try
+            {
+                State left(1.0, 1.0, 0.0, 1.0);
+                State center(1.0, 1.0, 1.0, 1.0);
+                State right(1.0, 1.0, 2.0, 1.0);
+                Flux fluxlo = solver.Solve(center, right, pref, small);
+                Flux fluxhi = solver.Solve(left, center, pref, small);
+
+                if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
+                {
+                    Util::Warning(INFO, "left:    ", left);
+                    Util::Warning(INFO, "center:  ", center);
+                    Util::Warning(INFO, "right:   ", right);
+                    Util::Warning(INFO, "Fluxlo:  ", fluxlo);
+                    Util::Warning(INFO, "Fluxhi:  ", fluxhi);
+                    Util::Exception(INFO, "Tangential velocity difference incorrectly affecting normal flux.");
+                }
+                Util::Test::SubMessage("Test 3: Tangential velocity should induce no normal flux", 0);
+            }
+            catch (const std::runtime_error &e)
+            {
+                failed++;
+                Util::Test::SubMessage("Test 3: Tangential velocity should induce no normal flux", 1);
+            }
+
+            // Test 4: Symmetry Test (no flux across identical states)
+            try
+            {
+                State left(1.0, 0.0, 0.0, 1.0);
+                State center(1.0, 0.0, 0.0, 1.0);
+                State right(1.0, 0.0, 0.0, 1.0);
+                Flux fluxhi = solver.Solve(center, right, pref, small);
+                Flux fluxlo = solver.Solve(left, center, pref, small);
+
+                if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 || fabs(fluxhi.momentum_tangent) > 1E-10 || fabs(fluxlo.momentum_tangent) > 1E-10 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
+                {
+                    Util::Warning(INFO, "left:  ", left);
+                    Util::Warning(INFO, "right: ", right);
+                    Util::Warning(INFO, "Fluxhi:  ", fluxhi);
+                    Util::Warning(INFO, "Fluxlo:  ", fluxlo);
+                    Util::Exception(INFO, "Symmetric states should result in zero flux.");
+                }
+                Util::Test::SubMessage("Test 4: Constant states induces no flux difference", 0);
+            }
+            catch (const std::runtime_error &e)
+            {
+                failed++;
+                Util::Test::SubMessage("Test 4: Constant states induces no flux difference", 1);
+            }
+
+            // Test 5: Uniform Flow Test
+            try
+            {
+                State left(1.0, 1.0, 0.5, 1.0);
+                State center(1.0, 1.0, 0.5, 1.0);
+                State right(1.0, 1.0, 0.5, 1.0);
+                Flux fluxhi = solver.Solve(center, right, pref, small);
+                Flux fluxlo = solver.Solve(left, center, pref, small);
+
+                if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
+                {
+                    Util::Warning(INFO, "left:   ", left);
+                    Util::Warning(INFO, "center: ", center);
+                    Util::Warning(INFO, "right:  ", right);
+                    Util::Warning(INFO, "Fluxlo: ", fluxlo);
+                    Util::Warning(INFO, "Fluxhi: ", fluxhi);
+                    Util::Exception(INFO, "Uniform flow should result in constant flux.");
+                }
+                Util::Test::SubMessage("Test 5: Uniform flow should maintain constant flux", 0);
+            }
+            catch (const std::runtime_error &e)
+            {
+                failed++;
+                Util::Test::SubMessage("Test 5: Uniform flow should maintain constant flux", 1);
+            }
+
+            return failed;
         }
+    };
 
-        return failed;
-    }
-};
-
-} // namespace FluidRiemann
-} // namespace Local
+    } // namespace FluidRiemann
+    } // namespace Local
 } // namespace Solver
 
 #endif
