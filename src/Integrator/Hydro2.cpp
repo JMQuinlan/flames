@@ -12,11 +12,12 @@
 #include "IC/PNG.H"
 // Solvers
 #include "Solver/Local/FluidRiemann/Roe.H"
+#include "Solver/Local/FluidRiemann/HLLE.H"
 #include "Solver/Local/FluidRiemann/HLLC.H"
+#include "Solver/Local/FluidRiemann/HLLC_Oomar_Jainman.H"
 #include "Solver/Local/FluidRiemann/HLLC_All_Mach.H"
 #include "Solver/Local/FluidRiemann/HLLC_All_Mach_Furfaro.H"
 //#include "Solver/Local/FluidRiemann/HLLC_WENO5.H"
-#include "Solver/Local/FluidRiemann/HLLE.H"
 //#include "Solver/Local/FluidRiemann/HLLE_WENO5.H"
 //#include "Solver/Local/FluidRiemann/HLLCE.H"
 //#include "Solver/Local/FluidRiemann/HLLCE_WENO5.H"
@@ -248,9 +249,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                       Solver::Local::FluidRiemann::HLLE,
                       Solver::Local::FluidRiemann::HLLC,
                       //Solver::Local::FluidRiemann::HLLCE, // WIP - Need to update
-                      //Solver::Local::FluidRiemann::HLLCE_WENO5, // WIP - very outdated - never verified
+                      //Solver::Local::FluidRiemann::HLLCE_WENO5, // Never verified but updated
                       //Solver::Local::FluidRiemann::PartiallyParabolic, // WIP - very outdated - never verified
-                      //Solver::Local::FluidRiemann::HLLC_Oomar_Jainman, // Can't remember if this has been verified
+                      Solver::Local::FluidRiemann::HLLC_Oomar_Jainman, // Can't remember if this has been verified
                       Solver::Local::FluidRiemann::HLLC_All_Mach,
                       Solver::Local::FluidRiemann::HLLC_All_Mach_Furfaro
     >("Riemann_Solver", value.riemannsolver);
