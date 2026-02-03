@@ -1,6 +1,7 @@
 // Base
 #include "Hydro2.H"
 // Parsing and Input Handeling
+#include "AMReX_MultiFab.H"
 #include "IO/ParmParse.H"
 #include "BC/Constant.H"
 #include "BC/Expression.H"
@@ -584,8 +585,9 @@ Hydro2::RHS(int lev,
     amrex::Box domain = geom[lev].Domain();
 
     // Primitive Fields
-    for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
-    {
+    //for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
+    for (amrex::MFIter mfi(*(velocity_mf)[lev], true); mfi.isValid(); ++mfi)
+        {
         const amrex::Box &bx = mfi.validbox();
 
         // Mixture
@@ -708,8 +710,9 @@ Hydro2::RHS(int lev,
     }
 
     // Main time integration loop
-    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
-    {
+    //for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+    for (amrex::MFIter mfi(*(velocity_mf)[lev], true); mfi.isValid(); ++mfi)
+        {
         const amrex::Box &bx = mfi.validbox();
         // PRIMARY FLUIDS
         // FLUID 0
@@ -1195,11 +1198,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         energy_bc->FillBoundary(stage_mf[0], 0, 1, time, 0); // Might break since I don't have eta_bc specified directly
         stage_mf[0].FillBoundary(true);
         density_bc->FillBoundary(stage_mf[1], 0, 1, time, 0);
-        stage_mf[0].FillBoundary(true);
-        momentum_bc->FillBoundary(stage_mf[2], 0, 2, time, 0);
         stage_mf[1].FillBoundary(true);
-        energy_bc->FillBoundary(stage_mf[3], 0, 1, time, 0);
+        momentum_bc->FillBoundary(stage_mf[2], 0, 2, time, 0);
         stage_mf[2].FillBoundary(true);
+        energy_bc->FillBoundary(stage_mf[3], 0, 1, time, 0);
+        stage_mf[3].FillBoundary(true);
     });
 
     // Do the update
