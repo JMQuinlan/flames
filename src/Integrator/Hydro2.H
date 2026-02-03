@@ -105,15 +105,15 @@ protected:
     void TagCellsForRefinement(int lev, amrex::TagBoxArray& tags, amrex::Real /*time*/, int /*ngrow*/) override;
     void Regrid(int lev, Set::Scalar time) override;
     void RHS(int lev, 
-        Set::Scalar time, 
+        Set::Scalar time,
+        amrex::MultiFab &eta_rhs_mf, 
         amrex::MultiFab &rho_rhs_mf, 
         amrex::MultiFab &M_rhs_mf, 
         amrex::MultiFab &E_rhs_mf, 
-        amrex::MultiFab &eta_rhs_mf, 
+        const amrex::MultiFab &eta_mf_in,
         const amrex::MultiFab &rho_mf, 
         const amrex::MultiFab &M_mf, 
-        const amrex::MultiFab &E_mf, 
-        const amrex::MultiFab &eta_mf_in );
+        const amrex::MultiFab &E_mf);
 
 
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
