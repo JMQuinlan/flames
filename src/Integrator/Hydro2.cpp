@@ -252,7 +252,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<IC::Constant, IC::Expression>("cp0.ic",           value.cp0_ic, value.geom);
     pp.select_default<IC::Constant, IC::Expression>("cv0.ic",           value.cv0_ic, value.geom);
     pp.select_default<IC::Constant, IC::Expression>("k0_thermal.ic",    value.k0_thermal_ic, value.geom);
-    pp.select_default<IC::Constant, IC::Expression>("h1_thermal.ic",    value.h0_thermal_ic, value.geom);
+    pp.select_default<IC::Constant, IC::Expression>("h0_thermal.ic",    value.h0_thermal_ic, value.geom);
 
 
     // Fluid 1
@@ -1333,7 +1333,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Vector u_new = Set::Vector(M(i, j, k, 0) / (rho(i, j, k) + small),
                                             M(i, j, k, 1) / (rho(i, j, k) + small));
 
-            // Cahn-Hillard equation: d(eta)/dt = -u·grad(eta) + Mob * laplacian(mu)
+            // Cahn-Hillard equation: d(eta)/dt = -uï¿½grad(eta) + Mob * laplacian(mu)
             Set::Scalar advection = -u_new.dot(grad_eta);
             // Set::Scalar diffusion = Mob * lap_mu_chem;
             Set::Scalar phi = eta(i, j, k); // Dummy Variable bc it gets UGGGLLLYYYYY
