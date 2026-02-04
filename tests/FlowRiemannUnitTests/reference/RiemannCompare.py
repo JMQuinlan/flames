@@ -12,8 +12,8 @@ import os
 yt.funcs.mylog.setLevel(40)
 
 # Configuration
-case_name = 'cavitation'
-Tammann = 'TammannEOS' # Change to "." for not Tammann and "TammannEOS" for Tamman
+case_name = 'Toro1a'
+Tammann = '.' # Change to "." for not Tammann and "TammannEOS" for Tamman
 #Tammann = '.' # Change to "." for not Tammann and "TammannEOS" for Tamman
 hdf5_file = fr'{Tammann}\{case_name}.hdf5'
 amrex_output_dir = fr'..\..\..\bin\tests\FlowRiemannUnitTests\output_{case_name}'
