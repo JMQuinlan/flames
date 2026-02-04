@@ -32,7 +32,7 @@
 
 
 
-#if AMREX_SPACEDIM == 2
+//#if AMREX_SPACEDIM == 2
 
 namespace Integrator
 {
@@ -1507,4 +1507,4 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
 }
 
 
-#endif
+//#endif

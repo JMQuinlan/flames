@@ -1,5 +1,5 @@
-#ifndef INTEGRATOR_Hydro2_H
-#define INTEGRATOR_Hydro2_H
+#ifndef INTEGRATOR_HYDRO2_H
+#define INTEGRATOR_HYDRO2_H
 
 #include "Integrator/Integrator.H"
 #include "IO/ParmParse.H"
@@ -13,27 +13,28 @@
 
 // Solvers
 #include "Solver/Local/FluidRiemann/Roe.H"
-#include "Solver/Local/FluidRiemann/HLLC.H"
-#include "Solver/Local/FluidRiemann/HLLC_All_Mach.H"
-#include "Solver/Local/FluidRiemann/HLLC_All_Mach_Furfaro.H"
+//#include "Solver/Local/FluidRiemann/HLLC.H"
+//#include "Solver/Local/FluidRiemann/HLLC_All_Mach.H"
+//#include "Solver/Local/FluidRiemann/HLLC_All_Mach_Furfaro.H"
 //#include "Solver/Local/FluidRiemann/HLLC_WENO5.H"
-#include "Solver/Local/FluidRiemann/HLLE.H"
-//#include "Solver/Local/FluidRiemann/HLLE_WENO5.H"
-//#include "Solver/Local/FluidRiemann/HLLCE.H"
-//#include "Solver/Local/FluidRiemann/HLLCE_WENO5.H"
+//#include "Solver/Local/FluidRiemann/HLLE.H"
+// #include "Solver/Local/FluidRiemann/HLLE_WENO5.H"
+// #include "Solver/Local/FluidRiemann/HLLCE.H"
+// #include "Solver/Local/FluidRiemann/HLLCE_WENO5.H"
 // #include "Solver/Local/FluidRiemann/PartiallyParabolic.H"
+//
 // Limiters
 // #include "Solver/Local/Limiter/Minmod.H"
 // #include "Solver/Local/Limiter/VanLeer.H"
 
 
-#if AMREX_SPACEDIM==2
 
 namespace Integrator
 {
 class Hydro2 : virtual public Integrator
 {
 public:
+    static constexpr const char *name = "hydro2";
 
     Hydro2() {};
     Hydro2(IO::ParmParse& pp);
@@ -344,5 +345,4 @@ private:
 };
 }
 
-#endif
 #endif
