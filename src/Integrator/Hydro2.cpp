@@ -178,7 +178,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.q_mf,            &value.bc_nothing, 2, nghost, "q0", true, false, { "x", "y" });
         value.RegisterNewFab(value.Source_mf,       &value.bc_nothing,  4, nghost, "Source", true, false);
         value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, nghost, "Fsv", true, false, { "x", "y" });  // Surface Tension
-        value.RegisterNewFab(value.Fb_mf,           &value.bc_nothing,  2, nghost, "Fb", true, false, { "x", "y" });   // Buoyancy
         value.RegisterNewFab(value.Fw_mf,           &value.bc_nothing,  2, nghost, "Fw", true, false, { "x", "y" });   // Weight
         value.RegisterNewFab(value.Ldot_mf,         &value.bc_nothing,  2, nghost, "Ldot", true, false, { "x", "y" });  // Ldot
         value.RegisterNewFab(value.T_mf,            &value.bc_nothing,  1, nghost, "T", true, false);                  // Temperature
@@ -336,7 +335,6 @@ void Hydro2::Initialize(int lev)
     // NATURAL SOURCE
     Source_mf[lev]  ->setVal(0.0);
     Fsv_mf[lev]     ->setVal(0.0);
-    Fb_mf[lev]      ->setVal(0.0);
     Fw_mf[lev]      ->setVal(0.0); 
     Ldot_mf[lev]    ->setVal(0.0); 
 
@@ -439,9 +437,6 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar>         KE_vol      = KE_per_vol_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         KE_mas      = KE_per_mas_mf.Patch(lev, mfi);
 
-        // Tryna degub initlialization of nans
-        Set::Patch<Set::Scalar>         Fsv      = Fsv_mf.Patch(lev, mfi);
-
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
@@ -519,10 +514,6 @@ void Hydro2::Mix(int lev)
             Ma(i, j, k, 0) = v(i, j, k, 0) / a(i, j, k);
             Ma(i, j, k, 1) = v(i, j, k, 1) / a(i, j, k);
 
-
-            //
-            Fsv(i, j, k, 0) = 0.0;
-            Fsv(i, j, k, 1) = 0.0;
         });
     }
     c_max = 0.0;
@@ -930,7 +921,6 @@ Hydro2::RHS(int lev,
             // Surface Tension:
             // Fsv =  simga * kappa * n_hat
             Set::Vector Fsv_vector = Set::Vector(0.0, 0.0);
-            /*
             if (apply_surface_tension)
             {
                 // Optimization, only calc surface tension if on interface
@@ -944,7 +934,6 @@ Hydro2::RHS(int lev,
                     Fsv_vector(1) = sigma_eff * kappa * n_hat(1) * UFFDA; // / (grad_eta_mag + small)); // / (DX[1] + small);
                 }
             }
-            */
             Fsv(i, j, k, 0) = Fsv_vector(0);
             Fsv(i, j, k, 1) = Fsv_vector(1);
 
@@ -966,7 +955,7 @@ Hydro2::RHS(int lev,
             Source(i, j, k, 0) = mdot0;
             Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0);
             Source(i, j, k, 2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1);
-            Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force); //
+            Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force);
 
             // Lagrange terms to enforce no-penetration
             Source(i, j, k, 1) = Source(i, j, k, 1) - lagrange * u.dot(grad_eta) * grad_eta(0);

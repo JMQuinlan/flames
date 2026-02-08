@@ -61,7 +61,6 @@ public:
         delete cv0_ic;          // Constant Volume Specific Heat
         delete k0_thermal_ic;   // Thermal Conductivity
         delete h0_thermal_ic;   // Thermal Convectivity
-        //delete gamma0_ic;       // Specific Heat Ratio
         // FLUID 1
         delete density1_ic;
         delete velocity1_ic;
@@ -71,7 +70,6 @@ public:
         delete cv1_ic;          // Constant Volume Specific Heat
         delete k1_thermal_ic;   // Thermal Conductivity
         delete h1_thermal_ic;   // Thermal Convectivity
-        // delete gamma1_ic;       // Specific Heat Ratio
         // SOURCES
         delete ic_m0;
         delete ic_u0;
@@ -119,7 +117,7 @@ protected:
 
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
 
-private:
+protected:
     // FLUID 0
     Set::Field<Set::Scalar> density0_mf;
     Set::Field<Set::Scalar> density0_old_mf;
@@ -189,28 +187,9 @@ private:
     Set::Field<Set::Scalar> KE_per_vol_mf;  // Kinetic Energy (per unit volume)
     Set::Field<Set::Scalar> KE_per_mas_mf;  // Kinetic Energy (per unit mass)
 
-protected:
-    Set::Field<Set::Scalar> eta_mf;
-    Set::Field<Set::Scalar> eta_mf_in;
-    Set::Field<Set::Scalar> etadot_mf;
-    Set::Field<Set::Scalar> eta_old_mf;
-    Set::Field<Set::Scalar> hess_eta_mf;
-    Set::Field<Set::Scalar> n_hat_mf;
-private:
-   
-    Set::Field<Set::Scalar> m0_mf;
-    Set::Field<Set::Scalar> u0_mf;
-    Set::Field<Set::Scalar> q_mf;
-
-    //Set::Field<Set::Scalar> m1_mf;
-    //Set::Field<Set::Scalar> u1_mf;
-    //Set::Field<Set::Scalar> q1_mf;
-    
-
     Set::Field<Set::Scalar> Source_mf;      // Sumation of Source Terms
     Set::Field<Set::Scalar> flux_mf;        // Riemann Solver Fluxes
     Set::Field<Set::Scalar> Fsv_mf;         // Surface Tension
-    Set::Field<Set::Scalar> Fb_mf;          // Boyancy Force (INOP)
     Set::Field<Set::Scalar> Fw_mf;          // Weight Force
     Set::Field<Set::Scalar> Bm_mf;          // Spalding Number
     Set::Field<Set::Scalar> Ldot_mf;        // Ldot
@@ -226,6 +205,20 @@ private:
     Set::Field<Set::Scalar> div_tau_mf;
     Set::Field<Set::Scalar> hess_u_mf;
 
+    Set::Field<Set::Scalar> m0_mf;
+    Set::Field<Set::Scalar> u0_mf;
+    Set::Field<Set::Scalar> q_mf;
+
+protected:
+    Set::Field<Set::Scalar> eta_mf;
+    Set::Field<Set::Scalar> eta_mf_in;
+    Set::Field<Set::Scalar> etadot_mf;
+    Set::Field<Set::Scalar> eta_old_mf;
+    Set::Field<Set::Scalar> hess_eta_mf;
+    Set::Field<Set::Scalar> n_hat_mf;
+protected:
+   
+    
 
     BC::BC<Set::Scalar>* density_bc = nullptr;
     BC::BC<Set::Scalar>* momentum_bc = nullptr;
@@ -308,21 +301,6 @@ private:
     // Adaptive Timestep
     bool adaptive_timestep = false;
     Set::Scalar dt_min = NAN, dt_max = NAN, dt_growth = NAN;
-
-    // Solvers
-    /*
-    int scheme = 0;
-    Solver::Local::FluidRiemann::Roe *roesolver = nullptr;
-    Solver::Local::FluidRiemann::HLLC *hllcsolver = nullptr;
-    Solver::Local::FluidRiemann::HLLC_All_Mach *hllc_All_Machsolver = nullptr;
-    Solver::Local::FluidRiemann::HLLC_All_Mach_Furfaro *hllc_All_Mach_Furfarosolver = nullptr;
-    //Solver::Local::FluidRiemann::HLLC_WENO5 *hllc_weno5solver = nullptr; 
-    Solver::Local::FluidRiemann::HLLE *hllesolver = nullptr;
-    //Solver::Local::FluidRiemann::HLLE_WENO5 *hlle_weno5solver = nullptr;
-    //Solver::Local::FluidRiemann::HLLCE *hllcesolver = nullptr;
-    //Solver::Local::FluidRiemann::HLLCE_WENO5 *hllce_weno5solver = nullptr;
-    //Solver::Local::FluidRiemann::PartiallyParabolic *partiallyparabolicsolver = nullptr;
-    */
 
     // Limiters
     int Limiter = 0;
