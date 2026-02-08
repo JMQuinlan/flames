@@ -56,3 +56,9 @@ compile_commands.json
 .DS_Store
 logRuns/
 docs/.venv/
+/.vs
+/.vscode
+
+*.png
+*.eps
+*.gif
