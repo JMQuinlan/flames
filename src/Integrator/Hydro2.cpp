@@ -439,6 +439,9 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar>         KE_vol      = KE_per_vol_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         KE_mas      = KE_per_mas_mf.Patch(lev, mfi);
 
+        // Tryna degub initlialization of nans
+        Set::Patch<Set::Scalar>         Fsv      = Fsv_mf.Patch(lev, mfi);
+
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
@@ -515,6 +518,11 @@ void Hydro2::Mix(int lev)
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / a(i, j, k);
             Ma(i, j, k, 1) = v(i, j, k, 1) / a(i, j, k);
+
+
+            //
+            Fsv(i, j, k, 0) = 0.0;
+            Fsv(i, j, k, 1) = 0.0;
         });
     }
     c_max = 0.0;
@@ -921,8 +929,8 @@ Hydro2::RHS(int lev,
 
             // Surface Tension:
             // Fsv =  simga * kappa * n_hat
-            Fsv(i, j, k) = (0.0, 0.0);
             Set::Vector Fsv_vector = Set::Vector(0.0, 0.0);
+            /*
             if (apply_surface_tension)
             {
                 // Optimization, only calc surface tension if on interface
@@ -932,26 +940,28 @@ Hydro2::RHS(int lev,
                     Set::Scalar sigma_eff = sigma;
                     Set::Scalar alpha = 6 * sqrt(2);
                     Set::Scalar UFFDA = epsilon * alpha * grad_eta_mag * grad_eta_mag;
-                    Fsv(i, j, k, 0) = sigma_eff * kappa * n_hat(0) * UFFDA; // / (grad_eta_mag + small)); // / (DX[0] + small);
-                    Fsv(i, j, k, 1) = sigma_eff * kappa * n_hat(1) * UFFDA; // / (grad_eta_mag + small)); // / (DX[1] + small);
+                    Fsv_vector(0) = sigma_eff * kappa * n_hat(0) * UFFDA; // / (grad_eta_mag + small)); // / (DX[0] + small);
+                    Fsv_vector(1) = sigma_eff * kappa * n_hat(1) * UFFDA; // / (grad_eta_mag + small)); // / (DX[1] + small);
                 }
-                Fsv_vector = Set::Vector(Fsv(i, j, k, 0), Fsv(i, j, k, 1));
             }
+            */
+            Fsv(i, j, k, 0) = Fsv_vector(0);
+            Fsv(i, j, k, 1) = Fsv_vector(1);
 
             // Weight:
-            Fw(i, j, k) = (0.0, 0.0);
             Set::Vector Fw_vector = Set::Vector(0.0, 0.0);
             if (apply_weight)
             {
-                Fw(i, j, k, 0) = 0.0;
-                Fw(i, j, k, 1) = -rho(i, j, k) * g;
-                Fw_vector = Set::Vector(Fw(i, j, k, 0), Fw(i, j, k, 1)); // or multiply by cell area if needed
+                Fw_vector(0) = 0.0;
+                Fw_vector(1) = -rho(i, j, k) * g;
             }
+            Fw(i, j, k, 0) = Fw_vector(0);
+            Fw(i, j, k, 1) = Fw_vector(1);
 
 
             // Total:
-            Set::Vector Total_Force = Set::Vector(Fsv(i, j, k, 0) + Fw_vector(0),
-                                                  Fsv(i, j, k, 1) + Fw_vector(1));
+            Set::Vector Total_Force = Set::Vector(Fsv_vector(0) + Fw_vector(0),
+                                                  Fsv_vector(1) + Fw_vector(1));
 
             Source(i, j, k, 0) = mdot0;
             Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0);
