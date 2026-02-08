@@ -124,6 +124,6 @@ apply_surface_tension = 0
 apply_weight = 0
 apply_vaporization = 0
 
-Riemann_Solver = hllc
+Riemann_Solver.type = hllc
 #integration.type = RungeKutta
 #integration.rk.type = 4
