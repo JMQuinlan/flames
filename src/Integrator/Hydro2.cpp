@@ -247,6 +247,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
     // SOLVERS
     // Riemann solver
+    std::string solver_name;
+    pp.query("Riemann_Solver", solver_name);
+    Util::Message(INFO, "Input file has Riemann_Solver = ", solver_name);
     pp.select_default<Solver::Local::FluidRiemann::Roe,
                       Solver::Local::FluidRiemann::HLLE,
                       Solver::Local::FluidRiemann::HLLC,
@@ -257,6 +260,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                       Solver::Local::FluidRiemann::HLLC_All_Mach,
                       Solver::Local::FluidRiemann::HLLC_All_Mach_Furfaro
     >("Riemann_Solver", value.riemannsolver);
+    Util::Message(INFO, "Selected Riemann solver: ", typeid(*value.riemannsolver).name());
+
 
     // LIMITERS
     pp_query_default("Limiter", value.Limiter, 0); // Type of solver
@@ -323,14 +328,10 @@ void Hydro2::Initialize(int lev)
     // FORCED SOURCE
     ic_m0           ->Initialize(lev, m0_mf, 0.0);
     ic_u0           ->Initialize(lev, u0_mf, 0.0);
-    //ic_q->Initialize(lev, q_mf, 0.0);
-    q_mf[lev]->setVal(0.0);
+    ic_q            ->Initialize(lev, q_mf, 0.0);
 
-    /*
-    m0_mf[lev]->FillBoundary(geom[lev].periodicity());
-    u0_mf[lev]->FillBoundary(geom[lev].periodicity());
-    q_mf[lev]->FillBoundary(geom[lev].periodicity());
-    */
+    // Calculate mixed variables based on individual fluid variables
+    Mix(lev);
 
     // NATURAL SOURCE
     Source_mf[lev]  ->setVal(0.0);
@@ -351,14 +352,7 @@ void Hydro2::Initialize(int lev)
     KE_per_vol_mf[lev]  ->setVal(0.0);
     KE_per_mas_mf[lev]  ->setVal(0.0);
 
-    //amrex::Gpu::synchronize();
-    //amrex::ParallelDescriptor::Barrier();
-
-    // Calculate mixed variables based on individual fluid variables
-    Mix(lev);
-    //amrex::Gpu::synchronize();
-    //amrex::ParallelDescriptor::Barrier();
-
+    Util::ParallelMessage(INFO, "Finished initialization, begginning time iteration");
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1016,6 +1010,23 @@ Hydro2::RHS(int lev,
 
             // Calculate fluxes using the mixed fluid approach
             Solver::Local::FluidRiemann::Flux flux_xlo, flux_ylo, flux_xhi, flux_yhi;
+            
+            if (rho(i, j, k) != rho(i, j, k) || M(i, j, k, 0) != M(i, j, k, 0) || E(i, j, k) != E(i, j, k) || gammaf(i, j, k) != gammaf(i, j, k) || press(i, j, k) != press(i, j, k))
+            {
+                Util::ParallelMessage(INFO, "NaN detected at i=", i, " j=", j);
+                Util::ParallelMessage(INFO, "rho=", rho(i, j, k));
+                Util::ParallelMessage(INFO, "M=", M(i, j, k, 0), M(i, j, k, 1));
+                Util::ParallelMessage(INFO, "E=", E(i, j, k));
+                Util::ParallelMessage(INFO, "gamma=", gammaf(i, j, k));
+                Util::ParallelMessage(INFO, "press=", press(i, j, k));
+                Util::Abort(INFO);
+            }
+
+            if (rho(i - 1, j, k) != rho(i - 1, j, k) || rho(i + 1, j, k) != rho(i + 1, j, k) || rho(i, j - 1, k) != rho(i, j - 1, k) || rho(i, j + 1, k) != rho(i, j + 1, k))
+            {
+                Util::ParallelMessage(INFO, "NaN in neighbor at i=", i, " j=", j);
+                Util::Abort(INFO);
+            }
 
             try
             {
