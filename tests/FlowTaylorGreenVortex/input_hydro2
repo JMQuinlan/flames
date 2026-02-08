@@ -30,7 +30,7 @@ stop_time = 10.0
 
 ### ETA IC ###
 eta.ic.type = constant
-eta.ic.constant.value = 1.0
+eta.ic.constant.value = 0.0
 eta.ic.expression.constant.epsilon  = 1.0
 epsilon = eta.ic.expression.constant.epsilon
 
@@ -118,11 +118,17 @@ momentum.bc.type.yhi = periodic periodic
 omega_refinement_criterion = 0.1
 gradu_refinement_criterion = 0.1
 
-amr.abort_on_nan = 1
-
 apply_surface_tension = 0
 apply_weight = 0
 apply_vaporization = 0
+
+amr.abort_on_nan = 1
+
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.cfl = 0.5
+dynamictimestep.max = 1.0
+dynamictimestep.min = 1.0e-12
 
 Riemann_Solver.type = hllc
 #integration.type = RungeKutta
