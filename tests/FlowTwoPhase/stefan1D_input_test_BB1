@@ -5,8 +5,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = /mnt/c/Users/samar/Downloads/CloneResearch/flames/bin/tests/output/stefan_1
-plot_file = tests/stefan/stefan_1
+plot_file = /mnt/c/Users/samar/Downloads/CloneResearch/flames/bin/tests/stefan/stefan_1
+#plot_file = tests/stefan/stefan_1
 
 ### MESHING ###
 amr.plot_dt = 2e-3

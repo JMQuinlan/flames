@@ -5,7 +5,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = /mnt/c/Users/samar/Downloads/CloneResearch/flames/bin/tests/output/stefan
+plot_file = /mnt/c/Users/samar/Downloads/CloneResearch/flames/bin/tests/stefan/stefan
 
 ### MESHING ###
 amr.plot_dt = 1e-4
@@ -85,17 +85,11 @@ temperature1.ic.type = expression
 temperature1.ic.expression.region0 = "293.15"
 
 # Thermodynamic properties
-cp0.ic.type = expression
-cp0.ic.expression.region0 = "1005.0"
+cp0 = "1005.0"
+cp1 = "4179.0"
 
-cp1.ic.type = expression
-cp1.ic.expression.region0 = "4179.0"
-
-cv0.ic.type = expression
-cv0.ic.expression.region0 = "717.86"
-
-cv1.ic.type = expression
-cv1.ic.expression.region0 = "2984.3"  #cp/gamma for gamma=1.4
+cv0 = "717.86"
+cv1 = "2984.3"
 
 # Thermal conductivities
 k0_thermal.ic.type = expression
