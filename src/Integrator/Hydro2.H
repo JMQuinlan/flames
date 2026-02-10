@@ -54,8 +54,8 @@ public:
         delete velocity0_ic;
         delete pressure0_ic;
         delete temperature0_ic; // Temperature
-        delete cp0_ic;          // Constant Pressure Specific heat
-        delete cv0_ic;          // Constant Volume Specific Heat
+        //delete cp0_ic;          // Constant Pressure Specific heat
+        //delete cv0_ic;          // Constant Volume Specific Heat
         delete k0_thermal_ic;   // Thermal Conductivity
         delete h0_thermal_ic;   // Thermal Convectivity
         //delete gamma0_ic;       // Specific Heat Ratio
@@ -64,8 +64,8 @@ public:
         delete velocity1_ic;
         delete pressure1_ic;
         delete temperature1_ic; // Temperature
-        delete cp1_ic;          // Constant Pressure Specific heat
-        delete cv1_ic;          // Constant Volume Specific Heat
+        //delete cp1_ic;          // Constant Pressure Specific heat
+        //delete cv1_ic;          // Constant Volume Specific Heat
         delete k1_thermal_ic;   // Thermal Conductivity
         delete h1_thermal_ic;   // Thermal Convectivity
         // delete gamma1_ic;       // Specific Heat Ratio
@@ -124,8 +124,8 @@ private:
     Set::Field<Set::Scalar> momentum0_old_mf;
 
     Set::Field<Set::Scalar> T0_mf;
-    Set::Field<Set::Scalar> cp0_mf;
-    Set::Field<Set::Scalar> cv0_mf;
+    //Set::Field<Set::Scalar> cp0_mf;
+    //Set::Field<Set::Scalar> cv0_mf;
     Set::Field<Set::Scalar> k0_thermal_mf;
     Set::Field<Set::Scalar> h0_thermal_mf;
     //Set::Field<Set::Scalar> gamma0_mf;
@@ -145,8 +145,8 @@ private:
     Set::Field<Set::Scalar> momentum1_old_mf;
 
     Set::Field<Set::Scalar> T1_mf;
-    Set::Field<Set::Scalar> cp1_mf;
-    Set::Field<Set::Scalar> cv1_mf;
+    //Set::Field<Set::Scalar> cp1_mf;
+    //Set::Field<Set::Scalar> cv1_mf;
     Set::Field<Set::Scalar> k1_thermal_mf;
     Set::Field<Set::Scalar> h1_thermal_mf;
     //Set::Field<Set::Scalar> gamma1_mf;
@@ -229,8 +229,8 @@ private:
     IC::IC<Set::Scalar>* pressure0_ic = nullptr;
     IC::IC<Set::Scalar>* density0_ic  = nullptr;
     IC::IC<Set::Scalar>* temperature0_ic  = nullptr;
-    IC::IC<Set::Scalar>* cp0_ic  = nullptr;
-    IC::IC<Set::Scalar>* cv0_ic  = nullptr;
+    //IC::IC<Set::Scalar>* cp0_ic  = nullptr;
+    //IC::IC<Set::Scalar>* cv0_ic  = nullptr;
     IC::IC<Set::Scalar>* k0_thermal_ic  = nullptr;
     IC::IC<Set::Scalar>* h0_thermal_ic  = nullptr;
     //IC::IC<Set::Scalar>* gamma0_ic  = nullptr;
@@ -239,8 +239,8 @@ private:
     IC::IC<Set::Scalar>* pressure1_ic = nullptr;
     IC::IC<Set::Scalar>* density1_ic = nullptr;
     IC::IC<Set::Scalar>* temperature1_ic = nullptr;
-    IC::IC<Set::Scalar>* cp1_ic  = nullptr;
-    IC::IC<Set::Scalar>* cv1_ic  = nullptr;
+    //IC::IC<Set::Scalar>* cp1_ic  = nullptr;
+    //IC::IC<Set::Scalar>* cv1_ic  = nullptr;
     IC::IC<Set::Scalar>* k1_thermal_ic  = nullptr;
     IC::IC<Set::Scalar>* h1_thermal_ic  = nullptr;
     //IC::IC<Set::Scalar>* gamma1_ic  = nullptr;
@@ -266,10 +266,12 @@ private:
     Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion=NAN;
     // FLUID 0
     Set::Scalar gamma0 = NAN, p0_0 = NAN, mu0 = NAN, mu0_b = NAN, MW0 = NAN;
+    Set::Scalar cp0 = NAN, cv0 = NAN;
     Set::Scalar b0 = NAN, q0EOS = NAN;
 
     // FLUID 1
     Set::Scalar gamma1 = NAN, p0_1 = NAN, mu1 = NAN, mu1_b = NAN, MW1 = NAN;
+    Set::Scalar cp1 = NAN, cv1 = NAN;
     Set::Scalar b1 = NAN, q1EOS = NAN;
 
     // Interaction Parameters

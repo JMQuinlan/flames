@@ -91,6 +91,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("p0_0", value.p0_0, 0.0);      // p0 for Tammann EOS
         pp_query_required("mu0", value.mu0);            // linear viscosity coefficient
         pp_query_default("mu0_b", value.mu0_b, 0.0);    // bulk viscosity coefficient
+        pp_query_default("cp0", value.cp0, 0.0);        // Constant Pressure Specific Heat [J/kg]
+        pp_query_default("cv0", value.cv0, 0.0);        // Constant Volume Specific Heat [J/kg]
         // pp_query_required("R0", value.R0);              // Specific Gas Constant
         // pp_query_required("MW0", value.MW0);            // Molecular Weight
         
@@ -99,6 +101,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("p0_1", value.p0_1, 0.0);      // p0 for Tammann EOS
         pp_query_required("mu1", value.mu1);            // linear viscosity coefficient
         pp_query_default("mu1_b", value.mu1_b, 0.0);    // bulk viscosity coefficient
+        pp_query_default("cp1", value.cp1, 0.0);        // Constant Pressure Specific Heat [J/kg]
+        pp_query_default("cv1", value.cv1, 0.0);        // Constant Volume Specific Heat [J/kg]
         // pp_query_required("R1", value.R1);              // Specific Gas Constant
         // pp_query_required("MW1", value.MW1);            // Molecular Weight
 
@@ -157,8 +161,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.momentum0_old_mf,value.momentum_bc,  2, nghost, "momentum0_old", false);
  
         value.RegisterNewFab(value.T0_mf,           value.temperature_bc, 1, nghost, "T0", false);
-        value.RegisterNewFab(value.cp0_mf,          &value.bc_nothing, 1, nghost, "cp0", false);
-        value.RegisterNewFab(value.cv0_mf,          &value.bc_nothing, 1, nghost, "cv0", false);
+        //value.RegisterNewFab(value.cp0_mf,          &value.bc_nothing, 1, nghost, "cp0", false);
+        //value.RegisterNewFab(value.cv0_mf,          &value.bc_nothing, 1, nghost, "cv0", false);
         value.RegisterNewFab(value.k0_thermal_mf,   &value.bc_nothing, 1, nghost, "k0_thermal", false);
         value.RegisterNewFab(value.h0_thermal_mf,   &value.bc_nothing, 1, nghost, "h0_thermal", false);
 
@@ -177,8 +181,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.momentum1_old_mf,value.momentum_bc,  2, nghost, "momentum1_old", false);
 
         value.RegisterNewFab(value.T1_mf,           value.temperature_bc, 1, nghost, "T1", false);
-        value.RegisterNewFab(value.cp1_mf,          &value.bc_nothing, 1, nghost, "cp1", false);
-        value.RegisterNewFab(value.cv1_mf,          &value.bc_nothing, 1, nghost, "cv1", false);
+        //value.RegisterNewFab(value.cp1_mf,          &value.bc_nothing, 1, nghost, "cp1", false);
+        //value.RegisterNewFab(value.cv1_mf,          &value.bc_nothing, 1, nghost, "cv1", false);
         value.RegisterNewFab(value.k1_thermal_mf,   &value.bc_nothing, 1, nghost, "k1_thermal", false);
         value.RegisterNewFab(value.h1_thermal_mf,   &value.bc_nothing, 1, nghost, "h1_thermal", false);
 
@@ -207,7 +211,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, nghost, "Fsv", true, { "x", "y" });  // Surface Tension
         value.RegisterNewFab(value.Fb_mf,           &value.bc_nothing,  2, nghost, "Fb", true, { "x", "y" });   // Buoyancy
         value.RegisterNewFab(value.Fw_mf,           &value.bc_nothing,  2, nghost, "Fw", true, { "x", "y" });   // Weight
-        value.RegisterNewFab(value.T_mf,            &value.bc_nothing,  1, nghost, "T", true);                  // Temperature
+        value.RegisterNewFab(value.T_mf,            value.energy_bc,  1, nghost, "T", true);                  // Temperature
         value.RegisterNewFab(value.cp_mf,           &value.bc_nothing,  1, nghost, "cp", false);                // Constant Pressure Specific Heat
         value.RegisterNewFab(value.cv_mf,           &value.bc_nothing,  1, nghost, "cv", false);                // Constant Volume Specific Heat
         value.RegisterNewFab(value.k_thermal_mf,    &value.bc_nothing,  1, nghost, "k_thermal", false);         // Thermal Conductivity
@@ -248,6 +252,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp_forbid("pressure.ic", "--> pressure0.ic or pressure1.ic");
     pp_forbid("density.ic.type", "--> density0.ic.type or density1.ic.type");
 
+    pp_forbid("cp0.ic.type", "--> cp0");
+    pp_forbid("cv0.ic.type", "--> cv0");
+    pp_forbid("cp1.ic.type", "--> cp1");
+    pp_forbid("cv1.ic.type", "--> cv1");
+
 
     // INITIAL CONDITIONS
     // Eta
@@ -257,8 +266,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<IC::Constant,IC::Expression>("pressure0.ic",      value.pressure0_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("density0.ic",       value.density0_ic,  value.geom);
     pp.select_default<IC::Constant, IC::Expression>("temperature0.ic",  value.temperature0_ic, value.geom);
-    pp.select_default<IC::Constant, IC::Expression>("cp0.ic",           value.cp0_ic, value.geom);
-    pp.select_default<IC::Constant, IC::Expression>("cv0.ic",           value.cv0_ic, value.geom);
+    //pp.select_default<IC::Constant, IC::Expression>("cp0.ic",           value.cp0_ic, value.geom);
+    //pp.select_default<IC::Constant, IC::Expression>("cv0.ic",           value.cv0_ic, value.geom);
     pp.select_default<IC::Constant, IC::Expression>("k0_thermal.ic",    value.k0_thermal_ic, value.geom);
     pp.select_default<IC::Constant, IC::Expression>("h0_thermal.ic",    value.h0_thermal_ic, value.geom);
 
@@ -268,8 +277,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<IC::Constant,IC::Expression>("pressure1.ic",      value.pressure1_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("density1.ic",       value.density1_ic,  value.geom);
     pp.select_default<IC::Constant, IC::Expression>("temperature1.ic",  value.temperature1_ic, value.geom);
-    pp.select_default<IC::Constant, IC::Expression>("cp1.ic",           value.cp1_ic, value.geom);
-    pp.select_default<IC::Constant, IC::Expression>("cv1.ic",           value.cv1_ic, value.geom);
+    //pp.select_default<IC::Constant, IC::Expression>("cp1.ic",           value.cp1_ic, value.geom);
+    //pp.select_default<IC::Constant, IC::Expression>("cv1.ic",           value.cv1_ic, value.geom);
     pp.select_default<IC::Constant, IC::Expression>("k1_thermal.ic",    value.k1_thermal_ic, value.geom);
     pp.select_default<IC::Constant, IC::Expression>("h1_thermal.ic",    value.h1_thermal_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("gamma1.ic",        value.gamma1_ic, value.geom);
@@ -376,8 +385,8 @@ void Hydro2::Initialize(int lev)
     density0_ic     ->Initialize(lev, density0_mf, 0.0);
     density0_ic     ->Initialize(lev, density0_old_mf, 0.0);
     temperature0_ic ->Initialize(lev, T0_mf, 0.0);
-    cp0_ic          ->Initialize(lev, cp0_mf, 0.0);
-    cv0_ic          ->Initialize(lev, cv0_mf, 0.0);
+    //cp0_ic          ->Initialize(lev, cp0_mf, 0.0);
+    //cv0_ic          ->Initialize(lev, cv0_mf, 0.0);
     k0_thermal_ic   ->Initialize(lev, k0_thermal_mf, 0.0);
     h0_thermal_ic   ->Initialize(lev, h0_thermal_mf, 0.0);
 
@@ -387,8 +396,8 @@ void Hydro2::Initialize(int lev)
     density1_ic     ->Initialize(lev, density1_mf, 0.0);
     density1_ic     ->Initialize(lev, density1_old_mf, 0.0);
     temperature1_ic ->Initialize(lev, T1_mf, 0.0);
-    cp1_ic          ->Initialize(lev, cp1_mf, 0.0);
-    cv1_ic          ->Initialize(lev, cv1_mf, 0.0);
+    //cp1_ic          ->Initialize(lev, cp1_mf, 0.0);
+    //cv1_ic          ->Initialize(lev, cv1_mf, 0.0);
     k1_thermal_ic   ->Initialize(lev, k1_thermal_mf, 0.0);
     h1_thermal_ic   ->Initialize(lev, h1_thermal_mf, 0.0);
 
@@ -457,8 +466,8 @@ void Hydro2::Mix(int lev)
         Set::Patch<const Set::Scalar>   E0          = energy0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   E0_old      = energy0_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   T0          = T0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar>   cp0         = cp0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar>   cv0         = cv0_mf.Patch(lev, mfi);
+        //Set::Patch<const Set::Scalar>   cp0         = cp0_mf.Patch(lev, mfi);
+        //Set::Patch<const Set::Scalar>   cv0         = cv0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   k0_thermal  = k0_thermal_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   h0_thermal  = h0_thermal_mf.Patch(lev, mfi);
 
@@ -472,8 +481,8 @@ void Hydro2::Mix(int lev)
         Set::Patch<const Set::Scalar>   E1          = energy1_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   E1_old      = energy1_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   T1          = T1_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar>   cp1         = cp1_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar>   cv1         = cv1_mf.Patch(lev, mfi);
+        //Set::Patch<const Set::Scalar>   cp1         = cp1_mf.Patch(lev, mfi);
+        //Set::Patch<const Set::Scalar>   cv1         = cv1_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   k1_thermal  = k1_thermal_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   h1_thermal  = h1_thermal_mf.Patch(lev, mfi);
 
@@ -566,10 +575,10 @@ void Hydro2::Mix(int lev)
             T(i, j, k) = T0(i, j, k) * eta(i, j, k) + T1(i, j, k) * (1.0 - eta(i, j, k));
 
             // Constant Pressure Specific Heat
-            cp(i, j, k) = eta(i, j, k) * cp0(i, j, k) + (1.0 - eta(i, j, k)) * cp1(i, j, k);
+            cp(i, j, k) = eta(i, j, k) * cp0 + (1.0 - eta(i, j, k)) * cp1;
 
             // Constant Volume Specific Heat
-            cv(i, j, k) = eta(i, j, k) * cv0(i, j, k) + (1.0 - eta(i, j, k)) * cv1(i, j, k);
+            cv(i, j, k) = eta(i, j, k) * cv0 + (1.0 - eta(i, j, k)) * cv1;
 
             // Thermal Conductivity
             k_thermal(i, j, k) = eta(i, j, k) * k0_thermal(i, j, k) + (1.0 - eta(i, j, k)) * k1_thermal(i, j, k);
@@ -690,6 +699,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
         Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> T = T_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
@@ -698,9 +708,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
 
-
-
-        
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
@@ -752,7 +759,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             
             // Pressure
             press(i, j, k) = (UE_vol(i, j, k) - B) / A;
-            p0_eff(i,j,k) = (B / A) / gamma_eff;
+            p0_eff(i, j, k) = (B / A) / gamma_eff;
 
             // Chemical Potential
             Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
@@ -760,6 +767,17 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             mu_chem_(i, j, k) = mu_chem;
 
             // Spalding Number
+
+
+            // Constant Pressure Specific Heat
+            cp(i, j, k) = eta(i, j, k) * cp0 + (1.0 - eta(i, j, k)) * cp1;
+
+            // Constant Volume Specific Heat
+            cv(i, j, k) = eta(i, j, k) * cv0 + (1.0 - eta(i, j, k)) * cv1;
+
+
+            // Temperature
+            T(i, j, k) = UE_vol(i, j, k) / (rho(i, j, k) * cv(i, j, k) + small);
             
 
             // Speed of sound:
@@ -926,8 +944,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> E0 = energy0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> E0_old = energy0_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> T0 = T0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> cp0 = cp0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> cv0 = cv0_mf.Patch(lev, mfi);
+        //Set::Patch<const Set::Scalar> cp0 = cp0_mf.Patch(lev, mfi);
+        //Set::Patch<const Set::Scalar> cv0 = cv0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> k0_thermal = k0_thermal_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> h0_thermal = h0_thermal_mf.Patch(lev, mfi);
         // FLUID 1
@@ -940,8 +958,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> E1 = energy1_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> E1_old = energy1_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> T1 = T1_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> cp1 = cp1_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> cv1 = cv1_mf.Patch(lev, mfi);
+        //Set::Patch<const Set::Scalar> cp1 = cp1_mf.Patch(lev, mfi);
+        //Set::Patch<const Set::Scalar> cv1 = cv1_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> k1_thermal = k1_thermal_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> h1_thermal = h1_thermal_mf.Patch(lev, mfi);
 
@@ -970,7 +988,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> q0 = q_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> _u0 = u0_mf.Patch(lev, mfi);
 
-        Set::Patch<Set::Scalar> T = T_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> T = T_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
@@ -1356,6 +1374,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             
             if (apply_vaporization == 1 && grad_eta_mag > 1e-6) {
                 // Interface temperature - use gas side temperature
+
                 Set::Scalar T_s = T(i,j,k);  // Interface temperature [K]
                 Set::Scalar T_celsius = T_s - 273.15;  // Convert to Celsius for Antoine equation
                 
