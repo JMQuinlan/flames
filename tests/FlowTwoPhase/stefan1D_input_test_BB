@@ -1,0 +1,172 @@
+#@ [stefan-flow-1d-planar]
+#@ exe=hydro2
+#@ dim=2
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = /mnt/c/Users/samar/Downloads/CloneResearch/flames/bin/tests/output/stefan
+
+### MESHING ###
+amr.plot_dt = 1e-4
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.regrid_int = 100
+amr.grid_eff = 0.8
+amr.max_level = 0              #NO AMR 
+amr.n_cell = 64 8              #VERY COARSE
+
+### TIME STEPPING ###
+timestep = 1e-7
+
+## Adaptive
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1e-7
+dynamictimestep.min = 1e-12
+cfl = 0.05                     #VERY SMALL
+cfl_v = 0.05
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0 -0.0625 0.0
+geometry.prob_hi = 1.0  0.0625 0.0
+geometry.is_periodic = 0 0 0   #NO PERIODICITY
+
+### TIME STEP ###
+stop_time = 1e-5               #VERY SHORT
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.03125  #VERY THICK
+eta.ic.expression.constant.x_interface = 0.5
+
+eta.ic.expression.region0 = "0.5*(1 + tanh((x - x_interface)/(2*sqrt(2)*epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+gamma0 = 1.4
+p0_0 = 0
+mu0 = 1.8e-5
+mu0_b = 0.0
+
+gamma1 = 1.4                   #SAME GAMMA TO AVOID MIXING ISSUES
+p0_1 = 0                       #REMOVE TAMMANN FOR NOW
+mu1 = 1.0e-3
+mu1_b = 0.0
+
+# Densities
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1000.0"
+
+# Velocities
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Pressures - SAME EVERYWHERE
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "101325"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "101325"
+
+# Temperatures
+temperature0.ic.type = expression
+temperature0.ic.expression.region0 = "293.15"
+
+temperature1.ic.type = expression
+temperature1.ic.expression.region0 = "293.15"
+
+# Thermodynamic properties
+cp0.ic.type = expression
+cp0.ic.expression.region0 = "1005.0"
+
+cp1.ic.type = expression
+cp1.ic.expression.region0 = "4179.0"
+
+cv0.ic.type = expression
+cv0.ic.expression.region0 = "717.86"
+
+cv1.ic.type = expression
+cv1.ic.expression.region0 = "2984.3"  #cp/gamma for gamma=1.4
+
+# Thermal conductivities
+k0_thermal.ic.type = expression
+k0_thermal.ic.expression.region0 = "0.026"
+
+k1_thermal.ic.type = expression
+k1_thermal.ic.expression.region0 = "0.6"
+
+h0_thermal.ic.type = expression
+h0_thermal.ic.expression.region0 = "1005.0"
+
+h1_thermal.ic.type = expression
+h1_thermal.ic.expression.region0 = "4179.0"
+
+# Surface tension
+sigma = 0.0                    #DISABLE
+
+# Vapor Diffusivity
+Dv = "0.0"                     #DISABLE
+
+# Reference pressure
+pref = 0.0
+
+### BOUNDARY CONDITIONS ###
+# ALL NEUMANN (reflective/symmetric)
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.yhi = neumann  #CHANGED
+density.bc.type.ylo = neumann  #CHANGED
+
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.yhi = neumann   #CHANGED
+energy.bc.type.ylo = neumann   #CHANGED
+
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.yhi = neumann neumann  #CHANGED
+momentum.bc.type.ylo = neumann neumann  #CHANGED
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion = 0.1
+omega_refinement_criterion = 1000.0
+p_refinement_criterion = 1e+6
+rho_refinement_criterion = 1e+4
+gradu_refinement_criterion = 1e+4
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.type = constant
+m0.ic.constant.value = 0.0
+
+u0.ic.type = constant
+u0.ic.constant.value = 0.0 0.0
+
+q.ic.type = constant
+q.ic.constant.value = 0.0 0.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 0
+apply_buoyancy = 0
+apply_weight = 0
+apply_vaporization = 0
+static_eta = 1                 #FREEZE INTERFACE FOR TESTING
+Spec_Vol = 1
+grav = 9.81
+
+### SOLVER SETTINGS ###
+Riemann_Solver = 1
+kappa_method = 2
+scheme = 0
+Limiter = 0
+small = 1e-8
+lagrange = 0.0

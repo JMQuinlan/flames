@@ -1,0 +1,171 @@
+#@ [stefan-flow-1d-planar]
+#@ exe=hydro2
+#@ dim=2
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = /mnt/c/Users/samar/Downloads/CloneResearch/flames/bin/tests/output/stefan_1
+
+### MESHING ###
+amr.plot_dt = 2e-4
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.regrid_int = 50
+amr.grid_eff = 0.8
+amr.max_level = 1              # level 1 
+amr.n_cell = 128 16            # finer base grid
+
+### TIME STEPPING ###
+timestep = 1e-7
+
+## Adaptive
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1e-7
+dynamictimestep.min = 1e-12
+cfl = 0.1                      # little more aggressive
+cfl_v = 0.1
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0 -0.0625 0.0
+geometry.prob_hi = 1.0  0.0625 0.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEP ###
+stop_time = 2e-3               # little longer run
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.015625  # Thinner interface
+eta.ic.expression.constant.x_interface = 0.5
+
+eta.ic.expression.region0 = "0.5*(1 + tanh((x - x_interface)/(2*sqrt(2)*epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+gamma0 = 1.4
+p0_0 = 0
+mu0 = 1.8e-5
+mu0_b = 0.0
+
+gamma1 = 1.4
+p0_1 = 0
+mu1 = 1.0e-3
+mu1_b = 0.0
+
+# Densities
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1000.0"
+
+# Velocities
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Pressures
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "101325"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "101325"
+
+# Temperatures
+temperature0.ic.type = expression
+temperature0.ic.expression.region0 = "293.15"
+
+temperature1.ic.type = expression
+temperature1.ic.expression.region0 = "293.15"
+
+# Thermodynamic properties
+cp0.ic.type = expression
+cp0.ic.expression.region0 = "1005.0"
+
+cp1.ic.type = expression
+cp1.ic.expression.region0 = "4179.0"
+
+cv0.ic.type = expression
+cv0.ic.expression.region0 = "717.86"
+
+cv1.ic.type = expression
+cv1.ic.expression.region0 = "2984.3"
+
+# Thermal conductivities
+k0_thermal.ic.type = expression
+k0_thermal.ic.expression.region0 = "0.026"
+
+k1_thermal.ic.type = expression
+k1_thermal.ic.expression.region0 = "0.6"
+
+h0_thermal.ic.type = expression
+h0_thermal.ic.expression.region0 = "1005.0"
+
+h1_thermal.ic.type = expression
+h1_thermal.ic.expression.region0 = "4179.0"
+
+# Surface tension
+sigma = 72.8                   # RE-ENABLED
+
+# Vapor Diffusivity
+Dv = "1.0e-5"                  #RE-ENABLED
+
+# Reference pressure
+pref = 0.0
+
+### BOUNDARY CONDITIONS ###
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.yhi = neumann
+density.bc.type.ylo = neumann
+
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.yhi = neumann
+energy.bc.type.ylo = neumann
+
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion = 0.01
+omega_refinement_criterion = 100.0
+p_refinement_criterion = 1e+5
+rho_refinement_criterion = 1e+3
+gradu_refinement_criterion = 1e+3
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.type = constant
+m0.ic.constant.value = 0.0
+
+u0.ic.type = constant
+u0.ic.constant.value = 0.0 0.0
+
+q.ic.type = constant
+q.ic.constant.value = 0.0 0.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 1      # RE-ENABLED
+apply_buoyancy = 0
+apply_weight = 0
+apply_vaporization = 1         # RE-ENABLED
+static_eta = 0                 # INTERFACE CAN MOVE 
+Spec_Vol = 1
+grav = 9.81
+
+### SOLVER SETTINGS ###
+Riemann_Solver = 1
+kappa_method = 2
+scheme = 0
+Limiter = 0
+small = 1e-8
+lagrange = 0.0
