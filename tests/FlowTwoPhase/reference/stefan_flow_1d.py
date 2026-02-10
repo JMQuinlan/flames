@@ -1,45 +1,56 @@
 """
 ===============================================================================
-1D STEFAN FLOW SIMULATION - MASS FLUX AND INTERFACE TRACKING
+1D STEFAN FLOW - POST-PROCESSING FROM AMREX PLOT FILES
 ===============================================================================
 
 PURPOSE:
-    Simulate 1D planar Stefan flow evaporation and track interface motion.
-    Plot mass flux and interface position (eta = 0.5) over time.
+    Post-process AMReX plot files from 1D Stefan flow simulation.
+    Extract and plot interface position (eta = 0.5) and mass flux over time.
     
 FEATURES:
-    - Time-marching simulation of Stefan flow
-    - Interface tracking (eta = 0.5 contour)
-    - Mass flux calculation at interface
-    - Real-time or post-processing visualization
-    - Comparison with analytical Stefan flow solution
+    - Read AMReX plot files from simulation
+    - Track interface position (eta = 0.5 contour)
+    - Calculate mass flux at interface from simulation data
+    - Compare with analytical Stefan flow solution
+    - Time series plots
     
 PHYSICS:
     Stefan flow mass transfer with moving interface
-    - Mass fraction transport with convection
-    - Interface velocity from Stefan flow
-    - Quasi-steady mass fraction profile
+    - Interface tracking from eta field
+    - Mass flux from rho * v_x at interface
+    - Analytical comparison
     
 INPUTS:
-    Physical parameters from input file (densities, diffusivity, etc.)
+    - AMReX plot files from your hydro2 simulation
+    - Physical parameters from input file
     
 OUTPUTS:
     - Interface position vs time plot
     - Mass flux vs time plot
     - Combined visualization
+    - Data export to text file
 
 ===============================================================================
 """
 
+import yt
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+import re
+
+# Suppress yt verbose output
+yt.funcs.mylog.setLevel(40)
 
 # ============================================================================
-# CONFIGURATION PARAMETERS (FROM INPUT FILE)
+# CONFIGURATION PARAMETERS (FROM YOUR INPUT FILE)
 # ============================================================================
 
-# Physical parameters - EXTRACTED FROM YOUR INPUT FILE
+# File paths
+amrex_output_dir = r'../../../bin/tests/stefan/stefan_1'
+output_folder = './Stefan_Flow_1D_PostProcess'
+
+# Physical parameters - FROM YOUR INPUT FILE
 # Fluid 0 properties (vapor/gas phase, eta=1)
 density0 = 1.0                   # Density of gas phase [kg/m^3]
 mu0 = 1.8e-5                     # Dynamic viscosity of gas [Pa-s]
@@ -68,40 +79,26 @@ sigma = 72.8                     # Surface tension [N/m]
 Y_surface = 0.9                  # Mass fraction at liquid surface (eta=0.5)
 Y_infinity = 0.1                 # Mass fraction far from interface
 
-# Domain properties (FROM INPUT FILE)
+# Domain properties (FROM YOUR INPUT FILE)
 x_min = 0.0                      # geometry.prob_lo
 x_max = 1.0                      # geometry.prob_hi
-y_min = -0.0625
-y_max = 0.0625
+L_domain = x_max - x_min
 
-# Grid properties (FROM INPUT FILE)
-n_cells_x = 128                  # amr.n_cell
-n_cells_y = 16
-
-# Time stepping (FROM INPUT FILE)
-dt_initial = 1e-7                # timestep
-dt_max = 1e-0                    # dynamictimestep.max
-dt_min = 1e-12                   # dynamictimestep.min
-cfl = 0.1                        # cfl
-stop_time = 1.0                  # stop_time
-plot_dt = 2e-3                   # amr.plot_dt
-
-# Initial interface position (FROM INPUT FILE)
+# Initial interface position (FROM YOUR INPUT FILE)
 x_interface_initial = 0.5        # eta.ic.expression.constant.x_interface
-epsilon_interface = 0.005        # eta.ic.expression.constant.epsilon
-
-# Output settings
-output_folder = fr'..\..\..\bin\tests\stefan\stefan_1'
-
-if not os.path.exists(output_folder):
-    os.makedirs(output_folder)
 
 # Plotting customization
 FONT_SIZE_TITLE = 16
 FONT_SIZE_LABEL = 14
 FONT_SIZE_LEGEND = 12
 FONT_SIZE_TICK = 11
-LINE_WIDTH = 2.0
+LINE_WIDTH_EXACT = 2.5
+LINE_WIDTH_NUMERICAL = 2.0
+MARKER_SIZE = 6
+
+# Create output folder
+if not os.path.exists(output_folder):
+    os.makedirs(output_folder)
 
 # ============================================================================
 # ANALYTICAL SOLUTION FUNCTIONS
@@ -124,164 +121,136 @@ def stefan_mass_flux(rho, D_v, delta, Y_s, Y_inf):
     v_s = stefan_velocity(D_v, delta, Y_s, Y_inf)
     return rho * v_s
 
-def mass_fraction_profile(x, x_interface, D_v, Y_s, Y_inf, rho):
-    """
-    Analytical mass fraction profile with Stefan flow
-    Y(x) = Y_inf + (Y_s - Y_inf) * [exp(Pe*(x-x_i)/delta) - 1] / [exp(Pe) - 1]
-    """
-    delta = x_max - x_interface
-    if delta < 1e-12:
-        return np.full_like(x, Y_inf)
-    
-    v_s = stefan_velocity(D_v, delta, Y_s, Y_inf)
-    Pe = v_s * delta / D_v
-    
-    # Normalized distance from interface
-    xi = (x - x_interface) / delta
-    
-    # Mass fraction profile
-    if abs(Pe) < 1e-6:
-        Y = Y_s + (Y_inf - Y_s) * xi
-    else:
-        Y = Y_inf + (Y_s - Y_inf) * (np.exp(Pe * xi) - 1.0) / (np.exp(Pe) - 1.0)
-    
-    # Apply only in gas region
-    Y = np.where(x > x_interface, Y, Y_s)
-    
-    return Y
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
 
-def eta_profile_initial(x, x_interface, epsilon):
+def extract_timestep_number(filename):
+    """Extract timestep number from plot file name"""
+    match = re.search(r'(\d+)', os.path.basename(filename))
+    if match:
+        return int(match.group(1))
+    return 0
+
+def find_interface_position_1d(x_coords, eta_values):
     """
-    Initial eta profile (tanh interface)
-    eta = 0.5 * (1 + tanh((x - x_interface) / (2*sqrt(2)*epsilon)))
+    Find x-position where eta = 0.5 (interface location)
     """
-    return 0.5 * (1.0 + np.tanh((x - x_interface) / (2.0 * np.sqrt(2.0) * epsilon)))
+    idx = np.argmin(np.abs(eta_values - 0.5))
+    return x_coords[idx]
+
+def calculate_mass_flux_at_interface(ds, x_interface):
+    """
+    Calculate mass flux at interface from simulation data
+    m_dot = rho * v_x at interface
+    """
+    # Extract 1D ray along x-axis at y=0
+    y_mid = 0.0
+    z_mid = 0.0
+    x_min_domain = float(ds.domain_left_edge[0])
+    x_max_domain = float(ds.domain_right_edge[0])
+    
+    ray_start = ds.arr([x_min_domain, y_mid, z_mid], 'code_length')
+    ray_end = ds.arr([x_max_domain, y_mid, z_mid], 'code_length')
+    ray = ds.ray(ray_start, ray_end)
+    
+    # Sort by x-coordinate
+    sort_indices = np.argsort(ray['x'])
+    x_coords = np.array(ray['x'][sort_indices])
+    rho_values = np.array(ray['density'][sort_indices])
+    vx_values = np.array(ray['velocityx'][sort_indices])
+    
+    # Interpolate to interface position
+    idx = np.argmin(np.abs(x_coords - x_interface))
+    rho_interface = rho_values[idx]
+    vx_interface = vx_values[idx]
+    
+    return rho_interface * vx_interface
 
 # ============================================================================
-# SIMULATION SETUP
+# FIND AND SORT PLOT FILES
 # ============================================================================
 
 print("=" * 70)
-print("1D STEFAN FLOW SIMULATION")
+print("1D STEFAN FLOW - POST-PROCESSING FROM AMREX FILES")
 print("=" * 70)
 
-# Create spatial grid
-x = np.linspace(x_min, x_max, n_cells_x)
-dx = x[1] - x[0]
+plot_files = []
+for item in os.listdir(amrex_output_dir):
+    item_path = os.path.join(amrex_output_dir, item)
+    # Skip files with .old in the name
+    if os.path.isdir(item_path) and 'cell' in item and '.old' not in item:
+        plot_files.append(item_path)
 
-# Initialize eta field
-eta = eta_profile_initial(x, x_interface_initial, epsilon_interface)
+if not plot_files:
+    print(f"ERROR: No plot files found in {amrex_output_dir}")
+    exit(1)
 
-# Initialize storage arrays
-times = [0.0]
-interface_positions = [x_interface_initial]
-mass_fluxes = []
-stefan_velocities = []
-
-# Calculate initial mass flux
-delta_initial = x_max - x_interface_initial
-m_dot_initial = stefan_mass_flux(density0, D_v, delta_initial, Y_surface, Y_infinity)
-v_s_initial = stefan_velocity(D_v, delta_initial, Y_surface, Y_infinity)
-mass_fluxes.append(m_dot_initial)
-stefan_velocities.append(v_s_initial)
-
-print(f"\nInitial Conditions:")
-print(f"  Interface position: {x_interface_initial:.6f} m")
-print(f"  Stefan velocity: {v_s_initial:.6e} m/s")
-print(f"  Mass flux: {m_dot_initial:.6e} kg/m^2/s")
+plot_files.sort(key=extract_timestep_number)
+print(f"\nFound {len(plot_files)} plot files")
 
 # ============================================================================
-# TIME MARCHING SIMULATION
+# EXTRACT DATA FROM ALL TIMESTEPS
 # ============================================================================
 
 print("\n" + "=" * 70)
-print("RUNNING TIME MARCHING SIMULATION")
+print("EXTRACTING DATA FROM ALL TIMESTEPS")
 print("=" * 70)
 
-t = 0.0
-dt = dt_initial
-step = 0
-plot_counter = 0
-next_plot_time = plot_dt
+times = []
+interface_positions = []
+numerical_mass_flux = []
+stefan_velocities = []
+analytical_mass_flux = []
 
-while t < stop_time:
-    # Find current interface position (where eta = 0.5)
-    idx_interface = np.argmin(np.abs(eta - 0.5))
-    x_interface = x[idx_interface]
+for i, plot_file in enumerate(plot_files):
+    ds = yt.load(plot_file)
+    t = float(ds.current_time)
     
-    # Calculate Stefan velocity and mass flux
-    delta = x_max - x_interface
-    if delta < dx:
-        print(f"  Warning: Interface too close to boundary at t = {t:.6e} s")
-        break
+    # Extract 1D ray along x-axis at y=0
+    y_mid = 0.0
+    z_mid = 0.0
+    x_min_domain = float(ds.domain_left_edge[0])
+    x_max_domain = float(ds.domain_right_edge[0])
     
+    ray_start = ds.arr([x_min_domain, y_mid, z_mid], 'code_length')
+    ray_end = ds.arr([x_max_domain, y_mid, z_mid], 'code_length')
+    ray = ds.ray(ray_start, ray_end)
+    
+    # Sort by x-coordinate
+    sort_indices = np.argsort(ray['x'])
+    x_coords = np.array(ray['x'][sort_indices])
+    eta_values = np.array(ray['eta'][sort_indices])
+    
+    # Find interface position (where eta = 0.5)
+    x_interface = find_interface_position_1d(x_coords, eta_values)
+    
+    # Calculate numerical mass flux at interface
+    m_dot_num = calculate_mass_flux_at_interface(ds, x_interface)
+    
+    # Calculate analytical mass flux
+    delta = L_domain - x_interface
+    m_dot_ana = stefan_mass_flux(density0, D_v, delta, Y_surface, Y_infinity)
     v_s = stefan_velocity(D_v, delta, Y_surface, Y_infinity)
-    m_dot = stefan_mass_flux(density0, D_v, delta, Y_surface, Y_infinity)
     
-    # Adaptive time stepping based on CFL condition
-    if v_s > 1e-12:
-        dt_cfl = cfl * dx / abs(v_s)
-        dt = min(dt_cfl, dt_max)
-        dt = max(dt, dt_min)
+    times.append(t)
+    interface_positions.append(x_interface)
+    numerical_mass_flux.append(m_dot_num)
+    analytical_mass_flux.append(m_dot_ana)
+    stefan_velocities.append(v_s)
     
-    # Update interface position (simple explicit Euler)
-    x_interface_new = x_interface + v_s * dt
-    
-    # Update eta field (shift interface)
-    eta = eta_profile_initial(x, x_interface_new, epsilon_interface)
-    
-    # Update time
-    t += dt
-    step += 1
-    
-    # Store data at plot intervals
-    if t >= next_plot_time:
-        times.append(t)
-        interface_positions.append(x_interface_new)
-        mass_fluxes.append(m_dot)
-        stefan_velocities.append(v_s)
-        next_plot_time += plot_dt
-        plot_counter += 1
-        
-        if plot_counter % 10 == 0:
-            print(f"  Step {step}: t = {t:.6e} s, x_int = {x_interface_new:.6f} m, m_dot = {m_dot:.6e} kg/m^2/s")
-    
-    # Safety check
-    if step > 1e7:
-        print(f"  Warning: Maximum steps reached")
-        break
+    if (i + 1) % 10 == 0 or i == len(plot_files) - 1:
+        print(f"  Processed {i + 1}/{len(plot_files)} timesteps")
 
 times = np.array(times)
 interface_positions = np.array(interface_positions)
-mass_fluxes = np.array(mass_fluxes)
+numerical_mass_flux = np.array(numerical_mass_flux)
+analytical_mass_flux = np.array(analytical_mass_flux)
 stefan_velocities = np.array(stefan_velocities)
 
-print(f"\nSimulation complete!")
-print(f"  Total steps: {step}")
-print(f"  Final time: {t:.6e} s")
-print(f"  Final interface position: {interface_positions[-1]:.6f} m")
-print(f"  Final mass flux: {mass_fluxes[-1]:.6e} kg/m^2/s")
-
-# ============================================================================
-# CALCULATE ANALYTICAL SOLUTION FOR COMPARISON
-# ============================================================================
-
-print("\n" + "=" * 70)
-print("CALCULATING ANALYTICAL SOLUTION")
-print("=" * 70)
-
-analytical_mass_flux = []
-analytical_interface_pos = []
-
-for i, t_val in enumerate(times):
-    x_int = interface_positions[i]
-    delta = x_max - x_int
-    m_dot_ana = stefan_mass_flux(density0, D_v, delta, Y_surface, Y_infinity)
-    analytical_mass_flux.append(m_dot_ana)
-    analytical_interface_pos.append(x_int)
-
-analytical_mass_flux = np.array(analytical_mass_flux)
-analytical_interface_pos = np.array(analytical_interface_pos)
+print(f"\nExtraction complete!")
+print(f"  Time range: {times[0]:.6e} s to {times[-1]:.6e} s")
+print(f"  Interface displacement: {interface_positions[-1] - interface_positions[0]:.6e} m")
 
 # ============================================================================
 # PLOT 1: INTERFACE POSITION VS TIME
@@ -292,8 +261,8 @@ print("CREATING PLOTS")
 print("=" * 70)
 
 fig1, ax1 = plt.subplots(figsize=(10, 8))
-ax1.plot(times, interface_positions, 'b-', linewidth=LINE_WIDTH, 
-         label='Numerical Interface Position (eta = 0.5)', marker='o', markersize=4)
+ax1.plot(times, interface_positions, 'bo-', linewidth=LINE_WIDTH_NUMERICAL, 
+         markersize=MARKER_SIZE, label='Interface Position (eta = 0.5)', alpha=0.7)
 
 ax1.set_xlabel('Time (s)', fontsize=FONT_SIZE_LABEL)
 ax1.set_ylabel('Interface Position (m)', fontsize=FONT_SIZE_LABEL)
@@ -314,10 +283,10 @@ plt.close()
 # ============================================================================
 
 fig2, ax2 = plt.subplots(figsize=(10, 8))
-ax2.plot(times, mass_fluxes, 'r-', linewidth=LINE_WIDTH, 
-         label='Numerical Mass Flux', marker='s', markersize=4)
-ax2.plot(times, analytical_mass_flux, 'b--', linewidth=LINE_WIDTH, 
-         label='Analytical Mass Flux', alpha=0.7)
+ax2.plot(times, analytical_mass_flux, 'b-', linewidth=LINE_WIDTH_EXACT, 
+         label='Analytical Mass Flux', zorder=1)
+ax2.plot(times, numerical_mass_flux, 'ro', markersize=MARKER_SIZE, 
+         label='Numerical Mass Flux (rho * v_x)', alpha=0.7, zorder=2)
 
 ax2.set_xlabel('Time (s)', fontsize=FONT_SIZE_LABEL)
 ax2.set_ylabel('Mass Flux (kg/m^2/s)', fontsize=FONT_SIZE_LABEL)
@@ -337,23 +306,29 @@ plt.close()
 # PLOT 3: STEFAN VELOCITY VS TIME
 # ============================================================================
 
-fig3, ax3 = plt.subplots(figsize=(10, 8))
-ax3.plot(times, stefan_velocities, 'g-', linewidth=LINE_WIDTH, 
-         label='Stefan Velocity', marker='^', markersize=4)
-
-ax3.set_xlabel('Time (s)', fontsize=FONT_SIZE_LABEL)
-ax3.set_ylabel('Stefan Velocity (m/s)', fontsize=FONT_SIZE_LABEL)
-ax3.set_title('1D Stefan Flow: Interface Velocity vs Time', 
-              fontsize=FONT_SIZE_TITLE, fontweight='bold')
-ax3.legend(fontsize=FONT_SIZE_LEGEND, loc='best')
-ax3.grid(True, alpha=0.3)
-ax3.tick_params(labelsize=FONT_SIZE_TICK)
-plt.tight_layout()
-
-plt.savefig(os.path.join(output_folder, '03_Stefan_Velocity_vs_Time.png'), dpi=300)
-plt.savefig(os.path.join(output_folder, '03_Stefan_Velocity_vs_Time.eps'))
-print("  Saved: 03_Stefan_Velocity_vs_Time.png/.eps")
-plt.close()
+# Calculate numerical interface velocity from position
+if len(times) > 1:
+    interface_velocity_numerical = np.gradient(interface_positions, times)
+    
+    fig3, ax3 = plt.subplots(figsize=(10, 8))
+    ax3.plot(times, stefan_velocities, 'b-', linewidth=LINE_WIDTH_EXACT, 
+             label='Analytical Stefan Velocity', zorder=1)
+    ax3.plot(times, interface_velocity_numerical, 'ro', markersize=MARKER_SIZE, 
+             label='Numerical Interface Velocity', alpha=0.7, zorder=2)
+    
+    ax3.set_xlabel('Time (s)', fontsize=FONT_SIZE_LABEL)
+    ax3.set_ylabel('Interface Velocity (m/s)', fontsize=FONT_SIZE_LABEL)
+    ax3.set_title('1D Stefan Flow: Interface Velocity vs Time', 
+                  fontsize=FONT_SIZE_TITLE, fontweight='bold')
+    ax3.legend(fontsize=FONT_SIZE_LEGEND, loc='best')
+    ax3.grid(True, alpha=0.3)
+    ax3.tick_params(labelsize=FONT_SIZE_TICK)
+    plt.tight_layout()
+    
+    plt.savefig(os.path.join(output_folder, '03_Interface_Velocity_vs_Time.png'), dpi=300)
+    plt.savefig(os.path.join(output_folder, '03_Interface_Velocity_vs_Time.eps'))
+    print("  Saved: 03_Interface_Velocity_vs_Time.png/.eps")
+    plt.close()
 
 # ============================================================================
 # PLOT 4: COMBINED PLOT (INTERFACE AND MASS FLUX)
@@ -362,8 +337,8 @@ plt.close()
 fig4, (ax4a, ax4b) = plt.subplots(2, 1, figsize=(10, 12))
 
 # Top: Interface position
-ax4a.plot(times, interface_positions, 'b-', linewidth=LINE_WIDTH, 
-          label='Interface Position (eta = 0.5)', marker='o', markersize=4)
+ax4a.plot(times, interface_positions, 'bo-', linewidth=LINE_WIDTH_NUMERICAL, 
+          markersize=MARKER_SIZE, label='Interface Position (eta = 0.5)', alpha=0.7)
 ax4a.set_xlabel('Time (s)', fontsize=FONT_SIZE_LABEL)
 ax4a.set_ylabel('Interface Position (m)', fontsize=FONT_SIZE_LABEL)
 ax4a.set_title('Interface Position vs Time', fontsize=FONT_SIZE_TITLE, fontweight='bold')
@@ -372,10 +347,10 @@ ax4a.grid(True, alpha=0.3)
 ax4a.tick_params(labelsize=FONT_SIZE_TICK)
 
 # Bottom: Mass flux
-ax4b.plot(times, mass_fluxes, 'r-', linewidth=LINE_WIDTH, 
-          label='Numerical Mass Flux', marker='s', markersize=4)
-ax4b.plot(times, analytical_mass_flux, 'b--', linewidth=LINE_WIDTH, 
-          label='Analytical Mass Flux', alpha=0.7)
+ax4b.plot(times, analytical_mass_flux, 'b-', linewidth=LINE_WIDTH_EXACT, 
+          label='Analytical Mass Flux', zorder=1)
+ax4b.plot(times, numerical_mass_flux, 'ro', markersize=MARKER_SIZE, 
+          label='Numerical Mass Flux', alpha=0.7, zorder=2)
 ax4b.set_xlabel('Time (s)', fontsize=FONT_SIZE_LABEL)
 ax4b.set_ylabel('Mass Flux (kg/m^2/s)', fontsize=FONT_SIZE_LABEL)
 ax4b.set_title('Mass Flux vs Time', fontsize=FONT_SIZE_TITLE, fontweight='bold')
@@ -383,7 +358,7 @@ ax4b.legend(fontsize=FONT_SIZE_LEGEND, loc='best')
 ax4b.grid(True, alpha=0.3)
 ax4b.tick_params(labelsize=FONT_SIZE_TICK)
 
-fig4.suptitle('1D Stefan Flow Simulation Results', 
+fig4.suptitle('1D Stefan Flow - Simulation Results', 
               fontsize=FONT_SIZE_TITLE + 2, fontweight='bold', y=0.995)
 plt.tight_layout(rect=[0, 0, 1, 0.99])
 
@@ -396,11 +371,12 @@ plt.close()
 # PLOT 5: MASS FLUX ERROR
 # ============================================================================
 
-mass_flux_error = np.abs(mass_fluxes - analytical_mass_flux)
+mass_flux_error = np.abs(numerical_mass_flux - analytical_mass_flux)
 epsilon = 1e-16
+mass_flux_error_safe = mass_flux_error + epsilon
 
 fig5, ax5 = plt.subplots(figsize=(10, 8))
-ax5.semilogy(times, mass_flux_error + epsilon, 'k-', linewidth=LINE_WIDTH)
+ax5.semilogy(times, mass_flux_error_safe, 'k-', linewidth=LINE_WIDTH_NUMERICAL)
 
 ax5.set_xlabel('Time (s)', fontsize=FONT_SIZE_LABEL)
 ax5.set_ylabel('|m_dot_num - m_dot_analytical| (kg/m^2/s)', fontsize=FONT_SIZE_LABEL)
@@ -425,8 +401,8 @@ print("=" * 70)
 
 # Save time series data
 data_file = os.path.join(output_folder, 'stefan_flow_data.txt')
-header = "Time(s) Interface_Position(m) Mass_Flux(kg/m^2/s) Stefan_Velocity(m/s) Analytical_Mass_Flux(kg/m^2/s)"
-data = np.column_stack((times, interface_positions, mass_fluxes, stefan_velocities, analytical_mass_flux))
+header = "Time(s) Interface_Position(m) Numerical_Mass_Flux(kg/m^2/s) Analytical_Mass_Flux(kg/m^2/s) Stefan_Velocity(m/s)"
+data = np.column_stack((times, interface_positions, numerical_mass_flux, analytical_mass_flux, stefan_velocities))
 np.savetxt(data_file, data, header=header, fmt='%.10e')
 print(f"  Saved: stefan_flow_data.txt")
 
@@ -435,7 +411,7 @@ print(f"  Saved: stefan_flow_data.txt")
 # ============================================================================
 
 print("\n" + "=" * 70)
-print("SIMULATION COMPLETE")
+print("POST-PROCESSING COMPLETE")
 print("=" * 70)
 print(f"\nOutput directory: {output_folder}")
 print(f"\nPhysical Parameters:")
@@ -449,14 +425,15 @@ print(f"\nSimulation Results:")
 print(f"  Initial interface position: {interface_positions[0]:.6f} m")
 print(f"  Final interface position: {interface_positions[-1]:.6f} m")
 print(f"  Interface displacement: {interface_positions[-1] - interface_positions[0]:.6e} m")
-print(f"  Average mass flux: {np.mean(mass_fluxes):.6e} kg/m^2/s")
+print(f"  Average numerical mass flux: {np.mean(numerical_mass_flux):.6e} kg/m^2/s")
+print(f"  Average analytical mass flux: {np.mean(analytical_mass_flux):.6e} kg/m^2/s")
 print(f"  Average Stefan velocity: {np.mean(stefan_velocities):.6e} m/s")
 print(f"  Max mass flux error: {np.max(mass_flux_error):.6e} kg/m^2/s")
 
 print(f"\nFiles generated:")
 print(f"  - 01_Interface_Position_vs_Time.png/.eps")
 print(f"  - 02_Mass_Flux_vs_Time.png/.eps")
-print(f"  - 03_Stefan_Velocity_vs_Time.png/.eps")
+print(f"  - 03_Interface_Velocity_vs_Time.png/.eps")
 print(f"  - 04_Combined_Results.png/.eps")
 print(f"  - 05_Mass_Flux_Error.png/.eps")
 print(f"  - stefan_flow_data.txt")
