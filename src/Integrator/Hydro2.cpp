@@ -105,8 +105,16 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // INTERACTIONS
         pp_query_default("sigma", value.sigma, 0.0);   // surface tension condition
-        pp_query_default("Dv", value.Dv, 0.0);   // Vapor Diffusivity
+        pp_query_default("Dv", value.Dv, 0.0);   // Vapor Diffusivity (constant, m^2/s)
         pp_query_required("epsilon", value.epsilon);    // diffuse interface thickness
+
+        // VAPORIZATION PARAMETERS
+        pp_query_default("vap.W_v", value.vap_W_v, 46.07e-3);           // Molecular weight of fuel vapor [kg/mol], default: ethanol
+        pp_query_default("vap.W_g", value.vap_W_g, 28.97e-3);           // Molecular weight of carrier gas [kg/mol], default: air
+        pp_query_default("vap.Y_inf", value.vap_Y_inf, 0.0);            // Far-field vapor mass fraction (dry gas assumption)
+        pp_query_default("vap.Antoine_A", value.vap_Antoine_A, 8.04494); // Antoine coefficient A (ethanol default)
+        pp_query_default("vap.Antoine_B", value.vap_Antoine_B, 1554.3);  // Antoine coefficient B (ethanol default) [K]
+        pp_query_default("vap.Antoine_C", value.vap_Antoine_C, 222.65);  // Antoine coefficient C (ethanol default) [°C]
 
         // CURVATURE
         pp_query_default("kappa_method", value.kappa_method, 2); // Method to solve for curvature
@@ -552,7 +560,7 @@ void Hydro2::Mix(int lev)
             mu_chem_(i, j, k) = mu_chem;
 
             // Spalding Number
-            Bm(i, j, k) = eta(i, j, k) / (1.0 - eta(i, j, k) + small);
+            
             
             // Temperature
             T(i, j, k) = T0(i, j, k) * eta(i, j, k) + T1(i, j, k) * (1.0 - eta(i, j, k));
@@ -752,7 +760,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             mu_chem_(i, j, k) = mu_chem;
 
             // Spalding Number
-            Bm(i, j, k) = eta(i, j, k) / (1.0 - eta(i, j, k) + small);
+            
 
             // Speed of sound:
             a(i, j, k) = std::sqrt(gammaf(i,j,k) * (press(i, j, k) + p0_eff(i,j,k)) / (rho(i, j, k) + small));
@@ -970,7 +978,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
 
         Set::Patch<Set::Scalar> Source = Source_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fsv = Fsv_mf.Patch(lev, mfi);
@@ -1340,10 +1348,55 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar diffusion = Mob * ( lap_eta - ((phi * (1.0-phi) * (1.0-2.0*phi)) / (epsilon*epsilon + small)) - (grad_eta_mag * kappa) ); // Chiu & Lin (2011) URL: https://www.sciencedirect.com/science/article/pii/S0021999110005243
             Set::Scalar deta_dt = advection + diffusion;
 
-            // Spalding Evaporization
-            if (apply_vaporization == 1) {
-                deta_dt = deta_dt + (1.0 / (rho(i, j, k) * epsilon)) * (rho0(i, j, k) * Dv * (Bm(i, j, k) / (1.0 + Bm(i, j, k) + small)) * grad_eta_mag);
+            // ======================== VAPORIZATION SOURCE TERM ========================
+            // Physics from "Vaporization Model and Implementation Details" document
+            // Final evolution law (Equation 7):
+            //   ∂η/∂t + u·∇η = (1/ε) * (ρ_g * D_v / ρ_η) * (B_M/(1+B_M)) * |∇η|
+            // where B_M is the Spalding number
+            
+            if (apply_vaporization == 1 && grad_eta_mag > 1e-6) {
+                // Interface temperature - use gas side temperature
+                Set::Scalar T_s = T(i,j,k);  // Interface temperature [K]
+                Set::Scalar T_celsius = T_s - 273.15;  // Convert to Celsius for Antoine equation
+                
+                // Saturation pressure from Antoine equation
+                // log10(p_sat[mmHg]) = A - B/(C + T[°C])
+                Set::Scalar log10_psat_mmHg = vap_Antoine_A - vap_Antoine_B / (vap_Antoine_C + T_celsius);
+                Set::Scalar p_sat = std::pow(10.0, log10_psat_mmHg) * 133.322;  // Convert mmHg to Pa
+                
+                // Mole fraction of vapor at interface (saturation)
+                Set::Scalar x_vs = p_sat / (press(i,j,k) + small);
+                x_vs = std::min(x_vs, 0.99);  // Clamp to avoid numerical issues
+                
+                // Mass fraction of vapor at surface (Equation 5 of document):
+                // Y_v,s = W_v * x_v,s / (W_v * x_v,s + W_g * (1 - x_v,s))
+                Set::Scalar numerator_Y = vap_W_v * x_vs;
+                Set::Scalar Y_vs = numerator_Y / (numerator_Y + vap_W_g * (1.0 - x_vs) + small);
+                
+                // Spalding mass transfer number (Equation 4 of document):
+                // B_M = (Y_v,s - Y_∞) / (1 - Y_v,s)
+                Set::Scalar B_M = (Y_vs - vap_Y_inf) / (1.0 - Y_vs + small);
+                B_M = std::max(B_M, 0.0);  // Only evaporation, no condensation in this formulation
+                
+                // Gas density from fluid 0 (η=1 corresponds to fluid 0)
+                Set::Scalar rho_g = rho0(i,j,k);
+                
+                // Scaling density choice: using ρ_η = ρ_g makes RHS independent of mixture density
+                // This is consistent with the document recommendation
+                Set::Scalar rho_eta = rho_g;
+                
+                // Vaporization source for η equation (Equation 7):
+                // source_vap = (1/ε) * (ρ_g * D_v / ρ_η) * (B_M/(1+B_M)) * |∇η|
+                Set::Scalar vap_coeff = (rho_g * Dv / rho_eta + small) * (B_M / (1.0 + B_M + small));
+                Set::Scalar vap_source = (1.0 / epsilon) * vap_coeff * grad_eta_mag;
+                
+                // Add vaporization source to η evolution
+                deta_dt = deta_dt + vap_source;
+                
+                // Store Spalding number for visualization
+                Bm(i,j,k) = B_M;
             }
+            // ============================== END VAPORIZATION ===============================
 
 
             //Util::ParallelMessage(INFO, "Mob=", Mob);

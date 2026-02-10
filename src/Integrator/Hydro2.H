@@ -278,7 +278,15 @@ private:
     Set::Scalar g = 9.81; // m/s^2
     // Set::Scalar R = 8.314; // [J]/[mol]-[K]
     Set::Scalar R = 8314.; // [J]/[kmol]-[K] - Probably more common to use
-    Set::Scalar Dv = NAN; // Vapor Diffusivity
+    Set::Scalar Dv = NAN; // Vapor Diffusivity [m^2/s]
+    
+    // Vaporization Model Parameters
+    Set::Scalar vap_W_v = NAN;           // Molecular weight of fuel vapor [kg/mol]
+    Set::Scalar vap_W_g = NAN;           // Molecular weight of carrier gas [kg/mol]
+    Set::Scalar vap_Y_inf = NAN;         // Far-field vapor mass fraction (dimensionless)
+    Set::Scalar vap_Antoine_A = NAN;     // Antoine equation coefficient A (dimensionless)
+    Set::Scalar vap_Antoine_B = NAN;     // Antoine equation coefficient B [K]
+    Set::Scalar vap_Antoine_C = NAN;     // Antoine equation coefficient C [°C]
 
     // CFD Properties
     Set::Scalar cfl = NAN, cfl_v = NAN, pref = NAN;
