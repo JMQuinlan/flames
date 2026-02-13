@@ -67,14 +67,14 @@ output_folder = './Stefan_Flow_1D_PostProcess_Transient'
 
 # Physical parameters - ADJUST THESE FOR YOUR SIMULATION
 # Fluid 0 properties (vapor/gas phase, eta=1)
-density0 = 1.2                   # Density of gas phase [kg/m^3]
+density0 = 1.0                   # Density of gas phase [kg/m^3]
 velocity0 = 0.0                  # Initial velocity of gas [m/s]
 mu0 = 1.0e-5                     # Dynamic viscosity of gas [Pa-s]
 pressure0 = 101325.0             # Pressure of gas [Pa]
 gamma0 = 1.4                     # Ratio of specific heats for gas
 
 # Fluid 1 properties (liquid phase, eta=0)
-density1 = 1000.0                # Density of liquid [kg/m^3]
+density1 = 100.0                # Density of liquid [kg/m^3]
 velocity1 = 0.0                  # Initial velocity of liquid [m/s]
 mu1 = 1.0e-3                     # Dynamic viscosity of liquid [Pa-s]
 pressure1 = 101325.0             # Pressure of liquid [Pa]
@@ -82,8 +82,8 @@ gamma1 = 1.4                     # Ratio of specific heats for liquid
 
 # Mass transfer properties
 D_v = 2.0e-5                     # Binary diffusion coefficient [m^2/s]
-Y_surface = 0.01                 # Mass fraction at liquid surface (interface)
-Y_infinity = 0.99                 # Mass fraction far from interface
+Y_surface = density0 / (density0 + density1)                # Mass fraction at liquid surface (interface)
+Y_infinity = 0.0 #density1 / (density0 + density1)                  # Mass fraction far from interface
 
 # Domain properties
 L_domain = 1.0                   # Domain length [m]
@@ -270,9 +270,10 @@ def calculate_mass_fraction(eta, rho0, rho1):
     
     Y = (eta * rho0) / (eta * rho0 + (1-eta) * rho1)
     """
-    denominator = eta * rho0 + (1.0 - eta) * rho1
+    denominator = rho0 + rho1
     denominator = np.where(np.abs(denominator) < 1e-12, 1e-12, denominator)
-    return eta * rho0 / denominator
+    numerator = (eta) * rho0 # rho
+    return  numerator / denominator
 
 def find_interface_position_1d(x_coords, eta_values):
     """
@@ -350,6 +351,7 @@ for i, plot_file in enumerate(plot_files):
     sort_indices = np.argsort(ray['x'])
     x_coords = np.array(ray['x'][sort_indices])
     eta_values = np.array(ray['eta'][sort_indices])
+    rho_values = np.array(ray['density'][sort_indices])
     
     # Calculate mass fraction
     mass_fraction = calculate_mass_fraction(eta_values, density0, density1)

@@ -9,7 +9,7 @@ alamo.program = hydro2
 plot_file = tests/stefan/stefan_1
 
 ### MESHING ###
-amr.plot_dt = 2e-3
+amr.plot_dt = 2e-2
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 50
@@ -43,7 +43,7 @@ eta.ic.type = expression
 eta.ic.expression.constant.epsilon = 0.005  # Thinner interface
 eta.ic.expression.constant.x_interface = 0.5
 
-eta.ic.expression.region0 = "0.5*(1 + tanh((x - x_interface)/(2*sqrt(2)*epsilon)))"
+eta.ic.expression.region0 = "1.0 - 0.5*(1 + tanh((x - x_interface)/(2*sqrt(2)*epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
 
 ### HYDRO INITIAL CONDITIONS ###
