@@ -1032,6 +1032,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Extract velocity from momentum and density
             Set::Vector u = Set::Vector(v(i, j, k, 0), v(i, j, k, 1));
             Set::Vector u0 = Set::Vector(_u0(i, j, k, 0), _u0(i, j, k, 1));
+            Set::Scalar u_mag = u.lpNorm<2>();
 
             Set::Matrix gradM = Numeric::Gradient(M, i, j, k, DX);
             Set::Vector gradrho = Numeric::Gradient(rho, i, j, k, 0, DX);
@@ -1314,8 +1315,61 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             M_flux(i, j, k, 1) = (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / (DX[0]) + (flux_ylo.momentum_normal - flux_yhi.momentum_normal) / (DX[1]);
             E_flux(i, j, k) = (flux_xlo.energy - flux_xhi.energy) / (DX[0]) + (flux_ylo.energy - flux_yhi.energy) / (DX[1]);
 
+
+            // ======================== VAPORIZATION SOURCE TERM ========================
+            Set::Scalar vap_source = 0.0;
+            Set::Scalar m_dot_vap = 0.0;
+            if (apply_vaporization == 1 && grad_eta_mag > 1e-6)
+            {
+                // Interface temperature - use gas side temperature
+                Set::Scalar T_s = T(i, j, k);         // Interface temperature [K]
+                Set::Scalar T_celsius = T_s - 273.15; // Convert to Celsius for Antoine equation
+
+                // Saturation pressure from Antoine equation
+                // log10(p_sat[mmHg]) = A - B/(C + T[°C])
+                Set::Scalar log10_psat_mmHg = vap_Antoine_A - vap_Antoine_B / (vap_Antoine_C + T_celsius);
+                Set::Scalar p_sat = std::pow(10.0, log10_psat_mmHg) * 133.322; // Convert mmHg to Pa
+
+                // Mole fraction of vapor at interface (saturation)
+                Set::Scalar x_vs = p_sat / (press(i, j, k) + small);
+                x_vs = std::min(x_vs, 0.99); // Clamp to avoid numerical issues
+
+                // Mass fraction of vapor at surface (Equation 5 of document):
+                // Y_v,s = W_v * x_v,s / (W_v * x_v,s + W_g * (1 - x_v,s))
+                Set::Scalar numerator_Y = vap_W_v * x_vs;
+                Set::Scalar Y_vs = numerator_Y / (numerator_Y + vap_W_g * (1.0 - x_vs) + small);
+
+                // Spalding mass transfer number (Equation 4 of document):
+                // B_M = (Y_v,s - Y_∞) / (1 - Y_v,s)
+                Set::Scalar B_M = (Y_vs - vap_Y_inf) / (1.0 - Y_vs + small);
+                B_M = std::max(B_M, 0.0); // Only evaporation, no condensation in this formulation
+
+                // Gas density from fluid 0 (η=1 corresponds to fluid 0)
+                Set::Scalar rho_g = rho0(i, j, k);
+
+                // Scaling density choice: using ρ_η = ρ_g makes RHS independent of mixture density
+                // This is consistent with the document recommendation
+                //Set::Scalar rho_eta = rho_g;
+                Set::Scalar rho_eta = rho(i,j,k);
+
+                // Vaporization source for η equation (Equation 7):
+                // source_vap = (1/ε) * (ρ_g * D_v / ρ_η) * (B_M/(1+B_M)) * |∇η|
+                Set::Scalar vap_coeff = (rho_g * Dv / rho_eta + small) * (B_M / (1.0 + B_M + small));
+                vap_source = (1.0 / epsilon) * vap_coeff * grad_eta_mag;
+
+
+                // MASS FLUX
+                m_dot_vap = rho_g * Dv * (B_M / (1.0 + B_M + small));
+
+                // Store Spalding number for visualization
+                Bm(i, j, k) = B_M;
+            }
+            // ============================== END VAPORIZATION ===============================
+
+
             // Density
             Set::Scalar drho_dt = (flux_xlo.mass - flux_xhi.mass) / (DX[0]) + (flux_ylo.mass - flux_yhi.mass) / (DX[1]) + Source(i, j, k, 0);
+            drho_dt += m_dot_vap;
 
             rho_new(i, j, k) = rho(i, j, k) + (drho_dt)*dt;
             if (rho_new(i, j, k) < (small)) {
@@ -1326,15 +1380,19 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar dMx_dt = (flux_xlo.momentum_normal - flux_xhi.momentum_normal) / (DX[0]) + (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / (DX[1]) + div_tau(0) +
                                  //(mu * (lap_ux * eta(i, j, k))) +
                                  Source(i, j, k, 1);
+            dMx_dt += dMx_dt * v(i, j, k, 0);
             M_new(i, j, k, 0) = M(i, j, k, 0) + dMx_dt * dt;
 
             Set::Scalar dMy_dt = (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / (DX[0]) + (flux_ylo.momentum_normal - flux_yhi.momentum_normal) / (DX[1]) + div_tau(1) +
                                  //(mu * (lap_uy * eta(i, j, k))) +
                                  Source(i, j, k, 2);
+            dMy_dt += dMy_dt * v(i, j, k, 1);
             M_new(i, j, k, 1) = M(i, j, k, 1) + dMy_dt * dt;
 
             // Energy
             Set::Scalar dE_dt = (flux_xlo.energy - flux_xhi.energy) / (DX[0]) + (flux_ylo.energy - flux_yhi.energy) / (DX[1]) + Source(i, j, k, 3);
+            dE_dt += dE_dt * u_mag * u_mag;
+            
             if (Spec_Vol == 1)
             {
                 E_vol_new(i, j, k) = E_vol(i, j, k) + dE_dt * dt;
@@ -1366,6 +1424,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar diffusion = Mob * ( lap_eta - ((phi * (1.0-phi) * (1.0-2.0*phi)) / (epsilon*epsilon + small)) - (grad_eta_mag * kappa) ); // Chiu & Lin (2011) URL: https://www.sciencedirect.com/science/article/pii/S0021999110005243
             Set::Scalar deta_dt = advection + diffusion;
 
+            deta_dt += vap_source;
+
+
+            /*
             // ======================== VAPORIZATION SOURCE TERM ========================
             // Physics from "Vaporization Model and Implementation Details" document
             // Final evolution law (Equation 7):
@@ -1410,13 +1472,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Set::Scalar vap_source = (1.0 / epsilon) * vap_coeff * grad_eta_mag;
                 
                 // Add vaporization source to η evolution
-                deta_dt = deta_dt + vap_source;
                 
                 // Store Spalding number for visualization
                 Bm(i,j,k) = B_M;
             }
             // ============================== END VAPORIZATION ===============================
-
+            */
 
             //Util::ParallelMessage(INFO, "Mob=", Mob);
             //Util::ParallelMessage(INFO, "deta_dt=", deta_dt);
