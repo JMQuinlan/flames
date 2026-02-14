@@ -219,8 +219,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<IC::Constant,IC::Expression>("pressure0.ic",      value.pressure0_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("density0.ic",       value.density0_ic,  value.geom);
     pp.select_default<IC::Constant, IC::Expression>("temperature0.ic",  value.temperature0_ic, value.geom);
-    //pp.select_default<IC::Constant, IC::Expression>("cp0.ic",           value.cp0_ic, value.geom);
-    //pp.select_default<IC::Constant, IC::Expression>("cv0.ic",           value.cv0_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("k0_thermal.ic",    value.k0_thermal_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("h1_thermal.ic",    value.h0_thermal_ic, value.geom);
 
@@ -230,8 +228,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<IC::Constant,IC::Expression>("pressure1.ic",      value.pressure1_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("density1.ic",       value.density1_ic,  value.geom);
     pp.select_default<IC::Constant, IC::Expression>("temperature1.ic",  value.temperature1_ic, value.geom);
-    //pp.select_default<IC::Constant, IC::Expression>("cp1.ic",           value.cp1_ic, value.geom);
-    //pp.select_default<IC::Constant, IC::Expression>("cv1.ic",           value.cv1_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("k1_thermal.ic",    value.k1_thermal_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("h1_thermal.ic",    value.h1_thermal_ic, value.geom);
 
@@ -248,7 +244,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     // Riemann solver
     std::string solver_name;
     pp.query("Riemann_Solver", solver_name);
-    Util::Message(INFO, "Input file has Riemann_Solver = ", solver_name);
+    Util::Message(INFO, "Input file has Riemann_Solver = ", value.solver_name);
     pp.select_default<Solver::Local::FluidRiemann::Roe,
                       Solver::Local::FluidRiemann::HLLE,
                       Solver::Local::FluidRiemann::HLLC,
@@ -279,7 +275,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     else
     {
         Util::ParallelMessage(INFO, "-------------------------------");
-        Util::ParallelMessage(INFO, "Invalid Limiter: ", value.Riemann_Solver);
+        Util::ParallelMessage(INFO, "Invalid Limiter: ", value.Limiter);
         Util::ParallelMessage(INFO, "Acceptable Methods: ");
         Util::ParallelMessage(INFO, "None       : 0");
         Util::ParallelMessage(INFO, "MinMod     : 1");
@@ -381,8 +377,6 @@ void Hydro2::Mix(int lev)
         Set::Patch<const Set::Scalar>   E0          = energy0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   E0_old      = energy0_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   T0          = T0_mf.Patch(lev, mfi);
-        //Set::Patch<const Set::Scalar>   cp0         = cp0_mf.Patch(lev, mfi);
-        //Set::Patch<const Set::Scalar>   cv0         = cv0_mf.Patch(lev, mfi);
         //Set::Patch<const Set::Scalar>   k0_thermal  = k0_thermal_mf.Patch(lev, mfi);
         //Set::Patch<const Set::Scalar>   h0_thermal  = h0_thermal_mf.Patch(lev, mfi);
 
@@ -396,8 +390,6 @@ void Hydro2::Mix(int lev)
         Set::Patch<const Set::Scalar>   E1          = energy1_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   E1_old      = energy1_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   T1          = T1_mf.Patch(lev, mfi);
-        //Set::Patch<const Set::Scalar>   cp1         = cp1_mf.Patch(lev, mfi);
-        //Set::Patch<const Set::Scalar>   cv1         = cv1_mf.Patch(lev, mfi);
         //Set::Patch<const Set::Scalar>   k1_thermal  = k1_thermal_mf.Patch(lev, mfi);
         //Set::Patch<const Set::Scalar>   h1_thermal  = h1_thermal_mf.Patch(lev, mfi);
 

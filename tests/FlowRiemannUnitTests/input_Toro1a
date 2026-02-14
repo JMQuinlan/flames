@@ -167,6 +167,6 @@ p_refinement_criterion     = 100000.0
 static_eta = 1
 Spec_Vol = 1
 
-solver.type = hllc
+Riemann_Solver.type = hllc
 integration.type=RungeKutta
 integration.rk.type=4

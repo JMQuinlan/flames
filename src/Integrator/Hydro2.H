@@ -74,6 +74,9 @@ public:
         // delete limiter_minmod;
         // delete limiter_vanleer;
 
+        delete riemannsolver;
+
+
         
     }
 
@@ -274,7 +277,6 @@ protected:
     int apply_vaporization = 0;
     int Spec_Vol = 1;
 
-    int Riemann_Solver = 0;
     int kappa_method = 2;
 
     // Adaptive Timestep
