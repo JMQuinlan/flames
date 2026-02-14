@@ -176,7 +176,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.m0_mf,           &value.bc_nothing,  1, nghost, "m0", false, false);
         value.RegisterNewFab(value.u0_mf,           &value.bc_nothing, 2, nghost, "u0", false, false, { "x", "y" });
         value.RegisterNewFab(value.q_mf,            &value.bc_nothing, 2, nghost, "q0", false, false, { "x", "y" });
-        value.RegisterNewFab(value.Source_mf,       &value.bc_nothing,  4, nghost, "Source", true, false);
+        value.RegisterNewFab(value.Source_mf,       &value.bc_nothing,  4, nghost, "Source", true, false, { "_rho", "_Mx", "_My","_E" });
         value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, nghost, "Fsv", true, false, { "x", "y" });  // Surface Tension
         value.RegisterNewFab(value.Fw_mf,           &value.bc_nothing,  2, nghost, "Fw", true, false, { "x", "y" });   // Weight
         value.RegisterNewFab(value.Ldot_mf,         &value.bc_nothing,  2, nghost, "Ldot", true, false, { "x", "y" });  // Ldot
@@ -243,8 +243,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     // SOLVERS
     // Riemann solver
     std::string solver_name;
-    pp.query("Riemann_Solver", solver_name);
-    Util::Message(INFO, "Input file has Riemann_Solver = ", value.solver_name);
+    pp.query("Riemann_Solver.type", solver_name);
+    Util::Message(INFO, "Input file has Riemann_Solver.type = ", solver_name);
     pp.select_default<Solver::Local::FluidRiemann::Roe,
                       Solver::Local::FluidRiemann::HLLE,
                       Solver::Local::FluidRiemann::HLLC,
@@ -892,10 +892,8 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "lev=", lev);
                 Util::ParallelMessage(INFO, "i=", i, "j=", j);
                 Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
-
                 Util::ParallelMessage(INFO, "Ldot=", Ldot(0), ", ", Ldot(1));
                 Util::ParallelMessage(INFO, "div_tau=", div_tau(0), ", ", div_tau(1));
-
                 Util::Abort(INFO);
             }
 
@@ -921,6 +919,20 @@ Hydro2::RHS(int lev,
             Fsv(i, j, k, 0) = Fsv_vector(0);
             Fsv(i, j, k, 1) = Fsv_vector(1);
 
+            // DEBUG Tool
+            if ((Fsv_vector(0) != Fsv_vector(0))
+                or (Fsv_vector(1) != Fsv_vector(1)))
+            {
+                Util::ParallelMessage(INFO, "------------------------------------------------------------");
+                Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Surface Tension solving:");
+                Util::ParallelMessage(INFO, "lev=", lev);
+                Util::ParallelMessage(INFO, "i=", i, "j=", j);
+                Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
+                Util::ParallelMessage(INFO, "Fsv_vector=", Fsv_vector(0), ", ", Fsv_vector(1));
+                Util::Abort(INFO);
+            }
+            
+
             // ------------------------------------------------------------
             // Weight
             // ------------------------------------------------------------
@@ -933,6 +945,19 @@ Hydro2::RHS(int lev,
             }
             Fw(i, j, k, 0) = Fw_vector(0);
             Fw(i, j, k, 1) = Fw_vector(1);
+
+            // DEBUG Tool
+            if ((Fw_vector(0) != Fw_vector(0))
+                or (Fw_vector(1) != Fw_vector(1)))
+            {
+                Util::ParallelMessage(INFO, "------------------------------------------------------------");
+                Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Weight solving:");
+                Util::ParallelMessage(INFO, "lev=", lev);
+                Util::ParallelMessage(INFO, "i=", i, "j=", j);
+                Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
+                Util::ParallelMessage(INFO, "Fw_vector=", Fw_vector(0), ", ", Fw_vector(1));
+                Util::Abort(INFO);
+            }
 
             // ------------------------------------------------------------
             // Cahn-Hillard
@@ -1010,6 +1035,22 @@ Hydro2::RHS(int lev,
             // Total:
             Set::Vector Total_Force = Set::Vector(Fsv_vector(0) + Fw_vector(0),
                                                   Fsv_vector(1) + Fw_vector(1));
+            // DEBUG Tool
+            if ((Total_Force(0) != Total_Force(0))
+                or (Total_Force(1) != Total_Force(1)))
+            {
+                Util::ParallelMessage(INFO, "------------------------------------------------------------");
+                Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Total Force:");
+                Util::ParallelMessage(INFO, "lev=", lev);
+                Util::ParallelMessage(INFO, "i=", i, "j=", j);
+                Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
+                Util::ParallelMessage(INFO, "Total_Force=", Total_Force(0), ", ", Total_Force(1));
+                Util::Abort(INFO);
+            }
+
+            Util::ParallelMessage(INFO, "Calculated Force=", Total_Force(0), ", ", Total_Force(1)); // DEBUG MESSAGE
+
+
 
             Source(i, j, k, 0) = mdot0;
             Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0);
@@ -1019,6 +1060,23 @@ Hydro2::RHS(int lev,
             // Lagrange terms to enforce no-penetration
             Source(i, j, k, 1) = Source(i, j, k, 1) - lagrange * u.dot(grad_eta) * grad_eta(0);
             Source(i, j, k, 2) = Source(i, j, k, 2) - lagrange * u.dot(grad_eta) * grad_eta(1);
+
+            // DEBUG Tool
+            if ((Source(i, j, k, 0) != Source(i, j, k, 0))
+                or (Source(i, j, k, 1) != Source(i, j, k, 1))
+                or (Source(i, j, k, 2) != Source(i, j, k, 2))
+                or (Source(i, j, k, 3) != Source(i, j, k, 3)) )
+            {
+                Util::ParallelMessage(INFO, "------------------------------------------------------------");
+                Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Total Source:");
+                Util::ParallelMessage(INFO, "lev=", lev);
+                Util::ParallelMessage(INFO, "i=", i, "j=", j);
+                Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
+                Util::ParallelMessage(INFO, "Source_rho=", Source(i, j, k, 0) );
+                Util::ParallelMessage(INFO, "Source_M=", Source(i, j, k, 1), ", ", Source(i, j, k, 2));
+                Util::ParallelMessage(INFO, "Source_E=", Source(i, j, k, 3) );
+                Util::Abort(INFO);
+            }
 
             // Riemann solver for mixed fluid
             const int X = 0, Y = 1;
