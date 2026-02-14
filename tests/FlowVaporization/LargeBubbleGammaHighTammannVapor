@@ -6,7 +6,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/BubbleEvap
+plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowTwoPhase/VapoTest
 #plot_file = tests/BubbleEvap
 
 ### MESHING ###
