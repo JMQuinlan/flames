@@ -415,6 +415,8 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar>         Bm          = Bm_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         Y           = Y_mf.Patch(lev, mfi);
 
+        //Set::Patch<Set::Scalar>         Source           = Source_mf.Patch(lev, mfi);
+
         // EXTRAS & DEBUGGING
         Set::Patch<Set::Scalar>         a           = a_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         Ma          = Ma_mf.Patch(lev, mfi);
@@ -499,6 +501,19 @@ void Hydro2::Mix(int lev)
             Ma(i, j, k, 0) = v(i, j, k, 0) / a(i, j, k);
             Ma(i, j, k, 1) = v(i, j, k, 1) / a(i, j, k);
 
+
+            // Source
+            /*
+            Source(i, j, k, 0) = 0.0;
+            Source(i, j, k, 1) = 0.0;
+            Source(i, j, k, 2) = 0.0;
+            Source(i, j, k, 3) = 0.0;
+
+            Util::ParallelMessage(INFO, "Source_0=", Source(i,j,k,0));
+            Util::ParallelMessage(INFO, "Source_1=", Source(i,j,k,1));
+            Util::ParallelMessage(INFO, "Source_2=", Source(i,j,k,2));
+            Util::ParallelMessage(INFO, "Source_3=", Source(i,j,k,3));
+            */
         });
     }
     c_max = 0.0;
@@ -567,6 +582,9 @@ Hydro2::RHS(int lev,
 {
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
+
+    Util::ParallelMessage(INFO, "Called RHS()");
+
 
     // Primitive Fields
     //for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
@@ -1275,6 +1293,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     std::swap(energy_per_vol_old_mf[lev], energy_per_vol_mf[lev]);
     std::swap(energy_per_mas_old_mf[lev], energy_per_mas_mf[lev]);
     std::swap(eta_old_mf, eta_mf);
+
+    Util::ParallelMessage(INFO, "Called Advance()");
+
 
     // ------------------------------------------------------------
     // Time Integration
