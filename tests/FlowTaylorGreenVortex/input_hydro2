@@ -78,16 +78,6 @@ temperature0.ic.expression.region0 = "294.0"
 temperature1.ic.type = expression
 temperature1.ic.expression.region0 = "294.0"
 
-cp0.ic.type = expression
-cp0.ic.expression.region0 = "1.4"
-cp1.ic.type = expression
-cp1.ic.expression.region0 = "1.4"
-
-cv0.ic.type = expression
-cv0.ic.expression.region0 = "1.0"
-cv1.ic.type = expression
-cv1.ic.expression.region0 = "1.0"
-
 k0_thermal.ic.type = expression
 k0_thermal.ic.expression.region0 = "0.6"
 k1_thermal.ic.type = expression

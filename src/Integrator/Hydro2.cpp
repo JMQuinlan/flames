@@ -180,7 +180,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, nghost, "Fsv", true, false, { "x", "y" });  // Surface Tension
         value.RegisterNewFab(value.Fw_mf,           &value.bc_nothing,  2, nghost, "Fw", true, false, { "x", "y" });   // Weight
         value.RegisterNewFab(value.Ldot_mf,         &value.bc_nothing,  2, nghost, "Ldot", true, false, { "x", "y" });  // Ldot
-        value.RegisterNewFab(value.T_mf,            &value.bc_nothing,  1, nghost, "T", true, false);                  // Temperature
+        value.RegisterNewFab(value.T_mf,            value.energy_bc,  1, nghost, "T", true, false);                  // Temperature
+        value.RegisterNewFab(value.cp_mf,           &value.bc_nothing,  1, nghost, "cp", false, true);         // Constant Pressure Specific Heat
+        value.RegisterNewFab(value.cv_mf,           &value.bc_nothing,  1, nghost, "cv", false, true);         // Constant Volume Specific Heat
         //value.RegisterNewFab(value.k_thermal_mf,    &value.bc_nothing,  1, nghost, "k_thermal", false, true);         // Thermal Conductivity
         //value.RegisterNewFab(value.h_thermal_mf,    &value.bc_nothing,  1, nghost, "h_thermal", false, true);         // Thermal Convectivity
         value.RegisterNewFab(value.gamma_mf,        value.energy_bc, 1, nghost, "gamma", true, false);                 // Specific Heat Ratio
@@ -304,8 +306,6 @@ void Hydro2::Initialize(int lev)
     density0_ic     ->Initialize(lev, density0_mf, 0.0);
     density0_ic     ->Initialize(lev, density0_old_mf, 0.0);
     temperature0_ic ->Initialize(lev, T0_mf, 0.0);
-    //cp0_ic          ->Initialize(lev, cp0_mf, 0.0);
-    //cv0_ic          ->Initialize(lev, cv0_mf, 0.0);
     //k0_thermal_ic   ->Initialize(lev, k0_thermal_mf, 0.0);
     //h0_thermal_ic   ->Initialize(lev, h0_thermal_mf, 0.0);
 
@@ -315,8 +315,6 @@ void Hydro2::Initialize(int lev)
     density1_ic     ->Initialize(lev, density1_mf, 0.0);
     density1_ic     ->Initialize(lev, density1_old_mf, 0.0);
     temperature1_ic ->Initialize(lev, T1_mf, 0.0);
-    //cp1_ic          ->Initialize(lev, cp1_mf, 0.0);
-    //cv1_ic          ->Initialize(lev, cv1_mf, 0.0);
     //k1_thermal_ic   ->Initialize(lev, k1_thermal_mf, 0.0);
     //h1_thermal_ic   ->Initialize(lev, h1_thermal_mf, 0.0);
 
@@ -405,8 +403,8 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar>         E_vol_old   = energy_per_vol_old_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         E_mas_old   = energy_per_mas_old_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         T           = T_mf.Patch(lev, mfi);
-        //Set::Patch<Set::Scalar>         cp          = cp_mf.Patch(lev, mfi);
-        //Set::Patch<Set::Scalar>         cv          = cv_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar>         cp          = cp_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar>         cv          = cv_mf.Patch(lev, mfi);
         //Set::Patch<Set::Scalar>         k_thermal   = k_thermal_mf.Patch(lev, mfi);
         //Set::Patch<Set::Scalar>         h_thermal   = h_thermal_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         gammaf      = gamma_mf.Patch(lev, mfi);
@@ -481,10 +479,16 @@ void Hydro2::Mix(int lev)
             // Spalding Number
             Bm(i, j, k) = (Y(i, j, k) - Y_infinity) / (1 + Y_infinity + small);
             
+            // Constant Pressure Specific Heat
+            cp(i, j, k) = eta(i, j, k) * cp0 + (1.0 - eta(i, j, k)) * cp1;
+
+            // Constant Volume Specific Heat
+            cv(i, j, k) = eta(i, j, k) * cv0 + (1.0 - eta(i, j, k)) * cv1;
+
             // Temperature
-            //T(i, j, k) = T0(i, j, k) * eta(i, j, k) + T1(i, j, k) * (1.0 - eta(i, j, k));
-            Set::Scalar cv = eta(i, j, k) * cv0 + (1.0 - eta(i, j, k)) * cv1;
-            T(i, j, k) = UE_vol(i, j, k) / (rho(i, j, k) * cv + small);
+            // T(i, j, k) = T0(i, j, k) * eta(i, j, k) + T1(i, j, k) * (1.0 - eta(i, j, k));
+            T(i, j, k) = UE_vol(i, j, k) / (rho(i, j, k) * cv(i, j, k) + small); // Volume Specific
+            // T(i, j, k) = UE_vol(i, j, k) / (cv(i, j, k) + small); // Mass Specific
 
             // Thermal Conductivity
             //k_thermal(i, j, k) = eta(i, j, k) * k0_thermal(i, j, k) + (1.0 - eta(i, j, k)) * k1_thermal(i, j, k);
@@ -592,6 +596,8 @@ Hydro2::RHS(int lev,
         // SOURCE - ish
         Set::Patch<Set::Scalar> KE = KE_per_vol_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> UE = UE_per_vol_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> T = T_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
@@ -630,11 +636,16 @@ Hydro2::RHS(int lev,
             press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref;                // Per Vol
             press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE(i, j, k) * rho(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // Per Mass
 
+            // Constant Pressure Specific Heat
+            cp(i, j, k) = eta(i, j, k) * cp0 + (1.0 - eta(i, j, k)) * cp1;
+
+            // Constant Volume Specific Heat
+            cv(i, j, k) = eta(i, j, k) * cv0 + (1.0 - eta(i, j, k)) * cv1;
+
             // Temperature
-            Set::Scalar cp = eta(i, j, k) * cp0 + (1.0 - eta(i, j, k)) * cp1;
-            Set::Scalar cv = eta(i, j, k) * cv0 + (1.0 - eta(i, j, k)) * cv1;
-            T(i, j, k) = UE(i, j, k) / (rho(i, j, k) * cv + small); // For specific volume
-            //T(i, j, k) = UE(i, j, k) / (cv + small); // For specific mass
+            // T(i, j, k) = T0(i, j, k) * eta(i, j, k) + T1(i, j, k) * (1.0 - eta(i, j, k));
+            T(i, j, k) = UE(i, j, k) / (rho(i, j, k) * cv(i, j, k) + small); // Volume Specific
+            // T(i, j, k) = UE(i, j, k) / (cv(i, j, k) + small); // Mass Specific
 
             // Speed of sound:
             a(i, j, k) = sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k)));
@@ -759,6 +770,8 @@ Hydro2::RHS(int lev,
         Set::Patch<const Set::Scalar> press = pressure_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> a = a_mf.Patch(lev, mfi);
 
+        Set::Patch<const Set::Scalar> cp = cp_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> cv = cv_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> T = T_mf.Patch(lev, mfi);
 
         Set::Patch<const Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
@@ -1047,10 +1060,6 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "Total_Force=", Total_Force(0), ", ", Total_Force(1));
                 Util::Abort(INFO);
             }
-
-            Util::ParallelMessage(INFO, "Calculated Force=", Total_Force(0), ", ", Total_Force(1)); // DEBUG MESSAGE
-
-
 
             Source(i, j, k, 0) = mdot0;
             Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0);
