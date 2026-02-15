@@ -186,7 +186,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //value.RegisterNewFab(value.h_thermal_mf,    &value.bc_nothing,  1, nghost, "h_thermal", false, true);         // Thermal Convectivity
         value.RegisterNewFab(value.gamma_mf,        value.energy_bc, 1, nghost, "gamma", true, false);                 // Specific Heat Ratio
         value.RegisterNewFab(value.p0_mf,           value.energy_bc, 1, nghost, "p0", true, true);                    // Tamman Pressure
-        value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc, 1, nghost, "mu_chem", false, true);               // Tammann Pressure
+        value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc, 1, nghost, "mu_chem", true, false);               // Chemical Potential
         value.RegisterNewFab(value.a_mf,            &value.bc_nothing,  1, nghost, "a", true, false);                    // Speed of sound
         value.RegisterNewFab(value.Ma_mf,           &value.bc_nothing,  2, nghost, "Ma", true, false, { "x", "y" });   // Mach
         value.RegisterNewFab(value.UE_per_vol_mf,   &value.bc_nothing,  1, nghost, "UE_per_vol", true, false);         // Internal Energy (per unit volume)
@@ -571,9 +571,6 @@ Hydro2::RHS(int lev,
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
 
-    Util::ParallelMessage(INFO, "Called RHS()");
-
-
     // Primitive Fields
     //for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
     for (amrex::MFIter mfi(*(velocity_mf)[lev], true); mfi.isValid(); ++mfi)
@@ -926,8 +923,10 @@ Hydro2::RHS(int lev,
                     Set::Scalar kappa = kappas(i, j, k, 0);
                     Set::Scalar sigma_eff = sigma;
                     Set::Scalar alpha = 6 * sqrt(2);
-                    Set::Scalar UFFDA = epsilon * alpha * grad_eta_mag * grad_eta_mag;
-                    Fsv_vector(0) = sigma_eff * kappa * n_hat(0) * UFFDA; // / (grad_eta_mag + small)); // / (DX[0] + small);
+                    Set::Scalar UFFDA = epsilon * alpha * grad_eta_mag * grad_eta_mag;                // What I oringially had, did not reach max amplitude
+                    //Set::Scalar UFFDA = grad_eta_mag * grad_eta_mag / (epsilon * sqrt(2.0));          // Forces an interface thickness
+                    //Set::Scalar UFFDA = grad_eta_mag * grad_eta_mag;                                  // More natural
+                    Fsv_vector(0) = sigma_eff * kappa * n_hat(0) * UFFDA;    // / (grad_eta_mag + small)); // / (DX[0] + small);
                     Fsv_vector(1) = sigma_eff * kappa * n_hat(1) * UFFDA; // / (grad_eta_mag + small)); // / (DX[1] + small);
                 }
             }
@@ -975,19 +974,49 @@ Hydro2::RHS(int lev,
             }
 
             // ------------------------------------------------------------
-            // Cahn-Hillard
+            // Conservative Allen-Cahn
             // ------------------------------------------------------------
             // d(eta)/dt = -u·grad(eta) + Mob * laplacian(mu)
             // Laplacian of Chemical Potential (conservative form)
+            /*
             Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
+            Set::Scalar phi = eta(i, j, k); // Dummy Variable bc it gets UGGGLLLYYYYY
             Set::Scalar kappa = kappas(i, j, k, 0);
             Set::Scalar Mob = a(i, j, k) * 0.7 * DX[0]; // Mob = u_max * epsilon,  (epsilon = 0.7*DX) Chiu & Lin (2011)
-
             Set::Scalar advection = -u.dot(grad_eta);
             //Set::Scalar diffusion = Mob * lap_mu_chem; // Allen-Cahn Alternative - it has to be curve fit
-            Set::Scalar phi = eta(i, j, k); // Dummy Variable bc it gets UGGGLLLYYYYY
             Set::Scalar diffusion = Mob * ( lap_eta - ((phi * (1.0-phi) * (1.0-2.0*phi)) / (epsilon*epsilon + small)) - (grad_eta_mag * kappa) ); // Chiu & Lin (2011) URL: https://www.sciencedirect.com/science/article/pii/S0021999110005243
-            Set::Scalar eta_dot_CH = advection + diffusion;
+            Set::Scalar eta_dot = advection + diffusion;
+            */
+
+            // ------------------------------------------------------------
+            // Cahn–Hilliard
+            // ------------------------------------------------------------
+            // d(eta)/dt = -u·grad(eta) + div( M*grad(mu) )
+            Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
+            //Set::Scalar Mob = a(i, j, k) * 0.7 * DX[0]; // Mob = u_max * epsilon
+            Set::Scalar Mob = 0.0;  // a(i, j, k) * epsilon * epsilon / DX[0]; // Mob = u_max * epsilon
+            Set::Scalar advection = -u.dot(grad_eta);
+            Set::Scalar diffusion = Mob * lap_mu_chem;
+            Set::Scalar eta_dot = advection + diffusion;
+
+            // DEBUG Tool
+            if ((eta_dot != eta_dot))
+            {
+                Util::ParallelMessage(INFO, "------------------------------------------------------------");
+                Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Boundry Evolution:");
+                Util::ParallelMessage(INFO, "lev=", lev);
+                Util::ParallelMessage(INFO, "i=", i, "j=", j);
+                Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
+                Util::ParallelMessage(INFO, "mu_chem_=", mu_chem_(i, j, k));
+                Util::ParallelMessage(INFO, "lap_mu_chem=", lap_mu_chem);
+                Util::ParallelMessage(INFO, "a=", a(i, j, k));
+                Util::ParallelMessage(INFO, "Mob=", Mob);
+                Util::ParallelMessage(INFO, "advection=", advection);
+                Util::ParallelMessage(INFO, "diffusion=", diffusion);
+                Util::ParallelMessage(INFO, "eta_dot=", eta_dot);
+                Util::Abort(INFO);
+            } 
 
             // ------------------------------------------------------------
             // Vaporization
@@ -996,6 +1025,8 @@ Hydro2::RHS(int lev,
             // NOTE: rho0 (OR eta = 1) SHOULD BE THE GAS PHASE
             Set::Scalar eta_dot_Vap = 0.0;
             Set::Scalar m_dot_Vap = 0.0;
+            Set::Vector M_dot_Vap = Set::Vector(0.0, 0.0);
+            Set::Scalar E_dot_Vap = 0.0;
             if (apply_vaporization == 1)
             {
                 //m_dot_Vap = (rho0(i, j, k) * Dv * (Bm(i, j, k) / (1.0 + Bm(i, j, k) + small)) * grad_eta_mag);
@@ -1034,15 +1065,17 @@ Hydro2::RHS(int lev,
                 // Scaling density choice: using rho_eta = rho_g makes RHS independent of mixture density
                 // This is consistent with the document recommendation
                 // Set::Scalar rho_eta = rho_g;
-                Set::Scalar rho_eta = rho(i, j, k);
+                Set::Scalar rho_eta = rho(i, j, k);//rho_g;
 
                 // Vaporization source for eta equation (Equation 7):
                 // source_vap = (1/epsilon) * (rho_g * D_v / rho_eta) * (B_M/(1+B_M)) * |grad(eta)|
                 Set::Scalar vap_coeff = (rho_g * Dv / rho_eta + small) * (B_M / (1.0 + B_M + small));
                 eta_dot_Vap = (1.0 / epsilon) * vap_coeff * grad_eta_mag;
 
-                // MASS FLUX
-                m_dot_Vap = rho_g * Dv * (B_M / (1.0 + B_M + small));
+                // FLUXES
+                m_dot_Vap = rho_g * Dv * (B_M / (1.0 + B_M + small));   // Mass Flux
+                M_dot_Vap = u * m_dot_Vap;                              // Momentum Flux
+                E_dot_Vap = u.dot(M_dot_Vap);                           // Energy Flux
             }
             
 
@@ -1063,10 +1096,10 @@ Hydro2::RHS(int lev,
                 Util::Abort(INFO);
             }
 
-            Source(i, j, k, 0) = mdot0;
-            Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0);
-            Source(i, j, k, 2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1);
-            Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force);
+            Source(i, j, k, 0) = mdot0;// + m_dot_Vap;
+            Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0);// + M_dot_Vap(0);
+            Source(i, j, k, 2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1);// + M_dot_Vap(1);
+            Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force);// + E_dot_Vap;
 
             // Lagrange terms to enforce no-penetration
             Source(i, j, k, 1) = Source(i, j, k, 1) - lagrange * u.dot(grad_eta) * grad_eta(0);
@@ -1174,6 +1207,15 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "lev=", lev);
                 Util::ParallelMessage(INFO, "i=", i, "j=", j);
                 Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
+
+                Util::ParallelMessage(INFO, "x_states[0]=", x_states[0]);
+                Util::ParallelMessage(INFO, "x_states[1]=", x_states[1]);
+                Util::ParallelMessage(INFO, "x_states[2]=", x_states[2]);
+
+                Util::ParallelMessage(INFO, "y_states[0]=", y_states[0]);
+                Util::ParallelMessage(INFO, "y_states[1]=", y_states[1]);
+                Util::ParallelMessage(INFO, "y_states[2]=", y_states[2]);
+
                 Util::Abort(INFO);
             }
 
@@ -1209,7 +1251,7 @@ Hydro2::RHS(int lev,
             }
             else
             {
-                eta_rhs(i, j, k) = eta_dot_CH + eta_dot_Vap;
+                eta_rhs(i, j, k) = eta_dot + eta_dot_Vap;
             }
 
             // ERROR CHECKING
@@ -1279,9 +1321,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 {
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
-
-    Util::ParallelMessage(INFO, "Called Advance()");
-
 
     // Swaping pointers
     std::swap(density_old_mf[lev], density_mf[lev]);

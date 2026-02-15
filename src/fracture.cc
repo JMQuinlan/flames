@@ -2,7 +2,6 @@
 // This initializes and runs the Alamo fracture solver implemented in the
 // :ref:`Integrator::Fracture` integrator.
 //
-
 #include <iostream>
 #include <fstream>
 #include <iomanip>

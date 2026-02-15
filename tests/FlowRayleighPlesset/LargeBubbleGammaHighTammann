@@ -6,12 +6,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/AirBubble_2Bar_in_Water_1Bar
-#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHigh_SmallEta_HLLETamman
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/RPE
-#plot_file = tests/LargeBubbleRPE_2_Bar.GammaHigh
-#plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
-
+plot_file = ./tests/RayleighPlesset/output_RayleighPlesset
 
 ### MESHING ###
 amr.plot_dt = 5e-5
@@ -93,17 +88,10 @@ temperature1.ic.type = expression
 temperature1.ic.expression.region0 = "293.15"  # 20 C
 
 # Thermodynamic properties
-cp0.ic.type = expression
-cp0.ic.expression.region0 = "4179.0"  # Water specific heat [J/kg-K]
-
-cp1.ic.type = expression
-cp1.ic.expression.region0 = "1005.0"  # Air specific heat [J/kg-K]
-
-cv0.ic.type = expression
-cv0.ic.expression.region0 = "4179.0/7.15"  # Water cv = cp/gamma
-
-cv1.ic.type = expression
-cv1.ic.expression.region0 = "717.86"  # Air cv = cp/gamma
+cp0 = "4179.0"  # Water specific heat [J/kg-K]
+cp1 = "1005.0"  # Air specific heat [J/kg-K]
+cv0 = "4179.0/7.15"  # Water cv = cp/gamma
+cv1 = "717.86"  # Air cv = cp/gamma
 
 # Thermal conductivities
 k0_thermal.ic.type = expression
@@ -163,8 +151,5 @@ Spec_Vol = 1
 grav = 9.81
 
 ### DEBUGGING ### 
-# Used for testing of the model
-Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+Riemann_Solver.type = hllc
 kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
-scheme = 0		   # Valid Entries: 0:"Forward Euler" / 1:"SSPRK3" / 2:"RK4"
-Limiter = 0        # Valid Entries: 0:"None" / 1:"MinMod" / 2:"Van Leer"
