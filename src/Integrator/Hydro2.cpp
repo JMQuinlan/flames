@@ -31,7 +31,6 @@
 #include "AMReX_TimeIntegrator.H"
 
 
-
 //#if AMREX_SPACEDIM == 2
 
 namespace Integrator
@@ -304,8 +303,6 @@ void Hydro2::Initialize(int lev)
     density0_ic     ->Initialize(lev, density0_mf, 0.0);
     density0_ic     ->Initialize(lev, density0_old_mf, 0.0);
     temperature0_ic ->Initialize(lev, T0_mf, 0.0);
-    //cp0_ic          ->Initialize(lev, cp0_mf, 0.0);
-    //cv0_ic          ->Initialize(lev, cv0_mf, 0.0);
     //k0_thermal_ic   ->Initialize(lev, k0_thermal_mf, 0.0);
     //h0_thermal_ic   ->Initialize(lev, h0_thermal_mf, 0.0);
 
@@ -315,8 +312,6 @@ void Hydro2::Initialize(int lev)
     density1_ic     ->Initialize(lev, density1_mf, 0.0);
     density1_ic     ->Initialize(lev, density1_old_mf, 0.0);
     temperature1_ic ->Initialize(lev, T1_mf, 0.0);
-    //cp1_ic          ->Initialize(lev, cp1_mf, 0.0);
-    //cv1_ic          ->Initialize(lev, cv1_mf, 0.0);
     //k1_thermal_ic   ->Initialize(lev, k1_thermal_mf, 0.0);
     //h1_thermal_ic   ->Initialize(lev, h1_thermal_mf, 0.0);
 
@@ -567,6 +562,9 @@ Hydro2::RHS(int lev,
 {
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
+
+    Util::ParallelMessage(INFO, "Called RHS()");
+
 
     // Primitive Fields
     //for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
@@ -1269,6 +1267,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
 
+    Util::ParallelMessage(INFO, "Called Advance()");
+
+
     // Swaping pointers
     std::swap(density_old_mf[lev], density_mf[lev]);
     std::swap(momentum_old_mf[lev], momentum_mf[lev]);
@@ -1360,10 +1361,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> Source = Source_mf.Patch(lev, mfi);
 
 
-        Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
+        //Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
+        //Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
+        //Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
+        //Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
 
