@@ -31,7 +31,6 @@
 #include "AMReX_TimeIntegrator.H"
 
 
-
 //#if AMREX_SPACEDIM == 2
 
 namespace Integrator
@@ -571,6 +570,9 @@ Hydro2::RHS(int lev,
 {
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
+
+    Util::ParallelMessage(INFO, "Called RHS()");
+
 
     // Primitive Fields
     //for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
@@ -1278,6 +1280,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
 
+    Util::ParallelMessage(INFO, "Called Advance()");
+
+
     // Swaping pointers
     std::swap(density_old_mf[lev], density_mf[lev]);
     std::swap(momentum_old_mf[lev], momentum_mf[lev]);
@@ -1369,10 +1374,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> Source = Source_mf.Patch(lev, mfi);
 
 
-        Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
+        //Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
+        //Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
+        //Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
+        //Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
 
