@@ -132,7 +132,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.momentum0_mf,    value.momentum_bc,  2, nghost, "momentum0", false, false, { "x", "y" });
         value.RegisterNewFab(value.momentum0_old_mf,value.momentum_bc,  2, nghost, "momentum0_old", false, false);
  
-        value.RegisterNewFab(value.T0_mf,           value.temperature_bc, 1, nghost, "T0", false, false);
+        //value.RegisterNewFab(value.T0_mf,           value.temperature_bc, 1, nghost, "T0", false, false);
         //value.RegisterNewFab(value.k0_thermal_mf,   &value.bc_nothing, 1, nghost, "k0_thermal", false, false);
         //value.RegisterNewFab(value.h0_thermal_mf,   &value.bc_nothing, 1, nghost, "h0_thermal", false, false);
 
@@ -150,7 +150,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.momentum1_mf,    value.momentum_bc,  2, nghost, "momentum1", false, false, { "x", "y" });
         value.RegisterNewFab(value.momentum1_old_mf,value.momentum_bc,  2, nghost, "momentum1_old", false, false);
 
-        value.RegisterNewFab(value.T1_mf,           value.temperature_bc, 1, nghost, "T1", false, false);
+        //value.RegisterNewFab(value.T1_mf,           value.temperature_bc, 1, nghost, "T1", false, false);
         //value.RegisterNewFab(value.k1_thermal_mf,   &value.bc_nothing, 1, nghost, "k1_thermal", false, false);
         //value.RegisterNewFab(value.h1_thermal_mf,   &value.bc_nothing, 1, nghost, "h1_thermal", false, false);
 
@@ -219,7 +219,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<IC::Constant,IC::Expression>("velocity0.ic",      value.velocity0_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("pressure0.ic",      value.pressure0_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("density0.ic",       value.density0_ic,  value.geom);
-    pp.select_default<IC::Constant, IC::Expression>("temperature0.ic",  value.temperature0_ic, value.geom);
+    //pp.select_default<IC::Constant, IC::Expression>("temperature0.ic",  value.temperature0_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("k0_thermal.ic",    value.k0_thermal_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("h1_thermal.ic",    value.h0_thermal_ic, value.geom);
 
@@ -228,7 +228,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<IC::Constant,IC::Expression>("velocity1.ic",      value.velocity1_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("pressure1.ic",      value.pressure1_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("density1.ic",       value.density1_ic,  value.geom);
-    pp.select_default<IC::Constant, IC::Expression>("temperature1.ic",  value.temperature1_ic, value.geom);
+    //pp.select_default<IC::Constant, IC::Expression>("temperature1.ic",  value.temperature1_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("k1_thermal.ic",    value.k1_thermal_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("h1_thermal.ic",    value.h1_thermal_ic, value.geom);
 
@@ -304,7 +304,7 @@ void Hydro2::Initialize(int lev)
     pressure0_ic    ->Initialize(lev, pressure0_mf, 0.0);
     density0_ic     ->Initialize(lev, density0_mf, 0.0);
     density0_ic     ->Initialize(lev, density0_old_mf, 0.0);
-    temperature0_ic ->Initialize(lev, T0_mf, 0.0);
+    //temperature0_ic ->Initialize(lev, T0_mf, 0.0);
     //k0_thermal_ic   ->Initialize(lev, k0_thermal_mf, 0.0);
     //h0_thermal_ic   ->Initialize(lev, h0_thermal_mf, 0.0);
 
@@ -313,7 +313,7 @@ void Hydro2::Initialize(int lev)
     pressure1_ic    ->Initialize(lev, pressure1_mf, 0.0);
     density1_ic     ->Initialize(lev, density1_mf, 0.0);
     density1_ic     ->Initialize(lev, density1_old_mf, 0.0);
-    temperature1_ic ->Initialize(lev, T1_mf, 0.0);
+    //temperature1_ic ->Initialize(lev, T1_mf, 0.0);
     //k1_thermal_ic   ->Initialize(lev, k1_thermal_mf, 0.0);
     //h1_thermal_ic   ->Initialize(lev, h1_thermal_mf, 0.0);
 
@@ -373,7 +373,7 @@ void Hydro2::Mix(int lev)
         Set::Patch<const Set::Scalar>   M0_old      = momentum0_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   E0          = energy0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   E0_old      = energy0_old_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar>   T0          = T0_mf.Patch(lev, mfi);
+        //Set::Patch<const Set::Scalar>   T0          = T0_mf.Patch(lev, mfi);
         //Set::Patch<const Set::Scalar>   k0_thermal  = k0_thermal_mf.Patch(lev, mfi);
         //Set::Patch<const Set::Scalar>   h0_thermal  = h0_thermal_mf.Patch(lev, mfi);
 
@@ -386,7 +386,7 @@ void Hydro2::Mix(int lev)
         Set::Patch<const Set::Scalar>   M1_old      = momentum1_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   E1          = energy1_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   E1_old      = energy1_old_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar>   T1          = T1_mf.Patch(lev, mfi);
+        //Set::Patch<const Set::Scalar>   T1          = T1_mf.Patch(lev, mfi);
         //Set::Patch<const Set::Scalar>   k1_thermal  = k1_thermal_mf.Patch(lev, mfi);
         //Set::Patch<const Set::Scalar>   h1_thermal  = h1_thermal_mf.Patch(lev, mfi);
 

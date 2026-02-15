@@ -56,14 +56,14 @@ public:
         delete density0_ic;
         delete velocity0_ic;
         delete pressure0_ic;
-        delete temperature0_ic; // Temperature
+        //delete temperature0_ic; // Temperature
         //delete k0_thermal_ic;   // Thermal Conductivity
         //delete h0_thermal_ic;   // Thermal Convectivity
         // FLUID 1
         delete density1_ic;
         delete velocity1_ic;
         delete pressure1_ic;
-        delete temperature1_ic; // Temperature
+        //delete temperature1_ic; // Temperature
        // delete k1_thermal_ic;   // Thermal Conductivity
         //delete h1_thermal_ic;   // Thermal Convectivity
         // SOURCES
@@ -113,7 +113,7 @@ protected:
     Set::Field<Set::Scalar> momentum0_mf;
     Set::Field<Set::Scalar> momentum0_old_mf;
 
-    Set::Field<Set::Scalar> T0_mf;
+    //Set::Field<Set::Scalar> T0_mf;
     //Set::Field<Set::Scalar> k0_thermal_mf;
     //Set::Field<Set::Scalar> h0_thermal_mf;
     //Set::Field<Set::Scalar> gamma0_mf;
@@ -132,7 +132,7 @@ protected:
     Set::Field<Set::Scalar> momentum1_mf;
     Set::Field<Set::Scalar> momentum1_old_mf;
 
-    Set::Field<Set::Scalar> T1_mf;
+    //Set::Field<Set::Scalar> T1_mf;
     //Set::Field<Set::Scalar> k1_thermal_mf;
     //Set::Field<Set::Scalar> h1_thermal_mf;
     //Set::Field<Set::Scalar> gamma1_mf;
@@ -211,7 +211,7 @@ protected:
     IC::IC<Set::Scalar>* velocity0_ic = nullptr;
     IC::IC<Set::Scalar>* pressure0_ic = nullptr;
     IC::IC<Set::Scalar>* density0_ic  = nullptr;
-    IC::IC<Set::Scalar>* temperature0_ic  = nullptr;
+    //IC::IC<Set::Scalar>* temperature0_ic  = nullptr;
     //IC::IC<Set::Scalar>* k0_thermal_ic  = nullptr;
     //IC::IC<Set::Scalar>* h0_thermal_ic  = nullptr;
     //IC::IC<Set::Scalar>* gamma0_ic  = nullptr;
@@ -219,7 +219,7 @@ protected:
     IC::IC<Set::Scalar>* velocity1_ic = nullptr;
     IC::IC<Set::Scalar>* pressure1_ic = nullptr;
     IC::IC<Set::Scalar>* density1_ic = nullptr;
-    IC::IC<Set::Scalar>* temperature1_ic = nullptr;
+    //IC::IC<Set::Scalar>* temperature1_ic = nullptr;
     //IC::IC<Set::Scalar>* k1_thermal_ic  = nullptr;
     //IC::IC<Set::Scalar>* h1_thermal_ic  = nullptr;
     //IC::IC<Set::Scalar>* gamma1_ic  = nullptr;
