@@ -40,10 +40,10 @@ import os
 
 # Physical parameters (matching your input file)
 density0 = 1.0                   # Gas density [kg/m^3]
-density1 = 100.0                # Liquid density [kg/m^3]
+density1 = 10.0                # Liquid density [kg/m^3]
 D_v = 1.0e-4                     # Binary diffusion coefficient [m^2/s]
-Y_surface = 0.99                  # Mass fraction at liquid surface
-Y_infinity = 0.01                 # Mass fraction far from interface
+Y_surface = 1.00                 # Mass fraction at liquid surface
+Y_infinity = 0.00                 # Mass fraction far from interface
 
 # Domain properties
 x_min = 0.0                      # Domain start [m]

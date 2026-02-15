@@ -70,18 +70,18 @@ output_folder = './Stefan_Flow_1D_PostProcess_Transient'
 density0 = 1.0                   # Density of gas phase [kg/m^3]
 velocity0 = 0.0                  # Initial velocity of gas [m/s]
 mu0 = 1.0e-5                     # Dynamic viscosity of gas [Pa-s]
-pressure0 = 101325.0             # Pressure of gas [Pa]
+pressure0 = 10.0             # Pressure of gas [Pa]
 gamma0 = 1.4                     # Ratio of specific heats for gas
 
 # Fluid 1 properties (liquid phase, eta=0)
-density1 = 100.0                # Density of liquid [kg/m^3]
+density1 = 10.0                # Density of liquid [kg/m^3]
 velocity1 = 0.0                  # Initial velocity of liquid [m/s]
 mu1 = 1.0e-3                     # Dynamic viscosity of liquid [Pa-s]
-pressure1 = 101325.0             # Pressure of liquid [Pa]
+pressure1 = 10.0             # Pressure of liquid [Pa]
 gamma1 = 1.4                     # Ratio of specific heats for liquid
 
 # Mass transfer properties
-D_v = 2.0e-5                     # Binary diffusion coefficient [m^2/s]
+D_v = 2.0e-1                     # Binary diffusion coefficient [m^2/s]
 Y_surface = density0 / (density0 + density1)                # Mass fraction at liquid surface (interface)
 Y_infinity = 0.0 #density1 / (density0 + density1)                  # Mass fraction far from interface
 
