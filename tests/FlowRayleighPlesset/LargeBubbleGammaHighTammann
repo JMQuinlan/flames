@@ -6,7 +6,9 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/RayleighPlesset/output_RayleighPlesset
+#plot_file = ./tests/RayleighPlesset/output_RayleighPlesset
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/RayleighPlesset/output_RayleighPlesset
+
 
 ### MESHING ###
 amr.plot_dt = 5e-5
