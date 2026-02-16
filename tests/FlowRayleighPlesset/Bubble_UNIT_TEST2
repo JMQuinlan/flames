@@ -9,7 +9,7 @@ alamo.program = hydro2
 plot_file = ./tests/RayleighPlesset/output_RayleighPlesset_UNIT_TEST
 
 ### MESHING ###
-amr.plot_dt = 1e-4
+amr.plot_dt = 5e-4
 #amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
@@ -24,7 +24,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-0
 dynamictimestep.min = 1e-12
-cfl = 0.05
+cfl = 0.6
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.10 -0.10 0.0
@@ -35,9 +35,9 @@ stop_time = 50e-3
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.0002
+eta.ic.expression.constant.epsilon = 0.0005
 eta.ic.expression.constant.R0 = 0.02
-eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(2*sqrt(2)*epsilon)))"
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
 
 
@@ -134,6 +134,13 @@ momentum.bc.type.xlo = neumann neumann
 momentum.bc.type.ylo = neumann neumann
 momentum.bc.type.yhi = neumann neumann
 
+#momentum.bc.type.xhi = dirichlet dirichlet
+#momentum.bc.type.xlo = dirichlet dirichlet
+#momentum.bc.type.yhi = dirichlet dirichlet
+#momentum.bc.type.ylo = dirichlet dirichlet
+#momentum.bc.val.xhi = 0.0 0.0
+#momentum.bc.val.xlo = 0.0 0.0
+
 ### REFINEMENT CRITERIA ###
 eta_refinement_criterion = 1e-4
 omega_refinement_criterion = 10.55
@@ -155,5 +162,5 @@ Spec_Vol = 1
 grav = 0.0
 
 ### DEBUGGING ###
-Riemann_Solver.type = hllc
+Riemann_Solver.type = hllc_all_mach
 kappa_method = 1

@@ -36,45 +36,39 @@ def P_force(Amp, Freq, t):
         return Amp * np.sin(2 * np.pi * Freq * t)
 
 def rp_equation_2d_chen(t, y):
-    """
-    Chen's 2D Cylindrical RPE (Equation 3.7 from Chen 2010)
-    """
     R, R_dot = y
-    
-    # Safety checks
-    if R <= 1e-12:
+
+    if R <= 1e-12 or R >= 0.9 * r_inf:
         return [0, 0]
-    
-    if R >= 0.9 * r_inf:
-        return [0, 0]
-    
-    # Internal bubble pressure (2D polytropic gas law)
-    p_B = p_v + (p_B0 - p_v) * (R0 / R)**(2 * gamma)
-    
-    # External pressure with optional acoustic forcing
-    p_ext = p_inf + P_force(Amp, Freq, t)
-    
-    # Pressure difference normalized by rho_L
-    dP = (p_B - p_ext) / rho_L
-    
-    # Geometric logarithmic factor
+
     ln_factor = np.log(r_inf / R)
-    if ln_factor < 1e-6:
-        ln_factor = 1e-6
-    
-    # Viscous damping term
-    viscous = (2 * mu_L / (rho_L * R)) * R_dot
-    
-    # Surface tension term
-    surface = S / (rho_L * R)
-    
-    # Kinetic energy term
-    kinetic = 0.5 * R_dot**2
-    
-    # Chen's 2D cylindrical RPE acceleration
-    R_ddot = (dP - viscous + surface - kinetic) / (R * ln_factor)
-    
+
+    # Gas pressure (2D exponent)
+    p_B = p_v + (p_B0 - p_v) * (R0 / R)**(2 * gamma)
+
+    # External pressure
+    p_ext = p_inf + P_force(Amp, Freq, t)
+
+    # RHS pressure term
+    pressure_term = (
+        p_B
+        - p_ext
+        - 2 * mu_L * R_dot / R
+        - S / R
+    ) / rho_L
+
+    # Correct cylindrical inertia structure
+    numerator = (
+        pressure_term
+        - R_dot**2 * (0.5 - ln_factor)
+    )
+
+    denominator = R * ln_factor
+
+    R_ddot = numerator / denominator
+
     return [R_dot, R_ddot]
+
 
 # Solve the ODE
 print("Solving 2D Cylindrical RPE...")

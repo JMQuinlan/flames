@@ -198,7 +198,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // EXTRAS & DEBUGGING
         value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", false, false, { "x", "y" });
-        value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, nghost, "kappa", false, false, { "Avg", "1", "2" }); // To Surface curvature
+        value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, nghost, "kappa", true, false, { "Avg", "1", "2" }); // To Surface curvature
         value.RegisterNewFab(value.grad_mag_grad_eta_mf, &value.bc_nothing, 2, nghost, "grad_mag_grad_eta", false, false, { "x", "y" }); // grad( | grad(eta) | )
         value.RegisterNewFab(value.rho_flux_mf,     &value.bc_nothing,  1, nghost, "rho_flux", true, false);                    // Density Flux
         value.RegisterNewFab(value.M_flux_mf,       &value.bc_nothing,  2, nghost, "M_flux", true, false, { "x", "y" });        // Momentum Flux
@@ -633,7 +633,8 @@ Hydro2::RHS(int lev,
             // Pressure
             p0_eff(i, j, k) = (B / A) / gammaf(i, j, k);
             press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref;                // Per Vol
-            press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE(i, j, k) * rho(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // Per Mass
+            //press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE(i, j, k) * rho(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // Per Mass
+            //press(i, j, k) = std::max(small, press(i, j, k));
 
             // Constant Pressure Specific Heat
             cp(i, j, k) = eta(i, j, k) * cp0 + (1.0 - eta(i, j, k)) * cp1;
@@ -662,7 +663,7 @@ Hydro2::RHS(int lev,
 
             // Curvature
             Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
-            if (grad_eta_mag < 1e-4)
+            if (false)//(grad_eta_mag < 1e-4)
             {
                 n_hat(0) = 0.0;
                 n_hat(1) = 0.0;
@@ -880,7 +881,7 @@ Hydro2::RHS(int lev,
                                 dMpqrs += grad_lambda(q) - (2.0 / 3.0) * grad_mu(q);
                             }
 
-                            div_tau(p) += Mpqrs * hess_u(r, q, s);
+                            div_tau(p) += Mpqrs * hess_u(r, s, q);
                             Ldot(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
 
                             // Grad visc terms
@@ -918,14 +919,16 @@ Hydro2::RHS(int lev,
             if (apply_surface_tension)
             {
                 // Optimization, only calc surface tension if on interface
-                if (grad_eta_mag > 0.01)
+                if (grad_eta_mag > 0.0)
                 {
                     Set::Scalar kappa = kappas(i, j, k, 0);
                     Set::Scalar sigma_eff = sigma;
                     Set::Scalar alpha = 6 * sqrt(2);
-                    Set::Scalar UFFDA = epsilon * alpha * grad_eta_mag * grad_eta_mag;                // What I oringially had, did not reach max amplitude
+                    //Set::Scalar UFFDA = epsilon * alpha * grad_eta_mag * grad_eta_mag;                // What I oringially had, did not reach max amplitude
                     //Set::Scalar UFFDA = grad_eta_mag * grad_eta_mag / (epsilon * sqrt(2.0));          // Forces an interface thickness
                     //Set::Scalar UFFDA = grad_eta_mag * grad_eta_mag;                                  // More natural
+                    Set::Scalar UFFDA = epsilon * grad_eta_mag / 0.02;           // Working the best
+                    //Set::Scalar UFFDA = grad_eta_mag;           // More natural
                     Fsv_vector(0) = sigma_eff * kappa * n_hat(0) * UFFDA;    // / (grad_eta_mag + small)); // / (DX[0] + small);
                     Fsv_vector(1) = sigma_eff * kappa * n_hat(1) * UFFDA; // / (grad_eta_mag + small)); // / (DX[1] + small);
                 }
