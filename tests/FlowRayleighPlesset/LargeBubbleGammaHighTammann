@@ -6,8 +6,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = ./tests/RayleighPlesset/output_RayleighPlesset
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/RayleighPlesset/output_RayleighPlesset
+plot_file = ./tests/RayleighPlesset/output_RayleighPlesset
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/RayleighPlesset/output_RayleighPlesset
 
 
 ### MESHING ###
@@ -16,8 +16,8 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 250
 amr.grid_eff = 0.8
-amr.max_level = 7
-amr.n_cell = 32 32
+amr.max_level = 6
+amr.n_cell = 16 16
 
 ### TIME STEPING ###
 ## Static:
@@ -27,7 +27,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-5
 dynamictimestep.min = 1e-12
-cfl = 0.5e-1
+cfl = 0.05
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.10 -0.10 0.0 # [ m ]
@@ -133,7 +133,7 @@ momentum.bc.type.yhi = neumann neumann
 
 
 ### REFINEMENT CRITERIA ###
-eta_refinement_criterion = 0.000001
+eta_refinement_criterion = 0.0001
 omega_refinement_criterion = 10.55
 p_refinement_criterion = 1e+4
 rho_refinement_criterion = 1e+2
@@ -154,4 +154,4 @@ grav = 9.81
 
 ### DEBUGGING ### 
 Riemann_Solver.type = hllc
-kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
+kappa_method = 1   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
