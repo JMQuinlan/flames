@@ -271,7 +271,6 @@ protected:
 
     // Booleans
     int apply_surface_tension = 1;
-    int apply_buoyancy = 0;
     int apply_weight = 0;
     int static_eta = 0;
     int apply_vaporization = 0;

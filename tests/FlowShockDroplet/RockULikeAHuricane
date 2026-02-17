@@ -8,7 +8,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowShockDroplet/output_ShockDroplet
+#plot_file = ./tests/FlowShockDroplet/output_ShockDroplet
 plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_ShockDroplet
 
 ### MESHING ###
@@ -114,6 +114,9 @@ cv1 = "4179.0/7.15"  # Water cv = cp/gamma
 # Surface tension
 sigma = 72.8e-3  # Water-air surface tension [N/m]
 
+# Vapor Diffusivity
+Dv = "2.3e-5"	# Water-Vapor Diffusivity [m^2/s]
+
 # Reference pressure
 pref = 0.0
 
@@ -153,8 +156,9 @@ q.ic.constant.value = 0.0 0.0
 
 ### ADDITIONAL SOURCES ###
 apply_surface_tension = 1
-apply_buoyancy = 0
 apply_weight = 0
+apply_vaporization = 1
+
 Spec_Vol = 1
 grav = 9.81
 

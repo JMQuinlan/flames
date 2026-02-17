@@ -68,10 +68,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // OPTIONAL SOURCE TERMS
         pp_query_default("apply_surface_tension", value.apply_surface_tension, false); // Apply surface tension when solving, default: true --> "Apply Surface Tension"
-        pp_query_default("apply_buoyancy", value.apply_buoyancy, false);              // Apply buoyancy when solving, default: false --> "No Buoyancy"
         pp_query_default("apply_weight", value.apply_weight, false);                  // Apply weight when solving, default: false --> "No Weight"
+        pp_query_default("apply_vaporization", value.apply_vaporization, false);       // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
-        pp_query_default("apply_vaporization", value.apply_vaporization, false);      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
         // FLUID 0
         pp_query_required("gamma0", value.gamma0);      // gamma for gamma law
