@@ -91,7 +91,9 @@ SAVE_INDIVIDUAL_FRAMES = 1             # Save PNG for each timestep (for manual 
 # ============================================================================
 
 # File paths
-amrex_output_dir = r'../../../bin/tests/FlowShockDroplet/output_ShockDroplet'
+#amrex_output_dir = r'../../../bin/tests/FlowShockDroplet/output_ShockDroplet'
+amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_ShockDroplet'
+
 output_folder = './ShockDroplet_Analysis'
 
 # Physical parameters (matching input file)
@@ -127,7 +129,7 @@ ETA_CONTOURS = [0.1, 0.5, 0.9]        # Eta values for interface contours
 ETA_THRESHOLD = 0.5                    # Threshold for droplet boundary definition
 
 # Schlieren parameters
-SCHLIEREN_BETA = 10.0                  # Sensitivity parameter (1-10, higher = more contrast)
+SCHLIEREN_BETA = 1.0                   # Sensitivity parameter (1-10, higher = more contrast)
 SCHLIEREN_LOG_SCALE = 1                # Use log scaling for schlieren (0=linear, 1=log)
 SCHLIEREN_USE_MIXTURE = 1              # Use mixture density (1) or phase densities (0)
 
@@ -218,15 +220,15 @@ def compute_schlieren(rho, dx, dy, beta=5.0, log_scale=False):
         schlieren: 2D schlieren field
     """
     # Compute gradients
-    drho_dx = np.gradient(rho, dx, axis=1)
-    drho_dy = np.gradient(rho, dy, axis=0)
+    drho_dx = np.gradient(rho, dx, axis=0)
+    drho_dy = np.gradient(rho, dy, axis=1)
     
     # Magnitude of gradient
     grad_rho_mag = np.sqrt(drho_dx**2 + drho_dy**2)
     
     if log_scale:
         # Logarithmic schlieren
-        schlieren = np.log10(grad_rho_mag + 1e-16)
+        schlieren = np.log10(1 + 100*grad_rho_mag)
     else:
         # Exponential schlieren (traditional)
         grad_max = np.max(grad_rho_mag)
@@ -639,100 +641,206 @@ for i, idx in enumerate(analysis_indices):
 print("  Derived field computation complete")
 
 # ============================================================================
+# COMPUTE GLOBAL MIN/MAX FOR FIXED COLORBARS
+# ============================================================================
+
+print("\n" + "=" * 70)
+print("COMPUTING GLOBAL MIN/MAX FOR FIXED COLORBARS")
+print("=" * 70)
+
+# Schlieren range
+schlieren_min = min([np.min(s) for s in schlieren_fields])
+schlieren_max = max([np.max(s) for s in schlieren_fields])
+print(f"  Schlieren range: [{schlieren_min:.6e}, {schlieren_max:.6e}]")
+
+# Pressure range
+pressure_min = min([np.min(p) for p in pressure_fields])
+pressure_max = max([np.max(p) for p in pressure_fields])
+print(f"  Pressure range: [{pressure_min:.6e}, {pressure_max:.6e}] Pa")
+
+# Density range
+density_min = min([np.min(rho) for rho in density_fields])
+density_max = max([np.max(rho) for rho in density_fields])
+print(f"  Density range: [{density_min:.6e}, {density_max:.6e}] kg/m^3")
+
+# Velocity magnitude range
+v_mag_min = 0.0
+v_mag_max = max([np.max(np.sqrt(vx**2 + vy**2)) for vx, vy in velocity_fields])
+print(f"  Velocity range: [{v_mag_min:.6e}, {v_mag_max:.6e}] m/s")
+
+# Vorticity range
+vort_min = min([np.min(v) for v in vorticity_fields])
+vort_max = max([np.max(v) for v in vorticity_fields])
+vort_lim = max(abs(vort_min), abs(vort_max))
+print(f"  Vorticity range: [{-vort_lim:.6e}, {vort_lim:.6e}] 1/s")
+
+# ============================================================================
 # PLOTTING FUNCTIONS
 # ============================================================================
 
 def plot_schlieren_pressure_split_single(idx, save_name):
-    """Plot 1: Split view (schlieren top, pressure bottom) with eta contours - NO GAP"""
-    
     from matplotlib.gridspec import GridSpec
-    
-    # Create figure with GridSpec for precise control
+    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
     fig = plt.figure(figsize=FIGURE_SIZE_SINGLE)
-    gs = GridSpec(2, 1, figure=fig, height_ratios=[1, 1], hspace=0.0)  # ZERO gap
-    
-    ax1 = fig.add_subplot(gs[0])
-    ax2 = fig.add_subplot(gs[1], sharex=ax1)
-    
+
+    # Zero vertical spacing
+    gs = GridSpec(2, 1, height_ratios=[1, 1], hspace=0.0)
+
+    ax_top = fig.add_subplot(gs[0])
+    ax_bot = fig.add_subplot(gs[1], sharex=ax_top)
+
+    # -------------------------------------------------------
+    # Load data
+    # -------------------------------------------------------
     t = times[analysis_indices[idx]]
     schlieren = schlieren_fields[idx]
     pressure = pressure_fields[idx]
     eta = eta_fields[idx]
     x_grid = x_grids[idx]
     y_grid = y_grids[idx]
-    
-    # Get droplet centroid for centering
+
+    y_vals = y_grid[:, 0]
+    x_vals = x_grid[0, :]
+
+    # Exact y = 0 index
+    zero_idx = np.argmin(np.abs(y_vals))
+
+    # Clean split
+    schlieren_top = schlieren[zero_idx:, :]
+    pressure_bottom = pressure[:zero_idx + 1, :]
+    eta_top = eta[zero_idx:, :]
+    eta_bottom = eta[:zero_idx + 1, :]
+
+    y_top = y_vals[zero_idx:]
+    y_bottom = y_vals[:zero_idx + 1]
+
+    # Extents
+    extent_top = [x_vals.min(), x_vals.max(), y_top.min(), y_top.max()]
+    extent_bot = [x_vals.min(), x_vals.max(), y_bottom.min(), y_bottom.max()]
+
+    # -------------------------------------------------------
+    # ZOOM WINDOW
+    # -------------------------------------------------------
     centroid = deformation_data[idx]['centroid']
-    
-    # Calculate zoom window centered on droplet
     domain_width = X_MAX - X_MIN
     domain_height = Y_MAX - Y_MIN
     zoom_width = domain_width / PLOT_ZOOM_FACTOR
     zoom_height = domain_height / PLOT_ZOOM_FACTOR
-    
+
     x_min_zoom = centroid[0] - zoom_width / 2
     x_max_zoom = centroid[0] + zoom_width / 2
     y_min_zoom = centroid[1] - zoom_height / 2
     y_max_zoom = centroid[1] + zoom_height / 2
-    
-    # Top: Schlieren (y >= 0)
-    mask_top = y_grid >= 0
-    schlieren_top = np.where(mask_top, schlieren, np.nan)
-    
-    im1 = ax1.contourf(x_grid, y_grid, schlieren_top, levels=50, 
-                       cmap=COLORMAP_SCHLIEREN)
-    
-    # Add eta contours
+
+    # =======================================================
+    # TOP - SCHLIEREN
+    # =======================================================
+    im1 = ax_top.imshow(
+        schlieren_top,
+        origin='lower',
+        extent=extent_top,
+        cmap=COLORMAP_SCHLIEREN + '_r',  # CHANGED: Added '_r' to reverse colormap
+        vmin=schlieren_min,
+        vmax=schlieren_max,
+        interpolation='bilinear',  # CHANGED: Better interpolation for smoother gradients
+        aspect='auto'
+    )
+
     for eta_val in ETA_CONTOURS:
-        ax1.contour(x_grid, y_grid, eta, levels=[eta_val], 
-                   colors='red', linewidths=CONTOUR_LINE_WIDTH, 
-                   linestyles='--' if eta_val != 0.5 else '-')
-    
-    ax1.set_ylabel('Y (m)', fontsize=FONT_SIZE_LABEL)
-    ax1.set_title(f't = {t:.6e} s', fontsize=FONT_SIZE_TITLE, fontweight='bold')
-    ax1.set_xlim([x_min_zoom, x_max_zoom])
-    ax1.set_ylim([max(0, y_min_zoom), y_max_zoom])
-    ax1.set_aspect(ASPECT_RATIO, adjustable='box')  # Added adjustable='box'
-    ax1.tick_params(labelsize=FONT_SIZE_TICK, labelbottom=False)
-    
-    # Remove x-axis spine between plots
-    ax1.spines['bottom'].set_visible(False)
-    ax1.xaxis.set_ticks_position('none')
-    
-    cbar1 = plt.colorbar(im1, ax=ax1, pad=0.02)
-    cbar1.set_label('Numerical Schlieren', fontsize=FONT_SIZE_LABEL, fontweight='bold')
-    
-    # Bottom: Pressure (y < 0)
-    mask_bottom = y_grid < 0
-    pressure_bottom = np.where(mask_bottom, pressure, np.nan)
-    
-    im2 = ax2.contourf(x_grid, y_grid, pressure_bottom, levels=50, 
-                       cmap=COLORMAP_PRESSURE)
-    
-    # Add eta contours
+        ax_top.contour(
+            x_vals,
+            y_top,
+            eta_top,
+            levels=[eta_val],
+            colors='red',
+            linewidths=CONTOUR_LINE_WIDTH,
+            linestyles='--' if eta_val != 0.5 else '-'
+        )
+
+    ax_top.set_xlim(x_min_zoom, x_max_zoom)
+    ax_top.set_ylim(0, y_max_zoom)
+    ax_top.set_aspect('equal', adjustable='box')
+    ax_top.set_ylabel('Y (m)', fontsize=FONT_SIZE_LABEL)
+    ax_top.set_title(f't = {t:.6e} s',
+                     fontsize=FONT_SIZE_TITLE,
+                     fontweight='bold')
+    ax_top.tick_params(labelbottom=False)
+
+    # Remove bottom spine to avoid double line at y=0
+    ax_top.spines['bottom'].set_visible(False)
+
+    cax1 = inset_axes(ax_top, width="3%", height="80%", loc='right')
+    cbar1 = fig.colorbar(im1, cax=cax1)
+    cbar1.set_label('Numerical Schlieren',
+                    fontsize=FONT_SIZE_LABEL)
+
+    # =======================================================
+    # BOTTOM - PRESSURE
+    # =======================================================
+    im2 = ax_bot.imshow(
+        pressure_bottom,
+        origin='lower',
+        extent=extent_bot,
+        cmap=COLORMAP_PRESSURE,
+        vmin=pressure_min,
+        vmax=pressure_max,
+        interpolation='bilinear',  # CHANGED: Better interpolation
+        aspect='auto'
+    )
+
     for eta_val in ETA_CONTOURS:
-        ax2.contour(x_grid, y_grid, eta, levels=[eta_val], 
-                   colors='white', linewidths=CONTOUR_LINE_WIDTH, 
-                   linestyles='--' if eta_val != 0.5 else '-')
-    
-    ax2.set_xlabel('X (m)', fontsize=FONT_SIZE_LABEL)
-    ax2.set_ylabel('Y (m)', fontsize=FONT_SIZE_LABEL)
-    ax2.set_xlim([x_min_zoom, x_max_zoom])
-    ax2.set_ylim([y_min_zoom, min(0, y_max_zoom)])
-    ax2.set_aspect(ASPECT_RATIO, adjustable='box')  # Added adjustable='box'
-    ax2.tick_params(labelsize=FONT_SIZE_TICK)
-    
-    # Remove top spine
-    ax2.spines['top'].set_visible(False)
-    
-    cbar2 = plt.colorbar(im2, ax=ax2, pad=0.02)
-    cbar2.set_label('Pressure (Pa)', fontsize=FONT_SIZE_LABEL, fontweight='bold')
-    
-    # Use subplots_adjust instead of tight_layout
-    plt.subplots_adjust(left=0.1, right=0.88, top=0.95, bottom=0.08, hspace=0.0)
-    
-    plt.savefig(os.path.join(output_folder, f'{save_name}.{SAVE_FORMAT_RASTER}'), dpi=DPI)
-    plt.savefig(os.path.join(output_folder, f'{save_name}.{SAVE_FORMAT_VECTOR}'))
+        ax_bot.contour(
+            x_vals,
+            y_bottom,
+            eta_bottom,
+            levels=[eta_val],
+            colors='white',
+            linewidths=CONTOUR_LINE_WIDTH,
+            linestyles='--' if eta_val != 0.5 else '-'
+        )
+
+    ax_bot.set_xlim(x_min_zoom, x_max_zoom)
+    ax_bot.set_ylim(y_min_zoom, 0)
+    ax_bot.set_aspect('equal', adjustable='box')
+    ax_bot.set_xlabel('X (m)', fontsize=FONT_SIZE_LABEL)
+    ax_bot.set_ylabel('Y (m)', fontsize=FONT_SIZE_LABEL)
+
+    # Remove top spine to avoid double line at y=0
+    ax_bot.spines['top'].set_visible(False)
+
+    cax2 = inset_axes(ax_bot, width="3%", height="80%", loc='right')
+    cbar2 = fig.colorbar(im2, cax=cax2)
+    cbar2.set_label('Pressure (Pa)',
+                    fontsize=FONT_SIZE_LABEL)
+
+    # -------------------------------------------------------
+    # Make it visually seamless
+    # -------------------------------------------------------
+    plt.subplots_adjust(
+        left=0.08,
+        right=0.92,
+        top=0.95,
+        bottom=0.08,
+        hspace=0.0
+    )
+
+    # Remove vertical gap completely
+    ax_top.set_position([
+        ax_top.get_position().x0,
+        ax_bot.get_position().y1,
+        ax_top.get_position().width,
+        ax_top.get_position().height
+    ])
+
+    # -------------------------------------------------------
+    # Save
+    # -------------------------------------------------------
+    plt.savefig(os.path.join(output_folder,
+                f'{save_name}.{SAVE_FORMAT_RASTER}'),
+                dpi=DPI)
+    plt.savefig(os.path.join(output_folder,
+                f'{save_name}.{SAVE_FORMAT_VECTOR}'))
     plt.close()
 
 
