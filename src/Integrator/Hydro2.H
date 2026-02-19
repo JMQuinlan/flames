@@ -186,6 +186,8 @@ protected:
     // Debugging
     Set::Field<Set::Scalar> div_tau_mf;
     Set::Field<Set::Scalar> hess_u_mf;
+    Set::Field<Set::Scalar> Vap_dot_mf;
+    
 
     Set::Field<Set::Scalar> m0_mf;
     Set::Field<Set::Scalar> u0_mf;

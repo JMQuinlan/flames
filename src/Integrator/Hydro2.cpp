@@ -209,6 +209,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                                                                                                      "100","101",
                                                                                                      "110","111",
                                                                                                     }); // hess_u Flux
+        value.RegisterNewFab(value.Vap_dot_mf, &value.bc_nothing, 5, nghost, "Vap_dot", true, false, { "_eta", "_rho", "_Mx", "_My", "_E" }); // Momentum Flux
+
+
+        
     }
 
     // INITIAL CONDITIONS
@@ -328,7 +332,8 @@ void Hydro2::Initialize(int lev)
     Source_mf[lev]  ->setVal(0.0);
     Fsv_mf[lev]     ->setVal(0.0);
     Fw_mf[lev]      ->setVal(0.0); 
-    Ldot_mf[lev]    ->setVal(0.0); 
+    Ldot_mf[lev]    ->setVal(0.0);
+    Vap_dot_mf[lev] ->setVal(0.0); 
 
     // BOUNDRY CURVATURE AND THINGS
     kappas_mf[lev]  ->setVal(0.0);
@@ -783,6 +788,7 @@ Hydro2::RHS(int lev,
         Set::Patch<Set::Scalar> Fsv = Fsv_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fw = Fw_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Ldot_ = Ldot_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> Vap_dot = Vap_dot_mf.Patch(lev, mfi);
 
         Set::Patch<const Set::Scalar> m0 = m0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> q0 = q_mf.Patch(lev, mfi);
@@ -902,6 +908,7 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "------------------------------------------------------------");
                 Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Viscosity solving:");
                 Util::ParallelMessage(INFO, "lev=", lev);
+                Util::ParallelMessage(INFO, "time=", time);
                 Util::ParallelMessage(INFO, "i=", i, "j=", j);
                 Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
                 Util::ParallelMessage(INFO, "Ldot=", Ldot(0), ", ", Ldot(1));
@@ -943,6 +950,7 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Surface Tension solving:");
                 Util::ParallelMessage(INFO, "lev=", lev);
                 Util::ParallelMessage(INFO, "i=", i, "j=", j);
+                Util::ParallelMessage(INFO, "time=", time);
                 Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
                 Util::ParallelMessage(INFO, "Fsv_vector=", Fsv_vector(0), ", ", Fsv_vector(1));
                 Util::Abort(INFO);
@@ -970,6 +978,7 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Weight solving:");
                 Util::ParallelMessage(INFO, "lev=", lev);
                 Util::ParallelMessage(INFO, "i=", i, "j=", j);
+                Util::ParallelMessage(INFO, "time=", time);
                 Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
                 Util::ParallelMessage(INFO, "Fw_vector=", Fw_vector(0), ", ", Fw_vector(1));
                 Util::Abort(INFO);
@@ -1009,6 +1018,7 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Boundry Evolution:");
                 Util::ParallelMessage(INFO, "lev=", lev);
                 Util::ParallelMessage(INFO, "i=", i, "j=", j);
+                Util::ParallelMessage(INFO, "time=", time);
                 Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
                 Util::ParallelMessage(INFO, "mu_chem_=", mu_chem_(i, j, k));
                 Util::ParallelMessage(INFO, "lap_mu_chem=", lap_mu_chem);
@@ -1078,8 +1088,15 @@ Hydro2::RHS(int lev,
                 m_dot_Vap = rho_g * Dv * (B_M / (1.0 + B_M + small));   // Mass Flux
                 M_dot_Vap = u * m_dot_Vap;                              // Momentum Flux
                 E_dot_Vap = u.dot(M_dot_Vap);                           // Energy Flux
+
+                
             }
-            
+            // Vaporization Trackers
+            Vap_dot(i, j, k, 0) = eta_dot_Vap;
+            Vap_dot(i, j, k, 1) = m_dot_Vap;
+            Vap_dot(i, j, k, 2) = M_dot_Vap(0);
+            Vap_dot(i, j, k, 3) = M_dot_Vap(1);
+            Vap_dot(i, j, k, 4) = E_dot_Vap;
 
 
             // Total:
@@ -1092,6 +1109,7 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "------------------------------------------------------------");
                 Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Total Force:");
                 Util::ParallelMessage(INFO, "lev=", lev);
+                Util::ParallelMessage(INFO, "time=", time);
                 Util::ParallelMessage(INFO, "i=", i, "j=", j);
                 Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
                 Util::ParallelMessage(INFO, "Total_Force=", Total_Force(0), ", ", Total_Force(1));
@@ -1116,6 +1134,7 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "------------------------------------------------------------");
                 Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Total Source:");
                 Util::ParallelMessage(INFO, "lev=", lev);
+                Util::ParallelMessage(INFO, "time=", time);
                 Util::ParallelMessage(INFO, "i=", i, "j=", j);
                 Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
                 Util::ParallelMessage(INFO, "Source_rho=", Source(i, j, k, 0) );
@@ -1182,7 +1201,11 @@ Hydro2::RHS(int lev,
             
             if (rho(i, j, k) != rho(i, j, k) || M(i, j, k, 0) != M(i, j, k, 0) || E(i, j, k) != E(i, j, k) || gammaf(i, j, k) != gammaf(i, j, k) || press(i, j, k) != press(i, j, k))
             {
+                Util::ParallelMessage(INFO, "-------------------------------");
+                Util::ParallelMessage(INFO, "ERROR IN CONSERVATIVE VARIABLES");
+                Util::ParallelMessage(INFO, "time=", time);
                 Util::ParallelMessage(INFO, "NaN detected at i=", i, " j=", j);
+                Util::ParallelMessage(INFO, "eta=", eta(i, j, k));
                 Util::ParallelMessage(INFO, "rho=", rho(i, j, k));
                 Util::ParallelMessage(INFO, "M=", M(i, j, k, 0), M(i, j, k, 1));
                 Util::ParallelMessage(INFO, "E=", E(i, j, k));
@@ -1193,6 +1216,9 @@ Hydro2::RHS(int lev,
 
             if (rho(i - 1, j, k) != rho(i - 1, j, k) || rho(i + 1, j, k) != rho(i + 1, j, k) || rho(i, j - 1, k) != rho(i, j - 1, k) || rho(i, j + 1, k) != rho(i, j + 1, k))
             {
+                Util::ParallelMessage(INFO, "-------------------------------");
+                Util::ParallelMessage(INFO, "ERROR WITH GHOST CELLS");
+                Util::ParallelMessage(INFO, "time=", time);
                 Util::ParallelMessage(INFO, "NaN in neighbor at i=", i, " j=", j);
                 Util::Abort(INFO);
             }
@@ -1206,6 +1232,8 @@ Hydro2::RHS(int lev,
             }
             catch (...)
             {
+                Util::ParallelMessage(INFO, "-------------------------------");
+                Util::ParallelMessage(INFO, "ERROR IN RIEMANN SOLVERS");
                 Util::ParallelMessage(INFO, "lev=", lev);
                 Util::ParallelMessage(INFO, "i=", i, "j=", j);
                 Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
