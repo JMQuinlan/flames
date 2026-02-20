@@ -1,0 +1,179 @@
+#@ [d2-law-spherical-droplet-nheptane-fast]
+#@ exe=hydro2
+#@ dim=2
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = /mnt/c/Users/samar/Downloads/CloneResearch/flames/Output/d2law_nheptane_droplet
+
+### MESHING ###
+amr.plot_dt = 2e-3             
+amr.max_grid_size = 500000
+amr.blocking_factor = 4
+amr.regrid_int = 50            
+amr.grid_eff = 0.85
+amr.max_level = 1              
+amr.n_cell = 64 64             
+
+### TIME STEPPING ###
+timestep = 1e-6                
+
+## Adaptive
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1e+0     
+dynamictimestep.min = 1e-10
+cfl = 0.7                      
+cfl_v = 0.7
+
+### DIMENSIONS ###
+# 2D axisymmetric domain: x is radial, y is axial
+# Droplet centered at origin with radius 50 μm
+geometry.prob_lo = -3.0e-4 -3.0e-4 0.0
+geometry.prob_hi =  3.0e-4  3.0e-4 0.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEP ###
+stop_time = 0.08
+
+### ETA INITIAL CONDITIONS ###
+# Spherical droplet at center (2D axisymmetric)
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 5.0e-6  
+eta.ic.expression.constant.r0 = 50.0e-6      # Initial droplet radius (50 μm)
+eta.ic.expression.constant.x_center = 0.0
+eta.ic.expression.constant.y_center = 0.0
+
+# Spherical droplet: eta = 0 inside (liquid), eta = 1 outside (gas)
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x-x_center)^2 + (y-y_center)^2) - r0)/(2*sqrt(2)*epsilon)))"
+
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+
+# Air properties (gas phase, eta=1)
+gamma0 = 1.4
+p0_0 = 0
+mu0 = 2.0e-5        # Air dynamic viscosity at elevated temperature
+mu0_b = 0.0
+
+# n-Heptane properties (liquid phase, eta=0)
+gamma1 = 1.4
+p0_1 = 0
+mu1 = 3.0e-4        # n-Heptane dynamic viscosity
+mu1_b = 0.0
+
+# Densities
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"       # Air density at high temp [kg/m³]
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "684.0"     # n-Heptane density [kg/m³]
+
+# Velocities (initially at rest)
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Pressures
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "101325.0"  # 1 atm [Pa]
+
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "101325.0"  # 1 atm [Pa]
+
+# Temperatures
+temperature0.ic.type = expression
+temperature0.ic.expression.region0 = "700.0"  # Hot ambient air [K]
+
+temperature1.ic.type = expression
+temperature1.ic.expression.region0 = "371.6"  # n-Heptane at boiling point [K]
+
+# Thermodynamic properties
+# Air
+cp0 = "1005.0"      # Specific heat at constant pressure [J/kg/K]
+cv0 = "717.86"      # Specific heat at constant volume [J/kg/K]
+
+# n-Heptane
+cp1 = "2240.0"      # Specific heat at constant pressure [J/kg/K]
+cv1 = "1600.0"      # Specific heat at constant volume [J/kg/K]
+
+# Thermal conductivities
+k0_thermal.ic.type = expression
+k0_thermal.ic.expression.region0 = "0.045"   # Air thermal conductivity at 700K [W/m/K]
+
+k1_thermal.ic.type = expression
+k1_thermal.ic.expression.region0 = "0.12"    # n-Heptane thermal conductivity [W/m/K]
+
+# Thermal enthalpies
+h0_thermal.ic.type = expression
+h0_thermal.ic.expression.region0 = "1005.0"  # Air [J/kg/K]
+
+h1_thermal.ic.type = expression
+h1_thermal.ic.expression.region0 = "2240.0"  # n-Heptane [J/kg/K]
+
+# Surface tension - DISABLED
+sigma = 0.0         # Surface tension OFF
+
+# Vapor Diffusivity
+Dv = "8.0e-6"       # Higher diffusivity at 700K [m²/s]
+
+# Reference pressure
+pref = 0.0
+
+### BOUNDARY CONDITIONS ###
+# All boundaries are open (Neumann for outflow)
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.yhi = neumann
+density.bc.type.ylo = neumann
+
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.yhi = neumann
+energy.bc.type.ylo = neumann
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion = 0.01
+omega_refinement_criterion = 100.0
+p_refinement_criterion = 1e+5
+rho_refinement_criterion = 1e+3
+gradu_refinement_criterion = 1e+3
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.type = constant
+m0.ic.constant.value = 0.0
+
+u0.ic.type = constant
+u0.ic.constant.value = 0.0 0.0
+
+q.ic.type = constant
+q.ic.constant.value = 0.0 0.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 0      # Surface tension DISABLED
+apply_buoyancy = 0             # No buoyancy
+apply_weight = 0               # No gravity
+apply_vaporization = 1         # Vaporization enabled
+static_eta = 0                 # Interface can move
+Spec_Vol = 1
+grav = 0.0
+
+### SOLVER SETTINGS ###
+Riemann_Solver = 1
+kappa_method = 2
+scheme = 0
+Limiter = 0
+small = 1e-10
+lagrange = 0.0
