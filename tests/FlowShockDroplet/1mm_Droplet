@@ -30,7 +30,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-6
 dynamictimestep.min = 1e-16
-cfl = 0.005
+cfl = 0.01
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.005 -0.005 0.0  # 1/4 tube left of droplet
@@ -69,7 +69,7 @@ mu1_b = 0.001
 # Densities
 density0.ic.type = expression
 density0.ic.expression.constant.rho_air = 1.225
-density0.ic.expression.constant.rho_shock = 50.0
+density0.ic.expression.constant.rho_shock = 20.0
 density0.ic.expression.constant.x_shock = -0.004  # Shock region near left wall
 # Air field with shock
 density0.ic.expression.region0 = "(x < x_shock)*rho_shock + (x >= x_shock)*rho_air"
@@ -142,11 +142,11 @@ energy.bc.type.xhi = neumann
 momentum.bc.type.xhi = neumann neumann
 
 ### REFINEMENT CRITERIA ###
-eta_refinement_criterion = 0.001
+eta_refinement_criterion = 0.1
 omega_refinement_criterion = 10.55
-p_refinement_criterion = 1e+5
-rho_refinement_criterion = 1e+4
-gradu_refinement_criterion = 1e+4
+p_refinement_criterion = 1e+6
+rho_refinement_criterion = 1e+5
+gradu_refinement_criterion = 1e+5
 cutoff = 1e-16
 
 ### SOURCE TERMS ###
