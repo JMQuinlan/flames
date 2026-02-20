@@ -83,17 +83,7 @@ pressure1.ic.type = expression
 pressure1.ic.expression.region0 = "1000.0"
 
 # ----------------------------
-# Temperature (consistent but irrelevant)
-# ----------------------------
-
-temperature0.ic.type = expression
-temperature0.ic.expression.region0 = "300.0"
-
-temperature1.ic.type = expression
-temperature1.ic.expression.region0 = "300.0"
-
-# ----------------------------
-# Thermodynamics (gamma-law)
+# Specific Heats
 # ----------------------------
 
 cp0 = "1000.0"
@@ -102,7 +92,13 @@ cv0 = "1000.0/1.4"
 cv1 = "1000.0/1.4"
 
 # ----------------------------
-# No viscosity (pure RP)
+# Stiffened pressure
+# ----------------------------
+p0_0 = 0.0
+p0_1 = 10000.0
+
+# ----------------------------
+# Viscosity
 # ----------------------------
 
 mu0 = 0.1

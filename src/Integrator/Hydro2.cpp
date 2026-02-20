@@ -1250,15 +1250,6 @@ Hydro2::RHS(int lev,
             }
 
             // UPDATE MIXED FLUID VARIABLES
-
-            // Update Source Terms to account for moving boundry
-            // Delete me if does not worky :(
-            // Source(i, j, k, 0) = Source(i, j, k, 0) - rho(i, j, k) * deta_dt;
-            // Source(i, j, k, 1) = Source(i, j, k, 1) - M(i, j, k, 0) * deta_dt;
-            // Source(i, j, k, 2) = Source(i, j, k, 2) - M(i, j, k, 1) * deta_dt;
-            // Source(i, j, k, 3) = Source(i, j, k, 3) - E_vol(i, j, k) * deta_dt;
-
-            // DEBUGGING:
             rho_flux(i, j, k) = (flux_xlo.mass - flux_xhi.mass) / (DX[0]) + (flux_ylo.mass - flux_yhi.mass) / (DX[1]);
             M_flux(i, j, k, 0) = (flux_xlo.momentum_normal - flux_xhi.momentum_normal) / (DX[0]) + (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / (DX[1]);
             M_flux(i, j, k, 1) = (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / (DX[0]) + (flux_ylo.momentum_normal - flux_yhi.momentum_normal) / (DX[1]);
