@@ -96,7 +96,7 @@ TIME_STEP = 1  # Sample every Nth timestep (1=all, 2=every other, 5=every 5th, e
 
 # File paths
 #amrex_output_dir = r'../../../bin/tests/FlowShockDroplet/output_ShockDroplet'
-amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_ShockDroplet'
+amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet'
 output_folder = './ShockDroplet_Analysis'
 
 # Physical parameters
