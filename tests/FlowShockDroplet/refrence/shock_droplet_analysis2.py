@@ -116,7 +116,7 @@ P_ATM = 1.01325e5
 
 # Domain parameters
 X_MIN = -0.005
-X_MAX = 0.003
+X_MAX = 0.015
 Y_MIN = -0.005
 Y_MAX = 0.005
 DROPLET_CENTER_X = 0.0
