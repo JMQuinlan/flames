@@ -1,0 +1,175 @@
+# ==============================================================================
+# ADIABATIC TEST 1: 1D SINUSOIDAL COMPRESSION (NO INTERFACE)
+# ==============================================================================
+# Purpose: Test pure adiabatic gas dynamics without interface complications
+# Method: Uniform gas with sinusoidal velocity perturbation in x-direction
+# Expected: Isentropic invariant (p/rho^gamma) must remain constant
+# ==============================================================================
+
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/Adiabatic/TEST1_1D_Compression
+amr.plot_dt = 1e-4
+
+### MESHING ###
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.regrid_int = 1000
+amr.grid_eff = 0.8
+amr.max_level = 0
+amr.n_cell = 256 4
+
+### TIME STEPPING ###
+timestep = 1e-6
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1e-5
+dynamictimestep.min = 1e-12
+cfl = 0.3
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 1.0 0.01 0.0
+geometry.is_periodic = 1 1 0
+stop_time = 10e-3
+
+### ETA INITIAL CONDITIONS ###
+# Uniform eta = 0 (all gas, phase 1)
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.001
+eta.ic.expression.region0 = "0.0"
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+# Ideal Gas EOS
+gamma0 = 1.4
+gamma1 = 1.4
+
+# Uniform density (single phase - all gas)
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+# Sinusoidal velocity perturbation in x-direction ONLY
+# u(x) = A * sin(2*pi*x/L), v(x) = 0
+# This creates 1D compression/expansion waves
+velocity0.ic.type = expression
+velocity0.ic.expression.constant.A = 0.1
+velocity0.ic.expression.constant.L = 1.0
+velocity0.ic.expression.region0 = "A * sin(2.0 * 3.14159265359 * x / L)"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.A = 0.1
+velocity1.ic.expression.constant.L = 1.0
+velocity1.ic.expression.region0 = "A * sin(2.0 * 3.14159265359 * x / L)"
+velocity1.ic.expression.region1 = "0.0"
+
+# Uniform base pressure
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "1.0"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "1.0"
+
+# Specific Heats
+cp0 = "1000.0"
+cp1 = "1000.0"
+cv0 = "1000.0/1.4"
+cv1 = "1000.0/1.4"
+
+# Stiffened pressure
+p0_0 = 0.0
+p0_1 = 0.0
+
+# ZERO VISCOSITY - pure inviscid adiabatic flow
+mu0 = 0.0
+mu0_b = 0.0
+mu1 = 0.0
+mu1_b = 0.0
+
+# ZERO SURFACE TENSION - no interface
+sigma = 0.0
+pref = 0.0
+
+### BOUNDARY CONDITIONS ###
+# Periodic boundaries
+density.bc.type.xhi = periodic
+density.bc.type.xlo = periodic
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+
+energy.bc.type.xhi = periodic
+energy.bc.type.xlo = periodic
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+
+momentum.bc.type.xhi = periodic periodic
+momentum.bc.type.xlo = periodic periodic
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion = 1e+10
+omega_refinement_criterion = 1e+10
+p_refinement_criterion = 1e+10
+rho_refinement_criterion = 1e+10
+gradu_refinement_criterion = 1e+10
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 0
+apply_buoyancy = 0
+apply_weight = 0
+Spec_Vol = 1
+grav = 0.0
+
+### DEBUGGING ###
+Riemann_Solver.type = hllc
+kappa_method = 1
+
+# ==============================================================================
+# DIAGNOSTIC INSTRUCTIONS:
+# 1. Extract p(x,t) and rho(x,t) at each timestep
+# 2. Compute isentropic invariant: S = p / rho^gamma
+# 3. Check if S is spatially constant and temporally constant
+# 4. Compute effective gamma: gamma_eff = d(ln p) / d(ln rho)
+#
+# EXPECTED BEHAVIOR:
+# - Sinusoidal compression/expansion waves propagate in x-direction
+# - S = p/rho^gamma remains constant everywhere
+# - gamma_eff = 1.4 (your input gamma)
+# - No drift in S over time
+#
+# FAILURE MODES:
+# - S drifts with time -> energy equation wrong
+# - S varies spatially -> EOS coupling broken
+# - gamma_eff != 1.4 -> wrong polytropic relation
+# - gamma_eff ~ 1.0 -> isothermal instead of adiabatic
+#
+# CONNECTION TO YOUR BUBBLE PROBLEM:
+# Your pressure plot shows numerical pressure (red) dropping much faster
+# than analytical (blue), reaching p_inf by ~4ms instead of staying elevated.
+# This suggests gas is NOT following p_B ~ R^(-2*gamma).
+#
+# If this 1D test PASSES:
+#   -> Your EOS is correct for pure gas
+#   -> Problem is at the interface (eta field)
+#   -> Check: gas mass conservation, pressure BC at interface
+#
+# If this 1D test FAILS:
+#   -> Fundamental EOS problem
+#   -> Energy equation not conserving entropy
+#   -> Check: how pressure is computed from density and energy
+# ==============================================================================

@@ -1,0 +1,236 @@
+# ==============================================================================
+# ADIABATIC TEST 4: STATIC BUBBLE WITH DIFFUSE INTERFACE
+# ==============================================================================
+# Purpose: Test if diffuse interface causes gas mass loss or pressure equilibration
+# Method: Gas bubble in liquid with ZERO velocity (no dynamics)
+# Expected: Pressure and gas mass should remain constant (no equilibration)
+# ==============================================================================
+
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/Adiabatic/TEST4_Static_Interface
+amr.plot_dt = 1e-4
+
+### MESHING ###
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.regrid_int = 50
+amr.grid_eff = 0.8
+amr.max_level = 3
+amr.n_cell = 64 64
+
+### TIME STEPPING ###
+timestep = 1e-6
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1e-0
+dynamictimestep.min = 1e-12
+cfl = 0.3
+
+### DIMENSIONS ###
+geometry.prob_lo = -0.10 -0.10 0.0
+geometry.prob_hi =  0.10  0.10 0.0
+geometry.is_periodic = 0 0 0
+stop_time = 10e-3
+
+### ETA INITIAL CONDITIONS ###
+# Diffuse interface bubble (same as your real simulation)
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.0005
+eta.ic.expression.constant.R0 = 0.02
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+# Ideal Gas EOS
+gamma0 = 1.4
+gamma1 = 1.4
+
+# Density: liquid = 10, gas = 1 (same as your simulation)
+density0.ic.type = expression
+density0.ic.expression.region0 = "10.0"
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+# ZERO VELOCITY EVERYWHERE - this is the key difference
+# No dynamics, just let it sit and see what happens
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Pressure: gas = 500 Pa, liquid = 500 Pa (same as your simulation)
+# This creates pressure jump at interface
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "500.0"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "550.0"
+
+# Specific Heats
+cp0 = "1000.0"
+cp1 = "1000.0"
+cv0 = "1000.0/1.4"
+cv1 = "1000.0/1.4"
+
+# Stiffened pressure
+p0_0 = 0.0
+p0_1 = 0.0
+
+# ZERO VISCOSITY - no dissipation
+mu0 = 0.0
+mu0_b = 0.0
+mu1 = 0.0
+mu1_b = 0.0
+
+# ZERO SURFACE TENSION - isolate pressure effects
+sigma = 0.0
+pref = 0.0
+
+### BOUNDARY CONDITIONS ###
+# Neumann boundaries
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion = 1e-4
+omega_refinement_criterion = 10.55
+p_refinement_criterion = 1e+2
+rho_refinement_criterion = 1e+10
+gradu_refinement_criterion = 1e+1
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 0
+apply_buoyancy = 0
+apply_weight = 0
+Spec_Vol = 1
+grav = 0.0
+
+static_eta=1
+
+### DEBUGGING ###
+Riemann_Solver.type = hllc
+kappa_method = 1
+
+# ==============================================================================
+# DIAGNOSTIC INSTRUCTIONS:
+# 1. Extract p_B(t) at bubble center - should stay at 550 Pa
+# 2. Extract p_L(t) far from bubble - should stay at 500 Pa
+# 3. Compute gas mass: m_gas = integral(rho * (1 - eta) * dA)
+# 4. Monitor interface thickness: measure width of eta transition
+# 5. Check for gas diffusion into liquid phase
+#
+# EXPECTED BEHAVIOR (CORRECT):
+# - p_B stays at 550 Pa (no equilibration)
+# - p_L stays at 500 Pa
+# - Gas mass constant
+# - Interface thickness constant (epsilon = 0.0005 m)
+# - No velocity develops (u = 0 everywhere)
+#
+# EXPECTED BEHAVIOR (YOUR BUG - MY HYPOTHESIS):
+# - p_B drops from 550 Pa toward 500 Pa
+# - Gas mass decreases over time
+# - Interface blurs (epsilon grows)
+# - Gas diffuses into liquid (rho increases in liquid phase)
+#
+# CONNECTION TO YOUR BUBBLE PROBLEM:
+# Looking at your pressure plot (02_Pressure_vs_Time.png):
+#   - Numerical pressure (red) drops from 550 Pa to ~497 Pa
+#   - Equilibrates to p_inf = 500 Pa by ~4 ms
+#   - This suggests pressure equilibration even without proper dynamics
+#
+# If Test 4 shows pressure equilibration with u=0:
+#   -> Interface model is DIFFUSING pressure (fundamental bug)
+#   -> Gas mass is leaking through diffuse interface
+#   -> This explains why your bubble doesn't oscillate
+#
+# ROOT CAUSE HYPOTHESES:
+#
+# Hypothesis 1: Interface Too Thick
+#   - Your epsilon = 0.0005 m vs R0 = 0.02 m (2.5% of radius)
+#   - Even this might be too thick for accurate gas mass conservation
+#   - Gas properties "smeared" across interface
+#   - Try epsilon = 0.0001 m (0.5% of radius)
+#
+# Hypothesis 2: Pressure Averaging at Interface
+#   - Code might be averaging pressure across eta field
+#   - Should have SHARP pressure jump at eta = 0.5
+#   - Check if pressure is being smoothed/interpolated
+#   - Diffuse interface methods can incorrectly equilibrate pressure
+#
+# Hypothesis 3: Gas Mass Not Conserved at Interface
+#   - Gas mass should be: m_gas = integral(rho * (1 - eta) * dA)
+#   - If eta field evolves incorrectly, gas "disappears"
+#   - Check how eta is advected/updated
+#   - Numerical diffusion in eta equation can blur interface
+#
+# Hypothesis 4: Incorrect Mixture Properties
+#   - At interface (0 < eta < 1), properties are mixed
+#   - Density: rho_mix = rho_gas * (1 - eta) + rho_liquid * eta
+#   - Pressure: should NOT be mixed (discontinuous at interface)
+#   - Check if pressure is being averaged: p_mix = p_gas * (1-eta) + p_liquid * eta
+#   - This would cause equilibration!
+#
+# KEY DIAGNOSTIC:
+# If p_B drops from 550 Pa to 500 Pa with ZERO velocity:
+#   -> Proves interface model is broken (not dynamics)
+#   -> Gas pressure equilibrating through diffusion
+#   -> This is why your bubble doesn't oscillate
+#
+# LITERATURE CONTEXT:
+# From your knowledge (NIST diffuse interface paper):
+#   "The physical model breaks down when interfacial thickness is 
+#    comparable to the length scale of phenomena being examined"
+#
+# Your epsilon = 0.0005 m vs R0 = 0.02 m means interface is 2.5% of radius.
+# For accurate bubble dynamics, you typically need epsilon < 1% of R0.
+#
+# From Stanford diffuse interface paper:
+#   "Physically, capillary interfaces are only a few nanometers thick.
+#    In continuum models, liquid-gas interfaces are assumed to have zero thickness."
+#
+# Your diffuse interface is ~500 micrometers thick - that's HUGE compared
+# to physical interfaces (nanometers). This can cause:
+#   - Pressure equilibration across interface
+#   - Gas mass diffusion into liquid
+#   - Loss of sharp pressure jump
+#
+# NEXT STEPS AFTER TEST 4:
+#
+# If Test 4 FAILS (pressure equilibrates):
+#   1. Reduce epsilon to 0.0001 m (0.5% of R0)
+#   2. Check pressure reconstruction at interface
+#   3. Verify gas mass conservation formula
+#   4. Look for pressure averaging in mixture region
+#
+# If Test 4 PASSES (pressure stays constant):
+#   -> Interface model is OK
+#   -> Problem is in dynamics (inertia, viscosity, etc.)
+#   -> Go back to RPE term analysis
+# ==============================================================================
