@@ -31,7 +31,6 @@
 #include "AMReX_TimeIntegrator.H"
 
 
-
 //#if AMREX_SPACEDIM == 2
 
 namespace Integrator
@@ -69,10 +68,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // OPTIONAL SOURCE TERMS
         pp_query_default("apply_surface_tension", value.apply_surface_tension, false); // Apply surface tension when solving, default: true --> "Apply Surface Tension"
-        pp_query_default("apply_buoyancy", value.apply_buoyancy, false);              // Apply buoyancy when solving, default: false --> "No Buoyancy"
         pp_query_default("apply_weight", value.apply_weight, false);                  // Apply weight when solving, default: false --> "No Weight"
+        pp_query_default("apply_vaporization", value.apply_vaporization, false);       // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
-        pp_query_default("apply_vaporization", value.apply_vaporization, false);      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
         // FLUID 0
         pp_query_required("gamma0", value.gamma0);      // gamma for gamma law
@@ -133,7 +131,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.momentum0_mf,    value.momentum_bc,  2, nghost, "momentum0", false, false, { "x", "y" });
         value.RegisterNewFab(value.momentum0_old_mf,value.momentum_bc,  2, nghost, "momentum0_old", false, false);
  
-        value.RegisterNewFab(value.T0_mf,           value.temperature_bc, 1, nghost, "T0", false, false);
+        //value.RegisterNewFab(value.T0_mf,           value.temperature_bc, 1, nghost, "T0", false, false);
         //value.RegisterNewFab(value.k0_thermal_mf,   &value.bc_nothing, 1, nghost, "k0_thermal", false, false);
         //value.RegisterNewFab(value.h0_thermal_mf,   &value.bc_nothing, 1, nghost, "h0_thermal", false, false);
 
@@ -151,7 +149,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.momentum1_mf,    value.momentum_bc,  2, nghost, "momentum1", false, false, { "x", "y" });
         value.RegisterNewFab(value.momentum1_old_mf,value.momentum_bc,  2, nghost, "momentum1_old", false, false);
 
-        value.RegisterNewFab(value.T1_mf,           value.temperature_bc, 1, nghost, "T1", false, false);
+        //value.RegisterNewFab(value.T1_mf,           value.temperature_bc, 1, nghost, "T1", false, false);
         //value.RegisterNewFab(value.k1_thermal_mf,   &value.bc_nothing, 1, nghost, "k1_thermal", false, false);
         //value.RegisterNewFab(value.h1_thermal_mf,   &value.bc_nothing, 1, nghost, "h1_thermal", false, false);
 
@@ -180,12 +178,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, nghost, "Fsv", true, false, { "x", "y" });  // Surface Tension
         value.RegisterNewFab(value.Fw_mf,           &value.bc_nothing,  2, nghost, "Fw", true, false, { "x", "y" });   // Weight
         value.RegisterNewFab(value.Ldot_mf,         &value.bc_nothing,  2, nghost, "Ldot", true, false, { "x", "y" });  // Ldot
-        value.RegisterNewFab(value.T_mf,            &value.bc_nothing,  1, nghost, "T", true, false);                  // Temperature
+        value.RegisterNewFab(value.T_mf,            value.energy_bc,  1, nghost, "T", true, false);                  // Temperature
+        value.RegisterNewFab(value.cp_mf,           &value.bc_nothing,  1, nghost, "cp", false, true);         // Constant Pressure Specific Heat
+        value.RegisterNewFab(value.cv_mf,           &value.bc_nothing,  1, nghost, "cv", false, true);         // Constant Volume Specific Heat
         //value.RegisterNewFab(value.k_thermal_mf,    &value.bc_nothing,  1, nghost, "k_thermal", false, true);         // Thermal Conductivity
         //value.RegisterNewFab(value.h_thermal_mf,    &value.bc_nothing,  1, nghost, "h_thermal", false, true);         // Thermal Convectivity
         value.RegisterNewFab(value.gamma_mf,        value.energy_bc, 1, nghost, "gamma", true, false);                 // Specific Heat Ratio
         value.RegisterNewFab(value.p0_mf,           value.energy_bc, 1, nghost, "p0", true, true);                    // Tamman Pressure
-        value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc, 1, nghost, "mu_chem", false, true);               // Tammann Pressure
+        value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc, 1, nghost, "mu_chem", true, false);               // Chemical Potential
         value.RegisterNewFab(value.a_mf,            &value.bc_nothing,  1, nghost, "a", true, false);                    // Speed of sound
         value.RegisterNewFab(value.Ma_mf,           &value.bc_nothing,  2, nghost, "Ma", true, false, { "x", "y" });   // Mach
         value.RegisterNewFab(value.UE_per_vol_mf,   &value.bc_nothing,  1, nghost, "UE_per_vol", true, false);         // Internal Energy (per unit volume)
@@ -197,7 +197,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // EXTRAS & DEBUGGING
         value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", false, false, { "x", "y" });
-        value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, nghost, "kappa", false, false, { "Avg", "1", "2" }); // To Surface curvature
+        value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, nghost, "kappa", true, false, { "Avg", "1", "2" }); // To Surface curvature
         value.RegisterNewFab(value.grad_mag_grad_eta_mf, &value.bc_nothing, 2, nghost, "grad_mag_grad_eta", false, false, { "x", "y" }); // grad( | grad(eta) | )
         value.RegisterNewFab(value.rho_flux_mf,     &value.bc_nothing,  1, nghost, "rho_flux", true, false);                    // Density Flux
         value.RegisterNewFab(value.M_flux_mf,       &value.bc_nothing,  2, nghost, "M_flux", true, false, { "x", "y" });        // Momentum Flux
@@ -209,6 +209,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                                                                                                      "100","101",
                                                                                                      "110","111",
                                                                                                     }); // hess_u Flux
+        value.RegisterNewFab(value.Vap_dot_mf, &value.bc_nothing, 5, nghost, "Vap_dot", true, false, { "_eta", "_rho", "_Mx", "_My", "_E" }); // Momentum Flux
+
+
+        
     }
 
     // INITIAL CONDITIONS
@@ -218,7 +222,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<IC::Constant,IC::Expression>("velocity0.ic",      value.velocity0_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("pressure0.ic",      value.pressure0_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("density0.ic",       value.density0_ic,  value.geom);
-    pp.select_default<IC::Constant, IC::Expression>("temperature0.ic",  value.temperature0_ic, value.geom);
+    //pp.select_default<IC::Constant, IC::Expression>("temperature0.ic",  value.temperature0_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("k0_thermal.ic",    value.k0_thermal_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("h1_thermal.ic",    value.h0_thermal_ic, value.geom);
 
@@ -227,7 +231,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<IC::Constant,IC::Expression>("velocity1.ic",      value.velocity1_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("pressure1.ic",      value.pressure1_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("density1.ic",       value.density1_ic,  value.geom);
-    pp.select_default<IC::Constant, IC::Expression>("temperature1.ic",  value.temperature1_ic, value.geom);
+    //pp.select_default<IC::Constant, IC::Expression>("temperature1.ic",  value.temperature1_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("k1_thermal.ic",    value.k1_thermal_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("h1_thermal.ic",    value.h1_thermal_ic, value.geom);
 
@@ -303,9 +307,7 @@ void Hydro2::Initialize(int lev)
     pressure0_ic    ->Initialize(lev, pressure0_mf, 0.0);
     density0_ic     ->Initialize(lev, density0_mf, 0.0);
     density0_ic     ->Initialize(lev, density0_old_mf, 0.0);
-    temperature0_ic ->Initialize(lev, T0_mf, 0.0);
-    //cp0_ic          ->Initialize(lev, cp0_mf, 0.0);
-    //cv0_ic          ->Initialize(lev, cv0_mf, 0.0);
+    //temperature0_ic ->Initialize(lev, T0_mf, 0.0);
     //k0_thermal_ic   ->Initialize(lev, k0_thermal_mf, 0.0);
     //h0_thermal_ic   ->Initialize(lev, h0_thermal_mf, 0.0);
 
@@ -314,9 +316,7 @@ void Hydro2::Initialize(int lev)
     pressure1_ic    ->Initialize(lev, pressure1_mf, 0.0);
     density1_ic     ->Initialize(lev, density1_mf, 0.0);
     density1_ic     ->Initialize(lev, density1_old_mf, 0.0);
-    temperature1_ic ->Initialize(lev, T1_mf, 0.0);
-    //cp1_ic          ->Initialize(lev, cp1_mf, 0.0);
-    //cv1_ic          ->Initialize(lev, cv1_mf, 0.0);
+    //temperature1_ic ->Initialize(lev, T1_mf, 0.0);
     //k1_thermal_ic   ->Initialize(lev, k1_thermal_mf, 0.0);
     //h1_thermal_ic   ->Initialize(lev, h1_thermal_mf, 0.0);
 
@@ -332,7 +332,8 @@ void Hydro2::Initialize(int lev)
     Source_mf[lev]  ->setVal(0.0);
     Fsv_mf[lev]     ->setVal(0.0);
     Fw_mf[lev]      ->setVal(0.0); 
-    Ldot_mf[lev]    ->setVal(0.0); 
+    Ldot_mf[lev]    ->setVal(0.0);
+    Vap_dot_mf[lev] ->setVal(0.0); 
 
     // BOUNDRY CURVATURE AND THINGS
     kappas_mf[lev]  ->setVal(0.0);
@@ -376,7 +377,7 @@ void Hydro2::Mix(int lev)
         Set::Patch<const Set::Scalar>   M0_old      = momentum0_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   E0          = energy0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   E0_old      = energy0_old_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar>   T0          = T0_mf.Patch(lev, mfi);
+        //Set::Patch<const Set::Scalar>   T0          = T0_mf.Patch(lev, mfi);
         //Set::Patch<const Set::Scalar>   k0_thermal  = k0_thermal_mf.Patch(lev, mfi);
         //Set::Patch<const Set::Scalar>   h0_thermal  = h0_thermal_mf.Patch(lev, mfi);
 
@@ -389,7 +390,7 @@ void Hydro2::Mix(int lev)
         Set::Patch<const Set::Scalar>   M1_old      = momentum1_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   E1          = energy1_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   E1_old      = energy1_old_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar>   T1          = T1_mf.Patch(lev, mfi);
+        //Set::Patch<const Set::Scalar>   T1          = T1_mf.Patch(lev, mfi);
         //Set::Patch<const Set::Scalar>   k1_thermal  = k1_thermal_mf.Patch(lev, mfi);
         //Set::Patch<const Set::Scalar>   h1_thermal  = h1_thermal_mf.Patch(lev, mfi);
 
@@ -405,8 +406,8 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar>         E_vol_old   = energy_per_vol_old_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         E_mas_old   = energy_per_mas_old_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         T           = T_mf.Patch(lev, mfi);
-        //Set::Patch<Set::Scalar>         cp          = cp_mf.Patch(lev, mfi);
-        //Set::Patch<Set::Scalar>         cv          = cv_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar>         cp          = cp_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar>         cv          = cv_mf.Patch(lev, mfi);
         //Set::Patch<Set::Scalar>         k_thermal   = k_thermal_mf.Patch(lev, mfi);
         //Set::Patch<Set::Scalar>         h_thermal   = h_thermal_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         gammaf      = gamma_mf.Patch(lev, mfi);
@@ -483,10 +484,16 @@ void Hydro2::Mix(int lev)
             // Spalding Number
             Bm(i, j, k) = (Y(i, j, k) - Y_infinity) / (1 + Y_infinity + small);
             
+            // Constant Pressure Specific Heat
+            cp(i, j, k) = eta(i, j, k) * cp0 + (1.0 - eta(i, j, k)) * cp1;
+
+            // Constant Volume Specific Heat
+            cv(i, j, k) = eta(i, j, k) * cv0 + (1.0 - eta(i, j, k)) * cv1;
+
             // Temperature
-            //T(i, j, k) = T0(i, j, k) * eta(i, j, k) + T1(i, j, k) * (1.0 - eta(i, j, k));
-            Set::Scalar cv = eta(i, j, k) * cv0 + (1.0 - eta(i, j, k)) * cv1;
-            T(i, j, k) = UE_vol(i, j, k) / (rho(i, j, k) * cv + small);
+            // T(i, j, k) = T0(i, j, k) * eta(i, j, k) + T1(i, j, k) * (1.0 - eta(i, j, k));
+            T(i, j, k) = UE_vol(i, j, k) / (rho(i, j, k) * cv(i, j, k) + small); // Volume Specific
+            // T(i, j, k) = UE_vol(i, j, k) / (cv(i, j, k) + small); // Mass Specific
 
             // Thermal Conductivity
             //k_thermal(i, j, k) = eta(i, j, k) * k0_thermal(i, j, k) + (1.0 - eta(i, j, k)) * k1_thermal(i, j, k);
@@ -610,6 +617,8 @@ Hydro2::RHS(int lev,
         // SOURCE - ish
         Set::Patch<Set::Scalar> KE = KE_per_vol_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> UE = UE_per_vol_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> T = T_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
@@ -646,13 +655,19 @@ Hydro2::RHS(int lev,
             // Pressure
             p0_eff(i, j, k) = (B / A) / gammaf(i, j, k);
             press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref;                // Per Vol
-            press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE(i, j, k) * rho(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // Per Mass
+            //press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE(i, j, k) * rho(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // Per Mass
+            //press(i, j, k) = std::max(small, press(i, j, k));
+
+            // Constant Pressure Specific Heat
+            cp(i, j, k) = eta(i, j, k) * cp0 + (1.0 - eta(i, j, k)) * cp1;
+
+            // Constant Volume Specific Heat
+            cv(i, j, k) = eta(i, j, k) * cv0 + (1.0 - eta(i, j, k)) * cv1;
 
             // Temperature
-            Set::Scalar cp = eta(i, j, k) * cp0 + (1.0 - eta(i, j, k)) * cp1;
-            Set::Scalar cv = eta(i, j, k) * cv0 + (1.0 - eta(i, j, k)) * cv1;
-            T(i, j, k) = UE(i, j, k) / (rho(i, j, k) * cv + small); // For specific volume
-            //T(i, j, k) = UE(i, j, k) / (cv + small); // For specific mass
+            // T(i, j, k) = T0(i, j, k) * eta(i, j, k) + T1(i, j, k) * (1.0 - eta(i, j, k));
+            T(i, j, k) = UE(i, j, k) / (rho(i, j, k) * cv(i, j, k) + small); // Volume Specific
+            // T(i, j, k) = UE(i, j, k) / (cv(i, j, k) + small); // Mass Specific
 
             // Speed of sound:
             a(i, j, k) = sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k)));
@@ -670,7 +685,7 @@ Hydro2::RHS(int lev,
 
             // Curvature
             Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
-            if (grad_eta_mag < 1e-4)
+            if (false)//(grad_eta_mag < 1e-4)
             {
                 n_hat(0) = 0.0;
                 n_hat(1) = 0.0;
@@ -777,6 +792,8 @@ Hydro2::RHS(int lev,
         Set::Patch<const Set::Scalar> press = pressure_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> a = a_mf.Patch(lev, mfi);
 
+        Set::Patch<const Set::Scalar> cp = cp_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> cv = cv_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> T = T_mf.Patch(lev, mfi);
 
         Set::Patch<const Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
@@ -789,6 +806,7 @@ Hydro2::RHS(int lev,
         Set::Patch<Set::Scalar> Fsv = Fsv_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fw = Fw_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Ldot_ = Ldot_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> Vap_dot = Vap_dot_mf.Patch(lev, mfi);
 
         Set::Patch<const Set::Scalar> m0 = m0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> q0 = q_mf.Patch(lev, mfi);
@@ -886,7 +904,7 @@ Hydro2::RHS(int lev,
                                 dMpqrs += grad_lambda(q) - (2.0 / 3.0) * grad_mu(q);
                             }
 
-                            div_tau(p) += Mpqrs * hess_u(r, q, s);
+                            div_tau(p) += Mpqrs * hess_u(r, s, q);
                             Ldot(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
 
                             // Grad visc terms
@@ -908,6 +926,7 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "------------------------------------------------------------");
                 Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Viscosity solving:");
                 Util::ParallelMessage(INFO, "lev=", lev);
+                Util::ParallelMessage(INFO, "time=", time);
                 Util::ParallelMessage(INFO, "i=", i, "j=", j);
                 Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
                 Util::ParallelMessage(INFO, "Ldot=", Ldot(0), ", ", Ldot(1));
@@ -924,13 +943,17 @@ Hydro2::RHS(int lev,
             if (apply_surface_tension)
             {
                 // Optimization, only calc surface tension if on interface
-                if (grad_eta_mag > 0.01)
+                if (grad_eta_mag > 0.0)
                 {
                     Set::Scalar kappa = kappas(i, j, k, 0);
                     Set::Scalar sigma_eff = sigma;
                     Set::Scalar alpha = 6 * sqrt(2);
-                    Set::Scalar UFFDA = epsilon * alpha * grad_eta_mag * grad_eta_mag;
-                    Fsv_vector(0) = sigma_eff * kappa * n_hat(0) * UFFDA; // / (grad_eta_mag + small)); // / (DX[0] + small);
+                    //Set::Scalar UFFDA = epsilon * alpha * grad_eta_mag * grad_eta_mag;                // What I oringially had, did not reach max amplitude
+                    //Set::Scalar UFFDA = grad_eta_mag * grad_eta_mag / (epsilon * sqrt(2.0));          // Forces an interface thickness
+                    //Set::Scalar UFFDA = grad_eta_mag * grad_eta_mag;                                  // More natural
+                    Set::Scalar UFFDA = epsilon * grad_eta_mag / 0.02;           // Working the best
+                    //Set::Scalar UFFDA = grad_eta_mag;           // More natural
+                    Fsv_vector(0) = sigma_eff * kappa * n_hat(0) * UFFDA;    // / (grad_eta_mag + small)); // / (DX[0] + small);
                     Fsv_vector(1) = sigma_eff * kappa * n_hat(1) * UFFDA; // / (grad_eta_mag + small)); // / (DX[1] + small);
                 }
             }
@@ -945,6 +968,7 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Surface Tension solving:");
                 Util::ParallelMessage(INFO, "lev=", lev);
                 Util::ParallelMessage(INFO, "i=", i, "j=", j);
+                Util::ParallelMessage(INFO, "time=", time);
                 Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
                 Util::ParallelMessage(INFO, "Fsv_vector=", Fsv_vector(0), ", ", Fsv_vector(1));
                 Util::Abort(INFO);
@@ -972,25 +996,57 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Weight solving:");
                 Util::ParallelMessage(INFO, "lev=", lev);
                 Util::ParallelMessage(INFO, "i=", i, "j=", j);
+                Util::ParallelMessage(INFO, "time=", time);
                 Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
                 Util::ParallelMessage(INFO, "Fw_vector=", Fw_vector(0), ", ", Fw_vector(1));
                 Util::Abort(INFO);
             }
 
             // ------------------------------------------------------------
-            // Cahn-Hillard
+            // Conservative Allen-Cahn
             // ------------------------------------------------------------
             // d(eta)/dt = -u·grad(eta) + Mob * laplacian(mu)
             // Laplacian of Chemical Potential (conservative form)
+            /*
             Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
+            Set::Scalar phi = eta(i, j, k); // Dummy Variable bc it gets UGGGLLLYYYYY
             Set::Scalar kappa = kappas(i, j, k, 0);
             Set::Scalar Mob = a(i, j, k) * 0.7 * DX[0]; // Mob = u_max * epsilon,  (epsilon = 0.7*DX) Chiu & Lin (2011)
-
             Set::Scalar advection = -u.dot(grad_eta);
             //Set::Scalar diffusion = Mob * lap_mu_chem; // Allen-Cahn Alternative - it has to be curve fit
-            Set::Scalar phi = eta(i, j, k); // Dummy Variable bc it gets UGGGLLLYYYYY
             Set::Scalar diffusion = Mob * ( lap_eta - ((phi * (1.0-phi) * (1.0-2.0*phi)) / (epsilon*epsilon + small)) - (grad_eta_mag * kappa) ); // Chiu & Lin (2011) URL: https://www.sciencedirect.com/science/article/pii/S0021999110005243
-            Set::Scalar eta_dot_CH = advection + diffusion;
+            Set::Scalar eta_dot = advection + diffusion;
+            */
+
+            // ------------------------------------------------------------
+            // Cahn–Hilliard
+            // ------------------------------------------------------------
+            // d(eta)/dt = -u·grad(eta) + div( M*grad(mu) )
+            Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
+            //Set::Scalar Mob = a(i, j, k) * 0.7 * DX[0]; // Mob = u_max * epsilon
+            Set::Scalar Mob = 0.0;  // a(i, j, k) * epsilon * epsilon / DX[0]; // Mob = u_max * epsilon
+            Set::Scalar advection = -u.dot(grad_eta);
+            Set::Scalar diffusion = Mob * lap_mu_chem;
+            Set::Scalar eta_dot = advection + diffusion;
+
+            // DEBUG Tool
+            if ((eta_dot != eta_dot))
+            {
+                Util::ParallelMessage(INFO, "------------------------------------------------------------");
+                Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Boundry Evolution:");
+                Util::ParallelMessage(INFO, "lev=", lev);
+                Util::ParallelMessage(INFO, "i=", i, "j=", j);
+                Util::ParallelMessage(INFO, "time=", time);
+                Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
+                Util::ParallelMessage(INFO, "mu_chem_=", mu_chem_(i, j, k));
+                Util::ParallelMessage(INFO, "lap_mu_chem=", lap_mu_chem);
+                Util::ParallelMessage(INFO, "a=", a(i, j, k));
+                Util::ParallelMessage(INFO, "Mob=", Mob);
+                Util::ParallelMessage(INFO, "advection=", advection);
+                Util::ParallelMessage(INFO, "diffusion=", diffusion);
+                Util::ParallelMessage(INFO, "eta_dot=", eta_dot);
+                Util::Abort(INFO);
+            } 
 
             // ------------------------------------------------------------
             // Vaporization
@@ -999,6 +1055,8 @@ Hydro2::RHS(int lev,
             // NOTE: rho0 (OR eta = 1) SHOULD BE THE GAS PHASE
             Set::Scalar eta_dot_Vap = 0.0;
             Set::Scalar m_dot_Vap = 0.0;
+            Set::Vector M_dot_Vap = Set::Vector(0.0, 0.0);
+            Set::Scalar E_dot_Vap = 0.0;
             if (apply_vaporization == 1)
             {
                 //m_dot_Vap = (rho0(i, j, k) * Dv * (Bm(i, j, k) / (1.0 + Bm(i, j, k) + small)) * grad_eta_mag);
@@ -1037,17 +1095,26 @@ Hydro2::RHS(int lev,
                 // Scaling density choice: using rho_eta = rho_g makes RHS independent of mixture density
                 // This is consistent with the document recommendation
                 // Set::Scalar rho_eta = rho_g;
-                Set::Scalar rho_eta = rho(i, j, k);
+                Set::Scalar rho_eta = rho(i, j, k);//rho_g;
 
                 // Vaporization source for eta equation (Equation 7):
                 // source_vap = (1/epsilon) * (rho_g * D_v / rho_eta) * (B_M/(1+B_M)) * |grad(eta)|
                 Set::Scalar vap_coeff = (rho_g * Dv / rho_eta + small) * (B_M / (1.0 + B_M + small));
                 eta_dot_Vap = (1.0 / epsilon) * vap_coeff * grad_eta_mag;
 
-                // MASS FLUX
-                m_dot_Vap = rho_g * Dv * (B_M / (1.0 + B_M + small));
+                // FLUXES
+                m_dot_Vap = rho_g * Dv * (B_M / (1.0 + B_M + small));   // Mass Flux
+                M_dot_Vap = u * m_dot_Vap;                              // Momentum Flux
+                E_dot_Vap = u.dot(M_dot_Vap);                           // Energy Flux
+
+                
             }
-            
+            // Vaporization Trackers
+            Vap_dot(i, j, k, 0) = eta_dot_Vap;
+            Vap_dot(i, j, k, 1) = m_dot_Vap;
+            Vap_dot(i, j, k, 2) = M_dot_Vap(0);
+            Vap_dot(i, j, k, 3) = M_dot_Vap(1);
+            Vap_dot(i, j, k, 4) = E_dot_Vap;
 
 
             // Total:
@@ -1060,20 +1127,17 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "------------------------------------------------------------");
                 Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Total Force:");
                 Util::ParallelMessage(INFO, "lev=", lev);
+                Util::ParallelMessage(INFO, "time=", time);
                 Util::ParallelMessage(INFO, "i=", i, "j=", j);
                 Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
                 Util::ParallelMessage(INFO, "Total_Force=", Total_Force(0), ", ", Total_Force(1));
                 Util::Abort(INFO);
             }
 
-            Util::ParallelMessage(INFO, "Calculated Force=", Total_Force(0), ", ", Total_Force(1)); // DEBUG MESSAGE
-
-
-
-            Source(i, j, k, 0) = mdot0;
-            Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0);
-            Source(i, j, k, 2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1);
-            Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force);
+            Source(i, j, k, 0) = mdot0;// + m_dot_Vap;
+            Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0);// + M_dot_Vap(0);
+            Source(i, j, k, 2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1);// + M_dot_Vap(1);
+            Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force);// + E_dot_Vap;
 
             // Lagrange terms to enforce no-penetration
             Source(i, j, k, 1) = Source(i, j, k, 1) - lagrange * u.dot(grad_eta) * grad_eta(0);
@@ -1088,6 +1152,7 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "------------------------------------------------------------");
                 Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Total Source:");
                 Util::ParallelMessage(INFO, "lev=", lev);
+                Util::ParallelMessage(INFO, "time=", time);
                 Util::ParallelMessage(INFO, "i=", i, "j=", j);
                 Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
                 Util::ParallelMessage(INFO, "Source_rho=", Source(i, j, k, 0) );
@@ -1154,7 +1219,11 @@ Hydro2::RHS(int lev,
             
             if (rho(i, j, k) != rho(i, j, k) || M(i, j, k, 0) != M(i, j, k, 0) || E(i, j, k) != E(i, j, k) || gammaf(i, j, k) != gammaf(i, j, k) || press(i, j, k) != press(i, j, k))
             {
+                Util::ParallelMessage(INFO, "-------------------------------");
+                Util::ParallelMessage(INFO, "ERROR IN CONSERVATIVE VARIABLES");
+                Util::ParallelMessage(INFO, "time=", time);
                 Util::ParallelMessage(INFO, "NaN detected at i=", i, " j=", j);
+                Util::ParallelMessage(INFO, "eta=", eta(i, j, k));
                 Util::ParallelMessage(INFO, "rho=", rho(i, j, k));
                 Util::ParallelMessage(INFO, "M=", M(i, j, k, 0), M(i, j, k, 1));
                 Util::ParallelMessage(INFO, "E=", E(i, j, k));
@@ -1165,6 +1234,9 @@ Hydro2::RHS(int lev,
 
             if (rho(i - 1, j, k) != rho(i - 1, j, k) || rho(i + 1, j, k) != rho(i + 1, j, k) || rho(i, j - 1, k) != rho(i, j - 1, k) || rho(i, j + 1, k) != rho(i, j + 1, k))
             {
+                Util::ParallelMessage(INFO, "-------------------------------");
+                Util::ParallelMessage(INFO, "ERROR WITH GHOST CELLS");
+                Util::ParallelMessage(INFO, "time=", time);
                 Util::ParallelMessage(INFO, "NaN in neighbor at i=", i, " j=", j);
                 Util::Abort(INFO);
             }
@@ -1178,9 +1250,20 @@ Hydro2::RHS(int lev,
             }
             catch (...)
             {
+                Util::ParallelMessage(INFO, "-------------------------------");
+                Util::ParallelMessage(INFO, "ERROR IN RIEMANN SOLVERS");
                 Util::ParallelMessage(INFO, "lev=", lev);
                 Util::ParallelMessage(INFO, "i=", i, "j=", j);
                 Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
+
+                Util::ParallelMessage(INFO, "x_states[0]=", x_states[0]);
+                Util::ParallelMessage(INFO, "x_states[1]=", x_states[1]);
+                Util::ParallelMessage(INFO, "x_states[2]=", x_states[2]);
+
+                Util::ParallelMessage(INFO, "y_states[0]=", y_states[0]);
+                Util::ParallelMessage(INFO, "y_states[1]=", y_states[1]);
+                Util::ParallelMessage(INFO, "y_states[2]=", y_states[2]);
+
                 Util::Abort(INFO);
             }
 
@@ -1216,7 +1299,7 @@ Hydro2::RHS(int lev,
             }
             else
             {
-                eta_rhs(i, j, k) = eta_dot_CH + eta_dot_Vap;
+                eta_rhs(i, j, k) = eta_dot + eta_dot_Vap;
             }
 
             // ERROR CHECKING
@@ -1250,7 +1333,7 @@ Hydro2::RHS(int lev,
                 Util::Abort(INFO);
             }
 
-            if (time <= 1e-7 && i == 0 && j == 0)
+            if ((time <= 1e-7 && i == 0 && j == 0) && false)
             { // First timestep~ish~, first cell
                 Util::ParallelMessage(INFO, "=== FIRST CELL DIAGNOSTICS ===");
                 Util::ParallelMessage(INFO, "eta = ", eta(i, j, k));
@@ -1381,10 +1464,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> Source = Source_mf.Patch(lev, mfi);
 
 
-        Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
+        //Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
+        //Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
+        //Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
+        //Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
 

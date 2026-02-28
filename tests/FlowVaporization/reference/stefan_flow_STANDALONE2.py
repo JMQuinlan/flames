@@ -7,11 +7,11 @@ import matplotlib as mpl
 # -----------------------------
 # Physical parameters
 # -----------------------------
-D_v = 2e-5
-rho_liq = 100.0
-rho_gas = 1.2
+D_v = 2e-1
+rho_liq = 10.0
+rho_gas = 1.0
 
-Y_s = 0.01
+Y_s = 0.1
 Y_inf = 0.0
 
 # -----------------------------
@@ -31,7 +31,11 @@ print("Lambda =", lam)
 # Domain and time
 # -----------------------------
 x = np.linspace(0, 0.04, 500)
-times = np.linspace(0.01, 2.0, 400)
+times = np.linspace(0.01, 20.0, 400)
+
+# ============================================================
+# PLOT 1: Mass fraction profiles (unchanged)
+# ============================================================
 
 fig, ax = plt.subplots(figsize=(8, 5))
 
@@ -58,6 +62,25 @@ ax.set_ylabel("Vapor Mass Fraction")
 ax.set_title("Transient 1D Stefan Evaporation")
 ax.set_ylim(0, Y_s * 1.05)
 ax.grid(True)
+
+plt.tight_layout()
+plt.show()
+
+# ============================================================
+# PLOT 2: Interface position vs time (NEW)
+# ============================================================
+
+# Compute interface position history
+s_history = 2.0 * lam * np.sqrt(D_v * times)
+
+fig2, ax2 = plt.subplots(figsize=(8, 5))
+
+ax2.plot(times, s_history, 'b-', linewidth=2)
+
+ax2.set_xlabel("Time (s)")
+ax2.set_ylabel("Interface Position s(t) (m)")
+ax2.set_title("Interface Motion: s(t) = 2*lambda*sqrt(D t)")
+ax2.grid(True)
 
 plt.tight_layout()
 plt.show()

@@ -25,8 +25,8 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-0
 dynamictimestep.min = 1e-12
-cfl = 0.1                      # little more aggressive
-cfl_v = 0.1
+cfl = 0.6                      # little more aggressive
+cfl_v = 0.6
 
 ### DIMENSIONS ###
 geometry.prob_lo = 0.0 -0.0625 0.0
@@ -61,7 +61,7 @@ density0.ic.type = expression
 density0.ic.expression.region0 = "1.0"
 
 density1.ic.type = expression
-density1.ic.expression.region0 = "100.0"
+density1.ic.expression.region0 = "10.0"
 
 # Velocities
 velocity0.ic.type = expression
@@ -74,10 +74,10 @@ velocity1.ic.expression.region1 = "0.0"
 
 # Pressures
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "101325"
+pressure0.ic.expression.region0 = "10"
 
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "101325"
+pressure1.ic.expression.region0 = "10"
 
 # Temperatures
 temperature0.ic.type = expression
@@ -110,7 +110,7 @@ h1_thermal.ic.expression.region0 = "4179.0"
 sigma = 72.8                   # RE-ENABLED
 
 # Vapor Diffusivity
-Dv = "2.0e-5"                  #RE-ENABLED
+Dv = "2.0e-1"                  #RE-ENABLED
 
 # Reference pressure
 pref = 0.0

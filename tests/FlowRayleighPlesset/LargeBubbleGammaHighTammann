@@ -6,11 +6,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/AirBubble_2Bar_in_Water_1Bar
-#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/LargeBubbleRPE_2_Bar.GammaHigh_SmallEta_HLLETamman
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTwoPhase/RPE
-#plot_file = tests/LargeBubbleRPE_2_Bar.GammaHigh
-#plot_file = /mmfs1/home/jquinlan/runs/RDE/droplet/droplet_20250529/output_Bubble
+plot_file = ./tests/RayleighPlesset/output_RayleighPlesset
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/RayleighPlesset/output_RayleighPlesset
 
 
 ### MESHING ###
@@ -19,8 +16,8 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 250
 amr.grid_eff = 0.8
-amr.max_level = 7
-amr.n_cell = 32 32
+amr.max_level = 6
+amr.n_cell = 16 16
 
 ### TIME STEPING ###
 ## Static:
@@ -30,7 +27,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-5
 dynamictimestep.min = 1e-12
-cfl = 0.5e-1
+cfl = 0.05
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.10 -0.10 0.0 # [ m ]
@@ -93,17 +90,10 @@ temperature1.ic.type = expression
 temperature1.ic.expression.region0 = "293.15"  # 20 C
 
 # Thermodynamic properties
-cp0.ic.type = expression
-cp0.ic.expression.region0 = "4179.0"  # Water specific heat [J/kg-K]
-
-cp1.ic.type = expression
-cp1.ic.expression.region0 = "1005.0"  # Air specific heat [J/kg-K]
-
-cv0.ic.type = expression
-cv0.ic.expression.region0 = "4179.0/7.15"  # Water cv = cp/gamma
-
-cv1.ic.type = expression
-cv1.ic.expression.region0 = "717.86"  # Air cv = cp/gamma
+cp0 = "4179.0"  # Water specific heat [J/kg-K]
+cp1 = "1005.0"  # Air specific heat [J/kg-K]
+cv0 = "4179.0/7.15"  # Water cv = cp/gamma
+cv1 = "717.86"  # Air cv = cp/gamma
 
 # Thermal conductivities
 k0_thermal.ic.type = expression
@@ -143,7 +133,7 @@ momentum.bc.type.yhi = neumann neumann
 
 
 ### REFINEMENT CRITERIA ###
-eta_refinement_criterion = 0.000001
+eta_refinement_criterion = 0.0001
 omega_refinement_criterion = 10.55
 p_refinement_criterion = 1e+4
 rho_refinement_criterion = 1e+2
@@ -163,8 +153,5 @@ Spec_Vol = 1
 grav = 9.81
 
 ### DEBUGGING ### 
-# Used for testing of the model
-Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
-kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
-scheme = 0		   # Valid Entries: 0:"Forward Euler" / 1:"SSPRK3" / 2:"RK4"
-Limiter = 0        # Valid Entries: 0:"None" / 1:"MinMod" / 2:"Van Leer"
+Riemann_Solver.type = hllc
+kappa_method = 1   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
