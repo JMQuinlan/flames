@@ -1,0 +1,9 @@
+This folder contains CO2 Depressurization Tests w/o and w/ Vaporization, as outlined in the following paper
+
+https://hal.science/hal-04691261v1/document
+
+Anil Gun, Yannick Hoarau, Eric Goncalves da Silva. Numerical simulation of fast depressurization
+using 4-equation and 6-equation models. 15th International Conference on Hydrodynamics (ICHD
+2024), Sep 2024, Rome, Italy. ffhal-04691261f
+
+This is simply a 1D unit test to verify our vaporization model
