@@ -96,7 +96,7 @@ TIME_STEP = 1  # Sample every Nth timestep (1=all, 2=every other, 5=every 5th, e
 
 # File paths
 #amrex_output_dir = r'../../../bin/tests/FlowShockDroplet/output_ShockDroplet'
-amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_ShockDroplet'
+amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet'
 output_folder = './ShockDroplet_Analysis'
 
 # Physical parameters
@@ -115,10 +115,10 @@ D_DROPLET_INITIAL = 0.01
 P_ATM = 1.01325e5
 
 # Domain parameters
-X_MIN = -0.025
-X_MAX = 0.075
-Y_MIN = -0.025
-Y_MAX = 0.025
+X_MIN = -0.005
+X_MAX = 0.015
+Y_MIN = -0.005
+Y_MAX = 0.005
 DROPLET_CENTER_X = 0.0
 DROPLET_CENTER_Y = 0.0
 

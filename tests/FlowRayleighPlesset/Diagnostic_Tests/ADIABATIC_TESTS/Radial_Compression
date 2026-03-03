@@ -1,0 +1,195 @@
+# ==============================================================================
+# ADIABATIC TEST 3: RADIAL COMPRESSION (2D CYLINDRICAL BUBBLE)
+# ==============================================================================
+# Purpose: Test 2D cylindrical adiabatic relation p_B ~ R^(-2*gamma)
+# Method: Pure gas bubble with prescribed radial compression velocity
+# Expected: p_B = p_B0 * (R0/R)^(2*gamma), gas mass conserved
+# ==============================================================================
+
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/Adiabatic/TEST3_Radial_Compression
+amr.plot_dt = 2e-4
+
+### MESHING ###
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.regrid_int = 50
+amr.grid_eff = 0.8
+amr.max_level = 3
+amr.n_cell = 256 256
+
+### TIME STEPPING ###
+timestep = 1e-6
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1e-0
+dynamictimestep.min = 1e-12
+cfl = 0.3
+
+### DIMENSIONS ###
+geometry.prob_lo = -0.50 -0.50 0.0
+geometry.prob_hi =  0.50  0.50 0.0
+geometry.is_periodic = 0 0 0
+stop_time = 5e-3
+
+### ETA INITIAL CONDITIONS ###
+# Pure gas everywhere (no interface, no liquid)
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.004
+eta.ic.expression.constant.R0 = 0.02
+eta.ic.expression.region0 = "0.0"
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+# Ideal Gas EOS
+gamma0 = 1.4
+gamma1 = 1.4
+
+# Uniform gas density everywhere
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+# Radial compression velocity field: u_r = -alpha * r
+# This creates uniform radial compression
+# u_x = -alpha * x, u_y = -alpha * y
+# div(u) = -2*alpha (2D radial compression)
+velocity0.ic.type = expression
+velocity0.ic.expression.constant.alpha = 5.0
+velocity0.ic.expression.region0 = "-alpha * x"
+velocity0.ic.expression.region1 = "-alpha * y"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.alpha = 5.0
+velocity1.ic.expression.region0 = "-alpha * x"
+velocity1.ic.expression.region1 = "-alpha * y"
+
+# Initial pressure - higher in center (like bubble interior)
+# Uniform for simplicity
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "550.0"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "550.0"
+
+# Specific Heats
+cp0 = "1000.0"
+cp1 = "1000.0"
+cv0 = "1000.0/1.4"
+cv1 = "1000.0/1.4"
+
+# Stiffened pressure
+p0_0 = 0.0
+p0_1 = 0.0
+
+# ZERO VISCOSITY - pure inviscid adiabatic flow
+mu0 = 0.0
+mu0_b = 0.0
+mu1 = 0.0
+mu1_b = 0.0
+
+# ZERO SURFACE TENSION - no interface
+sigma = 0.0
+pref = 0.0
+
+### BOUNDARY CONDITIONS ###
+# Neumann boundaries (allow flow out)
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion = 1e+10
+omega_refinement_criterion = 1e+10
+p_refinement_criterion = 1e+2
+rho_refinement_criterion = 1e+10
+gradu_refinement_criterion = 1e+1
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 0
+apply_buoyancy = 0
+apply_weight = 0
+Spec_Vol = 1
+grav = 0.0
+
+### DEBUGGING ###
+Riemann_Solver.type = hllc
+kappa_method = 1
+
+# ==============================================================================
+# DIAGNOSTIC INSTRUCTIONS:
+# 1. Extract p(r,t) and rho(r,t) as functions of radius from center
+# 2. Compute effective radius: R_eff = sqrt(A/pi) where A is domain area
+# 3. Verify 2D cylindrical relation: p ~ R^(-2*gamma) = R^(-2.8)
+# 4. Check gas mass conservation: m_gas = integral(rho * dA) = constant
+# 5. Compute effective exponent: n_eff = d(ln p) / d(ln R)
+#
+# ANALYTICAL SOLUTION:
+# With u_r = -alpha * r, the radial compression gives:
+#   R(t) = R0 * exp(-alpha * t)
+#   For 2D cylindrical: p_B(t) = p_B0 * (R0/R)^(2*gamma)
+#                               = p_B0 * exp(2*gamma*alpha*t)
+#   
+# With alpha = 5.0 s^-1, gamma = 1.4, p_B0 = 550 Pa:
+#   At t = 5 ms = 0.005 s:
+#   R(0.005) = 0.02 * exp(-5*0.005) = 0.02 * exp(-0.025) = 0.0195 m
+#   p_B(0.005) = 550 * exp(2*1.4*5*0.005) = 550 * exp(0.07) = 590 Pa
+#
+# EXPECTED BEHAVIOR:
+# - Radial compression (domain shrinks)
+# - Pressure increases as R^(-2.8) (2D cylindrical)
+# - Density increases to conserve mass
+# - Radial symmetry maintained
+# - n_eff = -2*gamma = -2.8 (NOT -3*gamma = -4.2 which is 3D spherical)
+#
+# FAILURE MODES:
+# - n_eff = -3*gamma -> using 3D spherical formula instead of 2D cylindrical
+# - Gas mass not conserved -> leaking through boundaries or numerical diffusion
+# - Asymmetry appears -> radial symmetry broken
+# - Pressure doesn't follow power law -> EOS coupling broken in radial geometry
+#
+# CONNECTION TO YOUR BUBBLE PROBLEM:
+# Looking at your pressure plot (02_Pressure_vs_Time.png), the analytical
+# curve (blue) follows 2D adiabatic relation but numerical (red) drops from
+# 550 Pa to ~500 Pa by 4 ms and stays flat.
+#
+# If this test PASSES:
+#   -> Your 2D cylindrical adiabatic relation is correct
+#   -> Problem is at the gas-liquid interface
+#   -> Check: interface thickness, pressure jump, gas mass leaking to liquid
+#
+# If this test FAILS:
+#   -> Radial geometry handling is broken
+#   -> Check: using wrong exponent (3*gamma vs 2*gamma)
+#   -> Check: radial mass conservation
+#   -> Check: boundary conditions allowing mass loss
+#
+# KEY DIAGNOSTIC:
+# Plot log(p) vs log(R). Slope should be -2.8 for 2D cylindrical.
+# If slope is -4.2, you're using 3D spherical formula.
+# If slope is shallower, gas mass is being lost.
+# ==============================================================================
