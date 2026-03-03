@@ -69,11 +69,8 @@ pressure0.ic.expression.region0 = "p_L"
 temperature0.ic.type = expression
 temperature0.ic.expression.region0 = "294.0"
 
-cp0.ic.type = expression
-cp0.ic.expression.region0 = "1.4"
-
-cv0.ic.type = expression
-cv0.ic.expression.region0 = "1.0"
+cp0 = "1.4"
+cv0 = "1.0"
 
 k0_thermal.ic.type = expression
 k0_thermal.ic.expression.region0 = "0.6"
@@ -95,20 +92,8 @@ pressure1.ic.type = expression
 pressure1.ic.expression.constant.p_R = "0.1"
 pressure1.ic.expression.region0 = "p_R"
 
-temperature1.ic.type = expression
-temperature1.ic.expression.region0 = "294.0"
-
-cp1.ic.type = expression
-cp1.ic.expression.region0 = "1.4"
-
-cv1.ic.type = expression
-cv1.ic.expression.region0 = "1.0"
-
-k1_thermal.ic.type = expression
-k1_thermal.ic.expression.region0 = "0.6"
-
-h1_thermal.ic.type = expression
-h1_thermal.ic.expression.region0 = "1.0"
+cp1 = "1.4"
+cv1 = "1.0"
 
 ### ETA BC  ###
 pf.eta.bc.type.xlo = neumann
@@ -140,4 +125,4 @@ rho_refinement_criterion   = 100000.0
 p_refinement_criterion     = 100000.0
 
 Spec_Vol = 1
-solver.type = hllc
+Riemann_Solver.type = hllc

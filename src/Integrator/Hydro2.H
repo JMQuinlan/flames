@@ -22,7 +22,8 @@
 // #include "Solver/Local/FluidRiemann/HLLCE.H"
 // #include "Solver/Local/FluidRiemann/HLLCE_WENO5.H"
 // #include "Solver/Local/FluidRiemann/PartiallyParabolic.H"
-//
+#include "Solver/Local/FluidRiemann/Upwind.H"
+
 // Limiters
 // #include "Solver/Local/Limiter/Minmod.H"
 // #include "Solver/Local/Limiter/VanLeer.H"

@@ -1,0 +1,186 @@
+# ==============================================================================
+# ADIABATIC TEST 2: HOMOGENEOUS BOX COMPRESSION
+# ==============================================================================
+# Purpose: Test pure adiabatic compression with uniform velocity divergence
+# Method: Uniform gas with constant divergence field (div u = constant)
+# Expected: rho(t) = rho_0 * exp(-div_u * t), p/rho^gamma = constant
+# ==============================================================================
+
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/Adiabatic/TEST2_Homogeneous_Compression
+amr.plot_dt = 1e-3
+
+### MESHING ###
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.regrid_int = 1000
+amr.grid_eff = 0.8
+amr.max_level = 0
+amr.n_cell = 64 64
+
+### TIME STEPPING ###
+timestep = 1e-6
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1e-0
+dynamictimestep.min = 1e-12
+cfl = 0.8
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 1.0 1.0 0.0
+geometry.is_periodic = 0 0 0
+stop_time = 100e-3
+
+### ETA INITIAL CONDITIONS ###
+# Uniform eta = 0 (all gas, phase 1)
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.001
+eta.ic.expression.region0 = "0.0"
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+# Ideal Gas EOS
+gamma0 = 1.4
+gamma1 = 1.4
+
+# Uniform density (single phase - all gas)
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+# Uniform velocity divergence field
+# div(u) = du/dx + dv/dy = constant
+# Simple choice: u = -0.5*x, v = -0.5*y gives div(u) = -1.0
+# This creates uniform compression at rate 1.0 per second
+velocity0.ic.type = expression
+velocity0.ic.expression.constant.rate = 0.5
+velocity0.ic.expression.region0 = "-rate * x"
+velocity0.ic.expression.region1 = "-rate * y"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.rate = 0.5
+velocity1.ic.expression.region0 = "-rate * x"
+velocity1.ic.expression.region1 = "-rate * y"
+
+# Uniform base pressure
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "1.0"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "1.0"
+
+# Specific Heats
+cp0 = "1000.0"
+cp1 = "1000.0"
+cv0 = "1000.0/1.4"
+cv1 = "1000.0/1.4"
+
+# Stiffened pressure
+p0_0 = 0.0
+p0_1 = 0.0
+
+# ZERO VISCOSITY - pure inviscid adiabatic flow
+mu0 = 0.0
+mu0_b = 0.0
+mu1 = 0.0
+mu1_b = 0.0
+
+# ZERO SURFACE TENSION - no interface
+sigma = 0.0
+pref = 0.0
+
+### BOUNDARY CONDITIONS ###
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion = 1e+10
+omega_refinement_criterion = 1e+10
+p_refinement_criterion = 1e+10
+rho_refinement_criterion = 1e+10
+gradu_refinement_criterion = 1e+10
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 0
+apply_buoyancy = 0
+apply_weight = 0
+Spec_Vol = 1
+grav = 0.0
+
+### DEBUGGING ###
+Riemann_Solver.type = hllc
+kappa_method = 1
+
+# ==============================================================================
+# DIAGNOSTIC INSTRUCTIONS:
+# 1. Extract rho(t) and p(t) (should be spatially uniform)
+# 2. Verify density evolution: rho(t) = rho_0 * exp(-div_u * t)
+#    where div_u = -1.0 s^-1 for this setup
+# 3. Compute isentropic invariant: S = p / rho^gamma
+# 4. Check if S remains constant in time
+# 5. Compute effective gamma: gamma_eff = d(ln p) / d(ln rho)
+#
+# ANALYTICAL SOLUTION:
+# With u = -0.5*x, v = -0.5*y:
+#   div(u) = -0.5 - 0.5 = -1.0 s^-1
+#   rho(t) = rho_0 * exp(1.0 * t) = 1.0 * exp(t)
+#   p(t) = p_0 * (rho/rho_0)^gamma = 1.0 * exp(1.4 * t)
+#
+# At t = 10 ms = 0.01 s:
+#   rho(0.01) = exp(0.01) = 1.01005
+#   p(0.01) = exp(0.014) = 1.01408
+#
+# EXPECTED BEHAVIOR:
+# - Density increases exponentially: rho ~ exp(t)
+# - Pressure increases faster: p ~ exp(gamma * t)
+# - S = p/rho^gamma remains constant = 1.0
+# - gamma_eff = 1.4 (your input gamma)
+# - NO spatial variation (perfectly uniform)
+#
+# FAILURE MODES:
+# - rho doesn't follow exponential -> mass conservation broken
+# - S drifts with time -> energy equation wrong
+# - gamma_eff != 1.4 -> wrong polytropic relation
+# - gamma_eff ~ 1.0 -> isothermal instead of adiabatic
+# - Spatial variation appears -> numerical instability
+#
+# CONNECTION TO YOUR BUBBLE PROBLEM:
+# Your pressure plot shows numerical pressure dropping from 550 Pa to 500 Pa
+# by 4 ms, while analytical stays elevated. This suggests:
+#
+# If this test FAILS:
+#   -> Fundamental adiabatic EOS problem
+#   -> Gas behaving isothermally (gamma_eff ~ 1.0)
+#   -> Energy equation not coupled to density correctly
+#
+# If this test PASSES but bubble test fails:
+#   -> Issue is specific to radial geometry or interface
+#   -> Check: 2D cylindrical vs 3D spherical exponent (2*gamma vs 3*gamma)
+#   -> Check: gas mass conservation at diffuse interface
+# ==============================================================================

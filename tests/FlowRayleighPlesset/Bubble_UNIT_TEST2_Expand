@@ -1,0 +1,163 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/RayleighPlesset/output_RayleighPlesset_UNIT_TEST
+
+### MESHING ###
+amr.plot_dt = 5e-4
+#amr.plot_int = 1
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.regrid_int = 50
+amr.grid_eff = 0.8
+amr.max_level = 3
+amr.n_cell = 32 32
+
+### TIME STEPING ###
+timestep  = 1e-6
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1e-0
+dynamictimestep.min = 1e-12
+cfl = 0.5
+
+### DIMENSIONS ###
+geometry.prob_lo = -0.10 -0.10 0.0
+geometry.prob_hi =  0.10  0.10 0.0
+geometry.is_periodic = 0 0 0
+
+stop_time = 50e-3
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.0005
+eta.ic.expression.constant.R0 = 0.02
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+
+### HYDRO INITIAL CONDITIONS ###
+
+# ----------------------------
+# Ideal Gas EOS (NO TAMMANN)
+# ----------------------------
+
+gamma0 = 1.4
+gamma1 = 1.4
+
+# ----------------------------
+# Density ratio 1 : 10
+# ----------------------------
+
+density0.ic.type = expression
+density0.ic.expression.region0 = "10.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+# ----------------------------
+# Initial velocities (rest)
+# ----------------------------
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# ----------------------------
+# Lowest stable pressure
+# ----------------------------
+
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "500.0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "1000.0"
+
+# ----------------------------
+# Specific Heats
+# ----------------------------
+
+cp0 = "1000.0"
+cp1 = "1000.0"
+cv0 = "1000.0/1.4"
+cv1 = "1000.0/1.4"
+
+# ----------------------------
+# Stiffened pressure
+# ----------------------------
+p0_0 = 0.0
+p0_1 = 0.0
+
+# ----------------------------
+# Viscosity
+# ----------------------------
+
+mu0 = 0.1
+mu0_b = 0.0
+mu1 = 0.0
+mu1_b = 0.0
+
+# ----------------------------
+# Surface tension ON
+# ----------------------------
+
+sigma = 7.28
+
+pref = 0.0
+
+### BOUNDARY CONDITIONS ###
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+#momentum.bc.type.xhi = dirichlet dirichlet
+#momentum.bc.type.xlo = dirichlet dirichlet
+#momentum.bc.type.yhi = dirichlet dirichlet
+#momentum.bc.type.ylo = dirichlet dirichlet
+#momentum.bc.val.xhi = 0.0 0.0
+#momentum.bc.val.xlo = 0.0 0.0
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion = 1e-4
+omega_refinement_criterion = 10.55
+p_refinement_criterion = 1e+2
+rho_refinement_criterion = 1e+10
+gradu_refinement_criterion = 1e+1
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 1
+apply_buoyancy = 0
+apply_weight = 0
+Spec_Vol = 1
+grav = 0.0
+
+### DEBUGGING ###
+Riemann_Solver.type = hllc
+kappa_method = 1
+

@@ -23,6 +23,8 @@
 //#include "Solver/Local/FluidRiemann/HLLCE.H"
 //#include "Solver/Local/FluidRiemann/HLLCE_WENO5.H"
 //#include "Solver/Local/FluidRiemann/PartiallyParabolic.H"
+#include "Solver/Local/FluidRiemann/Upwind.H"
+
 // Limiters
 //#include "Solver/Local/Limiter/Minmod.H"
 //#include "Solver/Local/Limiter/VanLeer.H"
@@ -257,7 +259,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                       //Solver::Local::FluidRiemann::PartiallyParabolic, // WIP - very outdated - never verified
                       Solver::Local::FluidRiemann::HLLC_Oomar_Jaiman, // Can't remember if this has been verified
                       Solver::Local::FluidRiemann::HLLC_All_Mach,
-                      Solver::Local::FluidRiemann::HLLC_All_Mach_Furfaro
+                      Solver::Local::FluidRiemann::HLLC_All_Mach_Furfaro,
+                      Solver::Local::FluidRiemann::Upwind
     >("Riemann_Solver", value.riemannsolver);
     Util::Message(INFO, "Selected Riemann solver: ", typeid(*value.riemannsolver).name());
 
@@ -1116,10 +1119,10 @@ Hydro2::RHS(int lev,
                 Util::Abort(INFO);
             }
 
-            Source(i, j, k, 0) = mdot0;// + m_dot_Vap;
-            Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0);// + M_dot_Vap(0);
-            Source(i, j, k, 2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1);// + M_dot_Vap(1);
-            Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force);// + E_dot_Vap;
+            Source(i, j, k, 0) = mdot0 + m_dot_Vap;
+            Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0) + M_dot_Vap(0);
+            Source(i, j, k, 2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1) + M_dot_Vap(1);
+            Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force) + E_dot_Vap;
 
             // Lagrange terms to enforce no-penetration
             Source(i, j, k, 1) = Source(i, j, k, 1) - lagrange * u.dot(grad_eta) * grad_eta(0);
@@ -1250,15 +1253,6 @@ Hydro2::RHS(int lev,
             }
 
             // UPDATE MIXED FLUID VARIABLES
-
-            // Update Source Terms to account for moving boundry
-            // Delete me if does not worky :(
-            // Source(i, j, k, 0) = Source(i, j, k, 0) - rho(i, j, k) * deta_dt;
-            // Source(i, j, k, 1) = Source(i, j, k, 1) - M(i, j, k, 0) * deta_dt;
-            // Source(i, j, k, 2) = Source(i, j, k, 2) - M(i, j, k, 1) * deta_dt;
-            // Source(i, j, k, 3) = Source(i, j, k, 3) - E_vol(i, j, k) * deta_dt;
-
-            // DEBUGGING:
             rho_flux(i, j, k) = (flux_xlo.mass - flux_xhi.mass) / (DX[0]) + (flux_ylo.mass - flux_yhi.mass) / (DX[1]);
             M_flux(i, j, k, 0) = (flux_xlo.momentum_normal - flux_xhi.momentum_normal) / (DX[0]) + (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / (DX[1]);
             M_flux(i, j, k, 1) = (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / (DX[0]) + (flux_ylo.momentum_normal - flux_yhi.momentum_normal) / (DX[1]);
