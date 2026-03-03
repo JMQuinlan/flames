@@ -24,6 +24,8 @@
 //#include "Solver/Local/FluidRiemann/HLLCE_WENO5.H"
 //#include "Solver/Local/FluidRiemann/PartiallyParabolic.H"
 #include "Solver/Local/FluidRiemann/Upwind.H"
+#include "Solver/Local/FluidRiemann/Lax_Friedrich.H"
+
 
 // Limiters
 //#include "Solver/Local/Limiter/Minmod.H"
@@ -260,7 +262,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                       Solver::Local::FluidRiemann::HLLC_Oomar_Jaiman, // Can't remember if this has been verified
                       Solver::Local::FluidRiemann::HLLC_All_Mach,
                       Solver::Local::FluidRiemann::HLLC_All_Mach_Furfaro,
-                      Solver::Local::FluidRiemann::Upwind
+                      Solver::Local::FluidRiemann::Upwind,
+                      Solver::Local::FluidRiemann::Lax_Friedrich
     >("Riemann_Solver", value.riemannsolver);
     Util::Message(INFO, "Selected Riemann solver: ", typeid(*value.riemannsolver).name());
 

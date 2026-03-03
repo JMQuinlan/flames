@@ -23,6 +23,7 @@
 // #include "Solver/Local/FluidRiemann/HLLCE_WENO5.H"
 // #include "Solver/Local/FluidRiemann/PartiallyParabolic.H"
 #include "Solver/Local/FluidRiemann/Upwind.H"
+#include "Solver/Local/FluidRiemann/Lax_Friedrich.H"
 
 // Limiters
 // #include "Solver/Local/Limiter/Minmod.H"
