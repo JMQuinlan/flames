@@ -66,3 +66,4 @@ alamo.py
 *.eps
 *.png
 *.gif
+logs/
