@@ -3,8 +3,14 @@
 #@ dim=2
 
 ### OUTPUT ###
-#plot_file = ./tests/FlowRiemannUnitTests/output_Toro1a_HLLC_epsilon_1e-3
-plot_file = ./tests/FlowRiemannUnitTests/output_Toro1a
+plot_file = ./tests/FlowRiemannUnitTests/output_Toro1a_HLLCE_epsilon_1e-1
+#plot_file = ./tests/FlowRiemannUnitTests/output_Toro1a
+Riemann_Solver.type = hllce
+
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = "1e-1"
+eta.ic.expression.region0 = "1.0 - (0.5 * (1.0 + tanh(x / epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
 
 amr.plot_int = 100
 
@@ -23,13 +29,6 @@ geometry.is_periodic = 0 0 0
 ### TIME STEP ###
 timestep  = 4.0e-4
 stop_time = 0.25
-
-### ETA IC - Hyperbolic Tangent Profile ###
-eta.ic.type = expression
-eta.ic.expression.constant.epsilon = "1e-3"
-eta.ic.expression.region0 = "1.0 - (0.5 * (1.0 + tanh(x / epsilon)))"
-epsilon = eta.ic.expression.constant.epsilon  # Interface thickness parameter
-
 
 m0.ic.constant.value = 0.0
 u0.ic.constant.value = 0.0
@@ -71,12 +70,6 @@ temperature0.ic.expression.region0 = "294.0"
 
 cp0 = "1.4"
 cv0 = "1.0"
-
-k0_thermal.ic.type = expression
-k0_thermal.ic.expression.region0 = "0.6"
-
-h0_thermal.ic.type = expression
-h0_thermal.ic.expression.region0 = "1.4"
 
 ### IC State - Fluid 1 (Right side, x > 0) ###
 density1.ic.type = expression
@@ -125,4 +118,4 @@ rho_refinement_criterion   = 100000.0
 p_refinement_criterion     = 100000.0
 
 Spec_Vol = 1
-Riemann_Solver.type = hllc
+kappa_method = 1

@@ -20,7 +20,7 @@
 #include "Solver/Local/FluidRiemann/HLLC_All_Mach_Furfaro.H"
 //#include "Solver/Local/FluidRiemann/HLLC_WENO5.H"
 //#include "Solver/Local/FluidRiemann/HLLE_WENO5.H"
-//#include "Solver/Local/FluidRiemann/HLLCE.H"
+#include "Solver/Local/FluidRiemann/HLLCE.H"
 //#include "Solver/Local/FluidRiemann/HLLCE_WENO5.H"
 //#include "Solver/Local/FluidRiemann/PartiallyParabolic.H"
 #include "Solver/Local/FluidRiemann/Upwind.H"
@@ -256,7 +256,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<Solver::Local::FluidRiemann::Roe,
                       Solver::Local::FluidRiemann::HLLE,
                       Solver::Local::FluidRiemann::HLLC,
-                      //Solver::Local::FluidRiemann::HLLCE, // WIP - Need to update
+                      Solver::Local::FluidRiemann::HLLCE,
                       //Solver::Local::FluidRiemann::HLLCE_WENO5, // Never verified but updated
                       //Solver::Local::FluidRiemann::PartiallyParabolic, // WIP - very outdated - never verified
                       Solver::Local::FluidRiemann::HLLC_Oomar_Jaiman, // Can't remember if this has been verified

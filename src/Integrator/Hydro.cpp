@@ -225,7 +225,7 @@ void Hydro::Initialize(int lev)
 
     Source_mf[lev]   ->setVal(0.0);
 
-    if (managed)  { if (lev >= mixed.size()) mixed.push_back(false);}
+    if (managed)  { if (lev >= (int)mixed.size()) mixed.push_back(false);}
     else  Mix(lev);
 }
 
@@ -265,7 +265,7 @@ void Hydro::Mix(int lev)
             M_old(i, j, k, 1) = M(i, j, k, 1);
 
             E(i, j, k) =
-                (0.5 * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1)) * rho(i, j, k) + p(i, j, k) / (gamma - 1.0)) * eta 
+                (0.5 * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1)) * rho(i, j, k) + (p(i, j, k) + pref) / (gamma - 1.0)) * eta 
                 + 
                 E_solid(i, j, k) * (1.0 - eta);
             E_old(i, j, k) = E(i, j, k);
@@ -283,7 +283,7 @@ void Hydro::UpdateEta(int lev, Set::Scalar time)
     eta_ic->Initialize(lev, *eta_mf, time);
 }
 
-void Hydro::UpdateFluxes(int lev, Set::Scalar time, Set::Scalar dt)
+void Hydro::UpdateFluxes(int /*lev*/, Set::Scalar /*time*/, Set::Scalar /*dt*/)
 {
     Util::Assert(INFO,TEST(!managed),"Should override this if Hydro is managed!");
 }
@@ -640,12 +640,6 @@ void Hydro::RHS(int lev, Set::Scalar /*time*/,
                             //Ldot0(p) += 0.5 * (u(r) - u0(r)) * gradM(s) * grad_eta(q, s);
                         }
 
-            //for (int p = 0; p < 2; p++)             // i
-            //{
-            //    Ldot0(p) += (u(p) - u0(p)) * M(i,j,k,p) * grad_eta(p);
-            //}
-
-            
             Source(i,j, k, 0) = mdot0;
             Source(i,j, k, 1) = (Pdot0(0) - Ldot0(0));
             Source(i,j, k, 2) = (Pdot0(1) - Ldot0(1));

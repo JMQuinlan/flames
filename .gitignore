@@ -60,9 +60,10 @@ alamo.egg-info
 alamo
 setup.py
 alamo.py
-.amrex
+.alamo
 
 .vs/
 *.eps
 *.png
 *.gif
+logs/

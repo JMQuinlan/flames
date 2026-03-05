@@ -4,7 +4,13 @@
 # alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Toro1a_HLLC-All-Mach-Furfaro_Sharp_Interface
+plot_file = ./tests/FlowRiemannUnitTests/output_Toro1a_HLLCE_Sharp_Interface
+Riemann_Solver.type = hllce
+
+eta.ic.type = constant
+eta.ic.expression.constant.epsilon  = 111111.0005
+eta.ic.constant.value  = 0.0
+epsilon = eta.ic.expression.constant.epsilon
 
 ### MESHING ###
 #amr.plot_dt = 0.1
@@ -43,15 +49,7 @@ q.ic.constant.value = 0.0
 #deltapInterface.ic.type = expression
 #deltapInterface.ic.expression.region0 = "0.0"
 
-eta.ic.type = constant
-eta.ic.expression.constant.epsilon  = 111111.0005
-eta.ic.constant.value  = 0.0
-epsilon = eta.ic.expression.constant.epsilon
-
-### Advection solver ###
-
 ### HYDRO PARAM ###
-
 gamma0 = 1.4
 gamma1 = 1.4
 cfl   = 0.4
@@ -104,29 +102,11 @@ temperature0.ic.expression.region0 = "294.0"
 temperature1.ic.type = expression
 temperature1.ic.expression.region0 = "294.0"
 
-cp0.ic.type = expression
-cp0.ic.expression.region0 = "1.4"
+cp0 = "1.4"
+cv0 = "1.0"
 
-cp1.ic.type = expression
-cp1.ic.expression.region0 = "1.4"
-
-cv0.ic.type = expression
-cv0.ic.expression.region0 = "1.0"
-
-cv1.ic.type = expression
-cv1.ic.expression.region0 = "1.0"
-
-k0_thermal.ic.type = expression
-k0_thermal.ic.expression.region0 = "0.6"
-
-k1_thermal.ic.type = expression
-k1_thermal.ic.expression.region0 = "0.6"
-
-h0_thermal.ic.type = expression
-h0_thermal.ic.expression.region0 = "1.4"
-
-h1_thermal.ic.type = expression
-h1_thermal.ic.expression.region0 = "1.0"
+cp1 = "1.4"
+cv1 = "1.0"
 
 ### ETA BC  ###
 
@@ -163,4 +143,4 @@ p_refinement_criterion     = 100000.0
 static_eta = 1
 Spec_Vol = 1
 
-Riemann_Solver = 38 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+kappa_method = 1
