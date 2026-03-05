@@ -3,11 +3,11 @@
 #@ dim=2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Toro1b_HLLCE_epsilon_1e-1
-Riemann_Solver.type = hllce
+plot_file = ./tests/FlowRiemannUnitTests/output_Toro1b_Roe_epsilon_1e-3
+Riemann_Solver.type = roe
 
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = "1e-1"
+eta.ic.expression.constant.epsilon = "1e-3"
 eta.ic.expression.region0 = "1.0 - (0.5 * (1.0 + tanh(x / epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
 amr.plot_int = 100
@@ -61,9 +61,6 @@ velocity0.ic.expression.region1 = "0.0"
 pressure0.ic.type = expression
 pressure0.ic.expression.constant.p_L = "1.0"
 pressure0.ic.expression.region0 = "p_L"
-
-temperature0.ic.type = expression
-temperature0.ic.expression.region0 = "294.0"
 
 cp0 = "1.4"
 cv0 = "1.0"

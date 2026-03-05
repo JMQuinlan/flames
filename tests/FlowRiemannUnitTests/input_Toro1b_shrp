@@ -4,8 +4,8 @@
 # alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Toro1b_HLLCE_Sharp_Interface
-Riemann_Solver.type = hllce
+plot_file = ./tests/FlowRiemannUnitTests/output_Toro1b_Roe_Sharp_Interface
+Riemann_Solver.type = roe
 
 eta.ic.type = constant
 eta.ic.expression.constant.epsilon  = 111111.0005

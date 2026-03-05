@@ -155,12 +155,12 @@ ERROR_SHARP_LINEWIDTH = 2.0
 ERROR_EPSILON_LINEWIDTH = 1.5
 
 # Test case configuration
-case_name = 'Toro1a'
+case_name = 'Toro3'
 Tammann = '.'  # Change to "." for CPG and "TammannEOS" for Tammann
 
 # File paths
 hdf5_file = fr'{Tammann}\{case_name}.hdf5'
-base_output_dir = fr'..\..\..\bin\tests\FlowRiemannUnitTests'
+base_output_dir = fr'..\..\..\bin\tests\FlowRiemannUnitTests\{case_name}'
 
 # Case name mapping
 case_to_group = {

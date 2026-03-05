@@ -3,11 +3,11 @@
 #@ dim=2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Toro2_HLLCE_epsilon_1e-1
-Riemann_Solver.type = hllce
+plot_file = ./tests/FlowRiemannUnitTests/output_Toro2_Roe_epsilon_1e-3
+Riemann_Solver.type = roe
 
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = "1e-1"
+eta.ic.expression.constant.epsilon = "1e-3"
 eta.ic.expression.region0 = "1.0 - (0.5 * (1.0 + tanh(x / epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
 amr.plot_int = 100

@@ -4,8 +4,8 @@
 # alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Toro1r_HLLCE_Sharp_Interface
-Riemann_Solver.type = hllce
+plot_file = ./tests/FlowRiemannUnitTests/output_Toro1r_HLLC_All_Mach_Sharp_Interface
+Riemann_Solver.type = hllc_all_mach
 
 eta.ic.type = constant
 eta.ic.expression.constant.epsilon  = 111111.0005
@@ -99,23 +99,10 @@ pressure1.ic.expression.constant.p_L = "0.1"
 pressure1.ic.expression.constant.p_R = "1.0"
 pressure1.ic.expression.region0 = "p_L*(x<0) + p_R*(x>0)"
 
-temperature0.ic.type = expression
-temperature0.ic.expression.region0 = "294.0"
-
-temperature1.ic.type = expression
-temperature1.ic.expression.region0 = "294.0"
-
-cp0.ic.type = expression
-cp0.ic.expression.region0 = "1.4"
-
-cp1.ic.type = expression
-cp1.ic.expression.region0 = "1.4"
-
-cv0.ic.type = expression
-cv0.ic.expression.region0 = "1.0"
-
-cv1.ic.type = expression
-cv1.ic.expression.region0 = "1.0"
+cp0 = "1.4"
+cp1 = "1.4"
+cv0 = "1.0"
+cv1 = "1.0"
 
 k0_thermal.ic.type = expression
 k0_thermal.ic.expression.region0 = "0.6"
