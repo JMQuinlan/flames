@@ -496,7 +496,8 @@ void Hydro2::Mix(int lev)
 
             // Temperature
             // T(i, j, k) = T0(i, j, k) * eta(i, j, k) + T1(i, j, k) * (1.0 - eta(i, j, k));
-            T(i, j, k) = UE_vol(i, j, k) / (rho(i, j, k) * cv(i, j, k) + small); // Volume Specific
+            //T(i, j, k) = UE_vol(i, j, k) / (rho(i, j, k) * cv(i, j, k) + small); // Volume Specific
+            T(i, j, k) = (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) * cv(i, j, k) * (gammaf(i, j, k) - 1.0) + small); // Volume Specific
             // T(i, j, k) = UE_vol(i, j, k) / (cv(i, j, k) + small); // Mass Specific
 
             // Thermal Conductivity
@@ -654,7 +655,8 @@ Hydro2::RHS(int lev,
 
             // Temperature
             // T(i, j, k) = T0(i, j, k) * eta(i, j, k) + T1(i, j, k) * (1.0 - eta(i, j, k));
-            T(i, j, k) = UE(i, j, k) / (rho(i, j, k) * cv(i, j, k) + small); // Volume Specific
+            //T(i, j, k) = UE(i, j, k) / (rho(i, j, k) * cv(i, j, k) + small); // Volume Specific
+            T(i, j, k) = (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) * cv(i, j, k) * (gammaf(i, j, k) - 1.0) + small); // Volume Specific
             // T(i, j, k) = UE(i, j, k) / (cv(i, j, k) + small); // Mass Specific
 
             // Speed of sound:
