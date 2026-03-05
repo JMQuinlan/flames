@@ -4,13 +4,14 @@
 # alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Toro1a_HLLCE_Sharp_Interface
+plot_file = ./tests/FlowRiemannUnitTests/output_Toro1b_HLLCE_Sharp_Interface
 Riemann_Solver.type = hllce
 
 eta.ic.type = constant
 eta.ic.expression.constant.epsilon  = 111111.0005
 eta.ic.constant.value  = 0.0
 epsilon = eta.ic.expression.constant.epsilon
+
 
 ### MESHING ###
 #amr.plot_dt = 0.1
@@ -20,7 +21,7 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.grid_eff = 0.8
 
-amr.n_cell = 800 16
+amr.n_cell = 800 4
 
 # Uncomment to test AMR
 #amr.max_level = 2
@@ -33,8 +34,9 @@ geometry.prob_hi =  1.0   0.02   0.0 # [ m ]
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
+
 timestep  = 1.0e-4
-stop_time = 0.25
+stop_time = 0.2
 
 ### ETA IC ###
 
@@ -46,10 +48,8 @@ u0.ic.constant.value = 0.0
 q.ic.type = constant
 q.ic.constant.value = 0.0
 
-#deltapInterface.ic.type = expression
-#deltapInterface.ic.expression.region0 = "0.0"
-
 ### HYDRO PARAM ###
+
 gamma0 = 1.4
 gamma1 = 1.4
 cfl   = 0.4
@@ -77,13 +77,16 @@ density1.ic.type = expression
 density1.ic.expression.constant.rho_L = 1.0
 density1.ic.expression.constant.rho_R = 0.125
 density1.ic.expression.region0 = "rho_L*(x<0) + rho_R*(x>0)"
+#density1.ic.expression.constant.halfdx = 1.25e-3 #0.00625 / 20;
+#density1.ic.expression.region0 = "rho_L*(x<-0) + ((rho_R-rho_L)/(2*halfdx)*x + (rho_L+halfdx*((rho_R-rho_L)/(2*halfdx))))*((x>-0)*(x<halfdx)) + rho_R*(x>halfdx)"
+#density1.ic.expression.region0 = "rho_L*(x<-0) + 0.305752*((x>-0)*(x<halfdx)) + rho_R*(x>halfdx)"
 
 velocity0.ic.type = expression
 velocity0.ic.expression.region0 = "0.0"
 velocity0.ic.expression.region1 = "0.0"
 
 velocity1.ic.type = expression
-velocity1.ic.expression.constant.v_L = "0.0"
+velocity1.ic.expression.constant.v_L = "0.75"
 velocity1.ic.expression.constant.v_R = "0.0"
 velocity1.ic.expression.region0 = "v_L*(x<0) + v_R*(x>0)"
 velocity1.ic.expression.region1 = "0.0"
@@ -143,4 +146,3 @@ p_refinement_criterion     = 100000.0
 static_eta = 1
 Spec_Vol = 1
 
-kappa_method = 1

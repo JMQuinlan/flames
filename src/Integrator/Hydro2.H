@@ -19,7 +19,7 @@
 #include "Solver/Local/FluidRiemann/HLLC_WENO5.H"
 #include "Solver/Local/FluidRiemann/HLLE.H"
 // #include "Solver/Local/FluidRiemann/HLLE_WENO5.H"
-// #include "Solver/Local/FluidRiemann/HLLCE.H"
+#include "Solver/Local/FluidRiemann/HLLCE.H"
 // #include "Solver/Local/FluidRiemann/HLLCE_WENO5.H"
 // #include "Solver/Local/FluidRiemann/PartiallyParabolic.H"
 #include "Solver/Local/FluidRiemann/Upwind.H"
