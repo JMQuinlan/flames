@@ -568,7 +568,7 @@ def plot_density_comparison(python_data, hydro2_data, frame_num, vmin, vmax):
                        vmin=vmin, vmax=vmax, extend='both')
     ax1.set_xlabel('X', fontsize=FONT_SIZE_LABEL)
     ax1.set_ylabel('Y', fontsize=FONT_SIZE_LABEL)
-    ax1.set_title('Python HLLC', fontsize=FONT_SIZE_TITLE, fontweight='bold')
+    ax1.set_title('Volume of Fluids', fontsize=FONT_SIZE_TITLE, fontweight='bold')
     ax1.set_aspect('equal')
     
     im2 = ax2.contourf(hydro2_data['x_grid'], hydro2_data['y_grid'],
@@ -576,7 +576,7 @@ def plot_density_comparison(python_data, hydro2_data, frame_num, vmin, vmax):
                        vmin=vmin, vmax=vmax, extend='both')
     ax2.set_xlabel('X', fontsize=FONT_SIZE_LABEL)
     ax2.set_ylabel('Y', fontsize=FONT_SIZE_LABEL)
-    ax2.set_title('hydro2 AMReX', fontsize=FONT_SIZE_TITLE, fontweight='bold')
+    ax2.set_title('Diffuse Interface', fontsize=FONT_SIZE_TITLE, fontweight='bold')
     ax2.set_aspect('equal')
     
     fig.subplots_adjust(right=0.9)
@@ -602,7 +602,7 @@ def plot_vorticity_comparison(python_data, hydro2_data, frame_num, vmin, vmax):
                        vmin=vmin, vmax=vmax, extend='both')
     ax1.set_xlabel('X', fontsize=FONT_SIZE_LABEL)
     ax1.set_ylabel('Y', fontsize=FONT_SIZE_LABEL)
-    ax1.set_title('Python HLLC', fontsize=FONT_SIZE_TITLE, fontweight='bold')
+    ax1.set_title('Volume of Fluids', fontsize=FONT_SIZE_TITLE, fontweight='bold')
     ax1.set_aspect('equal')
     
     im2 = ax2.contourf(hydro2_data['x_grid'], hydro2_data['y_grid'],
@@ -610,7 +610,7 @@ def plot_vorticity_comparison(python_data, hydro2_data, frame_num, vmin, vmax):
                        vmin=vmin, vmax=vmax, extend='both')
     ax2.set_xlabel('X', fontsize=FONT_SIZE_LABEL)
     ax2.set_ylabel('Y', fontsize=FONT_SIZE_LABEL)
-    ax2.set_title('hydro2 AMReX', fontsize=FONT_SIZE_TITLE, fontweight='bold')
+    ax2.set_title('Diffuse Interface', fontsize=FONT_SIZE_TITLE, fontweight='bold')
     ax2.set_aspect('equal')
     
     fig.subplots_adjust(right=0.9)
