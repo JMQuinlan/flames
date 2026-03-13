@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
+
 """
 ===============================================================================
 KELVIN-HELMHOLTZ INSTABILITY: PYTHON vs HYDRO2 COMPARISON ANALYSIS
-FULLY DEBUGGED INTERPOLATION - NO SPECIAL CHARACTERS
+FULLY DEBUGGED INTERPOLATION - FIXED COLORBARS
 ===============================================================================
 FIXES:
     - Added comprehensive grid extraction debugging
@@ -10,7 +11,10 @@ FIXES:
     - Validates strictly ascending coordinates before interpolation
     - Falls back to nearest-neighbor if interpolation fails
     - Fixed hydro2 data transpose issue
-
+    - FIXED: Removed triangle extensions on colorbars (extend='neither')
+    - FIXED: Global min/max calculated across ALL timesteps and BOTH methods
+    - FIXED: Explicit contour levels generated from global limits
+    - FIXED: Colorbars forced to use global limits
 ===============================================================================
 """
 
@@ -71,6 +75,7 @@ Y_MID = 0.5
 NX = 256
 NY = 256
 CFL = 0.7
+
 EPSILON = 1e-10
 MIN_DENSITY = 1e-6
 MIN_PRESSURE = 1e-6
@@ -97,7 +102,7 @@ for folder in [subfolder_density, subfolder_vorticity,
         os.makedirs(folder)
 
 print("=" * 80)
-print("KELVIN-HELMHOLTZ: PYTHON vs HYDRO2 COMPARISON (DEBUGGED)")
+print("KELVIN-HELMHOLTZ: PYTHON vs HYDRO2 COMPARISON (FIXED COLORBARS)")
 print("=" * 80)
 
 # ============================================================================
@@ -452,36 +457,24 @@ def extract_1d_coords_robust(grid_2d, axis_name):
     Robustly extract 1D coordinate array from 2D meshgrid
     Returns strictly ascending 1D array
     """
-    print(f"\n  Extracting {axis_name} coordinates:")
-    print(f"    Input shape: {grid_2d.shape}")
-    
     coord_row = grid_2d[0, :]
     coord_col = grid_2d[:, 0]
     
     unique_row = len(np.unique(coord_row))
     unique_col = len(np.unique(coord_col))
     
-    print(f"    First row: {unique_row} unique values, range [{np.min(coord_row):.6e}, {np.max(coord_row):.6e}]")
-    print(f"    First col: {unique_col} unique values, range [{np.min(coord_col):.6e}, {np.max(coord_col):.6e}]")
-    
     if unique_row > unique_col:
         coord_1d = coord_row
-        print(f"    -> Using first row (varies along columns)")
     else:
         coord_1d = coord_col
-        print(f"    -> Using first column (varies along rows)")
     
     if len(coord_1d) > 1:
         diffs = np.diff(coord_1d)
         if np.all(diffs > 0):
-            print(f"    -> Strictly ascending")
             return coord_1d, False
         elif np.all(diffs < 0):
-            print(f"    -> Strictly descending, reversing...")
             return coord_1d[::-1], True
         else:
-            print(f"    -> ERROR: Not monotonic!")
-            print(f"       diff range: [{np.min(diffs):.6e}, {np.max(diffs):.6e}]")
             raise ValueError(f"{axis_name} coordinates are not monotonic")
     
     return coord_1d, False
@@ -490,29 +483,16 @@ def interpolate_to_common_grid(data, x_old, y_old, x_new, y_new):
     """
     Robust interpolation with comprehensive debugging
     """
-    print("\n=== INTERPOLATION DEBUG ===")
-    print(f"Data shape: {data.shape}")
-    print(f"x_old shape: {x_old.shape}")
-    print(f"y_old shape: {y_old.shape}")
-    
     x_old_1d, x_reversed = extract_1d_coords_robust(x_old, 'X')
     y_old_1d, y_reversed = extract_1d_coords_robust(y_old, 'Y')
     
     data_copy = data.copy()
     if x_reversed:
-        print("  Reversing data along axis 0 (x-direction)")
         data_copy = data_copy[::-1, :]
     if y_reversed:
-        print("  Reversing data along axis 1 (y-direction)")
         data_copy = data_copy[:, ::-1]
     
-    print(f"\nFinal 1D coordinates:")
-    print(f"  x: {len(x_old_1d)} points, [{x_old_1d[0]:.6e}, {x_old_1d[-1]:.6e}]")
-    print(f"  y: {len(y_old_1d)} points, [{y_old_1d[0]:.6e}, {y_old_1d[-1]:.6e}]")
-    print(f"  Data shape: {data_copy.shape}")
-    
     if not (np.all(np.diff(x_old_1d) > 0) and np.all(np.diff(y_old_1d) > 0)):
-        print("\nERROR: Coordinates still not strictly ascending!")
         raise ValueError("Cannot create strictly ascending coordinate arrays")
     
     interp_func = RegularGridInterpolator(
@@ -525,8 +505,6 @@ def interpolate_to_common_grid(data, x_old, y_old, x_new, y_new):
     
     points = np.column_stack([x_new.ravel(), y_new.ravel()])
     data_new = interp_func(points).reshape(x_new.shape)
-    
-    print(f"Interpolation successful! Output shape: {data_new.shape}\n")
     
     return data_new
 
@@ -555,7 +533,7 @@ def create_gif_from_folder(subfolder_name, output_gif_name):
         print(f"  Created GIF: {output_gif_name} ({len(frames)} frames)")
 
 # ============================================================================
-# PLOTTING FUNCTIONS
+# PLOTTING FUNCTIONS WITH EXPLICIT LEVELS
 # ============================================================================
 
 def plot_density_comparison(python_data, hydro2_data, frame_num, vmin, vmax):
@@ -563,17 +541,20 @@ def plot_density_comparison(python_data, hydro2_data, frame_num, vmin, vmax):
     
     t = python_data['t']
     
+    # CRITICAL FIX: Create explicit levels from global min/max
+    levels = np.linspace(vmin, vmax, 101)
+    
     im1 = ax1.contourf(python_data['x_grid'], python_data['y_grid'],
-                       python_data['rho'], levels=100, cmap=COLORMAP_DENSITY,
-                       vmin=vmin, vmax=vmax, extend='both')
+                       python_data['rho'], levels=levels, cmap=COLORMAP_DENSITY,
+                       vmin=vmin, vmax=vmax, extend='neither')
     ax1.set_xlabel('X', fontsize=FONT_SIZE_LABEL)
     ax1.set_ylabel('Y', fontsize=FONT_SIZE_LABEL)
     ax1.set_title('Volume of Fluids', fontsize=FONT_SIZE_TITLE, fontweight='bold')
     ax1.set_aspect('equal')
     
     im2 = ax2.contourf(hydro2_data['x_grid'], hydro2_data['y_grid'],
-                       hydro2_data['rho'], levels=100, cmap=COLORMAP_DENSITY,
-                       vmin=vmin, vmax=vmax, extend='both')
+                       hydro2_data['rho'], levels=levels, cmap=COLORMAP_DENSITY,
+                       vmin=vmin, vmax=vmax, extend='neither')
     ax2.set_xlabel('X', fontsize=FONT_SIZE_LABEL)
     ax2.set_ylabel('Y', fontsize=FONT_SIZE_LABEL)
     ax2.set_title('Diffuse Interface', fontsize=FONT_SIZE_TITLE, fontweight='bold')
@@ -583,6 +564,7 @@ def plot_density_comparison(python_data, hydro2_data, frame_num, vmin, vmax):
     cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
     cbar = fig.colorbar(im2, cax=cbar_ax)
     cbar.set_label('Density', fontsize=FONT_SIZE_LABEL, rotation=270, labelpad=20)
+    cbar.mappable.set_clim(vmin, vmax)
     
     fig.suptitle(f't = {t:.4f} s', fontsize=FONT_SIZE_TIMESTAMP, fontweight='bold', y=0.98)
     
@@ -597,17 +579,20 @@ def plot_vorticity_comparison(python_data, hydro2_data, frame_num, vmin, vmax):
     
     t = python_data['t']
     
+    # CRITICAL FIX: Create explicit levels from global min/max
+    levels = np.linspace(vmin, vmax, 101)
+    
     im1 = ax1.contourf(python_data['x_grid'], python_data['y_grid'],
-                       python_data['vorticity'], levels=100, cmap=COLORMAP_VORTICITY,
-                       vmin=vmin, vmax=vmax, extend='both')
+                       python_data['vorticity'], levels=levels, cmap=COLORMAP_VORTICITY,
+                       vmin=vmin, vmax=vmax, extend='neither')
     ax1.set_xlabel('X', fontsize=FONT_SIZE_LABEL)
     ax1.set_ylabel('Y', fontsize=FONT_SIZE_LABEL)
     ax1.set_title('Volume of Fluids', fontsize=FONT_SIZE_TITLE, fontweight='bold')
     ax1.set_aspect('equal')
     
     im2 = ax2.contourf(hydro2_data['x_grid'], hydro2_data['y_grid'],
-                       hydro2_data['vorticity'], levels=100, cmap=COLORMAP_VORTICITY,
-                       vmin=vmin, vmax=vmax, extend='both')
+                       hydro2_data['vorticity'], levels=levels, cmap=COLORMAP_VORTICITY,
+                       vmin=vmin, vmax=vmax, extend='neither')
     ax2.set_xlabel('X', fontsize=FONT_SIZE_LABEL)
     ax2.set_ylabel('Y', fontsize=FONT_SIZE_LABEL)
     ax2.set_title('Diffuse Interface', fontsize=FONT_SIZE_TITLE, fontweight='bold')
@@ -617,6 +602,7 @@ def plot_vorticity_comparison(python_data, hydro2_data, frame_num, vmin, vmax):
     cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
     cbar = fig.colorbar(im2, cax=cbar_ax)
     cbar.set_label('Vorticity', fontsize=FONT_SIZE_LABEL, rotation=270, labelpad=20)
+    cbar.mappable.set_clim(vmin, vmax)
     
     fig.suptitle(f't = {t:.4f} s', fontsize=FONT_SIZE_TIMESTAMP, fontweight='bold', y=0.98)
     
@@ -659,9 +645,12 @@ def plot_difference(python_data, hydro2_data, field_name, frame_num, vmin_diff, 
     rel_error_rms = (rms_error / python_max * 100) if python_max > 1e-10 else 0.0
     l2_norm = np.sqrt(np.sum(difference**2))
     
+    # CRITICAL FIX: Create explicit levels from global min/max
+    levels = np.linspace(vmin_diff, vmax_diff, 51)
+    
     im = ax_main.contourf(hydro2_data['x_grid'], hydro2_data['y_grid'],
-                         difference, levels=50, cmap=COLORMAP_DIFFERENCE,
-                         vmin=vmin_diff, vmax=vmax_diff)
+                         difference, levels=levels, cmap=COLORMAP_DIFFERENCE,
+                         vmin=vmin_diff, vmax=vmax_diff, extend='neither')
     
     ax_main.set_xlabel('X', fontsize=FONT_SIZE_LABEL)
     ax_main.set_ylabel('Y', fontsize=FONT_SIZE_LABEL)
@@ -671,6 +660,7 @@ def plot_difference(python_data, hydro2_data, field_name, frame_num, vmin_diff, 
     
     cbar = plt.colorbar(im, ax=ax_main)
     cbar.set_label('Difference', fontsize=FONT_SIZE_LABEL)
+    cbar.mappable.set_clim(vmin_diff, vmax_diff)
     
     error_text = f"""
     ERROR METRICS:
@@ -743,7 +733,7 @@ def main():
         return
     
     print("\n" + "=" * 80)
-    print("STEP 4: EXTRACTING HYDRO2 DATA")
+    print("STEP 4: EXTRACTING HYDRO2 DATA FOR ALL TIMESTEPS")
     print("=" * 80)
     
     hydro2_data_list = []
@@ -793,7 +783,7 @@ def main():
     print(f"Extracted {len(hydro2_data_list)} timesteps")
     
     print("\n" + "=" * 80)
-    print("STEP 5: INTERPOLATING PYTHON DATA")
+    print("STEP 5: INTERPOLATING PYTHON DATA TO COMMON GRID FOR ALL TIMESTEPS")
     print("=" * 80)
     
     python_data_interp = []
@@ -801,8 +791,6 @@ def main():
     for hydro2_idx, python_idx in matched_pairs:
         python_data = python_data_list[python_idx]
         hydro2_data = hydro2_data_list[len(python_data_interp)]
-        
-        print(f"\nInterpolating timestep {len(python_data_interp)+1}/{len(matched_pairs)}...")
         
         rho_interp = interpolate_to_common_grid(python_data['rho'], 
                                                 python_data['x_grid'], python_data['y_grid'],
@@ -831,23 +819,70 @@ def main():
     print(f"\nInterpolation complete")
     
     print("\n" + "=" * 80)
-    print("STEP 6: COMPUTING LIMITS")
+    print("STEP 6: COMPUTING GLOBAL MIN/MAX ACROSS ALL TIMESTEPS AND BOTH METHODS")
     print("=" * 80)
     
-    rho_min = min(np.min(d['rho']) for d in python_data_interp + hydro2_data_list)
-    rho_max = max(np.max(d['rho']) for d in python_data_interp + hydro2_data_list)
+    # Collect all data from all timesteps
+    all_rho_python = []
+    all_rho_hydro2 = []
+    all_vort_python = []
+    all_vort_hydro2 = []
     
-    vort_all = np.concatenate([d['vorticity'].flatten() for d in python_data_interp + hydro2_data_list])
-    vort_lim = 2.0 * np.std(vort_all)
+    print("\nCollecting data from all timesteps...")
+    for i in range(len(matched_pairs)):
+        all_rho_python.append(python_data_interp[i]['rho'])
+        all_vort_python.append(python_data_interp[i]['vorticity'])
+        
+        all_rho_hydro2.append(hydro2_data_list[i]['rho'])
+        all_vort_hydro2.append(hydro2_data_list[i]['vorticity'])
     
-    diff_rho_list = [hydro2_data_list[i]['rho'] - python_data_interp[i]['rho'] for i in range(len(matched_pairs))]
-    diff_vort_list = [hydro2_data_list[i]['vorticity'] - python_data_interp[i]['vorticity'] for i in range(len(matched_pairs))]
+    # Compute global density limits
+    print("\nComputing global density limits across ALL timesteps...")
+    rho_min_python = min(np.min(arr) for arr in all_rho_python)
+    rho_max_python = max(np.max(arr) for arr in all_rho_python)
+    rho_min_hydro2 = min(np.min(arr) for arr in all_rho_hydro2)
+    rho_max_hydro2 = max(np.max(arr) for arr in all_rho_hydro2)
     
-    diff_rho_max = max(np.max(np.abs(d)) for d in diff_rho_list)
-    diff_vort_max = max(np.max(np.abs(d)) for d in diff_vort_list)
+    rho_min = min(rho_min_python, rho_min_hydro2)
+    rho_max = max(rho_max_python, rho_max_hydro2)
+    
+    print(f"  Python density range (all timesteps): [{rho_min_python:.6e}, {rho_max_python:.6e}]")
+    print(f"  Hydro2 density range (all timesteps): [{rho_min_hydro2:.6e}, {rho_max_hydro2:.6e}]")
+    print(f"  GLOBAL density range: [{rho_min:.6e}, {rho_max:.6e}]")
+    
+    # Compute global vorticity limits (symmetric)
+    print("\nComputing global vorticity limits across ALL timesteps...")
+    vort_python_all = np.concatenate([arr.flatten() for arr in all_vort_python])
+    vort_hydro2_all = np.concatenate([arr.flatten() for arr in all_vort_hydro2])
+    vort_all = np.concatenate([vort_python_all, vort_hydro2_all])
+    
+    vort_abs_max = np.max(np.abs(vort_all))
+    vort_lim = vort_abs_max
+    
+    print(f"  Python vorticity abs max (all timesteps): {np.max(np.abs(vort_python_all)):.6e}")
+    print(f"  Hydro2 vorticity abs max (all timesteps): {np.max(np.abs(vort_hydro2_all)):.6e}")
+    print(f"  GLOBAL vorticity range: [{-vort_lim:.6e}, {vort_lim:.6e}]")
+    
+    # Compute difference limits
+    print("\nComputing difference limits across ALL timesteps...")
+    all_diff_rho = []
+    all_diff_vort = []
+    
+    for i in range(len(matched_pairs)):
+        diff_rho = hydro2_data_list[i]['rho'] - python_data_interp[i]['rho']
+        all_diff_rho.append(diff_rho)
+        
+        diff_vort = hydro2_data_list[i]['vorticity'] - python_data_interp[i]['vorticity']
+        all_diff_vort.append(diff_vort)
+    
+    diff_rho_max = max(np.max(np.abs(arr)) for arr in all_diff_rho)
+    diff_vort_max = max(np.max(np.abs(arr)) for arr in all_diff_vort)
+    
+    print(f"  Density difference range: [{-diff_rho_max:.6e}, {diff_rho_max:.6e}]")
+    print(f"  Vorticity difference range: [{-diff_vort_max:.6e}, {diff_vort_max:.6e}]")
     
     print("\n" + "=" * 80)
-    print("STEP 7: GENERATING PLOTS")
+    print("STEP 7: GENERATING PLOTS WITH GLOBAL LIMITS")
     print("=" * 80)
     
     for i in range(len(matched_pairs)):
@@ -883,7 +918,17 @@ def main():
             create_gif_from_folder('difference_vorticity', 'ANIM_diff_vorticity.gif')
     
     print("\n" + "=" * 80)
-    print("COMPLETE!")
+    print("ANALYSIS COMPLETE")
+    print("=" * 80)
+    print(f"\nOutput directory: {OUTPUT_FOLDER}")
+    print(f"Matched timesteps: {len(matched_pairs)}")
+    print("\n" + "=" * 80)
+    print("GLOBAL COLORBAR LIMITS USED (ACROSS ALL TIMESTEPS):")
+    print("=" * 80)
+    print(f"Density:           [{rho_min:.6e}, {rho_max:.6e}]")
+    print(f"Vorticity:         [{-vort_lim:.6e}, {vort_lim:.6e}]")
+    print(f"Diff Density:      [{-diff_rho_max:.6e}, {diff_rho_max:.6e}]")
+    print(f"Diff Vorticity:    [{-diff_vort_max:.6e}, {diff_vort_max:.6e}]")
     print("=" * 80)
 
 if __name__ == "__main__":
