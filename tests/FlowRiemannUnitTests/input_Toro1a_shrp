@@ -4,8 +4,8 @@
 # alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Toro1a_HLLCE_Sharp_Interface
-Riemann_Solver.type = hllce
+plot_file = ./tests/FlowRiemannUnitTests/output_Toro1a_HLLE_Sharp_Interface
+Riemann_Solver.type = hlle
 
 eta.ic.type = constant
 eta.ic.expression.constant.epsilon  = 111111.0005
@@ -14,7 +14,7 @@ epsilon = eta.ic.expression.constant.epsilon
 
 ### MESHING ###
 #amr.plot_dt = 0.1
-amr.plot_int = 500
+amr.plot_int = 100
 amr.max_level = 0
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
@@ -33,7 +33,7 @@ geometry.prob_hi =  1.0   0.02   0.0 # [ m ]
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
-timestep  = 1.0e-4
+timestep  = 4.0e-4
 stop_time = 0.25
 
 ### ETA IC ###

@@ -777,7 +777,7 @@ def plot_density_comparison(python_data, hydro2_data, frame_num, vmin, vmax):
     ax.set_aspect('equal', adjustable='box')
     ax.set_title(f't = {t*1e3:.2f} ms', fontsize=FONT_SIZE_TIMESTAMP, fontweight='bold', pad=15)
     
-    cbar = fig.colorbar(im2, ax=ax, orientation='vertical', pad=0.02, aspect=30)
+    cbar = fig.colorbar(im2, ax=ax, orientation='vertical', extend="neither", pad=0.02, aspect=30)
     cbar.set_label('Density (kg/m^3)', fontsize=FONT_SIZE_LABEL, rotation=270, labelpad=20)
     cbar.mappable.set_clim(vmin, vmax)
     
@@ -830,7 +830,7 @@ def plot_velocity_comparison(python_data, hydro2_data, frame_num, vmin, vmax):
     ax.set_aspect('equal', adjustable='box')
     ax.set_title(f't = {t*1e3:.2f} ms', fontsize=FONT_SIZE_TIMESTAMP, fontweight='bold', pad=15)
     
-    cbar = fig.colorbar(im2, ax=ax, orientation='vertical', pad=0.02, aspect=30)
+    cbar = fig.colorbar(im2, ax=ax, orientation='vertical', extend="neither", pad=0.02, aspect=30)
     cbar.set_label('Velocity Magnitude (m/s)', fontsize=FONT_SIZE_LABEL, rotation=270, labelpad=20)
     cbar.mappable.set_clim(vmin, vmax)
     
@@ -880,7 +880,7 @@ def plot_vorticity_comparison(python_data, hydro2_data, frame_num, vmin, vmax):
     ax.set_aspect('equal', adjustable='box')
     ax.set_title(f't = {t*1e3:.2f} ms', fontsize=FONT_SIZE_TIMESTAMP, fontweight='bold', pad=15)
     
-    cbar = fig.colorbar(im2, ax=ax, orientation='vertical', pad=0.02, aspect=30)
+    cbar = fig.colorbar(im2, ax=ax, orientation='vertical', extend="neither", pad=0.02, aspect=30)
     cbar.set_label('Vorticity (1/s)', fontsize=FONT_SIZE_LABEL, rotation=270, labelpad=20)
     cbar.mappable.set_clim(vmin, vmax)
     
@@ -946,7 +946,7 @@ def plot_difference(python_data, hydro2_data, field_name, frame_num, vmin_diff, 
                      fontsize=FONT_SIZE_TITLE, fontweight='bold')
     ax_main.set_aspect('equal', adjustable='box')
     
-    cbar = plt.colorbar(im, ax=ax_main)
+    cbar = plt.colorbar(im, extend="neither", ax=ax_main)
     cbar.set_label(f'Difference ({field_units})', fontsize=FONT_SIZE_LABEL)
     
     error_text = f"""

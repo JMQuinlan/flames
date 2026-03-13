@@ -37,6 +37,11 @@ RIEMANN SOLVER NAMING:
 
 CONFIGURATION VARIABLES (lines 32-48):
     
+    Display Options:
+        PLOT_TO_SCREEN          - Display plots interactively (default: False)
+                                  True: Shows plots on screen (allows zooming)
+                                  False: Only saves plots without displaying
+    
     Font Sizes:
         TITLE_FONTSIZE          - Plot title font size (default: 16)
         AXIS_LABEL_FONTSIZE     - Axis label font size (default: 14)
@@ -73,20 +78,26 @@ OUTPUTS:
     1. Individual Solver Comparisons (per Riemann solver):
        - {case}__{solver}_comparison.png/eps
        - Shows exact solution, sharp interface, and all epsilon variants
+       - Legend appears only on top subplot
        - {case}_{solver}_error.png/eps
        - Semi-log error plot for that solver
+       - Legend appears only on top subplot
     
     2. Sharp Interface Comparison:
        - {case}_sharp_comparison.png/eps
        - Compares all sharp interfaces against exact solution
+       - Legend appears only on top subplot
        - {case}_sharp_error.png/eps
        - Semi-log error plot for all sharp interfaces
+       - Legend appears only on top subplot
     
     3. Aggregated Comparison:
        - {case}_aggregated_comparison.png/eps
        - All solvers and interface thicknesses on one plot
+       - Legend appears only on top subplot
        - {case}_aggregated_error.png/eps
        - Semi-log error plot for all data
+       - Legend appears only on top subplot
 
 COLOR SCHEME:
     - Each Riemann solver gets a unique base color
@@ -107,10 +118,11 @@ ERROR METRICS:
 
 USAGE:
     1. Set case_name, Tammann, and file paths in configuration section
-    2. Ensure output directories follow naming convention
-    3. Run script: python RiemannCompareAGGREGATED.py
-    4. Check ./Images/ for generated plots
-    5. Review console output for error metrics
+    2. Set PLOT_TO_SCREEN = True if you want interactive plots
+    3. Ensure output directories follow naming convention
+    4. Run script: python RiemannCompareAGGREGATED.py
+    5. Check ./Images/ for generated plots
+    6. Review console output for error metrics
 
 DEPENDENCIES:
     - yt (for AMReX data loading)
@@ -138,6 +150,9 @@ yt.funcs.mylog.setLevel(40)
 # CONFIGURATION
 # ============================================================================
 
+# Display options
+PLOT_TO_SCREEN = False  # Set to True to display plots interactively (allows zooming)
+
 # Font sizes for plots
 TITLE_FONTSIZE = 16
 AXIS_LABEL_FONTSIZE = 14
@@ -155,7 +170,7 @@ ERROR_SHARP_LINEWIDTH = 2.0
 ERROR_EPSILON_LINEWIDTH = 1.5
 
 # Test case configuration
-case_name = 'Toro3'
+case_name = 'Toro1a'
 Tammann = '.'  # Change to "." for CPG and "TammannEOS" for Tammann
 
 # File paths
@@ -381,6 +396,16 @@ def get_color_shade(base_color, epsilon_value, epsilon_values):
     
     return rgb_adjusted
 
+def save_and_show_plot(output_filename, plot_to_screen=False):
+    """Save plot to file and optionally display on screen"""
+    plt.savefig(output_filename + '.png', format='png', dpi=300, bbox_inches='tight')
+    plt.savefig(output_filename + '.eps', format='eps', bbox_inches='tight')
+    
+    if plot_to_screen:
+        plt.show()
+    
+    plt.close()
+
 # ============================================================================
 # MAIN SCRIPT
 # ============================================================================
@@ -390,6 +415,7 @@ print("RIEMANN SOLVER COMPARISON ANALYSIS")
 print("=" * 80)
 print(f"\nTest Case: {case_name}")
 print(f"Base Directory: {base_output_dir}")
+print(f"Plot to Screen: {PLOT_TO_SCREEN}")
 
 # Load exact solution
 group_name = case_to_group.get(case_name, case_name)
@@ -544,17 +570,19 @@ for solver in riemann_solvers:
         
         ax.set_xlabel('Position (x)', fontsize=AXIS_LABEL_FONTSIZE)
         ax.set_ylabel(ylabel, fontsize=AXIS_LABEL_FONTSIZE)
-        ax.legend(fontsize=LEGEND_FONTSIZE, loc='best')
+        
+        # Only show legend on the first (top) subplot
+        if idx == 0:
+            ax.legend(fontsize=LEGEND_FONTSIZE, loc='best')
+        
         ax.grid(True, alpha=0.3)
         ax.set_xlim([exact_data['x'][0], exact_data['x'][-1]])
         ax.tick_params(labelsize=TICK_FONTSIZE)
     
     plt.tight_layout()
     output_filename = f'./Images/{case_name}_{solver}_comparison'
-    plt.savefig(output_filename + '.png', format='png', dpi=300, bbox_inches='tight')
-    plt.savefig(output_filename + '.eps', format='eps', bbox_inches='tight')
+    save_and_show_plot(output_filename, PLOT_TO_SCREEN)
     print(f"  Saved: {output_filename}")
-    plt.close()
     
     # ========================================================================
     # ERROR PLOT: Sharp vs Epsilon variants
@@ -590,17 +618,19 @@ for solver in riemann_solvers:
             
             ax.set_xlabel('Position (x)', fontsize=AXIS_LABEL_FONTSIZE)
             ax.set_ylabel(f'{ylabel.split("(")[0].strip()} Error', fontsize=AXIS_LABEL_FONTSIZE)
-            ax.legend(fontsize=LEGEND_FONTSIZE, loc='best')
+            
+            # Only show legend on the first (top) subplot
+            if idx == 0:
+                ax.legend(fontsize=LEGEND_FONTSIZE, loc='best')
+            
             ax.grid(True, alpha=0.3, which='both')
             ax.set_xlim([exact_data['x'][0], exact_data['x'][-1]])
             ax.tick_params(labelsize=TICK_FONTSIZE)
         
         plt.tight_layout()
         output_filename = f'./Images/{case_name}_{solver}_error'
-        plt.savefig(output_filename + '.png', format='png', dpi=300, bbox_inches='tight')
-        plt.savefig(output_filename + '.eps', format='eps', bbox_inches='tight')
+        save_and_show_plot(output_filename, PLOT_TO_SCREEN)
         print(f"  Saved: {output_filename}")
-        plt.close()
 
 # ============================================================================
 # PLOT 2: All Sharp Interfaces Comparison
@@ -636,17 +666,19 @@ if sharp_solvers:
         
         ax.set_xlabel('Position (x)', fontsize=AXIS_LABEL_FONTSIZE)
         ax.set_ylabel(ylabel, fontsize=AXIS_LABEL_FONTSIZE)
-        ax.legend(fontsize=LEGEND_FONTSIZE, loc='best')
+        
+        # Only show legend on the first (top) subplot
+        if idx == 0:
+            ax.legend(fontsize=LEGEND_FONTSIZE, loc='best')
+        
         ax.grid(True, alpha=0.3)
         ax.set_xlim([exact_data['x'][0], exact_data['x'][-1]])
         ax.tick_params(labelsize=TICK_FONTSIZE)
     
     plt.tight_layout()
     output_filename = f'./Images/{case_name}_sharp_comparison'
-    plt.savefig(output_filename + '.png', format='png', dpi=300, bbox_inches='tight')
-    plt.savefig(output_filename + '.eps', format='eps', bbox_inches='tight')
+    save_and_show_plot(output_filename, PLOT_TO_SCREEN)
     print(f"Saved: {output_filename}")
-    plt.close()
     
     # ========================================================================
     # ERROR PLOT: Sharp Interfaces
@@ -669,17 +701,19 @@ if sharp_solvers:
         
         ax.set_xlabel('Position (x)', fontsize=AXIS_LABEL_FONTSIZE)
         ax.set_ylabel(f'{ylabel.split("(")[0].strip()} Error', fontsize=AXIS_LABEL_FONTSIZE)
-        ax.legend(fontsize=LEGEND_FONTSIZE, loc='best')
+        
+        # Only show legend on the first (top) subplot
+        if idx == 0:
+            ax.legend(fontsize=LEGEND_FONTSIZE, loc='best')
+        
         ax.grid(True, alpha=0.3, which='both')
         ax.set_xlim([exact_data['x'][0], exact_data['x'][-1]])
         ax.tick_params(labelsize=TICK_FONTSIZE)
     
     plt.tight_layout()
     output_filename = f'./Images/{case_name}_sharp_error'
-    plt.savefig(output_filename + '.png', format='png', dpi=300, bbox_inches='tight')
-    plt.savefig(output_filename + '.eps', format='eps', bbox_inches='tight')
+    save_and_show_plot(output_filename, PLOT_TO_SCREEN)
     print(f"Saved: {output_filename}")
-    plt.close()
 
 # ============================================================================
 # PLOT 3: Aggregated Plot (All Solvers and Interface Thicknesses)
@@ -726,17 +760,19 @@ for idx, (var, ylabel) in enumerate(zip(variables, ylabels)):
     
     ax.set_xlabel('Position (x)', fontsize=AXIS_LABEL_FONTSIZE)
     ax.set_ylabel(ylabel, fontsize=AXIS_LABEL_FONTSIZE)
-    ax.legend(fontsize=LEGEND_FONTSIZE - 1, loc='best', ncol=2)
+    
+    # Only show legend on the first (top) subplot
+    if idx == 0:
+        ax.legend(fontsize=LEGEND_FONTSIZE - 1, loc='best', ncol=2)
+    
     ax.grid(True, alpha=0.3)
     ax.set_xlim([exact_data['x'][0], exact_data['x'][-1]])
     ax.tick_params(labelsize=TICK_FONTSIZE)
 
 plt.tight_layout()
 output_filename = f'./Images/{case_name}_aggregated_comparison'
-plt.savefig(output_filename + '.png', format='png', dpi=300, bbox_inches='tight')
-plt.savefig(output_filename + '.eps', format='eps', bbox_inches='tight')
+save_and_show_plot(output_filename, PLOT_TO_SCREEN)
 print(f"Saved: {output_filename}")
-plt.close()
 
 # ============================================================================
 # ERROR PLOT: Aggregated
@@ -776,17 +812,19 @@ for idx, (var, ylabel) in enumerate(zip(variables, ylabels)):
     
     ax.set_xlabel('Position (x)', fontsize=AXIS_LABEL_FONTSIZE)
     ax.set_ylabel(f'{ylabel.split("(")[0].strip()} Error', fontsize=AXIS_LABEL_FONTSIZE)
-    ax.legend(fontsize=LEGEND_FONTSIZE - 1, loc='best', ncol=2)
+    
+    # Only show legend on the first (top) subplot
+    if idx == 0:
+        ax.legend(fontsize=LEGEND_FONTSIZE - 1, loc='best', ncol=2)
+    
     ax.grid(True, alpha=0.3, which='both')
     ax.set_xlim([exact_data['x'][0], exact_data['x'][-1]])
     ax.tick_params(labelsize=TICK_FONTSIZE)
 
 plt.tight_layout()
 output_filename = f'./Images/{case_name}_aggregated_error'
-plt.savefig(output_filename + '.png', format='png', dpi=300, bbox_inches='tight')
-plt.savefig(output_filename + '.eps', format='eps', bbox_inches='tight')
+save_and_show_plot(output_filename, PLOT_TO_SCREEN)
 print(f"Saved: {output_filename}")
-plt.close()
 
 # ============================================================================
 # SUMMARY STATISTICS

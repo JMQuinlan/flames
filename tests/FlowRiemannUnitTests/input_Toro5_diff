@@ -3,8 +3,8 @@
 #@ dim=2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Toro5_HLLCE_epsilon_1e-1
-Riemann_Solver.type = hllce
+plot_file = ./tests/FlowRiemannUnitTests/output_Toro5_Roe_epsilon_1e-1
+Riemann_Solver.type = roe
 
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = "1e-1"

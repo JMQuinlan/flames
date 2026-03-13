@@ -3,11 +3,11 @@
 #@ dim=2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Toro2_Roe_epsilon_1e-3
-Riemann_Solver.type = roe
+plot_file = ./tests/FlowRiemannUnitTests/output_Toro2_HLLC_All_Mach_Furfaro_epsilon_1e-1
+Riemann_Solver.type = hllc_all_mach_furfaro
 
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = "1e-3"
+eta.ic.expression.constant.epsilon = "1e-1"
 eta.ic.expression.region0 = "1.0 - (0.5 * (1.0 + tanh(x / epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
 amr.plot_int = 100
@@ -25,7 +25,7 @@ geometry.prob_hi =  1.0   0.02   0.0 # [ m ]
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
-timestep  = 4.0e-4
+timestep  = 5.0e-4
 stop_time = 0.15
 
 m0.ic.constant.value = 0.0
