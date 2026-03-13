@@ -81,7 +81,7 @@ pressure1 = 10.0             # Pressure of liquid [Pa]
 gamma1 = 1.4                     # Ratio of specific heats for liquid
 
 # Mass transfer properties
-D_v = 2.0e-1                     # Binary diffusion coefficient [m^2/s]
+D_v = 2.0e-2                     # Binary diffusion coefficient [m^2/s]
 Y_surface = density0 / (density0 + density1)                # Mass fraction at liquid surface (interface)
 Y_infinity = 0.0 #density1 / (density0 + density1)                  # Mass fraction far from interface
 

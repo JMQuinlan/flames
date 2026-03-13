@@ -9,7 +9,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 #plot_file = ./tests/FlowShockDroplet/output_Shock1mmDroplet
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_moreAMR
 
 ### MESHING ###
 amr.plot_dt = 0.5e-6
@@ -18,7 +18,7 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 10
 amr.grid_eff = 0.8
-amr.max_level = 5
+amr.max_level = 6
 amr.n_cell = 64 32  # Maintains aspect ratio for 0.02m × 0.01m domain
 
 ### TIME STEPPING ###
@@ -30,7 +30,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-6
 dynamictimestep.min = 1e-16
-cfl = 0.008
+cfl = 0.01
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.005 -0.005 0.0  # 1/4 tube left of droplet
@@ -42,7 +42,7 @@ stop_time = 0.0002  # Shorter time for shock interaction
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.00004
+eta.ic.expression.constant.epsilon = 0.00002
 eta.ic.expression.constant.R0 = 0.001  # 5mm droplet radius
 eta.ic.expression.constant.x_center = 0.0  # Centered at origin
 eta.ic.expression.constant.y_center = 0.0  # Centered at origin
@@ -142,7 +142,7 @@ energy.bc.type.xhi = neumann
 momentum.bc.type.xhi = neumann neumann
 
 ### REFINEMENT CRITERIA ###
-eta_refinement_criterion = 0.1
+eta_refinement_criterion = 1000
 omega_refinement_criterion = 10.55
 p_refinement_criterion = 1e+6
 rho_refinement_criterion = 1e+5

@@ -34,12 +34,13 @@ geometry.prob_hi = 1.0  0.0625 0.0
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
-stop_time = 20.0
+stop_time = 1.0
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
 #eta.ic.expression.constant.epsilon = 0.015625  # Thinner interface
-eta.ic.expression.constant.epsilon = 0.005  # Thinner interface
+#eta.ic.expression.constant.epsilon = 0.005  # Thinner interface
+eta.ic.expression.constant.epsilon = 0.01  # Thinner interface
 eta.ic.expression.constant.x_interface = 0.5
 
 eta.ic.expression.region0 = "1.0 - 0.5*(1 + tanh((x - x_interface)/(2*sqrt(2)*epsilon)))"
@@ -79,13 +80,6 @@ pressure0.ic.expression.region0 = "10"
 pressure1.ic.type = expression
 pressure1.ic.expression.region0 = "10"
 
-# Temperatures
-temperature0.ic.type = expression
-temperature0.ic.expression.region0 = "293.15"
-
-temperature1.ic.type = expression
-temperature1.ic.expression.region0 = "293.15"
-
 # Thermodynamic properties
 cp0 = "1005.0"
 cp1 = "4179.0"
@@ -93,24 +87,11 @@ cp1 = "4179.0"
 cv0 = "717.86"
 cv1 = "2984.3"
 
-# Thermal conductivities
-k0_thermal.ic.type = expression
-k0_thermal.ic.expression.region0 = "0.026"
-
-k1_thermal.ic.type = expression
-k1_thermal.ic.expression.region0 = "0.6"
-
-h0_thermal.ic.type = expression
-h0_thermal.ic.expression.region0 = "1005.0"
-
-h1_thermal.ic.type = expression
-h1_thermal.ic.expression.region0 = "4179.0"
-
 # Surface tension
 sigma = 72.8                   # RE-ENABLED
 
 # Vapor Diffusivity
-Dv = "2.0e-1"                  #RE-ENABLED
+Dv = "2.0e-2"                  #RE-ENABLED
 
 # Reference pressure
 pref = 0.0
@@ -161,9 +142,7 @@ Spec_Vol = 1
 grav = 9.81
 
 ### SOLVER SETTINGS ###
-Riemann_Solver = 1
-kappa_method = 2
-scheme = 0
-Limiter = 0
+Riemann_Solver.type = "hllc"
+kappa_method = 1
 small = 1e-8
 lagrange = 0.0
