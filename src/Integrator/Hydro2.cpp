@@ -200,7 +200,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.Y_mf,            &value.bc_nothing,  1, nghost, "Mass_Fraction", true, false);       // Mass Fraction
 
         // EXTRAS & DEBUGGING
-        value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", false, false, { "x", "y" });
+        value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", true, false, { "x", "y" });
         value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, nghost, "kappa", true, false, { "Avg", "1", "2" }); // To Surface curvature
         value.RegisterNewFab(value.grad_mag_grad_eta_mf, &value.bc_nothing, 2, nghost, "grad_mag_grad_eta", false, false, { "x", "y" }); // grad( | grad(eta) | )
         value.RegisterNewFab(value.rho_flux_mf,     &value.bc_nothing,  1, nghost, "rho_flux", true, false);                    // Density Flux
@@ -664,6 +664,7 @@ Hydro2::RHS(int lev,
             // Chemical Potential
             Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
             Set::Scalar mu_chem = -epsilon * epsilon * lap_eta + f_prime;
+            //Set::Scalar mu_chem = -epsilon * lap_eta + f_prime / epsilon;
             mu_chem_(i, j, k) = mu_chem;
 
             // Mass Fraction
@@ -1007,7 +1008,7 @@ Hydro2::RHS(int lev,
             Set::Scalar advection = -u.dot(grad_eta);
             //Set::Scalar diffusion = Mob * lap_mu_chem; // Allen-Cahn Alternative - it has to be curve fit
             Set::Scalar diffusion = Mob * ( lap_eta - ((phi * (1.0-phi) * (1.0-2.0*phi)) / (epsilon*epsilon + small)) - (grad_eta_mag * kappa) ); // Chiu & Lin (2011) URL: https://www.sciencedirect.com/science/article/pii/S0021999110005243
-            Set::Scalar eta_dot = advection + diffusion;
+            Set::Scalar eta_dot_AC = advection + diffusion;
             */
 
             // ------------------------------------------------------------
@@ -1015,14 +1016,12 @@ Hydro2::RHS(int lev,
             // ------------------------------------------------------------
             // d(eta)/dt = -u·grad(eta) + div( M*grad(mu) )
             Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
-            //Set::Scalar Mob = a(i, j, k) * 0.7 * DX[0]; // Mob = u_max * epsilon
-            Set::Scalar Mob = 0.0;  // a(i, j, k) * epsilon * epsilon / DX[0]; // Mob = u_max * epsilon
-            Set::Scalar advection = -u.dot(grad_eta);
-            Set::Scalar diffusion = Mob * lap_mu_chem;
-            Set::Scalar eta_dot = advection + diffusion;
+            // Set::Scalar Mob = a(i, j, k) * 0.7 * DX[0]; // Mob = u_max * epsilon
+            Set::Scalar Mob = 0.0001; // a(i, j, k) * epsilon * epsilon / DX[0]; // Mob = u_max * epsilon
+            Set::Scalar eta_dot_CH = Mob * lap_mu_chem;
 
             // DEBUG Tool
-            if ((eta_dot != eta_dot))
+            if ((eta_dot_CH != eta_dot_CH))
             {
                 Util::ParallelMessage(INFO, "------------------------------------------------------------");
                 Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Boundry Evolution:");
@@ -1034,9 +1033,7 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "lap_mu_chem=", lap_mu_chem);
                 Util::ParallelMessage(INFO, "a=", a(i, j, k));
                 Util::ParallelMessage(INFO, "Mob=", Mob);
-                Util::ParallelMessage(INFO, "advection=", advection);
-                Util::ParallelMessage(INFO, "diffusion=", diffusion);
-                Util::ParallelMessage(INFO, "eta_dot=", eta_dot);
+                Util::ParallelMessage(INFO, "eta_dot_CH=", eta_dot_CH);
                 Util::Abort(INFO);
             } 
 
@@ -1288,10 +1285,11 @@ Hydro2::RHS(int lev,
                 Set::Scalar u_ylo = flux_ylo.u_interface;
                 Set::Scalar u_yhi = flux_yhi.u_interface;
 
-                Set::Vector u_interface = Set::Vector(u_xhi - u_xlo, u_yhi - u_ylo);
+                Set::Vector u_interface = Set::Vector((u_xhi + u_xlo) / 2.0, (u_yhi - u_ylo) / 2.0);
 
                 // Update eta RHS with divergence of flux
-                eta_rhs(i, j, k) = - u_interface.dot(grad_eta)
+                eta_rhs(i, j, k) = -u_interface.dot(grad_eta)
+                                   + eta_dot_CH;
                                    + eta_dot_Vap;
 
                 //eta_rhs(i, j, k) = eta_dot + eta_dot_Vap;
