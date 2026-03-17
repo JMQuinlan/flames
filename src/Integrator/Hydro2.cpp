@@ -458,7 +458,6 @@ void Hydro2::Mix(int lev)
             UE_mas(i, j, k) = (UE_vol(i, j, k)) / (rho(i, j, k));
             
             // Kinetic Energy
-            //  TODO: Get rid of thermally perfect assumption. Involve temperature
             E_vol(i, j, k) = KE_vol(i, j, k) + UE_vol(i, j, k);
             E_vol_old(i, j, k) = E_vol(i, j, k);
             E_mas(i, j, k) = KE_mas(i, j, k) + UE_mas(i, j, k);
@@ -1469,8 +1468,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
 
             // gamma
-            Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
-            Set::Scalar B = (eta(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
+            Set::Scalar A = (eta_new(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta_new(i, j, k)) / (gamma1 - 1.0);
+            Set::Scalar B = (eta_new(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta_new(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
             gammaf(i, j, k) = 1.0 + (1.0 / A);
 
             // etadot
@@ -1493,7 +1492,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE_vol(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // pressure Tammann EOS modification
 
             // Chemical Potential
-            Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
+            Set::Scalar f_prime = 4.0 * eta_new(i, j, k) * (eta_new(i, j, k) - 0.5) * (eta_new(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
             Set::Scalar mu_chem = -epsilon * epsilon * lap_eta + f_prime;
             mu_chem_(i, j, k) = mu_chem;
 

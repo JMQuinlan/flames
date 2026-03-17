@@ -1,0 +1,128 @@
+#@ [case1]
+#@ exe=hydro2
+#@ dim=2
+
+# See https://www.sciencedirect.com/science/article/pii/S0021999117301948
+# Figure 4 - Gass Liquid Riemann Problem
+
+### OUTPUT ###
+plot_file = ./tests/FlowRiemannUnitTests/output_Garrick_GasLiquid
+Riemann_Solver.type = hllc
+
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = "1e-3"
+eta.ic.expression.region0 = "1.0 - (0.5 * (1.0 + tanh(x / epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+amr.plot_int = 10
+
+### MESHING ###
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.grid_eff = 0.8
+amr.n_cell = 1600 6
+
+### DIMENSIONS ###
+geometry.prob_lo = -1.0  -0.02   0.0 # [ m ]
+geometry.prob_hi =  1.0   0.02   0.0 # [ m ]
+geometry.is_periodic = 0 1 0
+
+### TIME STEP ###
+timestep  = 2.5e-4
+stop_time = 0.2
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+### Advection solver ###
+
+### HYDRO PARAM ###
+gamma0 = 1.4
+gamma1 = 2.5 # 5.5
+cfl   = 0.4
+mu0   = 0.0
+mu1   = 0.0
+p0_0  = 0.0
+p0_1  = 0.0 # 1.505
+
+### Surface tension coefficient ###
+sigma = 1000
+
+### Reference pressure ###
+pref = 0.0
+
+### IC State - Fluid 0 (Left side, x < 0) ###
+density0.ic.type = expression
+density0.ic.expression.constant.rho_L = 1.241
+density0.ic.expression.region0 = "rho_L"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_L = "2.753"
+pressure0.ic.expression.region0 = "p_L"
+
+cp0 = "1.4"
+cv0 = "1.0"
+
+### IC State - Fluid 1 (Right side, x > 0) ###
+density1.ic.type = expression
+density1.ic.expression.constant.rho_R = 0.991
+density1.ic.expression.region0 = "rho_R"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.v_R = "0.0"
+velocity1.ic.expression.region0 = "v_R"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_R = "3.059e-4"
+pressure1.ic.expression.region0 = "p_R"
+
+cp1 = "1.4"
+cv1 = "1.0"
+
+### ETA BC  ###
+pf.eta.bc.type.xlo = neumann
+pf.eta.bc.type.xhi = neumann
+pf.eta.bc.type.ylo = periodic
+pf.eta.bc.type.yhi = periodic
+
+### HYDRO BC ###
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+
+momentum.bc.type.xhi = neumann periodic
+momentum.bc.type.xlo = neumann periodic
+momentum.bc.type.ylo = neumann periodic
+momentum.bc.type.yhi = neumann periodic
+
+### HYDRO REFINEMENT CRITERIA ###
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+Spec_Vol = 1
+kappa_method = 1
+
+sigma = 0;
+Dv = 0;
+g = 0.0;
+
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
