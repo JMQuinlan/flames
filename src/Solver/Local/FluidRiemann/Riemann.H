@@ -57,6 +57,7 @@ struct State
         }
         E = energy_mf(i, j, k);
         gam = NAN;
+        p0 = NAN;
         T = NAN;
     }
 
@@ -94,7 +95,6 @@ struct State
         os << "gam=" << state.gam << ", ";
         os << "p0=" << state.p0 << ", ";
         os << "T=" << state.T << ", ";
-        // do stuf
         return os;
     }
 
@@ -116,6 +116,7 @@ struct State
         rho -= a.rho;
         M_normal -= a.M_normal;
         M_tangent -= a.M_tangent;
+        E -= a.E;
         gam -= a.gam;
         p0 -= a.p0;
         T -= a.T;
@@ -127,6 +128,7 @@ struct State
         rho *= alpha;
         M_normal *= alpha;
         M_tangent *= alpha;
+        E *= alpha;
         gam *= alpha;
         p0 *= alpha;
         T *= alpha;
@@ -138,6 +140,7 @@ struct State
         rho /= alpha;
         M_normal /= alpha;
         M_tangent /= alpha;
+        E /= alpha;
         gam /= alpha;
         p0 /= alpha;
         T /= alpha;
@@ -183,10 +186,21 @@ struct Flux
     Set::Scalar Gam;
     Set::Scalar P0;
     Set::Scalar temperature;
-    Flux() : mass(0.0), momentum_normal(0.0), momentum_tangent(0.0), energy(0.0), Gam(0.0), P0(0.0), temperature(0.0) {}
+    Set::Scalar u_interface; // NEW: HLLC interface velocity
+
+    Flux() : mass(0.0), momentum_normal(0.0), momentum_tangent(0.0), energy(0.0), Gam(0.0), P0(0.0), temperature(0.0), u_interface(0.0) {}
+
+    // Constructor without u_interface (for backward compatibility)
     Flux(Set::Scalar a_mass, Set::Scalar a_momentum_normal, Set::Scalar a_momentum_tangent, Set::Scalar a_energy, Set::Scalar a_Gam = NAN, Set::Scalar a_P0 = NAN, Set::Scalar a_temperature = NAN)
         : mass(a_mass), momentum_normal(a_momentum_normal),
-          momentum_tangent(a_momentum_tangent), energy(a_energy), Gam(a_Gam), P0(a_P0), temperature(a_temperature) {}
+          momentum_tangent(a_momentum_tangent), energy(a_energy), Gam(a_Gam), P0(a_P0), temperature(a_temperature), u_interface(0.0) {}
+
+    // Constructor with u_interface
+    Flux(Set::Scalar a_mass, Set::Scalar a_momentum_normal, Set::Scalar a_momentum_tangent, Set::Scalar a_energy, Set::Scalar a_Gam, Set::Scalar a_P0, Set::Scalar a_temperature, Set::Scalar a_u_interface)
+        : mass(a_mass), momentum_normal(a_momentum_normal),
+          momentum_tangent(a_momentum_tangent), energy(a_energy),
+          Gam(a_Gam), P0(a_P0), temperature(a_temperature),
+          u_interface(a_u_interface) {}
 
     Flux(const State &in) : mass(in.rho),
                             momentum_normal(in.M_normal),
@@ -194,7 +208,8 @@ struct Flux
                             energy(in.E),
                             Gam(in.gam),
                             P0(in.p0),
-                            temperature(in.T) {}
+                            temperature(in.T),
+                            u_interface(0.0) {}
 
     friend std::ostream &
     operator<<(std::ostream &os, const Flux &flux)
@@ -206,7 +221,7 @@ struct Flux
         os << "gam=" << flux.Gam << ", ";
         os << "p0=" << flux.P0 << ", ";
         os << "T=" << flux.temperature << ", ";
-        // do stuff
+        os << "u_int=" << flux.u_interface; // NEW
         return os;
     }
 
@@ -220,6 +235,7 @@ struct Flux
         Gam += a.Gam;
         P0 += a.P0;
         temperature += a.temperature;
+        u_interface += a.u_interface; // NEW
     }
 
     void
@@ -232,6 +248,7 @@ struct Flux
         Gam -= a.Gam;
         P0 -= a.P0;
         temperature -= a.temperature;
+        u_interface -= a.u_interface; // NEW
     }
 
     void
@@ -241,9 +258,10 @@ struct Flux
         momentum_normal *= alpha;
         momentum_tangent *= alpha;
         energy *= alpha;
-        Gam *= Gam;
-        P0 *= P0;
+        Gam *= alpha; // FIXED (was Gam *= Gam)
+        P0 *= alpha;  // FIXED (was P0 *= P0)
         temperature *= alpha;
+        u_interface *= alpha; // NEW
     }
 
     void
@@ -256,36 +274,39 @@ struct Flux
         Gam /= alpha;
         P0 /= alpha;
         temperature /= alpha;
+        u_interface /= alpha; // NEW
     }
 
     friend Flux
     operator+(const Flux &a, const Flux &b)
     {
-        return Flux(a.mass + b.mass, a.momentum_normal + b.momentum_normal, a.momentum_tangent + b.momentum_tangent, a.energy + b.energy, a.Gam + b.Gam, a.P0 + b.P0, a.temperature + b.temperature);
+        return Flux(a.mass + b.mass, a.momentum_normal + b.momentum_normal, a.momentum_tangent + b.momentum_tangent, a.energy + b.energy, a.Gam + b.Gam, a.P0 + b.P0, a.temperature + b.temperature,
+                    a.u_interface + b.u_interface); // NEW
     }
 
     friend Flux
     operator-(const Flux &a, const Flux &b)
     {
-        return Flux(a.mass - b.mass, a.momentum_normal - b.momentum_normal, a.momentum_tangent - b.momentum_tangent, a.energy - b.energy, a.Gam - b.Gam, a.P0 - b.P0, a.temperature - b.temperature); // We can't "add" temperatures
+        return Flux(a.mass - b.mass, a.momentum_normal - b.momentum_normal, a.momentum_tangent - b.momentum_tangent, a.energy - b.energy, a.Gam - b.Gam, a.P0 - b.P0, a.temperature - b.temperature,
+                    a.u_interface - b.u_interface); // NEW
     }
 
     friend Flux
     operator*(const Flux &a, const Set::Scalar beta)
     {
-        return Flux(a.mass * beta, a.momentum_normal * beta, a.momentum_tangent * beta, a.energy * beta, a.Gam * beta, a.P0 * beta, a.temperature * beta);
+        return Flux(a.mass * beta, a.momentum_normal * beta, a.momentum_tangent * beta, a.energy * beta, a.Gam * beta, a.P0 * beta, a.temperature * beta, a.u_interface * beta); // NEW
     }
 
     friend Flux
     operator*(const Set::Scalar beta, const Flux &a)
     {
-        return Flux(a.mass * beta, a.momentum_normal * beta, a.momentum_tangent * beta, a.energy * beta, a.Gam * beta, a.P0 * beta, a.temperature * beta);
+        return Flux(a.mass * beta, a.momentum_normal * beta, a.momentum_tangent * beta, a.energy * beta, a.Gam * beta, a.P0 * beta, a.temperature * beta, a.u_interface * beta); // NEW
     }
 
     friend Flux
     operator/(const Flux &a, const Set::Scalar beta)
     {
-        return Flux(a.mass / beta, a.momentum_normal / beta, a.momentum_tangent / beta, a.energy / beta, a.Gam / beta, a.P0 / beta, a.temperature / beta);
+        return Flux(a.mass / beta, a.momentum_normal / beta, a.momentum_tangent / beta, a.energy / beta, a.Gam / beta, a.P0 / beta, a.temperature / beta, a.u_interface / beta); // NEW
     }
 };
 

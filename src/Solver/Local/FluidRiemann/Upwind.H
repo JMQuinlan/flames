@@ -131,6 +131,8 @@ public:
             fl.energy = u * (E + p / (rho + small));
         }
 
+        fl.u_interface = u;
+
         // ERROR CHECKING
         if ((fl.mass != fl.mass)
             or (fl.momentum_normal != fl.momentum_normal)

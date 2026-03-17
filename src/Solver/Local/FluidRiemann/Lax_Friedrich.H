@@ -154,6 +154,8 @@ public:
         fl.momentum_tangent = 0.5 * (f_L.momentum_tangent + f_R.momentum_tangent) - 0.5 * S_max * (U_R.M_tangent - U_L.M_tangent);
         fl.energy = 0.5 * (f_L.energy + f_R.energy) - 0.5 * S_max * (U_R.E - U_L.E);
 
+        fl.u_interface = S_max;
+
         // ERROR CHECKING
         if ((fl.mass != fl.mass)
             or (fl.momentum_normal != fl.momentum_normal)

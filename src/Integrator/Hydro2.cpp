@@ -1282,7 +1282,19 @@ Hydro2::RHS(int lev,
             }
             else
             {
-                eta_rhs(i, j, k) = eta_dot + eta_dot_Vap;
+                // Get HLLC interface velocities from fluxes (Equation 47)
+                Set::Scalar u_xlo = flux_xlo.u_interface;
+                Set::Scalar u_xhi = flux_xhi.u_interface;
+                Set::Scalar u_ylo = flux_ylo.u_interface;
+                Set::Scalar u_yhi = flux_yhi.u_interface;
+
+                Set::Vector u_interface = Set::Vector(u_xhi - u_xlo, u_yhi - u_ylo);
+
+                // Update eta RHS with divergence of flux
+                eta_rhs(i, j, k) = - u_interface.dot(grad_eta)
+                                   + eta_dot_Vap;
+
+                //eta_rhs(i, j, k) = eta_dot + eta_dot_Vap;
             }
 
             // ERROR CHECKING

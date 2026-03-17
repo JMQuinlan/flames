@@ -254,6 +254,8 @@ public:
             fl.energy = 0.5 * (u_L * (E_L + p_L / (rho_L + small)) + u_R * (E_R + p_R / (rho_R + small))) - 0.5 * (r13 * lambda1 * deltav1 + r23 * lambda2 * deltav2 + r33 * lambda3 * deltav3);
         }
 
+        fl.u_interface = u_L;
+
         // ERROR CHECKING
         if ((fl.mass != fl.mass) || (fl.momentum_normal != fl.momentum_normal) || (fl.momentum_tangent != fl.momentum_tangent) || (fl.energy != fl.energy))
         {

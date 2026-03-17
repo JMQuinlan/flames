@@ -244,18 +244,22 @@
             if (0.0 <= S_L)
             {
                 fl = f_L;
+                fl.u_interface = u_L;
             }
             else if (S_L <= 0.0 && 0.0 <= S_star)
             {
                 fl = f_star_L;
+                fl.u_interface = S_star;
             }
             else if (S_star <= 0.0 && 0.0 <= S_R)
             {
                 fl = f_star_R;
+                fl.u_interface = S_star;
             }
             else
             {
                 fl = f_R;
+                fl.u_interface = u_R;
             }
 
             // ========================================

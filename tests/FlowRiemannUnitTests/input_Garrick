@@ -10,7 +10,7 @@ plot_file = ./tests/FlowRiemannUnitTests/output_Garrick_GasLiquid
 Riemann_Solver.type = hllc
 
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = "1e-3"
+eta.ic.expression.constant.epsilon = "1e-2"
 eta.ic.expression.region0 = "1.0 - (0.5 * (1.0 + tanh(x / epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
 
@@ -21,7 +21,7 @@ amr.max_level = 0
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.grid_eff = 0.8
-amr.n_cell = 1600 6
+amr.n_cell = 800 2
 
 ### DIMENSIONS ###
 geometry.prob_lo = -1.0  -0.02   0.0 # [ m ]
@@ -29,7 +29,7 @@ geometry.prob_hi =  1.0   0.02   0.0 # [ m ]
 geometry.is_periodic = 0 1 0
 
 ### TIME STEP ###
-timestep  = 2.5e-4
+timestep  = 2.5e-5
 stop_time = 0.2
 
 m0.ic.constant.value = 0.0
@@ -41,12 +41,12 @@ q.ic.constant.value = 0.0
 
 ### HYDRO PARAM ###
 gamma0 = 1.4
-gamma1 = 2.5 # 5.5
+gamma1 = 2.0
 cfl   = 0.4
 mu0   = 0.0
 mu1   = 0.0
 p0_0  = 0.0
-p0_1  = 0.0 # 1.505
+p0_1  = 1.505
 
 ### Surface tension coefficient ###
 sigma = 1000

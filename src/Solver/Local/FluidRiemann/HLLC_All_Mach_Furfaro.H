@@ -265,26 +265,32 @@ public:
         if (0.0 <= S_L)
         {
             fl = f_L;
+            fl.u_interface = u_L;
         }
         else if (S_L <= 0.0 && 0.0 <= S_star_L)
         {
             fl = f_star_L;
+            fl.u_interface = S_star_L;
         }
         else if (S_star_L <= 0.0 && 0.0 <= S_I)
         {
             fl = f_star_I_L;
+            fl.u_interface = S_I;
         }
         else if (S_I <= 0.0 && 0.0 <= S_star_R)
         {
             fl = f_star_I_R;
+            fl.u_interface = S_I;
         }
         else if (S_star_R <= 0.0 && 0.0 <= S_R)
         {
             fl = f_star_R;
+            fl.u_interface = S_star_R;
         }
         else
         {
             fl = f_R;
+            fl.u_interface = u_R;
         }
 
         // =====================================================================

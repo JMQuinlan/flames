@@ -141,10 +141,12 @@ public:
         if (0.0 <= S_L)
         {
             fl = f_L;
+            fl.u_interface = u_L;
         }
         else if (S_R <= 0.0)
         {
             fl = f_R;
+            fl.u_interface = u_R;
         }
         else
         {
