@@ -6,7 +6,7 @@
 # Figure 4 - Gass Liquid Riemann Problem
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Garrick_GasLiquid
+plot_file = ./tests/FlowRiemannUnitTests/output_Garrick_GasLiquid2
 Riemann_Solver.type = hllc
 
 eta.ic.type = expression
@@ -30,7 +30,8 @@ geometry.is_periodic = 0 1 0
 
 ### TIME STEP ###
 timestep  = 2.5e-4
-stop_time = 0.2
+#stop_time = 0.2
+stop_time = 0.25
 
 m0.ic.constant.value = 0.0
 u0.ic.constant.value = 0.0

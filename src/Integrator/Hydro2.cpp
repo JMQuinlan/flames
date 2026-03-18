@@ -450,7 +450,7 @@ void Hydro2::Mix(int lev)
             KE_mas(i, j, k) = (0.5 * ((v0(i, j, k, 0) * v0(i, j, k, 0)) + (v0(i, j, k, 1) * v0(i, j, k, 1)))) * eta(i, j, k)
                             + (0.5 * ((v1(i, j, k, 0) * v1(i, j, k, 0)) + (v1(i, j, k, 1) * v1(i, j, k, 1)))) * (1.0 - eta(i, j, k));
 
-            // Internal Energy   
+            // Internal Energy
             Set::Scalar p_eff = p0(i, j, k) * (eta(i, j, k)) + p1(i, j, k) * (1.0 - eta(i, j, k));
             Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0); 
             Set::Scalar B = (eta(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
@@ -1017,8 +1017,9 @@ Hydro2::RHS(int lev,
             // d(eta)/dt = -u·grad(eta) + div( M*grad(mu) )
             Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
             // Set::Scalar Mob = a(i, j, k) * 0.7 * DX[0]; // Mob = u_max * epsilon
-            Set::Scalar Mob = 0.0001; // a(i, j, k) * epsilon * epsilon / DX[0]; // Mob = u_max * epsilon
-            Set::Scalar eta_dot_CH = Mob * lap_mu_chem;
+            Set::Scalar Mob = a(i, j, k) * epsilon;// *epsilon / DX[0]; // Mob = u_max * epsilon
+            //Set::Scalar advection = -u.dot(grad_eta);
+            Set::Scalar eta_dot_CH = Mob * lap_mu_chem * 0.2;
 
             // DEBUG Tool
             if ((eta_dot_CH != eta_dot_CH))
@@ -1279,20 +1280,62 @@ Hydro2::RHS(int lev,
             }
             else
             {
-                // Get HLLC interface velocities from fluxes (Equation 47)
+                // Get HLLC interface velocities from fluxes (Equation 48)
                 Set::Scalar u_xlo = flux_xlo.u_interface;
                 Set::Scalar u_xhi = flux_xhi.u_interface;
                 Set::Scalar u_ylo = flux_ylo.u_interface;
                 Set::Scalar u_yhi = flux_yhi.u_interface;
 
-                Set::Vector u_interface = Set::Vector((u_xhi + u_xlo) / 2.0, (u_yhi - u_ylo) / 2.0);
+                // x-direction faces
+                Set::Scalar sgn_xlo = (u_xlo > 0.0) ? 1.0 : ((u_xlo < 0.0) ? -1.0 : 0.0);
+                Set::Scalar sgn_xhi = (u_xhi > 0.0) ? 1.0 : ((u_xhi < 0.0) ? -1.0 : 0.0);
 
-                // Update eta RHS with divergence of flux
-                eta_rhs(i, j, k) = -u_interface.dot(grad_eta)
-                                   + eta_dot_CH;
-                                   + eta_dot_Vap;
+                Set::Scalar eta_face_xlo = 0.5 * (1.0 + sgn_xlo) * eta(i - 1, j, k)
+                                           + 0.5 * (1.0 - sgn_xlo) * eta(i, j, k);
+                Set::Scalar eta_face_xhi = 0.5 * (1.0 + sgn_xhi) * eta(i, j, k)
+                                           + 0.5 * (1.0 - sgn_xhi) * eta(i + 1, j, k);
 
-                //eta_rhs(i, j, k) = eta_dot + eta_dot_Vap;
+                // y-direction faces
+                Set::Scalar sgn_ylo = (u_ylo > 0.0) ? 1.0 : ((u_ylo < 0.0) ? -1.0 : 0.0);
+                Set::Scalar sgn_yhi = (u_yhi > 0.0) ? 1.0 : ((u_yhi < 0.0) ? -1.0 : 0.0);
+
+                Set::Scalar eta_face_ylo = 0.5 * (1.0 + sgn_ylo) * eta(i, j - 1, k)
+                                           + 0.5 * (1.0 - sgn_ylo) * eta(i, j, k);
+                Set::Scalar eta_face_yhi = 0.5 * (1.0 + sgn_yhi) * eta(i, j, k)
+                                           + 0.5 * (1.0 - sgn_yhi) * eta(i, j + 1, k);
+
+                Set::Scalar phi_u_xlo = eta_face_xlo * u_xlo;
+                Set::Scalar phi_u_xhi = eta_face_xhi * u_xhi;
+                Set::Scalar phi_u_ylo = eta_face_ylo * u_ylo;
+                Set::Scalar phi_u_yhi = eta_face_yhi * u_yhi;
+
+                Set::Scalar div_phi_u = (phi_u_xhi - phi_u_xlo) / DX[0]
+                                        + (phi_u_yhi - phi_u_ylo) / DX[1];
+
+                Set::Scalar div_u = (u_xhi - u_xlo) / DX[0]
+                                    + (u_yhi - u_ylo) / DX[1];
+
+                Set::Scalar phi_div_u = eta(i, j, k) * div_u;
+
+                eta_rhs(i, j, k) = -div_phi_u     // Advection flux
+                                   + phi_div_u    // Compressibility source (Eq. 46)
+                                   + eta_dot_CH   // Cahn-Hilliard diffusion
+                                   + eta_dot_Vap; // Vaporization source
+
+                ///////////////////////////////////////
+                // Interface compression //
+                // From: https://www.sciencedirect.com/science/article/pii/S0021999117301948
+                // Does keep interface compressed nicely but it does not properlly advect. Interface becomes decoupled from other variables with this implemnted
+                //      Only keeping this as a template for a future compression technique
+                /*
+                Set::Scalar H = tanh(eta(i, j, k) * (1.0 - eta(i, j, k)) / 0.01); // Heaviside function - only compress at interface
+                H = H * H; // tanh^2
+                Set::Scalar eps_h = 0.72 * sqrt(DX[0] * DX[0] + DX[1] * DX[1]); // Interface thickness parameter
+                Set::Scalar compression_diffusion = eps_h * lap_eta; // Anti-diffusion term
+                Set::Scalar compression_drift = -(1.0 - 2.0 * eta(i, j, k)) * grad_eta.lpNorm<2>(); // Compression drift
+                Set::Scalar eta_compression = H * (compression_diffusion + compression_drift); // Total compression source
+                eta_rhs(i, j, k) += eta_compression; // Add to eta RHS
+                */
             }
 
             // ERROR CHECKING
