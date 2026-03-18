@@ -1318,9 +1318,16 @@ Hydro2::RHS(int lev,
                 Set::Scalar phi_div_u = eta(i, j, k) * div_u;
 
                 eta_rhs(i, j, k) = -div_phi_u     // Advection flux
-                                   + phi_div_u    // Compressibility source (Eq. 46)
+                                   //+ phi_div_u    // Compressibility source (Eq. 46)
                                    + eta_dot_CH   // Cahn-Hilliard diffusion
                                    + eta_dot_Vap; // Vaporization source
+
+                //eta_rhs(i, j, k) = -grad_eta.dot(Set::Vector((u_xhi - u_xlo) / DX[0], (u_yhi - u_ylo) / DX[1] )) // Advection flux
+                //eta_rhs(i, j, k) = -grad_eta.dot(Set::Vector((u_xhi - u_xlo), (u_yhi - u_ylo) )) // Advection flux
+                //eta_rhs(i, j, k) = -grad_eta.dot(Set::Vector((u_xhi + u_xlo) / 2.0, (u_yhi + u_ylo) / 2.0 )) // Advection flux
+                //                   //+ phi_div_u    // Compressibility source (Eq. 46)
+                //                   + eta_dot_CH   // Cahn-Hilliard diffusion
+                //                   + eta_dot_Vap; // Vaporization source
 
                 ///////////////////////////////////////
                 // Interface compression //
