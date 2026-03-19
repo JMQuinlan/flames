@@ -121,6 +121,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // DIFFUSE PARAMETERS
         value.RegisterNewFab(value.eta_mf,          value.energy_bc, 1, nghost, "eta", true, true);
         value.RegisterNewFab(value.eta_old_mf,      value.energy_bc, 1, nghost, "eta_old", false, true);
+        value.RegisterNewFab(value.rho_eta_mf,      value.energy_bc, 1, nghost, "rho_eta", true, true);
+        value.RegisterNewFab(value.rho_eta_old_mf,      value.energy_bc, 1, nghost, "rho_eta_old", false, true);
+
         value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing, 1, nghost, "etadot", true, false);
         value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing, 4, nghost, "hess_eta", false, false, { "00", "01", "10", "11" });
         value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing,  2, nghost, "n_hat", false, false, { "x", "y" });
@@ -373,6 +376,8 @@ void Hydro2::Mix(int lev)
 
         // DIFFUSIVE BOUNDRY
         Set::Patch<const Set::Scalar> eta = eta_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> rho_eta = rho_eta_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> rho_eta_old = rho_eta_old_mf.Patch(lev, mfi);
 
         // FLUID 0
         Set::Patch<const Set::Scalar>   v0          = velocity0_mf.Patch(lev, mfi);
@@ -435,9 +440,14 @@ void Hydro2::Mix(int lev)
 
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
 
+
+
             // Calculate State Variables 
-            rho(i, j, k) = eta(i, j, k) * rho0(i, j, k) + (1.0 - eta(i, j, k)) * rho1(i, j, k);
+            //rho(i, j, k) = eta(i, j, k) * rho0(i, j, k) + (1.0 - eta(i, j, k)) * rho1(i, j, k);
+            rho(i, j, k) = 1.0 / (eta(i, j, k) / (rho0(i, j, k)) + (1.0 - eta(i, j, k)) / (rho1(i, j, k)));
             rho_old(i, j, k) = rho(i, j, k);  
+            rho_eta(i, j, k) = rho(i, j, k) * eta(i, j, k);
+            rho_eta_old(i, j, k) = rho_eta(i, j, k);
 
             M(i, j, k, 0) = (rho0(i, j, k) * v0(i, j, k, 0)) * eta(i, j, k) + (rho1(i, j, k) * v1(i, j, k, 0)) * (1.0 - eta(i, j, k));
             M(i, j, k, 1) = (rho0(i, j, k) * v0(i, j, k, 1)) * eta(i, j, k) + (rho1(i, j, k) * v1(i, j, k, 1)) * (1.0 - eta(i, j, k));
@@ -569,17 +579,36 @@ void Hydro2::SurfaceTension(Set::Scalar time, int lev)
 void
 Hydro2::RHS(int lev, 
     Set::Scalar time, 
-    amrex::MultiFab &eta_rhs_mf, 
+    amrex::MultiFab &rho_eta_rhs_mf, 
     amrex::MultiFab &rho_rhs_mf, 
     amrex::MultiFab &M_rhs_mf, 
     amrex::MultiFab &E_rhs_mf, 
-    const amrex::MultiFab &eta_mf_in,
+    const amrex::MultiFab &rho_eta_mf_in,
     const amrex::MultiFab &rho_mf_in,
     const amrex::MultiFab &M_mf_in, 
     const amrex::MultiFab &E_mf_in) //, const amrex::MultiFab &velocity_mf_in, const amrex::MultiFab &pressure_mf_in, const amrex::MultiFab &T_mf_in)
 {
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
+
+    // Eta Fields
+    // for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
+    for (amrex::MFIter mfi(*(velocity_mf)[lev], true); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
+
+        // CONSERVATIVE
+        Set::Patch<Set::Scalar> eta = eta_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> rho_eta = rho_eta_mf_in.array(mfi);
+        Set::Patch<const Set::Scalar> rho = rho_mf_in.array(mfi);
+        
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            auto sten = Numeric::GetStencil(i, j, k, domain);
+
+            eta(i, j, k) = rho_eta(i, j, k) / rho(i, j, k);
+            
+        });
+    }
 
     // Primitive Fields
     //for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
@@ -588,7 +617,8 @@ Hydro2::RHS(int lev,
         const amrex::Box &bx = mfi.validbox();
 
         // CONSERVATIVE
-        Set::Patch<const Set::Scalar> eta = eta_mf_in.array(mfi);
+        Set::Patch<const Set::Scalar> eta = eta_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> rho_eta = rho_eta_mf_in.array(mfi);
         Set::Patch<const Set::Scalar> rho = rho_mf_in.array(mfi);
         Set::Patch<const Set::Scalar> M = M_mf_in.array(mfi);
         Set::Patch<const Set::Scalar> E = E_mf_in.array(mfi);
@@ -761,13 +791,14 @@ Hydro2::RHS(int lev,
         */
 
         // Mixture
-        Set::Patch<const Set::Scalar> eta = eta_mf_in.array(mfi);
+        Set::Patch<const Set::Scalar> eta = eta_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> rho_eta = rho_eta_mf_in.array(mfi);
         Set::Patch<const Set::Scalar> rho = rho_mf_in.array(mfi);
         Set::Patch<const Set::Scalar> M = M_mf_in.array(mfi);
         Set::Patch<const Set::Scalar> E = E_mf_in.array(mfi);
 
         // OUTPUTS
-        Set::Patch<Set::Scalar> eta_rhs = eta_rhs_mf.array(mfi);
+        Set::Patch<Set::Scalar> rho_eta_rhs = rho_eta_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> rho_rhs = rho_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> M_rhs = M_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> E_rhs = E_rhs_mf.array(mfi);
@@ -1085,11 +1116,11 @@ Hydro2::RHS(int lev,
                 // Scaling density choice: using rho_eta = rho_g makes RHS independent of mixture density
                 // This is consistent with the document recommendation
                 // Set::Scalar rho_eta = rho_g;
-                Set::Scalar rho_eta = rho(i, j, k);//rho_g;
+                //Set::Scalar rho_eta = rho(i, j, k);//rho_g;
 
                 // Vaporization source for eta equation (Equation 7):
                 // source_vap = (1/epsilon) * (rho_g * D_v / rho_eta) * (B_M/(1+B_M)) * |grad(eta)|
-                Set::Scalar vap_coeff = (rho_g * Dv / rho_eta + small) * (B_M / (1.0 + B_M + small));
+                Set::Scalar vap_coeff = (rho_g * Dv / rho_eta(i, j, k) + small) * (B_M / (1.0 + B_M + small));
                 eta_dot_Vap = (1.0 / epsilon) * vap_coeff * grad_eta_mag;
 
                 // FLUXES
@@ -1276,10 +1307,11 @@ Hydro2::RHS(int lev,
             /// Eta:
             if (static_eta == 1)
             {
-                eta_rhs(i, j, k) = 0.0;
+                rho_eta_rhs(i, j, k) = 0.0;
             }
             else
             {
+                /*
                 // Get HLLC interface velocities from fluxes (Equation 48)
                 Set::Scalar u_xlo = flux_xlo.u_interface;
                 Set::Scalar u_xhi = flux_xhi.u_interface;
@@ -1311,38 +1343,44 @@ Hydro2::RHS(int lev,
 
                 Set::Scalar div_phi_u = (phi_u_xhi - phi_u_xlo) / DX[0]
                                         + (phi_u_yhi - phi_u_ylo) / DX[1];
-
-                Set::Scalar div_u = (u_xhi - u_xlo) / DX[0]
-                                    + (u_yhi - u_ylo) / DX[1];
-
-                Set::Scalar phi_div_u = eta(i, j, k) * div_u;
-
-                eta_rhs(i, j, k) = -div_phi_u     // Advection flux
-                                   //+ phi_div_u    // Compressibility source (Eq. 46)
-                                   + eta_dot_CH   // Cahn-Hilliard diffusion
-                                   + eta_dot_Vap; // Vaporization source
-
-                //eta_rhs(i, j, k) = -grad_eta.dot(Set::Vector((u_xhi - u_xlo) / DX[0], (u_yhi - u_ylo) / DX[1] )) // Advection flux
-                //eta_rhs(i, j, k) = -grad_eta.dot(Set::Vector((u_xhi - u_xlo), (u_yhi - u_ylo) )) // Advection flux
-                //eta_rhs(i, j, k) = -grad_eta.dot(Set::Vector((u_xhi + u_xlo) / 2.0, (u_yhi + u_ylo) / 2.0 )) // Advection flux
-                //                   //+ phi_div_u    // Compressibility source (Eq. 46)
-                //                   + eta_dot_CH   // Cahn-Hilliard diffusion
-                //                   + eta_dot_Vap; // Vaporization source
-
-                ///////////////////////////////////////
-                // Interface compression //
-                // From: https://www.sciencedirect.com/science/article/pii/S0021999117301948
-                // Does keep interface compressed nicely but it does not properlly advect. Interface becomes decoupled from other variables with this implemnted
-                //      Only keeping this as a template for a future compression technique
-                /*
-                Set::Scalar H = tanh(eta(i, j, k) * (1.0 - eta(i, j, k)) / 0.01); // Heaviside function - only compress at interface
-                H = H * H; // tanh^2
-                Set::Scalar eps_h = 0.72 * sqrt(DX[0] * DX[0] + DX[1] * DX[1]); // Interface thickness parameter
-                Set::Scalar compression_diffusion = eps_h * lap_eta; // Anti-diffusion term
-                Set::Scalar compression_drift = -(1.0 - 2.0 * eta(i, j, k)) * grad_eta.lpNorm<2>(); // Compression drift
-                Set::Scalar eta_compression = H * (compression_diffusion + compression_drift); // Total compression source
-                eta_rhs(i, j, k) += eta_compression; // Add to eta RHS
                 */
+
+                // Generating upwind scheme for rho_eta
+                Set::Scalar eta_face_xlo = (flux_xlo.u_interface > 0.0) ? eta(i - 1, j, k) : eta(i, j, k);
+                Set::Scalar eta_face_xhi = (flux_xhi.u_interface > 0.0) ? eta(i, j, k) : eta(i + 1, j, k);
+                Set::Scalar eta_face_ylo = (flux_ylo.u_interface > 0.0) ? eta(i, j - 1, k) : eta(i, j, k);
+                Set::Scalar eta_face_yhi = (flux_yhi.u_interface > 0.0) ? eta(i, j, k) : eta(i, j + 1, k);
+                Set::Scalar div_u = (flux_xhi.u_interface - flux_xlo.u_interface) / DX[0]
+                                    + (flux_yhi.u_interface - flux_ylo.u_interface) / DX[1];
+
+                // Now use MASS FLUX (not velocity!) for the flux
+                Set::Scalar F_rho_eta_xlo = eta_face_xlo * flux_xlo.mass;
+                Set::Scalar F_rho_eta_xhi = eta_face_xhi * flux_xhi.mass;
+                Set::Scalar F_rho_eta_ylo = eta_face_ylo * flux_ylo.mass;
+                Set::Scalar F_rho_eta_yhi = eta_face_yhi * flux_yhi.mass;
+
+                Set::Scalar rho_eta_flux = (F_rho_eta_xhi - F_rho_eta_xlo) / DX[0] + (F_rho_eta_yhi - F_rho_eta_ylo) / DX[1];
+
+                
+
+                rho_eta_rhs(i, j, k) = -rho_eta_flux
+                                       + rho_eta(i, j, k) * div_u;
+                                       //+ rho_eta_dot_CH   // modified CH
+                                       //+ rho_eta_dot_Vap; // if applicable
+                ///
+                ///  Up to this point we have some negative velocity but rho_eta dramatically helped
+                ///     In a previous attempt this moved the boundry in the correct direction, I am now tring again.
+                Set::Vector grad_rho_eta = Numeric::Gradient(rho_eta, i, j, k, 0, DX);
+                Set::Scalar H = tanh(eta(i, j, k) * (1.0 - eta(i, j, k)) / 0.01);
+                H = H * H;
+                Set::Scalar eps_h = 0.72 * sqrt(DX[0] * DX[0] + DX[1] * DX[1]); // 2D
+                Set::Scalar lap_rho_eta = Numeric::Laplacian(rho_eta, i, j, k, 0, DX);
+                Set::Scalar diffusion_term = eps_h * lap_rho_eta;
+                Set::Scalar drift_term = -(1.0 - 2.0 * eta(i, j, k)) * grad_rho_eta.lpNorm<2>();
+                Set::Scalar R = H * (diffusion_term + drift_term);
+                //rho_eta_rhs(i, j, k) += R*0.7;
+
+
             }
 
             // ERROR CHECKING
@@ -1350,7 +1388,7 @@ Hydro2::RHS(int lev,
                 or (M_rhs(i, j, k, 0) != M_rhs(i, j, k, 0))
                 or (M_rhs(i, j, k, 1) != M_rhs(i, j, k, 1))
                 or (E_rhs(i, j, k) != E_rhs(i, j, k))
-                or (eta_rhs(i, j, k) != eta_rhs(i, j, k)))
+                or (rho_eta_rhs(i, j, k) != rho_eta_rhs(i, j, k)))
             {
                 Util::ParallelMessage(INFO, "-------------------------------");
                 Util::ParallelMessage(INFO, "ERROR IN HYDRO2");
@@ -1372,7 +1410,7 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "drho/dt=", rho_rhs(i, j, k));
                 Util::ParallelMessage(INFO, "dM/dt=", M_rhs(i, j, k, 0), ", ", M_rhs(i, j, k, 1));
                 Util::ParallelMessage(INFO, "dE/dt=", E_rhs(i, j, k));
-                Util::ParallelMessage(INFO, "deta/dt=", eta_rhs(i, j, k));
+                Util::ParallelMessage(INFO, "drhoeta/dt=", rho_eta_rhs(i, j, k));
                 Util::Abort(INFO);
             }
 
@@ -1396,7 +1434,7 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "drho/dt=", rho_rhs(i, j, k));
                 Util::ParallelMessage(INFO, "dM/dt=", M_rhs(i, j, k, 0), ", ", M_rhs(i, j, k, 1));
                 Util::ParallelMessage(INFO, "dE/dt=", E_rhs(i, j, k));
-                Util::ParallelMessage(INFO, "deta/dt=", eta_rhs(i, j, k));
+                Util::ParallelMessage(INFO, "drhoeta/dt=", rho_eta_rhs(i, j, k));
             }
 
             // Calculate vorticity for visualization
@@ -1419,20 +1457,21 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     std::swap(energy_per_vol_old_mf[lev], energy_per_vol_mf[lev]);
     std::swap(energy_per_mas_old_mf[lev], energy_per_mas_mf[lev]);
     std::swap(eta_old_mf, eta_mf);
+    std::swap(rho_eta_old_mf, rho_eta_mf);
 
     // ------------------------------------------------------------
     // Time Integration
     // ------------------------------------------------------------
     // New Solution Refrences
     amrex::Vector<amrex::MultiFab> solution_new;
-    solution_new.emplace_back(*eta_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
+    solution_new.emplace_back(*rho_eta_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
     solution_new.emplace_back(*density_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
     solution_new.emplace_back(*momentum_mf[lev].get(), amrex::MakeType::make_alias, 0, 2);
     solution_new.emplace_back(*energy_per_vol_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
 
     // Old Solution Refrences
     amrex::Vector<amrex::MultiFab> solution_old;
-    solution_old.emplace_back(*eta_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
+    solution_old.emplace_back(*rho_eta_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
     solution_old.emplace_back(*density_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
     solution_old.emplace_back(*momentum_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 2);
     solution_old.emplace_back(*energy_per_vol_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
@@ -1464,6 +1503,32 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // Do the update
     timeintegrator.advance(solution_old, solution_new, time, dt);
 
+    // Updating eta first
+    for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
+
+        // Eta
+        Set::Patch<Set::Scalar> eta_new = eta_mf.Patch(lev, mfi);
+
+        Set::Patch<const Set::Scalar> rho_eta = rho_eta_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> rho_eta_old = rho_eta_old_mf.Patch(lev, mfi);
+
+        // Density
+        Set::Patch<Set::Scalar> rho = density_mf.Patch(lev, mfi);
+
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            auto sten = Numeric::GetStencil(i, j, k, domain);
+
+            // CUTOFFS
+            eta_new(i, j, k) = rho_eta(i, j, k) / rho(i, j, k);
+            eta_new(i, j, k) = std::max(0.0, std::min(1.0, (eta_new(i, j, k) - cutoff) / (1.0 - 2.0 * cutoff)));
+
+            rho(i, j, k) = std::max(rho(i, j, k), small);
+
+        });
+    }
+
     // ------------------------------------------------------------
     // Cutoffs and Visualization Fields
     // ------------------------------------------------------------
@@ -1478,7 +1543,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         const amrex::Box &bx = mfi.validbox();
 
         // Eta
-        Set::Patch<Set::Scalar> eta_new = eta_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> eta_new = eta_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> eta = eta_old_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> etadot = etadot_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> grad_eta_ = grad_eta_mf.Patch(lev, mfi);
@@ -1518,8 +1583,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
             // CUTOFFS
-            eta_new(i, j, k) = std::max( 0.0,std::min( 1.0,(eta_new(i, j, k) - cutoff) / (1.0 - 2.0 * cutoff) ) );
-            rho(i, j, k) = std::max(rho(i, j, k), small);
+            //eta_new(i, j, k) = std::max( 0.0,std::min( 1.0,(eta_new(i, j, k) - cutoff) / (1.0 - 2.0 * cutoff) ) );
+            //rho(i, j, k) = std::max(rho(i, j, k), small);
 
             // Derivatice Function Calls
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);

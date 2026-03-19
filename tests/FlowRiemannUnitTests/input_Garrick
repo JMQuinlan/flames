@@ -21,7 +21,7 @@ amr.max_level = 0
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.grid_eff = 0.8
-amr.n_cell = 800 2
+amr.n_cell = 800 16
 
 ### DIMENSIONS ###
 geometry.prob_lo = -1.0  -0.02   0.0 # [ m ]
@@ -31,7 +31,7 @@ geometry.is_periodic = 0 1 0
 ### TIME STEP ###
 timestep  = 2.5e-4
 #stop_time = 0.2
-stop_time = 0.25
+stop_time = 0.2
 
 m0.ic.constant.value = 0.0
 u0.ic.constant.value = 0.0
@@ -105,10 +105,10 @@ energy.bc.type.xlo = neumann
 energy.bc.type.ylo = periodic
 energy.bc.type.yhi = periodic
 
-momentum.bc.type.xhi = neumann periodic
-momentum.bc.type.xlo = neumann periodic
-momentum.bc.type.ylo = neumann periodic
-momentum.bc.type.yhi = neumann periodic
+momentum.bc.type.xhi = dirichlet periodic
+momentum.bc.type.xlo = dirichlet periodic
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
 
 ### HYDRO REFINEMENT CRITERIA ###
 eta_refinement_criterion   = 100000.1
