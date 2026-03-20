@@ -116,7 +116,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     // Register FabFields:
     // Toggle the last boolean to true/false to track the variable or not.
     {
-        int nghost = 2;
+        int nghost = 3;
 
         // DIFFUSE PARAMETERS
         value.RegisterNewFab(value.eta_mf,          value.energy_bc, 1, nghost, "eta", true, true);
@@ -256,17 +256,17 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     std::string solver_name;
     pp.query("Riemann_Solver.type", solver_name);
     Util::Message(INFO, "Input file has Riemann_Solver.type = ", solver_name);
-    pp.select_default<Solver::Local::FluidRiemann::Roe,
-                      Solver::Local::FluidRiemann::HLLE,
-                      Solver::Local::FluidRiemann::HLLC,
-                      Solver::Local::FluidRiemann::HLLCE,
+    pp.select_default<//Solver::Local::FluidRiemann::Roe,
+                      //Solver::Local::FluidRiemann::HLLE,
+                      Solver::Local::FluidRiemann::HLLC
+                      //Solver::Local::FluidRiemann::HLLCE,
                       //Solver::Local::FluidRiemann::HLLCE_WENO5, // Never verified but updated
                       //Solver::Local::FluidRiemann::PartiallyParabolic, // WIP - very outdated - never verified
-                      Solver::Local::FluidRiemann::HLLC_Oomar_Jaiman, // Can't remember if this has been verified
-                      Solver::Local::FluidRiemann::HLLC_All_Mach,
-                      Solver::Local::FluidRiemann::HLLC_All_Mach_Furfaro,
-                      Solver::Local::FluidRiemann::Upwind,
-                      Solver::Local::FluidRiemann::Lax_Friedrich
+                      //Solver::Local::FluidRiemann::HLLC_Oomar_Jaiman, // Can't remember if this has been verified
+                      //Solver::Local::FluidRiemann::HLLC_All_Mach,
+                      //Solver::Local::FluidRiemann::HLLC_All_Mach_Furfaro,
+                      //Solver::Local::FluidRiemann::Upwind,
+                      //Solver::Local::FluidRiemann::Lax_Friedrich
     >("Riemann_Solver", value.riemannsolver);
     Util::Message(INFO, "Selected Riemann solver: ", typeid(*value.riemannsolver).name());
 
@@ -443,8 +443,8 @@ void Hydro2::Mix(int lev)
 
 
             // Calculate State Variables 
-            //rho(i, j, k) = eta(i, j, k) * rho0(i, j, k) + (1.0 - eta(i, j, k)) * rho1(i, j, k);
-            rho(i, j, k) = 1.0 / (eta(i, j, k) / (rho0(i, j, k)) + (1.0 - eta(i, j, k)) / (rho1(i, j, k)));
+            rho(i, j, k) = eta(i, j, k) * rho0(i, j, k) + (1.0 - eta(i, j, k)) * rho1(i, j, k);
+            //rho(i, j, k) = 1.0 / (eta(i, j, k) / (rho0(i, j, k)) + (1.0 - eta(i, j, k)) / (rho1(i, j, k)));
             rho_old(i, j, k) = rho(i, j, k);  
             rho_eta(i, j, k) = rho(i, j, k) * eta(i, j, k);
             rho_eta_old(i, j, k) = rho_eta(i, j, k);
@@ -1358,15 +1358,16 @@ Hydro2::RHS(int lev,
                 Set::Scalar F_rho_eta_xhi = eta_face_xhi * flux_xhi.mass;
                 Set::Scalar F_rho_eta_ylo = eta_face_ylo * flux_ylo.mass;
                 Set::Scalar F_rho_eta_yhi = eta_face_yhi * flux_yhi.mass;
-
+                
                 Set::Scalar rho_eta_flux = (F_rho_eta_xhi - F_rho_eta_xlo) / DX[0] + (F_rho_eta_yhi - F_rho_eta_ylo) / DX[1];
 
-                
-
-                rho_eta_rhs(i, j, k) = -rho_eta_flux
-                                       + rho_eta(i, j, k) * div_u;
+                rho_eta_rhs(i, j, k) = -rho_eta_flux;
+                                       //+ rho_eta(i, j, k) * div_u;
                                        //+ rho_eta_dot_CH   // modified CH
                                        //+ rho_eta_dot_Vap; // if applicable
+
+
+
                 ///
                 ///  Up to this point we have some negative velocity but rho_eta dramatically helped
                 ///     In a previous attempt this moved the boundry in the correct direction, I am now tring again.
@@ -1378,7 +1379,7 @@ Hydro2::RHS(int lev,
                 Set::Scalar diffusion_term = eps_h * lap_rho_eta;
                 Set::Scalar drift_term = -(1.0 - 2.0 * eta(i, j, k)) * grad_rho_eta.lpNorm<2>();
                 Set::Scalar R = H * (diffusion_term + drift_term);
-                //rho_eta_rhs(i, j, k) += R*0.7;
+                //rho_eta_rhs(i, j, k) += R*0.1;
 
 
             }
