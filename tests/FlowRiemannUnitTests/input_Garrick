@@ -16,14 +16,14 @@ eta.ic.expression.constant.epsilon = "1.25e-3"
 eta.ic.expression.region0 = "0.5 * (1.0 + tanh(x / epsilon))" 
 epsilon = eta.ic.expression.constant.epsilon
 
-amr.plot_int = 10
+amr.plot_int = 1
 
 ### MESHING ###
 amr.max_level = 0
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.grid_eff = 0.8
-amr.n_cell = 800 8
+amr.n_cell = 800 16
 
 ### DIMENSIONS ###
 geometry.prob_lo = -1.0  -0.02   0.0 # [ m ]
@@ -94,10 +94,10 @@ energy.bc.type.xlo = neumann
 energy.bc.type.ylo = periodic
 energy.bc.type.yhi = periodic
 
-momentum.bc.type.xhi = dirichlet periodic
-momentum.bc.type.xlo = dirichlet periodic
-momentum.bc.type.ylo = neumann periodic
-momentum.bc.type.yhi = neumann periodic
+momentum.bc.type.xhi = dirichlet dirichlet
+momentum.bc.type.xlo = dirichlet dirichlet
+momentum.bc.type.ylo = dirichlet dirichlet
+momentum.bc.type.yhi = dirichlet dirichlet
 
 ### HYDRO REFINEMENT CRITERIA ###
 eta_refinement_criterion   = 100000.1
