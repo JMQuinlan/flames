@@ -119,10 +119,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         int nghost = 3;
 
         // DIFFUSE PARAMETERS
-        value.RegisterNewFab(value.eta_mf,          value.energy_bc, 1, nghost, "eta", true, true);
-        value.RegisterNewFab(value.eta_old_mf,      value.energy_bc, 1, nghost, "eta_old", false, true);
-        value.RegisterNewFab(value.rho_eta_mf,      value.energy_bc, 1, nghost, "rho_eta", true, true);
-        value.RegisterNewFab(value.rho_eta_old_mf,      value.energy_bc, 1, nghost, "rho_eta_old", false, true);
+        value.RegisterNewFab(value.eta_mf,          value.density_bc, 1, nghost, "eta", true, true);
+        value.RegisterNewFab(value.eta_old_mf,      value.density_bc, 1, nghost, "eta_old", false, true);
+        value.RegisterNewFab(value.rho_eta_mf,      value.density_bc, 1, nghost, "rho_eta", true, true);
+        value.RegisterNewFab(value.rho_eta_old_mf,      value.density_bc, 1, nghost, "rho_eta_old", false, true);
 
         value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing, 1, nghost, "etadot", true, false);
         value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing, 4, nghost, "hess_eta", false, false, { "00", "01", "10", "11" });
@@ -593,6 +593,7 @@ Hydro2::RHS(int lev,
 
     // Eta Fields
     // for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
+    /*
     for (amrex::MFIter mfi(*(velocity_mf)[lev], true); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
@@ -609,6 +610,7 @@ Hydro2::RHS(int lev,
             
         });
     }
+    */
 
     // Primitive Fields
     //for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
@@ -617,7 +619,7 @@ Hydro2::RHS(int lev,
         const amrex::Box &bx = mfi.validbox();
 
         // CONSERVATIVE
-        Set::Patch<const Set::Scalar> eta = eta_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> eta = eta_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> rho_eta = rho_eta_mf_in.array(mfi);
         Set::Patch<const Set::Scalar> rho = rho_mf_in.array(mfi);
         Set::Patch<const Set::Scalar> M = M_mf_in.array(mfi);
@@ -648,11 +650,24 @@ Hydro2::RHS(int lev,
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
+            eta(i, j, k) = rho_eta(i, j, k) / rho(i, j, k);
+
             // Derivatice Function Calls
+            /*
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
             Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
             Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
+            */
+            Set::Vector grad_rho_eta = Numeric::Gradient(rho_eta, i, j, k, 0, DX);
+            Set::Vector grad_rho = Numeric::Gradient(rho, i, j, k, 0, DX);
+            Set::Vector grad_eta = (grad_rho_eta - eta(i, j, k) * grad_rho) / rho(i, j, k);
+            Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
+
+            Set::Matrix hes_rho_eta = Numeric::Hessian(rho_eta, i, j, k, 0, DX, sten);
+            Set::Matrix hes_rho = Numeric::Hessian(rho, i, j, k, 0, DX, sten);
+            Set::Matrix hess_eta = (1 / rho(i, j, k)) * (-(grad_rho * grad_eta.transpose()) - (grad_eta * grad_rho.transpose()) - (eta(i, j, k) * hes_rho) + (hes_rho_eta));
+            Set::Scalar lap_eta = hess_eta(0, 0) + hess_eta(1, 1);
 
             // gamma
             Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
@@ -1311,41 +1326,7 @@ Hydro2::RHS(int lev,
             }
             else
             {
-                /*
-                // Get HLLC interface velocities from fluxes (Equation 48)
-                Set::Scalar u_xlo = flux_xlo.u_interface;
-                Set::Scalar u_xhi = flux_xhi.u_interface;
-                Set::Scalar u_ylo = flux_ylo.u_interface;
-                Set::Scalar u_yhi = flux_yhi.u_interface;
-
-                // x-direction faces
-                Set::Scalar sgn_xlo = (u_xlo > 0.0) ? 1.0 : ((u_xlo < 0.0) ? -1.0 : 0.0);
-                Set::Scalar sgn_xhi = (u_xhi > 0.0) ? 1.0 : ((u_xhi < 0.0) ? -1.0 : 0.0);
-
-                Set::Scalar eta_face_xlo = 0.5 * (1.0 + sgn_xlo) * eta(i - 1, j, k)
-                                           + 0.5 * (1.0 - sgn_xlo) * eta(i, j, k);
-                Set::Scalar eta_face_xhi = 0.5 * (1.0 + sgn_xhi) * eta(i, j, k)
-                                           + 0.5 * (1.0 - sgn_xhi) * eta(i + 1, j, k);
-
-                // y-direction faces
-                Set::Scalar sgn_ylo = (u_ylo > 0.0) ? 1.0 : ((u_ylo < 0.0) ? -1.0 : 0.0);
-                Set::Scalar sgn_yhi = (u_yhi > 0.0) ? 1.0 : ((u_yhi < 0.0) ? -1.0 : 0.0);
-
-                Set::Scalar eta_face_ylo = 0.5 * (1.0 + sgn_ylo) * eta(i, j - 1, k)
-                                           + 0.5 * (1.0 - sgn_ylo) * eta(i, j, k);
-                Set::Scalar eta_face_yhi = 0.5 * (1.0 + sgn_yhi) * eta(i, j, k)
-                                           + 0.5 * (1.0 - sgn_yhi) * eta(i, j + 1, k);
-
-                Set::Scalar phi_u_xlo = eta_face_xlo * u_xlo;
-                Set::Scalar phi_u_xhi = eta_face_xhi * u_xhi;
-                Set::Scalar phi_u_ylo = eta_face_ylo * u_ylo;
-                Set::Scalar phi_u_yhi = eta_face_yhi * u_yhi;
-
-                Set::Scalar div_phi_u = (phi_u_xhi - phi_u_xlo) / DX[0]
-                                        + (phi_u_yhi - phi_u_ylo) / DX[1];
-                */
-
-                // Generating upwind scheme for rho_eta
+               // Generating upwind scheme for rho_eta
                 Set::Scalar eta_face_xlo = (flux_xlo.u_interface > 0.0) ? eta(i - 1, j, k) : eta(i, j, k);
                 Set::Scalar eta_face_xhi = (flux_xhi.u_interface > 0.0) ? eta(i, j, k) : eta(i + 1, j, k);
                 Set::Scalar eta_face_ylo = (flux_ylo.u_interface > 0.0) ? eta(i, j - 1, k) : eta(i, j, k);
@@ -1365,22 +1346,6 @@ Hydro2::RHS(int lev,
                                        //+ rho_eta(i, j, k) * div_u;
                                        //+ rho_eta_dot_CH   // modified CH
                                        //+ rho_eta_dot_Vap; // if applicable
-
-
-
-                ///
-                ///  Up to this point we have some negative velocity but rho_eta dramatically helped
-                ///     In a previous attempt this moved the boundry in the correct direction, I am now tring again.
-                Set::Vector grad_rho_eta = Numeric::Gradient(rho_eta, i, j, k, 0, DX);
-                Set::Scalar H = tanh(eta(i, j, k) * (1.0 - eta(i, j, k)) / 0.01);
-                H = H * H;
-                Set::Scalar eps_h = 0.72 * sqrt(DX[0] * DX[0] + DX[1] * DX[1]); // 2D
-                Set::Scalar lap_rho_eta = Numeric::Laplacian(rho_eta, i, j, k, 0, DX);
-                Set::Scalar diffusion_term = eps_h * lap_rho_eta;
-                Set::Scalar drift_term = -(1.0 - 2.0 * eta(i, j, k)) * grad_rho_eta.lpNorm<2>();
-                Set::Scalar R = H * (diffusion_term + drift_term);
-                //rho_eta_rhs(i, j, k) += R*0.1;
-
 
             }
 
@@ -1504,47 +1469,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // Do the update
     timeintegrator.advance(solution_old, solution_new, time, dt);
 
-    // Updating eta first
-    for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
-    {
-        const amrex::Box &bx = mfi.validbox();
-
-        // Eta
-        Set::Patch<Set::Scalar> eta_new = eta_mf.Patch(lev, mfi);
-
-        Set::Patch<const Set::Scalar> rho_eta = rho_eta_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> rho_eta_old = rho_eta_old_mf.Patch(lev, mfi);
-
-        // Density
-        Set::Patch<Set::Scalar> rho = density_mf.Patch(lev, mfi);
-
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            auto sten = Numeric::GetStencil(i, j, k, domain);
-
-            // CUTOFFS
-            eta_new(i, j, k) = rho_eta(i, j, k) / rho(i, j, k);
-            eta_new(i, j, k) = std::max(0.0, std::min(1.0, (eta_new(i, j, k) - cutoff) / (1.0 - 2.0 * cutoff)));
-
-            rho(i, j, k) = std::max(rho(i, j, k), small);
-
-
-
-            if ( (eta_new(i, j, k) != eta_new(i, j, k))
-                or (rho(i, j, k) != rho(i, j, k)) )
-            {
-                Util::ParallelMessage(INFO, "-------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN HYDRO2");
-                Util::ParallelMessage(INFO, "time=", time);
-                Util::ParallelMessage(INFO, "lev=", lev);
-                Util::ParallelMessage(INFO, "i=", i, ", j=", j);
-                Util::ParallelMessage(INFO, "eta_new=", eta_new(i, j, k));
-                Util::ParallelMessage(INFO, "rho=", rho(i, j, k));
-                Util::Abort(INFO);
-            }
-
-        });
-    }
-
     // ------------------------------------------------------------
     // Cutoffs and Visualization Fields
     // ------------------------------------------------------------
@@ -1559,7 +1483,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         const amrex::Box &bx = mfi.validbox();
 
         // Eta
-        Set::Patch<const Set::Scalar> eta_new = eta_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> eta_new = eta_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> eta = eta_old_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> etadot = etadot_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> grad_eta_ = grad_eta_mf.Patch(lev, mfi);
@@ -1568,7 +1492,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> grad_mag_grad_eta_ = grad_mag_grad_eta_mf.Patch(lev, mfi);
 
         // Mixture
-        Set::Patch<const Set::Scalar> rho = density_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> rho_eta = rho_eta_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> rho = density_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> E_vol = energy_per_vol_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> E_mas = energy_per_mas_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> M = momentum_mf.Patch(lev, mfi);
@@ -1598,15 +1523,24 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
-            // CUTOFFS
-            //eta_new(i, j, k) = std::max( 0.0,std::min( 1.0,(eta_new(i, j, k) - cutoff) / (1.0 - 2.0 * cutoff) ) );
-            //rho(i, j, k) = std::max(rho(i, j, k), small);
+            eta_new(i, j, k) = rho_eta(i, j, k) / rho(i, j, k);
 
             // Derivatice Function Calls
-            Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
+            Set::Vector grad_rho_eta = Numeric::Gradient(rho_eta, i, j, k, 0, DX);
+            Set::Vector grad_rho = Numeric::Gradient(rho, i, j, k, 0, DX);
+            Set::Vector grad_eta = (grad_rho_eta - eta_new(i, j, k) * grad_rho) / rho(i, j, k);
             Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
-            Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
-            Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
+
+            Set::Matrix hes_rho_eta = Numeric::Hessian(rho_eta, i, j, k, 0, DX, sten);
+            Set::Matrix hes_rho = Numeric::Hessian(rho, i, j, k, 0, DX, sten);
+            Set::Matrix hes_eta = (1 / rho(i, j, k)) * (-(grad_rho * grad_eta.transpose()) - (grad_eta * grad_rho.transpose()) - (eta_new(i, j, k) * hes_rho) + (hes_rho_eta));
+            Set::Scalar lap_eta = hes_eta(0, 0) + hes_eta(1, 1);
+
+
+            // CUTOFFS
+            eta_new(i, j, k) = std::max(0.0, std::min(1.0, (eta_new(i, j, k) - cutoff) / (1.0 - 2.0 * cutoff)));
+            rho(i, j, k) = std::max(rho(i, j, k), small);
+
 
             // gamma
             Set::Scalar A = (eta_new(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta_new(i, j, k)) / (gamma1 - 1.0);
