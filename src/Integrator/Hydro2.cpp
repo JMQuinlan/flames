@@ -1604,8 +1604,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Potential Energy
             UE_vol(i, j, k) = E_vol(i, j, k) - KE_vol(i, j, k);
-            //E_mas(i, j, k) = E_vol(i, j, k) / (rho(i, j, k) + small);
-            //UE_mas(i, j, k) = E_mas(i, j, k) - KE_mas(i, j, k);
+            E_mas(i, j, k) = E_vol(i, j, k) / (rho(i, j, k) + small);
+            UE_mas(i, j, k) = E_mas(i, j, k) - KE_mas(i, j, k);
 
             // Pressure
             p0_eff(i, j, k) = (B / A) / gammaf(i, j, k);
