@@ -1351,7 +1351,7 @@ Hydro2::RHS(int lev,
                 Set::Scalar eta_face_ylo = (flux_ylo.u_interface > 0.0) ? eta(i, j - 1, k) : eta(i, j, k);
                 Set::Scalar eta_face_yhi = (flux_yhi.u_interface > 0.0) ? eta(i, j, k) : eta(i, j + 1, k);
                 Set::Scalar div_u = (flux_xhi.u_interface - flux_xlo.u_interface) / DX[0]
-                                    + (flux_yhi.u_interface - flux_ylo.u_interface) / DX[1];
+                                  + (flux_yhi.u_interface - flux_ylo.u_interface) / DX[1];
 
                 // Now use MASS FLUX (not velocity!) for the flux
                 Set::Scalar F_rho_eta_xlo = eta_face_xlo * flux_xlo.mass;
@@ -1527,6 +1527,21 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             rho(i, j, k) = std::max(rho(i, j, k), small);
 
+
+
+            if ( (eta_new(i, j, k) != eta_new(i, j, k))
+                or (rho(i, j, k) != rho(i, j, k)) )
+            {
+                Util::ParallelMessage(INFO, "-------------------------------");
+                Util::ParallelMessage(INFO, "ERROR IN HYDRO2");
+                Util::ParallelMessage(INFO, "time=", time);
+                Util::ParallelMessage(INFO, "lev=", lev);
+                Util::ParallelMessage(INFO, "i=", i, ", j=", j);
+                Util::ParallelMessage(INFO, "eta_new=", eta_new(i, j, k));
+                Util::ParallelMessage(INFO, "rho=", rho(i, j, k));
+                Util::Abort(INFO);
+            }
+
         });
     }
 
@@ -1553,9 +1568,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> grad_mag_grad_eta_ = grad_mag_grad_eta_mf.Patch(lev, mfi);
 
         // Mixture
-        Set::Patch<Set::Scalar> rho = density_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> rho = density_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> E_vol = energy_per_vol_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> E_mas = energy_per_mas_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> E_mas = energy_per_mas_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> M = momentum_mf.Patch(lev, mfi);
 
         Set::Patch<Set::Scalar> a = a_mf.Patch(lev, mfi);
@@ -1611,6 +1626,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Potential Energy
             UE_vol(i, j, k) = E_vol(i, j, k) - KE_vol(i, j, k);
+            E_mas(i, j, k) = E_vol(i, j, k) / rho(i, j, k);
             UE_mas(i, j, k) = E_mas(i, j, k) - KE_mas(i, j, k);
 
             // Pressure

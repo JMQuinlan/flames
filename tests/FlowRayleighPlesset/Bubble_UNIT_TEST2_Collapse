@@ -24,7 +24,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-0
 dynamictimestep.min = 1e-12
-cfl = 0.5
+cfl = 0.2
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.10 -0.10 0.0
@@ -158,5 +158,5 @@ Spec_Vol = 1
 grav = 0.0
 
 ### DEBUGGING ###
-Riemann_Solver.type = hllc_all_mach
+Riemann_Solver.type = hllc
 kappa_method = 1

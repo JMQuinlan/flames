@@ -9,8 +9,8 @@ alamo.program = hydro2
 plot_file = ./tests/RayleighPlesset/output_RayleighPlesset_UNIT_TEST
 
 ### MESHING ###
-amr.plot_dt = 5e-4
-#amr.plot_int = 1
+#amr.plot_dt = 5e-4
+amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 50
@@ -35,7 +35,7 @@ stop_time = 50e-3
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.0005
+eta.ic.expression.constant.epsilon = 0.001
 eta.ic.expression.constant.R0 = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
