@@ -92,12 +92,12 @@ protected:
     void Regrid(int lev, Set::Scalar time) override;
     void RHS(int lev, 
         Set::Scalar time,
-        amrex::MultiFab &rho_eta_rhs_mf, 
-        amrex::MultiFab &rho_rhs_mf, 
+        amrex::MultiFab &rho_eta0_rhs_mf, 
+        amrex::MultiFab &rho_eta1_rhs_mf, 
         amrex::MultiFab &M_rhs_mf, 
         amrex::MultiFab &E_rhs_mf, 
-        const amrex::MultiFab &rho_eta_mf_in,
-        const amrex::MultiFab &rho_mf, 
+        const amrex::MultiFab &rho_eta0_mf_in,
+        const amrex::MultiFab &rho_eta1_mf_in,
         const amrex::MultiFab &M_mf, 
         const amrex::MultiFab &E_mf);
 
@@ -198,8 +198,10 @@ protected:
 protected:
     Set::Field<Set::Scalar> eta_mf;
 
-    Set::Field<Set::Scalar> rho_eta_mf;
-    Set::Field<Set::Scalar> rho_eta_old_mf;
+    Set::Field<Set::Scalar> rho_eta0_mf;
+    Set::Field<Set::Scalar> rho_eta1_mf;
+    Set::Field<Set::Scalar> rho_eta0_old_mf;
+    Set::Field<Set::Scalar> rho_eta1_old_mf;
 
     //Set::Field<Set::Scalar> eta_mf_in;
     Set::Field<Set::Scalar> etadot_mf;
