@@ -140,8 +140,8 @@ momentum.bc.type.yhi = neumann neumann
 ### REFINEMENT CRITERIA ###
 eta_refinement_criterion = 1e-4
 omega_refinement_criterion = 10.55
-p_refinement_criterion = 1e+2
-rho_refinement_criterion = 1e+10
+p_refinement_criterion = 1e+1
+rho_refinement_criterion = 1e+1
 gradu_refinement_criterion = 1e+1
 cutoff = 1e-16
 
