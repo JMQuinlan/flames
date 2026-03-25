@@ -690,11 +690,32 @@ Hydro2::RHS(int lev,
 
             // Curvature
             Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
-            if (false)//(grad_eta_mag < 1e-4)
+            
+            double grad_eta_tol = 0.1 / epsilon;     // Some tolerance
+
+            if (grad_eta_mag < grad_eta_tol || eta(i, j, k) < 1e-3 || eta(i, j, k) > 1.0 - 1e-3)
             {
+                // Zero curvature AND zero normal
+                // kappa  = 0.0;
+                // kappa1 = 0.0;
+                // kappa2 = 0.0;
+
                 n_hat(0) = 0.0;
                 n_hat(1) = 0.0;
+
+                // Write zeros to your output arrays
+                kappas(i,j,k,0) = 0.0;
+                kappas(i,j,k,1) = 0.0;
+                kappas(i,j,k,2) = 0.0;
             }
+            // else
+            // {
+
+            // if (false)//(grad_eta_mag < 1e-4)
+            // {
+            //     n_hat(0) = 0.0;
+            //     n_hat(1) = 0.0;
+            // }
             else
             {
                 n_hat(0) = n_hat(0);
@@ -745,7 +766,7 @@ Hydro2::RHS(int lev,
                     kappa = kappa2; // Or use another curvature measure as needed
                     // Store curvature values
                     kappa = std::clamp(kappa, -kappa_max, kappa_max);
-                    kappa1 = std::clamp(kappa1, -kappa_max, kappa_max);
+                    // kappa1 = std::clamp(kappa1, -kappa_max, kappa_max);
                     kappa2 = std::clamp(kappa2, -kappa_max, kappa_max);
                     kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
                     kappas(i, j, k, 1) = kappa1; // First principal curvature
@@ -1555,7 +1576,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             grad_eta_(i, j, k, 1) = grad_eta(1);
 
             // Debugging, would like to delete condition
-            if (grad_eta_mag < 1e-4)
+            double grad_eta_tol = 0.1 / epsilon;     // Some tolerance
+
+            if (grad_eta_mag < grad_eta_tol || eta(i, j, k) < 1e-3 || eta(i, j, k) > 1.0 - 1e-3)
             {
                 n_hat_(i, j, k, 0) = 0.0;
                 n_hat_(i, j, k, 1) = 0.0;

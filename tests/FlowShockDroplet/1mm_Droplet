@@ -10,7 +10,7 @@ alamo.program = hydro2
 ### OUTPUT ###
 #plot_file = ./tests/FlowShockDroplet/output_Shock1mmDroplet
 # plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet
-plot_file = /mmfs1/home/jquinlan/runs/temp4/output_Shock1mmDroplet_kappa_10x_limit
+plot_file = /mmfs1/home/jquinlan/runs/temp4/output_kappa_method2_kappa1_nolimit
 
 ### MESHING ###
 amr.plot_dt = 0.25e-6
@@ -39,7 +39,8 @@ geometry.prob_hi =  0.015  0.005 0.0  # 3/4 tube right of droplet (0.02m � 0.0
 geometry.is_periodic = 0 0 0
  
 ### TIME STEP ###
-stop_time = 0.0002  # Shorter time for shock interaction
+# stop_time = 0.0002  # Shorter time for shock interaction
+stop_time = 1.0e-5  # Shorter time for shock interaction
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
@@ -165,4 +166,4 @@ grav = 9.81
 
 ### DEBUGGING ### 
 Riemann_Solver.type = hllc
-kappa_method = 1   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
+kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
