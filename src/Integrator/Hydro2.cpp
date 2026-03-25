@@ -455,6 +455,10 @@ void Hydro2::Mix(int lev)
             Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0); 
             Set::Scalar B = (eta(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
             UE_vol(i, j, k) = (p_eff + pref)*A + B;
+            if (UE_vol(i, j, k) < 0.0)
+            {
+                UE_vol(i, j, k) = 0.0; // Prevent negative internal energy
+            }
             UE_mas(i, j, k) = (UE_vol(i, j, k)) / (rho(i, j, k));
             
             // Kinetic Energy
@@ -474,6 +478,10 @@ void Hydro2::Mix(int lev)
             // Pressure
             p0_eff(i, j, k) = (B / A) / gammaf(i, j, k);
             press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE_vol(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // pressure Tammann EOS modification
+            if (press(i, j, k) < 0.0)
+            {
+                press(i, j, k) = 1e-10; // Prevent negative pressure
+            }
 
             // Chemical Potential
             // Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
@@ -636,6 +644,10 @@ Hydro2::RHS(int lev,
             // Kinetic Energy
             KE(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1)); // Per Vol
             // KE(i, j, k) = 0.5 * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1)); // Per Mass
+            if (KE(i, j, k) < 0.0)
+            {
+                KE(i, j, k) = 0.0; // Prevent negative kinetic energy
+            }
 
             // Potential Energy
             UE(i, j, k) = E(i, j, k) - KE(i, j, k);
@@ -645,6 +657,10 @@ Hydro2::RHS(int lev,
             press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref;                // Per Vol
             //press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE(i, j, k) * rho(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // Per Mass
             //press(i, j, k) = std::max(small, press(i, j, k));
+            if (press(i, j, k) < 0.0)
+            {
+                press(i, j, k) = 1e-10; // Prevent negative pressure
+            }
 
             // Constant Pressure Specific Heat
             cp(i, j, k) = eta(i, j, k) * cp0 + (1.0 - eta(i, j, k)) * cp1;
@@ -688,9 +704,12 @@ Hydro2::RHS(int lev,
                                                             1 / (grad_eta_mag + small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));
 
                 Set::Scalar kappa, kappa1, kappa2 = 0.0;
+                // double kappa_max = 1.0 / epsilon; // physically consistent maximum curvature based on interface thickness
+                double kappa_max = 1.0 / (epsilon * 10.0); // physically consistent maximum curvature based on interface thickness
                 if (kappa_method == 1)
                 {
                     kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / (grad_eta_mag * grad_eta_mag + small)));
+                    kappa = std::clamp(kappa, -kappa_max, kappa_max);
 
                     kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
                     kappas(i, j, k, 1) = kappa1; // First principal curvature
@@ -725,6 +744,9 @@ Hydro2::RHS(int lev,
                     // Assign the curvature you want to use
                     kappa = kappa2; // Or use another curvature measure as needed
                     // Store curvature values
+                    kappa = std::clamp(kappa, -kappa_max, kappa_max);
+                    kappa1 = std::clamp(kappa1, -kappa_max, kappa_max);
+                    kappa2 = std::clamp(kappa2, -kappa_max, kappa_max);
                     kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
                     kappas(i, j, k, 1) = kappa1; // First principal curvature
                     kappas(i, j, k, 2) = kappa2; // Second principal curvature
@@ -997,7 +1019,7 @@ Hydro2::RHS(int lev,
             // ------------------------------------------------------------
             // Conservative Allen-Cahn
             // ------------------------------------------------------------
-            // d(eta)/dt = -u·grad(eta) + Mob * laplacian(mu)
+            // d(eta)/dt = -uï¿½grad(eta) + Mob * laplacian(mu)
             // Laplacian of Chemical Potential (conservative form)
             /*
             Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
@@ -1011,9 +1033,9 @@ Hydro2::RHS(int lev,
             */
 
             // ------------------------------------------------------------
-            // Cahn–Hilliard
+            // Cahnï¿½Hilliard
             // ------------------------------------------------------------
-            // d(eta)/dt = -u·grad(eta) + div( M*grad(mu) )
+            // d(eta)/dt = -uï¿½grad(eta) + div( M*grad(mu) )
             Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
             //Set::Scalar Mob = a(i, j, k) * 0.7 * DX[0]; // Mob = u_max * epsilon
             Set::Scalar Mob = 0.0;  // a(i, j, k) * epsilon * epsilon / DX[0]; // Mob = u_max * epsilon
@@ -1481,15 +1503,35 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Kinetic Energy
             KE_vol(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
+            if (KE_vol(i, j, k) < 0.0)
+            {
+                KE_vol(i, j, k) = 0.0;
+            }
             KE_mas(i, j, k) = 0.5 * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
+            if (KE_mas(i, j, k) < 0.0)
+            {
+                KE_mas(i, j, k) = 0.0;
+            }
 
             // Potential Energy
             UE_vol(i, j, k) = E_vol(i, j, k) - KE_vol(i, j, k);
+            if (UE_vol(i, j, k) < 0.0)
+            {
+                UE_vol(i, j, k) = 0.0;
+            }
             UE_mas(i, j, k) = E_mas(i, j, k) - KE_mas(i, j, k);
+            if (UE_mas(i, j, k) < 0.0)
+            {
+                UE_mas(i, j, k) = 0.0;
+            }
 
             // Pressure
             p0_eff(i, j, k) = (B / A) / gammaf(i, j, k);
             press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE_vol(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // pressure Tammann EOS modification
+            if (press(i, j, k) < 0.0)
+            {
+                press(i, j, k) = 1e-6;
+            }
 
             // Chemical Potential
             Set::Scalar f_prime = 4.0 * eta_new(i, j, k) * (eta_new(i, j, k) - 0.5) * (eta_new(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
@@ -1534,8 +1576,20 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar gamma_eff_new = 1.0 + (1.0 / A_new);
             Set::Vector v_new = Set::Vector(M(i, j, k, 0) / (rho(i, j, k)), M(i, j, k, 1) / (rho(i, j, k)));
             Set::Scalar KE_vol_new = 0.5 * rho(i, j, k) * (v_new(0) * v_new(0) + v_new(1) * v_new(1));
+            if (KE_vol_new < 0.0)
+            {
+                KE_vol_new = 0.0;
+            }
             Set::Scalar UE_vol_new = E_vol(i, j, k) - KE_vol_new;
+            if (UE_vol_new < 0.0)
+            {
+                UE_vol_new = 0.0;
+            }
             Set::Scalar press_new = (UE_vol_new - B_new) / A_new;
+            if (press_new < 0.0)
+            {
+                press_new = 1e-6;
+            }
             Set::Scalar p0_eff_new = (B_new / A_new) / gamma_eff_new;
             Set::Scalar sound_speed_new = sqrt(gamma_eff_new * (press_new + p0_eff_new) / (rho(i, j, k)));
 
