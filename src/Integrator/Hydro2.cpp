@@ -64,7 +64,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("cfl_v", value.cfl_v, value.cfl);  // cfl condition
         pp_query_default("pref", value.pref, 0.0);          // reference pressure for Roe solver
         pp_query_default("small", value.small, 1.0E-8);       // small regularization value
-        pp_query_default("cutoff", value.cutoff, 1.0E-8);   // eta cutoff value
+        pp_query_default("cutoff", value.cutoff, 1.0E-6);   // eta cutoff value
         pp_query_default("lagrange", value.lagrange, 0.0);  // lagrange no-penetration factor
         pp_query_default("grav", value.g, 9.81);            // Gravitational Acceletation
         pp_forbid("roefix", "--> solver.roe.entropy_fix");  // Roe solver entropy fix
@@ -116,7 +116,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     // Register FabFields:
     // Toggle the last boolean to true/false to track the variable or not.
     {
-        int nghost = 3;
+        int nghost = 2;
 
         // DIFFUSE PARAMETERS
         value.RegisterNewFab(value.eta_mf,           value.density_bc, 1, nghost, "eta", true, true);
@@ -126,9 +126,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.rho_eta0_old_mf,  value.density_bc, 1, nghost, "rho_eta0_old", false, false);
         value.RegisterNewFab(value.rho_eta1_old_mf,  value.density_bc, 1, nghost, "rho_eta1_old", false, false);
 
-        value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing, 1, nghost, "etadot", true, false);
-        value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing, 4, nghost, "hess_eta", false, false, { "00", "01", "10", "11" });
-        value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing,  2, nghost, "n_hat", false, false, { "x", "y" });
+        value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing, 1, 0, "etadot", true, false);
+        value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing, 4, 0, "hess_eta", false, false, { "00", "01", "10", "11" });
+        value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing, 2, 0, "n_hat", false, false, { "x", "y" });
 
         // FLUID 0
         value.RegisterNewFab(value.density0_mf,     value.density_bc,   1, nghost, "density0",     false, false );
@@ -313,9 +313,6 @@ void Hydro2::Initialize(int lev)
     etadot_mf[lev]  ->setVal(0.0);
     hess_eta_mf[lev]->setVal(0.0);
 
-    
-
-
     // FLUID 0
     velocity0_ic    ->Initialize(lev, velocity0_mf, 0.0);
     pressure0_ic    ->Initialize(lev, pressure0_mf, 0.0);
@@ -462,16 +459,19 @@ void Hydro2::Mix(int lev)
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
+            // Derivative Function Calls
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
-
-
 
             // Calculate State Variables 
             rho(i, j, k) = eta(i, j, k) * rho0(i, j, k) + (1.0 - eta(i, j, k)) * rho1(i, j, k);
             //rho(i, j, k) = 1.0 / (eta(i, j, k) / (rho0(i, j, k)) + (1.0 - eta(i, j, k)) / (rho1(i, j, k)));
             rho_old(i, j, k) = rho(i, j, k);  
+
             rho_eta0(i, j, k) = rho0(i, j, k) * eta(i, j, k);
             rho_eta1(i, j, k) = rho1(i, j, k) * (1.0 - eta(i, j, k));
+
+            rho_eta0(i, j, k) = rho(i, j, k) * eta(i, j, k);
+            rho_eta1(i, j, k) = rho(i, j, k) * (1.0 - eta(i, j, k));
 
             rho_eta0_old(i, j, k) = rho_eta0(i, j, k);
             rho_eta1_old(i, j, k) = rho_eta1(i, j, k);
@@ -620,24 +620,29 @@ Hydro2::RHS(int lev,
 
     // Eta Fields
     // for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
-    /*
-    for (amrex::MFIter mfi(*(velocity_mf)[lev], true); mfi.isValid(); ++mfi)
+    for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
 
         // CONSERVATIVE
         Set::Patch<Set::Scalar> eta = eta_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> rho_eta = rho_eta_mf_in.array(mfi);
-        Set::Patch<const Set::Scalar> rho = rho_mf_in.array(mfi);
+        Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf_in.array(mfi);
+        Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf_in.array(mfi);
+        Set::Patch<Set::Scalar> rho = density_mf.Patch(lev, mfi);
         
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
-            eta(i, j, k) = rho_eta(i, j, k) / rho(i, j, k);
+            rho(i, j, k) = std::max(rho_eta0(i, j, k) + rho_eta1(i, j, k), small);
+
+            // eta(i, j, k) = (rho(i, j, k) - rho_eta1(i, j, k)) / (rho_eta0(i, j, k) - rho_eta1(i, j, k) + small);
+            eta(i, j, k) = rho_eta0(i, j, k) / rho(i, j, k);
+
+            // CUTOFFS
+            eta(i, j, k) = std::max(0.0, std::min(1.0, (eta(i, j, k) - cutoff) / (1.0 - 2.0 * cutoff)));
             
         });
     }
-    */
 
     // Primitive Fields
     //for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
@@ -646,10 +651,10 @@ Hydro2::RHS(int lev,
         const amrex::Box &bx = mfi.validbox();
 
         // CONSERVATIVE
-        Set::Patch<Set::Scalar> eta = eta_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> eta = eta_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf_in.array(mfi);
         Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf_in.array(mfi);
-        Set::Patch<Set::Scalar> rho = density_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> rho = density_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> M = M_mf_in.array(mfi);
         Set::Patch<const Set::Scalar> E = E_mf_in.array(mfi);
 
@@ -678,27 +683,12 @@ Hydro2::RHS(int lev,
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
-            rho(i, j, k) = std::max(rho_eta0(i, j, k) + rho_eta1(i, j, k), small);
-            //eta(i, j, k) = (rho(i, j, k) - rho_eta1(i, j, k)) / (rho_eta0(i, j, k) - rho_eta1(i, j, k) + small);
-            eta(i, j, k) = rho_eta0(i, j, k) / rho(i, j, k);
-
-
-            // Derivatice Function Calls
-            /*
+            // Derivative Function Calls
+            // Normal Compute
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
             Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
             Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
-            */
-            Set::Vector grad_rho_eta = Numeric::Gradient(rho_eta0, i, j, k, 0, DX);
-            Set::Vector grad_rho = Numeric::Gradient(rho, i, j, k, 0, DX);
-            Set::Vector grad_eta = (grad_rho_eta - eta(i, j, k) * grad_rho) / rho(i, j, k);
-            Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
-
-            Set::Matrix hes_rho_eta = Numeric::Hessian(rho_eta0, i, j, k, 0, DX, sten);
-            Set::Matrix hes_rho = Numeric::Hessian(rho, i, j, k, 0, DX, sten);
-            Set::Matrix hess_eta = (1 / rho(i, j, k)) * (-(grad_rho * grad_eta.transpose()) - (grad_eta * grad_rho.transpose()) - (eta(i, j, k) * hes_rho) + (hes_rho_eta));
-            Set::Scalar lap_eta = hess_eta(0, 0) + hess_eta(1, 1);
 
             // gamma
             Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
@@ -1636,17 +1626,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
-            // Derivatice Function Calls
-            Set::Vector grad_rho_eta = Numeric::Gradient(rho_eta0, i, j, k, 0, DX);
-            Set::Vector grad_rho = Numeric::Gradient(rho, i, j, k, 0, DX);
-            Set::Vector grad_eta = (grad_rho_eta - eta_new(i, j, k) * grad_rho) / rho(i, j, k);
+            // Derivative Function Calls
+            // Normal Compute
+            Set::Vector grad_eta = Numeric::Gradient(eta_new, i, j, k, 0, DX);
             Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
-
-            Set::Matrix hes_rho_eta = Numeric::Hessian(rho_eta0, i, j, k, 0, DX, sten);
-            Set::Matrix hes_rho = Numeric::Hessian(rho, i, j, k, 0, DX, sten);
-            Set::Matrix hes_eta = (1 / rho(i, j, k)) * (-(grad_rho * grad_eta.transpose()) - (grad_eta * grad_rho.transpose()) - (eta_new(i, j, k) * hes_rho) + (hes_rho_eta));
-            Set::Scalar lap_eta = hes_eta(0, 0) + hes_eta(1, 1);
-
+            Set::Matrix hess_eta = Numeric::Hessian(eta_new, i, j, k, 0, DX, sten);
+            Set::Scalar lap_eta = Numeric::Laplacian(eta_new, i, j, k, 0, DX);
 
             // gamma
             Set::Scalar A = (eta_new(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta_new(i, j, k)) / (gamma1 - 1.0);
