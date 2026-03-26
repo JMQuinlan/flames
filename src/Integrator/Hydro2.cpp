@@ -11,6 +11,7 @@
 #include "IC/Expression.H"
 #include "IC/BMP.H"
 #include "IC/PNG.H"
+#include "AMReX_Geometry.H"
 // Solvers
 #include "Solver/Local/FluidRiemann/Roe.H"
 #include "Solver/Local/FluidRiemann/HLLE.H"
@@ -33,6 +34,12 @@
 
 #include <AMReX_Math.H>
 #include "AMReX_TimeIntegrator.H"
+#include <AMReX.H>
+#include <AMReX_Geometry.H>
+#include <AMReX_MFIter.H>
+#include <AMReX_Array4.H>
+
+using namespace amrex;
 
 
 //#if AMREX_SPACEDIM == 2
@@ -199,6 +206,18 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.Bm_mf,           &value.bc_nothing,  1, nghost, "Spadling_Number", true, false);    // Spalding Number
         value.RegisterNewFab(value.Y_mf,            &value.bc_nothing,  1, nghost, "Mass_Fraction", true, false);       // Mass Fraction
 
+        // Kappa and curvature related fields
+        value.RegisterNewFab(value.kappa_HF_mf,            &value.bc_nothing,  1, nghost, "kappa_HF", true, false);
+        value.RegisterNewFab(value.kappa_SF_mf,            &value.bc_nothing,  1, nghost, "kappa_SF", true, false);
+        value.RegisterNewFab(value.h_eta_mf,               &value.bc_nothing,  1, nghost, "h_eta", true, false);
+        value.RegisterNewFab(value.nx_smoothed_mf,         &value.bc_nothing,  1, nghost, "nx_smoothed", true, false);
+        value.RegisterNewFab(value.ny_smoothed_mf,         &value.bc_nothing,  1, nghost, "ny_smoothed", true, false);
+        value.RegisterNewFab(value.gradmag_mf,             &value.bc_nothing,  1, nghost, "gradmag", true, false);
+        value.RegisterNewFab(value.eta_x_mf,               &value.bc_nothing,  1, nghost, "eta_x", true, false);
+        value.RegisterNewFab(value.eta_y_mf,               &value.bc_nothing,  1, nghost, "eta_y", true, false);
+        
+        value.RegisterNewFab(value.kappas_mf,              &value.bc_nothing,  3, nghost, "kappas", true, false);
+
         // EXTRAS & DEBUGGING
         value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", false, false, { "x", "y" });
         value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, nghost, "kappa", true, false, { "Avg", "1", "2" }); // To Surface curvature
@@ -301,6 +320,10 @@ void Hydro2::Initialize(int lev)
 {
     BL_PROFILE("Integrator::Hydro2::Initialize");
 
+    const Geometry& geom = this->geom[lev];
+    const Real* dx = geom.CellSize();
+    const Box& domain = geom.Domain();
+
     // Initialize individual fluid variables
     // DIFFUSIVE BOUNDRY
     eta_ic          ->Initialize(lev, eta_mf, 0.0);
@@ -333,6 +356,12 @@ void Hydro2::Initialize(int lev)
 
     // Calculate mixed variables based on individual fluid variables
     Mix(lev);
+
+    // Make sure ghost cells are consistent with initial conditions
+    eta_mf[lev]->FillBoundary(geom.periodicity());
+    density_mf[lev]->FillBoundary(geom.periodicity());
+    momentum_mf[lev]->FillBoundary(geom.periodicity());
+    energy_per_vol_mf[lev]->FillBoundary(geom.periodicity());
 
     // NATURAL SOURCE
     Source_mf[lev]  ->setVal(0.0);
@@ -586,8 +615,28 @@ Hydro2::RHS(int lev,
     const amrex::MultiFab &M_mf_in, 
     const amrex::MultiFab &E_mf_in) //, const amrex::MultiFab &velocity_mf_in, const amrex::MultiFab &pressure_mf_in, const amrex::MultiFab &T_mf_in)
 {
-    const Set::Scalar *DX = geom[lev].CellSize();
-    amrex::Box domain = geom[lev].Domain();
+    const Geometry& geom = this->geom[lev];
+    const Real* DX = geom.CellSize();
+    const Box& domain = geom.Domain();
+    // const Set::Scalar *DX = geom[lev].CellSize();
+    // amrex::Box domain = geom[lev].Domain();
+
+    // MultiFab eta_tmp(eta_mf_in, amrex::make_alias, 0, eta_mf_in.nComp());
+    // MultiFab rho_tmp(rho_mf_in, amrex::make_alias, 0, rho_mf_in.nComp());
+    // MultiFab M_tmp(M_mf_in, amrex::make_alias, 0, M_mf_in.nComp());
+    // MultiFab E_tmp(E_mf_in, amrex::make_alias, 0, E_mf_in.nComp());
+
+    // // Make sure ghost cells are updated before calculating derivatives
+    // eta_tmp.FillBoundary(geom.periodicity());
+    // rho_tmp.FillBoundary(geom.periodicity());
+    // M_tmp.FillBoundary(geom.periodicity());
+    // E_tmp.FillBoundary(geom.periodicity());
+
+    // Pre calculate kappa 
+    
+    if (kappa_method == 3)
+            ComputeKappas(lev); 
+
 
     // Primitive Fields
     //for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
@@ -741,7 +790,7 @@ Hydro2::RHS(int lev,
                     // Orthogonal Basis
                     Set::Vector t1, t2;
 
-                    if (abs(n_hat(0)) > abs(n_hat(1)))
+                    if (amrex::Math::abs(n_hat(0)) > amrex::Math::abs(n_hat(1)))
                     {
                         t1 = Set::Vector(-n_hat(1), n_hat(0)) / sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
                     }
@@ -771,6 +820,11 @@ Hydro2::RHS(int lev,
                     kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
                     kappas(i, j, k, 1) = kappa1; // First principal curvature
                     kappas(i, j, k, 2) = kappa2; // Second principal curvature
+                }
+                else if (kappa_method == 3)
+                {
+                    // Calculate required gradients
+                    // ComputeKappas(lev);
                 }
             }
         });
@@ -1388,40 +1442,472 @@ Hydro2::RHS(int lev,
     }
 }
 
+// CURVATURE CALCULATION
+void Hydro2::ComputeHeightFunction(int lev)
+{
+    BL_PROFILE("Hydro2::ComputeHeightFunction");
+
+    using namespace amrex;
+
+    // Geometry for this AMR level
+    const Geometry& geom = this->geom[lev];
+    const Real* dx = geom.CellSize();
+    const Box& domain = geom.Domain();
+
+    // MultiFab array accessors
+    
+
+    // Domain extents
+    const int ilo = domain.smallEnd(0);
+    const int ihi = domain.bigEnd(0);
+    const int jlo = domain.smallEnd(1);
+    const int jhi = domain.bigEnd(1);
+
+    //--------------------------------------------------------------------
+    // HEIGHT FUNCTION (HOST)
+    //
+    // We scan each vertical column (i fixed, j varies) for the location
+    // where η is closest to 0.5.  This gives the interface height h(i).
+    //
+    // HF is cheap (O(Nx)), not GPU-friendly, and AMReX encourages doing
+    // this type of search on the host side.
+    //--------------------------------------------------------------------
+
+    // for (int i = ilo; i <= ihi; ++i)
+    
+    for (MFIter mfi(*eta_mf[lev]); mfi.isValid(); ++mfi)
+    {
+        const Box& bx = mfi.validbox();
+        const auto& eta_arr = eta_mf[lev]->const_array(mfi);
+        auto h_arr   = h_eta_mf[lev]->array(mfi);
+        
+
+        for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i)
+        {
+
+            Set::Scalar best_err = 1e20;
+            int best_j = jlo;
+
+            // Search column for η ≈ 0.5
+            for (int j = jlo; j <= jhi; ++j)
+            {
+                Set::Scalar e = eta_arr(i,j,0);
+                Set::Scalar d = amrex::Math::abs(e - 0.5);
+
+                if (d < best_err) {
+                    best_err = d;
+                    best_j = j;
+                }
+            }
+
+            // Convert index j → physical coordinate y
+            Set::Scalar y_phys =
+                geom.ProbLo()[1] + (best_j + 0.5) * dx[1];
+
+            // Height function is stored as h(i,0,0)
+            h_arr(i,0,0) = y_phys;
+        }
+    }
+
+    // Fill ghost cells for AMR safety
+    h_eta_mf[lev]->FillBoundary(this->geom[lev].periodicity());
+}
+
+void Hydro2::ComputeHFcurvature_MUSCL(int lev)
+{
+    BL_PROFILE("Hydro2::ComputeHFcurvature_MUSCL");
+
+    const Geometry& geom = this->geom[lev];
+    const Real* dx = geom.CellSize();
+    const Box& domain = geom.Domain();
+
+    
+
+    int ilo = domain.smallEnd(0);
+    int ihi = domain.bigEnd(0);
+
+    for (MFIter mfi(*h_eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const Box& tb = mfi.tilebox();
+        // auto const& h_arr = h_eta_mf[lev]->const_arrays();
+        auto h_arr = h_eta_mf[lev]->array(mfi);
+        auto kHF_arr = kappa_HF_mf[lev]->array(mfi);
+
+        ParallelFor(tb, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        {
+            Set::Scalar hC = h_arr(i,0,0);
+            Set::Scalar hL = (i > ilo) ? h_arr(i-1,0,0) : hC;
+            Set::Scalar hR = (i < ihi) ? h_arr(i+1,0,0) : hC;
+
+            // MUSCL slope
+            Set::Scalar dl = hC - hL;
+            Set::Scalar dr = hR - hC;
+            Set::Scalar slope = (dl*dr > 0.0) ? (2.0*dl*dr)/(dl + dr) : 0.0;
+            Set::Scalar hx = slope / dx[0];
+
+            // second derivative
+            Set::Scalar hxx = (hR - 2.0*hC + hL) / (dx[0]*dx[0]);
+
+            kHF_arr(i,0,0) = hxx / pow(1.0 + hx*hx, 1.5);
+        });
+    }
+
+    kappa_HF_mf[lev]->FillBoundary(this->geom[lev].periodicity());
+}
+
+void Hydro2::ComputeSmoothNormals(int lev)
+{
+    BL_PROFILE("Hydro2::SmoothNormals");
+
+    // auto const& eta_x = eta_x_mf[lev]->const_arrays();
+    // auto const& eta_y = eta_y_mf[lev]->const_arrays();
+    // auto const& gradmag = gradmag_mf[lev]->const_arrays();
+
+    
+    for (MFIter mfi(*nx_smoothed_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const Box& tb = mfi.tilebox();
+        auto const eta_x = eta_x_mf[lev]->const_array(mfi);
+        auto const eta_y = eta_y_mf[lev]->const_array(mfi);
+        auto const gradmag = gradmag_mf[lev]->const_array(mfi);
+        auto nx_s = nx_smoothed_mf[lev]->array(mfi);
+        auto ny_s = ny_smoothed_mf[lev]->array(mfi);
+
+
+        ParallelFor(tb, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        {
+            Set::Scalar gm = gradmag(i,j,k) + 1e-14;
+
+            // raw normal
+            Set::Scalar nx0 = eta_x(i,j,k) / gm;
+            Set::Scalar ny0 = eta_y(i,j,k) / gm;
+            // 3×3 Gaussian smoothing
+            Set::Scalar accx=0, accy=0, wsum=0;
+            const Set::Scalar w0 = 0.27901, w1 = 0.44198, w2 = 0.27901;
+
+            for (int di=-1; di<=1; di++)
+            for (int dj=-1; dj<=1; dj++)
+            {
+                Set::Scalar w = ((di==0 && dj==0)? w1 :
+                          ((amrex::Math::abs(di)+amrex::Math::abs(dj)==1)? w0 : w2));
+
+                int ii = i+di;
+                int jj = j+dj;
+
+                // if (!tb.contains(IntVect(ii,jj))) continue;
+                if (!tb.contains(IntVect(AMREX_D_DECL(ii,jj,0)))) continue;
+
+                Set::Scalar gmN = gradmag(ii,jj,k) + 1e-14;
+                Set::Scalar nxN = eta_x(ii,jj,k)/gmN;
+                Set::Scalar nyN = eta_y(ii,jj,k)/gmN;
+
+                accx += w*nxN;
+                accy += w*nyN;
+                wsum += w;
+            }
+
+            Set::Scalar nx = accx/(wsum + 1e-14);
+            Set::Scalar ny = accy/(wsum + 1e-14);
+
+            Set::Scalar m = std::sqrt(nx*nx + ny*ny) + 1e-14;
+            nx_s(i,j,k) = nx/m;
+            ny_s(i,j,k) = ny/m;
+        });
+    }
+
+    nx_smoothed_mf[lev]->FillBoundary(this->geom[lev].periodicity());
+    ny_smoothed_mf[lev]->FillBoundary(this->geom[lev].periodicity());
+}
+
+void Hydro2::ComputeHybridCurvature(int lev)
+{
+    BL_PROFILE("Hydro2::ComputeHybridCurvature");
+
+    const Geometry& geom = this->geom[lev];
+    const Real* dx = geom.CellSize();
+    const Box& domain = geom.Domain();
+
+    const Real Cg = 0.1/epsilon;
+    const Real small = 1e-14;
+
+    
+
+    
+
+    for (MFIter mfi(*kappas_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const Box& tb = mfi.tilebox();
+
+        
+        auto const gradmag  = gradmag_mf[lev]->const_array(mfi);
+        auto const nx_s     = nx_smoothed_mf[lev]->const_array(mfi);
+        auto const ny_s     = ny_smoothed_mf[lev]->const_array(mfi);
+        auto const kHF      = kappa_HF_mf[lev]->const_array(mfi);
+        auto const h_eta    = h_eta_mf[lev]->const_array(mfi);
+
+        auto kappas = kappas_mf[lev]->array(mfi);
+
+        ParallelFor(tb, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        {
+            Set::Scalar gm = gradmag(i,j,k);
+
+            if (gm < Cg)
+            {
+                kappas(i,j,k,0)=0;
+                kappas(i,j,k,1)=0;
+                kappas(i,j,k,2)=0;
+                return;
+            }
+
+            // ---------------- S_g ----------------
+            Set::Scalar Sg = gm/(gm + Cg);
+
+            // ------- SN curvature -------
+            Set::Scalar nx = nx_s(i,j,k);
+            Set::Scalar ny = ny_s(i,j,k);
+            Set::Scalar nx_x = 0.5*(nx_s(i+1,j,k) - nx_s(i-1,j,k)) / dx[0];
+            Set::Scalar ny_y = 0.5*(ny_s(i,j+1,k) - ny_s(i,j-1,k)) / dx[1];
+            Set::Scalar kSN = nx_x + ny_y;
+
+            // ---------- HF curvature ----------
+            Set::Scalar kHF_i = kHF(i,0,0);
+
+            // ---------- S_m monotonicity ----------
+            Set::Scalar Sm = 1.0;
+            Set::Scalar hC = h_eta(i,0,0);
+            if (i > domain.smallEnd(0))
+                if (amrex::Math::abs(h_eta(i-1,0,0) - hC) > 3*dx[1]) Sm = 0;
+
+            if (i < domain.bigEnd(0))
+                if (amrex::Math::abs(h_eta(i+1,0,0) - hC) > 3*dx[1]) Sm = 0;
+
+            // ---------- S_s smoothness ----------
+            Set::Scalar Cs = amrex::max(amrex::Math::abs(kHF_i), 1e-12);
+            Set::Scalar dk = amrex::Math::abs(kHF_i - kSN);
+            Set::Scalar Ss = std::exp(-dk/(Cs + small));
+
+            // ---------- Weight ----------
+            Set::Scalar w = Sg * Sm * Ss;
+            w = amrex::max(0.0, amrex::min(1.0, w));
+            // ---------- Hybrid curvature ----------
+            Set::Scalar kH = w*kHF_i + (1.0-w)*kSN;
+            kappas(i,j,k,0) = kH;     // hybrid
+            kappas(i,j,k,1) = kHF_i;  // HF
+            kappas(i,j,k,2) = kSN;    // SN
+        });
+    }
+
+    kappas_mf[lev]->FillBoundary(this->geom[lev].periodicity());
+}
+void Hydro2::ComputeGradEta(int lev)
+{
+    BL_PROFILE("Hydro2::ComputeGradEta");
+
+    const Geometry& geom = this->geom[lev];
+    const Real* dx = geom.CellSize();
+    const amrex::Box& domain = geom.Domain();
+
+    for (MFIter mfi(*eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const Box& tb = mfi.tilebox();
+
+        auto const& eta_arr     = eta_mf[lev]->const_array(mfi);
+        auto eta_x_arr          = eta_x_mf[lev]->array(mfi);
+        auto eta_y_arr          = eta_y_mf[lev]->array(mfi);
+        auto gradmag_arr        = gradmag_mf[lev]->array(mfi);
+
+        // ⭐ COPY INTO SIMPLE LAMBDA-CAPTURE-FRIENDLY VARIABLES ⭐
+        auto eta  = eta_arr;
+        auto etax = eta_x_arr;
+        auto etay = eta_y_arr;
+        auto gmag = gradmag_arr;
+
+        ParallelFor(tb, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        {
+            auto sten = Numeric::GetStencil(i,j,k, domain);
+
+            // Set::Vector g = Numeric::Gradient(eta, i, j, k, dx, sten);
+            Set::Vector g = Numeric::Gradient(eta, i, j, k, 0, dx);
+
+            double gx = g(0);
+            double gy = g(1);
+
+            etax(i,j,k,0) = gx;
+            etay(i,j,k,0) = gy;
+
+            gmag(i,j,k,0) = std::sqrt(gx*gx + gy*gy);
+        });
+    }
+    // for (MFIter mfi(*eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    // {
+    //     const Box& tb = mfi.tilebox();
+
+        
+    //     auto const& eta_arr     = eta_mf[lev]->const_array(mfi);
+    //     auto eta_x_arr          = eta_x_mf[lev]->array(mfi);
+    //     auto eta_y_arr          = eta_y_mf[lev]->array(mfi);
+    //     auto gradmag_arr        = gradmag_mf[lev]->array(mfi);
+
+        
+    //     ParallelFor(tb, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+    //     {
+
+    //         auto sten = Numeric::GetStencil(i,j,k, domain);
+
+    //         // Call your safe gradient routine
+    //         // Set::Vector g = Numeric::Gradient(eta_arr, i, j, k, 0, dx);
+            
+    //         Set::Vector g = Numeric::Gradient(eta_arr, i, j, k, dx, sten);
+
+    //         Set::Scalar gx = g(0);
+    //         Set::Scalar gy = g(1);
+
+    //         eta_x_arr(i,j,k,0) = gx;
+    //         eta_y_arr(i,j,k,0) = gy;
+
+    //         gradmag_arr(i,j,k,0) = std::sqrt(gx*gx + gy*gy);
+    //     });
+    // }
+}
+
+void Hydro2::ComputeKappas(int lev)
+{
+    BL_PROFILE("Hydro2::ComputeKappas");
+
+    //
+    // IMPORTANT: curvature pipeline depends on the following sequence:
+    //
+    //  1. Compute ∇η (eta_x, eta_y) and |∇η| into gradmag_mf
+    //  2. Build height function h(i)
+    //  3. Compute HF curvature using MUSCL limited slopes
+    //  4. Compute smoothed-normal curvature (SN curvature)
+    //  5. Blend HF and SN to get hybrid curvature
+    //
+    // All MultiFabs involved must be already allocated via RegisterNewFab().
+    //
+
+    // 1. gradient of eta (uses your Numeric::Gradient)
+    ComputeGradEta(lev);
+
+    // 2. height function for HF method
+    ComputeHeightFunction(lev);
+
+    // 3. HF curvature with MUSCL slope limiter
+    ComputeHFcurvature_MUSCL(lev);
+
+    // 4. Gaussian smoothed normals + SN curvature
+    ComputeSmoothNormals(lev);   // you named it this in your header
+
+    // 5. Hybrid curvature (HF + SN with S_g, S_m, S_s)
+    ComputeHybridCurvature(lev);
+
+    // That’s it. Output curvature lives in kappas_mf:
+    //    component 0 = hybrid curvature
+    //    component 1 = HF curvature
+    //    component 2 = SN curvature
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////// ADVANCE ///////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 {
-    const Set::Scalar *DX = geom[lev].CellSize();
-    amrex::Box domain = geom[lev].Domain();
+    const Geometry& geom = this->geom[lev];
+    const Real* DX = geom.CellSize();
+    const Box& domain = geom.Domain();
+    // const Set::Scalar *DX = geom[lev].CellSize();
+    // amrex::Box domain = geom[lev].Domain();
 
     // Swaping pointers
     std::swap(density_old_mf[lev], density_mf[lev]);
     std::swap(momentum_old_mf[lev], momentum_mf[lev]);
     std::swap(energy_per_vol_old_mf[lev], energy_per_vol_mf[lev]);
     std::swap(energy_per_mas_old_mf[lev], energy_per_mas_mf[lev]);
-    std::swap(eta_old_mf, eta_mf);
+    std::swap(eta_old_mf[lev], eta_mf[lev]);
 
     // ------------------------------------------------------------
     // Time Integration
     // ------------------------------------------------------------
     // New Solution Refrences
     amrex::Vector<amrex::MultiFab> solution_new;
-    solution_new.emplace_back(*eta_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
-    solution_new.emplace_back(*density_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
-    solution_new.emplace_back(*momentum_mf[lev].get(), amrex::MakeType::make_alias, 0, 2);
-    solution_new.emplace_back(*energy_per_vol_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
+    solution_new.emplace_back(eta_mf[lev]->boxArray(),
+                            eta_mf[lev]->DistributionMap(),
+                            eta_mf[lev]->nComp(),
+                            eta_mf[lev]->nGrow());
+    solution_new.back().ParallelCopy(*eta_mf[lev]);
+
+    solution_new.emplace_back(density_mf[lev]->boxArray(),
+                            density_mf[lev]->DistributionMap(),
+                            density_mf[lev]->nComp(),
+                            density_mf[lev]->nGrow());
+    solution_new.back().ParallelCopy(*density_mf[lev]);
+    // Debugging
+    amrex::Print()
+    << "momentum_mf["<<lev<<"] has " 
+    << momentum_mf[lev]->nComp() << " components and "
+    << momentum_mf[lev]->nGrow()  << " ghost cells.\n";
+
+    solution_new.emplace_back(momentum_mf[lev]->boxArray(),
+                            momentum_mf[lev]->DistributionMap(),
+                            momentum_mf[lev]->nComp(),
+                            momentum_mf[lev]->nGrow());
+    solution_new.back().ParallelCopy(*momentum_mf[lev]);
+
+    solution_new.emplace_back(energy_per_vol_mf[lev]->boxArray(),
+                            energy_per_vol_mf[lev]->DistributionMap(),
+                            energy_per_vol_mf[lev]->nComp(),
+                            energy_per_vol_mf[lev]->nGrow());
+    solution_new.back().ParallelCopy(*energy_per_vol_mf[lev]);
+// !!!!!!!! Aliasas are only safe when no ghost cells are involved, which is not the case during the time integrator stages. We need to make full copies to be safe. !!!!!!!!
+    // amrex::Vector<amrex::MultiFab> solution_new;
+    // solution_new.emplace_back(*eta_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
+    // solution_new.emplace_back(*density_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
+    // solution_new.emplace_back(*momentum_mf[lev].get(), amrex::MakeType::make_alias, 0, 2);
+    // solution_new.emplace_back(*energy_per_vol_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
 
     // Old Solution Refrences
     amrex::Vector<amrex::MultiFab> solution_old;
-    solution_old.emplace_back(*eta_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
-    solution_old.emplace_back(*density_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
-    solution_old.emplace_back(*momentum_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 2);
-    solution_old.emplace_back(*energy_per_vol_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
+    solution_old.emplace_back(eta_old_mf[lev]->boxArray(),
+                            eta_old_mf[lev]->DistributionMap(),
+                            eta_old_mf[lev]->nComp(),
+                            eta_old_mf[lev]->nGrow());
+    solution_old.back().ParallelCopy(*eta_old_mf[lev]);
+    solution_old.emplace_back(density_old_mf[lev]->boxArray(),
+                            density_old_mf[lev]->DistributionMap(),
+                            density_old_mf[lev]->nComp(),
+                            density_old_mf[lev]->nGrow());
+    solution_old.back().ParallelCopy(*density_old_mf[lev]);
+    solution_old.emplace_back(momentum_old_mf[lev]->boxArray(),
+                            momentum_old_mf[lev]->DistributionMap(),
+                            momentum_old_mf[lev]->nComp(),
+                            momentum_old_mf[lev]->nGrow());
+    solution_old.back().ParallelCopy(*momentum_old_mf[lev]);
+    solution_old.emplace_back(energy_per_vol_old_mf[lev]->boxArray(),
+                            energy_per_vol_old_mf[lev]->DistributionMap(),
+                            energy_per_vol_old_mf[lev]->nComp(),
+                            energy_per_vol_old_mf[lev]->nGrow());
+    solution_old.back().ParallelCopy(*energy_per_vol_old_mf[lev]);
+
+    // amrex::Vector<amrex::MultiFab> solution_old;
+    // solution_old.emplace_back(*eta_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
+    // solution_old.emplace_back(*density_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
+    // solution_old.emplace_back(*momentum_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 2);
+    // solution_old.emplace_back(*energy_per_vol_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
 
     // Create the time integrator
     amrex::TimeIntegrator timeintegrator(solution_new, time);
+
+    // eta_mf[lev]->FillBoundary(geom.periodicity());
+    // density_mf[lev]->FillBoundary(geom.periodicity());
+    // momentum_mf[lev]->FillBoundary(geom.periodicity());
+    // energy_per_vol_mf[lev]->FillBoundary(geom.periodicity());
+
+    // Fill boundaries for the initial condition before starting the time integrator
+    // eta_mf, density_mf, momentum_mf, energy_per_vol_mf are all filled in the same way, so we can loop over them
+    for (auto& mf : solution_new)
+        mf.FillBoundary(geom.periodicity());
+    for (auto& mf : solution_old)
+        mf.FillBoundary(geom.periodicity());
 
     // Set the time integrator RHS
     timeintegrator.set_rhs([&](
@@ -1501,8 +1987,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
             // CUTOFFS
-            eta_new(i, j, k) = std::max( 0.0,std::min( 1.0,(eta_new(i, j, k) - cutoff) / (1.0 - 2.0 * cutoff) ) );
-            rho(i, j, k) = std::max(rho(i, j, k), small);
+            eta_new(i, j, k) = amrex::max( 0.0,amrex::min( 1.0,(eta_new(i, j, k) - cutoff) / (1.0 - 2.0 * cutoff) ) );
+            rho(i, j, k) = amrex::max(rho(i, j, k), small);
 
             // Derivatice Function Calls
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
@@ -1616,14 +2102,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar p0_eff_new = (B_new / A_new) / gamma_eff_new;
             Set::Scalar sound_speed_new = sqrt(gamma_eff_new * (press_new + p0_eff_new) / (rho(i, j, k)));
 
-            c_max = std::max(c_max, sound_speed_new);
-            vx_max = std::max(vx_max, abs(v_new(0))); // vx
-            vy_max = std::max(vy_max, abs(v_new(1))); // vy
+            c_max = amrex::max(c_max, sound_speed_new);
+            vx_max = amrex::max(vx_max, amrex::Math::abs(v_new(0))); // vx
+            vy_max = amrex::max(vy_max, amrex::Math::abs(v_new(1))); // vy
 
             // Track maximum force magnitude (not acceleration yet)
             Set::Scalar F_mag = sqrt(Source(i, j, k, 1) * Source(i, j, k, 1) + Source(i, j, k, 2) * Source(i, j, k, 2));
-            F_max = std::max(F_max, F_mag);
-            rho_min = std::min(rho_min, rho(i, j, k));
+            F_max = amrex::max(F_max, F_mag);
+            rho_min = amrex::min(rho_min, rho(i, j, k));
                 
         });
     }
@@ -1641,7 +2127,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     amrex::ParallelDescriptor::ReduceRealMin(rho_min);
 
     // Compute timestep constraints
-    Set::Scalar dx_min = std::min(DX[0], DX[1]);
+    Set::Scalar dx_min = amrex::min(DX[0], DX[1]);
 
     // 1. Acoustic CFL 
     Set::Scalar wave_speed = c_max + sqrt(vx_max * vx_max + vy_max * vy_max);

@@ -10,7 +10,7 @@ alamo.program = hydro2
 ### OUTPUT ###
 #plot_file = ./tests/FlowShockDroplet/output_Shock1mmDroplet
 # plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet
-plot_file = /mmfs1/home/jquinlan/runs/temp4/output_kappa_method2_kappa1_nolimit
+plot_file = /mmfs1/home/jquinlan/runs/temp4/output_kappa_method3
 
 ### MESHING ###
 amr.plot_dt = 0.25e-6
@@ -166,4 +166,4 @@ grav = 9.81
 
 ### DEBUGGING ### 
 Riemann_Solver.type = hllc
-kappa_method = 2   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
+kappa_method = 3   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization" / 3:"Advanced Hybrid"

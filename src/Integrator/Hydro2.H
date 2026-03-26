@@ -103,6 +103,13 @@ protected:
 
 
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
+    void ComputeHybridCurvature(int lev);
+    void ComputeSmoothNormals(int lev);
+    void ComputeHeightFunction(int lev);
+    void ComputeKappas(int lev);
+    void ComputeGradEta(int lev);
+    void ComputeHFcurvature_MUSCL(int lev);
+
 
 protected:
     // FLUID 0
@@ -180,6 +187,16 @@ protected:
     Set::Field<Set::Scalar> grad_eta_mf;
     Set::Field<Set::Scalar> kappas_mf;
     Set::Field<Set::Scalar> grad_mag_grad_eta_mf;
+
+    Set::Field<Set::Scalar>     h_eta_mf;           // height field
+    Set::Field<Set::Scalar>     nx_smoothed_mf;     // smoothed normals n_x
+    Set::Field<Set::Scalar>     ny_smoothed_mf;     // smoothed normals n_y
+    Set::Field<Set::Scalar>     eta_x_mf;           // gradient of eta in x direction
+    Set::Field<Set::Scalar>     eta_y_mf;           // gradient of eta in y direction
+    Set::Field<Set::Scalar>     gradmag_mf;         // mag(grad(eta))
+    Set::Field<Set::Scalar>     kappa_SF_mf;        // curvature from smoothed normals
+    Set::Field<Set::Scalar>     kappa_HF_mf;        // curvature from height function
+    // Set::Field<Set::Scalar>     kappas_mf;          // weighted curvature
 
     Set::Field<Set::Scalar> rho_flux_mf;
     Set::Field<Set::Scalar> M_flux_mf;
