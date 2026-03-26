@@ -43,154 +43,108 @@ public:
         // No parameters to parse
     }
 
-    virtual Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1) override
+    virtual Flux Solve(State lo, State hi,
+                   Set::Scalar p_ref,
+                   Set::Scalar small,
+                   int Spec_Vol = 1) override
     {
-        Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
-        Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
-        Set::Scalar Mt_L = lo.M_tangent, Mt_R = hi.M_tangent;
-        Set::Scalar E_L = lo.E, E_R = hi.E;
-        Set::Scalar gamma_L = lo.gam, gamma_R = hi.gam;
-        Set::Scalar p0_L = lo.p0, p0_R = hi.p0;
-        Set::Scalar T_L = lo.T, T_R = hi.T;
+        //----------------------------------------------------------------------
+        // Extract states
+        //----------------------------------------------------------------------
+        Set::Scalar rhoL = std::max(lo.rho, small);
+        Set::Scalar rhoR = std::max(hi.rho, small);
 
-        // Ensure no negative densities
-        rho_L = std::max(small, rho_L);
-        rho_R = std::max(small, rho_R);
+        Set::Scalar uL = lo.M_normal  / rhoL;
+        Set::Scalar vL = lo.M_tangent / rhoL;
+        Set::Scalar uR = hi.M_normal  / rhoR;
+        Set::Scalar vR = hi.M_tangent / rhoR;
 
-        // Fluid primitives
-        Set::Scalar ke_L, ke_R;
-        Set::Scalar ue_L, ue_R;
-        Set::Scalar p_L, p_R;
-        Set::Scalar h_TL, h_TR;
+        Set::Scalar EL = lo.E;
+        Set::Scalar ER = hi.E;
 
-        if (Spec_Vol == 1)
-        {
-            // With Respect to Specific Volume (energies are per unit volume)
-            ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
-            ue_L = E_L - ke_L;                                          // IE per unit volume
-            p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;
-            h_TL = (ke_L + ue_L + p_L);
+        Set::Scalar gamL = lo.gam;
+        Set::Scalar gamR = hi.gam;
 
-            ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
-            ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;
-            h_TR = (ke_R + ue_R + p_R);
-        }
-        else
-        {
-            // With Respect to Specific Mass (energies are per unit mass)
-            ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small); // KE per unit mass
-            ue_L = E_L - ke_L;                                                  // IE per unit mass
-            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;
-            h_TL = ke_L + ue_L + (p_L / rho_L);
+        Set::Scalar p0L = lo.p0;
+        Set::Scalar p0R = hi.p0;
 
-            ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
-            ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R + p_ref;
-            h_TR = ke_R + ue_R + (p_R / rho_R);
-        }
+        //----------------------------------------------------------------------
+        // Internal energy and stiffened‑gas pressure
+        //----------------------------------------------------------------------
+        Set::Scalar KEL = 0.5*rhoL*(uL*uL + vL*vL);
+        Set::Scalar UEL = EL - KEL;
 
-        // Acoustic Speeds
-        Set::Scalar u_L = Mn_L / (rho_L + small), u_R = Mn_R / (rho_R + small);
-        Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
+        Set::Scalar KER = 0.5*rhoR*(uR*uR + vR*vR);
+        Set::Scalar UER = ER - KER;
 
-        // Sound Speeds
-        Set::Scalar a_L = std::sqrt(gamma_L * (p_L + p0_L) / (rho_L + small));
-        Set::Scalar a_R = std::sqrt(gamma_R * (p_R + p0_R) / (rho_R + small));
+        Set::Scalar pL = (gamL-1.0)*UEL - gamL*p0L + p_ref;
+        Set::Scalar pR = (gamR-1.0)*UER - gamR*p0R + p_ref;
 
-        // Wave speed estimates
-        Set::Scalar S_L = std::min(u_L - a_L, u_R - a_R);
-        Set::Scalar S_R = std::max(u_L + a_L, u_R + a_R);
+        pL = std::max(pL, small);
+        pR = std::max(pR, small);
 
-        // Fluxes for left and right states
-        Flux f_L, f_R;
+        //----------------------------------------------------------------------
+        // Correct stiffened-gas sound speeds:  a² = γ (p + γ p0) / ρ
+        //----------------------------------------------------------------------
+        Set::Scalar aL = std::sqrt(gamL * (pL + gamL*p0L) / rhoL);
+        Set::Scalar aR = std::sqrt(gamR * (pR + gamR*p0R) / rhoR);
 
-        if (Spec_Vol == 1)
-        {
-            // Energies per unit volume [J/m^3]
-            // ---- Left ----
-            f_L.mass = rho_L * u_L;
-            f_L.momentum_normal = rho_L * u_L * u_L + p_L;
-            f_L.momentum_tangent = rho_L * u_L * v_L;
-            f_L.energy = u_L * (E_L + p_L); // [W/m^2]
+        //----------------------------------------------------------------------
+        // HLLE wave speed estimates
+        //----------------------------------------------------------------------
+        Set::Scalar SL = std::min(uL - aL, uR - aR);
+        Set::Scalar SR = std::max(uL + aL, uR + aR);
 
-            // ---- Right ----
-            f_R.mass = rho_R * u_R;
-            f_R.momentum_normal = rho_R * u_R * u_R + p_R;
-            f_R.momentum_tangent = rho_R * u_R * v_R;
-            f_R.energy = u_R * (E_R + p_R);
-        }
-        else
-        {
-            // Energies per unit mass [J/kg]
-            // ---- Left ----
-            f_L.mass = rho_L * u_L;
-            f_L.momentum_normal = rho_L * u_L * u_L + p_L;
-            f_L.momentum_tangent = rho_L * u_L * v_L;
-            f_L.energy = u_L * (E_L + p_L / (rho_L + small)); // [W/kg]
+        //----------------------------------------------------------------------
+        // Compute fluxes (now stiffened-gas corrected)
+        //----------------------------------------------------------------------
+        Flux FL, FR;
 
-            // ---- Right ----
-            f_R.mass = rho_R * u_R;
-            f_R.momentum_normal = rho_R * u_R * u_R + p_R;
-            f_R.momentum_tangent = rho_R * u_R * v_R;
-            f_R.energy = u_R * (E_R + p_R / (rho_R + small));
-        }
+        // left state fluxes
+        FL.mass = rhoL*uL;
+        FL.momentum_normal  = rhoL*uL*uL + pL;
+        FL.momentum_tangent = rhoL*uL*vL;
+        FL.energy = uL*(EL + pL + p0L);
 
-        // Compute HLLE flux based on wave positions
-        Flux fl;
-        if (0.0 <= S_L)
-        {
-            fl = f_L;
-        }
-        else if (S_R <= 0.0)
-        {
-            fl = f_R;
-        }
-        else
-        {
-            // Subsonic flow - HLLE averaging
-            Set::Scalar denom = 1.0 / (S_R - S_L + small);
-            fl.mass = (S_R * f_L.mass - S_L * f_R.mass + S_L * S_R * (rho_R - rho_L)) * denom;
-            fl.momentum_normal = (S_R * f_L.momentum_normal - S_L * f_R.momentum_normal + S_L * S_R * (Mn_R - Mn_L)) * denom;
-            fl.momentum_tangent = (S_R * f_L.momentum_tangent - S_L * f_R.momentum_tangent + S_L * S_R * (Mt_R - Mt_L)) * denom;
-            fl.energy = (S_R * f_L.energy - S_L * f_R.energy + S_L * S_R * (E_R - E_L)) * denom;
-        }
+        // right state fluxes
+        FR.mass = rhoR*uR;
+        FR.momentum_normal  = rhoR*uR*uR + pR;
+        FR.momentum_tangent = rhoR*uR*vR;
+        FR.energy = uR*(ER + pR + p0R);
 
-        // ERROR CHECKING
-        if ((fl.mass != fl.mass)
-            or (fl.momentum_normal != fl.momentum_normal)
-            or (fl.momentum_tangent != fl.momentum_tangent)
-            or (fl.energy != fl.energy)
-            or (a_L != a_L)
-            or (a_R != a_R))
-        {
-            bool verbose = false;
-            if (verbose)
-            {
-                Util::ParallelMessage(INFO, "-------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN HLLE SOLVER:");
-                Util::ParallelMessage(INFO, "hi:   ", hi);
-                Util::ParallelMessage(INFO, "lo:   ", lo);
-                Util::ParallelMessage(INFO, "flux: ", fl);
-                Util::ParallelMessage(INFO, "rho_L=", rho_L);
-                Util::ParallelMessage(INFO, "rho_R=", rho_R);
-                Util::ParallelMessage(INFO, "u_L=  ", u_L);
-                Util::ParallelMessage(INFO, "u_R=  ", u_R);
-                Util::ParallelMessage(INFO, "ke_R= ", ke_R);
-                Util::ParallelMessage(INFO, "ke_L= ", ke_L);
-                Util::ParallelMessage(INFO, "ue_L= ", ue_L);
-                Util::ParallelMessage(INFO, "ue_R= ", ue_R);
-                Util::ParallelMessage(INFO, "p_L=  ", p_L);
-                Util::ParallelMessage(INFO, "p_R=  ", p_R);
-                Util::ParallelMessage(INFO, "a_L=  ", a_L);
-                Util::ParallelMessage(INFO, "a_R=  ", a_R);
-                Util::ParallelMessage(INFO, "S_L=  ", S_L);
-                Util::ParallelMessage(INFO, "S_R=  ", S_R);
-            }
-            Util::Exception(INFO);
-        }
+        //----------------------------------------------------------------------
+        // Select region
+        //----------------------------------------------------------------------
+        if (SL >= 0.0)
+            return FL;
 
-        return fl;
+        if (SR <= 0.0)
+            return FR;
+
+        //----------------------------------------------------------------------
+        // HLLE intermediate (subsonic region)
+        //----------------------------------------------------------------------
+        Set::Scalar inv = 1.0 / (SR - SL + small);
+
+        Flux F;
+
+        F.mass =
+            (SR*FL.mass - SL*FR.mass + SL*SR*(rhoR - rhoL)) * inv;
+
+        F.momentum_normal =
+            (SR*FL.momentum_normal - SL*FR.momentum_normal
+            + SL*SR*(hi.M_normal - lo.M_normal)) * inv;
+
+        F.momentum_tangent =
+            (SR*FL.momentum_tangent - SL*FR.momentum_tangent
+            + SL*SR*(hi.M_tangent - lo.M_tangent)) * inv;
+
+        // energy jump uses corrected total E
+        F.energy =
+            (SR*FL.energy - SL*FR.energy
+            + SL*SR*(ER - EL)) * inv;
+
+        return F;
     }
 
     static int Test()
@@ -203,9 +157,9 @@ public:
         // Test 1: Tangential Velocity Difference - No Normal Flux
         try
         {
-            State left(1.0, 1.0, 0.0, 1.0);
-            State center(1.0, 1.0, 1.0, 1.0);
-            State right(1.0, 1.0, 2.0, 1.0);
+            State left(1.0, 1.0, 0.0, 1.0, 1.4, 0.0, NAN);
+            State center(1.0, 1.0, 1.0, 1.0, 1.4, 0.0, NAN);
+            State right(1.0, 1.0, 2.0, 1.0, 1.4, 0.0, NAN);
             Flux fluxlo = solver.Solve(center, right, pref, small);
             Flux fluxhi = solver.Solve(left, center, pref, small);
 
@@ -231,9 +185,9 @@ public:
         // Test 2: Pure Transverse Velocity Difference
         try
         {
-            State left(1.0, 0.0, 0.0, 1.0);
-            State center(1.0, 0.0, 1.0, 1.0);
-            State right(1.0, 0.0, 2.0, 1.0);
+            State left(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
+            State center(1.0, 0.0, 1.0, 1.0, 1.4, 0.0, NAN);
+            State right(1.0, 0.0, 2.0, 1.0, 1.4, 0.0, NAN);
             Flux fluxlo = solver.Solve(left, center, pref, small);
             Flux fluxhi = solver.Solve(center, right, pref, small);
 
@@ -259,9 +213,9 @@ public:
         // Test 3: Symmetry Test (no flux across identical states)
         try
         {
-            State left(1.0, 0.0, 0.0, 1.0);
-            State center(1.0, 0.0, 0.0, 1.0);
-            State right(1.0, 0.0, 0.0, 1.0);
+            State left(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
+            State center(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
+            State right(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
             Flux fluxhi = solver.Solve(center, right, pref, small);
             Flux fluxlo = solver.Solve(left, center, pref, small);
 
@@ -289,9 +243,9 @@ public:
         // Test 4: Uniform Flow Test (no flux across uniform flow)
         try
         {
-            State left(1.0, 1.0, 0.5, 1.0);
-            State center(1.0, 1.0, 0.5, 1.0);
-            State right(1.0, 1.0, 0.5, 1.0);
+            State left(1.0, 1.0, 0.5, 1.0, 1.4, 0.0, NAN);
+            State center(1.0, 1.0, 0.5, 1.0, 1.4, 0.0, NAN);
+            State right(1.0, 1.0, 0.5, 1.0, 1.4, 0.0, NAN);
             Flux fluxhi = solver.Solve(center, right, pref, small);
             Flux fluxlo = solver.Solve(left, center, pref, small);
 

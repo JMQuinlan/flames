@@ -676,23 +676,39 @@ Divergence(const amrex::Array4<const Set::Scalar> &f,
 }
 
 
-[[nodiscard]] AMREX_FORCE_INLINE
+[[nodiscard]] AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 Set::Vector
 Gradient(const amrex::Array4<const Set::Scalar>& f,
-    const int& i, const int& j, const int& k, const int& m,
-    const Set::Scalar dx[AMREX_SPACEDIM],
-    std::array<StencilType, AMREX_SPACEDIM> stencil = DefaultType)
+         int i, int j, int k, int m,
+         const Set::Scalar* dx,
+         const std::array<StencilType, AMREX_SPACEDIM>& stencil)
 {
     Set::Vector ret;
-    ret(0) = (Numeric::Stencil<Set::Scalar, 1, 0, 0>::D(f, i, j, k, m, dx, stencil));
+
+    ret(0) = Numeric::Stencil<Set::Scalar, 1,0,0>::D(f, i,j,k,m, dx, stencil);
+
 #if AMREX_SPACEDIM > 1
-    ret(1) = (Numeric::Stencil<Set::Scalar, 0, 1, 0>::D(f, i, j, k, m, dx, stencil));
+    ret(1) = Numeric::Stencil<Set::Scalar, 0,1,0>::D(f, i,j,k,m, dx, stencil);
+#endif
+
 #if AMREX_SPACEDIM > 2
-    ret(2) = (Numeric::Stencil<Set::Scalar, 0, 0, 1>::D(f, i, j, k, m, dx, stencil));
+    ret(2) = Numeric::Stencil<Set::Scalar, 0,0,1>::D(f, i,j,k,m, dx, stencil);
 #endif
-#endif
+
     return ret;
 }
+
+// Add an overloaded function for Gradient with default stencil type
+// This make the GPU safe
+[[nodiscard]] AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+Set::Vector Gradient(
+    const amrex::Array4<const Set::Scalar>& f,
+    int i, int j, int k,
+    int m,
+    const Set::Scalar* dx)
+{
+    return Gradient(f, i, j, k, m, dx, Numeric::DefaultType);
+} 
 
 [[nodiscard]] AMREX_FORCE_INLINE
 Set::Vector

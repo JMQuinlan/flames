@@ -13,6 +13,7 @@
 
 #include "IO/ParmParse.H"
 #include "Solver/Local/FluidRiemann/Riemann.H"
+// #include <limits>
 
 namespace Solver
 {
@@ -120,7 +121,7 @@ public:
             fl.mass = rho * u;
             fl.momentum_normal = rho * u * u + p;
             fl.momentum_tangent = rho * u * v;
-            fl.energy = u * (E + p);
+            fl.energy = u * (E + p + p0);
         }
         else
         {
@@ -128,7 +129,7 @@ public:
             fl.mass = rho * u;
             fl.momentum_normal = rho * u * u + p;
             fl.momentum_tangent = rho * u * v;
-            fl.energy = u * (E + p / (rho + small));
+            fl.energy = u * (E + (p + p0) / (rho + small));
         }
 
         // ERROR CHECKING
@@ -169,9 +170,9 @@ public:
         // Test 1: Tangential Velocity Difference - No Normal Flux
         try
         {
-            State left(1.0, 1.0, 0.0, 1.0);
-            State center(1.0, 1.0, 1.0, 1.0);
-            State right(1.0, 1.0, 2.0, 1.0);
+            State left(1.0, 1.0, 0.0, 1.0, 1.4, 0.0, NAN);
+            State center(1.0, 1.0, 1.0, 1.0, 1.4, 0.0, NAN);
+            State right(1.0, 1.0, 2.0, 1.0, 1.4, 0.0, NAN);
 
             Flux fluxlo = solver.Solve(center, right, pref, small);
             Flux fluxhi = solver.Solve(left, center, pref, small);
@@ -198,9 +199,9 @@ public:
         // Test 2: Pure Transverse Velocity Difference
         try
         {
-            State left(1.0, 0.0, 0.0, 1.0);
-            State center(1.0, 0.0, 1.0, 1.0);
-            State right(1.0, 0.0, 2.0, 1.0);
+            State left(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
+            State center(1.0, 0.0, 1.0, 1.0, 1.4, 0.0, NAN);
+            State right(1.0, 0.0, 2.0, 1.0, 1.4, 0.0, NAN);
 
             Flux fluxlo = solver.Solve(left, center, pref, small);
             Flux fluxhi = solver.Solve(center, right, pref, small);
@@ -227,9 +228,9 @@ public:
         // Test 3: Symmetry Test (no flux across identical states)
         try
         {
-            State left(1.0, 0.0, 0.0, 1.0);
-            State center(1.0, 0.0, 0.0, 1.0);
-            State right(1.0, 0.0, 0.0, 1.0);
+            State left(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
+            State center(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
+            State right(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
 
             Flux fluxhi = solver.Solve(center, right, pref, small);
             Flux fluxlo = solver.Solve(left, center, pref, small);
@@ -257,9 +258,9 @@ public:
         // Test 4: Uniform Flow Test (no flux across uniform flow)
         try
         {
-            State left(1.0, 1.0, 0.5, 1.0);
-            State center(1.0, 1.0, 0.5, 1.0);
-            State right(1.0, 1.0, 0.5, 1.0);
+            State left(1.0, 1.0, 0.5, 1.0, 1.4, 0.0, NAN);
+            State center(1.0, 1.0, 0.5, 1.0, 1.4, 0.0, NAN);
+            State right(1.0, 1.0, 0.5, 1.0, 1.4, 0.0, NAN);
 
             Flux fluxhi = solver.Solve(center, right, pref, small);
             Flux fluxlo = solver.Solve(left, center, pref, small);

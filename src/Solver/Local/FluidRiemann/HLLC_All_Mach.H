@@ -306,8 +306,8 @@
             try
             {
                 // Toro1a-like conditions
-                State left(1.0, 0.0, 0.0, 1.0);
-                State right(0.125, 0.0, 0.0, 0.1);
+                State left(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
+                State right(0.125, 0.0, 0.0, 0.1, 1.4, 0.0, NAN);
 
                 Flux flux = solver.Solve(left, right, pref, small);
 
@@ -331,8 +331,8 @@
             try
             {
                 // Water-like properties on left, air-like on right
-                State left(1000.0, 0.0, 0.0, 10.0);
-                State right(1.0, 0.0, 0.0, 10.0);
+                State left(1000.0, 0.0, 0.0, 10.0, 7.15, 3.0e8, NAN); // High density, high sound speed
+                State right(1.0, 0.0, 0.0, 10.0, 1.4, 0.0, NAN);
 
                 Flux flux = solver.Solve(left, right, pref, small);
 
@@ -355,9 +355,9 @@
             // Test 3: Tangential Velocity Difference - No Normal Flux
             try
             {
-                State left(1.0, 1.0, 0.0, 1.0);
-                State center(1.0, 1.0, 1.0, 1.0);
-                State right(1.0, 1.0, 2.0, 1.0);
+                State left(1.0, 1.0, 0.0, 1.0, 1.4, 0.0, NAN);
+                State center(1.0, 1.0, 1.0, 1.0, 1.4, 0.0, NAN);
+                State right(1.0, 1.0, 2.0, 1.0, 1.4, 0.0, NAN);
                 Flux fluxlo = solver.Solve(center, right, pref, small);
                 Flux fluxhi = solver.Solve(left, center, pref, small);
 
@@ -381,9 +381,9 @@
             // Test 4: Symmetry Test (no flux across identical states)
             try
             {
-                State left(1.0, 0.0, 0.0, 1.0);
-                State center(1.0, 0.0, 0.0, 1.0);
-                State right(1.0, 0.0, 0.0, 1.0);
+                State left(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
+                State center(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
+                State right(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
                 Flux fluxhi = solver.Solve(center, right, pref, small);
                 Flux fluxlo = solver.Solve(left, center, pref, small);
 
@@ -406,9 +406,9 @@
             // Test 5: Uniform Flow Test
             try
             {
-                State left(1.0, 1.0, 0.5, 1.0);
-                State center(1.0, 1.0, 0.5, 1.0);
-                State right(1.0, 1.0, 0.5, 1.0);
+                State left(1.0, 1.0, 0.5, 1.0, 1.4, 0.0, NAN);
+                State center(1.0, 1.0, 0.5, 1.0, 1.4, 0.0, NAN);
+                State right(1.0, 1.0, 0.5, 1.0, 1.4, 0.0, NAN);
                 Flux fluxhi = solver.Solve(center, right, pref, small);
                 Flux fluxlo = solver.Solve(left, center, pref, small);
 

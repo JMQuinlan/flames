@@ -13,164 +13,191 @@ namespace FluidRiemann
 
 struct State
 {
-    Set::Scalar rho = NAN;
-    Set::Scalar M_normal = NAN;
-    Set::Scalar M_tangent = NAN;
-    Set::Scalar E = NAN;
-    Set::Scalar gam = NAN;
-    Set::Scalar p0 = NAN;
-    Set::Scalar T = NAN;
+    // --------------------------------------------------------------
+    // Conservative variables
+    // --------------------------------------------------------------
+    amrex::Array4<const Set::Scalar> rho_arr;
+    amrex::Array4<const Set::Scalar> M_arr;      // momentum has 2 comps
+    amrex::Array4<const Set::Scalar> E_arr;
 
-    // Default constructor
+    // Thermodynamic fields
+    amrex::Array4<const Set::Scalar> gamma_arr;
+    amrex::Array4<const Set::Scalar> p0_arr;
+    amrex::Array4<const Set::Scalar> T_arr;
+
+    // Coordinates and direction
+    int i, j, k;
+    int dir;   // 0 = X normal, 1 = Y normal
+
+    // --------------------------------------------------------------
+    // Stored primitive/conservative scalars
+    // --------------------------------------------------------------
+    Set::Scalar rho;
+    Set::Scalar M_normal;
+    Set::Scalar M_tangent;
+    Set::Scalar E;
+    Set::Scalar gam;
+    Set::Scalar p0;
+    Set::Scalar T;
+
+    // --------------------------------------------------------------
+    // Default
+    // --------------------------------------------------------------
+    AMREX_GPU_HOST_DEVICE
     State()
+        : rho(0), M_normal(0), M_tangent(0), E(0),
+          gam(NAN), p0(NAN), T(NAN),
+          i(0), j(0), k(0), dir(0)
+    {}
+
+    
+    // ===============================================================
+    // CPU‑only constructor for Riemann test problems
+    // ===============================================================
+    #ifdef AMREX_USE_GPU
+    AMREX_CPU_HOST    // ensures it's HOST‑only when GPU is enabled
+    #endif
+    State(Set::Scalar a_rho,
+        Set::Scalar a_Mn,
+        Set::Scalar a_Mt,
+        Set::Scalar a_E,
+        Set::Scalar a_gam,
+        Set::Scalar a_p0,
+        Set::Scalar a_T)
     {
-        rho = 0.0;
-        M_normal = 0.0;
-        M_tangent = 0.0;
-        E = 0.0;
-        gam = NAN;
-        p0 = NAN;
-        T = NAN;
+        rho       = a_rho;
+        M_normal  = a_Mn;
+        M_tangent = a_Mt;
+        E         = a_E;
+        gam       = a_gam;
+        p0        = a_p0;
+        T         = a_T;
+
+        // Dummy indices for CPU test constructor
+        i = j = k = 0;
+        dir = 0;
     }
 
-    // Constructor with optional temperature
-    State(Set::Scalar a_rho, Set::Scalar a_M_normal, Set::Scalar a_M_tangent, Set::Scalar a_E, Set::Scalar a_gam = NAN, Set::Scalar a_p0 = NAN, Set::Scalar a_T = NAN)
-        : rho(a_rho), M_normal(a_M_normal), M_tangent(a_M_tangent), E(a_E), gam(a_gam), p0(a_p0), T(a_T) {}
 
-    // Constructor without temperature_mf
-    State(Set::Patch<const Set::Scalar> density_mf, Set::Patch<const Set::Scalar> momentum_mf, Set::Patch<const Set::Scalar> energy_mf, int i, int j, int k, int direction)
+    // --------------------------------------------------------------
+    // Main constructor: Array4 everywhere (CORRECT)
+    // --------------------------------------------------------------
+    AMREX_GPU_HOST_DEVICE
+    State(const amrex::Array4<const Set::Scalar>& rhoA,
+          const amrex::Array4<const Set::Scalar>& MA,
+          const amrex::Array4<const Set::Scalar>& EA,
+          const amrex::Array4<const Set::Scalar>& gA,
+          const amrex::Array4<const Set::Scalar>& p0A,
+          const amrex::Array4<const Set::Scalar>& TA,
+          int ii, int jj, int kk, int idir)
+        :
+          rho_arr(rhoA),
+          M_arr(MA),
+          E_arr(EA),
+          gamma_arr(gA),
+          p0_arr(p0A),
+          T_arr(TA),
+          i(ii), j(jj), k(kk),
+          dir(idir)
     {
-        rho = density_mf(i, j, k);
-        if (direction == 0)
-        {
-            M_normal = momentum_mf(i, j, k, 0);
-            M_tangent = momentum_mf(i, j, k, 1);
-        }
-        else if (direction == 1)
-        {
-            M_normal = momentum_mf(i, j, k, 1);
-            M_tangent = momentum_mf(i, j, k, 0);
-        }
-        else
-        {
-            Util::Abort(INFO, "Not supported yet");
-        }
-        E = energy_mf(i, j, k);
-        gam = NAN;
-        T = NAN;
+        load_state();
     }
 
-    // Original constructor with temperature_mf
-    State(Set::Patch<const Set::Scalar> density_mf, Set::Patch<const Set::Scalar> momentum_mf, Set::Patch<const Set::Scalar> energy_mf, Set::Patch<const Set::Scalar> gam_mf, Set::Patch<const Set::Scalar> p0_mf, Set::Patch<const Set::Scalar> temperature_mf, int i, int j, int k, int direction)
+    // --------------------------------------------------------------
+    // Load fields from the Array4s
+    // --------------------------------------------------------------
+    AMREX_GPU_HOST_DEVICE
+    void load_state()
     {
-        rho = density_mf(i, j, k);
-        if (direction == 0)
+        rho = rho_arr(i,j,k);
+        E   = E_arr(i,j,k);
+
+        gam = gamma_arr(i,j,k);
+        p0  = p0_arr(i,j,k);
+        T   = T_arr(i,j,k);
+
+        // Momentum components
+        Set::Scalar mx = M_arr(i,j,k,0);
+        Set::Scalar my = M_arr(i,j,k,1);
+
+        // Select normal/tangent directions
+        if (dir == 0)        // X-normal face
         {
-            M_normal = momentum_mf(i, j, k, 0);
-            M_tangent = momentum_mf(i, j, k, 1);
+            M_normal  = mx;
+            M_tangent = my;
         }
-        else if (direction == 1)
+        else                 // Y-normal face
         {
-            M_normal = momentum_mf(i, j, k, 1);
-            M_tangent = momentum_mf(i, j, k, 0);
+            M_normal  = my;
+            M_tangent = mx;
         }
-        else
-        {
-            Util::Abort(INFO, "Not supported yet");
-        }
-        E = energy_mf(i, j, k);
-        gam = gam_mf(i, j, k);
-        p0 = p0_mf(i, j, k);
-        T = temperature_mf(i, j, k);
     }
 
-    friend std::ostream &
-    operator<<(std::ostream &os, const State &state)
+    // --------------------------------------------------------------
+    // Printing utilities
+    // --------------------------------------------------------------
+    friend std::ostream&
+    operator<<(std::ostream& os, const State& s)
     {
-        os << "rho=" << state.rho << ", ";
-        os << "Mn=" << state.M_normal << ", ";
-        os << "Mt=" << state.M_tangent << ", ";
-        os << "E=" << state.E << ", ";
-        os << "gam=" << state.gam << ", ";
-        os << "p0=" << state.p0 << ", ";
-        os << "T=" << state.T << ", ";
-        // do stuf
+        os << "rho=" << s.rho << ", "
+           << "Mn="  << s.M_normal << ", "
+           << "Mt="  << s.M_tangent << ", "
+           << "E="   << s.E << ", "
+           << "gam=" << s.gam << ", "
+           << "p0="  << s.p0 << ", "
+           << "T="   << s.T;
         return os;
     }
 
-    void
-    operator+=(const State &a)
+    // --------------------------------------------------------------
+    // Vector arithmetic keeps working unchanged
+    // --------------------------------------------------------------
+    AMREX_GPU_HOST_DEVICE
+    void operator+=(const State& b)
     {
-        rho += a.rho;
-        M_normal += a.M_normal;
-        M_tangent += a.M_tangent;
-        E += a.E;
-        gam += a.gam;
-        p0 += a.p0;
-        T += a.T;
-    };
-
-    void
-    operator-=(const State &a)
-    {
-        rho -= a.rho;
-        M_normal -= a.M_normal;
-        M_tangent -= a.M_tangent;
-        gam -= a.gam;
-        p0 -= a.p0;
-        T -= a.T;
-    };
-
-    void
-    operator*=(const Set::Scalar alpha)
-    {
-        rho *= alpha;
-        M_normal *= alpha;
-        M_tangent *= alpha;
-        gam *= alpha;
-        p0 *= alpha;
-        T *= alpha;
-    };
-
-    void
-    operator/=(const Set::Scalar alpha)
-    {
-        rho /= alpha;
-        M_normal /= alpha;
-        M_tangent /= alpha;
-        gam /= alpha;
-        p0 /= alpha;
-        T /= alpha;
-    };
-
-    friend State
-    operator+(const State &a, const State &b)
-    {
-        return State(a.rho + b.rho, a.M_normal + b.M_normal, a.M_tangent + b.M_tangent, a.E + b.E, a.gam + b.gam, a.p0 + b.p0, a.T + b.T);
+        rho += b.rho;
+        M_normal += b.M_normal;
+        M_tangent += b.M_tangent;
+        E   += b.E;
+        gam += b.gam;
+        p0  += b.p0;
+        T   += b.T;
     }
 
-    friend State
-    operator-(const State &a, const State &b)
+    AMREX_GPU_HOST_DEVICE
+    void operator-=(const State& b)
     {
-        return State(a.rho - b.rho, a.M_normal - b.M_normal, a.M_tangent - b.M_tangent, a.E - b.E, a.gam - b.gam, a.p0 - b.p0, a.T - b.T);
+        rho -= b.rho;
+        M_normal -= b.M_normal;
+        M_tangent -= b.M_tangent;
+        E   -= b.E;
+        gam -= b.gam;
+        p0  -= b.p0;
+        T   -= b.T;
     }
 
-    friend State
-    operator*(const Set::Scalar alpha, const State &b)
+    AMREX_GPU_HOST_DEVICE
+    void operator*=(Set::Scalar a)
     {
-        return State(b.rho * alpha, b.M_normal * alpha, b.M_tangent * alpha, b.E * alpha, b.gam * alpha, b.p0 * alpha, b.T * alpha);
+        rho *= a;
+        M_normal *= a;
+        M_tangent *= a;
+        E *= a;
+        gam *= a;
+        p0 *= a;
+        T *= a;
     }
 
-    friend State
-    operator*(const State &b, const Set::Scalar alpha)
+    AMREX_GPU_HOST_DEVICE
+    void operator/=(Set::Scalar a)
     {
-        return State(b.rho * alpha, b.M_normal * alpha, b.M_tangent * alpha, b.E * alpha, b.gam * alpha, b.p0 * alpha, b.T * alpha);
-    }
-
-    friend State
-    operator/(const State &b, const Set::Scalar alpha)
-    {
-        return State(b.rho / alpha, b.M_normal / alpha, b.M_tangent / alpha, b.E / alpha, b.gam / alpha, b.p0 / alpha, b.T / alpha);
+        rho /= a;
+        M_normal /= a;
+        M_tangent /= a;
+        E /= a;
+        gam /= a;
+        p0 /= a;
+        T /= a;
     }
 };
 
@@ -180,112 +207,161 @@ struct Flux
     Set::Scalar momentum_normal;
     Set::Scalar momentum_tangent;
     Set::Scalar energy;
-    Set::Scalar Gam;
-    Set::Scalar P0;
-    Set::Scalar temperature;
-    Flux() : mass(0.0), momentum_normal(0.0), momentum_tangent(0.0), energy(0.0), Gam(0.0), P0(0.0), temperature(0.0) {}
-    Flux(Set::Scalar a_mass, Set::Scalar a_momentum_normal, Set::Scalar a_momentum_tangent, Set::Scalar a_energy, Set::Scalar a_Gam = NAN, Set::Scalar a_P0 = NAN, Set::Scalar a_temperature = NAN)
-        : mass(a_mass), momentum_normal(a_momentum_normal),
-          momentum_tangent(a_momentum_tangent), energy(a_energy), Gam(a_Gam), P0(a_P0), temperature(a_temperature) {}
 
-    Flux(const State &in) : mass(in.rho),
-                            momentum_normal(in.M_normal),
-                            momentum_tangent(in.M_tangent),
-                            energy(in.E),
-                            Gam(in.gam),
-                            P0(in.p0),
-                            temperature(in.T) {}
+    // Auxiliary thermodynamic quantities (not conserved)
+    Set::Scalar gam;
+    Set::Scalar p0;
+    Set::Scalar T;
 
-    friend std::ostream &
-    operator<<(std::ostream &os, const Flux &flux)
+    // ----------------------------------------------------------
+    // Default constructor
+    // ----------------------------------------------------------
+    AMREX_GPU_HOST_DEVICE
+    Flux()
+        : mass(0.0), momentum_normal(0.0), momentum_tangent(0.0),
+          energy(0.0), gam(NAN), p0(NAN), T(NAN)
+    {}
+
+    // ----------------------------------------------------------
+    // Constructor from components
+    // ----------------------------------------------------------
+    AMREX_GPU_HOST_DEVICE
+    Flux(Set::Scalar m, Set::Scalar Mn, Set::Scalar Mt, Set::Scalar E,
+         Set::Scalar g = NAN, Set::Scalar p0_ = NAN, Set::Scalar T_ = NAN)
+        : mass(m), momentum_normal(Mn), momentum_tangent(Mt), energy(E),
+          gam(g), p0(p0_), T(T_)
+    {}
+
+    // ----------------------------------------------------------
+    // Construct from a State
+    // ----------------------------------------------------------
+    AMREX_GPU_HOST_DEVICE
+    Flux(const State& s)
+        : mass(s.rho),
+          momentum_normal(s.M_normal),
+          momentum_tangent(s.M_tangent),
+          energy(s.E),
+          gam(s.gam),
+          p0(s.p0),
+          T(s.T)
+    {}
+
+    // ----------------------------------------------------------
+    // Printing (debugging only)
+    // ----------------------------------------------------------
+    friend std::ostream& operator<<(std::ostream& os, const Flux& f)
     {
-        os << "mass=" << flux.mass << ", ";
-        os << "Mn=" << flux.momentum_normal << ", ";
-        os << "Mt=" << flux.momentum_tangent << ", ";
-        os << "E=" << flux.energy << ", ";
-        os << "gam=" << flux.Gam << ", ";
-        os << "p0=" << flux.P0 << ", ";
-        os << "T=" << flux.temperature << ", ";
-        // do stuff
+        os << "mass=" << f.mass << ", "
+           << "Mn="   << f.momentum_normal << ", "
+           << "Mt="   << f.momentum_tangent << ", "
+           << "E="    << f.energy << ", "
+           << "gam="  << f.gam << ", "
+           << "p0="   << f.p0 << ", "
+           << "T="    << f.T;
         return os;
     }
 
-    void
-    operator+=(const Flux &a)
+    // ----------------------------------------------------------
+    // +=  (conservative)
+    // ----------------------------------------------------------
+    AMREX_GPU_HOST_DEVICE
+    void operator+=(const Flux& b)
     {
-        mass += a.mass;
-        momentum_normal += a.momentum_normal;
-        momentum_tangent += a.momentum_tangent;
-        energy += a.energy;
-        Gam += a.Gam;
-        P0 += a.P0;
-        temperature += a.temperature;
+        mass             += b.mass;
+        momentum_normal  += b.momentum_normal;
+        momentum_tangent += b.momentum_tangent;
+        energy           += b.energy;
+
+        // Non-conserved values: best to forward RHS source terms
+        gam = b.gam;
+        p0  = b.p0;
+        T   = b.T;
     }
 
-    void
-    operator-=(const Flux &a)
+    // ----------------------------------------------------------
+    // -=  
+    // ----------------------------------------------------------
+    AMREX_GPU_HOST_DEVICE
+    void operator-=(const Flux& b)
     {
-        mass -= a.mass;
-        momentum_normal -= a.momentum_normal;
-        momentum_tangent -= a.momentum_tangent;
-        energy -= a.energy;
-        Gam -= a.Gam;
-        P0 -= a.P0;
-        temperature -= a.temperature;
+        mass             -= b.mass;
+        momentum_normal  -= b.momentum_normal;
+        momentum_tangent -= b.momentum_tangent;
+        energy           -= b.energy;
+
+        gam = b.gam;
+        p0  = b.p0;
+        T   = b.T;
     }
 
-    void
-    operator*=(const Set::Scalar alpha)
+    // ----------------------------------------------------------
+    // *= scalar  
+    // ----------------------------------------------------------
+    AMREX_GPU_HOST_DEVICE
+    void operator*=(Set::Scalar a)
     {
-        mass *= alpha;
-        momentum_normal *= alpha;
-        momentum_tangent *= alpha;
-        energy *= alpha;
-        Gam *= Gam;
-        P0 *= P0;
-        temperature *= alpha;
+        mass             *= a;
+        momentum_normal  *= a;
+        momentum_tangent *= a;
+        energy           *= a;
+
+        // pass-through
+        gam *= 1;
+        p0  *= 1;
+        T   *= 1;
     }
 
-    void
-    operator/=(const Set::Scalar alpha)
+    // ----------------------------------------------------------
+    // /= scalar
+    // ----------------------------------------------------------
+    AMREX_GPU_HOST_DEVICE
+    void operator/=(Set::Scalar a)
     {
-        mass /= alpha;
-        momentum_normal /= alpha;
-        momentum_tangent /= alpha;
-        energy /= alpha;
-        Gam /= alpha;
-        P0 /= alpha;
-        temperature /= alpha;
+        mass             /= a;
+        momentum_normal  /= a;
+        momentum_tangent /= a;
+        energy           /= a;
+
+        gam *= 1;
+        p0  *= 1;
+        T   *= 1;
     }
 
-    friend Flux
-    operator+(const Flux &a, const Flux &b)
+    // ----------------------------------------------------------
+    // Binary ops
+    // ----------------------------------------------------------
+    friend AMREX_GPU_HOST_DEVICE
+    Flux operator+(Flux a, const Flux& b)
+    { a += b; return a; }
+
+    friend AMREX_GPU_HOST_DEVICE
+    Flux operator-(Flux a, const Flux& b)
+   { a -= b; return a; }
+
+    friend AMREX_GPU_HOST_DEVICE
+    Flux operator*(const Flux& a, Set::Scalar b)
     {
-        return Flux(a.mass + b.mass, a.momentum_normal + b.momentum_normal, a.momentum_tangent + b.momentum_tangent, a.energy + b.energy, a.Gam + b.Gam, a.P0 + b.P0, a.temperature + b.temperature);
+        Flux f = a;
+        f.mass             *= b;
+        f.momentum_normal  *= b;
+        f.momentum_tangent *= b;
+        f.energy           *= b;
+        return f;
     }
 
-    friend Flux
-    operator-(const Flux &a, const Flux &b)
-    {
-        return Flux(a.mass - b.mass, a.momentum_normal - b.momentum_normal, a.momentum_tangent - b.momentum_tangent, a.energy - b.energy, a.Gam - b.Gam, a.P0 - b.P0, a.temperature - b.temperature); // We can't "add" temperatures
-    }
+    friend AMREX_GPU_HOST_DEVICE
+    Flux operator*(Set::Scalar b, const Flux& a)
+    { return a * b; }
 
-    friend Flux
-    operator*(const Flux &a, const Set::Scalar beta)
+    friend AMREX_GPU_HOST_DEVICE
+    Flux operator/(const Flux& a, Set::Scalar b)
     {
-        return Flux(a.mass * beta, a.momentum_normal * beta, a.momentum_tangent * beta, a.energy * beta, a.Gam * beta, a.P0 * beta, a.temperature * beta);
-    }
-
-    friend Flux
-    operator*(const Set::Scalar beta, const Flux &a)
-    {
-        return Flux(a.mass * beta, a.momentum_normal * beta, a.momentum_tangent * beta, a.energy * beta, a.Gam * beta, a.P0 * beta, a.temperature * beta);
-    }
-
-    friend Flux
-    operator/(const Flux &a, const Set::Scalar beta)
-    {
-        return Flux(a.mass / beta, a.momentum_normal / beta, a.momentum_tangent / beta, a.energy / beta, a.Gam / beta, a.P0 / beta, a.temperature / beta);
+        Flux f = a;
+        f.mass             /= b;
+        f.momentum_normal  /= b;
+        f.momentum_tangent /= b;
+        f.energy           /= b;
+        return f;
     }
 };
 

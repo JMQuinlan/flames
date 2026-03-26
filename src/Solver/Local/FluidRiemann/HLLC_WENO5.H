@@ -10,7 +10,7 @@
 //          URL: https://www.sciencedirect.com/science/article/pii/S0021999104002281
 //
 // Source: M. J. Del Razo and R. J. LeVeque, "Numerical Methods for Interface Coupling of Compressible
-// and Almost Incompressible Media," SIAM Journal on Scientific Computing, vol. 39, no. 3, pp. B486–B507,
+// and Almost Incompressible Media," SIAM Journal on Scientific Computing, vol. 39, no. 3, pp. B486ï¿½B507,
 // Jan. 2017, doi: 10.1137/16m1067834.
 //          URL: https://arxiv.org/abs/1604.08544
 //
@@ -90,60 +90,68 @@ public:
     }
 
     // Reconstruct states at cell interfaces (component-wise)
-    void reconstructStates(const std::vector<State> &cellAverages,
-                           std::vector<State> &leftStates,
-                           std::vector<State> &rightStates) const
+    void reconstructStates(
+    const std::vector<State>& cell,
+    std::vector<State>& left,
+    std::vector<State>& right) const
     {
-        const int n = cellAverages.size();
-        leftStates.resize(n + 1);
-        rightStates.resize(n + 1);
+        const int n = cell.size();
+        left.resize(n+1);
+        right.resize(n+1);
 
-        // Extract components for reconstruction
+        // Extract arrays
         std::vector<double> rho(n), Mn(n), Mt(n), E(n);
-        for (int i = 0; i < n; i++)
-        {
-            rho[i] = cellAverages[i].rho;
-            Mn[i] = cellAverages[i].M_normal;
-            Mt[i] = cellAverages[i].M_tangent;
-            E[i] = cellAverages[i].E;
+        for (int i=0; i<n; ++i) {
+            rho[i] = cell[i].rho;
+            Mn[i]  = cell[i].M_normal;
+            Mt[i]  = cell[i].M_tangent;
+            E[i]   = cell[i].E;
         }
 
-        // Add ghost cells (simple extrapolation)
-        rho.insert(rho.begin(), 2, rho[0]);
-        rho.insert(rho.end(), 2, rho[n - 1]);
-        Mn.insert(Mn.begin(), 2, Mn[0]);
-        Mn.insert(Mn.end(), 2, Mn[n - 1]);
-        Mt.insert(Mt.begin(), 2, Mt[0]);
-        Mt.insert(Mt.end(), 2, Mt[n - 1]);
-        E.insert(E.begin(), 2, E[0]);
-        E.insert(E.end(), 2, E[n - 1]);
+        // Ghost cells (constant extrapolation)
+        auto extend = [&](std::vector<double>& a) {
+            a.insert(a.begin(),2,a[0]);
+            a.insert(a.end(),2,a[a.size()-1]);
+        };
+        extend(rho); extend(Mn); extend(Mt); extend(E);
 
-        // Perform reconstruction for each interface
-        for (int i = 0; i <= n; i++)
+        // Reconstruct
+        for (int i=0; i<=n; ++i)
         {
-            int idx = i + 2;
-            if (i == 0)
-            {
-                leftStates[i] = cellAverages[0];
-                rightStates[i] = cellAverages[0];
+            if (i==0) {
+                left[i]  = cell[0];
+                right[i] = cell[0];
+                continue;
             }
-            else if (i == n)
-            {
-                leftStates[i] = cellAverages[n - 1];
-                rightStates[i] = cellAverages[n - 1];
+            if (i==n) {
+                left[i]  = cell[n-1];
+                right[i] = cell[n-1];
+                continue;
             }
-            else
-            {
-                rightStates[i].rho = reconstructRight(rho.data(), idx);
-                rightStates[i].M_normal = reconstructRight(Mn.data(), idx);
-                rightStates[i].M_tangent = reconstructRight(Mt.data(), idx);
-                rightStates[i].E = reconstructRight(E.data(), idx);
 
-                leftStates[i].rho = reconstructLeft(rho.data(), idx - 1);
-                leftStates[i].M_normal = reconstructLeft(Mn.data(), idx - 1);
-                leftStates[i].M_tangent = reconstructLeft(Mt.data(), idx - 1);
-                leftStates[i].E = reconstructLeft(E.data(), idx - 1);
-            }
+            int k = i+2; // shift due to ghosts
+
+            // Right state from cell i
+            right[i].rho       = reconstructRight(rho.data(), k);
+            right[i].M_normal  = reconstructRight(Mn.data(),  k);
+            right[i].M_tangent = reconstructRight(Mt.data(),  k);
+            right[i].E         = reconstructRight(E.data(),   k);
+
+            // Copy thermodynamic fields from physical cell i
+            right[i].gam = cell[i].gam;
+            right[i].p0  = cell[i].p0;
+            right[i].T   = cell[i].T;
+
+            // Left state from cell i-1
+            left[i].rho       = reconstructLeft(rho.data(), k-1);
+            left[i].M_normal  = reconstructLeft(Mn.data(),  k-1);
+            left[i].M_tangent = reconstructLeft(Mt.data(),  k-1);
+            left[i].E         = reconstructLeft(E.data(),   k-1);
+
+            // Copy thermodynamics from physical cell i-1
+            left[i].gam = cell[i-1].gam;
+            left[i].p0  = cell[i-1].p0;
+            left[i].T   = cell[i-1].T;
         }
     }
 
@@ -293,6 +301,24 @@ public:
                     }
                 }
 
+                //
+                // Convert back to State (LEFT)
+                leftStates[i].rho       = std::max(small, leftU[0]);
+                leftStates[i].M_normal  = leftU[1];
+                leftStates[i].M_tangent = leftU[2];
+                leftStates[i].E         = leftU[3];
+                leftStates[i].gam       = extendedCells[idx-1].gam;
+                leftStates[i].p0        = extendedCells[idx-1].p0;
+                leftStates[i].T         = extendedCells[idx-1].T;
+
+                // Convert back to State (RIGHT)
+                rightStates[i].rho       = std::max(small, rightU[0]);
+                rightStates[i].M_normal  = rightU[1];
+                rightStates[i].M_tangent = rightU[2];
+                rightStates[i].E         = rightU[3];
+                rightStates[i].gam       = extendedCells[idx].gam;
+                rightStates[i].p0        = extendedCells[idx].p0;
+                rightStates[i].T         = extendedCells[idx].T;
                 // Convert back to State
                 leftStates[i].rho = std::max(small, leftU[0]);
                 leftStates[i].M_normal = leftU[1];
@@ -301,12 +327,34 @@ public:
                 leftStates[i].gam = gamma_L;
                 leftStates[i].p0 = p0_L;
 
+                double rL   = leftStates[i].rho;
+                double uL   = leftStates[i].M_normal  / rL;
+                double vL   = leftStates[i].M_tangent / rL;
+                double EL   = leftStates[i].E;
+                double gamL = leftStates[i].gam;
+                double p0L  = leftStates[i].p0;
+
+                double keL = 0.5 * rL * (uL*uL + vL*vL);
+                double ueL = EL - keL;
+                double pL  = (gamL - 1.0)*ueL - gamL*p0L + p_ref;
+                
                 rightStates[i].rho = std::max(small, rightU[0]);
                 rightStates[i].M_normal = rightU[1];
                 rightStates[i].M_tangent = rightU[2];
                 rightStates[i].E = rightU[3];
                 rightStates[i].gam = gamma_R;
                 rightStates[i].p0 = p0_R;
+
+                double rR   = rightStates[i].rho;
+                double uR   = rightStates[i].M_normal  / rR;
+                double vR   = rightStates[i].M_tangent / rR;
+                double ER   = rightStates[i].E;
+                double gamR = rightStates[i].gam;
+                double p0R  = rightStates[i].p0;
+
+                double keR = 0.5 * rR * (uR*uR + vR*vR);
+                double ueR = ER - keR;
+                double pR  = (gamR - 1.0)*ueR - gamR*p0R + p_ref;
             }
         }
     }
@@ -558,9 +606,9 @@ public:
         // Test 1: Tangential Velocity Difference - No Normal Flux
         try
         {
-            State left(1.0, 1.0, 0.0, 1.0);
-            State center(1.0, 1.0, 1.0, 1.0);
-            State right(1.0, 1.0, 2.0, 1.0);
+            State left(1.0, 1.0, 0.0, 1.0, 1.4, 0.0, NAN);
+            State center(1.0, 1.0, 1.0, 1.0, 1.4, 0.0, NAN);
+            State right(1.0, 1.0, 2.0, 1.0, 1.4, 0.0, NAN);
             Flux fluxlo = solver.Solve(center, right, pref, small, Spec_Vol);
             Flux fluxhi = solver.Solve(left, center, pref, small, Spec_Vol);
 
@@ -584,9 +632,9 @@ public:
         // Test 2: Pure Transverse Velocity Difference
         try
         {
-            State left(1.0, 0.0, 0.0, 1.0);
-            State center(1.0, 0.0, 1.0, 1.0);
-            State right(1.0, 0.0, 2.0, 1.0);
+            State left(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
+            State center(1.0, 0.0, 1.0, 1.0, 1.4, 0.0, NAN);
+            State right(1.0, 0.0, 2.0, 1.0, 1.4, 0.0, NAN);
             Flux fluxlo = solver.Solve(left, center, pref, small, Spec_Vol);
             Flux fluxhi = solver.Solve(center, right, pref, small, Spec_Vol);
 
@@ -610,9 +658,9 @@ public:
         // Test 3: Symmetry Test (no flux across identical states)
         try
         {
-            State left(1.0, 0.0, 0.0, 1.0);
-            State center(1.0, 0.0, 0.0, 1.0);
-            State right(1.0, 0.0, 0.0, 1.0);
+            State left(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
+            State center(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
+            State right(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
             Flux fluxhi = solver.Solve(center, right, pref, small, Spec_Vol);
             Flux fluxlo = solver.Solve(left, center, pref, small, Spec_Vol);
 
@@ -635,9 +683,9 @@ public:
         // Test 4: Uniform Flow Test
         try
         {
-            State left(1.0, 1.0, 0.5, 1.0);
-            State center(1.0, 1.0, 0.5, 1.0);
-            State right(1.0, 1.0, 0.5, 1.0);
+            State left(1.0, 1.0, 0.5, 1.0, 1.4, 0.0, NAN);
+            State center(1.0, 1.0, 0.5, 1.0, 1.4, 0.0, NAN);
+            State right(1.0, 1.0, 0.5, 1.0, 1.4, 0.0, NAN);
             Flux fluxhi = solver.Solve(center, right, pref, small, Spec_Vol);
             Flux fluxlo = solver.Solve(left, center, pref, small, Spec_Vol);
 

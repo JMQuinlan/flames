@@ -6,7 +6,7 @@
 //         3rd Edition, Springer, 2009, Chapter 10.
 //
 // Source: M. J. Del Razo and R. J. LeVeque, "Numerical Methods for Interface Coupling of Compressible and Almost Incompressible Media,"
-//         SIAM Journal on Scientific Computing, vol. 39, no. 3, pp. B486–B507, Jan. 2017, doi: 10.1137/16m1067834.
+//         SIAM Journal on Scientific Computing, vol. 39, no. 3, pp. B486ï¿½B507, Jan. 2017, doi: 10.1137/16m1067834.
 //         URL: https://arxiv.org/abs/1604.08544
 //         If you wish to use the regular gas solver and not the stiffened gas modeled by the Tammann EOS, set P0 = 0
 
@@ -200,9 +200,9 @@ public:
         // Test 1: Tangential Velocity Difference - No Normal Flux
         try
         {
-            State left(1.0, 1.0, 0.0, 1.0);
-            State center(1.0, 1.0, 1.0, 1.0);
-            State right(1.0, 1.0, 2.0, 1.0);
+            State left(1.0, 1.0, 0.0, 1.0, 1.4, 0.0, NAN);
+            State center(1.0, 1.0, 1.0, 1.0, 1.4, 0.0, NAN);
+            State right(1.0, 1.0, 2.0, 1.0, 1.4, 0.0, NAN);
 
             Flux fluxlo = solver.Solve(center, right, pref, small);
             Flux fluxhi = solver.Solve(left, center, pref, small);
@@ -229,9 +229,9 @@ public:
         // Test 2: Pure Transverse Velocity Difference
         try
         {
-            State left(1.0, 0.0, 0.0, 1.0);
-            State center(1.0, 0.0, 1.0, 1.0);
-            State right(1.0, 0.0, 2.0, 1.0);
+            State left(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
+            State center(1.0, 0.0, 1.0, 1.0, 1.4, 0.0, NAN);
+            State right(1.0, 0.0, 2.0, 1.0, 1.4, 0.0, NAN);
 
             Flux fluxlo = solver.Solve(left, center, pref, small);
             Flux fluxhi = solver.Solve(center, right, pref, small);
@@ -258,9 +258,9 @@ public:
         // Test 3: Symmetry Test (no flux across identical states)
         try
         {
-            State left(1.0, 0.0, 0.0, 1.0);
-            State center(1.0, 0.0, 0.0, 1.0);
-            State right(1.0, 0.0, 0.0, 1.0);
+            State left(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
+            State center(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
+            State right(1.0, 0.0, 0.0, 1.0, 1.4, 0.0, NAN);
 
             Flux fluxhi = solver.Solve(center, right, pref, small);
             Flux fluxlo = solver.Solve(left, center, pref, small);
@@ -289,9 +289,9 @@ public:
         // Test 4: Uniform Flow Test (no flux across uniform flow)
         try
         {
-            State left(1.0, 1.0, 0.5, 1.0);
-            State center(1.0, 1.0, 0.5, 1.0);
-            State right(1.0, 1.0, 0.5, 1.0);
+            State left(1.0, 1.0, 0.5, 1.0, 1.4, 0.0, NAN);
+            State center(1.0, 1.0, 0.5, 1.0, 1.4, 0.0, NAN);
+            State right(1.0, 1.0, 0.5, 1.0, 1.4, 0.0, NAN);
 
             Flux fluxhi = solver.Solve(center, right, pref, small);
             Flux fluxlo = solver.Solve(left, center, pref, small);
