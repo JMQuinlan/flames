@@ -549,6 +549,66 @@ void Hydro2::Mix(int lev)
             Ma(i, j, k, 0) = v(i, j, k, 0) / a(i, j, k);
             Ma(i, j, k, 1) = v(i, j, k, 1) / a(i, j, k);
 
+            // ERROR CHECKING
+            if (
+                (gammaf(i, j, k) != gammaf(i, j, k))
+                or (v(i, j, k, 0) != v(i, j, k, 0))
+                or (v(i, j, k, 1) != v(i, j, k, 1))
+                or (KE_vol(i, j, k) != KE_vol(i, j, k))
+                or (UE_vol(i, j, k) != UE_vol(i, j, k))
+                or (E_vol(i, j, k) != E_vol(i, j, k))
+                or (KE_mas(i, j, k) != KE_mas(i, j, k))
+                or (UE_mas(i, j, k) != UE_mas(i, j, k))
+                or (E_mas(i, j, k) != E_mas(i, j, k))
+                or (press(i, j, k) != press(i, j, k))
+                or (p0_eff(i, j, k) != p0_eff(i, j, k))
+                or (cp(i, j, k) != cp(i, j, k))
+                or (cv(i, j, k) != cv(i, j, k))
+                or (T(i, j, k) != T(i, j, k))
+                or (a(i, j, k) != a(i, j, k))
+                //or (mu_chem_(i, j, k) != mu_chem_(i, j, k))
+                or (Y(i, j, k) != Y(i, j, k))
+                or (Bm(i, j, k) != Bm(i, j, k))
+               )
+            {
+                Util::ParallelMessage(INFO, "-------------------------------");
+                Util::ParallelMessage(INFO, "ERROR IN DERIVED STATE");
+                Util::ParallelMessage(INFO, "time=", time);
+                Util::ParallelMessage(INFO, "lev=", lev);
+                Util::ParallelMessage(INFO, "i=", i, ", j=", j);
+                // ===== INPUTS =====
+                Util::ParallelMessage(INFO, "rho=", rho(i, j, k));
+                Util::ParallelMessage(INFO, "M=", M(i, j, k, 0), ", ", M(i, j, k, 1));
+                Util::ParallelMessage(INFO, "KE_vol=", KE_vol(i, j, k));
+                Util::ParallelMessage(INFO, "UE_vol=", UE_vol(i, j, k));
+                Util::ParallelMessage(INFO, "E_vol=", E_vol(i, j, k));
+                Util::ParallelMessage(INFO, "KE_mas=", KE_mas(i, j, k));
+                Util::ParallelMessage(INFO, "UE_mas=", UE_mas(i, j, k));
+                Util::ParallelMessage(INFO, "E_mas=", E_mas(i, j, k));
+                Util::ParallelMessage(INFO, "eta=", eta(i, j, k));
+                Util::ParallelMessage(INFO, "lap_eta=", lap_eta);
+                // ===== INTERMEDIATE =====
+                Util::ParallelMessage(INFO, "A=", A);
+                Util::ParallelMessage(INFO, "B=", B);
+                // ===== FLOW =====
+                Util::ParallelMessage(INFO, "v=", v(i, j, k, 0), ", ", v(i, j, k, 1));
+                // ===== EOS =====
+                Util::ParallelMessage(INFO, "gamma=", gammaf(i, j, k));
+                Util::ParallelMessage(INFO, "p0_eff=", p0_eff(i, j, k));
+                Util::ParallelMessage(INFO, "press=", press(i, j, k));
+                // ===== THERMO =====
+                Util::ParallelMessage(INFO, "cp=", cp(i, j, k));
+                Util::ParallelMessage(INFO, "cv=", cv(i, j, k));
+                Util::ParallelMessage(INFO, "T=", T(i, j, k));
+                Util::ParallelMessage(INFO, "a=", a(i, j, k));
+                // ===== PHASE FIELD =====
+                Util::ParallelMessage(INFO, "mu_chem=", mu_chem_(i, j, k));
+                Util::ParallelMessage(INFO, "Y=", Y(i, j, k));
+                Util::ParallelMessage(INFO, "Bm=", Bm(i, j, k));
+                // ===== ===== =====
+                Util::Abort(INFO);
+            }
+
         });
     }
     c_max = 0.0;
@@ -797,6 +857,81 @@ Hydro2::RHS(int lev,
                     kappas(i, j, k, 2) = kappa2; // Second principal curvature
                 }
             }
+
+
+            // ERROR CHECKING
+            if (
+                (gammaf(i, j, k) != gammaf(i, j, k)) 
+                or (v(i, j, k, 0) != v(i, j, k, 0)) 
+                or (v(i, j, k, 1) != v(i, j, k, 1)) 
+                or (KE(i, j, k) != KE(i, j, k)) 
+                or (UE(i, j, k) != UE(i, j, k)) 
+                or (press(i, j, k) != press(i, j, k)) 
+                or (p0_eff(i, j, k) != p0_eff(i, j, k)) 
+                or (cp(i, j, k) != cp(i, j, k)) 
+                or (cv(i, j, k) != cv(i, j, k)) 
+                or (T(i, j, k) != T(i, j, k)) 
+                or (a(i, j, k) != a(i, j, k)) 
+                or (mu_chem_(i, j, k) != mu_chem_(i, j, k)) 
+                or (Y(i, j, k) != Y(i, j, k)) 
+                or (Bm(i, j, k) != Bm(i, j, k)) 
+                or (grad_eta(0) != grad_eta(0)) 
+                or (grad_eta(1) != grad_eta(1)) 
+                or (grad_eta_mag != grad_eta_mag) 
+                or (lap_eta != lap_eta) 
+                or (hess_eta(0, 0) != hess_eta(0, 0)) 
+                or (hess_eta(0, 1) != hess_eta(0, 1)) 
+                or (hess_eta(1, 0) != hess_eta(1, 0)) 
+                or (hess_eta(1, 1) != hess_eta(1, 1)) 
+                or (kappas(i, j, k, 0) != kappas(i, j, k, 0)) 
+                or (kappas(i, j, k, 1) != kappas(i, j, k, 1)) 
+                or (kappas(i, j, k, 2) != kappas(i, j, k, 2))
+               )
+            {
+                Util::ParallelMessage(INFO, "-------------------------------");
+                Util::ParallelMessage(INFO, "ERROR IN DERIVED STATE");
+                Util::ParallelMessage(INFO, "time=", time);
+                Util::ParallelMessage(INFO, "lev=", lev);
+                Util::ParallelMessage(INFO, "i=", i, ", j=", j);
+                // ===== INPUTS =====
+                Util::ParallelMessage(INFO, "rho=", rho(i, j, k));
+                Util::ParallelMessage(INFO, "M=", M(i, j, k, 0), ", ", M(i, j, k, 1));
+                Util::ParallelMessage(INFO, "E=", E(i, j, k));
+                Util::ParallelMessage(INFO, "eta=", eta(i, j, k));
+                // ===== INTERMEDIATE =====
+                Util::ParallelMessage(INFO, "A=", A);
+                Util::ParallelMessage(INFO, "B=", B);
+                // ===== GRADIENT / HESSIAN =====
+                Util::ParallelMessage(INFO, "grad_eta=", grad_eta(0), ", ", grad_eta(1));
+                Util::ParallelMessage(INFO, "grad_eta_mag=", grad_eta_mag);
+                Util::ParallelMessage(INFO, "lap_eta=", lap_eta);
+                Util::ParallelMessage(INFO, "hess_eta=", hess_eta(0, 0), ", ", hess_eta(0, 1), ", ", hess_eta(1, 0), ", ", hess_eta(1, 1));
+                // ===== FLOW =====
+                Util::ParallelMessage(INFO, "v=", v(i, j, k, 0), ", ", v(i, j, k, 1));
+                Util::ParallelMessage(INFO, "KE=", KE(i, j, k));
+                Util::ParallelMessage(INFO, "UE=", UE(i, j, k));
+                // ===== EOS =====
+                Util::ParallelMessage(INFO, "gamma=", gammaf(i, j, k));
+                Util::ParallelMessage(INFO, "p0_eff=", p0_eff(i, j, k));
+                Util::ParallelMessage(INFO, "press=", press(i, j, k));
+                // ===== THERMO =====
+                Util::ParallelMessage(INFO, "cp=", cp(i, j, k));
+                Util::ParallelMessage(INFO, "cv=", cv(i, j, k));
+                Util::ParallelMessage(INFO, "T=", T(i, j, k));
+                Util::ParallelMessage(INFO, "a=", a(i, j, k));
+                // ===== PHASE FIELD =====
+                Util::ParallelMessage(INFO, "mu_chem=", mu_chem_(i, j, k));
+                Util::ParallelMessage(INFO, "Y=", Y(i, j, k));
+                Util::ParallelMessage(INFO, "Bm=", Bm(i, j, k));
+                // ===== CURVATURE =====
+                Util::ParallelMessage(INFO, "kappa=", kappas(i, j, k, 0));
+                Util::ParallelMessage(INFO, "kappa1=", kappas(i, j, k, 1));
+                Util::ParallelMessage(INFO, "kappa2=", kappas(i, j, k, 2));
+                // ===== ===== =====
+                Util::Abort(INFO);
+            }
+
+
         });
     }
 

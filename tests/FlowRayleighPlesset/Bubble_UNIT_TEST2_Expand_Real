@@ -6,7 +6,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/RayleighPlesset/output_RayleighPlesset_UNIT_TEST
+plot_file = ./tests/RayleighPlesset/output_RayleighPlesset_UNIT_TEST_REAL
 
 ### MESHING ###
 amr.plot_dt = 5e-4
@@ -24,7 +24,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-0
 dynamictimestep.min = 1e-12
-cfl = 0.5
+cfl = 0.2
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.10 -0.10 0.0
@@ -35,7 +35,7 @@ stop_time = 50e-3
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.001
+eta.ic.expression.constant.epsilon = 0.002
 eta.ic.expression.constant.R0 = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
@@ -55,10 +55,10 @@ gamma1 = 1.4
 # ----------------------------
 
 density0.ic.type = expression
-density0.ic.expression.region0 = "10.0"
+density0.ic.expression.region0 = "1000.0"
 
 density1.ic.type = expression
-density1.ic.expression.region0 = "1.0"
+density1.ic.expression.region0 = "2.0"
 
 # ----------------------------
 # Initial velocities (rest)
@@ -77,10 +77,10 @@ velocity1.ic.expression.region1 = "0.0"
 # ----------------------------
 
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "500.0"
+pressure0.ic.expression.region0 = "1.0e5"
 
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "1000.0"
+pressure1.ic.expression.region0 = "2.0e5"
 
 # ----------------------------
 # Specific Heats
@@ -94,8 +94,8 @@ cv1 = "1000.0/1.4"
 # ----------------------------
 # Stiffened pressure
 # ----------------------------
-p0_0 = 10000.0
-p0_1 = 0.0
+p0_0 = "3.0e8"
+p0_1 = "0.0"
 
 # ----------------------------
 # Viscosity
@@ -143,7 +143,7 @@ omega_refinement_criterion = 10.55
 p_refinement_criterion = 1e+1
 rho_refinement_criterion = 1e+1
 gradu_refinement_criterion = 1e+1
-cutoff = 1e-4
+cutoff = 1e-16
 
 ### SOURCE TERMS ###
 m0.ic.constant.value = 0.0

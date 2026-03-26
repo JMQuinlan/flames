@@ -109,7 +109,7 @@ h1_thermal.ic.type = expression
 h1_thermal.ic.expression.region0 = "1005.0"  # Air heat transfer coefficient
 
 # Surface tension
-sigma = 72.8  # Water-air surface tension [N/m]
+sigma = 7.28  # Water-air surface tension [N/m]
 
 # Reference pressure
 pref = 0.0
