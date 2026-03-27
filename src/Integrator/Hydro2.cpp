@@ -465,9 +465,6 @@ void Hydro2::Mix(int lev)
             //rho(i, j, k) = 1.0 / (eta(i, j, k) / (rho0(i, j, k)) + (1.0 - eta(i, j, k)) / (rho1(i, j, k)));
             rho_old(i, j, k) = rho(i, j, k);  
 
-            rho_eta0(i, j, k) = rho0(i, j, k) * eta(i, j, k);
-            rho_eta1(i, j, k) = rho1(i, j, k) * (1.0 - eta(i, j, k));
-
             rho_eta0(i, j, k) = rho(i, j, k) * eta(i, j, k);
             rho_eta1(i, j, k) = rho(i, j, k) * (1.0 - eta(i, j, k));
 
@@ -517,7 +514,8 @@ void Hydro2::Mix(int lev)
             mu_chem_(i, j, k) = mu_chem;
 
             // Mass Fraction
-            Y(i, j, k) = rho0(i, j, k) * eta(i, j, k) / (rho(i, j, k));
+            Y(i, j, k) = rho_eta0(i, j, k) / (rho(i, j, k));
+
 
             // Spalding Number
             Bm(i, j, k) = (Y(i, j, k) - Y_infinity) / (1 + Y_infinity + small);
@@ -806,7 +804,6 @@ Hydro2::RHS(int lev,
                         t1 = Set::Vector(n_hat(1), -n_hat(0)) / sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
                     }
 
-                    // t1 = Set::Vector(-n_hat(1), n_hat(0)) / sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
                     kappa1 = n_hat.dot(hess_eta * n_hat); // Normal Curvature
                     kappa2 = t1.dot(hess_eta * t1);       // Tangential Curvature
 
@@ -1179,14 +1176,14 @@ Hydro2::RHS(int lev,
                 */
 
                 // Mass fraction of vapor at surface
-                Set::Scalar Y_vs = rho_eta0(i, j, k) / (rho0(i, j, k) + rho1(i, j, k));
+                Set::Scalar Y_vs = Y(i, j, k); // rho_eta0(i, j, k) / (rho0(i, j, k) + rho1(i, j, k));
 
                 // Spalding mass transfer number
                 Set::Scalar B_M = Bm(i, j, k);
                 //B_M = std::max(B_M, 0.0); // Only evaporation, no condensation in this formulation
 
                 // Gas density from fluid 0 (eta=1 corresponds to fluid 0)
-                Set::Scalar rho_g = rho_eta0(i, j, k);
+                Set::Scalar rho_g = rho_eta0(i, j, k) / std::max(eta(i, j, k), small);
 
                 // Scaling density choice: using rho_eta = rho_g makes RHS independent of mixture density
                 // This is consistent with the document recommendation
