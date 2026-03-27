@@ -146,7 +146,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         value.RegisterNewFab(value.pressure0_mf,    value.energy_bc,  1, nghost, "pressure0", false, false);
         value.RegisterNewFab(value.velocity0_mf,    &value.bc_nothing,  2, nghost, "velocity0", false, false, { "x", "y" });
-        value.RegisterNewFab(value.vorticity0_mf,   &value.bc_nothing,  1, nghost, "vorticity0", false, false);
 
         // FLUID 1
         value.RegisterNewFab(value.density1_mf,     value.density_bc,   1, nghost, "density1", false, false);
@@ -164,12 +163,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         value.RegisterNewFab(value.pressure1_mf,    value.energy_bc,  1, nghost, "pressure1", false, true);
         value.RegisterNewFab(value.velocity1_mf,    &value.bc_nothing,  2, nghost, "velocity1", false, true, { "x", "y" });
-        value.RegisterNewFab(value.vorticity1_mf,   &value.bc_nothing,  1, nghost, "vorticity1", false, true);
 
         // MIXTURE
         value.RegisterNewFab(value.pressure_mf,     value.energy_bc, 1, nghost, "pressure", true, false);
         value.RegisterNewFab(value.velocity_mf,     &value.bc_nothing,  2, nghost, "velocity", true, false, { "x", "y" });
-        value.RegisterNewFab(value.vorticity_mf,    &value.bc_nothing,  1, nghost, "vorticity", true, false);
+        value.RegisterNewFab(value.vorticity_mf,    &value.bc_nothing,  1, 0, "vorticity", true, false);
         value.RegisterNewFab(value.density_mf,      value.density_bc,   1, nghost, "density", true, true);
         value.RegisterNewFab(value.density_old_mf,  value.density_bc,   1, nghost, "density_old", false, true);
         value.RegisterNewFab(value.energy_per_vol_mf,       value.energy_bc,    1, nghost, "energy_per_vol", true, true);
@@ -205,14 +203,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.Y_mf,            &value.bc_nothing,  1, nghost, "Mass_Fraction", true, false);       // Mass Fraction
 
         // EXTRAS & DEBUGGING
-        value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", true, false, { "x", "y" });
-        value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, nghost, "kappa", true, false, { "Avg", "1", "2" }); // To Surface curvature
-        value.RegisterNewFab(value.grad_mag_grad_eta_mf, &value.bc_nothing, 2, nghost, "grad_mag_grad_eta", false, false, { "x", "y" }); // grad( | grad(eta) | )
+        value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, 0, "grad_eta", true, false, { "x", "y" });
+        value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, 0, "kappa", true, false, { "Avg", "1", "2" }); // To Surface curvature
+        value.RegisterNewFab(value.grad_mag_grad_eta_mf, &value.bc_nothing, 2, 0, "grad_mag_grad_eta", false, false, { "x", "y" }); // grad( | grad(eta) | )
         value.RegisterNewFab(value.rho_flux_mf,     &value.bc_nothing,  1, nghost, "rho_flux", true, false);                    // Density Flux
         value.RegisterNewFab(value.M_flux_mf,       &value.bc_nothing,  2, nghost, "M_flux", true, false, { "x", "y" });        // Momentum Flux
         value.RegisterNewFab(value.E_flux_mf,       &value.bc_nothing,  1, nghost, "E_flux", true, false);                      // Energy Flux
-        value.RegisterNewFab(value.div_tau_mf,      &value.bc_nothing,  2, nghost, "div_tau", true, false, { "x", "y" });            // Energy Flux
-        value.RegisterNewFab(value.hess_u_mf,       &value.bc_nothing,  8, nghost, "hess_u", false, false, {
+        value.RegisterNewFab(value.div_tau_mf,      &value.bc_nothing,  2, 0, "div_tau", true, false, { "x", "y" });            // Energy Flux
+        value.RegisterNewFab(value.hess_u_mf,       &value.bc_nothing,  8, 0, "hess_u", false, false, {
                                                                                                      "000","001",
                                                                                                      "010","011",
                                                                                                      "100","101",
