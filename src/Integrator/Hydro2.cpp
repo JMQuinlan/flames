@@ -844,38 +844,69 @@ Hydro2::RHS(int lev,
     }
 }
 // CURVATURE CALCULATION
-void Hydro2::ComputeHeightFunction(int lev)
+void Hydro2::ComputeHeightFunction (int lev)
 {
     BL_PROFILE("Hydro2::ComputeHeightFunction");
 
     const Geometry& geom = this->geom[lev];
     const Real* dx = geom.CellSize();
     const Box& domain = geom.Domain();
+    const auto problo = geom.ProbLo();
 
-    for (MFIter mfi(*eta_mf[lev]); mfi.isValid(); ++mfi)
+    const int ilo = domain.smallEnd(0);
+    const int ihi = domain.bigEnd(0);
+    const int jlo = domain.smallEnd(1);
+    const int jhi = domain.bigEnd(1);
+
+    // ------------------------------------------------------------
+    // (1) Make a SINGLE-FAB scratch MF covering the entire domain
+    // ------------------------------------------------------------
+    BoxArray ba_single(domain);
+
+    // Correct: generates a valid 1-element DM
+    DistributionMapping dm_single(ba_single);
+
+    MultiFab eta_single(ba_single, dm_single, 1, 0);
+    eta_single.setVal(0.0);
+
+    // Copy data from tiled MF into single FAB MF
+    eta_single.ParallelCopy(*eta_mf[lev]);
+
+    MultiFab h_single(ba_single, dm_single, 1, 0);
+
+    // ------------------------------------------------------------
+    // (2) Now we can safely access full-domain array
+    // ------------------------------------------------------------
+    auto eta_arr = eta_single.const_array(0);
+    auto h_arr   = h_single.array(0);
+
+    // ------------------------------------------------------------
+    // (3) Compute heights globally, full domain
+    // ------------------------------------------------------------
+    ParallelFor(ihi - ilo + 1, [=] AMREX_GPU_DEVICE(int ii)
     {
-        const Box& vb = mfi.validbox();
+        int i = ii + ilo;
 
-        auto eta_arr = eta_mf[lev]->const_array(mfi);
-        auto h_arr   = h_eta_mf[lev]->array(mfi);
+        Real best = 1e20;
+        int jbest = jlo;
 
-        // height function is h(i,0)
-        for (int i = vb.smallEnd(0); i <= vb.bigEnd(0); ++i)
+        for (int j = jlo; j <= jhi; ++j)
         {
-            Real best = 1e20;
-            int   jbest = domain.smallEnd(1);
-
-            for (int j = domain.smallEnd(1); j <= domain.bigEnd(1); ++j)
-            {
-                Real d = std::abs(eta_arr(i,j,0) - 0.5);
-                if (d < best) { best = d; jbest = j; }
-            }
-
-            Real y = geom.ProbLo(1) + (jbest + 0.5)*dx[1];
-            h_arr(i,0,0) = y;
+            Real d = amrex::Math::abs(eta_arr(i,j,0) - 0.5);
+            if (d < best) { best = d; jbest = j; }
         }
-    }
 
+        Real y = problo[1] + (jbest + 0.5)*dx[1];
+
+        // Fill all j for later tile-safe curvature use
+        for (int j = jlo; j <= jhi; ++j)
+            h_arr(i,j,0) = y;
+    });
+
+    // ------------------------------------------------------------
+    // (4) Scatter back to tiled MF
+    // ------------------------------------------------------------
+    h_eta_mf[lev]->ParallelCopy(h_single);
     h_eta_mf[lev]->FillBoundary(geom.periodicity());
 }
 
@@ -885,32 +916,31 @@ void Hydro2::ComputeHFcurvature_MUSCL(int lev)
 
     const Geometry& geom = this->geom[lev];
     const Real* dx = geom.CellSize();
-    const Box& dom = geom.Domain();
-
-    int ilo = dom.smallEnd(0);
-    int ihi = dom.bigEnd(0);
 
     for (MFIter mfi(*h_eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
         const Box& tb = mfi.tilebox();
 
-        auto h_arr  = h_eta_mf[lev]->const_array(mfi);
-        auto kHF_arr= kappa_HF_mf[lev]->array(mfi);
+        auto h_arr   = h_eta_mf[lev]->const_array(mfi);
+        auto kHF_arr = kappa_HF_mf[lev]->array(mfi);
 
         ParallelFor(tb, [=] AMREX_GPU_DEVICE(int i,int j,int k)
         {
-            Real hC = h_arr(i,0,0);
-            Real hL = (i > ilo ? h_arr(i-1,0,0) : hC);
-            Real hR = (i < ihi ? h_arr(i+1,0,0) : hC);
+            int il = (i > tb.smallEnd(0)) ? i-1 : i;
+            int ir = (i < tb.bigEnd(0))   ? i+1 : i;
+
+            Real hC = h_arr(i,j,0);
+            Real hL = h_arr(il,j,0);
+            Real hR = h_arr(ir,j,0);
 
             Real dl = hC - hL;
             Real dr = hR - hC;
+
             Real slope = (dl*dr > 0.0 ? (2*dl*dr)/(dl+dr) : 0.0);
-            Real hx = slope/dx[0];
+            Real hx  = slope / dx[0];
+            Real hxx = (hR - 2*hC + hL) / (dx[0]*dx[0]);
 
-            Real hxx = (hR - 2*hC + hL)/(dx[0]*dx[0]);
-
-            kHF_arr(i,0,0) = hxx/std::pow(1.0 + hx*hx, 1.5);
+            kHF_arr(i,j,0) = hxx / std::pow(1.0 + hx*hx, 1.5);
         });
     }
 
@@ -992,87 +1022,89 @@ void Hydro2::ComputeHybridCurvature(int lev)
     {
         const Box& tb = mfi.tilebox();
 
-        auto gradmag = gradmag_mf[lev]->const_array(mfi);
-        auto nx_s    = nx_smoothed_mf[lev]->const_array(mfi);
-        auto ny_s    = ny_smoothed_mf[lev]->const_array(mfi);
-        auto kHF_arr = kappa_HF_mf[lev]->const_array(mfi);
-        auto h_arr   = h_eta_mf[lev]->const_array(mfi);
+        auto gradmag  = gradmag_mf[lev]->const_array(mfi);
+        auto nx_s     = nx_smoothed_mf[lev]->const_array(mfi);
+        auto ny_s     = ny_smoothed_mf[lev]->const_array(mfi);
+        auto kHF_arr  = kappa_HF_mf[lev]->const_array(mfi);
+        auto h_arr    = h_eta_mf[lev]->const_array(mfi);
 
-        auto kappas  = kappas_mf[lev]->array(mfi);
+        auto kappas   = kappas_mf[lev]->array(mfi);
 
-        int ilo = dom.smallEnd(0);
-        int ihi = dom.bigEnd(0);
-
-        ParallelFor(tb, [=] AMREX_GPU_DEVICE(int i,int j,int k)
+        ParallelFor(tb, [=] AMREX_GPU_DEVICE (int i,int j,int k)
         {
             Real gm = gradmag(i,j,k);
 
             if (gm < Cg)
             {
-                kappas(i,j,k,0)=0;
-                kappas(i,j,k,1)=0;
-                kappas(i,j,k,2)=0;
+                kappas(i,j,k,0) = 0.0;
+                kappas(i,j,k,1) = 0.0;
+                kappas(i,j,k,2) = 0.0;
                 return;
             }
 
             //------------------------------------------------------
-            // S_g
+            // Sg
             //------------------------------------------------------
-            Real Sg = gm/(gm+Cg);
+            Real Sg = gm / (gm + Cg);
 
             //------------------------------------------------------
-            // Smoothed‑normal curvature kSN
+            // Compute SN curvature: kSN = d(nx)/dx + d(ny)/dy
             //------------------------------------------------------
-            int il = (i>ilo? i-1:i);
-            int ir = (i<ihi? i+1:i);
-            int jl = j>tb.smallEnd(1)? j-1:j;
-            int jr = j<tb.bigEnd(1)?   j+1:j;
+            int il = (i > tb.smallEnd(0)) ? i-1 : i;
+            int ir = (i < tb.bigEnd(0))   ? i+1 : i;
+            int jl = (j > tb.smallEnd(1)) ? j-1 : j;
+            int jr = (j < tb.bigEnd(1))   ? j+1 : j;
 
-            Real nx0 = nx_s(i,j,k);
-            Real ny0 = ny_s(i,j,k);
-
-            Real nx_x = 0.5*(nx_s(ir,j,k) - nx_s(il,j,k))/dx[0];
-            Real ny_y = 0.5*(ny_s(i,jr,k) - ny_s(i,jl,k))/dx[1];
+            Real nx_x = 0.5 * (nx_s(ir,j,k) - nx_s(il,j,k)) / dx[0];
+            Real ny_y = 0.5 * (ny_s(i,jr,k) - ny_s(i,jl,k)) / dx[1];
 
             Real kSN = nx_x + ny_y;
 
             //------------------------------------------------------
-            // HF curvature
+            // HF curvature at same (i,j,k)
             //------------------------------------------------------
-            Real kHF = kHF_arr(i,0,0);
+            Real kHF = kHF_arr(i,j,k);
 
             //------------------------------------------------------
-            // S_m monotonicity
+            // Sm monotonicity test — must use j, not 0
             //------------------------------------------------------
-            Real hC = h_arr(i,0,0);
+            Real hC = h_arr(i,j,0);
             Real Sm = 1.0;
 
-            if (i>ilo)
-                if (std::abs(h_arr(i-1,0,0)-hC)>3*dx[1])
-                    Sm=0;
+            if (i > tb.smallEnd(0))
+            {
+                if (std::abs(h_arr(i-1,j,0) - hC) > 3*dx[1])
+                    Sm = 0.0;
+            }
 
-            if (i<ihi)
-                if (std::abs(h_arr(i+1,0,0)-hC)>3*dx[1])
-                    Sm=0;
+            if (i < tb.bigEnd(0))
+            {
+                if (std::abs(h_arr(i+1,j,0) - hC) > 3*dx[1])
+                    Sm = 0.0;
+            }
 
             //------------------------------------------------------
-            // S_s smoothness
+            // Ss smoothness: depends on |kHF - kSN|
             //------------------------------------------------------
             Real Cs = amrex::max(std::abs(kHF), 1e-12);
             Real dk = std::abs(kHF - kSN);
-            Real Ss = std::exp(-dk/(Cs+small));
+
+            Real Ss = std::exp(-dk / (Cs + small));
 
             //------------------------------------------------------
-            // Hybrid curvature weight
+            // Final hybrid curvature weight
             //------------------------------------------------------
             Real w = Sg * Sm * Ss;
-            w = amrex::max(0.0, amrex::min(1.0,w));
+            w = amrex::max(0.0, amrex::min(1.0, w));
 
-            Real kH = w*kHF + (1.0-w)*kSN;
+            Real kH = w * kHF + (1.0 - w) * kSN;
 
-            kappas(i,j,k,0)=kH;
-            kappas(i,j,k,1)=kHF;
-            kappas(i,j,k,2)=kSN;
+            //------------------------------------------------------
+            // Store results
+            //------------------------------------------------------
+            kappas(i,j,k,0) = kH;
+            kappas(i,j,k,1) = kHF;
+            kappas(i,j,k,2) = kSN;
         });
     }
 
@@ -1163,6 +1195,36 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
     const Geometry& geom = this->geom[lev];
     const Real* DX = geom.CellSize();
+
+    // // check MF are defined correctly
+    // amrex::Print() << "CHECK MF CONSISTENCY:\n";
+    // amrex::Print() << "eta        nComp=" << eta_mf[lev]->nComp()
+    //             << "  nGrow=" << eta_mf[lev]->nGrow() << "\n";
+    // amrex::Print() << "etaOld     nComp=" << eta_old_mf[lev]->nComp()
+    //             << "  nGrow=" << eta_old_mf[lev]->nGrow() << "\n";
+    // amrex::Print() << "density    nComp=" << density_mf[lev]->nComp()
+    //             << "  nGrow=" << density_mf[lev]->nGrow() << "\n";
+    // amrex::Print() << "densityOld nComp=" << density_old_mf[lev]->nComp()
+    //             << "  nGrow=" << density_old_mf[lev]->nGrow() << "\n";
+
+    // amrex::Print() << "momentum    nComp=" << momentum_mf[lev]->nComp()
+    //             << "  nGrow=" << momentum_mf[lev]->nGrow() << "\n";
+    // amrex::Print() << "momentumOld nComp=" << momentum_old_mf[lev]->nComp()
+    //             << "  nGrow=" << momentum_old_mf[lev]->nGrow() << "\n";
+
+    // amrex::Print() << "energyVol    nComp=" << energy_per_vol_mf[lev]->nComp()
+    //             << "  nGrow=" << energy_per_vol_mf[lev]->nGrow() << "\n";
+    // amrex::Print() << "energyVolOld nComp=" << energy_per_vol_old_mf[lev]->nComp()
+    //             << "  nGrow=" << energy_per_vol_old_mf[lev]->nGrow() << "\n";
+
+    // if (density_mf[lev]->boxArray() != (density_old_mf[lev]->boxArray()))
+    //     amrex::Abort("density_mf and density_old_mf boxArrays do NOT match!");
+
+    // if (momentum_mf[lev]->boxArray() != (momentum_old_mf[lev]->boxArray()))
+    //     amrex::Abort("momentum_mf and momentum_old_mf boxArrays do NOT match!");
+
+    // if (energy_per_vol_mf[lev]->boxArray() != (energy_per_vol_old_mf[lev]->boxArray()))
+    //     amrex::Abort("energy_per_vol_mf and energy_per_vol_old_mf boxArrays do NOT match!");
 
     //==============================================================
     // 1. Swap old/new pointers for the *real* solution MultiFabs
