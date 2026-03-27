@@ -549,65 +549,36 @@ void Hydro2::Mix(int lev)
             Ma(i, j, k, 0) = v(i, j, k, 0) / a(i, j, k);
             Ma(i, j, k, 1) = v(i, j, k, 1) / a(i, j, k);
 
-            // ERROR CHECKING
-            if (
-                (gammaf(i, j, k) != gammaf(i, j, k))
-                or (v(i, j, k, 0) != v(i, j, k, 0))
-                or (v(i, j, k, 1) != v(i, j, k, 1))
-                or (KE_vol(i, j, k) != KE_vol(i, j, k))
-                or (UE_vol(i, j, k) != UE_vol(i, j, k))
-                or (E_vol(i, j, k) != E_vol(i, j, k))
-                or (KE_mas(i, j, k) != KE_mas(i, j, k))
-                or (UE_mas(i, j, k) != UE_mas(i, j, k))
-                or (E_mas(i, j, k) != E_mas(i, j, k))
-                or (press(i, j, k) != press(i, j, k))
-                or (p0_eff(i, j, k) != p0_eff(i, j, k))
-                or (cp(i, j, k) != cp(i, j, k))
-                or (cv(i, j, k) != cv(i, j, k))
-                or (T(i, j, k) != T(i, j, k))
-                or (a(i, j, k) != a(i, j, k))
-                //or (mu_chem_(i, j, k) != mu_chem_(i, j, k))
-                or (Y(i, j, k) != Y(i, j, k))
-                or (Bm(i, j, k) != Bm(i, j, k))
-               )
-            {
-                Util::ParallelMessage(INFO, "-------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN DERIVED STATE");
-                Util::ParallelMessage(INFO, "time=", time);
-                Util::ParallelMessage(INFO, "lev=", lev);
-                Util::ParallelMessage(INFO, "i=", i, ", j=", j);
-                // ===== INPUTS =====
-                Util::ParallelMessage(INFO, "rho=", rho(i, j, k));
-                Util::ParallelMessage(INFO, "M=", M(i, j, k, 0), ", ", M(i, j, k, 1));
-                Util::ParallelMessage(INFO, "KE_vol=", KE_vol(i, j, k));
-                Util::ParallelMessage(INFO, "UE_vol=", UE_vol(i, j, k));
-                Util::ParallelMessage(INFO, "E_vol=", E_vol(i, j, k));
-                Util::ParallelMessage(INFO, "KE_mas=", KE_mas(i, j, k));
-                Util::ParallelMessage(INFO, "UE_mas=", UE_mas(i, j, k));
-                Util::ParallelMessage(INFO, "E_mas=", E_mas(i, j, k));
-                Util::ParallelMessage(INFO, "eta=", eta(i, j, k));
-                Util::ParallelMessage(INFO, "lap_eta=", lap_eta);
-                // ===== INTERMEDIATE =====
-                Util::ParallelMessage(INFO, "A=", A);
-                Util::ParallelMessage(INFO, "B=", B);
-                // ===== FLOW =====
-                Util::ParallelMessage(INFO, "v=", v(i, j, k, 0), ", ", v(i, j, k, 1));
-                // ===== EOS =====
-                Util::ParallelMessage(INFO, "gamma=", gammaf(i, j, k));
-                Util::ParallelMessage(INFO, "p0_eff=", p0_eff(i, j, k));
-                Util::ParallelMessage(INFO, "press=", press(i, j, k));
-                // ===== THERMO =====
-                Util::ParallelMessage(INFO, "cp=", cp(i, j, k));
-                Util::ParallelMessage(INFO, "cv=", cv(i, j, k));
-                Util::ParallelMessage(INFO, "T=", T(i, j, k));
-                Util::ParallelMessage(INFO, "a=", a(i, j, k));
-                // ===== PHASE FIELD =====
-                Util::ParallelMessage(INFO, "mu_chem=", mu_chem_(i, j, k));
-                Util::ParallelMessage(INFO, "Y=", Y(i, j, k));
-                Util::ParallelMessage(INFO, "Bm=", Bm(i, j, k));
-                // ===== ===== =====
-                Util::Abort(INFO);
-            }
+            // ------------------------------------------------------------
+            // Error Checking
+            // ------------------------------------------------------------
+            check4nans(0, lev, i, j, k, "ERROR IN Mix(): Primative Field Calculation", {
+                { "rho_eta0", rho_eta0(i, j, k) }, 
+                { "rho_eta1", rho_eta1(i, j, k) }, 
+                { "rho", rho(i, j, k) }, 
+                { "M[0]", M(i, j, k, 0) }, 
+                { "M[1]", M(i, j, k, 1) }, 
+                { "E_vol", E_vol(i, j, k) }, 
+                { "E_mas", E_mas(i, j, k) }, 
+                { "UE_vol", UE_vol(i, j, k) }, 
+                { "UE_mas", UE_mas(i, j, k) }, 
+                { "KE_vol", KE_vol(i, j, k) }, 
+                { "KE_mas", KE_mas(i, j, k) }, 
+                { "eta", eta(i, j, k) }, 
+                { "A", A }, 
+                { "B", B }, 
+                { "gammaf", gammaf(i, j, k) }, 
+                { "v[0]", v(i, j, k, 0) }, 
+                { "v[1]", v(i, j, k, 1) }, 
+                { "press", press(i, j, k) },
+                { "p0_eff", p0_eff(i, j, k) },
+                { "cp", cp(i, j, k) },
+                { "cv", cv(i, j, k) },
+                { "T", T(i, j, k) },
+                { "a", a(i, j, k) },
+                { "Y", Y(i, j, k) },
+                { "Bm", Bm(i, j, k) }
+            }); // end check4nans
 
         });
     }
@@ -794,7 +765,7 @@ Hydro2::RHS(int lev,
             mu_chem_(i, j, k) = mu_chem;
 
             // Mass Fraction
-            Y(i, j, k) = rho0(i, j, k) * eta(i, j, k) / (rho(i, j, k));
+            Y(i, j, k) = rho_eta0(i, j, k) / (rho(i, j, k));
             
             // Spalding Number
             Bm(i, j, k) = (Y(i, j, k) - Y_infinity) / (1 + Y_infinity + small);
@@ -855,88 +826,56 @@ Hydro2::RHS(int lev,
                     kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
                     kappas(i, j, k, 1) = kappa1; // First principal curvature
                     kappas(i, j, k, 2) = kappa2; // Second principal curvature
-                }
+                } 
             }
 
+            // ------------------------------------------------------------
+            // Error Checking
+            // ------------------------------------------------------------
+            check4nans(time, lev, i, j, k, "ERROR IN RHS(): Primative Field Calculation", {
+                { "rho_eta0", rho_eta0(i, j, k) }, 
+                { "rho_eta1", rho_eta1(i, j, k) }, 
+                { "rho", rho(i, j, k) }, 
+                { "M[0]", M(i, j, k, 0) }, 
+                { "M[1]", M(i, j, k, 1) }, 
+                { "E", E(i, j, k) }, 
+                { "eta", eta(i, j, k) }, 
+                { "A", A }, 
+                { "B", B }, 
+                { "gammaf", gammaf(i, j, k) }, 
+                { "gammaf", gammaf(i, j, k) }, 
+                { "gammaf", gammaf(i, j, k) }, 
+                { "gammaf", gammaf(i, j, k) }, 
+                { "v[0]", v(i, j, k, 0) }, 
+                { "v[1]", v(i, j, k, 1) }, 
+                { "KE", KE(i, j, k) }, 
+                { "UE", UE(i, j, k) }, 
+                { "press", press(i, j, k) },
+                { "p0_eff", p0_eff(i, j, k) },
+                { "cp", cp(i, j, k) },
+                { "cv", cv(i, j, k) },
+                { "T", T(i, j, k) },
+                { "a", a(i, j, k) },
+                { "Y", Y(i, j, k) },
+                { "Bm", Bm(i, j, k) },
+                { "mu_chem", mu_chem_(i, j, k) },
+                { "grad_eta[0]", grad_eta(0) },
+                { "grad_eta[1]", grad_eta(1) },
+                { "grad_eta_mag", grad_eta_mag },
+                { "lap_eta", lap_eta },
+                { "hess_eta[0,0]", hess_eta(0, 0) },
+                { "hess_eta[0,1]", hess_eta(0, 1) },
+                { "hess_eta[1,0]", hess_eta(1, 0) },
+                { "hess_eta[1,1]", hess_eta(1, 1) },
+                { "kappas[0]", kappas(i, j, k, 0) },
+                { "kappas[1]", kappas(i, j, k, 1) },
+                { "kappas[2]", kappas(i, j, k, 2) }
+            }); // end check4nans
 
-            // ERROR CHECKING
-            if (
-                (gammaf(i, j, k) != gammaf(i, j, k)) 
-                or (v(i, j, k, 0) != v(i, j, k, 0)) 
-                or (v(i, j, k, 1) != v(i, j, k, 1)) 
-                or (KE(i, j, k) != KE(i, j, k)) 
-                or (UE(i, j, k) != UE(i, j, k)) 
-                or (press(i, j, k) != press(i, j, k)) 
-                or (p0_eff(i, j, k) != p0_eff(i, j, k)) 
-                or (cp(i, j, k) != cp(i, j, k)) 
-                or (cv(i, j, k) != cv(i, j, k)) 
-                or (T(i, j, k) != T(i, j, k)) 
-                or (a(i, j, k) != a(i, j, k)) 
-                or (mu_chem_(i, j, k) != mu_chem_(i, j, k)) 
-                or (Y(i, j, k) != Y(i, j, k)) 
-                or (Bm(i, j, k) != Bm(i, j, k)) 
-                or (grad_eta(0) != grad_eta(0)) 
-                or (grad_eta(1) != grad_eta(1)) 
-                or (grad_eta_mag != grad_eta_mag) 
-                or (lap_eta != lap_eta) 
-                or (hess_eta(0, 0) != hess_eta(0, 0)) 
-                or (hess_eta(0, 1) != hess_eta(0, 1)) 
-                or (hess_eta(1, 0) != hess_eta(1, 0)) 
-                or (hess_eta(1, 1) != hess_eta(1, 1)) 
-                or (kappas(i, j, k, 0) != kappas(i, j, k, 0)) 
-                or (kappas(i, j, k, 1) != kappas(i, j, k, 1)) 
-                or (kappas(i, j, k, 2) != kappas(i, j, k, 2))
-               )
-            {
-                Util::ParallelMessage(INFO, "-------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN DERIVED STATE");
-                Util::ParallelMessage(INFO, "time=", time);
-                Util::ParallelMessage(INFO, "lev=", lev);
-                Util::ParallelMessage(INFO, "i=", i, ", j=", j);
-                // ===== INPUTS =====
-                Util::ParallelMessage(INFO, "rho=", rho(i, j, k));
-                Util::ParallelMessage(INFO, "M=", M(i, j, k, 0), ", ", M(i, j, k, 1));
-                Util::ParallelMessage(INFO, "E=", E(i, j, k));
-                Util::ParallelMessage(INFO, "eta=", eta(i, j, k));
-                // ===== INTERMEDIATE =====
-                Util::ParallelMessage(INFO, "A=", A);
-                Util::ParallelMessage(INFO, "B=", B);
-                // ===== GRADIENT / HESSIAN =====
-                Util::ParallelMessage(INFO, "grad_eta=", grad_eta(0), ", ", grad_eta(1));
-                Util::ParallelMessage(INFO, "grad_eta_mag=", grad_eta_mag);
-                Util::ParallelMessage(INFO, "lap_eta=", lap_eta);
-                Util::ParallelMessage(INFO, "hess_eta=", hess_eta(0, 0), ", ", hess_eta(0, 1), ", ", hess_eta(1, 0), ", ", hess_eta(1, 1));
-                // ===== FLOW =====
-                Util::ParallelMessage(INFO, "v=", v(i, j, k, 0), ", ", v(i, j, k, 1));
-                Util::ParallelMessage(INFO, "KE=", KE(i, j, k));
-                Util::ParallelMessage(INFO, "UE=", UE(i, j, k));
-                // ===== EOS =====
-                Util::ParallelMessage(INFO, "gamma=", gammaf(i, j, k));
-                Util::ParallelMessage(INFO, "p0_eff=", p0_eff(i, j, k));
-                Util::ParallelMessage(INFO, "press=", press(i, j, k));
-                // ===== THERMO =====
-                Util::ParallelMessage(INFO, "cp=", cp(i, j, k));
-                Util::ParallelMessage(INFO, "cv=", cv(i, j, k));
-                Util::ParallelMessage(INFO, "T=", T(i, j, k));
-                Util::ParallelMessage(INFO, "a=", a(i, j, k));
-                // ===== PHASE FIELD =====
-                Util::ParallelMessage(INFO, "mu_chem=", mu_chem_(i, j, k));
-                Util::ParallelMessage(INFO, "Y=", Y(i, j, k));
-                Util::ParallelMessage(INFO, "Bm=", Bm(i, j, k));
-                // ===== CURVATURE =====
-                Util::ParallelMessage(INFO, "kappa=", kappas(i, j, k, 0));
-                Util::ParallelMessage(INFO, "kappa1=", kappas(i, j, k, 1));
-                Util::ParallelMessage(INFO, "kappa2=", kappas(i, j, k, 2));
-                // ===== ===== =====
-                Util::Abort(INFO);
-            }
-
-
-        });
-    }
+        }); // end parallelfor
+    } // end Primative field
 
     // Main time integration loop
-    //for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
         {
         const amrex::Box &bx = mfi.validbox();
@@ -1110,23 +1049,13 @@ Hydro2::RHS(int lev,
             Ldot_(i, j, k, 0) = Ldot(0);
             Ldot_(i, j, k, 1) = Ldot(1);
 
-            // DEBUG Tool
-            if ((Ldot(0) != Ldot(0))
-                or (Ldot(1) != Ldot(1))
-                or (div_tau(0) != div_tau(0))
-                or (div_tau(1) != div_tau(1)))
-            {
-                Util::ParallelMessage(INFO, "------------------------------------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Viscosity solving:");
-                Util::ParallelMessage(INFO, "lev=", lev);
-                Util::ParallelMessage(INFO, "time=", time);
-                Util::ParallelMessage(INFO, "i=", i, "j=", j);
-                Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
-                Util::ParallelMessage(INFO, "Ldot=", Ldot(0), ", ", Ldot(1));
-                Util::ParallelMessage(INFO, "div_tau=", div_tau(0), ", ", div_tau(1));
-                Util::Abort(INFO);
-            }
-
+            // ERROR CHECKING
+            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Viscosity solving", {
+                { "Ldot[0]", Ldot(0) },
+                { "Ldot[1]", Ldot(1) },
+                { "div_tau[0]", div_tau(0) },
+                { "div_tau[1]", div_tau(1) }
+            }); // end check4nans
             
             // ------------------------------------------------------------
             // Surface Tension
@@ -1151,24 +1080,16 @@ Hydro2::RHS(int lev,
                     
                     Fsv_vector(0) = sigma_eff * kappa * grad_eta(0) * epsilon; // / (grad_eta_mag + small)); // / (DX[1] + small);
                     Fsv_vector(1) = sigma_eff * kappa * grad_eta(1) * epsilon; // / (grad_eta_mag + small)); // / (DX[1] + small);
-                }
+                } 
             }
             Fsv(i, j, k, 0) = Fsv_vector(0);
             Fsv(i, j, k, 1) = Fsv_vector(1);
 
-            // DEBUG Tool
-            if ((Fsv_vector(0) != Fsv_vector(0))
-                or (Fsv_vector(1) != Fsv_vector(1)))
-            {
-                Util::ParallelMessage(INFO, "------------------------------------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Surface Tension solving:");
-                Util::ParallelMessage(INFO, "lev=", lev);
-                Util::ParallelMessage(INFO, "i=", i, "j=", j);
-                Util::ParallelMessage(INFO, "time=", time);
-                Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
-                Util::ParallelMessage(INFO, "Fsv_vector=", Fsv_vector(0), ", ", Fsv_vector(1));
-                Util::Abort(INFO);
-            }
+            // ERROR CHECKING
+            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Surface Tension solving", {
+                { "Fsv_vector[0]", Fsv_vector(0) },
+                { "Fsv_vector[1]", Fsv_vector(1) }
+            }); // end check4nans
             
 
             // ------------------------------------------------------------
@@ -1184,19 +1105,11 @@ Hydro2::RHS(int lev,
             Fw(i, j, k, 0) = Fw_vector(0);
             Fw(i, j, k, 1) = Fw_vector(1);
 
-            // DEBUG Tool
-            if ((Fw_vector(0) != Fw_vector(0))
-                or (Fw_vector(1) != Fw_vector(1)))
-            {
-                Util::ParallelMessage(INFO, "------------------------------------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Weight solving:");
-                Util::ParallelMessage(INFO, "lev=", lev);
-                Util::ParallelMessage(INFO, "i=", i, "j=", j);
-                Util::ParallelMessage(INFO, "time=", time);
-                Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
-                Util::ParallelMessage(INFO, "Fw_vector=", Fw_vector(0), ", ", Fw_vector(1));
-                Util::Abort(INFO);
-            }
+            // ERROR CHECKING
+            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Weight solving", {
+                { "Fw_vector[0]", Fw_vector(0) },
+                { "Fw_vector[1]", Fw_vector(1) }
+            }); // end check4nans
 
             // ------------------------------------------------------------
             // Conservative Allen-Cahn
@@ -1224,22 +1137,14 @@ Hydro2::RHS(int lev,
             //Set::Scalar advection = -u.dot(grad_eta);
             Set::Scalar eta_dot_CH = Mob * lap_mu_chem * 0.2;
 
-            // DEBUG Tool
-            if ((eta_dot_CH != eta_dot_CH))
-            {
-                Util::ParallelMessage(INFO, "------------------------------------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Boundry Evolution:");
-                Util::ParallelMessage(INFO, "lev=", lev);
-                Util::ParallelMessage(INFO, "i=", i, "j=", j);
-                Util::ParallelMessage(INFO, "time=", time);
-                Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
-                Util::ParallelMessage(INFO, "mu_chem_=", mu_chem_(i, j, k));
-                Util::ParallelMessage(INFO, "lap_mu_chem=", lap_mu_chem);
-                Util::ParallelMessage(INFO, "a=", a(i, j, k));
-                Util::ParallelMessage(INFO, "Mob=", Mob);
-                Util::ParallelMessage(INFO, "eta_dot_CH=", eta_dot_CH);
-                Util::Abort(INFO);
-            } 
+            // ERROR CHECKING
+            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Cahn-Hillard solving", {
+                { "mu_chem",  mu_chem_(i, j, k) },
+                { "lap_mu_chem",  lap_mu_chem },
+                { "a",  a(i, j, k) },
+                { "Mob",  Mob },
+                { "eta_dot_CH",  eta_dot_CH }
+            }); // end check4nans
 
             // ------------------------------------------------------------
             // Vaporization
@@ -1276,14 +1181,14 @@ Hydro2::RHS(int lev,
                 */
 
                 // Mass fraction of vapor at surface
-                Set::Scalar Y_vs = rho0(i, j, k) * eta(i, j, k) / (rho0(i, j, k) + rho1(i, j, k));
+                Set::Scalar Y_vs = rho_eta0(i, j, k) / (rho0(i, j, k) + rho1(i, j, k));
 
                 // Spalding mass transfer number
                 Set::Scalar B_M = Bm(i, j, k);
                 //B_M = std::max(B_M, 0.0); // Only evaporation, no condensation in this formulation
 
                 // Gas density from fluid 0 (eta=1 corresponds to fluid 0)
-                Set::Scalar rho_g = rho0(i, j, k);
+                Set::Scalar rho_g = rho_eta0(i, j, k);
 
                 // Scaling density choice: using rho_eta = rho_g makes RHS independent of mixture density
                 // This is consistent with the document recommendation
@@ -1313,20 +1218,7 @@ Hydro2::RHS(int lev,
             // Total:
             Set::Vector Total_Force = Set::Vector(Fsv_vector(0) + Fw_vector(0),
                                                   Fsv_vector(1) + Fw_vector(1));
-            // DEBUG Tool
-            if ((Total_Force(0) != Total_Force(0))
-                or (Total_Force(1) != Total_Force(1)))
-            {
-                Util::ParallelMessage(INFO, "------------------------------------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Total Force:");
-                Util::ParallelMessage(INFO, "lev=", lev);
-                Util::ParallelMessage(INFO, "time=", time);
-                Util::ParallelMessage(INFO, "i=", i, "j=", j);
-                Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
-                Util::ParallelMessage(INFO, "Total_Force=", Total_Force(0), ", ", Total_Force(1));
-                Util::Abort(INFO);
-            }
-
+            
             Source(i, j, k, 0) = mdot0 + m_dot_Vap;
             Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0) + M_dot_Vap(0);
             Source(i, j, k, 2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1) + M_dot_Vap(1);
@@ -1336,23 +1228,17 @@ Hydro2::RHS(int lev,
             Source(i, j, k, 1) = Source(i, j, k, 1) - lagrange * u.dot(grad_eta) * grad_eta(0);
             Source(i, j, k, 2) = Source(i, j, k, 2) - lagrange * u.dot(grad_eta) * grad_eta(1);
 
-            // DEBUG Tool
-            if ((Source(i, j, k, 0) != Source(i, j, k, 0))
-                or (Source(i, j, k, 1) != Source(i, j, k, 1))
-                or (Source(i, j, k, 2) != Source(i, j, k, 2))
-                or (Source(i, j, k, 3) != Source(i, j, k, 3)) )
-            {
-                Util::ParallelMessage(INFO, "------------------------------------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN Hydro2(): Total Source:");
-                Util::ParallelMessage(INFO, "lev=", lev);
-                Util::ParallelMessage(INFO, "time=", time);
-                Util::ParallelMessage(INFO, "i=", i, "j=", j);
-                Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
-                Util::ParallelMessage(INFO, "Source_rho=", Source(i, j, k, 0) );
-                Util::ParallelMessage(INFO, "Source_M=", Source(i, j, k, 1), ", ", Source(i, j, k, 2));
-                Util::ParallelMessage(INFO, "Source_E=", Source(i, j, k, 3) );
-                Util::Abort(INFO);
-            }
+            // ------------------------------------------------------------
+            // Error Checking
+            // ------------------------------------------------------------
+            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Source solving", { 
+                { "Total_Force[0]",  Total_Force(0) },
+                { "Total_Force[1]",  Total_Force(1) },
+                { "Source[0]",  Source(i, j, k, 0) },
+                { "Source[1]",  Source(i, j, k, 1) },
+                { "Source[2]",  Source(i, j, k, 2) },
+                { "Source[3]",  Source(i, j, k, 3) }
+            }); // end check4nans
 
             // Riemann solver for mixed fluid
             const int X = 0, Y = 1;
@@ -1410,29 +1296,21 @@ Hydro2::RHS(int lev,
             // Calculate fluxes using the mixed fluid approach
             Solver::Local::FluidRiemann::Flux flux_xlo, flux_ylo, flux_xhi, flux_yhi;
             
-            if (rho(i, j, k) != rho(i, j, k) || M(i, j, k, 0) != M(i, j, k, 0) || E(i, j, k) != E(i, j, k) || gammaf(i, j, k) != gammaf(i, j, k) || press(i, j, k) != press(i, j, k))
-            {
-                Util::ParallelMessage(INFO, "-------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN CONSERVATIVE VARIABLES");
-                Util::ParallelMessage(INFO, "time=", time);
-                Util::ParallelMessage(INFO, "NaN detected at i=", i, " j=", j);
-                Util::ParallelMessage(INFO, "eta=", eta(i, j, k));
-                Util::ParallelMessage(INFO, "rho=", rho(i, j, k));
-                Util::ParallelMessage(INFO, "M=", M(i, j, k, 0), M(i, j, k, 1));
-                Util::ParallelMessage(INFO, "E=", E(i, j, k));
-                Util::ParallelMessage(INFO, "gamma=", gammaf(i, j, k));
-                Util::ParallelMessage(INFO, "press=", press(i, j, k));
-                Util::Abort(INFO);
-            }
+            // ------------------------------------------------------------
+            // Error Checking
+            // ------------------------------------------------------------
+            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Conservative Variable Check", { 
+                { "eta", eta(i, j, k) },
+                { "rho_eta0", rho_eta0(i, j, k) },
+                { "rho_eta1", rho_eta1(i, j, k) },
+                { "rho", rho(i, j, k) },
+                { "M[0]", M(i, j, k, 0) },
+                { "M[1]", M(i, j, k, 1) },
+                { "E", E(i, j, k) },
+                { "gammaf", gammaf(i, j, k) },
+                { "press", press(i, j, k) },
+            }); // end check4nans
 
-            if (rho(i - 1, j, k) != rho(i - 1, j, k) || rho(i + 1, j, k) != rho(i + 1, j, k) || rho(i, j - 1, k) != rho(i, j - 1, k) || rho(i, j + 1, k) != rho(i, j + 1, k))
-            {
-                Util::ParallelMessage(INFO, "-------------------------------");
-                Util::ParallelMessage(INFO, "ERROR WITH GHOST CELLS");
-                Util::ParallelMessage(INFO, "time=", time);
-                Util::ParallelMessage(INFO, "NaN in neighbor at i=", i, " j=", j);
-                Util::Abort(INFO);
-            }
 
             try
             {
@@ -1534,8 +1412,10 @@ Hydro2::RHS(int lev,
             }
             */
 
-            // ERROR CHECKING
-            if ( (M_rhs(i, j, k, 0) != M_rhs(i, j, k, 0))
+           // ------------------------------------------------------------
+           // Error Checking
+           // ------------------------------------------------------------
+           if ( (M_rhs(i, j, k, 0) != M_rhs(i, j, k, 0))
                 or (M_rhs(i, j, k, 1) != M_rhs(i, j, k, 1))
                 or (E_rhs(i, j, k) != E_rhs(i, j, k))
                 or (rho_eta0_rhs(i, j, k) != rho_eta0_rhs(i, j, k))
@@ -1686,22 +1566,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // ------------------------------------------------------------
             // Error Checking
             // ------------------------------------------------------------
-            if ((eta_new(i, j, k) != eta_new(i, j, k))
-                or (rho_eta0(i, j, k) != rho_eta0(i, j, k))
-                or (rho_eta1(i, j, k) != rho_eta1(i, j, k))
-                or (rho(i, j, k) != rho(i, j, k)))
-            {
-                Util::ParallelMessage(INFO, "-------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN HYDRO2");
-                Util::ParallelMessage(INFO, "time=", time);
-                Util::ParallelMessage(INFO, "lev=", lev);
-                Util::ParallelMessage(INFO, "i=", i, ", j=", j);
-                Util::ParallelMessage(INFO, "eta_new=", eta_new(i, j, k));
-                Util::ParallelMessage(INFO, "rho0=", rho_eta0(i, j, k));
-                Util::ParallelMessage(INFO, "rho1=", rho_eta1(i, j, k));
-                Util::ParallelMessage(INFO, "rho=", rho(i, j, k));
-                Util::Abort(INFO);
-            }
+            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::Advance(): Conservative Variable Check", { 
+                { "eta_new", eta_new(i, j, k) },
+                { "rho_eta0", rho_eta0(i, j, k) },
+                { "rho_eta1", rho_eta1(i, j, k) },
+                { "rho", rho(i, j, k) }
+            }); // end check4nans
+
         });
     }
 
@@ -1829,64 +1700,34 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // ------------------------------------------------------------
             // Error Checking
             // ------------------------------------------------------------
-            if (   (eta_new(i, j, k) != eta_new(i, j, k))
-                or (rho_eta0(i, j, k) != rho_eta0(i, j, k))
-                or (rho_eta1(i, j, k) != rho_eta1(i, j, k))
-                or (rho(i, j, k) != rho(i, j, k))
-                or (gammaf(i, j, k) != gammaf(i, j, k))
-                or (etadot(i, j, k) != etadot(i, j, k))
-                or (v(i, j, k, 0) != v(i, j, k, 0))
-                or (v(i, j, k, 1) != v(i, j, k, 1))
-                or (KE_vol(i, j, k) != KE_vol(i, j, k))
-                or (KE_mas(i, j, k) != KE_mas(i, j, k))
-                or (UE_vol(i, j, k) != UE_vol(i, j, k))
-                or (E_mas(i, j, k) != E_mas(i, j, k))
-                or (UE_mas(i, j, k) != UE_mas(i, j, k))
-                or (p0_eff(i, j, k) != p0_eff(i, j, k))
-                or (press(i, j, k) != press(i, j, k))
-                or (mu_chem_(i, j, k) != mu_chem_(i, j, k))
-                or (Bm(i, j, k) != Bm(i, j, k))
-                or (a(i, j, k) != a(i, j, k))
-                or (a(i, j, k) != a(i, j, k))
-                or (Ma(i, j, k, 0) != Ma(i, j, k, 0))
-                or (Ma(i, j, k, 1) != Ma(i, j, k, 1))
-                or (grad_eta_(i, j, k, 0) != grad_eta_(i, j, k, 0))
-                or (grad_eta_(i, j, k, 1) != grad_eta_(i, j, k, 1))
-                or (n_hat_(i, j, k, 0) != n_hat_(i, j, k, 0))
-                or (n_hat_(i, j, k, 1) != n_hat_(i, j, k, 1))
-               )
-            {
-                Util::ParallelMessage(INFO, "-------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN HYDRO2");
-                Util::ParallelMessage(INFO, "time=", time);
-                Util::ParallelMessage(INFO, "lev=", lev);
-                Util::ParallelMessage(INFO, "i=", i, ", j=", j);
-                Util::ParallelMessage(INFO, "eta_new=", eta_new(i, j, k));
-                Util::ParallelMessage(INFO, "rho0=", rho_eta0(i, j, k));
-                Util::ParallelMessage(INFO, "rho1=", rho_eta1(i, j, k));
-                Util::ParallelMessage(INFO, "rho=", rho(i, j, k));
-                Util::ParallelMessage(INFO, "gammaf=", gammaf(i, j, k));
-                Util::ParallelMessage(INFO, "etadot=", etadot(i, j, k));
-                Util::ParallelMessage(INFO, "v_x=", v(i, j, k, 0));
-                Util::ParallelMessage(INFO, "v_y=", v(i, j, k, 1));
-                Util::ParallelMessage(INFO, "KE_vol=", KE_vol(i, j, k));
-                Util::ParallelMessage(INFO, "KE_mas=", KE_mas(i, j, k));
-                Util::ParallelMessage(INFO, "UE_vol=", UE_vol(i, j, k));
-                Util::ParallelMessage(INFO, "E_mas=", E_mas(i, j, k));
-                Util::ParallelMessage(INFO, "UE_mas=", UE_mas(i, j, k));
-                Util::ParallelMessage(INFO, "p0_eff=", p0_eff(i, j, k));
-                Util::ParallelMessage(INFO, "press=", press(i, j, k));
-                Util::ParallelMessage(INFO, "mu_chem_=", mu_chem_(i, j, k));
-                Util::ParallelMessage(INFO, "Bm=", Bm(i, j, k));
-                Util::ParallelMessage(INFO, "a=", a(i, j, k));
-                Util::ParallelMessage(INFO, "Ma_x=", Ma(i, j, k, 0));
-                Util::ParallelMessage(INFO, "Ma_y=", Ma(i, j, k, 1));
-                Util::ParallelMessage(INFO, "grad_eta_x=", grad_eta_(i, j, k, 0));
-                Util::ParallelMessage(INFO, "grad_eta_y=", grad_eta_(i, j, k, 1));
-                Util::ParallelMessage(INFO, "n_hat_x=", n_hat_(i, j, k, 0));
-                Util::ParallelMessage(INFO, "n_hat_y=", n_hat_(i, j, k, 1));
-                Util::Abort(INFO);
-            }
+            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::Advance(): Visualization", { 
+                { "eta_new", eta_new(i, j, k) },
+                { "rho_eta0", rho_eta0(i, j, k) },
+                { "rho_eta1", rho_eta1(i, j, k) },
+                { "gammaf", gammaf(i, j, k) },
+                { "etadot", etadot(i, j, k) },
+                { "M[0]", M(i, j, k, 0) },
+                { "M[1]", M(i, j, k, 1) },
+                { "v[0]", v(i, j, k, 0) },
+                { "v[1]", v(i, j, k, 1) },
+                { "KE_vol", KE_vol(i, j, k) },
+                { "KE_mas", KE_mas(i, j, k) },
+                { "UE_vol", UE_vol(i, j, k) },
+                { "UE_mas", UE_mas(i, j, k) },
+                { "E_vol", E_vol(i, j, k) },
+                { "E_mas", E_mas(i, j, k) },
+                { "p0_eff", p0_eff(i, j, k) },
+                { "press", press(i, j, k) },
+                { "mu_chem_", mu_chem_(i, j, k) },
+                { "Bm", Bm(i, j, k) },
+                { "a", a(i, j, k) },
+                { "Ma[0]", Ma(i, j, k, 0) },
+                { "Ma[1]", Ma(i, j, k, 1) },
+                { "grad_eta_[0]", grad_eta_(i, j, k, 0) },
+                { "grad_eta_[1]", grad_eta_(i, j, k, 1) },
+                { "n_hat_[0]", n_hat_(i, j, k, 0) },
+                { "n_hat_[1]", n_hat_(i, j, k, 1) }
+            }); // end check4nans
 
 
 
@@ -2068,7 +1909,43 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
 
 }
 
+
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////// ERROR CHECKING ////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+void Hydro2::check4nans(int time, int lev, int i, int j, int k, const std::string &message, std::initializer_list<std::pair<std::string, double> > vars)
+{
+    bool hasNaN = false;
+    for (const auto &[name, value] : vars)
+    {
+        if (value != value)
+        { // NaN check
+            hasNaN = true;
+            break;
+        }
+    }
+
+    if (hasNaN)
+    {
+        Util::ParallelMessage(INFO, "-------------------------------");
+        Util::ParallelMessage(INFO, message);
+        Util::ParallelMessage(INFO, "time=", time);
+        Util::ParallelMessage(INFO, "lev=", lev);
+        Util::ParallelMessage(INFO, "i=", i, ", j=", j, ", k=", k);
+
+        for (const auto &[name, value] : vars)
+        {
+            Util::ParallelMessage(INFO, name, "=", value);
+        }
+
+        Util::Abort(INFO);
+    }
 }
 
+}
 
 //#endif
