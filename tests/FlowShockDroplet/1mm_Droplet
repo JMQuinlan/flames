@@ -10,16 +10,17 @@ alamo.program = hydro2
 ### OUTPUT ###
 #plot_file = ./tests/FlowShockDroplet/output_Shock1mmDroplet
 # plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet
-plot_file = /mmfs1/home/jquinlan/runs/temp4/output_kappa_method3
+# plot_file = /mmfs1/home/jquinlan/runs/temp4/output_kappa_method3
+plot_file = ./tests/FlowShockDroplet/output_amr_0
 
 ### MESHING ###
 amr.plot_dt = 0.25e-6
-#amr.plot_int = 1
+amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
-amr.regrid_int = 10
+amr.regrid_int = 1
 amr.grid_eff = 0.8
-amr.max_level = 4
+amr.max_level = 0
 amr.n_cell = 64 32  # Maintains aspect ratio for 0.02m � 0.01m domain
 
 ### TIME STEPPING ###
@@ -40,7 +41,8 @@ geometry.is_periodic = 0 0 0
  
 ### TIME STEP ###
 # stop_time = 0.0002  # Shorter time for shock interaction
-stop_time = 1.0e-5  # Shorter time for shock interaction
+#stop_time = 1.0e-5  # Shorter time for shock interaction
+stop_time = 1.0e-11  # Shorter time for shock interaction
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
