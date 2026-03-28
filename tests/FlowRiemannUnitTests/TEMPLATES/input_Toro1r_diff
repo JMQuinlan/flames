@@ -1,0 +1,112 @@
+#@ [case1]
+#@ exe=hydro2
+#@ dim=2
+
+### OUTPUT ###
+plot_file = OUTPUT_PATH
+Riemann_Solver.type = SOLVER_NAME
+
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = EPSILON
+eta.ic.expression.region0 = "1.0 - (0.5 * (1.0 + tanh(x / epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+amr.plot_int = 100
+
+### MESHING ###
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.grid_eff = 0.8
+amr.n_cell = 800 4
+
+### DIMENSIONS ###
+geometry.prob_lo = -1.0  -0.02   0.0 # [ m ]
+geometry.prob_hi =  1.0   0.02   0.0 # [ m ]
+geometry.is_periodic = 0 0 0
+
+### TIME STEP ###
+timestep  = 4.0e-4
+stop_time = 0.25
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+### HYDRO PARAM ###
+gamma0 = 1.4
+gamma1 = 1.4
+cfl   = 0.4
+mu0   = 0.0
+mu1   = 0.0
+p0_0  = 0.0
+p0_1  = 0.0
+
+### Surface tension coefficient ###
+sigma = 1000
+
+### Reference pressure ###
+pref = 0.0
+
+### IC State - Fluid 0 (Left side, x < 0) ###
+density0.ic.type = expression
+density0.ic.expression.constant.rho_L = 0.125
+density0.ic.expression.region0 = "rho_L"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_L = "0.1"
+pressure0.ic.expression.region0 = "p_L"
+
+cp0 = "1.4"
+cv0 = "1.0"
+
+### IC State - Fluid 1 (Right side, x > 0) ###
+density1.ic.type = expression
+density1.ic.expression.constant.rho_R = 1.0
+density1.ic.expression.region0 = "rho_R"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_R = "1.0"
+pressure1.ic.expression.region0 = "p_R"
+
+cp1 = "1.4"
+cv1 = "1.0"
+
+### ETA BC  ###
+pf.eta.bc.type.xlo = neumann
+pf.eta.bc.type.xhi = neumann
+pf.eta.bc.type.ylo = neumann
+pf.eta.bc.type.yhi = neumann
+
+### HYDRO BC ###
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### HYDRO REFINEMENT CRITERIA ###
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+Spec_Vol = 1
