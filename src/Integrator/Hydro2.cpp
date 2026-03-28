@@ -1904,7 +1904,19 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
 
 }
 
-
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////// INTERFACE COMPRESSION ////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+void Hydro2::InterfaceCompression() {
+    // No clue what to add yet but here is the psuedo code:
+    // https://www.sciencedirect.com/science/article/pii/S0021999114005270?ref=pdf_download&fr=RR-2&rr=9e30cc4b6b1ae74f
+    // For each phase
+    //  Calculate map function : psi = epsilon * ln(eta / (1.0 - eta) )                                             EQN 6
+    //  Calculate map funciton derivative : grad_psi = grad_eta * epsilon / std::max(eta * (1.0 - eta), small)      EQN 7
+    //  Calculate mass fraction flux 0: d(rho_0*eta_0)/d(tau'_2) = (eta*(1.0-eta)^2) * (|grad_eta|^2 * lap(rho_eta0) - (lap_eta + (1.0-2.0*eta)/epsilion * |grad_eta|^2)*(grad_eta *dot* grad_rho_eta0 )    EQN 15
+    //  Calculate mass fraction flux 1: ^^^ Similar to above exept use 1.0-eta && rho_eta1
+    //  Itrate thru interface thicknes til delta(tau'_2) le gh^2/5 and |kappa| + |(1.0 - 2.0*eta)| / epsilon le sqrt(2)/h   EQN 21 & 22
+}
 
 
 
@@ -1912,6 +1924,14 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////// ERROR CHECKING ////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
+// Inputs:
+//      time : integer of timestep
+//      lev  : level integer
+//      i, j, k : Cell posistions
+//      msg  : string message to display. Use this to denote which section of the code the funciton is being called.
+//      { "name",name(i,j,k) } : Format Name Value Pair. Duplicate this pair for all values to check. Name shows the output when it fails, value is the actual value.
+// Outputs:
+//      Will display an error message showing ALL variables with the user defined message to which part of the code failed.
 void Hydro2::check4nans(int time, int lev, int i, int j, int k, const std::string &message, std::initializer_list<std::pair<std::string, double> > vars)
 {
     bool hasNaN = false;
