@@ -72,7 +72,7 @@ for test in "${TESTS[@]}"; do
     echo "=== Running $test | $solver_label | SHARP ==="
 
     INPUT_FILE="tmp_${test}_${solver}_sharp.in"
-    OUTPUT_PATH="${OUTDIR}/output_${test}_${solver_label}_Sharp"
+    OUTPUT_PATH="${OUTDIR}/output_${test}_${solver_label}_Sharp_Interface"
 
     sed -e "s|SOLVER_NAME|$solver|g" \
         -e "s|OUTPUT_PATH|$OUTPUT_PATH|g" \
@@ -88,7 +88,7 @@ for test in "${TESTS[@]}"; do
       echo "=== Running $test | $solver_label | DIFFUSE | eps=$eps ==="
 
       INPUT_FILE="tmp_${test}_${solver}_diff_eps${eps}.in"
-      OUTPUT_PATH="${OUTDIR}/output_${test}_${solver_label}_Diffuse_eps${eps}"
+      OUTPUT_PATH="${OUTDIR}/output_${test}_${solver_label}_epsilon_${eps}"
 
       sed -e "s|SOLVER_NAME|$solver|g" \
           -e "s|OUTPUT_PATH|$OUTPUT_PATH|g" \
