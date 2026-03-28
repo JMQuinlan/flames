@@ -92,7 +92,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("cv0", value.cv0, 0.0);        // Constant Volume Specific Heat [J/kg]
         // pp_query_required("R0", value.R0);              // Specific Gas Constant
         // pp_query_required("MW0", value.MW0);            // Molecular Weight
-        
+
         // FLUID 1
         pp_query_required("gamma1", value.gamma1);      // gamma for gamma law
         pp_query_default("p0_1", value.p0_1, 0.0);      // p0 for Tammann EOS
@@ -111,7 +111,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // CURVATURE
         pp_query_default("kappa_method", value.kappa_method, 2); // Method to solve for curvature
-        
+
         // Boundry Conditions
         value.density_bc = new BC::Expression(1, pp, "density.bc");
         value.energy_bc = new BC::Constant(1, pp, "energy.bc");
@@ -141,7 +141,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         value.RegisterNewFab(value.momentum0_mf,    value.momentum_bc,  2, nghost, "momentum0", false, false, { "x", "y" });
         value.RegisterNewFab(value.momentum0_old_mf,value.momentum_bc,  2, nghost, "momentum0_old", false, false);
- 
+
         //value.RegisterNewFab(value.T0_mf,           value.temperature_bc, 1, nghost, "T0", false, false);
         //value.RegisterNewFab(value.k0_thermal_mf,   &value.bc_nothing, 1, nghost, "k0_thermal", false, false);
         //value.RegisterNewFab(value.h0_thermal_mf,   &value.bc_nothing, 1, nghost, "h0_thermal", false, false);
@@ -175,9 +175,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.density_mf,      value.density_bc,   1, nghost, "density", true, true);
         value.RegisterNewFab(value.density_old_mf,  value.density_bc,   1, nghost, "density_old", false, true);
         value.RegisterNewFab(value.energy_per_vol_mf,       value.energy_bc,    1, nghost, "energy_per_vol", true, true);
-        value.RegisterNewFab(value.energy_per_mas_mf,       value.energy_bc,    1, nghost, "energy_per_mass", true, true);
+        value.RegisterNewFab(value.energy_per_mass_mf,       value.energy_bc,    1, nghost, "energy_per_mass", true, true);
         value.RegisterNewFab(value.energy_per_vol_old_mf,   value.energy_bc,    1, nghost, "energy_vol_old", false, true);
-        value.RegisterNewFab(value.energy_per_mas_old_mf,   value.energy_bc,    1, nghost, "energy_mas_old", false, true);
+        value.RegisterNewFab(value.energy_per_mass_old_mf,   value.energy_bc,    1, nghost, "energy_mass_old", false, true);
         value.RegisterNewFab(value.momentum_mf,     value.momentum_bc,  2, nghost, "momentum", true, true, { "x", "y" });
         value.RegisterNewFab(value.momentum_old_mf, value.momentum_bc,  2, nghost, "momentum_old", false, true, { "x", "y" });
 
@@ -195,14 +195,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //value.RegisterNewFab(value.k_thermal_mf,    &value.bc_nothing,  1, nghost, "k_thermal", false, true);         // Thermal Conductivity
         //value.RegisterNewFab(value.h_thermal_mf,    &value.bc_nothing,  1, nghost, "h_thermal", false, true);         // Thermal Convectivity
         value.RegisterNewFab(value.gamma_mf,        value.energy_bc, 1, nghost, "gamma", true, false);                 // Specific Heat Ratio
-        value.RegisterNewFab(value.p0_mf,           value.energy_bc, 1, nghost, "p0", true, true);                    // Tamman Pressure
+        value.RegisterNewFab(value.Tamann_p_0_mf,   value.energy_bc, 1, nghost, "Tamann_p_0", true, true);                    // Tamman Pressure
         value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc, 1, nghost, "mu_chem", true, false);               // Chemical Potential
         value.RegisterNewFab(value.a_mf,            &value.bc_nothing,  1, nghost, "a", true, false);                    // Speed of sound
         value.RegisterNewFab(value.Ma_mf,           &value.bc_nothing,  2, nghost, "Ma", true, false, { "x", "y" });   // Mach
         value.RegisterNewFab(value.UE_per_vol_mf,   &value.bc_nothing,  1, nghost, "UE_per_vol", true, false);         // Internal Energy (per unit volume)
-        value.RegisterNewFab(value.UE_per_mas_mf,   &value.bc_nothing,  1, nghost, "UE_per_mass", true, false);        // Internal Energy (per unit mass)
+        value.RegisterNewFab(value.UE_per_mass_mf,   &value.bc_nothing,  1, nghost, "UE_per_mass", true, false);        // Internal Energy (per unit mass)
         value.RegisterNewFab(value.KE_per_vol_mf,   &value.bc_nothing,  1, nghost, "KE_per_vol", true, false);         // Kinetic Energy (per unit volume)
-        value.RegisterNewFab(value.KE_per_mas_mf,   &value.bc_nothing,  1, nghost, "KE_per_mass", true, false);        // Kinetic Energy (per unit mass)
+        value.RegisterNewFab(value.KE_per_mass_mf,   &value.bc_nothing,  1, nghost, "KE_per_mass", true, false);        // Kinetic Energy (per unit mass)
         value.RegisterNewFab(value.Bm_mf,           &value.bc_nothing,  1, nghost, "Spadling_Number", true, false);    // Spalding Number
         value.RegisterNewFab(value.Y_mf,            &value.bc_nothing,  1, nghost, "Mass_Fraction", true, false);       // Mass Fraction
 
@@ -215,7 +215,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.gradmag_mf,             &value.bc_nothing,  1, nghost, "gradmag", true, false);
         value.RegisterNewFab(value.eta_x_mf,               &value.bc_nothing,  1, nghost, "eta_x", true, false);
         value.RegisterNewFab(value.eta_y_mf,               &value.bc_nothing,  1, nghost, "eta_y", true, false);
-        
+
         // EXTRAS & DEBUGGING
         value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", false, false, { "x", "y" });
         value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, nghost, "kappa", true, false, { "Avg", "1", "2" }); // To Surface curvature
@@ -233,7 +233,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.Vap_dot_mf, &value.bc_nothing, 5, nghost, "Vap_dot", true, false, { "_eta", "_rho", "_Mx", "_My", "_E" }); // Momentum Flux
 
 
-        
+
     }
 
     // INITIAL CONDITIONS
@@ -257,13 +257,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     //pp.select_default<IC::Constant, IC::Expression>("h1_thermal.ic",    value.h1_thermal_ic, value.geom);
 
     // DIFFUSE BOUNDARY SOURCES
-    // diffuse boundary prescribed mass flux 
+    // diffuse boundary prescribed mass flux
     pp.select_default<IC::Constant,IC::Expression>("m0.ic",value.ic_m0,value.geom);
     // diffuse boundary prescribed velocity
     pp.select_default<IC::Constant,IC::Expression>("u0.ic",value.ic_u0,value.geom);
-    // diffuse boundary prescribed heat flux 
+    // diffuse boundary prescribed heat flux
     pp.select_default<IC::Constant,IC::Expression>("q.ic",value.ic_q,value.geom);
-    
+
 
     // SOLVERS
     // Riemann solver
@@ -364,9 +364,9 @@ void Hydro2::Initialize(int lev)
     // NATURAL SOURCE
     Source_mf[lev]  ->setVal(0.0);
     Fsv_mf[lev]     ->setVal(0.0);
-    Fw_mf[lev]      ->setVal(0.0); 
+    Fw_mf[lev]      ->setVal(0.0);
     Ldot_mf[lev]    ->setVal(0.0);
-    Vap_dot_mf[lev] ->setVal(0.0); 
+    Vap_dot_mf[lev] ->setVal(0.0);
 
     // BOUNDRY CURVATURE AND THINGS
     kappas_mf[lev]  ->setVal(0.0);
@@ -377,9 +377,9 @@ void Hydro2::Initialize(int lev)
     a_mf[lev]           ->setVal(0.0);
     Ma_mf[lev]          ->setVal(0.0);
     UE_per_vol_mf[lev]  ->setVal(0.0);
-    UE_per_mas_mf[lev]  ->setVal(0.0);
+    UE_per_mass_mf[lev] ->setVal(0.0);
     KE_per_vol_mf[lev]  ->setVal(0.0);
-    KE_per_mas_mf[lev]  ->setVal(0.0);
+    KE_per_mass_mf[lev] ->setVal(0.0);
 
     Util::ParallelMessage(INFO, "Finished initialization, begginning time iteration");
 }
@@ -424,13 +424,13 @@ void Hydro2::Mix(int lev)
         auto E_vol    = energy_per_vol_mf[lev]->array(mfi);
         auto E_vol_old= energy_per_vol_old_mf[lev]->array(mfi);
 
-        auto E_mas    = energy_per_mas_mf[lev]->array(mfi);
-        auto E_mas_old= energy_per_mas_old_mf[lev]->array(mfi);
+        auto E_mass    = energy_per_mass_mf[lev]->array(mfi);
+        auto E_mass_old= energy_per_mass_old_mf[lev]->array(mfi);
 
-        auto press    = pressure_mf[lev]->array(mfi);
+        auto p_mix    = pressure_mf[lev]->array(mfi);
         auto v_mix    = velocity_mf[lev]->array(mfi);
-        auto gammaf   = gamma_mf[lev]->array(mfi);
-        auto p0eff    = p0_mf[lev]->array(mfi);
+        auto gamma_mix      = gamma_mf[lev]->array(mfi);
+        auto Tamann_p_0_mix  = Tamann_p_0_mf[lev]->array(mfi);
         auto T_arr    = T_mf[lev]->array(mfi);
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i,int j,int k)
@@ -478,8 +478,8 @@ void Hydro2::Mix(int lev)
             E_vol_old(i,j,k)  = Ev_mix;
 
             Real Emas = Ev_mix/rho_mix;
-            E_mas(i,j,k)      = Emas;
-            E_mas_old(i,j,k)  = Emas;
+            E_mass(i,j,k)      = Emas;
+            E_mass_old(i,j,k)  = Emas;
 
             //------------------------------------------------------------------
             // EOS mixture
@@ -489,19 +489,19 @@ void Hydro2::Mix(int lev)
                    + ((1.0-e) * gamma1 * p0_1)/(gamma1-1.0);
 
             Real gam = 1.0 + 1.0/A;
-            gammaf(i,j,k) = gam;
+            gamma_mix(i,j,k) = gam;
 
-            Real p0eff_local = (B/A)/gam;
-            p0eff(i,j,k) = p0eff_local;
+            Real Tamann_p_0_mix_local = (B/A)/gam;
+            Tamann_p_0_mix(i,j,k) = Tamann_p_0_mix_local;
 
-            Real p = (gam-1.0)*UEv - gam*p0eff_local + pref;
-            if (p < 0) p = 1e-10;
-            press(i,j,k) = p;
+            Real p_local = (gam-1.0)*UEv - gam*Tamann_p_0_mix_local + pref;
+            if (p_local < 0) p_local = 1e-6;
+            p_mix(i,j,k) = p_local;
 
             // T_arr(i,j,k) =
-            //     (p + p0eff_local)/(rho_mix*cv_arr(i,j,k)*(gam-1.0) + 1e-14);
+            //     (p + Tamann_p_0_mix_local)/(rho_mix*cv_arr(i,j,k)*(gam-1.0) + 1e-14);
             T_arr(i,j,k) =
-                (p + p0eff_local)/(rho_mix*cv0*(gam-1.0) + 1e-14);
+                (p_local + Tamann_p_0_mix_local)/(rho_mix*cv0*(gam-1.0) + 1e-14);
         });
     }
 
@@ -511,11 +511,11 @@ void Hydro2::Mix(int lev)
     density_mf[lev]->FillBoundary(geom.periodicity());
     momentum_mf[lev]->FillBoundary(geom.periodicity());
     energy_per_vol_mf[lev]->FillBoundary(geom.periodicity());
-    energy_per_mas_mf[lev]->FillBoundary(geom.periodicity());
+    energy_per_mass_mf[lev]->FillBoundary(geom.periodicity());
     velocity_mf[lev]->FillBoundary(geom.periodicity());
     pressure_mf[lev]->FillBoundary(geom.periodicity());
     gamma_mf[lev]->FillBoundary(geom.periodicity());
-    p0_mf[lev]->FillBoundary(geom.periodicity());
+    Tamann_p_0_mf[lev]->FillBoundary(geom.periodicity());
     T_mf[lev]->FillBoundary(geom.periodicity());
 }
 
@@ -535,7 +535,7 @@ void Hydro2::TimeStepComplete(Set::Scalar time, int lev)
     if (dynamictimestep.on)
     {
         Integrator::DynamicTimestep_Update();
-    }    
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -563,15 +563,15 @@ void Hydro2::SurfaceTension(Set::Scalar time, int lev)
 ///////////////////////////////////////////////// RHS /////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 void
-Hydro2::RHS(int lev, 
-            Set::Scalar time, 
-            amrex::MultiFab &eta_rhs_mf, 
-            amrex::MultiFab &rho_rhs_mf, 
-            amrex::MultiFab &M_rhs_mf, 
-            amrex::MultiFab &E_rhs_mf, 
+Hydro2::RHS(int lev,
+            Set::Scalar time,
+            amrex::MultiFab &eta_rhs_mf,
+            amrex::MultiFab &rho_rhs_mf,
+            amrex::MultiFab &M_rhs_mf,
+            amrex::MultiFab &E_rhs_mf,
             const amrex::MultiFab &eta_mf_in,
             const amrex::MultiFab &rho_mf_in,
-            const amrex::MultiFab &M_mf_in, 
+            const amrex::MultiFab &M_mf_in,
             const amrex::MultiFab &E_mf_in)
 {
     BL_PROFILE("Hydro2::RHS");
@@ -601,7 +601,7 @@ Hydro2::RHS(int lev,
 
         // PRIMITIVE/OUTPUT
         auto v_arr     = velocity_mf[lev]->array(mfi);
-        auto press_arr = pressure_mf[lev]->array(mfi);
+        auto p_arr = pressure_mf[lev]->array(mfi);
         auto a_arr     = a_mf[lev]->array(mfi);
 
         auto KE_arr    = KE_per_vol_mf[lev]->array(mfi);
@@ -611,8 +611,8 @@ Hydro2::RHS(int lev,
         auto cv_arr    = cv_mf[lev]->array(mfi);
         auto T_arr     = T_mf[lev]->array(mfi);
 
-        auto gamma_arr = gamma_mf[lev]->array(mfi);
-        auto p0_arr    = p0_mf[lev]->array(mfi);
+        auto gamma_arr      = gamma_mf[lev]->array(mfi);
+        auto Tamann_p_0_mix     = Tamann_p_0_mf[lev]->array(mfi);
 
         auto mu_arr    = mu_chem_mf[lev]->array(mfi);
         auto Bm_arr    = Bm_mf[lev]->array(mfi);
@@ -662,23 +662,23 @@ Hydro2::RHS(int lev,
             gamma_arr(i,j,k) = gamma_eff;
 
             // Tammann pressure offset
-            Real p0_eff = (B/A)/gamma_eff;
-            p0_arr(i,j,k) = p0_eff;
+            Real Tamann_p_0_eff = (B/A)/gamma_eff;
+            Tamann_p_0_mix  (i,j,k) = Tamann_p_0_eff;
 
             // Pressure
-            Real press = (gamma_eff - 1.0)*UE - gamma_eff*p0_eff + pref;
-            if (press < 0.0) press = 1e-10;
-            press_arr(i,j,k) = press;
+            Real p_mix = (gamma_eff - 1.0)*UE - gamma_eff*Tamann_p_0_eff + pref;
+            if (p_mix < 0.0) p_mix = 1e-6;
+            p_arr(i,j,k) = p_mix;
 
             // Specific heats
             cp_arr(i,j,k) = eta*cp0 + (1.0 - eta)*cp1;
             cv_arr(i,j,k) = eta*cv0 + (1.0 - eta)*cv1;
 
             // Temperature
-            T_arr(i,j,k) = (press + p0_eff) / (rho * cv_arr(i,j,k) * (gamma_eff - 1.0) + 1e-14);
+            T_arr(i,j,k) = (p_mix +Tamann_p_0_eff) / (rho * cv_arr(i,j,k) * (gamma_eff - 1.0) + 1e-14);
 
             // Speed of sound
-            a_arr(i,j,k) = std::sqrt(gamma_eff * (press + p0_eff) / rho);
+            a_arr(i,j,k) = std::sqrt(gamma_eff * (p_mix + Tamann_p_0_eff) / rho);
 
             //------------------------------------------------------------------
             // Chemical potential + mass fraction
@@ -710,11 +710,11 @@ Hydro2::RHS(int lev,
 
         // Primitive arrays
         auto v_arr     = velocity_mf[lev]->array(mfi);
-        auto press_arr = pressure_mf[lev]->array(mfi);
+        auto p_arr = pressure_mf[lev]->array(mfi);
         auto a_arr     = a_mf[lev]->array(mfi);
 
         auto gamma_arr = gamma_mf[lev]->array(mfi);
-        auto p0_arr    = p0_mf[lev]->array(mfi);
+        auto Tamann_p_0_mix      = Tamann_p_0_mf[lev]->array(mfi);
         auto T_arr     = T_mf[lev]->array(mfi);
 
         // Output
@@ -748,32 +748,32 @@ Hydro2::RHS(int lev,
 
             FR::State Sxm = FR::State(
                 rho_arr, M_arr, E_arr,
-                gamma_arr, p0_arr, T_arr,
+                gamma_arr, Tamann_p_0_mix  , T_arr,
                 il, j, k, 0);    // x-direction
 
             FR::State Sxc = FR::State(
                 rho_arr, M_arr, E_arr,
-                gamma_arr, p0_arr, T_arr,
+                gamma_arr, Tamann_p_0_mix  , T_arr,
                 i, j, k, 0);
 
             FR::State Sxp = FR::State(
                 rho_arr, M_arr, E_arr,
-                gamma_arr, p0_arr, T_arr,
+                gamma_arr, Tamann_p_0_mix  , T_arr,
                 ir, j, k, 0);
 
             FR::State Sym = FR::State(
                 rho_arr, M_arr, E_arr,
-                gamma_arr, p0_arr, T_arr,
+                gamma_arr, Tamann_p_0_mix  , T_arr,
                 i, jl, k, 1);   // y-direction
 
             FR::State Syc = FR::State(
                 rho_arr, M_arr, E_arr,
-                gamma_arr, p0_arr, T_arr,
+                gamma_arr, Tamann_p_0_mix  , T_arr,
                 i, j, k, 1);
 
             FR::State Syp = FR::State(
                 rho_arr, M_arr, E_arr,
-                gamma_arr, p0_arr, T_arr,
+                gamma_arr, Tamann_p_0_mix  , T_arr,
                 i, jr, k, 1);
 
             //------------------------------------------------------------------
@@ -1193,6 +1193,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
     const Geometry& geom = this->geom[lev];
     const Real* DX = geom.CellSize();
+    const Box& domain = geom.Domain();
 
     // // check MF are defined correctly
     // amrex::Print() << "CHECK MF CONSISTENCY:\n";
@@ -1232,12 +1233,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // std::swap(momentum_old_mf[lev],     momentum_mf[lev]);
     // std::swap(energy_per_vol_old_mf[lev], energy_per_vol_mf[lev]);
     // std::swap(energy_per_mas_old_mf[lev], energy_per_mas_mf[lev]);
-    // actually copy instead of swap  
+    // actually copy instead of swap
     eta_old_mf[lev]->ParallelCopy(*eta_mf[lev]);
     density_old_mf[lev]->ParallelCopy(*density_mf[lev]);
     momentum_old_mf[lev]->ParallelCopy(*momentum_mf[lev]);
     energy_per_vol_old_mf[lev]->ParallelCopy(*energy_per_vol_mf[lev]);
-    energy_per_mas_old_mf[lev]->ParallelCopy(*energy_per_mas_mf[lev]);
+    energy_per_mass_old_mf[lev]->ParallelCopy(*energy_per_mass_mf[lev]);
 
     //==============================================================
     // 2. Build *fresh*, fully allocated MultiFabs for TimeIntegrator
@@ -1370,7 +1371,265 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     F_max   = 0.0;
     rho_min = 1e10;
 
-    // (KEEP your final diagnostic block as is—it was correct)
+    for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
+
+        // Eta
+        auto eta        = eta_mf[lev]->array(mfi);
+        auto eta_old    = eta_old_mf[lev]->const_array(mfi);
+        auto etadot     = etadot_mf[lev]->array(mfi);
+        auto grad_eta   = grad_eta_mf[lev]->const_array(mfi);
+        auto n_hat      = n_hat_mf[lev]->const_array(mfi);
+        auto kappas     = kappas_mf[lev]->const_array(mfi);
+        auto grad_mag_grad_eta  = grad_mag_grad_eta_mf[lev]->const_array(mfi);
+
+        // Set::Patch<Set::Scalar> eta_new = eta_mf.Patch(lev, mfi);
+        // Set::Patch<const Set::Scalar> eta = eta_old_mf.Patch(lev, mfi);
+        // Set::Patch<Set::Scalar> etadot = etadot_mf.Patch(lev, mfi);
+        // Set::Patch<Set::Scalar> grad_eta_ = grad_eta_mf.Patch(lev, mfi);
+        // Set::Patch<Set::Scalar> n_hat_ = n_hat_mf.Patch(lev, mfi);
+        // Set::Patch<Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
+        // Set::Patch<Set::Scalar> grad_mag_grad_eta_ = grad_mag_grad_eta_mf.Patch(lev, mfi);
+
+        // Mixture
+        auto rho        = density_mf[lev]->array(mfi);
+        auto E_vol      = energy_per_vol_mf[lev]->const_array(mfi);
+        auto E_mass     = energy_per_mass_mf[lev]->const_array(mfi);
+        auto M          = momentum_mf[lev]->array(mfi);
+
+        // Set::Patch<Set::Scalar> rho = density_mf.Patch(lev, mfi);
+        // Set::Patch<const Set::Scalar> E_vol = energy_per_vol_mf.Patch(lev, mfi);
+        // Set::Patch<const Set::Scalar> E_mas = energy_per_mas_mf.Patch(lev, mfi);
+        // Set::Patch<const Set::Scalar> M = momentum_mf.Patch(lev, mfi);
+
+        auto a       = a_mf[lev]->array(mfi);
+        auto Ma      = Ma_mf[lev]->array(mfi);
+        auto KE_vol  = KE_per_vol_mf[lev]->array(mfi);
+        auto KE_mass = KE_per_mass_mf[lev]->array(mfi);
+        auto UE_vol  = UE_per_vol_mf[lev]->array(mfi);
+        auto UE_mass = UE_per_mass_mf[lev]->array(mfi);
+
+        // Set::Patch<Set::Scalar> a = a_mf.Patch(lev, mfi);
+        // Set::Patch<Set::Scalar> Ma = Ma_mf.Patch(lev, mfi);
+        // Set::Patch<Set::Scalar> KE_vol = KE_per_vol_mf.Patch(lev, mfi);
+        // Set::Patch<Set::Scalar> KE_mas = KE_per_mas_mf.Patch(lev, mfi);
+        // Set::Patch<Set::Scalar> UE_vol = UE_per_vol_mf.Patch(lev, mfi);
+        // Set::Patch<Set::Scalar> UE_mas = UE_per_mas_mf.Patch(lev, mfi);
+
+        auto v      = velocity_mf[lev]->array(mfi);
+        auto p      = pressure_mf[lev]->array(mfi);
+        auto Source = Source_mf[lev]->const_array(mfi);
+
+        // Set::Patch<Set::Scalar> v = velocity_mf.Patch(lev, mfi);
+        // Set::Patch<Set::Scalar> press = pressure_mf.Patch(lev, mfi);
+        // Set::Patch<const Set::Scalar> Source = Source_mf.Patch(lev, mfi);
+
+
+        // //Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
+        // //Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
+        // //Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
+        // //Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
+
+        auto gamma      = gamma_mf[lev]->array(mfi);
+        auto Tamann_p_0 = Tamann_p_0_mf[lev]->array(mfi);
+
+        // Set::Patch<Set::Scalar> gamma_mix = gamma_mf.Patch(lev, mfi);
+        // Set::Patch<Set::Scalar> Tamann_p_0 = Tamann_p_0_mf.Patch(lev, mfi);
+
+        auto mu_chem    = mu_chem_mf[lev]->array(mfi);
+        auto Bm         = Bm_mf[lev]->array(mfi);
+
+        // Set::Patch<Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
+        // Set::Patch<Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
+
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            auto sten = Numeric::GetStencil(i, j, k, domain);
+
+            // CUTOFFS
+            eta(i, j, k) = std::max( 0.0,std::min( 1.0,(eta(i, j, k) - cutoff) / (1.0 - 2.0 * cutoff) ) );
+            rho(i, j, k) = std::max(rho(i, j, k), small);
+
+            // Derivatice Function Calls
+            Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
+            Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
+            Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
+            Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
+
+            // gamma
+            Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
+            Set::Scalar B = (eta(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
+            gamma(i, j, k) = 1.0 + (1.0 / A);
+
+            // etadot
+            etadot(i, j, k) = (eta(i, j, k) - eta_old(i, j, k)) / dt;
+
+            // Velocity = M ./ (DX*DY*rho)
+            v(i, j, k, 0) = M(i, j, k, 0) / (rho(i, j, k));
+            v(i, j, k, 1) = M(i, j, k, 1) / (rho(i, j, k));
+
+            // Kinetic Energy
+            KE_vol(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
+            if (KE_vol(i, j, k) < 0.0)
+            {
+                KE_vol(i, j, k) = 0.0;
+            }
+            KE_mass(i, j, k) = 0.5 * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
+            if (KE_mass(i, j, k) < 0.0)
+            {
+                KE_mass(i, j, k) = 0.0;
+            }
+
+            // Potential Energy
+            UE_vol(i, j, k) = E_vol(i, j, k) - KE_vol(i, j, k);
+            if (UE_vol(i, j, k) < 0.0)
+            {
+                UE_vol(i, j, k) = 0.0;
+            }
+            UE_mass(i, j, k) = E_mass(i, j, k) - KE_mass(i, j, k);
+            if (UE_mass(i, j, k) < 0.0)
+            {
+                UE_mass(i, j, k) = 0.0;
+            }
+
+            // Pressure
+            Tamann_p_0(i, j, k) = (B / A) / gamma(i, j, k);
+            p(i, j, k) = (gamma(i, j, k) - 1.0) * UE_vol(i, j, k) - gamma(i, j, k) * Tamann_p_0(i, j, k) + pref; // pressure Tammann EOS modification
+            if (p(i, j, k) < 0.0)
+            {
+                p(i, j, k) = 1e-6;
+            }
+
+            // Chemical Potential
+            Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
+            Set::Scalar mu_chem_local = -epsilon * epsilon * lap_eta + f_prime;
+            mu_chem(i, j, k) = mu_chem_local;
+
+            // Spalding Number
+            Bm(i, j, k) = eta(i, j, k) / (1.0 - eta(i, j, k) + small);
+
+            // Speed of sound:
+            a(i, j, k) = sqrt(gamma(i, j, k) * (p(i, j, k) + Tamann_p_0(i, j, k)) / (rho(i, j, k)));
+
+            // Mach Number
+            Ma(i, j, k, 0) = v(i, j, k, 0) / (a(i, j, k) + small);
+            Ma(i, j, k, 1) = v(i, j, k, 1) / (a(i, j, k) + small);
+
+            // // Curvature
+            // Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
+
+            // grad_eta_(i, j, k, 0) = grad_eta(0);
+            // grad_eta_(i, j, k, 1) = grad_eta(1);
+
+            // // Debugging, would like to delete condition
+            // if (grad_eta_mag < 1e-4)
+            // {
+            //     n_hat_(i, j, k, 0) = 0.0;
+            //     n_hat_(i, j, k, 1) = 0.0;
+            // }
+            // else
+            // {
+            //     n_hat_(i, j, k, 0) = n_hat(0);
+            //     n_hat_(i, j, k, 1) = n_hat(1);
+            // }
+
+
+            // ------------------------------------------------------------
+            // Adaptive Timestepping
+            // ------------------------------------------------------------
+            // Solving for new states
+            Set::Scalar A_new = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
+            Set::Scalar B_new = (eta(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
+            Set::Scalar gamma_eff_new = 1.0 + (1.0 / A_new);
+            Set::Vector v_new = Set::Vector(M(i, j, k, 0) / (rho(i, j, k)), M(i, j, k, 1) / (rho(i, j, k)));
+            Set::Scalar KE_vol_new = 0.5 * rho(i, j, k) * (v_new(0) * v_new(0) + v_new(1) * v_new(1));
+
+            Set::Scalar UE_vol_new = E_vol(i, j, k) - KE_vol_new;
+            if (UE_vol_new < 0.0)
+            {
+                UE_vol_new = 0.0;
+            }
+            Set::Scalar p_new = (UE_vol_new - B_new) / A_new;
+            if (p_new < 0.0)
+            {
+                p_new = 1e-6;
+            }
+            Set::Scalar Tamann_p_0_new = (B_new / A_new) / gamma_eff_new;
+            Set::Scalar sound_speed_new = sqrt(gamma_eff_new * (p_new + Tamann_p_0_new) / (rho(i, j, k)));
+
+            c_max = std::max(c_max, sound_speed_new);
+            vx_max = std::max(vx_max, std::abs(v_new(0))); // vx
+            vy_max = std::max(vy_max, std::abs(v_new(1))); // vy
+
+            // Track maximum force magnitude (not acceleration yet)
+            Set::Scalar F_mag = sqrt(Source(i, j, k, 1) * Source(i, j, k, 1) + Source(i, j, k, 2) * Source(i, j, k, 2));
+            F_max = std::max(F_max, F_mag);
+            rho_min = std::min(rho_min, rho(i, j, k));
+
+        });
+    }
+
+    // ------------------------------------------------------------
+    // Dynamic Timesteping
+    // ------------------------------------------------------------
+    Set::Scalar dt_max = std::numeric_limits<Set::Scalar>::max();
+
+    // Update adaptive timestep
+    amrex::ParallelDescriptor::ReduceRealMax(c_max);
+    amrex::ParallelDescriptor::ReduceRealMax(vx_max);
+    amrex::ParallelDescriptor::ReduceRealMax(vy_max);
+    amrex::ParallelDescriptor::ReduceRealMax(F_max);
+    amrex::ParallelDescriptor::ReduceRealMin(rho_min);
+
+    // Compute timestep constraints
+    Set::Scalar dx_min = std::min(DX[0], DX[1]);
+
+    // 1. Acoustic CFL
+    Set::Scalar wave_speed = c_max + sqrt(vx_max * vx_max + vy_max * vy_max);
+    Set::Scalar dt_acoustic = cfl * dx_min / (wave_speed + small);
+
+    // 2. Viscous CFL
+    Set::Scalar mu_max = std::max(mu0, mu1);
+    Set::Scalar dt_viscous = cfl_v * rho_min * dx_min * dx_min / (mu_max + small);
+
+    // 3. Force CFL
+    Set::Scalar a_max = F_max / rho_min; // Maximum acceleration
+    Set::Scalar dt_force = cfl_v * sqrt(dx_min / a_max);
+
+    // 4. Allen-Cahn diffusion CFL
+    Set::Scalar Mob = 0.01 * dx_min * dx_min;
+    Set::Scalar dt_allen_cahn = 0.5 * dx_min * dx_min / (Mob + small);
+
+    // Take minimum
+    dt_max = std::min({ dt_acoustic, dt_viscous, dt_force, dt_allen_cahn });
+
+    // Safety factor
+    dt_max = dt_max * 0.9;
+
+    // Timestep diagnostics
+    bool timestep_verbose = false;
+    if (timestep_verbose == true)
+    {
+        Util::ParallelMessage(INFO, "\n=== CFL TIMESTEP DIAGNOSTICS ===");
+        Util::ParallelMessage(INFO, "Grid spacing: ", dx_min, " m");
+        Util::ParallelMessage(INFO, "Sound speed max: ", c_max, " m/s");
+        Util::ParallelMessage(INFO, "Velocity max: ", std::max(vx_max, vy_max), " m/s");
+        Util::ParallelMessage(INFO, "Force max: ", F_max, " N/m^3");
+        Util::ParallelMessage(INFO, "Density min: ", rho_min, " kg/m^3");
+        Util::ParallelMessage(INFO, "");
+        Util::ParallelMessage(INFO, "dt_acoustic: ", dt_acoustic, " s");
+        Util::ParallelMessage(INFO, "dt_viscous: ", dt_viscous, " s");
+        Util::ParallelMessage(INFO, "dt_force: ", dt_force, " s");
+        Util::ParallelMessage(INFO, "dt_allen_cahn: ", dt_allen_cahn, " s");
+        Util::ParallelMessage(INFO, "");
+        Util::ParallelMessage(INFO, "Final dt_max: ", dt_max, " s");
+        Util::ParallelMessage(INFO, "================================\n");
+    }
+    if (dynamictimestep.on)
+    {
+        this->DynamicTimestep_SyncTimeStep(lev, dt_max);
+    }
+
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1417,7 +1676,7 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
             if (grad_omega.lpNorm<2>() * dr * 2 > omega_refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
         });
     }
-    
+
     // Gradu criterion for refinement
     for (amrex::MFIter mfi(*velocity_mf[lev], true); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.tilebox();
@@ -1435,11 +1694,11 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
     for (amrex::MFIter mfi(*pressure_mf[lev], true); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.tilebox();
         amrex::Array4<char> const& tags = a_tags.array(mfi);
-        amrex::Array4<const Set::Scalar> const& press = (*pressure_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar> const& p_mix = (*pressure_mf[lev]).array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, bx);
-            Set::Vector grad_p = Numeric::Gradient(press, i, j, k, 0, DX, sten);
+            Set::Vector grad_p = Numeric::Gradient(p_mix, i, j, k, 0, DX, sten);
             if (grad_p.lpNorm<2>() * dr * 2 > p_refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
         });
     }

@@ -7,7 +7,7 @@
 //
 // Source: M. J. Del Razo and R. J. LeVeque, "Numerical Methods for Interface Coupling of Compressible and Almost Incompressible Media," SIAM Journal on Scientific Computing, vol. 39, no. 3, pp. B486�B507, Jan. 2017, doi: 10.1137/16m1067834.
 //          URL: https://arxiv.org/abs/1604.08544
-//          If you wish to use the regular gas HLLC sovler and not the stiffened gas modeled by the Tammann EOS, set P0 = 0
+//          If you wish to use the regular gas HLLC sovler and not the stiffened gas modeled by the Tammann EOS, set Tamann_p_0 = 0
 
 #ifndef SOLVER_LOCAL_FLUIDRIEMANN_HLLC_H
 #define SOLVER_LOCAL_FLUIDRIEMANN_HLLC_H
@@ -63,8 +63,8 @@ public:
         Set::Scalar gamL = lo.gam;
         Set::Scalar gamR = hi.gam;
 
-        Set::Scalar p0L = lo.p0;
-        Set::Scalar p0R = hi.p0;
+        Set::Scalar Tamann_p_0L = lo.Tamann_p_0;
+        Set::Scalar Tamann_p_0R = hi.Tamann_p_0;
 
         //---------------------------------------------------------------------
         // Internal energy
@@ -78,8 +78,8 @@ public:
         //---------------------------------------------------------------------
         // Stiffened‑gas physical pressure
         //---------------------------------------------------------------------
-        Set::Scalar pL = (gamL - 1.0) * UEL - gamL * p0L + p_ref;
-        Set::Scalar pR = (gamR - 1.0) * UER - gamR * p0R + p_ref;
+        Set::Scalar pL = (gamL - 1.0) * UEL - gamL * Tamann_p_0L + p_ref;
+        Set::Scalar pR = (gamR - 1.0) * UER - gamR * Tamann_p_0R + p_ref;
 
         pL = std::max(pL, small);
         pR = std::max(pR, small);
@@ -87,8 +87,8 @@ public:
         //---------------------------------------------------------------------
         // Correct stiffened‑gas sound speeds
         //---------------------------------------------------------------------
-        Set::Scalar aL = std::sqrt(gamL * ((pL + gamL*p0L) / rhoL));
-        Set::Scalar aR = std::sqrt(gamR * ((pR + gamR*p0R) / rhoR));
+        Set::Scalar aL = std::sqrt(gamL * ((pL + gamL*Tamann_p_0L) / rhoL));
+        Set::Scalar aR = std::sqrt(gamR * ((pR + gamR*Tamann_p_0R) / rhoR));
 
         //---------------------------------------------------------------------
         // Wave speed estimates (HLLE)

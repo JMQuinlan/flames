@@ -38,11 +38,11 @@ cfl = 0.008
 geometry.prob_lo = -0.005 -0.005 0.0  # 1/4 tube left of droplet
 geometry.prob_hi =  0.015  0.005 0.0  # 3/4 tube right of droplet (0.02m � 0.01m)
 geometry.is_periodic = 0 0 0
- 
+
 ### TIME STEP ###
 # stop_time = 0.0002  # Shorter time for shock interaction
 #stop_time = 1.0e-5  # Shorter time for shock interaction
-stop_time = 1.0e-11  # Shorter time for shock interaction
+stop_time = 1.0e-8  # Shorter time for shock interaction
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
@@ -166,6 +166,6 @@ apply_vaporization = 1
 Spec_Vol = 1
 grav = 9.81
 
-### DEBUGGING ### 
+### DEBUGGING ###
 Riemann_Solver.type = hllc
 kappa_method = 3   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization" / 3:"Advanced Hybrid"

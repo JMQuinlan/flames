@@ -79,7 +79,7 @@ public:
         delete riemannsolver;
 
 
-        
+
     }
 
 protected:
@@ -90,15 +90,15 @@ protected:
     void Advance(int lev, Set::Scalar time, Set::Scalar dt) override;
     void TagCellsForRefinement(int lev, amrex::TagBoxArray& tags, amrex::Real /*time*/, int /*ngrow*/) override;
     void Regrid(int lev, Set::Scalar time) override;
-    void RHS(int lev, 
+    void RHS(int lev,
         Set::Scalar time,
-        amrex::MultiFab &eta_rhs_mf, 
-        amrex::MultiFab &rho_rhs_mf, 
-        amrex::MultiFab &M_rhs_mf, 
-        amrex::MultiFab &E_rhs_mf, 
+        amrex::MultiFab &eta_rhs_mf,
+        amrex::MultiFab &rho_rhs_mf,
+        amrex::MultiFab &M_rhs_mf,
+        amrex::MultiFab &E_rhs_mf,
         const amrex::MultiFab &eta_mf_in,
-        const amrex::MultiFab &rho_mf, 
-        const amrex::MultiFab &M_mf, 
+        const amrex::MultiFab &rho_mf,
+        const amrex::MultiFab &M_mf,
         const amrex::MultiFab &E_mf);
 
 
@@ -156,9 +156,9 @@ protected:
     Set::Field<Set::Scalar> momentum_mf;
     Set::Field<Set::Scalar> momentum_old_mf;
     Set::Field<Set::Scalar> energy_per_vol_mf;
-    Set::Field<Set::Scalar> energy_per_mas_mf;
+    Set::Field<Set::Scalar> energy_per_mass_mf;
     Set::Field<Set::Scalar> energy_per_vol_old_mf;
-    Set::Field<Set::Scalar> energy_per_mas_old_mf;
+    Set::Field<Set::Scalar> energy_per_mass_old_mf;
     Set::Field<Set::Scalar> velocity_mf;
     Set::Field<Set::Scalar> pressure_mf;
 
@@ -168,14 +168,14 @@ protected:
     Set::Field<Set::Scalar> k_thermal_mf;   // Thermal Conductivity
     Set::Field<Set::Scalar> h_thermal_mf;   // Thermal Convectivity
     Set::Field<Set::Scalar> gamma_mf;       // Specific Heat Ratio
-    Set::Field<Set::Scalar> p0_mf;          // Tamman Pressure
+    Set::Field<Set::Scalar> Tamann_p_0_mf;          // Tamman Pressure
     Set::Field<Set::Scalar> mu_chem_mf;     // Allen-Cahn Chemical Potential
     Set::Field<Set::Scalar> a_mf;           // Speed of sound
     Set::Field<Set::Scalar> Ma_mf;          // Mach
     Set::Field<Set::Scalar> UE_per_vol_mf;  // Internal Energy (per unit volume)
-    Set::Field<Set::Scalar> UE_per_mas_mf;  // Internal Energy (per unit mass)
+    Set::Field<Set::Scalar> UE_per_mass_mf; // Internal Energy (per unit mass)
     Set::Field<Set::Scalar> KE_per_vol_mf;  // Kinetic Energy (per unit volume)
-    Set::Field<Set::Scalar> KE_per_mas_mf;  // Kinetic Energy (per unit mass)
+    Set::Field<Set::Scalar> KE_per_mass_mf; // Kinetic Energy (per unit mass)
 
     Set::Field<Set::Scalar> Source_mf;      // Sumation of Source Terms
     Set::Field<Set::Scalar> flux_mf;        // Riemann Solver Fluxes
@@ -206,7 +206,7 @@ protected:
     Set::Field<Set::Scalar> div_tau_mf;
     Set::Field<Set::Scalar> hess_u_mf;
     Set::Field<Set::Scalar> Vap_dot_mf;
-    
+
 
     Set::Field<Set::Scalar> m0_mf;
     Set::Field<Set::Scalar> u0_mf;
@@ -220,8 +220,8 @@ protected:
     Set::Field<Set::Scalar> hess_eta_mf;
     Set::Field<Set::Scalar> n_hat_mf;
 protected:
-   
-    
+
+
 
     BC::BC<Set::Scalar>* density_bc = nullptr;
     BC::BC<Set::Scalar>* momentum_bc = nullptr;

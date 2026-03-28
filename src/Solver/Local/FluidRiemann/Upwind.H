@@ -48,7 +48,7 @@ public:
         Set::Scalar Mt_L = lo.M_tangent, Mt_R = hi.M_tangent;
         Set::Scalar E_L = lo.E, E_R = hi.E;
         Set::Scalar gamma_L = lo.gam, gamma_R = hi.gam;
-        Set::Scalar p0_L = lo.p0, p0_R = hi.p0;
+        Set::Scalar Tamann_p_0_L = lo.Tamann_p_0, Tamann_p_0_R = hi.Tamann_p_0;
         Set::Scalar T_L = lo.T, T_R = hi.T;
 
         // Ensure no negative densities
@@ -66,7 +66,7 @@ public:
 
         // Select upwind state based on interface velocity
         State upwind_state;
-        Set::Scalar rho, u, v, E, gamma, p0;
+        Set::Scalar rho, u, v, E, gamma, Tamann_p_0;
 
         if (u_interface >= 0.0)
         {
@@ -77,7 +77,7 @@ public:
             v = v_L;
             E = E_L;
             gamma = gamma_L;
-            p0 = p0_L;
+            Tamann_p_0 = Tamann_p_0_L;
         }
         else
         {
@@ -88,7 +88,7 @@ public:
             v = v_R;
             E = E_R;
             gamma = gamma_R;
-            p0 = p0_R;
+            Tamann_p_0 = Tamann_p_0_R;
         }
 
         // Compute pressure from upwind state
@@ -99,14 +99,14 @@ public:
             // With Respect to Specific Volume (energies are per unit volume)
             ke = 0.5 * (u * u + v * v) * rho;
             ue = E - ke;
-            p = (gamma - 1.0) * ue - gamma * p0 + p_ref;
+            p = (gamma - 1.0) * ue - gamma * Tamann_p_0 + p_ref;
         }
         else
         {
             // With Respect to Specific Mass (energies are per unit mass)
             ke = 0.5 * (u * u + v * v);
             ue = E - ke;
-            p = (gamma - 1.0) * rho * ue - gamma * p0 + p_ref;
+            p = (gamma - 1.0) * rho * ue - gamma * Tamann_p_0 + p_ref;
         }
 
         // Ensure positive pressure
@@ -121,7 +121,7 @@ public:
             fl.mass = rho * u;
             fl.momentum_normal = rho * u * u + p;
             fl.momentum_tangent = rho * u * v;
-            fl.energy = u * (E + p + p0);
+            fl.energy = u * (E + p + Tamann_p_0);
         }
         else
         {
@@ -129,7 +129,7 @@ public:
             fl.mass = rho * u;
             fl.momentum_normal = rho * u * u + p;
             fl.momentum_tangent = rho * u * v;
-            fl.energy = u * (E + (p + p0) / (rho + small));
+            fl.energy = u * (E + (p + Tamann_p_0) / (rho + small));
         }
 
         // ERROR CHECKING

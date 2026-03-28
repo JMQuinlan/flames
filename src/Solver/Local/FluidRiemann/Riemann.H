@@ -22,7 +22,7 @@ struct State
 
     // Thermodynamic fields
     amrex::Array4<const Set::Scalar> gamma_arr;
-    amrex::Array4<const Set::Scalar> p0_arr;
+    amrex::Array4<const Set::Scalar> Tamann_p_0_arr;
     amrex::Array4<const Set::Scalar> T_arr;
 
     // Coordinates and direction
@@ -37,7 +37,7 @@ struct State
     Set::Scalar M_tangent;
     Set::Scalar E;
     Set::Scalar gam;
-    Set::Scalar p0;
+    Set::Scalar Tamann_p_0;
     Set::Scalar T;
 
     // --------------------------------------------------------------
@@ -46,11 +46,11 @@ struct State
     AMREX_GPU_HOST_DEVICE
     State()
         : rho(0), M_normal(0), M_tangent(0), E(0),
-          gam(NAN), p0(NAN), T(NAN),
+          gam(NAN), Tamann_p_0(NAN), T(NAN),
           i(0), j(0), k(0), dir(0)
     {}
 
-    
+
     // ===============================================================
     // CPU‑only constructor for Riemann test problems
     // ===============================================================
@@ -62,7 +62,7 @@ struct State
         Set::Scalar a_Mt,
         Set::Scalar a_E,
         Set::Scalar a_gam,
-        Set::Scalar a_p0,
+        Set::Scalar a_Tamann_p_0,
         Set::Scalar a_T)
     {
         rho       = a_rho;
@@ -70,7 +70,7 @@ struct State
         M_tangent = a_Mt;
         E         = a_E;
         gam       = a_gam;
-        p0        = a_p0;
+        Tamann_p_0        = a_Tamann_p_0;
         T         = a_T;
 
         // Dummy indices for CPU test constructor
@@ -87,7 +87,7 @@ struct State
           const amrex::Array4<const Set::Scalar>& MA,
           const amrex::Array4<const Set::Scalar>& EA,
           const amrex::Array4<const Set::Scalar>& gA,
-          const amrex::Array4<const Set::Scalar>& p0A,
+          const amrex::Array4<const Set::Scalar>& Tamann_p_0A,
           const amrex::Array4<const Set::Scalar>& TA,
           int ii, int jj, int kk, int idir)
         :
@@ -95,7 +95,7 @@ struct State
           M_arr(MA),
           E_arr(EA),
           gamma_arr(gA),
-          p0_arr(p0A),
+          Tamann_p_0_arr(Tamann_p_0A),
           T_arr(TA),
           i(ii), j(jj), k(kk),
           dir(idir)
@@ -113,7 +113,7 @@ struct State
         E   = E_arr(i,j,k);
 
         gam = gamma_arr(i,j,k);
-        p0  = p0_arr(i,j,k);
+        Tamann_p_0  = Tamann_p_0_arr(i,j,k);
         T   = T_arr(i,j,k);
 
         // Momentum components
@@ -144,7 +144,7 @@ struct State
            << "Mt="  << s.M_tangent << ", "
            << "E="   << s.E << ", "
            << "gam=" << s.gam << ", "
-           << "p0="  << s.p0 << ", "
+           << "Tamann_p_0="  << s.Tamann_p_0 << ", "
            << "T="   << s.T;
         return os;
     }
@@ -160,7 +160,7 @@ struct State
         M_tangent += b.M_tangent;
         E   += b.E;
         gam += b.gam;
-        p0  += b.p0;
+        Tamann_p_0  += b.Tamann_p_0;
         T   += b.T;
     }
 
@@ -172,7 +172,7 @@ struct State
         M_tangent -= b.M_tangent;
         E   -= b.E;
         gam -= b.gam;
-        p0  -= b.p0;
+        Tamann_p_0  -= b.Tamann_p_0;
         T   -= b.T;
     }
 
@@ -184,7 +184,7 @@ struct State
         M_tangent *= a;
         E *= a;
         gam *= a;
-        p0 *= a;
+        Tamann_p_0 *= a;
         T *= a;
     }
 
@@ -196,7 +196,7 @@ struct State
         M_tangent /= a;
         E /= a;
         gam /= a;
-        p0 /= a;
+        Tamann_p_0 /= a;
         T /= a;
     }
 };
@@ -210,7 +210,7 @@ struct Flux
 
     // Auxiliary thermodynamic quantities (not conserved)
     Set::Scalar gam;
-    Set::Scalar p0;
+    Set::Scalar Tamann_p_0;
     Set::Scalar T;
 
     // ----------------------------------------------------------
@@ -219,7 +219,7 @@ struct Flux
     AMREX_GPU_HOST_DEVICE
     Flux()
         : mass(0.0), momentum_normal(0.0), momentum_tangent(0.0),
-          energy(0.0), gam(NAN), p0(NAN), T(NAN)
+          energy(0.0), gam(NAN), Tamann_p_0(NAN), T(NAN)
     {}
 
     // ----------------------------------------------------------
@@ -227,9 +227,9 @@ struct Flux
     // ----------------------------------------------------------
     AMREX_GPU_HOST_DEVICE
     Flux(Set::Scalar m, Set::Scalar Mn, Set::Scalar Mt, Set::Scalar E,
-         Set::Scalar g = NAN, Set::Scalar p0_ = NAN, Set::Scalar T_ = NAN)
+         Set::Scalar g = NAN, Set::Scalar Tamann_p_0_ = NAN, Set::Scalar T_ = NAN)
         : mass(m), momentum_normal(Mn), momentum_tangent(Mt), energy(E),
-          gam(g), p0(p0_), T(T_)
+          gam(g), Tamann_p_0(Tamann_p_0_), T(T_)
     {}
 
     // ----------------------------------------------------------
@@ -242,7 +242,7 @@ struct Flux
           momentum_tangent(s.M_tangent),
           energy(s.E),
           gam(s.gam),
-          p0(s.p0),
+          Tamann_p_0(s.Tamann_p_0),
           T(s.T)
     {}
 
@@ -256,7 +256,7 @@ struct Flux
            << "Mt="   << f.momentum_tangent << ", "
            << "E="    << f.energy << ", "
            << "gam="  << f.gam << ", "
-           << "p0="   << f.p0 << ", "
+           << "Tamann_p_0="   << f.Tamann_p_0 << ", "
            << "T="    << f.T;
         return os;
     }
@@ -274,12 +274,12 @@ struct Flux
 
         // Non-conserved values: best to forward RHS source terms
         gam = b.gam;
-        p0  = b.p0;
+        Tamann_p_0  = b.Tamann_p_0;
         T   = b.T;
     }
 
     // ----------------------------------------------------------
-    // -=  
+    // -=
     // ----------------------------------------------------------
     AMREX_GPU_HOST_DEVICE
     void operator-=(const Flux& b)
@@ -290,12 +290,12 @@ struct Flux
         energy           -= b.energy;
 
         gam = b.gam;
-        p0  = b.p0;
+        Tamann_p_0  = b.Tamann_p_0;
         T   = b.T;
     }
 
     // ----------------------------------------------------------
-    // *= scalar  
+    // *= scalar
     // ----------------------------------------------------------
     AMREX_GPU_HOST_DEVICE
     void operator*=(Set::Scalar a)
@@ -307,7 +307,7 @@ struct Flux
 
         // pass-through
         gam *= 1;
-        p0  *= 1;
+        Tamann_p_0  *= 1;
         T   *= 1;
     }
 
@@ -323,7 +323,7 @@ struct Flux
         energy           /= a;
 
         gam *= 1;
-        p0  *= 1;
+        Tamann_p_0  *= 1;
         T   *= 1;
     }
 

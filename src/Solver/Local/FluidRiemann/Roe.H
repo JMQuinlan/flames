@@ -74,8 +74,8 @@ public:
         Set::Scalar gamL = lo.gam;
         Set::Scalar gamR = hi.gam;
 
-        Set::Scalar p0L = lo.p0;
-        Set::Scalar p0R = hi.p0;
+        Set::Scalar Tamann_p_0L = lo.Tamann_p_0;
+        Set::Scalar Tamann_p_0R = hi.Tamann_p_0;
 
         //----------------------------------------------------------------------
         // Internal energy and pressure
@@ -86,8 +86,8 @@ public:
         Set::Scalar KER = 0.5*rhoR*(uR*uR + vR*vR);
         Set::Scalar UER = ER - KER;
 
-        Set::Scalar pL = (gamL-1.0)*UEL - gamL*p0L + p_ref;
-        Set::Scalar pR = (gamR-1.0)*UER - gamR*p0R + p_ref;
+        Set::Scalar pL = (gamL-1.0)*UEL - gamL*Tamann_p_0L + p_ref;
+        Set::Scalar pR = (gamR-1.0)*UER - gamR*Tamann_p_0R + p_ref;
 
         pL = std::max(pL, small);
         pR = std::max(pR, small);
@@ -103,13 +103,13 @@ public:
         Set::Scalar uRoe = (rL*uL + rR*uR)/denom;
         Set::Scalar vRoe = (rL*vL + rR*vR)/denom;
 
-        // enthalpy includes p0 contribution
-        Set::Scalar hL = (EL + pL + p0L) / rhoL;
-        Set::Scalar hR = (ER + pR + p0R) / rhoR;
+        // enthalpy includes Tamann_p_0 contribution
+        Set::Scalar hL = (EL + pL + Tamann_p_0L) / rhoL;
+        Set::Scalar hR = (ER + pR + Tamann_p_0R) / rhoR;
 
         Set::Scalar hRoe = (rL*hL + rR*hR)/denom;
 
-        Set::Scalar p0Roe = (rL*p0L + rR*p0R)/denom;
+        Set::Scalar Tamann_p_0Roe = (rL*Tamann_p_0L + rR*Tamann_p_0R)/denom;
         Set::Scalar gamRoe = (rL*gamL + rR*gamR)/denom;
 
         //----------------------------------------------------------------------
@@ -152,8 +152,8 @@ public:
         FL.momentum_tangent = rhoL*uL*vL;
         FR.momentum_tangent = rhoR*uR*vR;
 
-        FL.energy = uL*(EL + pL + p0L);
-        FR.energy = uR*(ER + pR + p0R);
+        FL.energy = uL*(EL + pL + Tamann_p_0L);
+        FR.energy = uR*(ER + pR + Tamann_p_0R);
 
         //----------------------------------------------------------------------
         // Average flux

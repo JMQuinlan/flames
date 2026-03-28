@@ -68,8 +68,8 @@ public:
         Set::Scalar E_R = hi.E;
         Set::Scalar gamma_L = lo.gam;
         Set::Scalar gamma_R = hi.gam;
-        Set::Scalar p0_L = lo.p0;
-        Set::Scalar p0_R = hi.p0;
+        Set::Scalar Tamann_p_0_L = lo.Tamann_p_0;
+        Set::Scalar Tamann_p_0_R = hi.Tamann_p_0;
         Set::Scalar T_L = lo.T;
         Set::Scalar T_R = hi.T;
 
@@ -90,8 +90,8 @@ public:
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
             ue_L = E_L - ke_L;
             ue_R = E_R - ke_R;
-            p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;
-            p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;
+            p_L = (gamma_L - 1.0) * ue_L - gamma_L * Tamann_p_0_L + p_ref;
+            p_R = (gamma_R - 1.0) * ue_R - gamma_R * Tamann_p_0_R + p_ref;
         }
         else
         {
@@ -100,13 +100,13 @@ public:
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
             ue_L = E_L - ke_L;
             ue_R = E_R - ke_R;
-            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;
-            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R + p_ref;
+            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * Tamann_p_0_L + p_ref;
+            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * Tamann_p_0_R + p_ref;
         }
 
         // Sound speeds (stiffened gas)
-        a_L = std::sqrt(gamma_L * (p_L + p0_L) / (rho_L + small));
-        a_R = std::sqrt(gamma_R * (p_R + p0_R) / (rho_R + small));
+        a_L = std::sqrt(gamma_L * (p_L + Tamann_p_0_L) / (rho_L + small));
+        a_R = std::sqrt(gamma_R * (p_R + Tamann_p_0_R) / (rho_R + small));
 
         // =====================================================================
         // 3. WAVE SPEED ESTIMATES (5-wave structure)

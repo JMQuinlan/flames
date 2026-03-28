@@ -68,7 +68,7 @@
             Set::Scalar Mt_L = lo.M_tangent, Mt_R = hi.M_tangent;
             Set::Scalar E_L = lo.E, E_R = hi.E;
             Set::Scalar gamma_L = lo.gam, gamma_R = hi.gam;
-            Set::Scalar p0_L = lo.p0, p0_R = hi.p0;
+            Set::Scalar Tamann_p_0_L = lo.Tamann_p_0, Tamann_p_0_R = hi.Tamann_p_0;
             Set::Scalar T_L = lo.T, T_R = hi.T;
 
             // Ensure no negative densities
@@ -86,12 +86,12 @@
                 // With Respect to Specific Volume (energies are per unit volume)
                 ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small);
                 ue_L = E_L - ke_L;
-                p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;
+                p_L = (gamma_L - 1.0) * ue_L - gamma_L * Tamann_p_0_L + p_ref;
                 h_TL = (ke_L + ue_L + p_L);
 
                 ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
                 ue_R = E_R - ke_R;
-                p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;
+                p_R = (gamma_R - 1.0) * ue_R - gamma_R * Tamann_p_0_R + p_ref;
                 h_TR = (ke_R + ue_R + p_R);
             }
             else
@@ -99,12 +99,12 @@
                 // With Respect to Specific Mass (energies are per unit mass)
                 ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small);
                 ue_L = E_L - ke_L;
-                p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;
+                p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * Tamann_p_0_L + p_ref;
                 h_TL = ke_L + ue_L + (p_L / rho_L);
 
                 ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
                 ue_R = E_R - ke_R;
-                p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R + p_ref;
+                p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * Tamann_p_0_R + p_ref;
                 h_TR = ke_R + ue_R + (p_R / rho_R);
             }
 
@@ -113,8 +113,8 @@
             Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
             // Sound speeds (Tammann EOS)
-            Set::Scalar a_L = std::sqrt(gamma_L * (p_L + p0_L) / (rho_L + small));
-            Set::Scalar a_R = std::sqrt(gamma_R * (p_R + p0_R) / (rho_R + small));
+            Set::Scalar a_L = std::sqrt(gamma_L * (p_L + Tamann_p_0_L) / (rho_L + small));
+            Set::Scalar a_R = std::sqrt(gamma_R * (p_R + Tamann_p_0_R) / (rho_R + small));
 
             // ========================================
             // STANDARD HLLC WAVE SPEEDS (UNCHANGED)

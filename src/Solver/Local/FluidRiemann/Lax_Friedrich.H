@@ -8,7 +8,7 @@
 // Source: M. J. Del Razo and R. J. LeVeque, "Numerical Methods for Interface Coupling of Compressible and Almost Incompressible Media,"
 //         SIAM Journal on Scientific Computing, vol. 39, no. 3, pp. B486�B507, Jan. 2017, doi: 10.1137/16m1067834.
 //         URL: https://arxiv.org/abs/1604.08544
-//         If you wish to use the regular gas solver and not the stiffened gas modeled by the Tammann EOS, set P0 = 0
+//         If you wish to use the regular gas solver and not the stiffened gas modeled by the Tammann EOS, set Tamann_p_0 = 0
 
 #ifndef SOLVER_LOCAL_FLUIDRIEMANN_LAX_FRIEDRICH_H
 #define SOLVER_LOCAL_FLUIDRIEMANN_LAX_FRIEDRICH_H
@@ -50,7 +50,7 @@ public:
         Set::Scalar Mt_L = lo.M_tangent, Mt_R = hi.M_tangent;
         Set::Scalar E_L = lo.E, E_R = hi.E;
         Set::Scalar gamma_L = lo.gam, gamma_R = hi.gam;
-        Set::Scalar p0_L = lo.p0, p0_R = hi.p0;
+        Set::Scalar Tamann_p_0_L = lo.Tamann_p_0, Tamann_p_0_R = hi.Tamann_p_0;
         Set::Scalar T_L = lo.T, T_R = hi.T;
 
         // Ensure no negative densities
@@ -68,12 +68,12 @@ public:
             // With Respect to Specific Volume (energies are per unit volume)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
             ue_L = E_L - ke_L;                                          // IE per unit volume
-            p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;
+            p_L = (gamma_L - 1.0) * ue_L - gamma_L * Tamann_p_0_L + p_ref;
             h_TL = (ke_L + ue_L + p_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;
+            p_R = (gamma_R - 1.0) * ue_R - gamma_R * Tamann_p_0_R + p_ref;
             h_TR = (ke_R + ue_R + p_R);
         }
         else
@@ -81,12 +81,12 @@ public:
             // With Respect to Specific Mass (energies are per unit mass)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small); // KE per unit volume
             ue_L = E_L - ke_L;                                                  // IE per unit volume
-            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;
+            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * Tamann_p_0_L + p_ref;
             h_TL = ke_L + ue_L + (p_L / rho_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R + p_ref;
+            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * Tamann_p_0_R + p_ref;
             h_TR = ke_R + ue_R + (p_R / rho_R);
         }
 
@@ -95,8 +95,8 @@ public:
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
         // Sound Speeds
-        Set::Scalar a_L = std::sqrt(gamma_L * (p_L + p0_L) / (rho_L));
-        Set::Scalar a_R = std::sqrt(gamma_R * (p_R + p0_R) / (rho_R));
+        Set::Scalar a_L = std::sqrt(gamma_L * (p_L + Tamann_p_0_L) / (rho_L));
+        Set::Scalar a_R = std::sqrt(gamma_R * (p_R + Tamann_p_0_R) / (rho_R));
 
         // Maximum wave speed (Lax-Friedrichs characteristic)
         Set::Scalar S_max = std::max(std::abs(u_L) + a_L, std::abs(u_R) + a_R);
