@@ -175,7 +175,7 @@ Tammann = '.'  # Change to "." for CPG and "TammannEOS" for Tammann
 
 # File paths
 hdf5_file = fr'{Tammann}\{case_name}.hdf5'
-base_output_dir = fr'..\..\..\bin\tests\FlowRiemannUnitTests\{case_name}'
+base_output_dir = fr'..\..\..\bin\tests\FlowRiemannUnitTestsAUTO\{case_name}'
 
 # Case name mapping
 case_to_group = {
