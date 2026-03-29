@@ -104,6 +104,14 @@ protected:
 
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
     void check4nans(int time, int lev, int i, int j, int k, const std::string &message, std::initializer_list<std::pair<std::string, double> > vars);
+    //void InterfaceCompression(int lev, Set::Scalar dt_physical);
+
+    void InterfaceSharpening(int lev, Set::Scalar dt_physical);
+private:
+    void ReinitializeSignedDistance(int lev,
+                                    amrex::MultiFab &psi_mf,
+                                    const amrex::MultiFab &psi_init_mf,
+                                    int max_iter = 50);
 
 protected:
     // FLUID 0
@@ -211,7 +219,7 @@ protected:
     Set::Field<Set::Scalar> n_hat_mf;
 protected:
    
-    
+    int n_step = 0;
 
     BC::BC<Set::Scalar>* density_bc = nullptr;
     BC::BC<Set::Scalar>* momentum_bc = nullptr;
@@ -310,7 +318,18 @@ protected:
     };
     IntegrationScheme scheme;
 
-
+    // Interface Compression Stuff
+    /*
+    int compression_max_iter = 10; // From paper: 5-10 iterations sufficient
+    Set::Scalar compression_tolerance = 1e-8;
+    bool apply_compression = true;
+    int compression_frequency = 1; // Apply every N timesteps
+    */
+    bool apply_sharpening = false;
+    int sharpening_frequency = 1;
+    int reinit_max_iter = 50;
+    Set::Scalar reinit_tolerance = 1e-6;
+    std::vector<int> step_counter; // Track steps per level
 };
 }
 
