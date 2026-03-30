@@ -38,9 +38,13 @@
 #include <AMReX_Geometry.H>
 #include <AMReX_MFIter.H>
 #include <AMReX_Array4.H>
+#include "Thermo_Interp.H"
+
 
 using namespace amrex;
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
 
 //#if AMREX_SPACEDIM == 2
 
@@ -85,7 +89,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // FLUID 0
         pp_query_required("gamma0", value.gamma0);      // gamma for gamma law
-        pp_query_default("p0_0", value.p0_0, 0.0);      // p0 for Tammann EOS
+        pp_query_default("p0_0", value.pi_0, 0.0);      // pi for Tammann EOS
         pp_query_required("mu0", value.mu0);            // linear viscosity coefficient
         pp_query_default("mu0_b", value.mu0_b, 0.0);    // bulk viscosity coefficient
         pp_query_default("cp0", value.cp0, 0.0);        // Constant Pressure Specific Heat [J/kg]
@@ -95,7 +99,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // FLUID 1
         pp_query_required("gamma1", value.gamma1);      // gamma for gamma law
-        pp_query_default("p0_1", value.p0_1, 0.0);      // p0 for Tammann EOS
+        pp_query_default("p0_1", value.pi_1, 0.0);      // pi for Tammann EOS
         pp_query_required("mu1", value.mu1);            // linear viscosity coefficient
         pp_query_default("mu1_b", value.mu1_b, 0.0);    // bulk viscosity coefficient
         pp_query_default("cp1", value.cp1, 0.0);        // Constant Pressure Specific Heat [J/kg]
@@ -146,7 +150,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //value.RegisterNewFab(value.k0_thermal_mf,   &value.bc_nothing, 1, nghost, "k0_thermal", false, false);
         //value.RegisterNewFab(value.h0_thermal_mf,   &value.bc_nothing, 1, nghost, "h0_thermal", false, false);
 
-        value.RegisterNewFab(value.pressure0_mf,    value.energy_bc,  1, nghost, "pressure0", false, false);
+        value.RegisterNewFab(value.pressure0_mf,    value.energy_bc,  1, nghost, "pressure0", false, true);
         value.RegisterNewFab(value.velocity0_mf,    &value.bc_nothing,  2, nghost, "velocity0", false, false, { "x", "y" });
         value.RegisterNewFab(value.vorticity0_mf,   &value.bc_nothing,  1, nghost, "vorticity0", false, false);
 
@@ -169,7 +173,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.vorticity1_mf,   &value.bc_nothing,  1, nghost, "vorticity1", false, true);
 
         // MIXTURE
-        value.RegisterNewFab(value.pressure_mf,     value.energy_bc, 1, nghost, "pressure", true, false);
+        value.RegisterNewFab(value.pressure_mf,     value.energy_bc, 1, nghost, "pressure", true, true);
         value.RegisterNewFab(value.velocity_mf,     &value.bc_nothing,  2, nghost, "velocity", true, false, { "x", "y" });
         value.RegisterNewFab(value.vorticity_mf,    &value.bc_nothing,  1, nghost, "vorticity", true, false);
         value.RegisterNewFab(value.density_mf,      value.density_bc,   1, nghost, "density", true, true);
@@ -195,7 +199,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //value.RegisterNewFab(value.k_thermal_mf,    &value.bc_nothing,  1, nghost, "k_thermal", false, true);         // Thermal Conductivity
         //value.RegisterNewFab(value.h_thermal_mf,    &value.bc_nothing,  1, nghost, "h_thermal", false, true);         // Thermal Convectivity
         value.RegisterNewFab(value.gamma_mf,        value.energy_bc, 1, nghost, "gamma", true, false);                 // Specific Heat Ratio
-        value.RegisterNewFab(value.Tamann_p_0_mf,   value.energy_bc, 1, nghost, "Tamann_p_0", true, true);                    // Tamman Pressure
+        value.RegisterNewFab(value.pi_mf,   value.energy_bc, 1, nghost, "Tamann_pi", true, true);                    // Tamman Pressure
         value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc, 1, nghost, "mu_chem", true, false);               // Chemical Potential
         value.RegisterNewFab(value.a_mf,            &value.bc_nothing,  1, nghost, "a", true, false);                    // Speed of sound
         value.RegisterNewFab(value.Ma_mf,           &value.bc_nothing,  2, nghost, "Ma", true, false, { "x", "y" });   // Mach
@@ -243,6 +247,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<IC::Constant,IC::Expression>("velocity0.ic",      value.velocity0_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("pressure0.ic",      value.pressure0_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("density0.ic",       value.density0_ic,  value.geom);
+    // pp.select_default<IC::Constant,IC::Expression>("energy0.ic",       value.energy0_ic,  value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("temperature0.ic",  value.temperature0_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("k0_thermal.ic",    value.k0_thermal_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("h1_thermal.ic",    value.h0_thermal_ic, value.geom);
@@ -252,9 +257,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<IC::Constant,IC::Expression>("velocity1.ic",      value.velocity1_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("pressure1.ic",      value.pressure1_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("density1.ic",       value.density1_ic,  value.geom);
+    // pp.select_default<IC::Constant,IC::Expression>("energy1.ic",       value.energy1_ic,  value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("temperature1.ic",  value.temperature1_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("k1_thermal.ic",    value.k1_thermal_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("h1_thermal.ic",    value.h1_thermal_ic, value.geom);
+
 
     // DIFFUSE BOUNDARY SOURCES
     // diffuse boundary prescribed mass flux
@@ -347,6 +354,21 @@ void Hydro2::Initialize(int lev)
     //k1_thermal_ic   ->Initialize(lev, k1_thermal_mf, 0.0);
     //h1_thermal_ic   ->Initialize(lev, h1_thermal_mf, 0.0);
 
+// // Debugging checks to make sure ICs are initialized:
+// if (eta_ic == nullptr) {
+//     Util::ParallelMessage(INFO, "eta_ic is not initialized!");
+// }
+// if (std::isnan(gamma0)) {
+//     Util::ParallelMessage(INFO, "gamma0 is not initialized!");
+// }
+
+
+    // // Energy missing:
+    // energy0_ic     ->Initialize(lev, energy0_mf, 0.0);
+    // energy0_ic     ->Initialize(lev, energy0_old_mf, 0.0);
+    // energy1_ic     ->Initialize(lev, energy1_mf, 0.0);
+    // energy1_ic     ->Initialize(lev, energy1_old_mf, 0.0);
+
     // FORCED SOURCE
     ic_m0           ->Initialize(lev, m0_mf, 0.0);
     ic_u0           ->Initialize(lev, u0_mf, 0.0);
@@ -427,10 +449,11 @@ void Hydro2::Mix(int lev)
         auto E_mass    = energy_per_mass_mf[lev]->array(mfi);
         auto E_mass_old= energy_per_mass_old_mf[lev]->array(mfi);
 
-        auto p_mix    = pressure_mf[lev]->array(mfi);
-        auto v_mix    = velocity_mf[lev]->array(mfi);
-        auto gamma_mix      = gamma_mf[lev]->array(mfi);
-        auto Tamann_p_0_mix  = Tamann_p_0_mf[lev]->array(mfi);
+        auto p_mix      = pressure_mf[lev]->array(mfi);
+        auto v_mix      = velocity_mf[lev]->array(mfi);
+        auto gamma_mix  = gamma_mf[lev]->array(mfi);
+        auto pi_mix     = pi_mf[lev]->array(mfi);
+        // auto pi_mix_1_mix  = pi_mix_1_mf[lev]->array(mfi);
         auto T_arr    = T_mf[lev]->array(mfi);
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i,int j,int k)
@@ -474,34 +497,53 @@ void Hydro2::Mix(int lev)
             Real UEv = Ev_mix - KEv;
             if (UEv < 0) UEv = 0;
 
-            E_vol(i,j,k)      = Ev_mix;
-            E_vol_old(i,j,k)  = Ev_mix;
+            // E_vol(i,j,k)      = Ev_mix;
+            // E_vol_old(i,j,k)  = Ev_mix;
 
-            Real Emas = Ev_mix/rho_mix;
-            E_mass(i,j,k)      = Emas;
-            E_mass_old(i,j,k)  = Emas;
+            // Real Emas = Ev_mix/rho_mix;
+            // E_mass(i,j,k)      = Emas;
+            // E_mass_old(i,j,k)  = Emas;
+
+            // double gmix, pimix;
+            // Thermo_Interp::InterpolateGammaPi_Stiffened(eta(i,j,k), gamma0, gamma1, pi_0, pi_1, gmix, pimix);
+
+            // Set::Scalar pi_mix = InterpolateTamannP0(eta(i,j,k), p0_0, p0_1);
+            // Set::Scalar gamma_mix = InterpolateTamannP0(eta(i,j,k), gamma0, gamma1);
 
             //------------------------------------------------------------------
             // EOS mixture
             //------------------------------------------------------------------
             Real A = e/(gamma0-1.0) + (1.0-e)/(gamma1-1.0);
-            Real B = (e * gamma0 * p0_0)/(gamma0-1.0)
-                   + ((1.0-e) * gamma1 * p0_1)/(gamma1-1.0);
+            Real B = (e * gamma0 * pi_0)/(gamma0-1.0)
+                   + ((1.0-e) * gamma1 * pi_1)/(gamma1-1.0);
 
-            Real gam = 1.0 + 1.0/A;
-            gamma_mix(i,j,k) = gam;
+            // Real gam = 1.0 + 1.0/A;
+            // gamma_mix(i,j,k) = gam;
 
-            Real Tamann_p_0_mix_local = (B/A)/gam;
-            Tamann_p_0_mix(i,j,k) = Tamann_p_0_mix_local;
+            double gmix, pimix;
+            Thermo_Interp::InterpolateGammaPi_Stiffened(
+                eta(i,j,k), gamma0, gamma1, pi_0, pi_1, gmix, pimix);
+            gamma_mix(i,j,k) = gmix;
+            pi_mix(i,j,k) = pimix;
 
-            Real p_local = (gam-1.0)*UEv - gam*Tamann_p_0_mix_local + pref;
+            // Real p_local = (gmix-1.0)*UEv - gmix*pimix + pref;
+            Real p_local = e*p0(i,j,k) + (1.0-e)*p1(i,j,k);
             if (p_local < 0) p_local = 1e-6;
             p_mix(i,j,k) = p_local;
 
+            // Calculate energy (Tammann stiffened gas model)
+            //------------------------------------------------------------------
+            Real KE = 0.5 * rho_mix * (vx*vx + vy*vy); // Kinetic energy
+            Real UE = (p_local + gmix * pimix) / (gmix - 1.0); // Internal energy
+            E_vol(i,j,k) = KE + UE; // Total energy
+
+            Real Emas = (KE + UE)/rho_mix;
+            E_mass(i,j,k)  = Emas;
+
             // T_arr(i,j,k) =
-            //     (p + Tamann_p_0_mix_local)/(rho_mix*cv_arr(i,j,k)*(gam-1.0) + 1e-14);
+            //     (p + pi_mix)/(rho_mix*cv_arr(i,j,k)*(gam-1.0) + 1e-14);
             T_arr(i,j,k) =
-                (p_local + Tamann_p_0_mix_local)/(rho_mix*cv0*(gam-1.0) + 1e-14);
+                (p_local + pimix)/(rho_mix*cv0*(gmix-1.0) + 1e-14);
         });
     }
 
@@ -515,7 +557,7 @@ void Hydro2::Mix(int lev)
     velocity_mf[lev]->FillBoundary(geom.periodicity());
     pressure_mf[lev]->FillBoundary(geom.periodicity());
     gamma_mf[lev]->FillBoundary(geom.periodicity());
-    Tamann_p_0_mf[lev]->FillBoundary(geom.periodicity());
+    pi_mf[lev]->FillBoundary(geom.periodicity());
     T_mf[lev]->FillBoundary(geom.periodicity());
 }
 
@@ -601,7 +643,7 @@ Hydro2::RHS(int lev,
 
         // PRIMITIVE/OUTPUT
         auto v_arr     = velocity_mf[lev]->array(mfi);
-        auto p_arr = pressure_mf[lev]->array(mfi);
+        auto p_arr     = pressure_mf[lev]->array(mfi);
         auto a_arr     = a_mf[lev]->array(mfi);
 
         auto KE_arr    = KE_per_vol_mf[lev]->array(mfi);
@@ -611,8 +653,8 @@ Hydro2::RHS(int lev,
         auto cv_arr    = cv_mf[lev]->array(mfi);
         auto T_arr     = T_mf[lev]->array(mfi);
 
-        auto gamma_arr      = gamma_mf[lev]->array(mfi);
-        auto Tamann_p_0_mix     = Tamann_p_0_mf[lev]->array(mfi);
+        auto gamma_mix = gamma_mf[lev]->array(mfi);
+        auto pi_mix    = pi_mf[lev]->array(mfi);
 
         auto mu_arr    = mu_chem_mf[lev]->array(mfi);
         auto Bm_arr    = Bm_mf[lev]->array(mfi);
@@ -655,18 +697,24 @@ Hydro2::RHS(int lev,
             Real A =   eta/(gamma0-1.0)
                      + (1.0 - eta)/(gamma1-1.0);
 
-            Real B = ( eta * gamma0 * p0_0 )/(gamma0-1.0)
-                   + ((1.0 - eta) * gamma1 * p0_1)/(gamma1-1.0);
+            Real B = ( eta * gamma0 * pi_0 )/(gamma0-1.0)
+                   + ((1.0 - eta) * gamma1 * pi_1)/(gamma1-1.0);
 
-            Real gamma_eff = 1.0 + 1.0/A;
-            gamma_arr(i,j,k) = gamma_eff;
+            // Real gmix = 1.0 + 1.0/A;
+            // gamma_mix(i,j,k) = gmix;
 
-            // Tammann pressure offset
-            Real Tamann_p_0_eff = (B/A)/gamma_eff;
-            Tamann_p_0_mix  (i,j,k) = Tamann_p_0_eff;
+            // // Tammann pressure offset
+            // Real pimix = (B/A)/gmix;
+            // pi_mix  (i,j,k) = pimix;
+
+            double gmix, pimix;
+            Thermo_Interp::InterpolateGammaPi_Stiffened(
+                eta, gamma0, gamma1, pi_0, pi_1, gmix, pimix);
+            gamma_mix(i,j,k) = gmix;
+            pi_mix(i,j,k) = pimix;
 
             // Pressure
-            Real p_mix = (gamma_eff - 1.0)*UE - gamma_eff*Tamann_p_0_eff + pref;
+            Real p_mix = (gmix - 1.0)*UE - gmix*pimix + pref;
             if (p_mix < 0.0) p_mix = 1e-6;
             p_arr(i,j,k) = p_mix;
 
@@ -675,10 +723,10 @@ Hydro2::RHS(int lev,
             cv_arr(i,j,k) = eta*cv0 + (1.0 - eta)*cv1;
 
             // Temperature
-            T_arr(i,j,k) = (p_mix +Tamann_p_0_eff) / (rho * cv_arr(i,j,k) * (gamma_eff - 1.0) + 1e-14);
+            T_arr(i,j,k) = (p_mix +pimix) / (rho * cv_arr(i,j,k) * (gmix - 1.0) + 1e-14);
 
             // Speed of sound
-            a_arr(i,j,k) = std::sqrt(gamma_eff * (p_mix + Tamann_p_0_eff) / rho);
+            a_arr(i,j,k) = std::sqrt(gmix * (p_mix + pimix) / rho);
 
             //------------------------------------------------------------------
             // Chemical potential + mass fraction
@@ -710,11 +758,11 @@ Hydro2::RHS(int lev,
 
         // Primitive arrays
         auto v_arr     = velocity_mf[lev]->array(mfi);
-        auto p_arr = pressure_mf[lev]->array(mfi);
+        auto p_arr     = pressure_mf[lev]->array(mfi);
         auto a_arr     = a_mf[lev]->array(mfi);
 
-        auto gamma_arr = gamma_mf[lev]->array(mfi);
-        auto Tamann_p_0_mix      = Tamann_p_0_mf[lev]->array(mfi);
+        auto gamma_mix = gamma_mf[lev]->array(mfi);
+        auto pi_mix    = pi_mf[lev]->array(mfi);
         auto T_arr     = T_mf[lev]->array(mfi);
 
         // Output
@@ -748,32 +796,32 @@ Hydro2::RHS(int lev,
 
             FR::State Sxm = FR::State(
                 rho_arr, M_arr, E_arr,
-                gamma_arr, Tamann_p_0_mix  , T_arr,
+                gamma_mix, pi_mix  , T_arr,
                 il, j, k, 0);    // x-direction
 
             FR::State Sxc = FR::State(
                 rho_arr, M_arr, E_arr,
-                gamma_arr, Tamann_p_0_mix  , T_arr,
+                gamma_mix, pi_mix  , T_arr,
                 i, j, k, 0);
 
             FR::State Sxp = FR::State(
                 rho_arr, M_arr, E_arr,
-                gamma_arr, Tamann_p_0_mix  , T_arr,
+                gamma_mix, pi_mix  , T_arr,
                 ir, j, k, 0);
 
             FR::State Sym = FR::State(
                 rho_arr, M_arr, E_arr,
-                gamma_arr, Tamann_p_0_mix  , T_arr,
+                gamma_mix, pi_mix  , T_arr,
                 i, jl, k, 1);   // y-direction
 
             FR::State Syc = FR::State(
                 rho_arr, M_arr, E_arr,
-                gamma_arr, Tamann_p_0_mix  , T_arr,
+                gamma_mix, pi_mix  , T_arr,
                 i, j, k, 1);
 
             FR::State Syp = FR::State(
                 rho_arr, M_arr, E_arr,
-                gamma_arr, Tamann_p_0_mix  , T_arr,
+                gamma_mix, pi_mix  , T_arr,
                 i, jr, k, 1);
 
             //------------------------------------------------------------------
@@ -841,6 +889,14 @@ Hydro2::RHS(int lev,
         });
     }
 }
+
+Set::Scalar InterpolateInterface(Set::Scalar eta, Set::Scalar val1, Set::Scalar val2) {
+    // Ensure eta is clamped between 0 and 1
+    eta = std::max(0.0, std::min(1.0, eta));
+    // Perform linear interpolation
+    return (1.0 - eta) * val1 + eta * val2;
+}
+
 // CURVATURE CALCULATION
 void Hydro2::ComputeHeightFunction (int lev)
 {
@@ -1431,11 +1487,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         // //Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
         // //Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
 
-        auto gamma      = gamma_mf[lev]->array(mfi);
-        auto Tamann_p_0 = Tamann_p_0_mf[lev]->array(mfi);
+        auto gamma_mix  = gamma_mf[lev]->array(mfi);
+        auto pi_mix     = pi_mf[lev]->array(mfi);
 
         // Set::Patch<Set::Scalar> gamma_mix = gamma_mf.Patch(lev, mfi);
-        // Set::Patch<Set::Scalar> Tamann_p_0 = Tamann_p_0_mf.Patch(lev, mfi);
+        // Set::Patch<Set::Scalar> pi_mix = pi_mix_mf.Patch(lev, mfi);
 
         auto mu_chem    = mu_chem_mf[lev]->array(mfi);
         auto Bm         = Bm_mf[lev]->array(mfi);
@@ -1458,8 +1514,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // gamma
             Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
-            Set::Scalar B = (eta(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
-            gamma(i, j, k) = 1.0 + (1.0 / A);
+            Set::Scalar B = (eta(i, j, k) * gamma0 * pi_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * pi_1) / (gamma1 - 1.0);
+            // gamma(i, j, k) = 1.0 + (1.0 / A);
+
+            double gmix, pimix;
+            Thermo_Interp::InterpolateGammaPi_Stiffened(
+                eta(i,j,k), gamma0, gamma1, pi_0, pi_1, gmix, pimix);
+            gamma_mix(i,j,k) = gmix;
+            pi_mix(i,j,k) = pimix;
 
             // etadot
             etadot(i, j, k) = (eta(i, j, k) - eta_old(i, j, k)) / dt;
@@ -1493,8 +1555,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             }
 
             // Pressure
-            Tamann_p_0(i, j, k) = (B / A) / gamma(i, j, k);
-            p(i, j, k) = (gamma(i, j, k) - 1.0) * UE_vol(i, j, k) - gamma(i, j, k) * Tamann_p_0(i, j, k) + pref; // pressure Tammann EOS modification
+            pi_mix(i, j, k) = (B / A) / gamma_mix(i, j, k);
+            p(i, j, k) = (gamma_mix(i, j, k) - 1.0) * UE_vol(i, j, k) - gamma_mix(i, j, k) * pi_mix(i, j, k) + pref; // pressure Tammann EOS modification
             if (p(i, j, k) < 0.0)
             {
                 p(i, j, k) = 1e-6;
@@ -1509,7 +1571,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Bm(i, j, k) = eta(i, j, k) / (1.0 - eta(i, j, k) + small);
 
             // Speed of sound:
-            a(i, j, k) = sqrt(gamma(i, j, k) * (p(i, j, k) + Tamann_p_0(i, j, k)) / (rho(i, j, k)));
+            a(i, j, k) = sqrt(gamma_mix(i, j, k) * (p(i, j, k) + pi_mix(i, j, k)) / (rho(i, j, k)));
 
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / (a(i, j, k) + small);
@@ -1539,8 +1601,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // ------------------------------------------------------------
             // Solving for new states
             Set::Scalar A_new = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
-            Set::Scalar B_new = (eta(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
-            Set::Scalar gamma_eff_new = 1.0 + (1.0 / A_new);
+            Set::Scalar B_new = (eta(i, j, k) * gamma0 * pi_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * pi_1) / (gamma1 - 1.0);
+            // Set::Scalar gmix_new = 1.0 + (1.0 / A_new);
             Set::Vector v_new = Set::Vector(M(i, j, k, 0) / (rho(i, j, k)), M(i, j, k, 1) / (rho(i, j, k)));
             Set::Scalar KE_vol_new = 0.5 * rho(i, j, k) * (v_new(0) * v_new(0) + v_new(1) * v_new(1));
 
@@ -1554,8 +1616,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 p_new = 1e-6;
             }
-            Set::Scalar Tamann_p_0_new = (B_new / A_new) / gamma_eff_new;
-            Set::Scalar sound_speed_new = sqrt(gamma_eff_new * (p_new + Tamann_p_0_new) / (rho(i, j, k)));
+            // Set::Scalar pi_mix_new = (B_new / A_new) / gmix_new;
+            double gmix_new, pimix_new;
+            Thermo_Interp::InterpolateGammaPi_Stiffened(
+                eta(i,j,k), gamma0, gamma1, pi_0, pi_1, gmix_new, pimix_new);
+            // gamma_mix(i,j,k) = gmix;
+            // pi_mix_new(i,j,k) = pimix;
+            Set::Scalar sound_speed_new = sqrt(gmix_new * (p_new + pimix_new) / (rho(i, j, k)));
 
             c_max = std::max(c_max, sound_speed_new);
             vx_max = std::max(vx_max, std::abs(v_new(0))); // vx
@@ -1720,5 +1787,6 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
 
 }
 
+#pragma GCC diagnostic pop
 
 //#endif

@@ -58,6 +58,7 @@ public:
         delete density0_ic;
         delete velocity0_ic;
         delete pressure0_ic;
+        delete energy0_ic;
         //delete temperature0_ic; // Temperature
         //delete k0_thermal_ic;   // Thermal Conductivity
         //delete h0_thermal_ic;   // Thermal Convectivity
@@ -65,6 +66,7 @@ public:
         delete density1_ic;
         delete velocity1_ic;
         delete pressure1_ic;
+        delete energy1_ic;
         //delete temperature1_ic; // Temperature
        // delete k1_thermal_ic;   // Thermal Conductivity
         //delete h1_thermal_ic;   // Thermal Convectivity
@@ -109,6 +111,7 @@ protected:
     void ComputeKappas(int lev);
     void ComputeGradEta(int lev);
     void ComputeHFcurvature_MUSCL(int lev);
+    Set::Scalar InterpolateTamannP0(Set::Scalar eta, Set::Scalar Tamann_p_0_0, Set::Scalar Tamann_p_0_1);
 
 
 protected:
@@ -168,7 +171,7 @@ protected:
     Set::Field<Set::Scalar> k_thermal_mf;   // Thermal Conductivity
     Set::Field<Set::Scalar> h_thermal_mf;   // Thermal Convectivity
     Set::Field<Set::Scalar> gamma_mf;       // Specific Heat Ratio
-    Set::Field<Set::Scalar> Tamann_p_0_mf;          // Tamman Pressure
+    Set::Field<Set::Scalar> pi_mf;          // Tamman Pressure
     Set::Field<Set::Scalar> mu_chem_mf;     // Allen-Cahn Chemical Potential
     Set::Field<Set::Scalar> a_mf;           // Speed of sound
     Set::Field<Set::Scalar> Ma_mf;          // Mach
@@ -232,6 +235,7 @@ protected:
     IC::IC<Set::Scalar>* velocity0_ic = nullptr;
     IC::IC<Set::Scalar>* pressure0_ic = nullptr;
     IC::IC<Set::Scalar>* density0_ic  = nullptr;
+    IC::IC<Set::Scalar>* energy0_ic = nullptr;
     //IC::IC<Set::Scalar>* temperature0_ic  = nullptr;
     //IC::IC<Set::Scalar>* k0_thermal_ic  = nullptr;
     //IC::IC<Set::Scalar>* h0_thermal_ic  = nullptr;
@@ -240,6 +244,7 @@ protected:
     IC::IC<Set::Scalar>* velocity1_ic = nullptr;
     IC::IC<Set::Scalar>* pressure1_ic = nullptr;
     IC::IC<Set::Scalar>* density1_ic = nullptr;
+    IC::IC<Set::Scalar>* energy1_ic = nullptr;
     //IC::IC<Set::Scalar>* temperature1_ic = nullptr;
     //IC::IC<Set::Scalar>* k1_thermal_ic  = nullptr;
     //IC::IC<Set::Scalar>* h1_thermal_ic  = nullptr;
@@ -265,12 +270,12 @@ protected:
 
     Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion=NAN;
     // FLUID 0
-    Set::Scalar gamma0 = NAN, p0_0 = NAN, mu0 = NAN, mu0_b = NAN, MW0 = NAN;
+    Set::Scalar gamma0 = NAN, pi_0 = NAN, mu0 = NAN, mu0_b = NAN, MW0 = NAN;
     Set::Scalar b0 = NAN, q0EOS = NAN;
     Set::Scalar cp0 = NAN, cv0 = NAN;
 
     // FLUID 1
-    Set::Scalar gamma1 = NAN, p0_1 = NAN, mu1 = NAN, mu1_b = NAN, MW1 = NAN;
+    Set::Scalar gamma1 = NAN, pi_1 = NAN, mu1 = NAN, mu1_b = NAN, MW1 = NAN;
     Set::Scalar b1 = NAN, q1EOS = NAN;
     Set::Scalar cp1 = NAN, cv1 = NAN;
 

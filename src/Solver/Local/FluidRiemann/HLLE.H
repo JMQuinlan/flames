@@ -65,8 +65,8 @@ public:
         Set::Scalar gamL = lo.gam;
         Set::Scalar gamR = hi.gam;
 
-        Set::Scalar Tamann_p_0L = lo.Tamann_p_0;
-        Set::Scalar Tamann_p_0R = hi.Tamann_p_0;
+        Set::Scalar piL = lo.pi;
+        Set::Scalar piR = hi.pi;
 
         //----------------------------------------------------------------------
         // Internal energy and stiffened‑gas pressure
@@ -77,17 +77,17 @@ public:
         Set::Scalar KER = 0.5*rhoR*(uR*uR + vR*vR);
         Set::Scalar UER = ER - KER;
 
-        Set::Scalar pL = (gamL-1.0)*UEL - gamL*Tamann_p_0L + p_ref;
-        Set::Scalar pR = (gamR-1.0)*UER - gamR*Tamann_p_0R + p_ref;
+        Set::Scalar pL = (gamL-1.0)*UEL - gamL*piL + p_ref;
+        Set::Scalar pR = (gamR-1.0)*UER - gamR*piR + p_ref;
 
         pL = std::max(pL, small);
         pR = std::max(pR, small);
 
         //----------------------------------------------------------------------
-        // Correct stiffened-gas sound speeds:  a² = γ (p + γ Tamann_p_0) / ρ
+        // Correct stiffened-gas sound speeds:  a² = γ (p + γ pi) / ρ
         //----------------------------------------------------------------------
-        Set::Scalar aL = std::sqrt(gamL * (pL + gamL*Tamann_p_0L) / rhoL);
-        Set::Scalar aR = std::sqrt(gamR * (pR + gamR*Tamann_p_0R) / rhoR);
+        Set::Scalar aL = std::sqrt(gamL * (pL + gamL*piL) / rhoL);
+        Set::Scalar aR = std::sqrt(gamR * (pR + gamR*piR) / rhoR);
 
         //----------------------------------------------------------------------
         // HLLE wave speed estimates
@@ -104,13 +104,13 @@ public:
         FL.mass = rhoL*uL;
         FL.momentum_normal  = rhoL*uL*uL + pL;
         FL.momentum_tangent = rhoL*uL*vL;
-        FL.energy = uL*(EL + pL + Tamann_p_0L);
+        FL.energy = uL*(EL + pL + piL);
 
         // right state fluxes
         FR.mass = rhoR*uR;
         FR.momentum_normal  = rhoR*uR*uR + pR;
         FR.momentum_tangent = rhoR*uR*vR;
-        FR.energy = uR*(ER + pR + Tamann_p_0R);
+        FR.energy = uR*(ER + pR + piR);
 
         //----------------------------------------------------------------------
         // Select region

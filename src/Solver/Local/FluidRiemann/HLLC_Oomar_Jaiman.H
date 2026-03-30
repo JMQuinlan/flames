@@ -62,7 +62,7 @@ public:
         Set::Scalar Mt_L = lo.M_tangent, Mt_R = hi.M_tangent;
         Set::Scalar E_L = lo.E, E_R = hi.E;
         Set::Scalar gamma_L = lo.gam, gamma_R = hi.gam;
-        Set::Scalar Tamann_p_0_L = lo.Tamann_p_0, Tamann_p_0_R = hi.Tamann_p_0;
+        Set::Scalar pi_L = lo.pi, pi_R = hi.pi;
         Set::Scalar T_L = lo.T, T_R = hi.T;
 
         // Ensure no negative densities
@@ -80,12 +80,12 @@ public:
             // With Respect to Specific Volume (energies are per unit volume)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small);
             ue_L = E_L - ke_L;
-            p_L = (gamma_L - 1.0) * ue_L - gamma_L * Tamann_p_0_L + p_ref;
+            p_L = (gamma_L - 1.0) * ue_L - gamma_L * pi_L + p_ref;
             h_TL = (ke_L + ue_L + p_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * ue_R - gamma_R * Tamann_p_0_R + p_ref;
+            p_R = (gamma_R - 1.0) * ue_R - gamma_R * pi_R + p_ref;
             h_TR = (ke_R + ue_R + p_R);
         }
         else
@@ -93,12 +93,12 @@ public:
             // With Respect to Specific Mass (energies are per unit mass)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small);
             ue_L = E_L - ke_L;
-            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * Tamann_p_0_L + p_ref;
+            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * pi_L + p_ref;
             h_TL = ke_L + ue_L + (p_L / rho_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * Tamann_p_0_R + p_ref;
+            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * pi_R + p_ref;
             h_TR = ke_R + ue_R + (p_R / rho_R);
         }
 
@@ -107,8 +107,8 @@ public:
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
         // Sound speeds (Tammann EOS)
-        Set::Scalar a_L = std::sqrt(gamma_L * (p_L + gamma_L * Tamann_p_0_L) / (rho_L + small));
-        Set::Scalar a_R = std::sqrt(gamma_R * (p_R + gamma_R * Tamann_p_0_R) / (rho_R + small));
+        Set::Scalar a_L = std::sqrt(gamma_L * (p_L + gamma_L * pi_L) / (rho_L + small));
+        Set::Scalar a_R = std::sqrt(gamma_R * (p_R + gamma_R * pi_R) / (rho_R + small));
 
         // ========================================
         // OOMAR-JAIMAN ALL-MACH MODIFICATIONS
@@ -118,8 +118,8 @@ public:
         Set::Scalar Ma_R = std::abs(u_R) / (a_R + small);
 
         // Pressure-based Mach number (for shock detection)
-        Set::Scalar pL_ac = p_L + gamma_L*Tamann_p_0_L;
-        Set::Scalar pR_ac = p_R + gamma_R*Tamann_p_0_R;
+        Set::Scalar pL_ac = p_L + gamma_L*pi_L;
+        Set::Scalar pR_ac = p_R + gamma_R*pi_R;
         Set::Scalar p_ratio = std::max(pL_ac/(pR_ac+small), pR_ac/(pL_ac+small));
         Set::Scalar Ma_pressure = std::sqrt(std::max(0.0, (p_ratio - 1.0) * (gamma_L + 1.0) / (2.0 * gamma_L)));
 
@@ -156,16 +156,16 @@ public:
 
         if (Spec_Vol == 1)
         {
-            // E_star_L = rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + (p_L + Tamann_p_0_L) / (rho_L * (S_L - u_L) + small)));
-            Set::Scalar h_L = (E_L + p_L + Tamann_p_0_L) / rho_L;
+            // E_star_L = rho_star_L * (E_L / rho_L + (S_star - u_L) * (S_star + (p_L + pi_L) / (rho_L * (S_L - u_L) + small)));
+            Set::Scalar h_L = (E_L + p_L + pi_L) / rho_L;
             E_star_L =
                 rho_star_L * (
                     h_L
                     - 0.5*(u_L*u_L + v_L*v_L)
                     + (S_star - u_L)*S_star
                 );
-            // E_star_R = rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + (p_R + Tamann_p_0_R) / (rho_R * (S_R - u_R) + small)));
-            Set::Scalar h_R = (E_R + p_R + Tamann_p_0_R) / rho_R;
+            // E_star_R = rho_star_R * (E_R / rho_R + (S_star - u_R) * (S_star + (p_R + pi_R) / (rho_R * (S_R - u_R) + small)));
+            Set::Scalar h_R = (E_R + p_R + pi_R) / rho_R;
             E_star_R =
                 rho_star_R * (
                     h_R
@@ -175,18 +175,18 @@ public:
         }
         else
         {
-            // E_star_L = E_L + (S_star - u_L) * (S_star + (p_L + Tamann_p_0_L) / (rho_L * (S_L - u_L) + small));
-            // Set::Scalar h_L = E_L + (p_L + Tamann_p_0_L) / rho_L;
+            // E_star_L = E_L + (S_star - u_L) * (S_star + (p_L + pi_L) / (rho_L * (S_L - u_L) + small));
+            // Set::Scalar h_L = E_L + (p_L + pi_L) / rho_L;
             // E_star_L = h_L + (S_star - u_L) * S_star - 0.5*(u_L*u_L + v_L*v_L);
             amrex::Real e_L = E_L;  // already per mass
-            amrex::Real h_L = e_L + (p_L + Tamann_p_0_L)/rho_L;
+            amrex::Real h_L = e_L + (p_L + pi_L)/rho_L;
             E_star_L = h_L - 0.5*(u_L*u_L + v_L*v_L) + (S_star - u_L)*S_star;
             E_star_L *= rho_star_L;
-            // E_star_R = E_R + (S_star - u_R) * (S_star + (p_R + Tamann_p_0_R) / (rho_R * (S_R - u_R) + small));
-            // Set::Scalar h_R = E_R + (p_R + Tamann_p_0_R) / rho_R;
+            // E_star_R = E_R + (S_star - u_R) * (S_star + (p_R + pi_R) / (rho_R * (S_R - u_R) + small));
+            // Set::Scalar h_R = E_R + (p_R + pi_R) / rho_R;
             // E_star_R = h_R + (S_star - u_R) * S_star - 0.5*(u_R*u_R + v_R*v_R);
             amrex::Real e_R = E_R;  // already per mass
-            amrex::Real h_R = e_R + (p_R + Tamann_p_0_R)/rho_R;
+            amrex::Real h_R = e_R + (p_R + pi_R)/rho_R;
             E_star_R = h_R - 0.5*(u_R*u_R + v_R*v_R) + (S_star - u_R)*S_star;
             E_star_R *= rho_star_R;
         }
@@ -205,13 +205,13 @@ public:
             f_L.mass = rho_L * u_L;
             f_L.momentum_normal = rho_L * u_L * u_L + p_L;
             f_L.momentum_tangent = rho_L * u_L * v_L;
-            f_L.energy = u_L * (E_L + p_L + Tamann_p_0_L);
+            f_L.energy = u_L * (E_L + p_L + pi_L);
 
             // ---- Right ----
             f_R.mass = rho_R * u_R;
             f_R.momentum_normal = rho_R * u_R * u_R + p_R;
             f_R.momentum_tangent = rho_R * u_R * v_R;
-            f_R.energy = u_R * (E_R + p_R + Tamann_p_0_R);
+            f_R.energy = u_R * (E_R + p_R + pi_R);
 
             // - Left Star --
             f_star_L.mass = f_L.mass + S_L * (rho_star_L - rho_L);
@@ -220,7 +220,7 @@ public:
             Set::Scalar mt_L_star = rho_star_L * v_L;
             f_star_L.momentum_tangent =
                 f_L.momentum_tangent + S_L * (mt_L_star - mt_L);
-            f_star_L.energy = f_L.energy + S_L * ((E_star_L + Tamann_p_0_L) - (E_L + Tamann_p_0_L));
+            f_star_L.energy = f_L.energy + S_L * ((E_star_L + pi_L) - (E_L + pi_L));
 
             // - Right Star --
             f_star_R.mass = f_R.mass + S_R * (rho_star_R - rho_R);
@@ -229,7 +229,7 @@ public:
             Set::Scalar mt_R_star = rho_star_R * v_R;
             f_star_R.momentum_tangent =
                 f_R.momentum_tangent + S_R * (mt_R_star - mt_R);
-            f_star_R.energy = f_R.energy + S_R * ((E_star_R + Tamann_p_0_R) - (E_R + Tamann_p_0_R));
+            f_star_R.energy = f_R.energy + S_R * ((E_star_R + pi_R) - (E_R + pi_R));
         }
         else
         {

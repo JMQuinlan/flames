@@ -139,7 +139,7 @@ public:
 
             // Copy thermodynamic fields from physical cell i
             right[i].gam = cell[i].gam;
-            right[i].Tamann_p_0  = cell[i].Tamann_p_0;
+            right[i].pi  = cell[i].pi;
             right[i].T   = cell[i].T;
 
             // Left state from cell i-1
@@ -150,7 +150,7 @@ public:
 
             // Copy thermodynamics from physical cell i-1
             left[i].gam = cell[i-1].gam;
-            left[i].Tamann_p_0  = cell[i-1].Tamann_p_0;
+            left[i].pi  = cell[i-1].pi;
             left[i].T   = cell[i-1].T;
         }
     }
@@ -196,8 +196,8 @@ public:
                 Set::Scalar rho_R = extendedCells[idx].rho;
                 Set::Scalar gamma_L = extendedCells[idx - 1].gam;
                 Set::Scalar gamma_R = extendedCells[idx].gam;
-                Set::Scalar Tamann_p_0_L = extendedCells[idx - 1].Tamann_p_0;
-                Set::Scalar Tamann_p_0_R = extendedCells[idx].Tamann_p_0;
+                Set::Scalar pi_L = extendedCells[idx - 1].pi;
+                Set::Scalar pi_R = extendedCells[idx].pi;
 
                 Set::Scalar sqrt_rho_L = std::sqrt(rho_L);
                 Set::Scalar sqrt_rho_R = std::sqrt(rho_R);
@@ -216,8 +216,8 @@ public:
                 {
                     ke_L = 0.5 * (u_L * u_L + v_L * v_L) * rho_L;
                     ke_R = 0.5 * (u_R * u_R + v_R * v_R) * rho_R;
-                    p_L = (gamma_L - 1.0) * (E_L - ke_L) - gamma_L * Tamann_p_0_L + p_ref;
-                    p_R = (gamma_R - 1.0) * (E_R - ke_R) - gamma_R * Tamann_p_0_R + p_ref;
+                    p_L = (gamma_L - 1.0) * (E_L - ke_L) - gamma_L * pi_L + p_ref;
+                    p_R = (gamma_R - 1.0) * (E_R - ke_R) - gamma_R * pi_R + p_ref;
                     H_L = (E_L + p_L) / rho_L;
                     H_R = (E_R + p_R) / rho_R;
                 }
@@ -225,8 +225,8 @@ public:
                 {
                     ke_L = 0.5 * (u_L * u_L + v_L * v_L);
                     ke_R = 0.5 * (u_R * u_R + v_R * v_R);
-                    p_L = (gamma_L - 1.0) * rho_L * (E_L - ke_L) - gamma_L * Tamann_p_0_L + p_ref;
-                    p_R = (gamma_R - 1.0) * rho_R * (E_R - ke_R) - gamma_R * Tamann_p_0_R + p_ref;
+                    p_L = (gamma_L - 1.0) * rho_L * (E_L - ke_L) - gamma_L * pi_L + p_ref;
+                    p_R = (gamma_R - 1.0) * rho_R * (E_R - ke_R) - gamma_R * pi_R + p_ref;
                     H_L = E_L + p_L / rho_L;
                     H_R = E_R + p_R / rho_R;
                 }
@@ -237,10 +237,10 @@ public:
                 Set::Scalar H_roe = (sqrt_rho_L * H_L + sqrt_rho_R * H_R) / (sqrt_rho_L + sqrt_rho_R + small);
 
                 Set::Scalar p_roe = (sqrt_rho_L * p_L + sqrt_rho_R * p_R) / (sqrt_rho_L + sqrt_rho_R + small);
-                Set::Scalar Tamann_p_0_roe = (sqrt_rho_L * Tamann_p_0_L + sqrt_rho_R * Tamann_p_0_R) / (sqrt_rho_L + sqrt_rho_R + small);
+                Set::Scalar pi_roe = (sqrt_rho_L * pi_L + sqrt_rho_R * pi_R) / (sqrt_rho_L + sqrt_rho_R + small);
                 Set::Scalar gamma_roe = (sqrt_rho_L * gamma_L + sqrt_rho_R * gamma_R) / (sqrt_rho_L + sqrt_rho_R + small);
 
-                Set::Scalar a_roe = std::sqrt(gamma_roe * (p_roe + Tamann_p_0_roe) / (sqrt_rho_L * sqrt_rho_R + small));
+                Set::Scalar a_roe = std::sqrt(gamma_roe * (p_roe + pi_roe) / (sqrt_rho_L * sqrt_rho_R + small));
 
                 // Right eigenvectors matrix (R)
                 double R[4][4] = {
@@ -308,7 +308,7 @@ public:
                 leftStates[i].M_tangent = leftU[2];
                 leftStates[i].E         = leftU[3];
                 leftStates[i].gam       = extendedCells[idx-1].gam;
-                leftStates[i].Tamann_p_0        = extendedCells[idx-1].Tamann_p_0;
+                leftStates[i].pi        = extendedCells[idx-1].pi;
                 leftStates[i].T         = extendedCells[idx-1].T;
 
                 // Convert back to State (RIGHT)
@@ -317,7 +317,7 @@ public:
                 rightStates[i].M_tangent = rightU[2];
                 rightStates[i].E         = rightU[3];
                 rightStates[i].gam       = extendedCells[idx].gam;
-                rightStates[i].Tamann_p_0        = extendedCells[idx].Tamann_p_0;
+                rightStates[i].pi        = extendedCells[idx].pi;
                 rightStates[i].T         = extendedCells[idx].T;
                 // Convert back to State
                 leftStates[i].rho = std::max(small, leftU[0]);
@@ -325,36 +325,36 @@ public:
                 leftStates[i].M_tangent = leftU[2];
                 leftStates[i].E = leftU[3];
                 leftStates[i].gam = gamma_L;
-                leftStates[i].Tamann_p_0 = Tamann_p_0_L;
+                leftStates[i].pi = pi_L;
 
                 double rL   = leftStates[i].rho;
                 double uL   = leftStates[i].M_normal  / rL;
                 double vL   = leftStates[i].M_tangent / rL;
                 double EL   = leftStates[i].E;
                 double gamL = leftStates[i].gam;
-                double Tamann_p_0L  = leftStates[i].Tamann_p_0;
+                double piL  = leftStates[i].pi;
 
                 double keL = 0.5 * rL * (uL*uL + vL*vL);
                 double ueL = EL - keL;
-                double pL  = (gamL - 1.0)*ueL - gamL*Tamann_p_0L + p_ref;
+                double pL  = (gamL - 1.0)*ueL - gamL*piL + p_ref;
 
                 rightStates[i].rho = std::max(small, rightU[0]);
                 rightStates[i].M_normal = rightU[1];
                 rightStates[i].M_tangent = rightU[2];
                 rightStates[i].E = rightU[3];
                 rightStates[i].gam = gamma_R;
-                rightStates[i].Tamann_p_0 = Tamann_p_0_R;
+                rightStates[i].pi = pi_R;
 
                 double rR   = rightStates[i].rho;
                 double uR   = rightStates[i].M_normal  / rR;
                 double vR   = rightStates[i].M_tangent / rR;
                 double ER   = rightStates[i].E;
                 double gamR = rightStates[i].gam;
-                double Tamann_p_0R  = rightStates[i].Tamann_p_0;
+                double piR  = rightStates[i].pi;
 
                 double keR = 0.5 * rR * (uR*uR + vR*vR);
                 double ueR = ER - keR;
-                double pR  = (gamR - 1.0)*ueR - gamR*Tamann_p_0R + p_ref;
+                double pR  = (gamR - 1.0)*ueR - gamR*piR + p_ref;
             }
         }
     }
@@ -392,7 +392,7 @@ public:
         Set::Scalar Mt_L = lo.M_tangent, Mt_R = hi.M_tangent;
         Set::Scalar E_L = lo.E, E_R = hi.E;
         Set::Scalar gamma_L = lo.gam, gamma_R = hi.gam;
-        Set::Scalar Tamann_p_0_L = lo.Tamann_p_0, Tamann_p_0_R = hi.Tamann_p_0;
+        Set::Scalar pi_L = lo.pi, pi_R = hi.pi;
         Set::Scalar T_L = lo.T, T_R = hi.T;
 
         // Ensure no negative densities
@@ -410,12 +410,12 @@ public:
             // With Respect to Specific Volume (energies are per unit volume)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small);
             ue_L = E_L - ke_L;
-            p_L = (gamma_L - 1.0) * ue_L - gamma_L * Tamann_p_0_L + p_ref;
+            p_L = (gamma_L - 1.0) * ue_L - gamma_L * pi_L + p_ref;
             h_TL = (ke_L + ue_L + p_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * ue_R - gamma_R * Tamann_p_0_R + p_ref;
+            p_R = (gamma_R - 1.0) * ue_R - gamma_R * pi_R + p_ref;
             h_TR = (ke_R + ue_R + p_R);
         }
         else
@@ -423,12 +423,12 @@ public:
             // With Respect to Specific Mass (energies are per unit mass)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small);
             ue_L = E_L - ke_L;
-            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * Tamann_p_0_L + p_ref;
+            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * pi_L + p_ref;
             h_TL = ke_L + ue_L + (p_L / rho_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * Tamann_p_0_R + p_ref;
+            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * pi_R + p_ref;
             h_TR = ke_R + ue_R + (p_R / rho_R);
         }
 
@@ -436,8 +436,8 @@ public:
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
         // Sound speeds (Tammann EOS)
-        Set::Scalar a_L = std::sqrt(gamma_L * (p_L + Tamann_p_0_L) / (rho_L + small));
-        Set::Scalar a_R = std::sqrt(gamma_R * (p_R + Tamann_p_0_R) / (rho_R + small));
+        Set::Scalar a_L = std::sqrt(gamma_L * (p_L + pi_L) / (rho_L + small));
+        Set::Scalar a_R = std::sqrt(gamma_R * (p_R + pi_R) / (rho_R + small));
 
         // Wave speed estimates
         Set::Scalar S_L = std::min(u_L - a_L, u_R - a_R);
