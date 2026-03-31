@@ -89,7 +89,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // FLUID 0
         pp_query_required("gamma0", value.gamma0);      // gamma for gamma law
-        pp_query_default("p0_0", value.pi_0, 0.0);      // pi for Tammann EOS
+        pp_query_default("pi_0", value.pi_0, 0.0);      // pi for Tammann EOS
         pp_query_required("mu0", value.mu0);            // linear viscosity coefficient
         pp_query_default("mu0_b", value.mu0_b, 0.0);    // bulk viscosity coefficient
         pp_query_default("cp0", value.cp0, 0.0);        // Constant Pressure Specific Heat [J/kg]
@@ -99,7 +99,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // FLUID 1
         pp_query_required("gamma1", value.gamma1);      // gamma for gamma law
-        pp_query_default("p0_1", value.pi_1, 0.0);      // pi for Tammann EOS
+        pp_query_default("pi_1", value.pi_1, 0.0);      // pi for Tammann EOS
         pp_query_required("mu1", value.mu1);            // linear viscosity coefficient
         pp_query_default("mu1_b", value.mu1_b, 0.0);    // bulk viscosity coefficient
         pp_query_default("cp1", value.cp1, 0.0);        // Constant Pressure Specific Heat [J/kg]
@@ -329,30 +329,38 @@ void Hydro2::Initialize(int lev)
     const Real* dx = geom.CellSize();
     const Box& domain = geom.Domain();
 
-    // Initialize individual fluid variables
-    // DIFFUSIVE BOUNDRY
-    eta_ic          ->Initialize(lev, eta_mf, 0.0);
-    eta_ic          ->Initialize(lev, eta_old_mf, 0.0);
-    etadot_mf[lev]  ->setVal(0.0);
-    hess_eta_mf[lev]->setVal(0.0);
+    // debugging prints to check initial conditions before mixing:
+    amrex::Print() << "p0 BEFORE MIX: "
+                << pressure0_mf[lev]->min(0) << " "
+                << pressure0_mf[lev]->max(0) << "\n";
+    amrex::Print() << "p1 BEFORE MIX: "
+                << pressure1_mf[lev]->min(0) << " "
+                << pressure1_mf[lev]->max(0) << "\n";
 
-    // FLUID 0
-    velocity0_ic    ->Initialize(lev, velocity0_mf, 0.0);
-    pressure0_ic    ->Initialize(lev, pressure0_mf, 0.0);
-    density0_ic     ->Initialize(lev, density0_mf, 0.0);
-    density0_ic     ->Initialize(lev, density0_old_mf, 0.0);
-    //temperature0_ic ->Initialize(lev, T0_mf, 0.0);
-    //k0_thermal_ic   ->Initialize(lev, k0_thermal_mf, 0.0);
-    //h0_thermal_ic   ->Initialize(lev, h0_thermal_mf, 0.0);
+    // // Initialize individual fluid variables
+    // // DIFFUSIVE BOUNDRY
+    // eta_ic          ->Initialize(lev, eta_mf, 0.0);
+    // eta_ic          ->Initialize(lev, eta_old_mf, 0.0);
+    // etadot_mf[lev]  ->setVal(0.0);
+    // hess_eta_mf[lev]->setVal(0.0);
 
-    // FLUID 1
-    velocity1_ic    ->Initialize(lev, velocity1_mf, 0.0);
-    pressure1_ic    ->Initialize(lev, pressure1_mf, 0.0);
-    density1_ic     ->Initialize(lev, density1_mf, 0.0);
-    density1_ic     ->Initialize(lev, density1_old_mf, 0.0);
-    //temperature1_ic ->Initialize(lev, T1_mf, 0.0);
-    //k1_thermal_ic   ->Initialize(lev, k1_thermal_mf, 0.0);
-    //h1_thermal_ic   ->Initialize(lev, h1_thermal_mf, 0.0);
+    // // FLUID 0
+    // velocity0_ic    ->Initialize(lev, velocity0_mf, 0.0);
+    // // pressure0_ic    ->Initialize(lev, pressure0_mf, 0.0);
+    // density0_ic     ->Initialize(lev, density0_mf, 0.0);
+    // density0_ic     ->Initialize(lev, density0_old_mf, 0.0);
+    // //temperature0_ic ->Initialize(lev, T0_mf, 0.0);
+    // //k0_thermal_ic   ->Initialize(lev, k0_thermal_mf, 0.0);
+    // //h0_thermal_ic   ->Initialize(lev, h0_thermal_mf, 0.0);
+
+    // // FLUID 1
+    // velocity1_ic    ->Initialize(lev, velocity1_mf, 0.0);
+    // // pressure1_ic    ->Initialize(lev, pressure1_mf, 0.0);
+    // density1_ic     ->Initialize(lev, density1_mf, 0.0);
+    // density1_ic     ->Initialize(lev, density1_old_mf, 0.0);
+    // //temperature1_ic ->Initialize(lev, T1_mf, 0.0);
+    // //k1_thermal_ic   ->Initialize(lev, k1_thermal_mf, 0.0);
+    // //h1_thermal_ic   ->Initialize(lev, h1_thermal_mf, 0.0);
 
 // // Debugging checks to make sure ICs are initialized:
 // if (eta_ic == nullptr) {
@@ -373,6 +381,55 @@ void Hydro2::Initialize(int lev)
     ic_m0           ->Initialize(lev, m0_mf, 0.0);
     ic_u0           ->Initialize(lev, u0_mf, 0.0);
     ic_q            ->Initialize(lev, q_mf, 0.0);
+
+    // --------------------------------------------
+    // ENERGY FROM PRESSURE USING STIFFENED EOS
+    // --------------------------------------------
+    for (MFIter mfi(*pressure0_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const Box& bx = mfi.validbox();
+
+        auto p0  = pressure0_mf[lev]->array(mfi);
+        auto p1  = pressure1_mf[lev]->array(mfi);
+
+        auto rho0 = density0_mf[lev]->array(mfi);
+        auto rho1 = density1_mf[lev]->array(mfi);
+
+        auto v0   = velocity0_mf[lev]->array(mfi);
+        auto v1   = velocity1_mf[lev]->array(mfi);
+
+        auto E0   = energy0_mf[lev]->array(mfi);
+        auto E1   = energy1_mf[lev]->array(mfi);
+
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i,int j,int k)
+        {
+            // Phase 0
+            Real KE0 = 0.5 * rho0(i,j,k) *
+                (v0(i,j,k,0)*v0(i,j,k,0) + v0(i,j,k,1)*v0(i,j,k,1));
+            Real UE0 = (p0(i,j,k) + gamma0*pi_0)/(gamma0 - 1.0);
+            if (UE0 < 0) UE0 = 0;
+            E0(i,j,k) = KE0 + UE0;
+
+            // Phase 1
+            Real KE1 = 0.5 * rho1(i,j,k) *
+                (v1(i,j,k,0)*v1(i,j,k,0) + v1(i,j,k,1)*v1(i,j,k,1));
+            Real UE1 = (p1(i,j,k) + gamma1*pi_1)/(gamma1 - 1.0);
+            if (UE1 < 0) UE1 = 0;
+            E1(i,j,k) = KE1 + UE1;
+        });
+    }
+
+    energy0_mf[lev]->FillBoundary(geom.periodicity());
+    energy1_mf[lev]->FillBoundary(geom.periodicity());
+
+    // debugging prints to check initial conditions before mixing:
+    amrex::Print() << "p0 BEFORE MIX: "
+                << pressure0_mf[lev]->min(0) << " "
+                << pressure0_mf[lev]->max(0) << "\n";
+    amrex::Print() << "p1 BEFORE MIX: "
+                << pressure1_mf[lev]->min(0) << " "
+                << pressure1_mf[lev]->max(0) << "\n";
+
 
     // Calculate mixed variables based on individual fluid variables
     Mix(lev);
@@ -416,149 +473,155 @@ void Hydro2::Mix(int lev)
     const Geometry& geom = this->geom[lev];
     const Real* DX = geom.CellSize();
 
-    //----------------------------------------------------------------------
-    // 1. Compute mixtures only on valid region
-    //----------------------------------------------------------------------
     for (MFIter mfi(*eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
         const Box& bx = mfi.validbox();
 
-        auto eta  = eta_mf[lev]->const_array(mfi);
+        // Inputs
+        auto eta    = eta_mf[lev]->const_array(mfi);
 
-        auto v0   = velocity0_mf[lev]->const_array(mfi);
-        auto v1   = velocity1_mf[lev]->const_array(mfi);
+        auto rho0   = density0_mf[lev]->const_array(mfi);
+        auto rho1   = density1_mf[lev]->const_array(mfi);
 
-        auto p0   = pressure0_mf[lev]->const_array(mfi);
-        auto p1   = pressure1_mf[lev]->const_array(mfi);
+        auto v0     = velocity0_mf[lev]->const_array(mfi);
+        auto v1     = velocity1_mf[lev]->const_array(mfi);
 
-        auto rho0 = density0_mf[lev]->const_array(mfi);
-        auto rho1 = density1_mf[lev]->const_array(mfi);
+        auto p0     = pressure0_mf[lev]->const_array(mfi);
+        auto p1     = pressure1_mf[lev]->const_array(mfi);
 
-        auto E0   = energy0_mf[lev]->const_array(mfi);
-        auto E1   = energy1_mf[lev]->const_array(mfi);
+        // Outputs (phase energies)
+        auto E0     = energy0_mf[lev]->array(mfi);
+        auto E1     = energy1_mf[lev]->array(mfi);
 
+        // Mixture fields
         auto rho      = density_mf[lev]->array(mfi);
         auto rho_old  = density_old_mf[lev]->array(mfi);
 
         auto M        = momentum_mf[lev]->array(mfi);
         auto M_old    = momentum_old_mf[lev]->array(mfi);
 
-        auto E_vol    = energy_per_vol_mf[lev]->array(mfi);
-        auto E_vol_old= energy_per_vol_old_mf[lev]->array(mfi);
+        auto E_vol      = energy_per_vol_mf[lev]->array(mfi);
+        auto E_vol_old  = energy_per_vol_old_mf[lev]->array(mfi);
 
-        auto E_mass    = energy_per_mass_mf[lev]->array(mfi);
-        auto E_mass_old= energy_per_mass_old_mf[lev]->array(mfi);
+        auto E_mass     = energy_per_mass_mf[lev]->array(mfi);
+        auto E_mass_old = energy_per_mass_old_mf[lev]->array(mfi);
 
-        auto p_mix      = pressure_mf[lev]->array(mfi);
-        auto v_mix      = velocity_mf[lev]->array(mfi);
-        auto gamma_mix  = gamma_mf[lev]->array(mfi);
-        auto pi_mix     = pi_mf[lev]->array(mfi);
-        // auto pi_mix_1_mix  = pi_mix_1_mf[lev]->array(mfi);
-        auto T_arr    = T_mf[lev]->array(mfi);
+        auto gamma_mix = gamma_mf[lev]->array(mfi);
+        auto pi_mix    = pi_mf[lev]->array(mfi);
+        auto p_mix     = pressure_mf[lev]->array(mfi);
 
-        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i,int j,int k)
+        auto v_mix     = velocity_mf[lev]->array(mfi);
+
+        ParallelFor(bx,
+        [=] AMREX_GPU_DEVICE (int i,int j,int k)
         {
-            //------------------------------------------------------------------
-            // Mixture interpolation
-            //------------------------------------------------------------------
-            Real e  = eta(i,j,k);
-            Real r0 = rho0(i,j,k);
-            Real r1 = rho1(i,j,k);
+            Real e = eta(i,j,k);
 
+            //--------------------------------------------------------------
+            // 1. Compute energy of each phase from pressure (your request)
+            //--------------------------------------------------------------
+
+            // ---------------- Phase 0 ----------------
+            Real r0 = rho0(i,j,k);
             Real u0x = v0(i,j,k,0);
             Real u0y = v0(i,j,k,1);
+
+            Real KE0 = 0.5 * r0 * (u0x*u0x + u0y*u0y);
+            Real UE0 = (p0(i,j,k) + gamma0*pi_0) / (gamma0 - 1.0);
+            if (UE0 < 0) UE0 = 0;
+
+            E0(i,j,k) = KE0 + UE0;       // total energy per volume
+
+
+            // ---------------- Phase 1 ----------------
+            Real r1 = rho1(i,j,k);
             Real u1x = v1(i,j,k,0);
             Real u1y = v1(i,j,k,1);
 
-            Real rho_mix = e*r0 + (1.0-e)*r1;
-            rho(i,j,k)      = rho_mix;
-            rho_old(i,j,k)  = rho_mix;
+            Real KE1 = 0.5 * r1 * (u1x*u1x + u1y*u1y);
+            Real UE1 = (p1(i,j,k) + gamma1*pi_1) / (gamma1 - 1.0);
+            if (UE1 < 0) UE1 = 0;
 
+            E1(i,j,k) = KE1 + UE1;       // total energy per volume
+
+
+            //--------------------------------------------------------------
+            // 2. Mixture density (linear in η)
+            //--------------------------------------------------------------
+            Real rm = e*r0 + (1.0-e)*r1;
+            rho(i,j,k)     = rm;
+            rho_old(i,j,k) = rm;
+
+
+            //--------------------------------------------------------------
+            // 3. Mixture momentum (conservative mixing)
+            //--------------------------------------------------------------
             Real Mx = e*r0*u0x + (1.0-e)*r1*u1x;
             Real My = e*r0*u0y + (1.0-e)*r1*u1y;
+
             M(i,j,k,0)      = Mx;
             M(i,j,k,1)      = My;
             M_old(i,j,k,0)  = Mx;
             M_old(i,j,k,1)  = My;
 
-            Real vx = Mx/rho_mix;
-            Real vy = My/rho_mix;
+
+            //--------------------------------------------------------------
+            // 4. Mixture velocity
+            //--------------------------------------------------------------
+            Real vx = Mx / rm;
+            Real vy = My / rm;
+
             v_mix(i,j,k,0) = vx;
             v_mix(i,j,k,1) = vy;
 
-            //------------------------------------------------------------------
-            // Energy (per volume)
-            //------------------------------------------------------------------
-            Real E0v = E0(i,j,k);
-            Real E1v = E1(i,j,k);
-            Real Ev_mix = e*E0v + (1.0-e)*E1v;
 
-            Real KEv = 0.5*rho_mix*(vx*vx + vy*vy);
-            Real UEv = Ev_mix - KEv;
-            if (UEv < 0) UEv = 0;
+            //--------------------------------------------------------------
+            // 5. Mixture total energy (linear in η)
+            //--------------------------------------------------------------
+            Real Ev = e*E0(i,j,k) + (1.0-e)*E1(i,j,k);
 
-            // E_vol(i,j,k)      = Ev_mix;
-            // E_vol_old(i,j,k)  = Ev_mix;
+            E_vol(i,j,k)      = Ev;
+            E_vol_old(i,j,k)  = Ev;
 
-            // Real Emas = Ev_mix/rho_mix;
-            // E_mass(i,j,k)      = Emas;
-            // E_mass_old(i,j,k)  = Emas;
+            Real Em = Ev / rm;
+            E_mass(i,j,k)     = Em;
+            E_mass_old(i,j,k) = Em;
 
-            // double gmix, pimix;
-            // Thermo_Interp::InterpolateGammaPi_Stiffened(eta(i,j,k), gamma0, gamma1, pi_0, pi_1, gmix, pimix);
 
-            // Set::Scalar pi_mix = InterpolateTamannP0(eta(i,j,k), p0_0, p0_1);
-            // Set::Scalar gamma_mix = InterpolateTamannP0(eta(i,j,k), gamma0, gamma1);
-
-            //------------------------------------------------------------------
-            // EOS mixture
-            //------------------------------------------------------------------
-            Real A = e/(gamma0-1.0) + (1.0-e)/(gamma1-1.0);
-            Real B = (e * gamma0 * pi_0)/(gamma0-1.0)
-                   + ((1.0-e) * gamma1 * pi_1)/(gamma1-1.0);
-
-            // Real gam = 1.0 + 1.0/A;
-            // gamma_mix(i,j,k) = gam;
-
+            //--------------------------------------------------------------
+            // 6. Mixture gamma and pi (use your interpolation function)
+            //--------------------------------------------------------------
             double gmix, pimix;
             Thermo_Interp::InterpolateGammaPi_Stiffened(
-                eta(i,j,k), gamma0, gamma1, pi_0, pi_1, gmix, pimix);
+                e, gamma0, gamma1, pi_0, pi_1, gmix, pimix);
+
             gamma_mix(i,j,k) = gmix;
-            pi_mix(i,j,k) = pimix;
+            pi_mix(i,j,k)    = pimix;
 
-            // Real p_local = (gmix-1.0)*UEv - gmix*pimix + pref;
-            Real p_local = e*p0(i,j,k) + (1.0-e)*p1(i,j,k);
-            if (p_local < 0) p_local = 1e-6;
-            p_mix(i,j,k) = p_local;
 
-            // Calculate energy (Tammann stiffened gas model)
-            //------------------------------------------------------------------
-            Real KE = 0.5 * rho_mix * (vx*vx + vy*vy); // Kinetic energy
-            Real UE = (p_local + gmix * pimix) / (gmix - 1.0); // Internal energy
-            E_vol(i,j,k) = KE + UE; // Total energy
+            //--------------------------------------------------------------
+            // 7. Mixture pressure from stiffened EOS (energy-primary)
+            //--------------------------------------------------------------
+            Real KE = 0.5 * rm * (vx*vx + vy*vy);
+            Real UE = Ev - KE;
+            if (UE < 0) UE = 0;
 
-            Real Emas = (KE + UE)/rho_mix;
-            E_mass(i,j,k)  = Emas;
+            Real p = (gmix - 1.0)*UE - gmix*pimix + pref;
+            if (p < 0) p = 1e-6;
 
-            // T_arr(i,j,k) =
-            //     (p + pi_mix)/(rho_mix*cv_arr(i,j,k)*(gam-1.0) + 1e-14);
-            T_arr(i,j,k) =
-                (p_local + pimix)/(rho_mix*cv0*(gmix-1.0) + 1e-14);
+            p_mix(i,j,k) = p;
         });
     }
 
-    //----------------------------------------------------------------------
-    // 2. Fill same-level ghosts
-    //----------------------------------------------------------------------
+    // Fill ghost cells
     density_mf[lev]->FillBoundary(geom.periodicity());
     momentum_mf[lev]->FillBoundary(geom.periodicity());
     energy_per_vol_mf[lev]->FillBoundary(geom.periodicity());
     energy_per_mass_mf[lev]->FillBoundary(geom.periodicity());
-    velocity_mf[lev]->FillBoundary(geom.periodicity());
     pressure_mf[lev]->FillBoundary(geom.periodicity());
+    velocity_mf[lev]->FillBoundary(geom.periodicity());
     gamma_mf[lev]->FillBoundary(geom.periodicity());
     pi_mf[lev]->FillBoundary(geom.periodicity());
-    T_mf[lev]->FillBoundary(geom.periodicity());
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -714,19 +777,19 @@ Hydro2::RHS(int lev,
             pi_mix(i,j,k) = pimix;
 
             // Pressure
-            Real p_mix = (gmix - 1.0)*UE - gmix*pimix + pref;
-            if (p_mix < 0.0) p_mix = 1e-6;
-            p_arr(i,j,k) = p_mix;
+            Real p_mix_local = (gmix - 1.0)*UE - gmix*pimix + pref;
+            if (p_mix_local < 0.0) p_mix_local = 1e-6;
+            p_arr(i,j,k) = p_mix_local;
 
             // Specific heats
             cp_arr(i,j,k) = eta*cp0 + (1.0 - eta)*cp1;
             cv_arr(i,j,k) = eta*cv0 + (1.0 - eta)*cv1;
 
             // Temperature
-            T_arr(i,j,k) = (p_mix +pimix) / (rho * cv_arr(i,j,k) * (gmix - 1.0) + 1e-14);
+            T_arr(i,j,k) = (p_mix_local +pimix) / (rho * cv_arr(i,j,k) * (gmix - 1.0) + 1e-14);
 
             // Speed of sound
-            a_arr(i,j,k) = std::sqrt(gmix * (p_mix + pimix) / rho);
+            a_arr(i,j,k) = std::sqrt(gmix * (p_mix_local + pimix) / rho);
 
             //------------------------------------------------------------------
             // Chemical potential + mass fraction
@@ -1532,17 +1595,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Kinetic Energy
             KE_vol(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
-            if (KE_vol(i, j, k) < 0.0)
-            {
-                KE_vol(i, j, k) = 0.0;
-            }
             KE_mass(i, j, k) = 0.5 * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
-            if (KE_mass(i, j, k) < 0.0)
-            {
-                KE_mass(i, j, k) = 0.0;
-            }
 
-            // Potential Energy
+            // Internal Energy
             UE_vol(i, j, k) = E_vol(i, j, k) - KE_vol(i, j, k);
             if (UE_vol(i, j, k) < 0.0)
             {
@@ -1555,8 +1610,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             }
 
             // Pressure
-            pi_mix(i, j, k) = (B / A) / gamma_mix(i, j, k);
-            p(i, j, k) = (gamma_mix(i, j, k) - 1.0) * UE_vol(i, j, k) - gamma_mix(i, j, k) * pi_mix(i, j, k) + pref; // pressure Tammann EOS modification
+            // pi_mix(i, j, k) = (B / A) / gamma_mix(i, j, k);
+            p(i, j, k) = (gmix - 1.0) * UE_vol(i, j, k) - gmix * pimix + pref; // pressure Tammann EOS modification
             if (p(i, j, k) < 0.0)
             {
                 p(i, j, k) = 1e-6;

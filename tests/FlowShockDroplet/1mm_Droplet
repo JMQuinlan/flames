@@ -42,7 +42,7 @@ geometry.is_periodic = 0 0 0
 ### TIME STEP ###
 # stop_time = 0.0002  # Shorter time for shock interaction
 #stop_time = 1.0e-5  # Shorter time for shock interaction
-stop_time = 1.0e-8  # Shorter time for shock interaction
+stop_time = 1.0e-11  # Shorter time for shock interaction
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
@@ -52,7 +52,7 @@ eta.ic.expression.constant.x_center = 0.0  # Centered at origin
 eta.ic.expression.constant.y_center = 0.0  # Centered at origin
 
 # Droplet shape definition (air is eta=0, water is eta=1)
-eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x-x_center)**2 + (y-y_center)**2) - R0)/(2*sqrt(2)*epsilon)))"
+eta.ic.expression.region0 = "1.0 - 0.5*(1 + tanh((sqrt((x-x_center)**2 + (y-y_center)**2) - R0)/(2*sqrt(2)*epsilon)))"
 
 epsilon = eta.ic.expression.constant.epsilon
 
@@ -60,13 +60,13 @@ epsilon = eta.ic.expression.constant.epsilon
 
 # Air properties (fluid 0 - surrounding vapor/gas)
 gamma0 = 1.4   # Air
-p0_0 = 0       # Ideal gas
+pi_0 = 0       # Tammann EOS parameter for air (should be zero since we use ideal gas)
 mu0 = 1.8e-5   # Air viscosity [Pa-s]
 mu0_b = 0.0
 
 # Water properties (fluid 1 - droplet)
 gamma1 = 7.15  # Water
-p0_1 = 3.0e8   # Tammann EOS parameter for water
+pi_1 = 3.0e8   # Tammann EOS parameter for water
 mu1 = 1.0e-3   # Water viscosity [Pa-s]
 mu1_b = 0.001
 
