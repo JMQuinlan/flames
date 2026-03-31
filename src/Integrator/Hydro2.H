@@ -105,13 +105,18 @@ protected:
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
     void check4nans(int time, int lev, int i, int j, int k, const std::string &message, std::initializer_list<std::pair<std::string, double> > vars);
     //void InterfaceCompression(int lev, Set::Scalar dt_physical);
-
     void InterfaceSharpening(int lev, Set::Scalar dt_physical);
 private:
     void ReinitializeSignedDistance(int lev,
                                     amrex::MultiFab &psi_mf,
                                     const amrex::MultiFab &psi_init_mf,
                                     int max_iter = 50);
+    // BOUNDRY CONDITION FUNCTIONS
+    // For MultiFabs that only need periodic/processor boundaries
+    void FillBoundaries(int lev, std::initializer_list<amrex::MultiFab *> mfs);
+    // For MultiFabs that need physical BCs + periodic/processor boundaries
+    void FillBoundariesWithBC(int lev, Set::Scalar time, BC::BC<Set::Scalar> *bc, std::initializer_list<amrex::MultiFab *> mfs);
+
 
 protected:
     // FLUID 0
