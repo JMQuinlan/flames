@@ -1207,7 +1207,12 @@ void Hydro2::ComputeHybridCurvature(int lev)
     const Real* dx = geom.CellSize();
     const Box& dom = geom.Domain();
 
-    const Real Cg = 0.1/epsilon;
+    // Cg: gradient magnitude threshold to identify interface cells.
+    // When epsilon >= dx (resolved), expected gm ~ 1/epsilon.
+    // When epsilon < dx (under-resolved), effective gm ~ 1/dx.
+    // Use the coarser scale so the threshold is never too tight.
+    const Real dx_eff = std::max({dx[0], dx[1], epsilon});
+    const Real Cg = 0.1 / dx_eff;
     const Real small = 1e-14;
 
     for (MFIter mfi(*kappas_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
@@ -1220,7 +1225,8 @@ void Hydro2::ComputeHybridCurvature(int lev)
         auto kHF_arr  = kappa_HF_mf[lev]->const_array(mfi);
         auto h_arr    = h_eta_mf[lev]->const_array(mfi);
 
-        auto kappas   = kappas_mf[lev]->array(mfi);
+        auto kappas      = kappas_mf[lev]->array(mfi);
+        auto kappa_SF    = kappa_SF_mf[lev]->array(mfi);
 
         ParallelFor(tb, [=] AMREX_GPU_DEVICE (int i,int j,int k)
         {
@@ -1231,6 +1237,7 @@ void Hydro2::ComputeHybridCurvature(int lev)
                 kappas(i,j,k,0) = 0.0;
                 kappas(i,j,k,1) = 0.0;
                 kappas(i,j,k,2) = 0.0;
+                kappa_SF(i,j,k) = 0.0;
                 return;
             }
 
@@ -1297,6 +1304,7 @@ void Hydro2::ComputeHybridCurvature(int lev)
             kappas(i,j,k,0) = kH;
             kappas(i,j,k,1) = kHF;
             kappas(i,j,k,2) = kSN;
+            kappa_SF(i,j,k) = kSN;
         });
     }
 
