@@ -772,10 +772,21 @@ Hydro2::RHS(int lev,
         auto E_rhs   = E_rhs_mf.array(mfi);
 
         // Source terms
-        auto S_arr      = Source_mf[lev]->array(mfi);
-        auto kappas_arr = kappas_mf[lev]->array(mfi);
+        auto S_arr       = Source_mf[lev]->array(mfi);
+        auto kappas_arr  = kappas_mf[lev]->array(mfi);
+        auto mu_chem_arr = mu_chem_mf[lev]->array(mfi);
+        auto Bm_arr      = Bm_mf[lev]->array(mfi);
+        auto Fsv_arr     = Fsv_mf[lev]->array(mfi);
+        auto Fw_arr      = Fw_mf[lev]->array(mfi);
+        auto Ldot_arr    = Ldot_mf[lev]->array(mfi);
+        auto Vap_dot_arr = Vap_dot_mf[lev]->array(mfi);
+        auto div_tau_arr = div_tau_mf[lev]->array(mfi);
+        auto hess_u_arr  = hess_u_mf[lev]->array(mfi);
+        auto m0_arr      = m0_mf[lev]->array(mfi);
+        auto u0_arr      = u0_mf[lev]->array(mfi);
+        auto q0_arr      = q_mf[lev]->array(mfi);
 
-        // For diagnostic fields
+        // For diagnostic fields / vaporization
         auto rho0_arr = density0_mf[lev]->array(mfi);
         auto rho1_arr = density1_mf[lev]->array(mfi);
 
@@ -865,7 +876,138 @@ Hydro2::RHS(int lev,
                       + (fym.energy - fyp.energy)/DX[1];
 
             //------------------------------------------------------------------
-            // Add source terms
+            // Source terms
+            //------------------------------------------------------------------
+            auto sten = Numeric::GetStencil(i, j, k, domain);
+
+            Real eta_loc    = eta_arr(i,j,k);
+            Real rho_loc    = rho_arr(i,j,k);
+            Set::Vector u   = Set::Vector(v_arr(i,j,k,0), v_arr(i,j,k,1));
+            Set::Vector u0v = Set::Vector(u0_arr(i,j,k,0), u0_arr(i,j,k,1));
+
+            Set::Vector grad_eta    = Numeric::Gradient(eta_arr, i, j, k, 0, DX);
+            Real grad_eta_mag       = grad_eta.lpNorm<2>();
+            Set::Matrix hess_eta    = Numeric::Hessian(eta_arr, i, j, k, 0, DX, sten);
+
+            // External source fields
+            Real mdot0 = -m0_arr(i,j,k) * grad_eta_mag;
+            Set::Vector Pdot0 = Set::Vector::Zero();
+            Set::Vector q0_ = Set::Vector(q0_arr(i,j,k,0), q0_arr(i,j,k,1));
+            Real qdot0 = q0_.dot(grad_eta);
+
+            // Velocity gradient (for viscous stress)
+            Set::Matrix gradM    = Numeric::Gradient(M_arr, i, j, k, DX);
+            Set::Vector gradrho  = Numeric::Gradient(rho_arr, i, j, k, 0, DX);
+            Set::Matrix hess_rho = Numeric::Hessian(rho_arr, i, j, k, 0, DX, sten);
+            Set::Matrix gradu    = (gradM - u * gradrho.transpose()) / rho_loc;
+
+            Set::Matrix3 hess_M = Numeric::Hessian(M_arr, i, j, k, DX);
+            Set::Matrix3 hess_u = Set::Matrix3::Zero();
+            for (int p = 0; p < 2; p++)
+                for (int q = 0; q < 2; q++)
+                    for (int r = 0; r < 2; r++)
+                        hess_u(r,p,q) = (hess_M(r,p,q)
+                                        - gradu(r,q)*gradrho(p)
+                                        - gradu(r,p)*gradrho(q)
+                                        - u(r)*hess_rho(p,q)) / rho_loc;
+
+            hess_u_arr(i,j,k,0) = hess_u(0,0,0);
+            hess_u_arr(i,j,k,1) = hess_u(0,0,1);
+            hess_u_arr(i,j,k,2) = hess_u(0,1,0);
+            hess_u_arr(i,j,k,3) = hess_u(0,1,1);
+            hess_u_arr(i,j,k,4) = hess_u(1,0,0);
+            hess_u_arr(i,j,k,5) = hess_u(1,0,1);
+            hess_u_arr(i,j,k,6) = hess_u(1,1,0);
+            hess_u_arr(i,j,k,7) = hess_u(1,1,1);
+
+            // Viscous stress divergence + interface Lagrangian term
+            Set::Vector div_tau = Set::Vector::Zero();
+            Set::Vector Ldot    = Set::Vector::Zero();
+
+            Real mu_eff     = eta_loc * mu0  + (1.0 - eta_loc) * mu1;
+            Real lambda_eff = eta_loc * mu0_b + (1.0 - eta_loc) * mu1_b;
+            Set::Vector grad_mu     = (mu0  - mu1 ) * grad_eta;
+            Set::Vector grad_lambda = (mu0_b - mu1_b) * grad_eta;
+
+            for (int p = 0; p < 2; p++)
+                for (int q = 0; q < 2; q++)
+                    for (int r = 0; r < 2; r++)
+                        for (int s = 0; s < 2; s++)
+                        {
+                            Real Mpqrs  = 0.0;
+                            Real dMpqrs = 0.0;
+                            if ((p==r) && (q==s)) { Mpqrs  += mu_eff;     dMpqrs += grad_mu(q); }
+                            if ((p==s) && (q==r)) { Mpqrs  += mu_eff;     dMpqrs += grad_mu(q); }
+                            if ((p==q) && (r==s)) { Mpqrs  += lambda_eff - (2.0/3.0)*mu_eff;
+                                                    dMpqrs += grad_lambda(q) - (2.0/3.0)*grad_mu(q); }
+                            div_tau(p) += Mpqrs  * hess_u(r,s,q);
+                            div_tau(p) += dMpqrs * gradu(r,s);
+                            Ldot(p)    += 0.5 * Mpqrs * (u(r) - u0v(r)) * hess_eta(q,s);
+                        }
+
+            div_tau_arr(i,j,k,0) = div_tau(0);
+            div_tau_arr(i,j,k,1) = div_tau(1);
+            Ldot_arr(i,j,k,0)    = Ldot(0);
+            Ldot_arr(i,j,k,1)    = Ldot(1);
+
+            // Surface tension: F_sv = sigma * kappa * grad(eta) * epsilon
+            Set::Vector Fsv_vector = Set::Vector(0.0, 0.0);
+            if (apply_surface_tension && grad_eta_mag > 0.0)
+            {
+                Real kappa = kappas_arr(i,j,k,0);
+                Fsv_vector(0) = sigma * kappa * grad_eta(0) * epsilon;
+                Fsv_vector(1) = sigma * kappa * grad_eta(1) * epsilon;
+            }
+            Fsv_arr(i,j,k,0) = Fsv_vector(0);
+            Fsv_arr(i,j,k,1) = Fsv_vector(1);
+
+            // Gravity: F_w = -rho * g (downward)
+            Set::Vector Fw_vector = Set::Vector(0.0, 0.0);
+            if (apply_weight)
+            {
+                Fw_vector(0) = 0.0;
+                Fw_vector(1) = -rho_loc * g;
+            }
+            Fw_arr(i,j,k,0) = Fw_vector(0);
+            Fw_arr(i,j,k,1) = Fw_vector(1);
+
+            // Vaporization (Spalding model)
+            Real eta_dot_Vap = 0.0;
+            Real m_dot_Vap   = 0.0;
+            Set::Vector M_dot_Vap = Set::Vector(0.0, 0.0);
+            Real E_dot_Vap   = 0.0;
+            if (apply_vaporization == 1)
+            {
+                Real B_M      = Bm_arr(i,j,k);
+                Real rho_eta0 = eta_loc * rho_loc;
+                Real rho_g    = rho_eta0 / std::max(eta_loc, 1e-14);
+                Real vap_coeff = (rho_g * Dv / (rho_eta0 + 1e-14)) * (B_M / (1.0 + B_M + 1e-14));
+                eta_dot_Vap = (1.0 / epsilon) * vap_coeff * grad_eta_mag;
+                m_dot_Vap   = rho_g * Dv * (B_M / (1.0 + B_M + 1e-14));
+                M_dot_Vap   = u * m_dot_Vap;
+                E_dot_Vap   = u.dot(M_dot_Vap);
+            }
+            Vap_dot_arr(i,j,k,0) = eta_dot_Vap;
+            Vap_dot_arr(i,j,k,1) = m_dot_Vap;
+            Vap_dot_arr(i,j,k,2) = M_dot_Vap(0);
+            Vap_dot_arr(i,j,k,3) = M_dot_Vap(1);
+            Vap_dot_arr(i,j,k,4) = E_dot_Vap;
+
+            // Total body force
+            Set::Vector Total_Force = Fsv_vector + Fw_vector;
+
+            // Assemble source vector
+            S_arr(i,j,k,0) = mdot0 + m_dot_Vap;
+            S_arr(i,j,k,1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0) + M_dot_Vap(0);
+            S_arr(i,j,k,2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1) + M_dot_Vap(1);
+            S_arr(i,j,k,3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force) + E_dot_Vap;
+
+            // Lagrange no-penetration enforcement
+            S_arr(i,j,k,1) -= lagrange * u.dot(grad_eta) * grad_eta(0);
+            S_arr(i,j,k,2) -= lagrange * u.dot(grad_eta) * grad_eta(1);
+
+            //------------------------------------------------------------------
+            // Apply to RHS
             //------------------------------------------------------------------
             rho_rhs(i,j,k) = drho + S_arr(i,j,k,0);
             M_rhs(i,j,k,0) = dMx  + S_arr(i,j,k,1);
@@ -873,20 +1015,15 @@ Hydro2::RHS(int lev,
             E_rhs(i,j,k)   = dE   + S_arr(i,j,k,3);
 
             //------------------------------------------------------------------
-            // ETA equation
+            // ETA equation: advection + Cahn-Hilliard + vaporization
             //------------------------------------------------------------------
-            // Build grad_eta properly from Array4
-            Real eta = eta_arr(i,j,k);
-            auto grad   = Numeric::Gradient(eta_arr, i,j,k, 0, DX);
-            Real lapeta = Numeric::Laplacian(eta_arr, i,j,k, 0, DX);
+            Real adv = -(u(0)*grad_eta(0) + u(1)*grad_eta(1));
 
-            Real adv = -( (M_arr(i,j,k,0)/rho_arr(i,j,k))*grad(0)
-                         +(M_arr(i,j,k,1)/rho_arr(i,j,k))*grad(1) );
+            Real lap_mu_chem = Numeric::Laplacian(mu_chem_arr, i, j, k, 0, DX);
+            Real Mob         = a_arr(i,j,k) * epsilon;
+            Real eta_dot_CH  = Mob * lap_mu_chem * 0.2;
 
-            Real Mob = 0.0; // as you had in your original
-            Real diff= Mob * lapeta;
-
-            eta_rhs(i,j,k) = adv + diff;  // + vaporization if needed
+            eta_rhs(i,j,k) = adv + eta_dot_CH + eta_dot_Vap;
         });
     }
 }
