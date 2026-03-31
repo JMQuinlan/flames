@@ -20,7 +20,7 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 1
 amr.grid_eff = 0.8
-amr.max_level = 0
+amr.max_level = 1
 amr.n_cell = 64 32  # Maintains aspect ratio for 0.02m � 0.01m domain
 
 ### TIME STEPPING ###
@@ -171,3 +171,5 @@ grav = 9.81
 ### DEBUGGING ###
 Riemann_Solver.type = hllc
 kappa_method = 3   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization" / 3:"Advanced Hybrid"
+integration.type = ForwardEuler
+# integration.type = RungeKutta

@@ -389,7 +389,9 @@ void Hydro2::Initialize(int lev)
     grad_mag_grad_eta_mf[lev]->setVal(0.0);
     Bm_mf[lev]      ->setVal(0.0);  // Spalding Number
 
-    // MIXED PROPERTIES
+    // MIXED PROPERTIES (setVal also clears ghost cells, preventing NaN from debug-mode allocation)
+    mu_chem_mf[lev]     ->setVal(0.0);
+    T_mf[lev]           ->setVal(0.0);
     a_mf[lev]           ->setVal(0.0);
     Ma_mf[lev]          ->setVal(0.0);
     UE_per_vol_mf[lev]  ->setVal(0.0);
@@ -744,6 +746,13 @@ Hydro2::RHS(int lev,
     }
 
     //---------------------------------------------------------------------------
+    // Fill ghost cells of derived fields computed in the first loop so that
+    // neighbor accesses in the second loop (e.g. Laplacian of mu_chem) don't
+    // read stale or NaN ghost cells at coarse-fine boundaries.
+    //---------------------------------------------------------------------------
+    mu_chem_mf[lev]->FillBoundary(geom.periodicity());
+
+    //---------------------------------------------------------------------------
     // 2. SECOND LOOP: compute fluxes using Riemann solver
     //---------------------------------------------------------------------------
     for (MFIter mfi(*velocity_mf[lev], true); mfi.isValid(); ++mfi)
@@ -1019,7 +1028,7 @@ Hydro2::RHS(int lev,
             //------------------------------------------------------------------
             Real adv = -(u(0)*grad_eta(0) + u(1)*grad_eta(1));
 
-            Real lap_mu_chem = Numeric::Laplacian(mu_chem_arr, i, j, k, 0, DX);
+            Real lap_mu_chem = Numeric::Laplacian(mu_chem_arr, i, j, k, 0, DX, sten);
             Real Mob         = a_arr(i,j,k) * epsilon;
             Real eta_dot_CH  = Mob * lap_mu_chem * 0.2;
 
@@ -1067,33 +1076,34 @@ void Hydro2::ComputeHeightFunction (int lev)
     MultiFab h_single(ba_single, dm_single, 1, 0);
 
     // ------------------------------------------------------------
-    // (2) Now we can safely access full-domain array
+    // (2) Compute heights on whichever rank owns the single box.
+    //     Must use MFIter rather than const_array(0) so that
+    //     non-owning MPI ranks skip the computation safely.
     // ------------------------------------------------------------
-    auto eta_arr = eta_single.const_array(0);
-    auto h_arr   = h_single.array(0);
-
-    // ------------------------------------------------------------
-    // (3) Compute heights globally, full domain
-    // ------------------------------------------------------------
-    ParallelFor(ihi - ilo + 1, [=] AMREX_GPU_DEVICE(int ii)
+    for (MFIter mfi(eta_single); mfi.isValid(); ++mfi)
     {
-        int i = ii + ilo;
+        auto eta_arr = eta_single.const_array(mfi);
+        auto h_arr   = h_single.array(mfi);
 
-        Real best = 1e20;
-        int jbest = jlo;
-
-        for (int j = jlo; j <= jhi; ++j)
+        ParallelFor(ihi - ilo + 1, [=] AMREX_GPU_DEVICE(int ii)
         {
-            Real d = amrex::Math::abs(eta_arr(i,j,0) - 0.5);
-            if (d < best) { best = d; jbest = j; }
-        }
+            int i = ii + ilo;
 
-        Real y = problo[1] + (jbest + 0.5)*dx[1];
+            Real best = 1e20;
+            int jbest = jlo;
 
-        // Fill all j for later tile-safe curvature use
-        for (int j = jlo; j <= jhi; ++j)
-            h_arr(i,j,0) = y;
-    });
+            for (int j = jlo; j <= jhi; ++j)
+            {
+                Real d = amrex::Math::abs(eta_arr(i,j,0) - 0.5);
+                if (d < best) { best = d; jbest = j; }
+            }
+
+            Real y = problo[1] + (jbest + 0.5)*dx[1];
+
+            for (int j = jlo; j <= jhi; ++j)
+                h_arr(i,j,0) = y;
+        });
+    }
 
     // ------------------------------------------------------------
     // (4) Scatter back to tiled MF
@@ -1449,76 +1459,70 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     amrex::Vector<amrex::MultiFab> solution_new;
     amrex::Vector<amrex::MultiFab> solution_old;
 
+    // Build solution_new from the current-time MultiFabs.
+    // Use src_ngrow=nGrow so that the coarse-fine ghost cells (filled by
+    // FillPatch in Integrator::timeStep before calling Advance) are preserved.
     // eta
     solution_new.emplace_back(eta_mf[lev]->boxArray(),
                               eta_mf[lev]->DistributionMap(),
                               eta_mf[lev]->nComp(),
                               eta_mf[lev]->nGrow());
-    solution_new.back().ParallelCopy(*eta_mf[lev], 0, 0, eta_mf[lev]->nComp(), 0, eta_mf[lev]->nGrow());
-
-    solution_old.emplace_back(eta_old_mf[lev]->boxArray(),
-                              eta_old_mf[lev]->DistributionMap(),
-                              eta_old_mf[lev]->nComp(),
-                              eta_old_mf[lev]->nGrow());
-    solution_old.back().ParallelCopy(*eta_old_mf[lev], 0, 0, eta_old_mf[lev]->nComp(), 0, eta_old_mf[lev]->nGrow());
-
+    solution_new.back().ParallelCopy(*eta_mf[lev], 0, 0, eta_mf[lev]->nComp(),
+                                     eta_mf[lev]->nGrow(), eta_mf[lev]->nGrow());
 
     // density
     solution_new.emplace_back(density_mf[lev]->boxArray(),
                               density_mf[lev]->DistributionMap(),
                               density_mf[lev]->nComp(),
                               density_mf[lev]->nGrow());
-    solution_new.back().ParallelCopy(*density_mf[lev], 0, 0, density_mf[lev]->nComp(), 0, density_mf[lev]->nGrow());
-
-    solution_old.emplace_back(density_old_mf[lev]->boxArray(),
-                              density_old_mf[lev]->DistributionMap(),
-                              density_old_mf[lev]->nComp(),
-                              density_old_mf[lev]->nGrow());
-    solution_old.back().ParallelCopy(*density_old_mf[lev], 0, 0, density_old_mf[lev]->nComp(), 0, density_old_mf[lev]->nGrow());
-
+    solution_new.back().ParallelCopy(*density_mf[lev], 0, 0, density_mf[lev]->nComp(),
+                                     density_mf[lev]->nGrow(), density_mf[lev]->nGrow());
 
     // momentum (2 components)
     solution_new.emplace_back(momentum_mf[lev]->boxArray(),
                               momentum_mf[lev]->DistributionMap(),
                               momentum_mf[lev]->nComp(),
                               momentum_mf[lev]->nGrow());
-    solution_new.back().ParallelCopy(*momentum_mf[lev], 0, 0, momentum_mf[lev]->nComp(), 0, momentum_mf[lev]->nGrow());
-
-    solution_old.emplace_back(momentum_old_mf[lev]->boxArray(),
-                              momentum_old_mf[lev]->DistributionMap(),
-                              momentum_old_mf[lev]->nComp(),
-                              momentum_old_mf[lev]->nGrow());
-    solution_old.back().ParallelCopy(*momentum_old_mf[lev], 0, 0, momentum_old_mf[lev]->nComp(), 0, momentum_old_mf[lev]->nGrow());
-
+    solution_new.back().ParallelCopy(*momentum_mf[lev], 0, 0, momentum_mf[lev]->nComp(),
+                                     momentum_mf[lev]->nGrow(), momentum_mf[lev]->nGrow());
 
     // energy per volume
     solution_new.emplace_back(energy_per_vol_mf[lev]->boxArray(),
                               energy_per_vol_mf[lev]->DistributionMap(),
                               energy_per_vol_mf[lev]->nComp(),
                               energy_per_vol_mf[lev]->nGrow());
-    solution_new.back().ParallelCopy(*energy_per_vol_mf[lev], 0, 0, energy_per_vol_mf[lev]->nComp(), 0, energy_per_vol_mf[lev]->nGrow());
-
-    solution_old.emplace_back(energy_per_vol_old_mf[lev]->boxArray(),
-                              energy_per_vol_old_mf[lev]->DistributionMap(),
-                              energy_per_vol_old_mf[lev]->nComp(),
-                              energy_per_vol_old_mf[lev]->nGrow());
-    solution_old.back().ParallelCopy(*energy_per_vol_old_mf[lev], 0, 0, energy_per_vol_old_mf[lev]->nComp(), 0, energy_per_vol_old_mf[lev]->nGrow());
+    solution_new.back().ParallelCopy(*energy_per_vol_mf[lev], 0, 0, energy_per_vol_mf[lev]->nComp(),
+                                     energy_per_vol_mf[lev]->nGrow(), energy_per_vol_mf[lev]->nGrow());
 
 
     //==============================================================
-    // 3. Fill ghosts for *both* solution vectors BEFORE integration
-    //    (ghost cells were copied above; this handles any periodic
-    //     communication and applies physical BCs)
+    // 3. Fill ghosts for solution_new BEFORE integration.
+    //    coarse-fine ghost cells were already included via src_ngrow=nGrow
+    //    in the ParallelCopy above; FillBoundary handles physical BCs
+    //    and same-level neighbor communication.
     //==============================================================
     energy_bc->FillBoundary(solution_new[0], 0, solution_new[0].nComp(), time, 0);
     density_bc->FillBoundary(solution_new[1], 0, solution_new[1].nComp(), time, 0);
     momentum_bc->FillBoundary(solution_new[2], 0, solution_new[2].nComp(), time, 0);
     energy_bc->FillBoundary(solution_new[3], 0, solution_new[3].nComp(), time, 0);
 
-    energy_bc->FillBoundary(solution_old[0], 0, solution_old[0].nComp(), time, 0);
-    density_bc->FillBoundary(solution_old[1], 0, solution_old[1].nComp(), time, 0);
-    momentum_bc->FillBoundary(solution_old[2], 0, solution_old[2].nComp(), time, 0);
-    energy_bc->FillBoundary(solution_old[3], 0, solution_old[3].nComp(), time, 0);
+    //==============================================================
+    // Build solution_old as a complete copy of solution_new (valid
+    // cells + ghost cells).  The FEIntegrator copies S_old→S_new at
+    // the start of advance(), so solution_old MUST have valid ghost
+    // cells or it will overwrite the valid ghost cells we just built.
+    // For multi-step RK methods solution_old is the beginning-of-step
+    // state, which at this point equals solution_new, so this is
+    // always correct.
+    //==============================================================
+    for (int n = 0; n < (int)solution_new.size(); n++) {
+        solution_old.emplace_back(solution_new[n].boxArray(),
+                                  solution_new[n].DistributionMap(),
+                                  solution_new[n].nComp(),
+                                  solution_new[n].nGrow());
+        amrex::MultiFab::Copy(solution_old.back(), solution_new[n], 0, 0,
+                              solution_new[n].nComp(), solution_new[n].nGrow());
+    }
 
     //==============================================================
     // 4. Set up AMReX TimeIntegrator
@@ -1538,7 +1542,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     });
 
     //==============================================================
-    // 5. Fill ghosts after each RK stage (REQUIRED)
+    // 5. Fill ghosts after each stage (REQUIRED for multi-stage methods)
     //==============================================================
     timeintegrator.set_post_stage_action(
         [&](amrex::Vector<amrex::MultiFab>& stage, Real t)
