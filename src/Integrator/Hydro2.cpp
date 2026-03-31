@@ -772,7 +772,8 @@ Hydro2::RHS(int lev,
         auto E_rhs   = E_rhs_mf.array(mfi);
 
         // Source terms
-        auto S_arr    = Source_mf[lev]->array(mfi);
+        auto S_arr      = Source_mf[lev]->array(mfi);
+        auto kappas_arr = kappas_mf[lev]->array(mfi);
 
         // For diagnostic fields
         auto rho0_arr = density0_mf[lev]->array(mfi);
@@ -1308,13 +1309,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                               eta_mf[lev]->DistributionMap(),
                               eta_mf[lev]->nComp(),
                               eta_mf[lev]->nGrow());
-    solution_new.back().ParallelCopy(*eta_mf[lev]);
+    solution_new.back().ParallelCopy(*eta_mf[lev], 0, 0, eta_mf[lev]->nComp(), 0, eta_mf[lev]->nGrow());
 
     solution_old.emplace_back(eta_old_mf[lev]->boxArray(),
                               eta_old_mf[lev]->DistributionMap(),
                               eta_old_mf[lev]->nComp(),
                               eta_old_mf[lev]->nGrow());
-    solution_old.back().ParallelCopy(*eta_old_mf[lev]);
+    solution_old.back().ParallelCopy(*eta_old_mf[lev], 0, 0, eta_old_mf[lev]->nComp(), 0, eta_old_mf[lev]->nGrow());
 
 
     // density
@@ -1322,13 +1323,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                               density_mf[lev]->DistributionMap(),
                               density_mf[lev]->nComp(),
                               density_mf[lev]->nGrow());
-    solution_new.back().ParallelCopy(*density_mf[lev]);
+    solution_new.back().ParallelCopy(*density_mf[lev], 0, 0, density_mf[lev]->nComp(), 0, density_mf[lev]->nGrow());
 
     solution_old.emplace_back(density_old_mf[lev]->boxArray(),
                               density_old_mf[lev]->DistributionMap(),
                               density_old_mf[lev]->nComp(),
                               density_old_mf[lev]->nGrow());
-    solution_old.back().ParallelCopy(*density_old_mf[lev]);
+    solution_old.back().ParallelCopy(*density_old_mf[lev], 0, 0, density_old_mf[lev]->nComp(), 0, density_old_mf[lev]->nGrow());
 
 
     // momentum (2 components)
@@ -1336,13 +1337,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                               momentum_mf[lev]->DistributionMap(),
                               momentum_mf[lev]->nComp(),
                               momentum_mf[lev]->nGrow());
-    solution_new.back().ParallelCopy(*momentum_mf[lev]);
+    solution_new.back().ParallelCopy(*momentum_mf[lev], 0, 0, momentum_mf[lev]->nComp(), 0, momentum_mf[lev]->nGrow());
 
     solution_old.emplace_back(momentum_old_mf[lev]->boxArray(),
                               momentum_old_mf[lev]->DistributionMap(),
                               momentum_old_mf[lev]->nComp(),
                               momentum_old_mf[lev]->nGrow());
-    solution_old.back().ParallelCopy(*momentum_old_mf[lev]);
+    solution_old.back().ParallelCopy(*momentum_old_mf[lev], 0, 0, momentum_old_mf[lev]->nComp(), 0, momentum_old_mf[lev]->nGrow());
 
 
     // energy per volume
@@ -1350,23 +1351,29 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                               energy_per_vol_mf[lev]->DistributionMap(),
                               energy_per_vol_mf[lev]->nComp(),
                               energy_per_vol_mf[lev]->nGrow());
-    solution_new.back().ParallelCopy(*energy_per_vol_mf[lev]);
+    solution_new.back().ParallelCopy(*energy_per_vol_mf[lev], 0, 0, energy_per_vol_mf[lev]->nComp(), 0, energy_per_vol_mf[lev]->nGrow());
 
     solution_old.emplace_back(energy_per_vol_old_mf[lev]->boxArray(),
                               energy_per_vol_old_mf[lev]->DistributionMap(),
                               energy_per_vol_old_mf[lev]->nComp(),
                               energy_per_vol_old_mf[lev]->nGrow());
-    solution_old.back().ParallelCopy(*energy_per_vol_old_mf[lev]);
+    solution_old.back().ParallelCopy(*energy_per_vol_old_mf[lev], 0, 0, energy_per_vol_old_mf[lev]->nComp(), 0, energy_per_vol_old_mf[lev]->nGrow());
 
 
     //==============================================================
     // 3. Fill ghosts for *both* solution vectors BEFORE integration
+    //    (ghost cells were copied above; this handles any periodic
+    //     communication and applies physical BCs)
     //==============================================================
-    for (auto& mf : solution_new)
-        mf.FillBoundary(geom.periodicity());
+    energy_bc->FillBoundary(solution_new[0], 0, solution_new[0].nComp(), time, 0);
+    density_bc->FillBoundary(solution_new[1], 0, solution_new[1].nComp(), time, 0);
+    momentum_bc->FillBoundary(solution_new[2], 0, solution_new[2].nComp(), time, 0);
+    energy_bc->FillBoundary(solution_new[3], 0, solution_new[3].nComp(), time, 0);
 
-    for (auto& mf : solution_old)
-        mf.FillBoundary(geom.periodicity());
+    energy_bc->FillBoundary(solution_old[0], 0, solution_old[0].nComp(), time, 0);
+    density_bc->FillBoundary(solution_old[1], 0, solution_old[1].nComp(), time, 0);
+    momentum_bc->FillBoundary(solution_old[2], 0, solution_old[2].nComp(), time, 0);
+    energy_bc->FillBoundary(solution_old[3], 0, solution_old[3].nComp(), time, 0);
 
     //==============================================================
     // 4. Set up AMReX TimeIntegrator
@@ -1391,10 +1398,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     timeintegrator.set_post_stage_action(
         [&](amrex::Vector<amrex::MultiFab>& stage, Real t)
     {
-        for (int n = 0; n < stage.size(); ++n)
-        {
-            stage[n].FillBoundary(geom.periodicity());
-        }
+        // Apply physical BCs (which also calls FillBoundary internally)
+        energy_bc->FillBoundary(stage[0], 0, stage[0].nComp(), t, 0);   // eta
+        density_bc->FillBoundary(stage[1], 0, stage[1].nComp(), t, 0);  // density
+        momentum_bc->FillBoundary(stage[2], 0, stage[2].nComp(), t, 0); // momentum
+        energy_bc->FillBoundary(stage[3], 0, stage[3].nComp(), t, 0);   // energy
     });
 
     //==============================================================

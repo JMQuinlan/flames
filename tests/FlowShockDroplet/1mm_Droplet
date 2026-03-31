@@ -42,7 +42,7 @@ geometry.is_periodic = 0 0 0
 ### TIME STEP ###
 # stop_time = 0.0002  # Shorter time for shock interaction
 #stop_time = 1.0e-5  # Shorter time for shock interaction
-stop_time = 1.0e-8  # Shorter time for shock interaction
+stop_time = 1.0e-7  # Shorter time for shock interaction
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
