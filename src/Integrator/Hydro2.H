@@ -324,17 +324,17 @@ protected:
     IntegrationScheme scheme;
 
     // Interface Compression Stuff
-    /*
-    int compression_max_iter = 10; // From paper: 5-10 iterations sufficient
-    Set::Scalar compression_tolerance = 1e-8;
-    bool apply_compression = true;
-    int compression_frequency = 1; // Apply every N timesteps
-    */
     bool apply_sharpening = false;
     int sharpening_frequency = 1;
     int reinit_max_iter = 50;
     Set::Scalar reinit_tolerance = 1e-6;
     std::vector<int> step_counter; // Track steps per level
+    int density_max_iter = 10;
+    Set::Scalar density_tol = 1e-8;
+    Set::Scalar omega_relax = 0.5;
+
+
+
 };
 }
 

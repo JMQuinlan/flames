@@ -106,12 +106,15 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("kappa_method", value.kappa_method, 2); // Method to solve for curvature
 
         // INTERFACE COMPRESSION
-        pp_query_default("apply_sharpening", value.apply_sharpening, true);
-        pp_query_default("sharpening_frequency", value.sharpening_frequency, 1);
-        pp_query_default("reinit_max_iter", value.reinit_max_iter, 1);
+        pp_query_default("apply_sharpening", value.apply_sharpening, false);
+        pp_query_default("sharpening_frequency", value.sharpening_frequency, 10);
+        pp_query_default("reinit_max_iter", value.reinit_max_iter, 10);
         pp_query_default("reinit_tolerance", value.reinit_tolerance, 1e-6);
+        pp_query_default("density_max_iter", value.density_max_iter, value.reinit_max_iter); // Density correction iterations (papers use 5-10 iterations)
+        pp_query_default("density_tolerance", value.density_tol, value.reinit_tolerance);    // Density correction tolerance
+        pp_query_default("density_relax", value.omega_relax, 0.5);                  // Relaxation parameter (0.3-0.7 typical)
+
     
-        
         // Boundry Conditions
         value.density_bc = new BC::Expression(1, pp, "density.bc");
         value.energy_bc = new BC::Constant(1, pp, "energy.bc");
@@ -1965,7 +1968,20 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
 
-    Util::Message(INFO, "Applying interface sharpening at level ", lev);
+    Util::Message(INFO, "=== INTERFACE SHARPENING START ===");
+    Util::Message(INFO, "Level: ", lev);
+
+    // Check if interface exists
+    Set::Scalar eta_min = eta_mf[lev]->min(0);
+    Set::Scalar eta_max = eta_mf[lev]->max(0);
+
+    Util::Message(INFO, "eta range: [", eta_min, ", ", eta_max, "]");
+
+    if (eta_max - eta_min < 0.1)
+    {
+        Util::Message(INFO, "No significant interface detected, skipping sharpening");
+        return;
+    }
 
     // Temporary MultiFabs for sharpening procedure
     amrex::MultiFab psi_mf(rho_eta0_mf[lev]->boxArray(), rho_eta0_mf[lev]->DistributionMap(), 1, 2);
@@ -1973,11 +1989,23 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
     amrex::MultiFab phi_sharp_mf(rho_eta0_mf[lev]->boxArray(), rho_eta0_mf[lev]->DistributionMap(), 1, 2);
 
     // ============================================================================
-    // STEP 1: Transform eta -> psi (Equation 6)
+    // STEP 1: Transform phi to psi (Equation 6)
+    // psi = epsilon * ln(phi / (1-phi))
+    // Only operate on INTERIOR cells (exclude boundaries)
     // ============================================================================
     for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
     {
-        const amrex::Box &bx = mfi.validbox();
+        const amrex::Box &bx_full = mfi.validbox();
+
+        // Shrink box to exclude boundaries
+        amrex::Box bx = bx_full;
+        bx.grow(-2); // Exclude 2 layers from all boundaries
+
+        if (bx.isEmpty())
+        {
+            Util::Message(INFO, "Box too small for sharpening, skipping");
+            continue;
+        }
 
         Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf[lev]->array(mfi);
         Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf[lev]->array(mfi);
@@ -1993,37 +2021,46 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
             // Clamp to avoid log(0)
             phi = std::max(1e-10, std::min(1.0 - 1e-10, phi));
 
-            // Equation (6): psi = eps_h * ln(phi/(1-phi))
+            // Equation (6): psi = epsilon * ln(phi/(1-phi))
             psi(i, j, k) = epsilon * std::log(phi / (1.0 - phi));
         });
     }
 
-    // Fill boundaries for psi
-    psi_mf.FillBoundary(geom[lev].periodicity());
+    // Fill boundaries for psi using custom BC function
+    FillBoundariesWithBC(lev, 0.0, density_bc, { &psi_mf });
 
     // ============================================================================
     // STEP 2: Reinitialize psi to signed distance function (Equation 10)
+    // d(psi)/d(tau) = S(psi) * (1 - |grad(psi)|)
     // ============================================================================
-    // Enable multiple MFIters for reinitialization (which has nested loops)
     amrex::MFIter::allowMultipleMFIters(true);
     ReinitializeSignedDistance(lev, psi_reinit_mf, psi_mf, reinit_max_iter);
     amrex::MFIter::allowMultipleMFIters(false);
 
     // Fill boundaries for reinitialized psi
-    psi_reinit_mf.FillBoundary(geom[lev].periodicity());
+    FillBoundariesWithBC(lev, 0.0, density_bc, { &psi_reinit_mf });
 
     // ============================================================================
-    // STEP 3: Transform psi -> phi_sharp (Inverse of Equation 6)
+    // STEP 3: Transform psi back to phi_sharp (Inverse of Equation 6)
+    // phi = 1 / (1 + exp(-psi/epsilon))
+    // Only operate on INTERIOR cells
     // ============================================================================
     for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
     {
-        const amrex::Box &bx = mfi.validbox();
+        const amrex::Box &bx_full = mfi.validbox();
+
+        // Shrink box to exclude boundaries
+        amrex::Box bx = bx_full;
+        bx.grow(-2);
+
+        if (bx.isEmpty())
+            continue;
 
         Set::Patch<const Set::Scalar> psi_reinit = psi_reinit_mf.array(mfi);
         Set::Patch<Set::Scalar> phi_sharp = phi_sharp_mf.array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            // Inverse of Eq. (6): phi = 1/(1 + exp(-psi/eps_h))
+            // Inverse of Eq. (6): phi = 1/(1 + exp(-psi/epsilon))
             phi_sharp(i, j, k) = 1.0 / (1.0 + std::exp(-psi_reinit(i, j, k) / epsilon));
 
             // Clamp to [0,1]
@@ -2032,65 +2069,379 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
     }
 
     // Fill boundaries for phi_sharp
-    phi_sharp_mf.FillBoundary(geom[lev].periodicity());
+    FillBoundariesWithBC(lev, 0.0, density_bc, { &phi_sharp_mf });
 
     // ============================================================================
-    // STEP 4: Reconstruct Conservative Variables (SINGLE LOOP)
+    // STEP 4: Density Correction with Compression Operators (Equations 15-16)
+    // This is the key step that prevents density anomalies!
     // ============================================================================
+
+    // Create working copies for iterative correction
+    amrex::MultiFab rho_eta0_work(rho_eta0_mf[lev]->boxArray(), rho_eta0_mf[lev]->DistributionMap(), 1, 2);
+    amrex::MultiFab rho_eta1_work(rho_eta1_mf[lev]->boxArray(), rho_eta1_mf[lev]->DistributionMap(), 1, 2);
+
+    // Initialize with current values
+    amrex::MultiFab::Copy(rho_eta0_work, *rho_eta0_mf[lev], 0, 0, 1, 2);
+    amrex::MultiFab::Copy(rho_eta1_work, *rho_eta1_mf[lev], 0, 0, 1, 2);
+
+    // Pseudo-timestep for density correction (Equation 20a)
+    // From knowledge: dt <= 2*h^2 for well-resolved interface (epsilon >= h/2)
+    Set::Scalar h = std::min(DX[0], DX[1]);
+    Set::Scalar dt_compression = 0.5 * h * h;
+
+    Set::Scalar omega_relax = 0.5;
+
+    
+
+    Util::Message(INFO, "Starting density correction iterations...");
+
+    for (int density_iter = 0; density_iter < density_max_iter; density_iter++)
+    {
+        // Store old values for convergence check
+        amrex::MultiFab rho_eta0_old(rho_eta0_work.boxArray(), rho_eta0_work.DistributionMap(), 1, 2);
+        amrex::MultiFab rho_eta1_old(rho_eta1_work.boxArray(), rho_eta1_work.DistributionMap(), 1, 2);
+
+        amrex::MultiFab::Copy(rho_eta0_old, rho_eta0_work, 0, 0, 1, 2);
+        amrex::MultiFab::Copy(rho_eta1_old, rho_eta1_work, 0, 0, 1, 2);
+
+        // Apply compression operators (INTERIOR CELLS ONLY)
+        for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx_full = mfi.validbox();
+
+            // Shrink box to exclude boundaries
+            amrex::Box bx = bx_full;
+            bx.grow(-2);
+
+            if (bx.isEmpty())
+                continue;
+
+            Set::Patch<const Set::Scalar> phi_sharp = phi_sharp_mf.array(mfi);
+            Set::Patch<Set::Scalar> rho_eta0 = rho_eta0_work.array(mfi);
+            Set::Patch<Set::Scalar> rho_eta1 = rho_eta1_work.array(mfi);
+            Set::Patch<const Set::Scalar> rho_eta0_original = rho_eta0_mf[lev]->array(mfi);
+            Set::Patch<const Set::Scalar> rho_eta1_original = rho_eta1_mf[lev]->array(mfi);
+
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                auto sten = Numeric::GetStencil(i, j, k, domain);
+
+                // ============================================================
+                // Compute geometric quantities from sharpened interface
+                // ============================================================
+
+                // Gradient of phi_sharp
+                Set::Vector grad_phi = Numeric::Gradient(phi_sharp, i, j, k, 0, DX);
+                Set::Scalar grad_phi_mag = grad_phi.lpNorm<2>();
+
+                // Narrow band check (papers use phi(1-phi) > 0.001)
+                Set::Scalar phi_val = phi_sharp(i, j, k);
+                Set::Scalar narrow_band_indicator = phi_val * (1.0 - phi_val);
+
+                if (narrow_band_indicator < 0.001)
+                {
+                    // Outside narrow band - don't modify density
+                    return;
+                }
+
+                if (grad_phi_mag < 1e-10)
+                {
+                    // No interface gradient - don't modify
+                    return;
+                }
+
+                // Normal vector
+                Set::Vector n_hat = grad_phi / grad_phi_mag;
+
+                // Laplacian of phi_sharp
+                Set::Scalar lap_phi = Numeric::Laplacian(phi_sharp, i, j, k, 0, DX);
+
+                // Curvature
+                Set::Scalar kappa = -lap_phi / (grad_phi_mag + small);
+
+                // ============================================================
+                // Maximum Principle Check (Equation 23)
+                // From knowledge: prevents spurious oscillations
+                // Condition: |kappa| + |(1-2*phi)|/epsilon <= sqrt(2)/h
+                // ============================================================
+
+                Set::Scalar max_principle_lhs = std::abs(kappa) + std::abs(1.0 - 2.0 * phi_val) / epsilon;
+                Set::Scalar max_principle_rhs = std::sqrt(2.0) / h;
+
+                if (max_principle_lhs > max_principle_rhs)
+                {
+                    // Maximum principle violated - DON'T modify density
+                    // This preserves thermodynamically consistent state from flow solver
+                    return;
+                }
+
+                // ============================================================
+                // Heaviside Function (from knowledge)
+                // Localizes density correction to interface region
+                // H = tanh(phi*(1-phi) / 0.01)
+                // ============================================================
+
+                Set::Scalar H = std::tanh(narrow_band_indicator / 0.01);
+
+                // ============================================================
+                // Compression Operator for Fluid 0 (Liquid) - Equation (15)
+                // R_l = H * n dot [grad(epsilon * n dot grad(rho_0*phi_0))
+                //                  - (1-2*phi)*grad(rho_0*phi_0)]
+                // ============================================================
+
+                // Gradient of rho_eta0
+                Set::Vector grad_rho_eta0 = Numeric::Gradient(rho_eta0, i, j, k, 0, DX);
+
+                // n dot grad(rho_0*phi_0)
+                Set::Scalar n_dot_grad_rho_eta0 = n_hat.dot(grad_rho_eta0);
+
+                // Compute grad(epsilon * n dot grad(rho_0*phi_0))
+                // Need n dot grad(rho_0*phi_0) at neighboring cells
+                Set::Scalar n_dot_grad_rho_eta0_ip = 0.0, n_dot_grad_rho_eta0_im = 0.0;
+                Set::Scalar n_dot_grad_rho_eta0_jp = 0.0, n_dot_grad_rho_eta0_jm = 0.0;
+
+                // At i+1,j
+                if (i + 1 <= domain.bigEnd(0))
+                {
+                    Set::Vector grad_phi_ip = Numeric::Gradient(phi_sharp, i + 1, j, k, 0, DX);
+                    Set::Scalar grad_phi_mag_ip = grad_phi_ip.lpNorm<2>();
+                    if (grad_phi_mag_ip > 1e-10)
+                    {
+                        Set::Vector n_hat_ip = grad_phi_ip / grad_phi_mag_ip;
+                        Set::Vector grad_rho_eta0_ip = Numeric::Gradient(rho_eta0, i + 1, j, k, 0, DX);
+                        n_dot_grad_rho_eta0_ip = n_hat_ip.dot(grad_rho_eta0_ip);
+                    }
+                }
+
+                // At i-1,j
+                if (i - 1 >= domain.smallEnd(0))
+                {
+                    Set::Vector grad_phi_im = Numeric::Gradient(phi_sharp, i - 1, j, k, 0, DX);
+                    Set::Scalar grad_phi_mag_im = grad_phi_im.lpNorm<2>();
+                    if (grad_phi_mag_im > 1e-10)
+                    {
+                        Set::Vector n_hat_im = grad_phi_im / grad_phi_mag_im;
+                        Set::Vector grad_rho_eta0_im = Numeric::Gradient(rho_eta0, i - 1, j, k, 0, DX);
+                        n_dot_grad_rho_eta0_im = n_hat_im.dot(grad_rho_eta0_im);
+                    }
+                }
+
+                // At i,j+1
+                if (j + 1 <= domain.bigEnd(1))
+                {
+                    Set::Vector grad_phi_jp = Numeric::Gradient(phi_sharp, i, j + 1, k, 0, DX);
+                    Set::Scalar grad_phi_mag_jp = grad_phi_jp.lpNorm<2>();
+                    if (grad_phi_mag_jp > 1e-10)
+                    {
+                        Set::Vector n_hat_jp = grad_phi_jp / grad_phi_mag_jp;
+                        Set::Vector grad_rho_eta0_jp = Numeric::Gradient(rho_eta0, i, j + 1, k, 0, DX);
+                        n_dot_grad_rho_eta0_jp = n_hat_jp.dot(grad_rho_eta0_jp);
+                    }
+                }
+
+                // At i,j-1
+                if (j - 1 >= domain.smallEnd(1))
+                {
+                    Set::Vector grad_phi_jm = Numeric::Gradient(phi_sharp, i, j - 1, k, 0, DX);
+                    Set::Scalar grad_phi_mag_jm = grad_phi_jm.lpNorm<2>();
+                    if (grad_phi_mag_jm > 1e-10)
+                    {
+                        Set::Vector n_hat_jm = grad_phi_jm / grad_phi_mag_jm;
+                        Set::Vector grad_rho_eta0_jm = Numeric::Gradient(rho_eta0, i, j - 1, k, 0, DX);
+                        n_dot_grad_rho_eta0_jm = n_hat_jm.dot(grad_rho_eta0_jm);
+                    }
+                }
+
+                // grad(epsilon * n dot grad(rho_0*phi_0))
+                Set::Scalar grad_term0_x = epsilon * (n_dot_grad_rho_eta0_ip - n_dot_grad_rho_eta0_im) / (2.0 * DX[0]);
+                Set::Scalar grad_term0_y = epsilon * (n_dot_grad_rho_eta0_jp - n_dot_grad_rho_eta0_jm) / (2.0 * DX[1]);
+
+                Set::Scalar term1_0 = n_hat(0) * grad_term0_x + n_hat(1) * grad_term0_y;
+
+                // (1-2*phi) * grad(rho_0*phi_0)
+                Set::Scalar term2_0 = (1.0 - 2.0 * phi_val) * n_dot_grad_rho_eta0;
+
+                // Compression operator R_l (Equation 15)
+                Set::Scalar R_l = H * (term1_0 - term2_0);
+
+                // ============================================================
+                // Compression Operator for Fluid 1 (Gas) - Equation (16)
+                // R_g = H * n dot [grad(epsilon * n dot grad(rho_1*phi_1))
+                //                  - (1-2*phi)*grad(rho_1*phi_1)]
+                // ============================================================
+
+                // Gradient of rho_eta1
+                Set::Vector grad_rho_eta1 = Numeric::Gradient(rho_eta1, i, j, k, 0, DX);
+
+                // n dot grad(rho_1*phi_1)
+                Set::Scalar n_dot_grad_rho_eta1 = n_hat.dot(grad_rho_eta1);
+
+                // Compute grad(epsilon * n dot grad(rho_1*phi_1)) at neighbors
+                Set::Scalar n_dot_grad_rho_eta1_ip = 0.0, n_dot_grad_rho_eta1_im = 0.0;
+                Set::Scalar n_dot_grad_rho_eta1_jp = 0.0, n_dot_grad_rho_eta1_jm = 0.0;
+
+                // At i+1,j
+                if (i + 1 <= domain.bigEnd(0))
+                {
+                    Set::Vector grad_phi_ip = Numeric::Gradient(phi_sharp, i + 1, j, k, 0, DX);
+                    Set::Scalar grad_phi_mag_ip = grad_phi_ip.lpNorm<2>();
+                    if (grad_phi_mag_ip > 1e-10)
+                    {
+                        Set::Vector n_hat_ip = grad_phi_ip / grad_phi_mag_ip;
+                        Set::Vector grad_rho_eta1_ip = Numeric::Gradient(rho_eta1, i + 1, j, k, 0, DX);
+                        n_dot_grad_rho_eta1_ip = n_hat_ip.dot(grad_rho_eta1_ip);
+                    }
+                }
+
+                // At i-1,j
+                if (i - 1 >= domain.smallEnd(0))
+                {
+                    Set::Vector grad_phi_im = Numeric::Gradient(phi_sharp, i - 1, j, k, 0, DX);
+                    Set::Scalar grad_phi_mag_im = grad_phi_im.lpNorm<2>();
+                    if (grad_phi_mag_im > 1e-10)
+                    {
+                        Set::Vector n_hat_im = grad_phi_im / grad_phi_mag_im;
+                        Set::Vector grad_rho_eta1_im = Numeric::Gradient(rho_eta1, i - 1, j, k, 0, DX);
+                        n_dot_grad_rho_eta1_im = n_hat_im.dot(grad_rho_eta1_im);
+                    }
+                }
+
+                // At i,j+1
+                if (j + 1 <= domain.bigEnd(1))
+                {
+                    Set::Vector grad_phi_jp = Numeric::Gradient(phi_sharp, i, j + 1, k, 0, DX);
+                    Set::Scalar grad_phi_mag_jp = grad_phi_jp.lpNorm<2>();
+                    if (grad_phi_mag_jp > 1e-10)
+                    {
+                        Set::Vector n_hat_jp = grad_phi_jp / grad_phi_mag_jp;
+                        Set::Vector grad_rho_eta1_jp = Numeric::Gradient(rho_eta1, i, j + 1, k, 0, DX);
+                        n_dot_grad_rho_eta1_jp = n_hat_jp.dot(grad_rho_eta1_jp);
+                    }
+                }
+
+                // At i,j-1
+                if (j - 1 >= domain.smallEnd(1))
+                {
+                    Set::Vector grad_phi_jm = Numeric::Gradient(phi_sharp, i, j - 1, k, 0, DX);
+                    Set::Scalar grad_phi_mag_jm = grad_phi_jm.lpNorm<2>();
+                    if (grad_phi_mag_jm > 1e-10)
+                    {
+                        Set::Vector n_hat_jm = grad_phi_jm / grad_phi_mag_jm;
+                        Set::Vector grad_rho_eta1_jm = Numeric::Gradient(rho_eta1, i, j - 1, k, 0, DX);
+                        n_dot_grad_rho_eta1_jm = n_hat_jm.dot(grad_rho_eta1_jm);
+                    }
+                }
+
+                // grad(epsilon * n dot grad(rho_1*phi_1))
+                Set::Scalar grad_term1_x = epsilon * (n_dot_grad_rho_eta1_ip - n_dot_grad_rho_eta1_im) / (2.0 * DX[0]);
+                Set::Scalar grad_term1_y = epsilon * (n_dot_grad_rho_eta1_jp - n_dot_grad_rho_eta1_jm) / (2.0 * DX[1]);
+
+                Set::Scalar term1_1 = n_hat(0) * grad_term1_x + n_hat(1) * grad_term1_y;
+
+                // (1-2*phi) * grad(rho_1*phi_1)
+                Set::Scalar term2_1 = (1.0 - 2.0 * phi_val) * n_dot_grad_rho_eta1;
+
+                // Compression operator R_g (Equation 16)
+                Set::Scalar R_g = H * (term1_1 - term2_1);
+
+                // ============================================================
+                // Update with relaxation (pseudo-time stepping)
+                // ============================================================
+
+                rho_eta0(i, j, k) = rho_eta0(i, j, k) - omega_relax * dt_compression * R_l;
+                rho_eta1(i, j, k) = rho_eta1(i, j, k) - omega_relax * dt_compression * R_g;
+
+                // Ensure positivity
+                rho_eta0(i, j, k) = std::max(small, rho_eta0(i, j, k));
+                rho_eta1(i, j, k) = std::max(small, rho_eta1(i, j, k));
+
+                // ============================================================
+                // Enforce exact mass conservation
+                // Total mass must equal original total mass
+                // ============================================================
+
+                Set::Scalar rho_total_original = rho_eta0_original(i, j, k) + rho_eta1_original(i, j, k);
+                Set::Scalar rho_total_new = rho_eta0(i, j, k) + rho_eta1(i, j, k);
+
+                Set::Scalar mass_error = std::abs(rho_total_new - rho_total_original);
+
+                if (mass_error > 1e-12)
+                {
+                    // Renormalize to ensure exact mass conservation
+                    Set::Scalar scale = rho_total_original / (rho_total_new + small);
+                    rho_eta0(i, j, k) *= scale;
+                    rho_eta1(i, j, k) *= scale;
+                }
+            });
+        }
+
+        // Fill boundaries after each iteration using custom BC function
+        FillBoundariesWithBC(lev, 0.0, density_bc, { &rho_eta0_work, &rho_eta1_work });
+
+        // ========================================================================
+        // Check convergence of density correction
+        // ========================================================================
+
+        amrex::MultiFab residual0(rho_eta0_work.boxArray(), rho_eta0_work.DistributionMap(), 1, 0);
+        amrex::MultiFab residual1(rho_eta1_work.boxArray(), rho_eta1_work.DistributionMap(), 1, 0);
+
+        amrex::MultiFab::Copy(residual0, rho_eta0_work, 0, 0, 1, 0);
+        amrex::MultiFab::Copy(residual1, rho_eta1_work, 0, 0, 1, 0);
+        amrex::MultiFab::Subtract(residual0, rho_eta0_old, 0, 0, 1, 0);
+        amrex::MultiFab::Subtract(residual1, rho_eta1_old, 0, 0, 1, 0);
+
+        Set::Scalar max_residual = std::max(residual0.norm0(), residual1.norm0());
+
+        if (max_residual < density_tol)
+        {
+            Util::Message(INFO, "  Density correction converged in ", density_iter + 1, " iterations");
+            break;
+        }
+
+        if (density_iter == density_max_iter - 1)
+        {
+            Util::Message(INFO, "  Density correction reached max iterations (", density_max_iter, ")");
+            Util::Message(INFO, "  Final residual: ", max_residual);
+        }
+    }
+
+    // ============================================================================
+    // STEP 5: Copy corrected densities back to main arrays
+    // ============================================================================
+
+    amrex::MultiFab::Copy(*rho_eta0_mf[lev], rho_eta0_work, 0, 0, 1, 0);
+    amrex::MultiFab::Copy(*rho_eta1_mf[lev], rho_eta1_work, 0, 0, 1, 0);
+
+    // ============================================================================
+    // STEP 6: Update eta from corrected densities
+    // ============================================================================
+
     for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
 
-        Set::Patch<const Set::Scalar> phi_sharp = phi_sharp_mf.array(mfi);
-        Set::Patch<const Set::Scalar> rho_eta0_in = rho_eta0_mf[lev]->array(mfi);
-        Set::Patch<const Set::Scalar> rho_eta1_in = rho_eta1_mf[lev]->array(mfi);
-
-        Set::Patch<Set::Scalar> rho_eta0_out = rho_eta0_mf[lev]->array(mfi);
-        Set::Patch<Set::Scalar> rho_eta1_out = rho_eta1_mf[lev]->array(mfi);
+        Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf[lev]->array(mfi);
+        Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf[lev]->array(mfi);
         Set::Patch<Set::Scalar> eta = eta_mf.Patch(lev, mfi);
 
-        // Apply sharpening to all cells (no interior_bx since grow(0) does nothing)
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            // Total mixture density (CONSERVED)
-            Set::Scalar rho_total = rho_eta0_in(i, j, k) + rho_eta1_in(i, j, k);
+            Set::Scalar rho_total = rho_eta0(i, j, k) + rho_eta1(i, j, k);
+            eta(i, j, k) = rho_eta0(i, j, k) / (rho_total + small);
 
-            // Check if in narrow band
-            Set::Scalar phi_in = rho_eta0_in(i, j, k) / (rho_total + small);
-            Set::Scalar narrow_band_tol = 0.01;
-
-            if (phi_in < narrow_band_tol || phi_in > 1.0 - narrow_band_tol)
-            {
-                // Outside narrow band - don't modify
-                return;
-            }
-
-            // GENTLE blending to prevent over-sharpening
-            Set::Scalar blend_factor = 0.1; // 10% sharpening
-            Set::Scalar phi_blended = blend_factor * phi_sharp(i, j, k) + (1.0 - blend_factor) * phi_in;
-
-            // Redistribute density
-            rho_eta0_out(i, j, k) = phi_blended * rho_total;
-            rho_eta1_out(i, j, k) = (1.0 - phi_blended) * rho_total;
-
-            // Update eta (NO cutoff transformation)
-            eta(i, j, k) = phi_blended;
-
-            // Simple clamping
+            // Simple clamping (NO cutoff transformation)
             eta(i, j, k) = std::max(0.0, std::min(1.0, eta(i, j, k)));
-
-            // Ensure positivity
-            rho_eta0_out(i, j, k) = std::max(small, rho_eta0_out(i, j, k));
-            rho_eta1_out(i, j, k) = std::max(small, rho_eta1_out(i, j, k));
         });
     }
 
     // ============================================================================
-    // FILL BOUNDARIES WITH BC (After reconstruction)
+    // FILL BOUNDARIES WITH CUSTOM BC (FINAL - ONLY ONCE)
     // ============================================================================
+
     FillBoundariesWithBC(lev, 0.0, density_bc, { rho_eta0_mf[lev].get(), rho_eta1_mf[lev].get(), eta_mf[lev].get() });
 
-    Util::Message(INFO, "Interface sharpening complete");
+    Util::Message(INFO, "=== INTERFACE SHARPENING COMPLETE ===");
 }
+
+
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
