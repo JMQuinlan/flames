@@ -7,7 +7,7 @@
 # Equation 68
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Garrick_GasLiquid2
+plot_file = ./tests/FlowRiemannUnitTests/output_Garrick_GasLiquid4
 Riemann_Solver.type = hllc
 
 # Interface at x=0 (sharp transition)
@@ -113,3 +113,10 @@ g = 0.0
 apply_surface_tension = 0
 apply_weight = 0
 apply_vaporization = 0
+
+
+
+apply_sharpening = 1
+sharpening_frequency = 10
+reinit_max_iter = 5
+reinit_tolerance = 1e-6

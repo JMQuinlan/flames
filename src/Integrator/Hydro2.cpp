@@ -106,14 +106,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("kappa_method", value.kappa_method, 2); // Method to solve for curvature
 
         // INTERFACE COMPRESSION
-        /*
-        pp_query_default("apply_compression", value.apply_compression, true);
-        pp_query_default("compression_frequency", value.compression_frequency, 1);
-        pp_query_default("compression_max_iter", value.compression_max_iter, 10);
-        pp_query_default("compression_tolerance", value.compression_tolerance, 1e-8);
-        */
-        pp_query_default("apply_sharpening", value.apply_sharpening, false);
-        pp_query_default("sharpening_frequency", value.sharpening_frequency, 1e9);
+        pp_query_default("apply_sharpening", value.apply_sharpening, true);
+        pp_query_default("sharpening_frequency", value.sharpening_frequency, 1);
         pp_query_default("reinit_max_iter", value.reinit_max_iter, 1);
         pp_query_default("reinit_tolerance", value.reinit_tolerance, 1e-6);
     
@@ -1511,7 +1505,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     amrex::Box domain = geom[lev].Domain();
 
     // Increment step counter
-    n_step++;
+    step_counter[lev]++;
     
     // Swaping pointers
     std::swap(density_old_mf[lev], density_mf[lev]);
@@ -1569,11 +1563,18 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // ------------------------------------------------------------
     // INTERFACE Sharpening
     // ------------------------------------------------------------
-    int sharpening_start_step = 50; // Start after 10 steps
-
+    int sharpening_start_step = 10; // Start after 10 steps
+    // Lil debugging to track mean of eta to see if it stay the same thickness. Change bool to true for verbose
+    if ((step_counter[lev] % 10 == 0) && false)
+    { // Every 10 steps
+        Set::Scalar eta_min = eta_mf[lev]->min(0);
+        Set::Scalar eta_max = eta_mf[lev]->max(0);
+        Set::Scalar eta_mean = eta_mf[lev]->sum(0) / eta_mf[lev]->boxArray().numPts();
+        Util::Message(INFO, "Step ", step_counter[lev], ": eta range = [", eta_min, ", ", eta_max, "], mean = ", eta_mean);
+    }
     if (apply_sharpening && (step_counter[lev] > sharpening_start_step) && (step_counter[lev] % sharpening_frequency == 0))
     {
-        //InterfaceSharpening(lev, dt);
+        InterfaceSharpening(lev, dt);
     }
 
     // ------------------------------------------------------------
@@ -1954,7 +1955,6 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////// INTERFACE SHARPENING /////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-
 void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
 {
     BL_PROFILE("Integrator::Hydro2::InterfaceSharpening");
@@ -1968,9 +1968,9 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
     Util::Message(INFO, "Applying interface sharpening at level ", lev);
 
     // Temporary MultiFabs for sharpening procedure
-    amrex::MultiFab psi_mf(rho_eta0_mf[lev] -> boxArray(), rho_eta0_mf[lev] -> DistributionMap(), 1, 2);
-    amrex::MultiFab psi_reinit_mf(rho_eta0_mf[lev] -> boxArray(), rho_eta0_mf[lev] -> DistributionMap(), 1, 2);
-    amrex::MultiFab phi_sharp_mf(rho_eta0_mf[lev] -> boxArray(), rho_eta0_mf[lev] -> DistributionMap(), 1, 2);
+    amrex::MultiFab psi_mf(rho_eta0_mf[lev]->boxArray(), rho_eta0_mf[lev]->DistributionMap(), 1, 2);
+    amrex::MultiFab psi_reinit_mf(rho_eta0_mf[lev]->boxArray(), rho_eta0_mf[lev]->DistributionMap(), 1, 2);
+    amrex::MultiFab phi_sharp_mf(rho_eta0_mf[lev]->boxArray(), rho_eta0_mf[lev]->DistributionMap(), 1, 2);
 
     // ============================================================================
     // STEP 1: Transform eta -> psi (Equation 6)
@@ -1979,8 +1979,8 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
     {
         const amrex::Box &bx = mfi.validbox();
 
-        Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf[lev] -> array(mfi);
-        Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf[lev] -> array(mfi);
+        Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf[lev]->array(mfi);
+        Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf[lev]->array(mfi);
         Set::Patch<Set::Scalar> psi = psi_mf.array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
@@ -1993,21 +1993,27 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
             // Clamp to avoid log(0)
             phi = std::max(1e-10, std::min(1.0 - 1e-10, phi));
 
-            // Equation (6): psi = eps_h * ln(eta/(1-eta))
+            // Equation (6): psi = eps_h * ln(phi/(1-phi))
             psi(i, j, k) = epsilon * std::log(phi / (1.0 - phi));
         });
     }
 
-    // Fill boundaries
+    // Fill boundaries for psi
     psi_mf.FillBoundary(geom[lev].periodicity());
 
     // ============================================================================
     // STEP 2: Reinitialize psi to signed distance function (Equation 10)
     // ============================================================================
+    // Enable multiple MFIters for reinitialization (which has nested loops)
+    amrex::MFIter::allowMultipleMFIters(true);
     ReinitializeSignedDistance(lev, psi_reinit_mf, psi_mf, reinit_max_iter);
+    amrex::MFIter::allowMultipleMFIters(false);
+
+    // Fill boundaries for reinitialized psi
+    psi_reinit_mf.FillBoundary(geom[lev].periodicity());
 
     // ============================================================================
-    // STEP 3: Transform psi -> eta_sharp (Inverse of Equation 6)
+    // STEP 3: Transform psi -> phi_sharp (Inverse of Equation 6)
     // ============================================================================
     for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
     {
@@ -2017,72 +2023,79 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
         Set::Patch<Set::Scalar> phi_sharp = phi_sharp_mf.array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            // Inverse of Eq. (6): eta = 1/(1 + exp(-psi/eps_h))
+            // Inverse of Eq. (6): phi = 1/(1 + exp(-psi/eps_h))
             phi_sharp(i, j, k) = 1.0 / (1.0 + std::exp(-psi_reinit(i, j, k) / epsilon));
 
-            // Clamp to ,[0,1]
+            // Clamp to [0,1]
             phi_sharp(i, j, k) = std::max(0.0, std::min(1.0, phi_sharp(i, j, k)));
         });
     }
 
-    // Fill boundaries
+    // Fill boundaries for phi_sharp
     phi_sharp_mf.FillBoundary(geom[lev].periodicity());
 
     // ============================================================================
-    // STEP 4: Reconstruct Conservative Variables (Mass-conserving redistribution)
+    // STEP 4: Reconstruct Conservative Variables (SINGLE LOOP)
     // ============================================================================
     for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
 
         Set::Patch<const Set::Scalar> phi_sharp = phi_sharp_mf.array(mfi);
-        Set::Patch<const Set::Scalar> rho_eta0_in = rho_eta0_mf[lev] -> array(mfi);
-        Set::Patch<const Set::Scalar> rho_eta1_in = rho_eta1_mf[lev] -> array(mfi);
+        Set::Patch<const Set::Scalar> rho_eta0_in = rho_eta0_mf[lev]->array(mfi);
+        Set::Patch<const Set::Scalar> rho_eta1_in = rho_eta1_mf[lev]->array(mfi);
 
-        Set::Patch<Set::Scalar> rho_eta0_out = rho_eta0_mf[lev] -> array(mfi);
-        Set::Patch<Set::Scalar> rho_eta1_out = rho_eta1_mf[lev] -> array(mfi);
+        Set::Patch<Set::Scalar> rho_eta0_out = rho_eta0_mf[lev]->array(mfi);
+        Set::Patch<Set::Scalar> rho_eta1_out = rho_eta1_mf[lev]->array(mfi);
         Set::Patch<Set::Scalar> eta = eta_mf.Patch(lev, mfi);
 
+        // Apply sharpening to all cells (no interior_bx since grow(0) does nothing)
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            // Total mixture density (CONSERVED - this is the key!)
+            // Total mixture density (CONSERVED)
             Set::Scalar rho_total = rho_eta0_in(i, j, k) + rho_eta1_in(i, j, k);
 
-            // Redistribute density based on sharpened volume fraction
-            // This preserves total mass exactly
-            rho_eta0_out(i, j, k) = phi_sharp(i, j, k) * rho_total;
-            rho_eta1_out(i, j, k) = (1.0 - phi_sharp(i, j, k)) * rho_total;
+            // Check if in narrow band
+            Set::Scalar phi_in = rho_eta0_in(i, j, k) / (rho_total + small);
+            Set::Scalar narrow_band_tol = 0.01;
 
-            // Update eta
-            eta(i, j, k) = phi_sharp(i, j, k);
+            if (phi_in < narrow_band_tol || phi_in > 1.0 - narrow_band_tol)
+            {
+                // Outside narrow band - don't modify
+                return;
+            }
 
-            // Apply cutoff
-            eta(i, j, k) = std::max(0.0, std::min(1.0, (eta(i, j, k) - cutoff) / (1.0 - 2.0 * cutoff)));
+            // GENTLE blending to prevent over-sharpening
+            Set::Scalar blend_factor = 0.1; // 10% sharpening
+            Set::Scalar phi_blended = blend_factor * phi_sharp(i, j, k) + (1.0 - blend_factor) * phi_in;
 
-            // Recompute with cutoff applied
-            rho_eta0_out(i, j, k) = eta(i, j, k) * rho_total;
-            rho_eta1_out(i, j, k) = (1.0 - eta(i, j, k)) * rho_total;
+            // Redistribute density
+            rho_eta0_out(i, j, k) = phi_blended * rho_total;
+            rho_eta1_out(i, j, k) = (1.0 - phi_blended) * rho_total;
 
-            // Ensure positivity and non-zero
+            // Update eta (NO cutoff transformation)
+            eta(i, j, k) = phi_blended;
+
+            // Simple clamping
+            eta(i, j, k) = std::max(0.0, std::min(1.0, eta(i, j, k)));
+
+            // Ensure positivity
             rho_eta0_out(i, j, k) = std::max(small, rho_eta0_out(i, j, k));
             rho_eta1_out(i, j, k) = std::max(small, rho_eta1_out(i, j, k));
-
-            // Error checking
-            check4nans(0, lev, i, j, k, "ERROR IN InterfaceSharpening(): Reconstruction", { { "phi_sharp", phi_sharp(i, j, k) }, { "rho_total", rho_total }, { "rho_eta0_out", rho_eta0_out(i, j, k) }, { "rho_eta1_out", rho_eta1_out(i, j, k) }, { "eta", eta(i, j, k) } });
         });
     }
 
-    // Fill boundaries
-    rho_eta0_mf[lev] -> FillBoundary(geom[lev].periodicity());
-    rho_eta1_mf[lev] -> FillBoundary(geom[lev].periodicity());
-    eta_mf[lev] -> FillBoundary(geom[lev].periodicity());
+    // ============================================================================
+    // FILL BOUNDARIES WITH BC (After reconstruction)
+    // ============================================================================
+    FillBoundariesWithBC(lev, 0.0, density_bc, { rho_eta0_mf[lev].get(), rho_eta1_mf[lev].get(), eta_mf[lev].get() });
 
     Util::Message(INFO, "Interface sharpening complete");
 }
 
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////// REINITIALIZE SIGNED DISTANCE ///////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-
 void Hydro2::ReinitializeSignedDistance(int lev,
                                         amrex::MultiFab &psi_mf,
                                         const amrex::MultiFab &psi_init_mf,
@@ -2251,21 +2264,6 @@ void Hydro2::FillBoundariesWithBC(int lev, Set::Scalar time, BC::BC<Set::Scalar>
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-}
+} // end of Integrator namespace
 
 //#endif

@@ -17,7 +17,7 @@ eta.ic.expression.region0 = "0.5 * (1.0 + tanh(x / epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
 
 #amr.plot_int = 1
-amr.plot_int = 10
+amr.plot_int = 1
 
 ### MESHING ###
 amr.max_level = 0
