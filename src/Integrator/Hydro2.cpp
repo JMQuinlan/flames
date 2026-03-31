@@ -329,106 +329,43 @@ void Hydro2::Initialize(int lev)
     const Real* dx = geom.CellSize();
     const Box& domain = geom.Domain();
 
-    // debugging prints to check initial conditions before mixing:
-    amrex::Print() << "p0 BEFORE MIX: "
-                << pressure0_mf[lev]->min(0) << " "
-                << pressure0_mf[lev]->max(0) << "\n";
-    amrex::Print() << "p1 BEFORE MIX: "
-                << pressure1_mf[lev]->min(0) << " "
-                << pressure1_mf[lev]->max(0) << "\n";
+    // Initialize individual fluid variables
+    // DIFFUSE BOUNDARY
+    eta_ic          ->Initialize(lev, eta_mf, 0.0);
+    eta_ic          ->Initialize(lev, eta_old_mf, 0.0);
+    etadot_mf[lev]  ->setVal(0.0);
+    hess_eta_mf[lev]->setVal(0.0);
 
-    // // Initialize individual fluid variables
-    // // DIFFUSIVE BOUNDRY
-    // eta_ic          ->Initialize(lev, eta_mf, 0.0);
-    // eta_ic          ->Initialize(lev, eta_old_mf, 0.0);
-    // etadot_mf[lev]  ->setVal(0.0);
-    // hess_eta_mf[lev]->setVal(0.0);
+    // FLUID 0
+    velocity0_ic    ->Initialize(lev, velocity0_mf, 0.0);
+    pressure0_ic    ->Initialize(lev, pressure0_mf, 0.0);
+    density0_ic     ->Initialize(lev, density0_mf, 0.0);
+    density0_ic     ->Initialize(lev, density0_old_mf, 0.0);
 
-    // // FLUID 0
-    // velocity0_ic    ->Initialize(lev, velocity0_mf, 0.0);
-    // // pressure0_ic    ->Initialize(lev, pressure0_mf, 0.0);
-    // density0_ic     ->Initialize(lev, density0_mf, 0.0);
-    // density0_ic     ->Initialize(lev, density0_old_mf, 0.0);
-    // //temperature0_ic ->Initialize(lev, T0_mf, 0.0);
-    // //k0_thermal_ic   ->Initialize(lev, k0_thermal_mf, 0.0);
-    // //h0_thermal_ic   ->Initialize(lev, h0_thermal_mf, 0.0);
-
-    // // FLUID 1
-    // velocity1_ic    ->Initialize(lev, velocity1_mf, 0.0);
-    // // pressure1_ic    ->Initialize(lev, pressure1_mf, 0.0);
-    // density1_ic     ->Initialize(lev, density1_mf, 0.0);
-    // density1_ic     ->Initialize(lev, density1_old_mf, 0.0);
-    // //temperature1_ic ->Initialize(lev, T1_mf, 0.0);
-    // //k1_thermal_ic   ->Initialize(lev, k1_thermal_mf, 0.0);
-    // //h1_thermal_ic   ->Initialize(lev, h1_thermal_mf, 0.0);
-
-// // Debugging checks to make sure ICs are initialized:
-// if (eta_ic == nullptr) {
-//     Util::ParallelMessage(INFO, "eta_ic is not initialized!");
-// }
-// if (std::isnan(gamma0)) {
-//     Util::ParallelMessage(INFO, "gamma0 is not initialized!");
-// }
-
-
-    // // Energy missing:
-    // energy0_ic     ->Initialize(lev, energy0_mf, 0.0);
-    // energy0_ic     ->Initialize(lev, energy0_old_mf, 0.0);
-    // energy1_ic     ->Initialize(lev, energy1_mf, 0.0);
-    // energy1_ic     ->Initialize(lev, energy1_old_mf, 0.0);
+    // FLUID 1
+    velocity1_ic    ->Initialize(lev, velocity1_mf, 0.0);
+    pressure1_ic    ->Initialize(lev, pressure1_mf, 0.0);
+    density1_ic     ->Initialize(lev, density1_mf, 0.0);
+    density1_ic     ->Initialize(lev, density1_old_mf, 0.0);
 
     // FORCED SOURCE
     ic_m0           ->Initialize(lev, m0_mf, 0.0);
     ic_u0           ->Initialize(lev, u0_mf, 0.0);
     ic_q            ->Initialize(lev, q_mf, 0.0);
 
-    // --------------------------------------------
-    // ENERGY FROM PRESSURE USING STIFFENED EOS
-    // --------------------------------------------
-    for (MFIter mfi(*pressure0_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
-    {
-        const Box& bx = mfi.validbox();
-
-        auto p0  = pressure0_mf[lev]->array(mfi);
-        auto p1  = pressure1_mf[lev]->array(mfi);
-
-        auto rho0 = density0_mf[lev]->array(mfi);
-        auto rho1 = density1_mf[lev]->array(mfi);
-
-        auto v0   = velocity0_mf[lev]->array(mfi);
-        auto v1   = velocity1_mf[lev]->array(mfi);
-
-        auto E0   = energy0_mf[lev]->array(mfi);
-        auto E1   = energy1_mf[lev]->array(mfi);
-
-        ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i,int j,int k)
-        {
-            // Phase 0
-            Real KE0 = 0.5 * rho0(i,j,k) *
-                (v0(i,j,k,0)*v0(i,j,k,0) + v0(i,j,k,1)*v0(i,j,k,1));
-            Real UE0 = (p0(i,j,k) + gamma0*pi_0)/(gamma0 - 1.0);
-            if (UE0 < 0) UE0 = 0;
-            E0(i,j,k) = KE0 + UE0;
-
-            // Phase 1
-            Real KE1 = 0.5 * rho1(i,j,k) *
-                (v1(i,j,k,0)*v1(i,j,k,0) + v1(i,j,k,1)*v1(i,j,k,1));
-            Real UE1 = (p1(i,j,k) + gamma1*pi_1)/(gamma1 - 1.0);
-            if (UE1 < 0) UE1 = 0;
-            E1(i,j,k) = KE1 + UE1;
-        });
-    }
-
-    energy0_mf[lev]->FillBoundary(geom.periodicity());
-    energy1_mf[lev]->FillBoundary(geom.periodicity());
-
-    // debugging prints to check initial conditions before mixing:
-    amrex::Print() << "p0 BEFORE MIX: "
+    // Debugging: verify IC values before mixing
+    amrex::Print() << "p0 AFTER IC, BEFORE MIX: "
                 << pressure0_mf[lev]->min(0) << " "
                 << pressure0_mf[lev]->max(0) << "\n";
-    amrex::Print() << "p1 BEFORE MIX: "
+    amrex::Print() << "p1 AFTER IC, BEFORE MIX: "
                 << pressure1_mf[lev]->min(0) << " "
                 << pressure1_mf[lev]->max(0) << "\n";
+    amrex::Print() << "rho0 AFTER IC, BEFORE MIX: "
+                << density0_mf[lev]->min(0) << " "
+                << density0_mf[lev]->max(0) << "\n";
+    amrex::Print() << "eta AFTER IC, BEFORE MIX: "
+                << eta_mf[lev]->min(0) << " "
+                << eta_mf[lev]->max(0) << "\n";
 
 
     // Calculate mixed variables based on individual fluid variables
@@ -593,7 +530,7 @@ void Hydro2::Mix(int lev)
             //--------------------------------------------------------------
             double gmix, pimix;
             Thermo_Interp::InterpolateGammaPi_Stiffened(
-                e, gamma0, gamma1, pi_0, pi_1, gmix, pimix);
+                e, gamma1, gamma0, pi_1, pi_0, gmix, pimix);
 
             gamma_mix(i,j,k) = gmix;
             pi_mix(i,j,k)    = pimix;
@@ -772,7 +709,7 @@ Hydro2::RHS(int lev,
 
             double gmix, pimix;
             Thermo_Interp::InterpolateGammaPi_Stiffened(
-                eta, gamma0, gamma1, pi_0, pi_1, gmix, pimix);
+                eta, gamma1, gamma0, pi_1, pi_0, gmix, pimix);
             gamma_mix(i,j,k) = gmix;
             pi_mix(i,j,k) = pimix;
 
@@ -1582,7 +1519,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             double gmix, pimix;
             Thermo_Interp::InterpolateGammaPi_Stiffened(
-                eta(i,j,k), gamma0, gamma1, pi_0, pi_1, gmix, pimix);
+                eta(i,j,k), gamma1, gamma0, pi_1, pi_0, gmix, pimix);
             gamma_mix(i,j,k) = gmix;
             pi_mix(i,j,k) = pimix;
 
@@ -1674,7 +1611,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Set::Scalar pi_mix_new = (B_new / A_new) / gmix_new;
             double gmix_new, pimix_new;
             Thermo_Interp::InterpolateGammaPi_Stiffened(
-                eta(i,j,k), gamma0, gamma1, pi_0, pi_1, gmix_new, pimix_new);
+                eta(i,j,k), gamma1, gamma0, pi_1, pi_0, gmix_new, pimix_new);
             // gamma_mix(i,j,k) = gmix;
             // pi_mix_new(i,j,k) = pimix;
             Set::Scalar sound_speed_new = sqrt(gmix_new * (p_new + pimix_new) / (rho(i, j, k)));

@@ -15,7 +15,7 @@ plot_file = ./tests/FlowShockDroplet/output_amr_0
 
 ### MESHING ###
 amr.plot_dt = 0.25e-6
-amr.plot_int = 1
+amr.plot_int = 10
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 1
@@ -42,7 +42,7 @@ geometry.is_periodic = 0 0 0
 ### TIME STEP ###
 # stop_time = 0.0002  # Shorter time for shock interaction
 #stop_time = 1.0e-5  # Shorter time for shock interaction
-stop_time = 1.0e-11  # Shorter time for shock interaction
+stop_time = 1.0e-8  # Shorter time for shock interaction
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
@@ -52,7 +52,9 @@ eta.ic.expression.constant.x_center = 0.0  # Centered at origin
 eta.ic.expression.constant.y_center = 0.0  # Centered at origin
 
 # Droplet shape definition (air is eta=0, water is eta=1)
-eta.ic.expression.region0 = "1.0 - 0.5*(1 + tanh((sqrt((x-x_center)**2 + (y-y_center)**2) - R0)/(2*sqrt(2)*epsilon)))"
+# eta.ic.expression.region0 = "1.0 - 0.5*(1 + tanh((sqrt((x-x_center)**2 + (y-y_center)**2) - R0)/(2*sqrt(2)*epsilon)))"
+# Droplet shape definition (air is eta=1, water is eta=0)
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x-x_center)**2 + (y-y_center)**2) - R0)/(2*sqrt(2)*epsilon)))"
 
 epsilon = eta.ic.expression.constant.epsilon
 
