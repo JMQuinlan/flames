@@ -1304,6 +1304,21 @@ void Hydro2::ApplyImplicitCH_Newton(int lev, Set::Scalar dt)
     };
 
     // ------------------------------------------------------------------
+    // FIX 1: Pre-clamp eta to [0,1] before saving eta_star.
+    // The explicit Riemann/surface-tension advance (step 6) may push eta
+    // outside [0,1].  If eta_star stores an exploded value the Newton rhs
+    // (eta_star - eta^k + ...) is permanently huge regardless of convergence.
+    // The global clamp in Advance step 9 hasn't run yet at this point.
+    // ------------------------------------------------------------------
+    for (MFIter mfi(*eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const Box& vbx = mfi.validbox();
+        auto eta = eta_mf[lev]->array(mfi);
+        ParallelFor(vbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            eta(i,j,k,0) = amrex::max(0.0, amrex::min(1.0, eta(i,j,k,0)));
+        });
+    }
+
+    // ------------------------------------------------------------------
     // Save η* — Newton iterates modify eta_mf[lev] in place
     // ------------------------------------------------------------------
     MultiFab eta_star(eta_mf[lev]->boxArray(),
@@ -1312,6 +1327,11 @@ void Hydro2::ApplyImplicitCH_Newton(int lev, Set::Scalar dt)
 
     // Scratch MultiFabs allocated once outside the loop
     MultiFab mu_k    (eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, nghost);
+    // FIX 2: Initialize mu_k to 0 so coarse-fine boundary ghost cells that
+    // FillBoundary cannot fill (same-level only) contain 0 rather than
+    // uninitialized garbage.  The Laplacian stencil in the residual reads
+    // ghost cells; garbage there → ∇²μ ~ 1e+80 → persistent huge residual.
+    mu_k.setVal(0.0);
     MultiFab rhs_mf  (eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, 0);
     MultiFab psi_mf  (eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, nghost);
     MultiFab delta_mf(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, nghost);
