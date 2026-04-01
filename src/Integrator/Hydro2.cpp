@@ -1507,10 +1507,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
 
-    // Increment step counter
     step_counter[lev]++;
-    
-    // Swaping pointers
+
+    // Swapping pointers
     std::swap(density_old_mf[lev], density_mf[lev]);
     std::swap(momentum_old_mf[lev], momentum_mf[lev]);
     std::swap(energy_per_vol_old_mf[lev], energy_per_vol_mf[lev]);
@@ -1522,60 +1521,45 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // ------------------------------------------------------------
     // Time Integration
     // ------------------------------------------------------------
-    // New Solution Refrences
+
     amrex::Vector<amrex::MultiFab> solution_new;
     solution_new.emplace_back(*rho_eta0_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
     solution_new.emplace_back(*rho_eta1_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
     solution_new.emplace_back(*momentum_mf[lev].get(), amrex::MakeType::make_alias, 0, 2);
     solution_new.emplace_back(*energy_per_vol_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
 
-    // Old Solution Refrences
     amrex::Vector<amrex::MultiFab> solution_old;
     solution_old.emplace_back(*rho_eta0_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
     solution_old.emplace_back(*rho_eta1_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
     solution_old.emplace_back(*momentum_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 2);
     solution_old.emplace_back(*energy_per_vol_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
 
-    // Create the time integrator
     amrex::TimeIntegrator timeintegrator(solution_new, time);
 
-    // Set the time integrator RHS
     timeintegrator.set_rhs([&](
-        amrex::Vector<amrex::MultiFab> &rhs_mf,
-        amrex::Vector<amrex::MultiFab> &solution_mf, 
-        const Set::Scalar time) {
-            RHS(lev, time, rhs_mf[0], rhs_mf[1], rhs_mf[2], rhs_mf[3], solution_mf[0], solution_mf[1], solution_mf[2], solution_mf[3]);
+                               amrex::Vector<amrex::MultiFab> &rhs_mf,
+                               amrex::Vector<amrex::MultiFab> &solution_mf,
+                               const Set::Scalar time) {
+        RHS(lev, time, rhs_mf[0], rhs_mf[1], rhs_mf[2], rhs_mf[3], solution_mf[0], solution_mf[1], solution_mf[2], solution_mf[3]);
     });
 
-    // Filling boundaries during stages
     timeintegrator.set_post_stage_action([&](amrex::Vector<amrex::MultiFab> &stage_mf, Set::Scalar time) {
-        density_bc->FillBoundary(stage_mf[0], 0, 1, time, 0);   // rho_eta0
+        density_bc->FillBoundary(stage_mf[0], 0, 1, time, 0);
         stage_mf[0].FillBoundary(true);
-        density_bc->FillBoundary(stage_mf[1], 0, 1, time, 0);   // rho_eta1
+        density_bc->FillBoundary(stage_mf[1], 0, 1, time, 0);
         stage_mf[1].FillBoundary(true);
-        momentum_bc->FillBoundary(stage_mf[2], 0, 2, time, 0);  // M
+        momentum_bc->FillBoundary(stage_mf[2], 0, 2, time, 0);
         stage_mf[2].FillBoundary(true);
-        energy_bc->FillBoundary(stage_mf[3], 0, 1, time, 0);    // E
+        energy_bc->FillBoundary(stage_mf[3], 0, 1, time, 0);
         stage_mf[3].FillBoundary(true);
     });
 
-    // Do the update
     timeintegrator.advance(solution_old, solution_new, time, dt);
 
-
     // ------------------------------------------------------------
-    // INTERFACE Sharpening
+    // Interface Sharpenging
     // ------------------------------------------------------------
-    int sharpening_start_step = 10; // Start after 10 steps
-    // Lil debugging to track mean of eta to see if it stay the same thickness. Change bool to true for verbose
-    if ((step_counter[lev] % 10 == 0) && false)
-    { // Every 10 steps
-        Set::Scalar eta_min = eta_mf[lev]->min(0);
-        Set::Scalar eta_max = eta_mf[lev]->max(0);
-        Set::Scalar eta_mean = eta_mf[lev]->sum(0) / eta_mf[lev]->boxArray().numPts();
-        Util::Message(INFO, "Step ", step_counter[lev], ": eta range = [", eta_min, ", ", eta_max, "], mean = ", eta_mean);
-    }
-    if (apply_sharpening && (step_counter[lev] > sharpening_start_step) && (step_counter[lev] % sharpening_frequency == 0))
+    if (apply_sharpening && (step_counter[lev] > 10) && (step_counter[lev] % sharpening_frequency == 0))
     {
         InterfaceSharpening(lev, dt);
     }
@@ -1583,15 +1567,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // ------------------------------------------------------------
     // Mixed Fields
     // ------------------------------------------------------------
-
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
 
-        // Eta
         Set::Patch<Set::Scalar> eta_new = eta_mf.Patch(lev, mfi);
-        
-        // Mixture
         Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> rho = density_mf.Patch(lev, mfi);
@@ -1600,268 +1580,194 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
             rho(i, j, k) = rho_eta0(i, j, k) + rho_eta1(i, j, k);
-            // eta_new(i, j, k) = (rho(i, j, k) - rho_eta1(i, j, k)) / (rho_eta0(i, j, k) - rho_eta1(i, j, k) + small);
-            eta_new(i, j, k) = rho_eta0(i, j, k) / rho(i, j, k);
+            eta_new(i, j, k) = rho_eta0(i, j, k) / (rho(i, j, k) + small);
 
-            // CUTOFFS
             eta_new(i, j, k) = std::max(0.0, std::min(1.0, (eta_new(i, j, k) - cutoff) / (1.0 - 2.0 * cutoff)));
             rho(i, j, k) = std::max(rho(i, j, k), small);
 
-            // ------------------------------------------------------------
-            // Error Checking
-            // ------------------------------------------------------------
-            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::Advance(): Conservative Variable Check", { 
-                { "eta_new", eta_new(i, j, k) },
-                { "rho_eta0", rho_eta0(i, j, k) },
-                { "rho_eta1", rho_eta1(i, j, k) },
-                { "rho", rho(i, j, k) }
-            }); // end check4nans
-
+            check4nans(time, lev, i, j, k, "ERROR IN Advance(): Conservative Variable Check", { { "eta_new", eta_new(i, j, k) }, { "rho_eta0", rho_eta0(i, j, k) }, { "rho_eta1", rho_eta1(i, j, k) }, { "rho", rho(i, j, k) } });
         });
-    }
-
-    
+    } // end rho, eta solver loop
 
     // ------------------------------------------------------------
-    // Cutoffs and Visualization Fields
+    // Compute CFL for next time step on this level
     // ------------------------------------------------------------
-    // Dynamic Time Step Initialization
-    c_max = 0.0;
-    vx_max = 0.0;
-    vy_max = 0.0;
-    F_max = 0.0;
-    rho_min = 1e10;
+    Set::Scalar c_max_local = 0.0;
+    Set::Scalar vx_max_local = 0.0;
+    Set::Scalar vy_max_local = 0.0;
+    Set::Scalar F_max_local = 0.0;
+    Set::Scalar rho_min_local = 1e10;
+
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
-
-        // Eta
+    
         Set::Patch<const Set::Scalar> eta_new = eta_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> eta = eta_old_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> etadot = etadot_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> grad_eta_ = grad_eta_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> n_hat_ = n_hat_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> grad_mag_grad_eta_ = grad_mag_grad_eta_mf.Patch(lev, mfi);
-
-        // Mixture
+    
         Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> rho = density_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> E_vol = energy_per_vol_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> E_mas = energy_per_mas_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> M = momentum_mf.Patch(lev, mfi);
-
         Set::Patch<Set::Scalar> a = a_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Ma = Ma_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> KE_vol = KE_per_vol_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> KE_mas = KE_per_mas_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> UE_vol = UE_per_vol_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> UE_mas = UE_per_mas_mf.Patch(lev, mfi);
-
         Set::Patch<Set::Scalar> v = velocity_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> press = pressure_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> Source = Source_mf.Patch(lev, mfi);
-
-        //Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
-        //Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
-        //Set::Patch<Set::Scalar> k_thermal = k_thermal_mf.Patch(lev, mfi);
-        //Set::Patch<Set::Scalar> h_thermal = h_thermal_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
-
         Set::Patch<Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
-
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+    
+        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &F_max_local, &rho_min_local] AMREX_GPU_DEVICE(int i, int j, int k) 
+        {
             auto sten = Numeric::GetStencil(i, j, k, domain);
-
-            // Derivative Function Calls
-            // Normal Compute
+        
             Set::Vector grad_eta = Numeric::Gradient(eta_new, i, j, k, 0, DX);
             Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
             Set::Matrix hess_eta = Numeric::Hessian(eta_new, i, j, k, 0, DX, sten);
             Set::Scalar lap_eta = Numeric::Laplacian(eta_new, i, j, k, 0, DX);
-
-            // gamma
-            Set::Scalar A = (eta_new(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta_new(i, j, k)) / (gamma1 - 1.0);
-            Set::Scalar B = (eta_new(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta_new(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
-            gammaf(i, j, k) = 1.0 + (1.0 / A);
-
-            // etadot
-            etadot(i, j, k) = (eta_new(i, j, k) - eta(i, j, k)) / dt;
-
-            // Velocity = M ./ (DX*DY*rho)
-            v(i, j, k, 0) = M(i, j, k, 0) / (rho(i, j, k));
-            v(i, j, k, 1) = M(i, j, k, 1) / (rho(i, j, k));
-
-            // Kinetic Energy
-            KE_vol(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
-            KE_mas(i, j, k) = 0.5 * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
-
-            // Potential Energy
-            UE_vol(i, j, k) = E_vol(i, j, k) - KE_vol(i, j, k);
-            E_mas(i, j, k) = E_vol(i, j, k) / (rho(i, j, k) + small);
-            UE_mas(i, j, k) = E_mas(i, j, k) - KE_mas(i, j, k);
-
-            // Pressure
-            p0_eff(i, j, k) = (B / A) / gammaf(i, j, k);
-            press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE_vol(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // pressure Tammann EOS modification
-
-            // Chemical Potential
-            Set::Scalar f_prime = 4.0 * eta_new(i, j, k) * (eta_new(i, j, k) - 0.5) * (eta_new(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
+        
+            Set::Scalar A = (eta_new(i,j,k)) / (gamma0 - 1.0) + (1.0 - eta_new(i,j,k)) / (gamma1 - 1.0);
+            Set::Scalar B = (eta_new(i,j,k) * gamma0 * p0_0) / (gamma0 - 1.0) + 
+                           ((1.0 - eta_new(i,j,k)) * gamma1 * p0_1) / (gamma1 - 1.0);
+            gammaf(i,j,k) = 1.0 + (1.0 / A);
+        
+            etadot(i,j,k) = (eta_new(i,j,k) - eta(i,j,k)) / dt;
+        
+            v(i,j,k,0) = M(i,j,k,0) / (rho(i,j,k));
+            v(i,j,k,1) = M(i,j,k,1) / (rho(i,j,k));
+        
+            KE_vol(i,j,k) = 0.5 * rho(i,j,k) * (v(i,j,k,0) * v(i,j,k,0) + v(i,j,k,1) * v(i,j,k,1));
+            KE_mas(i,j,k) = 0.5 * (v(i,j,k,0) * v(i,j,k,0) + v(i,j,k,1) * v(i,j,k,1));
+        
+            UE_vol(i,j,k) = E_vol(i,j,k) - KE_vol(i,j,k);
+            E_mas(i,j,k) = E_vol(i,j,k) / (rho(i,j,k) + small);
+            UE_mas(i,j,k) = E_mas(i,j,k) - KE_mas(i,j,k);
+        
+            p0_eff(i,j,k) = (B / A) / gammaf(i,j,k);
+            press(i,j,k) = (gammaf(i,j,k) - 1.0) * UE_vol(i,j,k) - gammaf(i,j,k) * p0_eff(i,j,k) + pref;
+        
+            Set::Scalar f_prime = 4.0 * eta_new(i,j,k) * (eta_new(i,j,k) - 0.5) * (eta_new(i,j,k) - 1.0);
             Set::Scalar mu_chem = -epsilon * epsilon * lap_eta + f_prime;
-            mu_chem_(i, j, k) = mu_chem;
-
-            // Spalding Number
-            Bm(i, j, k) = eta(i, j, k) / (1.0 - eta(i, j, k) + small);
-
-            // Speed of sound:
-            a(i, j, k) = sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k)));
-
-            // Mach Number
-            Ma(i, j, k, 0) = v(i, j, k, 0) / (a(i, j, k) + small);
-            Ma(i, j, k, 1) = v(i, j, k, 1) / (a(i, j, k) + small);
-
-            // Curvature
-            Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
-
-            grad_eta_(i, j, k, 0) = grad_eta(0);
-            grad_eta_(i, j, k, 1) = grad_eta(1);
-
-            // Debugging, would like to delete condition
-            if (grad_eta_mag < 1e-4)
-            {
-                n_hat_(i, j, k, 0) = 0.0;
-                n_hat_(i, j, k, 1) = 0.0;
+            mu_chem_(i,j,k) = mu_chem;
+        
+            Bm(i,j,k) = eta(i,j,k) / (1.0 - eta(i,j,k) + small);
+        
+            a(i,j,k) = sqrt(gammaf(i,j,k) * (press(i,j,k) + p0_eff(i,j,k)) / (rho(i,j,k)));
+        
+            Ma(i,j,k,0) = v(i,j,k,0) / (a(i,j,k) + small);
+            Ma(i,j,k,1) = v(i,j,k,1) / (a(i,j,k) + small);
+        
+            Set::Vector n_hat = grad_eta / (grad_eta_mag + small);
+            grad_eta_(i,j,k,0) = grad_eta(0);
+            grad_eta_(i,j,k,1) = grad_eta(1);
+        
+            if (grad_eta_mag < 1e-4) {
+                n_hat_(i,j,k,0) = 0.0;
+                n_hat_(i,j,k,1) = 0.0;
+            } else {
+                n_hat_(i,j,k,0) = n_hat(0);
+                n_hat_(i,j,k,1) = n_hat(1);
             }
-            else
-            {
-                n_hat_(i, j, k, 0) = n_hat(0);
-                n_hat_(i, j, k, 1) = n_hat(1);
-            }
-
-            // ------------------------------------------------------------
-            // Error Checking
-            // ------------------------------------------------------------
-            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::Advance(): Visualization", { 
-                { "eta_new", eta_new(i, j, k) },
-                { "rho_eta0", rho_eta0(i, j, k) },
-                { "rho_eta1", rho_eta1(i, j, k) },
-                { "gammaf", gammaf(i, j, k) },
-                { "etadot", etadot(i, j, k) },
-                { "M[0]", M(i, j, k, 0) },
-                { "M[1]", M(i, j, k, 1) },
-                { "v[0]", v(i, j, k, 0) },
-                { "v[1]", v(i, j, k, 1) },
-                { "KE_vol", KE_vol(i, j, k) },
-                { "KE_mas", KE_mas(i, j, k) },
-                { "UE_vol", UE_vol(i, j, k) },
-                { "UE_mas", UE_mas(i, j, k) },
-                { "E_vol", E_vol(i, j, k) },
-                { "E_mas", E_mas(i, j, k) },
-                { "p0_eff", p0_eff(i, j, k) },
-                { "press", press(i, j, k) },
-                { "mu_chem_", mu_chem_(i, j, k) },
-                { "Bm", Bm(i, j, k) },
-                { "a", a(i, j, k) },
-                { "Ma[0]", Ma(i, j, k, 0) },
-                { "Ma[1]", Ma(i, j, k, 1) },
-                { "grad_eta_[0]", grad_eta_(i, j, k, 0) },
-                { "grad_eta_[1]", grad_eta_(i, j, k, 1) },
-                { "n_hat_[0]", n_hat_(i, j, k, 0) },
-                { "n_hat_[1]", n_hat_(i, j, k, 1) }
-            }); // end check4nans
-
-
-
-            // ------------------------------------------------------------
-            // Adaptive Timestepping
-            // ------------------------------------------------------------
-            // Solving for new states
-            Set::Scalar A_new = (eta_new(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta_new(i, j, k)) / (gamma1 - 1.0);
-            Set::Scalar B_new = (eta_new(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta_new(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
-            Set::Scalar gamma_eff_new = 1.0 + (1.0 / A_new);
-            Set::Vector v_new = Set::Vector(M(i, j, k, 0) / (rho(i, j, k)), M(i, j, k, 1) / (rho(i, j, k)));
-            Set::Scalar KE_vol_new = 0.5 * rho(i, j, k) * (v_new(0) * v_new(0) + v_new(1) * v_new(1));
-            Set::Scalar UE_vol_new = E_vol(i, j, k) - KE_vol_new;
-            Set::Scalar press_new = (UE_vol_new - B_new) / A_new;
-            Set::Scalar p0_eff_new = (B_new / A_new) / gamma_eff_new;
-            Set::Scalar sound_speed_new = sqrt(gamma_eff_new * (press_new + p0_eff_new) / (rho(i, j, k)));
-
-            c_max = std::max(c_max, sound_speed_new);
-            vx_max = std::max(vx_max, abs(v_new(0))); // vx
-            vy_max = std::max(vy_max, abs(v_new(1))); // vy
-
-            // Track maximum force magnitude (not acceleration yet)
-            Set::Scalar F_mag = sqrt(Source(i, j, k, 1) * Source(i, j, k, 1) + Source(i, j, k, 2) * Source(i, j, k, 2));
-            F_max = std::max(F_max, F_mag);
-            rho_min = std::min(rho_min, rho(i, j, k));
-                
+        
+            check4nans(time, lev, i, j, k, "ERROR IN Advance(): Visualization", { 
+                {"eta_new", eta_new(i,j,k)},
+                {"rho_eta0", rho_eta0(i,j,k)},
+                {"rho_eta1", rho_eta1(i,j,k)},
+                {"gammaf", gammaf(i,j,k)},
+                {"etadot", etadot(i,j,k)},
+                {"M[0]", M(i,j,k,0)},
+                {"M[1]", M(i,j,k,1)},
+                {"v[0]", v(i,j,k,0)},
+                {"v[1]", v(i,j,k,1)},
+                {"KE_vol", KE_vol(i,j,k)},
+                {"KE_mas", KE_mas(i,j,k)},
+                {"UE_vol", UE_vol(i,j,k)},
+                {"UE_mas", UE_mas(i,j,k)},
+                {"E_vol", E_vol(i,j,k)},
+                {"E_mas", E_mas(i,j,k)},
+                {"p0_eff", p0_eff(i,j,k)},
+                {"press", press(i,j,k)},
+                {"mu_chem_", mu_chem_(i,j,k)},
+                {"Bm", Bm(i,j,k)},
+                {"a", a(i,j,k)},
+                {"Ma[0]", Ma(i,j,k,0)},
+                {"Ma[1]", Ma(i,j,k,1)},
+                {"grad_eta_[0]", grad_eta_(i,j,k,0)},
+                {"grad_eta_[1]", grad_eta_(i,j,k,1)},
+                {"n_hat_[0]", n_hat_(i,j,k,0)},
+                {"n_hat_[1]", n_hat_(i,j,k,1)}
+            });
+        
+            // Track CFL quantities (NOW WORKS - captured by reference!)
+            c_max_local = std::max(c_max_local, a(i,j,k));
+            vx_max_local = std::max(vx_max_local, std::abs(v(i,j,k,0)));
+            vy_max_local = std::max(vy_max_local, std::abs(v(i,j,k,1)));
+        
+            Set::Scalar F_mag = sqrt(Source(i,j,k,1) * Source(i,j,k,1) + 
+                                    Source(i,j,k,2) * Source(i,j,k,2));
+            F_max_local = std::max(F_max_local, F_mag);
+            rho_min_local = std::min(rho_min_local, rho(i,j,k));
         });
-    }
+    } // end Mixed Fields loop
 
-    // ------------------------------------------------------------
-    // Dynamic Timesteping
-    // ------------------------------------------------------------
-    Set::Scalar dt_max = std::numeric_limits<Set::Scalar>::max();
-    
-    // Update adaptive timestep
-    amrex::ParallelDescriptor::ReduceRealMax(c_max);
-    amrex::ParallelDescriptor::ReduceRealMax(vx_max);
-    amrex::ParallelDescriptor::ReduceRealMax(vy_max);
-    amrex::ParallelDescriptor::ReduceRealMax(F_max);
-    amrex::ParallelDescriptor::ReduceRealMin(rho_min);
+    // Parallel Reduction
+    amrex::ParallelDescriptor::ReduceRealMax(c_max_local);
+    amrex::ParallelDescriptor::ReduceRealMax(vx_max_local);
+    amrex::ParallelDescriptor::ReduceRealMax(vy_max_local);
+    amrex::ParallelDescriptor::ReduceRealMax(F_max_local);
+    amrex::ParallelDescriptor::ReduceRealMin(rho_min_local);
 
-    // Compute timestep constraints
+    c_max = c_max_local;
+    vx_max = vx_max_local;
+    vy_max = vy_max_local;
+    F_max = F_max_local;
+    rho_min = rho_min_local;
+
+    // Computing dt for next time step on all levels
     Set::Scalar dx_min = std::min(DX[0], DX[1]);
 
-    // 1. Acoustic CFL 
     Set::Scalar wave_speed = c_max + sqrt(vx_max * vx_max + vy_max * vy_max);
     Set::Scalar dt_acoustic = cfl * dx_min / (wave_speed + small);
 
-    // 2. Viscous CFL
     Set::Scalar mu_max = std::max(mu0, mu1);
     Set::Scalar dt_viscous = cfl_v * rho_min * dx_min * dx_min / (mu_max + small);
 
-    // 3. Force CFL
-    Set::Scalar a_max = F_max / rho_min; // Maximum acceleration
-    Set::Scalar dt_force = cfl_v * sqrt(dx_min / a_max);
+    Set::Scalar a_max = F_max / (rho_min + small);
+    Set::Scalar dt_force = cfl_v * sqrt(dx_min / (a_max + small));
 
-    // 4. Allen-Cahn diffusion CFL
     Set::Scalar Mob = 0.01 * dx_min * dx_min;
     Set::Scalar dt_allen_cahn = 0.5 * dx_min * dx_min / (Mob + small);
 
-    // Take minimum
-    dt_max = std::min({ dt_acoustic, dt_viscous, dt_force, dt_allen_cahn });
-
-    // Safety factor
+    Set::Scalar dt_max = std::min({ dt_acoustic, dt_viscous, dt_force, dt_allen_cahn });
     dt_max = dt_max * 0.9;
 
-    // Timestep diagnostics
-    bool timestep_verbose = false;
-    if (timestep_verbose == true)
+    // Debugging to report cfl constants used. Change bool to show
+    if ((step_counter[lev] % 10 == 0) && false)
     {
-        Util::ParallelMessage(INFO, "\n=== CFL TIMESTEP DIAGNOSTICS ===");
-        Util::ParallelMessage(INFO, "Grid spacing: ", dx_min, " m");
-        Util::ParallelMessage(INFO, "Sound speed max: ", c_max, " m/s");
-        Util::ParallelMessage(INFO, "Velocity max: ", std::max(vx_max, vy_max), " m/s");
-        Util::ParallelMessage(INFO, "Force max: ", F_max, " N/m^3");
-        Util::ParallelMessage(INFO, "Density min: ", rho_min, " kg/m^3");
-        Util::ParallelMessage(INFO, "");
-        Util::ParallelMessage(INFO, "dt_acoustic: ", dt_acoustic, " s");
-        Util::ParallelMessage(INFO, "dt_viscous: ", dt_viscous, " s");
-        Util::ParallelMessage(INFO, "dt_force: ", dt_force, " s");
-        Util::ParallelMessage(INFO, "dt_allen_cahn: ", dt_allen_cahn, " s");
-        Util::ParallelMessage(INFO, "");
-        Util::ParallelMessage(INFO, "Final dt_max: ", dt_max, " s");
-        Util::ParallelMessage(INFO, "================================\n");
+        Util::Message(INFO, "=== CFL DIAGNOSTICS Level ", lev, " ===");
+        Util::Message(INFO, "  c_max = ", c_max, " m/s");
+        Util::Message(INFO, "  vx_max = ", vx_max, " m/s");
+        Util::Message(INFO, "  vy_max = ", vy_max, " m/s");
+        Util::Message(INFO, "  dt_max = ", dt_max, " s");
     }
+
     if (dynamictimestep.on)
     {
         this->DynamicTimestep_SyncTimeStep(lev, dt_max);
     }
-}
+
+} 
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1999,7 +1905,7 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
 
         // Shrink box to exclude boundaries
         amrex::Box bx = bx_full;
-        bx.grow(-2); // Exclude 2 layers from all boundaries
+        bx.grow(0); // Exclude 2 layers from all boundaries
 
         if (bx.isEmpty())
         {
@@ -2051,7 +1957,7 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
 
         // Shrink box to exclude boundaries
         amrex::Box bx = bx_full;
-        bx.grow(-2);
+        bx.grow(0);
 
         if (bx.isEmpty())
             continue;
@@ -2111,7 +2017,7 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
 
             // Shrink box to exclude boundaries
             amrex::Box bx = bx_full;
-            bx.grow(-2);
+            bx.grow(0);
 
             if (bx.isEmpty())
                 continue;

@@ -24,7 +24,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-0
 dynamictimestep.min = 1e-12
-cfl = 0.5
+cfl = 0.9
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.10 -0.10 0.0
@@ -35,7 +35,7 @@ stop_time = 50e-3
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.001
+eta.ic.expression.constant.epsilon = 0.002
 eta.ic.expression.constant.R0 = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
@@ -94,7 +94,7 @@ cv1 = "1000.0/1.4"
 # ----------------------------
 # Stiffened pressure
 # ----------------------------
-p0_0 = 10000.0
+p0_0 = 5000.0
 p0_1 = 0.0
 
 # ----------------------------
@@ -161,3 +161,9 @@ grav = 0.0
 Riemann_Solver.type = hllc
 kappa_method = 1
 
+### INTERFACE COMPRESSION ###
+apply_sharpening = 1
+sharpening_frequency = 50
+reinit_max_iter = 100
+reinit_tolerance = 1e-6
+omega_relax = 0.5; 

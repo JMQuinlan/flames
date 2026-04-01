@@ -21,9 +21,9 @@ amr.n_cell = 256 256
 timestep = 1e-8
 dynamictimestep.on = 1
 dynamictimestep.verbose = 1
-dynamictimestep.max = 1e-6
+dynamictimestep.max = 1e-4
 dynamictimestep.min = 1e-12
-cfl = 0.1
+cfl = 0.5
 
 ### DIMENSIONS ###
 # Domain: 4R0 x 4R0 (bubble radius R0 = 1mm at center)
@@ -172,6 +172,13 @@ grav = 0.0
 ### DEBUGGING ###
 Riemann_Solver.type = hllc
 kappa_method = 1
+
+### INTERFACE COMPRESSION ###
+apply_sharpening = 1
+sharpening_frequency = 50
+reinit_max_iter = 100
+reinit_tolerance = 1e-6
+omega_relax = 0.5; 
 
 # ==============================================================================
 # VALIDATION NOTES:

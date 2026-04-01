@@ -58,7 +58,7 @@ density0.ic.type = expression
 density0.ic.expression.region0 = "1000.0"
 
 density1.ic.type = expression
-density1.ic.expression.region0 = "2.0"
+density1.ic.expression.region0 = "1.0"
 
 # ----------------------------
 # Initial velocities (rest)
@@ -77,10 +77,10 @@ velocity1.ic.expression.region1 = "0.0"
 # ----------------------------
 
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "1.0e5"
+pressure0.ic.expression.region0 = "2.0e5"
 
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "2.0e5"
+pressure1.ic.expression.region0 = "1.0e5"
 
 # ----------------------------
 # Specific Heats
