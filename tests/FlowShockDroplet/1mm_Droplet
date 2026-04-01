@@ -173,3 +173,6 @@ Riemann_Solver.type = hllc
 kappa_method = 3   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization" / 3:"Advanced Hybrid"
 integration.type = ForwardEuler
 # integration.type = RungeKutta
+implicit_ch = 1
+# ch_mobility_nom = 0.032   # optional: override auto M = 2*ε*c_max
+# implicit_ch = 0 # solves CH rhs explicitly (faster but dx^4 reduction in timestep needed, so only on course grids)

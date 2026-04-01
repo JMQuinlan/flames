@@ -39,6 +39,8 @@
 #include <AMReX_MFIter.H>
 #include <AMReX_Array4.H>
 #include "Thermo_Interp.H"
+#include <AMReX_MLABecLaplacian.H>
+#include <AMReX_MLMG.H>
 
 
 using namespace amrex;
@@ -115,6 +117,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // CURVATURE
         pp_query_default("kappa_method", value.kappa_method, 2); // Method to solve for curvature
+
+        // IMPLICIT CAHN-HILLIARD
+        pp_query_default("implicit_ch", value.implicit_ch, false);              // Use implicit biharmonic solve for CH (removes dx^4 timestep penalty)
+        pp_query_default("ch_mobility_nom", value.ch_mobility_nom, 0.0);        // Nominal mobility for implicit CH Helmholtz operator [m^2/s] (0 = auto from epsilon)
 
         // Boundry Conditions
         value.density_bc = new BC::Expression(1, pp, "density.bc");
@@ -799,6 +805,9 @@ Hydro2::RHS(int lev,
         auto rho0_arr = density0_mf[lev]->array(mfi);
         auto rho1_arr = density1_mf[lev]->array(mfi);
 
+        // Capture implicit_ch as a plain bool so the GPU lambda can use it
+        bool do_implicit_ch = implicit_ch;
+
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i,int j,int k)
         {
             //------------------------------------------------------------------
@@ -1025,16 +1034,188 @@ Hydro2::RHS(int lev,
 
             //------------------------------------------------------------------
             // ETA equation: advection + Cahn-Hilliard + vaporization
+            // When implicit_ch is enabled, the biharmonic term is handled
+            // after the explicit step via ApplyImplicitCH(); only advection
+            // and vaporization remain in the explicit RHS.
             //------------------------------------------------------------------
             Real adv = -(u(0)*grad_eta(0) + u(1)*grad_eta(1));
 
-            Real lap_mu_chem = Numeric::Laplacian(mu_chem_arr, i, j, k, 0, DX, sten);
-            Real Mob         = a_arr(i,j,k) * epsilon;
-            Real eta_dot_CH  = Mob * lap_mu_chem * 0.2;
+            Real eta_dot_CH = 0.0;
+            if (!do_implicit_ch) {
+                Real lap_mu_chem = Numeric::Laplacian(mu_chem_arr, i, j, k, 0, DX, sten);
+                Real Mob         = a_arr(i,j,k) * epsilon;
+                eta_dot_CH       = Mob * lap_mu_chem * 0.2;
+            }
 
             eta_rhs(i,j,k) = adv + eta_dot_CH + eta_dot_Vap;
         });
     }
+}
+
+// IMPLICIT CAHN-HILLIARD BIHARMONIC
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+// ApplyImplicitCH: operator-split implicit treatment of the CH biharmonic.
+//
+// The CH eta equation is:  ∂η/∂t = M(∇²f'(η) − κ∇⁴η)
+// After the explicit advance gives η*, we solve (implicitly for the biharmonic):
+//
+//   (I + dt·M·κ·∇⁴) η^{n+1} = η* + dt·M·∇²f'(η*)
+//
+// Using the approximate double-Helmholtz factorization with γ = sqrt(dt·M·κ):
+//
+//   (I + γ·(−∇²)) ψ       = η* + dt·M·∇²f'(η*)   [Solve 1]
+//   (I + γ·(−∇²)) η^{n+1} = ψ                      [Solve 2]
+//
+// Each solve is a standard Helmholtz equation handled by MLABecLaplacian + MLMG.
+// Combined operator: (I + γ(−∇²))² = I + 2γ(−∇²) + γ²∇⁴, which approximates
+// I + γ²∇⁴ = I + dt·M·κ·∇⁴ with an O(dt) error — acceptable for a 1st-order integrator.
+// Both factors are symmetric positive definite, so the method is unconditionally stable.
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+void Hydro2::ApplyImplicitCH(int lev, Set::Scalar dt)
+{
+    BL_PROFILE("Integrator::Hydro2::ApplyImplicitCH");
+
+    const Geometry& geom  = this->geom[lev];
+    const Real*     DX    = geom.CellSize();
+    const Box&      domain = geom.Domain();
+    const int nghost = 2;
+
+    // Effective CH parameters
+    // κ = ε²  (interface energy parameter matching mu_chem = -ε²∇²η + f'(η))
+    // M = ch_mobility_nom if user-specified, else auto from explicit RHS formula:
+    //   Mob = a*ε, factor 0.2 → M_eff = 0.2*ε*a_max
+    const Real kappa_CH = epsilon * epsilon;
+    const Real M_nom    = (ch_mobility_nom > 0.0) ? ch_mobility_nom
+                                                   : 0.2 * epsilon * (c_max + 1.0);
+    const Real gamma_CH = std::sqrt(dt * M_nom * kappa_CH); // γ = sqrt(dt·M·κ)
+
+    // ------------------------------------------------------------------
+    // Step 0: Compute f'(η*) on cell centers (including ghosts for Laplacian)
+    //         then form rhs = η* + dt·M·∇²f'(η*)
+    // ------------------------------------------------------------------
+    MultiFab f_prime_mf(eta_mf[lev]->boxArray(),
+                        eta_mf[lev]->DistributionMap(), 1, nghost);
+    MultiFab rhs_mf(eta_mf[lev]->boxArray(),
+                    eta_mf[lev]->DistributionMap(), 1, 0);
+
+    // Compute f'(η*) everywhere including ghost cells (needed for the Laplacian below)
+    for (MFIter mfi(*eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const Box& gbx = mfi.growntilebox(nghost);
+        auto eta = eta_mf[lev]->const_array(mfi);
+        auto fp  = f_prime_mf.array(mfi);
+        ParallelFor(gbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            Real e = eta(i,j,k,0);
+            fp(i,j,k,0) = 4.0 * e * (e - 0.5) * (e - 1.0);
+        });
+    }
+    f_prime_mf.FillBoundary(geom.periodicity());
+
+    // Form rhs = η* + dt·M·∇²f'(η*)  on valid cells
+    for (MFIter mfi(*eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const Box& vbx = mfi.validbox();
+        auto eta = eta_mf[lev]->const_array(mfi);
+        auto fp  = f_prime_mf.const_array(mfi);
+        auto rhs = rhs_mf.array(mfi);
+        ParallelFor(vbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            auto sten   = Numeric::GetStencil(i, j, k, domain);
+            Real lap_fp = Numeric::Laplacian(fp, i, j, k, 0, DX, sten);
+            rhs(i,j,k,0) = eta(i,j,k,0) + dt * M_nom * lap_fp;
+        });
+    }
+
+    // ------------------------------------------------------------------
+    // Build domain BC arrays for MLMG.
+    // Use Neumann (zero-flux) for η on all non-periodic faces — the standard
+    // CH contact-angle condition ∂η/∂n = 0 at walls.
+    // ------------------------------------------------------------------
+    Array<LinOpBCType, AMREX_SPACEDIM> lo_bc, hi_bc;
+    for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+        lo_bc[d] = geom.isPeriodic(d) ? LinOpBCType::Periodic : LinOpBCType::Neumann;
+        hi_bc[d] = geom.isPeriodic(d) ? LinOpBCType::Periodic : LinOpBCType::Neumann;
+    }
+
+    // Face-centred b-coefficient arrays (uniform b = 1.0, spatially constant mobility)
+    Array<MultiFab, AMREX_SPACEDIM> bcoef;
+    for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+        BoxArray ba = eta_mf[lev]->boxArray();
+        ba.surroundingNodes(d);
+        bcoef[d].define(ba, eta_mf[lev]->DistributionMap(), 1, 0);
+        bcoef[d].setVal(1.0);
+    }
+
+    // LPInfo: allow full multigrid coarsening for fast convergence
+    LPInfo info;
+    // info.setMaxCoarseningLevel(-1);  // default: unlimited, good for large grids
+
+    // ------------------------------------------------------------------
+    // Helper: build MLABecLaplacian + MLMG and solve
+    //   (1·I + gamma_CH·(−∇²)) sol = f_rhs
+    //   i.e. MLABecLaplacian with alpha=1, beta=gamma_CH, a(x)=1, b(x)=1
+    // ------------------------------------------------------------------
+    auto solveHelmholtz = [&](MultiFab& sol, const MultiFab& f_rhs)
+    {
+        MLABecLaplacian mlabec(
+            {geom},
+            {eta_mf[lev]->boxArray()},
+            {eta_mf[lev]->DistributionMap()},
+            info);
+
+        mlabec.setMaxOrder(2);
+        mlabec.setDomainBC(lo_bc, hi_bc);
+        mlabec.setLevelBC(0, &sol);         // provides ghost-cell BC data
+
+        // Operator: alpha * a(x) * sol  −  beta * ∇·(b(x) ∇ sol)
+        //         = 1 * 1 * sol  −  (−gamma_CH) * ∇·(1·∇ sol)
+        //         = sol + gamma_CH * (−∇²) sol
+        // Pass beta as gamma_CH (positive) so the operator is (I + gamma*(-∇²))
+        mlabec.setScalars(1.0, gamma_CH);
+        mlabec.setACoeffs(0, 1.0);
+        mlabec.setBCoeffs(0, amrex::GetArrOfConstPtrs(bcoef));
+
+        MLMG mlmg(mlabec);
+        mlmg.setMaxIter(200);
+        mlmg.setMaxFmgIter(0);
+        mlmg.setVerbose(0);
+        mlmg.solve({&sol}, {&f_rhs}, 1.0e-11, 0.0);
+    };
+
+    // ------------------------------------------------------------------
+    // Solve 1: (I + γ(−∇²)) ψ = rhs
+    // ------------------------------------------------------------------
+    MultiFab psi_mf(eta_mf[lev]->boxArray(),
+                    eta_mf[lev]->DistributionMap(), 1, nghost);
+    psi_mf.setVal(0.0);  // initial guess for MLMG
+
+    solveHelmholtz(psi_mf, rhs_mf);
+
+    // Fill ghosts of ψ so it can serve as a valid rhs for the second solve
+    energy_bc->FillBoundary(psi_mf, 0, 1, 0.0, 0);
+
+    // ------------------------------------------------------------------
+    // Solve 2: (I + γ(−∇²)) η^{n+1} = ψ
+    // ------------------------------------------------------------------
+    MultiFab eta_new_mf(eta_mf[lev]->boxArray(),
+                        eta_mf[lev]->DistributionMap(), 1, nghost);
+    // Initial guess = current η (warm start helps MLMG convergence)
+    MultiFab::Copy(eta_new_mf, *eta_mf[lev], 0, 0, 1, nghost);
+
+    solveHelmholtz(eta_new_mf, psi_mf);
+
+    // ------------------------------------------------------------------
+    // Clamp result to [0, 1] and write back to eta_mf
+    // ------------------------------------------------------------------
+    for (MFIter mfi(*eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const Box& vbx = mfi.validbox();
+        auto eta     = eta_mf[lev]->array(mfi);
+        auto eta_new = eta_new_mf.const_array(mfi);
+        ParallelFor(vbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            eta(i,j,k,0) = amrex::max(0.0, amrex::min(1.0, eta_new(i,j,k,0)));
+        });
+    }
+    // Ghost cells will be filled by the FillBoundary call in Advance (step 8)
 }
 
 Set::Scalar InterpolateInterface(Set::Scalar eta, Set::Scalar val1, Set::Scalar val2) {
@@ -1726,6 +1907,15 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     density_mf[lev]->ParallelCopy(solution_new[1]);
     momentum_mf[lev]->ParallelCopy(solution_new[2]);
     energy_per_vol_mf[lev]->ParallelCopy(solution_new[3]);
+
+    //==============================================================
+    // 7b. Implicit Cahn-Hilliard biharmonic step (operator split)
+    //     Solves (I + sqrt_alpha*(-∇²))^2 η = η* + dt*M*∇²f'(η*)
+    //     unconditionally stable — no dx^4 timestep penalty.
+    //==============================================================
+    if (implicit_ch && !static_eta) {
+        ApplyImplicitCH(lev, dt);
+    }
 
     //==============================================================
     // 8. Fill ghosts after final update

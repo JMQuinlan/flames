@@ -105,6 +105,7 @@ protected:
 
 
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
+    void ApplyImplicitCH(int lev, Set::Scalar dt);
     void ComputeHybridCurvature(int lev);
     void ComputeSmoothNormals(int lev);
     void ComputeHeightFunction(int lev);
@@ -303,6 +304,10 @@ protected:
     int Spec_Vol = 1;
 
     int kappa_method = 2;
+
+    // Implicit CH
+    bool implicit_ch = false;          // enable implicit biharmonic Helmholtz solve
+    Set::Scalar ch_mobility_nom = 0.0; // nominal mobility for implicit solve (0 = auto)
 
     // Adaptive Timestep
     bool adaptive_timestep = false;
