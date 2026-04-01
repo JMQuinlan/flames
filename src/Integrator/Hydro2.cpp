@@ -1437,10 +1437,21 @@ void Hydro2::ComputeHybridCurvature(int lev)
             }
 
             //------------------------------------------------------
-            // Ss smoothness: depends on |kHF - kSN|
+            // Ss smoothness: depends on |kHF - kSN_neg|
+            //
+            // Sign convention note:
+            //   kHF = sign(eta_dominant) * h_xx/(1+hx^2)^1.5
+            //       → negative for a convex droplet (eta=0 inside, eta=1 outside)
+            //   kSN = div(∇η/|∇η|) = +1/R for the same convex droplet
+            //
+            // Both represent the same physical curvature but with opposite signs.
+            // Flip kSN before blending so both conventions match: kSN_neg ≈ kHF.
+            // This keeps Ss high (methods agree) and gives a consistent kH.
             //------------------------------------------------------
+            Real kSN_neg = -kSN;
+
             Real Cs = amrex::max(std::abs(kHF), 1e-12);
-            Real dk = std::abs(kHF - kSN);
+            Real dk = std::abs(kHF - kSN_neg);
 
             Real Ss = std::exp(-dk / (Cs + small));
 
@@ -1450,7 +1461,12 @@ void Hydro2::ComputeHybridCurvature(int lev)
             Real w = Sg * Sm * Ss;
             w = amrex::max(0.0, amrex::min(1.0, w));
 
-            Real kH = w * kHF + (1.0 - w) * kSN;
+            Real kH = w * kHF + (1.0 - w) * kSN_neg;
+
+            // Clamp to prevent runaway curvature from shock-compressed or
+            // under-resolved interface regions driving enormous surface tension forces.
+            const Real kappa_max = 2.0 / amrex::min(dx[0], dx[1]);
+            kH = amrex::max(-kappa_max, amrex::min(kappa_max, kH));
 
             //------------------------------------------------------
             // Store results
@@ -1458,7 +1474,7 @@ void Hydro2::ComputeHybridCurvature(int lev)
             kappas(i,j,k,0) = kH;
             kappas(i,j,k,1) = kHF;
             kappas(i,j,k,2) = kSN;
-            kappa_SF(i,j,k) = kSN;
+            kappa_SF(i,j,k) = kSN_neg;
         });
     }
 
