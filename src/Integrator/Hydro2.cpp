@@ -1059,56 +1059,102 @@ void Hydro2::ComputeHeightFunction (int lev)
     const int jlo = domain.smallEnd(1);
     const int jhi = domain.bigEnd(1);
 
-    // ------------------------------------------------------------
-    // (1) Make a SINGLE-FAB scratch MF covering the entire domain
-    // ------------------------------------------------------------
-    BoxArray ba_single(domain);
+    // Local per-cell height function: for each cell determine the dominant
+    // normal direction from grad(eta), then search ±N cells in that direction
+    // for eta=0.5 crossings.  All crossings in the band are found (handles
+    // droplets/bubbles with two crossings per line), and the one closest to
+    // the current cell center is selected.
+    // N must be <= nghost (2) so all accesses fall within the fab's grown box.
+    //
+    // Cells for which no crossing is found are written with a sentinel value
+    // (h_sentinel = 1e30).  ComputeHFcurvature_MUSCL checks for this sentinel
+    // and zeros kHF whenever any stencil neighbor is unfound, so that cells at
+    // the edge of the N=2 search band (where the crossing is just out of reach)
+    // cannot corrupt the curvature computation.
+    const int N = 2;
+    const Real h_sentinel = 1.0e30;
 
-    // Correct: generates a valid 1-element DM
-    DistributionMapping dm_single(ba_single);
+    // Initialize entire MF to sentinel before filling found crossings.
+    h_eta_mf[lev]->setVal(h_sentinel);
 
-    MultiFab eta_single(ba_single, dm_single, 1, 0);
-    eta_single.setVal(0.0);
-
-    // Copy data from tiled MF into single FAB MF
-    eta_single.ParallelCopy(*eta_mf[lev]);
-
-    MultiFab h_single(ba_single, dm_single, 1, 0);
-
-    // ------------------------------------------------------------
-    // (2) Compute heights on whichever rank owns the single box.
-    //     Must use MFIter rather than const_array(0) so that
-    //     non-owning MPI ranks skip the computation safely.
-    // ------------------------------------------------------------
-    for (MFIter mfi(eta_single); mfi.isValid(); ++mfi)
+    for (MFIter mfi(*h_eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
-        auto eta_arr = eta_single.const_array(mfi);
-        auto h_arr   = h_single.array(mfi);
+        const Box& tb  = mfi.tilebox();
+        const Box& fab = mfi.fabbox();
 
-        ParallelFor(ihi - ilo + 1, [=] AMREX_GPU_DEVICE(int ii)
+        const int ilo_f = fab.smallEnd(0);
+        const int ihi_f = fab.bigEnd(0);
+        const int jlo_f = fab.smallEnd(1);
+        const int jhi_f = fab.bigEnd(1);
+
+        auto eta_arr = eta_mf[lev]->const_array(mfi);
+        auto eta_x   = eta_x_mf[lev]->const_array(mfi);
+        auto eta_y   = eta_y_mf[lev]->const_array(mfi);
+        auto h_arr   = h_eta_mf[lev]->array(mfi);
+
+        ParallelFor(tb, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
-            int i = ii + ilo;
+            Real ax = std::abs(eta_x(i,j,0));
+            Real ay = std::abs(eta_y(i,j,0));
 
-            Real best = 1e20;
-            int jbest = jlo;
+            Real best_dist = 1e20;
+            Real h_val = h_sentinel; // default: no crossing found
 
-            for (int j = jlo; j <= jhi; ++j)
+            if (ay >= ax)
             {
-                Real d = amrex::Math::abs(eta_arr(i,j,0) - 0.5);
-                if (d < best) { best = d; jbest = j; }
+                // Dominant normal is y → h is y-coordinate of crossing in column i
+                Real cell_y = problo[1] + (j + 0.5) * dx[1];
+
+                int j0 = amrex::max(amrex::max(jlo, jlo_f),     j - N);
+                int j1 = amrex::min(amrex::min(jhi, jhi_f) - 1, j + N);
+
+                for (int jj = j0; jj <= j1; ++jj)
+                {
+                    Real e0 = eta_arr(i, jj,   0) - 0.5;
+                    Real e1 = eta_arr(i, jj+1, 0) - 0.5;
+
+                    if (e0 * e1 <= 0.0)
+                    {
+                        Real denom = e1 - e0;
+                        Real t = (std::abs(denom) > 1e-14) ? (-e0 / denom) : 0.5;
+                        Real y_cross = problo[1] + (jj + 0.5 + t) * dx[1];
+                        Real dist = std::abs(y_cross - cell_y);
+                        if (dist < best_dist) { best_dist = dist; h_val = y_cross; }
+                    }
+                }
+            }
+            else
+            {
+                // Dominant normal is x → h is x-coordinate of crossing in row j
+                Real cell_x = problo[0] + (i + 0.5) * dx[0];
+
+                int i0 = amrex::max(amrex::max(ilo, ilo_f),     i - N);
+                int i1 = amrex::min(amrex::min(ihi, ihi_f) - 1, i + N);
+
+                for (int ii = i0; ii <= i1; ++ii)
+                {
+                    Real e0 = eta_arr(ii,   j, 0) - 0.5;
+                    Real e1 = eta_arr(ii+1, j, 0) - 0.5;
+
+                    if (e0 * e1 <= 0.0)
+                    {
+                        Real denom = e1 - e0;
+                        Real t = (std::abs(denom) > 1e-14) ? (-e0 / denom) : 0.5;
+                        Real x_cross = problo[0] + (ii + 0.5 + t) * dx[0];
+                        Real dist = std::abs(x_cross - cell_x);
+                        if (dist < best_dist) { best_dist = dist; h_val = x_cross; }
+                    }
+                }
             }
 
-            Real y = problo[1] + (jbest + 0.5)*dx[1];
-
-            for (int j = jlo; j <= jhi; ++j)
-                h_arr(i,j,0) = y;
+            // Only write if a crossing was found; otherwise leave the sentinel
+            // (set by setVal above) so that ComputeHFcurvature_MUSCL can detect
+            // unfound neighbors and zero kHF for those cells.
+            if (h_val < 1e20)
+                h_arr(i, j, 0) = h_val;
         });
     }
 
-    // ------------------------------------------------------------
-    // (4) Scatter back to tiled MF
-    // ------------------------------------------------------------
-    h_eta_mf[lev]->ParallelCopy(h_single);
     h_eta_mf[lev]->FillBoundary(geom.periodicity());
 }
 
@@ -1121,28 +1167,104 @@ void Hydro2::ComputeHFcurvature_MUSCL(int lev)
 
     for (MFIter mfi(*h_eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
-        const Box& tb = mfi.tilebox();
+        const Box& fab = mfi.fabbox();
+        const int ilo_f = fab.smallEnd(0);
+        const int ihi_f = fab.bigEnd(0);
+        const int jlo_f = fab.smallEnd(1);
+        const int jhi_f = fab.bigEnd(1);
 
         auto h_arr   = h_eta_mf[lev]->const_array(mfi);
+        auto eta_x   = eta_x_mf[lev]->const_array(mfi);
+        auto eta_y   = eta_y_mf[lev]->const_array(mfi);
         auto kHF_arr = kappa_HF_mf[lev]->array(mfi);
 
-        ParallelFor(tb, [=] AMREX_GPU_DEVICE(int i,int j,int k)
+        ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE(int i,int j,int k)
         {
-            int il = (i > tb.smallEnd(0)) ? i-1 : i;
-            int ir = (i < tb.bigEnd(0))   ? i+1 : i;
+            Real ax = std::abs(eta_x(i,j,0));
+            Real ay = std::abs(eta_y(i,j,0));
 
-            Real hC = h_arr(i,j,0);
-            Real hL = h_arr(il,j,0);
-            Real hR = h_arr(ir,j,0);
+            Real kHF;
 
-            Real dl = hC - hL;
-            Real dr = hR - hC;
+            // Sentinel value written by ComputeHeightFunction for cells where
+            // no eta=0.5 crossing was found within the N=2 search band.
+            // If the center cell or either stencil neighbor has the sentinel,
+            // the curvature stencil is invalid — zero kHF and let
+            // ComputeHybridCurvature fall back to the smooth-normal estimate.
+            const Real h_sentinel = 1.0e30;
 
-            Real slope = (dl*dr > 0.0 ? (2*dl*dr)/(dl+dr) : 0.0);
-            Real hx  = slope / dx[0];
-            Real hxx = (hR - 2*hC + hL) / (dx[0]*dx[0]);
+            if (ay >= ax)
+            {
+                // y-dominant: h(i,j) = y-crossing, varies across x.
+                int il = (i > ilo_f) ? i-1 : i;
+                int ir = (i < ihi_f) ? i+1 : i;
 
-            kHF_arr(i,j,0) = hxx / std::pow(1.0 + hx*hx, 1.5);
+                Real hC = h_arr(i,  j, 0);
+                Real hL = h_arr(il, j, 0);
+                Real hR = h_arr(ir, j, 0);
+
+                // Require center and both neighbors to be (a) found (not sentinel)
+                // and (b) y-dominant.  A neighbor that found an x-crossing has a
+                // physically different h than a y-crossing; mixing them gives wrong hxx.
+                bool neigh_ok =
+                    (hC < h_sentinel*0.5) &&
+                    (hL < h_sentinel*0.5) && (std::abs(eta_y(il,j,0)) >= std::abs(eta_x(il,j,0))) &&
+                    (hR < h_sentinel*0.5) && (std::abs(eta_y(ir,j,0)) >= std::abs(eta_x(ir,j,0)));
+
+                if (!neigh_ok)
+                {
+                    kHF = 0.0;
+                }
+                else
+                {
+                    Real dl = hC - hL;
+                    Real dr = hR - hC;
+                    Real slope = (dl*dr > 0.0) ? (2.0*dl*dr)/(dl+dr) : 0.0;
+
+                    Real hx  = slope / dx[0];
+                    Real hxx = (hR - 2.0*hC + hL) / (dx[0]*dx[0]);
+
+                    // sign(eta_y) makes curvature consistent around the interface:
+                    // without it, h_xx is negative at the top (concave-down) and
+                    // positive at the bottom (concave-up) giving opposite signs for
+                    // the same physical curvature.
+                    Real sn = (eta_y(i,j,0) >= 0.0) ? 1.0 : -1.0;
+                    kHF = sn * hxx / std::pow(1.0 + hx*hx, 1.5);
+                }
+            }
+            else
+            {
+                // x-dominant: h(i,j) = x-crossing, varies across y.
+                int jd = (j > jlo_f) ? j-1 : j;
+                int ju = (j < jhi_f) ? j+1 : j;
+
+                Real hC = h_arr(i, j,  0);
+                Real hD = h_arr(i, jd, 0);
+                Real hU = h_arr(i, ju, 0);
+
+                bool neigh_ok =
+                    (hC < h_sentinel*0.5) &&
+                    (hD < h_sentinel*0.5) && (std::abs(eta_x(i,jd,0)) >  std::abs(eta_y(i,jd,0))) &&
+                    (hU < h_sentinel*0.5) && (std::abs(eta_x(i,ju,0)) >  std::abs(eta_y(i,ju,0)));
+
+                if (!neigh_ok)
+                {
+                    kHF = 0.0;
+                }
+                else
+                {
+                    Real dl = hC - hD;
+                    Real dr = hU - hC;
+                    Real slope = (dl*dr > 0.0) ? (2.0*dl*dr)/(dl+dr) : 0.0;
+
+                    Real hy  = slope / dx[1];
+                    Real hyy = (hU - 2.0*hC + hD) / (dx[1]*dx[1]);
+
+                    Real sn = (eta_x(i,j,0) >= 0.0) ? 1.0 : -1.0;
+                    kHF = sn * hyy / std::pow(1.0 + hy*hy, 1.5);
+                }
+            }
+
+            kHF_arr(i,j,0) = kHF;
         });
     }
 
@@ -1275,21 +1397,43 @@ void Hydro2::ComputeHybridCurvature(int lev)
             Real kHF = kHF_arr(i,j,k);
 
             //------------------------------------------------------
-            // Sm monotonicity test — must use j, not 0
+            // Sm monotonicity test: check neighbors in the direction
+            // perpendicular to the dominant normal (i.e. along the
+            // interface tangent) with the corresponding grid scale.
             //------------------------------------------------------
+            const Real h_sentinel = 1.0e30;
             Real hC = h_arr(i,j,0);
             Real Sm = 1.0;
 
-            if (i > tb.smallEnd(0))
+            // Any sentinel in center or tangential neighbors → kHF not valid here
+            if (hC > h_sentinel*0.5) { Sm = 0.0; }
+            else if (std::abs(ny_s(i,j,k)) >= std::abs(nx_s(i,j,k)))
             {
-                if (std::abs(h_arr(i-1,j,0) - hC) > 3*dx[1])
-                    Sm = 0.0;
+                // y-dominant: h is y-crossing varying in x
+                if (i > tb.smallEnd(0))
+                {
+                    Real hN = h_arr(i-1,j,0);
+                    if (hN > h_sentinel*0.5 || std::abs(hN - hC) > 3.0*dx[1]) Sm = 0.0;
+                }
+                if (i < tb.bigEnd(0))
+                {
+                    Real hN = h_arr(i+1,j,0);
+                    if (hN > h_sentinel*0.5 || std::abs(hN - hC) > 3.0*dx[1]) Sm = 0.0;
+                }
             }
-
-            if (i < tb.bigEnd(0))
+            else
             {
-                if (std::abs(h_arr(i+1,j,0) - hC) > 3*dx[1])
-                    Sm = 0.0;
+                // x-dominant: h is x-crossing varying in y
+                if (j > tb.smallEnd(1))
+                {
+                    Real hN = h_arr(i,j-1,0);
+                    if (hN > h_sentinel*0.5 || std::abs(hN - hC) > 3.0*dx[0]) Sm = 0.0;
+                }
+                if (j < tb.bigEnd(1))
+                {
+                    Real hN = h_arr(i,j+1,0);
+                    if (hN > h_sentinel*0.5 || std::abs(hN - hC) > 3.0*dx[0]) Sm = 0.0;
+                }
             }
 
             //------------------------------------------------------
