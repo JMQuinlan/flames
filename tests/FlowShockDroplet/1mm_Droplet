@@ -25,14 +25,15 @@ amr.n_cell = 64 32  # Maintains aspect ratio for 0.02m � 0.01m domain
 
 ### TIME STEPPING ###
 ## Static:
-timestep = 1e-12
+timestep = 1e-10
 
 ## Adaptive
 dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-6
 dynamictimestep.min = 1e-16
-cfl = 0.008
+# cfl = 0.008
+cfl = 0.3
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.005 -0.005 0.0  # 1/4 tube left of droplet
@@ -41,8 +42,8 @@ geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
 # stop_time = 0.0002  # Shorter time for shock interaction
-#stop_time = 1.0e-5  # Shorter time for shock interaction
-stop_time = 1.0e-9  # Shorter time for shock interaction
+stop_time = 1.0e-5  # Shorter time for shock interaction
+# stop_time = 1.0e-9  # Shorter time for shock interaction
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
@@ -173,6 +174,11 @@ Riemann_Solver.type = hllc
 kappa_method = 3   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization" / 3:"Advanced Hybrid"
 integration.type = ForwardEuler
 # integration.type = RungeKutta
-implicit_ch = 1
+# implicit_ch = 1
 # ch_mobility_nom = 0.032   # optional: override auto M = 2*ε*c_max
+# ch_mobility_nom = 1e-4  # seems to need to be smaller
 # implicit_ch = 0 # solves CH rhs explicitly (faster but dx^4 reduction in timestep needed, so only on course grids)
+implicit_ch = 2
+  ch_mobility_nom = 1e-4
+  ch_newton_iters = 5       # default, usually converges in 3
+  ch_newton_tol = 1e-10     # default 
