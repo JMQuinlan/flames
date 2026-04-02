@@ -1662,11 +1662,18 @@ void Hydro2::ComputeSmoothNormals(int lev)
         {
             Real accx = 0.0, accy = 0.0, wsum = 0.0;
 
+            // Use the grown tilebox (valid cells + up to krad ghost layers) so
+            // that MPI-neighbor ghost cells filled by FillBoundary are included.
+            // Only skip cells that are outside the allocated ghost region.
+            // Physical-boundary ghost cells beyond the domain are initialized to
+            // zero by RegisterNewFab and contribute zero weight — correct behavior.
+            const Box tb_g = amrex::grow(tb, krad);
+
             for (int di = -krad; di <= krad; ++di)
             for (int dj = -krad; dj <= krad; ++dj)
             {
                 int ii = i + di, jj = j + dj;
-                if (!tb.contains(IntVect(AMREX_D_DECL(ii, jj, 0)))) continue;
+                if (!tb_g.contains(IntVect(AMREX_D_DECL(ii, jj, 0)))) continue;
 
                 Real w    = gw[std::abs(di)] * gw[std::abs(dj)];
                 Real gmN  = gradmag(ii, jj, k) + 1e-14;
@@ -1737,10 +1744,15 @@ void Hydro2::ComputeHybridCurvature(int lev)
             //------------------------------------------------------
             // Compute SN curvature: kSN = d(nx)/dx + d(ny)/dy
             //------------------------------------------------------
-            int il = (i > tb.smallEnd(0)) ? i-1 : i;
-            int ir = (i < tb.bigEnd(0))   ? i+1 : i;
-            int jl = (j > tb.smallEnd(1)) ? j-1 : j;
-            int jr = (j < tb.bigEnd(1))   ? j+1 : j;
+            // Clamp to the DOMAIN boundary, not the tilebox boundary.
+            // Ghost cells of nx_s / ny_s / h_arr are valid (FillBoundary was
+            // called) for MPI-neighbor cells, so we should read them.  Only
+            // clamp when the cell is at the physical domain edge where no ghost
+            // data exists beyond the boundary.
+            int il = amrex::max(i-1, dom.smallEnd(0));
+            int ir = amrex::min(i+1, dom.bigEnd(0));
+            int jl = amrex::max(j-1, dom.smallEnd(1));
+            int jr = amrex::min(j+1, dom.bigEnd(1));
 
             Real nx_x = 0.5 * (nx_s(ir,j,k) - nx_s(il,j,k)) / dx[0];
             Real ny_y = 0.5 * (ny_s(i,jr,k) - ny_s(i,jl,k)) / dx[1];
