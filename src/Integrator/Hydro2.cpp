@@ -762,6 +762,15 @@ Hydro2::RHS(int lev,
     //---------------------------------------------------------------------------
     mu_chem_mf[lev]->FillBoundary(geom.periodicity());
 
+    // Fill ghost cells of EOS fields computed in the first loop.
+    // The Riemann solver in the second loop reads neighbor cells (i±1, j±1)
+    // of gamma_mf and pi_mf.  Without this exchange, those ghost cells hold
+    // stale values from the previous timestep, giving wrong wave speeds and
+    // pressures at every MPI rank boundary.
+    gamma_mf[lev]->FillBoundary(geom.periodicity());
+    pi_mf[lev]->FillBoundary(geom.periodicity());
+    T_mf[lev]->FillBoundary(geom.periodicity());
+
     //---------------------------------------------------------------------------
     // 2. SECOND LOOP: compute fluxes using Riemann solver
     //---------------------------------------------------------------------------
@@ -815,12 +824,16 @@ Hydro2::RHS(int lev,
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i,int j,int k)
         {
             //------------------------------------------------------------------
-            // Neighbors (safe indexing)
+            // Neighbors — clamp to DOMAIN boundary, not tilebox boundary.
+            // Ghost cells of rho/M/E/gamma/pi/T are filled by FillBoundary
+            // above so reading (i±1, j±1) across MPI rank boundaries is safe.
+            // Clamping to bx would silently duplicate the edge cell state,
+            // zeroing the Riemann flux at every interior rank boundary.
             //------------------------------------------------------------------
-            int il = amrex::max(i-1, bx.smallEnd(0));
-            int ir = amrex::min(i+1, bx.bigEnd(0));
-            int jl = amrex::max(j-1, bx.smallEnd(1));
-            int jr = amrex::min(j+1, bx.bigEnd(1));
+            int il = amrex::max(i-1, domain.smallEnd(0));
+            int ir = amrex::min(i+1, domain.bigEnd(0));
+            int jl = amrex::max(j-1, domain.smallEnd(1));
+            int jr = amrex::min(j+1, domain.bigEnd(1));
 
             //------------------------------------------------------------------
             // Build Riemann states ONLY from Array4 fields
@@ -2405,6 +2418,7 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
 
     const Set::Scalar* DX = geom[lev].CellSize();
     Set::Scalar dr = sqrt(AMREX_D_TERM(DX[0] * DX[0], +DX[1] * DX[1], +DX[2] * DX[2]));
+    const Box& domain = geom[lev].Domain();
 
     // Eta criterion for refinement
     for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi) {
@@ -2425,7 +2439,7 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
         amrex::Array4<const Set::Scalar> const& omega = (*vorticity_mf[lev]).array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            auto sten = Numeric::GetStencil(i, j, k, bx);
+            auto sten = Numeric::GetStencil(i, j, k, domain);
             Set::Vector grad_omega = Numeric::Gradient(omega, i, j, k, 0, DX, sten);
             if (grad_omega.lpNorm<2>() * dr * 2 > omega_refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
         });
@@ -2438,7 +2452,7 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
         amrex::Array4<const Set::Scalar> const& v = (*velocity_mf[lev]).array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            auto sten = Numeric::GetStencil(i, j, k, bx);
+            auto sten = Numeric::GetStencil(i, j, k, domain);
             Set::Matrix grad_u = Numeric::Gradient(v, i, j, k, DX, sten);
             if (grad_u.lpNorm<2>() * dr * 2 > gradu_refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
         });
@@ -2451,7 +2465,7 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
         amrex::Array4<const Set::Scalar> const& p_mix = (*pressure_mf[lev]).array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            auto sten = Numeric::GetStencil(i, j, k, bx);
+            auto sten = Numeric::GetStencil(i, j, k, domain);
             Set::Vector grad_p = Numeric::Gradient(p_mix, i, j, k, 0, DX, sten);
             if (grad_p.lpNorm<2>() * dr * 2 > p_refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
         });
@@ -2464,7 +2478,7 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
         amrex::Array4<const Set::Scalar> const& rho = (*density_mf[lev]).array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            auto sten = Numeric::GetStencil(i, j, k, bx);
+            auto sten = Numeric::GetStencil(i, j, k, domain);
             Set::Vector grad_rho = Numeric::Gradient(rho, i, j, k, 0, DX, sten);
             if (grad_rho.lpNorm<2>() * dr * 2 > rho_refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
         });
