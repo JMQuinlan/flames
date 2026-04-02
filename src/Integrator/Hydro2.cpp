@@ -116,7 +116,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("Y_infinity", value.Y_infinity, 0.0); // Far Field Vapor Mass Fraction
 
         // CURVATURE
-        pp_query_default("kappa_method",        value.kappa_method,        2); // Method to solve for curvature
+        pp_query_default("kappa_method",        value.kappa_method,        1); // 1:"Smooth Normals" (default)  2:"Height Function"  3:"Hybrid"
         pp_query_default("smooth_kernel_size",  value.smooth_kernel_size,  3); // Gaussian normal-smoothing kernel: 3 (3x3) or 5 (5x5)
 
         // IMPLICIT CAHN-HILLIARD
@@ -232,7 +232,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // EXTRAS & DEBUGGING
         value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", false, false, { "x", "y" });
-        value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, nghost, "kappa", true, false, { "Avg", "1", "2" }); // To Surface curvature
+        value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, nghost, "kappa", true, false, { "Active", "HF", "SN" }); // Active=selected method, HF=height function, SN=smooth normals (raw div)
         value.RegisterNewFab(value.grad_mag_grad_eta_mf, &value.bc_nothing, 2, nghost, "grad_mag_grad_eta", false, false, { "x", "y" }); // grad( | grad(eta) | )
         value.RegisterNewFab(value.rho_flux_mf,     &value.bc_nothing,  1, nghost, "rho_flux", true, false);                    // Density Flux
         value.RegisterNewFab(value.M_flux_mf,       &value.bc_nothing,  2, nghost, "M_flux", true, false, { "x", "y" });        // Momentum Flux
@@ -635,10 +635,11 @@ Hydro2::RHS(int lev,
     const Box& domain = geom.Domain();
 
     //---------------------------------------------------------------------------
-    // 0. (Optional) Curvature pipeline
+    // 0. Curvature pipeline — always run; kappa_method selects which result
+    //    goes into kappas_mf component 0 (used by the surface tension force).
+    //    Component 1 = HF, Component 2 = SN (raw) are always stored for output.
     //---------------------------------------------------------------------------
-    if (kappa_method == 3)
-        ComputeKappas(lev);
+    ComputeKappas(lev);
 
     //---------------------------------------------------------------------------
     // 1. FIRST LOOP: compute primitive fields and geometry-dependent things
@@ -1722,6 +1723,7 @@ void Hydro2::ComputeHybridCurvature(int lev)
     const Real dx_eff = std::max({dx[0], dx[1], epsilon});
     const Real Cg = 0.1 / dx_eff;
     const Real small = 1e-14;
+    const int km = kappa_method;  // capture for GPU lambda
 
     for (MFIter mfi(*kappas_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
@@ -1850,9 +1852,17 @@ void Hydro2::ComputeHybridCurvature(int lev)
             kH = amrex::max(-kappa_max, amrex::min(kappa_max, kH));
 
             //------------------------------------------------------
-            // Store results
+            // Store results.
+            // Component 0 = active curvature (selected by kappa_method):
+            //   1 → kSN_neg  (smooth normals, negated to HF sign convention)
+            //   2 → kHF      (height function)
+            //   3 → kH       (hybrid blend)
+            // Components 1,2 always store HF and raw SN for diagnostic output.
             //------------------------------------------------------
-            kappas(i,j,k,0) = kH;
+            Real kappa_active = (km == 1) ? kSN_neg
+                              : (km == 2) ? kHF
+                              :             kH;
+            kappas(i,j,k,0) = kappa_active;
             kappas(i,j,k,1) = kHF;
             kappas(i,j,k,2) = kSN;
             kappa_SF(i,j,k) = kSN_neg;
@@ -1905,15 +1915,16 @@ void Hydro2::ComputeKappas(int lev)
     BL_PROFILE("Hydro2::ComputeKappas");
 
     //
-    // IMPORTANT: curvature pipeline depends on the following sequence:
+    // Full curvature pipeline — all three methods are always computed so that
+    // all components of kappas_mf are available for diagnostic output:
+    //   kappas[0] = active curvature (selected by kappa_method, used in force)
+    //   kappas[1] = kHF  (height function)
+    //   kappas[2] = kSN  (smooth normals, raw divergence convention)
     //
-    //  1. Compute ∇η (eta_x, eta_y) and |∇η| into gradmag_mf
-    //  2. Build height function h(i)
-    //  3. Compute HF curvature using MUSCL limited slopes
-    //  4. Compute smoothed-normal curvature (SN curvature)
-    //  5. Blend HF and SN to get hybrid curvature
-    //
-    // All MultiFabs involved must be already allocated via RegisterNewFab().
+    // kappa_method:
+    //   1 → kSN_neg = −kSN  (smooth normals, HF sign convention, default)
+    //   2 → kHF             (height function)
+    //   3 → kH              (weighted hybrid blend of HF and SN)
     //
 
     // 1. gradient of eta (uses your Numeric::Gradient)

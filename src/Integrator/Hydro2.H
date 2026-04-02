@@ -304,7 +304,7 @@ protected:
     int apply_vaporization = 0;
     int Spec_Vol = 1;
 
-    int kappa_method = 2;
+    int kappa_method = 1;        // 1: Smooth Normals (default)  2: Height Function  3: Hybrid
     int smooth_kernel_size = 3;  // Gaussian kernel for normal smoothing: 3 (3x3, default) or 5 (5x5)
 
     // Implicit CH
