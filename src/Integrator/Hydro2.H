@@ -305,6 +305,7 @@ protected:
     int Spec_Vol = 1;
 
     int kappa_method = 2;
+    int smooth_kernel_size = 3;  // Gaussian kernel for normal smoothing: 3 (3x3, default) or 5 (5x5)
 
     // Implicit CH
     int implicit_ch = 0;               // 0: explicit  1: Eyre MLMG  2: Newton-MLMG

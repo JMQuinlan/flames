@@ -116,7 +116,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("Y_infinity", value.Y_infinity, 0.0); // Far Field Vapor Mass Fraction
 
         // CURVATURE
-        pp_query_default("kappa_method", value.kappa_method, 2); // Method to solve for curvature
+        pp_query_default("kappa_method",        value.kappa_method,        2); // Method to solve for curvature
+        pp_query_default("smooth_kernel_size",  value.smooth_kernel_size,  3); // Gaussian normal-smoothing kernel: 3 (3x3) or 5 (5x5)
 
         // IMPLICIT CAHN-HILLIARD
         // 0 = explicit, 1 = Eyre double-Helmholtz MLMG, 2 = Newton-MLMG (full nonlinear)
@@ -1634,53 +1635,51 @@ void Hydro2::ComputeSmoothNormals(int lev)
 
     const Geometry& geom = this->geom[lev];
 
+    // Kernel radius: 1 → 3x3, 2 → 5x5.
+    // The 5x5 kernel reads ghost cells at distance 2, which fits within nghost=2.
+    const int krad = (smooth_kernel_size >= 5) ? 2 : 1;
+
+    // Separable 1D Gaussian weights: g[d] = exp(-d^2/2), sigma=1 grid cell.
+    //   krad=1: uses g[0]=1, g[1]=exp(-0.5)≈0.6065
+    //   krad=2: additionally g[2]=exp(-2.0)≈0.1353
+    // 2D weight at (di,dj) = g[|di|] * g[|dj|]; normalization via wsum per cell.
+    amrex::GpuArray<Real, 3> gw;
+    gw[0] = 1.0;
+    gw[1] = std::exp(-0.5);
+    gw[2] = std::exp(-2.0);  // only accessed when krad=2
+
     for (MFIter mfi(*nx_smoothed_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
         const Box& tb = mfi.tilebox();
 
-        auto eta_x  = eta_x_mf[lev]->const_array(mfi);
-        auto eta_y  = eta_y_mf[lev]->const_array(mfi);
-        auto gradmag= gradmag_mf[lev]->const_array(mfi);
+        auto eta_x   = eta_x_mf[lev]->const_array(mfi);
+        auto eta_y   = eta_y_mf[lev]->const_array(mfi);
+        auto gradmag = gradmag_mf[lev]->const_array(mfi);
+        auto nx_s    = nx_smoothed_mf[lev]->array(mfi);
+        auto ny_s    = ny_smoothed_mf[lev]->array(mfi);
 
-        auto nx_s = nx_smoothed_mf[lev]->array(mfi);
-        auto ny_s = ny_smoothed_mf[lev]->array(mfi);
-
-        ParallelFor(tb, [=] AMREX_GPU_DEVICE(int i,int j,int k)
+        ParallelFor(tb, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
-            Real gm = gradmag(i,j,k) + 1e-14;
-            Real nx0 = eta_x(i,j,k)/gm;
-            Real ny0 = eta_y(i,j,k)/gm;
+            Real accx = 0.0, accy = 0.0, wsum = 0.0;
 
-            Real accx=0, accy=0, wsum=0;
-            const Real w0=0.27901, w1=0.44198, w2=0.27901;
-
-            for (int di=-1; di<=1; ++di)
-            for (int dj=-1; dj<=1; ++dj)
+            for (int di = -krad; di <= krad; ++di)
+            for (int dj = -krad; dj <= krad; ++dj)
             {
-                int ii=i+di, jj=j+dj;
+                int ii = i + di, jj = j + dj;
+                if (!tb.contains(IntVect(AMREX_D_DECL(ii, jj, 0)))) continue;
 
-                if (!tb.contains(IntVect(AMREX_D_DECL(ii,jj,0))))
-                    continue;
-
-                Real w = ((di==0 && dj==0)?  w1
-                       : (std::abs(di)+std::abs(dj)==1)? w0 : w2);
-
-                Real gmN = gradmag(ii,jj,k)+1e-14;
-                Real nxN = eta_x(ii,jj,k)/gmN;
-                Real nyN = eta_y(ii,jj,k)/gmN;
-
-                accx += w*nxN;
-                accy += w*nyN;
+                Real w    = gw[std::abs(di)] * gw[std::abs(dj)];
+                Real gmN  = gradmag(ii, jj, k) + 1e-14;
+                accx += w * eta_x(ii, jj, k) / gmN;
+                accy += w * eta_y(ii, jj, k) / gmN;
                 wsum += w;
             }
 
-            Real nx=accx/(wsum+1e-14);
-            Real ny=accy/(wsum+1e-14);
-
-            Real m = std::sqrt(nx*nx + ny*ny) + 1e-14;
-
-            nx_s(i,j,k) = nx/m;
-            ny_s(i,j,k) = ny/m;
+            Real nx = accx / (wsum + 1e-14);
+            Real ny = accy / (wsum + 1e-14);
+            Real m  = std::sqrt(nx*nx + ny*ny) + 1e-14;
+            nx_s(i, j, k) = nx / m;
+            ny_s(i, j, k) = ny / m;
         });
     }
 

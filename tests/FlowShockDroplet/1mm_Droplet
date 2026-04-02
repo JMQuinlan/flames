@@ -172,6 +172,7 @@ grav = 9.81
 ### DEBUGGING ###
 Riemann_Solver.type = hllc
 kappa_method = 3   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization" / 3:"Advanced Hybrid"
+smooth_kernel_size = 5  # Gaussian normal smoothing kernel: 3 (3x3, default) or 5 (5x5)
 integration.type = ForwardEuler
 # integration.type = RungeKutta
 # implicit_ch = 1
