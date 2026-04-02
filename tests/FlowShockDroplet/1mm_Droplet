@@ -17,10 +17,10 @@ plot_file = ./tests/FlowShockDroplet/output_amr_0
 amr.plot_dt = 0.25e-6
 amr.plot_int = 10
 amr.max_grid_size = 500000
-amr.blocking_factor = 2
+amr.blocking_factor = 4  # Must be >= nghost so FillBoundary can fill all ghost layers from neighbor valid cells
 amr.regrid_int = 1
 amr.grid_eff = 0.8
-amr.max_level = 3
+amr.max_level = 4
 amr.n_cell = 64 32  # Maintains aspect ratio for 0.02m � 0.01m domain
 
 ### TIME STEPPING ###
@@ -171,8 +171,9 @@ grav = 9.81
 
 ### DEBUGGING ###
 Riemann_Solver.type = hllc
-kappa_method = 1   # 1:"Smooth Normals" (default)  2:"Height Function"  3:"Hybrid (HF+SN blend)"
+kappa_method = 2   # 1:"Smooth Normals" (default)  2:"Height Function"  3:"Hybrid (HF+SN blend)"
 smooth_kernel_size = 5  # Gaussian normal smoothing kernel: 3 (3x3, default) or 5 (5x5)
+nghost = 4             # Ghost cell depth (= N_int for HF band). Requires amr.blocking_factor >= nghost.
 integration.type = ForwardEuler
 # integration.type = RungeKutta
 # implicit_ch = 1

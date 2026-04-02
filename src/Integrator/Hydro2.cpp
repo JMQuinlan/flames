@@ -118,6 +118,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // CURVATURE
         pp_query_default("kappa_method",        value.kappa_method,        1); // 1:"Smooth Normals" (default)  2:"Height Function"  3:"Hybrid"
         pp_query_default("smooth_kernel_size",  value.smooth_kernel_size,  3); // Gaussian normal-smoothing kernel: 3 (3x3) or 5 (5x5)
+        pp_query_default("nghost",              value.nghost,              2); // Ghost cell depth: controls HF column integration band and stencil reach
 
         // IMPLICIT CAHN-HILLIARD
         // 0 = explicit, 1 = Eyre double-Helmholtz MLMG, 2 = Newton-MLMG (full nonlinear)
@@ -137,7 +138,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     // Register FabFields:
     // Toggle the last boolean to true/false to track the variable or not.
     {
-        int nghost = 2;
+        int nghost = value.nghost;
 
         // DIFFUSE PARAMETERS
         value.RegisterNewFab(value.eta_mf,          value.energy_bc, 1, nghost, "eta", true, true);
@@ -1417,37 +1418,43 @@ Set::Scalar InterpolateInterface(Set::Scalar eta, Set::Scalar val1, Set::Scalar 
 }
 
 // CURVATURE CALCULATION
-void Hydro2::ComputeHeightFunction (int lev)
+void Hydro2::ComputeHeightFunction(int lev)
 {
     BL_PROFILE("Hydro2::ComputeHeightFunction");
 
     const Geometry& geom = this->geom[lev];
     const Real* dx = geom.CellSize();
     const Box& domain = geom.Domain();
-    const auto problo = geom.ProbLo();
 
     const int ilo = domain.smallEnd(0);
     const int ihi = domain.bigEnd(0);
     const int jlo = domain.smallEnd(1);
     const int jhi = domain.bigEnd(1);
 
-    // Local per-cell height function: for each cell determine the dominant
-    // normal direction from grad(eta), then search ±N cells in that direction
-    // for eta=0.5 crossings.  All crossings in the band are found (handles
-    // droplets/bubbles with two crossings per line), and the one closest to
-    // the current cell center is selected.
-    // N must be <= nghost (2) so all accesses fall within the fab's grown box.
+    // Column-integration height function (VOF analog for diffuse interfaces).
     //
-    // Cells for which no crossing is found are written with a sentinel value
-    // (h_sentinel = 1e30).  ComputeHFcurvature_MUSCL checks for this sentinel
-    // and zeros kHF whenever any stencil neighbor is unfound, so that cells at
-    // the edge of the N=2 search band (where the crossing is just out of reach)
-    // cannot corrupt the curvature computation.
-    const int N = 2;
-    const Real h_sentinel = 1.0e30;
+    // Rather than searching for the η=0.5 iso-contour in each column, we sum η
+    // over a local band of ±N_int cells in the dominant normal direction.  This
+    // is the direct diffuse-interface analog of summing volume fractions in VOF:
+    //
+    //   h_int(i) = Σ_{k=-N_int}^{N_int}  η(i, j+k) · dy      [y-dominant]
+    //
+    // For a tanh profile centered at y₀, this sum ≈ y_hi_band − y₀ (a smooth,
+    // always-defined quantity proportional to the interface position).
+    //
+    // Sign convention: to match the iso-contour sign expected by
+    // ComputeHFcurvature_MUSCL (h varies like the interface coordinate),
+    // we store  h = −sign(η_dominant) · h_int.  This gives:
+    //   top surface (η_y > 0):  h ≈ y_interface(i) − const  → h_xx same sign as d²y/dx²
+    //   bottom surface (η_y < 0): same property by symmetry
+    // ComputeHFcurvature_MUSCL is therefore completely unchanged.
+    //
+    // N_int equals nGrow so the band uses the full allocated ghost region.
+    // Increasing nghost to 4 gives a 9-cell band; blocking_factor must be >= nghost
+    // so that FillBoundary can supply all ghost layers from neighbor valid cells.
+    const int N_int = eta_mf[lev]->nGrow();
 
-    // Initialize entire MF to sentinel before filling found crossings.
-    h_eta_mf[lev]->setVal(h_sentinel);
+    h_eta_mf[lev]->setVal(0.0);
 
     for (MFIter mfi(*h_eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
@@ -1469,61 +1476,36 @@ void Hydro2::ComputeHeightFunction (int lev)
             Real ax = std::abs(eta_x(i,j,0));
             Real ay = std::abs(eta_y(i,j,0));
 
-            Real best_dist = 1e20;
-            Real h_val = h_sentinel; // default: no crossing found
-
             if (ay >= ax)
             {
-                // Dominant normal is y → h is y-coordinate of crossing in column i
-                Real cell_y = problo[1] + (j + 0.5) * dx[1];
+                // y-dominant: integrate η over column i in the j-direction.
+                // Flip sign so h ≈ y_interface(i) − const (same convention as
+                // iso-contour h), making ComputeHFcurvature_MUSCL unchanged.
+                Real sn = (eta_y(i,j,0) >= 0.0) ? -1.0 : 1.0;
 
-                int j0 = amrex::max(amrex::max(jlo, jlo_f),     j - N);
-                int j1 = amrex::min(amrex::min(jhi, jhi_f) - 1, j + N);
+                int j0 = amrex::max(amrex::max(jlo, jlo_f), j - N_int);
+                int j1 = amrex::min(amrex::min(jhi, jhi_f), j + N_int);
 
+                Real h_int = 0.0;
                 for (int jj = j0; jj <= j1; ++jj)
-                {
-                    Real e0 = eta_arr(i, jj,   0) - 0.5;
-                    Real e1 = eta_arr(i, jj+1, 0) - 0.5;
+                    h_int += eta_arr(i, jj, 0) * dx[1];
 
-                    if (e0 * e1 <= 0.0)
-                    {
-                        Real denom = e1 - e0;
-                        Real t = (std::abs(denom) > 1e-14) ? (-e0 / denom) : 0.5;
-                        Real y_cross = problo[1] + (jj + 0.5 + t) * dx[1];
-                        Real dist = std::abs(y_cross - cell_y);
-                        if (dist < best_dist) { best_dist = dist; h_val = y_cross; }
-                    }
-                }
+                h_arr(i, j, 0) = sn * h_int;
             }
             else
             {
-                // Dominant normal is x → h is x-coordinate of crossing in row j
-                Real cell_x = problo[0] + (i + 0.5) * dx[0];
+                // x-dominant: integrate η over row j in the i-direction.
+                Real sn = (eta_x(i,j,0) >= 0.0) ? -1.0 : 1.0;
 
-                int i0 = amrex::max(amrex::max(ilo, ilo_f),     i - N);
-                int i1 = amrex::min(amrex::min(ihi, ihi_f) - 1, i + N);
+                int i0 = amrex::max(amrex::max(ilo, ilo_f), i - N_int);
+                int i1 = amrex::min(amrex::min(ihi, ihi_f), i + N_int);
 
+                Real h_int = 0.0;
                 for (int ii = i0; ii <= i1; ++ii)
-                {
-                    Real e0 = eta_arr(ii,   j, 0) - 0.5;
-                    Real e1 = eta_arr(ii+1, j, 0) - 0.5;
+                    h_int += eta_arr(ii, j, 0) * dx[0];
 
-                    if (e0 * e1 <= 0.0)
-                    {
-                        Real denom = e1 - e0;
-                        Real t = (std::abs(denom) > 1e-14) ? (-e0 / denom) : 0.5;
-                        Real x_cross = problo[0] + (ii + 0.5 + t) * dx[0];
-                        Real dist = std::abs(x_cross - cell_x);
-                        if (dist < best_dist) { best_dist = dist; h_val = x_cross; }
-                    }
-                }
+                h_arr(i, j, 0) = sn * h_int;
             }
-
-            // Only write if a crossing was found; otherwise leave the sentinel
-            // (set by setVal above) so that ComputeHFcurvature_MUSCL can detect
-            // unfound neighbors and zero kHF for those cells.
-            if (h_val < 1e20)
-                h_arr(i, j, 0) = h_val;
         });
     }
 
