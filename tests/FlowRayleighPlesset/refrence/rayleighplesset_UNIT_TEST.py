@@ -42,7 +42,7 @@ yt.funcs.mylog.setLevel(40)
 # ============================================================================
 
 # Physical parameters (MUST MATCH YOUR SIMULATION INPUT FILE)
-rho_L = 10.0              # Liquid density [kg/m^3]
+rho_L = 1000.0              # Liquid density [kg/m^3]
 mu_L = 0.1                # Dynamic viscosity [Pa*s]
 S = 7.28                  # Surface tension [N/m]
 p_v = 0.0                 # Vapor pressure [Pa]
@@ -62,7 +62,7 @@ bubble_center_y = 0.0     # Y-coordinate of bubble center [m]
 eta_contour = 0.5         # Interface location (0.5 = midpoint)
 
 # File paths
-amrex_output_dir = r'../../../bin/tests/RayleighPlesset/output_RayleighPlesset_UNIT_TEST'  # Directory containing AMReX plot files
+amrex_output_dir = r'../../../bin/tests/RayleighPlesset/output_RayleighPlesset_UNIT_TEST_REAL'  # Directory containing AMReX plot files
 
 # Analytical RPE solver parameters
 r_inf = 5.0 * R0          # Far-field boundary for RPE
