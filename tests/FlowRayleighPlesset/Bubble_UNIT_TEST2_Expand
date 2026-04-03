@@ -10,13 +10,13 @@ plot_file = ./tests/RayleighPlesset/output_RayleighPlesset_gc-nscbc
 # plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE
 
 ### MESHING ###
-amr.plot_dt = 5e-6
+amr.plot_dt = 0.5e-6
 # amr.plot_int = 1
 amr.max_grid_size = 500000
-amr.blocking_factor = 4 # Must be >= nghost so FillBoundary can fill all ghost layers from neighbor valid cells
+amr.blocking_factor = 2 # Must be >= nghost so FillBoundary can fill all ghost layers from neighbor valid cells
 amr.regrid_int = 1
 amr.grid_eff = 0.8
-amr.max_level = 5
+amr.max_level = 3
 amr.n_cell = 32 32
 
 ### TIME STEPING ###
@@ -28,11 +28,11 @@ dynamictimestep.min = 1e-12
 cfl = 0.3
 
 ### DIMENSIONS ###
-geometry.prob_lo = -0.40 -0.40 0.0
-geometry.prob_hi =  0.40  0.40 0.0
+geometry.prob_lo = -0.10 -0.10 0.0
+geometry.prob_hi =  0.10  0.10 0.0
 geometry.is_periodic = 0 0 0
 
-stop_time = 50e-3
+stop_time = 1e-5
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
@@ -161,8 +161,8 @@ grav = 0.0
 ## DEBUGGING ###
 Riemann_Solver.type = hllc
 kappa_method = 1   # 1:"Smooth Normals" (default)  2:"Height Function"  3:"Hybrid (HF+SN blend)"
-smooth_kernel_size = 5  # Gaussian normal smoothing kernel: 3 (3x3, default) or 5 (5x5)
-nghost = 4             # Ghost cell depth (= N_int for HF band). Requires amr.blocking_factor >= nghost.
+smooth_kernel_size = 3  # Gaussian normal smoothing kernel: 3 (3x3, default) or 5 (5x5)
+nghost = 2             # Ghost cell depth (= N_int for HF band). Requires amr.blocking_factor >= nghost.
 integration.type = ForwardEuler
 # integration.type = RungeKutta
 # implicit_ch = 1

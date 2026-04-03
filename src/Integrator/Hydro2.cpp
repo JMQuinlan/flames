@@ -631,16 +631,22 @@ void Hydro2::Mix(int lev)
     pi_mf[lev]->FillBoundary(geom.periodicity());
 
     // Compute mixture vorticity: ω = ∂v/∂x − ∂u/∂y
-    for (MFIter mfi(*vorticity_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    // Use boundary-aware stencils to avoid reading uninitialized ghost cells
+    // at non-periodic domain boundaries.
     {
-        const Box& bx = mfi.validbox();
-        auto v_arr = velocity_mf[lev]->const_array(mfi);
-        auto omega = vorticity_mf[lev]->array(mfi);
-        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        const Box domain = geom.Domain();
+        for (MFIter mfi(*vorticity_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
         {
-            Set::Matrix grad_v = Numeric::Gradient(v_arr, i, j, k, DX);
-            omega(i, j, k) = grad_v(1, 0) - grad_v(0, 1); // dv/dx - du/dy
-        });
+            const Box& bx = mfi.validbox();
+            auto v_arr = velocity_mf[lev]->const_array(mfi);
+            auto omega = vorticity_mf[lev]->array(mfi);
+            ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+            {
+                auto sten = Numeric::GetStencil(i, j, k, domain);
+                Set::Matrix grad_v = Numeric::Gradient(v_arr, i, j, k, DX, sten);
+                omega(i, j, k) = grad_v(1, 0) - grad_v(0, 1); // dv/dx - du/dy
+            });
+        }
     }
 }
 
@@ -1453,7 +1459,7 @@ void Hydro2::ApplyImplicitCH_Newton(int lev, Set::Scalar dt)
             });
         }
         res_norm = rhs_mf.norm0();
-        Util::ParallelMessage(INFO, "  CH Newton iter ", iter, " residual: ", res_norm);
+        // Util::ParallelMessage(INFO, "  CH Newton iter ", iter, " residual: ", res_norm);
         if (res_norm < ch_newton_tol) break;
 
         // Solve (I + dt·M·ε²·∇⁴) δη = rhs_newton via double-Helmholtz
@@ -2338,7 +2344,9 @@ void Hydro2::ApplyNSCBC(
                     //   Shear:    L3   = eta_relax*(a/L)             *(ut - ut_t) - T3
                     //   (for lo side L4 is incoming; for hi side L1 is incoming)
                     // --------------------------------------------------------
-                    Real K = nscbc_sigma_ * a_b * (1.0 - M_loc*M_loc) / Ln_;
+                    // K has units s/m² to match the L-amplitude convention
+                    // (L_k = λ_k/(2a²) * characteristic_gradient, so K = σ/(a*L) not σ*a/L)
+                    Real K = nscbc_sigma_ * (1.0 - M_loc*M_loc) / (a_b * Ln_);
 
                     // Local temperature (needed for inflow entropy relaxation, Motheau Eq. 43)
                     Real eta_b  = eta_r(i,j,k);
@@ -2355,7 +2363,7 @@ void Hydro2::ApplyNSCBC(
                     }
                     else if (ftype == FT::INFLOW) {
                         Real er = eta_r_;
-                        Real K_acoustic = er * rho_b * a2_b * (1.0 - M_loc*M_loc) / Ln_;
+                        Real K_acoustic = er * rho_b * (1.0 - M_loc*M_loc) / Ln_;
                         Real K_entropy  = er * rho_b * a_b * (gm_b - 1.0) / Ln_;
                         Real K_shear    = er * a_b / Ln_;
                         if (side_ == 1) {  // hi boundary: L1 is incoming
@@ -2450,214 +2458,215 @@ void Hydro2::ApplyNSCBC(
         //   Ghost col:  (N,M+1), (N,M+2)  -- filled by yhi kernel above
         //   Ghost corner: (N+1,M+1), (N+2,M+1), (N+1,M+2), (N+2,M+2)  -- need corner fill
         // =====================================================================
-        for (int cx = 0; cx < 2; ++cx)  // cx=0 → xlo, cx=1 → xhi
-        for (int cy = 0; cy < 2; ++cy)  // cy=0 → ylo, cy=1 → yhi
-        {
-            int fx = cx;           // face index for x: 0=xlo, 1=xhi
-            int fy = 2 + cy;       // face index for y: 2=ylo, 3=yhi
-
-            if (face_types[fx] == FT::NONE) continue;
-            if (face_types[fy] == FT::NONE) continue;
-
-            // Check if this tile touches both corner-contributing boundaries
-            int ibdry_x = (cx == 0) ? domain.smallEnd(0) : domain.bigEnd(0);
-            int ibdry_y = (cy == 0) ? domain.smallEnd(1) : domain.bigEnd(1);
-
-            bool touch_x = (cx == 0) ? (vbx.smallEnd(0) == domain.smallEnd(0))
-                                      : (vbx.bigEnd  (0) == domain.bigEnd  (0));
-            bool touch_y = (cy == 0) ? (vbx.smallEnd(1) == domain.smallEnd(1))
-                                      : (vbx.bigEnd  (1) == domain.bigEnd  (1));
-
-            if (!touch_x || !touch_y) continue;
-
-            // nghost ghost cells to fill in each direction (max 2 since nghost=2)
-            int ng = amrex::min(rho_mf_in.nGrow(), 2);
-
-            // Build a box over the corner ghost cells.
-            // sign_x: +1 for xhi ghosts, -1 for xlo ghosts
-            int sx = (cx == 1) ?  1 : -1;
-            int sy = (cy == 1) ?  1 : -1;
-
-            Box corner_box;
-            corner_box.setSmall(0, (cx == 1) ? ibdry_x + 1 : ibdry_x - ng);
-            corner_box.setBig  (0, (cx == 1) ? ibdry_x + ng: ibdry_x - 1);
-            corner_box.setSmall(1, (cy == 1) ? ibdry_y + 1 : ibdry_y - ng);
-            corner_box.setBig  (1, (cy == 1) ? ibdry_y + ng: ibdry_y - 1);
-#if AMREX_SPACEDIM == 3
-            corner_box.setSmall(2, domain.smallEnd(2));
-            corner_box.setBig  (2, domain.bigEnd  (2));
-#endif
-
-            // Capture per-face scalars for the corner kernel
-            Real px_t_  = face_p_t[fx];
-            Real py_t_  = face_p_t[fy];
-            FT   ftx    = face_types[fx];
-            FT   fty    = face_types[fy];
-            Real etar_x = face_eta_r[fx];
-            Real etar_y = face_eta_r[fy];
-            Real un_t_x = face_un_t[fx];
-            Real un_t_y = face_un_t[fy];
-
-            ParallelFor(corner_box, [=] AMREX_GPU_DEVICE (int i, int j, int k)
-            {
-                // Physical corner cell (at the actual domain boundary intersection)
-                int ic = ibdry_x, jc = ibdry_y;
-
-                // --- Primitives at corner boundary cell ---
-                Real rho_c, un_c, ut_c, p_c, a_c, gm_c, pi_c;
-                compute_prim(eta_r, rho_r, M_r, E_r, ic, jc, k, 0,
-                             rho_c, un_c, ut_c, p_c, a_c, gm_c, pi_c);
-                // For y-direction, "un" = vy, "ut" = vx
-                Real vx_c = un_c, vy_c = ut_c;  // from dir=0 call: un=vx, ut=vy
-                Real a2_c = a_c * a_c;
-                Real Mx_c = std::abs(vx_c) / (a_c + 1.0e-14);
-                Real My_c = std::abs(vy_c) / (a_c + 1.0e-14);
-
-                // --- x-direction: one-sided FD at corner (ic, jc) ---
-                // Interior neighbors in x
-                int im1 = ic - sx, im2 = ic - 2*sx;
-                Real rho_xm1, un_xm1, ut_xm1, p_xm1, a_xm1, gm_xm1, pi_xm1;
-                compute_prim(eta_r, rho_r, M_r, E_r, im1, jc, k, 0,
-                             rho_xm1, un_xm1, ut_xm1, p_xm1, a_xm1, gm_xm1, pi_xm1);
-                Real rho_xm2, un_xm2, ut_xm2, p_xm2, a_xm2, gm_xm2, pi_xm2;
-                compute_prim(eta_r, rho_r, M_r, E_r, im2, jc, k, 0,
-                             rho_xm2, un_xm2, ut_xm2, p_xm2, a_xm2, gm_xm2, pi_xm2);
-
-                Real fdx = (Real)sx;  // positive for hi (backward diff), negative for lo (forward diff)
-                Real drho_dx_c = fdx * (3.0*rho_c - 4.0*rho_xm1 + rho_xm2) / (2.0*DX[0]);
-                Real dvx_dx_c  = fdx * (3.0*vx_c  - 4.0*un_xm1  + un_xm2 ) / (2.0*DX[0]);
-                Real dvy_dx_c  = fdx * (3.0*vy_c  - 4.0*ut_xm1  + ut_xm2 ) / (2.0*DX[0]);
-                Real dp_dx_c   = fdx * (3.0*p_c   - 4.0*p_xm1   + p_xm2  ) / (2.0*DX[0]);
-
-                // --- y-direction: one-sided FD at corner (ic, jc) ---
-                int jm1 = jc - sy, jm2 = jc - 2*sy;
-                Real rho_ym1, vn_ym1, vt_ym1, p_ym1, a_ym1, gm_ym1, pi_ym1;
-                compute_prim(eta_r, rho_r, M_r, E_r, ic, jm1, k, 1,
-                             rho_ym1, vn_ym1, vt_ym1, p_ym1, a_ym1, gm_ym1, pi_ym1);
-                Real rho_ym2, vn_ym2, vt_ym2, p_ym2, a_ym2, gm_ym2, pi_ym2;
-                compute_prim(eta_r, rho_r, M_r, E_r, ic, jm2, k, 1,
-                             rho_ym2, vn_ym2, vt_ym2, p_ym2, a_ym2, gm_ym2, pi_ym2);
-                // For y-direction (dir=1): un=vy, ut=vx in compute_prim output
-                Real drho_dy_c = (Real)sy * (3.0*rho_c - 4.0*rho_ym1 + rho_ym2) / (2.0*DX[1]);
-                Real dvy_dy_c  = (Real)sy * (3.0*vy_c  - 4.0*vn_ym1  + vn_ym2 ) / (2.0*DX[1]);
-                Real dvx_dy_c  = (Real)sy * (3.0*vx_c  - 4.0*vt_ym1  + vt_ym2 ) / (2.0*DX[1]);
-                Real dp_dy_c   = (Real)sy * (3.0*p_c   - 4.0*p_ym1   + p_ym2  ) / (2.0*DX[1]);
-
-                // --- LODI wave amplitudes from x-direction at corner ---
-                // L1_x (incoming at hi, outgoing at lo), L4_x (incoming at lo, outgoing at hi)
-                Real L1_x = (vx_c - a_c) / (2.0*a2_c) * (dp_dx_c - rho_c*a_c*dvx_dx_c);
-                Real L2_x = (std::abs(vx_c) > 1.0e-14) ?
-                             vx_c / a2_c * (a2_c*drho_dx_c - dp_dx_c) : 0.0;
-                Real L3_x = (std::abs(vx_c) > 1.0e-14) ?
-                             vx_c * dvy_dx_c : 0.0;
-                Real L4_x = (vx_c + a_c) / (2.0*a2_c) * (dp_dx_c + rho_c*a_c*dvx_dx_c);
-
-                // --- LODI wave amplitudes from y-direction at corner ---
-                Real L1_y = (vy_c - a_c) / (2.0*a2_c) * (dp_dy_c - rho_c*a_c*dvy_dy_c);
-                Real L2_y = (std::abs(vy_c) > 1.0e-14) ?
-                             vy_c / a2_c * (a2_c*drho_dy_c - dp_dy_c) : 0.0;
-                Real L3_y = (std::abs(vy_c) > 1.0e-14) ?
-                             vy_c * dvx_dy_c : 0.0;
-                Real L4_y = (vy_c + a_c) / (2.0*a2_c) * (dp_dy_c + rho_c*a_c*dvy_dy_c);
-
-                // --- Identify incoming acoustic waves for this corner ---
-                // hi-x: L1_x incoming; lo-x: L4_x incoming
-                // hi-y: L1_y incoming; lo-y: L4_y incoming
-                Real& Lx_in = (cx == 1) ? L1_x : L4_x;
-                Real& Ly_in = (cy == 1) ? L1_y : L4_y;
-
-                Real Kx = nscbc_sigma_ * a_c * (1.0 - Mx_c*Mx_c) / Lx_;
-                Real Ky = nscbc_sigma_ * a_c * (1.0 - My_c*My_c) / Ly_;
-                Real ab = (1.0 - nscbc_beta_) / 2.0;
-
-                if (ftx == FT::OUTFLOW && fty == FT::OUTFLOW)
-                {
-                    // Motheau Eq. 56: coupled outflow/outflow system
-                    //   Lx_in + ab * Ly_in = Kx * (p - pt)
-                    //   ab * Lx_in + Ly_in = Ky * (p - pt)
-                    Real bx = Kx * (p_c - px_t_);
-                    Real by = Ky * (p_c - py_t_);
-                    Real det_inv = 1.0 / (1.0 - ab*ab + 1.0e-20);
-                    Lx_in = det_inv * (bx - ab*by);
-                    Ly_in = det_inv * (by - ab*bx);
-                }
-                else if (ftx == FT::OUTFLOW && fty == FT::INFLOW)
-                {
-                    // Motheau Eq. 58: inflow/outflow compatibility: Ly_in = 0
-                    Ly_in = 0.0;
-                    Lx_in = Kx * (p_c - px_t_);
-                }
-                else if (ftx == FT::INFLOW && fty == FT::OUTFLOW)
-                {
-                    Lx_in = 0.0;
-                    Ly_in = Ky * (p_c - py_t_);
-                }
-                else if (ftx == FT::INFLOW && fty == FT::INFLOW)
-                {
-                    Real Kax = etar_x * rho_c * a2_c * (1.0 - Mx_c*Mx_c) / Lx_;
-                    Real Kay = etar_y * rho_c * a2_c * (1.0 - My_c*My_c) / Ly_;
-                    // x incoming: relax vx toward un_t_x; y incoming: relax vy toward un_t_y
-                    Lx_in = (cx == 1) ? (-Kax * (vx_c - un_t_x))
-                                      : ( Kax * (vx_c - un_t_x));
-                    Ly_in = (cy == 1) ? (-Kay * (vy_c - un_t_y))
-                                      : ( Kay * (vy_c - un_t_y));
-                }
-
-                // --- Reconstruct normal-direction gradients ---
-                // X-direction
-                Real xi1_x = L1_x / (vx_c - a_c);
-                Real xi2_x = (std::abs(vx_c) > 1.0e-14) ? L2_x / vx_c : 0.0;
-                Real xi3_x = (std::abs(vx_c) > 1.0e-14) ? L3_x / vx_c : 0.0;
-                Real xi4_x = L4_x / (vx_c + a_c);
-
-                Real drho_dx_new = xi1_x + xi2_x + xi4_x;
-                Real dvx_dx_new  = (-a_c/rho_c)*xi1_x + (a_c/rho_c)*xi4_x;
-                Real dvy_dx_new  = xi3_x;
-                Real dp_dx_new   = a2_c * (xi1_x + xi4_x);
-
-                // Y-direction
-                Real xi1_y = L1_y / (vy_c - a_c);
-                Real xi2_y = (std::abs(vy_c) > 1.0e-14) ? L2_y / vy_c : 0.0;
-                Real xi3_y = (std::abs(vy_c) > 1.0e-14) ? L3_y / vy_c : 0.0;
-                Real xi4_y = L4_y / (vy_c + a_c);
-
-                Real drho_dy_new = xi1_y + xi2_y + xi4_y;
-                Real dvy_dy_new  = (-a_c/rho_c)*xi1_y + (a_c/rho_c)*xi4_y;
-                Real dvx_dy_new  = xi3_y;
-                Real dp_dy_new   = a2_c * (xi1_y + xi4_y);
-
-                // --- Fill this ghost corner cell from both direction gradients ---
-                // Offset of this ghost cell from the corner cell (ic, jc)
-                int ox = i - ic;   // +1 or +2 for hi, -1 or -2 for lo
-                int oy = j - jc;
-
-                Real rho_g = rho_c + (Real)ox*DX[0]*drho_dx_new
-                                   + (Real)oy*DX[1]*drho_dy_new;
-                Real vx_g  = vx_c  + (Real)ox*DX[0]*dvx_dx_new
-                                   + (Real)oy*DX[1]*dvx_dy_new;
-                Real vy_g  = vy_c  + (Real)ox*DX[0]*dvy_dx_new
-                                   + (Real)oy*DX[1]*dvy_dy_new;
-                Real p_g   = p_c   + (Real)ox*DX[0]*dp_dx_new
-                                   + (Real)oy*DX[1]*dp_dy_new;
-
-                rho_g = amrex::max(rho_g, 1.0e-14);
-                p_g   = amrex::max(p_g,   1.0e-6);
-
-                // Store as conserved (use dir=0 since we already have vx,vy separately)
-                Real eta_g = eta_r(i, j, k);
-                Real gm_g, pi_g;
-                Thermo_Interp::InterpolateGammaPi_Stiffened(
-                    eta_g, g1_, g0_, pi1_, pi0_, gm_g, pi_g);
-                Real UE_g = (p_g + gm_g*pi_g - pref_) / (gm_g - 1.0);
-                if (UE_g < 0.0) UE_g = 0.0;
-                Real KE_g = 0.5 * rho_g * (vx_g*vx_g + vy_g*vy_g);
-
-                rho_a(i,j,k)   = rho_g;
-                M_a  (i,j,k,0) = rho_g * vx_g;
-                M_a  (i,j,k,1) = rho_g * vy_g;
-                E_a  (i,j,k)   = UE_g + KE_g;
-            });
-        }  // corner (cx, cy)
+//         for (int cx = 0; cx < 2; ++cx)  // cx=0 → xlo, cx=1 → xhi
+//         for (int cy = 0; cy < 2; ++cy)  // cy=0 → ylo, cy=1 → yhi
+//         {
+//             int fx = cx;           // face index for x: 0=xlo, 1=xhi
+//             int fy = 2 + cy;       // face index for y: 2=ylo, 3=yhi
+// 
+//             if (face_types[fx] == FT::NONE) continue;
+//             if (face_types[fy] == FT::NONE) continue;
+// 
+//             // Check if this tile touches both corner-contributing boundaries
+//             int ibdry_x = (cx == 0) ? domain.smallEnd(0) : domain.bigEnd(0);
+//             int ibdry_y = (cy == 0) ? domain.smallEnd(1) : domain.bigEnd(1);
+// 
+//             bool touch_x = (cx == 0) ? (vbx.smallEnd(0) == domain.smallEnd(0))
+//                                       : (vbx.bigEnd  (0) == domain.bigEnd  (0));
+//             bool touch_y = (cy == 0) ? (vbx.smallEnd(1) == domain.smallEnd(1))
+//                                       : (vbx.bigEnd  (1) == domain.bigEnd  (1));
+// 
+//             if (!touch_x || !touch_y) continue;
+// 
+//             // nghost ghost cells to fill in each direction (max 2 since nghost=2)
+//             int ng = amrex::min(rho_mf_in.nGrow(), 2);
+// 
+//             // Build a box over the corner ghost cells.
+//             // sign_x: +1 for xhi ghosts, -1 for xlo ghosts
+//             int sx = (cx == 1) ?  1 : -1;
+//             int sy = (cy == 1) ?  1 : -1;
+// 
+//             Box corner_box;
+//             corner_box.setSmall(0, (cx == 1) ? ibdry_x + 1 : ibdry_x - ng);
+//             corner_box.setBig  (0, (cx == 1) ? ibdry_x + ng: ibdry_x - 1);
+//             corner_box.setSmall(1, (cy == 1) ? ibdry_y + 1 : ibdry_y - ng);
+//             corner_box.setBig  (1, (cy == 1) ? ibdry_y + ng: ibdry_y - 1);
+// #if AMREX_SPACEDIM == 3
+//             corner_box.setSmall(2, domain.smallEnd(2));
+//             corner_box.setBig  (2, domain.bigEnd  (2));
+// #endif
+// 
+//             // Capture per-face scalars for the corner kernel
+//             Real px_t_  = face_p_t[fx];
+//             Real py_t_  = face_p_t[fy];
+//             FT   ftx    = face_types[fx];
+//             FT   fty    = face_types[fy];
+//             Real etar_x = face_eta_r[fx];
+//             Real etar_y = face_eta_r[fy];
+//             Real un_t_x = face_un_t[fx];
+//             Real un_t_y = face_un_t[fy];
+// 
+//             ParallelFor(corner_box, [=] AMREX_GPU_DEVICE (int i, int j, int k)
+//             {
+//                 // Physical corner cell (at the actual domain boundary intersection)
+//                 int ic = ibdry_x, jc = ibdry_y;
+// 
+//                 // --- Primitives at corner boundary cell ---
+//                 Real rho_c, un_c, ut_c, p_c, a_c, gm_c, pi_c;
+//                 compute_prim(eta_r, rho_r, M_r, E_r, ic, jc, k, 0,
+//                              rho_c, un_c, ut_c, p_c, a_c, gm_c, pi_c);
+//                 // For y-direction, "un" = vy, "ut" = vx
+//                 Real vx_c = un_c, vy_c = ut_c;  // from dir=0 call: un=vx, ut=vy
+//                 Real a2_c = a_c * a_c;
+//                 Real Mx_c = std::abs(vx_c) / (a_c + 1.0e-14);
+//                 Real My_c = std::abs(vy_c) / (a_c + 1.0e-14);
+// 
+//                 // --- x-direction: one-sided FD at corner (ic, jc) ---
+//                 // Interior neighbors in x
+//                 int im1 = ic - sx, im2 = ic - 2*sx;
+//                 Real rho_xm1, un_xm1, ut_xm1, p_xm1, a_xm1, gm_xm1, pi_xm1;
+//                 compute_prim(eta_r, rho_r, M_r, E_r, im1, jc, k, 0,
+//                              rho_xm1, un_xm1, ut_xm1, p_xm1, a_xm1, gm_xm1, pi_xm1);
+//                 Real rho_xm2, un_xm2, ut_xm2, p_xm2, a_xm2, gm_xm2, pi_xm2;
+//                 compute_prim(eta_r, rho_r, M_r, E_r, im2, jc, k, 0,
+//                              rho_xm2, un_xm2, ut_xm2, p_xm2, a_xm2, gm_xm2, pi_xm2);
+// 
+//                 Real fdx = (Real)sx;  // positive for hi (backward diff), negative for lo (forward diff)
+//                 Real drho_dx_c = fdx * (3.0*rho_c - 4.0*rho_xm1 + rho_xm2) / (2.0*DX[0]);
+//                 Real dvx_dx_c  = fdx * (3.0*vx_c  - 4.0*un_xm1  + un_xm2 ) / (2.0*DX[0]);
+//                 Real dvy_dx_c  = fdx * (3.0*vy_c  - 4.0*ut_xm1  + ut_xm2 ) / (2.0*DX[0]);
+//                 Real dp_dx_c   = fdx * (3.0*p_c   - 4.0*p_xm1   + p_xm2  ) / (2.0*DX[0]);
+// 
+//                 // --- y-direction: one-sided FD at corner (ic, jc) ---
+//                 int jm1 = jc - sy, jm2 = jc - 2*sy;
+//                 Real rho_ym1, vn_ym1, vt_ym1, p_ym1, a_ym1, gm_ym1, pi_ym1;
+//                 compute_prim(eta_r, rho_r, M_r, E_r, ic, jm1, k, 1,
+//                              rho_ym1, vn_ym1, vt_ym1, p_ym1, a_ym1, gm_ym1, pi_ym1);
+//                 Real rho_ym2, vn_ym2, vt_ym2, p_ym2, a_ym2, gm_ym2, pi_ym2;
+//                 compute_prim(eta_r, rho_r, M_r, E_r, ic, jm2, k, 1,
+//                              rho_ym2, vn_ym2, vt_ym2, p_ym2, a_ym2, gm_ym2, pi_ym2);
+//                 // For y-direction (dir=1): un=vy, ut=vx in compute_prim output
+//                 Real drho_dy_c = (Real)sy * (3.0*rho_c - 4.0*rho_ym1 + rho_ym2) / (2.0*DX[1]);
+//                 Real dvy_dy_c  = (Real)sy * (3.0*vy_c  - 4.0*vn_ym1  + vn_ym2 ) / (2.0*DX[1]);
+//                 Real dvx_dy_c  = (Real)sy * (3.0*vx_c  - 4.0*vt_ym1  + vt_ym2 ) / (2.0*DX[1]);
+//                 Real dp_dy_c   = (Real)sy * (3.0*p_c   - 4.0*p_ym1   + p_ym2  ) / (2.0*DX[1]);
+// 
+//                 // --- LODI wave amplitudes from x-direction at corner ---
+//                 // L1_x (incoming at hi, outgoing at lo), L4_x (incoming at lo, outgoing at hi)
+//                 Real L1_x = (vx_c - a_c) / (2.0*a2_c) * (dp_dx_c - rho_c*a_c*dvx_dx_c);
+//                 Real L2_x = (std::abs(vx_c) > 1.0e-14) ?
+//                              vx_c / a2_c * (a2_c*drho_dx_c - dp_dx_c) : 0.0;
+//                 Real L3_x = (std::abs(vx_c) > 1.0e-14) ?
+//                              vx_c * dvy_dx_c : 0.0;
+//                 Real L4_x = (vx_c + a_c) / (2.0*a2_c) * (dp_dx_c + rho_c*a_c*dvx_dx_c);
+// 
+//                 // --- LODI wave amplitudes from y-direction at corner ---
+//                 Real L1_y = (vy_c - a_c) / (2.0*a2_c) * (dp_dy_c - rho_c*a_c*dvy_dy_c);
+//                 Real L2_y = (std::abs(vy_c) > 1.0e-14) ?
+//                              vy_c / a2_c * (a2_c*drho_dy_c - dp_dy_c) : 0.0;
+//                 Real L3_y = (std::abs(vy_c) > 1.0e-14) ?
+//                              vy_c * dvx_dy_c : 0.0;
+//                 Real L4_y = (vy_c + a_c) / (2.0*a2_c) * (dp_dy_c + rho_c*a_c*dvy_dy_c);
+// 
+//                 // --- Identify incoming acoustic waves for this corner ---
+//                 // hi-x: L1_x incoming; lo-x: L4_x incoming
+//                 // hi-y: L1_y incoming; lo-y: L4_y incoming
+//                 Real& Lx_in = (cx == 1) ? L1_x : L4_x;
+//                 Real& Ly_in = (cy == 1) ? L1_y : L4_y;
+// 
+//                 Real Kx = nscbc_sigma_ * (1.0 - Mx_c*Mx_c) / (a_c * Lx_);
+//                 Real Ky = nscbc_sigma_ * (1.0 - My_c*My_c) / (a_c * Ly_);
+//                 Real ab = (1.0 - nscbc_beta_) / 2.0;
+// 
+//                 if (ftx == FT::OUTFLOW && fty == FT::OUTFLOW)
+//                 {
+//                     // Motheau Eq. 56: coupled outflow/outflow system
+//                     //   Lx_in + ab * Ly_in = Kx * (p - pt)
+//                     //   ab * Lx_in + Ly_in = Ky * (p - pt)
+//                     Real bx = Kx * (p_c - px_t_);
+//                     Real by = Ky * (p_c - py_t_);
+//                     Real det_inv = 1.0 / (1.0 - ab*ab + 1.0e-20);
+//                     Lx_in = det_inv * (bx - ab*by);
+//                     Ly_in = det_inv * (by - ab*bx);
+//                 }
+//                 else if (ftx == FT::OUTFLOW && fty == FT::INFLOW)
+//                 {
+//                     // Motheau Eq. 58: inflow/outflow compatibility: Ly_in = 0
+//                     Ly_in = 0.0;
+//                     Lx_in = Kx * (p_c - px_t_);
+//                 }
+//                 else if (ftx == FT::INFLOW && fty == FT::OUTFLOW)
+//                 {
+//                     Lx_in = 0.0;
+//                     Ly_in = Ky * (p_c - py_t_);
+//                 }
+//                 else if (ftx == FT::INFLOW && fty == FT::INFLOW)
+//                 {
+//                     Real Kax = etar_x * rho_c * (1.0 - Mx_c*Mx_c) / Lx_;
+//                     Real Kay = etar_y * rho_c * (1.0 - My_c*My_c) / Ly_;
+//                     // x incoming: relax vx toward un_t_x; y incoming: relax vy toward un_t_y
+//                     Lx_in = (cx == 1) ? (-Kax * (vx_c - un_t_x))
+//                                       : ( Kax * (vx_c - un_t_x));
+//                     Ly_in = (cy == 1) ? (-Kay * (vy_c - un_t_y))
+//                                       : ( Kay * (vy_c - un_t_y));
+//                 }
+// 
+//                 // --- Reconstruct normal-direction gradients ---
+//                 // X-direction
+//                 Real xi1_x = L1_x / (vx_c - a_c);
+//                 Real xi2_x = (std::abs(vx_c) > 1.0e-14) ? L2_x / vx_c : 0.0;
+//                 Real xi3_x = (std::abs(vx_c) > 1.0e-14) ? L3_x / vx_c : 0.0;
+//                 Real xi4_x = L4_x / (vx_c + a_c);
+// 
+//                 Real drho_dx_new = xi1_x + xi2_x + xi4_x;
+//                 Real dvx_dx_new  = (-a_c/rho_c)*xi1_x + (a_c/rho_c)*xi4_x;
+//                 Real dvy_dx_new  = xi3_x;
+//                 Real dp_dx_new   = a2_c * (xi1_x + xi4_x);
+// 
+//                 // Y-direction
+//                 Real xi1_y = L1_y / (vy_c - a_c);
+//                 Real xi2_y = (std::abs(vy_c) > 1.0e-14) ? L2_y / vy_c : 0.0;
+//                 Real xi3_y = (std::abs(vy_c) > 1.0e-14) ? L3_y / vy_c : 0.0;
+//                 Real xi4_y = L4_y / (vy_c + a_c);
+// 
+//                 Real drho_dy_new = xi1_y + xi2_y + xi4_y;
+//                 Real dvy_dy_new  = (-a_c/rho_c)*xi1_y + (a_c/rho_c)*xi4_y;
+//                 Real dvx_dy_new  = xi3_y;
+//                 Real dp_dy_new   = a2_c * (xi1_y + xi4_y);
+// 
+//                 // --- Fill this ghost corner cell from both direction gradients ---
+//                 // Offset of this ghost cell from the corner cell (ic, jc)
+//                 int ox = i - ic;   // +1 or +2 for hi, -1 or -2 for lo
+//                 int oy = j - jc;
+// 
+//                 Real rho_g = rho_c + (Real)ox*DX[0]*drho_dx_new
+//                                    + (Real)oy*DX[1]*drho_dy_new;
+//                 Real vx_g  = vx_c  + (Real)ox*DX[0]*dvx_dx_new
+//                                    + (Real)oy*DX[1]*dvx_dy_new;
+//                 Real vy_g  = vy_c  + (Real)ox*DX[0]*dvy_dx_new
+//                                    + (Real)oy*DX[1]*dvy_dy_new;
+//                 Real p_g   = p_c   + (Real)ox*DX[0]*dp_dx_new
+//                                    + (Real)oy*DX[1]*dp_dy_new;
+// 
+//                 rho_g = amrex::max(rho_g, 1.0e-14);
+//                 p_g   = amrex::max(p_g,   1.0e-6);
+// 
+//                 // Store as conserved (use dir=0 since we already have vx,vy separately)
+//                 Real eta_g = eta_r(i, j, k);
+//                 Real gm_g, pi_g;
+//                 Thermo_Interp::InterpolateGammaPi_Stiffened(
+//                     eta_g, g1_, g0_, pi1_, pi0_, gm_g, pi_g);
+//                 Real UE_g = (p_g + gm_g*pi_g - pref_) / (gm_g - 1.0);
+//                 if (UE_g < 0.0) UE_g = 0.0;
+//                 Real KE_g = 0.5 * rho_g * (vx_g*vx_g + vy_g*vy_g);
+// 
+//                 rho_a(i,j,k)   = rho_g;
+//                 M_a  (i,j,k,0) = rho_g * vx_g;
+//                 M_a  (i,j,k,1) = rho_g * vy_g;
+//                 E_a  (i,j,k)   = UE_g + KE_g;
+//             });
+//         }  // corner (cx, cy)
+//         
     }  // MFIter
 }
 
