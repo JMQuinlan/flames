@@ -6,8 +6,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-# plot_file = ./tests/RayleighPlesset/output_RayleighPlesset_UNIT_TEST
-plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE
+plot_file = ./tests/RayleighPlesset/output_RayleighPlesset_gc-nscbc
+# plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE
 
 ### MESHING ###
 amr.plot_dt = 5e-6
@@ -174,3 +174,16 @@ implicit_ch = 2
   ch_newton_iters = 5       # default, usually converges in 3
   ch_newton_tol = 1e-10     # default
   ch_W_scale = 1.0          # double-well amplitude (1.0 = standard; >1 narrows interface, <1 widens)
+
+
+nscbc.enabled   = true
+  nscbc.sigma     = 0.25
+  nscbc.beta      = 0.5
+  nscbc.xlo       = outflow
+  nscbc.xlo.p_target = 1.0e6   # Pa
+  nscbc.xhi       = outflow
+  nscbc.xhi.p_target  = 1.0e6  # Pa
+  nscbc.ylo       = outflow
+  nscbc.ylo.p_target = 1.0e6   # Pa
+  nscbc.yhi       = outflow
+  nscbc.yhi.p_target  = 1.0e6  # Pa

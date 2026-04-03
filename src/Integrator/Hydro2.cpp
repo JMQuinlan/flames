@@ -328,6 +328,62 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         Util::ParallelMessage(INFO, "Van Leer   : 2");
         Util::Abort(INFO);
     }
+
+    // -----------------------------------------------------------------------
+    // GC-NSCBC parameters (Motheau 2017)
+    // -----------------------------------------------------------------------
+    pp_query_default("nscbc.enabled", value.nscbc.enabled, false); // Enable GC-NSCBC boundary conditions
+
+    if (value.nscbc.enabled)
+    {
+        using FT = Hydro2::NSCBCParams::FaceType;
+        auto parse_face_type = [](const std::string& s) -> FT {
+            if (s == "outflow") return FT::OUTFLOW;
+            if (s == "inflow")  return FT::INFLOW;
+            return FT::NONE;
+        };
+
+        pp_query_default("nscbc.sigma", value.nscbc.sigma, 0.25); // Outflow pressure relaxation strength (Motheau sigma)
+        pp_query_default("nscbc.beta",  value.nscbc.beta,  0.5);  // Transverse term weight in [0,1]
+        pp_query_default("nscbc.Lx",    value.nscbc.Lx,    0.0);  // x-domain length for K (0 = auto from geometry)
+        pp_query_default("nscbc.Ly",    value.nscbc.Ly,    0.0);  // y-domain length for K (0 = auto from geometry)
+
+        // xlo face
+        { std::string s = "none"; pp.query("nscbc.xlo", s); // Face type: none | outflow | inflow
+          value.nscbc.face_type[0] = parse_face_type(s); }
+        pp_query_default("nscbc.xlo.p_target",  value.nscbc.p_t[0],      0.0);   // Target pressure at xlo [Pa]
+        pp_query_default("nscbc.xlo.un_target", value.nscbc.un_t[0],     0.0);   // Target normal velocity at xlo [m/s]
+        pp_query_default("nscbc.xlo.ut_target", value.nscbc.ut_t[0],     0.0);   // Target tangential velocity at xlo [m/s]
+        pp_query_default("nscbc.xlo.T_target",  value.nscbc.T_t[0],    300.0);   // Target temperature at xlo [K]
+        pp_query_default("nscbc.xlo.eta_relax", value.nscbc.eta_relax[0], 2.0);  // Inflow relaxation factor at xlo
+
+        // xhi face
+        { std::string s = "none"; pp.query("nscbc.xhi", s); // Face type: none | outflow | inflow
+          value.nscbc.face_type[1] = parse_face_type(s); }
+        pp_query_default("nscbc.xhi.p_target",  value.nscbc.p_t[1],      0.0);   // Target pressure at xhi [Pa]
+        pp_query_default("nscbc.xhi.un_target", value.nscbc.un_t[1],     0.0);   // Target normal velocity at xhi [m/s]
+        pp_query_default("nscbc.xhi.ut_target", value.nscbc.ut_t[1],     0.0);   // Target tangential velocity at xhi [m/s]
+        pp_query_default("nscbc.xhi.T_target",  value.nscbc.T_t[1],    300.0);   // Target temperature at xhi [K]
+        pp_query_default("nscbc.xhi.eta_relax", value.nscbc.eta_relax[1], 2.0);  // Inflow relaxation factor at xhi
+
+        // ylo face
+        { std::string s = "none"; pp.query("nscbc.ylo", s); // Face type: none | outflow | inflow
+          value.nscbc.face_type[2] = parse_face_type(s); }
+        pp_query_default("nscbc.ylo.p_target",  value.nscbc.p_t[2],      0.0);   // Target pressure at ylo [Pa]
+        pp_query_default("nscbc.ylo.un_target", value.nscbc.un_t[2],     0.0);   // Target normal velocity at ylo [m/s]
+        pp_query_default("nscbc.ylo.ut_target", value.nscbc.ut_t[2],     0.0);   // Target tangential velocity at ylo [m/s]
+        pp_query_default("nscbc.ylo.T_target",  value.nscbc.T_t[2],    300.0);   // Target temperature at ylo [K]
+        pp_query_default("nscbc.ylo.eta_relax", value.nscbc.eta_relax[2], 2.0);  // Inflow relaxation factor at ylo
+
+        // yhi face
+        { std::string s = "none"; pp.query("nscbc.yhi", s); // Face type: none | outflow | inflow
+          value.nscbc.face_type[3] = parse_face_type(s); }
+        pp_query_default("nscbc.yhi.p_target",  value.nscbc.p_t[3],      0.0);   // Target pressure at yhi [Pa]
+        pp_query_default("nscbc.yhi.un_target", value.nscbc.un_t[3],     0.0);   // Target normal velocity at yhi [m/s]
+        pp_query_default("nscbc.yhi.ut_target", value.nscbc.ut_t[3],     0.0);   // Target tangential velocity at yhi [m/s]
+        pp_query_default("nscbc.yhi.T_target",  value.nscbc.T_t[3],    300.0);   // Target temperature at yhi [K]
+        pp_query_default("nscbc.yhi.eta_relax", value.nscbc.eta_relax[3], 2.0);  // Inflow relaxation factor at yhi
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1946,6 +2002,666 @@ void Hydro2::ComputeKappas(int lev)
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////// GC-NSCBC /////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// Ghost Cell Navier-Stokes Characteristic Boundary Conditions
+// Reference: Motheau, Almgren & Bell, J. Comput. Phys. 333 (2017) 1-24
+//
+// Algorithm overview (per face):
+//   1. Compute one-sided 2nd-order FD of primitive variables at the boundary cell.
+//   2. Compute LODI wave amplitudes L from the primitive gradients.
+//   3. Replace the incoming acoustic L with the BC-specific value:
+//      - OUTFLOW: relax incoming acoustic toward target pressure (Eq. 35).
+//      - INFLOW:  relax all three incoming waves toward target state (Eqs. 42-44).
+//   4. Reconstruct modified primitive gradients via dQ/dn = S * Lambda^{-1} * L.
+//   5. Fill 1st and 2nd ghost cells from the gradient (Eqs. 27-28 or 31-32).
+//   6. Convert primitive ghost values (rho, un, ut, p) to conserved (rho, M, E).
+//
+// Stiffened-gas adaptation: the characteristic speed is a = sqrt(gamma*(p+pi)/rho).
+// The LODI relations retain the standard ideal-gas structure with (p+pi) in place of p
+// for pressure-velocity coupling. The ghost cells store the PHYSICAL pressure p.
+//
+// Corner treatment (Motheau Sec. IV.B, Eqs. 51-67):
+//   At corners where two NSCBC faces meet, a 2x2 coupled linear system is solved for
+//   the two incoming acoustic wave amplitudes, then ghost cells are filled from both
+//   normal-direction gradients simultaneously.
+//
+void Hydro2::ApplyNSCBC(
+    int lev,
+    amrex::MultiFab& eta_mf_in,
+    amrex::MultiFab& rho_mf_in,
+    amrex::MultiFab& M_mf_in,
+    amrex::MultiFab& E_mf_in,
+    amrex::Real /*time*/)
+{
+    BL_PROFILE("Integrator::Hydro2::ApplyNSCBC");
+
+    using FT = Hydro2::NSCBCParams::FaceType;
+    const Geometry& geom = this->geom[lev];
+    const Real* DX = geom.CellSize();
+    const Box& domain = geom.Domain();
+
+    // Domain lengths for K relaxation coefficient. Auto-detect from geometry if 0.
+    Real Lx_ = nscbc.Lx > 0.0 ? nscbc.Lx :
+                (domain.bigEnd(0) - domain.smallEnd(0) + 1) * DX[0];
+    Real Ly_ = nscbc.Ly > 0.0 ? nscbc.Ly :
+                (domain.bigEnd(1) - domain.smallEnd(1) + 1) * DX[1];
+
+    // Capture EOS and NSCBC scalars for the device kernels.
+    Real g0_ = gamma0, g1_ = gamma1;
+    Real pi0_ = pi_0, pi1_ = pi_1;
+    Real pref_ = pref;
+    Real cv0_ = cv0, cv1_ = cv1;
+
+    Real nscbc_sigma_ = nscbc.sigma;
+    Real nscbc_beta_  = nscbc.beta;
+
+    // Face parameter arrays (captured by copy into lambdas)
+    Real face_p_t [4], face_un_t[4], face_ut_t[4];
+    Real face_T_t [4], face_eta_r[4];
+    for (int f = 0; f < 4; ++f) {
+        face_p_t [f] = nscbc.p_t[f];
+        face_un_t[f] = nscbc.un_t[f];
+        face_ut_t[f] = nscbc.ut_t[f];
+        face_T_t [f] = nscbc.T_t[f];
+        face_eta_r[f]= nscbc.eta_relax[f];
+    }
+
+    FT face_types[4];
+    for (int f = 0; f < 4; ++f) face_types[f] = nscbc.face_type[f];
+
+    // -------------------------------------------------------------------------
+    // GPU-callable helper: compute primitives (rho, un, ut, p, a, gmix, pimix)
+    // at a given cell from the conserved arrays.
+    //
+    // dir   = normal direction (0=x, 1=y)
+    // For dir=0: un = vx, ut = vy
+    // For dir=1: un = vy, ut = vx
+    // -------------------------------------------------------------------------
+    auto compute_prim = [=] AMREX_GPU_HOST_DEVICE (
+        const Array4<const Real>& eta_a,
+        const Array4<const Real>& rho_a,
+        const Array4<const Real>& M_a,
+        const Array4<const Real>& E_a,
+        int ii, int jj, int kk, int dir_,
+        Real& rho_out, Real& un_out, Real& ut_out,
+        Real& p_out,   Real& a_out,
+        Real& gm_out,  Real& pi_out) -> void
+    {
+        Real eta_ = eta_a(ii,jj,kk);
+        Real rho_ = rho_a(ii,jj,kk);
+        Real mx_  = M_a(ii,jj,kk,0);
+        Real my_  = M_a(ii,jj,kk,1);
+        Real E_   = E_a(ii,jj,kk);
+
+        Real vx_ = mx_ / rho_;
+        Real vy_ = my_ / rho_;
+        Real KE_ = 0.5 * rho_ * (vx_*vx_ + vy_*vy_);
+        Real UE_ = E_ - KE_;
+        if (UE_ < 0.0) UE_ = 0.0;
+
+        // Stiffened-gas EOS mixing (same order as line 739 in RHS)
+        Real gm_,pi_;
+        Thermo_Interp::InterpolateGammaPi_Stiffened(
+            eta_, g1_, g0_, pi1_, pi0_, gm_, pi_);
+
+        Real p_ = (gm_ - 1.0)*UE_ - gm_*pi_ + pref_;
+        if (p_ < 0.0) p_ = 1.0e-6;
+
+        Real a_ = std::sqrt(gm_ * (p_ + pi_) / rho_);
+
+        rho_out = rho_;
+        un_out  = (dir_ == 0) ? vx_ : vy_;
+        ut_out  = (dir_ == 0) ? vy_ : vx_;
+        p_out   = p_;
+        a_out   = a_;
+        gm_out  = gm_;
+        pi_out  = pi_;
+    };
+
+    // -------------------------------------------------------------------------
+    // GPU-callable helper: write primitive ghost values back to conserved arrays.
+    // Uses the eta already set in the ghost cell by the prior FillBoundary call.
+    // -------------------------------------------------------------------------
+    auto set_ghost_cons = [=] AMREX_GPU_HOST_DEVICE (
+        const Array4<const Real>& eta_a,
+        const Array4<      Real>& rho_a,
+        const Array4<      Real>& M_a,
+        const Array4<      Real>& E_a,
+        int ii, int jj, int kk, int dir_,
+        Real rho_, Real un_, Real ut_, Real p_) -> void
+    {
+        Real eta_ = eta_a(ii,jj,kk);
+        Real gm_, pi_;
+        Thermo_Interp::InterpolateGammaPi_Stiffened(
+            eta_, g1_, g0_, pi1_, pi0_, gm_, pi_);
+
+        // Inverse EOS: UE from p
+        Real UE_ = (p_ + gm_*pi_ - pref_) / (gm_ - 1.0);
+        if (UE_ < 0.0) UE_ = 0.0;
+
+        Real vx_ = (dir_ == 0) ? un_ : ut_;
+        Real vy_ = (dir_ == 0) ? ut_ : un_;
+        Real KE_ = 0.5 * rho_ * (vx_*vx_ + vy_*vy_);
+
+        rho_a(ii,jj,kk)   = rho_;
+        M_a  (ii,jj,kk,0) = rho_ * vx_;
+        M_a  (ii,jj,kk,1) = rho_ * vy_;
+        E_a  (ii,jj,kk)   = UE_ + KE_;
+    };
+
+    // =========================================================================
+    // Loop over tiles, process each active NSCBC face.
+    //
+    // Face layout:  0 = xlo (dir=0, side=lo)
+    //               1 = xhi (dir=0, side=hi)
+    //               2 = ylo (dir=1, side=lo)
+    //               3 = yhi (dir=1, side=hi)
+    // =========================================================================
+    for (MFIter mfi(rho_mf_in, false); mfi.isValid(); ++mfi)
+    {
+        const Box& vbx = mfi.validbox();
+
+        auto eta_a = eta_mf_in.array(mfi);
+        auto rho_a = rho_mf_in.array(mfi);
+        auto M_a   = M_mf_in  .array(mfi);
+        auto E_a   = E_mf_in  .array(mfi);
+
+        // Read-only versions for the compute_prim helper (ghost cells are readable)
+        auto eta_r = eta_mf_in.const_array(mfi);
+        auto rho_r = rho_mf_in.const_array(mfi);
+        auto M_r   = M_mf_in  .const_array(mfi);
+        auto E_r   = E_mf_in  .const_array(mfi);
+
+        for (int dir = 0; dir < AMREX_SPACEDIM; ++dir)
+        {
+            Real dhn  = DX[dir];           // cell size in normal direction
+            Real dht  = DX[1 - dir];       // cell size in transverse direction
+            Real Ln_  = (dir == 0) ? Lx_ : Ly_;  // domain length in normal dir
+
+            for (int side = 0; side < 2; ++side)  // side=0 → lo, side=1 → hi
+            {
+                // face index: xlo=0, xhi=1, ylo=2, yhi=3
+                int face_idx = dir * 2 + side;
+
+                if (face_types[face_idx] == FT::NONE) continue;
+
+                // Check if this tile touches the physical domain boundary on this face
+                int ibdry;
+                if (side == 0) {
+                    if (vbx.smallEnd(dir) != domain.smallEnd(dir)) continue;
+                    ibdry = domain.smallEnd(dir);
+                } else {
+                    if (vbx.bigEnd(dir) != domain.bigEnd(dir)) continue;
+                    ibdry = domain.bigEnd(dir);
+                }
+
+                // Extract per-face BC parameters as scalars for GPU capture.
+                // C-style arrays cannot be reliably captured by value in GPU lambdas.
+                Real p_t_    = face_p_t [face_idx];
+                Real un_t_   = face_un_t[face_idx];
+                Real ut_t_   = face_ut_t[face_idx];
+                Real T_t_fi  = face_T_t [face_idx]; // temperature target (scalar for GPU)
+                Real eta_r_  = face_eta_r[face_idx];
+                FT   ftype   = face_types[face_idx];
+                int  side_  = side;  // 0=lo,1=hi (copy to avoid capture of loop var)
+                int  dir_   = dir;
+
+                // Build a 1-cell-thick box along the face for the ParallelFor
+                Box face_box = vbx;
+                face_box.setSmall(dir, ibdry);
+                face_box.setBig  (dir, ibdry);
+
+                ParallelFor(face_box, [=] AMREX_GPU_DEVICE (int i, int j, int k)
+                {
+                    // Boundary cell index in normal direction
+                    // (i or j depending on dir_ -- the lambda processes general (i,j,k))
+
+                    // --------------------------------------------------------
+                    // Step 1: compute primitives at boundary (b) and two interior
+                    // neighbors (m1, m2) for one-sided normal FD.
+                    //
+                    // Neighbor offsets in normal direction:
+                    //   hi side (side_=1): m1 = N-1, m2 = N-2  (interior)
+                    //   lo side (side_=0): m1 = N+1, m2 = N+2  (interior)
+                    // --------------------------------------------------------
+                    int di = (dir_ == 0) ? 1 : 0;
+                    int dj = (dir_ == 1) ? 1 : 0;
+
+                    // Offsets for "interior" direction (away from boundary)
+                    int sign_in = (side_ == 1) ? -1 : 1;  // -1 for hi, +1 for lo
+
+                    int im1 = i + sign_in * di;
+                    int jm1 = j + sign_in * dj;
+                    int im2 = i + sign_in * 2 * di;
+                    int jm2 = j + sign_in * 2 * dj;
+
+                    Real rho_b, un_b, ut_b, p_b, a_b, gm_b, pi_b;
+                    compute_prim(eta_r, rho_r, M_r, E_r, i, j, k, dir_,
+                                 rho_b, un_b, ut_b, p_b, a_b, gm_b, pi_b);
+
+                    Real rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1;
+                    compute_prim(eta_r, rho_r, M_r, E_r, im1, jm1, k, dir_,
+                                 rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1);
+
+                    Real rho_m2, un_m2, ut_m2, p_m2, a_m2, gm_m2, pi_m2;
+                    compute_prim(eta_r, rho_r, M_r, E_r, im2, jm2, k, dir_,
+                                 rho_m2, un_m2, ut_m2, p_m2, a_m2, gm_m2, pi_m2);
+
+                    Real a2_b = a_b * a_b;
+                    Real M_loc = std::abs(un_b) / (a_b + 1.0e-14);
+
+                    // --------------------------------------------------------
+                    // Step 2: one-sided 2nd-order FD in normal direction.
+                    //   hi side: df/dn = (3*f_b - 4*f_m1 + f_m2) / (2*dhn)
+                    //   lo side: df/dn = (-3*f_b + 4*f_m1 - f_m2) / (2*dhn)
+                    // The lo formula gives the derivative in +n direction.
+                    // --------------------------------------------------------
+                    Real fd_sign = (side_ == 1) ? 1.0 : -1.0;
+                    Real drho_dn = fd_sign * (3.0*rho_b - 4.0*rho_m1 + rho_m2) / (2.0*dhn);
+                    Real dun_dn  = fd_sign * (3.0*un_b  - 4.0*un_m1  + un_m2 ) / (2.0*dhn);
+                    Real dut_dn  = fd_sign * (3.0*ut_b  - 4.0*ut_m1  + ut_m2 ) / (2.0*dhn);
+                    Real dp_dn   = fd_sign * (3.0*p_b   - 4.0*p_m1   + p_m2  ) / (2.0*dhn);
+
+                    // --------------------------------------------------------
+                    // Step 3: central 2nd-order FD in transverse direction.
+                    // --------------------------------------------------------
+                    int ti = (dir_ == 1) ? 1 : 0;
+                    int tj = (dir_ == 0) ? 1 : 0;
+                    int itp = amrex::min(i + ti, domain.bigEnd (0));
+                    int itm = amrex::max(i - ti, domain.smallEnd(0));
+                    int jtp = amrex::min(j + tj, domain.bigEnd (1));
+                    int jtm = amrex::max(j - tj, domain.smallEnd(1));
+                    Real dt_denom = (itp != itm || jtp != jtm) ? 2.0*dht : dht;
+
+                    Real rho_tp, un_tp, ut_tp, p_tp, a_tp, gm_tp, pi_tp;
+                    compute_prim(eta_r, rho_r, M_r, E_r, itp, jtp, k, dir_,
+                                 rho_tp, un_tp, ut_tp, p_tp, a_tp, gm_tp, pi_tp);
+
+                    Real rho_tm, un_tm, ut_tm, p_tm, a_tm, gm_tm, pi_tm;
+                    compute_prim(eta_r, rho_r, M_r, E_r, itm, jtm, k, dir_,
+                                 rho_tm, un_tm, ut_tm, p_tm, a_tm, gm_tm, pi_tm);
+
+                    Real drho_dt = (rho_tp - rho_tm) / dt_denom;
+                    Real dun_dt  = (un_tp  - un_tm ) / dt_denom;
+                    Real dut_dt  = (ut_tp  - ut_tm ) / dt_denom;
+                    Real dp_dt   = (p_tp   - p_tm  ) / dt_denom;
+
+                    // --------------------------------------------------------
+                    // Step 4: LODI wave amplitudes from interior values.
+                    // L1 = (un-a)/(2a^2) * (dp/dn - rho*a*dun/dn)  [backward acoustic]
+                    // L2 = un/a^2 * (a^2*drho/dn - dp/dn)           [entropy]
+                    // L3 = un * dut/dn                               [shear]
+                    // L4 = (un+a)/(2a^2) * (dp/dn + rho*a*dun/dn)  [forward acoustic]
+                    // --------------------------------------------------------
+                    Real L1 = (un_b - a_b) / (2.0*a2_b) * (dp_dn - rho_b*a_b*dun_dn);
+                    Real L2 = (std::abs(un_b) > 1.0e-14) ?
+                               un_b / a2_b * (a2_b*drho_dn - dp_dn) : 0.0;
+                    Real L3 = (std::abs(un_b) > 1.0e-14) ?
+                               un_b * dut_dn : 0.0;
+                    Real L4 = (un_b + a_b) / (2.0*a2_b) * (dp_dn + rho_b*a_b*dun_dn);
+
+                    // --------------------------------------------------------
+                    // Step 5: transverse source terms (Motheau Eqs. 36-37,45-46).
+                    // These are the "T" terms included in the incoming wave mod.
+                    // T1 involves the backward acoustic direction (L1 wave).
+                    // T4 involves the forward acoustic direction (L4 wave).
+                    // T2 and T3 are for entropy and shear.
+                    //
+                    // Derived from: T = Lambda * S^{-1} * B_t * dQ/dt
+                    // where B_t is the transverse Jacobian.
+                    // --------------------------------------------------------
+                    Real T1 = (un_b - a_b) / (2.0*a2_b) *
+                              (-rho_b*a_b*ut_b*dun_dt + a2_b*rho_b*dut_dt + ut_b*dp_dt);
+                    Real T4 = (un_b + a_b) / (2.0*a2_b) *
+                              ( rho_b*a_b*ut_b*dun_dt + a2_b*rho_b*dut_dt + ut_b*dp_dt);
+                    Real T2 = (std::abs(un_b) > 1.0e-14) ?
+                               un_b * ut_b / a2_b * (a2_b*drho_dt - dp_dt) : 0.0;
+                    Real T3 = (std::abs(un_b) > 1.0e-14) ?
+                               un_b * (ut_b*dut_dt + (1.0/rho_b)*dp_dt) : 0.0;
+
+                    // --------------------------------------------------------
+                    // Step 6: apply BC-specific modification to incoming wave(s).
+                    //
+                    // Convention (subsonic, standard orientation):
+                    //   hi side (xhi/yhi): L1 is the incoming acoustic (speed un-a < 0).
+                    //   lo side (xlo/ylo): L4 is the incoming acoustic (speed un+a > 0).
+                    //
+                    // For OUTFLOW: damp the single incoming acoustic wave (Motheau Eq. 35).
+                    //   K = sigma * a * (1 - M^2) / L_domain
+                    //   L_in = K*(p - p_t) - (1-beta)*T_in
+                    //
+                    // For INFLOW: specify all three incoming waves (Motheau Eqs. 42-44).
+                    //   Acoustic: L_in = eta_relax*(rho*a^2*(1-M^2)/L)*(un - un_t) - T_in
+                    //   Entropy:  L2   = eta_relax*(rho*a*(gm-1)/L) *(T - T_t)  - T2
+                    //   Shear:    L3   = eta_relax*(a/L)             *(ut - ut_t) - T3
+                    //   (for lo side L4 is incoming; for hi side L1 is incoming)
+                    // --------------------------------------------------------
+                    Real K = nscbc_sigma_ * a_b * (1.0 - M_loc*M_loc) / Ln_;
+
+                    // Local temperature (needed for inflow entropy relaxation, Motheau Eq. 43)
+                    Real eta_b  = eta_r(i,j,k);
+                    Real cv_mix = eta_b * cv0_ + (1.0 - eta_b) * cv1_;
+                    Real T_b = (p_b + pi_b) / (rho_b * cv_mix * (gm_b - 1.0) + 1.0e-14);
+
+                    if (ftype == FT::OUTFLOW) {
+                        // hi side: incoming = L1; lo side: incoming = L4
+                        if (side_ == 1) {  // hi boundary (xhi or yhi)
+                            L1 = K * (p_b - p_t_) - (1.0 - nscbc_beta_) * T1;
+                        } else {           // lo boundary (xlo or ylo)
+                            L4 = K * (p_b - p_t_) - (1.0 - nscbc_beta_) * T4;
+                        }
+                    }
+                    else if (ftype == FT::INFLOW) {
+                        Real er = eta_r_;
+                        Real K_acoustic = er * rho_b * a2_b * (1.0 - M_loc*M_loc) / Ln_;
+                        Real K_entropy  = er * rho_b * a_b * (gm_b - 1.0) / Ln_;
+                        Real K_shear    = er * a_b / Ln_;
+                        if (side_ == 1) {  // hi boundary: L1 is incoming
+                            L1 = -K_acoustic * (un_b - un_t_) - T1;
+                            L2 = -K_entropy  * (T_b  - T_t_fi) - T2;
+                            L3 = -K_shear    * (ut_b - ut_t_) - T3;
+                        } else {           // lo boundary: L4 is incoming
+                            L4 = K_acoustic * (un_b - un_t_) - T4;
+                            L2 = K_entropy  * (T_b  - T_t_fi) - T2;
+                            L3 = K_shear    * (ut_b - ut_t_) - T3;
+                        }
+                    }
+
+                    // --------------------------------------------------------
+                    // Step 7: reconstruct modified primitive gradients.
+                    //   dQ/dn = S * Lambda^{-1} * L
+                    //
+                    //   xi1 = L1/(un-a),  xi2 = L2/un,  xi3 = L3/un,  xi4 = L4/(un+a)
+                    //
+                    //   drho/dn = xi1 + xi2 + xi4
+                    //   dun/dn  = (-a/rho)*xi1 + (a/rho)*xi4
+                    //   dut/dn  = xi3
+                    //   dp/dn   = a^2*(xi1 + xi4)
+                    // --------------------------------------------------------
+                    Real xi1 = L1 / (un_b - a_b);   // un_b - a_b != 0 for subsonic
+                    Real xi2 = (std::abs(un_b) > 1.0e-14) ? L2 / un_b : 0.0;
+                    Real xi3 = (std::abs(un_b) > 1.0e-14) ? L3 / un_b : 0.0;
+                    Real xi4 = L4 / (un_b + a_b);   // un_b + a_b != 0
+
+                    Real drho_dn_new = xi1 + xi2 + xi4;
+                    Real dun_dn_new  = (-a_b/rho_b)*xi1 + (a_b/rho_b)*xi4;
+                    Real dut_dn_new  = xi3;
+                    Real dp_dn_new   = a2_b * (xi1 + xi4);
+
+                    // --------------------------------------------------------
+                    // Step 8: fill 1st and 2nd ghost cells from gradient.
+                    //
+                    // hi side (right/top): ghost at N+1 and N+2
+                    //   Q_{N+1} = Q_{N-1} + 2*dhn * dQ/dn  (Eq. 31)
+                    //   Q_{N+2} = -2*Q_{N-1} - 3*Q_N + 6*Q_{N+1} - 6*dhn*dQ/dn (Eq. 32)
+                    //
+                    // lo side (left/bottom): ghost at -1 and -2
+                    //   Q_{-1}  = Q_{+1}  - 2*dhn * dQ/dn  (Eq. 27)
+                    //   Q_{-2}  = -2*Q_{+1} - 3*Q_0 + 6*Q_{-1} + 6*dhn*dQ/dn (Eq. 28)
+                    // --------------------------------------------------------
+                    // Ghost cell positions (in the normal direction)
+                    int ig1_i = i + (-sign_in) * di;   // 1st ghost cell
+                    int jg1_j = j + (-sign_in) * dj;
+                    int ig2_i = i + (-sign_in) * 2*di; // 2nd ghost cell
+                    int jg2_j = j + (-sign_in) * 2*dj;
+
+                    // 1st ghost (Eqs. 27/31): use Q_{m1} (1 cell interior) as reference
+                    Real sign_gh = (side_ == 1) ? 1.0 : -1.0; // +1 for hi, -1 for lo
+                    Real rho_g1 = rho_m1 + sign_gh * 2.0*dhn * drho_dn_new;
+                    Real un_g1  = un_m1  + sign_gh * 2.0*dhn * dun_dn_new;
+                    Real ut_g1  = ut_m1  + sign_gh * 2.0*dhn * dut_dn_new;
+                    Real p_g1   = p_m1   + sign_gh * 2.0*dhn * dp_dn_new;
+                    rho_g1 = amrex::max(rho_g1, 1.0e-14);
+                    p_g1   = amrex::max(p_g1,   1.0e-6);
+
+                    // 2nd ghost (Eqs. 28/32): uses boundary cell (b), m1, and 1st ghost
+                    Real rho_g2 = -2.0*rho_m1 - 3.0*rho_b + 6.0*rho_g1
+                                  - sign_gh * 6.0*dhn * drho_dn_new;
+                    Real un_g2  = -2.0*un_m1  - 3.0*un_b  + 6.0*un_g1
+                                  - sign_gh * 6.0*dhn * dun_dn_new;
+                    Real ut_g2  = -2.0*ut_m1  - 3.0*ut_b  + 6.0*ut_g1
+                                  - sign_gh * 6.0*dhn * dut_dn_new;
+                    Real p_g2   = -2.0*p_m1   - 3.0*p_b   + 6.0*p_g1
+                                  - sign_gh * 6.0*dhn * dp_dn_new;
+                    rho_g2 = amrex::max(rho_g2, 1.0e-14);
+                    p_g2   = amrex::max(p_g2,   1.0e-6);
+
+                    // Write ghost cells to conserved arrays
+                    set_ghost_cons(eta_r, rho_a, M_a, E_a,
+                                   ig1_i, jg1_j, k, dir_, rho_g1, un_g1, ut_g1, p_g1);
+                    set_ghost_cons(eta_r, rho_a, M_a, E_a,
+                                   ig2_i, jg2_j, k, dir_, rho_g2, un_g2, ut_g2, p_g2);
+                });
+            }  // side
+        }  // dir
+
+        // =====================================================================
+        // Corner treatment (Motheau Sec. IV.B, Eqs. 51-67).
+        //
+        // For cells that lie at the intersection of two NSCBC faces, we solve a
+        // 2x2 coupled system for the two incoming acoustic wave amplitudes and
+        // fill the corner ghost cells from both normal-direction gradients.
+        //
+        // Corner ghost cell positions (for top-right corner, xhi+yhi):
+        //   Physical corner: (N, M)  -- already a valid cell
+        //   Ghost row:  (N+1,M), (N+2,M)  -- filled by xhi kernel above
+        //   Ghost col:  (N,M+1), (N,M+2)  -- filled by yhi kernel above
+        //   Ghost corner: (N+1,M+1), (N+2,M+1), (N+1,M+2), (N+2,M+2)  -- need corner fill
+        // =====================================================================
+        for (int cx = 0; cx < 2; ++cx)  // cx=0 → xlo, cx=1 → xhi
+        for (int cy = 0; cy < 2; ++cy)  // cy=0 → ylo, cy=1 → yhi
+        {
+            int fx = cx;           // face index for x: 0=xlo, 1=xhi
+            int fy = 2 + cy;       // face index for y: 2=ylo, 3=yhi
+
+            if (face_types[fx] == FT::NONE) continue;
+            if (face_types[fy] == FT::NONE) continue;
+
+            // Check if this tile touches both corner-contributing boundaries
+            int ibdry_x = (cx == 0) ? domain.smallEnd(0) : domain.bigEnd(0);
+            int ibdry_y = (cy == 0) ? domain.smallEnd(1) : domain.bigEnd(1);
+
+            bool touch_x = (cx == 0) ? (vbx.smallEnd(0) == domain.smallEnd(0))
+                                      : (vbx.bigEnd  (0) == domain.bigEnd  (0));
+            bool touch_y = (cy == 0) ? (vbx.smallEnd(1) == domain.smallEnd(1))
+                                      : (vbx.bigEnd  (1) == domain.bigEnd  (1));
+
+            if (!touch_x || !touch_y) continue;
+
+            // nghost ghost cells to fill in each direction (max 2 since nghost=2)
+            int ng = amrex::min(rho_mf_in.nGrow(), 2);
+
+            // Build a box over the corner ghost cells.
+            // sign_x: +1 for xhi ghosts, -1 for xlo ghosts
+            int sx = (cx == 1) ?  1 : -1;
+            int sy = (cy == 1) ?  1 : -1;
+
+            Box corner_box;
+            corner_box.setSmall(0, (cx == 1) ? ibdry_x + 1 : ibdry_x - ng);
+            corner_box.setBig  (0, (cx == 1) ? ibdry_x + ng: ibdry_x - 1);
+            corner_box.setSmall(1, (cy == 1) ? ibdry_y + 1 : ibdry_y - ng);
+            corner_box.setBig  (1, (cy == 1) ? ibdry_y + ng: ibdry_y - 1);
+#if AMREX_SPACEDIM == 3
+            corner_box.setSmall(2, domain.smallEnd(2));
+            corner_box.setBig  (2, domain.bigEnd  (2));
+#endif
+
+            // Capture per-face scalars for the corner kernel
+            Real px_t_  = face_p_t[fx];
+            Real py_t_  = face_p_t[fy];
+            FT   ftx    = face_types[fx];
+            FT   fty    = face_types[fy];
+            Real etar_x = face_eta_r[fx];
+            Real etar_y = face_eta_r[fy];
+            Real un_t_x = face_un_t[fx];
+            Real un_t_y = face_un_t[fy];
+
+            ParallelFor(corner_box, [=] AMREX_GPU_DEVICE (int i, int j, int k)
+            {
+                // Physical corner cell (at the actual domain boundary intersection)
+                int ic = ibdry_x, jc = ibdry_y;
+
+                // --- Primitives at corner boundary cell ---
+                Real rho_c, un_c, ut_c, p_c, a_c, gm_c, pi_c;
+                compute_prim(eta_r, rho_r, M_r, E_r, ic, jc, k, 0,
+                             rho_c, un_c, ut_c, p_c, a_c, gm_c, pi_c);
+                // For y-direction, "un" = vy, "ut" = vx
+                Real vx_c = un_c, vy_c = ut_c;  // from dir=0 call: un=vx, ut=vy
+                Real a2_c = a_c * a_c;
+                Real Mx_c = std::abs(vx_c) / (a_c + 1.0e-14);
+                Real My_c = std::abs(vy_c) / (a_c + 1.0e-14);
+
+                // --- x-direction: one-sided FD at corner (ic, jc) ---
+                // Interior neighbors in x
+                int im1 = ic - sx, im2 = ic - 2*sx;
+                Real rho_xm1, un_xm1, ut_xm1, p_xm1, a_xm1, gm_xm1, pi_xm1;
+                compute_prim(eta_r, rho_r, M_r, E_r, im1, jc, k, 0,
+                             rho_xm1, un_xm1, ut_xm1, p_xm1, a_xm1, gm_xm1, pi_xm1);
+                Real rho_xm2, un_xm2, ut_xm2, p_xm2, a_xm2, gm_xm2, pi_xm2;
+                compute_prim(eta_r, rho_r, M_r, E_r, im2, jc, k, 0,
+                             rho_xm2, un_xm2, ut_xm2, p_xm2, a_xm2, gm_xm2, pi_xm2);
+
+                Real fdx = (Real)sx;  // positive for hi (backward diff), negative for lo (forward diff)
+                Real drho_dx_c = fdx * (3.0*rho_c - 4.0*rho_xm1 + rho_xm2) / (2.0*DX[0]);
+                Real dvx_dx_c  = fdx * (3.0*vx_c  - 4.0*un_xm1  + un_xm2 ) / (2.0*DX[0]);
+                Real dvy_dx_c  = fdx * (3.0*vy_c  - 4.0*ut_xm1  + ut_xm2 ) / (2.0*DX[0]);
+                Real dp_dx_c   = fdx * (3.0*p_c   - 4.0*p_xm1   + p_xm2  ) / (2.0*DX[0]);
+
+                // --- y-direction: one-sided FD at corner (ic, jc) ---
+                int jm1 = jc - sy, jm2 = jc - 2*sy;
+                Real rho_ym1, vn_ym1, vt_ym1, p_ym1, a_ym1, gm_ym1, pi_ym1;
+                compute_prim(eta_r, rho_r, M_r, E_r, ic, jm1, k, 1,
+                             rho_ym1, vn_ym1, vt_ym1, p_ym1, a_ym1, gm_ym1, pi_ym1);
+                Real rho_ym2, vn_ym2, vt_ym2, p_ym2, a_ym2, gm_ym2, pi_ym2;
+                compute_prim(eta_r, rho_r, M_r, E_r, ic, jm2, k, 1,
+                             rho_ym2, vn_ym2, vt_ym2, p_ym2, a_ym2, gm_ym2, pi_ym2);
+                // For y-direction (dir=1): un=vy, ut=vx in compute_prim output
+                Real drho_dy_c = (Real)sy * (3.0*rho_c - 4.0*rho_ym1 + rho_ym2) / (2.0*DX[1]);
+                Real dvy_dy_c  = (Real)sy * (3.0*vy_c  - 4.0*vn_ym1  + vn_ym2 ) / (2.0*DX[1]);
+                Real dvx_dy_c  = (Real)sy * (3.0*vx_c  - 4.0*vt_ym1  + vt_ym2 ) / (2.0*DX[1]);
+                Real dp_dy_c   = (Real)sy * (3.0*p_c   - 4.0*p_ym1   + p_ym2  ) / (2.0*DX[1]);
+
+                // --- LODI wave amplitudes from x-direction at corner ---
+                // L1_x (incoming at hi, outgoing at lo), L4_x (incoming at lo, outgoing at hi)
+                Real L1_x = (vx_c - a_c) / (2.0*a2_c) * (dp_dx_c - rho_c*a_c*dvx_dx_c);
+                Real L2_x = (std::abs(vx_c) > 1.0e-14) ?
+                             vx_c / a2_c * (a2_c*drho_dx_c - dp_dx_c) : 0.0;
+                Real L3_x = (std::abs(vx_c) > 1.0e-14) ?
+                             vx_c * dvy_dx_c : 0.0;
+                Real L4_x = (vx_c + a_c) / (2.0*a2_c) * (dp_dx_c + rho_c*a_c*dvx_dx_c);
+
+                // --- LODI wave amplitudes from y-direction at corner ---
+                Real L1_y = (vy_c - a_c) / (2.0*a2_c) * (dp_dy_c - rho_c*a_c*dvy_dy_c);
+                Real L2_y = (std::abs(vy_c) > 1.0e-14) ?
+                             vy_c / a2_c * (a2_c*drho_dy_c - dp_dy_c) : 0.0;
+                Real L3_y = (std::abs(vy_c) > 1.0e-14) ?
+                             vy_c * dvx_dy_c : 0.0;
+                Real L4_y = (vy_c + a_c) / (2.0*a2_c) * (dp_dy_c + rho_c*a_c*dvy_dy_c);
+
+                // --- Identify incoming acoustic waves for this corner ---
+                // hi-x: L1_x incoming; lo-x: L4_x incoming
+                // hi-y: L1_y incoming; lo-y: L4_y incoming
+                Real& Lx_in = (cx == 1) ? L1_x : L4_x;
+                Real& Ly_in = (cy == 1) ? L1_y : L4_y;
+
+                Real Kx = nscbc_sigma_ * a_c * (1.0 - Mx_c*Mx_c) / Lx_;
+                Real Ky = nscbc_sigma_ * a_c * (1.0 - My_c*My_c) / Ly_;
+                Real ab = (1.0 - nscbc_beta_) / 2.0;
+
+                if (ftx == FT::OUTFLOW && fty == FT::OUTFLOW)
+                {
+                    // Motheau Eq. 56: coupled outflow/outflow system
+                    //   Lx_in + ab * Ly_in = Kx * (p - pt)
+                    //   ab * Lx_in + Ly_in = Ky * (p - pt)
+                    Real bx = Kx * (p_c - px_t_);
+                    Real by = Ky * (p_c - py_t_);
+                    Real det_inv = 1.0 / (1.0 - ab*ab + 1.0e-20);
+                    Lx_in = det_inv * (bx - ab*by);
+                    Ly_in = det_inv * (by - ab*bx);
+                }
+                else if (ftx == FT::OUTFLOW && fty == FT::INFLOW)
+                {
+                    // Motheau Eq. 58: inflow/outflow compatibility: Ly_in = 0
+                    Ly_in = 0.0;
+                    Lx_in = Kx * (p_c - px_t_);
+                }
+                else if (ftx == FT::INFLOW && fty == FT::OUTFLOW)
+                {
+                    Lx_in = 0.0;
+                    Ly_in = Ky * (p_c - py_t_);
+                }
+                else if (ftx == FT::INFLOW && fty == FT::INFLOW)
+                {
+                    Real Kax = etar_x * rho_c * a2_c * (1.0 - Mx_c*Mx_c) / Lx_;
+                    Real Kay = etar_y * rho_c * a2_c * (1.0 - My_c*My_c) / Ly_;
+                    // x incoming: relax vx toward un_t_x; y incoming: relax vy toward un_t_y
+                    Lx_in = (cx == 1) ? (-Kax * (vx_c - un_t_x))
+                                      : ( Kax * (vx_c - un_t_x));
+                    Ly_in = (cy == 1) ? (-Kay * (vy_c - un_t_y))
+                                      : ( Kay * (vy_c - un_t_y));
+                }
+
+                // --- Reconstruct normal-direction gradients ---
+                // X-direction
+                Real xi1_x = L1_x / (vx_c - a_c);
+                Real xi2_x = (std::abs(vx_c) > 1.0e-14) ? L2_x / vx_c : 0.0;
+                Real xi3_x = (std::abs(vx_c) > 1.0e-14) ? L3_x / vx_c : 0.0;
+                Real xi4_x = L4_x / (vx_c + a_c);
+
+                Real drho_dx_new = xi1_x + xi2_x + xi4_x;
+                Real dvx_dx_new  = (-a_c/rho_c)*xi1_x + (a_c/rho_c)*xi4_x;
+                Real dvy_dx_new  = xi3_x;
+                Real dp_dx_new   = a2_c * (xi1_x + xi4_x);
+
+                // Y-direction
+                Real xi1_y = L1_y / (vy_c - a_c);
+                Real xi2_y = (std::abs(vy_c) > 1.0e-14) ? L2_y / vy_c : 0.0;
+                Real xi3_y = (std::abs(vy_c) > 1.0e-14) ? L3_y / vy_c : 0.0;
+                Real xi4_y = L4_y / (vy_c + a_c);
+
+                Real drho_dy_new = xi1_y + xi2_y + xi4_y;
+                Real dvy_dy_new  = (-a_c/rho_c)*xi1_y + (a_c/rho_c)*xi4_y;
+                Real dvx_dy_new  = xi3_y;
+                Real dp_dy_new   = a2_c * (xi1_y + xi4_y);
+
+                // --- Fill this ghost corner cell from both direction gradients ---
+                // Offset of this ghost cell from the corner cell (ic, jc)
+                int ox = i - ic;   // +1 or +2 for hi, -1 or -2 for lo
+                int oy = j - jc;
+
+                Real rho_g = rho_c + (Real)ox*DX[0]*drho_dx_new
+                                   + (Real)oy*DX[1]*drho_dy_new;
+                Real vx_g  = vx_c  + (Real)ox*DX[0]*dvx_dx_new
+                                   + (Real)oy*DX[1]*dvx_dy_new;
+                Real vy_g  = vy_c  + (Real)ox*DX[0]*dvy_dx_new
+                                   + (Real)oy*DX[1]*dvy_dy_new;
+                Real p_g   = p_c   + (Real)ox*DX[0]*dp_dx_new
+                                   + (Real)oy*DX[1]*dp_dy_new;
+
+                rho_g = amrex::max(rho_g, 1.0e-14);
+                p_g   = amrex::max(p_g,   1.0e-6);
+
+                // Store as conserved (use dir=0 since we already have vx,vy separately)
+                Real eta_g = eta_r(i, j, k);
+                Real gm_g, pi_g;
+                Thermo_Interp::InterpolateGammaPi_Stiffened(
+                    eta_g, g1_, g0_, pi1_, pi0_, gm_g, pi_g);
+                Real UE_g = (p_g + gm_g*pi_g - pref_) / (gm_g - 1.0);
+                if (UE_g < 0.0) UE_g = 0.0;
+                Real KE_g = 0.5 * rho_g * (vx_g*vx_g + vy_g*vy_g);
+
+                rho_a(i,j,k)   = rho_g;
+                M_a  (i,j,k,0) = rho_g * vx_g;
+                M_a  (i,j,k,1) = rho_g * vy_g;
+                E_a  (i,j,k)   = UE_g + KE_g;
+            });
+        }  // corner (cx, cy)
+    }  // MFIter
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////// ADVANCE ///////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
@@ -2054,6 +2770,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     density_bc->FillBoundary(solution_new[1], 0, solution_new[1].nComp(), time, 0);
     momentum_bc->FillBoundary(solution_new[2], 0, solution_new[2].nComp(), time, 0);
     energy_bc->FillBoundary(solution_new[3], 0, solution_new[3].nComp(), time, 0);
+    if (nscbc.enabled)
+        ApplyNSCBC(lev, solution_new[0], solution_new[1], solution_new[2], solution_new[3], time);
 
     //==============================================================
     // Build solution_old as a complete copy of solution_new (valid
@@ -2101,6 +2819,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         density_bc->FillBoundary(stage[1], 0, stage[1].nComp(), t, 0);  // density
         momentum_bc->FillBoundary(stage[2], 0, stage[2].nComp(), t, 0); // momentum
         energy_bc->FillBoundary(stage[3], 0, stage[3].nComp(), t, 0);   // energy
+        if (nscbc.enabled)
+            ApplyNSCBC(lev, stage[0], stage[1], stage[2], stage[3], t);
     });
 
     //==============================================================

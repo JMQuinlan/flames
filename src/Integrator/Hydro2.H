@@ -115,6 +115,12 @@ protected:
     void ComputeHFcurvature_MUSCL(int lev);
     Set::Scalar InterpolateTamannP0(Set::Scalar eta, Set::Scalar Tamann_p_0_0, Set::Scalar Tamann_p_0_1);
 
+    void ApplyNSCBC(int lev,
+                    amrex::MultiFab& eta_mf,
+                    amrex::MultiFab& rho_mf,
+                    amrex::MultiFab& M_mf,
+                    amrex::MultiFab& E_mf,
+                    amrex::Real time);
 
 protected:
     // FLUID 0
@@ -336,6 +342,36 @@ protected:
     };
     IntegrationScheme scheme;
 
+    // -----------------------------------------------------------------------
+    // Ghost Cell Navier-Stokes Characteristic Boundary Conditions (GC-NSCBC)
+    // Reference: Motheau et al. (2017), doi:10.1016/j.jcp.2017.01.010
+    // -----------------------------------------------------------------------
+    struct NSCBCParams {
+        enum class FaceType { NONE = 0, OUTFLOW = 1, INFLOW = 2 };
+
+        bool enabled = false;
+
+        // Per-face type. Index: 0=xlo, 1=xhi, 2=ylo, 3=yhi
+        FaceType face_type[4] = {FaceType::NONE, FaceType::NONE,
+                                  FaceType::NONE, FaceType::NONE};
+
+        // Outflow relaxation parameters (Motheau Eq. 38)
+        Set::Scalar sigma = 0.25;  // pressure relaxation strength
+        Set::Scalar beta  = 0.5;   // transverse term weight (0 = none, 1 = full)
+
+        // Domain lengths used for the K relaxation coefficient.
+        // Auto-set from geometry if not specified (0 = auto).
+        Set::Scalar Lx = 0.0, Ly = 0.0;
+
+        // Per-face target values (physical units)
+        Set::Scalar p_t [4] = {0.0, 0.0, 0.0, 0.0}; // target pressure
+        Set::Scalar un_t[4] = {0.0, 0.0, 0.0, 0.0}; // target normal velocity
+        Set::Scalar ut_t[4] = {0.0, 0.0, 0.0, 0.0}; // target tangential velocity
+        Set::Scalar T_t [4] = {0.0, 0.0, 0.0, 0.0}; // target temperature
+
+        // Per-face inflow relaxation damping (Motheau Eq. 42-44)
+        Set::Scalar eta_relax[4] = {2.0, 2.0, 2.0, 2.0};
+    } nscbc;
 
 };
 }
