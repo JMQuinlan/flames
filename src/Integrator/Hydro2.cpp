@@ -126,6 +126,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("ch_mobility_nom",  value.ch_mobility_nom,  0.0);      // Nominal mobility [m^2/s] (0 = auto: 0.2*ε*c_max)
         pp_query_default("ch_newton_iters",  value.ch_newton_iters,  5);        // Max Newton iterations (implicit_ch=2 only)
         pp_query_default("ch_newton_tol",    value.ch_newton_tol,    1.0e-10);  // Newton convergence tolerance
+        pp_query_default("ch_W_scale",       value.ch_W_scale,       1.0);      // double-well amplitude (equilibrium width = √2·ε/√W_scale)
 
         // Boundry Conditions
         value.density_bc = new BC::Expression(1, pp, "density.bc");
@@ -761,7 +762,7 @@ Hydro2::RHS(int lev,
             Real gm_eta = Numeric::Gradient(eta_arr, i,j,k, 0, DX).lpNorm<2>();
             Real lap_eta = Numeric::Laplacian(eta_arr, i,j,k, 0, DX);
 
-            Real fprime = 4.0 * eta * (eta-0.5) * (eta-1.0);
+            Real fprime = ch_W_scale * 4.0 * eta * (eta-0.5) * (eta-1.0);
             mu_arr(i,j,k) = -epsilon*epsilon*lap_eta + fprime;
 
             Y_arr(i,j,k) = rho0_arr(i,j,k)*eta / (rho + 1e-14);
@@ -1149,7 +1150,8 @@ static void CH_ComputeMu(
     const Geometry& geom,
     const Real* DX,
     const Box& domain,
-    Real kappa_CH)
+    Real kappa_CH,
+    Real W_scale)
 {
     for (MFIter mfi(eta_mf_in, TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
@@ -1159,7 +1161,7 @@ static void CH_ComputeMu(
         ParallelFor(vbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten  = Numeric::GetStencil(i, j, k, domain);
             Real e     = eta(i,j,k,0);
-            Real fp    = 4.0 * e * (e - 0.5) * (e - 1.0);
+            Real fp    = W_scale * 4.0 * e * (e - 0.5) * (e - 1.0);
             Real lap_e = Numeric::Laplacian(eta, i, j, k, 0, DX, sten);
             mu(i,j,k,0) = fp - kappa_CH * lap_e;
         });
@@ -1235,7 +1237,7 @@ void Hydro2::ApplyImplicitCH(int lev, Set::Scalar dt)
         auto fp  = f_prime_mf.array(mfi);
         ParallelFor(vbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             Real e = eta(i,j,k,0);
-            fp(i,j,k,0) = 4.0 * e * (e - 0.5) * (e - 1.0);
+            fp(i,j,k,0) = ch_W_scale * 4.0 * e * (e - 0.5) * (e - 1.0);
         });
     }
     energy_bc->FillBoundary(f_prime_mf, 0, 1, 0.0, 0);   // physical BCs
@@ -1375,7 +1377,7 @@ void Hydro2::ApplyImplicitCH_Newton(int lev, Set::Scalar dt)
         eta_mf[lev]->FillBoundary(geom.periodicity());
 
         // μ^k = f'(η^k) − ε²∇²η^k  (valid cells + filled ghosts)
-        CH_ComputeMu(mu_k, *eta_mf[lev], energy_bc, geom, DX, domain, kappa_CH);
+        CH_ComputeMu(mu_k, *eta_mf[lev], energy_bc, geom, DX, domain, kappa_CH, ch_W_scale);
 
         // Residual r = η^k − η* − dt·M·∇²μ^k
         // rhs_newton = −r = η* − η^k + dt·M·∇²μ^k
@@ -2269,7 +2271,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             }
 
             // Chemical Potential
-            Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
+            Set::Scalar f_prime = ch_W_scale * 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: W_scale*f'(eta)
             Set::Scalar mu_chem_local = -epsilon * epsilon * lap_eta + f_prime;
             mu_chem(i, j, k) = mu_chem_local;
 

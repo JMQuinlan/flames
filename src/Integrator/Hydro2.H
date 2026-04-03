@@ -313,6 +313,7 @@ protected:
     Set::Scalar ch_mobility_nom = 0.0; // nominal mobility for implicit solve (0 = auto)
     int ch_newton_iters = 5;           // max Newton iterations (implicit_ch=2)
     Set::Scalar ch_newton_tol = 1.0e-10; // Newton convergence tolerance
+    Set::Scalar ch_W_scale = 1.0;        // double-well amplitude scale (W_scale=1 → equilibrium width=√2·ε)
 
     // Adaptive Timestep
     bool adaptive_timestep = false;

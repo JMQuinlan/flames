@@ -37,7 +37,7 @@ stop_time = 50e-3
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = 0.0005
 eta.ic.expression.constant.R0 = 0.02
-eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(epsilon)))"
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(sqrt(2)*epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
 
 
@@ -171,4 +171,5 @@ integration.type = ForwardEuler
 implicit_ch = 2
   ch_mobility_nom = 1e-4
   ch_newton_iters = 5       # default, usually converges in 3
-  ch_newton_tol = 1e-10     # default 
+  ch_newton_tol = 1e-10     # default
+  ch_W_scale = 1.0          # double-well amplitude (1.0 = standard; >1 narrows interface, <1 widens)
