@@ -175,7 +175,13 @@ namespace Thermo_Interp
     //   A = eta/(g2-1) + (1-eta)/(g1-1)
     //   B = eta*g2*pi2/(g2-1) + (1-eta)*g1*pi1/(g1-1)
     //   gamma_mix = 1 + 1/A
-    //   pi_mix    = B / A
+    //   pi_mix    = B / (A + 1)   [NOT B/A — see derivation below]
+    //
+    // Derivation: for p = (gmix-1)*UE - gmix*pimix to recover p from
+    // UE = p*A + B (pressure-equilibrium mixture energy), we need:
+    //   (gmix-1)*A = 1  →  gmix = 1+1/A  ✓
+    //   pimix = (gmix-1)/gmix * B/A = (1/A)/(1+1/A) * B/A = B/(A+1)
+    // Equivalently: at pure phase i, pimix = pi_i (correct single-phase limit).
     inline void InterpolateGammaPi_Stiffened(
         Scalar eta,
         Scalar gamma1, Scalar gamma2,
@@ -192,7 +198,7 @@ namespace Thermo_Interp
                  + (Scalar(1.0) - eta) * gamma1 * pi1 / (gamma1 - Scalar(1.0));
 
         gamma_mix = Scalar(1.0) + Scalar(1.0) / A;
-        pi_mix    = B / A;
+        pi_mix    = B / (A + Scalar(1.0));
     }
 
     // Stiffened-gas pressure from EOS:

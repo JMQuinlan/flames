@@ -11,6 +11,7 @@ alamo.program = hydro2
 #plot_file = ./tests/FlowShockDroplet/output_Shock1mmDroplet
 # plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet
 # plot_file = /mmfs1/home/jquinlan/runs/temp4/output_kappa_method3
+# plot_file = /mmfs1/home/jquinlan/runs/temp5/output_rf
 plot_file = ./tests/FlowShockDroplet/output_amr_0
 
 ### MESHING ###
@@ -171,7 +172,7 @@ grav = 9.81
 
 ### DEBUGGING ###
 Riemann_Solver.type = hllc
-kappa_method = 2   # 1:"Smooth Normals" (default)  2:"Height Function"  3:"Hybrid (HF+SN blend)"
+kappa_method = 1   # 1:"Smooth Normals" (default)  2:"Height Function"  3:"Hybrid (HF+SN blend)"
 smooth_kernel_size = 5  # Gaussian normal smoothing kernel: 3 (3x3, default) or 5 (5x5)
 nghost = 4             # Ghost cell depth (= N_int for HF band). Requires amr.blocking_factor >= nghost.
 integration.type = ForwardEuler

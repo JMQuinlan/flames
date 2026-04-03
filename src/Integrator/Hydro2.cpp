@@ -572,6 +572,19 @@ void Hydro2::Mix(int lev)
     velocity_mf[lev]->FillBoundary(geom.periodicity());
     gamma_mf[lev]->FillBoundary(geom.periodicity());
     pi_mf[lev]->FillBoundary(geom.periodicity());
+
+    // Compute mixture vorticity: ω = ∂v/∂x − ∂u/∂y
+    for (MFIter mfi(*vorticity_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const Box& bx = mfi.validbox();
+        auto v_arr = velocity_mf[lev]->const_array(mfi);
+        auto omega = vorticity_mf[lev]->array(mfi);
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        {
+            Set::Matrix grad_v = Numeric::Gradient(v_arr, i, j, k, DX);
+            omega(i, j, k) = grad_v(1, 0) - grad_v(0, 1); // dv/dx - du/dy
+        });
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
