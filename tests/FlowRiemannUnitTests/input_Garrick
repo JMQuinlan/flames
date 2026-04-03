@@ -120,6 +120,4 @@ apply_sharpening = 1
 sharpening_frequency = 100
 reinit_max_iter = 50
 reinit_tolerance = 1e-6
-density_max_iter = 50
-density_tol = 1e-6
 omega_relax = 0.5; 
