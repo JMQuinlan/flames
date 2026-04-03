@@ -36,9 +36,9 @@
 
 
 
-#SBATCH -J jmq_droplet        # Job name
-#SBATCH -o ./logs/jmq_droplet.o%j    # Name of stdout output file
-#SBATCH -e ./logs/jmq_droplet.e%j    # Name of stderr error file
+#SBATCH -J jmq_bubble        # Job name
+#SBATCH -o ./logs/jmq_bubble.o%j    # Name of stdout output file
+#SBATCH -e ./logs/jmq_bubble.e%j    # Name of stderr error file
 #SBATCH -p compute-long         # Queue (partition) name
 #SBATCH --ntasks-per-node=128
 #SBATCH -N 1               # Total # of nodes
@@ -49,9 +49,12 @@
 # module list
 pwd
 date
-cat run_droplet.slurm
+cat run_bubble.slurm
 # cat ./tests/FlowVortexShedLarge/input
-cat ./tests/FlowShockDroplet/1mm_Droplet
+# cat ./tests/FlowShockbubble/1mm_droplet
+# cat ./tests/FlowRayleighPlesset/Bubble_UNIT_TEST2_Expand_Real
+cat ./tests/FlowRayleighPlesset/Bubble_UNIT_TEST2_Expand
+
 
 # Set thread count (default value is 1)...
 
@@ -60,6 +63,7 @@ export OMP_NUM_THREADS=1
 # Launch MPI code...
 
 # mpirun ./bin/hydro-2d-g++ ./tests/FlowVortexShedLarge/input
-mpirun ./bin/hydro2-2d-g++ ./tests/FlowShockDroplet/1mm_Droplet
-
+# mpirun ./bin/hydro2-2d-g++ ./tests/FlowShockbubble/1mm_bubble
+# mpirun ./bin/hydro2-2d-g++ ./tests/FlowRayleighPlesset/Bubble_UNIT_TEST2_Expand_Real
+mpirun ./bin/hydro2-2d-g++ ./tests/FlowRayleighPlesset/Bubble_UNIT_TEST2_Expand
 # ---------------------------------------------------
