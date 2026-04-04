@@ -41,13 +41,21 @@ q.ic.type = constant
 q.ic.constant.value = 0.0
 
 ### HYDRO PARAM ###
-gamma0 = 5.5   
-gamma1 = 1.4 
 cfl   = 0.4
+
+## EOS ##
+eos0.gamma = 5.5
+eos1.gamma = 1.4
+eos0.p0 = 1.505
+eos1.p0 = 0.0
+eos0.cp = 1004.5
+eos1.cp = 1004.5
+eos0.cv = 717.5
+eos1.cv = 717.5
+
+## Viscosity ##
 mu0   = 0.0
 mu1   = 0.0
-p0_0  = 1.505 
-p0_1  = 0.0  
 
 ### Surface tension coefficient ###
 sigma = 0.0       # No surface tension in this test
@@ -116,7 +124,7 @@ apply_vaporization = 0
 
 
 
-apply_sharpening = 1
+apply_sharpening = 0
 sharpening_frequency = 100
 reinit_max_iter = 50
 reinit_tolerance = 1e-6

@@ -104,7 +104,7 @@ public:
     AMREX_GPU_HOST_DEVICE
     Set::Scalar SoundSpeed(Set::Scalar rho, Set::Scalar p) const override
     {
-        return std::sqrt(m_gamma * (p + m_p0) / rho);
+        return std::sqrt(m_gamma * std::max(p + m_p0,0.0) / rho);
     }
 
     /// Compute internal energy from (rho, p)
@@ -112,7 +112,7 @@ public:
     AMREX_GPU_HOST_DEVICE
     Set::Scalar InternalEnergy(Set::Scalar rho, Set::Scalar p) const override
     {
-        return (p + m_gamma * m_p0) / ((m_gamma - 1.0) * rho);
+        return std::max(p + m_gamma * m_p0, 0.0) / ((m_gamma - 1.0) * rho);
     }
 };
 

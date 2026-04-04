@@ -66,7 +66,7 @@ public:
         {
             // With Respect to Specific Volume (energies are per unit volume)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
-            ue_L = E_L - ke_L;                                          // IE per unit volume
+            ue_L = std::max(E_L - ke_L, 0.0);                           // IE per unit volume
             p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;
             h_TL = (ke_L + ue_L + p_L);
 
@@ -79,7 +79,7 @@ public:
         {
             // With Respect to Specific Mass (energies are per unit mass)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small); // KE per unit volume
-            ue_L = E_L - ke_L;                                                  // IE per unit volume
+            ue_L = std::max(E_L - ke_L, 0.0);                                   // IE per unit volume
             p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;
             h_TL = ke_L + ue_L + (p_L / rho_L);
 
@@ -105,8 +105,8 @@ public:
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
         // Sound Speeds
-        Set::Scalar a_L = std::sqrt(gamma_L * (p_L + p0_L) / (rho_L));
-        Set::Scalar a_R = std::sqrt(gamma_R * (p_R + p0_R) / (rho_R));
+        Set::Scalar a_L = std::sqrt(gamma_L * std::max(p_L + p0_L, 0.0) / (rho_L));
+        Set::Scalar a_R = std::sqrt(gamma_R * std::max(p_R + p0_R, 0.0) / (rho_R));
 
         // Wave speed estimates
         Set::Scalar S_L = std::min(u_L - a_L, u_R - a_R);
