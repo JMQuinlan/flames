@@ -52,10 +52,19 @@ epsilon = eta.ic.expression.constant.epsilon
 ### Advection solver ###
 
 ### HYDRO PARAM ###
-
-gamma0 = 1.4
-gamma1 = 1.4
 cfl   = 0.4
+
+## EOS ##
+eos0.gamma = 1.4
+eos1.gamma = 1.4
+eos0.p0 = 0.0
+eos1.p0 = 0.0
+eos0.cp = 1004.5
+eos1.cp = 1004.5
+eos0.cv = 717.5
+eos1.cv = 717.5
+
+# Viscosity
 mu0   = 0.0
 mu1   = 0.0
 

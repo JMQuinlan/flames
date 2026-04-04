@@ -31,6 +31,12 @@
 //#include "Solver/Local/Limiter/Minmod.H"
 //#include "Solver/Local/Limiter/VanLeer.H"
 
+//EOS
+#include "Solver/EOS/EOS.H"
+#include "Solver/EOS/Tammann.H"
+#include "Solver/EOS/CPG.H"
+
+
 #include <AMReX_Math.H>
 #include "AMReX_TimeIntegrator.H"
 
@@ -77,24 +83,33 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
         // FLUID 0
+        pp_query_required("mu0", value.mu0); // linear viscosity coefficient
+        pp_query_default("mu0_b", value.mu0_b, 0.0); // bulk viscosity coefficient
+        /*
         pp_query_required("gamma0", value.gamma0);      // gamma for gamma law
         pp_query_default("p0_0", value.p0_0, 0.0);      // p0 for Tammann EOS
-        pp_query_required("mu0", value.mu0);            // linear viscosity coefficient
-        pp_query_default("mu0_b", value.mu0_b, 0.0);    // bulk viscosity coefficient
         pp_query_default("cp0", value.cp0, 0.0);        // Constant Pressure Specific Heat [J/kg]
         pp_query_default("cv0", value.cv0, 0.0);        // Constant Volume Specific Heat [J/kg]
         // pp_query_required("R0", value.R0);              // Specific Gas Constant
         // pp_query_required("MW0", value.MW0);            // Molecular Weight
+        */
         
         // FLUID 1
+        pp_query_required("mu1", value.mu1); // linear viscosity coefficient
+        pp_query_default("mu1_b", value.mu1_b, 0.0); // bulk viscosity coefficient
+        /*
         pp_query_required("gamma1", value.gamma1);      // gamma for gamma law
         pp_query_default("p0_1", value.p0_1, 0.0);      // p0 for Tammann EOS
-        pp_query_required("mu1", value.mu1);            // linear viscosity coefficient
-        pp_query_default("mu1_b", value.mu1_b, 0.0);    // bulk viscosity coefficient
         pp_query_default("cp1", value.cp1, 0.0);        // Constant Pressure Specific Heat [J/kg]
         pp_query_default("cv1", value.cv1, 0.0);        // Constant Volume Specific Heat [J/kg]
         // pp_query_required("R1", value.R1);              // Specific Gas Constant
         // pp_query_required("MW1", value.MW1);            // Molecular Weight
+        */
+
+        // EOS
+        Solver::EOS::Tammann::Parse(value.eos0, pp, "eos0.");
+        Solver::EOS::Tammann::Parse(value.eos1, pp, "eos1.");
+
 
         // INTERACTIONS
         pp_query_default("sigma", value.sigma, 0.0);    // Surface tension condition
@@ -402,6 +417,8 @@ void Hydro2::Mix(int lev)
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
 
+    
+
 
     // Function is for the diffusive mixing terms. I.E: rho = eta*rho0 + (1-eta)*rho1
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
@@ -471,6 +488,10 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar>         KE_vol      = KE_per_vol_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         KE_mas      = KE_per_mas_mf.Patch(lev, mfi);
 
+        // Local EOS Copy
+        const Solver::EOS::Tammann eos0_local = eos0;
+        const Solver::EOS::Tammann eos1_local = eos1;
+
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
@@ -501,10 +522,8 @@ void Hydro2::Mix(int lev)
 
             // Internal Energy
             Set::Scalar p_eff = p0(i, j, k) * (eta(i, j, k)) + p1(i, j, k) * (1.0 - eta(i, j, k));
-            Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0); 
-            Set::Scalar B = (eta(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
-            UE_vol(i, j, k) = (p_eff + pref)*A + B;
-            UE_mas(i, j, k) = (UE_vol(i, j, k)) / (rho(i, j, k));
+            UE_vol(i, j, k) = Solver::EOS::EOS::MixedInternalEnergy(p_eff, eta(i, j, k), eos0_local, eos1_local, pref);
+            UE_mas(i, j, k) = UE_vol(i, j, k) / rho(i, j, k);
             
             // Kinetic Energy
             E_vol(i, j, k) = KE_vol(i, j, k) + UE_vol(i, j, k);
@@ -518,11 +537,11 @@ void Hydro2::Mix(int lev)
             v(i, j, k, 1) = v0(i, j, k, 1) * eta(i, j, k) + v1(i, j, k, 1) * (1.0 - eta(i, j, k));
 
             // Specific Heat Ratio
-            gammaf(i, j, k) = 1.0 + (1.0 / A);
+            gammaf(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
 
             // Pressure
-            p0_eff(i, j, k) = (B / A) / gammaf(i, j, k);
-            press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE_vol(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // pressure Tammann EOS modification
+            p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
+            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE_vol(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
 
             // Chemical Potential
             // Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
@@ -533,21 +552,11 @@ void Hydro2::Mix(int lev)
             // Mass Fraction
             Y(i, j, k) = rho_eta0(i, j, k) / (rho(i, j, k));
 
-
             // Spalding Number
             Bm(i, j, k) = (Y(i, j, k) - Y_infinity) / (1 + Y_infinity + small);
             
-            // Constant Pressure Specific Heat
-            cp(i, j, k) = eta(i, j, k) * cp0 + (1.0 - eta(i, j, k)) * cp1;
-
-            // Constant Volume Specific Heat
-            cv(i, j, k) = eta(i, j, k) * cv0 + (1.0 - eta(i, j, k)) * cv1;
-
             // Temperature
-            // T(i, j, k) = T0(i, j, k) * eta(i, j, k) + T1(i, j, k) * (1.0 - eta(i, j, k));
-            //T(i, j, k) = UE_vol(i, j, k) / (rho(i, j, k) * cv(i, j, k) + small); // Volume Specific
-            T(i, j, k) = (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) * cv(i, j, k) * (gammaf(i, j, k) - 1.0) + small); // Volume Specific
-            // T(i, j, k) = UE_vol(i, j, k) / (cv(i, j, k) + small); // Mass Specific
+            T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
 
             // Thermal Conductivity
             //k_thermal(i, j, k) = eta(i, j, k) * k0_thermal(i, j, k) + (1.0 - eta(i, j, k)) * k1_thermal(i, j, k);
@@ -578,15 +587,11 @@ void Hydro2::Mix(int lev)
                 { "KE_vol", KE_vol(i, j, k) }, 
                 { "KE_mas", KE_mas(i, j, k) }, 
                 { "eta", eta(i, j, k) }, 
-                { "A", A }, 
-                { "B", B }, 
                 { "gammaf", gammaf(i, j, k) }, 
                 { "v[0]", v(i, j, k, 0) }, 
                 { "v[1]", v(i, j, k, 1) }, 
                 { "press", press(i, j, k) },
                 { "p0_eff", p0_eff(i, j, k) },
-                { "cp", cp(i, j, k) },
-                { "cv", cv(i, j, k) },
                 { "T", T(i, j, k) },
                 { "a", a(i, j, k) },
                 { "Y", Y(i, j, k) },
@@ -730,6 +735,10 @@ Hydro2::RHS(int lev,
         Set::Patch<Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Y = Y_mf.Patch(lev, mfi);
 
+        // Local EOS Copy
+        const Solver::EOS::Tammann eos0_local = eos0;
+        const Solver::EOS::Tammann eos1_local = eos1;
+
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
@@ -741,10 +750,8 @@ Hydro2::RHS(int lev,
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
 
             // gamma
-            Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
-            Set::Scalar B = (eta(i, j, k) * gamma0 * p0_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * p0_1) / (gamma1 - 1.0);
-            gammaf(i, j, k) = 1.0 + (1.0 / A);
-
+            gammaf(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
+            
             // Velocity
             v(i, j, k, 0) = M(i, j, k, 0) / (rho(i, j, k));
             v(i, j, k, 1) = M(i, j, k, 1) / (rho(i, j, k));
@@ -757,22 +764,11 @@ Hydro2::RHS(int lev,
             UE(i, j, k) = E(i, j, k) - KE(i, j, k);
 
             // Pressure
-            p0_eff(i, j, k) = (B / A) / gammaf(i, j, k);
-            press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref;                // Per Vol
-            //press(i, j, k) = (gammaf(i, j, k) - 1.0) * UE(i, j, k) * rho(i, j, k) - gammaf(i, j, k) * p0_eff(i, j, k) + pref; // Per Mass
-            //press(i, j, k) = std::max(small, press(i, j, k));
-
-            // Constant Pressure Specific Heat
-            cp(i, j, k) = eta(i, j, k) * cp0 + (1.0 - eta(i, j, k)) * cp1;
-
-            // Constant Volume Specific Heat
-            cv(i, j, k) = eta(i, j, k) * cv0 + (1.0 - eta(i, j, k)) * cv1;
+            p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
+            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
 
             // Temperature
-            // T(i, j, k) = T0(i, j, k) * eta(i, j, k) + T1(i, j, k) * (1.0 - eta(i, j, k));
-            //T(i, j, k) = UE(i, j, k) / (rho(i, j, k) * cv(i, j, k) + small); // Volume Specific
-            T(i, j, k) = (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k) * cv(i, j, k) * (gammaf(i, j, k) - 1.0) + small); // Volume Specific
-            // T(i, j, k) = UE(i, j, k) / (cv(i, j, k) + small); // Mass Specific
+            T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
 
             // Speed of sound:
             a(i, j, k) = sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k)));
@@ -858,11 +854,6 @@ Hydro2::RHS(int lev,
                 { "M[1]", M(i, j, k, 1) }, 
                 { "E", E(i, j, k) }, 
                 { "eta", eta(i, j, k) }, 
-                { "A", A }, 
-                { "B", B }, 
-                { "gammaf", gammaf(i, j, k) }, 
-                { "gammaf", gammaf(i, j, k) }, 
-                { "gammaf", gammaf(i, j, k) }, 
                 { "gammaf", gammaf(i, j, k) }, 
                 { "v[0]", v(i, j, k, 0) }, 
                 { "v[1]", v(i, j, k, 1) }, 
@@ -870,8 +861,6 @@ Hydro2::RHS(int lev,
                 { "UE", UE(i, j, k) }, 
                 { "press", press(i, j, k) },
                 { "p0_eff", p0_eff(i, j, k) },
-                { "cp", cp(i, j, k) },
-                { "cv", cv(i, j, k) },
                 { "T", T(i, j, k) },
                 { "a", a(i, j, k) },
                 { "Y", Y(i, j, k) },
@@ -1627,6 +1616,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
+
+        // Local EOS Copy
+        const Solver::EOS::Tammann eos0_local = eos0;
+        const Solver::EOS::Tammann eos1_local = eos1;
     
         amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &F_max_local, &rho_min_local] AMREX_GPU_DEVICE(int i, int j, int k) 
         {
@@ -1636,11 +1629,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
             Set::Matrix hess_eta = Numeric::Hessian(eta_new, i, j, k, 0, DX, sten);
             Set::Scalar lap_eta = Numeric::Laplacian(eta_new, i, j, k, 0, DX);
-        
-            Set::Scalar A = (eta_new(i,j,k)) / (gamma0 - 1.0) + (1.0 - eta_new(i,j,k)) / (gamma1 - 1.0);
-            Set::Scalar B = (eta_new(i,j,k) * gamma0 * p0_0) / (gamma0 - 1.0) + 
-                           ((1.0 - eta_new(i,j,k)) * gamma1 * p0_1) / (gamma1 - 1.0);
-            gammaf(i,j,k) = 1.0 + (1.0 / A);
+
+            gammaf(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
         
             etadot(i,j,k) = (eta_new(i,j,k) - eta(i,j,k)) / dt;
         
@@ -1654,8 +1644,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             E_mas(i,j,k) = E_vol(i,j,k) / (rho(i,j,k) + small);
             UE_mas(i,j,k) = E_mas(i,j,k) - KE_mas(i,j,k);
         
-            p0_eff(i,j,k) = (B / A) / gammaf(i,j,k);
-            press(i,j,k) = (gammaf(i,j,k) - 1.0) * UE_vol(i,j,k) - gammaf(i,j,k) * p0_eff(i,j,k) + pref;
+            p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
+            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE_vol(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
         
             Set::Scalar f_prime = 4.0 * eta_new(i,j,k) * (eta_new(i,j,k) - 0.5) * (eta_new(i,j,k) - 1.0);
             Set::Scalar mu_chem = -epsilon * epsilon * lap_eta + f_prime;

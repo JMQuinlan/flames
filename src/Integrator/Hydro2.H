@@ -25,6 +25,11 @@
 #include "Solver/Local/FluidRiemann/Upwind.H"
 #include "Solver/Local/FluidRiemann/Lax_Friedrich.H"
 
+//EOS
+#include "Solver/EOS/EOS.H"
+#include "Solver/EOS/Tammann.H"
+#include "Solver/EOS/CPG.H"
+
 // Limiters
 // #include "Solver/Local/Limiter/Minmod.H"
 // #include "Solver/Local/Limiter/VanLeer.H"
@@ -322,6 +327,10 @@ protected:
         RK4
     };
     IntegrationScheme scheme;
+
+    // EOS Parameters
+    Solver::EOS::Tammann eos0; // Fluid 0
+    Solver::EOS::Tammann eos1; // Fluid 1 
 
     // Interface Compression Stuff
     bool apply_sharpening = false;
