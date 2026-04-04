@@ -208,6 +208,33 @@ public:
 
         return std::sqrt(gamma_eff * (p + p0_eff) / rho);
     }
+
+    /// Safe sound speed calculation with error checking
+    /// Prevents NaN from negative arguments or division by zero
+    AMREX_GPU_HOST_DEVICE
+    static Set::Scalar SafeSoundSpeed(Set::Scalar rho,
+                                      Set::Scalar p,
+                                      Set::Scalar gamma,
+                                      Set::Scalar p0,
+                                      Set::Scalar small = 1e-10)
+    {
+        // Clamp inputs
+        rho = std::max(small, rho);
+        p = std::max(-p0 + small, p); // Ensure p + p0 > 0
+
+        // Compute argument
+        Set::Scalar arg = gamma * (p + p0) / rho;
+
+        // Check for negative or NaN
+        if (arg <= 0.0 || arg != arg)
+        {
+            return small; // Return small positive value
+        }
+
+        return std::sqrt(arg);
+    }
+
+
 };
 
 } // namespace EOS
