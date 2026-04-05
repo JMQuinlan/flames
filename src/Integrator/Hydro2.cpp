@@ -5,6 +5,8 @@
 #include "IO/ParmParse.H"
 #include "BC/Constant.H"
 #include "BC/Expression.H"
+#include "BC/Nothing.H"
+#include "BC/NSCBC.H"
 #include "Numeric/Stencil.H"
 #include "IC/Constant.H"
 #include "IC/Laminate.H"
@@ -131,17 +133,57 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
     
         // Boundry Conditions
+        /*
         value.density_bc = new BC::Expression(1, pp, "density.bc");
         value.energy_bc = new BC::Constant(1, pp, "energy.bc");
         value.momentum_bc = new BC::Expression(2, pp, "momentum.bc");
-        //value.eta_bc = new BC::Constant(1, pp, "pf.eta.bc");
         value.temperature_bc = new BC::Constant(1, pp, "energy.bc"); // Change to be different if needed? ___TEMP___
+        */
+        bool uses_nscbc = false;
+        std::vector<std::string> bc_faces = { "xlo", "xhi", "ylo", "yhi" };
+#if AMREX_SPACEDIM == 3
+        bc_faces.push_back("zlo");
+        bc_faces.push_back("zhi");
+#endif
+
+        for (const auto &face : bc_faces)
+        {
+            std::string bc_type_str;
+            pp.query(("density.bc.type." + face).c_str(), bc_type_str);
+            int bc_type = BC::BCUtil::ReadString(bc_type_str);
+            if (BC::BCUtil::IsNSCBC(bc_type))
+            {
+                uses_nscbc = true;
+                break;
+            }
+        }
+
+        // Initialize boundary conditions based on whether NSCBC is used
+        if (uses_nscbc)
+        {
+            // NSCBC mode: Initialize NSCBC handler and use Nothing BCs
+            value.nscbc_bc = new BC::NSCBC(pp);
+
+            // Use BC::Nothing (does nothing when called)
+            value.density_bc = &value.bc_nothing;
+            value.energy_bc = &value.bc_nothing;
+            value.momentum_bc = &value.bc_nothing;
+        }
+        else
+        {
+            // Standard mode: Use Expression BCs
+            value.nscbc_bc = nullptr;
+
+            value.density_bc = new BC::Expression(1, pp, "density.bc");
+            value.energy_bc = new BC::Constant(1, pp, "energy.bc");
+            value.momentum_bc = new BC::Expression(2, pp, "momentum.bc");
+        }
     }
 
     // Register FabFields:
     // Toggle the last boolean to true/false to track the variable or not.
     {
-        int nghost = 2;
+        int nghost = 4;
 
         // DIFFUSE PARAMETERS
         value.RegisterNewFab(value.eta_mf,           value.density_bc, 1, nghost, "eta", true, true);
@@ -692,13 +734,7 @@ Hydro2::RHS(int lev,
             
         });
     }
-    FillBoundariesWithBC(lev, time, density_bc, { 
-        eta_mf[lev].get(), 
-        density_mf[lev].get(), 
-        rho_eta0_mf[lev].get(),
-        rho_eta1_mf[lev].get() 
-    });
-
+    
     // Primitive Fields
     //for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
@@ -881,12 +917,81 @@ Hydro2::RHS(int lev,
 
         }); // end parallelfor
     } // end Primative field
-    FillBoundariesWithBC(lev, time, energy_bc, { 
-        pressure_mf[lev].get(), 
-        T_mf[lev].get(), 
-        gamma_mf[lev].get(),
-        p0_mf[lev].get() 
-    });
+
+
+    // NSCBC SPECIFIC BOUNDRY CONDITION
+    if (nscbc_bc != nullptr)
+    {
+        // NSCBC: Apply NSCBC boundaries
+        amrex::MultiFab M_copy(M_mf_in.boxArray(), M_mf_in.DistributionMap(), AMREX_SPACEDIM, 4);
+        amrex::MultiFab E_copy(E_mf_in.boxArray(), E_mf_in.DistributionMap(), 1, 4);
+    
+        amrex::MultiFab::Copy(M_copy, M_mf_in, 0, 0, AMREX_SPACEDIM, 0);
+        amrex::MultiFab::Copy(E_copy, E_mf_in, 0, 0, 1, 0);
+    
+        nscbc_bc->FillBoundary(*density_mf[lev],
+                               M_copy,
+                               E_copy,
+                               *eta_mf[lev],
+                               eos0,
+                               eos1,
+                               geom[lev],
+                               time,
+                               pref);
+    
+        amrex::MultiFab::Copy(const_cast<amrex::MultiFab&>(M_mf_in), M_copy, 0, 0, AMREX_SPACEDIM, 4);
+        amrex::MultiFab::Copy(const_cast<amrex::MultiFab&>(E_mf_in), E_copy, 0, 0, 1, 4);
+    }
+    else
+    {
+        // Standard: Apply standard BCs
+        FillBoundariesWithBC(lev, time, density_bc, { 
+            eta_mf[lev].get(), 
+            density_mf[lev].get(), 
+            rho_eta0_mf[lev].get(),
+            rho_eta1_mf[lev].get() 
+        });
+    }
+
+    // After computing primitive fields
+    if (nscbc_bc == nullptr) {
+        // Standard BCs
+        FillBoundariesWithBC(lev, time, density_bc, { 
+            eta_mf[lev].get(), 
+            density_mf[lev].get(), 
+            rho_eta0_mf[lev].get(),
+            rho_eta1_mf[lev].get() 
+        });
+    
+        for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi) {
+            const amrex::Box& ghost_box = mfi.growntilebox(4);  // All 4 ghost cell layers
+        
+            auto rho = density_mf[lev]->array(mfi);
+            auto eta = eta_mf[lev]->array(mfi);
+            auto rho_eta0 = rho_eta0_mf[lev]->array(mfi);
+            auto rho_eta1 = rho_eta1_mf[lev]->array(mfi);
+        
+            Set::Scalar small_local = small;
+            Set::Scalar cutoff_local = cutoff;
+        
+            amrex::ParallelFor(ghost_box, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                // Reconstruct partial densities from total density and eta
+                // (if eta BC was applied correctly)
+                rho_eta0(i,j,k) = rho(i,j,k) * eta(i,j,k);
+                rho_eta1(i,j,k) = rho(i,j,k) * (1.0 - eta(i,j,k));
+            
+                // OR: Reconstruct eta from partial densities
+                // (if rho_eta0/rho_eta1 BCs were applied correctly)
+                Set::Scalar rho_total = rho_eta0(i,j,k) + rho_eta1(i,j,k);
+                rho(i,j,k) = std::max(rho_total, small_local);
+                eta(i,j,k) = rho_eta0(i,j,k) / rho(i,j,k);
+            
+                // Apply cutoff transformation
+                eta(i,j,k) = std::max(0.0, std::min(1.0, (eta(i,j,k) - cutoff_local) / (1.0 - 2.0 * cutoff_local)));
+            });
+        }
+    }
+
 
     // Main time integration loop
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
@@ -1533,17 +1638,94 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     });
 
     timeintegrator.set_post_stage_action([&](amrex::Vector<amrex::MultiFab> &stage_mf, Set::Scalar time) {
-        density_bc->FillBoundary(stage_mf[0], 0, 1, time, 0);
-        stage_mf[0].FillBoundary(true);
-        density_bc->FillBoundary(stage_mf[1], 0, 1, time, 0);
-        stage_mf[1].FillBoundary(true);
-        momentum_bc->FillBoundary(stage_mf[2], 0, 2, time, 0);
-        stage_mf[2].FillBoundary(true);
-        energy_bc->FillBoundary(stage_mf[3], 0, 1, time, 0);
-        stage_mf[3].FillBoundary(true);
+        if (nscbc_bc != nullptr)
+        {
+            // NSCBC mode: Apply NSCBC boundaries
+
+            // Create copies for momentum and energy
+            amrex::MultiFab M_stage_copy(stage_mf[2].boxArray(), stage_mf[2].DistributionMap(), AMREX_SPACEDIM, 4);
+            amrex::MultiFab E_stage_copy(stage_mf[3].boxArray(), stage_mf[3].DistributionMap(), 1, 4);
+
+            amrex::MultiFab::Copy(M_stage_copy, stage_mf[2], 0, 0, AMREX_SPACEDIM, 0);
+            amrex::MultiFab::Copy(E_stage_copy, stage_mf[3], 0, 0, 1, 0);
+
+            // Compute total density: rho = rho_eta0 + rho_eta1
+            amrex::MultiFab rho_total(stage_mf[0].boxArray(), stage_mf[0].DistributionMap(), 1, 4);
+            amrex::MultiFab::Copy(rho_total, stage_mf[0], 0, 0, 1, 0); // rho_eta0
+            amrex::MultiFab::Add(rho_total, stage_mf[1], 0, 0, 1, 0);  // + rho_eta1
+
+            // Compute eta = rho_eta0 / rho_total
+            amrex::MultiFab eta_stage(stage_mf[0].boxArray(), stage_mf[0].DistributionMap(), 1, 4);
+
+            for (amrex::MFIter mfi(eta_stage); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &bx = mfi.growntilebox(4);
+
+                // Get Array4 accessors OUTSIDE the ParallelFor
+                amrex::Array4<Set::Scalar> eta_arr = eta_stage.array(mfi);
+                amrex::Array4<const Set::Scalar> rho_eta0_arr = stage_mf[0].array(mfi);
+                amrex::Array4<const Set::Scalar> rho_arr = rho_total.array(mfi);
+
+                Set::Scalar small_local = small;
+
+                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    eta_arr(i, j, k) = rho_eta0_arr(i, j, k) / (rho_arr(i, j, k) + small_local);
+                    eta_arr(i, j, k) = std::max(0.0, std::min(1.0, eta_arr(i, j, k)));
+                });
+            }
+
+            // Apply NSCBC boundary conditions
+            nscbc_bc->FillBoundary(rho_total,
+                                   M_stage_copy,
+                                   E_stage_copy,
+                                   eta_stage,
+                                   eos0,
+                                   eos1,
+                                   geom[lev],
+                                   time,
+                                   pref);
+
+            // Copy modified momentum and energy back
+            amrex::MultiFab::Copy(stage_mf[2], M_stage_copy, 0, 0, AMREX_SPACEDIM, 4);
+            amrex::MultiFab::Copy(stage_mf[3], E_stage_copy, 0, 0, 1, 4);
+
+            // Update rho_eta0 and rho_eta1 from modified rho_total and eta
+            for (amrex::MFIter mfi(rho_total); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &bx = mfi.growntilebox(4);
+
+                // Get Array4 accessors OUTSIDE the ParallelFor
+                amrex::Array4<const Set::Scalar> rho_arr = rho_total.array(mfi);
+                amrex::Array4<const Set::Scalar> eta_arr = eta_stage.array(mfi);
+                amrex::Array4<Set::Scalar> rho_eta0_arr = stage_mf[0].array(mfi);
+                amrex::Array4<Set::Scalar> rho_eta1_arr = stage_mf[1].array(mfi);
+
+                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    rho_eta0_arr(i, j, k) = rho_arr(i, j, k) * eta_arr(i, j, k);
+                    rho_eta1_arr(i, j, k) = rho_arr(i, j, k) * (1.0 - eta_arr(i, j, k));
+                });
+            }
+        }
+        else
+        {
+            // Standard mode: Apply standard BCs
+            density_bc->FillBoundary(stage_mf[0], 0, 1, time, 0);
+            stage_mf[0].FillBoundary(true);
+            density_bc->FillBoundary(stage_mf[1], 0, 1, time, 0);
+            stage_mf[1].FillBoundary(true);
+            momentum_bc->FillBoundary(stage_mf[2], 0, 2, time, 0);
+            stage_mf[2].FillBoundary(true);
+            energy_bc->FillBoundary(stage_mf[3], 0, 1, time, 0);
+            stage_mf[3].FillBoundary(true);
+        }
     });
 
+
     timeintegrator.advance(solution_old, solution_new, time, dt);
+
+
+    
+
 
     // ------------------------------------------------------------
     // Interface Sharpenging

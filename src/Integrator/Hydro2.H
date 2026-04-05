@@ -4,9 +4,12 @@
 #include "Integrator/Integrator.H"
 #include "IO/ParmParse.H"
 
+// Boundry Conditions
 #include "BC/BC.H"
 #include "BC/Constant.H"
+#include "BC/Expression.H"
 #include "BC/Nothing.H"
+#include "BC/NSCBC.H"
 #include "IC/IC.H"
 
 #include "Set/Base.H"
@@ -264,6 +267,9 @@ protected:
 
     BC::Constant neumann_bc_1 = BC::Constant::ZeroNeumann(1);
     BC::Constant neumann_bc_D = BC::Constant::ZeroNeumann(AMREX_SPACEDIM);
+
+    BC::NSCBC *nscbc_bc = nullptr;
+
 
     Set::Scalar c_max = 0.0;
     Set::Scalar vx_max = 0.0;

@@ -28,6 +28,18 @@ int ReadString(std::string bcstring)
     if (bcstring == "inflow")           return (int)amrex::LinOpBCType::inflow;
     if (bcstring == "Periodic" ||
         bcstring == "periodic")         return (int)amrex::LinOpBCType::Periodic;
+
+    // NSCBC
+    if (bcstring == "nscbc_inflow" ||
+        bcstring == "NSCBC_INFLOW")     return NSCBC_INFLOW;
+    if (bcstring == "nscbc_outflow" ||
+        bcstring == "NSCBC_OUTFLOW")    return NSCBC_OUTFLOW;
+    if (bcstring == "nscbc_slipwall" ||
+        bcstring == "NSCBC_SLIPWALL")   return NSCBC_SLIPWALL;
+    if (bcstring == "nscbc_noslipwall" ||
+        bcstring == "NSCBC_NOSLIPWALL") return NSCBC_NOSLIPWALL;
+
+    // Else
     return 0;
 }
 bool IsPeriodic(int bctype)
@@ -61,5 +73,15 @@ bool IsReflectOdd(int bctype)
     if (bctype == (int)amrex::BCType::mathematicalBndryTypes::reflect_odd) return true;
     else return false;
 }
+bool IsNSCBC(int bctype)
+{
+    if (bctype == NSCBC_INFLOW) return true;
+    if (bctype == NSCBC_OUTFLOW) return true;
+    if (bctype == NSCBC_SLIPWALL) return true;
+    if (bctype == NSCBC_NOSLIPWALL) return true;
+    else return false;
+}
+
+
 }
 }

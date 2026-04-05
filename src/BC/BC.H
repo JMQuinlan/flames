@@ -140,6 +140,15 @@ bool IsNeumann(int bctype);
 bool IsReflectEven(int bctype);
 bool IsReflectOdd(int bctype);
 bool IsDirichlet(int bctype);
+bool IsNSCBC(int bctype);
+
+constexpr int NSCBC_INFLOW = 200;     // Custom BC type for NSCBC inflow
+constexpr int NSCBC_OUTFLOW = 201;    // Custom BC type for NSCBC outflow
+constexpr int NSCBC_SLIPWALL = 202;   // Custom BC type for NSCBC slip wall
+constexpr int NSCBC_NOSLIPWALL = 203; // Custom BC type for NSCBC no-slip wall
+
+
+
 }
 
 }
