@@ -47,8 +47,8 @@ epsilon = eta.ic.expression.constant.epsilon
 # Ideal Gas EOS (NO TAMMANN)
 # ----------------------------
 
-gamma0 = 7.15
-gamma1 = 1.4
+eos0.gamma = 7.15
+eos1.gamma = 1.4
 
 # ----------------------------
 # Density ratio 1 : 10
@@ -86,16 +86,16 @@ pressure1.ic.expression.region0 = "1000.0"
 # Specific Heats
 # ----------------------------
 
-cp0 = "1000.0"
-cp1 = "1000.0"
-cv0 = "1000.0/1.4"
-cv1 = "1000.0/1.4"
+eos0.cp = "1000.0"
+eos1.cp = "1000.0"
+eos0.cv = "1000.0/1.4"
+eos1.cv = "1000.0/1.4"
 
 # ----------------------------
 # Stiffened pressure
 # ----------------------------
-p0_0 = 5000.0
-p0_1 = 0.0
+eos0.p0 = 5000.0
+eos1.p0 = 0.0
 
 # ----------------------------
 # Viscosity
