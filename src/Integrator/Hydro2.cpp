@@ -734,7 +734,7 @@ Hydro2::RHS(int lev,
             
         });
     }
-    
+
     // Primitive Fields
     //for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
@@ -807,7 +807,7 @@ Hydro2::RHS(int lev,
             T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
 
             // Speed of sound:
-            a(i, j, k) = sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k)));
+            a(i, j, k) = Solver::EOS::EOS::SafeSoundSpeed(rho(i, j, k), press(i, j, k), gammaf(i, j, k), p0_eff(i, j, k), small);
 
             // Chemical Potential
             Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
@@ -928,6 +928,14 @@ Hydro2::RHS(int lev,
     
         amrex::MultiFab::Copy(M_copy, M_mf_in, 0, 0, AMREX_SPACEDIM, 0);
         amrex::MultiFab::Copy(E_copy, E_mf_in, 0, 0, 1, 0);
+
+        FillBoundaries(lev, { 
+            eta_mf[lev].get(), 
+            density_mf[lev].get(), 
+            rho_eta0_mf[lev].get(),
+            rho_eta1_mf[lev].get() 
+        });
+
     
         nscbc_bc->FillBoundary(*density_mf[lev],
                                M_copy,
@@ -941,6 +949,116 @@ Hydro2::RHS(int lev,
     
         amrex::MultiFab::Copy(const_cast<amrex::MultiFab&>(M_mf_in), M_copy, 0, 0, AMREX_SPACEDIM, 4);
         amrex::MultiFab::Copy(const_cast<amrex::MultiFab&>(E_mf_in), E_copy, 0, 0, 1, 4);
+
+        // Filling in Primiave BC
+        for (amrex::MFIter mfi(*velocity_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &ghost_box = mfi.growntilebox(4); // All 4 ghost layers
+
+            auto rho = density_mf[lev]->array(mfi);
+            auto eta = eta_mf[lev]->array(mfi);
+            auto M = const_cast<amrex::MultiFab &>(M_mf_in).array(mfi);
+            auto E = const_cast<amrex::MultiFab &>(E_mf_in).array(mfi);
+            auto v = velocity_mf[lev]->array(mfi);
+            auto press = pressure_mf[lev]->array(mfi);
+            auto T = T_mf[lev]->array(mfi);
+            auto a = a_mf[lev]->array(mfi);
+            auto gammaf = gamma_mf[lev]->array(mfi);
+            auto p0_eff = p0_mf[lev]->array(mfi);
+            auto UE = UE_per_vol_mf[lev]->array(mfi);
+            auto KE = KE_per_vol_mf[lev]->array(mfi);
+
+            const Solver::EOS::Tammann eos0_local = eos0;
+            const Solver::EOS::Tammann eos1_local = eos1;
+
+            amrex::ParallelFor(ghost_box, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                // Velocity from momentum
+                v(i, j, k, 0) = M(i, j, k, 0) / (rho(i, j, k) + small);
+                v(i, j, k, 1) = M(i, j, k, 1) / (rho(i, j, k) + small);
+
+                // Kinetic energy
+                KE(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
+
+                // Internal energy
+                UE(i, j, k) = E(i, j, k) - KE(i, j, k);
+
+                // EOS properties
+                gammaf(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
+                p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
+                press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
+                T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
+                a(i, j, k) = Solver::EOS::EOS::SafeSoundSpeed(rho(i, j, k), press(i, j, k), gammaf(i, j, k), p0_eff(i, j, k), small);
+            });
+        }
+        ///  VALIDATION CHECK ///////////////////////////////
+        if (step_counter[lev] == 1)
+        { // First timestep only
+            for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &bx = mfi.validbox();
+                const amrex::Box &domain_box = geom[lev].Domain();
+
+                // Check X-LO boundary ghost cells
+                if (bx.smallEnd(0) == domain_box.smallEnd(0))
+                {
+                    auto rho = density_mf[lev]->array(mfi);
+                    auto M = const_cast<amrex::MultiFab &>(M_mf_in).array(mfi);
+                    auto E = const_cast<amrex::MultiFab &>(E_mf_in).array(mfi);
+
+                    // Sample one ghost cell at mid-height
+                    int i_ghost = domain_box.smallEnd(0) - 1;
+                    int j_mid = (bx.smallEnd(1) + bx.bigEnd(1)) / 2;
+
+                    Set::Scalar rho_g = rho(i_ghost, j_mid, 0);
+                    Set::Scalar Mx_g = M(i_ghost, j_mid, 0, 0);
+                    Set::Scalar My_g = M(i_ghost, j_mid, 0, 1);
+                    Set::Scalar E_g = E(i_ghost, j_mid, 0);
+                    Set::Scalar vx_g = Mx_g / (rho_g + small);
+                    Set::Scalar vy_g = My_g / (rho_g + small);
+
+                    Util::Message(INFO, "=== NSCBC X-LO GHOST CHECK ===");
+                    Util::Message(INFO, "Ghost cell (", i_ghost, ",", j_mid, "):");
+                    Util::Message(INFO, "  rho=", rho_g);
+                    Util::Message(INFO, "  Mx=", Mx_g, " My=", My_g);
+                    Util::Message(INFO, "  E=", E_g);
+                    Util::Message(INFO, "  vx=", vx_g, " vy=", vy_g);
+
+                    // Compare to interior neighbor
+                    int i_interior = domain_box.smallEnd(0);
+                    Set::Scalar rho_i = rho(i_interior, j_mid, 0);
+                    Set::Scalar vx_i = M(i_interior, j_mid, 0, 0) / (rho_i + small);
+                    Set::Scalar vy_i = M(i_interior, j_mid, 0, 1) / (rho_i + small);
+
+                    Util::Message(INFO, "Interior cell (", i_interior, ",", j_mid, "):");
+                    Util::Message(INFO, "  rho=", rho_i);
+                    Util::Message(INFO, "  vx=", vx_i, " vy=", vy_i);
+
+                    // FAIL CONDITIONS
+                    if (rho_g < 0.0 || rho_g > 10000.0)
+                    {
+                        Util::Message(INFO, "FAIL: Ghost density out of range!");
+                    }
+                    if (std::abs(vx_g) > 1000.0 || std::abs(vy_g) > 1000.0)
+                    {
+                        Util::Message(INFO, "FAIL: Ghost velocity too large!");
+                    }
+                    if (E_g < 0.0 || E_g > 1e10)
+                    {
+                        Util::Message(INFO, "FAIL: Ghost energy out of range!");
+                    }
+
+                    // EXPECTED: Ghost should be similar to interior (for outflow)
+                    Set::Scalar rho_diff = std::abs(rho_g - rho_i) / (rho_i + small);
+                    if (rho_diff > 0.5)
+                    {
+                        Util::Message(INFO, "WARNING: Ghost density differs by ", rho_diff * 100, "%");
+                    }
+                }
+            }
+        }
+
+        ///////////////////////////////
+
     }
     else
     {
@@ -952,47 +1070,7 @@ Hydro2::RHS(int lev,
             rho_eta1_mf[lev].get() 
         });
     }
-
-    // After computing primitive fields
-    if (nscbc_bc == nullptr) {
-        // Standard BCs
-        FillBoundariesWithBC(lev, time, density_bc, { 
-            eta_mf[lev].get(), 
-            density_mf[lev].get(), 
-            rho_eta0_mf[lev].get(),
-            rho_eta1_mf[lev].get() 
-        });
     
-        for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi) {
-            const amrex::Box& ghost_box = mfi.growntilebox(4);  // All 4 ghost cell layers
-        
-            auto rho = density_mf[lev]->array(mfi);
-            auto eta = eta_mf[lev]->array(mfi);
-            auto rho_eta0 = rho_eta0_mf[lev]->array(mfi);
-            auto rho_eta1 = rho_eta1_mf[lev]->array(mfi);
-        
-            Set::Scalar small_local = small;
-            Set::Scalar cutoff_local = cutoff;
-        
-            amrex::ParallelFor(ghost_box, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                // Reconstruct partial densities from total density and eta
-                // (if eta BC was applied correctly)
-                rho_eta0(i,j,k) = rho(i,j,k) * eta(i,j,k);
-                rho_eta1(i,j,k) = rho(i,j,k) * (1.0 - eta(i,j,k));
-            
-                // OR: Reconstruct eta from partial densities
-                // (if rho_eta0/rho_eta1 BCs were applied correctly)
-                Set::Scalar rho_total = rho_eta0(i,j,k) + rho_eta1(i,j,k);
-                rho(i,j,k) = std::max(rho_total, small_local);
-                eta(i,j,k) = rho_eta0(i,j,k) / rho(i,j,k);
-            
-                // Apply cutoff transformation
-                eta(i,j,k) = std::max(0.0, std::min(1.0, (eta(i,j,k) - cutoff_local) / (1.0 - 2.0 * cutoff_local)));
-            });
-        }
-    }
-
-
     // Main time integration loop
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
     {
@@ -1835,8 +1913,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         
             Bm(i,j,k) = eta(i,j,k) / (1.0 - eta(i,j,k) + small);
         
-            a(i,j,k) = sqrt(gammaf(i,j,k) * (press(i,j,k) + p0_eff(i,j,k)) / (rho(i,j,k)));
-        
+            a(i, j, k) = Solver::EOS::EOS::SafeSoundSpeed(rho(i, j, k), press(i, j, k), gammaf(i, j, k), p0_eff(i, j, k), small);
+
             Ma(i,j,k,0) = v(i,j,k,0) / (a(i,j,k) + small);
             Ma(i,j,k,1) = v(i,j,k,1) / (a(i,j,k) + small);
         

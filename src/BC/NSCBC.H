@@ -24,6 +24,7 @@ class NSCBC
 public:
     enum class Type
     {
+        None,
         Inflow,    ///< Subsonic inflow with relaxation to target state
         Outflow,   ///< Subsonic outflow with pressure relaxation
         SlipWall,  ///< Inviscid wall (tangential slip allowed)
@@ -77,9 +78,9 @@ public:
     static void Parse(NSCBC &value, IO::ParmParse &pp);
 
     /// Fill ghost cells for all conservative variables
-    /// @param density_mf    Density field [kg/m³]
-    /// @param momentum_mf   Momentum field [kg/(m²·s)]
-    /// @param energy_mf     Total energy field [J/m³]
+    /// @param density_mf    Density field [kg/m^3]
+    /// @param momentum_mf   Momentum field [kg*m/s)]
+    /// @param energy_mf     Total energy field [J/m^3]
     /// @param eta_mf        Volume fraction field (for mixed EOS)
     /// @param eos0          EOS for fluid 0
     /// @param eos1          EOS for fluid 1
@@ -100,7 +101,19 @@ public:
         const amrex::Box &domain = geom.Domain();
         const auto dx = geom.CellSizeArray();
 
-        // Capture parameters for GPU
+        // =========================================================================
+        // CAPTURE EOS PARAMETERS FOR GPU
+        // =========================================================================
+        Set::Scalar g0_ = eos0.Gamma();
+        Set::Scalar g1_ = eos1.Gamma();
+        Set::Scalar pi0_ = eos0.P0();
+        Set::Scalar pi1_ = eos1.P0();
+        Set::Scalar cv0_ = eos0.Cv();
+        Set::Scalar cv1_ = eos1.Cv();
+        Set::Scalar pref_local = pref;
+        Set::Scalar small_local = small;
+
+        // Capture boundary parameters for GPU
         BoundaryParams params_xlo_local = params_xlo;
         BoundaryParams params_xhi_local = params_xhi;
         BoundaryParams params_ylo_local = params_ylo;
@@ -109,1257 +122,1607 @@ public:
         BoundaryParams params_zlo_local = params_zlo;
         BoundaryParams params_zhi_local = params_zhi;
 #endif
-        Set::Scalar small_local = small;
-        Set::Scalar pref_local = pref;
 
-        // Loop over MultiFab boxes
+        // =========================================================================
+        // LAMBDA 1: COMPUTE PRIMITIVES FROM CONSERVED VARIABLES
+        // =========================================================================
+        // Computes (rho, un, ut, p, a, gamma_mix, pi_mix) at cell (ii, jj, kk)
+        // from conserved variables (eta, rho, M, E).
+        //
+        // dir = normal direction:
+        //   dir=0 (x): un=vx, ut=vy
+        //   dir=1 (y): un=vy, ut=vx
+        //
+        // All outputs returned by reference.
+        // =========================================================================
+        auto compute_prim = [=] AMREX_GPU_HOST_DEVICE(
+                                const amrex::Array4<const amrex::Real> &eta_arr,
+                                const amrex::Array4<const amrex::Real> &rho_arr,
+                                const amrex::Array4<const amrex::Real> &M_arr,
+                                const amrex::Array4<const amrex::Real> &E_arr,
+                                int ii,
+                                int jj,
+                                int kk,
+                                int dir,
+                                Set::Scalar &rho_out,
+                                Set::Scalar &un_out,
+                                Set::Scalar &ut_out,
+                                Set::Scalar &p_out,
+                                Set::Scalar &a_out,
+                                Set::Scalar &gamma_out,
+                                Set::Scalar &pi_out) -> void {
+            Set::Scalar eta_val = eta_arr(ii, jj, kk);
+            Set::Scalar rho_val = amrex::max(rho_arr(ii, jj, kk), small_local);
+            Set::Scalar mx = M_arr(ii, jj, kk, 0);
+            Set::Scalar my = M_arr(ii, jj, kk, 1);
+            Set::Scalar E_val = E_arr(ii, jj, kk);
+
+            // Velocities
+            Set::Scalar vx = mx / rho_val;
+            Set::Scalar vy = my / rho_val;
+
+            // Kinetic energy
+            Set::Scalar KE = 0.5 * rho_val * (vx * vx + vy * vy);
+
+            // Internal energy
+            Set::Scalar UE = E_val - KE;
+            if (!(UE > 0.0))
+                UE = 0.0; // handles NaN and negative
+
+            // Mixed EOS properties (volume-fraction weighted)
+            Set::Scalar A = eta_val / (g0_ - 1.0) + (1.0 - eta_val) / (g1_ - 1.0);
+            Set::Scalar B = (eta_val * g0_ * pi0_) / (g0_ - 1.0)
+                     + ((1.0 - eta_val) * g1_ * pi1_) / (g1_ - 1.0);
+            Set::Scalar gamma_mix = 1.0 + 1.0 / A;
+            Set::Scalar pi_mix = (B / A) / gamma_mix;
+
+            // Pressure (Tammann EOS)
+            Set::Scalar p_val = (gamma_mix - 1.0) * UE - gamma_mix * pi_mix + pref_local;
+            if (!(p_val > 0.0))
+                p_val = 1.0e-6; // handles NaN and negative
+
+            // Sound speed
+            Set::Scalar a_val = std::sqrt(gamma_mix * (p_val + pi_mix) / rho_val);
+
+            // Output
+            rho_out = rho_val;
+            un_out = (dir == 0) ? vx : vy; // normal velocity
+            ut_out = (dir == 0) ? vy : vx; // tangential velocity
+            p_out = p_val;
+            a_out = a_val;
+            gamma_out = gamma_mix;
+            pi_out = pi_mix;
+        };
+
+        // =========================================================================
+        // LAMBDA 2: WRITE CONSERVATIVE VARIABLES FROM PRIMITIVES
+        // =========================================================================
+        // Writes conserved variables (rho, M, E) to ghost cell (ii, jj, kk)
+        // from primitive values (rho, un, ut, p).
+        //
+        // Uses eta already present in the ghost cell and EOS to compute UE from p.
+        // =========================================================================
+        auto set_ghost_cons = [=] AMREX_GPU_HOST_DEVICE(
+                                  const amrex::Array4<const amrex::Real> &eta_arr,
+                                  const amrex::Array4<amrex::Real> &rho_arr,
+                                  const amrex::Array4<amrex::Real> &M_arr,
+                                  const amrex::Array4<amrex::Real> &E_arr,
+                                  int ii,
+                                  int jj,
+                                  int kk,
+                                  int dir,
+                                  Set::Scalar rho_val,
+                                  Set::Scalar un_val,
+                                  Set::Scalar ut_val,
+                                  Set::Scalar p_val) -> void {
+            Set::Scalar eta_val = eta_arr(ii, jj, kk);
+
+            // Mixed EOS
+            Set::Scalar A = eta_val / (g0_ - 1.0) + (1.0 - eta_val) / (g1_ - 1.0);
+            Set::Scalar B = (eta_val * g0_ * pi0_) / (g0_ - 1.0)
+                     + ((1.0 - eta_val) * g1_ * pi1_) / (g1_ - 1.0);
+            Set::Scalar gamma_mix = 1.0 + 1.0 / A;
+            Set::Scalar pi_mix = (B / A) / gamma_mix;
+
+            // Inverse EOS: compute UE from p
+            Set::Scalar UE = (p_val + gamma_mix * pi_mix - pref_local) / (gamma_mix - 1.0);
+            if (UE < 0.0)
+                UE = 0.0;
+
+            // Velocities (convert un, ut back to vx, vy)
+            Set::Scalar vx = (dir == 0) ? un_val : ut_val;
+            Set::Scalar vy = (dir == 0) ? ut_val : un_val;
+
+            // Kinetic energy
+            Set::Scalar KE = 0.5 * rho_val * (vx * vx + vy * vy);
+
+            // Write conservative variables
+            rho_arr(ii, jj, kk) = rho_val;
+            M_arr(ii, jj, kk, 0) = rho_val * vx;
+            M_arr(ii, jj, kk, 1) = rho_val * vy;
+            E_arr(ii, jj, kk) = UE + KE;
+        };
+
+        // =========================================================================
+        // MAIN LOOP OVER MULTIFAB BOXES
+        // =========================================================================
         for (amrex::MFIter mfi(density_mf); mfi.isValid(); ++mfi)
         {
             const amrex::Box &bx = mfi.validbox();
 
-            // Get array views
-            amrex::Array4<Set::Scalar> const &rho_arr = density_mf.array(mfi);
-            amrex::Array4<Set::Scalar> const &momx_arr = momentum_mf.array(mfi, 0);
-            amrex::Array4<Set::Scalar> const &momy_arr = momentum_mf.array(mfi, 1);
-#if AMREX_SPACEDIM == 3
-            amrex::Array4<Set::Scalar> const &momz_arr = momentum_mf.array(mfi, 2);
-#endif
-            amrex::Array4<Set::Scalar> const &energy_arr = energy_mf.array(mfi);
-            amrex::Array4<Set::Scalar> const &eta_arr = eta_mf.array(mfi);
+            // Get Array4 views of conserved variables
+            amrex::Array4<const amrex::Real> const &eta_arr = eta_mf.const_array(mfi);
+            amrex::Array4<amrex::Real> const &rho_arr = density_mf.array(mfi);        
+            amrex::Array4<amrex::Real> const &M_arr = momentum_mf.array(mfi);         
+            amrex::Array4<amrex::Real> const &E_arr = energy_mf.array(mfi);           
 
-            // Allocate temporary arrays for primitive variables
-            // These will be computed from conservative variables
-            amrex::Box grown_box = amrex::grow(bx, 4);
-            amrex::FArrayBox u_fab(grown_box, 1);
-            amrex::FArrayBox v_fab(grown_box, 1);
-            amrex::FArrayBox w_fab(grown_box, 1);
-            amrex::FArrayBox p_fab(grown_box, 1);
-            amrex::FArrayBox T_fab(grown_box, 1);
-            amrex::FArrayBox c_fab(grown_box, 1);
-            amrex::FArrayBox gamma_fab(grown_box, 1);
-            amrex::FArrayBox p0_fab(grown_box, 1);
+            // =====================================================================
+            // NOW PROCEED WITH BOUNDARY LOOPS (X-LO, X-HI, Y-LO, Y-HI)
+            // =====================================================================
 
-            amrex::Array4<Set::Scalar> const &u_arr = u_fab.array();
-            amrex::Array4<Set::Scalar> const &v_arr = v_fab.array();
-            amrex::Array4<Set::Scalar> const &w_arr = w_fab.array();
-            amrex::Array4<Set::Scalar> const &p_arr = p_fab.array();
-            amrex::Array4<Set::Scalar> const &T_arr = T_fab.array();
-            amrex::Array4<Set::Scalar> const &c_arr = c_fab.array();
-            amrex::Array4<Set::Scalar> const &gamma_arr = gamma_fab.array();
-            amrex::Array4<Set::Scalar> const &p0_arr = p0_fab.array();
-
-            // Step 1: Convert conservative to primitive variables in interior
-            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                Set::Scalar rho = rho_arr(i, j, k);
-                Set::Scalar momx = momx_arr(i, j, k);
-                Set::Scalar momy = momy_arr(i, j, k);
-#if AMREX_SPACEDIM == 3
-                Set::Scalar momz = momz_arr(i, j, k);
-#else
-            Set::Scalar momz = 0.0;
-#endif
-                Set::Scalar E = energy_arr(i, j, k);
-                Set::Scalar eta_val = eta_arr(i, j, k);
-
-                // Velocities
-                u_arr(i, j, k) = momx / (rho + small_local);
-                v_arr(i, j, k) = momy / (rho + small_local);
-                w_arr(i, j, k) = momz / (rho + small_local);
-
-                // Kinetic energy
-                Set::Scalar ke = 0.5 * rho * (u_arr(i, j, k) * u_arr(i, j, k) + v_arr(i, j, k) * v_arr(i, j, k) + w_arr(i, j, k) * w_arr(i, j, k));
-
-                // Internal energy
-                Set::Scalar ue = E - ke;
-
-                // Mixed EOS properties
-                gamma_arr(i, j, k) = Solver::EOS::EOS::MixedGamma(eta_val, eos0, eos1);
-                p0_arr(i, j, k) = Solver::EOS::EOS::MixedP0(eta_val, eos0, eos1);
-
-                // Pressure from Tammann EOS
-                p_arr(i, j, k) = (gamma_arr(i, j, k) - 1.0) * ue - gamma_arr(i, j, k) * p0_arr(i, j, k) + pref_local;
-                p_arr(i, j, k) = std::max(small_local, p_arr(i, j, k));
-
-                // Temperature
-                T_arr(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho, p_arr(i, j, k), eta_val, eos0, eos1, pref_local);
-
-                // Sound speed
-                c_arr(i, j, k) = Solver::EOS::EOS::SafeSoundSpeed(rho, p_arr(i, j, k), gamma_arr(i, j, k), p0_arr(i, j, k), small_local);
-            });
-
-            // Step 2: Apply NSCBC to each boundary face
-            // Note: Corners must be filled first (as per Motheau et al. 2018)
-
-            // ====================================================================
-            // X-LO BOUNDARY (i = domain.smallEnd(0))
-            // ====================================================================
-            if (bx.smallEnd(0) == domain.smallEnd(0))
+            // =====================================================================
+            // X-LO BOUNDARY (EDGES ONLY - SKIP CORNERS)
+            // =====================================================================
+            if (bx.smallEnd(0) == domain.smallEnd(0) && params_xlo_local.type != Type::None)
             {
                 int idir = 0;   // x-direction
                 int isign = -1; // left boundary
                 Set::Scalar delta = dx[0];
 
+                // Ghost box: 1 layer at x-lo
                 amrex::Box ghost_box = amrex::adjCellLo(bx, 0, 1);
 
                 amrex::ParallelFor(ghost_box, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    // ============================================================
+                    // SKIP CORNERS: If this cell is also on a Y boundary, skip it
+                    // (corners will be handled in a separate loop)
+                    // ============================================================
+                    if (j == domain.smallEnd(1) || j == domain.bigEnd(1))
+                        return;
+#if AMREX_SPACEDIM == 3
+                    if (k == domain.smallEnd(2) || k == domain.bigEnd(2))
+                        return;
+#endif
+
                     // Boundary cell index (last interior cell)
                     int i_bnd = domain.smallEnd(0);
 
-                    // Get boundary state
-                    Set::Scalar rho_bnd = rho_arr(i_bnd, j, k);
-                    Set::Scalar u_bnd = u_arr(i_bnd, j, k);
-                    Set::Scalar v_bnd = v_arr(i_bnd, j, k);
-                    Set::Scalar w_bnd = w_arr(i_bnd, j, k);
-                    Set::Scalar p_bnd = p_arr(i_bnd, j, k);
-                    Set::Scalar T_bnd = T_arr(i_bnd, j, k);
-                    Set::Scalar c_bnd = c_arr(i_bnd, j, k);
-                    Set::Scalar gamma_bnd = gamma_arr(i_bnd, j, k);
-                    Set::Scalar p0_bnd = p0_arr(i_bnd, j, k);
+                    // ============================================================
+                    // STEP 1: Compute primitives at boundary cell
+                    // ============================================================
+                    Set::Scalar rho_bnd, un_bnd, ut_bnd, p_bnd, a_bnd, gm_bnd, pi_bnd;
+                    compute_prim(eta_arr, rho_arr, M_arr, E_arr, i_bnd, j, k, idir, rho_bnd, un_bnd, ut_bnd, p_bnd, a_bnd, gm_bnd, pi_bnd);
 
-                    // Compute normal derivatives (one-sided, 2nd order)
-                    // dQ/dx ~= (-3Q_i + 4Q_{i+1} - Q_{i+2}) / (2dx)
-                    Set::Scalar drho_dx = (-3.0 * rho_arr(i_bnd, j, k) + 4.0 * rho_arr(i_bnd + 1, j, k) - rho_arr(i_bnd + 2, j, k)) / (2.0 * delta);
-                    Set::Scalar du_dx = (-3.0 * u_arr(i_bnd, j, k) + 4.0 * u_arr(i_bnd + 1, j, k) - u_arr(i_bnd + 2, j, k)) / (2.0 * delta);
-                    Set::Scalar dv_dx = (-3.0 * v_arr(i_bnd, j, k) + 4.0 * v_arr(i_bnd + 1, j, k) - v_arr(i_bnd + 2, j, k)) / (2.0 * delta);
-                    Set::Scalar dw_dx = (-3.0 * w_arr(i_bnd, j, k) + 4.0 * w_arr(i_bnd + 1, j, k) - w_arr(i_bnd + 2, j, k)) / (2.0 * delta);
-                    Set::Scalar dp_dx = (-3.0 * p_arr(i_bnd, j, k) + 4.0 * p_arr(i_bnd + 1, j, k) - p_arr(i_bnd + 2, j, k)) / (2.0 * delta);
+                    // ============================================================
+                    // STEP 2: Compute primitives at interior neighbors (for FD)
+                    // ============================================================
+                    Set::Scalar rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1;
+                    compute_prim(eta_arr, rho_arr, M_arr, E_arr, i_bnd + 1, j, k, idir, rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1);
 
-                    // Compute tangential derivatives (centered, 2nd order)
-                    // Y-direction: dQ/dy ~= (Q_{j+1} - Q_{j-1}) / (2dy)
-                    Set::Scalar drho_dy = 0.0, du_dy = 0.0, dv_dy = 0.0, dw_dy = 0.0, dp_dy = 0.0;
+                    Set::Scalar rho_m2, un_m2, ut_m2, p_m2, a_m2, gm_m2, pi_m2;
+                    compute_prim(eta_arr, rho_arr, M_arr, E_arr, i_bnd + 2, j, k, idir, rho_m2, un_m2, ut_m2, p_m2, a_m2, gm_m2, pi_m2);
+
+                    // ============================================================
+                    // STEP 3: One-sided normal derivatives (2nd order)
+                    // Forward difference: df/dx = (-3f_0 + 4f_1 - f_2) / (2dx)
+                    // ============================================================
+                    Set::Scalar drho_dx = (-3.0 * rho_bnd + 4.0 * rho_m1 - rho_m2) / (2.0 * delta);
+                    Set::Scalar dun_dx = (-3.0 * un_bnd + 4.0 * un_m1 - un_m2) / (2.0 * delta);
+                    Set::Scalar dut_dx = (-3.0 * ut_bnd + 4.0 * ut_m1 - ut_m2) / (2.0 * delta);
+                    Set::Scalar dp_dx = (-3.0 * p_bnd + 4.0 * p_m1 - p_m2) / (2.0 * delta);
+
+                    // ============================================================
+                    // STEP 4: Tangential derivatives (centered, 2nd order)
+                    // Y-direction: df/dy = (f_{j+1} - f_{j-1}) / (2dy)
+                    // ============================================================
+                    Set::Scalar drho_dy = 0.0, dun_dy = 0.0, dut_dy = 0.0, dp_dy = 0.0;
+
                     if (j > domain.smallEnd(1) && j < domain.bigEnd(1))
                     {
-                        drho_dy = (rho_arr(i_bnd, j + 1, k) - rho_arr(i_bnd, j - 1, k)) / (2.0 * dx[1]);
-                        du_dy = (u_arr(i_bnd, j + 1, k) - u_arr(i_bnd, j - 1, k)) / (2.0 * dx[1]);
-                        dv_dy = (v_arr(i_bnd, j + 1, k) - v_arr(i_bnd, j - 1, k)) / (2.0 * dx[1]);
-                        dw_dy = (w_arr(i_bnd, j + 1, k) - w_arr(i_bnd, j - 1, k)) / (2.0 * dx[1]);
-                        dp_dy = (p_arr(i_bnd, j + 1, k) - p_arr(i_bnd, j - 1, k)) / (2.0 * dx[1]);
+                        // Compute primitives at j+1
+                        Set::Scalar rho_jp, un_jp, ut_jp, p_jp, a_jp, gm_jp, pi_jp;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i_bnd, j + 1, k, idir, rho_jp, un_jp, ut_jp, p_jp, a_jp, gm_jp, pi_jp);
+
+                        // Compute primitives at j-1
+                        Set::Scalar rho_jm, un_jm, ut_jm, p_jm, a_jm, gm_jm, pi_jm;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i_bnd, j - 1, k, idir, rho_jm, un_jm, ut_jm, p_jm, a_jm, gm_jm, pi_jm);
+
+                        drho_dy = (rho_jp - rho_jm) / (2.0 * dx[1]);
+                        dun_dy = (un_jp - un_jm) / (2.0 * dx[1]);
+                        dut_dy = (ut_jp - ut_jm) / (2.0 * dx[1]);
+                        dp_dy = (p_jp - p_jm) / (2.0 * dx[1]);
                     }
 
-#if AMREX_SPACEDIM == 3
-                    // Z-direction: dQ/dz ~= (Q_{k+1} - Q_{k-1}) / (2dz)
-                    Set::Scalar drho_dz = 0.0, du_dz = 0.0, dv_dz = 0.0, dw_dz = 0.0, dp_dz = 0.0;
-                    if (k > domain.smallEnd(2) && k < domain.bigEnd(2))
+                    Set::Scalar a2_bnd = a_bnd * a_bnd;
+                    Set::Scalar M_loc = std::abs(un_bnd) / (a_bnd + small_local);
+
+                    // ============================================================
+                    // STEP 5: LODI wave amplitudes (Motheau Eqs. 18-21)
+                    // ============================================================
+                    Set::Scalar L1 = (un_bnd - a_bnd) / (2.0 * a2_bnd) * (dp_dx - rho_bnd * a_bnd * dun_dx);
+                    Set::Scalar L2 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd / a2_bnd * (a2_bnd * drho_dx - dp_dx) : 0.0;
+                    Set::Scalar L3 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * dut_dx : 0.0;
+                    Set::Scalar L4 = (un_bnd + a_bnd) / (2.0 * a2_bnd) * (dp_dx + rho_bnd * a_bnd * dun_dx);
+
+                    // ============================================================
+                    // STEP 6: Transverse terms (Motheau Eqs. 36-37)
+                    // ============================================================
+                    Set::Scalar T1 = (un_bnd - a_bnd) / (2.0 * a2_bnd) * (-rho_bnd * a_bnd * ut_bnd * dun_dy + a2_bnd * rho_bnd * dut_dy + ut_bnd * dp_dy);
+                    Set::Scalar T4 = (un_bnd + a_bnd) / (2.0 * a2_bnd) * (rho_bnd * a_bnd * ut_bnd * dun_dy + a2_bnd * rho_bnd * dut_dy + ut_bnd * dp_dy);
+                    Set::Scalar T2 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * ut_bnd / a2_bnd * (a2_bnd * drho_dy - dp_dy) : 0.0;
+                    Set::Scalar T3 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * (ut_bnd * dut_dy + (1.0 / rho_bnd) * dp_dy) : 0.0;
+
+                    // ============================================================
+                    // STEP 7: Apply BC-specific modification to incoming wave
+                    // For X-LO: L4 is incoming (speed un+a > 0 entering domain)
+                    // ============================================================
+                    Set::Scalar K = params_xlo_local.sigma * (1.0 - M_loc * M_loc) / (a_bnd * params_xlo_local.L_ref);
+
+                    if (params_xlo_local.type == Type::Outflow)
                     {
-                        drho_dz = (rho_arr(i_bnd, j, k + 1) - rho_arr(i_bnd, j, k - 1)) / (2.0 * dx, [2]);
-                        du_dz = (u_arr(i_bnd, j, k + 1) - u_arr(i_bnd, j, k - 1)) / (2.0 * dx, [2]);
-                        dv_dz = (v_arr(i_bnd, j, k + 1) - v_arr(i_bnd, j, k - 1)) / (2.0 * dx, [2]);
-                        dw_dz = (w_arr(i_bnd, j, k + 1) - w_arr(i_bnd, j, k - 1)) / (2.0 * dx, [2]);
-                        dp_dz = (p_arr(i_bnd, j, k + 1) - p_arr(i_bnd, j, k - 1)) / (2.0 * dx, [2]);
+                        L4 = K * (p_bnd - params_xlo_local.target_p) - (1.0 - params_xlo_local.beta) * T4;
                     }
-#else
-                Set::Scalar drho_dz = 0.0, du_dz = 0.0, dv_dz = 0.0, dw_dz = 0.0, dp_dz = 0.0;
-#endif
-
-                    // Compute transverse terms (Section III.B, Motheau et al. 2018)
-                    // For x-normal boundary: transverse = y and z directions
-                    // T_1 = v*dp/dy + w*dp/dz - rhoc^2(v*drho/dy + w*drho/dz)
-                    Set::Scalar T1 = v_bnd * dp_dy + w_bnd * dp_dz - rho_bnd * c_bnd * c_bnd * (v_bnd * drho_dy + w_bnd * drho_dz);
-                    Set::Scalar T2 = v_bnd * du_dy + w_bnd * du_dz;
-                    Set::Scalar T3 = v_bnd * dv_dy + w_bnd * dv_dz;
-                    Set::Scalar T4 = v_bnd * dw_dy + w_bnd * dw_dz;
-                    Set::Scalar T5 = v_bnd * dp_dy + w_bnd * dp_dz;
-
-                    // Compute characteristic waves (LODI system)
-                    // Wave speeds: A_1 = u - c, A_2 = u, A_3 = u, A_4 = u, A_5 = u + c
-                    Set::Scalar lambda1 = u_bnd - c_bnd;
-                    Set::Scalar lambda2 = u_bnd;
-                    Set::Scalar lambda3 = u_bnd;
-                    Set::Scalar lambda4 = u_bnd;
-                    Set::Scalar lambda5 = u_bnd + c_bnd;
-
-                    // Interior wave amplitudes (from spatial derivatives)
-                    // Equations from Motheau et al. (2018), Section III
-                    Set::Scalar L1_int = lambda1 * (dp_dx - rho_bnd * c_bnd * du_dx);
-                    Set::Scalar L2_int = lambda2 * (c_bnd * c_bnd * drho_dx - dp_dx);
-                    Set::Scalar L3_int = lambda3 * dv_dx;
-                    Set::Scalar L4_int = lambda4 * dw_dx;
-                    Set::Scalar L5_int = lambda5 * (dp_dx + rho_bnd * c_bnd * du_dx);
-
-                    // Add transverse terms (weighted by Beta)
-                    L1_int += params_xlo_local.beta * T1;
-                    L2_int += params_xlo_local.beta * T2;
-                    L3_int += params_xlo_local.beta * T3;
-                    L4_int += params_xlo_local.beta * T4;
-                    L5_int += params_xlo_local.beta * T5;
-
-                    // Apply boundary conditions
-                    Set::Scalar L1, L2, L3, L4, L5;
-                    Set::Scalar M_local = std::abs(u_bnd) / c_bnd; // Local Mach number
-
-                    if (params_xlo_local.type == Type::Inflow)
+                    else if (params_xlo_local.type == Type::Inflow)
                     {
-                        // SUBSONIC INFLOW
-                        // Specify: L2, L3, L4, L5 (incoming characteristics)
-                        // Compute: L1 (outgoing characteristic from interior)
+                        Set::Scalar er = params_xlo_local.relax_u;
+                        Set::Scalar K_acoustic = er * rho_bnd * (1.0 - M_loc * M_loc) / params_xlo_local.L_ref;
+                        Set::Scalar K_entropy = er * rho_bnd * a_bnd * (gm_bnd - 1.0) / params_xlo_local.L_ref;
+                        Set::Scalar K_shear = er * a_bnd / params_xlo_local.L_ref;
 
-                        Set::Scalar K_u = params_xlo_local.relax_u * (1.0 - M_local * M_local) * c_bnd / params_xlo_local.L_ref;
-                        Set::Scalar K_T = params_xlo_local.relax_T * (1.0 - M_local * M_local) * c_bnd / params_xlo_local.L_ref;
+                        // Temperature (for entropy relaxation)
+                        Set::Scalar eta_bnd = eta_arr(i_bnd, j, k);
+                        Set::Scalar cv_mix = eta_bnd * cv0_ + (1.0 - eta_bnd) * cv1_;
+                        Set::Scalar T_bnd = (p_bnd + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
 
-                        L1 = L1_int; // Outgoing wave from interior
-                        L2 = K_T * c_bnd * c_bnd * (T_bnd - params_xlo_local.target_T) / T_bnd;
-                        L3 = K_u * (v_bnd - params_xlo_local.target_v);
-                        L4 = K_u * (w_bnd - params_xlo_local.target_w);
-                        L5 = K_u * (u_bnd - params_xlo_local.target_u);
-                    }
-                    else if (params_xlo_local.type == Type::Outflow)
-                    {
-                        // SUBSONIC OUTFLOW
-                        // Specify: L1 (incoming characteristic)
-                        // Compute: L2, L3, L4, L5 (outgoing from interior)
-
-                        Set::Scalar K_p = params_xlo_local.sigma * (1.0 - M_local * M_local) * c_bnd / params_xlo_local.L_ref;
-
-                        L1 = K_p * (p_bnd - params_xlo_local.target_p);
-                        L2 = L2_int;
-                        L3 = L3_int;
-                        L4 = L4_int;
-                        L5 = L5_int;
-                    }
-                    else if (params_xlo_local.type == Type::SlipWall)
-                    {
-                        // SLIP WALL
-                        L1 = L5_int; // Reflect outgoing acoustic
-                        L2 = L2_int;
-                        L3 = L3_int;
-                        L4 = L4_int;
-                        L5 = L5_int;
-                    }
-                    else
-                    { // NoSlipWall
-                        // NO-SLIP WALL
-                        Set::Scalar K_wall = 0.5 * c_bnd / params_xlo_local.L_ref;
-
-                        L1 = L5_int;
-                        L2 = L2_int;
-                        L3 = -K_wall * v_bnd;
-                        L4 = -K_wall * w_bnd;
-                        L5 = L5_int;
+                        L4 = K_acoustic * (un_bnd - params_xlo_local.target_u) - T4;
+                        L2 = K_entropy * (T_bnd - params_xlo_local.target_T) - T2;
+                        L3 = K_shear * (ut_bnd - params_xlo_local.target_v) - T3;
                     }
 
-                    // Convert waves back to primitive variable gradients
-                    // Equation (26): dQ/dx = S(x)A^-1L
-                    Set::Scalar drho_bc = (L5 + L1) / (c_bnd * c_bnd) + L2 / (c_bnd * c_bnd);
-                    Set::Scalar du_bc = (L5 - L1) / (2.0 * rho_bnd * c_bnd);
-                    Set::Scalar dv_bc = L3;
-                    Set::Scalar dw_bc = L4;
-                    Set::Scalar dp_bc = (L5 + L1) / 2.0;
+                    // ============================================================
+                    // STEP 8: Reconstruct modified gradients (Motheau Eq. 26)
+                    // ============================================================
+                    Set::Scalar xi1 = L1 / (un_bnd - a_bnd);
+                    Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_bnd : 0.0;
+                    Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_bnd : 0.0;
+                    Set::Scalar xi4 = L4 / (un_bnd + a_bnd);
 
-                    // Extrapolate to ghost cells using finite differences
-                    // Equations (27)-(30) from Motheau et al. (2018)
+                    Set::Scalar drho_dx_new = xi1 + xi2 + xi4;
+                    Set::Scalar dun_dx_new = (-a_bnd / rho_bnd) * xi1 + (a_bnd / rho_bnd) * xi4;
+                    Set::Scalar dut_dx_new = xi3;
+                    Set::Scalar dp_dx_new = a2_bnd * (xi1 + xi4);
 
-                    // First ghost cell: Q_{i-1} = Q_i - dx*dQ/dx  ,[Eq. 27]
-                    rho_arr(i_bnd - 1, j, k) = rho_bnd - delta * drho_bc;
-                    u_arr(i_bnd - 1, j, k) = u_bnd - delta * du_bc;
-                    v_arr(i_bnd - 1, j, k) = v_bnd - delta * dv_bc;
-                    w_arr(i_bnd - 1, j, k) = w_bnd - delta * dw_bc;
-                    p_arr(i_bnd - 1, j, k) = p_bnd - delta * dp_bc;
+                    // ============================================================
+                    // STEP 9: Fill ghost cells (Motheau Eqs. 27-30)
+                    // ============================================================
+                    // 1st ghost: Q_{-1} = Q_{+1} - 2dx*dQ/dx
+                    Set::Scalar rho_g1 = rho_m1 - 2.0 * delta * drho_dx_new;
+                    Set::Scalar un_g1 = un_m1 - 2.0 * delta * dun_dx_new;
+                    Set::Scalar ut_g1 = ut_m1 - 2.0 * delta * dut_dx_new;
+                    Set::Scalar p_g1 = p_m1 - 2.0 * delta * dp_dx_new;
 
-                    // Second ghost cell: Q_{i-2} = -2Q_{i+1} - 3Q_i + 6Q_{i-1} + 6dx*dQ/dx  ,[Eq. 28]
-                    rho_arr(i_bnd - 2, j, k) = -2.0 * rho_arr(i_bnd + 1, j, k) - 3.0 * rho_bnd + 6.0 * rho_arr(i_bnd - 1, j, k) + 6.0 * delta * drho_bc;
-                    u_arr(i_bnd - 2, j, k) = -2.0 * u_arr(i_bnd + 1, j, k) - 3.0 * u_bnd + 6.0 * u_arr(i_bnd - 1, j, k) + 6.0 * delta * du_bc;
-                    v_arr(i_bnd - 2, j, k) = -2.0 * v_arr(i_bnd + 1, j, k) - 3.0 * v_bnd + 6.0 * v_arr(i_bnd - 1, j, k) + 6.0 * delta * dv_bc;
-                    w_arr(i_bnd - 2, j, k) = -2.0 * w_arr(i_bnd + 1, j, k) - 3.0 * w_bnd + 6.0 * w_arr(i_bnd - 1, j, k) + 6.0 * delta * dw_bc;
-                    p_arr(i_bnd - 2, j, k) = -2.0 * p_arr(i_bnd + 1, j, k) - 3.0 * p_bnd + 6.0 * p_arr(i_bnd - 1, j, k) + 6.0 * delta * dp_bc;
+                    rho_g1 = amrex::max(rho_g1, small_local);
+                    p_g1 = amrex::max(p_g1, 1.0e-6);
 
-                    // Third ghost cell: Q_{i-3} = 3Q_{i+1} + 10Q_i - 18Q_{i-1} + 6Q_{i-2} - 12dx*dQ/dx  ,[Eq. 29]
-                    rho_arr(i_bnd - 3, j, k) = 3.0 * rho_arr(i_bnd + 1, j, k) + 10.0 * rho_bnd - 18.0 * rho_arr(i_bnd - 1, j, k) + 6.0 * rho_arr(i_bnd - 2, j, k) - 12.0 * delta * drho_bc;
-                    u_arr(i_bnd - 3, j, k) = 3.0 * u_arr(i_bnd + 1, j, k) + 10.0 * u_bnd - 18.0 * u_arr(i_bnd - 1, j, k) + 6.0 * u_arr(i_bnd - 2, j, k) - 12.0 * delta * du_bc;
-                    v_arr(i_bnd - 3, j, k) = 3.0 * v_arr(i_bnd + 1, j, k) + 10.0 * v_bnd - 18.0 * v_arr(i_bnd - 1, j, k) + 6.0 * v_arr(i_bnd - 2, j, k) - 12.0 * delta * dv_bc;
-                    w_arr(i_bnd - 3, j, k) = 3.0 * w_arr(i_bnd + 1, j, k) + 10.0 * w_bnd - 18.0 * w_arr(i_bnd - 1, j, k) + 6.0 * w_arr(i_bnd - 2, j, k) - 12.0 * delta * dw_bc;
-                    p_arr(i_bnd - 3, j, k) = 3.0 * p_arr(i_bnd + 1, j, k) + 10.0 * p_bnd - 18.0 * p_arr(i_bnd - 1, j, k) + 6.0 * p_arr(i_bnd - 2, j, k) - 12.0 * delta * dp_bc;
+                    set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i_bnd - 1, j, k, idir, rho_g1, un_g1, ut_g1, p_g1);
 
-                    // Fourth ghost cell: Q_{i-4} = -2Q_{i+1} - 13Q_i + 24Q_{i-1} - 12Q_{i-2} + 4Q_{i-3} + 12dx*dQ/dx  ,[Eq. 30]
-                    rho_arr(i_bnd - 4, j, k) = -2.0 * rho_arr(i_bnd + 1, j, k) - 13.0 * rho_bnd + 24.0 * rho_arr(i_bnd - 1, j, k) - 12.0 * rho_arr(i_bnd - 2, j, k) + 4.0 * rho_arr(i_bnd - 3, j, k) + 12.0 * delta * drho_bc;
-                    u_arr(i_bnd - 4, j, k) = -2.0 * u_arr(i_bnd + 1, j, k) - 13.0 * u_bnd + 24.0 * u_arr(i_bnd - 1, j, k) - 12.0 * u_arr(i_bnd - 2, j, k) + 4.0 * u_arr(i_bnd - 3, j, k) + 12.0 * delta * du_bc;
-                    v_arr(i_bnd - 4, j, k) = -2.0 * v_arr(i_bnd + 1, j, k) - 13.0 * v_bnd + 24.0 * v_arr(i_bnd - 1, j, k) - 12.0 * v_arr(i_bnd - 2, j, k) + 4.0 * v_arr(i_bnd - 3, j, k) + 12.0 * delta * dv_bc;
-                    w_arr(i_bnd - 4, j, k) = -2.0 * w_arr(i_bnd + 1, j, k) - 13.0 * w_bnd + 24.0 * w_arr(i_bnd - 1, j, k) - 12.0 * w_arr(i_bnd - 2, j, k) + 4.0 * w_arr(i_bnd - 3, j, k) + 12.0 * delta * dw_bc;
-                    p_arr(i_bnd - 4, j, k) = -2.0 * p_arr(i_bnd + 1, j, k) - 13.0 * p_bnd + 24.0 * p_arr(i_bnd - 1, j, k) - 12.0 * p_arr(i_bnd - 2, j, k) + 4.0 * p_arr(i_bnd - 3, j, k) + 12.0 * delta * dp_bc;
+                    // 2nd ghost: Q_{-2} = -2Q_{+1} - 3Q_0 + 6Q_{-1} + 6dx*dQ/dx
+                    Set::Scalar rho_g2 = -2.0 * rho_m1 - 3.0 * rho_bnd + 6.0 * rho_g1 + 6.0 * delta * drho_dx_new;
+                    Set::Scalar un_g2 = -2.0 * un_m1 - 3.0 * un_bnd + 6.0 * un_g1 + 6.0 * delta * dun_dx_new;
+                    Set::Scalar ut_g2 = -2.0 * ut_m1 - 3.0 * ut_bnd + 6.0 * ut_g1 + 6.0 * delta * dut_dx_new;
+                    Set::Scalar p_g2 = -2.0 * p_m1 - 3.0 * p_bnd + 6.0 * p_g1 + 6.0 * delta * dp_dx_new;
 
-                    // Convert primitive back to conservative in ghost cells
-                    for (int ig = i_bnd - 1; ig >= i_bnd - 4; ig--)
-                    {
-                        Set::Scalar rho_g = std::max(small_local, rho_arr(ig, j, k));
-                        Set::Scalar u_g = u_arr(ig, j, k);
-                        Set::Scalar v_g = v_arr(ig, j, k);
-                        Set::Scalar w_g = w_arr(ig, j, k);
-                        Set::Scalar p_g = std::max(small_local, p_arr(ig, j, k));
+                    rho_g2 = amrex::max(rho_g2, small_local);
+                    p_g2 = amrex::max(p_g2, 1.0e-6);
 
-                        // Conservative variables
-                        rho_arr(ig, j, k) = rho_g;
-                        momx_arr(ig, j, k) = rho_g * u_g;
-                        momy_arr(ig, j, k) = rho_g * v_g;
-#if AMREX_SPACEDIM == 3
-                        momz_arr(ig, j, k) = rho_g * w_g;
-#endif
-
-                        // Total energy: E = rhoe + 1/2rho(u^2 + v^2 + w^2)
-                        Set::Scalar ke_g = 0.5 * (u_g * u_g + v_g * v_g + w_g * w_g);
-                        Set::Scalar ie_g = (p_g + pref_local + gamma_bnd * p0_bnd) / ((gamma_bnd - 1.0) * rho_g);
-                        energy_arr(ig, j, k) = rho_g * (ie_g + ke_g);
-                    }
+                    set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i_bnd - 2, j, k, idir, rho_g2, un_g2, ut_g2, p_g2);
                 });
             }
 
-            // ====================================================================
-            // X-HI BOUNDARY (i = domain.bigEnd(0))
-            // ====================================================================
-            if (bx.bigEnd(0) == domain.bigEnd(0))
+            // =====================================================================
+            // X-HI BOUNDARY (EDGES ONLY - SKIP CORNERS)
+            // =====================================================================
+            if (bx.bigEnd(0) == domain.bigEnd(0) && params_xhi_local.type != Type::None)
             {
-                int idir = 0;
-                int isign = 1;
+                int idir = 0;  // x-direction
+                int isign = 1; // right boundary
                 Set::Scalar delta = dx[0];
 
+                // Ghost box: 1 layer at x-hi
                 amrex::Box ghost_box = amrex::adjCellHi(bx, 0, 1);
 
                 amrex::ParallelFor(ghost_box, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    // ============================================================
+                    // SKIP CORNERS: If this cell is also on a Y boundary, skip it
+                    // ============================================================
+                    if (j == domain.smallEnd(1) || j == domain.bigEnd(1))
+                        return;
+#if AMREX_SPACEDIM == 3
+                    if (k == domain.smallEnd(2) || k == domain.bigEnd(2))
+                        return;
+#endif
+
+                    // Boundary cell index (last interior cell)
                     int i_bnd = domain.bigEnd(0);
 
-                    Set::Scalar rho_bnd = rho_arr(i_bnd, j, k);
-                    Set::Scalar u_bnd = u_arr(i_bnd, j, k);
-                    Set::Scalar v_bnd = v_arr(i_bnd, j, k);
-                    Set::Scalar w_bnd = w_arr(i_bnd, j, k);
-                    Set::Scalar p_bnd = p_arr(i_bnd, j, k);
-                    Set::Scalar T_bnd = T_arr(i_bnd, j, k);
-                    Set::Scalar c_bnd = c_arr(i_bnd, j, k);
-                    Set::Scalar gamma_bnd = gamma_arr(i_bnd, j, k);
-                    Set::Scalar p0_bnd = p0_arr(i_bnd, j, k);
+                    // ============================================================
+                    // STEP 1: Compute primitives at boundary cell
+                    // ============================================================
+                    Set::Scalar rho_bnd, un_bnd, ut_bnd, p_bnd, a_bnd, gm_bnd, pi_bnd;
+                    compute_prim(eta_arr, rho_arr, M_arr, E_arr, i_bnd, j, k, idir, rho_bnd, un_bnd, ut_bnd, p_bnd, a_bnd, gm_bnd, pi_bnd);
 
-                    // Normal derivatives (backward difference for right boundary)
-                    // dQ/dx ~= (3Q_i - 4Q_{i-1} + Q_{i-2}) / (2dx)
-                    Set::Scalar drho_dx = (3.0 * rho_arr(i_bnd, j, k) - 4.0 * rho_arr(i_bnd - 1, j, k) + rho_arr(i_bnd - 2, j, k)) / (2.0 * delta);
-                    Set::Scalar du_dx = (3.0 * u_arr(i_bnd, j, k) - 4.0 * u_arr(i_bnd - 1, j, k) + u_arr(i_bnd - 2, j, k)) / (2.0 * delta);
-                    Set::Scalar dv_dx = (3.0 * v_arr(i_bnd, j, k) - 4.0 * v_arr(i_bnd - 1, j, k) + v_arr(i_bnd - 2, j, k)) / (2.0 * delta);
-                    Set::Scalar dw_dx = (3.0 * w_arr(i_bnd, j, k) - 4.0 * w_arr(i_bnd - 1, j, k) + w_arr(i_bnd - 2, j, k)) / (2.0 * delta);
-                    Set::Scalar dp_dx = (3.0 * p_arr(i_bnd, j, k) - 4.0 * p_arr(i_bnd - 1, j, k) + p_arr(i_bnd - 2, j, k)) / (2.0 * delta);
+                    // ============================================================
+                    // STEP 2: Compute primitives at interior neighbors (for FD)
+                    // ============================================================
+                    Set::Scalar rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1;
+                    compute_prim(eta_arr, rho_arr, M_arr, E_arr, i_bnd - 1, j, k, idir, rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1);
 
-                    // Tangential derivatives (same as x-lo)
-                    Set::Scalar drho_dy = 0.0, du_dy = 0.0, dv_dy = 0.0, dw_dy = 0.0, dp_dy = 0.0;
+                    Set::Scalar rho_m2, un_m2, ut_m2, p_m2, a_m2, gm_m2, pi_m2;
+                    compute_prim(eta_arr, rho_arr, M_arr, E_arr, i_bnd - 2, j, k, idir, rho_m2, un_m2, ut_m2, p_m2, a_m2, gm_m2, pi_m2);
+
+                    // ============================================================
+                    // STEP 3: One-sided normal derivatives (2nd order)
+                    // Backward difference: df/dx = (3f_0 - 4f_{-1} + f_{-2}) / (2dx)
+                    // (Motheau Eq. 40)
+                    // ============================================================
+                    Set::Scalar drho_dx = (3.0 * rho_bnd - 4.0 * rho_m1 + rho_m2) / (2.0 * delta);
+                    Set::Scalar dun_dx = (3.0 * un_bnd - 4.0 * un_m1 + un_m2) / (2.0 * delta);
+                    Set::Scalar dut_dx = (3.0 * ut_bnd - 4.0 * ut_m1 + ut_m2) / (2.0 * delta);
+                    Set::Scalar dp_dx = (3.0 * p_bnd - 4.0 * p_m1 + p_m2) / (2.0 * delta);
+
+                    // ============================================================
+                    // STEP 4: Tangential derivatives (centered, 2nd order)
+                    // Y-direction: df/dy = (f_{j+1} - f_{j-1}) / (2dy)
+                    // (Motheau Eq. 41)
+                    // ============================================================
+                    Set::Scalar drho_dy = 0.0, dun_dy = 0.0, dut_dy = 0.0, dp_dy = 0.0;
+
                     if (j > domain.smallEnd(1) && j < domain.bigEnd(1))
                     {
-                        drho_dy = (rho_arr(i_bnd, j + 1, k) - rho_arr(i_bnd, j - 1, k)) / (2.0 * dx[1]);
-                        du_dy = (u_arr(i_bnd, j + 1, k) - u_arr(i_bnd, j - 1, k)) / (2.0 * dx[1]);
-                        dv_dy = (v_arr(i_bnd, j + 1, k) - v_arr(i_bnd, j - 1, k)) / (2.0 * dx[1]);
-                        dw_dy = (w_arr(i_bnd, j + 1, k) - w_arr(i_bnd, j - 1, k)) / (2.0 * dx[1]);
-                        dp_dy = (p_arr(i_bnd, j + 1, k) - p_arr(i_bnd, j - 1, k)) / (2.0 * dx[1]);
+                        // Compute primitives at j+1
+                        Set::Scalar rho_jp, un_jp, ut_jp, p_jp, a_jp, gm_jp, pi_jp;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i_bnd, j + 1, k, idir, rho_jp, un_jp, ut_jp, p_jp, a_jp, gm_jp, pi_jp);
+
+                        // Compute primitives at j-1
+                        Set::Scalar rho_jm, un_jm, ut_jm, p_jm, a_jm, gm_jm, pi_jm;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i_bnd, j - 1, k, idir, rho_jm, un_jm, ut_jm, p_jm, a_jm, gm_jm, pi_jm);
+
+                        drho_dy = (rho_jp - rho_jm) / (2.0 * dx[1]);
+                        dun_dy = (un_jp - un_jm) / (2.0 * dx[1]);
+                        dut_dy = (ut_jp - ut_jm) / (2.0 * dx[1]);
+                        dp_dy = (p_jp - p_jm) / (2.0 * dx[1]);
                     }
 
-#if AMREX_SPACEDIM == 3
-                    Set::Scalar drho_dz = 0.0, du_dz = 0.0, dv_dz = 0.0, dw_dz = 0.0, dp_dz = 0.0;
-                    if (k > domain.smallEnd(2) && k < domain.bigEnd(2))
+                    Set::Scalar a2_bnd = a_bnd * a_bnd;
+                    Set::Scalar M_loc = std::abs(un_bnd) / (a_bnd + small_local);
+
+                    // ============================================================
+                    // STEP 5: LODI wave amplitudes (Motheau Eqs. 18-21)
+                    // ============================================================
+                    Set::Scalar L1 = (un_bnd - a_bnd) / (2.0 * a2_bnd) * (dp_dx - rho_bnd * a_bnd * dun_dx);
+                    Set::Scalar L2 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd / a2_bnd * (a2_bnd * drho_dx - dp_dx) : 0.0;
+                    Set::Scalar L3 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * dut_dx : 0.0;
+                    Set::Scalar L4 = (un_bnd + a_bnd) / (2.0 * a2_bnd) * (dp_dx + rho_bnd * a_bnd * dun_dx);
+
+                    // ============================================================
+                    // STEP 6: Transverse terms (Motheau Eqs. 36-37)
+                    // ============================================================
+                    Set::Scalar T1 = (un_bnd - a_bnd) / (2.0 * a2_bnd) * (-rho_bnd * a_bnd * ut_bnd * dun_dy + a2_bnd * rho_bnd * dut_dy + ut_bnd * dp_dy);
+                    Set::Scalar T4 = (un_bnd + a_bnd) / (2.0 * a2_bnd) * (rho_bnd * a_bnd * ut_bnd * dun_dy + a2_bnd * rho_bnd * dut_dy + ut_bnd * dp_dy);
+                    Set::Scalar T2 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * ut_bnd / a2_bnd * (a2_bnd * drho_dy - dp_dy) : 0.0;
+                    Set::Scalar T3 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * (ut_bnd * dut_dy + (1.0 / rho_bnd) * dp_dy) : 0.0;
+
+                    // ============================================================
+                    // STEP 7: Apply BC-specific modification to incoming wave
+                    // For X-HI: L1 is incoming (speed un-a < 0 entering domain)
+                    // ============================================================
+                    Set::Scalar K = params_xhi_local.sigma * (1.0 - M_loc * M_loc) / (a_bnd * params_xhi_local.L_ref);
+
+                    if (params_xhi_local.type == Type::Outflow)
                     {
-                        drho_dz = (rho_arr(i_bnd, j, k + 1) - rho_arr(i_bnd, j, k - 1)) / (2.0 * dx, [2]);
-                        du_dz = (u_arr(i_bnd, j, k + 1) - u_arr(i_bnd, j, k - 1)) / (2.0 * dx, [2]);
-                        dv_dz = (v_arr(i_bnd, j, k + 1) - v_arr(i_bnd, j, k - 1)) / (2.0 * dx, [2]);
-                        dw_dz = (w_arr(i_bnd, j, k + 1) - w_arr(i_bnd, j, k - 1)) / (2.0 * dx, [2]);
-                        dp_dz = (p_arr(i_bnd, j, k + 1) - p_arr(i_bnd, j, k - 1)) / (2.0 * dx, [2]);
+                        L1 = K * (p_bnd - params_xhi_local.target_p) - (1.0 - params_xhi_local.beta) * T1;
                     }
-#else
-                Set::Scalar drho_dz = 0.0, du_dz = 0.0, dv_dz = 0.0, dw_dz = 0.0, dp_dz = 0.0;
-#endif
-
-                    // Transverse terms
-                    Set::Scalar T1 = v_bnd * dp_dy + w_bnd * dp_dz - rho_bnd * c_bnd * c_bnd * (v_bnd * drho_dy + w_bnd * drho_dz);
-                    Set::Scalar T2 = v_bnd * du_dy + w_bnd * du_dz;
-                    Set::Scalar T3 = v_bnd * dv_dy + w_bnd * dv_dz;
-                    Set::Scalar T4 = v_bnd * dw_dy + w_bnd * dw_dz;
-                    Set::Scalar T5 = v_bnd * dp_dy + w_bnd * dp_dz;
-
-                    // Characteristic waves
-                    Set::Scalar lambda1 = u_bnd - c_bnd;
-                    Set::Scalar lambda2 = u_bnd;
-                    Set::Scalar lambda3 = u_bnd;
-                    Set::Scalar lambda4 = u_bnd;
-                    Set::Scalar lambda5 = u_bnd + c_bnd;
-
-                    Set::Scalar L1_int = lambda1 * (dp_dx - rho_bnd * c_bnd * du_dx);
-                    Set::Scalar L2_int = lambda2 * (c_bnd * c_bnd * drho_dx - dp_dx);
-                    Set::Scalar L3_int = lambda3 * dv_dx;
-                    Set::Scalar L4_int = lambda4 * dw_dx;
-                    Set::Scalar L5_int = lambda5 * (dp_dx + rho_bnd * c_bnd * du_dx);
-
-                    L1_int += params_xhi_local.beta * T1;
-                    L2_int += params_xhi_local.beta * T2;
-                    L3_int += params_xhi_local.beta * T3;
-                    L4_int += params_xhi_local.beta * T4;
-                    L5_int += params_xhi_local.beta * T5;
-
-                    // Apply boundary conditions
-                    Set::Scalar L1, L2, L3, L4, L5;
-                    Set::Scalar M_local = std::abs(u_bnd) / c_bnd;
-
-                    if (params_xhi_local.type == Type::Inflow)
+                    else if (params_xhi_local.type == Type::Inflow)
                     {
-                        Set::Scalar K_u = params_xhi_local.relax_u * (1.0 - M_local * M_local) * c_bnd / params_xhi_local.L_ref;
-                        Set::Scalar K_T = params_xhi_local.relax_T * (1.0 - M_local * M_local) * c_bnd / params_xhi_local.L_ref;
+                        Set::Scalar er = params_xhi_local.relax_u;
+                        Set::Scalar K_acoustic = er * rho_bnd * (1.0 - M_loc * M_loc) / params_xhi_local.L_ref;
+                        Set::Scalar K_entropy = er * rho_bnd * a_bnd * (gm_bnd - 1.0) / params_xhi_local.L_ref;
+                        Set::Scalar K_shear = er * a_bnd / params_xhi_local.L_ref;
 
-                        L1 = K_u * (u_bnd - params_xhi_local.target_u);
-                        L2 = K_T * c_bnd * c_bnd * (T_bnd - params_xhi_local.target_T) / T_bnd;
-                        L3 = K_u * (v_bnd - params_xhi_local.target_v);
-                        L4 = K_u * (w_bnd - params_xhi_local.target_w);
-                        L5 = L5_int;
-                    }
-                    else if (params_xhi_local.type == Type::Outflow)
-                    {
-                        Set::Scalar K_p = params_xhi_local.sigma * (1.0 - M_local * M_local) * c_bnd / params_xhi_local.L_ref;
+                        // Temperature (for entropy relaxation)
+                        Set::Scalar eta_bnd = eta_arr(i_bnd, j, k);
+                        Set::Scalar cv_mix = eta_bnd * cv0_ + (1.0 - eta_bnd) * cv1_;
+                        Set::Scalar T_bnd = (p_bnd + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
 
-                        L1 = L1_int;
-                        L2 = L2_int;
-                        L3 = L3_int;
-                        L4 = L4_int;
-                        L5 = K_p * (p_bnd - params_xhi_local.target_p);
-                    }
-                    else if (params_xhi_local.type == Type::SlipWall)
-                    {
-                        L1 = L1_int;
-                        L2 = L2_int;
-                        L3 = L3_int;
-                        L4 = L4_int;
-                        L5 = L1_int;
-                    }
-                    else
-                    { // NoSlipWall
-                        Set::Scalar K_wall = 0.5 * c_bnd / params_xhi_local.L_ref;
-
-                        L1 = L1_int;
-                        L2 = L2_int;
-                        L3 = -K_wall * v_bnd;
-                        L4 = -K_wall * w_bnd;
-                        L5 = L1_int;
+                        L1 = -K_acoustic * (un_bnd - params_xhi_local.target_u) - T1;
+                        L2 = K_entropy * (T_bnd - params_xhi_local.target_T) - T2;
+                        L3 = K_shear * (ut_bnd - params_xhi_local.target_v) - T3;
                     }
 
-                    // Convert waves to gradients ,[Eq. 26]
-                    Set::Scalar drho_bc = (L5 + L1) / (c_bnd * c_bnd) + L2 / (c_bnd * c_bnd);
-                    Set::Scalar du_bc = (L5 - L1) / (2.0 * rho_bnd * c_bnd);
-                    Set::Scalar dv_bc = L3;
-                    Set::Scalar dw_bc = L4;
-                    Set::Scalar dp_bc = (L5 + L1) / 2.0;
+                    // ============================================================
+                    // STEP 8: Reconstruct modified gradients (Motheau Eq. 26)
+                    // ============================================================
+                    Set::Scalar xi1 = L1 / (un_bnd - a_bnd);
+                    Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_bnd : 0.0;
+                    Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_bnd : 0.0;
+                    Set::Scalar xi4 = L4 / (un_bnd + a_bnd);
 
-                    // Extrapolate to ghost cells ,[Eqs. 31-34]
-                    // First ghost cell: Q_{i+1} = Q_i + dx*dQ/dx  ,[Eq. 31]
-                    rho_arr(i_bnd + 1, j, k) = rho_bnd + delta * drho_bc;
-                    u_arr(i_bnd + 1, j, k) = u_bnd + delta * du_bc;
-                    v_arr(i_bnd + 1, j, k) = v_bnd + delta * dv_bc;
-                    w_arr(i_bnd + 1, j, k) = w_bnd + delta * dw_bc;
-                    p_arr(i_bnd + 1, j, k) = p_bnd + delta * dp_bc;
+                    Set::Scalar drho_dx_new = xi1 + xi2 + xi4;
+                    Set::Scalar dun_dx_new = (-a_bnd / rho_bnd) * xi1 + (a_bnd / rho_bnd) * xi4;
+                    Set::Scalar dut_dx_new = xi3;
+                    Set::Scalar dp_dx_new = a2_bnd * (xi1 + xi4);
 
-                    // Second ghost cell: Q_{i+2} = -2Q_{i-1} - 3Q_i + 6Q_{i+1} - 6dx*dQ/dx  ,[Eq. 32]
-                    rho_arr(i_bnd + 2, j, k) = -2.0 * rho_arr(i_bnd - 1, j, k) - 3.0 * rho_bnd + 6.0 * rho_arr(i_bnd + 1, j, k) - 6.0 * delta * drho_bc;
-                    u_arr(i_bnd + 2, j, k) = -2.0 * u_arr(i_bnd - 1, j, k) - 3.0 * u_bnd + 6.0 * u_arr(i_bnd + 1, j, k) - 6.0 * delta * du_bc;
-                    v_arr(i_bnd + 2, j, k) = -2.0 * v_arr(i_bnd - 1, j, k) - 3.0 * v_bnd + 6.0 * v_arr(i_bnd + 1, j, k) - 6.0 * delta * dv_bc;
-                    w_arr(i_bnd + 2, j, k) = -2.0 * w_arr(i_bnd - 1, j, k) - 3.0 * w_bnd + 6.0 * w_arr(i_bnd + 1, j, k) - 6.0 * delta * dw_bc;
-                    p_arr(i_bnd + 2, j, k) = -2.0 * p_arr(i_bnd - 1, j, k) - 3.0 * p_bnd + 6.0 * p_arr(i_bnd + 1, j, k) - 6.0 * delta * dp_bc;
+                    // ============================================================
+                    // STEP 9: Fill ghost cells (Motheau Eqs. 31-34)
+                    // ============================================================
+                    // 1st ghost: Q_{N+1} = Q_{N-1} + 2dx*dQ/dx  (Eq. 31)
+                    Set::Scalar rho_g1 = rho_m1 + 2.0 * delta * drho_dx_new;
+                    Set::Scalar un_g1 = un_m1 + 2.0 * delta * dun_dx_new;
+                    Set::Scalar ut_g1 = ut_m1 + 2.0 * delta * dut_dx_new;
+                    Set::Scalar p_g1 = p_m1 + 2.0 * delta * dp_dx_new;
 
-                    // Third ghost cell: Q_{i+3} = 3Q_{i-1} + 10Q_i - 18Q_{i+1} + 6Q_{i+2} + 12dx*dQ/dx  ,[Eq. 33]
-                    rho_arr(i_bnd + 3, j, k) = 3.0 * rho_arr(i_bnd - 1, j, k) + 10.0 * rho_bnd - 18.0 * rho_arr(i_bnd + 1, j, k) + 6.0 * rho_arr(i_bnd + 2, j, k) + 12.0 * delta * drho_bc;
-                    u_arr(i_bnd + 3, j, k) = 3.0 * u_arr(i_bnd - 1, j, k) + 10.0 * u_bnd - 18.0 * u_arr(i_bnd + 1, j, k) + 6.0 * u_arr(i_bnd + 2, j, k) + 12.0 * delta * du_bc;
-                    v_arr(i_bnd + 3, j, k) = 3.0 * v_arr(i_bnd - 1, j, k) + 10.0 * v_bnd - 18.0 * v_arr(i_bnd + 1, j, k) + 6.0 * v_arr(i_bnd + 2, j, k) + 12.0 * delta * dv_bc;
-                    w_arr(i_bnd + 3, j, k) = 3.0 * w_arr(i_bnd - 1, j, k) + 10.0 * w_bnd - 18.0 * w_arr(i_bnd + 1, j, k) + 6.0 * w_arr(i_bnd + 2, j, k) + 12.0 * delta * dw_bc;
-                    p_arr(i_bnd + 3, j, k) = 3.0 * p_arr(i_bnd - 1, j, k) + 10.0 * p_bnd - 18.0 * p_arr(i_bnd + 1, j, k) + 6.0 * p_arr(i_bnd + 2, j, k) + 12.0 * delta * dp_bc;
+                    rho_g1 = amrex::max(rho_g1, small_local);
+                    p_g1 = amrex::max(p_g1, 1.0e-6);
 
-                    // Fourth ghost cell: Q_{i+4} = -2Q_{i-1} - 13Q_i + 24Q_{i+1} - 12Q_{i+2} + 4Q_{i+3} - 12dx*dQ/dx  ,[Eq. 34]
-                    rho_arr(i_bnd + 4, j, k) = -2.0 * rho_arr(i_bnd - 1, j, k) - 13.0 * rho_bnd + 24.0 * rho_arr(i_bnd + 1, j, k) - 12.0 * rho_arr(i_bnd + 2, j, k) + 4.0 * rho_arr(i_bnd + 3, j, k) - 12.0 * delta * drho_bc;
-                    u_arr(i_bnd + 4, j, k) = -2.0 * u_arr(i_bnd - 1, j, k) - 13.0 * u_bnd + 24.0 * u_arr(i_bnd + 1, j, k) - 12.0 * u_arr(i_bnd + 2, j, k) + 4.0 * u_arr(i_bnd + 3, j, k) - 12.0 * delta * du_bc;
-                    v_arr(i_bnd + 4, j, k) = -2.0 * v_arr(i_bnd - 1, j, k) - 13.0 * v_bnd + 24.0 * v_arr(i_bnd + 1, j, k) - 12.0 * v_arr(i_bnd + 2, j, k) + 4.0 * v_arr(i_bnd + 3, j, k) - 12.0 * delta * dv_bc;
-                    w_arr(i_bnd + 4, j, k) = -2.0 * w_arr(i_bnd - 1, j, k) - 13.0 * w_bnd + 24.0 * w_arr(i_bnd + 1, j, k) - 12.0 * w_arr(i_bnd + 2, j, k) + 4.0 * w_arr(i_bnd + 3, j, k) - 12.0 * delta * dw_bc;
-                    p_arr(i_bnd + 4, j, k) = -2.0 * p_arr(i_bnd - 1, j, k) - 13.0 * p_bnd + 24.0 * p_arr(i_bnd + 1, j, k) - 12.0 * p_arr(i_bnd + 2, j, k) + 4.0 * p_arr(i_bnd + 3, j, k) - 12.0 * delta * dp_bc;
+                    set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i_bnd + 1, j, k, idir, rho_g1, un_g1, ut_g1, p_g1);
 
-                    // Convert primitive to conservative
-                    for (int ig = i_bnd + 1; ig <= i_bnd + 4; ig++)
-                    {
-                        Set::Scalar rho_g = std::max(small_local, rho_arr(ig, j, k));
-                        Set::Scalar u_g = u_arr(ig, j, k);
-                        Set::Scalar v_g = v_arr(ig, j, k);
-                        Set::Scalar w_g = w_arr(ig, j, k);
-                        Set::Scalar p_g = std::max(small_local, p_arr(ig, j, k));
+                    // 2nd ghost: Q_{N+2} = -2Q_{N-1} - 3Q_N + 6Q_{N+1} - 6dx*dQ/dx  (Eq. 32)
+                    Set::Scalar rho_g2 = -2.0 * rho_m1 - 3.0 * rho_bnd + 6.0 * rho_g1 - 6.0 * delta * drho_dx_new;
+                    Set::Scalar un_g2 = -2.0 * un_m1 - 3.0 * un_bnd + 6.0 * un_g1 - 6.0 * delta * dun_dx_new;
+                    Set::Scalar ut_g2 = -2.0 * ut_m1 - 3.0 * ut_bnd + 6.0 * ut_g1 - 6.0 * delta * dut_dx_new;
+                    Set::Scalar p_g2 = -2.0 * p_m1 - 3.0 * p_bnd + 6.0 * p_g1 - 6.0 * delta * dp_dx_new;
 
-                        rho_arr(ig, j, k) = rho_g;
-                        momx_arr(ig, j, k) = rho_g * u_g;
-                        momy_arr(ig, j, k) = rho_g * v_g;
-#if AMREX_SPACEDIM == 3
-                        momz_arr(ig, j, k) = rho_g * w_g;
-#endif
+                    rho_g2 = amrex::max(rho_g2, small_local);
+                    p_g2 = amrex::max(p_g2, 1.0e-6);
 
-                        Set::Scalar ke_g = 0.5 * (u_g * u_g + v_g * v_g + w_g * w_g);
-                        Set::Scalar ie_g = (p_g + pref_local + gamma_bnd * p0_bnd) / ((gamma_bnd - 1.0) * rho_g);
-                        energy_arr(ig, j, k) = rho_g * (ie_g + ke_g);
-                    }
+                    set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i_bnd + 2, j, k, idir, rho_g2, un_g2, ut_g2, p_g2);
                 });
             }
 
-            // ====================================================================
-            // Y-LO BOUNDARY (j = domain.smallEnd(1))
-            // ====================================================================
-            if (bx.smallEnd(1) == domain.smallEnd(1))
+
+            // =====================================================================
+            // Y-LO BOUNDARY (EDGES ONLY - SKIP CORNERS)
+            // =====================================================================
+            if (bx.smallEnd(1) == domain.smallEnd(1) && params_ylo_local.type != Type::None)
             {
                 int idir = 1;   // y-direction
                 int isign = -1; // bottom boundary
                 Set::Scalar delta = dx[1];
 
+                // Ghost box: 1 layer at y-lo
                 amrex::Box ghost_box = amrex::adjCellLo(bx, 1, 1);
 
                 amrex::ParallelFor(ghost_box, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    // ============================================================
+                    // SKIP CORNERS: If this cell is also on an X boundary, skip it
+                    // ============================================================
+                    if (i == domain.smallEnd(0) || i == domain.bigEnd(0))
+                        return;
+#if AMREX_SPACEDIM == 3
+                    if (k == domain.smallEnd(2) || k == domain.bigEnd(2))
+                        return;
+#endif
+
                     // Boundary cell index (last interior cell)
                     int j_bnd = domain.smallEnd(1);
 
-                    // Get boundary state
-                    Set::Scalar rho_bnd = rho_arr(i, j_bnd, k);
-                    Set::Scalar u_bnd = u_arr(i, j_bnd, k);
-                    Set::Scalar v_bnd = v_arr(i, j_bnd, k);
-                    Set::Scalar w_bnd = w_arr(i, j_bnd, k);
-                    Set::Scalar p_bnd = p_arr(i, j_bnd, k);
-                    Set::Scalar T_bnd = T_arr(i, j_bnd, k);
-                    Set::Scalar c_bnd = c_arr(i, j_bnd, k);
-                    Set::Scalar gamma_bnd = gamma_arr(i, j_bnd, k);
-                    Set::Scalar p0_bnd = p0_arr(i, j_bnd, k);
+                    // ============================================================
+                    // STEP 1: Compute primitives at boundary cell
+                    // ============================================================
+                    Set::Scalar rho_bnd, un_bnd, ut_bnd, p_bnd, a_bnd, gm_bnd, pi_bnd;
+                    compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd, k, idir, rho_bnd, un_bnd, ut_bnd, p_bnd, a_bnd, gm_bnd, pi_bnd);
 
-                    // Compute normal derivatives (one-sided, 2nd order)
-                    // dQ/dy ~= (-3Q_j + 4Q_{j+1} - Q_{j+2}) / (2dy)
-                    Set::Scalar drho_dy = (-3.0 * rho_arr(i, j_bnd, k) + 4.0 * rho_arr(i, j_bnd + 1, k) - rho_arr(i, j_bnd + 2, k)) / (2.0 * delta);
-                    Set::Scalar du_dy = (-3.0 * u_arr(i, j_bnd, k) + 4.0 * u_arr(i, j_bnd + 1, k) - u_arr(i, j_bnd + 2, k)) / (2.0 * delta);
-                    Set::Scalar dv_dy = (-3.0 * v_arr(i, j_bnd, k) + 4.0 * v_arr(i, j_bnd + 1, k) - v_arr(i, j_bnd + 2, k)) / (2.0 * delta);
-                    Set::Scalar dw_dy = (-3.0 * w_arr(i, j_bnd, k) + 4.0 * w_arr(i, j_bnd + 1, k) - w_arr(i, j_bnd + 2, k)) / (2.0 * delta);
-                    Set::Scalar dp_dy = (-3.0 * p_arr(i, j_bnd, k) + 4.0 * p_arr(i, j_bnd + 1, k) - p_arr(i, j_bnd + 2, k)) / (2.0 * delta);
+                    // ============================================================
+                    // STEP 2: Compute primitives at interior neighbors (for FD)
+                    // ============================================================
+                    Set::Scalar rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1;
+                    compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd + 1, k, idir, rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1);
 
-                    // Compute tangential derivatives (centered, 2nd order)
-                    // X-direction: dQ/dx ~= (Q_{i+1} - Q_{i-1}) / (2dx)
-                    Set::Scalar drho_dx = 0.0, du_dx = 0.0, dv_dx = 0.0, dw_dx = 0.0, dp_dx = 0.0;
+                    Set::Scalar rho_m2, un_m2, ut_m2, p_m2, a_m2, gm_m2, pi_m2;
+                    compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd + 2, k, idir, rho_m2, un_m2, ut_m2, p_m2, a_m2, gm_m2, pi_m2);
+
+                    // ============================================================
+                    // STEP 3: One-sided normal derivatives (2nd order)
+                    // Forward difference: df/dy = (-3f_0 + 4f_1 - f_2) / (2dy)
+                    // ============================================================
+                    Set::Scalar drho_dy = (-3.0 * rho_bnd + 4.0 * rho_m1 - rho_m2) / (2.0 * delta);
+                    Set::Scalar dun_dy = (-3.0 * un_bnd + 4.0 * un_m1 - un_m2) / (2.0 * delta);
+                    Set::Scalar dut_dy = (-3.0 * ut_bnd + 4.0 * ut_m1 - ut_m2) / (2.0 * delta);
+                    Set::Scalar dp_dy = (-3.0 * p_bnd + 4.0 * p_m1 - p_m2) / (2.0 * delta);
+
+                    // ============================================================
+                    // STEP 4: Tangential derivatives (centered, 2nd order)
+                    // X-direction: df/dx = (f_{i+1} - f_{i-1}) / (2dx)
+                    // ============================================================
+                    Set::Scalar drho_dx = 0.0, dun_dx = 0.0, dut_dx = 0.0, dp_dx = 0.0;
+
                     if (i > domain.smallEnd(0) && i < domain.bigEnd(0))
                     {
-                        drho_dx = (rho_arr(i + 1, j_bnd, k) - rho_arr(i - 1, j_bnd, k)) / (2.0 * dx[0]);
-                        du_dx = (u_arr(i + 1, j_bnd, k) - u_arr(i - 1, j_bnd, k)) / (2.0 * dx[0]);
-                        dv_dx = (v_arr(i + 1, j_bnd, k) - v_arr(i - 1, j_bnd, k)) / (2.0 * dx[0]);
-                        dw_dx = (w_arr(i + 1, j_bnd, k) - w_arr(i - 1, j_bnd, k)) / (2.0 * dx[0]);
-                        dp_dx = (p_arr(i + 1, j_bnd, k) - p_arr(i - 1, j_bnd, k)) / (2.0 * dx[0]);
+                        // Compute primitives at i+1
+                        Set::Scalar rho_ip, un_ip, ut_ip, p_ip, a_ip, gm_ip, pi_ip;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i + 1, j_bnd, k, idir, rho_ip, un_ip, ut_ip, p_ip, a_ip, gm_ip, pi_ip);
+
+                        // Compute primitives at i-1
+                        Set::Scalar rho_im, un_im, ut_im, p_im, a_im, gm_im, pi_im;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i - 1, j_bnd, k, idir, rho_im, un_im, ut_im, p_im, a_im, gm_im, pi_im);
+
+                        drho_dx = (rho_ip - rho_im) / (2.0 * dx[0]);
+                        dun_dx = (un_ip - un_im) / (2.0 * dx[0]);
+                        dut_dx = (ut_ip - ut_im) / (2.0 * dx[0]);
+                        dp_dx = (p_ip - p_im) / (2.0 * dx[0]);
                     }
 
-#if AMREX_SPACEDIM == 3
-                    // Z-direction: dQ/dz ~= (Q_{k+1} - Q_{k-1}) / (2dz)
-                    Set::Scalar drho_dz = 0.0, du_dz = 0.0, dv_dz = 0.0, dw_dz = 0.0, dp_dz = 0.0;
-                    if (k > domain.smallEnd(2) && k < domain.bigEnd(2))
+                    Set::Scalar a2_bnd = a_bnd * a_bnd;
+                    Set::Scalar M_loc = std::abs(un_bnd) / (a_bnd + small_local);
+
+                    // ============================================================
+                    // STEP 5: LODI wave amplitudes (Motheau Eqs. 18-21)
+                    // For Y-direction: un=vy, ut=vx
+                    // ============================================================
+                    Set::Scalar L1 = (un_bnd - a_bnd) / (2.0 * a2_bnd) * (dp_dy - rho_bnd * a_bnd * dun_dy);
+                    Set::Scalar L2 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * dut_dy : 0.0;
+                    Set::Scalar L3 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd / a2_bnd * (a2_bnd * drho_dy - dp_dy) : 0.0;
+                    Set::Scalar L4 = (un_bnd + a_bnd) / (2.0 * a2_bnd) * (dp_dy + rho_bnd * a_bnd * dun_dy);
+
+                    // ============================================================
+                    // STEP 6: Transverse terms (Motheau Eqs. 36-37)
+                    // For Y-normal: transverse = X-direction
+                    // ============================================================
+                    Set::Scalar T1 = (un_bnd - a_bnd) / (2.0 * a2_bnd) * (-rho_bnd * a_bnd * ut_bnd * dun_dx + a2_bnd * rho_bnd * dut_dx + ut_bnd * dp_dx);
+                    Set::Scalar T4 = (un_bnd + a_bnd) / (2.0 * a2_bnd) * (rho_bnd * a_bnd * ut_bnd * dun_dx + a2_bnd * rho_bnd * dut_dx + ut_bnd * dp_dx);
+                    Set::Scalar T2 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * (ut_bnd * dut_dx + (1.0 / rho_bnd) * dp_dx) : 0.0;
+                    Set::Scalar T3 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * ut_bnd / a2_bnd * (a2_bnd * drho_dx - dp_dx) : 0.0;
+
+                    // ============================================================
+                    // STEP 7: Apply BC-specific modification to incoming wave
+                    // For Y-LO: L4 is incoming (speed un+a > 0 entering domain)
+                    // ============================================================
+                    Set::Scalar K = params_ylo_local.sigma * (1.0 - M_loc * M_loc) / (a_bnd * params_ylo_local.L_ref);
+
+                    if (params_ylo_local.type == Type::Outflow)
                     {
-                        drho_dz = (rho_arr(i, j_bnd, k + 1) - rho_arr(i, j_bnd, k - 1)) / (2.0 * dx[2]);
-                        du_dz = (u_arr(i, j_bnd, k + 1) - u_arr(i, j_bnd, k - 1)) / (2.0 * dx[2]);
-                        dv_dz = (v_arr(i, j_bnd, k + 1) - v_arr(i, j_bnd, k - 1)) / (2.0 * dx[2]);
-                        dw_dz = (w_arr(i, j_bnd, k + 1) - w_arr(i, j_bnd, k - 1)) / (2.0 * dx[2]);
-                        dp_dz = (p_arr(i, j_bnd, k + 1) - p_arr(i, j_bnd, k - 1)) / (2.0 * dx[2]);
+                        L4 = K * (p_bnd - params_ylo_local.target_p) - (1.0 - params_ylo_local.beta) * T4;
                     }
-#else
-                Set::Scalar drho_dz = 0.0, du_dz = 0.0, dv_dz = 0.0, dw_dz = 0.0, dp_dz = 0.0;
-#endif
-
-                    // Compute transverse terms (Section III.B, Motheau et al. 2018)
-                    // For y-normal boundary: transverse = x and z directions
-                    // T_1 = u*dp/dx + w*dp/dz - rhoc^2(u*drho/dx + w*drho/dz)
-                    Set::Scalar T1 = u_bnd * dp_dx + w_bnd * dp_dz - rho_bnd * c_bnd * c_bnd * (u_bnd * drho_dx + w_bnd * drho_dz);
-                    Set::Scalar T2 = u_bnd * dv_dx + w_bnd * dv_dz;
-                    Set::Scalar T3 = u_bnd * du_dx + w_bnd * du_dz;
-                    Set::Scalar T4 = u_bnd * dw_dx + w_bnd * dw_dz;
-                    Set::Scalar T5 = u_bnd * dp_dx + w_bnd * dp_dz;
-
-                    // Compute characteristic waves (LODI system)
-                    // Wave speeds: lambda_1 = v - c, lambda_2 = v, lambda_3 = v, lambda_4 = v, lambda_5 = v + c
-                    Set::Scalar lambda1 = v_bnd - c_bnd;
-                    Set::Scalar lambda2 = v_bnd;
-                    Set::Scalar lambda3 = v_bnd;
-                    Set::Scalar lambda4 = v_bnd;
-                    Set::Scalar lambda5 = v_bnd + c_bnd;
-
-                    // Interior wave amplitudes (from spatial derivatives)
-                    // Equations from Motheau et al. (2018), Section III
-                    Set::Scalar L1_int = lambda1 * (dp_dy - rho_bnd * c_bnd * dv_dy);
-                    Set::Scalar L2_int = lambda2 * du_dy;
-                    Set::Scalar L3_int = lambda3 * (c_bnd * c_bnd * drho_dy - dp_dy);
-                    Set::Scalar L4_int = lambda4 * dw_dy;
-                    Set::Scalar L5_int = lambda5 * (dp_dy + rho_bnd * c_bnd * dv_dy);
-
-                    // Add transverse terms (weighted by beta)
-                    L1_int += params_ylo_local.beta * T1;
-                    L2_int += params_ylo_local.beta * T2;
-                    L3_int += params_ylo_local.beta * T3;
-                    L4_int += params_ylo_local.beta * T4;
-                    L5_int += params_ylo_local.beta * T5;
-
-                    // Apply boundary conditions
-                    Set::Scalar L1, L2, L3, L4, L5;
-                    Set::Scalar M_local = std::abs(v_bnd) / c_bnd; // Local Mach number
-
-                    if (params_ylo_local.type == Type::Inflow)
+                    else if (params_ylo_local.type == Type::Inflow)
                     {
-                        // SUBSONIC INFLOW
-                        Set::Scalar K_u = params_ylo_local.relax_u * (1.0 - M_local * M_local) * c_bnd / params_ylo_local.L_ref;
-                        Set::Scalar K_T = params_ylo_local.relax_T * (1.0 - M_local * M_local) * c_bnd / params_ylo_local.L_ref;
+                        Set::Scalar er = params_ylo_local.relax_u;
+                        Set::Scalar K_acoustic = er * rho_bnd * (1.0 - M_loc * M_loc) / params_ylo_local.L_ref;
+                        Set::Scalar K_entropy = er * rho_bnd * a_bnd * (gm_bnd - 1.0) / params_ylo_local.L_ref;
+                        Set::Scalar K_shear = er * a_bnd / params_ylo_local.L_ref;
 
-                        L1 = L1_int; // Outgoing wave from interior
-                        L2 = K_u * (u_bnd - params_ylo_local.target_u);
-                        L3 = K_T * c_bnd * c_bnd * (T_bnd - params_ylo_local.target_T) / T_bnd;
-                        L4 = K_u * (w_bnd - params_ylo_local.target_w);
-                        L5 = K_u * (v_bnd - params_ylo_local.target_v);
-                    }
-                    else if (params_ylo_local.type == Type::Outflow)
-                    {
-                        // SUBSONIC OUTFLOW
-                        Set::Scalar K_p = params_ylo_local.sigma * (1.0 - M_local * M_local) * c_bnd / params_ylo_local.L_ref;
+                        // Temperature
+                        Set::Scalar eta_bnd = eta_arr(i, j_bnd, k);
+                        Set::Scalar cv_mix = eta_bnd * cv0_ + (1.0 - eta_bnd) * cv1_;
+                        Set::Scalar T_bnd = (p_bnd + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
 
-                        L1 = K_p * (p_bnd - params_ylo_local.target_p);
-                        L2 = L2_int;
-                        L3 = L3_int;
-                        L4 = L4_int;
-                        L5 = L5_int;
-                    }
-                    else if (params_ylo_local.type == Type::SlipWall)
-                    {
-                        // SLIP WALL
-                        L1 = L5_int; // Reflect outgoing acoustic
-                        L2 = L2_int;
-                        L3 = L3_int;
-                        L4 = L4_int;
-                        L5 = L5_int;
-                    }
-                    else
-                    { // NoSlipWall
-                        // NO-SLIP WALL
-                        Set::Scalar K_wall = 0.5 * c_bnd / params_ylo_local.L_ref;
-
-                        L1 = L5_int;
-                        L2 = -K_wall * u_bnd;
-                        L3 = L3_int;
-                        L4 = -K_wall * w_bnd;
-                        L5 = L5_int;
+                        L4 = K_acoustic * (un_bnd - params_ylo_local.target_v) - T4;
+                        L2 = K_shear * (ut_bnd - params_ylo_local.target_u) - T2;
+                        L3 = K_entropy * (T_bnd - params_ylo_local.target_T) - T3;
                     }
 
-                    // Convert waves back to primitive variable gradients
-                    // Equation (26): dQ/dy = S(y)Lambda^-1L
-                    Set::Scalar drho_bc = (L5 + L1) / (c_bnd * c_bnd) + L3 / (c_bnd * c_bnd);
-                    Set::Scalar du_bc = L2;
-                    Set::Scalar dv_bc = (L5 - L1) / (2.0 * rho_bnd * c_bnd);
-                    Set::Scalar dw_bc = L4;
-                    Set::Scalar dp_bc = (L5 + L1) / 2.0;
+                    // ============================================================
+                    // STEP 8: Reconstruct modified gradients (Motheau Eq. 26)
+                    // ============================================================
+                    Set::Scalar xi1 = L1 / (un_bnd - a_bnd);
+                    Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_bnd : 0.0;
+                    Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_bnd : 0.0;
+                    Set::Scalar xi4 = L4 / (un_bnd + a_bnd);
 
-                    // Extrapolate to ghost cells using finite differences
-                    // Equations (27)-(30) from Motheau et al. (2018)
+                    Set::Scalar drho_dy_new = xi1 + xi3 + xi4;
+                    Set::Scalar dun_dy_new = (-a_bnd / rho_bnd) * xi1 + (a_bnd / rho_bnd) * xi4;
+                    Set::Scalar dut_dy_new = xi2;
+                    Set::Scalar dp_dy_new = a2_bnd * (xi1 + xi4);
 
-                    // First ghost cell: Q_{j-1} = Q_j - dy*dQ/dy  [Eq. 27]
-                    rho_arr(i, j_bnd - 1, k) = rho_bnd - delta * drho_bc;
-                    u_arr(i, j_bnd - 1, k) = u_bnd - delta * du_bc;
-                    v_arr(i, j_bnd - 1, k) = v_bnd - delta * dv_bc;
-                    w_arr(i, j_bnd - 1, k) = w_bnd - delta * dw_bc;
-                    p_arr(i, j_bnd - 1, k) = p_bnd - delta * dp_bc;
+                    // ============================================================
+                    // STEP 9: Fill ghost cells (Motheau Eqs. 27-28)
+                    // ============================================================
+                    // 1st ghost: Q_{-1} = Q_{+1} - 2dy*dQ/dy
+                    Set::Scalar rho_g1 = rho_m1 - 2.0 * delta * drho_dy_new;
+                    Set::Scalar un_g1 = un_m1 - 2.0 * delta * dun_dy_new;
+                    Set::Scalar ut_g1 = ut_m1 - 2.0 * delta * dut_dy_new;
+                    Set::Scalar p_g1 = p_m1 - 2.0 * delta * dp_dy_new;
 
-                    // Second ghost cell: Q_{j-2} = -2Q_{j+1} - 3Q_j + 6Q_{j-1} + 6dy*dQ/dy  [Eq. 28]
-                    rho_arr(i, j_bnd - 2, k) = -2.0 * rho_arr(i, j_bnd + 1, k) - 3.0 * rho_bnd + 6.0 * rho_arr(i, j_bnd - 1, k) + 6.0 * delta * drho_bc;
-                    u_arr(i, j_bnd - 2, k) = -2.0 * u_arr(i, j_bnd + 1, k) - 3.0 * u_bnd + 6.0 * u_arr(i, j_bnd - 1, k) + 6.0 * delta * du_bc;
-                    v_arr(i, j_bnd - 2, k) = -2.0 * v_arr(i, j_bnd + 1, k) - 3.0 * v_bnd + 6.0 * v_arr(i, j_bnd - 1, k) + 6.0 * delta * dv_bc;
-                    w_arr(i, j_bnd - 2, k) = -2.0 * w_arr(i, j_bnd + 1, k) - 3.0 * w_bnd + 6.0 * w_arr(i, j_bnd - 1, k) + 6.0 * delta * dw_bc;
-                    p_arr(i, j_bnd - 2, k) = -2.0 * p_arr(i, j_bnd + 1, k) - 3.0 * p_bnd + 6.0 * p_arr(i, j_bnd - 1, k) + 6.0 * delta * dp_bc;
+                    rho_g1 = amrex::max(rho_g1, small_local);
+                    p_g1 = amrex::max(p_g1, 1.0e-6);
 
-                    // Third ghost cell: Q_{j-3} = 3Q_{j+1} + 10Q_j - 18Q_{j-1} + 6Q_{j-2} - 12dy*dQ/dy  [Eq. 29]
-                    rho_arr(i, j_bnd - 3, k) = 3.0 * rho_arr(i, j_bnd + 1, k) + 10.0 * rho_bnd - 18.0 * rho_arr(i, j_bnd - 1, k) + 6.0 * rho_arr(i, j_bnd - 2, k) - 12.0 * delta * drho_bc;
-                    u_arr(i, j_bnd - 3, k) = 3.0 * u_arr(i, j_bnd + 1, k) + 10.0 * u_bnd - 18.0 * u_arr(i, j_bnd - 1, k) + 6.0 * u_arr(i, j_bnd - 2, k) - 12.0 * delta * du_bc;
-                    v_arr(i, j_bnd - 3, k) = 3.0 * v_arr(i, j_bnd + 1, k) + 10.0 * v_bnd - 18.0 * v_arr(i, j_bnd - 1, k) + 6.0 * v_arr(i, j_bnd - 2, k) - 12.0 * delta * dv_bc;
-                    w_arr(i, j_bnd - 3, k) = 3.0 * w_arr(i, j_bnd + 1, k) + 10.0 * w_bnd - 18.0 * w_arr(i, j_bnd - 1, k) + 6.0 * w_arr(i, j_bnd - 2, k) - 12.0 * delta * dw_bc;
-                    p_arr(i, j_bnd - 3, k) = 3.0 * p_arr(i, j_bnd + 1, k) + 10.0 * p_bnd - 18.0 * p_arr(i, j_bnd - 1, k) + 6.0 * p_arr(i, j_bnd - 2, k) - 12.0 * delta * dp_bc;
+                    set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd - 1, k, idir, rho_g1, un_g1, ut_g1, p_g1);
 
-                    // Fourth ghost cell: Q_{j-4} = -2Q_{j+1} - 13Q_j + 24Q_{j-1} - 12Q_{j-2} + 4Q_{j-3} + 12dy*dQ/dy  [Eq. 30]
-                    rho_arr(i, j_bnd - 4, k) = -2.0 * rho_arr(i, j_bnd + 1, k) - 13.0 * rho_bnd + 24.0 * rho_arr(i, j_bnd - 1, k) - 12.0 * rho_arr(i, j_bnd - 2, k) + 4.0 * rho_arr(i, j_bnd - 3, k) + 12.0 * delta * drho_bc;
-                    u_arr(i, j_bnd - 4, k) = -2.0 * u_arr(i, j_bnd + 1, k) - 13.0 * u_bnd + 24.0 * u_arr(i, j_bnd - 1, k) - 12.0 * u_arr(i, j_bnd - 2, k) + 4.0 * u_arr(i, j_bnd - 3, k) + 12.0 * delta * du_bc;
-                    v_arr(i, j_bnd - 4, k) = -2.0 * v_arr(i, j_bnd + 1, k) - 13.0 * v_bnd + 24.0 * v_arr(i, j_bnd - 1, k) - 12.0 * v_arr(i, j_bnd - 2, k) + 4.0 * v_arr(i, j_bnd - 3, k) + 12.0 * delta * dv_bc;
-                    w_arr(i, j_bnd - 4, k) = -2.0 * w_arr(i, j_bnd + 1, k) - 13.0 * w_bnd + 24.0 * w_arr(i, j_bnd - 1, k) - 12.0 * w_arr(i, j_bnd - 2, k) + 4.0 * w_arr(i, j_bnd - 3, k) + 12.0 * delta * dw_bc;
-                    p_arr(i, j_bnd - 4, k) = -2.0 * p_arr(i, j_bnd + 1, k) - 13.0 * p_bnd + 24.0 * p_arr(i, j_bnd - 1, k) - 12.0 * p_arr(i, j_bnd - 2, k) + 4.0 * p_arr(i, j_bnd - 3, k) + 12.0 * delta * dp_bc;
+                    // 2nd ghost: Q_{-2} = -2Q_{+1} - 3Q_0 + 6Q_{-1} + 6dy*dQ/dy
+                    Set::Scalar rho_g2 = -2.0 * rho_m1 - 3.0 * rho_bnd + 6.0 * rho_g1 + 6.0 * delta * drho_dy_new;
+                    Set::Scalar un_g2 = -2.0 * un_m1 - 3.0 * un_bnd + 6.0 * un_g1 + 6.0 * delta * dun_dy_new;
+                    Set::Scalar ut_g2 = -2.0 * ut_m1 - 3.0 * ut_bnd + 6.0 * ut_g1 + 6.0 * delta * dut_dy_new;
+                    Set::Scalar p_g2 = -2.0 * p_m1 - 3.0 * p_bnd + 6.0 * p_g1 + 6.0 * delta * dp_dy_new;
 
-                    // Convert primitive back to conservative in ghost cells
-                    for (int jg = j_bnd - 1; jg >= j_bnd - 4; jg--)
-                    {
-                        Set::Scalar rho_g = std::max(small_local, rho_arr(i, jg, k));
-                        Set::Scalar u_g = u_arr(i, jg, k);
-                        Set::Scalar v_g = v_arr(i, jg, k);
-                        Set::Scalar w_g = w_arr(i, jg, k);
-                        Set::Scalar p_g = std::max(small_local, p_arr(i, jg, k));
+                    rho_g2 = amrex::max(rho_g2, small_local);
+                    p_g2 = amrex::max(p_g2, 1.0e-6);
 
-                        // Conservative variables
-                        rho_arr(i, jg, k) = rho_g;
-                        momx_arr(i, jg, k) = rho_g * u_g;
-                        momy_arr(i, jg, k) = rho_g * v_g;
-#if AMREX_SPACEDIM == 3
-                        momz_arr(i, jg, k) = rho_g * w_g;
-#endif
-
-                        // Total energy: E = rhoe + 1/2rho(u^2 + v^2 + w^2)
-                        Set::Scalar ke_g = 0.5 * (u_g * u_g + v_g * v_g + w_g * w_g);
-                        Set::Scalar ie_g = (p_g + pref_local + gamma_bnd * p0_bnd) / ((gamma_bnd - 1.0) * rho_g);
-                        energy_arr(i, jg, k) = rho_g * (ie_g + ke_g);
-                    }
+                    set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd - 2, k, idir, rho_g2, un_g2, ut_g2, p_g2);
                 });
             }
 
-            // ====================================================================
-            // Y-HI BOUNDARY (j = domain.bigEnd(1))
-            // ====================================================================
-            if (bx.bigEnd(1) == domain.bigEnd(1))
+            // =====================================================================
+            // Y-HI BOUNDARY (EDGES ONLY - SKIP CORNERS)
+            // =====================================================================
+            if (bx.bigEnd(1) == domain.bigEnd(1) && params_yhi_local.type != Type::None)
             {
-                int idir = 1;
-                int isign = 1;
+                int idir = 1;  // y-direction
+                int isign = 1; // top boundary
                 Set::Scalar delta = dx[1];
 
+                // Ghost box: 1 layer at y-hi
                 amrex::Box ghost_box = amrex::adjCellHi(bx, 1, 1);
 
                 amrex::ParallelFor(ghost_box, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    // ============================================================
+                    // SKIP CORNERS: If this cell is also on an X boundary, skip it
+                    // ============================================================
+                    if (i == domain.smallEnd(0) || i == domain.bigEnd(0))
+                        return;
+#if AMREX_SPACEDIM == 3
+                    if (k == domain.smallEnd(2) || k == domain.bigEnd(2))
+                        return;
+#endif
+
+                    // Boundary cell index (last interior cell)
                     int j_bnd = domain.bigEnd(1);
 
-                    Set::Scalar rho_bnd = rho_arr(i, j_bnd, k);
-                    Set::Scalar u_bnd = u_arr(i, j_bnd, k);
-                    Set::Scalar v_bnd = v_arr(i, j_bnd, k);
-                    Set::Scalar w_bnd = w_arr(i, j_bnd, k);
-                    Set::Scalar p_bnd = p_arr(i, j_bnd, k);
-                    Set::Scalar T_bnd = T_arr(i, j_bnd, k);
-                    Set::Scalar c_bnd = c_arr(i, j_bnd, k);
-                    Set::Scalar gamma_bnd = gamma_arr(i, j_bnd, k);
-                    Set::Scalar p0_bnd = p0_arr(i, j_bnd, k);
+                    // ============================================================
+                    // STEP 1: Compute primitives at boundary cell
+                    // ============================================================
+                    Set::Scalar rho_bnd, un_bnd, ut_bnd, p_bnd, a_bnd, gm_bnd, pi_bnd;
+                    compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd, k, idir, rho_bnd, un_bnd, ut_bnd, p_bnd, a_bnd, gm_bnd, pi_bnd);
 
-                    // Normal derivatives (backward difference for top boundary)
-                    // dQ/dy ~= (3Q_j - 4Q_{j-1} + Q_{j-2}) / (2dy)
-                    Set::Scalar drho_dy = (3.0 * rho_arr(i, j_bnd, k) - 4.0 * rho_arr(i, j_bnd - 1, k) + rho_arr(i, j_bnd - 2, k)) / (2.0 * delta);
-                    Set::Scalar du_dy = (3.0 * u_arr(i, j_bnd, k) - 4.0 * u_arr(i, j_bnd - 1, k) + u_arr(i, j_bnd - 2, k)) / (2.0 * delta);
-                    Set::Scalar dv_dy = (3.0 * v_arr(i, j_bnd, k) - 4.0 * v_arr(i, j_bnd - 1, k) + v_arr(i, j_bnd - 2, k)) / (2.0 * delta);
-                    Set::Scalar dw_dy = (3.0 * w_arr(i, j_bnd, k) - 4.0 * w_arr(i, j_bnd - 1, k) + w_arr(i, j_bnd - 2, k)) / (2.0 * delta);
-                    Set::Scalar dp_dy = (3.0 * p_arr(i, j_bnd, k) - 4.0 * p_arr(i, j_bnd - 1, k) + p_arr(i, j_bnd - 2, k)) / (2.0 * delta);
+                    // ============================================================
+                    // STEP 2: Compute primitives at interior neighbors (for FD)
+                    // ============================================================
+                    Set::Scalar rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1;
+                    compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd - 1, k, idir,
+                                 rho_m1,
+                                 un_m1,
+                                 ut_m1,
+                                 p_m1,
+                                 a_m1,
+                                 gm_m1,
+                                 pi_m1);
 
-                    // Tangential derivatives (same as y-lo)
-                    Set::Scalar drho_dx = 0.0, du_dx = 0.0, dv_dx = 0.0, dw_dx = 0.0, dp_dx = 0.0;
+                    Set::Scalar rho_m2, un_m2, ut_m2, p_m2, a_m2, gm_m2, pi_m2;
+                    compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd - 2, k, idir,
+                                 rho_m2,
+                                 un_m2,
+                                 ut_m2,
+                                 p_m2,
+                                 a_m2,
+                                 gm_m2,
+                                 pi_m2);
+
+                    // ============================================================
+                    // STEP 3: One-sided normal derivatives (2nd order)
+                    // Backward difference: df/dy = (3f_0 - 4f_{-1} + f_{-2}) / (2dy)
+                    // ============================================================
+                    Set::Scalar drho_dy = (3.0 * rho_bnd - 4.0 * rho_m1 + rho_m2) / (2.0 * delta);
+                    Set::Scalar dun_dy = (3.0 * un_bnd - 4.0 * un_m1 + un_m2) / (2.0 * delta);
+                    Set::Scalar dut_dy = (3.0 * ut_bnd - 4.0 * ut_m1 + ut_m2) / (2.0 * delta);
+                    Set::Scalar dp_dy = (3.0 * p_bnd - 4.0 * p_m1 + p_m2) / (2.0 * delta);
+
+                    // ============================================================
+                    // STEP 4: Tangential derivatives (centered, 2nd order)
+                    // X-direction: df/dx = (f_{i+1} - f_{i-1}) / (2dx)
+                    // ============================================================
+                    Set::Scalar drho_dx = 0.0, dun_dx = 0.0, dut_dx = 0.0, dp_dx = 0.0;
+
                     if (i > domain.smallEnd(0) && i < domain.bigEnd(0))
                     {
-                        drho_dx = (rho_arr(i + 1, j_bnd, k) - rho_arr(i - 1, j_bnd, k)) / (2.0 * dx[0]);
-                        du_dx = (u_arr(i + 1, j_bnd, k) - u_arr(i - 1, j_bnd, k)) / (2.0 * dx[0]);
-                        dv_dx = (v_arr(i + 1, j_bnd, k) - v_arr(i - 1, j_bnd, k)) / (2.0 * dx[0]);
-                        dw_dx = (w_arr(i + 1, j_bnd, k) - w_arr(i - 1, j_bnd, k)) / (2.0 * dx[0]);
-                        dp_dx = (p_arr(i + 1, j_bnd, k) - p_arr(i - 1, j_bnd, k)) / (2.0 * dx[0]);
+                        Set::Scalar rho_ip, un_ip, ut_ip, p_ip, a_ip, gm_ip, pi_ip;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i + 1, j_bnd, k, idir, rho_ip, un_ip, ut_ip, p_ip, a_ip, gm_ip, pi_ip);
+
+                        Set::Scalar rho_im, un_im, ut_im, p_im, a_im, gm_im, pi_im;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i - 1, j_bnd, k, idir, rho_im, un_im, ut_im, p_im, a_im, gm_im, pi_im);
+
+                        drho_dx = (rho_ip - rho_im) / (2.0 * dx[0]);
+                        dun_dx = (un_ip - un_im) / (2.0 * dx[0]);
+                        dut_dx = (ut_ip - ut_im) / (2.0 * dx[0]);
+                        dp_dx = (p_ip - p_im) / (2.0 * dx[0]);
                     }
 
-#if AMREX_SPACEDIM == 3
-                    Set::Scalar drho_dz = 0.0, du_dz = 0.0, dv_dz = 0.0, dw_dz = 0.0, dp_dz = 0.0;
-                    if (k > domain.smallEnd(2) && k < domain.bigEnd(2))
+                    Set::Scalar a2_bnd = a_bnd * a_bnd;
+                    Set::Scalar M_loc = std::abs(un_bnd) / (a_bnd + small_local);
+
+                    // ============================================================
+                    // STEP 5: LODI wave amplitudes (Motheau Eqs. 18-21)
+                    // ============================================================
+                    Set::Scalar L1 = (un_bnd - a_bnd) / (2.0 * a2_bnd) * (dp_dy - rho_bnd * a_bnd * dun_dy);
+                    Set::Scalar L2 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * dut_dy : 0.0;
+                    Set::Scalar L3 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd / a2_bnd * (a2_bnd * drho_dy - dp_dy) : 0.0;
+                    Set::Scalar L4 = (un_bnd + a_bnd) / (2.0 * a2_bnd) * (dp_dy + rho_bnd * a_bnd * dun_dy);
+
+                    // ============================================================
+                    // STEP 6: Transverse terms (Motheau Eqs. 36-37)
+                    // ============================================================
+                    Set::Scalar T1 = (un_bnd - a_bnd) / (2.0 * a2_bnd) * (-rho_bnd * a_bnd * ut_bnd * dun_dx + a2_bnd * rho_bnd * dut_dx + ut_bnd * dp_dx);
+                    Set::Scalar T4 = (un_bnd + a_bnd) / (2.0 * a2_bnd) * (rho_bnd * a_bnd * ut_bnd * dun_dx + a2_bnd * rho_bnd * dut_dx + ut_bnd * dp_dx);
+                    Set::Scalar T2 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * (ut_bnd * dut_dx + (1.0 / rho_bnd) * dp_dx) : 0.0;
+                    Set::Scalar T3 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * ut_bnd / a2_bnd * (a2_bnd * drho_dx - dp_dx) : 0.0;
+
+                    // ============================================================
+                    // STEP 7: Apply BC-specific modification to incoming wave
+                    // For Y-HI: L1 is incoming (speed un-a < 0 entering domain)
+                    // ============================================================
+                    Set::Scalar K = params_yhi_local.sigma * (1.0 - M_loc * M_loc) / (a_bnd * params_yhi_local.L_ref);
+
+                    if (params_yhi_local.type == Type::Outflow)
                     {
-                        drho_dz = (rho_arr(i, j_bnd, k + 1) - rho_arr(i, j_bnd, k - 1)) / (2.0 * dx[2]);
-                        du_dz = (u_arr(i, j_bnd, k + 1) - u_arr(i, j_bnd, k - 1)) / (2.0 * dx[2]);
-                        dv_dz = (v_arr(i, j_bnd, k + 1) - v_arr(i, j_bnd, k - 1)) / (2.0 * dx[2]);
-                        dw_dz = (w_arr(i, j_bnd, k + 1) - w_arr(i, j_bnd, k - 1)) / (2.0 * dx[2]);
-                        dp_dz = (p_arr(i, j_bnd, k + 1) - p_arr(i, j_bnd, k - 1)) / (2.0 * dx[2]);
+                        L1 = K * (p_bnd - params_yhi_local.target_p) - (1.0 - params_yhi_local.beta) * T1; 
                     }
-#else
-                Set::Scalar drho_dz = 0.0, du_dz = 0.0, dv_dz = 0.0, dw_dz = 0.0, dp_dz = 0.0;
-#endif
-
-                    // Transverse terms
-                    Set::Scalar T1 = u_bnd * dp_dx + w_bnd * dp_dz - rho_bnd * c_bnd * c_bnd * (u_bnd * drho_dx + w_bnd * drho_dz);
-                    Set::Scalar T2 = u_bnd * dv_dx + w_bnd * dv_dz;
-                    Set::Scalar T3 = u_bnd * du_dx + w_bnd * du_dz;
-                    Set::Scalar T4 = u_bnd * dw_dx + w_bnd * dw_dz;
-                    Set::Scalar T5 = u_bnd * dp_dx + w_bnd * dp_dz;
-
-                    // Characteristic waves
-                    Set::Scalar lambda1 = v_bnd - c_bnd;
-                    Set::Scalar lambda2 = v_bnd;
-                    Set::Scalar lambda3 = v_bnd;
-                    Set::Scalar lambda4 = v_bnd;
-                    Set::Scalar lambda5 = v_bnd + c_bnd;
-
-                    Set::Scalar L1_int = lambda1 * (dp_dy - rho_bnd * c_bnd * dv_dy);
-                    Set::Scalar L2_int = lambda2 * du_dy;
-                    Set::Scalar L3_int = lambda3 * (c_bnd * c_bnd * drho_dy - dp_dy);
-                    Set::Scalar L4_int = lambda4 * dw_dy;
-                    Set::Scalar L5_int = lambda5 * (dp_dy + rho_bnd * c_bnd * dv_dy);
-
-                    L1_int += params_yhi_local.beta * T1;
-                    L2_int += params_yhi_local.beta * T2;
-                    L3_int += params_yhi_local.beta * T3;
-                    L4_int += params_yhi_local.beta * T4;
-                    L5_int += params_yhi_local.beta * T5;
-
-                    // Apply boundary conditions
-                    Set::Scalar L1, L2, L3, L4, L5;
-                    Set::Scalar M_local = std::abs(v_bnd) / c_bnd;
-
-                    if (params_yhi_local.type == Type::Inflow)
+                    else if (params_yhi_local.type == Type::Inflow)
                     {
-                        Set::Scalar K_u = params_yhi_local.relax_u * (1.0 - M_local * M_local) * c_bnd / params_yhi_local.L_ref;
-                        Set::Scalar K_T = params_yhi_local.relax_T * (1.0 - M_local * M_local) * c_bnd / params_yhi_local.L_ref;
+                        Set::Scalar er = params_yhi_local.relax_u;
+                        Set::Scalar K_acoustic = er * rho_bnd * (1.0 - M_loc * M_loc) / params_yhi_local.L_ref;
+                        Set::Scalar K_entropy = er * rho_bnd * a_bnd * (gm_bnd - 1.0) / params_yhi_local.L_ref;
+                        Set::Scalar K_shear = er * a_bnd / params_yhi_local.L_ref;
 
-                        L1 = K_u * (v_bnd - params_yhi_local.target_v);
-                        L2 = K_u * (u_bnd - params_yhi_local.target_u);
-                        L3 = K_T * c_bnd * c_bnd * (T_bnd - params_yhi_local.target_T) / T_bnd;
-                        L4 = K_u * (w_bnd - params_yhi_local.target_w);
-                        L5 = L5_int;
-                    }
-                    else if (params_yhi_local.type == Type::Outflow)
-                    {
-                        Set::Scalar K_p = params_yhi_local.sigma * (1.0 - M_local * M_local) * c_bnd / params_yhi_local.L_ref;
+                        Set::Scalar eta_bnd = eta_arr(i, j_bnd, k);
+                        Set::Scalar cv_mix = eta_bnd * cv0_ + (1.0 - eta_bnd) * cv1_;
+                        Set::Scalar T_bnd = (p_bnd + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
 
-                        L1 = L1_int;
-                        L2 = L2_int;
-                        L3 = L3_int;
-                        L4 = L4_int;
-                        L5 = K_p * (p_bnd - params_yhi_local.target_p);
-                    }
-                    else if (params_yhi_local.type == Type::SlipWall)
-                    {
-                        L1 = L1_int;
-                        L2 = L2_int;
-                        L3 = L3_int;
-                        L4 = L4_int;
-                        L5 = L1_int;
-                    }
-                    else
-                    { // NoSlipWall
-                        Set::Scalar K_wall = 0.5 * c_bnd / params_yhi_local.L_ref;
-
-                        L1 = L1_int;
-                        L2 = -K_wall * u_bnd;
-                        L3 = L3_int;
-                        L4 = -K_wall * w_bnd;
-                        L5 = L1_int;
+                        L1 = -K_acoustic * (un_bnd - params_yhi_local.target_v) - T1;
+                        L2 = K_shear * (ut_bnd - params_yhi_local.target_u) - T2;
+                        L3 = K_entropy * (T_bnd - params_yhi_local.target_T) - T3;
                     }
 
-                    // Convert waves to gradients [Eq. 26]
-                    Set::Scalar drho_bc = (L5 + L1) / (c_bnd * c_bnd) + L3 / (c_bnd * c_bnd);
-                    Set::Scalar du_bc = L2;
-                    Set::Scalar dv_bc = (L5 - L1) / (2.0 * rho_bnd * c_bnd);
-                    Set::Scalar dw_bc = L4;
-                    Set::Scalar dp_bc = (L5 + L1) / 2.0;
+                    // ============================================================
+                    // STEP 8: Reconstruct modified gradients (Motheau Eq. 26)
+                    // ============================================================
+                    Set::Scalar xi1 = L1 / (un_bnd - a_bnd);
+                    Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_bnd : 0.0;
+                    Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_bnd : 0.0;
+                    Set::Scalar xi4 = L4 / (un_bnd + a_bnd);
 
-                    // Extrapolate to ghost cells [Eqs. 31-34]
-                    // First ghost cell: Q_{j+1} = Q_j + dy*dQ/dy  [Eq. 31]
-                    rho_arr(i, j_bnd + 1, k) = rho_bnd + delta * drho_bc;
-                    u_arr(i, j_bnd + 1, k) = u_bnd + delta * du_bc;
-                    v_arr(i, j_bnd + 1, k) = v_bnd + delta * dv_bc;
-                    w_arr(i, j_bnd + 1, k) = w_bnd + delta * dw_bc;
-                    p_arr(i, j_bnd + 1, k) = p_bnd + delta * dp_bc;
+                    Set::Scalar drho_dy_new = xi1 + xi3 + xi4;
+                    Set::Scalar dun_dy_new = (-a_bnd / rho_bnd) * xi1 + (a_bnd / rho_bnd) * xi4;
+                    Set::Scalar dut_dy_new = xi2;
+                    Set::Scalar dp_dy_new = a2_bnd * (xi1 + xi4);
 
-                    // Second ghost cell: Q_{j+2} = -2Q_{j-1} - 3Q_j + 6Q_{j+1} - 6dy*dQ/dy  [Eq. 32]
-                    rho_arr(i, j_bnd + 2, k) = -2.0 * rho_arr(i, j_bnd - 1, k) - 3.0 * rho_bnd + 6.0 * rho_arr(i, j_bnd + 1, k) - 6.0 * delta * drho_bc;
-                    u_arr(i, j_bnd + 2, k) = -2.0 * u_arr(i, j_bnd - 1, k) - 3.0 * u_bnd + 6.0 * u_arr(i, j_bnd + 1, k) - 6.0 * delta * du_bc;
-                    v_arr(i, j_bnd + 2, k) = -2.0 * v_arr(i, j_bnd - 1, k) - 3.0 * v_bnd + 6.0 * v_arr(i, j_bnd + 1, k) - 6.0 * delta * dv_bc;
-                    w_arr(i, j_bnd + 2, k) = -2.0 * w_arr(i, j_bnd - 1, k) - 3.0 * w_bnd + 6.0 * w_arr(i, j_bnd + 1, k) - 6.0 * delta * dw_bc;
-                    p_arr(i, j_bnd + 2, k) = -2.0 * p_arr(i, j_bnd - 1, k) - 3.0 * p_bnd + 6.0 * p_arr(i, j_bnd + 1, k) - 6.0 * delta * dp_bc;
+                    // ============================================================
+                    // STEP 9: Fill ghost cells (Motheau Eqs. 31-32)
+                    // ============================================================
+                    // 1st ghost: Q_{N+1} = Q_{N-1} + 2dy*dQ/dy 
+                    Set::Scalar rho_g1 = rho_m1 + 2.0 * delta * drho_dy_new;
+                    Set::Scalar un_g1 = un_m1 + 2.0 * delta * dun_dy_new;
+                    Set::Scalar ut_g1 = ut_m1 + 2.0 * delta * dut_dy_new;
+                    Set::Scalar p_g1 = p_m1 + 2.0 * delta * dp_dy_new;
 
-                    // Third ghost cell: Q_{j+3} = 3Q_{j-1} + 10Q_j - 18Q_{j+1} + 6Q_{j+2} + 12dy*dQ/dy  [Eq. 33]
-                    rho_arr(i, j_bnd + 3, k) = 3.0 * rho_arr(i, j_bnd - 1, k) + 10.0 * rho_bnd - 18.0 * rho_arr(i, j_bnd + 1, k) + 6.0 * rho_arr(i, j_bnd + 2, k) + 12.0 * delta * drho_bc;
-                    u_arr(i, j_bnd + 3, k) = 3.0 * u_arr(i, j_bnd - 1, k) + 10.0 * u_bnd - 18.0 * u_arr(i, j_bnd + 1, k) + 6.0 * u_arr(i, j_bnd + 2, k) + 12.0 * delta * du_bc;
-                    v_arr(i, j_bnd + 3, k) = 3.0 * v_arr(i, j_bnd - 1, k) + 10.0 * v_bnd - 18.0 * v_arr(i, j_bnd + 1, k) + 6.0 * v_arr(i, j_bnd + 2, k) + 12.0 * delta * dv_bc;
-                    w_arr(i, j_bnd + 3, k) = 3.0 * w_arr(i, j_bnd - 1, k) + 10.0 * w_bnd - 18.0 * w_arr(i, j_bnd + 1, k) + 6.0 * w_arr(i, j_bnd + 2, k) + 12.0 * delta * dw_bc;
-                    p_arr(i, j_bnd + 3, k) = 3.0 * p_arr(i, j_bnd - 1, k) + 10.0 * p_bnd - 18.0 * p_arr(i, j_bnd + 1, k) + 6.0 * p_arr(i, j_bnd + 2, k) + 12.0 * delta * dp_bc;
+                    rho_g1 = amrex::max(rho_g1, small_local);
+                    p_g1 = amrex::max(p_g1, 1.0e-6);
 
-                    // Fourth ghost cell: Q_{j+4} = -2Q_{j-1} - 13Q_j + 24Q_{j+1} - 12Q_{j+2} + 4Q_{j+3} - 12dy*dQ/dy  [Eq. 34]
-                    rho_arr(i, j_bnd + 4, k) = -2.0 * rho_arr(i, j_bnd - 1, k) - 13.0 * rho_bnd + 24.0 * rho_arr(i, j_bnd + 1, k) - 12.0 * rho_arr(i, j_bnd + 2, k) + 4.0 * rho_arr(i, j_bnd + 3, k) - 12.0 * delta * drho_bc;
-                    u_arr(i, j_bnd + 4, k) = -2.0 * u_arr(i, j_bnd - 1, k) - 13.0 * u_bnd + 24.0 * u_arr(i, j_bnd + 1, k) - 12.0 * u_arr(i, j_bnd + 2, k) + 4.0 * u_arr(i, j_bnd + 3, k) - 12.0 * delta * du_bc;
-                    v_arr(i, j_bnd + 4, k) = -2.0 * v_arr(i, j_bnd - 1, k) - 13.0 * v_bnd + 24.0 * v_arr(i, j_bnd + 1, k) - 12.0 * v_arr(i, j_bnd + 2, k) + 4.0 * v_arr(i, j_bnd + 3, k) - 12.0 * delta * dv_bc;
-                    w_arr(i, j_bnd + 4, k) = -2.0 * w_arr(i, j_bnd - 1, k) - 13.0 * w_bnd + 24.0 * w_arr(i, j_bnd + 1, k) - 12.0 * w_arr(i, j_bnd + 2, k) + 4.0 * w_arr(i, j_bnd + 3, k) - 12.0 * delta * dw_bc;
-                    p_arr(i, j_bnd + 4, k) = -2.0 * p_arr(i, j_bnd - 1, k) - 13.0 * p_bnd + 24.0 * p_arr(i, j_bnd + 1, k) - 12.0 * p_arr(i, j_bnd + 2, k) + 4.0 * p_arr(i, j_bnd + 3, k) - 12.0 * delta * dp_bc;
+                    set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd + 1, k, idir,
+                                   rho_g1,
+                                   un_g1,
+                                   ut_g1,
+                                   p_g1);
 
-                    // Convert primitive to conservative
-                    for (int jg = j_bnd + 1; jg <= j_bnd + 4; jg++)
-                    {
-                        Set::Scalar rho_g = std::max(small_local, rho_arr(i, jg, k));
-                        Set::Scalar u_g = u_arr(i, jg, k);
-                        Set::Scalar v_g = v_arr(i, jg, k);
-                        Set::Scalar w_g = w_arr(i, jg, k);
-                        Set::Scalar p_g = std::max(small_local, p_arr(i, jg, k));
+                    // 2nd ghost: Q_{N+2} = -2Q_{N-1} - 3Q_N + 6Q_{N+1} - 6dy*dQ/dy 
+                    Set::Scalar rho_g2 = -2.0 * rho_m1 - 3.0 * rho_bnd + 6.0 * rho_g1 - 6.0 * delta * drho_dy_new;
+                    Set::Scalar un_g2 = -2.0 * un_m1 - 3.0 * un_bnd + 6.0 * un_g1 - 6.0 * delta * dun_dy_new;
+                    Set::Scalar ut_g2 = -2.0 * ut_m1 - 3.0 * ut_bnd + 6.0 * ut_g1 - 6.0 * delta * dut_dy_new;
+                    Set::Scalar p_g2 = -2.0 * p_m1 - 3.0 * p_bnd + 6.0 * p_g1 - 6.0 * delta * dp_dy_new;
 
-                        rho_arr(i, jg, k) = rho_g;
-                        momx_arr(i, jg, k) = rho_g * u_g;
-                        momy_arr(i, jg, k) = rho_g * v_g;
-#if AMREX_SPACEDIM == 3
-                        momz_arr(i, jg, k) = rho_g * w_g;
-#endif
+                    rho_g2 = amrex::max(rho_g2, small_local);
+                    p_g2 = amrex::max(p_g2, 1.0e-6);
 
-                        Set::Scalar ke_g = 0.5 * (u_g * u_g + v_g * v_g + w_g * w_g);
-                        Set::Scalar ie_g = (p_g + pref_local + gamma_bnd * p0_bnd) / ((gamma_bnd - 1.0) * rho_g);
-                        energy_arr(i, jg, k) = rho_g * (ie_g + ke_g);
-                    }
+                    set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd + 2, k, idir,
+                                   rho_g2,
+                                   un_g2,
+                                   ut_g2,
+                                   p_g2);
                 });
             }
 
 #if AMREX_SPACEDIM == 3
-            // ====================================================================
-            // Z-LO BOUNDARY (k = domain.smallEnd(2))
-            // ====================================================================
-            if (bx.smallEnd(2) == domain.smallEnd(2))
+            // =====================================================================
+            // Z-LO BOUNDARY (EDGES ONLY - SKIP CORNERS)
+            // =====================================================================
+            if (bx.smallEnd(2) == domain.smallEnd(2) && params_zlo_local.type != Type::None)
             {
                 int idir = 2;   // z-direction
                 int isign = -1; // bottom boundary
                 Set::Scalar delta = dx[2];
 
+                // Ghost box: 1 layer at z-lo
                 amrex::Box ghost_box = amrex::adjCellLo(bx, 2, 1);
 
                 amrex::ParallelFor(ghost_box, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    // ============================================================
+                    // SKIP CORNERS: If this cell is also on X or Y boundary, skip it
+                    // ============================================================
+                    if (i == domain.smallEnd(0) || i == domain.bigEnd(0))
+                        return;
+                    if (j == domain.smallEnd(1) || j == domain.bigEnd(1))
+                        return;
+
                     // Boundary cell index (last interior cell)
                     int k_bnd = domain.smallEnd(2);
 
-                    // Get boundary state
-                    Set::Scalar rho_bnd = rho_arr(i, j, k_bnd);
-                    Set::Scalar u_bnd = u_arr(i, j, k_bnd);
-                    Set::Scalar v_bnd = v_arr(i, j, k_bnd);
-                    Set::Scalar w_bnd = w_arr(i, j, k_bnd);
-                    Set::Scalar p_bnd = p_arr(i, j, k_bnd);
-                    Set::Scalar T_bnd = T_arr(i, j, k_bnd);
-                    Set::Scalar c_bnd = c_arr(i, j, k_bnd);
-                    Set::Scalar gamma_bnd = gamma_arr(i, j, k_bnd);
-                    Set::Scalar p0_bnd = p0_arr(i, j, k_bnd);
+                    // ============================================================
+                    // STEP 1: Compute primitives at boundary cell
+                    // ============================================================
+                    Set::Scalar rho_bnd, un_bnd, ut_bnd, p_bnd, a_bnd, gm_bnd, pi_bnd;
+                    compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j, k_bnd, idir, rho_bnd, un_bnd, ut_bnd, p_bnd, a_bnd, gm_bnd, pi_bnd);
 
-                    // Compute normal derivatives (one-sided, 2nd order)
-                    // dQ/dz ~= (-3Q_k + 4Q_{k+1} - Q_{k+2}) / (2dz)
-                    Set::Scalar drho_dz = (-3.0 * rho_arr(i, j, k_bnd) + 4.0 * rho_arr(i, j, k_bnd + 1) - rho_arr(i, j, k_bnd + 2)) / (2.0 * delta);
-                    Set::Scalar du_dz = (-3.0 * u_arr(i, j, k_bnd) + 4.0 * u_arr(i, j, k_bnd + 1) - u_arr(i, j, k_bnd + 2)) / (2.0 * delta);
-                    Set::Scalar dv_dz = (-3.0 * v_arr(i, j, k_bnd) + 4.0 * v_arr(i, j, k_bnd + 1) - v_arr(i, j, k_bnd + 2)) / (2.0 * delta);
-                    Set::Scalar dw_dz = (-3.0 * w_arr(i, j, k_bnd) + 4.0 * w_arr(i, j, k_bnd + 1) - w_arr(i, j, k_bnd + 2)) / (2.0 * delta);
-                    Set::Scalar dp_dz = (-3.0 * p_arr(i, j, k_bnd) + 4.0 * p_arr(i, j, k_bnd + 1) - p_arr(i, j, k_bnd + 2)) / (2.0 * delta);
+                    // Note: For Z-direction (dir=2), compute_prim needs to handle:
+                    // un = w (M[2]), ut = vx (M[0]) for tangential
+                    // You may need to extend compute_prim or create a Z-specific version
 
-                    // Compute tangential derivatives (centered, 2nd order)
-                    // X-direction: dQ/dx ~= (Q_{i+1} - Q_{i-1}) / (2dx)
-                    Set::Scalar drho_dx = 0.0, du_dx = 0.0, dv_dx = 0.0, dw_dx = 0.0, dp_dx = 0.0;
+                    // ============================================================
+                    // STEP 2: Compute primitives at interior neighbors (for FD)
+                    // ============================================================
+                    Set::Scalar rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1;
+                    compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j, k_bnd + 1, idir, rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1);
+
+                    Set::Scalar rho_m2, un_m2, ut_m2, p_m2, a_m2, gm_m2, pi_m2;
+                    compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j, k_bnd + 2, idir, rho_m2, un_m2, ut_m2, p_m2, a_m2, gm_m2, pi_m2);
+
+                    // ============================================================
+                    // STEP 3: One-sided normal derivatives (2nd order)
+                    // Forward difference: df/dz = (-3f_0 + 4f_1 - f_2) / (2dz)
+                    // ============================================================
+                    Set::Scalar drho_dz = (-3.0 * rho_bnd + 4.0 * rho_m1 - rho_m2) / (2.0 * delta);
+                    Set::Scalar dun_dz = (-3.0 * un_bnd + 4.0 * un_m1 - un_m2) / (2.0 * delta);
+                    Set::Scalar dut_dz = (-3.0 * ut_bnd + 4.0 * ut_m1 - ut_m2) / (2.0 * delta);
+                    Set::Scalar dp_dz = (-3.0 * p_bnd + 4.0 * p_m1 - p_m2) / (2.0 * delta);
+
+                    // ============================================================
+                    // STEP 4: Tangential derivatives (centered, 2nd order)
+                    // X-direction and Y-direction
+                    // ============================================================
+                    Set::Scalar drho_dx = 0.0, dun_dx = 0.0, dut_dx = 0.0, dp_dx = 0.0;
+                    Set::Scalar drho_dy = 0.0, dun_dy = 0.0, dut_dy = 0.0, dp_dy = 0.0;
+
+                    // X-direction tangential derivatives
                     if (i > domain.smallEnd(0) && i < domain.bigEnd(0))
                     {
-                        drho_dx = (rho_arr(i + 1, j, k_bnd) - rho_arr(i - 1, j, k_bnd)) / (2.0 * dx[0]);
-                        du_dx = (u_arr(i + 1, j, k_bnd) - u_arr(i - 1, j, k_bnd)) / (2.0 * dx[0]);
-                        dv_dx = (v_arr(i + 1, j, k_bnd) - v_arr(i - 1, j, k_bnd)) / (2.0 * dx[0]);
-                        dw_dx = (w_arr(i + 1, j, k_bnd) - w_arr(i - 1, j, k_bnd)) / (2.0 * dx[0]);
-                        dp_dx = (p_arr(i + 1, j, k_bnd) - p_arr(i - 1, j, k_bnd)) / (2.0 * dx[0]);
+                        Set::Scalar rho_ip, un_ip, ut_ip, p_ip, a_ip, gm_ip, pi_ip;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i + 1, j, k_bnd, idir, rho_ip, un_ip, ut_ip, p_ip, a_ip, gm_ip, pi_ip);
+
+                        Set::Scalar rho_im, un_im, ut_im, p_im, a_im, gm_im, pi_im;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i - 1, j, k_bnd, idir, rho_im, un_im, ut_im, p_im, a_im, gm_im, pi_im);
+
+                        drho_dx = (rho_ip - rho_im) / (2.0 * dx[0]);
+                        dun_dx = (un_ip - un_im) / (2.0 * dx[0]);
+                        dut_dx = (ut_ip - ut_im) / (2.0 * dx[0]);
+                        dp_dx = (p_ip - p_im) / (2.0 * dx[0]);
                     }
 
-                    // Y-direction: dQ/dy ~= (Q_{j+1} - Q_{j-1}) / (2dy)
-                    Set::Scalar drho_dy = 0.0, du_dy = 0.0, dv_dy = 0.0, dw_dy = 0.0, dp_dy = 0.0;
+                    // Y-direction tangential derivatives
                     if (j > domain.smallEnd(1) && j < domain.bigEnd(1))
                     {
-                        drho_dy = (rho_arr(i, j + 1, k_bnd) - rho_arr(i, j - 1, k_bnd)) / (2.0 * dx[1]);
-                        du_dy = (u_arr(i, j + 1, k_bnd) - u_arr(i, j - 1, k_bnd)) / (2.0 * dx[1]);
-                        dv_dy = (v_arr(i, j + 1, k_bnd) - v_arr(i, j - 1, k_bnd)) / (2.0 * dx[1]);
-                        dw_dy = (w_arr(i, j + 1, k_bnd) - w_arr(i, j - 1, k_bnd)) / (2.0 * dx[1]);
-                        dp_dy = (p_arr(i, j + 1, k_bnd) - p_arr(i, j - 1, k_bnd)) / (2.0 * dx[1]);
+                        Set::Scalar rho_jp, un_jp, ut_jp, p_jp, a_jp, gm_jp, pi_jp;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j + 1, k_bnd, idir, rho_jp, un_jp, ut_jp, p_jp, a_jp, gm_jp, pi_jp);
+
+                        Set::Scalar rho_jm, un_jm, ut_jm, p_jm, a_jm, gm_jm, pi_jm;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j - 1, k_bnd, idir, rho_jm, un_jm, ut_jm, p_jm, a_jm, gm_jm, pi_jm);
+
+                        drho_dy = (rho_jp - rho_jm) / (2.0 * dx[1]);
+                        dun_dy = (un_jp - un_jm) / (2.0 * dx[1]);
+                        dut_dy = (ut_jp - ut_jm) / (2.0 * dx[1]);
+                        dp_dy = (p_jp - p_jm) / (2.0 * dx[1]);
                     }
 
-                    // Compute transverse terms (Section III.B, Motheau et al. 2018)
-                    // For z-normal boundary: transverse = x and y directions
-                    // T_1 = u*dp/dx + v*dp/dy - rhoc^2(u*drho/dx + v*drho/dy)
-                    Set::Scalar T1 = u_bnd * dp_dx + v_bnd * dp_dy - rho_bnd * c_bnd * c_bnd * (u_bnd * drho_dx + v_bnd * drho_dy);
-                    Set::Scalar T2 = u_bnd * dw_dx + v_bnd * dw_dy;
-                    Set::Scalar T3 = u_bnd * du_dx + v_bnd * du_dy;
-                    Set::Scalar T4 = u_bnd * dv_dx + v_bnd * dv_dy;
-                    Set::Scalar T5 = u_bnd * dp_dx + v_bnd * dp_dy;
+                    Set::Scalar a2_bnd = a_bnd * a_bnd;
+                    Set::Scalar M_loc = std::abs(un_bnd) / (a_bnd + small_local);
 
-                    // Compute characteristic waves (LODI system)
-                    // Wave speeds: lambda_1 = w - c, lambda_2 = w, lambda_3 = w, lambda_4 = w, lambda_5 = w + c
-                    Set::Scalar lambda1 = w_bnd - c_bnd;
-                    Set::Scalar lambda2 = w_bnd;
-                    Set::Scalar lambda3 = w_bnd;
-                    Set::Scalar lambda4 = w_bnd;
-                    Set::Scalar lambda5 = w_bnd + c_bnd;
+                    // ============================================================
+                    // STEP 5: LODI wave amplitudes (Motheau Eqs. 18-21)
+                    // For Z-direction: un=w, transverse includes both vx and vy
+                    // ============================================================
+                    Set::Scalar L1 = (un_bnd - a_bnd) / (2.0 * a2_bnd) * (dp_dz - rho_bnd * a_bnd * dun_dz);
+                    Set::Scalar L2 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * dut_dz : 0.0;                              // shear in x
+                    Set::Scalar L3 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd / a2_bnd * (a2_bnd * drho_dz - dp_dz) : 0.0; // entropy
+                    Set::Scalar L4 = (un_bnd + a_bnd) / (2.0 * a2_bnd) * (dp_dz + rho_bnd * a_bnd * dun_dz);
 
-                    // Interior wave amplitudes (from spatial derivatives)
-                    // Equations from Motheau et al. (2018), Section III
-                    Set::Scalar L1_int = lambda1 * (dp_dz - rho_bnd * c_bnd * dw_dz);
-                    Set::Scalar L2_int = lambda2 * du_dz;
-                    Set::Scalar L3_int = lambda3 * dv_dz;
-                    Set::Scalar L4_int = lambda4 * (c_bnd * c_bnd * drho_dz - dp_dz);
-                    Set::Scalar L5_int = lambda5 * (dp_dz + rho_bnd * c_bnd * dw_dz);
+                    // Note: In 3D, you may need L5 for the second tangential velocity (vy)
+                    // For simplicity, we're treating this as 2D+1 (only one tangential)
 
-                    // Add transverse terms (weighted by beta)
-                    L1_int += params_zlo_local.beta * T1;
-                    L2_int += params_zlo_local.beta * T2;
-                    L3_int += params_zlo_local.beta * T3;
-                    L4_int += params_zlo_local.beta * T4;
-                    L5_int += params_zlo_local.beta * T5;
+                    // ============================================================
+                    // STEP 6: Transverse terms (Motheau Eqs. 36-37)
+                    // For Z-normal: transverse = X and Y directions
+                    // ============================================================
+                    Set::Scalar T1 = (un_bnd - a_bnd) / (2.0 * a2_bnd) * (-rho_bnd * a_bnd * ut_bnd * (dun_dx + dun_dy) + a2_bnd * rho_bnd * (dut_dx + dut_dy) + ut_bnd * (dp_dx + dp_dy));
+                    Set::Scalar T4 = (un_bnd + a_bnd) / (2.0 * a2_bnd) * (rho_bnd * a_bnd * ut_bnd * (dun_dx + dun_dy) + a2_bnd * rho_bnd * (dut_dx + dut_dy) + ut_bnd * (dp_dx + dp_dy));
+                    Set::Scalar T2 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * (ut_bnd * (dut_dx + dut_dy) + (1.0 / rho_bnd) * (dp_dx + dp_dy)) : 0.0;
+                    Set::Scalar T3 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * ut_bnd / a2_bnd * (a2_bnd * (drho_dx + drho_dy) - (dp_dx + dp_dy)) : 0.0;
 
-                    // Apply boundary conditions
-                    Set::Scalar L1, L2, L3, L4, L5;
-                    Set::Scalar M_local = std::abs(w_bnd) / c_bnd; // Local Mach number
+                    // ============================================================
+                    // STEP 7: Apply BC-specific modification to incoming wave
+                    // For Z-LO: L4 is incoming (speed un+a > 0 entering domain)
+                    // ============================================================
+                    Set::Scalar K = params_zlo_local.sigma * (1.0 - M_loc * M_loc) / (a_bnd * params_zlo_local.L_ref);
 
-                    if (params_zlo_local.type == Type::Inflow)
+                    if (params_zlo_local.type == Type::Outflow)
                     {
-                        // SUBSONIC INFLOW
-                        Set::Scalar K_u = params_zlo_local.relax_u * (1.0 - M_local * M_local) * c_bnd / params_zlo_local.L_ref;
-                        Set::Scalar K_T = params_zlo_local.relax_T * (1.0 - M_local * M_local) * c_bnd / params_zlo_local.L_ref;
-
-                        L1 = L1_int; // Outgoing wave from interior
-                        L2 = K_u * (u_bnd - params_zlo_local.target_u);
-                        L3 = K_u * (v_bnd - params_zlo_local.target_v);
-                        L4 = K_T * c_bnd * c_bnd * (T_bnd - params_zlo_local.target_T) / T_bnd;
-                        L5 = K_u * (w_bnd - params_zlo_local.target_w);
+                        L4 = K * (p_bnd - params_zlo_local.target_p) - (1.0 - params_zlo_local.beta) * T4;
                     }
-                    else if (params_zlo_local.type == Type::Outflow)
+                    else if (params_zlo_local.type == Type::Inflow)
                     {
-                        // SUBSONIC OUTFLOW
-                        Set::Scalar K_p = params_zlo_local.sigma * (1.0 - M_local * M_local) * c_bnd / params_zlo_local.L_ref;
+                        Set::Scalar er = params_zlo_local.relax_u;
+                        Set::Scalar K_acoustic = er * rho_bnd * (1.0 - M_loc * M_loc) / params_zlo_local.L_ref;
+                        Set::Scalar K_entropy = er * rho_bnd * a_bnd * (gm_bnd - 1.0) / params_zlo_local.L_ref;
+                        Set::Scalar K_shear = er * a_bnd / params_zlo_local.L_ref;
 
-                        L1 = K_p * (p_bnd - params_zlo_local.target_p);
-                        L2 = L2_int;
-                        L3 = L3_int;
-                        L4 = L4_int;
-                        L5 = L5_int;
-                    }
-                    else if (params_zlo_local.type == Type::SlipWall)
-                    {
-                        // SLIP WALL
-                        L1 = L5_int; // Reflect outgoing acoustic
-                        L2 = L2_int;
-                        L3 = L3_int;
-                        L4 = L4_int;
-                        L5 = L5_int;
-                    }
-                    else
-                    { // NoSlipWall
-                        // NO-SLIP WALL
-                        Set::Scalar K_wall = 0.5 * c_bnd / params_zlo_local.L_ref;
+                        // Temperature
+                        Set::Scalar eta_bnd = eta_arr(i, j, k_bnd);
+                        Set::Scalar cv_mix = eta_bnd * cv0_ + (1.0 - eta_bnd) * cv1_;
+                        Set::Scalar T_bnd = (p_bnd + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
 
-                        L1 = L5_int;
-                        L2 = -K_wall * u_bnd;
-                        L3 = -K_wall * v_bnd;
-                        L4 = L4_int;
-                        L5 = L5_int;
+                        L4 = K_acoustic * (un_bnd - params_zlo_local.target_w) - T4;
+                        L2 = K_shear * (ut_bnd - params_zlo_local.target_u) - T2;
+                        L3 = K_entropy * (T_bnd - params_zlo_local.target_T) - T3;
                     }
 
-                    // Convert waves back to primitive variable gradients
-                    // Equation (26): dQ/dz = S(z)Lambda^-1L
-                    Set::Scalar drho_bc = (L5 + L1) / (c_bnd * c_bnd) + L4 / (c_bnd * c_bnd);
-                    Set::Scalar du_bc = L2;
-                    Set::Scalar dv_bc = L3;
-                    Set::Scalar dw_bc = (L5 - L1) / (2.0 * rho_bnd * c_bnd);
-                    Set::Scalar dp_bc = (L5 + L1) / 2.0;
+                    // ============================================================
+                    // STEP 8: Reconstruct modified gradients (Motheau Eq. 26)
+                    // ============================================================
+                    Set::Scalar xi1 = L1 / (un_bnd - a_bnd);
+                    Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_bnd : 0.0;
+                    Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_bnd : 0.0;
+                    Set::Scalar xi4 = L4 / (un_bnd + a_bnd);
 
-                    // Extrapolate to ghost cells using finite differences
-                    // Equations (27)-(30) from Motheau et al. (2018)
+                    Set::Scalar drho_dz_new = xi1 + xi3 + xi4;
+                    Set::Scalar dun_dz_new = (-a_bnd / rho_bnd) * xi1 + (a_bnd / rho_bnd) * xi4;
+                    Set::Scalar dut_dz_new = xi2;
+                    Set::Scalar dp_dz_new = a2_bnd * (xi1 + xi4);
 
-                    // First ghost cell: Q_{k-1} = Q_k - dz*dQ/dz  [Eq. 27]
-                    rho_arr(i, j, k_bnd - 1) = rho_bnd - delta * drho_bc;
-                    u_arr(i, j, k_bnd - 1) = u_bnd - delta * du_bc;
-                    v_arr(i, j, k_bnd - 1) = v_bnd - delta * dv_bc;
-                    w_arr(i, j, k_bnd - 1) = w_bnd - delta * dw_bc;
-                    p_arr(i, j, k_bnd - 1) = p_bnd - delta * dp_bc;
+                    // ============================================================
+                    // STEP 9: Fill ghost cells (Motheau Eqs. 27-28)
+                    // ============================================================
+                    // 1st ghost: Q_{-1} = Q_{+1} - 2dz*dQ/dz
+                    Set::Scalar rho_g1 = rho_m1 - 2.0 * delta * drho_dz_new;
+                    Set::Scalar un_g1 = un_m1 - 2.0 * delta * dun_dz_new;
+                    Set::Scalar ut_g1 = ut_m1 - 2.0 * delta * dut_dz_new;
+                    Set::Scalar p_g1 = p_m1 - 2.0 * delta * dp_dz_new;
 
-                    // Second ghost cell: Q_{k-2} = -2Q_{k+1} - 3Q_k + 6Q_{k-1} + 6dz*dQ/dz  [Eq. 28]
-                    rho_arr(i, j, k_bnd - 2) = -2.0 * rho_arr(i, j, k_bnd + 1) - 3.0 * rho_bnd + 6.0 * rho_arr(i, j, k_bnd - 1) + 6.0 * delta * drho_bc;
-                    u_arr(i, j, k_bnd - 2) = -2.0 * u_arr(i, j, k_bnd + 1) - 3.0 * u_bnd + 6.0 * u_arr(i, j, k_bnd - 1) + 6.0 * delta * du_bc;
-                    v_arr(i, j, k_bnd - 2) = -2.0 * v_arr(i, j, k_bnd + 1) - 3.0 * v_bnd + 6.0 * v_arr(i, j, k_bnd - 1) + 6.0 * delta * dv_bc;
-                    w_arr(i, j, k_bnd - 2) = -2.0 * w_arr(i, j, k_bnd + 1) - 3.0 * w_bnd + 6.0 * w_arr(i, j, k_bnd - 1) + 6.0 * delta * dw_bc;
-                    p_arr(i, j, k_bnd - 2) = -2.0 * p_arr(i, j, k_bnd + 1) - 3.0 * p_bnd + 6.0 * p_arr(i, j, k_bnd - 1) + 6.0 * delta * dp_bc;
+                    rho_g1 = amrex::max(rho_g1, small_local);
+                    p_g1 = amrex::max(p_g1, 1.0e-6);
 
-                    // Third ghost cell: Q_{k-3} = 3Q_{k+1} + 10Q_k - 18Q_{k-1} + 6Q_{k-2} - 12dz*dQ/dz  [Eq. 29]
-                    rho_arr(i, j, k_bnd - 3) = 3.0 * rho_arr(i, j, k_bnd + 1) + 10.0 * rho_bnd - 18.0 * rho_arr(i, j, k_bnd - 1) + 6.0 * rho_arr(i, j, k_bnd - 2) - 12.0 * delta * drho_bc;
-                    u_arr(i, j, k_bnd - 3) = 3.0 * u_arr(i, j, k_bnd + 1) + 10.0 * u_bnd - 18.0 * u_arr(i, j, k_bnd - 1) + 6.0 * u_arr(i, j, k_bnd - 2) - 12.0 * delta * du_bc;
-                    v_arr(i, j, k_bnd - 3) = 3.0 * v_arr(i, j, k_bnd + 1) + 10.0 * v_bnd - 18.0 * v_arr(i, j, k_bnd - 1) + 6.0 * v_arr(i, j, k_bnd - 2) - 12.0 * delta * dv_bc;
-                    w_arr(i, j, k_bnd - 3) = 3.0 * w_arr(i, j, k_bnd + 1) + 10.0 * w_bnd - 18.0 * w_arr(i, j, k_bnd - 1) + 6.0 * w_arr(i, j, k_bnd - 2) - 12.0 * delta * dw_bc;
-                    p_arr(i, j, k_bnd - 3) = 3.0 * p_arr(i, j, k_bnd + 1) + 10.0 * p_bnd - 18.0 * p_arr(i, j, k_bnd - 1) + 6.0 * p_arr(i, j, k_bnd - 2) - 12.0 * delta * dp_bc;
+                    set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i, j, k_bnd - 1, idir, rho_g1, un_g1, ut_g1, p_g1);
 
-                    // Fourth ghost cell: Q_{k-4} = -2Q_{k+1} - 13Q_k + 24Q_{k-1} - 12Q_{k-2} + 4Q_{k-3} + 12dz*dQ/dz  [Eq. 30]
-                    rho_arr(i, j, k_bnd - 4) = -2.0 * rho_arr(i, j, k_bnd + 1) - 13.0 * rho_bnd + 24.0 * rho_arr(i, j, k_bnd - 1) - 12.0 * rho_arr(i, j, k_bnd - 2) + 4.0 * rho_arr(i, j, k_bnd - 3) + 12.0 * delta * drho_bc;
-                    u_arr(i, j, k_bnd - 4) = -2.0 * u_arr(i, j, k_bnd + 1) - 13.0 * u_bnd + 24.0 * u_arr(i, j, k_bnd - 1) - 12.0 * u_arr(i, j, k_bnd - 2) + 4.0 * u_arr(i, j, k_bnd - 3) + 12.0 * delta * du_bc;
-                    v_arr(i, j, k_bnd - 4) = -2.0 * v_arr(i, j, k_bnd + 1) - 13.0 * v_bnd + 24.0 * v_arr(i, j, k_bnd - 1) - 12.0 * v_arr(i, j, k_bnd - 2) + 4.0 * v_arr(i, j, k_bnd - 3) + 12.0 * delta * dv_bc;
-                    w_arr(i, j, k_bnd - 4) = -2.0 * w_arr(i, j, k_bnd + 1) - 13.0 * w_bnd + 24.0 * w_arr(i, j, k_bnd - 1) - 12.0 * w_arr(i, j, k_bnd - 2) + 4.0 * w_arr(i, j, k_bnd - 3) + 12.0 * delta * dw_bc;
-                    p_arr(i, j, k_bnd - 4) = -2.0 * p_arr(i, j, k_bnd + 1) - 13.0 * p_bnd + 24.0 * p_arr(i, j, k_bnd - 1) - 12.0 * p_arr(i, j, k_bnd - 2) + 4.0 * p_arr(i, j, k_bnd - 3) + 12.0 * delta * dp_bc;
+                    // 2nd ghost: Q_{-2} = -2Q_{+1} - 3Q_0 + 6Q_{-1} + 6dz*dQ/dz
+                    Set::Scalar rho_g2 = -2.0 * rho_m1 - 3.0 * rho_bnd + 6.0 * rho_g1 + 6.0 * delta * drho_dz_new;
+                    Set::Scalar un_g2 = -2.0 * un_m1 - 3.0 * un_bnd + 6.0 * un_g1 + 6.0 * delta * dun_dz_new;
+                    Set::Scalar ut_g2 = -2.0 * ut_m1 - 3.0 * ut_bnd + 6.0 * ut_g1 + 6.0 * delta * dut_dz_new;
+                    Set::Scalar p_g2 = -2.0 * p_m1 - 3.0 * p_bnd + 6.0 * p_g1 + 6.0 * delta * dp_dz_new;
 
-                    // Convert primitive back to conservative in ghost cells
-                    for (int kg = k_bnd - 1; kg >= k_bnd - 4; kg--)
-                    {
-                        Set::Scalar rho_g = std::max(small_local, rho_arr(i, j, kg));
-                        Set::Scalar u_g = u_arr(i, j, kg);
-                        Set::Scalar v_g = v_arr(i, j, kg);
-                        Set::Scalar w_g = w_arr(i, j, kg);
-                        Set::Scalar p_g = std::max(small_local, p_arr(i, j, kg));
+                    rho_g2 = amrex::max(rho_g2, small_local);
+                    p_g2 = amrex::max(p_g2, 1.0e-6);
 
-                        // Conservative variables
-                        rho_arr(i, j, kg) = rho_g;
-                        momx_arr(i, j, kg) = rho_g * u_g;
-                        momy_arr(i, j, kg) = rho_g * v_g;
-                        momz_arr(i, j, kg) = rho_g * w_g;
-
-                        // Total energy: E = rhoe + 1/2rho(u^2 + v^2 + w^2)
-                        Set::Scalar ke_g = 0.5 * (u_g * u_g + v_g * v_g + w_g * w_g);
-                        Set::Scalar ie_g = (p_g + pref_local + gamma_bnd * p0_bnd) / ((gamma_bnd - 1.0) * rho_g);
-                        energy_arr(i, j, kg) = rho_g * (ie_g + ke_g);
-                    }
+                    set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i, j, k_bnd - 2, idir, rho_g2, un_g2, ut_g2, p_g2);
                 });
             }
 
-            // ====================================================================
-            // Z-HI BOUNDARY (k = domain.bigEnd(2))
-            // ====================================================================
-            if (bx.bigEnd(2) == domain.bigEnd(2))
+            // =====================================================================
+            // Z-HI BOUNDARY (EDGES ONLY - SKIP CORNERS)
+            // =====================================================================
+            if (bx.bigEnd(2) == domain.bigEnd(2) && params_zhi_local.type != Type::None)
             {
-                int idir = 2;
-                int isign = 1;
+                int idir = 2;  // z-direction
+                int isign = 1; // top boundary
                 Set::Scalar delta = dx[2];
 
+                // Ghost box: 1 layer at z-hi
                 amrex::Box ghost_box = amrex::adjCellHi(bx, 2, 1);
 
                 amrex::ParallelFor(ghost_box, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    // ============================================================
+                    // SKIP CORNERS: If this cell is also on X or Y boundary, skip it
+                    // ============================================================
+                    if (i == domain.smallEnd(0) || i == domain.bigEnd(0))
+                        return;
+                    if (j == domain.smallEnd(1) || j == domain.bigEnd(1))
+                        return;
+
+                    // Boundary cell index (last interior cell)
                     int k_bnd = domain.bigEnd(2);
 
-                    Set::Scalar rho_bnd = rho_arr(i, j, k_bnd);
-                    Set::Scalar u_bnd = u_arr(i, j, k_bnd);
-                    Set::Scalar v_bnd = v_arr(i, j, k_bnd);
-                    Set::Scalar w_bnd = w_arr(i, j, k_bnd);
-                    Set::Scalar p_bnd = p_arr(i, j, k_bnd);
-                    Set::Scalar T_bnd = T_arr(i, j, k_bnd);
-                    Set::Scalar c_bnd = c_arr(i, j, k_bnd);
-                    Set::Scalar gamma_bnd = gamma_arr(i, j, k_bnd);
-                    Set::Scalar p0_bnd = p0_arr(i, j, k_bnd);
+                    // ============================================================
+                    // STEP 1: Compute primitives at boundary cell
+                    // ============================================================
+                    Set::Scalar rho_bnd, un_bnd, ut_bnd, p_bnd, a_bnd, gm_bnd, pi_bnd;
+                    compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j, k_bnd, idir, rho_bnd, un_bnd, ut_bnd, p_bnd, a_bnd, gm_bnd, pi_bnd);
 
-                    // Normal derivatives (backward difference for top boundary)
-                    // dQ/dz ~= (3Q_k - 4Q_{k-1} + Q_{k-2}) / (2dz)
-                    Set::Scalar drho_dz = (3.0 * rho_arr(i, j, k_bnd) - 4.0 * rho_arr(i, j, k_bnd - 1) + rho_arr(i, j, k_bnd - 2)) / (2.0 * delta);
-                    Set::Scalar du_dz = (3.0 * u_arr(i, j, k_bnd) - 4.0 * u_arr(i, j, k_bnd - 1) + u_arr(i, j, k_bnd - 2)) / (2.0 * delta);
-                    Set::Scalar dv_dz = (3.0 * v_arr(i, j, k_bnd) - 4.0 * v_arr(i, j, k_bnd - 1) + v_arr(i, j, k_bnd - 2)) / (2.0 * delta);
-                    Set::Scalar dw_dz = (3.0 * w_arr(i, j, k_bnd) - 4.0 * w_arr(i, j, k_bnd - 1) + w_arr(i, j, k_bnd - 2)) / (2.0 * delta);
-                    Set::Scalar dp_dz = (3.0 * p_arr(i, j, k_bnd) - 4.0 * p_arr(i, j, k_bnd - 1) + p_arr(i, j, k_bnd - 2)) / (2.0 * delta);
+                    // ============================================================
+                    // STEP 2: Compute primitives at interior neighbors (for FD)
+                    // ============================================================
+                    Set::Scalar rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1;
+                    compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j, k_bnd - 1, idir, rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1);
 
-                    // Tangential derivatives (same as z-lo)
-                    Set::Scalar drho_dx = 0.0, du_dx = 0.0, dv_dx = 0.0, dw_dx = 0.0, dp_dx = 0.0;
+                    Set::Scalar rho_m2, un_m2, ut_m2, p_m2, a_m2, gm_m2, pi_m2;
+                    compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j, k_bnd - 2, idir, rho_m2, un_m2, ut_m2, p_m2, a_m2, gm_m2, pi_m2);
+
+                    // ============================================================
+                    // STEP 3: One-sided normal derivatives (2nd order)
+                    // Backward difference: df/dz = (3f_0 - 4f_{-1} + f_{-2}) / (2dz)
+                    // ============================================================
+                    Set::Scalar drho_dz = (3.0 * rho_bnd - 4.0 * rho_m1 + rho_m2) / (2.0 * delta);
+                    Set::Scalar dun_dz = (3.0 * un_bnd - 4.0 * un_m1 + un_m2) / (2.0 * delta);
+                    Set::Scalar dut_dz = (3.0 * ut_bnd - 4.0 * ut_m1 + ut_m2) / (2.0 * delta);
+                    Set::Scalar dp_dz = (3.0 * p_bnd - 4.0 * p_m1 + p_m2) / (2.0 * delta);
+
+                    // ============================================================
+                    // STEP 4: Tangential derivatives (centered, 2nd order)
+                    // ============================================================
+                    Set::Scalar drho_dx = 0.0, dun_dx = 0.0, dut_dx = 0.0, dp_dx = 0.0;
+                    Set::Scalar drho_dy = 0.0, dun_dy = 0.0, dut_dy = 0.0, dp_dy = 0.0;
+
                     if (i > domain.smallEnd(0) && i < domain.bigEnd(0))
                     {
-                        drho_dx = (rho_arr(i + 1, j, k_bnd) - rho_arr(i - 1, j, k_bnd)) / (2.0 * dx[0]);
-                        du_dx = (u_arr(i + 1, j, k_bnd) - u_arr(i - 1, j, k_bnd)) / (2.0 * dx[0]);
-                        dv_dx = (v_arr(i + 1, j, k_bnd) - v_arr(i - 1, j, k_bnd)) / (2.0 * dx[0]);
-                        dw_dx = (w_arr(i + 1, j, k_bnd) - w_arr(i - 1, j, k_bnd)) / (2.0 * dx[0]);
-                        dp_dx = (p_arr(i + 1, j, k_bnd) - p_arr(i - 1, j, k_bnd)) / (2.0 * dx[0]);
+                        Set::Scalar rho_ip, un_ip, ut_ip, p_ip, a_ip, gm_ip, pi_ip;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i + 1, j, k_bnd, idir, rho_ip, un_ip, ut_ip, p_ip, a_ip, gm_ip, pi_ip);
+
+                        Set::Scalar rho_im, un_im, ut_im, p_im, a_im, gm_im, pi_im;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i - 1, j, k_bnd, idir, rho_im, un_im, ut_im, p_im, a_im, gm_im, pi_im);
+
+                        drho_dx = (rho_ip - rho_im) / (2.0 * dx[0]);
+                        dun_dx = (un_ip - un_im) / (2.0 * dx[0]);
+                        dut_dx = (ut_ip - ut_im) / (2.0 * dx[0]);
+                        dp_dx = (p_ip - p_im) / (2.0 * dx[0]);
                     }
 
-                    Set::Scalar drho_dy = 0.0, du_dy = 0.0, dv_dy = 0.0, dw_dy = 0.0, dp_dy = 0.0;
                     if (j > domain.smallEnd(1) && j < domain.bigEnd(1))
                     {
-                        drho_dy = (rho_arr(i, j + 1, k_bnd) - rho_arr(i, j - 1, k_bnd)) / (2.0 * dx[1]);
-                        du_dy = (u_arr(i, j + 1, k_bnd) - u_arr(i, j - 1, k_bnd)) / (2.0 * dx[1]);
-                        dv_dy = (v_arr(i, j + 1, k_bnd) - v_arr(i, j - 1, k_bnd)) / (2.0 * dx[1]);
-                        dw_dy = (w_arr(i, j + 1, k_bnd) - w_arr(i, j - 1, k_bnd)) / (2.0 * dx[1]);
-                        dp_dy = (p_arr(i, j + 1, k_bnd) - p_arr(i, j - 1, k_bnd)) / (2.0 * dx[1]);
+                        Set::Scalar rho_jp, un_jp, ut_jp, p_jp, a_jp, gm_jp, pi_jp;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j + 1, k_bnd, idir, rho_jp, un_jp, ut_jp, p_jp, a_jp, gm_jp, pi_jp);
+
+                        Set::Scalar rho_jm, un_jm, ut_jm, p_jm, a_jm, gm_jm, pi_jm;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j - 1, k_bnd, idir, rho_jm, un_jm, ut_jm, p_jm, a_jm, gm_jm, pi_jm);
+
+                        drho_dy = (rho_jp - rho_jm) / (2.0 * dx[1]);
+                        dun_dy = (un_jp - un_jm) / (2.0 * dx[1]);
+                        dut_dy = (ut_jp - ut_jm) / (2.0 * dx[1]);
+                        dp_dy = (p_jp - p_jm) / (2.0 * dx[1]);
                     }
 
-                    // Transverse terms
-                    Set::Scalar T1 = u_bnd * dp_dx + v_bnd * dp_dy - rho_bnd * c_bnd * c_bnd * (u_bnd * drho_dx + v_bnd * drho_dy);
-                    Set::Scalar T2 = u_bnd * dw_dx + v_bnd * dw_dy;
-                    Set::Scalar T3 = u_bnd * du_dx + v_bnd * du_dy;
-                    Set::Scalar T4 = u_bnd * dv_dx + v_bnd * dv_dy;
-                    Set::Scalar T5 = u_bnd * dp_dx + v_bnd * dp_dy;
+                    Set::Scalar a2_bnd = a_bnd * a_bnd;
+                    Set::Scalar M_loc = std::abs(un_bnd) / (a_bnd + small_local);
 
-                    // Characteristic waves
-                    Set::Scalar lambda1 = w_bnd - c_bnd;
-                    Set::Scalar lambda2 = w_bnd;
-                    Set::Scalar lambda3 = w_bnd;
-                    Set::Scalar lambda4 = w_bnd;
-                    Set::Scalar lambda5 = w_bnd + c_bnd;
+                    // ============================================================
+                    // STEP 5: LODI wave amplitudes
+                    // ============================================================
+                    Set::Scalar L1 = (un_bnd - a_bnd) / (2.0 * a2_bnd) * (dp_dz - rho_bnd * a_bnd * dun_dz);
+                    Set::Scalar L2 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * dut_dz : 0.0;
+                    Set::Scalar L3 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd / a2_bnd * (a2_bnd * drho_dz - dp_dz) : 0.0;
+                    Set::Scalar L4 = (un_bnd + a_bnd) / (2.0 * a2_bnd) * (dp_dz + rho_bnd * a_bnd * dun_dz);
 
-                    Set::Scalar L1_int = lambda1 * (dp_dz - rho_bnd * c_bnd * dw_dz);
-                    Set::Scalar L2_int = lambda2 * du_dz;
-                    Set::Scalar L3_int = lambda3 * dv_dz;
-                    Set::Scalar L4_int = lambda4 * (c_bnd * c_bnd * drho_dz - dp_dz);
-                    Set::Scalar L5_int = lambda5 * (dp_dz + rho_bnd * c_bnd * dw_dz);
+                    // ============================================================
+                    // STEP 6: Transverse terms
+                    // ============================================================
+                    Set::Scalar T1 = (un_bnd - a_bnd) / (2.0 * a2_bnd) * (-rho_bnd * a_bnd * ut_bnd * (dun_dx + dun_dy) + a2_bnd * rho_bnd * (dut_dx + dut_dy) + ut_bnd * (dp_dx + dp_dy));
+                    Set::Scalar T4 = (un_bnd + a_bnd) / (2.0 * a2_bnd) * (rho_bnd * a_bnd * ut_bnd * (dun_dx + dun_dy) + a2_bnd * rho_bnd * (dut_dx + dut_dy) + ut_bnd * (dp_dx + dp_dy));
+                    Set::Scalar T2 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * (ut_bnd * (dut_dx + dut_dy) + (1.0 / rho_bnd) * (dp_dx + dp_dy)) : 0.0;
+                    Set::Scalar T3 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * ut_bnd / a2_bnd * (a2_bnd * (drho_dx + drho_dy) - (dp_dx + dp_dy)) : 0.0;
 
-                    L1_int += params_zhi_local.beta * T1;
-                    L2_int += params_zhi_local.beta * T2;
-                    L3_int += params_zhi_local.beta * T3;
-                    L4_int += params_zhi_local.beta * T4;
-                    L5_int += params_zhi_local.beta * T5;
+                    // ============================================================
+                    // STEP 7: Apply BC-specific modification
+                    // For Z-HI: L1 is incoming (speed un-a < 0 entering domain)
+                    // ============================================================
+                    Set::Scalar K = params_zhi_local.sigma * (1.0 - M_loc * M_loc) / (a_bnd * params_zhi_local.L_ref);
 
-                    // Apply boundary conditions
-                    Set::Scalar L1, L2, L3, L4, L5;
-                    Set::Scalar M_local = std::abs(w_bnd) / c_bnd;
-
-                    if (params_zhi_local.type == Type::Inflow)
+                    if (params_zhi_local.type == Type::Outflow)
                     {
-                        Set::Scalar K_u = params_zhi_local.relax_u * (1.0 - M_local * M_local) * c_bnd / params_zhi_local.L_ref;
-                        Set::Scalar K_T = params_zhi_local.relax_T * (1.0 - M_local * M_local) * c_bnd / params_zhi_local.L_ref;
-
-                        L1 = K_u * (w_bnd - params_zhi_local.target_w);
-                        L2 = K_u * (u_bnd - params_zhi_local.target_u);
-                        L3 = K_u * (v_bnd - params_zhi_local.target_v);
-                        L4 = K_T * c_bnd * c_bnd * (T_bnd - params_zhi_local.target_T) / T_bnd;
-                        L5 = L5_int;
+                        L1 = K * (p_bnd - params_zhi_local.target_p) - (1.0 - params_zhi_local.beta) * T1;
                     }
-                    else if (params_zhi_local.type == Type::Outflow)
+                    else if (params_zhi_local.type == Type::Inflow)
                     {
-                        Set::Scalar K_p = params_zhi_local.sigma * (1.0 - M_local * M_local) * c_bnd / params_zhi_local.L_ref;
+                        Set::Scalar er = params_zhi_local.relax_u;
+                        Set::Scalar K_acoustic = er * rho_bnd * (1.0 - M_loc * M_loc) / params_zhi_local.L_ref;
+                        Set::Scalar K_entropy = er * rho_bnd * a_bnd * (gm_bnd - 1.0) / params_zhi_local.L_ref;
+                        Set::Scalar K_shear = er * a_bnd / params_zhi_local.L_ref;
 
-                        L1 = L1_int;
-                        L2 = L2_int;
-                        L3 = L3_int;
-                        L4 = L4_int;
-                        L5 = K_p * (p_bnd - params_zhi_local.target_p);
-                    }
-                    else if (params_zhi_local.type == Type::SlipWall)
-                    {
-                        L1 = L1_int;
-                        L2 = L2_int;
-                        L3 = L3_int;
-                        L4 = L4_int;
-                        L5 = L1_int;
-                    }
-                    else
-                    { // NoSlipWall
-                        Set::Scalar K_wall = 0.5 * c_bnd / params_zhi_local.L_ref;
+                        Set::Scalar eta_bnd = eta_arr(i, j, k_bnd);
+                        Set::Scalar cv_mix = eta_bnd * cv0_ + (1.0 - eta_bnd) * cv1_;
+                        Set::Scalar T_bnd = (p_bnd + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
 
-                        L1 = L1_int;
-                        L2 = -K_wall * u_bnd;
-                        L3 = -K_wall * v_bnd;
-                        L4 = L4_int;
-                        L5 = L1_int;
+                        L1 = -K_acoustic * (un_bnd - params_zhi_local.target_w) - T1;
+                        L2 = K_shear * (ut_bnd - params_zhi_local.target_u) - T2;
+                        L3 = K_entropy * (T_bnd - params_zhi_local.target_T) - T3;
                     }
 
-                    // Convert waves to gradients [Eq. 26]
-                    Set::Scalar drho_bc = (L5 + L1) / (c_bnd * c_bnd) + L4 / (c_bnd * c_bnd);
-                    Set::Scalar du_bc = L2;
-                    Set::Scalar dv_bc = L3;
-                    Set::Scalar dw_bc = (L5 - L1) / (2.0 * rho_bnd * c_bnd);
-                    Set::Scalar dp_bc = (L5 + L1) / 2.0;
+                    // ============================================================
+                    // STEP 8: Reconstruct modified gradients
+                    // ============================================================
+                    Set::Scalar xi1 = L1 / (un_bnd - a_bnd);
+                    Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_bnd : 0.0;
+                    Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_bnd : 0.0;
+                    Set::Scalar xi4 = L4 / (un_bnd + a_bnd);
 
-                    // Extrapolate to ghost cells [Eqs. 31-34]
-                    // First ghost cell: Q_{k+1} = Q_k + dz*dQ/dz  [Eq. 31]
-                    rho_arr(i, j, k_bnd + 1) = rho_bnd + delta * drho_bc;
-                    u_arr(i, j, k_bnd + 1) = u_bnd + delta * du_bc;
-                    v_arr(i, j, k_bnd + 1) = v_bnd + delta * dv_bc;
-                    w_arr(i, j, k_bnd + 1) = w_bnd + delta * dw_bc;
-                    p_arr(i, j, k_bnd + 1) = p_bnd + delta * dp_bc;
+                    Set::Scalar drho_dz_new = xi1 + xi3 + xi4;
+                    Set::Scalar dun_dz_new = (-a_bnd / rho_bnd) * xi1 + (a_bnd / rho_bnd) * xi4;
+                    Set::Scalar dut_dz_new = xi2;
+                    Set::Scalar dp_dz_new = a2_bnd * (xi1 + xi4);
 
-                    // Second ghost cell: Q_{k+2} = -2Q_{k-1} - 3Q_k + 6Q_{k+1} - 6dz*dQ/dz  [Eq. 32]
-                    rho_arr(i, j, k_bnd + 2) = -2.0 * rho_arr(i, j, k_bnd - 1) - 3.0 * rho_bnd + 6.0 * rho_arr(i, j, k_bnd + 1) - 6.0 * delta * drho_bc;
-                    u_arr(i, j, k_bnd + 2) = -2.0 * u_arr(i, j, k_bnd - 1) - 3.0 * u_bnd + 6.0 * u_arr(i, j, k_bnd + 1) - 6.0 * delta * du_bc;
-                    v_arr(i, j, k_bnd + 2) = -2.0 * v_arr(i, j, k_bnd - 1) - 3.0 * v_bnd + 6.0 * v_arr(i, j, k_bnd + 1) - 6.0 * delta * dv_bc;
-                    w_arr(i, j, k_bnd + 2) = -2.0 * w_arr(i, j, k_bnd - 1) - 3.0 * w_bnd + 6.0 * w_arr(i, j, k_bnd + 1) - 6.0 * delta * dw_bc;
-                    p_arr(i, j, k_bnd + 2) = -2.0 * p_arr(i, j, k_bnd - 1) - 3.0 * p_bnd + 6.0 * p_arr(i, j, k_bnd + 1) - 6.0 * delta * dp_bc;
+                    // ============================================================
+                    // STEP 9: Fill ghost cells (Motheau Eqs. 31-32)
+                    // ============================================================
+                    // 1st ghost: Q_{N+1} = Q_{N-1} + 2dz*dQ/dz
+                    Set::Scalar rho_g1 = rho_m1 + 2.0 * delta * drho_dz_new;
+                    Set::Scalar un_g1 = un_m1 + 2.0 * delta * dun_dz_new;
+                    Set::Scalar ut_g1 = ut_m1 + 2.0 * delta * dut_dz_new;
+                    Set::Scalar p_g1 = p_m1 + 2.0 * delta * dp_dz_new;
 
-                    // Third ghost cell: Q_{k+3} = 3Q_{k-1} + 10Q_k - 18Q_{k+1} + 6Q_{k+2} + 12dz*dQ/dz  [Eq. 33]
-                    rho_arr(i, j, k_bnd + 3) = 3.0 * rho_arr(i, j, k_bnd - 1) + 10.0 * rho_bnd - 18.0 * rho_arr(i, j, k_bnd + 1) + 6.0 * rho_arr(i, j, k_bnd + 2) + 12.0 * delta * drho_bc;
-                    u_arr(i, j, k_bnd + 3) = 3.0 * u_arr(i, j, k_bnd - 1) + 10.0 * u_bnd - 18.0 * u_arr(i, j, k_bnd + 1) + 6.0 * u_arr(i, j, k_bnd + 2) + 12.0 * delta * du_bc;
-                    v_arr(i, j, k_bnd + 3) = 3.0 * v_arr(i, j, k_bnd - 1) + 10.0 * v_bnd - 18.0 * v_arr(i, j, k_bnd + 1) + 6.0 * v_arr(i, j, k_bnd + 2) + 12.0 * delta * dv_bc;
-                    w_arr(i, j, k_bnd + 3) = 3.0 * w_arr(i, j, k_bnd - 1) + 10.0 * w_bnd - 18.0 * w_arr(i, j, k_bnd + 1) + 6.0 * w_arr(i, j, k_bnd + 2) + 12.0 * delta * dw_bc;
-                    p_arr(i, j, k_bnd + 3) = 3.0 * p_arr(i, j, k_bnd - 1) + 10.0 * p_bnd - 18.0 * p_arr(i, j, k_bnd + 1) + 6.0 * p_arr(i, j, k_bnd + 2) + 12.0 * delta * dp_bc;
+                    rho_g1 = amrex::max(rho_g1, small_local);
+                    p_g1 = amrex::max(p_g1, 1.0e-6);
 
-                    // Fourth ghost cell: Q_{k+4} = -2Q_{k-1} - 13Q_k + 24Q_{k+1} - 12Q_{k+2} + 4Q_{k+3} - 12dz*dQ/dz  [Eq. 34]
-                    rho_arr(i, j, k_bnd + 4) = -2.0 * rho_arr(i, j, k_bnd - 1) - 13.0 * rho_bnd + 24.0 * rho_arr(i, j, k_bnd + 1) - 12.0 * rho_arr(i, j, k_bnd + 2) + 4.0 * rho_arr(i, j, k_bnd + 3) - 12.0 * delta * drho_bc;
-                    u_arr(i, j, k_bnd + 4) = -2.0 * u_arr(i, j, k_bnd - 1) - 13.0 * u_bnd + 24.0 * u_arr(i, j, k_bnd + 1) - 12.0 * u_arr(i, j, k_bnd + 2) + 4.0 * u_arr(i, j, k_bnd + 3) - 12.0 * delta * du_bc;
-                    v_arr(i, j, k_bnd + 4) = -2.0 * v_arr(i, j, k_bnd - 1) - 13.0 * v_bnd + 24.0 * v_arr(i, j, k_bnd + 1) - 12.0 * v_arr(i, j, k_bnd + 2) + 4.0 * v_arr(i, j, k_bnd + 3) - 12.0 * delta * dv_bc;
-                    w_arr(i, j, k_bnd + 4) = -2.0 * w_arr(i, j, k_bnd - 1) - 13.0 * w_bnd + 24.0 * w_arr(i, j, k_bnd + 1) - 12.0 * w_arr(i, j, k_bnd + 2) + 4.0 * w_arr(i, j, k_bnd + 3) - 12.0 * delta * dw_bc;
-                    p_arr(i, j, k_bnd + 4) = -2.0 * p_arr(i, j, k_bnd - 1) - 13.0 * p_bnd + 24.0 * p_arr(i, j, k_bnd + 1) - 12.0 * p_arr(i, j, k_bnd + 2) + 4.0 * p_arr(i, j, k_bnd + 3) - 12.0 * delta * dp_bc;
+                    set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i, j, k_bnd + 1, idir, rho_g1, un_g1, ut_g1, p_g1);
 
-                    // Convert primitive to conservative
-                    for (int kg = k_bnd + 1; kg <= k_bnd + 4; kg++)
-                    {
-                        Set::Scalar rho_g = std::max(small_local, rho_arr(i, j, kg));
-                        Set::Scalar u_g = u_arr(i, j, kg);
-                        Set::Scalar v_g = v_arr(i, j, kg);
-                        Set::Scalar w_g = w_arr(i, j, kg);
-                        Set::Scalar p_g = std::max(small_local, p_arr(i, j, kg));
+                    // 2nd ghost: Q_{N+2} = -2Q_{N-1} - 3Q_N + 6Q_{N+1} - 6dz*dQ/dz
+                    Set::Scalar rho_g2 = -2.0 * rho_m1 - 3.0 * rho_bnd + 6.0 * rho_g1 - 6.0 * delta * drho_dz_new;
+                    Set::Scalar un_g2 = -2.0 * un_m1 - 3.0 * un_bnd + 6.0 * un_g1 - 6.0 * delta * dun_dz_new;
+                    Set::Scalar ut_g2 = -2.0 * ut_m1 - 3.0 * ut_bnd + 6.0 * ut_g1 - 6.0 * delta * dut_dz_new;
+                    Set::Scalar p_g2 = -2.0 * p_m1 - 3.0 * p_bnd + 6.0 * p_g1 - 6.0 * delta * dp_dz_new;
 
-                        rho_arr(i, j, kg) = rho_g;
-                        momx_arr(i, j, kg) = rho_g * u_g;
-                        momy_arr(i, j, kg) = rho_g * v_g;
-                        momz_arr(i, j, kg) = rho_g * w_g;
+                    rho_g2 = amrex::max(rho_g2, small_local);
+                    p_g2 = amrex::max(p_g2, 1.0e-6);
 
-                        Set::Scalar ke_g = 0.5 * (u_g * u_g + v_g * v_g + w_g * w_g);
-                        Set::Scalar ie_g = (p_g + pref_local + gamma_bnd * p0_bnd) / ((gamma_bnd - 1.0) * rho_g);
-                        energy_arr(i, j, kg) = rho_g * (ie_g + ke_g);
-                    }
+                    set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i, j, k_bnd + 2, idir, rho_g2, un_g2, ut_g2, p_g2);
                 });
             }
 #endif // AMREX_SPACEDIM == 3
-        }
-    }
+
+
+            // =====================================================================
+            // CORNER TREATMENT (Motheau Sec. IV.B, Eqs. 51-67, Figure 2)
+            // =====================================================================
+            // At corners where two NSCBC faces meet, we solve a 2x2 coupled system
+            // for the two incoming acoustic wave amplitudes, then fill corner ghost
+            // cells using gradients from BOTH directions simultaneously.
+            //
+            // IMPORTANT: Must fill ALL 4 layers of ghost cells (Motheau Figure 2)
+            // =====================================================================
+
+            for (int cx = 0; cx < 2; ++cx)     // cx=0 -> xlo, cx=1 -> xhi
+                for (int cy = 0; cy < 2; ++cy) // cy=0 -> ylo, cy=1 -> yhi
+                {
+                    BoundaryParams params_x = (cx == 0) ? params_xlo_local : params_xhi_local;
+                    BoundaryParams params_y = (cy == 0) ? params_ylo_local : params_yhi_local;
+
+                    if (params_x.type == Type::None || params_y.type == Type::None)
+                        continue;
+
+                    int ibdry_x = (cx == 0) ? domain.smallEnd(0) : domain.bigEnd(0);
+                    int jbdry_y = (cy == 0) ? domain.smallEnd(1) : domain.bigEnd(1);
+
+                    bool touch_x = (cx == 0) ? (bx.smallEnd(0) == domain.smallEnd(0))
+                                             : (bx.bigEnd(0) == domain.bigEnd(0));
+                    bool touch_y = (cy == 0) ? (bx.smallEnd(1) == domain.smallEnd(1))
+                                             : (bx.bigEnd(1) == domain.bigEnd(1));
+
+                    if (!touch_x || !touch_y)
+                        continue;
+
+                    // ================================================================
+                    // Build corner ghost box - ALL 4 LAYERS (Motheau Figure 2)
+                    // ================================================================
+                    int ng = 4; //  CRITICAL: Fill all 4 ghost layers
+                    int sx = (cx == 1) ? 1 : -1;
+                    int sy = (cy == 1) ? 1 : -1;
+
+                    amrex::Box corner_box;
+                    corner_box.setSmall(0, (cx == 1) ? ibdry_x + 1 : ibdry_x - ng);
+                    corner_box.setBig(0, (cx == 1) ? ibdry_x + ng : ibdry_x - 1);
+                    corner_box.setSmall(1, (cy == 1) ? jbdry_y + 1 : jbdry_y - ng);
+                    corner_box.setBig(1, (cy == 1) ? jbdry_y + ng : jbdry_y - 1);
+
+#if AMREX_SPACEDIM == 3
+                    corner_box.setSmall(2, domain.smallEnd(2));
+                    corner_box.setBig(2, domain.bigEnd(2));
+#endif
+
+                    // Capture parameters for GPU
+                    Set::Scalar px_t = params_x.target_p;
+                    Set::Scalar py_t = params_y.target_p;
+                    Set::Scalar sigma_x = params_x.sigma;
+                    Set::Scalar sigma_y = params_y.sigma;
+                    Set::Scalar beta_x = params_x.beta;
+                    Set::Scalar beta_y = params_y.beta;
+                    Set::Scalar Lx_ref = params_x.L_ref;
+                    Set::Scalar Ly_ref = params_y.L_ref;
+                    Type ftx = params_x.type;
+                    Type fty = params_y.type;
+                    int sx_local = sx;
+                    int sy_local = sy;
+                    int ibdry_x_local = ibdry_x;
+                    int jbdry_y_local = jbdry_y;
+
+                    amrex::ParallelFor(corner_box, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                        // ============================================================
+                        // Physical corner cell (at domain boundary intersection)
+                        // ============================================================
+                        int ic = ibdry_x_local;
+                        int jc = jbdry_y_local;
+
+                        // Distance from corner (1, 2, 3, or 4)
+                        int ox = std::abs(i - ic);
+                        int oy = std::abs(j - jc);
+
+                        // ============================================================
+                        // STEP 1: Compute primitives at corner boundary cell
+                        // (Only needed once - reuse for all layers)
+                        // ============================================================
+                        Set::Scalar rho_c, vx_c, vy_c, p_c, a_c, gm_c, pi_c;
+                        {
+                            Set::Scalar un_tmp, ut_tmp;
+                            compute_prim(eta_arr, rho_arr, M_arr, E_arr, ic, jc, k, 0, rho_c, un_tmp, ut_tmp, p_c, a_c, gm_c, pi_c);
+                            vx_c = un_tmp;
+                            vy_c = ut_tmp;
+                        }
+
+                        Set::Scalar a2_c = a_c * a_c;
+                        Set::Scalar Mx_c = std::abs(vx_c) / (a_c + small_local);
+                        Set::Scalar My_c = std::abs(vy_c) / (a_c + small_local);
+
+                        // ============================================================
+                        // STEP 2: X-direction one-sided derivatives at corner
+                        // ============================================================
+                        Set::Scalar rho_xm1, vx_xm1, vy_xm1, p_xm1, a_xm1, gm_xm1, pi_xm1;
+                        Set::Scalar rho_xm2, vx_xm2, vy_xm2, p_xm2, a_xm2, gm_xm2, pi_xm2;
+                        {
+                            int im1 = ic - sx_local;
+                            int im2 = ic - 2 * sx_local;
+                            Set::Scalar un_tmp, ut_tmp;
+
+                            compute_prim(eta_arr, rho_arr, M_arr, E_arr, im1, jc, k, 0, rho_xm1, un_tmp, ut_tmp, p_xm1, a_xm1, gm_xm1, pi_xm1);
+                            vx_xm1 = un_tmp;
+                            vy_xm1 = ut_tmp;
+
+                            compute_prim(eta_arr, rho_arr, M_arr, E_arr, im2, jc, k, 0, rho_xm2, un_tmp, ut_tmp, p_xm2, a_xm2, gm_xm2, pi_xm2);
+                            vx_xm2 = un_tmp;
+                            vy_xm2 = ut_tmp;
+                        }
+
+                        Set::Scalar fdx = (Set::Scalar)sx_local;
+                        Set::Scalar drho_dx = fdx * (3.0 * rho_c - 4.0 * rho_xm1 + rho_xm2) / (2.0 * dx[0]);
+                        Set::Scalar dvx_dx = fdx * (3.0 * vx_c - 4.0 * vx_xm1 + vx_xm2) / (2.0 * dx[0]);
+                        Set::Scalar dvy_dx = fdx * (3.0 * vy_c - 4.0 * vy_xm1 + vy_xm2) / (2.0 * dx[0]);
+                        Set::Scalar dp_dx = fdx * (3.0 * p_c - 4.0 * p_xm1 + p_xm2) / (2.0 * dx[0]);
+
+                        // ============================================================
+                        // STEP 3: Y-direction one-sided derivatives at corner
+                        // ============================================================
+                        Set::Scalar rho_ym1, vx_ym1, vy_ym1, p_ym1, a_ym1, gm_ym1, pi_ym1;
+                        Set::Scalar rho_ym2, vx_ym2, vy_ym2, p_ym2, a_ym2, gm_ym2, pi_ym2;
+                        {
+                            int jm1 = jc - sy_local;
+                            int jm2 = jc - 2 * sy_local;
+                            Set::Scalar un_tmp, ut_tmp;
+
+                            compute_prim(eta_arr, rho_arr, M_arr, E_arr, ic, jm1, k, 1, rho_ym1, un_tmp, ut_tmp, p_ym1, a_ym1, gm_ym1, pi_ym1);
+                            vy_ym1 = un_tmp;
+                            vx_ym1 = ut_tmp;
+
+                            compute_prim(eta_arr, rho_arr, M_arr, E_arr, ic, jm2, k, 1, rho_ym2, un_tmp, ut_tmp, p_ym2, a_ym2, gm_ym2, pi_ym2);
+                            vy_ym2 = un_tmp;
+                            vx_ym2 = ut_tmp;
+                        }
+
+                        Set::Scalar fdy = (Set::Scalar)sy_local;
+                        Set::Scalar drho_dy = fdy * (3.0 * rho_c - 4.0 * rho_ym1 + rho_ym2) / (2.0 * dx[1]);
+                        Set::Scalar dvy_dy = fdy * (3.0 * vy_c - 4.0 * vy_ym1 + vy_ym2) / (2.0 * dx[1]);
+                        Set::Scalar dvx_dy = fdy * (3.0 * vx_c - 4.0 * vx_ym1 + vx_ym2) / (2.0 * dx[1]);
+                        Set::Scalar dp_dy = fdy * (3.0 * p_c - 4.0 * p_ym1 + p_ym2) / (2.0 * dx[1]);
+
+                        // ============================================================
+                        // STEP 4: LODI waves in X-direction (Motheau Eq. 47-48)
+                        // ============================================================
+                        Set::Scalar L1_x = (vx_c - a_c) / (2.0 * a2_c) * (dp_dx - rho_c * a_c * dvx_dx);
+                        Set::Scalar L2_x = (std::abs(vx_c) > 1.0e-14) ? vx_c / a2_c * (a2_c * drho_dx - dp_dx) : 0.0;
+                        Set::Scalar L3_x = (std::abs(vx_c) > 1.0e-14) ? vx_c * dvy_dx : 0.0;
+                        Set::Scalar L4_x = (vx_c + a_c) / (2.0 * a2_c) * (dp_dx + rho_c * a_c * dvx_dx);
+
+                        // ============================================================
+                        // STEP 5: LODI waves in Y-direction (Motheau Eq. 47-48)
+                        // ============================================================
+                        Set::Scalar L1_y = (vy_c - a_c) / (2.0 * a2_c) * (dp_dy - rho_c * a_c * dvy_dy);
+                        Set::Scalar L2_y = (std::abs(vy_c) > 1.0e-14) ? vy_c * dvx_dy : 0.0;
+                        Set::Scalar L3_y = (std::abs(vy_c) > 1.0e-14) ? vy_c / a2_c * (a2_c * drho_dy - dp_dy) : 0.0;
+                        Set::Scalar L4_y = (vy_c + a_c) / (2.0 * a2_c) * (dp_dy + rho_c * a_c * dvy_dy);
+
+                        // ============================================================
+                        // STEP 6: Solve 2x2 system for incoming waves (Motheau Eq. 56-58)
+                        // ============================================================
+                        Set::Scalar Lx_in = (cx == 1) ? L1_x : L4_x; // Incoming wave in X
+                        Set::Scalar Ly_in = (cy == 1) ? L1_y : L4_y; // Incoming wave in Y
+
+                        Set::Scalar Kx = sigma_x * (1.0 - Mx_c * Mx_c) / (a_c * Lx_ref);
+                        Set::Scalar Ky = sigma_y * (1.0 - My_c * My_c) / (a_c * Ly_ref);
+                        Set::Scalar ab = (1.0 - 0.5 * (beta_x + beta_y)) / 2.0;
+
+                        if (ftx == Type::Outflow && fty == Type::Outflow)
+                        {
+                            // Motheau Eq. 56: Coupled outflow/outflow
+                            Set::Scalar bx = Kx * (p_c - px_t);
+                            Set::Scalar by = Ky * (p_c - py_t);
+                            Set::Scalar det_inv = 1.0 / (1.0 - ab * ab + 1.0e-20);
+
+                            Lx_in = det_inv * (bx - ab * by);
+                            Ly_in = det_inv * (by - ab * bx);
+                        }
+                        else if (ftx == Type::Outflow && fty == Type::Inflow)
+                        {
+                            Ly_in = 0.0;
+                            Lx_in = Kx * (p_c - px_t);
+                        }
+                        else if (ftx == Type::Inflow && fty == Type::Outflow)
+                        {
+                            Lx_in = 0.0;
+                            Ly_in = Ky * (p_c - py_t);
+                        }
+                        else if (ftx == Type::Inflow && fty == Type::Inflow)
+                        {
+                            Lx_in = 0.0;
+                            Ly_in = 0.0;
+                        }
+
+                        // Update wave amplitudes
+                        if (cx == 1)
+                            L1_x = Lx_in;
+                        else
+                            L4_x = Lx_in;
+                        if (cy == 1)
+                            L1_y = Ly_in;
+                        else
+                            L4_y = Ly_in;
+
+                        // ============================================================
+                        // STEP 7: Reconstruct gradients (Motheau Eq. 54-55)
+                        // ============================================================
+                        // X-direction
+                        Set::Scalar xi1_x = L1_x / (vx_c - a_c + small_local);
+                        Set::Scalar xi2_x = (std::abs(vx_c) > 1.0e-14) ? L2_x / vx_c : 0.0;
+                        Set::Scalar xi3_x = (std::abs(vx_c) > 1.0e-14) ? L3_x / vx_c : 0.0;
+                        Set::Scalar xi4_x = L4_x / (vx_c + a_c + small_local);
+
+                        Set::Scalar drho_dx_new = xi1_x + xi2_x + xi4_x;
+                        Set::Scalar dvx_dx_new = (-a_c / (rho_c + small_local)) * xi1_x + (a_c / (rho_c + small_local)) * xi4_x;
+                        Set::Scalar dvy_dx_new = xi3_x;
+                        Set::Scalar dp_dx_new = a2_c * (xi1_x + xi4_x);
+
+                        // Y-direction
+                        Set::Scalar xi1_y = L1_y / (vy_c - a_c + small_local);
+                        Set::Scalar xi2_y = (std::abs(vy_c) > 1.0e-14) ? L2_y / vy_c : 0.0;
+                        Set::Scalar xi3_y = (std::abs(vy_c) > 1.0e-14) ? L3_y / vy_c : 0.0;
+                        Set::Scalar xi4_y = L4_y / (vy_c + a_c + small_local);
+
+                        Set::Scalar drho_dy_new = xi1_y + xi3_y + xi4_y;
+                        Set::Scalar dvy_dy_new = (-a_c / (rho_c + small_local)) * xi1_y + (a_c / (rho_c + small_local)) * xi4_y;
+                        Set::Scalar dvx_dy_new = xi2_y;
+                        Set::Scalar dp_dy_new = a2_c * (xi1_y + xi4_y);
+
+                        // ============================================================
+                        // STEP 8: Fill ghost cells using layer-appropriate formula
+                        // (Motheau Eqs. 27-30 for layers 1-4)
+                        // ============================================================
+                        Set::Scalar rho_g, vx_g, vy_g, p_g;
+
+                        // Determine which extrapolation formula based on distance from corner
+                        int layer = std::max(ox, oy); // Layer 1, 2, 3, or 4
+
+                        if (layer == 1)
+                        {
+                            // ========================================================
+                            // 1st layer: Eq. 27 - Linear extrapolation
+                            // Q_{-1} = Q_{+1} - 2dx·dQ/dx
+                            // ========================================================
+                            Set::Scalar dx_off = (Set::Scalar)(i - ic) * dx[0];
+                            Set::Scalar dy_off = (Set::Scalar)(j - jc) * dx[1];
+
+                            rho_g = rho_c + dx_off * drho_dx_new + dy_off * drho_dy_new;
+                            vx_g = vx_c + dx_off * dvx_dx_new + dy_off * dvx_dy_new;
+                            vy_g = vy_c + dx_off * dvy_dx_new + dy_off * dvy_dy_new;
+                            p_g = p_c + dx_off * dp_dx_new + dy_off * dp_dy_new;
+                        }
+                        else if (layer == 2)
+                        {
+                            // ========================================================
+                            // 2nd layer: Eq. 28 - Quadratic extrapolation
+                            // Q_{-2} = -2Q_{+1} - 3Q_0 + 6Q_{-1} + 6dx·dQ/dx
+                            // ========================================================
+                            // Get layer 1 ghost cell values
+                            int i1 = ic + sx_local * ((ox > 0) ? 1 : 0);
+                            int j1 = jc + sy_local * ((oy > 0) ? 1 : 0);
+
+                            Set::Scalar rho_1 = rho_arr(i1, j1, k);
+                            Set::Scalar vx_1 = M_arr(i1, j1, k, 0) / (rho_1 + small_local);
+                            Set::Scalar vy_1 = M_arr(i1, j1, k, 1) / (rho_1 + small_local);
+
+                            // Compute pressure at layer 1
+                            Set::Scalar eta_1 = eta_arr(i1, j1, k);
+                            Set::Scalar A_1 = eta_1 / (g0_ - 1.0) + (1.0 - eta_1) / (g1_ - 1.0);
+                            Set::Scalar gm_1 = 1.0 + 1.0 / A_1;
+                            Set::Scalar KE_1 = 0.5 * rho_1 * (vx_1 * vx_1 + vy_1 * vy_1);
+                            Set::Scalar UE_1 = E_arr(i1, j1, k) - KE_1;
+                            Set::Scalar B_1 = (eta_1 * g0_ * pi0_) / (g0_ - 1.0) + ((1.0 - eta_1) * g1_ * pi1_) / (g1_ - 1.0);
+                            Set::Scalar pi_1 = (B_1 / A_1) / gm_1;
+                            Set::Scalar p_1 = (gm_1 - 1.0) * UE_1 - gm_1 * pi_1 + pref_local;
+
+                            // Eq. 28: Q_{-2} = -2Q_{+1} - 3Q_0 + 6Q_{-1} + 6dx·dQ/dx
+                            Set::Scalar dx_grad = (ox == 2) ? 6.0 * dx[0] * drho_dx_new : 0.0;
+                            Set::Scalar dy_grad = (oy == 2) ? 6.0 * dx[1] * drho_dy_new : 0.0;
+                            rho_g = -2.0 * rho_xm1 - 3.0 * rho_c + 6.0 * rho_1 + dx_grad + dy_grad;
+
+                            dx_grad = (ox == 2) ? 6.0 * dx[0] * dvx_dx_new : 0.0;
+                            dy_grad = (oy == 2) ? 6.0 * dx[1] * dvx_dy_new : 0.0;
+                            vx_g = -2.0 * vx_xm1 - 3.0 * vx_c + 6.0 * vx_1 + dx_grad + dy_grad;
+
+                            dx_grad = (ox == 2) ? 6.0 * dx[0] * dvy_dx_new : 0.0;
+                            dy_grad = (oy == 2) ? 6.0 * dx[1] * dvy_dy_new : 0.0;
+                            vy_g = -2.0 * vy_xm1 - 3.0 * vy_c + 6.0 * vy_1 + dx_grad + dy_grad;
+
+                            dx_grad = (ox == 2) ? 6.0 * dx[0] * dp_dx_new : 0.0;
+                            dy_grad = (oy == 2) ? 6.0 * dx[1] * dp_dy_new : 0.0;
+                            p_g = -2.0 * p_xm1 - 3.0 * p_c + 6.0 * p_1 + dx_grad + dy_grad;
+                        }
+                        else if (layer == 3)
+                        {
+                            // ========================================================
+                            // 3rd layer: Eq. 29 - Cubic extrapolation
+                            // Q_{-3} = 3Q_{+1} + 10Q_0 - 18Q_{-1} + 6Q_{-2} - 12dx·dQ/dx
+                            // ========================================================
+                            // Get layer 1 and 2 ghost cell values
+                            int i1 = ic + sx_local * 1;
+                            int j1 = jc + sy_local * ((oy >= 1) ? 1 : 0);
+                            int i2 = ic + sx_local * ((ox >= 2) ? 2 : 0);
+                            int j2 = jc + sy_local * ((oy >= 2) ? 2 : 0);
+
+                            Set::Scalar rho_1 = rho_arr(i1, j1, k);
+                            Set::Scalar vx_1 = M_arr(i1, j1, k, 0) / (rho_1 + small_local);
+                            Set::Scalar vy_1 = M_arr(i1, j1, k, 1) / (rho_1 + small_local);
+
+                            Set::Scalar rho_2 = rho_arr(i2, j2, k);
+                            Set::Scalar vx_2 = M_arr(i2, j2, k, 0) / (rho_2 + small_local);
+                            Set::Scalar vy_2 = M_arr(i2, j2, k, 1) / (rho_2 + small_local);
+
+                            // Compute pressures
+                            Set::Scalar eta_1 = eta_arr(i1, j1, k);
+                            Set::Scalar A_1 = eta_1 / (g0_ - 1.0) + (1.0 - eta_1) / (g1_ - 1.0);
+                            Set::Scalar gm_1 = 1.0 + 1.0 / A_1;
+                            Set::Scalar KE_1 = 0.5 * rho_1 * (vx_1 * vx_1 + vy_1 * vy_1);
+                            Set::Scalar UE_1 = E_arr(i1, j1, k) - KE_1;
+                            Set::Scalar B_1 = (eta_1 * g0_ * pi0_) / (g0_ - 1.0) + ((1.0 - eta_1) * g1_ * pi1_) / (g1_ - 1.0);
+                            Set::Scalar pi_1 = (B_1 / A_1) / gm_1;
+                            Set::Scalar p_1 = (gm_1 - 1.0) * UE_1 - gm_1 * pi_1 + pref_local;
+
+                            Set::Scalar eta_2 = eta_arr(i2, j2, k);
+                            Set::Scalar A_2 = eta_2 / (g0_ - 1.0) + (1.0 - eta_2) / (g1_ - 1.0);
+                            Set::Scalar gm_2 = 1.0 + 1.0 / A_2;
+                            Set::Scalar KE_2 = 0.5 * rho_2 * (vx_2 * vx_2 + vy_2 * vy_2);
+                            Set::Scalar UE_2 = E_arr(i2, j2, k) - KE_2;
+                            Set::Scalar B_2 = (eta_2 * g0_ * pi0_) / (g0_ - 1.0) + ((1.0 - eta_2) * g1_ * pi1_) / (g1_ - 1.0);
+                            Set::Scalar pi_2 = (B_2 / A_2) / gm_2;
+                            Set::Scalar p_2 = (gm_2 - 1.0) * UE_2 - gm_2 * pi_2 + pref_local;
+
+                            // Eq. 29: Q_{-3} = 3Q_{+1} + 10Q_0 - 18Q_{-1} + 6Q_{-2} - 12dx·dQ/dx
+                            Set::Scalar dx_grad = (ox == 3) ? -12.0 * dx[0] * drho_dx_new : 0.0;
+                            Set::Scalar dy_grad = (oy == 3) ? -12.0 * dx[1] * drho_dy_new : 0.0;
+                            rho_g = 3.0 * rho_xm1 + 10.0 * rho_c - 18.0 * rho_1 + 6.0 * rho_2 + dx_grad + dy_grad;
+
+                            dx_grad = (ox == 3) ? -12.0 * dx[0] * dvx_dx_new : 0.0;
+                            dy_grad = (oy == 3) ? -12.0 * dx[1] * dvx_dy_new : 0.0;
+                            vx_g = 3.0 * vx_xm1 + 10.0 * vx_c - 18.0 * vx_1 + 6.0 * vx_2 + dx_grad + dy_grad;
+
+                            dx_grad = (ox == 3) ? -12.0 * dx[0] * dvy_dx_new : 0.0;
+                            dy_grad = (oy == 3) ? -12.0 * dx[1] * dvy_dy_new : 0.0;
+                            vy_g = 3.0 * vy_xm1 + 10.0 * vy_c - 18.0 * vy_1 + 6.0 * vy_2 + dx_grad + dy_grad;
+
+                            dx_grad = (ox == 3) ? -12.0 * dx[0] * dp_dx_new : 0.0;
+                            dy_grad = (oy == 3) ? -12.0 * dx[1] * dp_dy_new : 0.0;
+                            p_g = 3.0 * p_xm1 + 10.0 * p_c - 18.0 * p_1 + 6.0 * p_2 + dx_grad + dy_grad;
+                        }
+                        else // layer == 4
+                        {
+                            // ========================================================
+                            // 4th layer: Eq. 30 - Quartic extrapolation
+                            // Q_{-4} = -2Q_{+1} - 13Q_0 + 24Q_{-1} - 12Q_{-2} + 4Q_{-3} + 12dx·dQ/dx
+                            // ========================================================
+                            // Get layers 1, 2, 3 ghost cell values
+                            int i1 = ic + sx_local * 1;
+                            int j1 = jc + sy_local * ((oy >= 1) ? 1 : 0);
+                            int i2 = ic + sx_local * ((ox >= 2) ? 2 : 0);
+                            int j2 = jc + sy_local * ((oy >= 2) ? 2 : 0);
+                            int i3 = ic + sx_local * ((ox >= 3) ? 3 : 0);
+                            int j3 = jc + sy_local * ((oy >= 3) ? 3 : 0);
+
+                            Set::Scalar rho_1 = rho_arr(i1, j1, k);
+                            Set::Scalar vx_1 = M_arr(i1, j1, k, 0) / (rho_1 + small_local);
+                            Set::Scalar vy_1 = M_arr(i1, j1, k, 1) / (rho_1 + small_local);
+
+                            Set::Scalar rho_2 = rho_arr(i2, j2, k);
+                            Set::Scalar vx_2 = M_arr(i2, j2, k, 0) / (rho_2 + small_local);
+                            Set::Scalar vy_2 = M_arr(i2, j2, k, 1) / (rho_2 + small_local);
+
+                            Set::Scalar rho_3 = rho_arr(i3, j3, k);
+                            Set::Scalar vx_3 = M_arr(i3, j3, k, 0) / (rho_3 + small_local);
+                            Set::Scalar vy_3 = M_arr(i3, j3, k, 1) / (rho_3 + small_local);
+
+                            // Compute pressures (same pattern as layer 3)
+                            Set::Scalar eta_1 = eta_arr(i1, j1, k);
+                            Set::Scalar A_1 = eta_1 / (g0_ - 1.0) + (1.0 - eta_1) / (g1_ - 1.0);
+                            Set::Scalar gm_1 = 1.0 + 1.0 / A_1;
+                            Set::Scalar KE_1 = 0.5 * rho_1 * (vx_1 * vx_1 + vy_1 * vy_1);
+                            Set::Scalar UE_1 = E_arr(i1, j1, k) - KE_1;
+                            Set::Scalar B_1 = (eta_1 * g0_ * pi0_) / (g0_ - 1.0) + ((1.0 - eta_1) * g1_ * pi1_) / (g1_ - 1.0);
+                            Set::Scalar pi_1 = (B_1 / A_1) / gm_1;
+                            Set::Scalar p_1 = (gm_1 - 1.0) * UE_1 - gm_1 * pi_1 + pref_local;
+
+                            Set::Scalar eta_2 = eta_arr(i2, j2, k);
+                            Set::Scalar A_2 = eta_2 / (g0_ - 1.0) + (1.0 - eta_2) / (g1_ - 1.0);
+                            Set::Scalar gm_2 = 1.0 + 1.0 / A_2;
+                            Set::Scalar KE_2 = 0.5 * rho_2 * (vx_2 * vx_2 + vy_2 * vy_2);
+                            Set::Scalar UE_2 = E_arr(i2, j2, k) - KE_2;
+                            Set::Scalar B_2 = (eta_2 * g0_ * pi0_) / (g0_ - 1.0) + ((1.0 - eta_2) * g1_ * pi1_) / (g1_ - 1.0);
+                            Set::Scalar pi_2 = (B_2 / A_2) / gm_2;
+                            Set::Scalar p_2 = (gm_2 - 1.0) * UE_2 - gm_2 * pi_2 + pref_local;
+
+                            Set::Scalar eta_3 = eta_arr(i3, j3, k);
+                            Set::Scalar A_3 = eta_3 / (g0_ - 1.0) + (1.0 - eta_3) / (g1_ - 1.0);
+                            Set::Scalar gm_3 = 1.0 + 1.0 / A_3;
+                            Set::Scalar KE_3 = 0.5 * rho_3 * (vx_3 * vx_3 + vy_3 * vy_3);
+                            Set::Scalar UE_3 = E_arr(i3, j3, k) - KE_3;
+                            Set::Scalar B_3 = (eta_3 * g0_ * pi0_) / (g0_ - 1.0) + ((1.0 - eta_3) * g1_ * pi1_) / (g1_ - 1.0);
+                            Set::Scalar pi_3 = (B_3 / A_3) / gm_3;
+                            Set::Scalar p_3 = (gm_3 - 1.0) * UE_3 - gm_3 * pi_3 + pref_local;
+
+                            // Eq. 30: Q_{-4} = -2Q_{+1} - 13Q_0 + 24Q_{-1} - 12Q_{-2} + 4Q_{-3} + 12dx·dQ/dx
+                            Set::Scalar dx_grad = (ox == 4) ? 12.0 * dx[0] * drho_dx_new : 0.0;
+                            Set::Scalar dy_grad = (oy == 4) ? 12.0 * dx[1] * drho_dy_new : 0.0;
+                            rho_g = -2.0 * rho_xm1 - 13.0 * rho_c + 24.0 * rho_1 - 12.0 * rho_2 + 4.0 * rho_3 + dx_grad + dy_grad;
+
+                            dx_grad = (ox == 4) ? 12.0 * dx[0] * dvx_dx_new : 0.0;
+                            dy_grad = (oy == 4) ? 12.0 * dx[1] * dvx_dy_new : 0.0;
+                            vx_g = -2.0 * vx_xm1 - 13.0 * vx_c + 24.0 * vx_1 - 12.0 * vx_2 + 4.0 * vx_3 + dx_grad + dy_grad;
+
+                            dx_grad = (ox == 4) ? 12.0 * dx[0] * dvy_dx_new : 0.0;
+                            dy_grad = (oy == 4) ? 12.0 * dx[1] * dvy_dy_new : 0.0;
+                            vy_g = -2.0 * vy_xm1 - 13.0 * vy_c + 24.0 * vy_1 - 12.0 * vy_2 + 4.0 * vy_3 + dx_grad + dy_grad;
+
+                            dx_grad = (ox == 4) ? 12.0 * dx[0] * dp_dx_new : 0.0;
+                            dy_grad = (oy == 4) ? 12.0 * dx[1] * dp_dy_new : 0.0;
+                            p_g = -2.0 * p_xm1 - 13.0 * p_c + 24.0 * p_1 - 12.0 * p_2 + 4.0 * p_3 + dx_grad + dy_grad;
+                        }
+
+                        // ============================================================
+                        // STEP 9: Enforce physical bounds
+                        // ============================================================
+                        rho_g = amrex::min(amrex::max(rho_g, 1.0e-8), 10000.0);
+                        p_g = amrex::min(amrex::max(p_g, 1.0), 1.0e8);
+                        vx_g = amrex::min(amrex::max(vx_g, -1000.0), 1000.0);
+                        vy_g = amrex::min(amrex::max(vy_g, -1000.0), 1000.0);
+
+                        // ============================================================
+                        // STEP 10: Write to conserved arrays
+                        // ============================================================
+                        Set::Scalar eta_g = eta_arr(i, j, k);
+                        Set::Scalar A = eta_g / (g0_ - 1.0) + (1.0 - eta_g) / (g1_ - 1.0);
+                        Set::Scalar B = (eta_g * g0_ * pi0_) / (g0_ - 1.0)
+                                        + ((1.0 - eta_g) * g1_ * pi1_) / (g1_ - 1.0);
+                        Set::Scalar gm_g = 1.0 + 1.0 / A;
+                        Set::Scalar pi_g = (B / A) / gm_g;
+
+                        Set::Scalar UE_g = (p_g + gm_g * pi_g - pref_local) / (gm_g - 1.0);
+                        if (UE_g < 0.0)
+                            UE_g = 0.0;
+
+                        Set::Scalar KE_g = 0.5 * rho_g * (vx_g * vx_g + vy_g * vy_g);
+
+                        rho_arr(i, j, k) = rho_g;
+                        M_arr(i, j, k, 0) = rho_g * vx_g;
+                        M_arr(i, j, k, 1) = rho_g * vy_g;
+                        E_arr(i, j, k) = UE_g + KE_g;
+                    });
+
+                } // end corner loops (cx, cy)
+
+        } // end MFIter loop
+
+    } // end FillBoundary()
+
 
 private:
     /// Parse parameters for a single boundary face
