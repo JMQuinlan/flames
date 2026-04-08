@@ -14,7 +14,7 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 10
 amr.grid_eff = 0.8
-amr.max_level = 3
+amr.max_level = 2
 amr.n_cell = 32 32
 
 ### TIME STEPPING ###
@@ -173,7 +173,7 @@ eta_refinement_criterion = 1e-4
 omega_refinement_criterion = 10.55
 p_refinement_criterion = 1e+1
 rho_refinement_criterion = 1e+1
-gradu_refinement_criterion = 1e+1
+gradu_refinement_criterion = 1e-6
 cutoff = 1e-4
 
 ### SOURCE TERMS ###
