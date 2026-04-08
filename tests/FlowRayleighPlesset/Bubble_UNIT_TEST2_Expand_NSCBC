@@ -8,8 +8,8 @@ alamo.program = hydro2
 plot_file = ./tests/RayleighPlesset/output_RayleighPlesset_UNIT_TEST
 
 ### MESHING ###
-amr.plot_dt = 5e-4
-#amr.plot_int = 1
+#amr.plot_dt = 5e-4
+amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 10
@@ -82,7 +82,7 @@ pressure0.ic.type = expression
 pressure0.ic.expression.region0 = "500.0"
 
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "1000.0"
+pressure1.ic.expression.region0 = "500.0"
 
 # ----------------------------
 # Viscosity
@@ -121,37 +121,47 @@ momentum.bc.type.yhi = nscbc_outflow nscbc_outflow
 # NSCBC PARAMETERS - X-LO (LEFT BOUNDARY)
 #======================================================================
 nscbc.xlo.type = outflow
-nscbc.xlo.target_p = 1000.0      # Target pressure [Pa] (matches far-field)
+nscbc.xlo.target_p = 500.0      # Target pressure [Pa] (matches far-field)
 nscbc.xlo.sigma = 0.25           # Pressure relaxation coefficient (from paper)
 nscbc.xlo.beta = 0.5             # Transverse term weight (from paper)
 nscbc.xlo.L_ref = 0.20           # Reference length = domain size
+nscbc.xlo.target_u = 0.0
+nscbc.xlo.target_v = 0.0
+
 
 #======================================================================
 # NSCBC PARAMETERS - X-HI (RIGHT BOUNDARY)
 #======================================================================
 nscbc.xhi.type = outflow
-nscbc.xhi.target_p = 1000.0
+nscbc.xhi.target_p = 500.0
 nscbc.xhi.sigma = 0.25
 nscbc.xhi.beta = 0.5
 nscbc.xhi.L_ref = 0.20
+nscbc.xhi.target_u = 0.0
+nscbc.xhi.target_v = 0.0
+
 
 #======================================================================
 # NSCBC PARAMETERS - Y-LO (BOTTOM BOUNDARY)
 #======================================================================
 nscbc.ylo.type = outflow
-nscbc.ylo.target_p = 1000.0
+nscbc.ylo.target_p = 500.0
 nscbc.ylo.sigma = 0.25
 nscbc.ylo.beta = 0.5
 nscbc.ylo.L_ref = 0.20
+nscbc.ylo.target_u = 0.0
+nscbc.ylo.target_v = 0.0
 
 #======================================================================
 # NSCBC PARAMETERS - Y-HI (TOP BOUNDARY)
 #======================================================================
 nscbc.yhi.type = outflow
-nscbc.yhi.target_p = 1000.0
+nscbc.yhi.target_p = 500.0
 nscbc.yhi.sigma = 0.25
 nscbc.yhi.beta = 0.5
 nscbc.yhi.L_ref = 0.20
+nscbc.yhi.target_u = 0.0
+nscbc.yhi.target_v = 0.0
 
 #======================================================================
 # NSCBC GLOBAL PARAMETERS
@@ -183,7 +193,7 @@ Riemann_Solver.type = hllc
 kappa_method = 1
 
 ### INTERFACE COMPRESSION ###
-apply_sharpening = 1
+apply_sharpening = 0
 sharpening_frequency = 50
 reinit_max_iter = 100
 reinit_tolerance = 1e-6

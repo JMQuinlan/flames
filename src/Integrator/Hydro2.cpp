@@ -248,10 +248,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.m0_mf,           &value.bc_nothing,  1, nghost, "m0", false, false);
         value.RegisterNewFab(value.u0_mf,           &value.bc_nothing, 2, nghost, "u0", false, false, { "x", "y" });
         value.RegisterNewFab(value.q_mf,            &value.bc_nothing, 2, nghost, "q0", false, false, { "x", "y" });
-        value.RegisterNewFab(value.Source_mf,       &value.bc_nothing,  4, nghost, "Source", true, false, { "_rho", "_Mx", "_My","_E" });
-        value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, nghost, "Fsv", true, false, { "x", "y" });  // Surface Tension
-        value.RegisterNewFab(value.Fw_mf,           &value.bc_nothing,  2, nghost, "Fw", true, false, { "x", "y" });   // Weight
-        value.RegisterNewFab(value.Ldot_mf,         &value.bc_nothing,  2, nghost, "Ldot", true, false, { "x", "y" });  // Ldot
+        value.RegisterNewFab(value.Source_mf,       &value.bc_nothing,  4, 0, "Source", true, false, { "_rho", "_Mx", "_My","_E" });
+        value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, 0, "Fsv", true, false, { "x", "y" });  // Surface Tension
+        value.RegisterNewFab(value.Fw_mf,           &value.bc_nothing,  2, 0, "Fw", true, false, { "x", "y" });   // Weight
+        value.RegisterNewFab(value.Ldot_mf,         &value.bc_nothing,  2, 0, "Ldot", true, false, { "x", "y" });  // Ldot
         value.RegisterNewFab(value.T_mf,            value.energy_bc,  1, nghost, "T", true, false);                  // Temperature
         value.RegisterNewFab(value.cp_mf,           &value.bc_nothing,  1, nghost, "cp", false, true);         // Constant Pressure Specific Heat
         value.RegisterNewFab(value.cv_mf,           &value.bc_nothing,  1, nghost, "cv", false, true);         // Constant Volume Specific Heat
@@ -273,9 +273,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, 0, "grad_eta", true, false, { "x", "y" });
         value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, 0, "kappa", true, false, { "Avg", "1", "2" }); // To Surface curvature
         value.RegisterNewFab(value.grad_mag_grad_eta_mf, &value.bc_nothing, 2, 0, "grad_mag_grad_eta", false, false, { "x", "y" }); // grad( | grad(eta) | )
-        value.RegisterNewFab(value.rho_flux_mf,     &value.bc_nothing,  1, nghost, "rho_flux", true, false);                    // Density Flux
-        value.RegisterNewFab(value.M_flux_mf,       &value.bc_nothing,  2, nghost, "M_flux", true, false, { "x", "y" });        // Momentum Flux
-        value.RegisterNewFab(value.E_flux_mf,       &value.bc_nothing,  1, nghost, "E_flux", true, false);                      // Energy Flux
+        value.RegisterNewFab(value.rho_flux_mf,     &value.bc_nothing,  1, 0, "rho_flux", true, false);                    // Density Flux
+        value.RegisterNewFab(value.M_flux_mf,       &value.bc_nothing,  2, 0, "M_flux", true, false, { "x", "y" });        // Momentum Flux
+        value.RegisterNewFab(value.E_flux_mf,       &value.bc_nothing,  1, 0, "E_flux", true, false);                      // Energy Flux
         value.RegisterNewFab(value.div_tau_mf,      &value.bc_nothing,  2, 0, "div_tau", true, false, { "x", "y" });            // Energy Flux
         value.RegisterNewFab(value.hess_u_mf,       &value.bc_nothing,  8, 0, "hess_u", false, false, {
                                                                                                      "000","001",
@@ -283,7 +283,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                                                                                                      "100","101",
                                                                                                      "110","111",
                                                                                                     }); // hess_u Flux
-        value.RegisterNewFab(value.Vap_dot_mf, &value.bc_nothing, 5, nghost, "Vap_dot", true, false, { "_eta", "_rho", "_Mx", "_My", "_E" }); // Momentum Flux
+        value.RegisterNewFab(value.Vap_dot_mf, &value.bc_nothing, 5, 0, "Vap_dot", true, false, { "_eta", "_rho", "_Mx", "_My", "_E" }); // Momentum Flux
 
 
         
@@ -920,23 +920,21 @@ Hydro2::RHS(int lev,
 
 
     // NSCBC SPECIFIC BOUNDRY CONDITION
+    // NSCBC SPECIFIC BOUNDRY CONDITION
     if (nscbc_bc != nullptr)
     {
         // NSCBC: Apply NSCBC boundaries
         amrex::MultiFab M_copy(M_mf_in.boxArray(), M_mf_in.DistributionMap(), AMREX_SPACEDIM, 4);
         amrex::MultiFab E_copy(E_mf_in.boxArray(), E_mf_in.DistributionMap(), 1, 4);
-    
-        amrex::MultiFab::Copy(M_copy, M_mf_in, 0, 0, AMREX_SPACEDIM, 0);
-        amrex::MultiFab::Copy(E_copy, E_mf_in, 0, 0, 1, 0);
 
-        FillBoundaries(lev, { 
-            eta_mf[lev].get(), 
-            density_mf[lev].get(), 
-            rho_eta0_mf[lev].get(),
-            rho_eta1_mf[lev].get() 
-        });
+        // Copy interior + ghost cells TO working copies
+        amrex::MultiFab::Copy(M_copy, M_mf_in, 0, 0, AMREX_SPACEDIM, 4); // Include ghosts
+        amrex::MultiFab::Copy(E_copy, E_mf_in, 0, 0, 1, 4);              // Include ghosts
 
-    
+        // Fill eta and density ghost cells BEFORE NSCBC
+        FillBoundaries(lev, { eta_mf[lev].get(), density_mf[lev].get(), rho_eta0_mf[lev].get(), rho_eta1_mf[lev].get() });
+
+        // Apply NSCBC (modifies M_copy, E_copy, and density_mf in-place)
         nscbc_bc->FillBoundary(*density_mf[lev],
                                M_copy,
                                E_copy,
@@ -946,11 +944,15 @@ Hydro2::RHS(int lev,
                                geom[lev],
                                time,
                                pref);
-    
-        amrex::MultiFab::Copy(const_cast<amrex::MultiFab&>(M_mf_in), M_copy, 0, 0, AMREX_SPACEDIM, 4);
-        amrex::MultiFab::Copy(const_cast<amrex::MultiFab&>(E_mf_in), E_copy, 0, 0, 1, 4);
 
-        // Filling in Primiave BC
+        // Copy back INCLUDING ALL 4 GHOST CELL LAYERS
+        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(M_mf_in), M_copy, 0, 0, AMREX_SPACEDIM, 4);
+        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(E_mf_in), E_copy, 0, 0, 1, 4);
+
+        // Ensure density ghost cells are synchronized
+        density_mf[lev]->FillBoundary(geom[lev].periodicity());
+
+        // Compute primitive variables in ghost cells from updated conservative variables
         for (amrex::MFIter mfi(*velocity_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box &ghost_box = mfi.growntilebox(4); // All 4 ghost layers
@@ -2715,6 +2717,7 @@ void Hydro2::ReinitializeSignedDistance(int lev,
 //      Will display an error message showing ALL variables with the user defined message to which part of the code failed.
 void Hydro2::check4nans(int time, int lev, int i, int j, int k, const std::string &message, std::initializer_list<std::pair<std::string, double> > vars)
 {
+    // NaNs
     bool hasNaN = false;
     for (const auto &[name, value] : vars)
     {
@@ -2725,7 +2728,18 @@ void Hydro2::check4nans(int time, int lev, int i, int j, int k, const std::strin
         }
     }
 
-    if (hasNaN)
+    // NaNs
+    bool hasInf = false;
+    for (const auto &[name, value] : vars)
+    {
+        if (!std::isfinite(value))
+        { // Inf check
+            hasInf = true;
+            break;
+        }
+    }
+
+    if (hasNaN || hasInf)
     {
         Util::ParallelMessage(INFO, "-------------------------------");
         Util::ParallelMessage(INFO, message);
