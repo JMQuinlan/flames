@@ -735,6 +735,26 @@ Hydro2::RHS(int lev,
         });
     }
 
+    if (false) // (nscbc_bc != nullptr)
+    {
+        FillBoundaries(lev, { 
+            eta_mf[lev].get(), 
+            density_mf[lev].get(), 
+            rho_eta0_mf[lev].get(), 
+            rho_eta1_mf[lev].get() });
+
+    }
+    else
+    {
+        FillBoundariesWithBC(lev, time, density_bc, { 
+            eta_mf[lev].get(), 
+            density_mf[lev].get(), 
+            rho_eta0_mf[lev].get(),
+            rho_eta1_mf[lev].get() 
+        });
+    }
+        
+
     // Primitive Fields
     //for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
@@ -920,8 +940,7 @@ Hydro2::RHS(int lev,
 
 
     // NSCBC SPECIFIC BOUNDRY CONDITION
-    // NSCBC SPECIFIC BOUNDRY CONDITION
-    if (nscbc_bc != nullptr)
+    if (false) // (nscbc_bc != nullptr)
     {
         // NSCBC: Apply NSCBC boundaries
         amrex::MultiFab M_copy(M_mf_in.boxArray(), M_mf_in.DistributionMap(), AMREX_SPACEDIM, 4);
@@ -931,8 +950,6 @@ Hydro2::RHS(int lev,
         amrex::MultiFab::Copy(M_copy, M_mf_in, 0, 0, AMREX_SPACEDIM, 4); // Include ghosts
         amrex::MultiFab::Copy(E_copy, E_mf_in, 0, 0, 1, 4);              // Include ghosts
 
-        // Fill eta and density ghost cells BEFORE NSCBC
-        FillBoundaries(lev, { eta_mf[lev].get(), density_mf[lev].get(), rho_eta0_mf[lev].get(), rho_eta1_mf[lev].get() });
 
         // Apply NSCBC (modifies M_copy, E_copy, and density_mf in-place)
         nscbc_bc->FillBoundary(*density_mf[lev],
@@ -1064,12 +1081,12 @@ Hydro2::RHS(int lev,
     }
     else
     {
-        // Standard: Apply standard BCs
-        FillBoundariesWithBC(lev, time, density_bc, { 
-            eta_mf[lev].get(), 
-            density_mf[lev].get(), 
-            rho_eta0_mf[lev].get(),
-            rho_eta1_mf[lev].get() 
+        // Primative Field Boundries
+        FillBoundariesWithBC(lev, time, energy_bc, { 
+            pressure_mf[lev].get(), 
+            T_mf[lev].get(), 
+            gamma_mf[lev].get(),
+            p0_mf[lev].get() 
         });
     }
     
@@ -1718,7 +1735,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     });
 
     timeintegrator.set_post_stage_action([&](amrex::Vector<amrex::MultiFab> &stage_mf, Set::Scalar time) {
-        if (nscbc_bc != nullptr)
+        if (false) // (nscbc_bc != nullptr)
         {
             // NSCBC mode: Apply NSCBC boundaries
 
