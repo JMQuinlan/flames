@@ -344,7 +344,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         };
 
         pp_query_default("nscbc.sigma", value.nscbc.sigma, 0.25); // Outflow pressure relaxation strength (Motheau sigma)
-        pp_query_default("nscbc.beta",  value.nscbc.beta,  0.5);  // Transverse term weight in [0,1]
+        pp_query_default("nscbc.beta",  value.nscbc.beta,  0.0);  // Transverse term weight: 0 = full Lodato (recommended), 1 = pure LODI
         pp_query_default("nscbc.Lx",    value.nscbc.Lx,    0.0);  // x-domain length for K (0 = auto from geometry)
         pp_query_default("nscbc.Ly",    value.nscbc.Ly,    0.0);  // y-domain length for K (0 = auto from geometry)
 
@@ -2585,27 +2585,58 @@ void Hydro2::ApplyNSCBC(
                 Real Ky = nscbc_sigma_ * (1.0 - My_c*My_c) / (a_c * Ly_);
                 Real ab = (1.0 - nscbc_beta_) / 2.0;
 
+                // --- Lodato (2008) Eq. 42: T̃ transverse corrections for corner ---
+                // T_5: pressure-dilatation transverse term for each face direction.
+                //   x-face (normal=x, transverse=y): T5_x = ρa² ∂vy/∂y
+                //   y-face (normal=y, transverse=x): T5_y = ρa² ∂vx/∂x
+                Real T5_x = a2_c * dvy_dy_c;
+                Real T5_y = a2_c * dvx_dx_c;
+
+                // Outgoing acoustic waves at the corner (complement of the incoming references)
+                Real Lx_out = (cx == 1) ? L4_x : L1_x;
+                Real Ly_out = (cy == 1) ? L4_y : L1_y;
+
+                // Entropy T-term for x-LODI at corner (normal=x, transverse=y derivative)
+                Real T2_xface = (std::abs(vx_c) > 1.0e-14) ?
+                    vx_c * vy_c / a2_c * (a2_c*drho_dy_c - dp_dy_c) : 0.0;
+                // Shear T-term for y-LODI at corner (normal=y, transverse=x derivative)
+                Real T3_yface = (std::abs(vy_c) > 1.0e-14) ?
+                    vy_c * (vx_c * dvx_dx_c + (1.0/rho_c)*dp_dx_c) : 0.0;
+
+                // ζ: sign of the outgoing acoustic eigenvalue (+1 at hi, -1 at lo)
+                Real zeta_x = (cx == 1) ? 1.0 : -1.0;
+                Real zeta_y = (cy == 1) ? 1.0 : -1.0;
+
+                // T̃ correction terms (Lodato 2008 Eqs. 42–43):
+                //   T̃_x = T5_x − Ly_out/2 − ζ_x·ρ·a·(L2_y − T2_xface)
+                //   T̃_y = T5_y − Lx_out/2 − ζ_y·ρ·a·(L3_x − T3_yface)
+                Real Ttilde_x = T5_x - 0.5*Ly_out
+                              - zeta_x * rho_c*a_c * (L2_y - T2_xface);
+                Real Ttilde_y = T5_y - 0.5*Lx_out
+                              - zeta_y * rho_c*a_c * (L3_x - T3_yface);
+
                 if (ftx == FT::OUTFLOW && fty == FT::OUTFLOW)
                 {
-                    // Motheau Eq. 56: coupled outflow/outflow system
-                    //   Lx_in + ab * Ly_in = Kx * (p - pt)
-                    //   ab * Lx_in + Ly_in = Ky * (p - pt)
-                    Real bx = Kx * (p_c - px_t_);
-                    Real by = Ky * (p_c - py_t_);
+                    // Lodato Eq. 42 / Motheau Eq. 56: coupled outflow/outflow system
+                    // with transverse correction terms added to RHS:
+                    //   Lx_in + ab * Ly_in = Kx*(p-pt) + (1-β)*T̃_x
+                    //   ab * Lx_in + Ly_in = Ky*(p-pt) + (1-β)*T̃_y
+                    Real bx = Kx * (p_c - px_t_) + (1.0 - nscbc_beta_) * Ttilde_x;
+                    Real by = Ky * (p_c - py_t_) + (1.0 - nscbc_beta_) * Ttilde_y;
                     Real det_inv = 1.0 / (1.0 - ab*ab + 1.0e-20);
                     Lx_in = det_inv * (bx - ab*by);
                     Ly_in = det_inv * (by - ab*bx);
                 }
                 else if (ftx == FT::OUTFLOW && fty == FT::INFLOW)
                 {
-                    // Motheau Eq. 58: inflow/outflow compatibility: Ly_in = 0
+                    // Motheau Eq. 58: compatibility Ly_in = 0; Lodato adds T5 to Lx_in
                     Ly_in = 0.0;
-                    Lx_in = Kx * (p_c - px_t_);
+                    Lx_in = Kx * (p_c - px_t_) + (1.0 - nscbc_beta_) * T5_x;
                 }
                 else if (ftx == FT::INFLOW && fty == FT::OUTFLOW)
                 {
                     Lx_in = 0.0;
-                    Ly_in = Ky * (p_c - py_t_);
+                    Ly_in = Ky * (p_c - py_t_) + (1.0 - nscbc_beta_) * T5_y;
                 }
                 else if (ftx == FT::INFLOW && fty == FT::INFLOW)
                 {

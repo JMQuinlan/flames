@@ -6,7 +6,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/RayleighPlesset/output_RayleighPlesset_gc-nscbc
+plot_file = ./tests/RayleighPlesset/output_RPE_gc-nscbc-Lodato
 # plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE
 
 ### MESHING ###
@@ -32,7 +32,7 @@ geometry.prob_lo = -0.10 -0.10 0.0
 geometry.prob_hi =  0.10  0.10 0.0
 geometry.is_periodic = 0 0 0
 
-stop_time = 1e-5
+stop_time = 2e-5
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
@@ -78,10 +78,10 @@ velocity1.ic.expression.region1 = "0.0"
 # ----------------------------
 
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "1.0e6"
+pressure0.ic.expression.region0 = "1.0e5"
 
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "1.0e7"
+pressure1.ic.expression.region0 = "1.0e6"
 
 # ----------------------------
 # Specific Heats
@@ -170,20 +170,20 @@ integration.type = ForwardEuler
 # ch_mobility_nom = 1e-4  # seems to need to be smaller
 # implicit_ch = 0 # solves CH rhs explicitly (faster but dx^4 reduction in timestep needed, so only on course grids)
 implicit_ch = 2
-  ch_mobility_nom = 1e-5
+  ch_mobility_nom = 1e-3
   ch_newton_iters = 5       # default, usually converges in 3
   ch_newton_tol = 1e-10     # default
   ch_W_scale = 1.0          # double-well amplitude (1.0 = standard; >1 narrows interface, <1 widens)
 
 
 nscbc.enabled   = true
-  nscbc.sigma     = 0.25
-  nscbc.beta      = 0.5
+  nscbc.sigma     = 0.28   # 0.28 is a good value for shock-droplet with gamma=1.4, but may need tuning for other problems. Higher sigma means more dissipation added by NSCBC, which can help stabilize but also adds more error.
+  nscbc.beta      = 0.0    # Lodato (2008) recommended: 0 = full transverse, 1 = pure LODI
   nscbc.xlo       = outflow
-  nscbc.xlo.p_target = 1.0e6   # Pa
+  nscbc.xlo.p_target = 500.0e5   # Pa
   nscbc.xhi       = outflow
-  nscbc.xhi.p_target  = 1.0e6  # Pa
+  nscbc.xhi.p_target  = 500.0e5  # Pa
   nscbc.ylo       = outflow
-  nscbc.ylo.p_target = 1.0e6   # Pa
+  nscbc.ylo.p_target = 500.0e5   # Pa
   nscbc.yhi       = outflow
-  nscbc.yhi.p_target  = 1.0e6  # Pa
+  nscbc.yhi.p_target  = 500.0e5  # Pa
