@@ -135,19 +135,33 @@ public:
 
     /// Compute mixture pressure from (rho, UE_vol, eta)
     /// Uses: p = (gamma_eff - 1)*UE_vol - gamma_eff*p0_eff + pref
-    /// This is your current formulation from Mix() function
     AMREX_GPU_HOST_DEVICE
     static Set::Scalar MixedPressure(Set::Scalar rho,
                                      Set::Scalar UE_vol,
                                      Set::Scalar eta,
                                      const EOS &eos0,
                                      const EOS &eos1,
-                                     Set::Scalar pref = 0.0)
+                                     Set::Scalar pref = 0.0,
+                                     Set::Scalar small = 1e-16)
     {
         Set::Scalar gamma_eff = MixedGamma(eta, eos0, eos1);
         Set::Scalar p0_eff = MixedP0(eta, eos0, eos1);
 
-        return (gamma_eff - 1.0) * UE_vol - gamma_eff * p0_eff + pref;
+        Set::Scalar press = (gamma_eff - 1.0) * UE_vol - gamma_eff * p0_eff + pref;
+        return std::max(press, small);
+    }
+
+    // Compute Tammann Pressure assuming correct mixing
+    AMREX_GPU_HOST_DEVICE
+    static Set::Scalar TammannPressure(Set::Scalar rho,
+                                     Set::Scalar UE_vol,
+                                     Set::Scalar gamma_eff,
+                                     Set::Scalar p0_eff,
+                                     Set::Scalar pref = 0.0,
+                                     Set::Scalar small = 1e-16)
+    {
+        Set::Scalar press = (gamma_eff - 1.0) * UE_vol - gamma_eff * p0_eff + pref;
+        return std::max(press, small);
     }
 
     /// Compute mixture internal energy from (p, eta)
@@ -160,7 +174,8 @@ public:
                                            Set::Scalar eta,
                                            const EOS &eos0,
                                            const EOS &eos1,
-                                           Set::Scalar pref = 0.0)
+                                           Set::Scalar pref = 0.0,
+                                           Set::Scalar small = 1e-16)
     {
         Set::Scalar gamma0 = eos0.Gamma();
         Set::Scalar gamma1 = eos1.Gamma();
@@ -171,7 +186,8 @@ public:
         Set::Scalar B = (eta * gamma0 * p0_0) / (gamma0 - 1.0)
                         + ((1.0 - eta) * gamma1 * p0_1) / (gamma1 - 1.0);
 
-        return (p + pref) * A + B;
+        Set::Scalar ue_vol = (p + pref) * A + B;
+        return std::max(ue_vol, small);
     }
 
     /// Compute mixture temperature from (rho, p, eta)
@@ -201,37 +217,43 @@ public:
                                        Set::Scalar eta,
                                        const EOS &eos0,
                                        const EOS &eos1,
-                                       Set::Scalar pref = 0.0)
+                                       Set::Scalar pref = 0.0,
+                                       Set::Scalar small = 1e-16)
     {
         Set::Scalar gamma_eff = MixedGamma(eta, eos0, eos1);
         Set::Scalar p0_eff = MixedP0(eta, eos0, eos1);
 
-        return std::sqrt(gamma_eff * (p + p0_eff) / rho);
+        Set::Scalar mixed_press = (p + p0_eff);
+        if (mixed_press <= 0.0)
+        {
+            return small;
+        }
+        else
+        {
+            return std::sqrt(gamma_eff * (p + p0_eff) / rho);
+        }
     }
 
     /// Safe sound speed calculation with error checking
     /// Prevents NaN from negative arguments or division by zero
     AMREX_GPU_HOST_DEVICE
-    static Set::Scalar SafeSoundSpeed(Set::Scalar rho,
+    static Set::Scalar TammannSoundSpeed(Set::Scalar rho,
                                       Set::Scalar p,
-                                      Set::Scalar gamma,
-                                      Set::Scalar p0,
-                                      Set::Scalar small = 1e-10)
+                                      Set::Scalar gamma_eff,
+                                      Set::Scalar p0_eff,
+                                      Set::Scalar small = 1e-16)
     {
-        // Clamp inputs
         rho = std::max(small, rho);
-        p = std::max(-p0 + small, p); // Ensure p + p0 > 0
 
-        // Compute argument
-        Set::Scalar arg = gamma * (p + p0) / rho;
-
-        // Check for negative or NaN
-        if (arg <= 0.0 || arg != arg)
+        Set::Scalar mixed_press = (p + p0_eff);
+        if (mixed_press <= 0.0)
         {
-            return small; // Return small positive value
+            return small;
         }
-
-        return std::sqrt(arg);
+        else
+        {
+            return std::sqrt(gamma_eff * (p + p0_eff) / rho);
+        }
     }
 
 

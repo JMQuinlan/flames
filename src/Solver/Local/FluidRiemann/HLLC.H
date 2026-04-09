@@ -45,13 +45,13 @@ public:
 
     virtual Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1) override
     {
-        Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
-        Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
-        Set::Scalar Mt_L = lo.M_tangent, Mt_R = hi.M_tangent;
-        Set::Scalar E_L = lo.E, E_R = hi.E;
-        Set::Scalar gamma_L = lo.gam, gamma_R = hi.gam;
-        Set::Scalar p0_L = lo.p0, p0_R = hi.p0;
-        Set::Scalar T_L = lo.T, T_R = hi.T;
+        Set::Scalar rho_L = lo.rho,         rho_R = hi.rho;
+        Set::Scalar Mn_L = lo.M_normal,     Mn_R = hi.M_normal;
+        Set::Scalar Mt_L = lo.M_tangent,    Mt_R = hi.M_tangent;
+        Set::Scalar E_L = lo.E,             E_R = hi.E;
+        Set::Scalar gamma_L = lo.gam,       gamma_R = hi.gam;
+        Set::Scalar p0_L = lo.p0,           p0_R = hi.p0;
+        Set::Scalar T_L = lo.T,             T_R = hi.T;
 
         // Ensure no negative densities
         rho_L = std::max(small, rho_L);
@@ -67,13 +67,13 @@ public:
         {
             // With Respect to Specific Volume (energies are per unit volume)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
-            ue_L = std::max(E_L - ke_L, 0.0);                           // IE per unit volume
-            p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;
+            ue_L = std::max(E_L - ke_L, small);                           // IE per unit volume
+            p_L = Solver::EOS::EOS::TammannPressure(rho_L, ue_L, gamma_L, p0_L, p_ref, small); // (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;
             h_TL = (ke_L + ue_L + p_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
-            ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;
+            ue_R = std::max(E_R - ke_R, small);
+            p_L = Solver::EOS::EOS::TammannPressure(rho_R, ue_R, gamma_R, p0_R, p_ref, small); // (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;
             h_TR = (ke_R + ue_R + p_R);
         }
         else
@@ -106,8 +106,8 @@ public:
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
         // Sound Speeds
-        Set::Scalar a_L = Solver::EOS::EOS::SafeSoundSpeed(rho_L, p_L, gamma_L, p0_L, small);
-        Set::Scalar a_R = Solver::EOS::EOS::SafeSoundSpeed(rho_R, p_R, gamma_R, p0_R, small);
+        Set::Scalar a_L = Solver::EOS::EOS::TammannSoundSpeed(rho_L, p_L, gamma_L, p0_L, small);
+        Set::Scalar a_R = Solver::EOS::EOS::TammannSoundSpeed(rho_R, p_R, gamma_R, p0_R, small);
 
         // Wave speed estimates
         Set::Scalar S_L = std::min(u_L - a_L, u_R - a_R);

@@ -564,7 +564,7 @@ void Hydro2::Mix(int lev)
 
             // Internal Energy
             Set::Scalar p_eff = p0(i, j, k) * (eta(i, j, k)) + p1(i, j, k) * (1.0 - eta(i, j, k));
-            UE_vol(i, j, k) = Solver::EOS::EOS::MixedInternalEnergy(p_eff, eta(i, j, k), eos0_local, eos1_local, pref);
+            UE_vol(i, j, k) = Solver::EOS::EOS::MixedInternalEnergy(p_eff, eta(i, j, k), eos0_local, eos1_local, pref, small);
             UE_mas(i, j, k) = UE_vol(i, j, k) / rho(i, j, k);
             
             // Kinetic Energy
@@ -583,7 +583,7 @@ void Hydro2::Mix(int lev)
 
             // Pressure
             p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
-            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE_vol(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
+            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE_vol(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small);
 
             // Chemical Potential
             // Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
@@ -607,7 +607,7 @@ void Hydro2::Mix(int lev)
             //h_thermal(i, j, k) = eta(i, j, k) * h0_thermal(i, j, k) + (1.0 - eta(i, j, k)) * h1_thermal(i, j, k);
 
             // Speed of Sound
-            a(i, j, k) = sqrt(gammaf(i, j, k) * (press(i, j, k) + p0_eff(i, j, k)) / (rho(i, j, k)));
+            a(i, j, k) = Solver::EOS::EOS::TammannSoundSpeed(rho(i, j, k), press(i, j, k), gammaf(i, j, k), p0_eff(i, j, k), small);
 
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / a(i, j, k);
@@ -801,13 +801,13 @@ Hydro2::RHS(int lev,
 
             // Pressure
             p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
-            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
+            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small);
 
             // Temperature
             T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
 
             // Speed of sound:
-            a(i, j, k) = Solver::EOS::EOS::SafeSoundSpeed(rho(i, j, k), press(i, j, k), gammaf(i, j, k), p0_eff(i, j, k), small);
+            a(i, j, k) = Solver::EOS::EOS::TammannSoundSpeed(rho(i, j, k), press(i, j, k), gammaf(i, j, k), p0_eff(i, j, k), small);
 
             // Chemical Potential
             Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
@@ -987,9 +987,9 @@ Hydro2::RHS(int lev,
                 // EOS properties
                 gammaf(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
                 p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
-                press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
+                press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small);
                 T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
-                a(i, j, k) = Solver::EOS::EOS::SafeSoundSpeed(rho(i, j, k), press(i, j, k), gammaf(i, j, k), p0_eff(i, j, k), small);
+                a(i, j, k) = Solver::EOS::EOS::TammannSoundSpeed(rho(i, j, k), press(i, j, k), gammaf(i, j, k), p0_eff(i, j, k), small);
             });
         }
         ///  VALIDATION CHECK ///////////////////////////////
@@ -1907,7 +1907,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             UE_mas(i,j,k) = E_mas(i,j,k) - KE_mas(i,j,k);
         
             p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
-            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE_vol(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
+            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE_vol(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small);
         
             Set::Scalar f_prime = 4.0 * eta_new(i,j,k) * (eta_new(i,j,k) - 0.5) * (eta_new(i,j,k) - 1.0);
             Set::Scalar mu_chem = -epsilon * epsilon * lap_eta + f_prime;
@@ -1915,7 +1915,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         
             Bm(i,j,k) = eta(i,j,k) / (1.0 - eta(i,j,k) + small);
         
-            a(i, j, k) = Solver::EOS::EOS::SafeSoundSpeed(rho(i, j, k), press(i, j, k), gammaf(i, j, k), p0_eff(i, j, k), small);
+            a(i, j, k) = Solver::EOS::EOS::TammannSoundSpeed(rho(i, j, k), press(i, j, k), gammaf(i, j, k), p0_eff(i, j, k), small);
 
             Ma(i,j,k,0) = v(i,j,k,0) / (a(i,j,k) + small);
             Ma(i,j,k,1) = v(i,j,k,1) / (a(i,j,k) + small);
