@@ -159,6 +159,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         }
 
         // Initialize boundary conditions based on whether NSCBC is used
+        uses_nscbc = false;
         if (uses_nscbc)
         {
             // NSCBC mode: Initialize NSCBC handler and use Nothing BCs

@@ -148,22 +148,22 @@ public:
         Set::Scalar p0_eff = MixedP0(eta, eos0, eos1);
 
         Set::Scalar press = (gamma_eff - 1.0) * UE_vol - gamma_eff * p0_eff + pref;
-        //return std::max(press, small);
-        return std::max(press, -p0_eff);
+        return std::max(press, small);
+        //return std::max(press, -p0_eff);
     }
 
     // Compute Tammann Pressure assuming correct mixing
     AMREX_GPU_HOST_DEVICE
     static Set::Scalar TammannPressure(Set::Scalar rho,
-                                     Set::Scalar UE_vol,
-                                     Set::Scalar gamma_eff,
-                                     Set::Scalar p0_eff,
-                                     Set::Scalar pref = 0.0,
-                                     Set::Scalar small = 1e-16)
+                                       Set::Scalar UE_vol,
+                                       Set::Scalar gamma_eff,
+                                       Set::Scalar p0_eff,
+                                       Set::Scalar pref = 0.0,
+                                       Set::Scalar small = 1e-16)
     {
         Set::Scalar press = (gamma_eff - 1.0) * UE_vol - gamma_eff * p0_eff + pref;
-        //return std::max(press, small);
-        return std::max(press, -p0_eff);
+        return std::max(press, small);
+        // return std::max(press, -p0_eff);
     }
 
     /// Compute mixture internal energy from (p, eta)
@@ -189,8 +189,8 @@ public:
                         + ((1.0 - eta) * gamma1 * p0_1) / (gamma1 - 1.0);
 
         Set::Scalar ue_vol = (p + pref) * A + B;
-        //return std::max(ue_vol, small);
-        return ue_vol;
+        return std::max(ue_vol, small);
+        // return ue_vol;
     }
 
     /// Compute mixture temperature from (rho, p, eta)
@@ -241,10 +241,10 @@ public:
     /// Prevents NaN from negative arguments or division by zero
     AMREX_GPU_HOST_DEVICE
     static Set::Scalar TammannSoundSpeed(Set::Scalar rho,
-                                      Set::Scalar p,
-                                      Set::Scalar gamma_eff,
-                                      Set::Scalar p0_eff,
-                                      Set::Scalar small = 1e-16)
+                                         Set::Scalar p,
+                                         Set::Scalar gamma_eff,
+                                         Set::Scalar p0_eff,
+                                         Set::Scalar small = 1e-16)
     {
         rho = std::max(small, rho);
 
@@ -258,8 +258,6 @@ public:
             return std::sqrt(gamma_eff * (p + p0_eff) / rho);
         }
     }
-
-
 };
 
 } // namespace EOS
