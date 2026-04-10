@@ -106,8 +106,8 @@ public:
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
         // Sound Speeds
-        Set::Scalar a_L = Solver::EOS::EOS::SafeSoundSpeed(rho_L, p_L, gamma_L, p0_L, small);
-        Set::Scalar a_R = Solver::EOS::EOS::SafeSoundSpeed(rho_R, p_R, gamma_R, p0_R, small);
+        Set::Scalar a_L = Solver::EOS::EOS::TammannSoundSpeed(rho_L, p_L, gamma_L, p0_L, small);
+        Set::Scalar a_R = Solver::EOS::EOS::TammannSoundSpeed(rho_R, p_R, gamma_R, p0_R, small);
 
         // Wave speed estimates
         Set::Scalar S_L = std::min(u_L - a_L, u_R - a_R);
