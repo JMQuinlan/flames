@@ -657,6 +657,37 @@ void Hydro2::Mix(int lev)
     vy_max = 0.0;
     F_max = 0.0;
     rho_min = 1e10;
+
+
+    // Filling Boundries
+    FillBoundariesWithBC(lev, 0.0, density_bc, { 
+            eta_mf[lev].get(), 
+            density_mf[lev].get(), 
+            rho_eta0_mf[lev].get(),
+            rho_eta1_mf[lev].get() 
+    });
+
+    FillBoundariesWithBC(lev, 0.0, energy_bc, { 
+            energy_per_vol_mf[lev].get(), 
+            energy_per_mas_mf[lev].get(), 
+            energy_per_vol_old_mf[lev].get(), 
+            energy_per_mas_old_mf[lev].get(),
+            UE_per_vol_mf[lev].get(),
+            UE_per_mas_mf[lev].get(), 
+            KE_per_vol_mf[lev].get(), 
+            KE_per_mas_mf[lev].get(), 
+            pressure_mf[lev].get(), 
+            gamma_mf[lev].get(), 
+            p0_mf[lev].get(), 
+            mu_chem_mf[lev].get(), 
+            Bm_mf[lev].get(),
+            Y_mf[lev].get(),
+            T_mf[lev].get(),
+            cp_mf[lev].get(),
+            cv_mf[lev].get()
+    });
+
+
 }
 
 
@@ -1096,12 +1127,34 @@ Hydro2::RHS(int lev,
     else
     {
         // Primative Field Boundries
+        /*
         FillBoundariesWithBC(lev, time, energy_bc, { 
             pressure_mf[lev].get(), 
             T_mf[lev].get(), 
             gamma_mf[lev].get(),
             p0_mf[lev].get() 
         });
+        */
+
+        FillBoundariesWithBC(lev, time, energy_bc, { 
+            energy_per_vol_mf[lev].get(), 
+            energy_per_mas_mf[lev].get(), 
+            energy_per_vol_old_mf[lev].get(), 
+            energy_per_mas_old_mf[lev].get(),
+            UE_per_vol_mf[lev].get(),
+            UE_per_mas_mf[lev].get(), 
+            KE_per_vol_mf[lev].get(), 
+            KE_per_mas_mf[lev].get(), 
+            pressure_mf[lev].get(), 
+            gamma_mf[lev].get(), 
+            p0_mf[lev].get(), 
+            mu_chem_mf[lev].get(), 
+            Bm_mf[lev].get(),
+            Y_mf[lev].get(),
+            T_mf[lev].get(),
+            cp_mf[lev].get(),
+            cv_mf[lev].get()
+    });
     }
     
     // Main time integration loop
@@ -2801,6 +2854,14 @@ void Hydro2::FillBoundaries(int lev, std::initializer_list<amrex::MultiFab *> mf
         {
             mf->FillBoundary(geom[lev].periodicity());
         }
+
+        // Checking
+        if (mf->contains_nan())
+        {
+            Util::ParallelMessage(INFO, "-------------------------------");
+            Util::ParallelMessage(INFO, "NaNs after FillBoundaries");
+            Util::Abort(INFO);
+        }
     }
 }
 
@@ -2809,10 +2870,21 @@ void Hydro2::FillBoundariesWithBC(int lev, Set::Scalar time, BC::BC<Set::Scalar>
     BL_PROFILE("Integrator::Hydro2::FillBoundariesWithBC");
     for (auto *mf : mfs)
     {
-        if (bc != nullptr && mf != nullptr)
+        if (mf != nullptr)
         {
-            bc->FillBoundary(*mf, 0, mf->nComp(), time, 0);
             mf->FillBoundary(geom[lev].periodicity());
+            if (bc != nullptr)
+            {
+                bc->FillBoundary(*mf, 0, mf->nComp(), time, 0);
+            }
+        }
+
+        // Checking
+        if (mf->contains_nan())
+        {
+            Util::ParallelMessage(INFO, "-------------------------------");
+            Util::ParallelMessage(INFO, "NaNs after FillBoundariesWithBC");
+            Util::Abort(INFO);
         }
     }
 }

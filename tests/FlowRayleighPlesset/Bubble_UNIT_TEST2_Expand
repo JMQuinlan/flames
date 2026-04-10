@@ -9,13 +9,13 @@ alamo.program = hydro2
 plot_file = ./tests/RayleighPlesset/output_RayleighPlesset_UNIT_TEST
 
 ### MESHING ###
-amr.plot_dt = 5e-4
-#amr.plot_int = 1
+#amr.plot_dt = 5e-4
+amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 10
 amr.grid_eff = 0.8
-amr.max_level = 3
+amr.max_level = 2
 amr.n_cell = 32 32
 
 ### TIME STEPING ###
@@ -24,7 +24,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-0
 dynamictimestep.min = 1e-12
-cfl = 0.9
+cfl = 0.5
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.10 -0.10 0.0
