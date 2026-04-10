@@ -745,13 +745,15 @@ Hydro2::RHS(int lev,
         });
     }
 
-    if (false) // (nscbc_bc != nullptr)
+    if (nscbc_bc != nullptr)
     {
         FillBoundaries(lev, { 
             eta_mf[lev].get(), 
             density_mf[lev].get(), 
             rho_eta0_mf[lev].get(), 
             rho_eta1_mf[lev].get() });
+
+        Util::Message(INFO, "Using NSCBC");
 
     }
     else
@@ -950,8 +952,10 @@ Hydro2::RHS(int lev,
 
 
     // NSCBC SPECIFIC BOUNDRY CONDITION
-    if (false) // (nscbc_bc != nullptr)
+    if (nscbc_bc != nullptr)
     {
+        Util::Message(INFO, "Using NSCBC");
+
         // NSCBC: Apply NSCBC boundaries
         amrex::MultiFab M_copy(M_mf_in.boxArray(), M_mf_in.DistributionMap(), AMREX_SPACEDIM, 4);
         amrex::MultiFab E_copy(E_mf_in.boxArray(), E_mf_in.DistributionMap(), 1, 4);
@@ -1748,6 +1752,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         if (false) // (nscbc_bc != nullptr)
         {
             // NSCBC mode: Apply NSCBC boundaries
+            Util::Message(INFO, "Using NSCBC");
 
             // Create copies for momentum and energy
             amrex::MultiFab M_stage_copy(stage_mf[2].boxArray(), stage_mf[2].DistributionMap(), AMREX_SPACEDIM, 4);

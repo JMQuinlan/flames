@@ -7,7 +7,7 @@
 # Equation 68
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Garrick_GasLiquid5
+plot_file = ./tests/FlowRiemannUnitTests/output_Garrick_GasLiquid6
 Riemann_Solver.type = hllc
 
 # Interface at x=0 (sharp transition)
