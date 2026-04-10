@@ -158,8 +158,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             }
         }
 
+        Util::Message(INFO, "uses_nscbc=", uses_nscbc);
+
+
         // Initialize boundary conditions based on whether NSCBC is used
-        uses_nscbc = false;
         if (uses_nscbc)
         {
             // NSCBC mode: Initialize NSCBC handler and use Nothing BCs
@@ -169,6 +171,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             value.density_bc = &value.bc_nothing;
             value.energy_bc = &value.bc_nothing;
             value.momentum_bc = &value.bc_nothing;
+
+            Util::Message(INFO, "Parsing NSCBC");
+            Util::Message(INFO, "nscbc_bc Pointer=", value.nscbc_bc);
+
         }
         else
         {
@@ -178,6 +184,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             value.density_bc = new BC::Expression(1, pp, "density.bc");
             value.energy_bc = new BC::Constant(1, pp, "energy.bc");
             value.momentum_bc = new BC::Expression(2, pp, "momentum.bc");
+
+            Util::Message(INFO, "Parsing Reg");
+            Util::Message(INFO, "nscbc_bc Pointer=", value.nscbc_bc);
         }
     }
 
