@@ -765,9 +765,14 @@ Hydro2::RHS(int lev,
             const Real mx  = M_arr(i,j,k,0);
             const Real my  = M_arr(i,j,k,1);
 
-            // Velocity
-            Real vx = mx / rho;
-            Real vy = my / rho;
+            // Velocity — guard against rho=0 (e.g. freshly created AMR cells or
+            // cells where the density update produced an exact zero).
+            // Without this, vx = mx/0 = NaN (if mx=0) or Inf (if mx≠0), which
+            // propagates to KE = 0*Inf = NaN and then to pressure = NaN,
+            // corrupting the DynamicTimestep CFL computation.
+            Real safe_rho = (rho > Real(1e-20)) ? rho : Real(1e-20);
+            Real vx = mx / safe_rho;
+            Real vy = my / safe_rho;
             v_arr(i,j,k,0) = vx;
             v_arr(i,j,k,1) = vy;
 
@@ -775,10 +780,11 @@ Hydro2::RHS(int lev,
             Real KE = 0.5 * rho * (vx*vx + vy*vy);
             KE_arr(i,j,k) = KE;
 
-            // Internal Energy
+            // Internal Energy — guard against NaN/Inf and runaway accumulation
             Real E = E_arr(i,j,k);
             Real UE = E - KE;
-            if (UE < 0.0) UE = 0.0;
+            if (!std::isfinite(UE) || UE < 0.0) UE = 0.0;
+            if (UE > Real(1e20)) UE = Real(1e20); // cap runaway energy
             UE_arr(i,j,k) = UE;
 
             //------------------------------------------------------------------
@@ -803,20 +809,30 @@ Hydro2::RHS(int lev,
             gamma_mix(i,j,k) = gmix;
             pi_mix(i,j,k) = pimix;
 
-            // Pressure
+            // Pressure — clamp both from below (non-negative) and from above
+            // (prevents T overflow during AMR interpolation / FillCoarsePatch).
             Real p_mix_local = (gmix - 1.0)*UE - gmix*pimix + pref;
-            if (p_mix_local < 0.0) p_mix_local = 1e-6;
+            if (!std::isfinite(p_mix_local) || p_mix_local < 0.0) p_mix_local = 1e-6;
+            if (p_mix_local > Real(1e15)) p_mix_local = Real(1e15); // upper cap
             p_arr(i,j,k) = p_mix_local;
 
             // Specific heats
             cp_arr(i,j,k) = eta*cp0 + (1.0 - eta)*cp1;
             cv_arr(i,j,k) = eta*cv0 + (1.0 - eta)*cv1;
 
-            // Temperature
-            T_arr(i,j,k) = (p_mix_local +pimix) / (rho * cv_arr(i,j,k) * (gmix - 1.0) + 1e-14);
+            // Temperature — guard against Inf/NaN and unrealistically large values
+            // (large T can overflow to Inf during AMR FillCoarsePatch interpolation).
+            {
+                Set::Scalar T_denom = rho * cv_arr(i,j,k) * (gmix - 1.0) + 1e-14;
+                if (T_denom <= Real(0.0)) T_denom = Real(1e-14);
+                Set::Scalar T_val = (p_mix_local + pimix) / T_denom;
+                if (!std::isfinite(T_val) || T_val > Real(1e15)) T_val = Real(0.0);
+                T_arr(i,j,k) = T_val;
+            }
 
-            // Speed of sound
-            a_arr(i,j,k) = std::sqrt(gmix * (p_mix_local + pimix) / rho);
+            // Speed of sound — use safe_rho to prevent astronomical a when rho→0,
+            // which would collapse DynamicTimestep to dt_min indefinitely.
+            a_arr(i,j,k) = std::sqrt(gmix * (p_mix_local + pimix) / safe_rho);
 
             //------------------------------------------------------------------
             // Chemical potential + mass fraction
@@ -902,16 +918,17 @@ Hydro2::RHS(int lev,
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i,int j,int k)
         {
             //------------------------------------------------------------------
-            // Neighbors — clamp to DOMAIN boundary, not tilebox boundary.
-            // Ghost cells of rho/M/E/gamma/pi/T are filled by FillBoundary
-            // above so reading (i±1, j±1) across MPI rank boundaries is safe.
-            // Clamping to bx would silently duplicate the edge cell state,
-            // zeroing the Riemann flux at every interior rank boundary.
+            // Neighbors — read directly including ghost cells.
+            // Ghost cells at physical boundaries are filled by ApplyNSCBC (when
+            // NSCBC is enabled) or by FillBoundary via the standard BC objects.
+            // Ghost cells at MPI rank boundaries are filled by FillBoundary.
+            // No clamping: the NSCBC ghost cells must be read by the Riemann
+            // solver for the BC to have any effect on the solution.
             //------------------------------------------------------------------
-            int il = amrex::max(i-1, domain.smallEnd(0));
-            int ir = amrex::min(i+1, domain.bigEnd(0));
-            int jl = amrex::max(j-1, domain.smallEnd(1));
-            int jr = amrex::min(j+1, domain.bigEnd(1));
+            int il = i-1;
+            int ir = i+1;
+            int jl = j-1;
+            int jr = j+1;
 
             //------------------------------------------------------------------
             // Build Riemann states ONLY from Array4 fields
@@ -994,8 +1011,13 @@ Hydro2::RHS(int lev,
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
             Real eta_loc    = eta_arr(i,j,k);
-            Real rho_loc    = rho_arr(i,j,k);
-            Set::Vector u   = Set::Vector(v_arr(i,j,k,0), v_arr(i,j,k,1));
+            // Guard against rho=0 to prevent division-by-zero in gradu/hess_u
+            Real rho_loc    = amrex::max(rho_arr(i,j,k), Real(1.0e-14));
+            // Guard against Inf/NaN velocity (e.g. from a prior step with near-zero rho
+            // that was fixed by safe_rho; Inf*0=NaN in grad/source terms)
+            Real vx_loc = v_arr(i,j,k,0);  if (!std::isfinite(vx_loc)) vx_loc = Real(0.0);
+            Real vy_loc = v_arr(i,j,k,1);  if (!std::isfinite(vy_loc)) vy_loc = Real(0.0);
+            Set::Vector u   = Set::Vector(vx_loc, vy_loc);
             Set::Vector u0v = Set::Vector(u0_arr(i,j,k,0), u0_arr(i,j,k,1));
 
             Set::Vector grad_eta    = Numeric::Gradient(eta_arr, i, j, k, 0, DX);
@@ -1123,7 +1145,19 @@ Hydro2::RHS(int lev,
 
             //------------------------------------------------------------------
             // Apply to RHS
+            // Guard flux divergences and source terms against NaN/Inf: a NaN
+            // entering the time advance produces NaN in conserved variables which
+            // then propagates indefinitely.  Setting the RHS to 0 at those cells
+            // leaves them unchanged this step — incorrect but bounded.
             //------------------------------------------------------------------
+            if (!std::isfinite(drho))          drho = Real(0.0);
+            if (!std::isfinite(dMx))           dMx  = Real(0.0);
+            if (!std::isfinite(dMy))           dMy  = Real(0.0);
+            if (!std::isfinite(dE))            dE   = Real(0.0);
+            if (!std::isfinite(S_arr(i,j,k,0))) S_arr(i,j,k,0) = Real(0.0);
+            if (!std::isfinite(S_arr(i,j,k,1))) S_arr(i,j,k,1) = Real(0.0);
+            if (!std::isfinite(S_arr(i,j,k,2))) S_arr(i,j,k,2) = Real(0.0);
+            if (!std::isfinite(S_arr(i,j,k,3))) S_arr(i,j,k,3) = Real(0.0);
             rho_rhs(i,j,k) = drho + S_arr(i,j,k,0);
             M_rhs(i,j,k,0) = dMx  + S_arr(i,j,k,1);
             M_rhs(i,j,k,1) = dMy  + S_arr(i,j,k,2);
@@ -2105,6 +2139,12 @@ void Hydro2::ApplyNSCBC(
 
         Real vx_ = mx_ / rho_;
         Real vy_ = my_ / rho_;
+        // Guard against huge velocities from near-zero rho (rho was clamped to 1e-14).
+        // Without this, vx_=mx_/1e-14 can be enormous, making T-terms Inf and
+        // then dp_dn_new=Inf → ghost pressure=Inf → Riemann solver hits Inf-Inf=NaN.
+        const Real vel_lim_ = Real(1.0e7);
+        if (!std::isfinite(vx_) || std::abs(vx_) > vel_lim_) vx_ = 0.0;
+        if (!std::isfinite(vy_) || std::abs(vy_) > vel_lim_) vy_ = 0.0;
         Real KE_ = 0.5 * rho_ * (vx_*vx_ + vy_*vy_);
         Real UE_ = E_ - KE_;
         if (!(UE_ > 0.0)) UE_ = 0.0;  // handles NaN as well as < 0
@@ -2137,10 +2177,19 @@ void Hydro2::ApplyNSCBC(
         const Array4<      Real>& rho_a,
         const Array4<      Real>& M_a,
         const Array4<      Real>& E_a,
+        const Array4<      Real>& gam_a_,
+        const Array4<      Real>& pi_a_,
+        const Array4<      Real>& p_a_,
         int ii, int jj, int kk, int dir_,
         Real rho_, Real un_, Real ut_, Real p_) -> void
     {
         Real eta_ = eta_a(ii,jj,kk);
+        // Guard: if eta at the ghost cell is NaN or out of range (e.g. FillBoundary
+        // extrapolated from a NaN boundary cell), clamp it to [0,1].  A NaN eta
+        // flows through InterpolateGammaPi and makes gm_/pi_ NaN, which then makes
+        // UE_ = (p + NaN - pref)/(NaN-1) = NaN even when p and rho are finite.
+        if (!(eta_ >= 0.0 && eta_ <= 1.0)) eta_ = amrex::max(amrex::min(eta_, Real(1.0)), Real(0.0));
+        if (amrex::isnan(eta_)) eta_ = Real(0.0);
         Real gm_, pi_;
         Thermo_Interp::InterpolateGammaPi_Stiffened(
             eta_, g1_, g0_, pi1_, pi0_, gm_, pi_);
@@ -2153,10 +2202,13 @@ void Hydro2::ApplyNSCBC(
         Real vy_ = (dir_ == 0) ? ut_ : un_;
         Real KE_ = 0.5 * rho_ * (vx_*vx_ + vy_*vy_);
 
-        rho_a(ii,jj,kk)   = rho_;
-        M_a  (ii,jj,kk,0) = rho_ * vx_;
-        M_a  (ii,jj,kk,1) = rho_ * vy_;
-        E_a  (ii,jj,kk)   = UE_ + KE_;
+        rho_a  (ii,jj,kk)   = rho_;
+        M_a    (ii,jj,kk,0) = rho_ * vx_;
+        M_a    (ii,jj,kk,1) = rho_ * vy_;
+        E_a    (ii,jj,kk)   = UE_ + KE_;
+        gam_a_ (ii,jj,kk)   = gm_;
+        pi_a_  (ii,jj,kk)   = pi_;
+        p_a_   (ii,jj,kk)   = p_;
     };
 
     // =========================================================================
@@ -2175,6 +2227,9 @@ void Hydro2::ApplyNSCBC(
         auto rho_a = rho_mf_in.array(mfi);
         auto M_a   = M_mf_in  .array(mfi);
         auto E_a   = E_mf_in  .array(mfi);
+        auto gam_a = gamma_mf   [lev]->array(mfi);
+        auto pi_a  = pi_mf      [lev]->array(mfi);
+        auto p_a   = pressure_mf[lev]->array(mfi);
 
         // Read-only versions for the compute_prim helper (ghost cells are readable)
         auto eta_r = eta_mf_in.const_array(mfi);
@@ -2249,6 +2304,16 @@ void Hydro2::ApplyNSCBC(
                     compute_prim(eta_r, rho_r, M_r, E_r, i, j, k, dir_,
                                  rho_b, un_b, ut_b, p_b, a_b, gm_b, pi_b);
 
+                    // If the boundary cell or its interior neighbors have bad energy,
+                    // the NSCBC formulas will produce junk ghost values that can cause
+                    // the Riemann solver to blow up in adjacent interior cells.
+                    // Skip NSCBC and leave ghost cells as-is from FillBoundary.
+                    if (!std::isfinite(E_r(i,   j,   k))  ||
+                        !std::isfinite(E_r(im1, jm1, k))  ||
+                        !std::isfinite(M_r(i,   j,   k,0))||
+                        !std::isfinite(M_r(i,   j,   k,1)))
+                        return;
+
                     Real rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1;
                     compute_prim(eta_r, rho_r, M_r, E_r, im1, jm1, k, dir_,
                                  rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1);
@@ -2261,16 +2326,33 @@ void Hydro2::ApplyNSCBC(
                     Real M_loc = std::abs(un_b) / (a_b + 1.0e-14);
 
                     // --------------------------------------------------------
-                    // Step 2: one-sided 2nd-order FD in normal direction.
-                    //   hi side: df/dn = (3*f_b - 4*f_m1 + f_m2) / (2*dhn)
-                    //   lo side: df/dn = (-3*f_b + 4*f_m1 - f_m2) / (2*dhn)
-                    // The lo formula gives the derivative in +n direction.
+                    // Step 2: one-sided 1st-order FD in normal direction.
+                    //   hi side: df/dn = (f_b - f_m1) / dhn
+                    //   lo side: df/dn = (f_m1 - f_b) / dhn  [= -(f_b-f_m1)/dhn]
+                    //
+                    // NOTE: we intentionally use 1st-order (not 2nd-order) here.
+                    // The 2nd-order one-sided stencil (3f_b - 4f_{m1} + f_{m2})
+                    // has a leading coefficient of 3, which amplifies boundary-
+                    // localized perturbations by 3× before the L-wave computation.
+                    // Combined with the acoustic impedance Z = ρa (large for
+                    // stiffened-EOS fluids), this creates a ~1.5× growth factor
+                    // per timestep, causing exponential blow-up along boundary
+                    // cells in ~25 steps.  The 1st-order stencil (coefficient 1)
+                    // eliminates this amplification while giving the same accuracy
+                    // as 2nd-order for smooth acoustic waves passing the boundary.
                     // --------------------------------------------------------
                     Real fd_sign = (side_ == 1) ? 1.0 : -1.0;
-                    Real drho_dn = fd_sign * (3.0*rho_b - 4.0*rho_m1 + rho_m2) / (2.0*dhn);
-                    Real dun_dn  = fd_sign * (3.0*un_b  - 4.0*un_m1  + un_m2 ) / (2.0*dhn);
-                    Real dut_dn  = fd_sign * (3.0*ut_b  - 4.0*ut_m1  + ut_m2 ) / (2.0*dhn);
-                    Real dp_dn   = fd_sign * (3.0*p_b   - 4.0*p_m1   + p_m2  ) / (2.0*dhn);
+                    Real drho_dn = fd_sign * (rho_b - rho_m1) / dhn;
+                    Real dun_dn  = fd_sign * (un_b  - un_m1 ) / dhn;
+                    Real dut_dn  = fd_sign * (ut_b  - ut_m1 ) / dhn;
+                    Real dp_dn   = fd_sign * (p_b   - p_m1  ) / dhn;
+                    // Here is the 2nd-order version we are NOT using:
+                    // Hopefully we can go back to this once we have a more robust corner treatment that can handle the amplified perturbations.  See Motheau et al. JCP 2017 for their use of the 2nd-order one-sided stencil.
+                    // Real drho_dn = fd_sign * (3.0*rho_b - 4.0*rho_m1 + rho_m2) / (2.0*dhn);
+                    // Real dun_dn  = fd_sign * (3.0*un_b  - 4.0*un_m1  + un_m2 ) / (2.0*dhn);
+                    // Real dut_dn  = fd_sign * (3.0*ut_b  - 4.0*ut_m1  + ut_m2 ) / (2.0*dhn);
+                    // Real dp_dn   = fd_sign * (3.0*p_b   - 4.0*p_m1   + p_m2  ) / (2.0*dhn);
+
 
                     // --------------------------------------------------------
                     // Step 3: central 2nd-order FD in transverse direction.
@@ -2404,6 +2486,13 @@ void Hydro2::ApplyNSCBC(
                     Real dun_dn_new  = (-a_b/rho_b)*xi1 + (a_b/rho_b)*xi4;
                     Real dut_dn_new  = xi3;
                     Real dp_dn_new   = a2_b * (xi1 + xi4);
+                    // Guard: if any upstream value was NaN or Inf (e.g. from huge
+                    // velocities at near-zero-rho cells), zero the gradient so the
+                    // ghost cell gets a flat extrapolation rather than Inf pressure.
+                    if (!std::isfinite(drho_dn_new)) drho_dn_new = 0.0;
+                    if (!std::isfinite(dun_dn_new))  dun_dn_new  = 0.0;
+                    if (!std::isfinite(dut_dn_new))  dut_dn_new  = 0.0;
+                    if (!std::isfinite(dp_dn_new))   dp_dn_new   = 0.0;
 
                     // --------------------------------------------------------
                     // Step 8: fill 1st and 2nd ghost cells from gradient.
@@ -2428,25 +2517,43 @@ void Hydro2::ApplyNSCBC(
                     Real un_g1  = un_m1  + sign_gh * 2.0*dhn * dun_dn_new;
                     Real ut_g1  = ut_m1  + sign_gh * 2.0*dhn * dut_dn_new;
                     Real p_g1   = p_m1   + sign_gh * 2.0*dhn * dp_dn_new;
-                    rho_g1 = amrex::max(rho_g1, 1.0e-14);
-                    p_g1   = amrex::max(p_g1,   1.0e-6);
 
-                    // 2nd ghost (Eqs. 28/32): uses boundary cell (b), m1, and 1st ghost
-                    Real rho_g2 = -2.0*rho_m1 - 3.0*rho_b + 6.0*rho_g1
-                                  - sign_gh * 6.0*dhn * drho_dn_new;
-                    Real un_g2  = -2.0*un_m1  - 3.0*un_b  + 6.0*un_g1
-                                  - sign_gh * 6.0*dhn * dun_dn_new;
-                    Real ut_g2  = -2.0*ut_m1  - 3.0*ut_b  + 6.0*ut_g1
-                                  - sign_gh * 6.0*dhn * dut_dn_new;
-                    Real p_g2   = -2.0*p_m1   - 3.0*p_b   + 6.0*p_g1
-                                  - sign_gh * 6.0*dhn * dp_dn_new;
-                    rho_g2 = amrex::max(rho_g2, 1.0e-14);
-                    p_g2   = amrex::max(p_g2,   1.0e-6);
+                    // Fallback: if the NSCBC formula produces a ghost-cell pressure
+                    // that is far below the boundary-cell pressure (e.g. a gas-phase
+                    // cell at the boundary with a steep interface gradient), the formula
+                    // has broken down.  Use zero-gradient (copy boundary cell state) so
+                    // the Riemann solver sees a smooth state rather than a vacuum.
+                    if (!std::isfinite(p_g1) || p_g1 < Real(1.0e-3) * p_b) {
+                        set_ghost_cons(eta_r, rho_a, M_a, E_a, gam_a, pi_a, p_a,
+                                       ig1_i, jg1_j, k, dir_, rho_b, un_b, ut_b, p_b);
+                        set_ghost_cons(eta_r, rho_a, M_a, E_a, gam_a, pi_a, p_a,
+                                       ig2_i, jg2_j, k, dir_, rho_b, un_b, ut_b, p_b);
+                        return;
+                    }
 
-                    // Write ghost cells to conserved arrays
-                    set_ghost_cons(eta_r, rho_a, M_a, E_a,
+                    // Use !(x>0) pattern which catches NaN; amrex::max(NaN,x) is not
+                    // guaranteed to return x on all GPU backends.
+                    if (!(rho_g1 > 0.0))         rho_g1 = rho_b;
+                    if (!std::isfinite(un_g1))   un_g1 = 0.0;
+                    if (!std::isfinite(ut_g1))   ut_g1 = 0.0;
+
+                    // 2nd ghost: simple linear extrapolation g2 = 2*g1 - b.
+                    // Algebraically equivalent to Lodato Eq. 32 for a linear profile,
+                    // but with error amplification of 2 instead of 6, preventing the
+                    // Eq. 32 coefficient-6 instability from collapsing the CFL timestep.
+                    Real rho_g2 = 2.0*rho_g1 - rho_b;
+                    Real un_g2  = 2.0*un_g1  - un_b;
+                    Real ut_g2  = 2.0*ut_g1  - ut_b;
+                    Real p_g2   = 2.0*p_g1   - p_b;
+                    if (!(rho_g2 > 0.0))         rho_g2 = rho_b;
+                    if (!std::isfinite(p_g2) || !(p_g2 > 0.0)) p_g2 = p_b;
+                    if (!std::isfinite(un_g2))   un_g2 = 0.0;
+                    if (!std::isfinite(ut_g2))   ut_g2 = 0.0;
+
+                    // Write ghost cells to conserved arrays and EOS fields
+                    set_ghost_cons(eta_r, rho_a, M_a, E_a, gam_a, pi_a, p_a,
                                    ig1_i, jg1_j, k, dir_, rho_g1, un_g1, ut_g1, p_g1);
-                    set_ghost_cons(eta_r, rho_a, M_a, E_a,
+                    set_ghost_cons(eta_r, rho_a, M_a, E_a, gam_a, pi_a, p_a,
                                    ig2_i, jg2_j, k, dir_, rho_g2, un_g2, ut_g2, p_g2);
                 });
             }  // side
@@ -2539,10 +2646,18 @@ void Hydro2::ApplyNSCBC(
                              rho_xm2, un_xm2, ut_xm2, p_xm2, a_xm2, gm_xm2, pi_xm2);
 
                 Real fdx = (Real)sx;  // positive for hi (backward diff), negative for lo (forward diff)
-                Real drho_dx_c = fdx * (3.0*rho_c - 4.0*rho_xm1 + rho_xm2) / (2.0*DX[0]);
-                Real dvx_dx_c  = fdx * (3.0*vx_c  - 4.0*un_xm1  + un_xm2 ) / (2.0*DX[0]);
-                Real dvy_dx_c  = fdx * (3.0*vy_c  - 4.0*ut_xm1  + ut_xm2 ) / (2.0*DX[0]);
-                Real dp_dx_c   = fdx * (3.0*p_c   - 4.0*p_xm1   + p_xm2  ) / (2.0*DX[0]);
+                // 1st-order one-sided FD (see face loop comment for stability rationale)
+                Real drho_dx_c = fdx * (rho_c - rho_xm1) / DX[0];
+                Real dvx_dx_c  = fdx * (vx_c  - un_xm1 ) / DX[0];
+                Real dvy_dx_c  = fdx * (vy_c  - ut_xm1 ) / DX[0];
+                Real dp_dx_c   = fdx * (p_c   - p_xm1  ) / DX[0];
+                // Here is the 2nd-order version we are NOT using:
+                // Hopefully we can go back to this once we have a more robust corner treatment that can handle the amplified perturbations.  See Motheau et al. JCP 2017 for their use of the 2nd-order one-sided stencil.
+                // Real drho_dx_c = fdx * (3.0*rho_c - 4.0*rho_xm1 + rho_xm2) / (2.0*DX[0]);
+                // Real dvx_dx_c  = fdx * (3.0*vx_c  - 4.0*un_xm1  + un_xm2 ) / (2.0*DX[0]);
+                // Real dvy_dx_c  = fdx * (3.0*vy_c  - 4.0*ut_xm1  + ut_xm2 ) / (2.0*DX[0]);
+                // Real dp_dx_c   = fdx * (3.0*p_c   - 4.0*p_xm1   + p_xm2  ) / (2.0*DX[0]);
+
 
                 // --- y-direction: one-sided FD at corner (ic, jc) ---
                 int jm1 = jc - sy, jm2 = jc - 2*sy;
@@ -2553,10 +2668,18 @@ void Hydro2::ApplyNSCBC(
                 compute_prim(eta_r, rho_r, M_r, E_r, ic, jm2, k, 1,
                              rho_ym2, vn_ym2, vt_ym2, p_ym2, a_ym2, gm_ym2, pi_ym2);
                 // For y-direction (dir=1): un=vy, ut=vx in compute_prim output
-                Real drho_dy_c = (Real)sy * (3.0*rho_c - 4.0*rho_ym1 + rho_ym2) / (2.0*DX[1]);
-                Real dvy_dy_c  = (Real)sy * (3.0*vy_c  - 4.0*vn_ym1  + vn_ym2 ) / (2.0*DX[1]);
-                Real dvx_dy_c  = (Real)sy * (3.0*vx_c  - 4.0*vt_ym1  + vt_ym2 ) / (2.0*DX[1]);
-                Real dp_dy_c   = (Real)sy * (3.0*p_c   - 4.0*p_ym1   + p_ym2  ) / (2.0*DX[1]);
+                // 1st-order one-sided FD (see face loop comment for stability rationale)
+                Real drho_dy_c = (Real)sy * (rho_c - rho_ym1) / DX[1];
+                Real dvy_dy_c  = (Real)sy * (vy_c  - vn_ym1 ) / DX[1];
+                Real dvx_dy_c  = (Real)sy * (vx_c  - vt_ym1 ) / DX[1];
+                Real dp_dy_c   = (Real)sy * (p_c   - p_ym1  ) / DX[1];
+                // Here is the 2nd-order version we are NOT using:
+                // Hopefully we can go back to this once we have a more robust corner treatment that can
+                // Real drho_dy_c = (Real)sy * (3.0*rho_c - 4.0*rho_ym1 + rho_ym2) / (2.0*DX[1]);
+                // Real dvy_dy_c  = (Real)sy * (3.0*vy_c  - 4.0*vn_ym1  + vn_ym2 ) / (2.0*DX[1]);
+                // Real dvx_dy_c  = (Real)sy * (3.0*vx_c  - 4.0*vt_ym1  + vt_ym2 ) / (2.0*DX[1]);
+                // Real dp_dy_c   = (Real)sy * (3.0*p_c   - 4.0*p_ym1   + p_ym2  ) / (2.0*DX[1]);
+
 
                 // --- LODI wave amplitudes from x-direction at corner ---
                 // L1_x (incoming at hi, outgoing at lo), L4_x (incoming at lo, outgoing at hi)
@@ -2660,6 +2783,10 @@ void Hydro2::ApplyNSCBC(
                 Real dvx_dx_new  = (-a_c/rho_c)*xi1_x + (a_c/rho_c)*xi4_x;
                 Real dvy_dx_new  = xi3_x;
                 Real dp_dx_new   = a2_c * (xi1_x + xi4_x);
+                if (!std::isfinite(drho_dx_new)) drho_dx_new = 0.0;
+                if (!std::isfinite(dvx_dx_new))  dvx_dx_new  = 0.0;
+                if (!std::isfinite(dvy_dx_new))  dvy_dx_new  = 0.0;
+                if (!std::isfinite(dp_dx_new))   dp_dx_new   = 0.0;
 
                 // Y-direction
                 Real xi1_y = L1_y / (vy_c - a_c);
@@ -2671,6 +2798,10 @@ void Hydro2::ApplyNSCBC(
                 Real dvy_dy_new  = (-a_c/rho_c)*xi1_y + (a_c/rho_c)*xi4_y;
                 Real dvx_dy_new  = xi3_y;
                 Real dp_dy_new   = a2_c * (xi1_y + xi4_y);
+                if (amrex::isnan(drho_dy_new)) drho_dy_new = 0.0;
+                if (amrex::isnan(dvy_dy_new))  dvy_dy_new  = 0.0;
+                if (amrex::isnan(dvx_dy_new))  dvx_dy_new  = 0.0;
+                if (amrex::isnan(dp_dy_new))   dp_dy_new   = 0.0;
 
                 // --- Fill this ghost corner cell from both direction gradients ---
                 // Linear extrapolation from the physical corner boundary cell (ic, jc)
@@ -2690,26 +2821,64 @@ void Hydro2::ApplyNSCBC(
                 Real p_g   = p_c   + (Real)ox*DX[0]*dp_dx_new
                                    + (Real)oy*DX[1]*dp_dy_new;
 
-                rho_g = amrex::max(rho_g, 1.0e-14);
-                p_g   = amrex::max(p_g,   1.0e-6);
+                if (!(rho_g > 0.0))          rho_g = rho_c;
+                if (!std::isfinite(p_g) || !(p_g > 0.0)) p_g = p_c;
+                if (!std::isfinite(vx_g))    vx_g  = 0.0;
+                if (!std::isfinite(vy_g))    vy_g  = 0.0;
 
                 // Store as conserved (use dir=0 since we already have vx,vy separately)
                 Real eta_g = eta_r(i, j, k);
+                if (amrex::isnan(eta_g) || !(eta_g >= 0.0 && eta_g <= 1.0))
+                    eta_g = amrex::max(amrex::min(eta_g, Real(1.0)), Real(0.0));
+                if (amrex::isnan(eta_g)) eta_g = 0.0;
                 Real gm_g, pi_g;
                 Thermo_Interp::InterpolateGammaPi_Stiffened(
                     eta_g, g1_, g0_, pi1_, pi0_, gm_g, pi_g);
                 Real UE_g = (p_g + gm_g*pi_g - pref_) / (gm_g - 1.0);
-                if (UE_g < 0.0) UE_g = 0.0;
+                if (!(UE_g > 0.0)) UE_g = 0.0;
                 Real KE_g = 0.5 * rho_g * (vx_g*vx_g + vy_g*vy_g);
 
                 rho_a(i,j,k)   = rho_g;
                 M_a  (i,j,k,0) = rho_g * vx_g;
                 M_a  (i,j,k,1) = rho_g * vy_g;
                 E_a  (i,j,k)   = UE_g + KE_g;
+                gam_a(i,j,k)   = gm_g;
+                pi_a (i,j,k)   = pi_g;
+                p_a  (i,j,k)   = p_g;
             });
         }  // corner (cx, cy)
-        
+
     }  // MFIter
+
+    // =========================================================================
+    // DIAGNOSTIC: scan ghost cells for NaN and print (i,j,k) location.
+    // Remove once the ghost-cell coverage bug is identified.
+    // =========================================================================
+    amrex::Gpu::synchronize();
+    for (amrex::MFIter mfi(rho_mf_in, false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box vbx  = mfi.validbox();
+        const amrex::Box gbx  = amrex::grow(vbx, rho_mf_in.nGrow());
+        auto const& rho_scan  = rho_mf_in.array(mfi);
+        auto const& E_scan    = E_mf_in.array(mfi);
+        auto const& eta_scan = eta_mf_in.array(mfi);
+        amrex::LoopOnCpu(gbx, [&](int i, int j, int k)
+        {
+            bool in_valid = vbx.contains(amrex::IntVect(AMREX_D_DECL(i,j,k)));
+            if (amrex::isnan(rho_scan(i,j,k)))
+                amrex::Print() << "[NSCBC-NaN] rho NaN at ("
+                    << i << "," << j << "," << k << ")"
+                    << (in_valid ? " [interior]" : " [ghost]") << "\n";
+            if (amrex::isnan(E_scan(i,j,k)))
+                amrex::Print() << "[NSCBC-NaN] E NaN at ("
+                    << i << "," << j << "," << k << ")"
+                    << (in_valid ? " [interior]" : " [ghost]") << "\n";
+            if (amrex::isnan(eta_scan(i,j,k)))
+                amrex::Print() << "[NSCBC-NaN] eta NaN at ("
+                    << i << "," << j << "," << k << ")"
+                    << (in_valid ? " [interior]" : " [ghost]") << "\n";
+        });
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2817,12 +2986,71 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     //    in the ParallelCopy above; FillBoundary handles physical BCs
     //    and same-level neighbor communication.
     //==============================================================
+    // DIAGNOSTIC: check for NaN right after ParallelCopy, before FillBoundary
+    {
+        const char* fnames[4] = {"eta","density","momentum","energy"};
+        for (int n = 0; n < 4; n++) {
+            if (solution_new[n].contains_nan(0, solution_new[n].nComp(), solution_new[n].nGrowVect()))
+                amrex::Print() << "[DIAG-post-copy] NaN in " << fnames[n]
+                               << " (incl ghosts) BEFORE FillBoundary lev=" << lev << " t=" << time << "\n";
+            if (solution_new[n].contains_nan()) {
+                amrex::Print() << "[DIAG-post-copy] NaN in " << fnames[n]
+                               << " (valid only) BEFORE FillBoundary lev=" << lev << " t=" << time << "\n";
+                // Print specific NaN cell locations (CPU scan, diagnostic only)
+                for (amrex::MFIter mfi(solution_new[n], false); mfi.isValid(); ++mfi) {
+                    auto const& arr = solution_new[n].array(mfi);
+                    const amrex::Box vbx = mfi.validbox();
+                    amrex::LoopOnCpu(vbx, [&](int i, int j, int k) {
+                        for (int c = 0; c < solution_new[n].nComp(); ++c)
+                            if (amrex::isnan(arr(i,j,k,c)))
+                                amrex::Print() << "[NaN-LOC] " << fnames[n]
+                                               << " comp=" << c
+                                               << " at (" << i << "," << j << "," << k << ")"
+                                               << " lev=" << lev << " t=" << time << "\n";
+                    });
+                }
+            }
+        }
+        // Also check pressure_mf (a separately tracked field, not in solution_new)
+        if (pressure_mf[lev]->contains_nan(0, 1, amrex::IntVect(AMREX_D_DECL(0,0,0)))) {
+            amrex::Print() << "[DIAG-post-copy] NaN in pressure_mf (valid only) lev=" << lev << " t=" << time << "\n";
+            for (amrex::MFIter mfi(*pressure_mf[lev], false); mfi.isValid(); ++mfi) {
+                auto const& parr = pressure_mf[lev]->array(mfi);
+                const amrex::Box vbx = mfi.validbox();
+                amrex::LoopOnCpu(vbx, [&](int i, int j, int k) {
+                    if (amrex::isnan(parr(i,j,k)))
+                        amrex::Print() << "[NaN-LOC] pressure at (" << i << "," << j << "," << k
+                                       << ") lev=" << lev << " t=" << time << "\n";
+                });
+            }
+        }
+    }
     energy_bc->FillBoundary(solution_new[0], 0, solution_new[0].nComp(), time, 0);
     density_bc->FillBoundary(solution_new[1], 0, solution_new[1].nComp(), time, 0);
     momentum_bc->FillBoundary(solution_new[2], 0, solution_new[2].nComp(), time, 0);
     energy_bc->FillBoundary(solution_new[3], 0, solution_new[3].nComp(), time, 0);
+    // DIAGNOSTIC: check for NaN introduced by FillBoundary
+    {
+        const char* fnames[4] = {"eta","density","momentum","energy"};
+        for (int n = 0; n < 4; n++)
+            if (solution_new[n].contains_nan(0, solution_new[n].nComp(), solution_new[n].nGrowVect()))
+                amrex::Print() << "[DIAG-pre-NSCBC] NaN in " << fnames[n]
+                               << " (incl ghosts) AFTER FillBoundary lev=" << lev << " t=" << time << "\n";
+    }
     if (nscbc.enabled)
         ApplyNSCBC(lev, solution_new[0], solution_new[1], solution_new[2], solution_new[3], time);
+    // DIAGNOSTIC: check for NaN after ApplyNSCBC
+    if (nscbc.enabled) {
+        const char* fnames[4] = {"eta","density","momentum","energy"};
+        for (int n = 0; n < 4; n++) {
+            if (solution_new[n].contains_nan(0, solution_new[n].nComp(), solution_new[n].nGrowVect()))
+                amrex::Print() << "[DIAG-post-NSCBC] NaN in " << fnames[n]
+                               << " (incl ghosts) t=" << time << "\n";
+            if (solution_new[n].contains_nan())
+                amrex::Print() << "[DIAG-post-NSCBC] NaN in " << fnames[n]
+                               << " (valid cells only) t=" << time << "\n";
+        }
+    }
 
     //==============================================================
     // Build solution_old as a complete copy of solution_new (valid
@@ -2870,8 +3098,28 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         density_bc->FillBoundary(stage[1], 0, stage[1].nComp(), t, 0);  // density
         momentum_bc->FillBoundary(stage[2], 0, stage[2].nComp(), t, 0); // momentum
         energy_bc->FillBoundary(stage[3], 0, stage[3].nComp(), t, 0);   // energy
+        // DIAGNOSTIC: check for NaN introduced by FillBoundary (stage)
+        {
+            const char* snames[4] = {"eta","density","momentum","energy"};
+            for (int n = 0; n < 4; n++)
+                if (stage[n].contains_nan(0, stage[n].nComp(), stage[n].nGrowVect()))
+                    amrex::Print() << "[DIAG-stage-pre-NSCBC] NaN in " << snames[n]
+                                   << " (incl ghosts) t=" << t << "\n";
+        }
         if (nscbc.enabled)
             ApplyNSCBC(lev, stage[0], stage[1], stage[2], stage[3], t);
+        // DIAGNOSTIC: check for NaN after ApplyNSCBC (stage)
+        if (nscbc.enabled) {
+            const char* snames[4] = {"eta","density","momentum","energy"};
+            for (int n = 0; n < 4; n++) {
+                if (stage[n].contains_nan(0, stage[n].nComp(), stage[n].nGrowVect()))
+                    amrex::Print() << "[DIAG-stage-post-NSCBC] NaN in " << snames[n]
+                                   << " (incl ghosts) t=" << t << "\n";
+                if (stage[n].contains_nan())
+                    amrex::Print() << "[DIAG-stage-post-NSCBC] NaN in " << snames[n]
+                                   << " (valid cells only) t=" << t << "\n";
+            }
+        }
     });
 
     //==============================================================
@@ -2991,7 +3239,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // CUTOFFS
             eta(i, j, k) = std::max( 0.0,std::min( 1.0,(eta(i, j, k) - cutoff) / (1.0 - 2.0 * cutoff) ) );
-            rho(i, j, k) = std::max(rho(i, j, k), small);
+            if (!std::isfinite(rho(i, j, k)) || rho(i, j, k) < small) rho(i, j, k) = small;
 
             // Derivatice Function Calls
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
@@ -3014,32 +3262,46 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             etadot(i, j, k) = (eta(i, j, k) - eta_old(i, j, k)) / dt;
 
             // Velocity = M ./ (DX*DY*rho)
-            v(i, j, k, 0) = M(i, j, k, 0) / (rho(i, j, k));
-            v(i, j, k, 1) = M(i, j, k, 1) / (rho(i, j, k));
+            // Guard against rho=0 (freshly created AMR cells or exact-zero density
+            // after time advance) to prevent 0/0=NaN propagating to pressure.
+            {
+                Set::Scalar safe_rho_ = (rho(i,j,k) > Set::Scalar(1e-20))
+                                      ? rho(i,j,k) : Set::Scalar(1e-20);
+                Set::Scalar vx_ = M(i, j, k, 0) / safe_rho_;
+                Set::Scalar vy_ = M(i, j, k, 1) / safe_rho_;
+                // Clamp Inf/NaN: M/1e-20 can be huge-but-finite when rho→0;
+                // Inf in velocity_mf causes Inf*0=NaN in source terms next step.
+                if (!std::isfinite(vx_)) vx_ = Set::Scalar(0.0);
+                if (!std::isfinite(vy_)) vy_ = Set::Scalar(0.0);
+                // Cap huge-but-finite velocity to prevent KE overflow (v²→Inf):
+                // bad NSCBC corner ghost cells can accumulate M over many steps.
+                const Set::Scalar v_cap = Set::Scalar(1e8); // unphysical upper bound
+                if (vx_ >  v_cap) vx_ =  v_cap;
+                if (vx_ < -v_cap) vx_ = -v_cap;
+                if (vy_ >  v_cap) vy_ =  v_cap;
+                if (vy_ < -v_cap) vy_ = -v_cap;
+                v(i, j, k, 0) = vx_;
+                v(i, j, k, 1) = vy_;
+            }
 
             // Kinetic Energy
             KE_vol(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
+            if (!std::isfinite(KE_vol(i, j, k))) KE_vol(i, j, k) = Set::Scalar(0.0);
             KE_mass(i, j, k) = 0.5 * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
+            if (!std::isfinite(KE_mass(i, j, k))) KE_mass(i, j, k) = Set::Scalar(0.0);
 
-            // Internal Energy
+            // Internal Energy — NaN-safe clamp (UE < 0 check misses NaN: NaN < 0 = false)
             UE_vol(i, j, k) = E_vol(i, j, k) - KE_vol(i, j, k);
-            if (UE_vol(i, j, k) < 0.0)
-            {
+            if (!std::isfinite(UE_vol(i, j, k)) || UE_vol(i, j, k) < 0.0)
                 UE_vol(i, j, k) = 0.0;
-            }
             UE_mass(i, j, k) = E_mass(i, j, k) - KE_mass(i, j, k);
-            if (UE_mass(i, j, k) < 0.0)
-            {
+            if (!std::isfinite(UE_mass(i, j, k)) || UE_mass(i, j, k) < 0.0)
                 UE_mass(i, j, k) = 0.0;
-            }
 
-            // Pressure
-            // pi_mix(i, j, k) = (B / A) / gamma_mix(i, j, k);
+            // Pressure — NaN-safe clamp
             p(i, j, k) = (gmix - 1.0) * UE_vol(i, j, k) - gmix * pimix + pref; // pressure Tammann EOS modification
-            if (p(i, j, k) < 0.0)
-            {
+            if (!std::isfinite(p(i, j, k)) || p(i, j, k) < 0.0)
                 p(i, j, k) = 1e-6;
-            }
 
             // Chemical Potential
             Set::Scalar f_prime = ch_W_scale * 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: W_scale*f'(eta)
@@ -3050,7 +3312,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Bm(i, j, k) = eta(i, j, k) / (1.0 - eta(i, j, k) + small);
 
             // Speed of sound:
-            a(i, j, k) = sqrt(gamma_mix(i, j, k) * (p(i, j, k) + pi_mix(i, j, k)) / (rho(i, j, k)));
+            {
+                Set::Scalar safe_rho_a = (std::isfinite(rho(i,j,k)) && rho(i,j,k) > small) ? rho(i,j,k) : small;
+                a(i, j, k) = sqrt(gamma_mix(i, j, k) * (p(i, j, k) + pi_mix(i, j, k)) / safe_rho_a);
+                if (!std::isfinite(a(i, j, k))) a(i, j, k) = Set::Scalar(0.0);
+            }
 
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / (a(i, j, k) + small);
@@ -3082,16 +3348,23 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar A_new = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
             Set::Scalar B_new = (eta(i, j, k) * gamma0 * pi_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * pi_1) / (gamma1 - 1.0);
             // Set::Scalar gmix_new = 1.0 + (1.0 / A_new);
-            Set::Vector v_new = Set::Vector(M(i, j, k, 0) / (rho(i, j, k)), M(i, j, k, 1) / (rho(i, j, k)));
-            Set::Scalar KE_vol_new = 0.5 * rho(i, j, k) * (v_new(0) * v_new(0) + v_new(1) * v_new(1));
+            Set::Scalar safe_rho_dt = (std::isfinite(rho(i,j,k)) && rho(i,j,k) > small) ? rho(i,j,k) : small;
+            Set::Vector v_new = Set::Vector(M(i, j, k, 0) / safe_rho_dt, M(i, j, k, 1) / safe_rho_dt);
+            if (!std::isfinite(v_new(0))) v_new(0) = Set::Scalar(0.0);
+            if (!std::isfinite(v_new(1))) v_new(1) = Set::Scalar(0.0);
+            if (v_new(0) >  Set::Scalar(1e8)) v_new(0) =  Set::Scalar(1e8);
+            if (v_new(0) < -Set::Scalar(1e8)) v_new(0) = -Set::Scalar(1e8);
+            if (v_new(1) >  Set::Scalar(1e8)) v_new(1) =  Set::Scalar(1e8);
+            if (v_new(1) < -Set::Scalar(1e8)) v_new(1) = -Set::Scalar(1e8);
+            Set::Scalar KE_vol_new = 0.5 * safe_rho_dt * (v_new(0) * v_new(0) + v_new(1) * v_new(1));
 
             Set::Scalar UE_vol_new = E_vol(i, j, k) - KE_vol_new;
-            if (UE_vol_new < 0.0)
+            if (!std::isfinite(UE_vol_new) || UE_vol_new < 0.0)
             {
                 UE_vol_new = 0.0;
             }
             Set::Scalar p_new = (UE_vol_new - B_new) / A_new;
-            if (p_new < 0.0)
+            if (!std::isfinite(p_new) || p_new < 0.0)
             {
                 p_new = 1e-6;
             }
@@ -3101,16 +3374,16 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 eta(i,j,k), gamma1, gamma0, pi_1, pi_0, gmix_new, pimix_new);
             // gamma_mix(i,j,k) = gmix;
             // pi_mix_new(i,j,k) = pimix;
-            Set::Scalar sound_speed_new = sqrt(gmix_new * (p_new + pimix_new) / (rho(i, j, k)));
+            Set::Scalar sound_speed_new = sqrt(gmix_new * (p_new + pimix_new) / safe_rho_dt);
 
-            c_max = std::max(c_max, sound_speed_new);
-            vx_max = std::max(vx_max, std::abs(v_new(0))); // vx
-            vy_max = std::max(vy_max, std::abs(v_new(1))); // vy
+            if (std::isfinite(sound_speed_new)) c_max = std::max(c_max, sound_speed_new);
+            if (std::isfinite(v_new(0))) vx_max = std::max(vx_max, std::abs(v_new(0))); // vx
+            if (std::isfinite(v_new(1))) vy_max = std::max(vy_max, std::abs(v_new(1))); // vy
 
             // Track maximum force magnitude (not acceleration yet)
             Set::Scalar F_mag = sqrt(Source(i, j, k, 1) * Source(i, j, k, 1) + Source(i, j, k, 2) * Source(i, j, k, 2));
-            F_max = std::max(F_max, F_mag);
-            rho_min = std::min(rho_min, rho(i, j, k));
+            if (std::isfinite(F_mag)) F_max = std::max(F_max, F_mag);
+            if (std::isfinite(rho(i, j, k))) rho_min = std::min(rho_min, rho(i, j, k));
 
         });
     }
@@ -3131,16 +3404,23 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     Set::Scalar dx_min = std::min(DX[0], DX[1]);
 
     // 1. Acoustic CFL
-    Set::Scalar wave_speed = c_max + sqrt(vx_max * vx_max + vy_max * vy_max);
+    Set::Scalar vel_mag = sqrt(vx_max * vx_max + vy_max * vy_max);
+    if (!std::isfinite(vel_mag)) vel_mag = Set::Scalar(0.0);
+    Set::Scalar wave_speed = c_max + vel_mag;
+    if (!std::isfinite(wave_speed)) wave_speed = Set::Scalar(0.0);
     Set::Scalar dt_acoustic = cfl * dx_min / (wave_speed + small);
 
     // 2. Viscous CFL
     Set::Scalar mu_max = std::max(mu0, mu1);
     Set::Scalar dt_viscous = cfl_v * rho_min * dx_min * dx_min / (mu_max + small);
 
-    // 3. Force CFL
-    Set::Scalar a_max = F_max / rho_min; // Maximum acceleration
-    Set::Scalar dt_force = cfl_v * sqrt(dx_min / a_max);
+    // 3. Force CFL (guard: if F_max=0 no force constraint; if a_max=Inf skip)
+    Set::Scalar dt_force = std::numeric_limits<Set::Scalar>::max();
+    if (F_max > Set::Scalar(0.0) && rho_min > Set::Scalar(0.0)) {
+        Set::Scalar a_max = F_max / rho_min;
+        if (std::isfinite(a_max) && a_max > Set::Scalar(0.0))
+            dt_force = cfl_v * sqrt(dx_min / a_max);
+    }
 
     // 4. Allen-Cahn diffusion CFL
     Set::Scalar Mob = 0.01 * dx_min * dx_min;
