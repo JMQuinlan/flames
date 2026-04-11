@@ -162,7 +162,7 @@ Riemann_Solver.type = hllc
 kappa_method = 1
 
 ### INTERFACE COMPRESSION ###
-apply_sharpening = 1
+apply_sharpening = 0
 sharpening_frequency = 50
 reinit_max_iter = 100
 reinit_tolerance = 1e-6

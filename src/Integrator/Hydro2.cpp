@@ -659,6 +659,7 @@ void Hydro2::Mix(int lev)
     rho_min = 1e10;
 
 
+    /*
     // Filling Boundries
     FillBoundariesWithBC(lev, 0.0, density_bc, { 
             eta_mf[lev].get(), 
@@ -687,7 +688,7 @@ void Hydro2::Mix(int lev)
             cv_mf[lev].get()
     });
 
-
+    */
 }
 
 
@@ -789,12 +790,53 @@ Hydro2::RHS(int lev,
     }
     else
     {
+        Util::ParallelMessage(INFO, "Filling Conserves");
+
+        // Copy interior + ghost cells TO working copies
+        amrex::MultiFab rho_eta0_copy(rho_eta0_mf_in.boxArray(), rho_eta0_mf_in.DistributionMap(), 1, 4);
+        amrex::MultiFab rho_eta1_copy(rho_eta1_mf_in.boxArray(), rho_eta1_mf_in.DistributionMap(), 1, 4);
+        amrex::MultiFab M_copy(M_mf_in.boxArray(), M_mf_in.DistributionMap(), AMREX_SPACEDIM, 4);
+        amrex::MultiFab E_copy(E_mf_in.boxArray(), E_mf_in.DistributionMap(), 1, 4);
+
+
+        amrex::MultiFab::Copy(rho_eta0_copy, rho_eta0_mf_in, 0, 0, 1, 4);              // Include ghosts
+        amrex::MultiFab::Copy(rho_eta1_copy, rho_eta1_mf_in, 0, 0, 1, 4);              // Include ghosts
+        amrex::MultiFab::Copy(M_copy, M_mf_in, 0, 0, AMREX_SPACEDIM, 4); // Include ghosts
+        amrex::MultiFab::Copy(E_copy, E_mf_in, 0, 0, 1, 4);              // Include ghosts
+        
+
+        FillBoundariesWithBC(lev, time, density_bc, { 
+            eta_mf[lev].get(), 
+            density_mf[lev].get() 
+            //&rho_eta0_copy,
+            //&rho_eta1_copy
+        });
+
+        FillBoundariesWithBC(lev, time, momentum_bc, { 
+            &M_copy
+        });
+
+        FillBoundariesWithBC(lev, time, energy_bc, { 
+            &E_copy
+        });
+
+        // Copy back INCLUDING ALL 4 GHOST CELL LAYERS
+        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(rho_eta0_mf_in), rho_eta0_copy, 0, 0, 1, 4);
+        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(rho_eta1_mf_in), rho_eta1_copy, 0, 0, 1, 4);
+        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(M_mf_in), M_copy, 0, 0, AMREX_SPACEDIM, 4);
+        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(E_mf_in), E_copy, 0, 0, 1, 4);
+        
+        /*
         FillBoundariesWithBC(lev, time, density_bc, { 
             eta_mf[lev].get(), 
             density_mf[lev].get(), 
             rho_eta0_mf[lev].get(),
             rho_eta1_mf[lev].get() 
         });
+        */
+        
+
+        
     }
         
 
@@ -1126,16 +1168,17 @@ Hydro2::RHS(int lev,
     }
     else
     {
+        Util::ParallelMessage(INFO, "Filling Primatives");
+
         // Primative Field Boundries
-        /*
         FillBoundariesWithBC(lev, time, energy_bc, { 
             pressure_mf[lev].get(), 
             T_mf[lev].get(), 
             gamma_mf[lev].get(),
             p0_mf[lev].get() 
         });
-        */
 
+        /*
         FillBoundariesWithBC(lev, time, energy_bc, { 
             energy_per_vol_mf[lev].get(), 
             energy_per_mas_mf[lev].get(), 
@@ -1154,7 +1197,9 @@ Hydro2::RHS(int lev,
             T_mf[lev].get(),
             cp_mf[lev].get(),
             cv_mf[lev].get()
-    });
+        });
+        */
+
     }
     
     // Main time integration loop
@@ -1164,23 +1209,9 @@ Hydro2::RHS(int lev,
         // PRIMARY FLUIDS
         // FLUID 0
         Set::Patch<const Set::Scalar> rho0 = density0_mf.Patch(lev, mfi);
-        /*
-        Set::Patch<const Set::Scalar> v0 = velocity0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> p0 = pressure0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> M0 = momentum0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> E0 = energy0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> T0 = T0_mf.Patch(lev, mfi);
-        */
 
         // FLUID 1
         Set::Patch<const Set::Scalar> rho1 = density1_mf.Patch(lev, mfi);
-        /*
-        Set::Patch<const Set::Scalar> v1 = velocity1_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> p1 = pressure1_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> M1 = momentum1_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> E1 = energy1_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> T1 = T1_mf.Patch(lev, mfi);
-        */
 
         // Mixture
         Set::Patch<const Set::Scalar> eta = eta_mf.Patch(lev, mfi);
@@ -2312,6 +2343,8 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
     }
 
     // Fill boundaries for phi_sharp
+    Util::ParallelMessage(INFO, "Filling Shrp Interface");
+
     FillBoundariesWithBC(lev, 0.0, density_bc, { &phi_sharp_mf });
 
     // ============================================================================
@@ -2618,6 +2651,8 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
         }
 
         // Fill boundaries after each iteration using custom BC function
+        Util::ParallelMessage(INFO, "Filling Shrp Interface: Density Correction");
+
         FillBoundariesWithBC(lev, 0.0, density_bc, { &rho_eta0_work, &rho_eta1_work });
 
         // ========================================================================
@@ -2678,6 +2713,7 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
     // ============================================================================
     // FILL BOUNDARIES WITH CUSTOM BC (FINAL - ONLY ONCE)
     // ============================================================================
+    Util::ParallelMessage(INFO, "Filling Shrp Interface: Density Correction, COMPELTE");
 
     FillBoundariesWithBC(lev, 0.0, density_bc, { rho_eta0_mf[lev].get(), rho_eta1_mf[lev].get(), eta_mf[lev].get() });
 
@@ -2856,12 +2892,14 @@ void Hydro2::FillBoundaries(int lev, std::initializer_list<amrex::MultiFab *> mf
         }
 
         // Checking
+        /*
         if (mf->contains_nan())
         {
             Util::ParallelMessage(INFO, "-------------------------------");
             Util::ParallelMessage(INFO, "NaNs after FillBoundaries");
             Util::Abort(INFO);
         }
+        */
     }
 }
 
