@@ -210,6 +210,29 @@ void Integrator::SetPlotInt(int a_plot_int)
     plot_int = a_plot_int;
 }
 
+/// \brief Replace any NaN in ghost cells (whole fab box) with 0.0.
+///        Used after FillCoarsePatch/FillPatch when INT_DIR/NSCBC faces or
+///        coarse-fine boundaries leave ghost cells uninitialised.
+static void FillNaNGhostCells(amrex::MultiFab& mf, const amrex::Geometry& /*geom*/)
+{
+    for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box gbx = mfi.fabbox();        // valid + all ghost layers
+        const amrex::Box vbx = mfi.validbox();      // valid cells only
+        auto arr = mf.array(mfi);
+        int  nc  = mf.nComp();
+        amrex::ParallelFor(gbx, nc, [=] AMREX_GPU_DEVICE (int i, int j, int k, int n)
+        {
+            // Only touch ghost cells (leave valid cells untouched)
+            bool is_valid = AMREX_D_TERM(   (i >= vbx.smallEnd(0) && i <= vbx.bigEnd(0)),
+                                          && (j >= vbx.smallEnd(1) && j <= vbx.bigEnd(1)),
+                                          && (k >= vbx.smallEnd(2) && k <= vbx.bigEnd(2)));
+            if (!is_valid && !std::isfinite(arr(i,j,k,n)))
+                arr(i,j,k,n) = amrex::Real(0.0);
+        });
+    }
+}
+
 /// \fn    Integrator::MakeNewLevelFromCoarse
 /// \brief Wrapper to call FillCoarsePatch
 /// \note **THIS OVERRIDES A PURE VIRTUAL METHOD - DO NOT CHANGE**
@@ -226,9 +249,11 @@ Integrator::MakeNewLevelFromCoarse(int lev, amrex::Real time, const amrex::BoxAr
 
         (*cell.fab_array[n])[lev].reset(new amrex::MultiFab(cgrids, dm, ncomp, nghost));
 
+        FillNaNGhostCells(*(*cell.fab_array[n])[lev - 1], geom[lev - 1]); // ensure coarse source is finite
         (*cell.fab_array[n])[lev]->setVal(0.0);
 
         FillCoarsePatch(lev, time, *cell.fab_array[n], *cell.physbc_array[n], 0, ncomp);
+        FillNaNGhostCells(*(*cell.fab_array[n])[lev], geom[lev]);
     }
 
     amrex::BoxArray ngrids = cgrids;
@@ -278,8 +303,19 @@ Integrator::RemakeLevel(int lev,                             ///<[in] AMR Level
 
         amrex::MultiFab new_state(cgrids, dm, ncomp, nghost);
 
+        // Ensure coarse and fine sources have finite ghost cells before interpolation
+        if (lev > 0) FillNaNGhostCells(*(*cell.fab_array[n])[lev - 1], geom[lev - 1]);
+        FillNaNGhostCells(*(*cell.fab_array[n])[lev], geom[lev]);
         new_state.setVal(0.0);
         FillPatch(lev, time, *cell.fab_array[n], new_state, *cell.physbc_array[n], 0);
+        bool nan_before       = new_state.contains_nan();
+        bool valid_nan_before = new_state.contains_nan(0, ncomp, 0);
+        FillNaNGhostCells(new_state, geom[lev]);
+        bool nan_after        = new_state.contains_nan();
+        bool valid_nan_after  = new_state.contains_nan(0, ncomp, 0);
+        if (nan_before) Util::Warning(INFO, cell.name_array[n][0], " RemakeLevel lev=", lev,
+                                      " NaN before FillNaN=", nan_before, " (valid=", valid_nan_before, ")",
+                                      " after=", nan_after, " (valid=", valid_nan_after, ")");
         std::swap(new_state, *(*cell.fab_array[n])[lev]);
     }
 
@@ -516,6 +552,13 @@ Integrator::InitData()
     {
         Restart(restart_file_node, true);
     }
+
+    // Debug: check all registered cell fabs for NaN before writing plot file
+    for (int ilev = 0; ilev <= finest_level; ++ilev)
+        for (int n = 0; n < cell.number_of_fabs; n++)
+            if ((*cell.fab_array[n])[ilev]->contains_nan())
+                Util::Warning(INFO, cell.name_array[n][0], " has nan before WritePlotFile (lev=", ilev,
+                              " valid_only=", (*cell.fab_array[n])[ilev]->contains_nan(0, (*cell.fab_array[n])[ilev]->nComp(), 0), ")");
 
     if (plot_int > 0 || plot_dt > 0.0) {
         WritePlotFile();
@@ -872,15 +915,30 @@ Integrator::WritePlotFile(Set::Scalar time, amrex::Vector<int> iter, bool initia
             for (int i = 0; i < cell.number_of_fabs; i++)
             {
                 if (!cell.writeout_array[i]) continue;
-                if ((*cell.fab_array[i])[ilev]->contains_nan())
                 {
-                    if (abort_on_nan) Util::Abort(INFO, cnames[cnames_cnt], " contains nan (i=", i, ")");
-                    else              Util::Warning(INFO, cnames[cnames_cnt], " contains nan (i=", i, ")");
+                    bool valid_nan = (*cell.fab_array[i])[ilev]->contains_nan(0, (*cell.fab_array[i])[ilev]->nComp(), 0);
+                    if (valid_nan)
+                    {
+                        // Print location of NaN valid cells for diagnosis
+                        for (amrex::MFIter mfi(*(*cell.fab_array[i])[ilev], false); mfi.isValid(); ++mfi) {
+                            auto const& arr = (*cell.fab_array[i])[ilev]->array(mfi);
+                            const amrex::Box gbx = mfi.validbox();
+                            amrex::LoopOnCpu(gbx, [&](int ci, int cj, int ck) {
+                                for (int cn = 0; cn < (*cell.fab_array[i])[ilev]->nComp(); ++cn)
+                                    if (amrex::isnan(arr(ci,cj,ck,cn)))
+                                        amrex::Print() << "[NaN-LOC] " << cnames[cnames_cnt]
+                                                       << " comp=" << cn << " at (" << ci << "," << cj << "," << ck << ")"
+                                                       << " lev=" << ilev << "\n";
+                            });
+                        }
+                        if (abort_on_nan) Util::Abort(INFO, cnames[cnames_cnt], " contains nan in valid cells (i=", i, " lev=", ilev, ")");
+                        else              Util::Warning(INFO, cnames[cnames_cnt], " contains nan in valid cells (i=", i, " lev=", ilev, ")");
+                    }
                 }
                 if ((*cell.fab_array[i])[ilev]->contains_inf())
                 {
-                    if (abort_on_nan) Util::Abort(INFO, cnames[cnames_cnt], " contains inf (i=", i, ")");
-                    else              Util::Warning(INFO, cnames[cnames_cnt], " contains inf (i=", i, ")");
+                    if (abort_on_nan) Util::Abort(INFO, cnames[cnames_cnt], " contains inf (i=", i, " lev=", ilev, ")");
+                    else              Util::Warning(INFO, cnames[cnames_cnt], " contains inf (i=", i, " lev=", ilev, ")");
                 }
                 cnames_cnt++;
                 amrex::MultiFab::Copy(cplotmf[ilev], *(*cell.fab_array[i])[ilev], 0, n, cell.ncomp_array[i], 0);
@@ -1246,6 +1304,9 @@ Integrator::TimeStep(int lev, amrex::Real time, int /*iteration*/)
             amrex::average_down(*(*cell.fab_array[n])[lev + 1], *(*cell.fab_array[n])[lev],
                 geom[lev + 1], geom[lev],
                 0, (*cell.fab_array[n])[lev]->nComp(), refRatio(lev));
+            if ((*cell.fab_array[n])[lev]->contains_nan(0, (*cell.fab_array[n])[lev]->nComp(), 0))
+                amrex::Print() << "[POST-AVGDOWN] lev=" << lev << " cell fab " << n
+                               << " (" << cell.name_array[n][0] << ") has valid-cell NaN\n";
         }
         for (int n = 0; n < node.number_of_fabs; n++)
         {

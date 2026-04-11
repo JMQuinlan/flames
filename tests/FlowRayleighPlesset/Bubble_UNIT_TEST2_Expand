@@ -162,7 +162,7 @@ grav = 0.0
 Riemann_Solver.type = hllc
 kappa_method = 1   # 1:"Smooth Normals" (default)  2:"Height Function"  3:"Hybrid (HF+SN blend)"
 smooth_kernel_size = 3  # Gaussian normal smoothing kernel: 3 (3x3, default) or 5 (5x5)
-nghost = 2             # Ghost cell depth (= N_int for HF band). Requires amr.blocking_factor >= nghost.
+nghost = 4             # Ghost cell depth (= N_int for HF band). Requires amr.blocking_factor >= nghost.
 integration.type = ForwardEuler
 # integration.type = RungeKutta
 # implicit_ch = 1

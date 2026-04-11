@@ -434,16 +434,19 @@ void Hydro2::Initialize(int lev)
     amrex::Print() << "eta AFTER IC, BEFORE MIX: "
                 << eta_mf[lev]->min(0) << " "
                 << eta_mf[lev]->max(0) << "\n";
-
+    amrex::Print() << "eta NaN after IC (incl ghost): " << eta_mf[lev]->contains_nan() << "\n";
+    amrex::Print() << "eta NaN valid-only after IC:   " << eta_mf[lev]->contains_nan(0,1,0) << "\n";
 
     // Calculate mixed variables based on individual fluid variables
     Mix(lev);
+    amrex::Print() << "eta NaN after Mix (incl ghost):" << eta_mf[lev]->contains_nan() << "\n";
 
     // Make sure ghost cells are consistent with initial conditions
     eta_mf[lev]->FillBoundary(geom.periodicity());
     density_mf[lev]->FillBoundary(geom.periodicity());
     momentum_mf[lev]->FillBoundary(geom.periodicity());
     energy_per_vol_mf[lev]->FillBoundary(geom.periodicity());
+    amrex::Print() << "eta NaN after FillBoundary (incl ghost): " << eta_mf[lev]->contains_nan() << "\n";
 
     // NATURAL SOURCE
     Source_mf[lev]  ->setVal(0.0);
@@ -1279,6 +1282,36 @@ static void CH_ComputeMu(
 // Ghost-cell fix applied: f_prime ghost cells are filled via energy_bc before
 // computing ∇²f', so boundary-adjacent cells don't read uninitialized data.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/// Zero-gradient extrapolation for any NaN ghost cells not reached by FillBoundary
+/// (e.g. INT_DIR/NSCBC faces where physbc does nothing).
+/// Reads from the nearest valid cell of the same fab — equivalent to Neumann BC.
+static void FillNaNGhostsZeroGrad(amrex::MultiFab& mf)
+{
+    for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+        const amrex::Box gbx = mfi.fabbox();
+        const amrex::Box vbx = mfi.validbox();
+        auto arr = mf.array(mfi);
+        int  nc  = mf.nComp();
+        amrex::ParallelFor(gbx, nc, [=] AMREX_GPU_DEVICE(int i, int j, int k, int n) {
+            bool is_valid = AMREX_D_TERM(
+                (i >= vbx.smallEnd(0) && i <= vbx.bigEnd(0)),
+             && (j >= vbx.smallEnd(1) && j <= vbx.bigEnd(1)),
+             && (k >= vbx.smallEnd(2) && k <= vbx.bigEnd(2)));
+            if (!is_valid && !std::isfinite(arr(i,j,k,n))) {
+                int ic = amrex::max(vbx.smallEnd(0), amrex::min(vbx.bigEnd(0), i));
+                int jc = amrex::max(vbx.smallEnd(1), amrex::min(vbx.bigEnd(1), j));
+#if AMREX_SPACEDIM == 3
+                int kc = amrex::max(vbx.smallEnd(2), amrex::min(vbx.bigEnd(2), k));
+#else
+                int kc = k;
+#endif
+                arr(i,j,k,n) = arr(ic,jc,kc,n);
+            }
+        });
+    }
+}
+
 void Hydro2::ApplyImplicitCH(int lev, Set::Scalar dt)
 {
     BL_PROFILE("Integrator::Hydro2::ApplyImplicitCH");
@@ -1286,7 +1319,7 @@ void Hydro2::ApplyImplicitCH(int lev, Set::Scalar dt)
     const Geometry& geom   = this->geom[lev];
     const Real*     DX     = geom.CellSize();
     const Box&      domain = geom.Domain();
-    const int nghost = 2;
+    const int nghost = eta_mf[lev]->nGrow();
 
     const Real kappa_CH = epsilon * epsilon;
     const Real M_nom    = (ch_mobility_nom > 0.0) ? ch_mobility_nom
@@ -1340,6 +1373,7 @@ void Hydro2::ApplyImplicitCH(int lev, Set::Scalar dt)
     }
     energy_bc->FillBoundary(f_prime_mf, 0, 1, 0.0, 0);   // physical BCs
     f_prime_mf.FillBoundary(geom.periodicity());            // periodic + neighbor exchange
+    FillNaNGhostsZeroGrad(f_prime_mf);  // INT_DIR/NSCBC faces: physbc does nothing, fill by extrapolation
 
     // ------------------------------------------------------------------
     // rhs = η* + dt·M·∇²f'(η*)
@@ -1407,7 +1441,7 @@ void Hydro2::ApplyImplicitCH_Newton(int lev, Set::Scalar dt)
     const Geometry& geom   = this->geom[lev];
     const Real*     DX     = geom.CellSize();
     const Box&      domain = geom.Domain();
-    const int nghost = 2;
+    const int nghost = eta_mf[lev]->nGrow();
 
     const Real kappa_CH = epsilon * epsilon;
     const Real M_nom    = (ch_mobility_nom > 0.0) ? ch_mobility_nom
@@ -1473,9 +1507,11 @@ void Hydro2::ApplyImplicitCH_Newton(int lev, Set::Scalar dt)
         // Ensure η^k ghost cells are valid for Laplacian inside CH_ComputeMu
         energy_bc->FillBoundary(*eta_mf[lev], 0, 1, 0.0, 0);
         eta_mf[lev]->FillBoundary(geom.periodicity());
+        FillNaNGhostsZeroGrad(*eta_mf[lev]);  // INT_DIR/NSCBC: extrapolate so ∇²η is finite
 
         // μ^k = f'(η^k) − ε²∇²η^k  (valid cells + filled ghosts)
         CH_ComputeMu(mu_k, *eta_mf[lev], energy_bc, geom, DX, domain, kappa_CH, ch_W_scale);
+        FillNaNGhostsZeroGrad(mu_k);  // ensure Laplacian of μ^k reads finite ghost cells
 
         // Residual r = η^k − η* − dt·M·∇²μ^k
         // rhs_newton = −r = η* − η^k + dt·M·∇²μ^k
@@ -1543,6 +1579,9 @@ void Hydro2::ComputeHeightFunction(int lev)
     const int ihi = domain.bigEnd(0);
     const int jlo = domain.smallEnd(1);
     const int jhi = domain.bigEnd(1);
+
+    // Ensure eta ghost cells are NaN-free before the column integration reads them.
+    FillNaNGhostsZeroGrad(*eta_mf[lev]);
 
     // Column-integration height function (VOF analog for diffuse interfaces).
     //
@@ -2275,6 +2314,7 @@ void Hydro2::ApplyNSCBC(
                 Box face_box = vbx;
                 face_box.setSmall(dir, ibdry);
                 face_box.setBig  (dir, ibdry);
+                int ng_total = rho_mf_in.nGrow(); // captured by value in lambda below
 
                 ParallelFor(face_box, [=] AMREX_GPU_DEVICE (int i, int j, int k)
                 {
@@ -2528,6 +2568,12 @@ void Hydro2::ApplyNSCBC(
                                        ig1_i, jg1_j, k, dir_, rho_b, un_b, ut_b, p_b);
                         set_ghost_cons(eta_r, rho_a, M_a, E_a, gam_a, pi_a, p_a,
                                        ig2_i, jg2_j, k, dir_, rho_b, un_b, ut_b, p_b);
+                        // Fill g3..nGrow by constant extrapolation (copy boundary state)
+                        for (int ig = 3; ig <= ng_total; ++ig) {
+                            set_ghost_cons(eta_r, rho_a, M_a, E_a, gam_a, pi_a, p_a,
+                                           i + (-sign_in)*ig*di, j + (-sign_in)*ig*dj,
+                                           k, dir_, rho_b, un_b, ut_b, p_b);
+                        }
                         return;
                     }
 
@@ -2555,6 +2601,12 @@ void Hydro2::ApplyNSCBC(
                                    ig1_i, jg1_j, k, dir_, rho_g1, un_g1, ut_g1, p_g1);
                     set_ghost_cons(eta_r, rho_a, M_a, E_a, gam_a, pi_a, p_a,
                                    ig2_i, jg2_j, k, dir_, rho_g2, un_g2, ut_g2, p_g2);
+                    // Fill g3..nGrow by constant extrapolation (copy g2 state)
+                    for (int ig = 3; ig <= ng_total; ++ig) {
+                        set_ghost_cons(eta_r, rho_a, M_a, E_a, gam_a, pi_a, p_a,
+                                       i + (-sign_in)*ig*di, j + (-sign_in)*ig*dj,
+                                       k, dir_, rho_g2, un_g2, ut_g2, p_g2);
+                    }
                 });
             }  // side
         }  // dir
@@ -2592,8 +2644,8 @@ void Hydro2::ApplyNSCBC(
 
             if (!touch_x || !touch_y) continue;
 
-            // nghost ghost cells to fill in each direction (max 2 since nghost=2)
-            int ng = amrex::min(rho_mf_in.nGrow(), 2);
+            // fill all ghost cells in each direction
+            int ng = rho_mf_in.nGrow();
 
             // Build a box over the corner ghost cells.
             // sign_x: +1 for xhi ghosts, -1 for xlo ghosts
@@ -3029,6 +3081,52 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     density_bc->FillBoundary(solution_new[1], 0, solution_new[1].nComp(), time, 0);
     momentum_bc->FillBoundary(solution_new[2], 0, solution_new[2].nComp(), time, 0);
     energy_bc->FillBoundary(solution_new[3], 0, solution_new[3].nComp(), time, 0);
+
+    // Fill any NaN ghost cells not reached by same-level FillBoundary
+    // (coarse-fine gap regions when nghost > 2) by zero-gradient extrapolation
+    // from the nearest valid cell in the same fab.
+    {
+        auto fillNaNGhosts = [](amrex::MultiFab& mf) {
+            for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+                const amrex::Box gbx = mfi.fabbox();
+                const amrex::Box vbx = mfi.validbox();
+                auto arr = mf.array(mfi);
+                int  nc  = mf.nComp();
+                amrex::ParallelFor(gbx, nc, [=] AMREX_GPU_DEVICE(int i, int j, int k, int n) {
+                    bool is_valid = AMREX_D_TERM(
+                        (i >= vbx.smallEnd(0) && i <= vbx.bigEnd(0)),
+                     && (j >= vbx.smallEnd(1) && j <= vbx.bigEnd(1)),
+                     && (k >= vbx.smallEnd(2) && k <= vbx.bigEnd(2)));
+                    if (!is_valid && !std::isfinite(arr(i,j,k,n))) {
+                        int ic = amrex::max(vbx.smallEnd(0), amrex::min(vbx.bigEnd(0), i));
+                        int jc = amrex::max(vbx.smallEnd(1), amrex::min(vbx.bigEnd(1), j));
+#if AMREX_SPACEDIM == 3
+                        int kc = amrex::max(vbx.smallEnd(2), amrex::min(vbx.bigEnd(2), k));
+#else
+                        int kc = k;
+#endif
+                        arr(i,j,k,n) = arr(ic,jc,kc,n);
+                    }
+                });
+            }
+        };
+        for (auto& mf : solution_new) fillNaNGhosts(mf);
+
+        // Sanitize any remaining NaN in valid cells (can arise from FillCoarsePatch
+        // using NaN-contaminated coarse ghost cells during AMR initialization).
+        auto fillNaNValid = [](amrex::MultiFab& mf) {
+            for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+                const amrex::Box vbx = mfi.validbox();
+                auto arr = mf.array(mfi);
+                int nc = mf.nComp();
+                amrex::ParallelFor(vbx, nc, [=] AMREX_GPU_DEVICE(int i, int j, int k, int n) {
+                    if (!std::isfinite(arr(i,j,k,n))) arr(i,j,k,n) = amrex::Real(0.0);
+                });
+            }
+        };
+        for (auto& mf : solution_new) fillNaNValid(mf);
+    }
+
     // DIAGNOSTIC: check for NaN introduced by FillBoundary
     {
         const char* fnames[4] = {"eta","density","momentum","energy"};
@@ -3319,8 +3417,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             }
 
             // Mach Number
-            Ma(i, j, k, 0) = v(i, j, k, 0) / (a(i, j, k) + small);
-            Ma(i, j, k, 1) = v(i, j, k, 1) / (a(i, j, k) + small);
+            {
+                Set::Scalar max_ = v(i, j, k, 0) / (a(i, j, k) + small);
+                Set::Scalar may_ = v(i, j, k, 1) / (a(i, j, k) + small);
+                Ma(i, j, k, 0) = std::isfinite(max_) ? max_ : Set::Scalar(0.0);
+                Ma(i, j, k, 1) = std::isfinite(may_) ? may_ : Set::Scalar(0.0);
+            }
 
             // // Curvature
             // Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
@@ -3387,6 +3489,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
         });
     }
+
+    // Diagnostic: check Ma_mf immediately after visualization kernel
+    if (Ma_mf[lev]->contains_nan(0, Ma_mf[lev]->nComp(), 0))
+        amrex::Print() << "[POST-VIZ] Ma_mf lev=" << lev << " has VALID-CELL NaN after viz kernel\n";
+    else
+        amrex::Print() << "[POST-VIZ] Ma_mf lev=" << lev << " clean after viz kernel\n";
 
     // ------------------------------------------------------------
     // Dynamic Timesteping
