@@ -357,7 +357,7 @@ protected:
 
         // Outflow relaxation parameters (Motheau Eq. 38)
         Set::Scalar sigma = 0.25;  // pressure relaxation strength
-        Set::Scalar beta  = 0.5;   // transverse term weight (0 = none, 1 = full)
+        Set::Scalar beta  = 0.0;   // transverse term weight: 0 = full Lodato (recommended), 1 = pure LODI (no transverse)
 
         // Domain lengths used for the K relaxation coefficient.
         // Auto-set from geometry if not specified (0 = auto).
