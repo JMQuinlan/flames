@@ -240,7 +240,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.M_flux_mf,       &value.bc_nothing,  2, nghost, "M_flux", true, false, { "x", "y" });        // Momentum Flux
         value.RegisterNewFab(value.E_flux_mf,       &value.bc_nothing,  1, nghost, "E_flux", true, false);                      // Energy Flux
         value.RegisterNewFab(value.div_tau_mf,      &value.bc_nothing,  2, nghost, "div_tau", true, false, { "x", "y" });
-        value.RegisterNewFab(value.tau_mf,          &value.bc_nothing,  3, nghost, "tau", false, false, { "xx", "xy", "yy" }); // viscous stress tensor
+        value.RegisterNewFab(value.tau_mf,          &value.bc_nothing,  3, nghost, "tau", true, false, { "xx", "xy", "yy" }); // viscous stress tensor
         value.RegisterNewFab(value.hess_u_mf,       &value.bc_nothing,  8, nghost, "hess_u", false, false, {
                                                                                                      "000","001",
                                                                                                      "010","011",
@@ -1089,6 +1089,20 @@ Hydro2::RHS(int lev,
             // hess_u is no longer computed; zero out diagnostic field
             for (int c = 0; c < 8; c++) hess_u_arr(i,j,k,c) = 0.0;
 
+            // Velocity gradient at this cell — needed for the τ:∇u and K:∇u
+            // stress-work terms in the energy equation.
+            // Full identity: ∇·(σ·u) = (∇·σ)·u + σ:∇u.
+            // The (∇·σ)·u half is already in u.dot(div_tau) / u.dot(Total_Force);
+            // this gradient supplies the missing σ:∇u half.
+            Set::Matrix gradu_loc = Numeric::Gradient(v_arr, i, j, k, DX, sten);
+
+            // Viscous dissipation τ:∇u  (always ≥ 0; converts kinetic → thermal energy)
+            // τ is symmetric so τ_ij ∂u_i/∂x_j = τ_xx ∂u/∂x + τ_yy ∂v/∂y
+            //                                   + τ_xy (∂u/∂y + ∂v/∂x)
+            Real tau_dot_gradu = tau_arr(i,j,k,0) * gradu_loc(0,0)
+                               + tau_arr(i,j,k,2) * gradu_loc(1,1)
+                               + tau_arr(i,j,k,1) * (gradu_loc(0,1) + gradu_loc(1,0));
+
             // Interface Lagrangian term (Ldot) — needs local M tensor and hess_eta
             Set::Vector Ldot = Set::Vector::Zero();
             Real mu_eff     = eta_loc * mu0  + (1.0 - eta_loc) * mu1;
@@ -1118,6 +1132,23 @@ Hydro2::RHS(int lev,
             }
             Fsv_arr(i,j,k,0) = Fsv_vector(0);
             Fsv_arr(i,j,k,1) = Fsv_vector(1);
+
+            // Capillary work K:∇u  (second half of ∇·(K·u) = (∇·K)·u + K:∇u)
+            // K_ij = σε(½|∇η|² δ_ij − ∂_i η ∂_j η)  (Korteweg stress tensor)
+            // The (∇·K)·u half is already captured by u.dot(Fsv_vector).
+            // K:∇u is angle-dependent around a curved interface (K_xx ≠ K_yy except
+            // at 45°), so omitting it breaks radial symmetry → pressure stripes.
+            Real K_dot_gradu = 0.0;
+            if (apply_surface_tension)
+            {
+                Real ge2 = grad_eta.squaredNorm();
+                Real K_xx = sigma * epsilon * (0.5*ge2 - grad_eta(0)*grad_eta(0));
+                Real K_yy = sigma * epsilon * (0.5*ge2 - grad_eta(1)*grad_eta(1));
+                Real K_xy = -sigma * epsilon * grad_eta(0) * grad_eta(1);
+                K_dot_gradu = K_xx * gradu_loc(0,0)
+                            + K_yy * gradu_loc(1,1)
+                            + K_xy * (gradu_loc(0,1) + gradu_loc(1,0));
+            }
 
             // Gravity: F_w = -rho * g (downward)
             Set::Vector Fw_vector = Set::Vector(0.0, 0.0);
@@ -1158,7 +1189,11 @@ Hydro2::RHS(int lev,
             S_arr(i,j,k,0) = mdot0 + m_dot_Vap;
             S_arr(i,j,k,1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0) + M_dot_Vap(0);
             S_arr(i,j,k,2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1) + M_dot_Vap(1);
-            S_arr(i,j,k,3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force) + E_dot_Vap;
+            S_arr(i,j,k,3) = qdot0
+                           + u.dot(div_tau) + tau_dot_gradu   // ∇·(τ·u) = (∇·τ)·u + τ:∇u
+                           + u.dot(Ldot)
+                           + u.dot(Total_Force) + K_dot_gradu // ∇·(K·u) = (∇·K)·u + K:∇u
+                           + E_dot_Vap;
 
             // Lagrange no-penetration enforcement
             S_arr(i,j,k,1) -= lagrange * u.dot(grad_eta) * grad_eta(0);
