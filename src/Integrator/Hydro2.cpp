@@ -1023,7 +1023,7 @@ Hydro2::RHS(int lev,
             Set::Vector u   = Set::Vector(vx_loc, vy_loc);
             Set::Vector u0v = Set::Vector(u0_arr(i,j,k,0), u0_arr(i,j,k,1));
 
-            Set::Vector grad_eta    = Numeric::Gradient(eta_arr, i, j, k, 0, DX);
+            Set::Vector grad_eta    = Numeric::Gradient(eta_arr, i, j, k, 0, DX, sten);
             Real grad_eta_mag       = grad_eta.lpNorm<2>();
             Set::Matrix hess_eta    = Numeric::Hessian(eta_arr, i, j, k, 0, DX, sten);
 
@@ -1036,20 +1036,23 @@ Hydro2::RHS(int lev,
             // Velocity gradient (for viscous stress)
             // Pass boundary-aware stencil so ghost cells at physical boundaries
             // are not read (prevents NaN propagation from NSCBC ghost cells).
-            Set::Matrix gradM    = Numeric::Gradient(M_arr, i, j, k, DX, sten);
-            Set::Vector gradrho  = Numeric::Gradient(rho_arr, i, j, k, 0, DX, sten);
-            Set::Matrix hess_rho = Numeric::Hessian(rho_arr, i, j, k, 0, DX, sten);
-            Set::Matrix gradu    = (gradM - u * gradrho.transpose()) / rho_loc;
+//             Set::Matrix gradM    = Numeric::Gradient(M_arr, i, j, k, DX, sten);
+//             Set::Vector gradrho  = Numeric::Gradient(rho_arr, i, j, k, 0, DX, sten);
+//             Set::Matrix hess_rho = Numeric::Hessian(rho_arr, i, j, k, 0, DX, sten);
+//             Set::Matrix gradu    = (gradM - u * gradrho.transpose()) / rho_loc;
+// 
+//             Set::Matrix3 hess_M = Numeric::Hessian(M_arr, i, j, k, DX, sten);
+//             Set::Matrix3 hess_u = Set::Matrix3::Zero();
+//             for (int p = 0; p < 2; p++)
+//                 for (int q = 0; q < 2; q++)
+//                     for (int r = 0; r < 2; r++)
+//                         hess_u(r,p,q) = (hess_M(r,p,q)
+//                                         - gradu(r,q)*gradrho(p)
+//                                         - gradu(r,p)*gradrho(q)
+//                                         - u(r)*hess_rho(p,q)) / rho_loc;
 
-            Set::Matrix3 hess_M = Numeric::Hessian(M_arr, i, j, k, DX, sten);
-            Set::Matrix3 hess_u = Set::Matrix3::Zero();
-            for (int p = 0; p < 2; p++)
-                for (int q = 0; q < 2; q++)
-                    for (int r = 0; r < 2; r++)
-                        hess_u(r,p,q) = (hess_M(r,p,q)
-                                        - gradu(r,q)*gradrho(p)
-                                        - gradu(r,p)*gradrho(q)
-                                        - u(r)*hess_rho(p,q)) / rho_loc;
+            Set::Matrix gradu = Numeric::Gradient(v_arr, i, j, k, DX, sten);
+            Set::Matrix3 hess_u = Numeric::Hessian(v_arr, i, j, k, DX, sten);
 
             hess_u_arr(i,j,k,0) = hess_u(0,0,0);
             hess_u_arr(i,j,k,1) = hess_u(0,0,1);
