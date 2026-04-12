@@ -786,14 +786,9 @@ Hydro2::RHS(int lev,
             density_mf[lev].get(), 
             rho_eta0_mf[lev].get(), 
             rho_eta1_mf[lev].get() });
-
-        Util::Message(INFO, "Using NSCBC");
-
     }
     else
     {
-        Util::ParallelMessage(INFO, "Filling Conserves");
-
         // Copy interior + ghost cells TO working copies
         amrex::MultiFab rho_eta0_copy(rho_eta0_mf_in.boxArray(), rho_eta0_mf_in.DistributionMap(), 1, nghost);
         amrex::MultiFab rho_eta1_copy(rho_eta1_mf_in.boxArray(), rho_eta1_mf_in.DistributionMap(), 1, nghost);
@@ -1170,8 +1165,6 @@ Hydro2::RHS(int lev,
     }
     else
     {
-        Util::ParallelMessage(INFO, "Filling Primatives");
-
         // Primative Field Boundries
         FillBoundariesWithBC(lev, time, energy_bc, { 
             pressure_mf[lev].get(), 
@@ -2920,12 +2913,14 @@ void Hydro2::FillBoundariesWithBC(int lev, Set::Scalar time, BC::BC<Set::Scalar>
         }
 
         // Checking
+        /*
         if (mf->contains_nan())
         {
-            Util::ParallelMessage(INFO, "-------------------------------");
+            Util::Paralle lMessage(INFO, "-------------------------------");
             Util::ParallelMessage(INFO, "NaNs after FillBoundariesWithBC");
             Util::Abort(INFO);
         }
+        */
     }
 }
 

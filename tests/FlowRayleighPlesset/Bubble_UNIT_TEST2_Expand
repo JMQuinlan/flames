@@ -167,3 +167,5 @@ sharpening_frequency = 50
 reinit_max_iter = 100
 reinit_tolerance = 1e-6
 omega_relax = 0.5; 
+
+nghost = 4
