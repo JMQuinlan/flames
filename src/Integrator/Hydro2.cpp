@@ -139,6 +139,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.momentum_bc = new BC::Expression(2, pp, "momentum.bc");
         value.temperature_bc = new BC::Constant(1, pp, "energy.bc"); // Change to be different if needed? ___TEMP___
         */
+        pp_query_default("nghost", value.nghost, 2);
+
         bool uses_nscbc = false;
         std::vector<std::string> bc_faces = { "xlo", "xhi", "ylo", "yhi" };
 #if AMREX_SPACEDIM == 3
@@ -193,7 +195,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     // Register FabFields:
     // Toggle the last boolean to true/false to track the variable or not.
     {
-        int nghost = 4;
+        int nghost = value.nghost;
 
         // DIFFUSE PARAMETERS
         value.RegisterNewFab(value.eta_mf,           value.density_bc, 1, nghost, "eta", true, true);

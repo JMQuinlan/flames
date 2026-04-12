@@ -349,6 +349,8 @@ protected:
     Set::Scalar omega_relax = 0.5;
 
 
+    // NGHOST
+    int nghost = 2;
 
 };
 }

@@ -122,6 +122,9 @@ apply_surface_tension = 0
 apply_weight = 0
 apply_vaporization = 0
 
+nghost = 4
+
+
 
 
 apply_sharpening = 0
