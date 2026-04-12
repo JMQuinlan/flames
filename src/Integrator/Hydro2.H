@@ -216,6 +216,7 @@ protected:
     // Debugging
     Set::Field<Set::Scalar> div_tau_mf;
     Set::Field<Set::Scalar> hess_u_mf;
+    Set::Field<Set::Scalar> tau_mf;     // viscous stress tensor (xx, xy, yy)
     Set::Field<Set::Scalar> Vap_dot_mf;
 
 

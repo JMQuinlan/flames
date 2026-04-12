@@ -6,8 +6,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-# plot_file = ./tests/RayleighPlesset/output_RayleighPlesset_gc-nscbc
-plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE
+plot_file = ./tests/FlowRayleighPlesset/output_RPE
+# plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE
 
 ### MESHING ###
 amr.plot_dt = 0.5e-6

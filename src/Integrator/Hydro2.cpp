@@ -239,7 +239,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.rho_flux_mf,     &value.bc_nothing,  1, nghost, "rho_flux", true, false);                    // Density Flux
         value.RegisterNewFab(value.M_flux_mf,       &value.bc_nothing,  2, nghost, "M_flux", true, false, { "x", "y" });        // Momentum Flux
         value.RegisterNewFab(value.E_flux_mf,       &value.bc_nothing,  1, nghost, "E_flux", true, false);                      // Energy Flux
-        value.RegisterNewFab(value.div_tau_mf,      &value.bc_nothing,  2, nghost, "div_tau", true, false, { "x", "y" });            // Energy Flux
+        value.RegisterNewFab(value.div_tau_mf,      &value.bc_nothing,  2, nghost, "div_tau", true, false, { "x", "y" });
+        value.RegisterNewFab(value.tau_mf,          &value.bc_nothing,  3, nghost, "tau", false, false, { "xx", "xy", "yy" }); // viscous stress tensor
         value.RegisterNewFab(value.hess_u_mf,       &value.bc_nothing,  8, nghost, "hess_u", false, false, {
                                                                                                      "000","001",
                                                                                                      "010","011",
@@ -454,6 +455,7 @@ void Hydro2::Initialize(int lev)
     Fw_mf[lev]      ->setVal(0.0);
     Ldot_mf[lev]    ->setVal(0.0);
     Vap_dot_mf[lev] ->setVal(0.0);
+    tau_mf[lev]     ->setVal(0.0);
 
     // BOUNDRY CURVATURE AND THINGS
     kappas_mf[lev]  ->setVal(0.0);
@@ -869,6 +871,42 @@ Hydro2::RHS(int lev,
     T_mf[lev]->FillBoundary(geom.periodicity());
 
     //---------------------------------------------------------------------------
+    // 1b. PASS A: compute viscous stress tensor tau at every cell.
+    //     tau is stored in tau_mf, then FillBoundary'd so that Pass B can
+    //     differentiate it with a single first-order FD — avoiding hess_u
+    //     and explicit grad(mu) terms entirely.
+    //---------------------------------------------------------------------------
+    for (MFIter mfi(*velocity_mf[lev], true); mfi.isValid(); ++mfi)
+    {
+        const Box& bx    = mfi.validbox();
+        auto eta_arr_tau = eta_mf_in.array(mfi);
+        auto v_arr_tau   = velocity_mf[lev]->array(mfi);
+        auto tau_arr     = tau_mf[lev]->array(mfi);
+
+        Real mu0_    = mu0;
+        Real mu1_    = mu1;
+        Real mu0_b_  = mu0_b;
+        Real mu1_b_  = mu1_b;
+
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        {
+            auto sten = Numeric::GetStencil(i, j, k, domain);
+            Real eta_loc    = eta_arr_tau(i,j,k);
+            Real mu_eff     = eta_loc * mu0_  + (1.0 - eta_loc) * mu1_;
+            Real lambda_eff = eta_loc * mu0_b_ + (1.0 - eta_loc) * mu1_b_;
+
+            Set::Matrix gradu = Numeric::Gradient(v_arr_tau, i, j, k, DX, sten);
+            Real div_u = gradu(0,0) + gradu(1,1);
+            Real bulk  = lambda_eff - (2.0/3.0)*mu_eff;
+
+            tau_arr(i,j,k,0) = 2.0*mu_eff*gradu(0,0) + bulk*div_u;           // tau_xx
+            tau_arr(i,j,k,1) = mu_eff*(gradu(0,1) + gradu(1,0));              // tau_xy = tau_yx
+            tau_arr(i,j,k,2) = 2.0*mu_eff*gradu(1,1) + bulk*div_u;           // tau_yy
+        });
+    }
+    tau_mf[lev]->FillBoundary(geom.periodicity());
+
+    //---------------------------------------------------------------------------
     // 2. SECOND LOOP: compute fluxes using Riemann solver
     //---------------------------------------------------------------------------
     for (MFIter mfi(*velocity_mf[lev], true); mfi.isValid(); ++mfi)
@@ -907,6 +945,7 @@ Hydro2::RHS(int lev,
         auto Vap_dot_arr = Vap_dot_mf[lev]->array(mfi);
         auto div_tau_arr = div_tau_mf[lev]->array(mfi);
         auto hess_u_arr  = hess_u_mf[lev]->array(mfi);
+        auto tau_arr     = tau_mf[lev]->const_array(mfi);
         auto m0_arr      = m0_mf[lev]->array(mfi);
         auto u0_arr      = u0_mf[lev]->array(mfi);
         auto q0_arr      = q_mf[lev]->array(mfi);
@@ -1014,7 +1053,7 @@ Hydro2::RHS(int lev,
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
             Real eta_loc    = eta_arr(i,j,k);
-            // Guard against rho=0 to prevent division-by-zero in gradu/hess_u
+            // Guard against rho=0
             Real rho_loc    = amrex::max(rho_arr(i,j,k), Real(1.0e-14));
             // Guard against Inf/NaN velocity (e.g. from a prior step with near-zero rho
             // that was fixed by safe_rho; Inf*0=NaN in grad/source terms)
@@ -1033,65 +1072,41 @@ Hydro2::RHS(int lev,
             Set::Vector q0_ = Set::Vector(q0_arr(i,j,k,0), q0_arr(i,j,k,1));
             Real qdot0 = q0_.dot(grad_eta);
 
-            // Velocity gradient (for viscous stress)
-            // Pass boundary-aware stencil so ghost cells at physical boundaries
-            // are not read (prevents NaN propagation from NSCBC ghost cells).
-//             Set::Matrix gradM    = Numeric::Gradient(M_arr, i, j, k, DX, sten);
-//             Set::Vector gradrho  = Numeric::Gradient(rho_arr, i, j, k, 0, DX, sten);
-//             Set::Matrix hess_rho = Numeric::Hessian(rho_arr, i, j, k, 0, DX, sten);
-//             Set::Matrix gradu    = (gradM - u * gradrho.transpose()) / rho_loc;
-// 
-//             Set::Matrix3 hess_M = Numeric::Hessian(M_arr, i, j, k, DX, sten);
-//             Set::Matrix3 hess_u = Set::Matrix3::Zero();
-//             for (int p = 0; p < 2; p++)
-//                 for (int q = 0; q < 2; q++)
-//                     for (int r = 0; r < 2; r++)
-//                         hess_u(r,p,q) = (hess_M(r,p,q)
-//                                         - gradu(r,q)*gradrho(p)
-//                                         - gradu(r,p)*gradrho(q)
-//                                         - u(r)*hess_rho(p,q)) / rho_loc;
+            // Viscous stress divergence: differentiate the pre-computed tau field.
+            // This avoids explicit grad(mu) and hess_u terms; variable viscosity
+            // is captured naturally through the tau values at neighboring cells.
+            Set::Vector grad_tau_xx = Numeric::Gradient(tau_arr, i, j, k, 0, DX, sten);
+            Set::Vector grad_tau_xy = Numeric::Gradient(tau_arr, i, j, k, 1, DX, sten);
+            Set::Vector grad_tau_yy = Numeric::Gradient(tau_arr, i, j, k, 2, DX, sten);
 
-            Set::Matrix gradu = Numeric::Gradient(v_arr, i, j, k, DX, sten);
-            Set::Matrix3 hess_u = Numeric::Hessian(v_arr, i, j, k, DX, sten);
+            Set::Vector div_tau;
+            div_tau(0) = grad_tau_xx(0) + grad_tau_xy(1);
+            div_tau(1) = grad_tau_xy(0) + grad_tau_yy(1);
 
-            hess_u_arr(i,j,k,0) = hess_u(0,0,0);
-            hess_u_arr(i,j,k,1) = hess_u(0,0,1);
-            hess_u_arr(i,j,k,2) = hess_u(0,1,0);
-            hess_u_arr(i,j,k,3) = hess_u(0,1,1);
-            hess_u_arr(i,j,k,4) = hess_u(1,0,0);
-            hess_u_arr(i,j,k,5) = hess_u(1,0,1);
-            hess_u_arr(i,j,k,6) = hess_u(1,1,0);
-            hess_u_arr(i,j,k,7) = hess_u(1,1,1);
+            div_tau_arr(i,j,k,0) = div_tau(0);
+            div_tau_arr(i,j,k,1) = div_tau(1);
 
-            // Viscous stress divergence + interface Lagrangian term
-            Set::Vector div_tau = Set::Vector::Zero();
-            Set::Vector Ldot    = Set::Vector::Zero();
+            // hess_u is no longer computed; zero out diagnostic field
+            for (int c = 0; c < 8; c++) hess_u_arr(i,j,k,c) = 0.0;
 
+            // Interface Lagrangian term (Ldot) — needs local M tensor and hess_eta
+            Set::Vector Ldot = Set::Vector::Zero();
             Real mu_eff     = eta_loc * mu0  + (1.0 - eta_loc) * mu1;
             Real lambda_eff = eta_loc * mu0_b + (1.0 - eta_loc) * mu1_b;
-            Set::Vector grad_mu     = (mu0  - mu1 ) * grad_eta;
-            Set::Vector grad_lambda = (mu0_b - mu1_b) * grad_eta;
-
             for (int p = 0; p < 2; p++)
                 for (int q = 0; q < 2; q++)
                     for (int r = 0; r < 2; r++)
                         for (int s = 0; s < 2; s++)
                         {
-                            Real Mpqrs  = 0.0;
-                            Real dMpqrs = 0.0;
-                            if ((p==r) && (q==s)) { Mpqrs  += mu_eff;     dMpqrs += grad_mu(q); }
-                            if ((p==s) && (q==r)) { Mpqrs  += mu_eff;     dMpqrs += grad_mu(q); }
-                            if ((p==q) && (r==s)) { Mpqrs  += lambda_eff - (2.0/3.0)*mu_eff;
-                                                    dMpqrs += grad_lambda(q) - (2.0/3.0)*grad_mu(q); }
-                            div_tau(p) += Mpqrs  * hess_u(r,s,q);
-                            div_tau(p) += dMpqrs * gradu(r,s);
-                            Ldot(p)    += 0.5 * Mpqrs * (u(r) - u0v(r)) * hess_eta(q,s);
+                            Real Mpqrs = 0.0;
+                            if ((p==r) && (q==s)) Mpqrs += mu_eff;
+                            if ((p==s) && (q==r)) Mpqrs += mu_eff;
+                            if ((p==q) && (r==s)) Mpqrs += lambda_eff - (2.0/3.0)*mu_eff;
+                            Ldot(p) += 0.5 * Mpqrs * (u(r) - u0v(r)) * hess_eta(q,s);
                         }
 
-            div_tau_arr(i,j,k,0) = div_tau(0);
-            div_tau_arr(i,j,k,1) = div_tau(1);
-            Ldot_arr(i,j,k,0)    = Ldot(0);
-            Ldot_arr(i,j,k,1)    = Ldot(1);
+            Ldot_arr(i,j,k,0) = Ldot(0);
+            Ldot_arr(i,j,k,1) = Ldot(1);
 
             // Surface tension: F_sv = sigma * kappa * grad(eta) * epsilon
             Set::Vector Fsv_vector = Set::Vector(0.0, 0.0);
