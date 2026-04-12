@@ -795,16 +795,16 @@ Hydro2::RHS(int lev,
         Util::ParallelMessage(INFO, "Filling Conserves");
 
         // Copy interior + ghost cells TO working copies
-        amrex::MultiFab rho_eta0_copy(rho_eta0_mf_in.boxArray(), rho_eta0_mf_in.DistributionMap(), 1, 4);
-        amrex::MultiFab rho_eta1_copy(rho_eta1_mf_in.boxArray(), rho_eta1_mf_in.DistributionMap(), 1, 4);
-        amrex::MultiFab M_copy(M_mf_in.boxArray(), M_mf_in.DistributionMap(), AMREX_SPACEDIM, 4);
-        amrex::MultiFab E_copy(E_mf_in.boxArray(), E_mf_in.DistributionMap(), 1, 4);
+        amrex::MultiFab rho_eta0_copy(rho_eta0_mf_in.boxArray(), rho_eta0_mf_in.DistributionMap(), 1, nghost);
+        amrex::MultiFab rho_eta1_copy(rho_eta1_mf_in.boxArray(), rho_eta1_mf_in.DistributionMap(), 1, nghost);
+        amrex::MultiFab M_copy(M_mf_in.boxArray(), M_mf_in.DistributionMap(), AMREX_SPACEDIM, nghost);
+        amrex::MultiFab E_copy(E_mf_in.boxArray(), E_mf_in.DistributionMap(), 1, nghost);
 
 
-        amrex::MultiFab::Copy(rho_eta0_copy, rho_eta0_mf_in, 0, 0, 1, 4);              // Include ghosts
-        amrex::MultiFab::Copy(rho_eta1_copy, rho_eta1_mf_in, 0, 0, 1, 4);              // Include ghosts
-        amrex::MultiFab::Copy(M_copy, M_mf_in, 0, 0, AMREX_SPACEDIM, 4); // Include ghosts
-        amrex::MultiFab::Copy(E_copy, E_mf_in, 0, 0, 1, 4);              // Include ghosts
+        amrex::MultiFab::Copy(rho_eta0_copy, rho_eta0_mf_in, 0, 0, 1, nghost); // Include ghosts
+        amrex::MultiFab::Copy(rho_eta1_copy, rho_eta1_mf_in, 0, 0, 1, nghost); // Include ghosts
+        amrex::MultiFab::Copy(M_copy, M_mf_in, 0, 0, AMREX_SPACEDIM, nghost);  // Include ghosts
+        amrex::MultiFab::Copy(E_copy, E_mf_in, 0, 0, 1, nghost);               // Include ghosts
         
 
         FillBoundariesWithBC(lev, time, density_bc, { 
@@ -823,10 +823,10 @@ Hydro2::RHS(int lev,
         });
 
         // Copy back INCLUDING ALL 4 GHOST CELL LAYERS
-        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(rho_eta0_mf_in), rho_eta0_copy, 0, 0, 1, 4);
-        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(rho_eta1_mf_in), rho_eta1_copy, 0, 0, 1, 4);
-        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(M_mf_in), M_copy, 0, 0, AMREX_SPACEDIM, 4);
-        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(E_mf_in), E_copy, 0, 0, 1, 4);
+        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(rho_eta0_mf_in), rho_eta0_copy, 0, 0, 1, nghost);
+        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(rho_eta1_mf_in), rho_eta1_copy, 0, 0, 1, nghost);
+        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(M_mf_in), M_copy, 0, 0, AMREX_SPACEDIM, nghost);
+        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(E_mf_in), E_copy, 0, 0, 1, nghost);
         
         /*
         FillBoundariesWithBC(lev, time, density_bc, { 
