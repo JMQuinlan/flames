@@ -1753,7 +1753,7 @@ Hydro2::RHS(int lev,
                 Util::Abort(INFO);
             }
 
-            if ((time <= 1e-7 && i == 0 && j == 0) && false)
+            if ((time <= 1e-7 && i == 0 && j == 0) && true)
             { // First timestep~ish~, first cell
                 Util::ParallelMessage(INFO, "=== FIRST CELL DIAGNOSTICS ===");
                 Util::ParallelMessage(INFO, "eta = ", eta(i, j, k));
@@ -1828,29 +1828,29 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     });
 
     timeintegrator.set_post_stage_action([&](amrex::Vector<amrex::MultiFab> &stage_mf, Set::Scalar time) {
-        if (false) // (nscbc_bc != nullptr)
+        if (nscbc_bc != nullptr)
         {
             // NSCBC mode: Apply NSCBC boundaries
             Util::Message(INFO, "Using NSCBC");
 
             // Create copies for momentum and energy
-            amrex::MultiFab M_stage_copy(stage_mf[2].boxArray(), stage_mf[2].DistributionMap(), AMREX_SPACEDIM, 4);
-            amrex::MultiFab E_stage_copy(stage_mf[3].boxArray(), stage_mf[3].DistributionMap(), 1, 4);
+            amrex::MultiFab M_stage_copy(stage_mf[2].boxArray(), stage_mf[2].DistributionMap(), AMREX_SPACEDIM, nghost);
+            amrex::MultiFab E_stage_copy(stage_mf[3].boxArray(), stage_mf[3].DistributionMap(), 1, nghost);
 
             amrex::MultiFab::Copy(M_stage_copy, stage_mf[2], 0, 0, AMREX_SPACEDIM, 0);
             amrex::MultiFab::Copy(E_stage_copy, stage_mf[3], 0, 0, 1, 0);
 
             // Compute total density: rho = rho_eta0 + rho_eta1
-            amrex::MultiFab rho_total(stage_mf[0].boxArray(), stage_mf[0].DistributionMap(), 1, 4);
+            amrex::MultiFab rho_total(stage_mf[0].boxArray(), stage_mf[0].DistributionMap(), 1, nghost);
             amrex::MultiFab::Copy(rho_total, stage_mf[0], 0, 0, 1, 0); // rho_eta0
             amrex::MultiFab::Add(rho_total, stage_mf[1], 0, 0, 1, 0);  // + rho_eta1
 
             // Compute eta = rho_eta0 / rho_total
-            amrex::MultiFab eta_stage(stage_mf[0].boxArray(), stage_mf[0].DistributionMap(), 1, 4);
+            amrex::MultiFab eta_stage(stage_mf[0].boxArray(), stage_mf[0].DistributionMap(), 1, nghost);
 
             for (amrex::MFIter mfi(eta_stage); mfi.isValid(); ++mfi)
             {
-                const amrex::Box &bx = mfi.growntilebox(4);
+                const amrex::Box &bx = mfi.growntilebox(nghost);
 
                 // Get Array4 accessors OUTSIDE the ParallelFor
                 amrex::Array4<Set::Scalar> eta_arr = eta_stage.array(mfi);
@@ -1877,13 +1877,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                                    pref);
 
             // Copy modified momentum and energy back
-            amrex::MultiFab::Copy(stage_mf[2], M_stage_copy, 0, 0, AMREX_SPACEDIM, 4);
-            amrex::MultiFab::Copy(stage_mf[3], E_stage_copy, 0, 0, 1, 4);
+            amrex::MultiFab::Copy(stage_mf[2], M_stage_copy, 0, 0, AMREX_SPACEDIM, nghost);
+            amrex::MultiFab::Copy(stage_mf[3], E_stage_copy, 0, 0, 1, nghost);
 
             // Update rho_eta0 and rho_eta1 from modified rho_total and eta
             for (amrex::MFIter mfi(rho_total); mfi.isValid(); ++mfi)
             {
-                const amrex::Box &bx = mfi.growntilebox(4);
+                const amrex::Box &bx = mfi.growntilebox(nghost);
 
                 // Get Array4 accessors OUTSIDE the ParallelFor
                 amrex::Array4<const Set::Scalar> rho_arr = rho_total.array(mfi);
@@ -1904,7 +1904,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             stage_mf[0].FillBoundary(true);
             density_bc->FillBoundary(stage_mf[1], 0, 1, time, 0);
             stage_mf[1].FillBoundary(true);
-            momentum_bc->FillBoundary(stage_mf[2], 0, 2, time, 0);
+            momentum_bc->FillBoundary(stage_mf[2], 0, AMREX_SPACEDIM, time, 0);
             stage_mf[2].FillBoundary(true);
             energy_bc->FillBoundary(stage_mf[3], 0, 1, time, 0);
             stage_mf[3].FillBoundary(true);
@@ -1947,7 +1947,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             eta_new(i, j, k) = std::max(0.0, std::min(1.0, (eta_new(i, j, k) - cutoff) / (1.0 - 2.0 * cutoff)));
             rho(i, j, k) = std::max(rho(i, j, k), small);
 
-            check4nans(time, lev, i, j, k, "ERROR IN Advance(): Conservative Variable Check", { { "eta_new", eta_new(i, j, k) }, { "rho_eta0", rho_eta0(i, j, k) }, { "rho_eta1", rho_eta1(i, j, k) }, { "rho", rho(i, j, k) } });
+            check4nans(time, lev, i, j, k, "ERROR IN Advance(): Conservative Variable Check", { 
+                { "eta_new", eta_new(i, j, k) }, 
+                { "rho_eta0", rho_eta0(i, j, k) }, 
+                { "rho_eta1", rho_eta1(i, j, k) }, 
+                { "rho", rho(i, j, k) } 
+            });
         });
     } // end rho, eta solver loop
 
