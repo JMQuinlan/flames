@@ -1027,12 +1027,12 @@ Hydro2::RHS(int lev,
         Util::Message(INFO, "Using NSCBC");
 
         // NSCBC: Apply NSCBC boundaries
-        amrex::MultiFab M_copy(M_mf_in.boxArray(), M_mf_in.DistributionMap(), AMREX_SPACEDIM, 4);
-        amrex::MultiFab E_copy(E_mf_in.boxArray(), E_mf_in.DistributionMap(), 1, 4);
+        amrex::MultiFab M_copy(M_mf_in.boxArray(), M_mf_in.DistributionMap(), AMREX_SPACEDIM, nghost);
+        amrex::MultiFab E_copy(E_mf_in.boxArray(), E_mf_in.DistributionMap(), 1, nghost);
 
         // Copy interior + ghost cells TO working copies
-        amrex::MultiFab::Copy(M_copy, M_mf_in, 0, 0, AMREX_SPACEDIM, 4); // Include ghosts
-        amrex::MultiFab::Copy(E_copy, E_mf_in, 0, 0, 1, 4);              // Include ghosts
+        amrex::MultiFab::Copy(M_copy, M_mf_in, 0, 0, AMREX_SPACEDIM, nghost); // Include ghosts
+        amrex::MultiFab::Copy(E_copy, E_mf_in, 0, 0, 1, nghost);              // Include ghosts
 
 
         // Apply NSCBC (modifies M_copy, E_copy, and density_mf in-place)
@@ -1046,9 +1046,9 @@ Hydro2::RHS(int lev,
                                time,
                                pref);
 
-        // Copy back INCLUDING ALL 4 GHOST CELL LAYERS
-        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(M_mf_in), M_copy, 0, 0, AMREX_SPACEDIM, 4);
-        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(E_mf_in), E_copy, 0, 0, 1, 4);
+        // Copy back INCLUDING ALL GHOST CELL LAYERS
+        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(M_mf_in), M_copy, 0, 0, AMREX_SPACEDIM, nghost);
+        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(E_mf_in), E_copy, 0, 0, 1, nghost);
 
         // Ensure density ghost cells are synchronized
         density_mf[lev]->FillBoundary(geom[lev].periodicity());
@@ -1056,7 +1056,7 @@ Hydro2::RHS(int lev,
         // Compute primitive variables in ghost cells from updated conservative variables
         for (amrex::MFIter mfi(*velocity_mf[lev], false); mfi.isValid(); ++mfi)
         {
-            const amrex::Box &ghost_box = mfi.growntilebox(4); // All 4 ghost layers
+            const amrex::Box &ghost_box = mfi.growntilebox(nghost);
 
             auto rho = density_mf[lev]->array(mfi);
             auto eta = eta_mf[lev]->array(mfi);
