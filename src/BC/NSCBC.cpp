@@ -3,12 +3,17 @@
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
 
-// SEE THIS PAPER: 
+// SEE THIS PAPER:
 // https://hal.science/hal-01699049/file/2018_AIAA_CFD_Motheau.pdf
 // Motheau, et. al (2018)
-// 
-// Implementation of the Navier-Stokes Characteristic Boundry Condition (NSCBC)
 //
+// Implementation of the Navier-Stokes Characteristic Boundary Condition (NSCBC)
+//
+// STABILITY MODIFICATIONS (matching professor's working implementation):
+//   - Uses 1st-order FD instead of 2nd-order to eliminate amplification
+//   - Uses simple linear extrapolation for 2nd ghost cell (2× vs 6× amplification)
+//   - Writes gamma, pi, pressure to ghost cells for Riemann solver
+//   - Extensive NaN guards and fallback to boundary state
 
 namespace BC
 {
@@ -17,14 +22,18 @@ namespace BC
 // CONSTRUCTOR AND PARSING
 // ============================================================================
 
-NSCBC::NSCBC(IO::ParmParse &pp, std::string prefix)
+NSCBC::NSCBC(IO::ParmParse &pp, std::string /*prefix*/)
 {
     Parse(*this, pp);
 }
 
+
 void NSCBC::Parse(NSCBC &value, IO::ParmParse &pp)
 {
-    // Parse boundary parameters
+    // Parse global parameters
+    pp.query_default("nscbc.small", value.small, 1.0e-10);
+
+    // Parse boundary parameters for each face
     value.params_xlo = ParseFace(pp, "nscbc.xlo");
     value.params_xhi = ParseFace(pp, "nscbc.xhi");
     value.params_ylo = ParseFace(pp, "nscbc.ylo");
@@ -33,17 +42,19 @@ void NSCBC::Parse(NSCBC &value, IO::ParmParse &pp)
     value.params_zlo = ParseFace(pp, "nscbc.zlo");
     value.params_zhi = ParseFace(pp, "nscbc.zhi");
 #endif
-
-    pp.query("nscbc.small", value.small);
 }
 
 NSCBC::BoundaryParams NSCBC::ParseFace(IO::ParmParse &pp, std::string face_name)
 {
     BoundaryParams params;
 
-    // Parse type
-    std::string type_str;
-    pp.query((face_name + ".type").c_str(), type_str);
+    // Parse boundary type - use queryarr for string
+    std::string type_str = "none";
+    std::vector<std::string> type_vec;
+    if (pp.queryarr((face_name + ".type").c_str(), type_vec) && !type_vec.empty())
+    {
+        type_str = type_vec[0];
+    }
 
     if (type_str == "inflow")
     {
@@ -61,8 +72,12 @@ NSCBC::BoundaryParams NSCBC::ParseFace(IO::ParmParse &pp, std::string face_name)
     {
         params.type = Type::NoSlipWall;
     }
+    else
+    {
+        params.type = Type::None;
+    }
 
-    // Parse target values
+    // Parse target values (with defaults) - use .c_str()
     pp.query((face_name + ".target_u").c_str(), params.target_u);
     pp.query((face_name + ".target_v").c_str(), params.target_v);
     pp.query((face_name + ".target_w").c_str(), params.target_w);
@@ -85,7 +100,7 @@ NSCBC::BoundaryParams NSCBC::ParseFace(IO::ParmParse &pp, std::string face_name)
     pp.query((face_name + ".L_ref").c_str(), params.L_ref);
 
     return params;
-
 }
+
 
 } // namespace BC

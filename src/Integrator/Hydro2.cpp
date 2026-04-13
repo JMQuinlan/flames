@@ -1026,40 +1026,62 @@ Hydro2::RHS(int lev,
     {
         Util::Message(INFO, "Using NSCBC");
 
-        // NSCBC: Apply NSCBC boundaries
+        // Compute total density from phase densities
+        amrex::MultiFab rho_total(rho_eta0_mf_in.boxArray(),
+                                  rho_eta0_mf_in.DistributionMap(),
+                                  1,
+                                  nghost);
+
+        for (amrex::MFIter mfi(rho_total); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.growntilebox(nghost);
+            auto rho = rho_total.array(mfi);
+            auto rho0 = rho_eta0_mf_in.const_array(mfi);
+            auto rho1 = rho_eta1_mf_in.const_array(mfi);
+
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                rho(i, j, k) = rho0(i, j, k) + rho1(i, j, k);
+            });
+        }
+
+        // Create working copies for NSCBC
         amrex::MultiFab M_copy(M_mf_in.boxArray(), M_mf_in.DistributionMap(), AMREX_SPACEDIM, nghost);
         amrex::MultiFab E_copy(E_mf_in.boxArray(), E_mf_in.DistributionMap(), 1, nghost);
 
-        // Copy interior + ghost cells TO working copies
-        amrex::MultiFab::Copy(M_copy, M_mf_in, 0, 0, AMREX_SPACEDIM, nghost); // Include ghosts
-        amrex::MultiFab::Copy(E_copy, E_mf_in, 0, 0, 1, nghost);              // Include ghosts
+        amrex::MultiFab::Copy(M_copy, M_mf_in, 0, 0, AMREX_SPACEDIM, nghost);
+        amrex::MultiFab::Copy(E_copy, E_mf_in, 0, 0, 1, nghost);
 
-
-        // Apply NSCBC (modifies M_copy, E_copy, and density_mf in-place)
-        nscbc_bc->FillBoundary(*density_mf[lev],
+        // Apply NSCBC
+        nscbc_bc->FillBoundary(rho_total,
                                M_copy,
                                E_copy,
                                *eta_mf[lev],
+                               *gamma_mf[lev],
+                               *p0_mf[lev],
+                               *pressure_mf[lev],
                                eos0,
                                eos1,
                                geom[lev],
                                time,
                                pref);
 
-        // Copy back INCLUDING ALL GHOST CELL LAYERS
+        // Copy back
         amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(M_mf_in), M_copy, 0, 0, AMREX_SPACEDIM, nghost);
         amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(E_mf_in), E_copy, 0, 0, 1, nghost);
 
-        // Ensure density ghost cells are synchronized
-        density_mf[lev]->FillBoundary(geom[lev].periodicity());
+        // Update density_mf from rho_total
+        density_mf[lev]->ParallelCopy(rho_total);
+
 
         // Compute primitive variables in ghost cells from updated conservative variables
         for (amrex::MFIter mfi(*velocity_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box &ghost_box = mfi.growntilebox(nghost);
 
-            auto rho = density_mf[lev]->array(mfi);
             auto eta = eta_mf[lev]->array(mfi);
+            auto rho = density_mf[lev]->array(mfi);
+            auto rho_eta0 = const_cast<amrex::MultiFab &>(rho_eta0_mf_in).array(mfi);
+            auto rho_eta1 = const_cast<amrex::MultiFab &>(rho_eta1_mf_in).array(mfi);
             auto M = const_cast<amrex::MultiFab &>(M_mf_in).array(mfi);
             auto E = const_cast<amrex::MultiFab &>(E_mf_in).array(mfi);
             auto v = velocity_mf[lev]->array(mfi);
@@ -1075,6 +1097,10 @@ Hydro2::RHS(int lev,
             const Solver::EOS::Tammann eos1_local = eos1;
 
             amrex::ParallelFor(ghost_box, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                // rho_eta Fields
+                rho_eta0(i, j, k) = rho(i, j, k) * eta(i, j, k);
+                rho_eta1(i, j, k) = rho(i, j, k) * (1.0 - eta(i, j, k));
+
                 // Velocity from momentum
                 v(i, j, k, 0) = M(i, j, k, 0) / (rho(i, j, k) + small);
                 v(i, j, k, 1) = M(i, j, k, 1) / (rho(i, j, k) + small);
@@ -1830,20 +1856,20 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     timeintegrator.set_post_stage_action([&](amrex::Vector<amrex::MultiFab> &stage_mf, Set::Scalar time) {
         if (nscbc_bc != nullptr)
         {
-            // NSCBC mode: Apply NSCBC boundaries
-            Util::Message(INFO, "Using NSCBC");
-
-            // Create copies for momentum and energy
-            amrex::MultiFab M_stage_copy(stage_mf[2].boxArray(), stage_mf[2].DistributionMap(), AMREX_SPACEDIM, nghost);
-            amrex::MultiFab E_stage_copy(stage_mf[3].boxArray(), stage_mf[3].DistributionMap(), 1, nghost);
-
-            amrex::MultiFab::Copy(M_stage_copy, stage_mf[2], 0, 0, AMREX_SPACEDIM, 0);
-            amrex::MultiFab::Copy(E_stage_copy, stage_mf[3], 0, 0, 1, 0);
-
             // Compute total density: rho = rho_eta0 + rho_eta1
             amrex::MultiFab rho_total(stage_mf[0].boxArray(), stage_mf[0].DistributionMap(), 1, nghost);
-            amrex::MultiFab::Copy(rho_total, stage_mf[0], 0, 0, 1, 0); // rho_eta0
-            amrex::MultiFab::Add(rho_total, stage_mf[1], 0, 0, 1, 0);  // + rho_eta1
+
+            for (amrex::MFIter mfi(rho_total); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &bx = mfi.growntilebox(nghost);
+                auto rho_arr = rho_total.array(mfi);
+                auto rho_eta0_arr = stage_mf[0].array(mfi);
+                auto rho_eta1_arr = stage_mf[1].array(mfi);
+
+                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    rho_arr(i, j, k) = rho_eta0_arr(i, j, k) + rho_eta1_arr(i, j, k);
+                });
+            }
 
             // Compute eta = rho_eta0 / rho_total
             amrex::MultiFab eta_stage(stage_mf[0].boxArray(), stage_mf[0].DistributionMap(), 1, nghost);
@@ -1851,12 +1877,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             for (amrex::MFIter mfi(eta_stage); mfi.isValid(); ++mfi)
             {
                 const amrex::Box &bx = mfi.growntilebox(nghost);
-
-                // Get Array4 accessors OUTSIDE the ParallelFor
-                amrex::Array4<Set::Scalar> eta_arr = eta_stage.array(mfi);
-                amrex::Array4<const Set::Scalar> rho_eta0_arr = stage_mf[0].array(mfi);
-                amrex::Array4<const Set::Scalar> rho_arr = rho_total.array(mfi);
-
+                auto eta_arr = eta_stage.array(mfi);
+                auto rho_eta0_arr = stage_mf[0].array(mfi);
+                auto rho_arr = rho_total.array(mfi);
                 Set::Scalar small_local = small;
 
                 amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
@@ -1865,35 +1888,36 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 });
             }
 
-            // Apply NSCBC boundary conditions
+            // ACTUALLY CALL NSCBC
             nscbc_bc->FillBoundary(rho_total,
-                                   M_stage_copy,
-                                   E_stage_copy,
+                                   stage_mf[2], // momentum
+                                   stage_mf[3], // energy
                                    eta_stage,
+                                   *gamma_mf[lev],
+                                   *p0_mf[lev],
+                                   *pressure_mf[lev],
                                    eos0,
                                    eos1,
                                    geom[lev],
                                    time,
                                    pref);
 
-            // Copy modified momentum and energy back
-            amrex::MultiFab::Copy(stage_mf[2], M_stage_copy, 0, 0, AMREX_SPACEDIM, nghost);
-            amrex::MultiFab::Copy(stage_mf[3], E_stage_copy, 0, 0, 1, nghost);
-
-            // Update rho_eta0 and rho_eta1 from modified rho_total and eta
+            // Update rho_eta0 and rho_eta1 from modified rho_total
             for (amrex::MFIter mfi(rho_total); mfi.isValid(); ++mfi)
             {
                 const amrex::Box &bx = mfi.growntilebox(nghost);
-
-                // Get Array4 accessors OUTSIDE the ParallelFor
-                amrex::Array4<const Set::Scalar> rho_arr = rho_total.array(mfi);
-                amrex::Array4<const Set::Scalar> eta_arr = eta_stage.array(mfi);
-                amrex::Array4<Set::Scalar> rho_eta0_arr = stage_mf[0].array(mfi);
-                amrex::Array4<Set::Scalar> rho_eta1_arr = stage_mf[1].array(mfi);
+                auto rho_arr = rho_total.array(mfi);
+                auto eta_arr = eta_stage.array(mfi);
+                auto rho_eta0_arr = stage_mf[0].array(mfi);
+                auto rho_eta1_arr = stage_mf[1].array(mfi);
 
                 amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                     rho_eta0_arr(i, j, k) = rho_arr(i, j, k) * eta_arr(i, j, k);
                     rho_eta1_arr(i, j, k) = rho_arr(i, j, k) * (1.0 - eta_arr(i, j, k));
+
+                    // Enforce positivity
+                    rho_eta0_arr(i, j, k) = std::max(rho_eta0_arr(i, j, k), small);
+                    rho_eta1_arr(i, j, k) = std::max(rho_eta1_arr(i, j, k), small);
                 });
             }
         }
@@ -1909,12 +1933,25 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             energy_bc->FillBoundary(stage_mf[3], 0, 1, time, 0);
             stage_mf[3].FillBoundary(true);
         }
+
     });
 
 
     timeintegrator.advance(solution_old, solution_new, time, dt);
 
+    // ENFORCE POSITIVITY after time advance
+    for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
+        auto rho_eta0 = rho_eta0_mf[lev]->array(mfi);
+        auto rho_eta1 = rho_eta1_mf[lev]->array(mfi);
+        Set::Scalar small_local = small;
 
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            rho_eta0(i, j, k) = std::max(rho_eta0(i, j, k), small_local);
+            rho_eta1(i, j, k) = std::max(rho_eta1(i, j, k), small_local);
+        });
+    }
     
 
 
