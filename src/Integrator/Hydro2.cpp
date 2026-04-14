@@ -1779,7 +1779,7 @@ Hydro2::RHS(int lev,
                 Util::Abort(INFO);
             }
 
-            if ((time <= 1e-7 && i == 0 && j == 0) && true)
+            if ((time <= 1e-7 && i == 0 && j == 0) && false)
             { // First timestep~ish~, first cell
                 Util::ParallelMessage(INFO, "=== FIRST CELL DIAGNOSTICS ===");
                 Util::ParallelMessage(INFO, "eta = ", eta(i, j, k));
