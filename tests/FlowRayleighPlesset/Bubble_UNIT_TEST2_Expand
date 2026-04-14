@@ -6,8 +6,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRayleighPlesset/output_RPE
-# plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE
+# plot_file = ./tests/FlowRayleighPlesset/output_RPE
+plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE
 
 ### MESHING ###
 amr.plot_dt = 0.5e-6
@@ -16,8 +16,11 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 2 # Must be >= nghost so FillBoundary can fill all ghost layers from neighbor valid cells
 amr.regrid_int = 1
 amr.grid_eff = 0.8
-amr.max_level = 5
+# amr.max_level = 5
+amr.max_level = 4
 amr.n_cell = 32 32
+# amr.n_cell = 256 256
+# amr.n_cell = 1024 1024
 
 ### TIME STEPING ###
 timestep  = 1e-10
@@ -36,7 +39,8 @@ stop_time = 1e-3
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.001
+# eta.ic.expression.constant.epsilon = 0.001
+eta.ic.expression.constant.epsilon = 0.01
 eta.ic.expression.constant.R0 = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(sqrt(2)*epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
@@ -102,7 +106,7 @@ pi_1 = 0.0     # Ideal gas (no Tammann)
 # Viscosity
 # ----------------------------
 
-mu0 = 0.1
+mu0 = 0.0
 mu0_b = 0.0
 mu1 = 0.0
 mu1_b = 0.0

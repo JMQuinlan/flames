@@ -11,7 +11,7 @@ alamo.program = hydro2
 #plot_file = ./tests/FlowShockDroplet/output_Shock1mmDroplet
 # plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet
 # plot_file = /mmfs1/home/jquinlan/runs/temp4/output_kappa_method3
-plot_file = /mmfs1/home/jquinlan/runs/temp5/output_rf
+plot_file = /mmfs1/home/jquinlan/runs/temp5/output_SD_20260412
 # plot_file = ./tests/FlowShockDroplet/output_amr_0
 
 ### MESHING ###

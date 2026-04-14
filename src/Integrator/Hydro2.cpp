@@ -3531,9 +3531,38 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // pi_mix_new(i,j,k) = pimix;
             Set::Scalar sound_speed_new = sqrt(gmix_new * (p_new + pimix_new) / safe_rho_dt);
 
-            if (std::isfinite(sound_speed_new)) c_max = std::max(c_max, sound_speed_new);
-            if (std::isfinite(v_new(0))) vx_max = std::max(vx_max, std::abs(v_new(0))); // vx
-            if (std::isfinite(v_new(1))) vy_max = std::max(vy_max, std::abs(v_new(1))); // vy
+            // Shock-speed correction (Rankine-Hugoniot):
+            //   W_s = u + a * sqrt( (γ+1)/(2γ) * p_neighbor/p_cell + (γ-1)/(2γ) )
+            // For p_neighbor ≈ p_cell this reduces to u + a (acoustic limit).
+            // For a strong shock p_neighbor >> p_cell it gives the true shock speed,
+            // which exceeds u + a and would violate a pure acoustic CFL.
+            //
+            // Estimate the maximum local pressure ratio from the four face neighbors.
+            // p(i,j,k) was computed above as p_new; read neighbors from pressure_mf
+            // (filled at end of previous step and in the ghost-fill above).
+            {
+                Real p_c  = std::max(p_new, Real(1e-6));
+                Real p_xm = std::max(p(i-1, j,   k),   Real(1e-6));
+                Real p_xp = std::max(p(i+1, j,   k),   Real(1e-6));
+                Real p_ym = std::max(p(i,   j-1, k),   Real(1e-6));
+                Real p_yp = std::max(p(i,   j+1, k),   Real(1e-6));
+                Real p_ratio = std::max({p_xm/p_c, p_xp/p_c, p_ym/p_c, p_yp/p_c});
+
+                Real gm = gmix_new;
+                Real shock_factor = std::sqrt(
+                    (gm + 1.0) / (2.0 * gm) * p_ratio
+                  + (gm - 1.0) / (2.0 * gm));
+                Real a_shock = std::isfinite(sound_speed_new)
+                             ? sound_speed_new * shock_factor
+                             : Real(0.0);
+
+                // Wave speed = |u| + shock-corrected a  (cell-local, not separate maxima)
+                Real wave_local = std::abs(v_new(0)) + std::abs(v_new(1)) + a_shock;
+                if (std::isfinite(wave_local)) c_max = std::max(c_max, wave_local);
+            }
+
+            if (std::isfinite(v_new(0))) vx_max = std::max(vx_max, std::abs(v_new(0))); // vx (kept for diagnostics)
+            if (std::isfinite(v_new(1))) vy_max = std::max(vy_max, std::abs(v_new(1))); // vy (kept for diagnostics)
 
             // Track maximum force magnitude (not acceleration yet)
             Set::Scalar F_mag = sqrt(Source(i, j, k, 1) * Source(i, j, k, 1) + Source(i, j, k, 2) * Source(i, j, k, 2));
@@ -3564,10 +3593,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // Compute timestep constraints
     Set::Scalar dx_min = std::min(DX[0], DX[1]);
 
-    // 1. Acoustic CFL
+    // 1. Acoustic / shock CFL
+    // c_max now stores max_cell(|u| + a_shock) with the Rankine-Hugoniot
+    // pressure-ratio correction, so it already encodes the convective term.
+    // vel_mag is kept for diagnostic output only.
     Set::Scalar vel_mag = sqrt(vx_max * vx_max + vy_max * vy_max);
     if (!std::isfinite(vel_mag)) vel_mag = Set::Scalar(0.0);
-    Set::Scalar wave_speed = c_max + vel_mag;
+    Set::Scalar wave_speed = c_max;  // already includes |u| + a_shock per cell
     if (!std::isfinite(wave_speed)) wave_speed = Set::Scalar(0.0);
     Set::Scalar dt_acoustic = cfl * dx_min / (wave_speed + small);
 
