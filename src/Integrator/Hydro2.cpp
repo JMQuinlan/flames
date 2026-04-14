@@ -689,7 +689,6 @@ void Hydro2::Mix(int lev)
             cp_mf[lev].get(),
             cv_mf[lev].get()
     });
-
     */
 }
 
@@ -1531,14 +1530,17 @@ Hydro2::RHS(int lev,
 
                 // Vaporization source for eta equation (Equation 7):
                 // source_vap = (1/epsilon) * (rho_g * D_v / rho_eta) * (B_M/(1+B_M)) * |grad(eta)|
-                Set::Scalar vap_coeff = (rho_g * Dv / rho_eta0(i, j, k) + small) * (B_M / (1.0 + B_M + small));
+                Set::Scalar vap_coeff = (rho_g * Dv / (rho_eta0(i, j, k) + small)) * (B_M / (1.0 + B_M + small));
                 eta_dot_Vap = (1.0 / epsilon) * vap_coeff * grad_eta_mag;
 
                 // FLUXES
-                m_dot_Vap = rho_g * Dv * (B_M / (1.0 + B_M + small));   // Mass Flux
-                M_dot_Vap = u * m_dot_Vap;                              // Momentum Flux
-                E_dot_Vap = u.dot(M_dot_Vap);                           // Energy Flux
+                m_dot_Vap = rho_g * Dv * (B_M / (1.0 + B_M + small)) * grad_eta_mag; // Mass Flux
+                M_dot_Vap = u * m_dot_Vap * grad_eta_mag;                            // Momentum Flux
+                E_dot_Vap = u.dot(M_dot_Vap) * grad_eta_mag;                         // Energy Flux
 
+                m_dot_Vap = m_dot_Vap * (1.0 / epsilon);                             // Mass Flux
+                M_dot_Vap = M_dot_Vap * (1.0 / epsilon); // Momentum Flux
+                E_dot_Vap = E_dot_Vap * (1.0 / epsilon);                             // Energy Flux
                 
             }
             // Vaporization Trackers

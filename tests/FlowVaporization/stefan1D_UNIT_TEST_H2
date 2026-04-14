@@ -1,0 +1,156 @@
+#@ [stefan_hydrogen]
+#@ exe=hydro2
+#@ dim=2
+
+# Stefan Problem: Liquid Hydrogen Evaporation
+# 1D planar interface with wall heating
+# Tests Spalding vaporization model with high diffusivity fluid
+
+### OUTPUT ###
+plot_file = ./tests/Stefan/output_Hydrogen_Stefan
+Riemann_Solver.type = hllc
+
+### MESHING ###
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.grid_eff = 0.8
+amr.n_cell = 1000 8  # High resolution in x, minimal in y (quasi-1D)
+
+# Interface at x=0 (diffuse transition)
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = "1.0e-4"  # Thin interface for Stefan
+eta.ic.expression.region0 = "0.5 * (1.0 - tanh(x / epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+#amr.plot_int = 100  # More frequent output to capture interface motion
+amr.plot_dt = 1e-6  # More frequent output to capture interface motion
+
+### DIMENSIONS ###
+# 1D domain: 1 cm length, thin in y-direction
+geometry.prob_lo = -0.005  -0.0001   0.0  # [m]
+geometry.prob_hi =  0.005   0.0001   0.0  # [m]
+geometry.is_periodic = 0 1 0
+
+### TIME STEP ###
+timestep  = 1.0e-8  # Small timestep for phase change
+stop_time = 0.01    # 10 ms simulation
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1e-0
+dynamictimestep.min = 1e-12
+cfl = 0.5
+
+# No prescribed sources
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+### HYDRO PARAM ###
+
+## EOS - HYDROGEN ##
+# Liquid H2 (Fluid 0, eta=1, LEFT side x<0)
+eos0.gamma = 1.4      # Liquid hydrogen (approximate)
+eos0.p0 = 1.0e8       # Stiffness parameter for liquid [Pa]
+eos0.cv = 9700        # Constant volume specific heat [J/(kg*K)]
+eos0.cp = 13580       
+
+# Vapor H2 (Fluid 1, eta=0, RIGHT side x>0)
+eos1.gamma = 1.41     # Ideal diatomic gas
+eos1.p0 = 0.0         # No stiffness (ideal gas)
+eos1.cv = 10200       # Constant volume specific heat [J/(kg*K)]
+eos1.cp = 14382       
+
+## Viscosity ##
+mu0 = 1.3e-5  # Liquid H2 viscosity [Pa*s]
+mu1 = 8.9e-6  # Vapor H2 viscosity [Pa*s]
+
+### Surface tension coefficient ###
+sigma = 0.002  # Liquid H2 surface tension [N/m]
+
+### Reference pressure ###
+pref = 0.0
+
+### VAPORIZATION PARAMETERS ###
+apply_vaporization = 1
+Dv = 6.1e-5           # Hydrogen vapor diffusivity [m^2/s] - VERY HIGH!
+Y_infinity = 0.0      # Pure vapor far-field
+g = 0.0               # No gravity
+
+### IC State - Fluid 0 (LEFT side, x < 0) - LIQUID HYDROGEN ###
+# At 1 atm, T_sat = 20.3 K
+density0.ic.type = constant
+density0.ic.constant.value = 70.8  # Liquid H2 density [kg/m^3]
+
+velocity0.ic.type = constant
+velocity0.ic.constant.value = 0.0 0.0
+
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 1.01325e5  # 1 atm [Pa]
+
+# Temperature IC (for initialization)
+# T_sat = 20.3 K at 1 atm
+# Internal energy: e = cv * T
+# For liquid: e ~= cv * T_sat = 9700 * 20.3 ~= 197,000 J/kg
+
+### IC State - Fluid 1 (RIGHT side, x > 0) - VAPOR HYDROGEN ###
+density1.ic.type = constant
+density1.ic.constant.value = 1.34  # Vapor H2 density at 1 atm, 20.3 K [kg/m^3]
+
+velocity1.ic.type = constant
+velocity1.ic.constant.value = 0.0 0.0
+
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 1.01325e5  # 1 atm [Pa]
+
+### BOUNDARY CONDITIONS ###
+# LEFT WALL (x = -0.005): HEATED WALL
+# Temperature = T_sat + 5 K = 25.3 K
+# This drives evaporation
+
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+
+# Energy BC: Fixed temperature at left wall
+# For T_wall = 25.3 K:
+# e_wall = cv * T_wall = 9700 * 25.3 ~= 245,410 J/kg
+# E_wall = rho * e_wall = 70.8 * 245,410 ~= 1.74e7 J/m^3
+energy.bc.type.xlo = neumann
+#energy.bc.type.xlo = dirichlet
+#energy.bc.val.xlo = 1.74e7  # Fixed energy at heated wall
+#energy.bc.val.xlo = 3.503e8  # Fixed energy at heated wall
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+### REFINEMENT CRITERIA ###
+# Refine at interface only
+eta_refinement_criterion   = 0.01   # Refine where |grad_eta| is large
+omega_refinement_criterion = 100.0  # Disable vorticity refinement
+gradu_refinement_criterion = 100.0  # Disable velocity gradient refinement
+rho_refinement_criterion   = 100.0  # Disable density refinement
+p_refinement_criterion     = 100.0  # Disable pressure refinement
+
+### SOLVER OPTIONS ###
+Spec_Vol = 1          # Solve energy per specific volume
+kappa_method = 2      # Curvature calculation method
+nghost = 2            # Ghost cells
+
+### SURFACE TENSION & WEIGHT ###
+apply_surface_tension = 0  # Disable for pure Stefan (optional: enable for realism)
+apply_weight = 0           # No gravity
+
+### INTERFACE SHARPENING ###
+apply_sharpening = 0       # Disable for Stefan (interface should diffuse naturally)
+sharpening_frequency = 100
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+omega_relax = 0.5

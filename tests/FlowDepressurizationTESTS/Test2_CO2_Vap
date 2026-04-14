@@ -12,8 +12,8 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 50
 amr.grid_eff = 0.8
-amr.max_level = 1
-amr.n_cell = 5000 2            # 5000 cells in x-direction to match paper
+amr.max_level = 0
+amr.n_cell = 5000 8            # 5000 cells in x-direction to match paper
 
 ### TIME STEPPING ###
 timestep = 1e-8
@@ -42,14 +42,14 @@ epsilon = eta.ic.expression.constant.epsilon
 
 ### STIFFENED GAS EOS PARAMETERS ###
 # Phase 0 = Liquid CO2
-gamma0 = 1.23
-p0_0 = 1.32e8                   # P_inf for liquid (Pa)
+eos0.gamma = 1.23
+eos0.p0 = 1.32e8                   # P_inf for liquid (Pa)
 mu0 = 1.0e-4
 mu0_b = 0.0
 
 # Phase 1 = Vapor CO2
-gamma1 = 1.06
-p0_1 = 8.86e5                   # P_inf for vapor (Pa)
+eos1.gamma = 1.06
+eos1.p0 = 8.86e5                   # P_inf for vapor (Pa)
 mu1 = 1.0e-5
 mu1_b = 0.0
 
@@ -114,12 +114,12 @@ temperature1.ic.expression.region0 = "273.0"
 
 # Thermodynamic properties (from Table 1)
 # Cv values
-cv0 = 2440.0                    # Liquid Cv (J/kg/K)
-cv1 = 2410.0                    # Vapor Cv (J/kg/K)
+eos0.cv = 2440.0                    # Liquid Cv (J/kg/K)
+eos1.cv = 2410.0                    # Vapor Cv (J/kg/K)
 
 # Cp = gamma * Cv
-cp0 = 3001.2                    # gamma0 * cv0 = 1.23 * 2440
-cp1 = 2554.6                    # gamma1 * cv1 = 1.06 * 2410
+eos0.cp = 3001.2                    # gamma0 * cv0 = 1.23 * 2440
+eos1.cp = 2554.6                    # gamma1 * cv1 = 1.06 * 2410
 
 # Thermal conductivities (estimated for CO2)
 k0_thermal.ic.type = expression
@@ -179,8 +179,7 @@ q.ic.type = constant
 q.ic.constant.value = 0.0 0.0
 
 ### ADDITIONAL SOURCES ###
-apply_surface_tension = 1       # ENABLED for interface dynamics
-apply_buoyancy = 0
+apply_surface_tension = 0
 apply_weight = 0
 apply_vaporization = 1          # TEST 2: WITH VAPORIZATION
 static_eta = 0
