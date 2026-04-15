@@ -87,31 +87,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // FLUID 0
         pp_query_required("mu0", value.mu0); // linear viscosity coefficient
         pp_query_default("mu0_b", value.mu0_b, 0.0); // bulk viscosity coefficient
-        /*
-        pp_query_required("gamma0", value.gamma0);      // gamma for gamma law
-        pp_query_default("p0_0", value.p0_0, 0.0);      // p0 for Tammann EOS
-        pp_query_default("cp0", value.cp0, 0.0);        // Constant Pressure Specific Heat [J/kg]
-        pp_query_default("cv0", value.cv0, 0.0);        // Constant Volume Specific Heat [J/kg]
-        // pp_query_required("R0", value.R0);              // Specific Gas Constant
-        // pp_query_required("MW0", value.MW0);            // Molecular Weight
-        */
         
         // FLUID 1
         pp_query_required("mu1", value.mu1); // linear viscosity coefficient
         pp_query_default("mu1_b", value.mu1_b, 0.0); // bulk viscosity coefficient
-        /*
-        pp_query_required("gamma1", value.gamma1);      // gamma for gamma law
-        pp_query_default("p0_1", value.p0_1, 0.0);      // p0 for Tammann EOS
-        pp_query_default("cp1", value.cp1, 0.0);        // Constant Pressure Specific Heat [J/kg]
-        pp_query_default("cv1", value.cv1, 0.0);        // Constant Volume Specific Heat [J/kg]
-        // pp_query_required("R1", value.R1);              // Specific Gas Constant
-        // pp_query_required("MW1", value.MW1);            // Molecular Weight
-        */
 
         // EOS
         Solver::EOS::Tammann::Parse(value.eos0, pp, "eos0.");
         Solver::EOS::Tammann::Parse(value.eos1, pp, "eos1.");
-
 
         // INTERACTIONS
         pp_query_default("sigma", value.sigma, 0.0);    // Surface tension condition
@@ -133,12 +116,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
     
         // Boundry Conditions
-        /*
-        value.density_bc = new BC::Expression(1, pp, "density.bc");
-        value.energy_bc = new BC::Constant(1, pp, "energy.bc");
-        value.momentum_bc = new BC::Expression(2, pp, "momentum.bc");
-        value.temperature_bc = new BC::Constant(1, pp, "energy.bc"); // Change to be different if needed? ___TEMP___
-        */
         pp_query_default("nghost", value.nghost, 2);
 
         bool uses_nscbc = false;
@@ -161,7 +138,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         }
 
         Util::Message(INFO, "uses_nscbc=", uses_nscbc);
-
 
         // Initialize boundary conditions based on whether NSCBC is used
         if (uses_nscbc)
@@ -296,8 +272,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                                                                                                      "110","111",
                                                                                                     }); // hess_u Flux
         value.RegisterNewFab(value.Vap_dot_mf, &value.bc_nothing, 5, 0, "Vap_dot", true, false, { "_eta", "_rho", "_Mx", "_My", "_E" }); // Momentum Flux
-
-
         
     }
 
@@ -311,7 +285,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     //pp.select_default<IC::Constant, IC::Expression>("temperature0.ic",  value.temperature0_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("k0_thermal.ic",    value.k0_thermal_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("h1_thermal.ic",    value.h0_thermal_ic, value.geom);
-
 
     // Fluid 1
     pp.select_default<IC::Constant,IC::Expression>("velocity1.ic",      value.velocity1_ic, value.geom);
@@ -470,10 +443,7 @@ void Hydro2::Mix(int lev)
 {
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
-
     
-
-
     // Function is for the diffusive mixing terms. I.E: rho = eta*rho0 + (1-eta)*rho1
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
@@ -659,37 +629,6 @@ void Hydro2::Mix(int lev)
     vy_max = 0.0;
     F_max = 0.0;
     rho_min = 1e10;
-
-
-    /*
-    // Filling Boundries
-    FillBoundariesWithBC(lev, 0.0, density_bc, { 
-            eta_mf[lev].get(), 
-            density_mf[lev].get(), 
-            rho_eta0_mf[lev].get(),
-            rho_eta1_mf[lev].get() 
-    });
-
-    FillBoundariesWithBC(lev, 0.0, energy_bc, { 
-            energy_per_vol_mf[lev].get(), 
-            energy_per_mas_mf[lev].get(), 
-            energy_per_vol_old_mf[lev].get(), 
-            energy_per_mas_old_mf[lev].get(),
-            UE_per_vol_mf[lev].get(),
-            UE_per_mas_mf[lev].get(), 
-            KE_per_vol_mf[lev].get(), 
-            KE_per_mas_mf[lev].get(), 
-            pressure_mf[lev].get(), 
-            gamma_mf[lev].get(), 
-            p0_mf[lev].get(), 
-            mu_chem_mf[lev].get(), 
-            Bm_mf[lev].get(),
-            Y_mf[lev].get(),
-            T_mf[lev].get(),
-            cp_mf[lev].get(),
-            cv_mf[lev].get()
-    });
-    */
 }
 
 
@@ -2897,6 +2836,7 @@ void Hydro2::check4nans(int time, int lev, int i, int j, int k, const std::strin
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////// BOUNDRY CONDITIONS //////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
+// FillBoundaries(): Fill Boundries with Periodicity
 void Hydro2::FillBoundaries(int lev, std::initializer_list<amrex::MultiFab *> mfs)
 {
     BL_PROFILE("Integrator::Hydro2::FillBoundaries");
@@ -2919,6 +2859,7 @@ void Hydro2::FillBoundaries(int lev, std::initializer_list<amrex::MultiFab *> mf
     }
 }
 
+// FillBoundariesWithBC(): Fill Boundries with BC
 void Hydro2::FillBoundariesWithBC(int lev, Set::Scalar time, BC::BC<Set::Scalar> *bc, std::initializer_list<amrex::MultiFab *> mfs)
 {
     BL_PROFILE("Integrator::Hydro2::FillBoundariesWithBC");
@@ -2944,6 +2885,21 @@ void Hydro2::FillBoundariesWithBC(int lev, Set::Scalar time, BC::BC<Set::Scalar>
         */
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 } // end of Integrator namespace
 
