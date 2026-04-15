@@ -1538,9 +1538,14 @@ Hydro2::RHS(int lev,
                 M_dot_Vap = u * m_dot_Vap * grad_eta_mag;                            // Momentum Flux
                 E_dot_Vap = u.dot(M_dot_Vap) * grad_eta_mag;                         // Energy Flux
 
+                /*
                 m_dot_Vap = m_dot_Vap * (1.0 / epsilon);                             // Mass Flux
                 M_dot_Vap = M_dot_Vap * (1.0 / epsilon); // Momentum Flux
                 E_dot_Vap = E_dot_Vap * (1.0 / epsilon);                             // Energy Flux
+                */
+                m_dot_Vap = m_dot_Vap;
+                M_dot_Vap = M_dot_Vap;
+                E_dot_Vap = E_dot_Vap;
                 
             }
             // Vaporization Trackers
@@ -1556,9 +1561,15 @@ Hydro2::RHS(int lev,
                                                   Fsv_vector(1) + Fw_vector(1));
             
             Source(i, j, k, 0) = mdot0 + m_dot_Vap;
+            /*
             Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0);// + M_dot_Vap(0);
             Source(i, j, k, 2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1);// + M_dot_Vap(1);
             Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force);// + E_dot_Vap;
+            */
+
+            Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0) + M_dot_Vap(0);
+            Source(i, j, k, 2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1) + M_dot_Vap(1);
+            Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force) + E_dot_Vap;
 
             // Lagrange terms to enforce no-penetration
             Source(i, j, k, 1) = Source(i, j, k, 1) - lagrange * u.dot(grad_eta) * grad_eta(0);
@@ -1674,12 +1685,6 @@ Hydro2::RHS(int lev,
                 Util::Abort(INFO);
             }
 
-            // Interface Velocities
-            Set::Scalar u_star_xlo = flux_xlo.u_interface;
-            Set::Scalar u_star_xhi = flux_xhi.u_interface;
-            Set::Scalar u_star_ylo = flux_ylo.u_interface;
-            Set::Scalar u_star_yhi = flux_yhi.u_interface;
-
             // Upwind volume fractions
             Set::Scalar eta_face_xlo = (flux_xlo.u_interface > 0.0) ? eta(i - 1, j, k) : eta(i, j, k);
             Set::Scalar eta_face_xhi = (flux_xhi.u_interface > 0.0) ? eta(i, j, k) : eta(i + 1, j, k);
@@ -1719,34 +1724,6 @@ Hydro2::RHS(int lev,
 
             // Energy
             E_rhs(i, j, k) = E_flux(i, j, k) + Source(i, j, k, 3);
-
-            /// Eta:
-            /*
-            if (static_eta == 1)
-            {
-                rho_eta_rhs(i, j, k) = 0.0;
-            }
-            else
-            {
-                // Generating upwind scheme for rho_eta
-                Set::Scalar div_u = (flux_xhi.u_interface - flux_xlo.u_interface) / DX[0]
-                                  + (flux_yhi.u_interface - flux_ylo.u_interface) / DX[1];
-
-                // Now use MASS FLUX (not velocity!) for the flux
-                Set::Scalar F_rho_eta_xlo = eta_face_xlo * flux_xlo.mass;
-                Set::Scalar F_rho_eta_xhi = eta_face_xhi * flux_xhi.mass;
-                Set::Scalar F_rho_eta_ylo = eta_face_ylo * flux_ylo.mass;
-                Set::Scalar F_rho_eta_yhi = eta_face_yhi * flux_yhi.mass;
-                
-                Set::Scalar rho_eta_flux = (F_rho_eta_xhi - F_rho_eta_xlo) / DX[0] + (F_rho_eta_yhi - F_rho_eta_ylo) / DX[1];
-
-                rho_eta_rhs(i, j, k) = -rho_eta_flux;
-                                       //+ rho_eta(i, j, k) * div_u;
-                                       //+ rho_eta_dot_CH   // modified CH
-                                       //+ rho_eta_dot_Vap; // if applicable
-
-            }
-            */
 
            // ------------------------------------------------------------
            // Error Checking
