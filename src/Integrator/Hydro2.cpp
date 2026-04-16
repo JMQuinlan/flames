@@ -127,6 +127,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("ch_newton_iters",  value.ch_newton_iters,  5);        // Max Newton iterations (implicit_ch=2 only)
         pp_query_default("ch_newton_tol",    value.ch_newton_tol,    1.0e-10);  // Newton convergence tolerance
         pp_query_default("ch_W_scale",       value.ch_W_scale,       1.0);      // double-well amplitude (equilibrium width = √2·ε/√W_scale)
+        pp_query_default("apply_kapila_source", value.apply_kapila_source, true); // Kapila compressibility source K·η(1-η)·∇·u for pressure consistency
 
         // Boundry Conditions
         value.density_bc = new BC::Expression(1, pp, "density.bc");
@@ -957,6 +958,13 @@ Hydro2::RHS(int lev,
         // Capture implicit_ch as a plain bool so the GPU lambda can use it
         bool do_implicit_ch = implicit_ch;
 
+        // Kapila compressibility source parameters (local copies for GPU lambda safety)
+        Real gamma0_       = gamma0;
+        Real gamma1_       = gamma1;
+        Real pi_0_         = pi_0;
+        Real pi_1_         = pi_1;
+        bool do_kapila     = apply_kapila_source;
+
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i,int j,int k)
         {
             //------------------------------------------------------------------
@@ -1234,7 +1242,24 @@ Hydro2::RHS(int lev,
                 eta_dot_CH       = Mob * lap_mu_chem * 0.2;
             }
 
-            eta_rhs(i,j,k) = adv + eta_dot_CH + eta_dot_Vap;
+            // Kapila compressibility source: K·η(1-η)·∇·u
+            // Required for pressure equilibrium across the interface when the two
+            // fluids have different bulk moduli (ρ_k c_k² = γ_k(p+π_k) for SG EOS).
+            // Without this, compressed/expanded mixtures develop spurious pressure
+            // oscillations at the interface even with the Allaire isobaric EOS mixing.
+            Real eta_dot_kapila = 0.0;
+            if (do_kapila) {
+                Real p_loc   = p_arr(i,j,k);
+                Real B0      = gamma0_ * (p_loc + pi_0_);   // ρ₀c₀²
+                Real B1      = gamma1_ * (p_loc + pi_1_);   // ρ₁c₁²
+                Real K_denom = eta_loc * B1 + (1.0 - eta_loc) * B0;
+                Real K_comp  = (std::abs(K_denom) > Real(1.0e-14)) ? (B1 - B0) / K_denom : Real(0.0);
+                Real div_u_  = gradu_loc(0,0) + gradu_loc(1,1);
+                eta_dot_kapila = K_comp * eta_loc * (1.0 - eta_loc) * div_u_;
+                if (!std::isfinite(eta_dot_kapila)) eta_dot_kapila = Real(0.0);
+            }
+
+            eta_rhs(i,j,k) = adv + eta_dot_CH + eta_dot_Vap + eta_dot_kapila;
         });
     }
 }

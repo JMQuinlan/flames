@@ -321,6 +321,7 @@ protected:
     int ch_newton_iters = 5;           // max Newton iterations (implicit_ch=2)
     Set::Scalar ch_newton_tol = 1.0e-10; // Newton convergence tolerance
     Set::Scalar ch_W_scale = 1.0;        // double-well amplitude scale (W_scale=1 → equilibrium width=√2·ε)
+    bool apply_kapila_source = true;     // Kapila compressibility source: K·η(1-η)·∇·u in η equation
 
     // Adaptive Timestep
     bool adaptive_timestep = false;
