@@ -124,7 +124,8 @@ private:
     void FillBoundaries(int lev, std::initializer_list<amrex::MultiFab *> mfs);
     // For MultiFabs that need physical BCs + periodic/processor boundaries
     void FillBoundariesWithBC(int lev, Set::Scalar time, BC::BC<Set::Scalar> *bc, std::initializer_list<amrex::MultiFab *> mfs);
-
+    // Wrapper Function for BCs and Primative Fields
+    void FillGhost4BC(int lev, Set::Scalar time);
 
 protected:
     // FLUID 0

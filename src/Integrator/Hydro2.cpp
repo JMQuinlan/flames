@@ -160,7 +160,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             value.nscbc_bc = nullptr;
 
             value.density_bc = new BC::Expression(1, pp, "density.bc");
-            value.energy_bc = new BC::Constant(1, pp, "energy.bc");
+            value.energy_bc = new BC::Expression(1, pp, "energy.bc");
             value.momentum_bc = new BC::Expression(2, pp, "momentum.bc");
 
             Util::Message(INFO, "Parsing Reg");
@@ -233,9 +233,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.momentum_old_mf, value.momentum_bc,  2, nghost, "momentum_old", false, true, { "x", "y" });
 
         // SOURCES
-        value.RegisterNewFab(value.m0_mf,           &value.bc_nothing,  1, nghost, "m0", false, false);
-        value.RegisterNewFab(value.u0_mf,           &value.bc_nothing, 2, nghost, "u0", false, false, { "x", "y" });
-        value.RegisterNewFab(value.q_mf,            &value.bc_nothing, 2, nghost, "q0", false, false, { "x", "y" });
+        value.RegisterNewFab(value.m0_mf,           &value.bc_nothing, 1, 0, "m0", false, false);
+        value.RegisterNewFab(value.u0_mf,           &value.bc_nothing, 2, 0, "u0", false, false, { "x", "y" });
+        value.RegisterNewFab(value.q_mf,            &value.bc_nothing, 2, 0, "q0", false, false, { "x", "y" });
         value.RegisterNewFab(value.Source_mf,       &value.bc_nothing,  4, 0, "Source", true, false, { "_rho", "_Mx", "_My","_E" });
         value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, 0, "Fsv", true, false, { "x", "y" });  // Surface Tension
         value.RegisterNewFab(value.Fw_mf,           &value.bc_nothing,  2, 0, "Fw", true, false, { "x", "y" });   // Weight
@@ -688,8 +688,17 @@ Hydro2::RHS(int lev,
     const amrex::MultiFab &M_mf_in, 
     const amrex::MultiFab &E_mf_in) //, const amrex::MultiFab &velocity_mf_in, const amrex::MultiFab &pressure_mf_in, const amrex::MultiFab &T_mf_in)
 {
+    BL_PROFILE("Integrator::Hydro2::RHS");
+
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
+
+    // Converting Array to mf
+    amrex::MultiFab::Copy(*rho_eta0_mf[lev], rho_eta0_mf_in, 0, 0, 1, 0); // Domain only
+    amrex::MultiFab::Copy(*rho_eta1_mf[lev], rho_eta1_mf_in, 0, 0, 1, 0);
+    amrex::MultiFab::Copy(*momentum_mf[lev], M_mf_in, 0, 0, AMREX_SPACEDIM, 0);
+    amrex::MultiFab::Copy(*energy_per_vol_mf[lev], E_mf_in, 0, 0, 1, 0);
+
 
     // Eta Fields
     // for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
@@ -698,10 +707,11 @@ Hydro2::RHS(int lev,
         const amrex::Box &bx = mfi.validbox();
 
         // CONSERVATIVE
-        Set::Patch<Set::Scalar> eta = eta_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf_in.array(mfi);
-        Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf_in.array(mfi);
+        auto rho_eta0 = rho_eta0_mf[lev]->array(mfi);
+        auto rho_eta1 = rho_eta1_mf[lev]->array(mfi);
         Set::Patch<Set::Scalar> rho = density_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> eta = eta_mf.Patch(lev, mfi);
+
         
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
@@ -716,96 +726,40 @@ Hydro2::RHS(int lev,
             
         });
     }
+    
+    // Primitive Fields (with BC)
+    FillGhost4BC(lev, time);
 
-    if (nscbc_bc != nullptr)
-    {
-        FillBoundaries(lev, { 
-            eta_mf[lev].get(), 
-            density_mf[lev].get(), 
-            rho_eta0_mf[lev].get(), 
-            rho_eta1_mf[lev].get() });
-    }
-    else
-    {
-        // Copy interior + ghost cells TO working copies
-        amrex::MultiFab rho_eta0_copy(rho_eta0_mf_in.boxArray(), rho_eta0_mf_in.DistributionMap(), 1, nghost);
-        amrex::MultiFab rho_eta1_copy(rho_eta1_mf_in.boxArray(), rho_eta1_mf_in.DistributionMap(), 1, nghost);
-        amrex::MultiFab M_copy(M_mf_in.boxArray(), M_mf_in.DistributionMap(), AMREX_SPACEDIM, nghost);
-        amrex::MultiFab E_copy(E_mf_in.boxArray(), E_mf_in.DistributionMap(), 1, nghost);
-
-
-        amrex::MultiFab::Copy(rho_eta0_copy, rho_eta0_mf_in, 0, 0, 1, nghost); // Include ghosts
-        amrex::MultiFab::Copy(rho_eta1_copy, rho_eta1_mf_in, 0, 0, 1, nghost); // Include ghosts
-        amrex::MultiFab::Copy(M_copy, M_mf_in, 0, 0, AMREX_SPACEDIM, nghost);  // Include ghosts
-        amrex::MultiFab::Copy(E_copy, E_mf_in, 0, 0, 1, nghost);               // Include ghosts
-        
-
-        FillBoundariesWithBC(lev, time, density_bc, { 
-            eta_mf[lev].get(), 
-            density_mf[lev].get() 
-            //&rho_eta0_copy,
-            //&rho_eta1_copy
-        });
-
-        FillBoundariesWithBC(lev, time, momentum_bc, { 
-            &M_copy
-        });
-
-        FillBoundariesWithBC(lev, time, energy_bc, { 
-            &E_copy
-        });
-
-        // Copy back INCLUDING ALL 4 GHOST CELL LAYERS
-        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(rho_eta0_mf_in), rho_eta0_copy, 0, 0, 1, nghost);
-        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(rho_eta1_mf_in), rho_eta1_copy, 0, 0, 1, nghost);
-        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(M_mf_in), M_copy, 0, 0, AMREX_SPACEDIM, nghost);
-        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(E_mf_in), E_copy, 0, 0, 1, nghost);
-        
-        /*
-        FillBoundariesWithBC(lev, time, density_bc, { 
-            eta_mf[lev].get(), 
-            density_mf[lev].get(), 
-            rho_eta0_mf[lev].get(),
-            rho_eta1_mf[lev].get() 
-        });
-        */
-        
-
-        
-    }
-        
-
-    // Primitive Fields
-    //for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
+    // Pre-Source Terms
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
 
         // CONSERVATIVE
         Set::Patch<const Set::Scalar> eta = eta_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf_in.array(mfi);
-        Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf_in.array(mfi);
+        auto const rho_eta0 = rho_eta0_mf[lev]->array(mfi);
+        auto const rho_eta1 = rho_eta1_mf[lev]->array(mfi);
         Set::Patch<const Set::Scalar> rho = density_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> M = M_mf_in.array(mfi);
-        Set::Patch<const Set::Scalar> E = E_mf_in.array(mfi);
+        auto const M = momentum_mf[lev]->array(mfi);
+        auto const E = energy_per_vol_mf[lev]->array(mfi);
 
         // PRIMITIVE
-        Set::Patch<Set::Scalar> v = velocity_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> press = pressure_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> a = a_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> v = velocity_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> press = pressure_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> a = a_mf.Patch(lev, mfi);
 
         // SINGLE PHASE
         Set::Patch<const Set::Scalar> rho0 = density0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> rho1 = density1_mf.Patch(lev, mfi);
 
         // SOURCE - ish
-        Set::Patch<Set::Scalar> KE = KE_per_vol_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> UE = UE_per_vol_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> cp = cp_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> cv = cv_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> T = T_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> KE = KE_per_vol_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> UE = UE_per_vol_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> cp = cp_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> cv = cv_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> T = T_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
@@ -824,30 +778,6 @@ Hydro2::RHS(int lev,
             Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
             Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
-
-            // gamma
-            gammaf(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
-            
-            // Velocity
-            v(i, j, k, 0) = M(i, j, k, 0) / (rho(i, j, k));
-            v(i, j, k, 1) = M(i, j, k, 1) / (rho(i, j, k));
-
-            // Kinetic Energy
-            KE(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1)); // Per Vol
-            // KE(i, j, k) = 0.5 * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1)); // Per Mass
-
-            // Potential Energy
-            UE(i, j, k) = E(i, j, k) - KE(i, j, k);
-
-            // Pressure
-            p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
-            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small);
-
-            // Temperature
-            T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
-
-            // Speed of sound:
-            a(i, j, k) = Solver::EOS::EOS::TammannSoundSpeed(rho(i, j, k), press(i, j, k), gammaf(i, j, k), p0_eff(i, j, k), small);
 
             // Chemical Potential
             Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
@@ -958,208 +888,6 @@ Hydro2::RHS(int lev,
         }); // end parallelfor
     } // end Primative field
 
-
-    // NSCBC SPECIFIC BOUNDRY CONDITION
-    if (nscbc_bc != nullptr)
-    {
-        Util::Message(INFO, "Using NSCBC");
-
-        // Compute total density from phase densities
-        amrex::MultiFab rho_total(rho_eta0_mf_in.boxArray(),
-                                  rho_eta0_mf_in.DistributionMap(),
-                                  1,
-                                  nghost);
-
-        for (amrex::MFIter mfi(rho_total); mfi.isValid(); ++mfi)
-        {
-            const amrex::Box &bx = mfi.growntilebox(nghost);
-            auto rho = rho_total.array(mfi);
-            auto rho0 = rho_eta0_mf_in.const_array(mfi);
-            auto rho1 = rho_eta1_mf_in.const_array(mfi);
-
-            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                rho(i, j, k) = rho0(i, j, k) + rho1(i, j, k);
-            });
-        }
-
-        // Create working copies for NSCBC
-        amrex::MultiFab M_copy(M_mf_in.boxArray(), M_mf_in.DistributionMap(), AMREX_SPACEDIM, nghost);
-        amrex::MultiFab E_copy(E_mf_in.boxArray(), E_mf_in.DistributionMap(), 1, nghost);
-
-        amrex::MultiFab::Copy(M_copy, M_mf_in, 0, 0, AMREX_SPACEDIM, nghost);
-        amrex::MultiFab::Copy(E_copy, E_mf_in, 0, 0, 1, nghost);
-
-        // Apply NSCBC
-        nscbc_bc->FillBoundary(rho_total,
-                               M_copy,
-                               E_copy,
-                               *eta_mf[lev],
-                               *gamma_mf[lev],
-                               *p0_mf[lev],
-                               *pressure_mf[lev],
-                               eos0,
-                               eos1,
-                               geom[lev],
-                               time,
-                               pref);
-
-        // Copy back
-        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(M_mf_in), M_copy, 0, 0, AMREX_SPACEDIM, nghost);
-        amrex::MultiFab::Copy(const_cast<amrex::MultiFab &>(E_mf_in), E_copy, 0, 0, 1, nghost);
-
-        // Update density_mf from rho_total
-        density_mf[lev]->ParallelCopy(rho_total);
-
-
-        // Compute primitive variables in ghost cells from updated conservative variables
-        for (amrex::MFIter mfi(*velocity_mf[lev], false); mfi.isValid(); ++mfi)
-        {
-            const amrex::Box &ghost_box = mfi.growntilebox(nghost);
-
-            auto eta = eta_mf[lev]->array(mfi);
-            auto rho = density_mf[lev]->array(mfi);
-            auto rho_eta0 = const_cast<amrex::MultiFab &>(rho_eta0_mf_in).array(mfi);
-            auto rho_eta1 = const_cast<amrex::MultiFab &>(rho_eta1_mf_in).array(mfi);
-            auto M = const_cast<amrex::MultiFab &>(M_mf_in).array(mfi);
-            auto E = const_cast<amrex::MultiFab &>(E_mf_in).array(mfi);
-            auto v = velocity_mf[lev]->array(mfi);
-            auto press = pressure_mf[lev]->array(mfi);
-            auto T = T_mf[lev]->array(mfi);
-            auto a = a_mf[lev]->array(mfi);
-            auto gammaf = gamma_mf[lev]->array(mfi);
-            auto p0_eff = p0_mf[lev]->array(mfi);
-            auto UE = UE_per_vol_mf[lev]->array(mfi);
-            auto KE = KE_per_vol_mf[lev]->array(mfi);
-
-            const Solver::EOS::Tammann eos0_local = eos0;
-            const Solver::EOS::Tammann eos1_local = eos1;
-
-            amrex::ParallelFor(ghost_box, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                // rho_eta Fields
-                rho_eta0(i, j, k) = rho(i, j, k) * eta(i, j, k);
-                rho_eta1(i, j, k) = rho(i, j, k) * (1.0 - eta(i, j, k));
-
-                // Velocity from momentum
-                v(i, j, k, 0) = M(i, j, k, 0) / (rho(i, j, k) + small);
-                v(i, j, k, 1) = M(i, j, k, 1) / (rho(i, j, k) + small);
-
-                // Kinetic energy
-                KE(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
-
-                // Internal energy
-                UE(i, j, k) = E(i, j, k) - KE(i, j, k);
-
-                // EOS properties
-                gammaf(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
-                p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
-                press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small);
-                T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
-                a(i, j, k) = Solver::EOS::EOS::TammannSoundSpeed(rho(i, j, k), press(i, j, k), gammaf(i, j, k), p0_eff(i, j, k), small);
-            });
-        }
-        ///  VALIDATION CHECK ///////////////////////////////
-        if (step_counter[lev] == 1)
-        { // First timestep only
-            for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
-            {
-                const amrex::Box &bx = mfi.validbox();
-                const amrex::Box &domain_box = geom[lev].Domain();
-
-                // Check X-LO boundary ghost cells
-                if (bx.smallEnd(0) == domain_box.smallEnd(0))
-                {
-                    auto rho = density_mf[lev]->array(mfi);
-                    auto M = const_cast<amrex::MultiFab &>(M_mf_in).array(mfi);
-                    auto E = const_cast<amrex::MultiFab &>(E_mf_in).array(mfi);
-
-                    // Sample one ghost cell at mid-height
-                    int i_ghost = domain_box.smallEnd(0) - 1;
-                    int j_mid = (bx.smallEnd(1) + bx.bigEnd(1)) / 2;
-
-                    Set::Scalar rho_g = rho(i_ghost, j_mid, 0);
-                    Set::Scalar Mx_g = M(i_ghost, j_mid, 0, 0);
-                    Set::Scalar My_g = M(i_ghost, j_mid, 0, 1);
-                    Set::Scalar E_g = E(i_ghost, j_mid, 0);
-                    Set::Scalar vx_g = Mx_g / (rho_g + small);
-                    Set::Scalar vy_g = My_g / (rho_g + small);
-
-                    Util::Message(INFO, "=== NSCBC X-LO GHOST CHECK ===");
-                    Util::Message(INFO, "Ghost cell (", i_ghost, ",", j_mid, "):");
-                    Util::Message(INFO, "  rho=", rho_g);
-                    Util::Message(INFO, "  Mx=", Mx_g, " My=", My_g);
-                    Util::Message(INFO, "  E=", E_g);
-                    Util::Message(INFO, "  vx=", vx_g, " vy=", vy_g);
-
-                    // Compare to interior neighbor
-                    int i_interior = domain_box.smallEnd(0);
-                    Set::Scalar rho_i = rho(i_interior, j_mid, 0);
-                    Set::Scalar vx_i = M(i_interior, j_mid, 0, 0) / (rho_i + small);
-                    Set::Scalar vy_i = M(i_interior, j_mid, 0, 1) / (rho_i + small);
-
-                    Util::Message(INFO, "Interior cell (", i_interior, ",", j_mid, "):");
-                    Util::Message(INFO, "  rho=", rho_i);
-                    Util::Message(INFO, "  vx=", vx_i, " vy=", vy_i);
-
-                    // FAIL CONDITIONS
-                    if (rho_g < 0.0 || rho_g > 10000.0)
-                    {
-                        Util::Message(INFO, "FAIL: Ghost density out of range!");
-                    }
-                    if (std::abs(vx_g) > 1000.0 || std::abs(vy_g) > 1000.0)
-                    {
-                        Util::Message(INFO, "FAIL: Ghost velocity too large!");
-                    }
-                    if (E_g < 0.0 || E_g > 1e10)
-                    {
-                        Util::Message(INFO, "FAIL: Ghost energy out of range!");
-                    }
-
-                    // EXPECTED: Ghost should be similar to interior (for outflow)
-                    Set::Scalar rho_diff = std::abs(rho_g - rho_i) / (rho_i + small);
-                    if (rho_diff > 0.5)
-                    {
-                        Util::Message(INFO, "WARNING: Ghost density differs by ", rho_diff * 100, "%");
-                    }
-                }
-            }
-        }
-
-        ///////////////////////////////
-
-    }
-    else
-    {
-        // Primative Field Boundries
-        FillBoundariesWithBC(lev, time, energy_bc, { 
-            pressure_mf[lev].get(), 
-            T_mf[lev].get(), 
-            gamma_mf[lev].get(),
-            p0_mf[lev].get() 
-        });
-
-        /*
-        FillBoundariesWithBC(lev, time, energy_bc, { 
-            energy_per_vol_mf[lev].get(), 
-            energy_per_mas_mf[lev].get(), 
-            energy_per_vol_old_mf[lev].get(), 
-            energy_per_mas_old_mf[lev].get(),
-            UE_per_vol_mf[lev].get(),
-            UE_per_mas_mf[lev].get(), 
-            KE_per_vol_mf[lev].get(), 
-            KE_per_mas_mf[lev].get(), 
-            pressure_mf[lev].get(), 
-            gamma_mf[lev].get(), 
-            p0_mf[lev].get(), 
-            mu_chem_mf[lev].get(), 
-            Bm_mf[lev].get(),
-            Y_mf[lev].get(),
-            T_mf[lev].get(),
-            cp_mf[lev].get(),
-            cv_mf[lev].get()
-        });
-        */
-
-    }
     
     // Main time integration loop
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
@@ -1172,13 +900,13 @@ Hydro2::RHS(int lev,
         // FLUID 1
         Set::Patch<const Set::Scalar> rho1 = density1_mf.Patch(lev, mfi);
 
-        // Mixture
+        // CONSERVATIVE
         Set::Patch<const Set::Scalar> eta = eta_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf_in.array(mfi);
-        Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf_in.array(mfi);
+        auto const rho_eta0 = rho_eta0_mf[lev]->array(mfi);
+        auto const rho_eta1 = rho_eta1_mf[lev]->array(mfi);
         Set::Patch<const Set::Scalar> rho = density_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> M = M_mf_in.array(mfi);
-        Set::Patch<const Set::Scalar> E = E_mf_in.array(mfi);
+        auto const M = momentum_mf[lev]->array(mfi);
+        auto const E = energy_per_vol_mf[lev]->array(mfi);
 
         // OUTPUTS
         Set::Patch<Set::Scalar> rho_eta0_rhs = rho_eta0_rhs_mf.array(mfi);
@@ -1772,85 +1500,20 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     });
 
     timeintegrator.set_post_stage_action([&](amrex::Vector<amrex::MultiFab> &stage_mf, Set::Scalar time) {
-        if (nscbc_bc != nullptr)
-        {
-            // Compute total density: rho = rho_eta0 + rho_eta1
-            amrex::MultiFab rho_total(stage_mf[0].boxArray(), stage_mf[0].DistributionMap(), 1, nghost);
+        // Copy stage data to working arrays
+        amrex::MultiFab::Copy(*rho_eta0_mf[lev], stage_mf[0], 0, 0, 1, nghost);
+        amrex::MultiFab::Copy(*rho_eta1_mf[lev], stage_mf[1], 0, 0, 1, nghost);
+        amrex::MultiFab::Copy(*momentum_mf[lev], stage_mf[2], 0, 0, AMREX_SPACEDIM, nghost);
+        amrex::MultiFab::Copy(*energy_per_vol_mf[lev], stage_mf[3], 0, 0, 1, nghost);
 
-            for (amrex::MFIter mfi(rho_total); mfi.isValid(); ++mfi)
-            {
-                const amrex::Box &bx = mfi.growntilebox(nghost);
-                auto rho_arr = rho_total.array(mfi);
-                auto rho_eta0_arr = stage_mf[0].array(mfi);
-                auto rho_eta1_arr = stage_mf[1].array(mfi);
+        // Fill all ghost cells
+        FillGhost4BC(lev, time);
 
-                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                    rho_arr(i, j, k) = rho_eta0_arr(i, j, k) + rho_eta1_arr(i, j, k);
-                });
-            }
-
-            // Compute eta = rho_eta0 / rho_total
-            amrex::MultiFab eta_stage(stage_mf[0].boxArray(), stage_mf[0].DistributionMap(), 1, nghost);
-
-            for (amrex::MFIter mfi(eta_stage); mfi.isValid(); ++mfi)
-            {
-                const amrex::Box &bx = mfi.growntilebox(nghost);
-                auto eta_arr = eta_stage.array(mfi);
-                auto rho_eta0_arr = stage_mf[0].array(mfi);
-                auto rho_arr = rho_total.array(mfi);
-                Set::Scalar small_local = small;
-
-                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                    eta_arr(i, j, k) = rho_eta0_arr(i, j, k) / (rho_arr(i, j, k) + small_local);
-                    eta_arr(i, j, k) = std::max(0.0, std::min(1.0, eta_arr(i, j, k)));
-                });
-            }
-
-            // ACTUALLY CALL NSCBC
-            nscbc_bc->FillBoundary(rho_total,
-                                   stage_mf[2], // momentum
-                                   stage_mf[3], // energy
-                                   eta_stage,
-                                   *gamma_mf[lev],
-                                   *p0_mf[lev],
-                                   *pressure_mf[lev],
-                                   eos0,
-                                   eos1,
-                                   geom[lev],
-                                   time,
-                                   pref);
-
-            // Update rho_eta0 and rho_eta1 from modified rho_total
-            for (amrex::MFIter mfi(rho_total); mfi.isValid(); ++mfi)
-            {
-                const amrex::Box &bx = mfi.growntilebox(nghost);
-                auto rho_arr = rho_total.array(mfi);
-                auto eta_arr = eta_stage.array(mfi);
-                auto rho_eta0_arr = stage_mf[0].array(mfi);
-                auto rho_eta1_arr = stage_mf[1].array(mfi);
-
-                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                    rho_eta0_arr(i, j, k) = rho_arr(i, j, k) * eta_arr(i, j, k);
-                    rho_eta1_arr(i, j, k) = rho_arr(i, j, k) * (1.0 - eta_arr(i, j, k));
-
-                    // Enforce positivity
-                    rho_eta0_arr(i, j, k) = std::max(rho_eta0_arr(i, j, k), small);
-                    rho_eta1_arr(i, j, k) = std::max(rho_eta1_arr(i, j, k), small);
-                });
-            }
-        }
-        else
-        {
-            // Standard mode: Apply standard BCs
-            density_bc->FillBoundary(stage_mf[0], 0, 1, time, 0);
-            stage_mf[0].FillBoundary(true);
-            density_bc->FillBoundary(stage_mf[1], 0, 1, time, 0);
-            stage_mf[1].FillBoundary(true);
-            momentum_bc->FillBoundary(stage_mf[2], 0, AMREX_SPACEDIM, time, 0);
-            stage_mf[2].FillBoundary(true);
-            energy_bc->FillBoundary(stage_mf[3], 0, 1, time, 0);
-            stage_mf[3].FillBoundary(true);
-        }
+        // Copy back
+        amrex::MultiFab::Copy(stage_mf[0], *rho_eta0_mf[lev], 0, 0, 1, nghost);
+        amrex::MultiFab::Copy(stage_mf[1], *rho_eta1_mf[lev], 0, 0, 1, nghost);
+        amrex::MultiFab::Copy(stage_mf[2], *momentum_mf[lev], 0, 0, AMREX_SPACEDIM, nghost);
+        amrex::MultiFab::Copy(stage_mf[3], *energy_per_vol_mf[lev], 0, 0, 1, nghost);
 
     });
 
@@ -2100,7 +1763,8 @@ void Hydro2::Regrid(int lev, Set::Scalar regrid_time)
 {
     BL_PROFILE("Integrator::Hydro2::Regrid");
 
-    Source_mf[lev]->setVal(0.0);
+    // Fill BCs and ghost cells after regridding 
+    FillGhost4BC(lev, regrid_time);
 
     if (lev < finest_level)
         return;
@@ -2887,16 +2551,954 @@ void Hydro2::FillBoundariesWithBC(int lev, Set::Scalar time, BC::BC<Set::Scalar>
 }
 
 
+/// ============================================================================
+/// FillGhost4BC(): Unified ghost cell filling for all boundary conditions
+/// ============================================================================
+///
+/// This function handles ghost cell filling for both NSCBC and standard BCs.
+/// It ensures proper ordering: compute domain quantities -> fill conservatives
+/// -> compute ghost primitives, maintaining consistency between all fields.
+///
+/// CRITICAL ORDERING (to prevent NaN propagation):
+///   1. Compute rho, eta in domain
+///   2. Fill eta in ghosts (NSCBC needs this for EOS)
+///   3. Compute primitives in domain (NSCBC needs these for characteristics)
+///   4. Call NSCBC or standard BCs to fill conservative ghosts
+///   5. Update rho_eta0, rho_eta1 from NSCBC-modified rho_total
+///   6. Compute primitives in ghosts (using NSCBC's gamma/p if available)
+///   7. Enforce consistency and check for NaN/Inf
+///
+/// @param lev   AMR level
+/// @param time  Current simulation time
+/// ============================================================================
+void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
+{
+    BL_PROFILE("Integrator::Hydro2::FillGhost4BC");
+
+    const Set::Scalar *DX = geom[lev].CellSize();
+    amrex::Box domain = geom[lev].Domain();
+
+    // ------------------------------------------------------------
+    // STEP 1: Determine BC strategy based on nghost and NSCBC flag
+    // ------------------------------------------------------------
+    bool use_nscbc = (nscbc_bc != nullptr);
+    int effective_nghost = nghost;
+
+    if (use_nscbc)
+    {
+        // NSCBC requires exactly 2 or 4 ghost cells
+        if (nghost == 2)
+        {
+            Util::Message(INFO, "FillGhost4BC: Using NSCBC with 2 ghost cells"); // Use 2-cell NSCBC stencil
+
+            // To-DO: Point towards NSCBC function
+        }
+        else if (nghost == 4)
+        {
+            Util::Message(INFO, "FillGhost4BC: Using NSCBC with 4 ghost cells"); // Use 4-cell NSCBC stencil
+            // To-DO: Point towards NSCBC4 function
+
+        }
+        else
+        {
+            Util::Abort(INFO, "NSCBC requires nghost = 2 or 4, but nghost = ", nghost);
+        }
+        effective_nghost = nghost;
+    }
+    else
+    {
+        // Standard BCs only use 2 ghost cell layers
+        effective_nghost = 2;
+        if (nghost > 2)
+        {
+            Util::Message(INFO, "FillGhost4BC: Standard BCs with nghost=", nghost, " (only using 2 layers)");
+        }
+    }
+
+    // ------------------------------------------------------------
+    // STEP 2: Compute mixed quantities (rho, eta) in DOMAIN
+    // ------------------------------------------------------------
+    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox(); // DOMAIN ONLY
+
+        auto rho_eta0 = rho_eta0_mf[lev]->array(mfi);
+        auto rho_eta1 = rho_eta1_mf[lev]->array(mfi);
+        auto rho = density_mf[lev]->array(mfi);
+        auto eta = eta_mf[lev]->array(mfi);
+
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            // Total density
+            rho(i, j, k) = rho_eta0(i, j, k) + rho_eta1(i, j, k);
+            rho(i, j, k) = std::max(rho(i, j, k), small);
+
+            // Volume fraction
+            eta(i, j, k) = rho_eta0(i, j, k) / rho(i, j, k);
+
+            // Clamp eta to [0, 1] to prevent NaN in EOS
+            eta(i, j, k) = std::max(0.0, std::min(1.0, eta(i, j, k)));
+        });
+    }
+
+    // ------------------------------------------------------------
+    // STEP 3: Fill Density / Eta ghost cells
+    // ------------------------------------------------------------
+    eta_mf[lev]->FillBoundary(geom[lev].periodicity());
+    density_bc->FillBoundary(*eta_mf[lev], 0, 1, time, 0);
+
+    // For AMR levels > 0, ensure all ghost cells are filled
+    /*
+    if (lev > 0)
+    {
+        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &validbox = mfi.validbox();
+            const amrex::Box &ghostbox = mfi.growntilebox(nghost);
+
+            auto eta = eta_mf[lev]->array(mfi);
+
+            amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                // Only process ghost cells
+                if (!validbox.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
+                {
+
+                    // If eta is NaN or out of bounds, extrapolate from nearest interior cell
+                    if (!std::isfinite(eta(i, j, k)) || eta(i, j, k) < 0.0 || eta(i, j, k) > 1.0)
+                    {
+
+                        // Find nearest interior cell
+                        int i_int = i;
+                        int j_int = j;
+
+                        if (i < validbox.smallEnd(0))
+                            i_int = validbox.smallEnd(0);
+                        if (i > validbox.bigEnd(0))
+                            i_int = validbox.bigEnd(0);
+                        if (j < validbox.smallEnd(1))
+                            j_int = validbox.smallEnd(1);
+                        if (j > validbox.bigEnd(1))
+                            j_int = validbox.bigEnd(1);
+
+                        // Copy from nearest interior
+                        eta(i, j, k) = eta(i_int, j_int, k);
+                    }
+
+                    // Clamp to [0,1]
+                    eta(i, j, k) = std::max(0.0, std::min(1.0, eta(i, j, k)));
+                }
+            });
+        }
+    }
+
+    // NSCBC-specific clamping
+    if (use_nscbc)
+    {
+        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            const amrex::Box &ghostbox = mfi.growntilebox(nghost);
+
+            auto eta = eta_mf[lev]->array(mfi);
+
+            amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                // Only process ghost cells
+                if (!bx.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
+                {
+                    // Extra safety for NSCBC
+                    if (!std::isfinite(eta(i, j, k)))
+                    {
+                        eta(i, j, k) = 0.5; // Safe default
+                    }
+                }
+            });
+        }
+    }
+    */
 
 
+    // ------------------------------------------------------------
+    // STEP 4: Compute primitives in DOMAIN
+    // ------------------------------------------------------------
+    for (amrex::MFIter mfi(*velocity_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox(); // DOMAIN ONLY
+
+        auto rho = density_mf[lev]->array(mfi);
+        auto eta = eta_mf[lev]->array(mfi);
+        auto M = momentum_mf[lev]->array(mfi);
+        auto E = energy_per_vol_mf[lev]->array(mfi);
+        auto v = velocity_mf[lev]->array(mfi);
+        auto press = pressure_mf[lev]->array(mfi);
+        auto T = T_mf[lev]->array(mfi);
+        auto a = a_mf[lev]->array(mfi);
+        auto gamma = gamma_mf[lev]->array(mfi);
+        auto p0_eff = p0_mf[lev]->array(mfi);
+        auto UE = UE_per_vol_mf[lev]->array(mfi);
+        auto KE = KE_per_vol_mf[lev]->array(mfi);
+
+        const Solver::EOS::Tammann eos0_local = eos0;
+        const Solver::EOS::Tammann eos1_local = eos1;
+
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            // Velocity
+            v(i, j, k, 0) = M(i, j, k, 0) / rho(i, j, k);
+            v(i, j, k, 1) = M(i, j, k, 1) / rho(i, j, k);
+
+            // Kinetic energy
+            KE(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
+
+            // Internal energy
+            UE(i, j, k) = E(i, j, k) - KE(i, j, k);
+
+            // Mixed EOS properties
+            gamma(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
+            p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
+
+            // Pressure from Tammann EOS
+            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small);
+
+            // Temperature
+            T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
+
+            // Sound speed
+            a(i, j, k) = Solver::EOS::EOS::TammannSoundSpeed(rho(i, j, k), press(i, j, k), gamma(i, j, k), p0_eff(i, j, k), small);
+        });
+    }
+
+    // ------------------------------------------------------------
+    // STEP 5: Fill CONSERVATIVE ghost cells (rho, M, E)
+    // ------------------------------------------------------------
+    if (use_nscbc)
+    {
+        // ====================================================================
+        // NSCBC PATH: Use characteristic-based boundary conditions
+        // ====================================================================
+
+        // NSCBC operates on total density, not phase densities
+        // Compute rho_total in domain + ghosts
+        amrex::MultiFab rho_total(rho_eta0_mf[lev]->boxArray(),
+                                  rho_eta0_mf[lev]->DistributionMap(),
+                                  1,
+                                  nghost);
+
+        for (amrex::MFIter mfi(rho_total); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.growntilebox(nghost);
+            auto rho = rho_total.array(mfi);
+            auto rho0 = rho_eta0_mf[lev]->array(mfi);
+            auto rho1 = rho_eta1_mf[lev]->array(mfi);
+
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                rho(i, j, k) = rho0(i, j, k) + rho1(i, j, k);
+            });
+        }
+
+        // Create working copies for NSCBC (it modifies them in-place)
+        amrex::MultiFab M_copy(momentum_mf[lev]->boxArray(),
+                               momentum_mf[lev]->DistributionMap(),
+                               AMREX_SPACEDIM,
+                               nghost);
+        amrex::MultiFab E_copy(energy_per_vol_mf[lev]->boxArray(),
+                               energy_per_vol_mf[lev]->DistributionMap(),
+                               1,
+                               nghost);
+
+        amrex::MultiFab::Copy(M_copy, *momentum_mf[lev], 0, 0, AMREX_SPACEDIM, nghost);
+        amrex::MultiFab::Copy(E_copy, *energy_per_vol_mf[lev], 0, 0, 1, nghost);
+
+        // ====================================================================
+        // CALL NSCBC TO FILL GHOST CELLS
+        // ====================================================================
+        // NSCBC will:
+        //   - Read eta, gamma, p0, pressure from domain (computed above)
+        //   - Compute characteristic waves from interior gradients
+        //   - Modify incoming waves based on BC type
+        //   - Fill rho_total, M, E in ghost cells
+        //   - Write gamma, p0, pressure to ghost cells
+        // ====================================================================
+        nscbc_bc->FillBoundary(rho_total,
+                               M_copy,
+                               E_copy,
+                               *eta_mf[lev],
+                               *gamma_mf[lev],
+                               *p0_mf[lev],
+                               *pressure_mf[lev],
+                               eos0,
+                               eos1,
+                               geom[lev],
+                               time,
+                               pref);
+
+        // Copy modified conservatives back to main arrays
+        amrex::MultiFab::Copy(*momentum_mf[lev], M_copy, 0, 0, AMREX_SPACEDIM, nghost);
+        amrex::MultiFab::Copy(*energy_per_vol_mf[lev], E_copy, 0, 0, 1, nghost);
+
+        // ====================================================================
+        // Update phase densities from NSCBC-modified rho_total
+        // ====================================================================
+        // NSCBC filled rho_total in ghosts, but we need rho_eta0, rho_eta1
+        // Partition using eta: rho_eta0 = rho_total * eta
+        // ====================================================================
+        for (amrex::MFIter mfi(rho_total); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &ghostbox = mfi.growntilebox(nghost);
+
+            auto rho = rho_total.array(mfi);
+            auto eta = eta_mf[lev]->array(mfi);
+            auto rho0 = rho_eta0_mf[lev]->array(mfi);
+            auto rho1 = rho_eta1_mf[lev]->array(mfi);
+
+            amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                // Partition total density by volume fraction
+                rho0(i, j, k) = rho(i, j, k) * eta(i, j, k);
+                rho1(i, j, k) = rho(i, j, k) * (1.0 - eta(i, j, k));
+
+                // Enforce positivity
+                rho0(i, j, k) = std::max(rho0(i, j, k), small);
+                rho1(i, j, k) = std::max(rho1(i, j, k), small);
+            });
+        }
+
+        // Update density_mf from rho_total
+        amrex::MultiFab::Copy(*density_mf[lev], rho_total, 0, 0, 1, nghost);
+    }
+    else
+    {
+        // ====================================================================
+        // Standard BC path: Use Neumann/Dirichlet/Expression BCs
+        // ====================================================================
+
+        // ====================================================================
+        // Fill phase densities
+        // ====================================================================
+        rho_eta0_mf[lev]->FillBoundary(geom[lev].periodicity());
+        density_bc->FillBoundary(*rho_eta0_mf[lev], 0, 1, time, 0);
+
+        // Immediately repair any NaN in rho_eta0
+        for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &validbox = mfi.validbox();
+            const amrex::Box &ghostbox = mfi.growntilebox(2); // Only first 2 layers
+
+            auto rho0 = rho_eta0_mf[lev]->array(mfi);
+
+            amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                if (!validbox.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
+                {
+                    if (!std::isfinite(rho0(i, j, k)) || rho0(i, j, k) <= 0.0)
+                    {
+                        // Find nearest interior cell
+                        int i_int = (i < validbox.smallEnd(0)) ? validbox.smallEnd(0) : (i > validbox.bigEnd(0)) ? validbox.bigEnd(0)
+                                                                                                                 : i;
+                        int j_int = (j < validbox.smallEnd(1)) ? validbox.smallEnd(1) : (j > validbox.bigEnd(1)) ? validbox.bigEnd(1)
+                                                                                                                 : j;
+
+                        rho0(i, j, k) = rho0(i_int, j_int, k);
+                    }
+                    rho0(i, j, k) = std::max(rho0(i, j, k), small);
+                }
+            });
+        }
+
+        // ====================================================================
+        // Fill rho_eta1
+        // ====================================================================
+        rho_eta1_mf[lev]->FillBoundary(geom[lev].periodicity());
+        density_bc->FillBoundary(*rho_eta1_mf[lev], 0, 1, time, 0);
+
+        // Immediately repair any NaN in rho_eta1
+        for (amrex::MFIter mfi(*rho_eta1_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &validbox = mfi.validbox();
+            const amrex::Box &ghostbox = mfi.growntilebox(2);
+
+            auto rho1 = rho_eta1_mf[lev]->array(mfi);
+
+            amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                if (!validbox.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
+                {
+                    if (!std::isfinite(rho1(i, j, k)) || rho1(i, j, k) <= 0.0)
+                    {
+                        int i_int = (i < validbox.smallEnd(0)) ? validbox.smallEnd(0) : (i > validbox.bigEnd(0)) ? validbox.bigEnd(0)
+                                                                                                                 : i;
+                        int j_int = (j < validbox.smallEnd(1)) ? validbox.smallEnd(1) : (j > validbox.bigEnd(1)) ? validbox.bigEnd(1)
+                                                                                                                 : j;
+
+                        rho1(i, j, k) = rho1(i_int, j_int, k);
+                    }
+                    rho1(i, j, k) = std::max(rho1(i, j, k), small);
+                }
+            });
+        }
+
+        // ====================================================================
+        // Fill momentum
+        // ====================================================================
+        momentum_mf[lev]->FillBoundary(geom[lev].periodicity());
+        momentum_bc->FillBoundary(*momentum_mf[lev], 0, AMREX_SPACEDIM, time, 0);
+
+        // Immediately repair any NaN in momentum
+        for (amrex::MFIter mfi(*momentum_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &validbox = mfi.validbox();
+            const amrex::Box &ghostbox = mfi.growntilebox(2);
+
+            auto M = momentum_mf[lev]->array(mfi);
+
+            amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                if (!validbox.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
+                {
+                    if (!std::isfinite(M(i, j, k, 0)) || !std::isfinite(M(i, j, k, 1)))
+                    {
+                        int i_int = (i < validbox.smallEnd(0)) ? validbox.smallEnd(0) : (i > validbox.bigEnd(0)) ? validbox.bigEnd(0)
+                                                                                                                 : i;
+                        int j_int = (j < validbox.smallEnd(1)) ? validbox.smallEnd(1) : (j > validbox.bigEnd(1)) ? validbox.bigEnd(1)
+                                                                                                                 : j;
+
+                        M(i, j, k, 0) = M(i_int, j_int, k, 0);
+                        M(i, j, k, 1) = M(i_int, j_int, k, 1);
+                    }
+                }
+            });
+        }
+
+        // ====================================================================
+        // Fill energy
+        // ====================================================================
+        energy_per_vol_mf[lev]->FillBoundary(geom[lev].periodicity());
+        energy_bc->FillBoundary(*energy_per_vol_mf[lev], 0, 1, time, 0);
+
+        // Immediately repair any NaN in energy (MORE AGGRESSIVE)
+        for (amrex::MFIter mfi(*energy_per_vol_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &validbox = mfi.validbox();
+            const amrex::Box &ghostbox = mfi.growntilebox(nghost); 
+
+            auto E = energy_per_vol_mf[lev]->array(mfi);
+            auto rho0 = rho_eta0_mf[lev]->array(mfi);
+            auto rho1 = rho_eta1_mf[lev]->array(mfi);
+            auto M = momentum_mf[lev]->array(mfi);
+
+            amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                if (!validbox.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
+                {
+
+                    // Check if energy is invalid
+                    if (!std::isfinite(E(i, j, k)) || E(i, j, k) <= 0.0)
+                    {
+
+                        // Find nearest interior cell
+                        int i_int = (i < validbox.smallEnd(0)) ? validbox.smallEnd(0) : (i > validbox.bigEnd(0)) ? validbox.bigEnd(0)
+                                                                                                                 : i;
+                        int j_int = (j < validbox.smallEnd(1)) ? validbox.smallEnd(1) : (j > validbox.bigEnd(1)) ? validbox.bigEnd(1)
+                                                                                                                 : j;
+
+                        // Try to copy from interior
+                        E(i, j, k) = E(i_int, j_int, k);
+
+                        // If interior is also bad, reconstruct from density and velocity
+                        if (!std::isfinite(E(i, j, k)) || E(i, j, k) <= 0.0)
+                        {
+                            Set::Scalar rho_ghost = rho0(i, j, k) + rho1(i, j, k);
+                            Set::Scalar vx = M(i, j, k, 0) / (rho_ghost + small);
+                            Set::Scalar vy = M(i, j, k, 1) / (rho_ghost + small);
+                            Set::Scalar KE = 0.5 * rho_ghost * (vx * vx + vy * vy);
+
+                            // Assume some reasonable internal energy
+                            Set::Scalar p_guess = 101325.0;       // Atmospheric pressure
+                            Set::Scalar UE_guess = p_guess / 0.4; // Rough estimate for gamma~1.4
+
+                            E(i, j, k) = KE + UE_guess;
+                        }
+                    }
+
+                    // Final safety
+                    E(i, j, k) = std::max(E(i, j, k), small);
+                }
+            });
+        }
 
 
+        // ====================================================================
+        // Handle nghost > 2: Extrapolate from layer 2 to layers 3-4
+        // ====================================================================
+        if (nghost > 2)
+        {
+            for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &ghost2box = mfi.growntilebox(2);
+                const amrex::Box &ghostNbox = mfi.growntilebox(nghost);
 
+                auto rho0 = rho_eta0_mf[lev]->array(mfi);
+                auto rho1 = rho_eta1_mf[lev]->array(mfi);
+                auto M = momentum_mf[lev]->array(mfi);
+                auto E = energy_per_vol_mf[lev]->array(mfi);
 
+                const amrex::Box &domain_box = geom[lev].Domain();
+                int ilo = domain_box.smallEnd(0);
+                int ihi = domain_box.bigEnd(0);
+                int jlo = domain_box.smallEnd(1);
+                int jhi = domain_box.bigEnd(1);
 
+                amrex::ParallelFor(ghostNbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    if (!ghost2box.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
+                    {
 
+                        int i_ref = i;
+                        int j_ref = j;
 
+                        if (i < ghost2box.smallEnd(0))
+                        {
+                            i_ref = ilo - 2;
+                        }
+                        else if (i > ghost2box.bigEnd(0))
+                        {
+                            i_ref = ihi + 2;
+                        }
+                        else
+                        {
+                            i_ref = i;
+                        }
 
+                        if (j < ghost2box.smallEnd(1))
+                        {
+                            j_ref = jlo - 2;
+                        }
+                        else if (j > ghost2box.bigEnd(1))
+                        {
+                            j_ref = jhi + 2;
+                        }
+                        else
+                        {
+                            j_ref = j;
+                        }
+
+                        rho0(i, j, k) = rho0(i_ref, j_ref, k);
+                        rho1(i, j, k) = rho1(i_ref, j_ref, k);
+                        M(i, j, k, 0) = M(i_ref, j_ref, k, 0);
+                        M(i, j, k, 1) = M(i_ref, j_ref, k, 1);
+                        E(i, j, k) = E(i_ref, j_ref, k);
+                    }
+                });
+            }
+        }
+        
+    }
+
+    // ------------------------------------------------------------
+    // STEP 6: Compute mixed quantities in GHOST CELLS
+    // ------------------------------------------------------------
+    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &ghostbox = mfi.growntilebox(effective_nghost);
+
+        auto rho_eta0 = rho_eta0_mf[lev]->array(mfi);
+        auto rho_eta1 = rho_eta1_mf[lev]->array(mfi);
+        auto rho = density_mf[lev]->array(mfi);
+        auto eta = eta_mf[lev]->array(mfi);
+
+        amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            // Total density
+            rho(i, j, k) = rho_eta0(i, j, k) + rho_eta1(i, j, k);
+            rho(i, j, k) = std::max(rho(i, j, k), small);
+
+            // Volume fraction
+            eta(i, j, k) = rho_eta0(i, j, k) / rho(i, j, k);
+
+            // Clamp to [0, 1]
+            eta(i, j, k) = std::max(0.0, std::min(1.0, eta(i, j, k)));
+        });
+    }
+
+    // ------------------------------------------------------------
+    // STEP 7: Compute primitives in GHOST CELLS
+    // ------------------------------------------------------------
+    for (amrex::MFIter mfi(*velocity_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &ghostbox = mfi.growntilebox(effective_nghost);
+
+        auto rho = density_mf[lev]->array(mfi);
+        auto eta = eta_mf[lev]->array(mfi);
+        auto M = momentum_mf[lev]->array(mfi);
+        auto E = energy_per_vol_mf[lev]->array(mfi);
+        auto v = velocity_mf[lev]->array(mfi);
+        auto press = pressure_mf[lev]->array(mfi);
+        auto T = T_mf[lev]->array(mfi);
+        auto a = a_mf[lev]->array(mfi);
+        auto gamma = gamma_mf[lev]->array(mfi);
+        auto p0_eff = p0_mf[lev]->array(mfi);
+        auto UE = UE_per_vol_mf[lev]->array(mfi);
+        auto KE = KE_per_vol_mf[lev]->array(mfi);
+
+        const Solver::EOS::Tammann eos0_local = eos0;
+        const Solver::EOS::Tammann eos1_local = eos1;
+
+        // Compute 
+        amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            v(i, j, k, 0) = M(i, j, k, 0) / rho(i, j, k);
+            v(i, j, k, 1) = M(i, j, k, 1) / rho(i, j, k);
+
+            KE(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
+
+            UE(i, j, k) = E(i, j, k) - KE(i, j, k);
+
+            if (!(use_nscbc))
+            {
+                gamma(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
+                p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
+                press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small);
+            }
+            T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
+            a(i, j, k) = Solver::EOS::EOS::TammannSoundSpeed(rho(i, j, k), press(i, j, k), gamma(i, j, k), p0_eff(i, j, k), small);
+        });
+    }
+
+    // ------------------------------------------------------------
+    // STEP 8: Repair any remaining NaN in ALL cells (domain + ghosts)
+    // ------------------------------------------------------------
+    for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &ghostbox = mfi.growntilebox(effective_nghost);
+
+        auto rho_eta0 = rho_eta0_mf[lev]->array(mfi);
+        auto rho_eta1 = rho_eta1_mf[lev]->array(mfi);
+        auto rho = density_mf[lev]->array(mfi);
+        auto eta = eta_mf[lev]->array(mfi);
+        auto M = momentum_mf[lev]->array(mfi);
+        auto E = energy_per_vol_mf[lev]->array(mfi);
+        auto press = pressure_mf[lev]->array(mfi);
+        auto v = velocity_mf[lev]->array(mfi);
+        auto T = T_mf[lev]->array(mfi);
+        auto a = a_mf[lev]->array(mfi);
+        auto gamma = gamma_mf[lev]->array(mfi);
+        auto p0_eff = p0_mf[lev]->array(mfi);
+
+        amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            // Check for NaN in any field
+            bool has_nan = !std::isfinite(rho_eta0(i, j, k)) || !std::isfinite(rho_eta1(i, j, k)) || !std::isfinite(rho(i, j, k)) || !std::isfinite(eta(i, j, k)) || !std::isfinite(M(i, j, k, 0)) || !std::isfinite(M(i, j, k, 1)) || !std::isfinite(E(i, j, k)) || !std::isfinite(press(i, j, k)) || !std::isfinite(v(i, j, k, 0)) || !std::isfinite(v(i, j, k, 1)) || !std::isfinite(T(i, j, k)) || !std::isfinite(a(i, j, k)) || !std::isfinite(gamma(i, j, k)) || !std::isfinite(p0_eff(i, j, k));
+
+            if (has_nan)
+            {
+                // Repair by copying from nearest valid neighbor
+
+                // Try left neighbor (i-1)
+                if (i > ghostbox.smallEnd(0))
+                {
+                    bool left_valid = std::isfinite(rho_eta0(i - 1, j, k)) && std::isfinite(E(i - 1, j, k)) && std::isfinite(press(i - 1, j, k));
+                    if (left_valid)
+                    {
+                        rho_eta0(i, j, k) = rho_eta0(i - 1, j, k);
+                        rho_eta1(i, j, k) = rho_eta1(i - 1, j, k);
+                        rho(i, j, k) = rho(i - 1, j, k);
+                        eta(i, j, k) = eta(i - 1, j, k);
+                        M(i, j, k, 0) = M(i - 1, j, k, 0);
+                        M(i, j, k, 1) = M(i - 1, j, k, 1);
+                        E(i, j, k) = E(i - 1, j, k);
+                        press(i, j, k) = press(i - 1, j, k);
+                        v(i, j, k, 0) = v(i - 1, j, k, 0);
+                        v(i, j, k, 1) = v(i - 1, j, k, 1);
+                        T(i, j, k) = T(i - 1, j, k);
+                        a(i, j, k) = a(i - 1, j, k);
+                        gamma(i, j, k) = gamma(i - 1, j, k);
+                        p0_eff(i, j, k) = p0_eff(i - 1, j, k);
+                        return; // Fixed, exit early
+                    }
+                }
+
+                // Try right neighbor (i+1)
+                if (i < ghostbox.bigEnd(0))
+                {
+                    bool right_valid = std::isfinite(rho_eta0(i + 1, j, k)) && std::isfinite(E(i + 1, j, k)) && std::isfinite(press(i + 1, j, k));
+                    if (right_valid)
+                    {
+                        rho_eta0(i, j, k) = rho_eta0(i + 1, j, k);
+                        rho_eta1(i, j, k) = rho_eta1(i + 1, j, k);
+                        rho(i, j, k) = rho(i + 1, j, k);
+                        eta(i, j, k) = eta(i + 1, j, k);
+                        M(i, j, k, 0) = M(i + 1, j, k, 0);
+                        M(i, j, k, 1) = M(i + 1, j, k, 1);
+                        E(i, j, k) = E(i + 1, j, k);
+                        press(i, j, k) = press(i + 1, j, k);
+                        v(i, j, k, 0) = v(i + 1, j, k, 0);
+                        v(i, j, k, 1) = v(i + 1, j, k, 1);
+                        T(i, j, k) = T(i + 1, j, k);
+                        a(i, j, k) = a(i + 1, j, k);
+                        gamma(i, j, k) = gamma(i + 1, j, k);
+                        p0_eff(i, j, k) = p0_eff(i + 1, j, k);
+                        return;
+                    }
+                }
+
+                // Try bottom neighbor (j-1)
+                if (j > ghostbox.smallEnd(1))
+                {
+                    bool bottom_valid = std::isfinite(rho_eta0(i, j - 1, k)) && std::isfinite(E(i, j - 1, k)) && std::isfinite(press(i, j - 1, k));
+                    if (bottom_valid)
+                    {
+                        rho_eta0(i, j, k) = rho_eta0(i, j - 1, k);
+                        rho_eta1(i, j, k) = rho_eta1(i, j - 1, k);
+                        rho(i, j, k) = rho(i, j - 1, k);
+                        eta(i, j, k) = eta(i, j - 1, k);
+                        M(i, j, k, 0) = M(i, j - 1, k, 0);
+                        M(i, j, k, 1) = M(i, j - 1, k, 1);
+                        E(i, j, k) = E(i, j - 1, k);
+                        press(i, j, k) = press(i, j - 1, k);
+                        v(i, j, k, 0) = v(i, j - 1, k, 0);
+                        v(i, j, k, 1) = v(i, j - 1, k, 1);
+                        T(i, j, k) = T(i, j - 1, k);
+                        a(i, j, k) = a(i, j - 1, k);
+                        gamma(i, j, k) = gamma(i, j - 1, k);
+                        p0_eff(i, j, k) = p0_eff(i, j - 1, k);
+                        return;
+                    }
+                }
+
+                // Try top neighbor (j+1)
+                if (j < ghostbox.bigEnd(1))
+                {
+                    bool top_valid = std::isfinite(rho_eta0(i, j + 1, k)) && std::isfinite(E(i, j + 1, k)) && std::isfinite(press(i, j + 1, k));
+                    if (top_valid)
+                    {
+                        rho_eta0(i, j, k) = rho_eta0(i, j + 1, k);
+                        rho_eta1(i, j, k) = rho_eta1(i, j + 1, k);
+                        rho(i, j, k) = rho(i, j + 1, k);
+                        eta(i, j, k) = eta(i, j + 1, k);
+                        M(i, j, k, 0) = M(i, j + 1, k, 0);
+                        M(i, j, k, 1) = M(i, j + 1, k, 1);
+                        E(i, j, k) = E(i, j + 1, k);
+                        press(i, j, k) = press(i, j + 1, k);
+                        v(i, j, k, 0) = v(i, j + 1, k, 0);
+                        v(i, j, k, 1) = v(i, j + 1, k, 1);
+                        T(i, j, k) = T(i, j + 1, k);
+                        a(i, j, k) = a(i, j + 1, k);
+                        gamma(i, j, k) = gamma(i, j + 1, k);
+                        p0_eff(i, j, k) = p0_eff(i, j + 1, k);
+                        return;
+                    }
+                }
+
+                Util::Message(INFO, "=== NaN DETECTED IN FillGhost4BC ===");
+                Util::Message(INFO, "Level: ", lev);
+                Util::Message(INFO, "Time: ", time);
+                Util::Message(INFO, "NSCBC mode: ", use_nscbc);
+                Util::Message(INFO, "All neighbors are NaNs, unable to patch cell");
+                Util::Abort(INFO, "NaN detected in FillGhost4BC - see details above");
+            }
+        });
+    }
+    for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &ghostbox = mfi.growntilebox(effective_nghost);
+
+        auto rho = density_mf[lev]->array(mfi);
+        auto rho0 = rho_eta0_mf[lev]->array(mfi);
+        auto rho1 = rho_eta1_mf[lev]->array(mfi);
+
+        amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            rho(i, j, k) = rho0(i, j, k) + rho1(i, j, k);
+        });
+    }
+
+    // ------------------------------------------------------------
+    // STEP 9: Enforce consistency and positivity in ALL cells
+    // ------------------------------------------------------------
+    for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &ghostbox = mfi.growntilebox(effective_nghost);
+
+        auto rho_eta0 = rho_eta0_mf[lev]->array(mfi);
+        auto rho_eta1 = rho_eta1_mf[lev]->array(mfi);
+        auto rho = density_mf[lev]->array(mfi);
+        auto eta = eta_mf[lev]->array(mfi);
+        auto press = pressure_mf[lev]->array(mfi);
+        auto E = energy_per_vol_mf[lev]->array(mfi);
+
+        amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            // Enforce rho = rho_eta0 + rho_eta1
+            Set::Scalar rho_calc = rho_eta0(i, j, k) + rho_eta1(i, j, k);
+            rho(i, j, k) = rho_calc;
+
+            // Enforce positivity
+            rho(i, j, k) = std::max(rho(i, j, k), small);
+            rho_eta0(i, j, k) = std::max(rho_eta0(i, j, k), small);
+            rho_eta1(i, j, k) = std::max(rho_eta1(i, j, k), small);
+            press(i, j, k) = std::max(press(i, j, k), 1.0e-6);
+            E(i, j, k) = std::max(E(i, j, k), 1.0e-10);
+
+            // Clamp eta to [0, 1]
+            eta(i, j, k) = std::max(0.0, std::min(1.0, eta(i, j, k)));
+        });
+    }
+
+    // ========================================================================
+    // STEP 10: NaN/Inf detection and reporting
+    // ========================================================================
+    // Check all critical fields for NaN/Inf in ghost cells.
+    // If found, report location and abort with diagnostic info.
+    // ========================================================================
+    bool found_nan = false;
+    std::string nan_details = "";
+
+    const amrex::Box &domain_box = geom[lev].Domain();
+    int domain_ilo = domain_box.smallEnd(0);
+    int domain_ihi = domain_box.bigEnd(0);
+    int domain_jlo = domain_box.smallEnd(1);
+    int domain_jhi = domain_box.bigEnd(1);
+
+    // Lambda to describe cell location
+    auto describe_location = [&](int i, int j, int k, const amrex::Box &validbox) -> std::string {
+        std::stringstream ss;
+
+        // Distance from domain boundaries
+        int dist_from_xlo = i - domain_ilo;
+        int dist_from_xhi = domain_ihi - i;
+        int dist_from_ylo = j - domain_jlo;
+        int dist_from_yhi = domain_jhi - j;
+
+        // Distance from valid box boundaries
+        int dist_from_valid_xlo = i - validbox.smallEnd(0);
+        int dist_from_valid_xhi = validbox.bigEnd(0) - i;
+        int dist_from_valid_ylo = j - validbox.smallEnd(1);
+        int dist_from_valid_yhi = validbox.bigEnd(1) - j;
+
+        ss << "Cell (" << i << "," << j << "," << k << ")\n";
+        ss << "  Domain: [" << domain_ilo << "," << domain_ihi << "] x ["
+           << domain_jlo << "," << domain_jhi << "]\n";
+        ss << "  ValidBox: [" << validbox.smallEnd(0) << "," << validbox.bigEnd(0) << "] x ["
+           << validbox.smallEnd(1) << "," << validbox.bigEnd(1) << "]\n";
+
+        // Determine location type
+        bool in_domain = (i >= domain_ilo && i <= domain_ihi && j >= domain_jlo && j <= domain_jhi);
+        bool in_valid = validbox.contains(amrex::IntVect(AMREX_D_DECL(i, j, k)));
+
+        if (in_valid)
+        {
+            ss << "  Location: INTERIOR (valid box)\n";
+        }
+        else if (in_domain)
+        {
+            ss << "  Location: DOMAIN but outside valid box\n";
+        }
+        else
+        {
+            ss << "  Location: GHOST CELL\n";
+
+            // Determine which boundary
+            if (i < domain_ilo)
+            {
+                ss << "    X-LO boundary (ghost layer " << (domain_ilo - i) << ")\n";
+            }
+            else if (i > domain_ihi)
+            {
+                ss << "    X-HI boundary (ghost layer " << (i - domain_ihi) << ")\n";
+            }
+
+            if (j < domain_jlo)
+            {
+                ss << "    Y-LO boundary (ghost layer " << (domain_jlo - j) << ")\n";
+            }
+            else if (j > domain_jhi)
+            {
+                ss << "    Y-HI boundary (ghost layer " << (j - domain_jhi) << ")\n";
+            }
+
+            // Check if corner
+            if ((i < domain_ilo || i > domain_ihi) && (j < domain_jlo || j > domain_jhi))
+            {
+                ss << "    CORNER CELL\n";
+            }
+        }
+
+        ss << "  Distance from domain boundaries:\n";
+        ss << "    X-LO: " << dist_from_xlo << " cells\n";
+        ss << "    X-HI: " << dist_from_xhi << " cells\n";
+        ss << "    Y-LO: " << dist_from_ylo << " cells\n";
+        ss << "    Y-HI: " << dist_from_yhi << " cells\n";
+
+        return ss.str();
+    };
+
+    // Check each field and report first NaN location
+    for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &validbox = mfi.validbox();
+        const amrex::Box &ghostbox = mfi.growntilebox(effective_nghost);
+
+        auto rho = density_mf[lev]->array(mfi);
+        auto M = momentum_mf[lev]->array(mfi);
+        auto E = energy_per_vol_mf[lev]->array(mfi);
+        auto p = pressure_mf[lev]->array(mfi);
+        auto v = velocity_mf[lev]->array(mfi);
+        auto eta = eta_mf[lev]->array(mfi);
+
+        // Scan for NaN (CPU loop for detailed reporting)
+        amrex::LoopOnCpu(ghostbox, [&](int i, int j, int k) {
+            // Check density
+            if (!found_nan && !std::isfinite(rho(i, j, k)))
+            {
+                found_nan = true;
+                nan_details = "Field: density\n" + describe_location(i, j, k, validbox);
+                nan_details += "Value: " + std::to_string(rho(i, j, k)) + "\n";
+            }
+
+            // Check momentum
+            if (!found_nan && (!std::isfinite(M(i, j, k, 0)) || !std::isfinite(M(i, j, k, 1))))
+            {
+                found_nan = true;
+                nan_details = "Field: momentum\n" + describe_location(i, j, k, validbox);
+                nan_details += "M[0]: " + std::to_string(M(i, j, k, 0)) + "\n";
+                nan_details += "M[1]: " + std::to_string(M(i, j, k, 1)) + "\n";
+            }
+
+            // Check energy
+            if (!found_nan && !std::isfinite(E(i, j, k)))
+            {
+                found_nan = true;
+                nan_details = "Field: energy\n" + describe_location(i, j, k, validbox);
+                nan_details += "Value: " + std::to_string(E(i, j, k)) + "\n";
+            }
+
+            // Check pressure
+            if (!found_nan && !std::isfinite(p(i, j, k)))
+            {
+                found_nan = true;
+                nan_details = "Field: pressure\n" + describe_location(i, j, k, validbox);
+                nan_details += "Value: " + std::to_string(p(i, j, k)) + "\n";
+            }
+
+            // Check velocity
+            if (!found_nan && (!std::isfinite(v(i, j, k, 0)) || !std::isfinite(v(i, j, k, 1))))
+            {
+                found_nan = true;
+                nan_details = "Field: velocity\n" + describe_location(i, j, k, validbox);
+                nan_details += "v[0]: " + std::to_string(v(i, j, k, 0)) + "\n";
+                nan_details += "v[1]: " + std::to_string(v(i, j, k, 1)) + "\n";
+            }
+
+            // Check eta
+            if (!found_nan && !std::isfinite(eta(i, j, k)))
+            {
+                found_nan = true;
+                nan_details = "Field: eta\n" + describe_location(i, j, k, validbox);
+                nan_details += "Value: " + std::to_string(eta(i, j, k)) + "\n";
+            }
+        });
+
+        // If NaN found, stop scanning
+        if (found_nan)
+            break;
+    }
+
+    if (found_nan)
+    {
+        Util::Message(INFO, "=== NaN DETECTED IN FillGhost4BC ===");
+        Util::Message(INFO, "Level: ", lev);
+        Util::Message(INFO, "Time: ", time);
+        Util::Message(INFO, "NSCBC mode: ", use_nscbc);
+        Util::Message(INFO, "\n" + nan_details);
+        Util::Abort(INFO, "NaN detected in FillGhost4BC - see details above");
+    }
+} // end FillGhost4BC()
 
 
 

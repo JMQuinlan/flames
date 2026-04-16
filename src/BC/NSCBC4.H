@@ -1,5 +1,3 @@
-#if false
-
 #ifndef BC_NSCBC_H
 #define BC_NSCBC_H
 
@@ -28,7 +26,7 @@ namespace BC
 ///
 /// This ordering is essential to prevent NaN propagation from uninitialized corner data.
 
-class NSCBC
+class NSCBC4
 {
 public:
     enum class Type
@@ -78,13 +76,13 @@ private:
     Set::Scalar small = 1.0e-10;
 
 public:
-    NSCBC() = default;
+    NSCBC4() = default;
 
     /// Constructor with input file parsing
-    NSCBC(IO::ParmParse &pp, std::string prefix = "nscbc");
+    NSCBC4(IO::ParmParse &pp, std::string prefix = "nscbc4");
 
     /// Parse boundary parameters from input file
-    static void Parse(NSCBC &value, IO::ParmParse &pp);
+    static void Parse(NSCBC4 &value, IO::ParmParse &pp);
 
     /// Fill ghost cells for all conservative variables
     ///
@@ -1581,10 +1579,9 @@ private:
     /// Parse parameters for a single boundary face
     static BoundaryParams ParseFace(IO::ParmParse &pp, std::string face_name);
 
-}; // end class NSCBC
+}; // end class NSCBC4
 
 } // namespace BC
 
-#endif // BC_NSCBC_H
+#endif // BC_NSCBC4_H
 
-#endif
