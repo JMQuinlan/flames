@@ -3574,8 +3574,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Real p_ratio = std::max({p_xm/p_c, p_xp/p_c, p_ym/p_c, p_yp/p_c});
 
                 Real gm = gmix_new;
+                // Cap p_ratio to prevent interface pressure floors (e.g. 1e-6 from
+                // negative UE in stiffened-gas cells) from inflating the shock factor
+                // by a factor of 1e11 and collapsing dt to machine epsilon.
+                // A cap of 10 allows for genuine strong shocks while excluding the
+                // floor-induced artefact at air/water interfaces.
+                Real p_ratio_capped = std::min(p_ratio, Real(10.0));
                 Real shock_factor = std::sqrt(
-                    (gm + 1.0) / (2.0 * gm) * p_ratio
+                    (gm + 1.0) / (2.0 * gm) * p_ratio_capped
                   + (gm - 1.0) / (2.0 * gm));
                 Real a_shock = std::isfinite(sound_speed_new)
                              ? sound_speed_new * shock_factor
