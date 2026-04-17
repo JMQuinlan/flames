@@ -786,39 +786,47 @@ Hydro2::RHS(int lev,
             Real KE = 0.5 * rho * (vx*vx + vy*vy);
             KE_arr(i,j,k) = KE;
 
-            // Internal Energy — guard against NaN/Inf and runaway accumulation
-            Real E = E_arr(i,j,k);
-            Real UE = E - KE;
-            if (!std::isfinite(UE) || UE < 0.0) UE = 0.0;
-            if (UE > Real(1e20)) UE = Real(1e20); // cap runaway energy
-            UE_arr(i,j,k) = UE;
-
             //------------------------------------------------------------------
-            // Gamma-law mixture + Tammann EOS
+            // Gamma-law mixture + Tammann EOS  (computed BEFORE energy floor)
             //------------------------------------------------------------------
-            Real A =   eta/(gamma0-1.0)
-                     + (1.0 - eta)/(gamma1-1.0);
-
-            Real B = ( eta * gamma0 * pi_0 )/(gamma0-1.0)
-                   + ((1.0 - eta) * gamma1 * pi_1)/(gamma1-1.0);
-
-            // Real gmix = 1.0 + 1.0/A;
-            // gamma_mix(i,j,k) = gmix;
-
-            // // Tammann pressure offset
-            // Real pimix = (B/A)/gmix;
-            // pi_mix  (i,j,k) = pimix;
-
             double gmix, pimix;
             Thermo_Interp::InterpolateGammaPi_Stiffened(
                 eta, gamma1, gamma0, pi_1, pi_0, gmix, pimix);
             gamma_mix(i,j,k) = gmix;
             pi_mix(i,j,k) = pimix;
 
-            // Pressure — clamp both from below (non-negative) and from above
-            // (prevents T overflow during AMR interpolation / FillCoarsePatch).
-            Real p_mix_local = (gmix - 1.0)*UE - gmix*pimix + pref;
-            if (!std::isfinite(p_mix_local) || p_mix_local < 0.0) p_mix_local = 1e-6;
+            // Internal Energy — EOS-consistent floor before Riemann solver sees E.
+            //
+            // The stiffened-gas EOS has a condition number of γπ/p ≈ 2×10⁴ at
+            // the water interface: a 0.005% error in E creates a 100% error in p.
+            // When UE drifts negative (from AMR interpolation, RK stages, etc.),
+            // the OLD code floored UE→0 in UE_arr but left E_arr unchanged.
+            // The Riemann solver then recomputed pL from E_arr → catastrophically
+            // negative → floored to small≈1e-14 Pa.  A cell at p≈0 next to a
+            // neighbor at p=1e5 Pa has a 1e5/dx momentum imbalance that drives
+            // spurious flow, first at the 4 cardinal points of the bubble
+            // (sharpest EOS jump), then spreading around the entire interface.
+            //
+            // Fix: when p < p_floor, compute the EOS-consistent UE_min and write
+            // it back to E_arr so the Riemann solver sees a physically bounded E.
+            Real E = E_arr(i,j,k);
+            Real UE = E - KE;
+            if (!std::isfinite(UE)) UE = 0.0;
+            if (UE > Real(1e20)) UE = Real(1e20);
+
+            // p_floor is chosen well below atmospheric (1e5 Pa) so it only
+            // activates for genuinely unphysical states, not near-vacuum air.
+            const Real p_floor_eos = Real(1.0);
+            Real p_raw = (Real(gmix) - 1.0)*UE - Real(gmix)*Real(pimix) + pref;
+            if (!std::isfinite(p_raw) || p_raw < p_floor_eos) {
+                UE = (p_floor_eos + Real(gmix)*Real(pimix) - pref) / (Real(gmix) - 1.0);
+                E_arr(i,j,k) = KE + UE;  // correct the conservative variable
+            }
+
+            UE_arr(i,j,k) = UE;
+
+            // Pressure (for diagnostics / sound speed / temperature)
+            Real p_mix_local = (Real(gmix) - 1.0)*UE - Real(gmix)*Real(pimix) + pref;
             if (p_mix_local > Real(1e15)) p_mix_local = Real(1e15); // upper cap
             p_arr(i,j,k) = p_mix_local;
 
@@ -3294,6 +3302,47 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 if (stage[n].contains_nan())
                     amrex::Print() << "[DIAG-stage-post-NSCBC] NaN in " << snames[n]
                                    << " (valid cells only) t=" << t << "\n";
+            }
+        }
+
+        // EOS-consistent energy floor after each RK stage.
+        // Mirrors the correction in the RHS first loop: when the Allaire
+        // EOS gives p < 1 Pa, correct E in the stage array so the next
+        // stage's Riemann solve sees a physically bounded pressure.
+        // Without this, RK intermediate stages can create E values that
+        // give p ≈ -γπ in the Riemann solver, floored to ~0, producing
+        // a 1e5 Pa/dx momentum imbalance that drives blow-up at the interface.
+        {
+            Real g0 = gamma0, g1 = gamma1, p0 = pi_0, p1 = pi_1;
+            Real pref_ = pref;
+            for (amrex::MFIter mfi(stage[3], amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+                const amrex::Box& bx = mfi.validbox();
+                auto E_s   = stage[3].array(mfi);
+                auto rho_s = stage[1].const_array(mfi);
+                auto M_s   = stage[2].const_array(mfi);
+                auto eta_s = stage[0].const_array(mfi);
+                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+                {
+                    Real eta_c = amrex::max(Real(0.0), amrex::min(Real(1.0), eta_s(i,j,k)));
+                    Real mx = M_s(i,j,k,0);
+                    Real my = M_s(i,j,k,1);
+                    Real E  = E_s(i,j,k);
+                    Real safe_rho = amrex::max(rho_s(i,j,k), Real(1e-14));
+                    Real KE = Real(0.5)*(mx*mx + my*my)/safe_rho;
+                    Real UE = E - KE;
+                    if (!std::isfinite(UE)) UE = Real(0.0);
+                    // Allaire EOS mixing
+                    Real A = eta_c/(g0-Real(1.0)) + (Real(1.0)-eta_c)/(g1-Real(1.0));
+                    Real B = eta_c*g0*p0/(g0-Real(1.0)) + (Real(1.0)-eta_c)*g1*p1/(g1-Real(1.0));
+                    Real gm = Real(1.0) + Real(1.0)/A;
+                    Real pm = B/(A + Real(1.0));
+                    Real p_check = (gm-Real(1.0))*UE - gm*pm + pref_;
+                    const Real p_floor_stage = Real(1.0);
+                    if (!std::isfinite(p_check) || p_check < p_floor_stage) {
+                        UE = (p_floor_stage + gm*pm - pref_) / (gm - Real(1.0));
+                        E_s(i,j,k) = KE + UE;
+                    }
+                });
             }
         }
     });
