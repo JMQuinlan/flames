@@ -84,10 +84,10 @@ public:
         pR = std::max(pR, small);
 
         //----------------------------------------------------------------------
-        // Correct stiffened-gas sound speeds:  a² = γ (p + γ pi) / ρ
+        // Stiffened-gas sound speeds:  a² = γ(p + π) / ρ
         //----------------------------------------------------------------------
-        Set::Scalar aL = std::sqrt(gamL * (pL + gamL*piL) / rhoL);
-        Set::Scalar aR = std::sqrt(gamR * (pR + gamR*piR) / rhoR);
+        Set::Scalar aL = std::sqrt(gamL * (pL + piL) / rhoL);
+        Set::Scalar aR = std::sqrt(gamR * (pR + piR) / rhoR);
 
         //----------------------------------------------------------------------
         // HLLE wave speed estimates
@@ -104,13 +104,13 @@ public:
         FL.mass = rhoL*uL;
         FL.momentum_normal  = rhoL*uL*uL + pL;
         FL.momentum_tangent = rhoL*uL*vL;
-        FL.energy = uL*(EL + pL + piL);
+        FL.energy = uL*(EL + pL);
 
         // right state fluxes
         FR.mass = rhoR*uR;
         FR.momentum_normal  = rhoR*uR*uR + pR;
         FR.momentum_tangent = rhoR*uR*vR;
-        FR.energy = uR*(ER + pR + piR);
+        FR.energy = uR*(ER + pR);
 
         //----------------------------------------------------------------------
         // Select region

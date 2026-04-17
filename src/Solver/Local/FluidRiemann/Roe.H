@@ -103,9 +103,8 @@ public:
         Set::Scalar uRoe = (rL*uL + rR*uR)/denom;
         Set::Scalar vRoe = (rL*vL + rR*vR)/denom;
 
-        // enthalpy includes pi contribution
-        Set::Scalar hL = (EL + pL + piL) / rhoL;
-        Set::Scalar hR = (ER + pR + piR) / rhoR;
+        Set::Scalar hL = (EL + pL) / rhoL;
+        Set::Scalar hR = (ER + pR) / rhoR;
 
         Set::Scalar hRoe = (rL*hL + rR*hR)/denom;
 
@@ -113,9 +112,10 @@ public:
         Set::Scalar gamRoe = (rL*gamL + rR*gamR)/denom;
 
         //----------------------------------------------------------------------
-        // Correct stiffened gas sound speed under Roe average
+        // Roe-average sound speed: a² = (γ-1)(H - ½|u|²), H = (E+p)/ρ
+        // Works for both ideal and stiffened gas (π absorbed into H via EOS).
         //----------------------------------------------------------------------
-        Set::Scalar a2 = gamRoe * ( hRoe - 0.5*(uRoe*uRoe + vRoe*vRoe) );
+        Set::Scalar a2 = (gamRoe-1.0) * ( hRoe - 0.5*(uRoe*uRoe + vRoe*vRoe) );
         a2 = std::max(a2, small);
         Set::Scalar aRoe = std::sqrt(a2);
 
@@ -152,8 +152,8 @@ public:
         FL.momentum_tangent = rhoL*uL*vL;
         FR.momentum_tangent = rhoR*uR*vR;
 
-        FL.energy = uL*(EL + pL + piL);
-        FR.energy = uR*(ER + pR + piR);
+        FL.energy = uL*(EL + pL);
+        FR.energy = uR*(ER + pR);
 
         //----------------------------------------------------------------------
         // Average flux
