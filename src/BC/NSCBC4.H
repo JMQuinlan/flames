@@ -8,6 +8,11 @@
 #include <AMReX_Geometry.H>
 #include <AMReX_MultiFab.H>
 
+//EOS
+#include "Solver/EOS/EOS.H"
+#include "Solver/EOS/Tammann.H"
+#include "Solver/EOS/CPG.H"
+
 namespace BC
 {
 
@@ -185,23 +190,16 @@ public:
 
             // Internal energy
             Set::Scalar UE = E_val - KE;
-            if (!(UE > 0.0))
-                UE = 0.0; // handles NaN and negative
 
-            // Mixed EOS properties (volume-fraction weighted Tammann EOS)
-            Set::Scalar A = eta_val / (g0_ - 1.0) + (1.0 - eta_val) / (g1_ - 1.0);
-            Set::Scalar B = (eta_val * g0_ * pi0_) / (g0_ - 1.0)
-                            + ((1.0 - eta_val) * g1_ * pi1_) / (g1_ - 1.0);
-            Set::Scalar gamma_mix = 1.0 + 1.0 / A;
-            Set::Scalar pi_mix = (B / A) / gamma_mix;
+            // EOS
+            Set::Scalar gamma_mix = Solver::EOS::EOS::MixedGamma(eta_val, eos0, eos1);
+            Set::Scalar pi_mix = Solver::EOS::EOS::MixedP0(eta_val, eos0, eos1);
 
             // Pressure (Tammann EOS)
-            Set::Scalar p_val = (gamma_mix - 1.0) * UE - gamma_mix * pi_mix + pref_local;
-            if (!(p_val > 0.0))
-                p_val = 1.0e-6; // handles NaN and negative
+            Set::Scalar p_val = Solver::EOS::EOS::MixedPressure(rho_val, UE, eta_val, eos0, eos1, pref, small_local);
 
             // Sound speed
-            Set::Scalar a_val = std::sqrt(gamma_mix * (p_val + pi_mix) / rho_val);
+            Set::Scalar a_val = Solver::EOS::EOS::TammannSoundSpeed(rho_val, p_val, gamma_mix, pi_mix, small_local);
 
             // Output based on direction
             rho_out = rho_val;
@@ -251,17 +249,7 @@ public:
                                   Set::Scalar p_val) -> void {
             Set::Scalar eta_val = eta_arr(ii, jj, kk);
 
-            // Mixed EOS
-            Set::Scalar A = eta_val / (g0_ - 1.0) + (1.0 - eta_val) / (g1_ - 1.0);
-            Set::Scalar B = (eta_val * g0_ * pi0_) / (g0_ - 1.0)
-                            + ((1.0 - eta_val) * g1_ * pi1_) / (g1_ - 1.0);
-            Set::Scalar gamma_mix = 1.0 + 1.0 / A;
-            Set::Scalar pi_mix = (B / A) / gamma_mix;
-
-            // Inverse EOS: compute UE from p
-            Set::Scalar UE = (p_val + gamma_mix * pi_mix - pref_local) / (gamma_mix - 1.0);
-            if (UE < 0.0)
-                UE = 0.0;
+            Set::Scalar UE = Solver::EOS::EOS::MixedInternalEnergy(p_eff, eta_val, eos0, eos1, pref_local, small_local);
 
             // Velocities (convert un, ut back to vx, vy, vz)
             Set::Scalar vx, vy, vz;
