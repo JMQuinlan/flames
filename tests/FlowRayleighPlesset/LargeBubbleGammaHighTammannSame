@@ -47,39 +47,39 @@ epsilon = eta.ic.expression.constant.epsilon
 
 ### HYDRO INITIAL CONDITIONS ###
 # Water properties (fluid 0)
-gamma0 = 7.15  # Water
+gamma_eta1 = 7.15  # Water
 p0_0 = 3.0e8   # Tammann EOS parameter for water
-mu0 = 1.0e-3   # Water viscosity [Pa-s]
-mu0_b = 0.001
+mu_eta1 = 1.0e-3   # Water viscosity [Pa-s]
+mu_eta1_b = 0.001
 
 # Air properties (fluid 1)
-gamma1 = 1.4   # Air
+gamma_eta0 = 1.4   # Air
 p0_1 = 0       # Ideal gas
-mu1 = 1.8e-5   # Air viscosity [Pa-s]
-mu1_b = 0
+mu_eta0 = 1.8e-5   # Air viscosity [Pa-s]
+mu_eta0_b = 0
 
 # Densities
-density0.ic.type = expression
-density0.ic.expression.region0 = "997.0"  # Water density [kg/m3]
+density_eta1.ic.type = expression
+density_eta1.ic.expression.region0 = "997.0"  # Water density [kg/m3]
 
-density1.ic.type = expression
-density1.ic.expression.region0 = "2.377"  # Air density at 2 bar [kg/m3]
+density_eta0.ic.type = expression
+density_eta0.ic.expression.region0 = "2.377"  # Air density at 2 bar [kg/m3]
 
 # Velocities (initially at rest)
-velocity0.ic.type = expression
-velocity0.ic.expression.region0 = "0.0"
-velocity0.ic.expression.region1 = "0.0"
+velocity_eta1.ic.type = expression
+velocity_eta1.ic.expression.region0 = "0.0"
+velocity_eta1.ic.expression.region1 = "0.0"
 
-velocity1.ic.type = expression
-velocity1.ic.expression.region0 = "0.0"
-velocity1.ic.expression.region1 = "0.0"
+velocity_eta0.ic.type = expression
+velocity_eta0.ic.expression.region0 = "0.0"
+velocity_eta0.ic.expression.region1 = "0.0"
 
 # Pressures
-pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "1.0e5 + 1.0e5"  # Water at 1 bar [Pa]
+pressure_eta1.ic.type = expression
+pressure_eta1.ic.expression.region0 = "1.0e5 + 1.0e5"  # Water at 1 bar [Pa]
 
-pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "1.0e5"  # Air at 2 bar [Pa]
+pressure_eta0.ic.type = expression
+pressure_eta0.ic.expression.region0 = "1.0e5"  # Air at 2 bar [Pa]
 
 # Temperatures
 temperature0.ic.type = expression
@@ -89,17 +89,17 @@ temperature1.ic.type = expression
 temperature1.ic.expression.region0 = "293.15"  # 20 C
 
 # Thermodynamic properties
-cp0.ic.type = expression
-cp0.ic.expression.region0 = "4179.0"  # Water specific heat [J/kg-K]
+cp_eta1.ic.type = expression
+cp_eta1.ic.expression.region0 = "4179.0"  # Water specific heat [J/kg-K]
 
-cp1.ic.type = expression
-cp1.ic.expression.region0 = "1005.0"  # Air specific heat [J/kg-K]
+cp_eta0.ic.type = expression
+cp_eta0.ic.expression.region0 = "1005.0"  # Air specific heat [J/kg-K]
 
-cv0.ic.type = expression
-cv0.ic.expression.region0 = "4179.0/7.15"  # Water cv = cp/gamma
+cv_eta1.ic.type = expression
+cv_eta1.ic.expression.region0 = "4179.0/7.15"  # Water cv = cp/gamma
 
-cv1.ic.type = expression
-cv1.ic.expression.region0 = "717.86"  # Air cv = cp/gamma
+cv_eta0.ic.type = expression
+cv_eta0.ic.expression.region0 = "717.86"  # Air cv = cp/gamma
 
 # Thermal conductivities
 k0_thermal.ic.type = expression

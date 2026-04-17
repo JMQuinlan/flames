@@ -184,18 +184,18 @@ namespace Thermo_Interp
     // Equivalently: at pure phase i, pimix = pi_i (correct single-phase limit).
     inline void InterpolateGammaPi_Stiffened(
         Scalar eta,
-        Scalar gamma1, Scalar gamma2,
-        Scalar pi1,    Scalar pi2,
+        Scalar gamma_eta0, Scalar gamma_eta1,
+        Scalar pi_eta0,    Scalar pi_eta1,
         Scalar &gamma_mix,
         Scalar &pi_mix)
     {
         eta = clamp01(eta);
 
-        Scalar A = eta / (gamma2 - Scalar(1.0))
-                 + (Scalar(1.0) - eta) / (gamma1 - Scalar(1.0));
+        Scalar A = eta / (gamma_eta1 - Scalar(1.0))
+                 + (Scalar(1.0) - eta) / (gamma_eta0 - Scalar(1.0));
 
-        Scalar B = eta * gamma2 * pi2 / (gamma2 - Scalar(1.0))
-                 + (Scalar(1.0) - eta) * gamma1 * pi1 / (gamma1 - Scalar(1.0));
+        Scalar B = eta * gamma_eta1 * pi_eta1 / (gamma_eta1 - Scalar(1.0))
+                 + (Scalar(1.0) - eta) * gamma_eta0 * pi_eta0 / (gamma_eta0 - Scalar(1.0));
 
         gamma_mix = Scalar(1.0) + Scalar(1.0) / A;
         pi_mix    = B / (A + Scalar(1.0));
@@ -218,18 +218,18 @@ namespace Thermo_Interp
     //   - p_mix from stiffened-gas EOS
     inline Scalar InterpolatePressure_Stiffened(
         Scalar eta,
-        Scalar rho1, Scalar rho2,
-        Scalar e1,   Scalar e2,
-        Scalar gamma1, Scalar gamma2,
-        Scalar pi1,    Scalar pi2)
+        Scalar rho_eta0, Scalar rho_eta1,
+        Scalar e_eta0,   Scalar e_eta1,
+        Scalar gamma_eta0, Scalar gamma_eta1,
+        Scalar pi_eta0,    Scalar pi_eta1)
     {
         eta = clamp01(eta);
 
-        Scalar rho_mix = (Scalar(1.0) - eta) * rho1 + eta * rho2;
-        Scalar e_mix   = (Scalar(1.0) - eta) * e1   + eta * e2;
+        Scalar rho_mix = (Scalar(1.0) - eta) * rho_eta0 + eta * rho_eta1;
+        Scalar e_mix   = (Scalar(1.0) - eta) * e_eta0   + eta * e_eta1;
 
         Scalar gamma_mix, pi_mix;
-        InterpolateGammaPi_Stiffened(eta, gamma1, gamma2, pi1, pi2,
+        InterpolateGammaPi_Stiffened(eta, gamma_eta0, gamma_eta1, pi_eta0, pi_eta1,
                                      gamma_mix, pi_mix);
 
         return Pressure_Stiffened(rho_mix, e_mix, gamma_mix, pi_mix);

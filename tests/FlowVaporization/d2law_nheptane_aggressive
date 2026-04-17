@@ -52,39 +52,39 @@ epsilon = eta.ic.expression.constant.epsilon
 ### HYDRO INITIAL CONDITIONS ###
 
 # Air properties (gas phase, eta=1)
-gamma0 = 1.4
+gamma_eta1 = 1.4
 p0_0 = 0
-mu0 = 2.0e-5        # Air dynamic viscosity at elevated temperature
-mu0_b = 0.0
+mu_eta1 = 2.0e-5        # Air dynamic viscosity at elevated temperature
+mu_eta1_b = 0.0
 
 # n-Heptane properties (liquid phase, eta=0)
-gamma1 = 1.4
+gamma_eta0 = 1.4
 p0_1 = 0
-mu1 = 3.0e-4        # n-Heptane dynamic viscosity
-mu1_b = 0.0
+mu_eta0 = 3.0e-4        # n-Heptane dynamic viscosity
+mu_eta0_b = 0.0
 
 # Densities
-density0.ic.type = expression
-density0.ic.expression.region0 = "1.0"       # Air density at high temp [kg/m³]
+density_eta1.ic.type = expression
+density_eta1.ic.expression.region0 = "1.0"       # Air density at high temp [kg/m³]
 
-density1.ic.type = expression
-density1.ic.expression.region0 = "684.0"     # n-Heptane density [kg/m³]
+density_eta0.ic.type = expression
+density_eta0.ic.expression.region0 = "684.0"     # n-Heptane density [kg/m³]
 
 # Velocities (initially at rest)
-velocity0.ic.type = expression
-velocity0.ic.expression.region0 = "0.0"
-velocity0.ic.expression.region1 = "0.0"
+velocity_eta1.ic.type = expression
+velocity_eta1.ic.expression.region0 = "0.0"
+velocity_eta1.ic.expression.region1 = "0.0"
 
-velocity1.ic.type = expression
-velocity1.ic.expression.region0 = "0.0"
-velocity1.ic.expression.region1 = "0.0"
+velocity_eta0.ic.type = expression
+velocity_eta0.ic.expression.region0 = "0.0"
+velocity_eta0.ic.expression.region1 = "0.0"
 
 # Pressures
-pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "101325.0"  # 1 atm [Pa]
+pressure_eta1.ic.type = expression
+pressure_eta1.ic.expression.region0 = "101325.0"  # 1 atm [Pa]
 
-pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "101325.0"  # 1 atm [Pa]
+pressure_eta0.ic.type = expression
+pressure_eta0.ic.expression.region0 = "101325.0"  # 1 atm [Pa]
 
 # Temperatures
 temperature0.ic.type = expression
@@ -95,12 +95,12 @@ temperature1.ic.expression.region0 = "371.6"  # n-Heptane at boiling point [K]
 
 # Thermodynamic properties
 # Air
-cp0 = "1005.0"      # Specific heat at constant pressure [J/kg/K]
-cv0 = "717.86"      # Specific heat at constant volume [J/kg/K]
+cp_eta1 = "1005.0"      # Specific heat at constant pressure [J/kg/K]
+cv_eta1 = "717.86"      # Specific heat at constant volume [J/kg/K]
 
 # n-Heptane
-cp1 = "2240.0"      # Specific heat at constant pressure [J/kg/K]
-cv1 = "1600.0"      # Specific heat at constant volume [J/kg/K]
+cp_eta0 = "2240.0"      # Specific heat at constant pressure [J/kg/K]
+cv_eta0 = "1600.0"      # Specific heat at constant volume [J/kg/K]
 
 # Thermal conductivities
 k0_thermal.ic.type = expression

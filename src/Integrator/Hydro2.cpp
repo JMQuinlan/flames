@@ -90,22 +90,22 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
         // FLUID 0
-        pp_query_required("gamma0", value.gamma0);      // gamma for gamma law
-        pp_query_default("pi_0", value.pi_0, 0.0);      // pi for Tammann EOS
-        pp_query_required("mu0", value.mu0);            // linear viscosity coefficient
-        pp_query_default("mu0_b", value.mu0_b, 0.0);    // bulk viscosity coefficient
-        pp_query_default("cp0", value.cp0, 0.0);        // Constant Pressure Specific Heat [J/kg]
-        pp_query_default("cv0", value.cv0, 0.0);        // Constant Volume Specific Heat [J/kg]
+        pp_query_required("gamma_eta1", value.gamma_eta1);      // gamma for gamma law
+        pp_query_default("pi_eta1", value.pi_eta1, 0.0);      // pi for Tammann EOS
+        pp_query_required("mu_eta1", value.mu_eta1);            // linear viscosity coefficient
+        pp_query_default("mu_eta1_b", value.mu_eta1_b, 0.0);    // bulk viscosity coefficient
+        pp_query_default("cp_eta1", value.cp_eta1, 0.0);        // Constant Pressure Specific Heat [J/kg]
+        pp_query_default("cv_eta1", value.cv_eta1, 0.0);        // Constant Volume Specific Heat [J/kg]
         // pp_query_required("R0", value.R0);              // Specific Gas Constant
         // pp_query_required("MW0", value.MW0);            // Molecular Weight
 
         // FLUID 1
-        pp_query_required("gamma1", value.gamma1);      // gamma for gamma law
-        pp_query_default("pi_1", value.pi_1, 0.0);      // pi for Tammann EOS
-        pp_query_required("mu1", value.mu1);            // linear viscosity coefficient
-        pp_query_default("mu1_b", value.mu1_b, 0.0);    // bulk viscosity coefficient
-        pp_query_default("cp1", value.cp1, 0.0);        // Constant Pressure Specific Heat [J/kg]
-        pp_query_default("cv1", value.cv1, 0.0);        // Constant Volume Specific Heat [J/kg]
+        pp_query_required("gamma_eta0", value.gamma_eta0);      // gamma for gamma law
+        pp_query_default("pi_eta0", value.pi_eta0, 0.0);      // pi for Tammann EOS
+        pp_query_required("mu_eta0", value.mu_eta0);            // linear viscosity coefficient
+        pp_query_default("mu_eta0_b", value.mu_eta0_b, 0.0);    // bulk viscosity coefficient
+        pp_query_default("cp_eta0", value.cp_eta0, 0.0);        // Constant Pressure Specific Heat [J/kg]
+        pp_query_default("cv_eta0", value.cv_eta0, 0.0);        // Constant Volume Specific Heat [J/kg]
         // pp_query_required("R1", value.R1);              // Specific Gas Constant
         // pp_query_required("MW1", value.MW1);            // Molecular Weight
 
@@ -150,8 +150,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing,  2, nghost, "n_hat", false, false, { "x", "y" });
 
         // FLUID 0
-        value.RegisterNewFab(value.density0_mf,     value.density_bc,   1, nghost, "density0",     false, false );
-        value.RegisterNewFab(value.density0_old_mf, value.density_bc,   1, nghost, "density0_old", false, false);
+        value.RegisterNewFab(value.density_eta1_mf,     value.density_bc,   1, nghost, "density_eta1",     false, false );
+        value.RegisterNewFab(value.density_eta1_old_mf, value.density_bc,   1, nghost, "density_eta1_old", false, false);
 
         value.RegisterNewFab(value.energy0_mf,      value.energy_bc,    1, nghost, "energy0", false, false);
         value.RegisterNewFab(value.energy0_old_mf,  value.energy_bc,    1, nghost, "energy0_old" , false, false);
@@ -163,13 +163,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //value.RegisterNewFab(value.k0_thermal_mf,   &value.bc_nothing, 1, nghost, "k0_thermal", false, false);
         //value.RegisterNewFab(value.h0_thermal_mf,   &value.bc_nothing, 1, nghost, "h0_thermal", false, false);
 
-        value.RegisterNewFab(value.pressure0_mf,    value.energy_bc,  1, nghost, "pressure0", false, true);
-        value.RegisterNewFab(value.velocity0_mf,    &value.bc_nothing,  2, nghost, "velocity0", false, false, { "x", "y" });
+        value.RegisterNewFab(value.pressure_eta1_mf,    value.energy_bc,  1, nghost, "pressure_eta1", false, true);
+        value.RegisterNewFab(value.velocity_eta1_mf,    &value.bc_nothing,  2, nghost, "velocity_eta1", false, false, { "x", "y" });
         value.RegisterNewFab(value.vorticity0_mf,   &value.bc_nothing,  1, nghost, "vorticity0", false, false);
 
         // FLUID 1
-        value.RegisterNewFab(value.density1_mf,     value.density_bc,   1, nghost, "density1", false, false);
-        value.RegisterNewFab(value.density1_old_mf, value.density_bc,   1, nghost, "density1_old", false, false);
+        value.RegisterNewFab(value.density_eta0_mf,     value.density_bc,   1, nghost, "density_eta0", false, false);
+        value.RegisterNewFab(value.density_eta0_old_mf, value.density_bc,   1, nghost, "density_eta0_old", false, false);
 
         value.RegisterNewFab(value.energy1_mf,      value.energy_bc,    1, nghost, "energy1", false, false);
         value.RegisterNewFab(value.energy1_old_mf,  value.energy_bc,    1, nghost, "energy1_old", false, false);
@@ -181,8 +181,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //value.RegisterNewFab(value.k1_thermal_mf,   &value.bc_nothing, 1, nghost, "k1_thermal", false, false);
         //value.RegisterNewFab(value.h1_thermal_mf,   &value.bc_nothing, 1, nghost, "h1_thermal", false, false);
 
-        value.RegisterNewFab(value.pressure1_mf,    value.energy_bc,  1, nghost, "pressure1", false, true);
-        value.RegisterNewFab(value.velocity1_mf,    &value.bc_nothing,  2, nghost, "velocity1", false, true, { "x", "y" });
+        value.RegisterNewFab(value.pressure_eta0_mf,    value.energy_bc,  1, nghost, "pressure_eta0", false, true);
+        value.RegisterNewFab(value.velocity_eta0_mf,    &value.bc_nothing,  2, nghost, "velocity_eta0", false, true, { "x", "y" });
         value.RegisterNewFab(value.vorticity1_mf,   &value.bc_nothing,  1, nghost, "vorticity1", false, true);
 
         // MIXTURE
@@ -258,9 +258,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     // Eta
     pp.select_default<IC::Constant,IC::Laminate,IC::Expression,IC::BMP,IC::PNG>("eta.ic",value.eta_ic,value.geom);
     // Fluid 0
-    pp.select_default<IC::Constant,IC::Expression>("velocity0.ic",      value.velocity0_ic, value.geom);
-    pp.select_default<IC::Constant,IC::Expression>("pressure0.ic",      value.pressure0_ic, value.geom);
-    pp.select_default<IC::Constant,IC::Expression>("density0.ic",       value.density0_ic,  value.geom);
+    pp.select_default<IC::Constant,IC::Expression>("velocity_eta1.ic",      value.velocity_eta1_ic, value.geom);
+    pp.select_default<IC::Constant,IC::Expression>("pressure_eta1.ic",      value.pressure_eta1_ic, value.geom);
+    pp.select_default<IC::Constant,IC::Expression>("density_eta1.ic",       value.density_eta1_ic,  value.geom);
     // pp.select_default<IC::Constant,IC::Expression>("energy0.ic",       value.energy0_ic,  value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("temperature0.ic",  value.temperature0_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("k0_thermal.ic",    value.k0_thermal_ic, value.geom);
@@ -268,9 +268,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
 
     // Fluid 1
-    pp.select_default<IC::Constant,IC::Expression>("velocity1.ic",      value.velocity1_ic, value.geom);
-    pp.select_default<IC::Constant,IC::Expression>("pressure1.ic",      value.pressure1_ic, value.geom);
-    pp.select_default<IC::Constant,IC::Expression>("density1.ic",       value.density1_ic,  value.geom);
+    pp.select_default<IC::Constant,IC::Expression>("velocity_eta0.ic",      value.velocity_eta0_ic, value.geom);
+    pp.select_default<IC::Constant,IC::Expression>("pressure_eta0.ic",      value.pressure_eta0_ic, value.geom);
+    pp.select_default<IC::Constant,IC::Expression>("density_eta0.ic",       value.density_eta0_ic,  value.geom);
     // pp.select_default<IC::Constant,IC::Expression>("energy1.ic",       value.energy1_ic,  value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("temperature1.ic",  value.temperature1_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("k1_thermal.ic",    value.k1_thermal_ic, value.geom);
@@ -407,16 +407,16 @@ void Hydro2::Initialize(int lev)
     hess_eta_mf[lev]->setVal(0.0);
 
     // FLUID 0
-    velocity0_ic    ->Initialize(lev, velocity0_mf, 0.0);
-    pressure0_ic    ->Initialize(lev, pressure0_mf, 0.0);
-    density0_ic     ->Initialize(lev, density0_mf, 0.0);
-    density0_ic     ->Initialize(lev, density0_old_mf, 0.0);
+    velocity_eta1_ic    ->Initialize(lev, velocity_eta1_mf, 0.0);
+    pressure_eta1_ic    ->Initialize(lev, pressure_eta1_mf, 0.0);
+    density_eta1_ic     ->Initialize(lev, density_eta1_mf, 0.0);
+    density_eta1_ic     ->Initialize(lev, density_eta1_old_mf, 0.0);
 
     // FLUID 1
-    velocity1_ic    ->Initialize(lev, velocity1_mf, 0.0);
-    pressure1_ic    ->Initialize(lev, pressure1_mf, 0.0);
-    density1_ic     ->Initialize(lev, density1_mf, 0.0);
-    density1_ic     ->Initialize(lev, density1_old_mf, 0.0);
+    velocity_eta0_ic    ->Initialize(lev, velocity_eta0_mf, 0.0);
+    pressure_eta0_ic    ->Initialize(lev, pressure_eta0_mf, 0.0);
+    density_eta0_ic     ->Initialize(lev, density_eta0_mf, 0.0);
+    density_eta0_ic     ->Initialize(lev, density_eta0_old_mf, 0.0);
 
     // FORCED SOURCE
     ic_m0           ->Initialize(lev, m0_mf, 0.0);
@@ -425,14 +425,14 @@ void Hydro2::Initialize(int lev)
 
     // Debugging: verify IC values before mixing
     amrex::Print() << "p0 AFTER IC, BEFORE MIX: "
-                << pressure0_mf[lev]->min(0) << " "
-                << pressure0_mf[lev]->max(0) << "\n";
+                << pressure_eta1_mf[lev]->min(0) << " "
+                << pressure_eta1_mf[lev]->max(0) << "\n";
     amrex::Print() << "p1 AFTER IC, BEFORE MIX: "
-                << pressure1_mf[lev]->min(0) << " "
-                << pressure1_mf[lev]->max(0) << "\n";
+                << pressure_eta0_mf[lev]->min(0) << " "
+                << pressure_eta0_mf[lev]->max(0) << "\n";
     amrex::Print() << "rho0 AFTER IC, BEFORE MIX: "
-                << density0_mf[lev]->min(0) << " "
-                << density0_mf[lev]->max(0) << "\n";
+                << density_eta1_mf[lev]->min(0) << " "
+                << density_eta1_mf[lev]->max(0) << "\n";
     amrex::Print() << "eta AFTER IC, BEFORE MIX: "
                 << eta_mf[lev]->min(0) << " "
                 << eta_mf[lev]->max(0) << "\n";
@@ -493,14 +493,14 @@ void Hydro2::Mix(int lev)
         // Inputs
         auto eta    = eta_mf[lev]->const_array(mfi);
 
-        auto rho0   = density0_mf[lev]->const_array(mfi);
-        auto rho1   = density1_mf[lev]->const_array(mfi);
+        auto rho0   = density_eta1_mf[lev]->const_array(mfi);
+        auto rho1   = density_eta0_mf[lev]->const_array(mfi);
 
-        auto v0     = velocity0_mf[lev]->const_array(mfi);
-        auto v1     = velocity1_mf[lev]->const_array(mfi);
+        auto v0     = velocity_eta1_mf[lev]->const_array(mfi);
+        auto v1     = velocity_eta0_mf[lev]->const_array(mfi);
 
-        auto p0     = pressure0_mf[lev]->const_array(mfi);
-        auto p1     = pressure1_mf[lev]->const_array(mfi);
+        auto p0     = pressure_eta1_mf[lev]->const_array(mfi);
+        auto p1     = pressure_eta0_mf[lev]->const_array(mfi);
 
         // Outputs (phase energies)
         auto E0     = energy0_mf[lev]->array(mfi);
@@ -540,7 +540,7 @@ void Hydro2::Mix(int lev)
             Real u0y = v0(i,j,k,1);
 
             Real KE0 = 0.5 * r0 * (u0x*u0x + u0y*u0y);
-            Real UE0 = (p0(i,j,k) + gamma0*pi_0) / (gamma0 - 1.0);
+            Real UE0 = (p0(i,j,k) + gamma_eta1*pi_eta1) / (gamma_eta1 - 1.0);
             if (UE0 < 0) UE0 = 0;
 
             E0(i,j,k) = KE0 + UE0;       // total energy per volume
@@ -552,7 +552,7 @@ void Hydro2::Mix(int lev)
             Real u1y = v1(i,j,k,1);
 
             Real KE1 = 0.5 * r1 * (u1x*u1x + u1y*u1y);
-            Real UE1 = (p1(i,j,k) + gamma1*pi_1) / (gamma1 - 1.0);
+            Real UE1 = (p1(i,j,k) + gamma_eta0*pi_eta0) / (gamma_eta0 - 1.0);
             if (UE1 < 0) UE1 = 0;
 
             E1(i,j,k) = KE1 + UE1;       // total energy per volume
@@ -606,7 +606,7 @@ void Hydro2::Mix(int lev)
             //--------------------------------------------------------------
             double gmix, pimix;
             Thermo_Interp::InterpolateGammaPi_Stiffened(
-                e, gamma1, gamma0, pi_1, pi_0, gmix, pimix);
+                e, gamma_eta0, gamma_eta1, pi_eta0, pi_eta1, gmix, pimix);
 
             gamma_mix(i,j,k) = gmix;
             pi_mix(i,j,k)    = pimix;
@@ -758,8 +758,8 @@ Hydro2::RHS(int lev,
 
         auto kappas_arr = kappas_mf[lev]->array(mfi);
 
-        auto rho0_arr = density0_mf[lev]->array(mfi);
-        auto rho1_arr = density1_mf[lev]->array(mfi);
+        auto rho0_arr = density_eta1_mf[lev]->array(mfi);
+        auto rho1_arr = density_eta0_mf[lev]->array(mfi);
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i,int j,int k)
         {
@@ -791,7 +791,7 @@ Hydro2::RHS(int lev,
             //------------------------------------------------------------------
             double gmix, pimix;
             Thermo_Interp::InterpolateGammaPi_Stiffened(
-                eta, gamma1, gamma0, pi_1, pi_0, gmix, pimix);
+                eta, gamma_eta0, gamma_eta1, pi_eta0, pi_eta1, gmix, pimix);
             gamma_mix(i,j,k) = gmix;
             pi_mix(i,j,k) = pimix;
 
@@ -832,8 +832,8 @@ Hydro2::RHS(int lev,
             p_arr(i,j,k) = p_mix_local;
 
             // Specific heats
-            cp_arr(i,j,k) = eta*cp0 + (1.0 - eta)*cp1;
-            cv_arr(i,j,k) = eta*cv0 + (1.0 - eta)*cv1;
+            cp_arr(i,j,k) = eta*cp_eta1 + (1.0 - eta)*cp_eta0;
+            cv_arr(i,j,k) = eta*cv_eta1 + (1.0 - eta)*cv_eta0;
 
             // Temperature — guard against Inf/NaN and unrealistically large values
             // (large T can overflow to Inf during AMR FillCoarsePatch interpolation).
@@ -893,17 +893,17 @@ Hydro2::RHS(int lev,
         auto v_arr_tau   = velocity_mf[lev]->array(mfi);
         auto tau_arr     = tau_mf[lev]->array(mfi);
 
-        Real mu0_    = mu0;
-        Real mu1_    = mu1;
-        Real mu0_b_  = mu0_b;
-        Real mu1_b_  = mu1_b;
+        Real mu_eta1_    = mu_eta1;
+        Real mu_eta0_    = mu_eta0;
+        Real mu_eta1_b_  = mu_eta1_b;
+        Real mu_eta0_b_  = mu_eta0_b;
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
             Real eta_loc    = eta_arr_tau(i,j,k);
-            Real mu_eff     = eta_loc * mu0_  + (1.0 - eta_loc) * mu1_;
-            Real lambda_eff = eta_loc * mu0_b_ + (1.0 - eta_loc) * mu1_b_;
+            Real mu_eff     = eta_loc * mu_eta1_  + (1.0 - eta_loc) * mu_eta0_;
+            Real lambda_eff = eta_loc * mu_eta1_b_ + (1.0 - eta_loc) * mu_eta0_b_;
 
             Set::Matrix gradu = Numeric::Gradient(v_arr_tau, i, j, k, DX, sten);
             Real div_u = gradu(0,0) + gradu(1,1);
@@ -961,8 +961,8 @@ Hydro2::RHS(int lev,
         auto q0_arr      = q_mf[lev]->array(mfi);
 
         // For diagnostic fields / vaporization
-        auto rho0_arr = density0_mf[lev]->array(mfi);
-        auto rho1_arr = density1_mf[lev]->array(mfi);
+        auto rho0_arr = density_eta1_mf[lev]->array(mfi);
+        auto rho1_arr = density_eta0_mf[lev]->array(mfi);
 
         // Capture implicit_ch as a plain bool so the GPU lambda can use it
         bool do_implicit_ch = implicit_ch;
@@ -975,10 +975,10 @@ Hydro2::RHS(int lev,
                                                : 0.2 * epsilon * (c_max + 1.0);
 
         // Kapila compressibility source parameters (local copies for GPU lambda safety)
-        Real gamma0_       = gamma0;
-        Real gamma1_       = gamma1;
-        Real pi_0_         = pi_0;
-        Real pi_1_         = pi_1;
+        Real gamma_eta1_       = gamma_eta1;
+        Real gamma_eta0_       = gamma_eta0;
+        Real pi_eta1_         = pi_eta1;
+        Real pi_eta0_         = pi_eta0;
         bool do_kapila     = apply_kapila_source;
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i,int j,int k)
@@ -1129,8 +1129,8 @@ Hydro2::RHS(int lev,
 
             // Interface Lagrangian term (Ldot) — needs local M tensor and hess_eta
             Set::Vector Ldot = Set::Vector::Zero();
-            Real mu_eff     = eta_loc * mu0  + (1.0 - eta_loc) * mu1;
-            Real lambda_eff = eta_loc * mu0_b + (1.0 - eta_loc) * mu1_b;
+            Real mu_eff     = eta_loc * mu_eta1  + (1.0 - eta_loc) * mu_eta0;
+            Real lambda_eff = eta_loc * mu_eta1_b + (1.0 - eta_loc) * mu_eta0_b;
             for (int p = 0; p < 2; p++)
                 for (int q = 0; q < 2; q++)
                     for (int r = 0; r < 2; r++)
@@ -1297,10 +1297,10 @@ Hydro2::RHS(int lev,
             Real eta_dot_kapila = 0.0;
             if (do_kapila) {
                 Real p_loc   = p_arr(i,j,k);
-                Real B0      = gamma0_ * (p_loc + pi_0_);   // ρ₀c₀²
-                Real B1      = gamma1_ * (p_loc + pi_1_);   // ρ₁c₁²
-                Real K_denom = eta_loc * B1 + (1.0 - eta_loc) * B0;
-                Real K_comp  = (std::abs(K_denom) > Real(1.0e-14)) ? (B1 - B0) / K_denom : Real(0.0);
+                Real B_eta1  = gamma_eta1_ * (p_loc + pi_eta1_);   // bulk modulus at eta=1
+                Real B_eta0  = gamma_eta0_ * (p_loc + pi_eta0_);   // bulk modulus at eta=0
+                Real K_denom = eta_loc * B_eta1 + (1.0 - eta_loc) * B_eta0;
+                Real K_comp  = (std::abs(K_denom) > Real(1.0e-14)) ? (B_eta1 - B_eta0) / K_denom : Real(0.0);
                 Real div_u_  = gradu_loc(0,0) + gradu_loc(1,1);
                 eta_dot_kapila = K_comp * eta_loc * (1.0 - eta_loc) * div_u_;
                 if (!std::isfinite(eta_dot_kapila)) eta_dot_kapila = Real(0.0);
@@ -2255,10 +2255,10 @@ void Hydro2::ApplyNSCBC(
                 (domain.bigEnd(1) - domain.smallEnd(1) + 1) * DX[1];
 
     // Capture EOS and NSCBC scalars for the device kernels.
-    Real g0_ = gamma0, g1_ = gamma1;
-    Real pi0_ = pi_0, pi1_ = pi_1;
+    Real g_eta1_ = gamma_eta1, g_eta0_ = gamma_eta0;
+    Real pi_eta1_ = pi_eta1, pi_eta0_ = pi_eta0;
     Real pref_ = pref;
-    Real cv0_ = cv0, cv1_ = cv1;
+    Real cv_eta1_ = cv_eta1, cv_eta0_ = cv_eta0;
 
     Real nscbc_sigma_ = nscbc.sigma;
     Real nscbc_beta_  = nscbc.beta;
@@ -2316,7 +2316,7 @@ void Hydro2::ApplyNSCBC(
         // Stiffened-gas EOS mixing (same order as line 739 in RHS)
         Real gm_,pi_;
         Thermo_Interp::InterpolateGammaPi_Stiffened(
-            eta_, g1_, g0_, pi1_, pi0_, gm_, pi_);
+            eta_, g_eta0_, g_eta1_, pi_eta0_, pi_eta1_, gm_, pi_);
 
         Real p_ = (gm_ - 1.0)*UE_ - gm_*pi_ + pref_;
         if (!(p_ > 0.0)) p_ = 1.0e-6;  // handles NaN as well as < 0
@@ -2356,7 +2356,7 @@ void Hydro2::ApplyNSCBC(
         if (amrex::isnan(eta_)) eta_ = Real(0.0);
         Real gm_, pi_;
         Thermo_Interp::InterpolateGammaPi_Stiffened(
-            eta_, g1_, g0_, pi1_, pi0_, gm_, pi_);
+            eta_, g_eta0_, g_eta1_, pi_eta0_, pi_eta1_, gm_, pi_);
 
         // Inverse EOS: UE from p
         Real UE_ = (p_ + gm_*pi_ - pref_) / (gm_ - 1.0);
@@ -2604,7 +2604,7 @@ void Hydro2::ApplyNSCBC(
 
                     // Local temperature (needed for inflow entropy relaxation, Motheau Eq. 43)
                     Real eta_b  = eta_r(i,j,k);
-                    Real cv_mix = eta_b * cv0_ + (1.0 - eta_b) * cv1_;
+                    Real cv_mix = eta_b * cv_eta1_ + (1.0 - eta_b) * cv_eta0_;
                     Real T_b = (p_b + pi_b) / (rho_b * cv_mix * (gm_b - 1.0) + 1.0e-14);
 
                     if (ftype == FT::OUTFLOW) {
@@ -3010,7 +3010,7 @@ void Hydro2::ApplyNSCBC(
                 if (amrex::isnan(eta_g)) eta_g = 0.0;
                 Real gm_g, pi_g;
                 Thermo_Interp::InterpolateGammaPi_Stiffened(
-                    eta_g, g1_, g0_, pi1_, pi0_, gm_g, pi_g);
+                    eta_g, g_eta0_, g_eta1_, pi_eta0_, pi_eta1_, gm_g, pi_g);
                 Real UE_g = (p_g + gm_g*pi_g - pref_) / (gm_g - 1.0);
                 if (!(UE_g > 0.0)) UE_g = 0.0;
                 Real KE_g = 0.5 * rho_g * (vx_g*vx_g + vy_g*vy_g);
@@ -3352,7 +3352,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         // give p ≈ -γπ in the Riemann solver, floored to ~0, producing
         // a 1e5 Pa/dx momentum imbalance that drives blow-up at the interface.
         {
-            Real g0 = gamma0, g1 = gamma1, p0 = pi_0, p1 = pi_1;
+            Real g_eta1 = gamma_eta1, g_eta0 = gamma_eta0, p_eta1 = pi_eta1, p_eta0 = pi_eta0;
             Real pref_ = pref;
             for (amrex::MFIter mfi(stage[3], amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
                 const amrex::Box& bx = mfi.validbox();
@@ -3371,8 +3371,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     Real UE = E - KE;
                     if (!std::isfinite(UE)) UE = Real(0.0);
                     // Allaire EOS mixing
-                    Real A = eta_c/(g0-Real(1.0)) + (Real(1.0)-eta_c)/(g1-Real(1.0));
-                    Real B = eta_c*g0*p0/(g0-Real(1.0)) + (Real(1.0)-eta_c)*g1*p1/(g1-Real(1.0));
+                    Real A = eta_c/(g_eta1-Real(1.0)) + (Real(1.0)-eta_c)/(g_eta0-Real(1.0));
+                    Real B = eta_c*g_eta1*p_eta1/(g_eta1-Real(1.0)) + (Real(1.0)-eta_c)*g_eta0*p_eta0/(g_eta0-Real(1.0));
                     Real gm = Real(1.0) + Real(1.0)/A;
                     Real pm = B/(A + Real(1.0));
                     Real p_check = (gm-Real(1.0))*UE - gm*pm + pref_;
@@ -3512,13 +3512,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
 
             // gamma
-            Set::Scalar A = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
-            Set::Scalar B = (eta(i, j, k) * gamma0 * pi_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * pi_1) / (gamma1 - 1.0);
+            Set::Scalar A = (eta(i, j, k)) / (gamma_eta1 - 1.0) + (1.0 - eta(i, j, k)) / (gamma_eta0 - 1.0);
+            Set::Scalar B = (eta(i, j, k) * gamma_eta1 * pi_eta1) / (gamma_eta1 - 1.0) + ((1.0 - eta(i, j, k)) * gamma_eta0 * pi_eta0) / (gamma_eta0 - 1.0);
             // gamma(i, j, k) = 1.0 + (1.0 / A);
 
             double gmix, pimix;
             Thermo_Interp::InterpolateGammaPi_Stiffened(
-                eta(i,j,k), gamma1, gamma0, pi_1, pi_0, gmix, pimix);
+                eta(i,j,k), gamma_eta0, gamma_eta1, pi_eta0, pi_eta1, gmix, pimix);
             gamma_mix(i,j,k) = gmix;
             pi_mix(i,j,k) = pimix;
 
@@ -3613,8 +3613,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Adaptive Timestepping
             // ------------------------------------------------------------
             // Solving for new states
-            Set::Scalar A_new = (eta(i, j, k)) / (gamma0 - 1.0) + (1.0 - eta(i, j, k)) / (gamma1 - 1.0);
-            Set::Scalar B_new = (eta(i, j, k) * gamma0 * pi_0) / (gamma0 - 1.0) + ((1.0 - eta(i, j, k)) * gamma1 * pi_1) / (gamma1 - 1.0);
+            Set::Scalar A_new = (eta(i, j, k)) / (gamma_eta1 - 1.0) + (1.0 - eta(i, j, k)) / (gamma_eta0 - 1.0);
+            Set::Scalar B_new = (eta(i, j, k) * gamma_eta1 * pi_eta1) / (gamma_eta1 - 1.0) + ((1.0 - eta(i, j, k)) * gamma_eta0 * pi_eta0) / (gamma_eta0 - 1.0);
             // Set::Scalar gmix_new = 1.0 + (1.0 / A_new);
             Set::Scalar safe_rho_dt = (std::isfinite(rho(i,j,k)) && rho(i,j,k) > small) ? rho(i,j,k) : small;
             Set::Vector v_new = Set::Vector(M(i, j, k, 0) / safe_rho_dt, M(i, j, k, 1) / safe_rho_dt);
@@ -3639,7 +3639,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Set::Scalar pi_mix_new = (B_new / A_new) / gmix_new;
             double gmix_new, pimix_new;
             Thermo_Interp::InterpolateGammaPi_Stiffened(
-                eta(i,j,k), gamma1, gamma0, pi_1, pi_0, gmix_new, pimix_new);
+                eta(i,j,k), gamma_eta0, gamma_eta1, pi_eta0, pi_eta1, gmix_new, pimix_new);
             // gamma_mix(i,j,k) = gmix;
             // pi_mix_new(i,j,k) = pimix;
             Set::Scalar sound_speed_new = sqrt(gmix_new * (p_new + pimix_new) / safe_rho_dt);
@@ -3723,7 +3723,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     Set::Scalar dt_acoustic = cfl * dx_min / (wave_speed + small);
 
     // 2. Viscous CFL
-    Set::Scalar mu_max = std::max(mu0, mu1);
+    Set::Scalar mu_max = std::max(mu_eta1, mu_eta0);
     Set::Scalar dt_viscous = cfl_v * rho_min * dx_min * dx_min / (mu_max + small);
 
     // 3. Force CFL (guard: if F_max=0 no force constraint; if a_max=Inf skip)

@@ -48,50 +48,50 @@ epsilon = eta.ic.expression.constant.epsilon
 
 ### HYDRO INITIAL CONDITIONS ###
 # Ideal Gas EOS
-gamma0 = 1.4
-gamma1 = 1.4
+gamma_eta1 = 1.4
+gamma_eta0 = 1.4
 
 # Uniform density (single phase - all gas)
-density0.ic.type = expression
-density0.ic.expression.region0 = "1.0"
-density1.ic.type = expression
-density1.ic.expression.region0 = "1.0"
+density_eta1.ic.type = expression
+density_eta1.ic.expression.region0 = "1.0"
+density_eta0.ic.type = expression
+density_eta0.ic.expression.region0 = "1.0"
 
 # Uniform velocity divergence field
 # div(u) = du/dx + dv/dy = constant
 # Simple choice: u = -0.5*x, v = -0.5*y gives div(u) = -1.0
 # This creates uniform compression at rate 1.0 per second
-velocity0.ic.type = expression
-velocity0.ic.expression.constant.rate = 0.5
-velocity0.ic.expression.region0 = "-rate * x"
-velocity0.ic.expression.region1 = "-rate * y"
+velocity_eta1.ic.type = expression
+velocity_eta1.ic.expression.constant.rate = 0.5
+velocity_eta1.ic.expression.region0 = "-rate * x"
+velocity_eta1.ic.expression.region1 = "-rate * y"
 
-velocity1.ic.type = expression
-velocity1.ic.expression.constant.rate = 0.5
-velocity1.ic.expression.region0 = "-rate * x"
-velocity1.ic.expression.region1 = "-rate * y"
+velocity_eta0.ic.type = expression
+velocity_eta0.ic.expression.constant.rate = 0.5
+velocity_eta0.ic.expression.region0 = "-rate * x"
+velocity_eta0.ic.expression.region1 = "-rate * y"
 
 # Uniform base pressure
-pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "1.0"
-pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "1.0"
+pressure_eta1.ic.type = expression
+pressure_eta1.ic.expression.region0 = "1.0"
+pressure_eta0.ic.type = expression
+pressure_eta0.ic.expression.region0 = "1.0"
 
 # Specific Heats
-cp0 = "1000.0"
-cp1 = "1000.0"
-cv0 = "1000.0/1.4"
-cv1 = "1000.0/1.4"
+cp_eta1 = "1000.0"
+cp_eta0 = "1000.0"
+cv_eta1 = "1000.0/1.4"
+cv_eta0 = "1000.0/1.4"
 
 # Stiffened pressure
 p0_0 = 0.0
 p0_1 = 0.0
 
 # ZERO VISCOSITY - pure inviscid adiabatic flow
-mu0 = 0.0
-mu0_b = 0.0
-mu1 = 0.0
-mu1_b = 0.0
+mu_eta1 = 0.0
+mu_eta1_b = 0.0
+mu_eta0 = 0.0
+mu_eta0_b = 0.0
 
 # ZERO SURFACE TENSION - no interface
 sigma = 0.0

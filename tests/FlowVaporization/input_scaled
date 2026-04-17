@@ -55,33 +55,33 @@ eta.ic.expression.region0        = "(0.5*(1 + tanh((((x-x0)**2/A1**2 + (y-y0)**2
 
 ### HYDRO PARAM ###
 # New parameters
-gamma0 = 1.4
-gamma1 = 1.4
+gamma_eta1 = 1.4
+gamma_eta0 = 1.4
 p0_0 = 0
 p0_1 = 0
 cfl   = 0.4
-mu0   = 0.002
-mu1   = 0.002
+mu_eta1   = 0.002
+mu_eta0   = 0.002
 
-density0.ic.type = expression
-density0.ic.expression.region0 = "1.0"
+density_eta1.ic.type = expression
+density_eta1.ic.expression.region0 = "1.0"
 
-density1.ic.type = expression
-density1.ic.expression.region0 = "1.0"
+density_eta0.ic.type = expression
+density_eta0.ic.expression.region0 = "1.0"
 
-velocity0.ic.type = expression
-velocity0.ic.expression.region0 = "0.0"
-velocity0.ic.expression.region1 = "0.0"
+velocity_eta1.ic.type = expression
+velocity_eta1.ic.expression.region0 = "0.0"
+velocity_eta1.ic.expression.region1 = "0.0"
 
-velocity1.ic.type = expression
-velocity1.ic.expression.region0 = "0.0"
-velocity1.ic.expression.region1 = "0.0"
+velocity_eta0.ic.type = expression
+velocity_eta0.ic.expression.region0 = "0.0"
+velocity_eta0.ic.expression.region1 = "0.0"
 
-pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "1e5" #" + (10e5*(x<=-115))"
+pressure_eta1.ic.type = expression
+pressure_eta1.ic.expression.region0 = "1e5" #" + (10e5*(x<=-115))"
 
-pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "1e5"
+pressure_eta0.ic.type = expression
+pressure_eta0.ic.expression.region0 = "1e5"
 
 ### Surface tension coefficient ###
 sigma0 = 1000;

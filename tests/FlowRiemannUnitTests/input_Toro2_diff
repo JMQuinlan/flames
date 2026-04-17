@@ -34,11 +34,11 @@ q.ic.type = constant
 q.ic.constant.value = 0.0
 
 ### HYDRO PARAM ###
-gamma0 = 1.4
-gamma1 = 1.4
+gamma_eta1 = 1.4
+gamma_eta0 = 1.4
 cfl   = 0.4
-mu0   = 0.0
-mu1   = 0.0
+mu_eta1   = 0.0
+mu_eta0   = 0.0
 p0_0  = 0.0
 p0_1  = 0.0
 
@@ -49,38 +49,38 @@ sigma = 1000
 pref = 0.0
 
 ### IC State - Fluid 0 (Left side, x < 0) ###
-density0.ic.type = expression
-density0.ic.expression.constant.rho_L = 1.0
-density0.ic.expression.region0 = "rho_L"
+density_eta1.ic.type = expression
+density_eta1.ic.expression.constant.rho_L = 1.0
+density_eta1.ic.expression.region0 = "rho_L"
 
-velocity0.ic.type = expression
-velocity0.ic.expression.constant.v_L = "-2.0"
-velocity0.ic.expression.region0 = "v_L"
-velocity0.ic.expression.region1 = "0.0"
+velocity_eta1.ic.type = expression
+velocity_eta1.ic.expression.constant.v_L = "-2.0"
+velocity_eta1.ic.expression.region0 = "v_L"
+velocity_eta1.ic.expression.region1 = "0.0"
 
-pressure0.ic.type = expression
-pressure0.ic.expression.constant.p_L = "0.4"
-pressure0.ic.expression.region0 = "p_L"
+pressure_eta1.ic.type = expression
+pressure_eta1.ic.expression.constant.p_L = "0.4"
+pressure_eta1.ic.expression.region0 = "p_L"
 
-cp0 = "1.4"
-cv0 = "1.0"
+cp_eta1 = "1.4"
+cv_eta1 = "1.0"
 
 ### IC State - Fluid 1 (Right side, x > 0) ###
-density1.ic.type = expression
-density1.ic.expression.constant.rho_R = 1.0
-density1.ic.expression.region0 = "rho_R"
+density_eta0.ic.type = expression
+density_eta0.ic.expression.constant.rho_R = 1.0
+density_eta0.ic.expression.region0 = "rho_R"
 
-velocity1.ic.type = expression
-velocity1.ic.expression.constant.v_R = "2.0"
-velocity1.ic.expression.region0 = "v_R"
-velocity1.ic.expression.region1 = "0.0"
+velocity_eta0.ic.type = expression
+velocity_eta0.ic.expression.constant.v_R = "2.0"
+velocity_eta0.ic.expression.region0 = "v_R"
+velocity_eta0.ic.expression.region1 = "0.0"
 
-pressure1.ic.type = expression
-pressure1.ic.expression.constant.p_R = "0.4"
-pressure1.ic.expression.region0 = "p_R"
+pressure_eta0.ic.type = expression
+pressure_eta0.ic.expression.constant.p_R = "0.4"
+pressure_eta0.ic.expression.region0 = "p_R"
 
-cp1 = "1.4"
-cv1 = "1.0"
+cp_eta0 = "1.4"
+cv_eta0 = "1.0"
 
 ### ETA BC  ###
 pf.eta.bc.type.xlo = neumann

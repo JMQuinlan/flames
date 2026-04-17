@@ -40,37 +40,37 @@ q.ic.type = constant
 q.ic.constant.value = 0.0
 
 ### HYDRO PARAM ###
-gamma0 = 1.4
-gamma1 = 1.4
+gamma_eta1 = 1.4
+gamma_eta0 = 1.4
 cfl   = 0.5
-mu0   = 0.01    # Adjust for desired Reynolds number: Re = rho*U*L/mu
-mu1   = 0.01
+mu_eta1   = 0.01    # Adjust for desired Reynolds number: Re = rho*U*L/mu
+mu_eta0   = 0.01
 pref  = 0.0
 
 ### IC State ###
 # Fluid 0 (inactive phase)
-density0.ic.type = expression
-density0.ic.expression.region0 = "1.0"
-velocity0.ic.type = expression
-velocity0.ic.expression.region0 = "0.0"
-velocity0.ic.expression.region1 = "0.0"
-pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "0.0"
+density_eta1.ic.type = expression
+density_eta1.ic.expression.region0 = "1.0"
+velocity_eta1.ic.type = expression
+velocity_eta1.ic.expression.region0 = "0.0"
+velocity_eta1.ic.expression.region1 = "0.0"
+pressure_eta1.ic.type = expression
+pressure_eta1.ic.expression.region0 = "0.0"
 
 # Fluid 1 (active phase - Taylor-Green Vortex)
-density1.ic.type = expression
-density1.ic.expression.region0 = "1.0"
+density_eta0.ic.type = expression
+density_eta0.ic.expression.region0 = "1.0"
 
 ### TAYLOR-GREEN INITIAL CONDITIONS ###
 # u =  sin(x) * cos(y)
 # v = -cos(x) * sin(y)
 # p = p0 + (rho/4) * (cos(2*x) + cos(2*y))
-velocity1.ic.type = expression
-velocity1.ic.expression.region0 = "sin(x) * cos(y)"
-velocity1.ic.expression.region1 = "-cos(x) * sin(y)"
+velocity_eta0.ic.type = expression
+velocity_eta0.ic.expression.region0 = "sin(x) * cos(y)"
+velocity_eta0.ic.expression.region1 = "-cos(x) * sin(y)"
 
-pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "1.1 + 0.25 * (cos(2.0*x) + cos(2.0*y))"
+pressure_eta0.ic.type = expression
+pressure_eta0.ic.expression.region0 = "1.1 + 0.25 * (cos(2.0*x) + cos(2.0*y))"
 
 ### THERMODYNAMICS ###
 temperature0.ic.type = expression

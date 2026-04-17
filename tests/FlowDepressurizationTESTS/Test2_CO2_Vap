@@ -42,16 +42,16 @@ epsilon = eta.ic.expression.constant.epsilon
 
 ### STIFFENED GAS EOS PARAMETERS ###
 # Phase 0 = Liquid CO2
-gamma0 = 1.23
+gamma_eta1 = 1.23
 p0_0 = 1.32e8                   # P_inf for liquid (Pa)
-mu0 = 1.0e-4
-mu0_b = 0.0
+mu_eta1 = 1.0e-4
+mu_eta1_b = 0.0
 
 # Phase 1 = Vapor CO2
-gamma1 = 1.06
+gamma_eta0 = 1.06
 p0_1 = 8.86e5                   # P_inf for vapor (Pa)
-mu1 = 1.0e-5
-mu1_b = 0.0
+mu_eta0 = 1.0e-5
+mu_eta0_b = 0.0
 
 ### INITIAL CONDITIONS ###
 # Left side: P_L = 60 bar, T_L = 273 K, alpha_L = 1e-5 (mostly liquid)
@@ -61,49 +61,49 @@ mu1_b = 0.0
 # Using step function: value_left + (value_right - value_left) * 0.5 * (1 + tanh((x - x_interface)/width))
 
 # Left side (liquid): rho_L = 902 kg/m^3, Right side: rho_R = 1.0 kg/m^3
-density0.ic.type = expression
-density0.ic.expression.constant.rho_left = 902.0
-density0.ic.expression.constant.rho_right = 1.0
-density0.ic.expression.constant.x_step = 50.0
-density0.ic.expression.constant.width = 0.1
-#density0.ic.expression.region0 = "rho_left + (rho_right - rho_left) * 0.5 * (1 + tanh((x - x_step)/width))"
-density0.ic.expression.region0 = "rho_left"
+density_eta1.ic.type = expression
+density_eta1.ic.expression.constant.rho_left = 902.0
+density_eta1.ic.expression.constant.rho_right = 1.0
+density_eta1.ic.expression.constant.x_step = 50.0
+density_eta1.ic.expression.constant.width = 0.1
+#density_eta1.ic.expression.region0 = "rho_left + (rho_right - rho_left) * 0.5 * (1 + tanh((x - x_step)/width))"
+density_eta1.ic.expression.region0 = "rho_left"
 
 # Right side (vapor): rho_L = 1.0 kg/m^3, rho_R = 47.8 kg/m^3
-density1.ic.type = expression
-density1.ic.expression.constant.rho_left = 1.0
-density1.ic.expression.constant.rho_right = 47.8
-density1.ic.expression.constant.x_step = 50.0
-density1.ic.expression.constant.width = 0.1
-#density1.ic.expression.region0 = "rho_left + (rho_right - rho_left) * 0.5 * (1 + tanh((x - x_step)/width))"
-density1.ic.expression.region0 = "rho_right"
+density_eta0.ic.type = expression
+density_eta0.ic.expression.constant.rho_left = 1.0
+density_eta0.ic.expression.constant.rho_right = 47.8
+density_eta0.ic.expression.constant.x_step = 50.0
+density_eta0.ic.expression.constant.width = 0.1
+#density_eta0.ic.expression.region0 = "rho_left + (rho_right - rho_left) * 0.5 * (1 + tanh((x - x_step)/width))"
+density_eta0.ic.expression.region0 = "rho_right"
 
 # Velocities (initially zero)
-velocity0.ic.type = expression
-velocity0.ic.expression.region0 = "0.0"
-velocity0.ic.expression.region1 = "0.0"
+velocity_eta1.ic.type = expression
+velocity_eta1.ic.expression.region0 = "0.0"
+velocity_eta1.ic.expression.region1 = "0.0"
 
-velocity1.ic.type = expression
-velocity1.ic.expression.region0 = "0.0"
-velocity1.ic.expression.region1 = "0.0"
+velocity_eta0.ic.type = expression
+velocity_eta0.ic.expression.region0 = "0.0"
+velocity_eta0.ic.expression.region1 = "0.0"
 
 # Pressures (using step function)
 # Left: 60 bar = 6.0e6 Pa, Right: 10 bar = 1.0e6 Pa
-pressure0.ic.type = expression
-pressure0.ic.expression.constant.p_left = 6.0e6
-pressure0.ic.expression.constant.p_right = 1.0e6
-pressure0.ic.expression.constant.x_step = 50.0
-pressure0.ic.expression.constant.width = 0.1
-#pressure0.ic.expression.region0 = "p_left + (p_right - p_left) * 0.5 * (1 + tanh((x - x_step)/width))"
-pressure0.ic.expression.region0 = "p_left"
+pressure_eta1.ic.type = expression
+pressure_eta1.ic.expression.constant.p_left = 6.0e6
+pressure_eta1.ic.expression.constant.p_right = 1.0e6
+pressure_eta1.ic.expression.constant.x_step = 50.0
+pressure_eta1.ic.expression.constant.width = 0.1
+#pressure_eta1.ic.expression.region0 = "p_left + (p_right - p_left) * 0.5 * (1 + tanh((x - x_step)/width))"
+pressure_eta1.ic.expression.region0 = "p_left"
 
-pressure1.ic.type = expression
-pressure1.ic.expression.constant.p_left = 6.0e6
-pressure1.ic.expression.constant.p_right = 1.0e6
-pressure1.ic.expression.constant.x_step = 50.0
-pressure1.ic.expression.constant.width = 0.1
-#pressure1.ic.expression.region0 = "p_left + (p_right - p_left) * 0.5 * (1 + tanh((x - x_step)/width))"
-pressure1.ic.expression.region0 = "p_right"
+pressure_eta0.ic.type = expression
+pressure_eta0.ic.expression.constant.p_left = 6.0e6
+pressure_eta0.ic.expression.constant.p_right = 1.0e6
+pressure_eta0.ic.expression.constant.x_step = 50.0
+pressure_eta0.ic.expression.constant.width = 0.1
+#pressure_eta0.ic.expression.region0 = "p_left + (p_right - p_left) * 0.5 * (1 + tanh((x - x_step)/width))"
+pressure_eta0.ic.expression.region0 = "p_right"
 
 # Temperatures (not directly used, but for reference)
 temperature0.ic.type = expression
@@ -114,12 +114,12 @@ temperature1.ic.expression.region0 = "273.0"
 
 # Thermodynamic properties (from Table 1)
 # Cv values
-cv0 = 2440.0                    # Liquid Cv (J/kg/K)
-cv1 = 2410.0                    # Vapor Cv (J/kg/K)
+cv_eta1 = 2440.0                    # Liquid Cv (J/kg/K)
+cv_eta0 = 2410.0                    # Vapor Cv (J/kg/K)
 
 # Cp = gamma * Cv
-cp0 = 3001.2                    # gamma0 * cv0 = 1.23 * 2440
-cp1 = 2554.6                    # gamma1 * cv1 = 1.06 * 2410
+cp_eta1 = 3001.2                    # gamma_eta1 * cv_eta1 = 1.23 * 2440
+cp_eta0 = 2554.6                    # gamma_eta0 * cv_eta0 = 1.06 * 2410
 
 # Thermal conductivities (estimated for CO2)
 k0_thermal.ic.type = expression

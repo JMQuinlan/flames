@@ -50,38 +50,38 @@ epsilon = eta.ic.expression.constant.epsilon
 
 
 ### HYDRO INITIAL CONDITIONS ###
-gamma0 = 5.0
-gamma1 = 1.4
+gamma_eta1 = 5.0
+gamma_eta0 = 1.4
 
 p0_0 = 0.0
 p0_1 = 0.0
 
-mu0   = 0.0
-mu1   = 0.0
+mu_eta1   = 0.0
+mu_eta0   = 0.0
 
-mu0_b   = 0.0
-mu1_b   = 0.0
+mu_eta1_b   = 0.0
+mu_eta0_b   = 0.0
 
-density0.ic.type = expression
-density0.ic.expression.region0 = "10.0"
+density_eta1.ic.type = expression
+density_eta1.ic.expression.region0 = "10.0"
 
-density1.ic.type = expression
-density1.ic.expression.region0 = "1.0"
+density_eta0.ic.type = expression
+density_eta0.ic.expression.region0 = "1.0"
 
-velocity0.ic.type = expression
-velocity0.ic.expression.region0 = "0.0"
-velocity0.ic.expression.region1 = "0.0"
+velocity_eta1.ic.type = expression
+velocity_eta1.ic.expression.region0 = "0.0"
+velocity_eta1.ic.expression.region1 = "0.0"
 
-velocity1.ic.type = expression
-velocity1.ic.expression.region0 = "0.0"
-velocity1.ic.expression.region1 = "0.0"
+velocity_eta0.ic.type = expression
+velocity_eta0.ic.expression.region0 = "0.0"
+velocity_eta0.ic.expression.region1 = "0.0"
 
 # Pressure initialization - adjusted for thermodynamic equilibrium
 # Inner fluid (gamma=5.0) has higher pressure to balance the interface forces
-pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "10e5"
-pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "1e5"
+pressure_eta1.ic.type = expression
+pressure_eta1.ic.expression.region0 = "10e5"
+pressure_eta0.ic.type = expression
+pressure_eta0.ic.expression.region0 = "1e5"
 
 temperature0.ic.type = expression
 temperature0.ic.expression.region0 = "294.0"
@@ -89,17 +89,17 @@ temperature0.ic.expression.region0 = "294.0"
 temperature1.ic.type = expression
 temperature1.ic.expression.region0 = "294.0"
 
-cp0.ic.type = expression
-cp0.ic.expression.region0 = "1.4"
+cp_eta1.ic.type = expression
+cp_eta1.ic.expression.region0 = "1.4"
 
-cp1.ic.type = expression
-cp1.ic.expression.region0 = "1.4"
+cp_eta0.ic.type = expression
+cp_eta0.ic.expression.region0 = "1.4"
 
-cv0.ic.type = expression
-cv0.ic.expression.region0 = "1.0"
+cv_eta1.ic.type = expression
+cv_eta1.ic.expression.region0 = "1.0"
 
-cv1.ic.type = expression
-cv1.ic.expression.region0 = "1.0"
+cv_eta0.ic.type = expression
+cv_eta0.ic.expression.region0 = "1.0"
 
 k0_thermal.ic.type = expression
 k0_thermal.ic.expression.region0 = "0.6"

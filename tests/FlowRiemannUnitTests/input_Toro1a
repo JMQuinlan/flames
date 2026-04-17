@@ -53,11 +53,11 @@ epsilon = eta.ic.expression.constant.epsilon
 
 ### HYDRO PARAM ###
 
-gamma0 = 1.4
-gamma1 = 1.4
+gamma_eta1 = 1.4
+gamma_eta0 = 1.4
 cfl   = 0.4
-mu0   = 0.0
-mu1   = 0.0
+mu_eta1   = 0.0
+mu_eta0   = 0.0
 
 ### Surface tension coefficient ###
 sigma = 1000;
@@ -73,34 +73,34 @@ pref = 0.0
 
 ### IC State ###
 
-density0.ic.type = expression
-density0.ic.expression.region0 = "1.0"
+density_eta1.ic.type = expression
+density_eta1.ic.expression.region0 = "1.0"
 
-density1.ic.type = expression
-density1.ic.expression.constant.rho_L = 1.0
-density1.ic.expression.constant.rho_R = 0.125
-density1.ic.expression.region0 = "rho_L*(x<0) + rho_R*(x>0)"
-#density1.ic.expression.constant.halfdx = 1.25e-3 #0.00625 / 20;
-#density1.ic.expression.region0 = "rho_L*(x<-0) + ((rho_R-rho_L)/(2*halfdx)*x + (rho_L+halfdx*((rho_R-rho_L)/(2*halfdx))))*((x>-0)*(x<halfdx)) + rho_R*(x>halfdx)"
-#density1.ic.expression.region0 = "rho_L*(x<-0) + 0.305752*((x>-0)*(x<halfdx)) + rho_R*(x>halfdx)"
+density_eta0.ic.type = expression
+density_eta0.ic.expression.constant.rho_L = 1.0
+density_eta0.ic.expression.constant.rho_R = 0.125
+density_eta0.ic.expression.region0 = "rho_L*(x<0) + rho_R*(x>0)"
+#density_eta0.ic.expression.constant.halfdx = 1.25e-3 #0.00625 / 20;
+#density_eta0.ic.expression.region0 = "rho_L*(x<-0) + ((rho_R-rho_L)/(2*halfdx)*x + (rho_L+halfdx*((rho_R-rho_L)/(2*halfdx))))*((x>-0)*(x<halfdx)) + rho_R*(x>halfdx)"
+#density_eta0.ic.expression.region0 = "rho_L*(x<-0) + 0.305752*((x>-0)*(x<halfdx)) + rho_R*(x>halfdx)"
 
-velocity0.ic.type = expression
-velocity0.ic.expression.region0 = "0.0"
-velocity0.ic.expression.region1 = "0.0"
+velocity_eta1.ic.type = expression
+velocity_eta1.ic.expression.region0 = "0.0"
+velocity_eta1.ic.expression.region1 = "0.0"
 
-velocity1.ic.type = expression
-velocity1.ic.expression.constant.v_L = "0.0"
-velocity1.ic.expression.constant.v_R = "0.0"
-velocity1.ic.expression.region0 = "v_L*(x<0) + v_R*(x>0)"
-velocity1.ic.expression.region1 = "0.0"
+velocity_eta0.ic.type = expression
+velocity_eta0.ic.expression.constant.v_L = "0.0"
+velocity_eta0.ic.expression.constant.v_R = "0.0"
+velocity_eta0.ic.expression.region0 = "v_L*(x<0) + v_R*(x>0)"
+velocity_eta0.ic.expression.region1 = "0.0"
 
-pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "0.0"
+pressure_eta1.ic.type = expression
+pressure_eta1.ic.expression.region0 = "0.0"
 
-pressure1.ic.type = expression
-pressure1.ic.expression.constant.p_L = "1.0"
-pressure1.ic.expression.constant.p_R = "0.1"
-pressure1.ic.expression.region0 = "p_L*(x<0) + p_R*(x>0)"
+pressure_eta0.ic.type = expression
+pressure_eta0.ic.expression.constant.p_L = "1.0"
+pressure_eta0.ic.expression.constant.p_R = "0.1"
+pressure_eta0.ic.expression.region0 = "p_L*(x<0) + p_R*(x>0)"
 
 temperature0.ic.type = expression
 temperature0.ic.expression.region0 = "294.0"

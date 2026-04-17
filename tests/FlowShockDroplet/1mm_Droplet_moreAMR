@@ -55,61 +55,61 @@ epsilon = eta.ic.expression.constant.epsilon
 ### HYDRO INITIAL CONDITIONS ###
 
 # Air properties (fluid 0 - surrounding vapor/gas)
-gamma0 = 1.4   # Air
+gamma_eta1 = 1.4   # Air
 p0_0 = 0       # Ideal gas
-mu0 = 1.8e-5   # Air viscosity [Pa-s]
-mu0_b = 0.0
+mu_eta1 = 1.8e-5   # Air viscosity [Pa-s]
+mu_eta1_b = 0.0
 
 # Water properties (fluid 1 - droplet)
-gamma1 = 7.15  # Water
+gamma_eta0 = 7.15  # Water
 p0_1 = 3.0e8   # Tammann EOS parameter for water
-mu1 = 1.0e-3   # Water viscosity [Pa-s]
-mu1_b = 0.001
+mu_eta0 = 1.0e-3   # Water viscosity [Pa-s]
+mu_eta0_b = 0.001
 
 # Densities
-density0.ic.type = expression
-density0.ic.expression.constant.rho_air = 1.225
-density0.ic.expression.constant.rho_shock = 20.0
-density0.ic.expression.constant.x_shock = -0.004  # Shock region near left wall
+density_eta1.ic.type = expression
+density_eta1.ic.expression.constant.rho_air = 1.225
+density_eta1.ic.expression.constant.rho_shock = 20.0
+density_eta1.ic.expression.constant.x_shock = -0.004  # Shock region near left wall
 # Air field with shock
-density0.ic.expression.region0 = "(x < x_shock)*rho_shock + (x >= x_shock)*rho_air"
+density_eta1.ic.expression.region0 = "(x < x_shock)*rho_shock + (x >= x_shock)*rho_air"
 
-density1.ic.type = expression
-density1.ic.expression.constant.rho_water = 1000.0
+density_eta0.ic.type = expression
+density_eta0.ic.expression.constant.rho_water = 1000.0
 # Water density (constant in droplet)
-density1.ic.expression.region0 = "rho_water"
+density_eta0.ic.expression.region0 = "rho_water"
 
 # Velocities (initially at rest, except shock region)
-velocity0.ic.type = expression
-velocity0.ic.expression.constant.u_shock = 500.0  # Shock velocity [m/s]
-velocity0.ic.expression.constant.x_shock = -0.004
-velocity0.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
-velocity0.ic.expression.region1 = "0.0"
+velocity_eta1.ic.type = expression
+velocity_eta1.ic.expression.constant.u_shock = 500.0  # Shock velocity [m/s]
+velocity_eta1.ic.expression.constant.x_shock = -0.004
+velocity_eta1.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
+velocity_eta1.ic.expression.region1 = "0.0"
 
-velocity1.ic.type = expression
-velocity1.ic.expression.constant.u_shock = 500.0
-velocity1.ic.expression.constant.x_shock = -0.004
-velocity1.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
-velocity1.ic.expression.region1 = "0.0"
+velocity_eta0.ic.type = expression
+velocity_eta0.ic.expression.constant.u_shock = 500.0
+velocity_eta0.ic.expression.constant.x_shock = -0.004
+velocity_eta0.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
+velocity_eta0.ic.expression.region1 = "0.0"
 
 # Pressures
-pressure0.ic.type = expression
-pressure0.ic.expression.constant.p_atm = 1.01325e5
-pressure0.ic.expression.constant.p_shock = 20.0e5  # High pressure shock region
-pressure0.ic.expression.constant.x_shock = -0.004
+pressure_eta1.ic.type = expression
+pressure_eta1.ic.expression.constant.p_atm = 1.01325e5
+pressure_eta1.ic.expression.constant.p_shock = 20.0e5  # High pressure shock region
+pressure_eta1.ic.expression.constant.x_shock = -0.004
 # Air pressure with shock
-pressure0.ic.expression.region0 = "(x < x_shock)*p_shock + (x >= x_shock)*p_atm"
+pressure_eta1.ic.expression.region0 = "(x < x_shock)*p_shock + (x >= x_shock)*p_atm"
 
-pressure1.ic.type = expression
-pressure1.ic.expression.constant.p_atm = 1.01325e5
+pressure_eta0.ic.type = expression
+pressure_eta0.ic.expression.constant.p_atm = 1.01325e5
 # Water pressure (atmospheric in droplet)
-pressure1.ic.expression.region0 = "p_atm"
+pressure_eta0.ic.expression.region0 = "p_atm"
 
 # Thermodynamic properties
-cp0 = "1005.0"  # Air specific heat [J/kg-K]
-cp1 = "4179.0"  # Water specific heat [J/kg-K]
-cv0 = "717.86"  # Air cv = cp/gamma
-cv1 = "4179.0/7.15"  # Water cv = cp/gamma
+cp_eta1 = "1005.0"  # Air specific heat [J/kg-K]
+cp_eta0 = "4179.0"  # Water specific heat [J/kg-K]
+cv_eta1 = "717.86"  # Air cv = cp/gamma
+cv_eta0 = "4179.0/7.15"  # Water cv = cp/gamma
 
 # Surface tension
 sigma = 72.8e-3  # Water-air surface tension [N/m]

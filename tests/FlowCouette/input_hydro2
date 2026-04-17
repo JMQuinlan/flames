@@ -27,11 +27,11 @@ stop_time = 30.0
 
 ### HYDRO PARAM ###
 
-gamma0 = 1.4
-gamma1 = 1.4
+gamma_eta1 = 1.4
+gamma_eta0 = 1.4
 cfl   = 0.4
-mu0   = 1.0
-mu1   = 10.0
+mu_eta1   = 1.0
+mu_eta0   = 10.0
 
 
 ### ETA IC ###
@@ -52,31 +52,31 @@ q.ic.type = expression
 q.ic.expression.region0 = "0.0"
 q.ic.expression.region1 = "0.0"
 
-density0.ic.type = expression
-density0.ic.expression.region0 = "100.0"
+density_eta1.ic.type = expression
+density_eta1.ic.expression.region0 = "100.0"
 
-velocity0.ic.type = expression
-velocity0.ic.expression.region0 = "0.0"
-velocity0.ic.expression.region1 = "0.0"
+velocity_eta1.ic.type = expression
+velocity_eta1.ic.expression.region0 = "0.0"
+velocity_eta1.ic.expression.region1 = "0.0"
 
-pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "100.0"
+pressure_eta1.ic.type = expression
+pressure_eta1.ic.expression.region0 = "100.0"
 
-density1.ic.type = expression
-density1.ic.expression.region0 = "100.0"
+density_eta0.ic.type = expression
+density_eta0.ic.expression.region0 = "100.0"
 
-velocity1.ic.type = expression
-velocity1.ic.expression.region0 = "0.1*(y>1.5)" #"0.5*(tanh((y-1.5)/.05) + 1)" # 0 at bottom plate and 1 at top plate
-velocity1.ic.expression.region1 = "0.0"
+velocity_eta0.ic.type = expression
+velocity_eta0.ic.expression.region0 = "0.1*(y>1.5)" #"0.5*(tanh((y-1.5)/.05) + 1)" # 0 at bottom plate and 1 at top plate
+velocity_eta0.ic.expression.region1 = "0.0"
 
-pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "100.0"
+pressure_eta0.ic.type = expression
+pressure_eta0.ic.expression.region0 = "100.0"
 
-cp0 = "1.4"
-cv0 = "1.0"
+cp_eta1 = "1.4"
+cv_eta1 = "1.0"
 
-cp1 = "1.4"
-cv1 = "1.0"
+cp_eta0 = "1.4"
+cv_eta0 = "1.0"
 
 ### HYDRO BC ###
 pf.eta.bc.type.xlo = neumann
