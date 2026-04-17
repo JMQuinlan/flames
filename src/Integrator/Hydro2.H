@@ -10,6 +10,7 @@
 #include "BC/Expression.H"
 #include "BC/Nothing.H"
 #include "BC/NSCBC.H"
+#include "BC/NSCBC4.H"
 #include "IC/IC.H"
 
 #include "Set/Base.H"
@@ -270,6 +271,7 @@ protected:
     BC::Constant neumann_bc_D = BC::Constant::ZeroNeumann(AMREX_SPACEDIM);
 
     BC::NSCBC *nscbc_bc = nullptr;
+    BC::NSCBC4 *nscbc4_bc = nullptr;
 
 
     Set::Scalar c_max = 0.0;

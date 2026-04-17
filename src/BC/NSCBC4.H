@@ -1,5 +1,5 @@
-#ifndef BC_NSCBC_H
-#define BC_NSCBC_H
+#ifndef BC_NSCBC4_H
+#define BC_NSCBC4_H
 
 #include "BC/BC.H"
 #include "IO/ParmParse.H"

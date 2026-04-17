@@ -7,6 +7,7 @@
 #include "BC/Expression.H"
 #include "BC/Nothing.H"
 #include "BC/NSCBC.H"
+#include "BC/NSCBC4.H"
 #include "Numeric/Stencil.H"
 #include "IC/Constant.H"
 #include "IC/Laminate.H"
@@ -142,17 +143,38 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // Initialize boundary conditions based on whether NSCBC is used
         if (uses_nscbc)
         {
-            // NSCBC mode: Initialize NSCBC handler and use Nothing BCs
-            value.nscbc_bc = new BC::NSCBC(pp);
+            if (value.nghost == 2)
+            {
+                value.nscbc_bc = new BC::NSCBC(pp);
+                value.nscbc4_bc = nullptr;
+                Util::Message(INFO, "Parsing NSCBC (2-cell)");
+            }
+            else if (value.nghost == 4)
+            {
+                value.nscbc_bc = nullptr;
+                value.nscbc4_bc = new BC::NSCBC4(pp);
+                Util::Message(INFO, "Parsing NSCBC4 (4-cell)");
+            }
+            else
+            {
+                Util::Abort(INFO, "NSCBC requires nghost = 2 or 4");
+            }
 
-            // Use BC::Nothing (does nothing when called)
+            // Use BC::Nothing for standard BC pointers
             value.density_bc = &value.bc_nothing;
             value.energy_bc = &value.bc_nothing;
             value.momentum_bc = &value.bc_nothing;
 
-            Util::Message(INFO, "Parsing NSCBC");
             Util::Message(INFO, "nscbc_bc Pointer=", value.nscbc_bc);
-
+            Util::Message(INFO, "nscbc4_bc Pointer=", value.nscbc4_bc);
+    
+            // Use BC::Nothing (does nothing when called)
+            value.density_bc = &value.bc_nothing;
+            value.energy_bc = &value.bc_nothing;
+            value.momentum_bc = &value.bc_nothing;
+    
+            Util::Message(INFO, "nscbc_bc Pointer=", value.nscbc_bc);
+            Util::Message(INFO, "nscbc4_bc Pointer=", value.nscbc4_bc);
         }
         else
         {
@@ -2585,23 +2607,24 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
 
     if (use_nscbc)
     {
-        // NSCBC requires exactly 2 or 4 ghost cells
+        // NSCBC objects were already created in Parse()
+        // Just verify the correct one exists for this nghost
+        if (nghost == 2 && nscbc_bc == nullptr)
+        {
+            Util::Abort(INFO, "nghost=2 but nscbc_bc is null - check Parse()");
+        }
+        else if (nghost == 4 && nscbc4_bc == nullptr)
+        {
+            Util::Abort(INFO, "nghost=4 but nscbc4_bc is null - check Parse()");
+        }
+
         if (nghost == 2)
         {
-            Util::Message(INFO, "FillGhost4BC: Using NSCBC with 2 ghost cells"); // Use 2-cell NSCBC stencil
-            // To-DO: Point towards NSCBC function
-            //nscbc_ptr()->nscbc();
-
+            Util::Message(INFO, "FillGhost4BC: Using NSCBC with 2 ghost cells");
         }
         else if (nghost == 4)
         {
-            Util::Message(INFO, "FillGhost4BC: Using NSCBC with 4 ghost cells"); // Use 4-cell NSCBC stencil
-            // To-DO: Point towards NSCBC4 function
-            //nscbc_ptr()->nscbc4();
-        }
-        else
-        {
-            Util::Abort(INFO, "NSCBC requires nghost = 2 or 4, but nghost = ", nghost);
+            Util::Message(INFO, "FillGhost4BC: Using NSCBC4 with 4 ghost cells");
         }
     }
 
@@ -2738,18 +2761,14 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         //   - Fill rho_total, M, E in ghost cells
         //   - Write gamma, p0, pressure to ghost cells
         // ====================================================================
-        nscbc_bc->FillBoundary(rho_total,
-                               M_copy,
-                               E_copy,
-                               *eta_mf[lev],
-                               *gamma_mf[lev],
-                               *p0_mf[lev],
-                               *pressure_mf[lev],
-                               eos0,
-                               eos1,
-                               geom[lev],
-                               time,
-                               pref);
+        if (nghost == 2 && nscbc_bc != nullptr)
+        {
+            nscbc_bc->FillBoundary(rho_total, M_copy, E_copy, *eta_mf[lev], *gamma_mf[lev], *p0_mf[lev], *pressure_mf[lev], eos0, eos1, geom[lev], time, pref);
+        }
+        else if (nghost == 4 && nscbc4_bc != nullptr)
+        {
+            nscbc4_bc->FillBoundary(rho_total, M_copy, E_copy, *eta_mf[lev], eos0, eos1, geom[lev], time, pref);
+        }
 
         // Copy modified conservatives back to main arrays
         amrex::MultiFab::Copy(*momentum_mf[lev], M_copy, 0, 0, AMREX_SPACEDIM, nghost);
