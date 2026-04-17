@@ -716,10 +716,10 @@ Hydro2::RHS(int lev,
     amrex::Box domain = geom[lev].Domain();
 
     // Converting Array to mf
-    amrex::MultiFab::Copy(*rho_eta0_mf[lev], rho_eta0_mf_in, 0, 0, 1, 0); // Domain only
-    amrex::MultiFab::Copy(*rho_eta1_mf[lev], rho_eta1_mf_in, 0, 0, 1, 0);
-    amrex::MultiFab::Copy(*momentum_mf[lev], M_mf_in, 0, 0, AMREX_SPACEDIM, 0);
-    amrex::MultiFab::Copy(*energy_per_vol_mf[lev], E_mf_in, 0, 0, 1, 0);
+    amrex::MultiFab::Copy(*rho_eta0_mf[lev], rho_eta0_mf_in, 0, 0, 1, nghost);
+    amrex::MultiFab::Copy(*rho_eta1_mf[lev], rho_eta1_mf_in, 0, 0, 1, nghost);
+    amrex::MultiFab::Copy(*momentum_mf[lev], M_mf_in, 0, 0, AMREX_SPACEDIM, nghost);
+    amrex::MultiFab::Copy(*energy_per_vol_mf[lev], E_mf_in, 0, 0, 1, nghost);
 
 
     // Eta Fields
@@ -1785,11 +1785,11 @@ void Hydro2::Regrid(int lev, Set::Scalar regrid_time)
 {
     BL_PROFILE("Integrator::Hydro2::Regrid");
 
-    // Fill BCs and ghost cells after regridding 
-    FillGhost4BC(lev, regrid_time);
-
     if (lev < finest_level)
         return;
+
+    // Fill BCs and ghost cells after regridding
+    FillGhost4BC(lev, regrid_time);
 
     Util::Message(INFO, "Regridding on level", lev);
 }// end regrid
@@ -2523,6 +2523,7 @@ void Hydro2::check4nans(int time, int lev, int i, int j, int k, const std::strin
 ///////////////////////////////////////// BOUNDRY CONDITIONS //////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 // FillBoundaries(): Fill Boundries with Periodicity
+// Example Usage: FillBoundaries(lev, time, {x_mf[lev].get(), y_mf[lev].get(), z_mf[lev].get()});
 void Hydro2::FillBoundaries(int lev, std::initializer_list<amrex::MultiFab *> mfs)
 {
     BL_PROFILE("Integrator::Hydro2::FillBoundaries");
@@ -2532,20 +2533,20 @@ void Hydro2::FillBoundaries(int lev, std::initializer_list<amrex::MultiFab *> mf
         {
             mf->FillBoundary(geom[lev].periodicity());
         }
-
+        
         // Checking
-        /*
-        if (mf->contains_nan())
+        bool err_verbose = false;
+        if (err_verbose && (mf->contains_nan()))
         {
             Util::ParallelMessage(INFO, "-------------------------------");
             Util::ParallelMessage(INFO, "NaNs after FillBoundaries");
             Util::Abort(INFO);
         }
-        */
     }
 }
 
 // FillBoundariesWithBC(): Fill Boundries with BC
+// Example Usage: FillBoundariesWithBC(lev, time, x_bc, {x_mf[lev].get(), y_mf[lev].get(), z_mf[lev].get()});
 void Hydro2::FillBoundariesWithBC(int lev, Set::Scalar time, BC::BC<Set::Scalar> *bc, std::initializer_list<amrex::MultiFab *> mfs)
 {
     BL_PROFILE("Integrator::Hydro2::FillBoundariesWithBC");
@@ -2561,14 +2562,13 @@ void Hydro2::FillBoundariesWithBC(int lev, Set::Scalar time, BC::BC<Set::Scalar>
         }
 
         // Checking
-        /*
-        if (mf->contains_nan())
+        bool err_verbose = false;
+        if (err_verbose && (mf->contains_nan()))
         {
-            Util::Paralle lMessage(INFO, "-------------------------------");
+            Util::ParallelMessage(INFO, "-------------------------------");
             Util::ParallelMessage(INFO, "NaNs after FillBoundariesWithBC");
             Util::Abort(INFO);
         }
-        */
     }
 }
 

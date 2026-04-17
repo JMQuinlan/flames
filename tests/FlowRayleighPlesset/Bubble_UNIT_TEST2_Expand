@@ -15,8 +15,8 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 10
 amr.grid_eff = 0.8
-amr.max_level = 0
-amr.n_cell = 128 128
+amr.max_level = 5
+amr.n_cell = 64 64
 
 ### TIME STEPING ###
 timestep  = 1e-6
@@ -27,8 +27,8 @@ dynamictimestep.min = 1e-12
 cfl = 0.5
 
 ### DIMENSIONS ###
-geometry.prob_lo = -0.10 -0.10 0.0
-geometry.prob_hi =  0.10  0.10 0.0
+geometry.prob_lo = -0.40 -0.40 0.0
+geometry.prob_hi =  0.40  0.40 0.0
 geometry.is_periodic = 0 0 0
 
 stop_time = 50e-3
@@ -168,4 +168,4 @@ reinit_max_iter = 100
 reinit_tolerance = 1e-6
 omega_relax = 0.5; 
 
-nghost = 4
+nghost = 2
