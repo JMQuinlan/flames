@@ -1242,20 +1242,39 @@ Hydro2::RHS(int lev,
             // after the explicit step via ApplyImplicitCH(); only advection
             // and vaporization remain in the explicit RHS.
             //------------------------------------------------------------------
-            // Upwind η advection: use first-order upwind instead of centered.
-            // The conservative variables (ρ,M,E) use a first-order upwind Godunov
-            // scheme; using centered differences here introduces an O(u·dx·∇²η)
-            // error equal in magnitude to the advection itself for fast-moving
-            // interfaces (e.g. RPE test at ~70 m/s).  That η lag, amplified by
-            // the stiffened-gas EOS condition number γπ/p ≈ 2e4, produces the
-            // cardinal-point pressure blow-up.
-            Real deta_dx = (u(0) >= 0)
-                ? (eta_arr(i,j,k) - eta_arr(i-1,j,k)) / DX[0]
-                : (eta_arr(i+1,j,k) - eta_arr(i,j,k)) / DX[0];
-            Real deta_dy = (u(1) >= 0)
-                ? (eta_arr(i,j,k) - eta_arr(i,j-1,k)) / DX[1]
-                : (eta_arr(i,j+1,k) - eta_arr(i,j,k)) / DX[1];
-            Real adv = -(u(0)*deta_dx + u(1)*deta_dy);
+            // Riemann-consistent upwind η advection.
+            // Use the sign of the Riemann mass flux at each face to determine
+            // the upwind direction — identical to treating η as a passive scalar
+            // in the HLLC sense (F_η = F_mass * η_upwind).  The non-conservative
+            // form ∂η/∂t = -u·∇η is recovered as:
+            //   adv = -(u_xp*(η_xp_upw - η) - u_xm*(η_xm_upw - η))/dx  + y-dir
+            // where u_face = F_mass / ρ_upwind.  This ensures η advects at the
+            // Riemann contact speed rather than the cell-center velocity, which
+            // was the residual source of the pressure dip at the outer interface.
+            // x-direction face velocities / upwind η
+            Real rho_xm = (fxm.mass >= Real(0)) ? amrex::max(rho_arr(i-1,j,k), Real(1e-14))
+                                                  : rho_loc;
+            Real u_xm   = fxm.mass / rho_xm;
+            Real eta_xm = (fxm.mass >= Real(0)) ? eta_arr(i-1,j,k) : eta_loc;
+
+            Real rho_xp = (fxp.mass >= Real(0)) ? rho_loc
+                                                  : amrex::max(rho_arr(i+1,j,k), Real(1e-14));
+            Real u_xp   = fxp.mass / rho_xp;
+            Real eta_xp = (fxp.mass >= Real(0)) ? eta_loc : eta_arr(i+1,j,k);
+
+            // y-direction face velocities / upwind η
+            Real rho_ym = (fym.mass >= Real(0)) ? amrex::max(rho_arr(i,j-1,k), Real(1e-14))
+                                                  : rho_loc;
+            Real u_ym   = fym.mass / rho_ym;
+            Real eta_ym = (fym.mass >= Real(0)) ? eta_arr(i,j-1,k) : eta_loc;
+
+            Real rho_yp = (fyp.mass >= Real(0)) ? rho_loc
+                                                  : amrex::max(rho_arr(i,j+1,k), Real(1e-14));
+            Real u_yp   = fyp.mass / rho_yp;
+            Real eta_yp = (fyp.mass >= Real(0)) ? eta_loc : eta_arr(i,j+1,k);
+
+            Real adv = -(u_xp*(eta_xp - eta_loc) - u_xm*(eta_xm - eta_loc)) / DX[0]
+                       -(u_yp*(eta_yp - eta_loc) - u_ym*(eta_ym - eta_loc)) / DX[1];
 
             Real eta_dot_CH = 0.0;
             if (!do_implicit_ch) {
