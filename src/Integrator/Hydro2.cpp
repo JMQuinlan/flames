@@ -816,11 +816,12 @@ Hydro2::RHS(int lev,
 
             // p_floor is chosen well below atmospheric (1e5 Pa) so it only
             // activates for genuinely unphysical states, not near-vacuum air.
+            // E_arr is const here (RHS input); the actual write-back happens in
+            // post_stage_action which holds the non-const stage MultiFabs.
             const Real p_floor_eos = Real(1.0);
             Real p_raw = (Real(gmix) - 1.0)*UE - Real(gmix)*Real(pimix) + pref;
             if (!std::isfinite(p_raw) || p_raw < p_floor_eos) {
                 UE = (p_floor_eos + Real(gmix)*Real(pimix) - pref) / (Real(gmix) - 1.0);
-                E_arr(i,j,k) = KE + UE;  // correct the conservative variable
             }
 
             UE_arr(i,j,k) = UE;
@@ -1241,7 +1242,20 @@ Hydro2::RHS(int lev,
             // after the explicit step via ApplyImplicitCH(); only advection
             // and vaporization remain in the explicit RHS.
             //------------------------------------------------------------------
-            Real adv = -(u(0)*grad_eta(0) + u(1)*grad_eta(1));
+            // Upwind η advection: use first-order upwind instead of centered.
+            // The conservative variables (ρ,M,E) use a first-order upwind Godunov
+            // scheme; using centered differences here introduces an O(u·dx·∇²η)
+            // error equal in magnitude to the advection itself for fast-moving
+            // interfaces (e.g. RPE test at ~70 m/s).  That η lag, amplified by
+            // the stiffened-gas EOS condition number γπ/p ≈ 2e4, produces the
+            // cardinal-point pressure blow-up.
+            Real deta_dx = (u(0) >= 0)
+                ? (eta_arr(i,j,k) - eta_arr(i-1,j,k)) / DX[0]
+                : (eta_arr(i+1,j,k) - eta_arr(i,j,k)) / DX[0];
+            Real deta_dy = (u(1) >= 0)
+                ? (eta_arr(i,j,k) - eta_arr(i,j-1,k)) / DX[1]
+                : (eta_arr(i,j+1,k) - eta_arr(i,j,k)) / DX[1];
+            Real adv = -(u(0)*deta_dx + u(1)*deta_dy);
 
             Real eta_dot_CH = 0.0;
             if (!do_implicit_ch) {
