@@ -85,10 +85,13 @@ public:
         pR = std::max(pR, small);
 
         //---------------------------------------------------------------------
-        // Correct stiffened‑gas sound speeds
+        // Stiffened-gas sound speeds: a² = γ(p + π)/ρ
+        // Derived from p = (γ−1)ρe − γπ  →  ρe = (p+γπ)/(γ−1)
+        //   (∂p/∂ρ)|_s = γ(p+π)/ρ  (one γ, acting on p+π, NOT γ²π)
+        // Note: pi stored in State is π∞, not γπ∞.
         //---------------------------------------------------------------------
-        Set::Scalar aL = std::sqrt(gamL * ((pL + gamL*piL) / rhoL));
-        Set::Scalar aR = std::sqrt(gamR * ((pR + gamR*piR) / rhoR));
+        Set::Scalar aL = std::sqrt(gamL * ((pL + piL) / rhoL));
+        Set::Scalar aR = std::sqrt(gamR * ((pR + piR) / rhoR));
 
         //---------------------------------------------------------------------
         // Wave speed estimates (HLLE)
