@@ -6,8 +6,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRayleighPlesset/output_RPE
-# plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE
+# plot_file = ./tests/FlowRayleighPlesset/output_RPE
+plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE_20260416
 
 ### MESHING ###
 amr.plot_dt = 0.5e-6
@@ -28,7 +28,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-0
 dynamictimestep.min = 1e-10
-cfl = 0.3
+cfl = 0.05
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.20 -0.20 0.0
@@ -190,10 +190,10 @@ nscbc.enabled   = true
   # EOS or any case where rho*a >> 1. The Lodato transverse terms require separate
   # normalization by rho*a to be stable for high-impedance fluids.
   nscbc.xlo       = outflow
-  nscbc.xlo.p_target = 5.0e5   # Pa
+  nscbc.xlo.p_target = 1.0e5   # Pa
   nscbc.xhi       = outflow
-  nscbc.xhi.p_target = 5.0e5  # Pa
+  nscbc.xhi.p_target = 1.0e5   # Pa
   nscbc.ylo       = outflow
-  nscbc.ylo.p_target = 5.0e5   # Pa
+  nscbc.ylo.p_target = 1.0e5   # Pa
   nscbc.yhi       = outflow
-  nscbc.yhi.p_target = 5.0e5  # Pa
+  nscbc.yhi.p_target = 1.0e5   # Pa

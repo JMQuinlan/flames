@@ -39,7 +39,7 @@
 #SBATCH -J jmq_bubble        # Job name
 #SBATCH -o ./logs/jmq_bubble.o%j    # Name of stdout output file
 #SBATCH -e ./logs/jmq_bubble.e%j    # Name of stderr error file
-#SBATCH -p compute-long         # Queue (partition) name
+#SBATCH -p bigmem-long         # Queue (partition) name
 #SBATCH --ntasks-per-node=128
 #SBATCH -N 1               # Total # of nodes
 #SBATCH -t 48:00:00        # Run time (hh:mm:ss)
