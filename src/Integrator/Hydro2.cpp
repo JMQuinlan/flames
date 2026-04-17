@@ -816,11 +816,12 @@ Hydro2::RHS(int lev,
 
             // p_floor is chosen well below atmospheric (1e5 Pa) so it only
             // activates for genuinely unphysical states, not near-vacuum air.
+            // E_arr is const here (RHS input); the actual write-back happens in
+            // post_stage_action which holds the non-const stage MultiFabs.
             const Real p_floor_eos = Real(1.0);
             Real p_raw = (Real(gmix) - 1.0)*UE - Real(gmix)*Real(pimix) + pref;
             if (!std::isfinite(p_raw) || p_raw < p_floor_eos) {
                 UE = (p_floor_eos + Real(gmix)*Real(pimix) - pref) / (Real(gmix) - 1.0);
-                E_arr(i,j,k) = KE + UE;  // correct the conservative variable
             }
 
             UE_arr(i,j,k) = UE;
