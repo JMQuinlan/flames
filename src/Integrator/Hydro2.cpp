@@ -852,8 +852,8 @@ Hydro2::RHS(int lev,
             //------------------------------------------------------------------
             // Chemical potential + mass fraction
             //------------------------------------------------------------------
-            Real gm_eta = Numeric::Gradient(eta_arr, i,j,k, 0, DX).lpNorm<2>();
-            Real lap_eta = Numeric::Laplacian(eta_arr, i,j,k, 0, DX);
+            auto sten_ch = Numeric::GetStencil(i, j, k, domain);
+            Real lap_eta = Numeric::Laplacian(eta_arr, i,j,k, 0, DX, sten_ch);
 
             Real fprime = ch_W_scale * 4.0 * eta * (eta-0.5) * (eta-1.0);
             mu_arr(i,j,k) = -epsilon*epsilon*lap_eta + fprime;
@@ -966,6 +966,13 @@ Hydro2::RHS(int lev,
 
         // Capture implicit_ch as a plain bool so the GPU lambda can use it
         bool do_implicit_ch = implicit_ch;
+
+        // Nominal CH mobility — constant across the domain, consistent with ApplyImplicitCH.
+        // The old code used a_arr(i,j,k)*epsilon (local sound speed), which created a
+        // feedback loop: Cartesian-grid pressure anisotropy → higher a at cardinal points
+        // → more CH diffusion there → amplifies anisotropy.  Use c_max instead.
+        Real mob_nom = (ch_mobility_nom > 0.0) ? ch_mobility_nom
+                                               : 0.2 * epsilon * (c_max + 1.0);
 
         // Kapila compressibility source parameters (local copies for GPU lambda safety)
         Real gamma0_       = gamma0;
@@ -1279,8 +1286,7 @@ Hydro2::RHS(int lev,
             Real eta_dot_CH = 0.0;
             if (!do_implicit_ch) {
                 Real lap_mu_chem = Numeric::Laplacian(mu_chem_arr, i, j, k, 0, DX, sten);
-                Real Mob         = a_arr(i,j,k) * epsilon;
-                eta_dot_CH       = Mob * lap_mu_chem * 0.2;
+                eta_dot_CH       = mob_nom * lap_mu_chem;
             }
 
             // Kapila compressibility source: K·η(1-η)·∇·u
