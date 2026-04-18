@@ -1308,7 +1308,10 @@ Hydro2::RHS(int lev,
                 // Previous code had numerator and denominator both swapped, reversing the sign.
                 Real K_denom = eta_loc * B_eta0 + (1.0 - eta_loc) * B_eta1;
                 Real K_comp  = (std::abs(K_denom) > Real(1.0e-14)) ? (B_eta0 - B_eta1) / K_denom : Real(0.0);
-                Real div_u_  = gradu_loc(0,0) + gradu_loc(1,1);
+                // Use mass-flux-consistent divergence: matches the ∇·(ρu) in mass conservation,
+                // so ∇·u is rotationally consistent for curved interfaces (avoids symmetry breaking).
+                Real div_u_  = (fxp.mass - fxm.mass) / (rho_loc * DX[0])
+                             + (fyp.mass - fym.mass) / (rho_loc * DX[1]);
                 eta_dot_kapila = K_comp * eta_loc * (1.0 - eta_loc) * div_u_;
                 if (!std::isfinite(eta_dot_kapila)) eta_dot_kapila = Real(0.0);
 
