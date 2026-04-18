@@ -1311,6 +1311,22 @@ Hydro2::RHS(int lev,
                 Real div_u_  = gradu_loc(0,0) + gradu_loc(1,1);
                 eta_dot_kapila = K_comp * eta_loc * (1.0 - eta_loc) * div_u_;
                 if (!std::isfinite(eta_dot_kapila)) eta_dot_kapila = Real(0.0);
+
+                // Energy coupling: when η shifts, the Allaire EOS mixing changes
+                // gamma_mix and pi_mix, which changes the pressure at constant UE.
+                // For stiff EOSs (γπ >> p, e.g. Tammann water with π=3e8), even a
+                // tiny Δη creates a huge spurious ΔP that radiates as acoustic waves.
+                //
+                // Fix: add the isobaric energy correction derived from UE = A(η)·p + B(η):
+                //   E_dot_kapila = ∂UE/∂η|_{p=const} · η_dot_kapila
+                //                = (∂A/∂η · p + ∂B/∂η) · η_dot_kapila
+                // Verified: with this source, p_new = p_old after the Kapila η update.
+                const Real dA_deta = Real(1.0)/(gamma_eta1_ - Real(1.0))
+                                   - Real(1.0)/(gamma_eta0_ - Real(1.0));
+                const Real dB_deta = gamma_eta1_*pi_eta1_/(gamma_eta1_ - Real(1.0))
+                                   - gamma_eta0_*pi_eta0_/(gamma_eta0_ - Real(1.0));
+                Real E_dot_kapila  = (dA_deta * p_loc + dB_deta) * eta_dot_kapila;
+                if (std::isfinite(E_dot_kapila)) S_arr(i,j,k,3) += E_dot_kapila;
             }
 
             eta_rhs(i,j,k) = adv + eta_dot_CH + eta_dot_Vap + eta_dot_kapila;
