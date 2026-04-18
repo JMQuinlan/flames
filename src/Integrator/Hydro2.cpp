@@ -1305,14 +1305,29 @@ Hydro2::RHS(int lev,
                 // where Z_k = γ_k(p+π_k) is the bulk modulus of phase k.
                 // Denominator is the volume-fraction-weighted mixture bulk modulus.
                 // K_comp < 0 (gas bulk Z₀ << liquid bulk Z₁ for water).
-                // No energy source needed: Allaire's 5-equation model has no Kapila term
-                // in the energy equation; the standard energy conservation already maintains
-                // pressure equilibrium when combined with this choice of K.
+                // K_comp < 0: gas is much less stiff than liquid, so expanding flow (div_u>0)
+                // decreases η (bubble grows). See isobaric energy correction below.
                 Real K_denom = eta_loc * B_eta1 + (1.0 - eta_loc) * B_eta0;
                 Real K_comp  = (std::abs(K_denom) > Real(1.0e-14)) ? (B_eta0 - B_eta1) / K_denom : Real(0.0);
-                Real div_u_  = gradu_loc(0,0) + gradu_loc(1,1);
+                // Face-flux divergence: consistent with the HLLC energy update and avoids
+                // odd-even decoupling that central-difference gradu_loc is blind to.
+                Real div_u_  = (fxp.mass - fxm.mass) / (rho_loc * DX[0])
+                             + (fyp.mass - fym.mass) / (rho_loc * DX[1]);
                 eta_dot_kapila = K_comp * eta_loc * (1.0 - eta_loc) * div_u_;
                 if (!std::isfinite(eta_dot_kapila)) eta_dot_kapila = Real(0.0);
+
+                // Isobaric energy correction: when η shifts, A(η) and B(η) change,
+                // so the same UE gives a different pressure. With π=3e8 (Tammann water),
+                // even tiny Δη creates a large ΔP. This correction keeps p constant:
+                //   δUE = (∂A/∂η · p + ∂B/∂η) · δη
+                // In practice this stabilises the stiff EOS; without it the HLLC
+                // numerical dissipation breaks the exact cancellation assumed by theory.
+                const Real dA_deta = Real(1.0)/(gamma_eta1_ - Real(1.0))
+                                   - Real(1.0)/(gamma_eta0_ - Real(1.0));
+                const Real dB_deta = gamma_eta1_*pi_eta1_/(gamma_eta1_ - Real(1.0))
+                                   - gamma_eta0_*pi_eta0_/(gamma_eta0_ - Real(1.0));
+                Real E_dot_kapila  = (dA_deta * p_arr(i,j,k) + dB_deta) * eta_dot_kapila;
+                if (std::isfinite(E_dot_kapila)) S_arr(i,j,k,3) += E_dot_kapila;
             }
 
             eta_rhs(i,j,k) = adv + eta_dot_CH + eta_dot_Vap + eta_dot_kapila;
