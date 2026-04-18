@@ -716,10 +716,10 @@ Hydro2::RHS(int lev,
     amrex::Box domain = geom[lev].Domain();
 
     // Converting Array to mf
-    amrex::MultiFab::Copy(*rho_eta0_mf[lev], rho_eta0_mf_in, 0, 0, 1, nghost);
-    amrex::MultiFab::Copy(*rho_eta1_mf[lev], rho_eta1_mf_in, 0, 0, 1, nghost);
-    amrex::MultiFab::Copy(*momentum_mf[lev], M_mf_in, 0, 0, AMREX_SPACEDIM, nghost);
-    amrex::MultiFab::Copy(*energy_per_vol_mf[lev], E_mf_in, 0, 0, 1, nghost);
+    amrex::MultiFab::Copy(*rho_eta0_mf[lev], rho_eta0_mf_in, 0, 0, 1, 0);
+    amrex::MultiFab::Copy(*rho_eta1_mf[lev], rho_eta1_mf_in, 0, 0, 1, 0);
+    amrex::MultiFab::Copy(*momentum_mf[lev], M_mf_in, 0, 0, AMREX_SPACEDIM, 0);
+    amrex::MultiFab::Copy(*energy_per_vol_mf[lev], E_mf_in, 0, 0, 1, 0);
 
 
     // Eta Fields
