@@ -1298,10 +1298,16 @@ Hydro2::RHS(int lev,
             Real eta_dot_kapila = 0.0;
             if (do_kapila) {
                 Real p_loc   = p_arr(i,j,k);
-                Real B_eta1  = gamma_eta1_ * (p_loc + pi_eta1_);   // bulk modulus at eta=1
-                Real B_eta0  = gamma_eta0_ * (p_loc + pi_eta0_);   // bulk modulus at eta=0
-                Real K_denom = eta_loc * B_eta1 + (1.0 - eta_loc) * B_eta0;
-                Real K_comp  = (std::abs(K_denom) > Real(1.0e-14)) ? (B_eta1 - B_eta0) / K_denom : Real(0.0);
+                Real B_eta1  = gamma_eta1_ * (p_loc + pi_eta1_);   // bulk modulus at eta=1 (liquid)
+                Real B_eta0  = gamma_eta0_ * (p_loc + pi_eta0_);   // bulk modulus at eta=0 (gas)
+                // Correct Kapila formula (Allaire 2002, Murrone & Guillard 2005):
+                //   D η/Dt = η(1-η) · (Z₀ - Z₁) / (η·Z₀ + (1-η)·Z₁) · ∇·u
+                // Z₀ = B_eta0 < Z₁ = B_eta1, so K_comp < 0.
+                // Compression (∇·u<0) → η increases (stiffer liquid compresses less) ✓
+                // Expansion  (∇·u>0) → η decreases ✓
+                // Previous code had numerator and denominator both swapped, reversing the sign.
+                Real K_denom = eta_loc * B_eta0 + (1.0 - eta_loc) * B_eta1;
+                Real K_comp  = (std::abs(K_denom) > Real(1.0e-14)) ? (B_eta0 - B_eta1) / K_denom : Real(0.0);
                 Real div_u_  = gradu_loc(0,0) + gradu_loc(1,1);
                 eta_dot_kapila = K_comp * eta_loc * (1.0 - eta_loc) * div_u_;
                 if (!std::isfinite(eta_dot_kapila)) eta_dot_kapila = Real(0.0);

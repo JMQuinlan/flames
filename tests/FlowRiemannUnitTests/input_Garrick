@@ -27,7 +27,8 @@ geometry.is_periodic = 0 1 0
 
 ### TIME STEP ###
 timestep  = 2.5e-4
-stop_time = 0.2
+# stop_time = 0.2
+stop_time = 0.1
 cfl   = 0.4
 
 ### Sources ###
@@ -40,7 +41,7 @@ q.ic.constant.value = 0.0
 
 ### HYDRO PARAM ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = "1.25e-3"
+eta.ic.expression.constant.epsilon = 8.0e-3
 eta.ic.expression.region0 = "(0.5 * (1.0 + tanh(x / epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
 
