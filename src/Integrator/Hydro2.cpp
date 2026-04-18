@@ -1309,10 +1309,10 @@ Hydro2::RHS(int lev,
                 // decreases η (bubble grows). See isobaric energy correction below.
                 Real K_denom = eta_loc * B_eta1 + (1.0 - eta_loc) * B_eta0;
                 Real K_comp  = (std::abs(K_denom) > Real(1.0e-14)) ? (B_eta0 - B_eta1) / K_denom : Real(0.0);
-                // Face-flux divergence: consistent with the HLLC energy update and avoids
-                // odd-even decoupling that central-difference gradu_loc is blind to.
-                Real div_u_  = (fxp.mass - fxm.mass) / (rho_loc * DX[0])
-                             + (fyp.mass - fym.mass) / (rho_loc * DX[1]);
+                // Cell-centered divergence from the velocity field. The face-flux form
+                // picks up AMR refinement-boundary artifacts that get amplified by the
+                // large dB/dη coefficient; gradu_loc is FillBoundary-smoothed and clean.
+                Real div_u_  = gradu_loc(0,0) + gradu_loc(1,1);
                 eta_dot_kapila = K_comp * eta_loc * (1.0 - eta_loc) * div_u_;
                 if (!std::isfinite(eta_dot_kapila)) eta_dot_kapila = Real(0.0);
 
