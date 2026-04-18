@@ -1300,36 +1300,19 @@ Hydro2::RHS(int lev,
                 Real p_loc   = p_arr(i,j,k);
                 Real B_eta1  = gamma_eta1_ * (p_loc + pi_eta1_);   // bulk modulus at eta=1 (liquid)
                 Real B_eta0  = gamma_eta0_ * (p_loc + pi_eta0_);   // bulk modulus at eta=0 (gas)
-                // Correct Kapila formula (Allaire 2002, Murrone & Guillard 2005):
-                //   D η/Dt = η(1-η) · (Z₀ - Z₁) / (η·Z₀ + (1-η)·Z₁) · ∇·u
-                // Z₀ = B_eta0 < Z₁ = B_eta1, so K_comp < 0.
-                // Compression (∇·u<0) → η increases (stiffer liquid compresses less) ✓
-                // Expansion  (∇·u>0) → η decreases ✓
-                // Previous code had numerator and denominator both swapped, reversing the sign.
-                Real K_denom = eta_loc * B_eta0 + (1.0 - eta_loc) * B_eta1;
+                // Kapila formula (Murrone & Guillard 2005, eq. for α₁ = η = liquid fraction):
+                //   D η/Dt = η(1-η) · (Z₀ - Z₁) / (η·Z₁ + (1-η)·Z₀) · ∇·u
+                // where Z_k = γ_k(p+π_k) is the bulk modulus of phase k.
+                // Denominator is the volume-fraction-weighted mixture bulk modulus.
+                // K_comp < 0 (gas bulk Z₀ << liquid bulk Z₁ for water).
+                // No energy source needed: Allaire's 5-equation model has no Kapila term
+                // in the energy equation; the standard energy conservation already maintains
+                // pressure equilibrium when combined with this choice of K.
+                Real K_denom = eta_loc * B_eta1 + (1.0 - eta_loc) * B_eta0;
                 Real K_comp  = (std::abs(K_denom) > Real(1.0e-14)) ? (B_eta0 - B_eta1) / K_denom : Real(0.0);
-                // Use mass-flux-consistent divergence: matches the ∇·(ρu) in mass conservation,
-                // so ∇·u is rotationally consistent for curved interfaces (avoids symmetry breaking).
-                Real div_u_  = (fxp.mass - fxm.mass) / (rho_loc * DX[0])
-                             + (fyp.mass - fym.mass) / (rho_loc * DX[1]);
+                Real div_u_  = gradu_loc(0,0) + gradu_loc(1,1);
                 eta_dot_kapila = K_comp * eta_loc * (1.0 - eta_loc) * div_u_;
                 if (!std::isfinite(eta_dot_kapila)) eta_dot_kapila = Real(0.0);
-
-                // Energy coupling: when η shifts, the Allaire EOS mixing changes
-                // gamma_mix and pi_mix, which changes the pressure at constant UE.
-                // For stiff EOSs (γπ >> p, e.g. Tammann water with π=3e8), even a
-                // tiny Δη creates a huge spurious ΔP that radiates as acoustic waves.
-                //
-                // Fix: add the isobaric energy correction derived from UE = A(η)·p + B(η):
-                //   E_dot_kapila = ∂UE/∂η|_{p=const} · η_dot_kapila
-                //                = (∂A/∂η · p + ∂B/∂η) · η_dot_kapila
-                // Verified: with this source, p_new = p_old after the Kapila η update.
-                const Real dA_deta = Real(1.0)/(gamma_eta1_ - Real(1.0))
-                                   - Real(1.0)/(gamma_eta0_ - Real(1.0));
-                const Real dB_deta = gamma_eta1_*pi_eta1_/(gamma_eta1_ - Real(1.0))
-                                   - gamma_eta0_*pi_eta0_/(gamma_eta0_ - Real(1.0));
-                Real E_dot_kapila  = (dA_deta * p_loc + dB_deta) * eta_dot_kapila;
-                if (std::isfinite(E_dot_kapila)) S_arr(i,j,k,3) += E_dot_kapila;
             }
 
             eta_rhs(i,j,k) = adv + eta_dot_CH + eta_dot_Vap + eta_dot_kapila;
