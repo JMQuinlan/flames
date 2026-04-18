@@ -814,11 +814,12 @@ Hydro2::RHS(int lev,
             if (!std::isfinite(UE)) UE = 0.0;
             if (UE > Real(1e20)) UE = Real(1e20);
 
-            // p_floor is chosen well below atmospheric (1e5 Pa) so it only
-            // activates for genuinely unphysical states, not near-vacuum air.
-            // E_arr is const here (RHS input); the actual write-back happens in
-            // post_stage_action which holds the non-const stage MultiFabs.
-            const Real p_floor_eos = Real(1.0);
+            // p_floor guards NaN/negative pressure from EOS ill-conditioning
+            // (γπ/p can be O(1e4) for stiffened liquids at low non-dimensional p).
+            // Must stay well below the minimum physical pressure in any problem —
+            // the previous value of 1.0 assumed SI Pa and broke non-dimensional
+            // cases where liquid pressure is O(1e-4).
+            const Real p_floor_eos = Real(1.0e-10);
             Real p_raw = (Real(gmix) - 1.0)*UE - Real(gmix)*Real(pimix) + pref;
             if (!std::isfinite(p_raw) || p_raw < p_floor_eos) {
                 UE = (p_floor_eos + Real(gmix)*Real(pimix) - pref) / (Real(gmix) - 1.0);
@@ -3376,7 +3377,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     Real gm = Real(1.0) + Real(1.0)/A;
                     Real pm = B/(A + Real(1.0));
                     Real p_check = (gm-Real(1.0))*UE - gm*pm + pref_;
-                    const Real p_floor_stage = Real(1.0);
+                    const Real p_floor_stage = Real(1.0e-10);
                     if (!std::isfinite(p_check) || p_check < p_floor_stage) {
                         UE = (p_floor_stage + gm*pm - pref_) / (gm - Real(1.0));
                         E_s(i,j,k) = KE + UE;
