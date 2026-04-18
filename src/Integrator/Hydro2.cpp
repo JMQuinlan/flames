@@ -1307,15 +1307,19 @@ Hydro2::RHS(int lev,
                 // K_comp < 0 (gas bulk Z₀ << liquid bulk Z₁ for water).
                 // K_comp < 0: gas is much less stiff than liquid, so expanding flow (div_u>0)
                 // decreases η (bubble grows). See isobaric energy correction below.
-                Real K_denom = eta_loc * B_eta1 + (1.0 - eta_loc) * B_eta0;
+                // Murrone & Guillard (2005): denominator is α₁Z₂ + α₂Z₁
+                // where α₁=η (liquid fraction), Z₁=B_eta1 (liquid), Z₂=B_eta0 (gas).
+                // This is CROSS-weighted: liquid-fraction × gas-bulk + gas-fraction × liquid-bulk.
+                // Cross-weighting naturally limits K_comp near the gas edge (η→0): at η=0.01,
+                // K_denom ≈ B_eta1 (liquid-dominated) → |K_comp|≈1, not ~94.
+                // Direct-weighting (eta*B_eta1+(1-eta)*B_eta0) makes K_comp ~100× larger
+                // at the gas edge, amplifying any div_u artifacts into vacuum-level energy extraction.
+                Real K_denom = eta_loc * B_eta0 + (1.0 - eta_loc) * B_eta1;
                 Real K_comp  = (std::abs(K_denom) > Real(1.0e-14)) ? (B_eta0 - B_eta1) / K_denom : Real(0.0);
-                // Velocity divergence from upwind face velocities (already computed above
-                // for η advection). Using u_xp, u_xm, u_yp, u_ym (mass-flux/upwind-rho)
-                // rather than -drho/rho_loc avoids dividing large spurious AMR mass fluxes
-                // by the small gas density (ρ≈1), which would give enormous div_u.
-                // Upwind-density selection is a natural limiter: fluxes from denser regions
-                // are divided by the denser density, not the receiving cell's density.
-                Real div_u_  = (u_xp - u_xm)/DX[0] + (u_yp - u_ym)/DX[1];
+                // Velocity divergence from the conservative mass flux (= -drho/rho).
+                // Consistent with the HLLC Riemann fluxes used throughout the scheme.
+                Real div_u_  = (fxp.mass - fxm.mass) / (rho_loc * DX[0])
+                             + (fyp.mass - fym.mass) / (rho_loc * DX[1]);
                 eta_dot_kapila = K_comp * eta_loc * (1.0 - eta_loc) * div_u_;
                 if (!std::isfinite(eta_dot_kapila)) eta_dot_kapila = Real(0.0);
 
