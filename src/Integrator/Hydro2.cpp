@@ -1309,10 +1309,13 @@ Hydro2::RHS(int lev,
                 // decreases η (bubble grows). See isobaric energy correction below.
                 Real K_denom = eta_loc * B_eta1 + (1.0 - eta_loc) * B_eta0;
                 Real K_comp  = (std::abs(K_denom) > Real(1.0e-14)) ? (B_eta0 - B_eta1) / K_denom : Real(0.0);
-                // Cell-centered divergence from the velocity field. The face-flux form
-                // picks up AMR refinement-boundary artifacts that get amplified by the
-                // large dB/dη coefficient; gradu_loc is FillBoundary-smoothed and clean.
-                Real div_u_  = gradu_loc(0,0) + gradu_loc(1,1);
+                // Velocity divergence from the conservative mass flux.
+                // -drho/rho is the exact mass-conservation identity for div(u), and is
+                // consistent with the upwind Riemann fluxes used by the scheme.
+                // This form avoids the odd-even decoupling of central-difference gradu_loc
+                // (which allowed diagonal blow-up in Image #4) and is free from the
+                // manual upwind-rho logic of the prior face-velocity form.
+                Real div_u_  = -drho / rho_loc;
                 eta_dot_kapila = K_comp * eta_loc * (1.0 - eta_loc) * div_u_;
                 if (!std::isfinite(eta_dot_kapila)) eta_dot_kapila = Real(0.0);
 
