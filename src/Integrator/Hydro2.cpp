@@ -1596,6 +1596,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         });
     } // end rho, eta solver loop
 
+    // Fill all ghost cells
+    FillGhost4BC(lev, time);
+
     // ------------------------------------------------------------
     // Compute CFL for next time step on this level
     // ------------------------------------------------------------
@@ -2604,6 +2607,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     // STEP 1: Determine BC strategy based on nghost and NSCBC flag
     // ------------------------------------------------------------
     bool use_nscbc = (nscbc_bc != nullptr);
+    int effective_nghost = nghost;
 
     if (use_nscbc)
     {
@@ -2626,6 +2630,10 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         {
             Util::Message(INFO, "FillGhost4BC: Using NSCBC4 with 4 ghost cells");
         }
+    }
+    else
+    {
+        effective_nghost = 2;
     }
 
     // ------------------------------------------------------------
@@ -2819,6 +2827,48 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             energy_per_vol_mf[lev].get()
         });
 
+        // Zero Gradient Fill
+        if (nghost > effective_nghost)
+        {
+            for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &validbox = mfi.validbox();
+                const amrex::Box &ghostEffbox = mfi.growntilebox(effective_nghost);
+                const amrex::Box &ghostNbox = mfi.growntilebox(nghost);
+
+                auto rho0 = rho_eta0_mf[lev]->array(mfi);
+                auto rho1 = rho_eta1_mf[lev]->array(mfi);
+                auto M = momentum_mf[lev]->array(mfi);
+                auto E = energy_per_vol_mf[lev]->array(mfi);
+
+                amrex::ParallelFor(ghostNbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    // If in outer ghost layers (beyond layer 2)
+                    if (!ghostEffbox.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
+                    {
+                        // Find nearest layer-2 ghost cell and copy its value
+                        int i_copy = i;
+                        int j_copy = j;
+
+                        // Clamp to layer-2 boundary
+                        if (i < ghostEffbox.smallEnd(0))
+                            i_copy = ghostEffbox.smallEnd(0);
+                        if (i > ghostEffbox.bigEnd(0))
+                            i_copy = ghostEffbox.bigEnd(0);
+                        if (j < ghostEffbox.smallEnd(1))
+                            j_copy = ghostEffbox.smallEnd(1);
+                        if (j > ghostEffbox.bigEnd(1))
+                            j_copy = ghostEffbox.bigEnd(1);
+
+                        // Zero-gradient extrapolation (copy from layer 2)
+                        rho0(i, j, k) = rho0(i_copy, j_copy, k);
+                        rho1(i, j, k) = rho1(i_copy, j_copy, k);
+                        M(i, j, k, 0) = M(i_copy, j_copy, k, 0);
+                        M(i, j, k, 1) = M(i_copy, j_copy, k, 1);
+                        E(i, j, k) = E(i_copy, j_copy, k);
+                    }
+                });
+            }
+        }
     }
 
     // ------------------------------------------------------------

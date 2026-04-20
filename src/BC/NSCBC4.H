@@ -249,7 +249,7 @@ public:
                                   Set::Scalar p_val) -> void {
             Set::Scalar eta_val = eta_arr(ii, jj, kk);
 
-            Set::Scalar UE = Solver::EOS::EOS::MixedInternalEnergy(p_eff, eta_val, eos0, eos1, pref_local, small_local);
+            Set::Scalar UE = Solver::EOS::EOS::MixedInternalEnergy(p_val, eta_val, eos0, eos1, pref_local, small_local);
 
             // Velocities (convert un, ut back to vx, vy, vz)
             Set::Scalar vx, vy, vz;
