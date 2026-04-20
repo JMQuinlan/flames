@@ -23,7 +23,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-0
 dynamictimestep.min = 1e-12
-cfl = 0.9
+cfl = 0.2
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.10 -0.10 0.0
@@ -79,7 +79,7 @@ velocity1.ic.expression.region1 = "0.0"
 # Initial pressures
 # ----------------------------
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "500.0"
+pressure0.ic.expression.region0 = "1000.0"
 
 pressure1.ic.type = expression
 pressure1.ic.expression.region0 = "500.0"

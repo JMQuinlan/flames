@@ -18,8 +18,8 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 20
 amr.grid_eff = 0.8
-amr.max_level = 4
-amr.n_cell = 32 32  # Maintains aspect ratio for 0.02m × 0.01m domain
+amr.max_level = 0
+amr.n_cell = 512 512  # Maintains aspect ratio for 0.02m × 0.01m domain
 
 ### TIME STEPPING ###
 ## Static:
@@ -30,7 +30,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-6
 dynamictimestep.min = 1e-16
-cfl = 0.1
+cfl = 0.05
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.005 -0.005 0.0  # 1/4 tube left of droplet
@@ -42,7 +42,7 @@ stop_time = 0.0002  # Shorter time for shock interaction
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.00001
+eta.ic.expression.constant.epsilon = 0.00002
 eta.ic.expression.constant.R0 = 0.001  # 5mm droplet radius
 eta.ic.expression.constant.x_center = 0.0  # Centered at origin
 eta.ic.expression.constant.y_center = 0.0  # Centered at origin
