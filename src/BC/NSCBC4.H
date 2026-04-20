@@ -593,13 +593,9 @@ public:
 
                             // Compute pressure at layer 1
                             Set::Scalar eta_1 = eta_arr(i1, j1, k);
-                            Set::Scalar A_1 = eta_1 / (g0_ - 1.0) + (1.0 - eta_1) / (g1_ - 1.0);
-                            Set::Scalar gm_1 = 1.0 + 1.0 / A_1;
                             Set::Scalar KE_1 = 0.5 * rho_1 * (vx_1 * vx_1 + vy_1 * vy_1);
                             Set::Scalar UE_1 = E_arr(i1, j1, k) - KE_1;
-                            Set::Scalar B_1 = (eta_1 * g0_ * pi0_) / (g0_ - 1.0) + ((1.0 - eta_1) * g1_ * pi1_) / (g1_ - 1.0);
-                            Set::Scalar pi_1 = (B_1 / A_1) / gm_1;
-                            Set::Scalar p_1 = (gm_1 - 1.0) * UE_1 - gm_1 * pi_1 + pref_local;
+                            Set::Scalar p_1 = Solver::EOS::EOS::MixedPressure(rho_1, UE_1, eta_1, eos0, eos1, pref_local, small_local);
 
                             // Motheau Eq. 28/32
                             Set::Scalar dx_grad = (ox == 2) ? 6.0 * dx[0] * drho_dx_new : 0.0;
@@ -640,22 +636,15 @@ public:
 
                             // Compute pressures
                             Set::Scalar eta_1 = eta_arr(i1, j1, k);
-                            Set::Scalar A_1 = eta_1 / (g0_ - 1.0) + (1.0 - eta_1) / (g1_ - 1.0);
-                            Set::Scalar gm_1 = 1.0 + 1.0 / A_1;
                             Set::Scalar KE_1 = 0.5 * rho_1 * (vx_1 * vx_1 + vy_1 * vy_1);
                             Set::Scalar UE_1 = E_arr(i1, j1, k) - KE_1;
-                            Set::Scalar B_1 = (eta_1 * g0_ * pi0_) / (g0_ - 1.0) + ((1.0 - eta_1) * g1_ * pi1_) / (g1_ - 1.0);
-                            Set::Scalar pi_1 = (B_1 / A_1) / gm_1;
-                            Set::Scalar p_1 = (gm_1 - 1.0) * UE_1 - gm_1 * pi_1 + pref_local;
+                            Set::Scalar p_1 = Solver::EOS::EOS::MixedPressure(rho_1, UE_1, eta_1, eos0, eos1, pref_local, small_local);
+
 
                             Set::Scalar eta_2 = eta_arr(i2, j2, k);
-                            Set::Scalar A_2 = eta_2 / (g0_ - 1.0) + (1.0 - eta_2) / (g1_ - 1.0);
-                            Set::Scalar gm_2 = 1.0 + 1.0 / A_2;
                             Set::Scalar KE_2 = 0.5 * rho_2 * (vx_2 * vx_2 + vy_2 * vy_2);
                             Set::Scalar UE_2 = E_arr(i2, j2, k) - KE_2;
-                            Set::Scalar B_2 = (eta_2 * g0_ * pi0_) / (g0_ - 1.0) + ((1.0 - eta_2) * g1_ * pi1_) / (g1_ - 1.0);
-                            Set::Scalar pi_2 = (B_2 / A_2) / gm_2;
-                            Set::Scalar p_2 = (gm_2 - 1.0) * UE_2 - gm_2 * pi_2 + pref_local;
+                            Set::Scalar p_2 = Solver::EOS::EOS::MixedPressure(rho_2, UE_2, eta_2, eos0, eos1, pref_local, small_local);
 
                             // Motheau Eq. 29/33
                             Set::Scalar dx_grad = (ox == 3) ? -12.0 * dx[0] * drho_dx_new : 0.0;
@@ -702,31 +691,19 @@ public:
 
                             // Compute pressures (same pattern as layer 3)
                             Set::Scalar eta_1 = eta_arr(i1, j1, k);
-                            Set::Scalar A_1 = eta_1 / (g0_ - 1.0) + (1.0 - eta_1) / (g1_ - 1.0);
-                            Set::Scalar gm_1 = 1.0 + 1.0 / A_1;
                             Set::Scalar KE_1 = 0.5 * rho_1 * (vx_1 * vx_1 + vy_1 * vy_1);
                             Set::Scalar UE_1 = E_arr(i1, j1, k) - KE_1;
-                            Set::Scalar B_1 = (eta_1 * g0_ * pi0_) / (g0_ - 1.0) + ((1.0 - eta_1) * g1_ * pi1_) / (g1_ - 1.0);
-                            Set::Scalar pi_1 = (B_1 / A_1) / gm_1;
-                            Set::Scalar p_1 = (gm_1 - 1.0) * UE_1 - gm_1 * pi_1 + pref_local;
+                            Set::Scalar p_1 = Solver::EOS::EOS::MixedPressure(rho_1, UE_1, eta_1, eos0, eos1, pref_local, small_local);
 
                             Set::Scalar eta_2 = eta_arr(i2, j2, k);
-                            Set::Scalar A_2 = eta_2 / (g0_ - 1.0) + (1.0 - eta_2) / (g1_ - 1.0);
-                            Set::Scalar gm_2 = 1.0 + 1.0 / A_2;
                             Set::Scalar KE_2 = 0.5 * rho_2 * (vx_2 * vx_2 + vy_2 * vy_2);
                             Set::Scalar UE_2 = E_arr(i2, j2, k) - KE_2;
-                            Set::Scalar B_2 = (eta_2 * g0_ * pi0_) / (g0_ - 1.0) + ((1.0 - eta_2) * g1_ * pi1_) / (g1_ - 1.0);
-                            Set::Scalar pi_2 = (B_2 / A_2) / gm_2;
-                            Set::Scalar p_2 = (gm_2 - 1.0) * UE_2 - gm_2 * pi_2 + pref_local;
+                            Set::Scalar p_2 = Solver::EOS::EOS::MixedPressure(rho_2, UE_2, eta_2, eos0, eos1, pref_local, small_local);
 
                             Set::Scalar eta_3 = eta_arr(i3, j3, k);
-                            Set::Scalar A_3 = eta_3 / (g0_ - 1.0) + (1.0 - eta_3) / (g1_ - 1.0);
-                            Set::Scalar gm_3 = 1.0 + 1.0 / A_3;
                             Set::Scalar KE_3 = 0.5 * rho_3 * (vx_3 * vx_3 + vy_3 * vy_3);
                             Set::Scalar UE_3 = E_arr(i3, j3, k) - KE_3;
-                            Set::Scalar B_3 = (eta_3 * g0_ * pi0_) / (g0_ - 1.0) + ((1.0 - eta_3) * g1_ * pi1_) / (g1_ - 1.0);
-                            Set::Scalar pi_3 = (B_3 / A_3) / gm_3;
-                            Set::Scalar p_3 = (gm_3 - 1.0) * UE_3 - gm_3 * pi_3 + pref_local;
+                            Set::Scalar p_3 = Solver::EOS::EOS::MixedPressure(rho_3, UE_3, eta_3, eos0, eos1, pref_local, small_local);
 
                             // Motheau Eq. 30/34
                             Set::Scalar dx_grad = (ox == 4) ? 12.0 * dx[0] * drho_dx_new : 0.0;
@@ -749,10 +726,10 @@ public:
                         // =============================================================
                         // STEP 9: Enforce physical bounds
                         // =============================================================
-                        rho_g = amrex::min(amrex::max(rho_g, 1.0e-8), 10000.0);
-                        p_g = amrex::min(amrex::max(p_g, 1.0), 1.0e8);
-                        vx_g = amrex::min(amrex::max(vx_g, -1000.0), 1000.0);
-                        vy_g = amrex::min(amrex::max(vy_g, -1000.0), 1000.0);
+                        rho_g = amrex::min(amrex::max(rho_g, pref_local), 1.0e20);
+                        p_g = amrex::min(amrex::max(p_g, 1.0), 1.0e20);
+                        vx_g = amrex::min(amrex::max(vx_g, -1.0e20), 1.0e20);
+                        vy_g = amrex::min(amrex::max(vy_g, -1.0e20), 1.0e20);
 
                         // =============================================================
                         // STEP 10: Write to conserved arrays
@@ -985,7 +962,7 @@ public:
                 } // end j loop
             } // end X-LO boundary
 
-        // =====================================================================
+            // =====================================================================
             // X-HI BOUNDARY (RIGHT EDGE - SKIP CORNERS)
             // =====================================================================
             if (bx.bigEnd(0) == domain.bigEnd(0) && params_xhi_local.type != Type::None)
