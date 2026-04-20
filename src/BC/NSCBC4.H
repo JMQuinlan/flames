@@ -304,7 +304,7 @@ public:
             amrex::Array4<amrex::Real> const &M_arr = momentum_mf.array(mfi);
             amrex::Array4<amrex::Real> const &E_arr = energy_mf.array(mfi);
 
-        // =====================================================================
+            // =====================================================================
             // STEP 1: FILL ALL 4 CORNERS FIRST (Motheau Figure 2)
             // =====================================================================
             // CRITICAL: Corners MUST be filled before edges to prevent NaN propagation
