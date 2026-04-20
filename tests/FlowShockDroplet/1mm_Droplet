@@ -30,7 +30,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-6
 dynamictimestep.min = 1e-16
-cfl = 0.1
+cfl = 0.5
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.005 -0.005 0.0  # 1/4 tube left of droplet
