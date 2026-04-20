@@ -19,7 +19,7 @@ amr.blocking_factor = 2
 amr.regrid_int = 20
 amr.grid_eff = 0.8
 amr.max_level = 4
-amr.n_cell = 64 32  # Maintains aspect ratio for 0.02m × 0.01m domain
+amr.n_cell = 32 32  # Maintains aspect ratio for 0.02m × 0.01m domain
 
 ### TIME STEPPING ###
 ## Static:
