@@ -1794,6 +1794,10 @@ void Hydro2::Regrid(int lev, Set::Scalar regrid_time)
     // Fill BCs and ghost cells after regridding
     FillGhost4BC(lev, regrid_time);
 
+    Source_mf[lev]->setVal(0.0);
+    Fsv_mf[lev]->setVal(0.0);
+    Fw_mf[lev]->setVal(0.0); 
+
     Util::Message(INFO, "Regridding on level", lev);
 }// end regrid
 
