@@ -142,11 +142,11 @@ energy.bc.type.xhi = neumann
 momentum.bc.type.xhi = neumann neumann
 
 ### REFINEMENT CRITERIA ###
-eta_refinement_criterion = 1e+2
+eta_refinement_criterion = 1e-1
 omega_refinement_criterion = 10.55
-p_refinement_criterion = 1e+8
-rho_refinement_criterion = 1e+8
-gradu_refinement_criterion = 1e+8
+p_refinement_criterion = 1e+7
+rho_refinement_criterion = 1e+6
+gradu_refinement_criterion = 1e+6
 cutoff = 1e-16
 
 ### SOURCE TERMS ###
