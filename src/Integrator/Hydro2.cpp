@@ -1596,9 +1596,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         });
     } // end rho, eta solver loop
 
-    // Fill all ghost cells
-    FillGhost4BC(lev, time);
-
     // ------------------------------------------------------------
     // Compute CFL for next time step on this level
     // ------------------------------------------------------------
