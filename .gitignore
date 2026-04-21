@@ -67,3 +67,5 @@ alamo.py
 *.png
 *.gif
 logs/
+*.md
+
