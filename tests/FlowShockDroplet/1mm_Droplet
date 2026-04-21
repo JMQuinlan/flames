@@ -148,7 +148,7 @@ p_refinement_criterion = 1e+7
 rho_refinement_criterion = 1e+6
 gradu_refinement_criterion = 1e+6
 cutoff = 1e-16
-small = 1e-4;
+small = 1e-6;
 
 ### SOURCE TERMS ###
 m0.ic.constant.value = 0.0
