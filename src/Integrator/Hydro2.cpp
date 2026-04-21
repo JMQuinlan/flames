@@ -127,7 +127,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("ch_newton_iters",  value.ch_newton_iters,  5);        // Max Newton iterations (implicit_ch=2 only)
         pp_query_default("ch_newton_tol",    value.ch_newton_tol,    1.0e-10);  // Newton convergence tolerance
         pp_query_default("ch_W_scale",       value.ch_W_scale,       1.0);      // double-well amplitude (equilibrium width = √2·ε/√W_scale)
-        pp_query_default("apply_kapila_source", value.apply_kapila_source, true); // Kapila compressibility source K·η(1-η)·∇·u for pressure consistency
 
         // Boundry Conditions
         value.density_bc = new BC::Expression(1, pp, "density.bc");
@@ -894,6 +893,112 @@ void Hydro2::EquationOfState(Set::Scalar time, int lev)
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////// RHS_Eta ////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+// η evolution driven by per-phase conserved state. Mirrors the η-equation
+// kernel in the old mixture RHS() but uses a mass-flux-weighted mixture
+// velocity reconstructed from (ρ_k, M_k) rather than Riemann mass fluxes.
+// Advection is simple central-upwind at faces. No Kapila source.
+void
+Hydro2::RHS_Eta(int lev,
+                Set::Scalar /*time*/,
+                amrex::MultiFab &eta_rhs_mf,
+                const amrex::MultiFab &eta_mf_in,
+                const amrex::MultiFab &rho0_mf_in,
+                const amrex::MultiFab &M0_mf_in,
+                const amrex::MultiFab &rho1_mf_in,
+                const amrex::MultiFab &M1_mf_in)
+{
+    BL_PROFILE("Hydro2::RHS_Eta");
+
+    const Geometry& geom = this->geom[lev];
+    const Real* DX = geom.CellSize();
+    const Box& domain = geom.Domain();
+
+    const Real eps_         = epsilon;
+    const Real Dv_          = Dv;
+    const int  apply_vap_   = apply_vaporization;
+    const Real mob_nom_loc  = (ch_mobility_nom > Real(0.0)) ? ch_mobility_nom : Real(0.0);
+    const bool do_implicit_ = (implicit_ch != 0);
+
+    for (MFIter mfi(eta_rhs_mf, TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const Box& bx = mfi.validbox();
+
+        auto eta_arr     = eta_mf_in.const_array(mfi);
+        auto r0_arr      = rho0_mf_in.const_array(mfi);
+        auto r1_arr      = rho1_mf_in.const_array(mfi);
+        auto M0_arr      = M0_mf_in.const_array(mfi);
+        auto M1_arr      = M1_mf_in.const_array(mfi);
+        auto mu_chem_arr = mu_chem_mf[lev]->const_array(mfi);
+        auto Bm_arr      = Bm_mf[lev]->const_array(mfi);
+        auto eta_rhs     = eta_rhs_mf.array(mfi);
+
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        {
+            auto sten = Numeric::GetStencil(i, j, k, domain);
+
+            Real eta_loc = eta_arr(i,j,k);
+            Real one_e   = Real(1.0) - eta_loc;
+
+            // Mass-flux-weighted mixture velocity at (ii,jj,kk), component comp.
+            auto umix = [&](int ii, int jj, int kk, int comp) -> Real
+            {
+                Real e  = eta_arr(ii,jj,kk);
+                Real om = Real(1.0) - e;
+                Real mm = om*M0_arr(ii,jj,kk,comp) + e*M1_arr(ii,jj,kk,comp);
+                Real rr = om*r0_arr(ii,jj,kk)     + e*r1_arr(ii,jj,kk);
+                Real sr = (rr > Real(1e-20)) ? rr : Real(1e-20);
+                Real v  = mm/sr;
+                return std::isfinite(v) ? v : Real(0.0);
+            };
+
+            Real u_c = umix(i,j,k,0);
+            Real v_c = umix(i,j,k,1);
+
+            // Central-averaged face velocities
+            Real u_xm = Real(0.5)*(u_c + umix(i-1,j,k,0));
+            Real u_xp = Real(0.5)*(u_c + umix(i+1,j,k,0));
+            Real v_ym = Real(0.5)*(v_c + umix(i,j-1,k,1));
+            Real v_yp = Real(0.5)*(v_c + umix(i,j+1,k,1));
+
+            // Upwind η at each face based on face velocity sign
+            Real eta_xm = (u_xm >= Real(0.0)) ? eta_arr(i-1,j,k) : eta_loc;
+            Real eta_xp = (u_xp >= Real(0.0)) ? eta_loc         : eta_arr(i+1,j,k);
+            Real eta_ym = (v_ym >= Real(0.0)) ? eta_arr(i,j-1,k) : eta_loc;
+            Real eta_yp = (v_yp >= Real(0.0)) ? eta_loc          : eta_arr(i,j+1,k);
+
+            // Non-conservative upwind form: dη/dt = -u·∇η
+            Real adv = -(u_xp*(eta_xp - eta_loc) - u_xm*(eta_xm - eta_loc))/DX[0]
+                       -(v_yp*(eta_yp - eta_loc) - v_ym*(eta_ym - eta_loc))/DX[1];
+
+            Real eta_dot_CH = Real(0.0);
+            if (!do_implicit_) {
+                Real lap_mu = Numeric::Laplacian(mu_chem_arr, i, j, k, 0, DX, sten);
+                eta_dot_CH  = mob_nom_loc * lap_mu;
+            }
+
+            Real eta_dot_Vap = Real(0.0);
+            if (apply_vap_ == 1) {
+                Real gex = (eta_arr(i+1,j,k) - eta_arr(i-1,j,k)) / (Real(2.0)*DX[0]);
+                Real gey = (eta_arr(i,j+1,k) - eta_arr(i,j-1,k)) / (Real(2.0)*DX[1]);
+                Real grad_eta_mag = std::sqrt(gex*gex + gey*gey);
+                Real rho_loc = one_e*r0_arr(i,j,k) + eta_loc*r1_arr(i,j,k);
+                Real B_M = Bm_arr(i,j,k);
+                Real rho_eta0_ = eta_loc * rho_loc;
+                Real rho_g    = rho_eta0_ / std::max(eta_loc, Real(1e-14));
+                Real vap_coeff = (rho_g * Dv_ / (rho_eta0_ + Real(1e-14)))
+                                 * (B_M / (Real(1.0) + B_M + Real(1e-14)));
+                eta_dot_Vap = (Real(1.0) / eps_) * vap_coeff * grad_eta_mag;
+            }
+
+            eta_rhs(i,j,k) = adv + eta_dot_CH + eta_dot_Vap;
+        });
+    }
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////// SurfaceTemsion ////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 /*
@@ -1181,13 +1286,6 @@ Hydro2::RHS(int lev,
         // → more CH diffusion there → amplifies anisotropy.  Use c_max instead.
         Real mob_nom = (ch_mobility_nom > 0.0) ? ch_mobility_nom
                                                : 0.2 * epsilon * (c_max + 1.0);
-
-        // Kapila compressibility source parameters (local copies for GPU lambda safety)
-        Real gamma_eta1_       = gamma_eta1;
-        Real gamma_eta0_       = gamma_eta0;
-        Real pi_eta1_         = pi_eta1;
-        Real pi_eta0_         = pi_eta0;
-        bool do_kapila     = apply_kapila_source;
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i,int j,int k)
         {
@@ -1497,54 +1595,14 @@ Hydro2::RHS(int lev,
                 eta_dot_CH       = mob_nom * lap_mu_chem;
             }
 
-            // Kapila compressibility source: K·η(1-η)·∇·u
-            // Required for pressure equilibrium across the interface when the two
-            // fluids have different bulk moduli (ρ_k c_k² = γ_k(p+π_k) for SG EOS).
-            // Without this, compressed/expanded mixtures develop spurious pressure
-            // oscillations at the interface even with the Allaire isobaric EOS mixing.
-            Real eta_dot_kapila = 0.0;
-            if (do_kapila) {
-                Real p_loc   = p_arr(i,j,k);
-                Real B_eta1  = gamma_eta1_ * (p_loc + pi_eta1_);   // bulk modulus at eta=1 (liquid)
-                Real B_eta0  = gamma_eta0_ * (p_loc + pi_eta0_);   // bulk modulus at eta=0 (gas)
-                // Kapila formula (Murrone & Guillard 2005, eq. for α₁ = η = liquid fraction):
-                //   D η/Dt = η(1-η) · (Z₀ - Z₁) / (η·Z₁ + (1-η)·Z₀) · ∇·u
-                // where Z_k = γ_k(p+π_k) is the bulk modulus of phase k.
-                // Denominator is the volume-fraction-weighted mixture bulk modulus.
-                // K_comp < 0 (gas bulk Z₀ << liquid bulk Z₁ for water).
-                // K_comp < 0: gas is much less stiff than liquid, so expanding flow (div_u>0)
-                // decreases η (bubble grows). See isobaric energy correction below.
-                // Murrone & Guillard (2005): denominator is α₁Z₂ + α₂Z₁
-                // where α₁=η (liquid fraction), Z₁=B_eta1 (liquid), Z₂=B_eta0 (gas).
-                // This is CROSS-weighted: liquid-fraction × gas-bulk + gas-fraction × liquid-bulk.
-                // Cross-weighting naturally limits K_comp near the gas edge (η→0): at η=0.01,
-                // K_denom ≈ B_eta1 (liquid-dominated) → |K_comp|≈1, not ~94.
-                // Direct-weighting (eta*B_eta1+(1-eta)*B_eta0) makes K_comp ~100× larger
-                // at the gas edge, amplifying any div_u artifacts into vacuum-level energy extraction.
-                Real K_denom = eta_loc * B_eta0 + (1.0 - eta_loc) * B_eta1;
-                Real K_comp  = (std::abs(K_denom) > Real(1.0e-14)) ? (B_eta0 - B_eta1) / K_denom : Real(0.0);
-                // Velocity divergence from the conservative mass flux (= -drho/rho).
-                // Consistent with the HLLC Riemann fluxes used throughout the scheme.
-                Real div_u_  = (fxp.mass - fxm.mass) / (rho_loc * DX[0])
-                             + (fyp.mass - fym.mass) / (rho_loc * DX[1]);
-                eta_dot_kapila = K_comp * eta_loc * (1.0 - eta_loc) * div_u_;
-                if (!std::isfinite(eta_dot_kapila)) eta_dot_kapila = Real(0.0);
+            // Kapila / isobaric-UE correction removed: those are 5-equation
+            // (Murrone-Guillard) machinery that compensate for Allaire EOS
+            // mixing. In the Stage-3 BS formulation each phase carries its
+            // own conserved state and its own single-phase EOS, so there is
+            // no cross-phase pressure closure to enforce via eta_dot_kapila
+            // or a dE = (dA p + dB) dη energy patch.
 
-                // Isobaric energy correction: when η shifts, A(η) and B(η) change,
-                // so the same UE gives a different pressure. With π=3e8 (Tammann water),
-                // even tiny Δη creates a large ΔP. This correction keeps p constant:
-                //   δUE = (∂A/∂η · p + ∂B/∂η) · δη
-                // In practice this stabilises the stiff EOS; without it the HLLC
-                // numerical dissipation breaks the exact cancellation assumed by theory.
-                const Real dA_deta = Real(1.0)/(gamma_eta1_ - Real(1.0))
-                                   - Real(1.0)/(gamma_eta0_ - Real(1.0));
-                const Real dB_deta = gamma_eta1_*pi_eta1_/(gamma_eta1_ - Real(1.0))
-                                   - gamma_eta0_*pi_eta0_/(gamma_eta0_ - Real(1.0));
-                Real E_dot_kapila  = (dA_deta * p_arr(i,j,k) + dB_deta) * eta_dot_kapila;
-                if (std::isfinite(E_dot_kapila)) S_arr(i,j,k,3) += E_dot_kapila;
-            }
-
-            eta_rhs(i,j,k) = adv + eta_dot_CH + eta_dot_Vap + eta_dot_kapila;
+            eta_rhs(i,j,k) = adv + eta_dot_CH + eta_dot_Vap;
         });
     }
 }
@@ -3351,6 +3409,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     momentum_old_mf[lev]->ParallelCopy(*momentum_mf[lev]);
     energy_per_vol_old_mf[lev]->ParallelCopy(*energy_per_vol_mf[lev]);
     energy_per_mass_old_mf[lev]->ParallelCopy(*energy_per_mass_mf[lev]);
+    // Per-phase (Stage 3)
+    density_eta0_old_mf[lev]->ParallelCopy(*density_eta0_mf[lev]);
+    momentum_eta0_old_mf[lev]->ParallelCopy(*momentum_eta0_mf[lev]);
+    energy_eta0_old_mf[lev]->ParallelCopy(*energy_eta0_mf[lev]);
+    density_eta1_old_mf[lev]->ParallelCopy(*density_eta1_mf[lev]);
+    momentum_eta1_old_mf[lev]->ParallelCopy(*momentum_eta1_mf[lev]);
+    energy_eta1_old_mf[lev]->ParallelCopy(*energy_eta1_mf[lev]);
 
     //==============================================================
     // 2. Build *fresh*, fully allocated MultiFabs for TimeIntegrator
@@ -3360,39 +3425,24 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     amrex::Vector<amrex::MultiFab> solution_old;
 
     // Build solution_new from the current-time MultiFabs.
-    // Use src_ngrow=nGrow so that the coarse-fine ghost cells (filled by
-    // FillPatch in Integrator::timeStep before calling Advance) are preserved.
-    // eta
-    solution_new.emplace_back(eta_mf[lev]->boxArray(),
-                              eta_mf[lev]->DistributionMap(),
-                              eta_mf[lev]->nComp(),
-                              eta_mf[lev]->nGrow());
-    solution_new.back().ParallelCopy(*eta_mf[lev], 0, 0, eta_mf[lev]->nComp(),
-                                     eta_mf[lev]->nGrow(), eta_mf[lev]->nGrow());
-
-    // density
-    solution_new.emplace_back(density_mf[lev]->boxArray(),
-                              density_mf[lev]->DistributionMap(),
-                              density_mf[lev]->nComp(),
-                              density_mf[lev]->nGrow());
-    solution_new.back().ParallelCopy(*density_mf[lev], 0, 0, density_mf[lev]->nComp(),
-                                     density_mf[lev]->nGrow(), density_mf[lev]->nGrow());
-
-    // momentum (2 components)
-    solution_new.emplace_back(momentum_mf[lev]->boxArray(),
-                              momentum_mf[lev]->DistributionMap(),
-                              momentum_mf[lev]->nComp(),
-                              momentum_mf[lev]->nGrow());
-    solution_new.back().ParallelCopy(*momentum_mf[lev], 0, 0, momentum_mf[lev]->nComp(),
-                                     momentum_mf[lev]->nGrow(), momentum_mf[lev]->nGrow());
-
-    // energy per volume
-    solution_new.emplace_back(energy_per_vol_mf[lev]->boxArray(),
-                              energy_per_vol_mf[lev]->DistributionMap(),
-                              energy_per_vol_mf[lev]->nComp(),
-                              energy_per_vol_mf[lev]->nGrow());
-    solution_new.back().ParallelCopy(*energy_per_vol_mf[lev], 0, 0, energy_per_vol_mf[lev]->nComp(),
-                                     energy_per_vol_mf[lev]->nGrow(), energy_per_vol_mf[lev]->nGrow());
+    // Stage 3 layout (7 MFs): [0]=eta, [1..3]=phase-0 (rho,M,E), [4..6]=phase-1 (rho,M,E).
+    // Each phase carries its own conserved state; no mixture state is evolved here.
+    auto push_copy = [&](const amrex::MultiFab& src)
+    {
+        solution_new.emplace_back(src.boxArray(),
+                                  src.DistributionMap(),
+                                  src.nComp(),
+                                  src.nGrow());
+        solution_new.back().ParallelCopy(src, 0, 0, src.nComp(),
+                                         src.nGrow(), src.nGrow());
+    };
+    push_copy(*eta_mf[lev]);              // 0: eta
+    push_copy(*density_eta0_mf[lev]);     // 1: rho_0 (CPG gas)
+    push_copy(*momentum_eta0_mf[lev]);    // 2: M_0
+    push_copy(*energy_eta0_mf[lev]);      // 3: E_0
+    push_copy(*density_eta1_mf[lev]);     // 4: rho_1 (SG liquid)
+    push_copy(*momentum_eta1_mf[lev]);    // 5: M_1
+    push_copy(*energy_eta1_mf[lev]);      // 6: E_1
 
 
     //==============================================================
@@ -3402,14 +3452,17 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     //    and same-level neighbor communication.
     //==============================================================
     // DIAGNOSTIC: check for NaN right after ParallelCopy, before FillBoundary
+    static const char* const fnames7[7] = {
+        "eta",
+        "rho_eta0","M_eta0","E_eta0",
+        "rho_eta1","M_eta1","E_eta1"};
     {
-        const char* fnames[4] = {"eta","density","momentum","energy"};
-        for (int n = 0; n < 4; n++) {
+        for (int n = 0; n < 7; n++) {
             if (solution_new[n].contains_nan(0, solution_new[n].nComp(), solution_new[n].nGrowVect()))
-                amrex::Print() << "[DIAG-post-copy] NaN in " << fnames[n]
+                amrex::Print() << "[DIAG-post-copy] NaN in " << fnames7[n]
                                << " (incl ghosts) BEFORE FillBoundary lev=" << lev << " t=" << time << "\n";
             if (solution_new[n].contains_nan()) {
-                amrex::Print() << "[DIAG-post-copy] NaN in " << fnames[n]
+                amrex::Print() << "[DIAG-post-copy] NaN in " << fnames7[n]
                                << " (valid only) BEFORE FillBoundary lev=" << lev << " t=" << time << "\n";
                 // Print specific NaN cell locations (CPU scan, diagnostic only)
                 for (amrex::MFIter mfi(solution_new[n], false); mfi.isValid(); ++mfi) {
@@ -3418,7 +3471,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     amrex::LoopOnCpu(vbx, [&](int i, int j, int k) {
                         for (int c = 0; c < solution_new[n].nComp(); ++c)
                             if (amrex::isnan(arr(i,j,k,c)))
-                                amrex::Print() << "[NaN-LOC] " << fnames[n]
+                                amrex::Print() << "[NaN-LOC] " << fnames7[n]
                                                << " comp=" << c
                                                << " at (" << i << "," << j << "," << k << ")"
                                                << " lev=" << lev << " t=" << time << "\n";
@@ -3440,10 +3493,15 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             }
         }
     }
-    energy_bc->FillBoundary(solution_new[0], 0, solution_new[0].nComp(), time, 0);
-    density_bc->FillBoundary(solution_new[1], 0, solution_new[1].nComp(), time, 0);
-    momentum_bc->FillBoundary(solution_new[2], 0, solution_new[2].nComp(), time, 0);
-    energy_bc->FillBoundary(solution_new[3], 0, solution_new[3].nComp(), time, 0);
+    // η uses energy_bc convention (as before); per-phase (ρ,M,E) reuse the
+    // mixture-style BC objects until phase-specific BCs are introduced.
+    energy_bc  ->FillBoundary(solution_new[0], 0, solution_new[0].nComp(), time, 0); // eta
+    density_bc ->FillBoundary(solution_new[1], 0, solution_new[1].nComp(), time, 0); // rho_0
+    momentum_bc->FillBoundary(solution_new[2], 0, solution_new[2].nComp(), time, 0); // M_0
+    energy_bc  ->FillBoundary(solution_new[3], 0, solution_new[3].nComp(), time, 0); // E_0
+    density_bc ->FillBoundary(solution_new[4], 0, solution_new[4].nComp(), time, 0); // rho_1
+    momentum_bc->FillBoundary(solution_new[5], 0, solution_new[5].nComp(), time, 0); // M_1
+    energy_bc  ->FillBoundary(solution_new[6], 0, solution_new[6].nComp(), time, 0); // E_1
 
     // Fill any NaN ghost cells not reached by same-level FillBoundary
     // (coarse-fine gap regions when nghost > 2) by zero-gradient extrapolation
@@ -3492,24 +3550,21 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
     // DIAGNOSTIC: check for NaN introduced by FillBoundary
     {
-        const char* fnames[4] = {"eta","density","momentum","energy"};
-        for (int n = 0; n < 4; n++)
+        for (int n = 0; n < 7; n++)
             if (solution_new[n].contains_nan(0, solution_new[n].nComp(), solution_new[n].nGrowVect()))
-                amrex::Print() << "[DIAG-pre-NSCBC] NaN in " << fnames[n]
+                amrex::Print() << "[DIAG-pre-NSCBC] NaN in " << fnames7[n]
                                << " (incl ghosts) AFTER FillBoundary lev=" << lev << " t=" << time << "\n";
     }
-    if (nscbc.enabled)
-        ApplyNSCBC(lev, solution_new[0], solution_new[1], solution_new[2], solution_new[3], time);
-    // DIAGNOSTIC: check for NaN after ApplyNSCBC
+    // NSCBC is currently a mixture-state BC. In the Stage 3 per-phase form
+    // there is no mixture state to pass it. Per-phase NSCBC is a Stage 4
+    // follow-up; warn once if NSCBC is enabled so the user knows.
     if (nscbc.enabled) {
-        const char* fnames[4] = {"eta","density","momentum","energy"};
-        for (int n = 0; n < 4; n++) {
-            if (solution_new[n].contains_nan(0, solution_new[n].nComp(), solution_new[n].nGrowVect()))
-                amrex::Print() << "[DIAG-post-NSCBC] NaN in " << fnames[n]
-                               << " (incl ghosts) t=" << time << "\n";
-            if (solution_new[n].contains_nan())
-                amrex::Print() << "[DIAG-post-NSCBC] NaN in " << fnames[n]
-                               << " (valid cells only) t=" << time << "\n";
+        static bool warned = false;
+        if (!warned) {
+            amrex::Print() << "[WARN] NSCBC is enabled but Stage 3 per-phase "
+                              "evolution has no mixture state to apply it to. "
+                              "Skipping NSCBC until per-phase NSCBC is added (Stage 4).\n";
+            warned = true;
         }
     }
 
@@ -3536,16 +3591,27 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     //==============================================================
     amrex::TimeIntegrator timeintegrator(solution_new, time);
 
-    // RHS functor
+    // Stage-3 RHS: one η eqn driven by per-phase state, plus one single-phase
+    // Euler RHS per phase, each closed by its own (γ_k, π_k). No Allaire, no Kapila.
+    // Layout: sol_mf[0]=eta, [1..3]=phase-0 (rho,M,E), [4..6]=phase-1 (rho,M,E).
     timeintegrator.set_rhs([&](
         amrex::Vector<amrex::MultiFab>& rhs_mf,
         amrex::Vector<amrex::MultiFab>& sol_mf,
         const Real t)
     {
-        // Each sol_mf[i] has correct structure & ghost cells
-        RHS(lev, t,
-            rhs_mf[0], rhs_mf[1], rhs_mf[2], rhs_mf[3],
-            sol_mf[0], sol_mf[1], sol_mf[2], sol_mf[3]);
+        RHS_Eta(lev, t,
+                rhs_mf[0],
+                sol_mf[0],
+                sol_mf[1], sol_mf[2],  // phase 0 (rho, M)
+                sol_mf[4], sol_mf[5]); // phase 1 (rho, M)
+
+        RHS_PerPhase(lev, t, gamma_eta0, pi_eta0,
+                     rhs_mf[1], rhs_mf[2], rhs_mf[3],
+                     sol_mf[1], sol_mf[2], sol_mf[3]);
+
+        RHS_PerPhase(lev, t, gamma_eta1, pi_eta1,
+                     rhs_mf[4], rhs_mf[5], rhs_mf[6],
+                     sol_mf[4], sol_mf[5], sol_mf[6]);
     });
 
     //==============================================================
@@ -3554,53 +3620,39 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     timeintegrator.set_post_stage_action(
         [&](amrex::Vector<amrex::MultiFab>& stage, Real t)
     {
-        // Apply physical BCs (which also calls FillBoundary internally)
-        energy_bc->FillBoundary(stage[0], 0, stage[0].nComp(), t, 0);   // eta
-        density_bc->FillBoundary(stage[1], 0, stage[1].nComp(), t, 0);  // density
-        momentum_bc->FillBoundary(stage[2], 0, stage[2].nComp(), t, 0); // momentum
-        energy_bc->FillBoundary(stage[3], 0, stage[3].nComp(), t, 0);   // energy
-        // DIAGNOSTIC: check for NaN introduced by FillBoundary (stage)
+        // Apply physical BCs to all 7 stage MFs (FillBoundary handles same-level comms)
+        energy_bc  ->FillBoundary(stage[0], 0, stage[0].nComp(), t, 0); // eta
+        density_bc ->FillBoundary(stage[1], 0, stage[1].nComp(), t, 0); // rho_0
+        momentum_bc->FillBoundary(stage[2], 0, stage[2].nComp(), t, 0); // M_0
+        energy_bc  ->FillBoundary(stage[3], 0, stage[3].nComp(), t, 0); // E_0
+        density_bc ->FillBoundary(stage[4], 0, stage[4].nComp(), t, 0); // rho_1
+        momentum_bc->FillBoundary(stage[5], 0, stage[5].nComp(), t, 0); // M_1
+        energy_bc  ->FillBoundary(stage[6], 0, stage[6].nComp(), t, 0); // E_1
+
         {
-            const char* snames[4] = {"eta","density","momentum","energy"};
-            for (int n = 0; n < 4; n++)
+            for (int n = 0; n < 7; n++)
                 if (stage[n].contains_nan(0, stage[n].nComp(), stage[n].nGrowVect()))
-                    amrex::Print() << "[DIAG-stage-pre-NSCBC] NaN in " << snames[n]
+                    amrex::Print() << "[DIAG-stage-post-FB] NaN in " << fnames7[n]
                                    << " (incl ghosts) t=" << t << "\n";
-        }
-        if (nscbc.enabled)
-            ApplyNSCBC(lev, stage[0], stage[1], stage[2], stage[3], t);
-        // DIAGNOSTIC: check for NaN after ApplyNSCBC (stage)
-        if (nscbc.enabled) {
-            const char* snames[4] = {"eta","density","momentum","energy"};
-            for (int n = 0; n < 4; n++) {
-                if (stage[n].contains_nan(0, stage[n].nComp(), stage[n].nGrowVect()))
-                    amrex::Print() << "[DIAG-stage-post-NSCBC] NaN in " << snames[n]
-                                   << " (incl ghosts) t=" << t << "\n";
-                if (stage[n].contains_nan())
-                    amrex::Print() << "[DIAG-stage-post-NSCBC] NaN in " << snames[n]
-                                   << " (valid cells only) t=" << t << "\n";
-            }
         }
 
-        // EOS-consistent energy floor after each RK stage.
-        // Mirrors the correction in the RHS first loop: when the Allaire
-        // EOS gives p < 1 Pa, correct E in the stage array so the next
-        // stage's Riemann solve sees a physically bounded pressure.
-        // Without this, RK intermediate stages can create E values that
-        // give p ≈ -γπ in the Riemann solver, floored to ~0, producing
-        // a 1e5 Pa/dx momentum imbalance that drives blow-up at the interface.
+        // Per-phase EOS-consistent energy floor.
+        // Phase 0 (CPG): p = (γ-1)·UE + p_ref; floor UE to p_floor.
+        // Phase 1 (SG):  p = (γ-1)·UE − γπ + p_ref; floor UE to (p_floor + γπ − p_ref)/(γ-1).
+        auto apply_floor = [&](amrex::MultiFab& E_mf,
+                               const amrex::MultiFab& rho_mf_s,
+                               const amrex::MultiFab& M_mf_s,
+                               Real gam_k, Real pi_k)
         {
-            Real g_eta1 = gamma_eta1, g_eta0 = gamma_eta0, p_eta1 = pi_eta1, p_eta0 = pi_eta0;
             Real pref_ = pref;
-            for (amrex::MFIter mfi(stage[3], amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+            const Real p_floor_stage = Real(1.0e-10);
+            for (amrex::MFIter mfi(E_mf, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
                 const amrex::Box& bx = mfi.validbox();
-                auto E_s   = stage[3].array(mfi);
-                auto rho_s = stage[1].const_array(mfi);
-                auto M_s   = stage[2].const_array(mfi);
-                auto eta_s = stage[0].const_array(mfi);
+                auto E_s   = E_mf.array(mfi);
+                auto rho_s = rho_mf_s.const_array(mfi);
+                auto M_s   = M_mf_s.const_array(mfi);
                 amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
                 {
-                    Real eta_c = amrex::max(Real(0.0), amrex::min(Real(1.0), eta_s(i,j,k)));
                     Real mx = M_s(i,j,k,0);
                     Real my = M_s(i,j,k,1);
                     Real E  = E_s(i,j,k);
@@ -3608,20 +3660,18 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     Real KE = Real(0.5)*(mx*mx + my*my)/safe_rho;
                     Real UE = E - KE;
                     if (!std::isfinite(UE)) UE = Real(0.0);
-                    // Allaire EOS mixing
-                    Real A = eta_c/(g_eta1-Real(1.0)) + (Real(1.0)-eta_c)/(g_eta0-Real(1.0));
-                    Real B = eta_c*g_eta1*p_eta1/(g_eta1-Real(1.0)) + (Real(1.0)-eta_c)*g_eta0*p_eta0/(g_eta0-Real(1.0));
-                    Real gm = Real(1.0) + Real(1.0)/A;
-                    Real pm = B/(A + Real(1.0));
-                    Real p_check = (gm-Real(1.0))*UE - gm*pm + pref_;
-                    const Real p_floor_stage = Real(1.0e-10);
+                    // Single-phase EOS pressure (with reference shift)
+                    Real p_check = (gam_k - Real(1.0))*UE - gam_k*pi_k + pref_;
                     if (!std::isfinite(p_check) || p_check < p_floor_stage) {
-                        UE = (p_floor_stage + gm*pm - pref_) / (gm - Real(1.0));
+                        UE = (p_floor_stage + gam_k*pi_k - pref_) / (gam_k - Real(1.0));
                         E_s(i,j,k) = KE + UE;
                     }
                 });
             }
-        }
+        };
+        // Phase 0 floor uses (γ_0, π_0); π_0 is 0 for CPG so this reduces to the CPG form.
+        apply_floor(stage[3], stage[1], stage[2], gamma_eta0, pi_eta0);
+        apply_floor(stage[6], stage[4], stage[5], gamma_eta1, pi_eta1);
     });
 
     //==============================================================
@@ -3630,12 +3680,20 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     timeintegrator.advance(solution_old, solution_new, time, dt);
 
     //==============================================================
-    // 7. Copy new state back into the owning MultiFabs
+    // 7. Copy new per-phase state back into the owning MultiFabs, then
+    //    derive the mixture diagnostic fields (density_mf, momentum_mf,
+    //    energy_per_vol_mf, pressure_mf, velocity_mf, a_mf, gamma_mf,
+    //    pi_mf) from the freshly advanced per-phase state.
     //==============================================================
-    eta_mf[lev]->ParallelCopy(solution_new[0]);
-    density_mf[lev]->ParallelCopy(solution_new[1]);
-    momentum_mf[lev]->ParallelCopy(solution_new[2]);
-    energy_per_vol_mf[lev]->ParallelCopy(solution_new[3]);
+    eta_mf[lev]           ->ParallelCopy(solution_new[0]);
+    density_eta0_mf[lev]  ->ParallelCopy(solution_new[1]);
+    momentum_eta0_mf[lev] ->ParallelCopy(solution_new[2]);
+    energy_eta0_mf[lev]   ->ParallelCopy(solution_new[3]);
+    density_eta1_mf[lev]  ->ParallelCopy(solution_new[4]);
+    momentum_eta1_mf[lev] ->ParallelCopy(solution_new[5]);
+    energy_eta1_mf[lev]   ->ParallelCopy(solution_new[6]);
+
+    MixDiagnostic(lev);
 
     //==============================================================
     // 7b. Implicit Cahn-Hilliard biharmonic step (operator split)

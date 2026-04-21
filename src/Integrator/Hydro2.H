@@ -121,6 +121,19 @@ protected:
         const amrex::MultiFab &M_mf,
         const amrex::MultiFab &E_mf);
 
+    // Stage 3: η evolution (advection + CH + vaporization) driven by
+    // per-phase conserved state. Advection uses a mass-flux-weighted
+    // mixture velocity u_mix = (η·ρ1·u1 + (1-η)·ρ0·u0)/(η·ρ1 + (1-η)·ρ0)
+    // with simple central-upwind at faces. No Kapila term.
+    void RHS_Eta(int lev,
+        Set::Scalar time,
+        amrex::MultiFab &eta_rhs_mf,
+        const amrex::MultiFab &eta_mf_in,
+        const amrex::MultiFab &rho0_mf_in,
+        const amrex::MultiFab &M0_mf_in,
+        const amrex::MultiFab &rho1_mf_in,
+        const amrex::MultiFab &M1_mf_in);
+
 
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
     void ApplyImplicitCH(int lev, Set::Scalar dt);
@@ -341,7 +354,6 @@ protected:
     int ch_newton_iters = 5;           // max Newton iterations (implicit_ch=2)
     Set::Scalar ch_newton_tol = 1.0e-10; // Newton convergence tolerance
     Set::Scalar ch_W_scale = 1.0;        // double-well amplitude scale (W_scale=1 → equilibrium width=√2·ε)
-    bool apply_kapila_source = true;     // Kapila compressibility source: K·η(1-η)·∇·u in η equation
 
     // Adaptive Timestep
     bool adaptive_timestep = false;
