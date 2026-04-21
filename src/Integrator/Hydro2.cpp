@@ -87,6 +87,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("apply_surface_tension", value.apply_surface_tension, false); // Apply surface tension when solving, default: true --> "Apply Surface Tension"
         pp_query_default("apply_weight", value.apply_weight, false);                  // Apply weight when solving, default: false --> "No Weight"
         pp_query_default("apply_vaporization", value.apply_vaporization, false);       // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
+        pp_query_default("apply_bs_source", value.apply_bs_source, true);               // Stage 4 BS phase-coupling sources (set 0 to disable for pure single-phase validation)
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
         // PHASE eta=1 (liquid — stiffened gas)
@@ -993,6 +994,128 @@ Hydro2::RHS_Eta(int lev,
             }
 
             eta_rhs(i,j,k) = adv + eta_dot_CH + eta_dot_Vap;
+        });
+    }
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////// ApplyBSSource ///////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+// Boyd-Schmidt phase-coupling source terms. Additive contributions to the
+// per-phase RHS over the diffuse interface region. Signs are sum-to-zero
+// so that total mixture mass/momentum/energy are conserved identically.
+//
+// Convention: phase 0 sits on the η=0 side (CPG gas); phase 1 sits on the
+// η=1 side (stiffened gas liquid). ∇η points from phase 0 → phase 1.
+//
+// Prescribed interface fields (from ic_m0, ic_u0, ic_q):
+//   m0_mf   [kg/m^2/s]  mass flux leaving phase 0, entering phase 1
+//   u0_mf   [m/s]       interface velocity vector
+//   q_mf    [W/m^2]     interface heat flux vector
+//
+// Interface pressure (for inviscid inert coupling) is taken as the simple
+// arithmetic mean of the per-phase pressures. This is zero-order accurate
+// and matches pressure identically when phases are already in equilibrium.
+// More sophisticated choices (upwinded by ∇η, Riemann-style interface
+// solve) can replace p_int later without changing the surrounding logic.
+//
+// TODO (vaporization/deflagration): add the convective specific-enthalpy
+// contribution ±ṁ₀·h₀·|∇η| to the energy source when ṁ₀ ≠ 0.
+void
+Hydro2::ApplyBSSource(int lev,
+                      Set::Scalar /*time*/,
+                      amrex::MultiFab &rho0_rhs_mf, amrex::MultiFab &M0_rhs_mf, amrex::MultiFab &E0_rhs_mf,
+                      amrex::MultiFab &rho1_rhs_mf, amrex::MultiFab &M1_rhs_mf, amrex::MultiFab &E1_rhs_mf,
+                      const amrex::MultiFab &eta_mf_in,
+                      const amrex::MultiFab &rho0_mf_in, const amrex::MultiFab &M0_mf_in, const amrex::MultiFab &E0_mf_in,
+                      const amrex::MultiFab &rho1_mf_in, const amrex::MultiFab &M1_mf_in, const amrex::MultiFab &E1_mf_in)
+{
+    BL_PROFILE("Hydro2::ApplyBSSource");
+
+    const Geometry& geom = this->geom[lev];
+    const Real* DX = geom.CellSize();
+    const Box& domain = geom.Domain();
+
+    const Real g0 = gamma_eta0, g1 = gamma_eta1;
+    const Real pi0 = pi_eta0,   pi1 = pi_eta1;
+    const Real pref_ = pref;
+
+    for (MFIter mfi(eta_mf_in, TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const Box& bx = mfi.validbox();
+
+        auto eta     = eta_mf_in.const_array(mfi);
+        auto r0_arr  = rho0_mf_in.const_array(mfi);
+        auto M0_arr  = M0_mf_in.const_array(mfi);
+        auto E0_arr  = E0_mf_in.const_array(mfi);
+        auto r1_arr  = rho1_mf_in.const_array(mfi);
+        auto M1_arr  = M1_mf_in.const_array(mfi);
+        auto E1_arr  = E1_mf_in.const_array(mfi);
+
+        auto m0_arr  = m0_mf[lev]->const_array(mfi);
+        auto u0_arr  = u0_mf[lev]->const_array(mfi);
+        auto q_arr   = q_mf[lev]->const_array(mfi);
+
+        auto R0 = rho0_rhs_mf.array(mfi);
+        auto P0 = M0_rhs_mf.array(mfi);
+        auto U0 = E0_rhs_mf.array(mfi);
+        auto R1 = rho1_rhs_mf.array(mfi);
+        auto P1 = M1_rhs_mf.array(mfi);
+        auto U1 = E1_rhs_mf.array(mfi);
+
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        {
+            auto sten = Numeric::GetStencil(i, j, k, domain);
+
+            Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX, sten);
+            Real grad_eta_mag = grad_eta.lpNorm<2>();
+
+            // Skip work where interface gradient is negligible. Keeps the BS
+            // source truly localized to the diffuse region.
+            if (grad_eta_mag < Real(1e-30)) return;
+
+            // Per-phase pressures at this cell (single-phase EOS, no Allaire)
+            Real safe_r0 = amrex::max(r0_arr(i,j,k), Real(1e-20));
+            Real safe_r1 = amrex::max(r1_arr(i,j,k), Real(1e-20));
+            Real KE0 = Real(0.5)*(M0_arr(i,j,k,0)*M0_arr(i,j,k,0)
+                                + M0_arr(i,j,k,1)*M0_arr(i,j,k,1))/safe_r0;
+            Real KE1 = Real(0.5)*(M1_arr(i,j,k,0)*M1_arr(i,j,k,0)
+                                + M1_arr(i,j,k,1)*M1_arr(i,j,k,1))/safe_r1;
+            Real UE0 = amrex::max(Real(0.0), E0_arr(i,j,k) - KE0);
+            Real UE1 = amrex::max(Real(0.0), E1_arr(i,j,k) - KE1);
+            Real p0_phase = (g0 - Real(1.0))*UE0                 + pref_;   // CPG
+            Real p1_phase = (g1 - Real(1.0))*UE1 - g1*pi1        + pref_;   // SG
+            (void)pi0;
+
+            // Interface pressure — simple arithmetic mean
+            Real p_int = Real(0.5) * (p0_phase + p1_phase);
+
+            // Prescribed interface inputs
+            Real mdot0 = m0_arr(i,j,k);
+            Real u0x   = u0_arr(i,j,k,0);
+            Real u0y   = u0_arr(i,j,k,1);
+            Real qx    = q_arr(i,j,k,0);
+            Real qy    = q_arr(i,j,k,1);
+
+            // === Mass: ±ṁ₀·|∇η| ===
+            Real Smass = mdot0 * grad_eta_mag;
+            R0(i,j,k) += -Smass;
+            R1(i,j,k) += +Smass;
+
+            // === Momentum: ±(p_int·∇η + ṁ₀·u₀·|∇η|) ===
+            Real Smx = p_int*grad_eta(0) + mdot0*u0x*grad_eta_mag;
+            Real Smy = p_int*grad_eta(1) + mdot0*u0y*grad_eta_mag;
+            P0(i,j,k,0) += -Smx;
+            P0(i,j,k,1) += -Smy;
+            P1(i,j,k,0) += +Smx;
+            P1(i,j,k,1) += +Smy;
+
+            // === Energy: ±(p_int·u₀·∇η + q̇₀·∇η) ===
+            Real SE = p_int*(u0x*grad_eta(0) + u0y*grad_eta(1))
+                    + (qx*grad_eta(0) + qy*grad_eta(1));
+            U0(i,j,k) += -SE;
+            U1(i,j,k) += +SE;
         });
     }
 }
@@ -3612,6 +3735,17 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         RHS_PerPhase(lev, t, gamma_eta1, pi_eta1,
                      rhs_mf[4], rhs_mf[5], rhs_mf[6],
                      sol_mf[4], sol_mf[5], sol_mf[6]);
+
+        // Stage 4: BS phase-coupling source terms, added to both phases'
+        // RHS with sum-to-zero signs so mixture conservation holds identically.
+        if (apply_bs_source) {
+            ApplyBSSource(lev, t,
+                          rhs_mf[1], rhs_mf[2], rhs_mf[3],
+                          rhs_mf[4], rhs_mf[5], rhs_mf[6],
+                          sol_mf[0],
+                          sol_mf[1], sol_mf[2], sol_mf[3],
+                          sol_mf[4], sol_mf[5], sol_mf[6]);
+        }
     });
 
     //==============================================================

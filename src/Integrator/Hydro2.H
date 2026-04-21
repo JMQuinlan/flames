@@ -134,6 +134,24 @@ protected:
         const amrex::MultiFab &rho1_mf_in,
         const amrex::MultiFab &M1_mf_in);
 
+    // Stage 4: Boyd-Schmidt (BS) phase-coupling source terms, additive
+    // contributions to the per-phase conservation laws over the diffuse
+    // interface region. Uses sum-to-zero signs (phase 0 and phase 1
+    // sources cancel in mixture sums) so total mixture mass/momentum/
+    // energy are conserved identically. Inputs:
+    //   m0_mf (prescribed interface mass flux, scalar)
+    //   u0_mf (prescribed interface velocity, 2-comp)
+    //   q_mf  (prescribed interface heat flux vector, 2-comp)
+    // For inert fluid-fluid (m0.ic = 0, q.ic = 0) reduces to the
+    // natural-BC pressure-balance momentum/energy coupling.
+    void ApplyBSSource(int lev,
+        Set::Scalar time,
+        amrex::MultiFab &rho0_rhs_mf, amrex::MultiFab &M0_rhs_mf, amrex::MultiFab &E0_rhs_mf,
+        amrex::MultiFab &rho1_rhs_mf, amrex::MultiFab &M1_rhs_mf, amrex::MultiFab &E1_rhs_mf,
+        const amrex::MultiFab &eta_mf_in,
+        const amrex::MultiFab &rho0_mf_in, const amrex::MultiFab &M0_mf_in, const amrex::MultiFab &E0_mf_in,
+        const amrex::MultiFab &rho1_mf_in, const amrex::MultiFab &M1_mf_in, const amrex::MultiFab &E1_mf_in);
+
 
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
     void ApplyImplicitCH(int lev, Set::Scalar dt);
@@ -342,6 +360,7 @@ protected:
     int apply_weight = 0;
     int static_eta = 0;
     int apply_vaporization = 0;
+    int apply_bs_source = 1;   // Stage 4: BS phase-coupling sources (set 0 to test single-phase limit)
     int Spec_Vol = 1;
 
     int kappa_method = 1;        // 1: Smooth Normals (default)  2: Height Function  3: Hybrid
