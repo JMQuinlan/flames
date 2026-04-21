@@ -104,6 +104,38 @@ struct State
     }
 
     // --------------------------------------------------------------
+    // GPU-capable constructor with SCALAR gamma/pi (single-phase EOS).
+    // Used by the per-phase Euler path where each phase carries a
+    // constant gamma, pi and the Array4 indirection is unnecessary.
+    // --------------------------------------------------------------
+    AMREX_GPU_HOST_DEVICE
+    State(const amrex::Array4<const Set::Scalar>& rhoA,
+          const amrex::Array4<const Set::Scalar>& MA,
+          const amrex::Array4<const Set::Scalar>& EA,
+          Set::Scalar a_gam,
+          Set::Scalar a_pi,
+          int ii, int jj, int kk, int idir)
+        :
+          rho_arr(rhoA),
+          M_arr(MA),
+          E_arr(EA),
+          // gamma_arr / pi_arr / T_arr left default-constructed; never read
+          i(ii), j(jj), k(kk),
+          dir(idir)
+    {
+        rho = rho_arr(i,j,k);
+        E   = E_arr(i,j,k);
+        gam = a_gam;
+        pi  = a_pi;
+        T   = Set::Scalar(0.0);
+
+        Set::Scalar mx = M_arr(i,j,k,0);
+        Set::Scalar my = M_arr(i,j,k,1);
+        if (dir == 0) { M_normal = mx; M_tangent = my; }
+        else          { M_normal = my; M_tangent = mx; }
+    }
+
+    // --------------------------------------------------------------
     // Load fields from the Array4s
     // --------------------------------------------------------------
     AMREX_GPU_HOST_DEVICE

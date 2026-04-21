@@ -679,6 +679,191 @@ void Hydro2::Mix(int lev)
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////// MIX DIAGNOSTIC /////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+// Derive mixture (rho, M, E, p, v, a) from the per-phase conserved state.
+// In the Stage-3 BS formulation the per-phase states (rho_k, M_k, E_k) are
+// the primary evolving variables; the mixture is a post-compute diagnostic
+// used only for plotting and integral reporting.
+//
+//   rho_mix = (1-eta)*rho_0 + eta*rho_1
+//   M_mix   = (1-eta)*M_0   + eta*M_1
+//   E_mix   = (1-eta)*E_0   + eta*E_1
+//   v_mix   = M_mix / rho_mix
+//   p_mix   : diagnostic "mixture pressure" = (1-eta)*p_0 + eta*p_1
+//   a_mix   : eta-weighted sound speed (diagnostic only — do NOT use for CFL)
+void Hydro2::MixDiagnostic(int lev)
+{
+    BL_PROFILE("Hydro2::MixDiagnostic");
+
+    const Geometry& geom = this->geom[lev];
+
+    for (MFIter mfi(*eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const Box& bx = mfi.validbox();
+
+        auto eta      = eta_mf[lev]->const_array(mfi);
+        auto rho0     = density_eta0_mf[lev]->const_array(mfi);
+        auto rho1     = density_eta1_mf[lev]->const_array(mfi);
+        auto M0       = momentum_eta0_mf[lev]->const_array(mfi);
+        auto M1       = momentum_eta1_mf[lev]->const_array(mfi);
+        auto E0       = energy_eta0_mf[lev]->const_array(mfi);
+        auto E1       = energy_eta1_mf[lev]->const_array(mfi);
+
+        auto rho_mix  = density_mf[lev]->array(mfi);
+        auto M_mix    = momentum_mf[lev]->array(mfi);
+        auto E_mix    = energy_per_vol_mf[lev]->array(mfi);
+        auto Em_mix   = energy_per_mass_mf[lev]->array(mfi);
+        auto v_mix    = velocity_mf[lev]->array(mfi);
+        auto p_mix    = pressure_mf[lev]->array(mfi);
+        auto a_mix    = a_mf[lev]->array(mfi);
+        auto gamma    = gamma_mf[lev]->array(mfi);
+        auto pi_out   = pi_mf[lev]->array(mfi);
+
+        Real g0 = gamma_eta0, g1 = gamma_eta1;
+        Real pi0 = pi_eta0,   pi1 = pi_eta1;
+        Real pref_ = pref;
+
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        {
+            Real e     = amrex::max(Real(0.0), amrex::min(Real(1.0), eta(i,j,k)));
+            Real one_e = Real(1.0) - e;
+
+            // Conservative linear mix
+            Real rm = one_e*rho0(i,j,k) + e*rho1(i,j,k);
+            Real Mx = one_e*M0(i,j,k,0) + e*M1(i,j,k,0);
+            Real My = one_e*M0(i,j,k,1) + e*M1(i,j,k,1);
+            Real Ev = one_e*E0(i,j,k)   + e*E1(i,j,k);
+
+            rho_mix(i,j,k)   = rm;
+            M_mix(i,j,k,0)   = Mx;
+            M_mix(i,j,k,1)   = My;
+            E_mix(i,j,k)     = Ev;
+
+            Real safe_rm = (rm > Real(1e-20)) ? rm : Real(1e-20);
+            Real vx = Mx / safe_rm;
+            Real vy = My / safe_rm;
+            if (!std::isfinite(vx)) vx = Real(0.0);
+            if (!std::isfinite(vy)) vy = Real(0.0);
+            v_mix(i,j,k,0) = vx;
+            v_mix(i,j,k,1) = vy;
+            Em_mix(i,j,k)  = Ev / safe_rm;
+
+            // Per-phase pressures from each phase's own (rho_k, M_k, E_k)
+            Real safe_r0 = (rho0(i,j,k) > Real(1e-20)) ? rho0(i,j,k) : Real(1e-20);
+            Real safe_r1 = (rho1(i,j,k) > Real(1e-20)) ? rho1(i,j,k) : Real(1e-20);
+            Real KE0 = Real(0.5)*(M0(i,j,k,0)*M0(i,j,k,0) + M0(i,j,k,1)*M0(i,j,k,1))/safe_r0;
+            Real KE1 = Real(0.5)*(M1(i,j,k,0)*M1(i,j,k,0) + M1(i,j,k,1)*M1(i,j,k,1))/safe_r1;
+            Real UE0 = amrex::max(Real(0.0), E0(i,j,k) - KE0);
+            Real UE1 = amrex::max(Real(0.0), E1(i,j,k) - KE1);
+            Real p0_ = (g0 - Real(1.0))*UE0                 + pref_;                  // CPG
+            Real p1_ = (g1 - Real(1.0))*UE1 - g1*pi1        + pref_;                  // SG
+            if (!std::isfinite(p0_) || p0_ < Real(0.0)) p0_ = Real(1e-6);
+            if (!std::isfinite(p1_) || p1_ < Real(0.0)) p1_ = Real(1e-6);
+
+            p_mix(i,j,k) = one_e*p0_ + e*p1_;
+
+            // Mixture gamma/pi kept for plotfile parity (Allaire A/B blend).
+            Real A = e/(g1-Real(1.0)) + one_e/(g0-Real(1.0));
+            Real B = e*g1*pi1/(g1-Real(1.0)) + one_e*g0*pi0/(g0-Real(1.0));
+            Real gm = Real(1.0) + Real(1.0)/A;
+            Real pm = B / (A + Real(1.0));
+            gamma(i,j,k)  = gm;
+            pi_out(i,j,k) = pm;
+
+            Real c2 = gm * (p_mix(i,j,k) + pm) / safe_rm;
+            a_mix(i,j,k) = (c2 > Real(0.0)) ? std::sqrt(c2) : Real(0.0);
+        });
+    }
+
+    density_mf[lev]->FillBoundary(geom.periodicity());
+    momentum_mf[lev]->FillBoundary(geom.periodicity());
+    energy_per_vol_mf[lev]->FillBoundary(geom.periodicity());
+    energy_per_mass_mf[lev]->FillBoundary(geom.periodicity());
+    velocity_mf[lev]->FillBoundary(geom.periodicity());
+    pressure_mf[lev]->FillBoundary(geom.periodicity());
+    gamma_mf[lev]->FillBoundary(geom.periodicity());
+    pi_mf[lev]->FillBoundary(geom.periodicity());
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////// RHS_PerPhase //////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+// Single-phase Euler RHS for one phase with its own (gamma_k, pi_k).
+// Produces (rho_rhs, M_rhs, E_rhs) for that phase from its own conserved
+// state (rho, M, E). No Allaire blend, no Kapila sources, no diagnostics.
+// BS phase-coupling source terms are added externally (Stage 4).
+//
+// NOT YET CALLED — prep only. Stage 3-IIb will wire this into Advance().
+void Hydro2::RHS_PerPhase(int lev,
+                          Set::Scalar /*time*/,
+                          Set::Scalar gamma_k,
+                          Set::Scalar pi_k,
+                          amrex::MultiFab &rho_rhs_mf,
+                          amrex::MultiFab &M_rhs_mf,
+                          amrex::MultiFab &E_rhs_mf,
+                          const amrex::MultiFab &rho_mf_in,
+                          const amrex::MultiFab &M_mf_in,
+                          const amrex::MultiFab &E_mf_in)
+{
+    BL_PROFILE("Hydro2::RHS_PerPhase");
+
+    const Geometry& geom = this->geom[lev];
+    const Real* DX = geom.CellSize();
+
+    const Real pref_     = pref;
+    const Real small_    = small;
+    const int  Spec_Vol_ = Spec_Vol;
+    auto* rsolver        = riemannsolver;
+
+    for (MFIter mfi(rho_mf_in, TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const Box& bx = mfi.validbox();
+
+        auto rho_arr  = rho_mf_in.const_array(mfi);
+        auto M_arr    = M_mf_in.const_array(mfi);
+        auto E_arr    = E_mf_in.const_array(mfi);
+
+        auto rho_rhs  = rho_rhs_mf.array(mfi);
+        auto M_rhs    = M_rhs_mf.array(mfi);
+        auto E_rhs    = E_rhs_mf.array(mfi);
+
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        {
+            namespace FR = Solver::Local::FluidRiemann;
+
+            // ----- face Riemann states (scalar gamma/pi constructor) -----
+            FR::State Sxm(rho_arr, M_arr, E_arr, gamma_k, pi_k, i-1, j, k, 0);
+            FR::State Sxc(rho_arr, M_arr, E_arr, gamma_k, pi_k, i,   j, k, 0);
+            FR::State Sxp(rho_arr, M_arr, E_arr, gamma_k, pi_k, i+1, j, k, 0);
+
+            FR::State Sym(rho_arr, M_arr, E_arr, gamma_k, pi_k, i, j-1, k, 1);
+            FR::State Syc(rho_arr, M_arr, E_arr, gamma_k, pi_k, i, j,   k, 1);
+            FR::State Syp(rho_arr, M_arr, E_arr, gamma_k, pi_k, i, j+1, k, 1);
+
+            FR::Flux fxm = rsolver->Solve(Sxm, Sxc, pref_, small_, Spec_Vol_);
+            FR::Flux fym = rsolver->Solve(Sym, Syc, pref_, small_, Spec_Vol_);
+            FR::Flux fxp = rsolver->Solve(Sxc, Sxp, pref_, small_, Spec_Vol_);
+            FR::Flux fyp = rsolver->Solve(Syc, Syp, pref_, small_, Spec_Vol_);
+
+            rho_rhs(i,j,k) = (fxm.mass             - fxp.mass)            /DX[0]
+                           + (fym.mass             - fyp.mass)            /DX[1];
+
+            M_rhs(i,j,k,0) = (fxm.momentum_normal  - fxp.momentum_normal) /DX[0]
+                           + (fym.momentum_tangent - fyp.momentum_tangent)/DX[1];
+
+            M_rhs(i,j,k,1) = (fxm.momentum_tangent - fxp.momentum_tangent)/DX[0]
+                           + (fym.momentum_normal  - fyp.momentum_normal) /DX[1];
+
+            E_rhs(i,j,k)   = (fxm.energy           - fxp.energy)          /DX[0]
+                           + (fym.energy           - fyp.energy)          /DX[1];
+        });
+    }
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////// TIMESTEPBEGIN ////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 void Hydro2::TimeStepBegin(Set::Scalar, int /*iter*/)

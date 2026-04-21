@@ -87,6 +87,9 @@ public:
 protected:
     void Initialize(int lev) override;
     void Mix(int lev);
+    // Stage 3: derive mixture (rho, M, E, p, v, a) from per-phase state.
+    // Post-compute only; evolution uses per-phase state directly.
+    void MixDiagnostic(int lev);
     void TimeStepBegin(Set::Scalar a_time, int a_iter) override;
     void TimeStepComplete(Set::Scalar time, int lev) override;
     void Advance(int lev, Set::Scalar time, Set::Scalar dt) override;
@@ -99,6 +102,21 @@ protected:
         amrex::MultiFab &M_rhs_mf,
         amrex::MultiFab &E_rhs_mf,
         const amrex::MultiFab &eta_mf_in,
+        const amrex::MultiFab &rho_mf,
+        const amrex::MultiFab &M_mf,
+        const amrex::MultiFab &E_mf);
+
+    // Stage 3: single-phase Euler RHS with a scalar (gamma, pi) EOS.
+    // Produces drho/dt, dM/dt, dE/dt for one phase, using that phase's own
+    // conserved state. No Allaire blend, no Kapila sources, no diagnostics.
+    // Phase coupling (BS source terms) is applied separately in Stage 4.
+    void RHS_PerPhase(int lev,
+        Set::Scalar time,
+        Set::Scalar gamma_k,
+        Set::Scalar pi_k,
+        amrex::MultiFab &rho_rhs_mf,
+        amrex::MultiFab &M_rhs_mf,
+        amrex::MultiFab &E_rhs_mf,
         const amrex::MultiFab &rho_mf,
         const amrex::MultiFab &M_mf,
         const amrex::MultiFab &E_mf);

@@ -6,12 +6,12 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-# plot_file = ./tests/FlowRayleighPlesset/output_RPE
-plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE_20260416
+plot_file = ./tests/FlowRayleighPlesset/output_RPE
+# plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE_20260416
 
 ### MESHING ###
 amr.plot_dt = 0.5e-6
-# amr.plot_int = 1
+amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 4 # Must be >= nghost so FillBoundary can fill all ghost layers from neighbor valid cells
 amr.regrid_int = 1
@@ -35,7 +35,8 @@ geometry.prob_lo = -0.20 -0.20 0.0
 geometry.prob_hi =  0.20  0.20 0.0
 geometry.is_periodic = 0 0 0
 
-stop_time = 1e-3
+# stop_time = 1e-3
+stop_time = 1e-7
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
