@@ -196,8 +196,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         int nghost = value.nghost;
 
         // DIFFUSE PARAMETERS
-        value.RegisterNewFab(value.eta_mf,           value.density_bc, 1, nghost, "eta", true, true);
-        value.RegisterNewFab(value.eta_old_mf,       value.density_bc, 1, nghost, "eta_old", false, true);
+        value.RegisterNewFab(value.eta_mf,           value.energy_bc, 1, nghost, "eta", true, true);
+        value.RegisterNewFab(value.eta_old_mf,       value.energy_bc, 1, nghost, "eta_old", false, true);
         value.RegisterNewFab(value.rho_eta0_mf,      value.density_bc, 1, nghost, "rho_eta0", true, false);
         value.RegisterNewFab(value.rho_eta1_mf,      value.density_bc, 1, nghost, "rho_eta1", true, false);
         value.RegisterNewFab(value.rho_eta0_old_mf,  value.density_bc, 1, nghost, "rho_eta0_old", false, false);
@@ -1946,7 +1946,7 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
     }
 
     // Fill boundaries for psi using custom BC function
-    FillBoundariesWithBC(lev, 0.0, density_bc, { &psi_mf });
+    FillBoundariesWithBC(lev, 0.0, energy_bc, { &psi_mf });
 
     // ============================================================================
     // STEP 2: Reinitialize psi to signed distance function (Equation 10)
@@ -1957,7 +1957,7 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
     amrex::MFIter::allowMultipleMFIters(false);
 
     // Fill boundaries for reinitialized psi
-    FillBoundariesWithBC(lev, 0.0, density_bc, { &psi_reinit_mf });
+    FillBoundariesWithBC(lev, 0.0, energy_bc, { &psi_reinit_mf });
 
     // ============================================================================
     // STEP 3: Transform psi back to phi_sharp (Inverse of Equation 6)
@@ -1990,7 +1990,7 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
     // Fill boundaries for phi_sharp
     Util::ParallelMessage(INFO, "Filling Shrp Interface");
 
-    FillBoundariesWithBC(lev, 0.0, density_bc, { &phi_sharp_mf });
+    FillBoundariesWithBC(lev, 0.0, energy_bc, { &phi_sharp_mf });
 
     // ============================================================================
     // STEP 4: Density Correction with Compression Operators (Equations 15-16)
@@ -2361,6 +2361,7 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
     Util::ParallelMessage(INFO, "Filling Shrp Interface: Density Correction, COMPELTE");
 
     FillBoundariesWithBC(lev, 0.0, density_bc, { rho_eta0_mf[lev].get(), rho_eta1_mf[lev].get(), eta_mf[lev].get() });
+    FillBoundariesWithBC(lev, 0.0, energy_bc, { eta_mf[lev].get() });
 
     Util::Message(INFO, "=== INTERFACE SHARPENING COMPLETE ===");
 }
@@ -2665,7 +2666,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     // ------------------------------------------------------------
     // STEP 3: Fill Eta ghost cells
     // ------------------------------------------------------------
-    FillBoundariesWithBC(lev, time, density_bc, {
+    FillBoundariesWithBC(lev, time, energy_bc, {
             eta_mf[lev].get()
      });
 
