@@ -54,19 +54,19 @@ public:
         // ETA
         delete eta_ic;
         delete etadot_ic;
-        // FLUID 0
+        // PHASE eta=1 (liquid)
         delete density_eta1_ic;
         delete velocity_eta1_ic;
         delete pressure_eta1_ic;
-        delete energy0_ic;
+        delete energy_eta1_ic;
         //delete temperature0_ic; // Temperature
         //delete k0_thermal_ic;   // Thermal Conductivity
         //delete h0_thermal_ic;   // Thermal Convectivity
-        // FLUID 1
+        // PHASE eta=0 (gas)
         delete density_eta0_ic;
         delete velocity_eta0_ic;
         delete pressure_eta0_ic;
-        delete energy1_ic;
+        delete energy_eta0_ic;
         //delete temperature1_ic; // Temperature
        // delete k1_thermal_ic;   // Thermal Conductivity
         //delete h1_thermal_ic;   // Thermal Convectivity
@@ -123,15 +123,15 @@ protected:
                     amrex::Real time);
 
 protected:
-    // FLUID 0
+    // PHASE eta=1 (liquid — stiffened gas)
     Set::Field<Set::Scalar> density_eta1_mf;
     Set::Field<Set::Scalar> density_eta1_old_mf;
 
-    Set::Field<Set::Scalar> energy0_mf;
-    Set::Field<Set::Scalar> energy0_old_mf;
+    Set::Field<Set::Scalar> energy_eta1_mf;
+    Set::Field<Set::Scalar> energy_eta1_old_mf;
 
-    Set::Field<Set::Scalar> momentum0_mf;
-    Set::Field<Set::Scalar> momentum0_old_mf;
+    Set::Field<Set::Scalar> momentum_eta1_mf;
+    Set::Field<Set::Scalar> momentum_eta1_old_mf;
 
     //Set::Field<Set::Scalar> T0_mf;
     //Set::Field<Set::Scalar> k0_thermal_mf;
@@ -140,17 +140,18 @@ protected:
 
     Set::Field<Set::Scalar> velocity_eta1_mf;
     Set::Field<Set::Scalar> pressure_eta1_mf;
-    Set::Field<Set::Scalar> vorticity0_mf;
+    Set::Field<Set::Scalar> vorticity_eta1_mf;
+    Set::Field<Set::Scalar> c_eta1_mf;
 
-    // FLUID 1
+    // PHASE eta=0 (gas — CPG)
     Set::Field<Set::Scalar> density_eta0_mf;
     Set::Field<Set::Scalar> density_eta0_old_mf;
 
-    Set::Field<Set::Scalar> energy1_mf;
-    Set::Field<Set::Scalar> energy1_old_mf;
+    Set::Field<Set::Scalar> energy_eta0_mf;
+    Set::Field<Set::Scalar> energy_eta0_old_mf;
 
-    Set::Field<Set::Scalar> momentum1_mf;
-    Set::Field<Set::Scalar> momentum1_old_mf;
+    Set::Field<Set::Scalar> momentum_eta0_mf;
+    Set::Field<Set::Scalar> momentum_eta0_old_mf;
 
     //Set::Field<Set::Scalar> T1_mf;
     //Set::Field<Set::Scalar> k1_thermal_mf;
@@ -158,7 +159,8 @@ protected:
     //Set::Field<Set::Scalar> gamma_eta0_mf;
     Set::Field<Set::Scalar> velocity_eta0_mf;
     Set::Field<Set::Scalar> pressure_eta0_mf;
-    Set::Field<Set::Scalar> vorticity1_mf;
+    Set::Field<Set::Scalar> vorticity_eta0_mf;
+    Set::Field<Set::Scalar> c_eta0_mf;
 
     // Mixture
     Set::Field<Set::Scalar> density_mf;
@@ -244,7 +246,7 @@ protected:
     IC::IC<Set::Scalar>* velocity_eta1_ic = nullptr;
     IC::IC<Set::Scalar>* pressure_eta1_ic = nullptr;
     IC::IC<Set::Scalar>* density_eta1_ic  = nullptr;
-    IC::IC<Set::Scalar>* energy0_ic = nullptr;
+    IC::IC<Set::Scalar>* energy_eta1_ic = nullptr;
     //IC::IC<Set::Scalar>* temperature0_ic  = nullptr;
     //IC::IC<Set::Scalar>* k0_thermal_ic  = nullptr;
     //IC::IC<Set::Scalar>* h0_thermal_ic  = nullptr;
@@ -253,7 +255,7 @@ protected:
     IC::IC<Set::Scalar>* velocity_eta0_ic = nullptr;
     IC::IC<Set::Scalar>* pressure_eta0_ic = nullptr;
     IC::IC<Set::Scalar>* density_eta0_ic = nullptr;
-    IC::IC<Set::Scalar>* energy1_ic = nullptr;
+    IC::IC<Set::Scalar>* energy_eta0_ic = nullptr;
     //IC::IC<Set::Scalar>* temperature1_ic = nullptr;
     //IC::IC<Set::Scalar>* k1_thermal_ic  = nullptr;
     //IC::IC<Set::Scalar>* h1_thermal_ic  = nullptr;
@@ -278,12 +280,12 @@ protected:
     Set::Scalar rho_min = 1e10;
 
     Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion=NAN;
-    // FLUID 0
+    // PHASE eta=1 (liquid — stiffened gas)
     Set::Scalar gamma_eta1 = NAN, pi_eta1 = NAN, mu_eta1 = NAN, mu_eta1_b = NAN, MW0 = NAN;
     Set::Scalar b0 = NAN, q0EOS = NAN;
     Set::Scalar cp_eta1 = NAN, cv_eta1 = NAN;
 
-    // FLUID 1
+    // PHASE eta=0 (gas — CPG)
     Set::Scalar gamma_eta0 = NAN, pi_eta0 = NAN, mu_eta0 = NAN, mu_eta0_b = NAN, MW1 = NAN;
     Set::Scalar b1 = NAN, q1EOS = NAN;
     Set::Scalar cp_eta0 = NAN, cv_eta0 = NAN;

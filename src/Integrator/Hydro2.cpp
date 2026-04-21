@@ -89,7 +89,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("apply_vaporization", value.apply_vaporization, false);       // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
-        // FLUID 0
+        // PHASE eta=1 (liquid — stiffened gas)
         pp_query_required("gamma_eta1", value.gamma_eta1);      // gamma for gamma law
         pp_query_default("pi_eta1", value.pi_eta1, 0.0);      // pi for Tammann EOS
         pp_query_required("mu_eta1", value.mu_eta1);            // linear viscosity coefficient
@@ -99,7 +99,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // pp_query_required("R0", value.R0);              // Specific Gas Constant
         // pp_query_required("MW0", value.MW0);            // Molecular Weight
 
-        // FLUID 1
+        // PHASE eta=0 (gas — CPG)
         pp_query_required("gamma_eta0", value.gamma_eta0);      // gamma for gamma law
         pp_query_default("pi_eta0", value.pi_eta0, 0.0);      // pi for Tammann EOS
         pp_query_required("mu_eta0", value.mu_eta0);            // linear viscosity coefficient
@@ -149,15 +149,15 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing, 4, nghost, "hess_eta", false, false, { "00", "01", "10", "11" });
         value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing,  2, nghost, "n_hat", false, false, { "x", "y" });
 
-        // FLUID 0
+        // PHASE eta=1 (liquid)
         value.RegisterNewFab(value.density_eta1_mf,     value.density_bc,   1, nghost, "density_eta1",     false, false );
         value.RegisterNewFab(value.density_eta1_old_mf, value.density_bc,   1, nghost, "density_eta1_old", false, false);
 
-        value.RegisterNewFab(value.energy0_mf,      value.energy_bc,    1, nghost, "energy0", false, false);
-        value.RegisterNewFab(value.energy0_old_mf,  value.energy_bc,    1, nghost, "energy0_old" , false, false);
+        value.RegisterNewFab(value.energy_eta1_mf,      value.energy_bc,    1, nghost, "energy_eta1", false, false);
+        value.RegisterNewFab(value.energy_eta1_old_mf,  value.energy_bc,    1, nghost, "energy_eta1_old" , false, false);
 
-        value.RegisterNewFab(value.momentum0_mf,    value.momentum_bc,  2, nghost, "momentum0", false, false, { "x", "y" });
-        value.RegisterNewFab(value.momentum0_old_mf,value.momentum_bc,  2, nghost, "momentum0_old", false, false);
+        value.RegisterNewFab(value.momentum_eta1_mf,    value.momentum_bc,  2, nghost, "momentum_eta1", false, false, { "x", "y" });
+        value.RegisterNewFab(value.momentum_eta1_old_mf,value.momentum_bc,  2, nghost, "momentum_eta1_old", false, false);
 
         //value.RegisterNewFab(value.T0_mf,           value.temperature_bc, 1, nghost, "T0", false, false);
         //value.RegisterNewFab(value.k0_thermal_mf,   &value.bc_nothing, 1, nghost, "k0_thermal", false, false);
@@ -165,17 +165,18 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         value.RegisterNewFab(value.pressure_eta1_mf,    value.energy_bc,  1, nghost, "pressure_eta1", false, true);
         value.RegisterNewFab(value.velocity_eta1_mf,    &value.bc_nothing,  2, nghost, "velocity_eta1", false, false, { "x", "y" });
-        value.RegisterNewFab(value.vorticity0_mf,   &value.bc_nothing,  1, nghost, "vorticity0", false, false);
+        value.RegisterNewFab(value.vorticity_eta1_mf,   &value.bc_nothing,  1, nghost, "vorticity_eta1", false, false);
+        value.RegisterNewFab(value.c_eta1_mf,           &value.bc_nothing,  1, nghost, "c_eta1", true, false);
 
-        // FLUID 1
+        // PHASE eta=0 (gas)
         value.RegisterNewFab(value.density_eta0_mf,     value.density_bc,   1, nghost, "density_eta0", false, false);
         value.RegisterNewFab(value.density_eta0_old_mf, value.density_bc,   1, nghost, "density_eta0_old", false, false);
 
-        value.RegisterNewFab(value.energy1_mf,      value.energy_bc,    1, nghost, "energy1", false, false);
-        value.RegisterNewFab(value.energy1_old_mf,  value.energy_bc,    1, nghost, "energy1_old", false, false);
+        value.RegisterNewFab(value.energy_eta0_mf,      value.energy_bc,    1, nghost, "energy_eta0", false, false);
+        value.RegisterNewFab(value.energy_eta0_old_mf,  value.energy_bc,    1, nghost, "energy_eta0_old", false, false);
 
-        value.RegisterNewFab(value.momentum1_mf,    value.momentum_bc,  2, nghost, "momentum1", false, false, { "x", "y" });
-        value.RegisterNewFab(value.momentum1_old_mf,value.momentum_bc,  2, nghost, "momentum1_old", false, false);
+        value.RegisterNewFab(value.momentum_eta0_mf,    value.momentum_bc,  2, nghost, "momentum_eta0", false, false, { "x", "y" });
+        value.RegisterNewFab(value.momentum_eta0_old_mf,value.momentum_bc,  2, nghost, "momentum_eta0_old", false, false);
 
         //value.RegisterNewFab(value.T1_mf,           value.temperature_bc, 1, nghost, "T1", false, false);
         //value.RegisterNewFab(value.k1_thermal_mf,   &value.bc_nothing, 1, nghost, "k1_thermal", false, false);
@@ -183,7 +184,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         value.RegisterNewFab(value.pressure_eta0_mf,    value.energy_bc,  1, nghost, "pressure_eta0", false, true);
         value.RegisterNewFab(value.velocity_eta0_mf,    &value.bc_nothing,  2, nghost, "velocity_eta0", false, true, { "x", "y" });
-        value.RegisterNewFab(value.vorticity1_mf,   &value.bc_nothing,  1, nghost, "vorticity1", false, true);
+        value.RegisterNewFab(value.vorticity_eta0_mf,   &value.bc_nothing,  1, nghost, "vorticity_eta0", false, true);
+        value.RegisterNewFab(value.c_eta0_mf,           &value.bc_nothing,  1, nghost, "c_eta0", true, false);
 
         // MIXTURE
         value.RegisterNewFab(value.pressure_mf,     value.energy_bc, 1, nghost, "pressure", true, true);
@@ -261,7 +263,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<IC::Constant,IC::Expression>("velocity_eta1.ic",      value.velocity_eta1_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("pressure_eta1.ic",      value.pressure_eta1_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("density_eta1.ic",       value.density_eta1_ic,  value.geom);
-    // pp.select_default<IC::Constant,IC::Expression>("energy0.ic",       value.energy0_ic,  value.geom);
+    // pp.select_default<IC::Constant,IC::Expression>("energy_eta1.ic",       value.energy_eta1_ic,  value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("temperature0.ic",  value.temperature0_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("k0_thermal.ic",    value.k0_thermal_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("h1_thermal.ic",    value.h0_thermal_ic, value.geom);
@@ -271,7 +273,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<IC::Constant,IC::Expression>("velocity_eta0.ic",      value.velocity_eta0_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("pressure_eta0.ic",      value.pressure_eta0_ic, value.geom);
     pp.select_default<IC::Constant,IC::Expression>("density_eta0.ic",       value.density_eta0_ic,  value.geom);
-    // pp.select_default<IC::Constant,IC::Expression>("energy1.ic",       value.energy1_ic,  value.geom);
+    // pp.select_default<IC::Constant,IC::Expression>("energy_eta0.ic",       value.energy_eta0_ic,  value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("temperature1.ic",  value.temperature1_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("k1_thermal.ic",    value.k1_thermal_ic, value.geom);
     //pp.select_default<IC::Constant, IC::Expression>("h1_thermal.ic",    value.h1_thermal_ic, value.geom);
@@ -406,13 +408,13 @@ void Hydro2::Initialize(int lev)
     etadot_mf[lev]  ->setVal(0.0);
     hess_eta_mf[lev]->setVal(0.0);
 
-    // FLUID 0
+    // PHASE eta=1 (liquid)
     velocity_eta1_ic    ->Initialize(lev, velocity_eta1_mf, 0.0);
     pressure_eta1_ic    ->Initialize(lev, pressure_eta1_mf, 0.0);
     density_eta1_ic     ->Initialize(lev, density_eta1_mf, 0.0);
     density_eta1_ic     ->Initialize(lev, density_eta1_old_mf, 0.0);
 
-    // FLUID 1
+    // PHASE eta=0 (gas)
     velocity_eta0_ic    ->Initialize(lev, velocity_eta0_mf, 0.0);
     pressure_eta0_ic    ->Initialize(lev, pressure_eta0_mf, 0.0);
     density_eta0_ic     ->Initialize(lev, density_eta0_mf, 0.0);
@@ -502,9 +504,15 @@ void Hydro2::Mix(int lev)
         auto p0     = pressure_eta1_mf[lev]->const_array(mfi);
         auto p1     = pressure_eta0_mf[lev]->const_array(mfi);
 
-        // Outputs (phase energies)
-        auto E0     = energy0_mf[lev]->array(mfi);
-        auto E1     = energy1_mf[lev]->array(mfi);
+        // Outputs (per-phase conserved — will become primary state in Stage 3)
+        auto E0     = energy_eta1_mf[lev]->array(mfi);
+        auto E1     = energy_eta0_mf[lev]->array(mfi);
+        auto M0     = momentum_eta1_mf[lev]->array(mfi);
+        auto M0_old = momentum_eta1_old_mf[lev]->array(mfi);
+        auto M1     = momentum_eta0_mf[lev]->array(mfi);
+        auto M1_old = momentum_eta0_old_mf[lev]->array(mfi);
+        auto E0_old = energy_eta1_old_mf[lev]->array(mfi);
+        auto E1_old = energy_eta0_old_mf[lev]->array(mfi);
 
         // Mixture fields
         auto rho      = density_mf[lev]->array(mfi);
@@ -544,6 +552,13 @@ void Hydro2::Mix(int lev)
             if (UE0 < 0) UE0 = 0;
 
             E0(i,j,k) = KE0 + UE0;       // total energy per volume
+            E0_old(i,j,k) = E0(i,j,k);
+
+            // Per-phase momentum (primary conserved field for Stage 3)
+            M0(i,j,k,0) = r0 * u0x;
+            M0(i,j,k,1) = r0 * u0y;
+            M0_old(i,j,k,0) = M0(i,j,k,0);
+            M0_old(i,j,k,1) = M0(i,j,k,1);
 
 
             // ---------------- Phase 1 ----------------
@@ -556,6 +571,13 @@ void Hydro2::Mix(int lev)
             if (UE1 < 0) UE1 = 0;
 
             E1(i,j,k) = KE1 + UE1;       // total energy per volume
+            E1_old(i,j,k) = E1(i,j,k);
+
+            // Per-phase momentum (primary conserved field for Stage 3)
+            M1(i,j,k,0) = r1 * u1x;
+            M1(i,j,k,1) = r1 * u1y;
+            M1_old(i,j,k,0) = M1(i,j,k,0);
+            M1_old(i,j,k,1) = M1(i,j,k,1);
 
 
             //--------------------------------------------------------------
@@ -3507,6 +3529,15 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         auto p      = pressure_mf[lev]->array(mfi);
         auto Source = Source_mf[lev]->const_array(mfi);
 
+        // Per-phase diagnostic fields (Stage 2: computed from mixture (rho,UE)
+        // using each phase's own single-phase EOS — no Allaire blend).
+        auto p_e0   = pressure_eta0_mf[lev]->array(mfi);
+        auto p_e1   = pressure_eta1_mf[lev]->array(mfi);
+        auto v_e0   = velocity_eta0_mf[lev]->array(mfi);
+        auto v_e1   = velocity_eta1_mf[lev]->array(mfi);
+        auto c_e0   = c_eta0_mf[lev]->array(mfi);
+        auto c_e1   = c_eta1_mf[lev]->array(mfi);
+
         // Set::Patch<Set::Scalar> v = velocity_mf.Patch(lev, mfi);
         // Set::Patch<Set::Scalar> press = pressure_mf.Patch(lev, mfi);
         // Set::Patch<const Set::Scalar> Source = Source_mf.Patch(lev, mfi);
@@ -3611,6 +3642,35 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Set::Scalar safe_rho_a = (std::isfinite(rho(i,j,k)) && rho(i,j,k) > small) ? rho(i,j,k) : small;
                 a(i, j, k) = sqrt(gamma_mix(i, j, k) * (p(i, j, k) + pi_mix(i, j, k)) / safe_rho_a);
                 if (!std::isfinite(a(i, j, k))) a(i, j, k) = Set::Scalar(0.0);
+            }
+
+            // ---- Stage 2: per-phase diagnostics from mixture (rho, UE) ----
+            // Each phase inverts the SAME conserved state (rho, UE) with its
+            // OWN single-phase EOS. These diverge when pressures differ between
+            // phases — a quantitative measure of the Allaire mixing error.
+            // (Stage 3 will promote per-phase (rho, M, E) to primary state.)
+            {
+                Set::Scalar UE_c      = UE_vol(i, j, k);
+                Set::Scalar safe_rho_ = (std::isfinite(rho(i,j,k)) && rho(i,j,k) > small) ? rho(i,j,k) : small;
+
+                // Phase 0 (gas, CPG): p = (gamma - 1) * UE
+                Set::Scalar p0_ = Thermo_Interp::Pressure_CPG(UE_c, gamma_eta0) + pref;
+                if (!std::isfinite(p0_) || p0_ < 0.0) p0_ = 1e-6;
+                p_e0(i, j, k) = p0_;
+                c_e0(i, j, k) = Thermo_Interp::SoundSpeed_CPG(safe_rho_, p0_, gamma_eta0);
+
+                // Phase 1 (liquid, stiffened gas): p = (gamma - 1) * UE - gamma * pi
+                Set::Scalar p1_ = Thermo_Interp::Pressure_SG_UE(UE_c, gamma_eta1, pi_eta1) + pref;
+                if (!std::isfinite(p1_) || p1_ < 0.0) p1_ = 1e-6;
+                p_e1(i, j, k) = p1_;
+                c_e1(i, j, k) = Thermo_Interp::SoundSpeed_SG(safe_rho_, p1_, gamma_eta1, pi_eta1);
+
+                // Velocity is a pure mixture kinematic quantity at Stage 2;
+                // both phases see the same u until per-phase state is live.
+                v_e0(i, j, k, 0) = v(i, j, k, 0);
+                v_e0(i, j, k, 1) = v(i, j, k, 1);
+                v_e1(i, j, k, 0) = v(i, j, k, 0);
+                v_e1(i, j, k, 1) = v(i, j, k, 1);
             }
 
             // Mach Number

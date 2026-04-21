@@ -236,6 +236,46 @@ namespace Thermo_Interp
     }
 
     // -------------------------------------------------------------------------
+    // 7b) Per-phase single-phase EOS inversions on (rho, UE)
+    //     UE = rho * e (volumetric internal energy)
+    //     These are used in the dual-state BS formulation where each phase
+    //     carries its own (rho, M, E) and is closed by its own single-phase
+    //     EOS — no Allaire/Kapila mixing.
+    // -------------------------------------------------------------------------
+
+    // Calorically perfect gas: p = (gamma - 1) * UE
+    inline Scalar Pressure_CPG(Scalar UE, Scalar gamma)
+    {
+        return (gamma - Scalar(1.0)) * UE;
+    }
+
+    // Stiffened gas from volumetric UE: p = (gamma-1)*UE - gamma*pi
+    inline Scalar Pressure_SG_UE(Scalar UE, Scalar gamma, Scalar pi)
+    {
+        return (gamma - Scalar(1.0)) * UE - gamma * pi;
+    }
+
+    // Sound speed for CPG from (rho, p): c^2 = gamma * p / rho
+    inline Scalar SoundSpeed_CPG(Scalar rho, Scalar p, Scalar gamma)
+    {
+        Scalar c2 = gamma * p / rho;
+        return c2 > Scalar(0.0) ? std::sqrt(c2) : Scalar(0.0);
+    }
+
+    // Sound speed for stiffened gas: c^2 = gamma * (p + pi) / rho
+    inline Scalar SoundSpeed_SG(Scalar rho, Scalar p, Scalar gamma, Scalar pi)
+    {
+        Scalar c2 = gamma * (p + pi) / rho;
+        return c2 > Scalar(0.0) ? std::sqrt(c2) : Scalar(0.0);
+    }
+
+    // Temperature from specific internal energy and Cv (ideal / SG share form)
+    inline Scalar Temperature_FromE(Scalar e, Scalar Cv)
+    {
+        return (Cv > Scalar(0.0)) ? (e / Cv) : Scalar(0.0);
+    }
+
+    // -------------------------------------------------------------------------
     // 8) Generic interface interpolation (linear vs nonlinear gamma)
     // -------------------------------------------------------------------------
 
