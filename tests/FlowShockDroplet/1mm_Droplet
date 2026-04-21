@@ -9,7 +9,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 #plot_file = ./tests/FlowShockDroplet/output_Shock1mmDroplet
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_FAST
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_SLOW
 
 ### MESHING ###
 amr.plot_dt = 0.5e-6
@@ -81,7 +81,8 @@ density1.ic.expression.region0 = "rho_water"
 
 # Velocities (initially at rest, except shock region)
 velocity0.ic.type = expression
-velocity0.ic.expression.constant.u_shock = 500.0  # Shock velocity [m/s]
+#velocity0.ic.expression.constant.u_shock = 500.0  # Shock velocity [m/s]
+velocity0.ic.expression.constant.u_shock = 400.0  # Shock velocity [m/s]
 velocity0.ic.expression.constant.x_shock = -0.004
 velocity0.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
 velocity0.ic.expression.region1 = "0.0"

@@ -42,7 +42,7 @@ epsilon = eta.ic.expression.constant.epsilon
 # EQUATION OF STATE - FLUID 0 (LIQUID)
 #======================================================================
 eos0.gamma = 7.15
-eos0.p0 = 5000.0         # Stiffened gas pressure [Pa]
+eos0.p0 = 3.0e8          # Stiffened gas pressure [Pa]
 eos0.cv = 714.286        # cv = cp/gamma = 1000.0/1.4
 eos0.cp = 1000.0         # Specific heat at constant pressure [J/(kg·K)]
 
@@ -59,10 +59,10 @@ eos1.cp = 1000.0         # Specific heat at constant pressure [J/(kg·K)]
 # Density ratio 1 : 10
 # ----------------------------
 density0.ic.type = expression
-density0.ic.expression.region0 = "10.0"
+density0.ic.expression.region0 = "1000.0"
 
 density1.ic.type = expression
-density1.ic.expression.region0 = "1.0"
+density1.ic.expression.region0 = "2.0"
 
 # ----------------------------
 # Initial velocities (rest)
@@ -79,10 +79,10 @@ velocity1.ic.expression.region1 = "0.0"
 # Initial pressures
 # ----------------------------
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "500.0"
+pressure0.ic.expression.region0 = "1e5"
 
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "1000.0"
+pressure1.ic.expression.region0 = "2.0e5"
 
 # ----------------------------
 # Viscosity
@@ -121,7 +121,7 @@ momentum.bc.type.yhi = nscbc_outflow nscbc_outflow
 # NSCBC PARAMETERS - X-LO (LEFT BOUNDARY)
 #======================================================================
 nscbc.xlo.type = outflow
-nscbc.xlo.target_p = 500.0      # Target pressure [Pa] (matches far-field)
+nscbc.xlo.target_p = 1.0e5      # Target pressure [Pa] (matches far-field)
 nscbc.xlo.sigma = 0.25           # Pressure relaxation coefficient (from paper)
 nscbc.xlo.beta = 0.5             # Transverse term weight (from paper)
 nscbc.xlo.L_ref = 0.20           # Reference length = domain size
@@ -133,7 +133,7 @@ nscbc.xlo.target_v = 0.0
 # NSCBC PARAMETERS - X-HI (RIGHT BOUNDARY)
 #======================================================================
 nscbc.xhi.type = outflow
-nscbc.xhi.target_p = 500.0
+nscbc.xhi.target_p = 1.0e5
 nscbc.xhi.sigma = 0.25
 nscbc.xhi.beta = 0.5
 nscbc.xhi.L_ref = 0.20
@@ -145,7 +145,7 @@ nscbc.xhi.target_v = 0.0
 # NSCBC PARAMETERS - Y-LO (BOTTOM BOUNDARY)
 #======================================================================
 nscbc.ylo.type = outflow
-nscbc.ylo.target_p = 500.0
+nscbc.ylo.target_p = 1.0e5
 nscbc.ylo.sigma = 0.25
 nscbc.ylo.beta = 0.5
 nscbc.ylo.L_ref = 0.20
@@ -156,7 +156,7 @@ nscbc.ylo.target_v = 0.0
 # NSCBC PARAMETERS - Y-HI (TOP BOUNDARY)
 #======================================================================
 nscbc.yhi.type = outflow
-nscbc.yhi.target_p = 500.0
+nscbc.yhi.target_p = 1.0e5
 nscbc.yhi.sigma = 0.25
 nscbc.yhi.beta = 0.5
 nscbc.yhi.L_ref = 0.20
