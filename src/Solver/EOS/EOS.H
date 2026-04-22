@@ -152,8 +152,8 @@ public:
         Set::Scalar p0_eff = MixedP0(eta, eos0, eos1);
 
         Set::Scalar press = (gamma_eff - 1.0) * UE_vol - gamma_eff * p0_eff + pref;
-        //return std::max(press, small);
-        return std::max(press, 1.0);
+        return std::max(press, small);
+        //return std::max(press, 1.0);
         //return std::max(press, -p0_eff);
     }
 
@@ -167,7 +167,8 @@ public:
                                        Set::Scalar small = 1e-16)
     {
         Set::Scalar press = (gamma_eff - 1.0) * UE_vol - gamma_eff * p0_eff + pref;
-        return std::max(press, small);
+        //return std::max(press, small);
+        return std::max(press, 0.1);
     }
 
     /// Compute mixture internal energy from (p, eta)

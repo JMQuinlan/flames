@@ -7,7 +7,7 @@
 # Equation 68
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Garrick_GasLiquid_Large
+plot_file = ./tests/FlowRiemannUnitTests/output_Garrick_GasLiquid
 Riemann_Solver.type = hllc
 
 # Interface at x=0 (sharp transition)
@@ -16,25 +16,23 @@ eta.ic.expression.constant.epsilon = "1.25e-3"
 eta.ic.expression.region0 = "0.5 * (1.0 + tanh(x / epsilon))" 
 epsilon = eta.ic.expression.constant.epsilon
 
-#amr.plot_int = 1
-amr.plot_int = 10
+amr.plot_int = 50
 
 ### MESHING ###
 amr.max_level = 0
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.grid_eff = 0.8
-amr.n_cell = 800 120
+amr.n_cell = 800 16
 
 ### DIMENSIONS ###
-geometry.prob_lo = -1.0  -0.5   0.0 # [ m ]
-geometry.prob_hi =  1.0   0.5   0.0 # [ m ]
+geometry.prob_lo = -1.0  -0.02   0.0 # [ m ]
+geometry.prob_hi =  1.0   0.02   0.0 # [ m ]
 geometry.is_periodic = 0 1 0
 
 ### TIME STEP ###
 timestep  = 2.5e-4
-#stop_time = 0.2
-stop_time = 0.2
+stop_time = 5.0
 
 m0.ic.constant.value = 0.0
 u0.ic.constant.value = 0.0
@@ -42,13 +40,21 @@ q.ic.type = constant
 q.ic.constant.value = 0.0
 
 ### HYDRO PARAM ###
-gamma0 = 5.5   
-gamma1 = 1.4 
 cfl   = 0.4
+
+## EOS ##
+eos0.gamma = 5.5
+eos1.gamma = 1.4
+eos0.p0 = 1.505
+eos1.p0 = 0.0
+eos0.cp = 1004.5
+eos1.cp = 1004.5
+eos0.cv = 717.5
+eos1.cv = 717.5
+
+## Viscosity ##
 mu0   = 0.0
 mu1   = 0.0
-p0_0  = 1.505 
-p0_1  = 0.0  
 
 ### Surface tension coefficient ###
 sigma = 0.0       # No surface tension in this test
@@ -80,25 +86,39 @@ velocity1.ic.constant.value = 0.0 0.0
 pressure1.ic.type = constant
 pressure1.ic.constant.value = 2.753 
 
-cp1 = 1.4
-cv1 = 1.0
-
 ### ETA BC  ###
 ### HYDRO BC ###
+#======================================================================
+# BOUNDARY CONDITIONS - NSCBC
+#======================================================================
+# Use NSCBC for all boundaries (non-reflecting outflow)
 density.bc.type.xhi = neumann
-density.bc.type.xlo = neumann
+density.bc.type.xlo = nscbc_outflow
 density.bc.type.ylo = periodic
 density.bc.type.yhi = periodic
 
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = nscbc_outflow nscbc_outflow
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
 energy.bc.type.xhi = neumann
-energy.bc.type.xlo = neumann
+energy.bc.type.xlo = nscbc_outflow
 energy.bc.type.ylo = periodic
 energy.bc.type.yhi = periodic
 
-momentum.bc.type.xhi = neumann neumann
-momentum.bc.type.xlo = neumann neumann
-momentum.bc.type.ylo = periodic periodic
-momentum.bc.type.yhi = periodic periodic
+#======================================================================
+# NSCBC PARAMETERS - X-HI (RIGHT BOUNDARY)
+#======================================================================
+nscbc.xhi.type = outflow
+nscbc.xhi.target_p = 3.059e-4
+nscbc.xhi.sigma = 0.25
+nscbc.xhi.beta = 0.5
+nscbc.xhi.L_ref = 0.20
+nscbc.xhi.target_u = 0.0
+nscbc.xhi.target_v = 0.0
+
+nscbc.small = 1.0e-10
 
 ### HYDRO REFINEMENT CRITERIA ###
 eta_refinement_criterion   = 100000.1
@@ -114,3 +134,11 @@ g = 0.0
 apply_surface_tension = 0
 apply_weight = 0
 apply_vaporization = 0
+
+nghost = 4
+
+apply_sharpening = 0
+sharpening_frequency = 100
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+omega_relax = 0.5; 
