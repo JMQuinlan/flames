@@ -115,7 +115,11 @@ public:
                                const EOS &eos0,
                                const EOS &eos1)
     {
-        return eta * eos0.Cv() + (1.0 - eta) * eos1.Cv();
+        Set::Scalar A = eta / (eos0.Gamma() - 1.0) + (1.0 - eta) / (eos1.Gamma() - 1.0);
+        Set::Scalar B = eta / (eos0.Cv() * (eos0.Gamma() - 1.0)) + (1.0 - eta) / (eos1.Cv() * (eos1.Gamma() - 1.0));
+        
+        return A / B;
+        //return eta * eos0.Cv() + (1.0 - eta) * eos1.Cv();
     }
 
     /// Compute mixed specific heat at constant pressure (linear interpolation)
@@ -164,7 +168,6 @@ public:
     {
         Set::Scalar press = (gamma_eff - 1.0) * UE_vol - gamma_eff * p0_eff + pref;
         return std::max(press, small);
-        // return std::max(press, -p0_eff);
     }
 
     /// Compute mixture internal energy from (p, eta)
@@ -209,7 +212,7 @@ public:
         Set::Scalar p0_eff = MixedP0(eta, eos0, eos1);
         Set::Scalar cv_eff = MixedCv(eta, eos0, eos1);
 
-        return (p + p0_eff) / (rho * cv_eff * (gamma_eff - 1.0));
+        return (p + gamma_eff * p0_eff) / (rho * cv_eff * (gamma_eff - 1.0));
     }
 
     /// Compute mixture sound speed from (rho, p, eta)
