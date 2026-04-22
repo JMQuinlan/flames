@@ -11,7 +11,7 @@ SOLVER_LABELS=(
   Roe
   HLLE
   HLLC
-  HLLC_Oomar_Jainman
+  HLLC_Oomar_Jaiman
   HLLC_All_Mach
   HLLC_All_Mach_Furfaro
 )
@@ -33,7 +33,7 @@ TESTS=(
 # Epsilon values for diffuse interface
 EPSILONS=("1e-1" "1e-2" "1e-3")
 
-NP=8
+NP=6
 EXEC=./hydro2-2d-g++
 OUTDIR=./tests/FlowRiemannUnitTestsAUTO
 TEMPLATE_DIR=../tests/FlowRiemannUnitTests/TEMPLATES  # folder containing test-specific templates
