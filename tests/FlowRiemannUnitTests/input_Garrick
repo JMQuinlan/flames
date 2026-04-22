@@ -8,7 +8,7 @@
 
 ### OUTPUT ###
 plot_file = ./tests/FlowRiemannUnitTests/output_Garrick_GasLiquid12
-Riemann_Solver.type = hllc
+Riemann_Solver.type = hllc_oomar_jaiman
 
 # Interface at x=0 (sharp transition)
 eta.ic.type = expression
@@ -122,10 +122,7 @@ apply_surface_tension = 0
 apply_weight = 0
 apply_vaporization = 0
 
-nghost = 8
-
-
-
+nghost = 2
 
 apply_sharpening = 0
 sharpening_frequency = 100

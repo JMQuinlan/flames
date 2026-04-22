@@ -25,6 +25,7 @@
 #include "IO/ParmParse.H"
 #include "Solver/Local/FluidRiemann/Riemann.H"
 // #include "Util/Util.H"
+#include "Solver/EOS/EOS.H"
 
     namespace Solver
 {
@@ -84,14 +85,14 @@
             if (Spec_Vol == 1)
             {
                 // With Respect to Specific Volume (energies are per unit volume)
-                ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small);
-                ue_L = E_L - ke_L;
-                p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;
+                ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small);                        // KE per unit volume
+                ue_L = std::max(E_L - ke_L, small);                                                // IE per unit volume
+                p_L = Solver::EOS::EOS::TammannPressure(rho_L, ue_L, gamma_L, p0_L, p_ref, small); // (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;
                 h_TL = (ke_L + ue_L + p_L);
 
                 ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
-                ue_R = E_R - ke_R;
-                p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;
+                ue_R = std::max(E_R - ke_R, small);
+                p_R = Solver::EOS::EOS::TammannPressure(rho_R, ue_R, gamma_R, p0_R, p_ref, small); // (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;
                 h_TR = (ke_R + ue_R + p_R);
             }
             else
@@ -112,9 +113,16 @@
             Set::Scalar u_L = Mn_L / (rho_L + small), u_R = Mn_R / (rho_R + small);
             Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);
 
-            // Sound speeds (Tammann EOS)
-            Set::Scalar a_L = std::sqrt(gamma_L * (p_L + p0_L) / (rho_L + small));
-            Set::Scalar a_R = std::sqrt(gamma_R * (p_R + p0_R) / (rho_R + small));
+            // Limiting
+            Set::Scalar u_limit = 1e8;
+            u_L = (u_L < 0.0) ? std::max(u_L, -u_limit) : std::min(u_L, u_limit);
+            v_L = (v_L < 0.0) ? std::max(v_L, -u_limit) : std::min(v_L, u_limit);
+            u_R = (u_R < 0.0) ? std::max(u_R, -u_limit) : std::min(u_R, u_limit);
+            v_R = (v_R < 0.0) ? std::max(v_R, -u_limit) : std::min(v_R, u_limit);
+
+            // Sound Speeds
+            Set::Scalar a_L = Solver::EOS::EOS::TammannSoundSpeed(rho_L, p_L, gamma_L, p0_L, small);
+            Set::Scalar a_R = Solver::EOS::EOS::TammannSoundSpeed(rho_R, p_R, gamma_R, p0_R, small);
 
             // ========================================
             // STANDARD HLLC WAVE SPEEDS (UNCHANGED)

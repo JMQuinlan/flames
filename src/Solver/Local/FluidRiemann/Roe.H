@@ -18,6 +18,8 @@
 #include "IO/ParmParse.H"
 #include "Solver/Local/FluidRiemann/Riemann.H"
 //#include "Util/Util.H"
+#include "Solver/EOS/EOS.H"
+
 
 namespace Solver
 {
@@ -76,9 +78,9 @@ public:
         {
             // With Respect to Specific Volume (energies are per unit volume)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small);
-            ue_L = E_L - ke_L;
-            p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;
-            h_TL = (E_L + p_L) / (rho_L + small); // Specific enthalpy
+            ue_L = std::max(E_L - ke_L, small);                                                // IE per unit volume
+            p_L = Solver::EOS::EOS::TammannPressure(rho_L, ue_L, gamma_L, p0_L, p_ref, small); // (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;
+            h_TL = (E_L + p_L) / (rho_L + small);                                              // Specific enthalpy
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
             ue_R = E_R - ke_R;
@@ -89,9 +91,9 @@ public:
         {
             // With Respect to Specific Mass (energies are per unit mass)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small);
-            ue_L = E_L - ke_L;
-            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;
-            h_TL = E_L + p_L / (rho_L + small); // Specific enthalpy
+            ue_R = std::max(E_R - ke_R, small);
+            p_R = Solver::EOS::EOS::TammannPressure(rho_R, ue_R, gamma_R, p0_R, p_ref, small); // (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;
+            h_TL = E_L + p_L / (rho_L + small);                                                // Specific enthalpy
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
             ue_R = E_R - ke_R;

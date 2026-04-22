@@ -34,13 +34,13 @@ q.ic.type = constant
 q.ic.constant.value = 0.0
 
 ### HYDRO PARAM ###
-gamma0 = 1.4
-gamma1 = 1.4
+eos0.gamma = 1.4
+eos1.gamma = 1.4
 cfl   = 0.4
 mu0   = 0.0
 mu1   = 0.0
-p0_0  = 0.0
-p0_1  = 0.0
+eos0.p0 = "0.0"
+eos1.p0 = "0.0"
 
 ### Surface tension coefficient ###
 sigma = 1000
@@ -62,8 +62,8 @@ pressure0.ic.type = expression
 pressure0.ic.expression.constant.p_L = "460.894"
 pressure0.ic.expression.region0 = "p_L"
 
-cp0 = "1.4"
-cv0 = "1.0"
+eos0.cp = "1.4"
+eos0.cv = "1.0"
 
 ### IC State - Fluid 1 (Right side, x > 0) ###
 density1.ic.type = expression
@@ -79,8 +79,8 @@ pressure1.ic.type = expression
 pressure1.ic.expression.constant.p_R = "46.0950"
 pressure1.ic.expression.region0 = "p_R"
 
-cp1 = "1.4"
-cv1 = "1.0"
+eos1.cp = "1.4"
+eos1.cv = "1.0"
 
 ### ETA BC  ###
 pf.eta.bc.type.xlo = neumann

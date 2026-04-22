@@ -67,7 +67,7 @@ public:
         {
             // With Respect to Specific Volume (energies are per unit volume)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small); // KE per unit volume
-            ue_L = std::max(E_L - ke_L, small);                           // IE per unit volume
+            ue_L = std::max(E_L - ke_L, small);                         // IE per unit volume
             p_L = Solver::EOS::EOS::TammannPressure(rho_L, ue_L, gamma_L, p0_L, p_ref, small); // (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;
             h_TL = (ke_L + ue_L + p_L);
 
