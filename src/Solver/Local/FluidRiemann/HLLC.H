@@ -90,17 +90,6 @@ public:
             h_TR = ke_R + ue_R + (p_R / rho_R);
         }
 
-        /*
-        ke_L = std::min(E_L, std::max(small, ke_L));
-        ke_R = std::min(E_R, std::max(small, ke_R));
-        ue_L = std::max(small, ue_L);
-        ue_R = std::max(small, ue_R);
-        
-
-        p_L = std::max(small, p_L);
-        p_R = std::max(small, p_R);
-        */
-
         // Acoustic Speeds
         Set::Scalar u_L = Mn_L / (rho_L + small), u_R = Mn_R / (rho_R + small);
         Set::Scalar v_L = Mt_L / (rho_L + small), v_R = Mt_R / (rho_R + small);

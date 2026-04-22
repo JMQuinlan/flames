@@ -2705,9 +2705,11 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             v(i, j, k, 1) = M(i, j, k, 1) / rho(i, j, k);
 
             // Limiting Velocity
+            /*
             Set::Scalar u_limit = 1e8;
             v(i, j, k, 0) = (v(i, j, k, 0) < 0.0) ? std::max(v(i, j, k, 0), -u_limit) : std::min(v(i, j, k, 0), u_limit);
             v(i, j, k, 1) = (v(i, j, k, 1) < 0.0) ? std::max(v(i, j, k, 1), -u_limit) : std::min(v(i, j, k, 1), u_limit);
+            */
 
             // Kinetic energy
             KE(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));

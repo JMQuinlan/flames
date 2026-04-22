@@ -28,8 +28,8 @@ timestep = 1e-12
 ## Adaptive
 dynamictimestep.on = 1
 dynamictimestep.verbose = 1
-dynamictimestep.max = 1e-6
-dynamictimestep.min = 1e-16
+dynamictimestep.max = 1e-4
+dynamictimestep.min = 1e-9
 cfl = 0.5
 
 ### DIMENSIONS ###
