@@ -1654,6 +1654,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         
             v(i,j,k,0) = M(i,j,k,0) / (rho(i,j,k));
             v(i,j,k,1) = M(i,j,k,1) / (rho(i,j,k));
+
+            // Limiting Velocity
+            Set::Scalar u_limit = 1e8;
+            v(i, j, k, 0) = (v(i, j, k, 0) < 0.0) ? std::max(v(i, j, k, 0), -u_limit) : std::min(v(i, j, k, 0), u_limit);
+            v(i, j, k, 1) = (v(i, j, k, 1) < 0.0) ? std::max(v(i, j, k, 1), -u_limit) : std::min(v(i, j, k, 1), u_limit);
         
             KE_vol(i,j,k) = 0.5 * rho(i,j,k) * (v(i,j,k,0) * v(i,j,k,0) + v(i,j,k,1) * v(i,j,k,1));
             KE_mas(i,j,k) = 0.5 * (v(i,j,k,0) * v(i,j,k,0) + v(i,j,k,1) * v(i,j,k,1));
