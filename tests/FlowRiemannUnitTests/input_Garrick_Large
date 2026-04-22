@@ -7,7 +7,7 @@
 # Equation 68
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Garrick_GasLiquid_Large2
+plot_file = ./tests/FlowRiemannUnitTests/output_Garrick_GasLiquid_Large
 Riemann_Solver.type = hllc
 
 # Interface at x=0 (sharp transition)
@@ -17,7 +17,7 @@ eta.ic.expression.region0 = "0.5 * (1.0 + tanh(x / epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
 
 #amr.plot_int = 1
-amr.plot_int = 1
+amr.plot_int = 10
 
 ### MESHING ###
 amr.max_level = 0
