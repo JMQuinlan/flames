@@ -117,7 +117,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
     
         // Boundry Conditions
-        pp_query_default("nghost", value.nghost, 2);
+        pp_query_default("nghost", value.nghost, 2); // Number of Ghost Cells
 
         bool uses_nscbc = false;
         std::vector<std::string> bc_faces = { "xlo", "xhi", "ylo", "yhi" };
