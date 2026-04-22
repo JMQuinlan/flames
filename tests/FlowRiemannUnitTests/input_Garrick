@@ -8,7 +8,7 @@
 
 ### OUTPUT ###
 plot_file = ./tests/FlowRiemannUnitTests/output_Garrick_GasLiquid12
-Riemann_Solver.type = hllc_oomar_jaiman
+Riemann_Solver.type = hllc
 
 # Interface at x=0 (sharp transition)
 eta.ic.type = expression
