@@ -113,7 +113,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // INTERACTIONS
         pp_query_default("sigma", value.sigma, 0.0);    // Surface tension condition
         pp_query_default("Dv", value.Dv, 0.0);          // Vapor Diffusivity
-        pp_query_required("epsilon", value.epsilon);    // diffuse interface thickness Y_infinity
+        pp_query_required("epsilon", value.epsilon);    // diffuse interface thickness
         pp_query_default("Y_infinity", value.Y_infinity, 0.0); // Far Field Vapor Mass Fraction
 
         // CURVATURE
@@ -138,7 +138,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     }
 
     // Register FabFields:
-    // Toggle the last boolean to true/false to track the variable or not.
+    // Toggle the boolean after the variable name to true/false to track the variable or not.
     {
         int nghost = value.nghost;
 
@@ -150,41 +150,41 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing,  2, nghost, "n_hat", false, false, { "x", "y" });
 
         // PHASE eta=1 (liquid)
-        value.RegisterNewFab(value.density_eta1_mf,     value.density_bc,   1, nghost, "density_eta1",     false, false );
+        value.RegisterNewFab(value.density_eta1_mf,     value.density_bc,   1, nghost, "density_eta1",     true, false );
         value.RegisterNewFab(value.density_eta1_old_mf, value.density_bc,   1, nghost, "density_eta1_old", false, false);
 
-        value.RegisterNewFab(value.energy_eta1_mf,      value.energy_bc,    1, nghost, "energy_eta1", false, false);
+        value.RegisterNewFab(value.energy_eta1_mf,      value.energy_bc,    1, nghost, "energy_eta1", true, false);
         value.RegisterNewFab(value.energy_eta1_old_mf,  value.energy_bc,    1, nghost, "energy_eta1_old" , false, false);
 
-        value.RegisterNewFab(value.momentum_eta1_mf,    value.momentum_bc,  2, nghost, "momentum_eta1", false, false, { "x", "y" });
+        value.RegisterNewFab(value.momentum_eta1_mf,    value.momentum_bc,  2, nghost, "momentum_eta1", true, false, { "x", "y" });
         value.RegisterNewFab(value.momentum_eta1_old_mf,value.momentum_bc,  2, nghost, "momentum_eta1_old", false, false);
 
         //value.RegisterNewFab(value.T0_mf,           value.temperature_bc, 1, nghost, "T0", false, false);
         //value.RegisterNewFab(value.k0_thermal_mf,   &value.bc_nothing, 1, nghost, "k0_thermal", false, false);
         //value.RegisterNewFab(value.h0_thermal_mf,   &value.bc_nothing, 1, nghost, "h0_thermal", false, false);
 
-        value.RegisterNewFab(value.pressure_eta1_mf,    value.energy_bc,  1, nghost, "pressure_eta1", false, true);
+        value.RegisterNewFab(value.pressure_eta1_mf,    value.energy_bc,  1, nghost, "pressure_eta1", true, false);
         value.RegisterNewFab(value.velocity_eta1_mf,    &value.bc_nothing,  2, nghost, "velocity_eta1", false, false, { "x", "y" });
         value.RegisterNewFab(value.vorticity_eta1_mf,   &value.bc_nothing,  1, nghost, "vorticity_eta1", false, false);
         value.RegisterNewFab(value.c_eta1_mf,           &value.bc_nothing,  1, nghost, "c_eta1", true, false);
 
         // PHASE eta=0 (gas)
-        value.RegisterNewFab(value.density_eta0_mf,     value.density_bc,   1, nghost, "density_eta0", false, false);
+        value.RegisterNewFab(value.density_eta0_mf,     value.density_bc,   1, nghost, "density_eta0", true, false);
         value.RegisterNewFab(value.density_eta0_old_mf, value.density_bc,   1, nghost, "density_eta0_old", false, false);
 
-        value.RegisterNewFab(value.energy_eta0_mf,      value.energy_bc,    1, nghost, "energy_eta0", false, false);
+        value.RegisterNewFab(value.energy_eta0_mf,      value.energy_bc,    1, nghost, "energy_eta0", true, false);
         value.RegisterNewFab(value.energy_eta0_old_mf,  value.energy_bc,    1, nghost, "energy_eta0_old", false, false);
 
-        value.RegisterNewFab(value.momentum_eta0_mf,    value.momentum_bc,  2, nghost, "momentum_eta0", false, false, { "x", "y" });
+        value.RegisterNewFab(value.momentum_eta0_mf,    value.momentum_bc,  2, nghost, "momentum_eta0", true, false, { "x", "y" });
         value.RegisterNewFab(value.momentum_eta0_old_mf,value.momentum_bc,  2, nghost, "momentum_eta0_old", false, false);
 
         //value.RegisterNewFab(value.T1_mf,           value.temperature_bc, 1, nghost, "T1", false, false);
         //value.RegisterNewFab(value.k1_thermal_mf,   &value.bc_nothing, 1, nghost, "k1_thermal", false, false);
         //value.RegisterNewFab(value.h1_thermal_mf,   &value.bc_nothing, 1, nghost, "h1_thermal", false, false);
 
-        value.RegisterNewFab(value.pressure_eta0_mf,    value.energy_bc,  1, nghost, "pressure_eta0", false, true);
-        value.RegisterNewFab(value.velocity_eta0_mf,    &value.bc_nothing,  2, nghost, "velocity_eta0", false, true, { "x", "y" });
-        value.RegisterNewFab(value.vorticity_eta0_mf,   &value.bc_nothing,  1, nghost, "vorticity_eta0", false, true);
+        value.RegisterNewFab(value.pressure_eta0_mf,    value.energy_bc,  1, nghost, "pressure_eta0", true, false);
+        value.RegisterNewFab(value.velocity_eta0_mf,    &value.bc_nothing,  2, nghost, "velocity_eta0", false, false, { "x", "y" });
+        value.RegisterNewFab(value.vorticity_eta0_mf,   &value.bc_nothing,  1, nghost, "vorticity_eta0", false, false);
         value.RegisterNewFab(value.c_eta0_mf,           &value.bc_nothing,  1, nghost, "c_eta0", true, false);
 
         // MIXTURE
@@ -192,9 +192,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.velocity_mf,     &value.bc_nothing,  2, nghost, "velocity", true, false, { "x", "y" });
         value.RegisterNewFab(value.vorticity_mf,    &value.bc_nothing,  1, nghost, "vorticity", true, false);
         value.RegisterNewFab(value.density_mf,      value.density_bc,   1, nghost, "density", true, true);
-        value.RegisterNewFab(value.density_old_mf,  value.density_bc,   1, nghost, "density_old", false, true);
+        value.RegisterNewFab(value.density_old_mf,  value.density_bc,   1, nghost, "density_old", false, false);
         value.RegisterNewFab(value.energy_per_vol_mf,       value.energy_bc,    1, nghost, "energy_per_vol", true, true);
-        value.RegisterNewFab(value.energy_per_mass_mf,       value.energy_bc,    1, nghost, "energy_per_mass", true, true);
+        value.RegisterNewFab(value.energy_per_mass_mf,       value.energy_bc,    1, nghost, "energy_per_mass", false, true);
         value.RegisterNewFab(value.energy_per_vol_old_mf,   value.energy_bc,    1, nghost, "energy_vol_old", false, true);
         value.RegisterNewFab(value.energy_per_mass_old_mf,   value.energy_bc,    1, nghost, "energy_mass_old", false, true);
         value.RegisterNewFab(value.momentum_mf,     value.momentum_bc,  2, nghost, "momentum", true, true, { "x", "y" });
@@ -209,19 +209,19 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.Fw_mf,           &value.bc_nothing,  2, nghost, "Fw", true, false, { "x", "y" });   // Weight
         value.RegisterNewFab(value.Ldot_mf,         &value.bc_nothing,  2, nghost, "Ldot", true, false, { "x", "y" });  // Ldot
         value.RegisterNewFab(value.T_mf,            value.energy_bc,  1, nghost, "T", true, false);                  // Temperature
-        value.RegisterNewFab(value.cp_mf,           &value.bc_nothing,  1, nghost, "cp", false, true);         // Constant Pressure Specific Heat
-        value.RegisterNewFab(value.cv_mf,           &value.bc_nothing,  1, nghost, "cv", false, true);         // Constant Volume Specific Heat
+        value.RegisterNewFab(value.cp_mf,           &value.bc_nothing,  1, nghost, "cp", false, false);         // Constant Pressure Specific Heat
+        value.RegisterNewFab(value.cv_mf,           &value.bc_nothing,  1, nghost, "cv", false, false);         // Constant Volume Specific Heat
         //value.RegisterNewFab(value.k_thermal_mf,    &value.bc_nothing,  1, nghost, "k_thermal", false, true);         // Thermal Conductivity
         //value.RegisterNewFab(value.h_thermal_mf,    &value.bc_nothing,  1, nghost, "h_thermal", false, true);         // Thermal Convectivity
         value.RegisterNewFab(value.gamma_mf,        value.energy_bc, 1, nghost, "gamma", true, false);                 // Specific Heat Ratio
-        value.RegisterNewFab(value.pi_mf,   value.energy_bc, 1, nghost, "Tamann_pi", true, true);                    // Tamman Pressure
+        value.RegisterNewFab(value.pi_mf,   value.energy_bc, 1, nghost, "Tamann_pi", true, false);                    // Tamman Pressure
         value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc, 1, nghost, "mu_chem", true, false);               // Chemical Potential
         value.RegisterNewFab(value.a_mf,            &value.bc_nothing,  1, nghost, "a", true, false);                    // Speed of sound
         value.RegisterNewFab(value.Ma_mf,           &value.bc_nothing,  2, nghost, "Ma", true, false, { "x", "y" });   // Mach
         value.RegisterNewFab(value.UE_per_vol_mf,   &value.bc_nothing,  1, nghost, "UE_per_vol", true, false);         // Internal Energy (per unit volume)
-        value.RegisterNewFab(value.UE_per_mass_mf,   &value.bc_nothing,  1, nghost, "UE_per_mass", true, false);        // Internal Energy (per unit mass)
+        value.RegisterNewFab(value.UE_per_mass_mf,   &value.bc_nothing,  1, nghost, "UE_per_mass", false, false);        // Internal Energy (per unit mass)
         value.RegisterNewFab(value.KE_per_vol_mf,   &value.bc_nothing,  1, nghost, "KE_per_vol", true, false);         // Kinetic Energy (per unit volume)
-        value.RegisterNewFab(value.KE_per_mass_mf,   &value.bc_nothing,  1, nghost, "KE_per_mass", true, false);        // Kinetic Energy (per unit mass)
+        value.RegisterNewFab(value.KE_per_mass_mf,   &value.bc_nothing,  1, nghost, "KE_per_mass", false, false);        // Kinetic Energy (per unit mass)
         value.RegisterNewFab(value.Bm_mf,           &value.bc_nothing,  1, nghost, "Spadling_Number", true, false);    // Spalding Number
         value.RegisterNewFab(value.Y_mf,            &value.bc_nothing,  1, nghost, "Mass_Fraction", true, false);       // Mass Fraction
 
@@ -236,7 +236,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.eta_y_mf,               &value.bc_nothing,  1, nghost, "eta_y", true, false);
 
         // EXTRAS & DEBUGGING
-        value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", false, false, { "x", "y" });
+        value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", true, false, { "x", "y" });
         value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, nghost, "kappa", true, false, { "Active", "HF", "SN" }); // Active=selected method, HF=height function, SN=smooth normals (raw div)
         value.RegisterNewFab(value.grad_mag_grad_eta_mf, &value.bc_nothing, 2, nghost, "grad_mag_grad_eta", false, false, { "x", "y" }); // grad( | grad(eta) | )
         value.RegisterNewFab(value.rho_flux_mf,     &value.bc_nothing,  1, nghost, "rho_flux", true, false);                    // Density Flux
@@ -795,7 +795,6 @@ void Hydro2::MixDiagnostic(int lev)
 // state (rho, M, E). No Allaire blend, no Kapila sources, no diagnostics.
 // BS phase-coupling source terms are added externally (Stage 4).
 //
-// NOT YET CALLED — prep only. Stage 3-IIb will wire this into Advance().
 void Hydro2::RHS_PerPhase(int lev,
                           Set::Scalar /*time*/,
                           Set::Scalar gamma_k,
@@ -965,7 +964,7 @@ Hydro2::RHS_Eta(int lev,
 
             // Upwind η at each face based on face velocity sign
             Real eta_xm = (u_xm >= Real(0.0)) ? eta_arr(i-1,j,k) : eta_loc;
-            Real eta_xp = (u_xp >= Real(0.0)) ? eta_loc         : eta_arr(i+1,j,k);
+            Real eta_xp = (u_xp >= Real(0.0)) ? eta_loc          : eta_arr(i+1,j,k);
             Real eta_ym = (v_ym >= Real(0.0)) ? eta_arr(i,j-1,k) : eta_loc;
             Real eta_yp = (v_yp >= Real(0.0)) ? eta_loc          : eta_arr(i,j+1,k);
 
@@ -981,7 +980,7 @@ Hydro2::RHS_Eta(int lev,
 
             Real eta_dot_Vap = Real(0.0);
             if (apply_vap_ == 1) {
-                Real gex = (eta_arr(i+1,j,k) - eta_arr(i-1,j,k)) / (Real(2.0)*DX[0]);
+                Real gex = (eta_arr(i+1,j,k) - eta_arr(i-1,j,k)) / (Real(2.0)*DX[0]); // Central difference gradient (why not use built in stencil?)
                 Real gey = (eta_arr(i,j+1,k) - eta_arr(i,j-1,k)) / (Real(2.0)*DX[1]);
                 Real grad_eta_mag = std::sqrt(gex*gex + gey*gey);
                 Real rho_loc = one_e*r0_arr(i,j,k) + eta_loc*r1_arr(i,j,k);
@@ -1041,6 +1040,35 @@ Hydro2::ApplyBSSource(int lev,
     const Real pi0 = pi_eta0,   pi1 = pi_eta1;
     const Real pref_ = pref;
 
+    const Real sigma_   = sigma;
+    const Real epsilon_ = epsilon;
+    const int  do_st    = apply_surface_tension;
+
+     amrex::Print() << "[BS] eta min/max on lev " << lev
+                 << " = " << eta_mf_in.min(0) << " / " << eta_mf_in.max(0)
+                 << "\n";
+
+    {
+      Real gmax = 0.0;
+      int n_band = 0;
+      for (MFIter mfi(eta_mf_in, false); mfi.isValid(); ++mfi) {
+          const Box& bx = mfi.validbox();
+          auto eta = eta_mf_in.const_array(mfi);
+          amrex::LoopOnCpu(bx, [&](int i, int j, int k) {
+              auto sten = Numeric::GetStencil(i, j, k, domain);
+              Set::Vector g = Numeric::Gradient(eta, i, j, k, 0, DX, sten);
+              Real m = g.lpNorm<2>();
+              if (m > gmax) gmax = m;
+              if (m > 1e-30) n_band++;
+          });
+      }
+      amrex::ParallelDescriptor::ReduceRealMax(gmax);
+      amrex::ParallelDescriptor::ReduceIntSum(n_band);
+      amrex::Print() << "[BS] lev=" << lev
+                     << "  max|grad_eta|=" << gmax
+                     << "  n_band_cells=" << n_band << "\n";
+    }
+
     for (MFIter mfi(eta_mf_in, TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
         const Box& bx = mfi.validbox();
@@ -1056,6 +1084,8 @@ Hydro2::ApplyBSSource(int lev,
         auto m0_arr  = m0_mf[lev]->const_array(mfi);
         auto u0_arr  = u0_mf[lev]->const_array(mfi);
         auto q_arr   = q_mf[lev]->const_array(mfi);
+
+        auto kap_arr = kappas_mf[lev]->const_array(mfi);
 
         auto R0 = rho0_rhs_mf.array(mfi);
         auto P0 = M0_rhs_mf.array(mfi);
@@ -1103,19 +1133,44 @@ Hydro2::ApplyBSSource(int lev,
             R0(i,j,k) += -Smass;
             R1(i,j,k) += +Smass;
 
-            // === Momentum: ±(p_int·∇η + ṁ₀·u₀·|∇η|) ===
+            // === Surface tension: Fsv = σ·κ·ε·∇η on the mixture ===
+            // Distributed η-weighted across phases so Σ_k (contribution_k) = Fsv.
+            // Phase 0 gets (1-η)·Fsv, phase 1 gets η·Fsv. Sum = Fsv on mixture.
+            Real Fsv_x = Real(0.0), Fsv_y = Real(0.0);
+            if (do_st)
+            {
+                Real kappa = kap_arr(i,j,k,0);
+                Fsv_x = sigma_ * kappa * epsilon_ * grad_eta(0);
+                Fsv_y = sigma_ * kappa * epsilon_ * grad_eta(1);
+            }
+            Real eta_c = eta(i,j,k);
+            if (eta_c < Real(0.0)) eta_c = Real(0.0);
+            if (eta_c > Real(1.0)) eta_c = Real(1.0);
+            Real w0 = Real(1.0) - eta_c;
+            Real w1 = eta_c;
+
+            // Energy work from surface tension, using each phase's own velocity.
+            // (Fsv · u_k) weighted by the same phase split.
+            Real u0x_ph = M0_arr(i,j,k,0) / safe_r0;
+            Real u0y_ph = M0_arr(i,j,k,1) / safe_r0;
+            Real u1x_ph = M1_arr(i,j,k,0) / safe_r1;
+            Real u1y_ph = M1_arr(i,j,k,1) / safe_r1;
+            Real Fsv_work_0 = Fsv_x*u0x_ph + Fsv_y*u0y_ph;
+            Real Fsv_work_1 = Fsv_x*u1x_ph + Fsv_y*u1y_ph;
+
+            // === Momentum: ±(p_int·∇η + ṁ₀·u₀·|∇η|)  plus  η-split Fsv ===
             Real Smx = p_int*grad_eta(0) + mdot0*u0x*grad_eta_mag;
             Real Smy = p_int*grad_eta(1) + mdot0*u0y*grad_eta_mag;
-            P0(i,j,k,0) += -Smx;
-            P0(i,j,k,1) += -Smy;
-            P1(i,j,k,0) += +Smx;
-            P1(i,j,k,1) += +Smy;
+            P0(i,j,k,0) += -Smx + w0*Fsv_x;
+            P0(i,j,k,1) += -Smy + w0*Fsv_y;
+            P1(i,j,k,0) += +Smx + w1*Fsv_x;
+            P1(i,j,k,1) += +Smy + w1*Fsv_y;
 
-            // === Energy: ±(p_int·u₀·∇η + q̇₀·∇η) ===
+            // === Energy: ±(p_int·u₀·∇η + q̇₀·∇η)  plus  η-split Fsv·u_k work ===
             Real SE = p_int*(u0x*grad_eta(0) + u0y*grad_eta(1))
                     + (qx*grad_eta(0) + qy*grad_eta(1));
-            U0(i,j,k) += -SE;
-            U1(i,j,k) += +SE;
+            U0(i,j,k) += -SE + w0*Fsv_work_0;
+            U1(i,j,k) += +SE + w1*Fsv_work_1;
         });
     }
 }
@@ -3722,6 +3777,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         amrex::Vector<amrex::MultiFab>& sol_mf,
         const Real t)
     {
+        // Interface geometry pipeline: populates grad_eta_mf (etax, etay, gradmag)
+        // and kappas_mf from the current stage eta. Reads eta_mf[lev] (the member),
+        // not sol_mf[0], so this uses beginning-of-step η for multi-stage schemes.
+        // For FE this is exact; for RK2+ consider syncing eta_mf[lev] ← sol_mf[0]
+        // before this call.
+        ComputeKappas(lev);
+
         RHS_Eta(lev, t,
                 rhs_mf[0],
                 sol_mf[0],
