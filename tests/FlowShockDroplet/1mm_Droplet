@@ -169,7 +169,7 @@ Riemann_Solver.type = hllc
 kappa_method = 1   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
 
 
-apply_sharpening = 1
+apply_sharpening = 0
 sharpening_frequency = 100
 reinit_max_iter = 20
 reinit_tolerance = 1e-6
