@@ -11,15 +11,17 @@ plot_file = ./tests/FlowRayleighPlesset/output_RPE_Q_202060421
 
 ### MESHING ###
 amr.plot_dt = 0.5e-6
-amr.plot_int = 5
+amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 4 # Must be >= nghost so FillBoundary can fill all ghost layers from neighbor valid cells
 amr.regrid_int = 1
 amr.grid_eff = 0.8
 # amr.max_level = 5
 amr.max_level = 4
+# amr.max_level = 0
 amr.n_cell = 32 32
 # amr.n_cell = 256 256
+# amr.n_cell = 512 512
 # amr.n_cell = 1024 1024
 
 ### TIME STEPING ###
@@ -86,7 +88,7 @@ pressure_eta1.ic.type = expression
 pressure_eta1.ic.expression.region0 = "1.0e5"
 
 pressure_eta0.ic.type = expression
-pressure_eta0.ic.expression.region0 = "1.0e6"
+pressure_eta0.ic.expression.region0 = "1.0e5+364"
 
 # ----------------------------
 # Specific Heats
@@ -157,7 +159,7 @@ u0.ic.constant.value = 0.0 0.0
 q.ic.constant.value = 0.0 0.0
 
 ### ADDITIONAL SOURCES ###
-apply_surface_tension = 1
+apply_surface_tension = 0
 apply_weight = 0
 apply_vaporization = 0
 Spec_Vol = 1

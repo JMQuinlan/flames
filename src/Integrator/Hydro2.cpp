@@ -86,6 +86,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // OPTIONAL SOURCE TERMS
         pp_query_default("apply_surface_tension", value.apply_surface_tension, false); // Apply surface tension when solving, default: true --> "Apply Surface Tension"
         pp_query_default("apply_weight", value.apply_weight, false);                  // Apply weight when solving, default: false --> "No Weight"
+        pp_query_default("apply_viscous", value.apply_viscous, false);                // Per-phase viscous stress (constant mu_k per phase), default: false
         pp_query_default("apply_vaporization", value.apply_vaporization, false);       // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
         pp_query_default("apply_bs_source", value.apply_bs_source, true);               // Stage 4 BS phase-coupling sources (set 0 to disable for pure single-phase validation)
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
@@ -150,13 +151,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing,  2, nghost, "n_hat", false, false, { "x", "y" });
 
         // PHASE eta=1 (liquid)
-        value.RegisterNewFab(value.density_eta1_mf,     value.density_bc,   1, nghost, "density_eta1",     true, false );
+        value.RegisterNewFab(value.density_eta1_mf,     value.density_bc,   1, nghost, "density_eta1",     true, true );
         value.RegisterNewFab(value.density_eta1_old_mf, value.density_bc,   1, nghost, "density_eta1_old", false, false);
 
-        value.RegisterNewFab(value.energy_eta1_mf,      value.energy_bc,    1, nghost, "energy_eta1", true, false);
+        value.RegisterNewFab(value.energy_eta1_mf,      value.energy_bc,    1, nghost, "energy_eta1", true, true);
         value.RegisterNewFab(value.energy_eta1_old_mf,  value.energy_bc,    1, nghost, "energy_eta1_old" , false, false);
 
-        value.RegisterNewFab(value.momentum_eta1_mf,    value.momentum_bc,  2, nghost, "momentum_eta1", true, false, { "x", "y" });
+        value.RegisterNewFab(value.momentum_eta1_mf,    value.momentum_bc,  2, nghost, "momentum_eta1", true, true, { "x", "y" });
         value.RegisterNewFab(value.momentum_eta1_old_mf,value.momentum_bc,  2, nghost, "momentum_eta1_old", false, false);
 
         //value.RegisterNewFab(value.T0_mf,           value.temperature_bc, 1, nghost, "T0", false, false);
@@ -169,13 +170,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.c_eta1_mf,           &value.bc_nothing,  1, nghost, "c_eta1", true, false);
 
         // PHASE eta=0 (gas)
-        value.RegisterNewFab(value.density_eta0_mf,     value.density_bc,   1, nghost, "density_eta0", true, false);
+        value.RegisterNewFab(value.density_eta0_mf,     value.density_bc,   1, nghost, "density_eta0", true, true);
         value.RegisterNewFab(value.density_eta0_old_mf, value.density_bc,   1, nghost, "density_eta0_old", false, false);
 
-        value.RegisterNewFab(value.energy_eta0_mf,      value.energy_bc,    1, nghost, "energy_eta0", true, false);
+        value.RegisterNewFab(value.energy_eta0_mf,      value.energy_bc,    1, nghost, "energy_eta0", true, true);
         value.RegisterNewFab(value.energy_eta0_old_mf,  value.energy_bc,    1, nghost, "energy_eta0_old", false, false);
 
-        value.RegisterNewFab(value.momentum_eta0_mf,    value.momentum_bc,  2, nghost, "momentum_eta0", true, false, { "x", "y" });
+        value.RegisterNewFab(value.momentum_eta0_mf,    value.momentum_bc,  2, nghost, "momentum_eta0", true, true, { "x", "y" });
         value.RegisterNewFab(value.momentum_eta0_old_mf,value.momentum_bc,  2, nghost, "momentum_eta0_old", false, false);
 
         //value.RegisterNewFab(value.T1_mf,           value.temperature_bc, 1, nghost, "T1", false, false);
@@ -799,6 +800,8 @@ void Hydro2::RHS_PerPhase(int lev,
                           Set::Scalar /*time*/,
                           Set::Scalar gamma_k,
                           Set::Scalar pi_k,
+                          Set::Scalar mu_k,
+                          Set::Scalar mu_k_b,
                           amrex::MultiFab &rho_rhs_mf,
                           amrex::MultiFab &M_rhs_mf,
                           amrex::MultiFab &E_rhs_mf,
@@ -815,6 +818,14 @@ void Hydro2::RHS_PerPhase(int lev,
     const Real small_    = small;
     const int  Spec_Vol_ = Spec_Vol;
     auto* rsolver        = riemannsolver;
+
+    const Real g_          = g;
+    const int  do_weight   = apply_weight;
+    const int  do_viscous  = apply_viscous;
+    const Real mu_         = mu_k;
+    const Real mu_b_       = mu_k_b;
+    const Real lam_prime   = mu_b_ - (Real(2.0)/Real(3.0))*mu_;
+    const Real mu_plus_lp  = mu_ + lam_prime;   // = mu_b + mu/3
 
     for (MFIter mfi(rho_mf_in, TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
@@ -857,6 +868,84 @@ void Hydro2::RHS_PerPhase(int lev,
 
             E_rhs(i,j,k)   = (fxm.energy           - fxp.energy)          /DX[0]
                            + (fym.energy           - fyp.energy)          /DX[1];
+
+            // Local cell-centered velocity (phase k), guarded against rho → 0
+            const Real rho_c = amrex::max(rho_arr(i,j,k), Real(1.0e-14));
+            const Real u_c   = M_arr(i,j,k,0)/rho_c;
+            const Real v_c   = M_arr(i,j,k,1)/rho_c;
+
+            // ----- Weight (per-phase body force): F_w,k = -ρ_k g ĵ -----
+            if (do_weight)
+            {
+                Real rho_phys = rho_arr(i,j,k);
+                M_rhs(i,j,k,1) += -rho_phys * g_;
+                E_rhs(i,j,k)   += -rho_phys * g_ * v_c;
+            }
+
+            // ----- Viscous stress (per-phase, constant μ_k) -----
+            // Direct form for constant-μ Newtonian fluid:
+            //   (∇·τ)_i = μ ∇² u_i + (μ + λ') ∂_i (∇·u),  λ' = μ_b - 2μ/3
+            //   τ:∇u   = 2μ(u_x² + v_y²) + μ(u_y + v_x)² + λ' (∇·u)²
+            if (do_viscous)
+            {
+                auto rho_safe = [&](int ii, int jj, int kk) AMREX_GPU_DEVICE {
+                    return amrex::max(rho_arr(ii,jj,kk), Real(1.0e-14));
+                };
+                const Real u_xp = M_arr(i+1,j,k,0)/rho_safe(i+1,j,k);
+                const Real u_xm = M_arr(i-1,j,k,0)/rho_safe(i-1,j,k);
+                const Real u_yp = M_arr(i,j+1,k,0)/rho_safe(i,j+1,k);
+                const Real u_ym = M_arr(i,j-1,k,0)/rho_safe(i,j-1,k);
+                const Real v_xp = M_arr(i+1,j,k,1)/rho_safe(i+1,j,k);
+                const Real v_xm = M_arr(i-1,j,k,1)/rho_safe(i-1,j,k);
+                const Real v_yp = M_arr(i,j+1,k,1)/rho_safe(i,j+1,k);
+                const Real v_ym = M_arr(i,j-1,k,1)/rho_safe(i,j-1,k);
+
+                // Corner cells for cross derivatives u_xy, v_xy
+                const Real u_pp = M_arr(i+1,j+1,k,0)/rho_safe(i+1,j+1,k);
+                const Real u_mp = M_arr(i-1,j+1,k,0)/rho_safe(i-1,j+1,k);
+                const Real u_pm = M_arr(i+1,j-1,k,0)/rho_safe(i+1,j-1,k);
+                const Real u_mm = M_arr(i-1,j-1,k,0)/rho_safe(i-1,j-1,k);
+                const Real v_pp = M_arr(i+1,j+1,k,1)/rho_safe(i+1,j+1,k);
+                const Real v_mp = M_arr(i-1,j+1,k,1)/rho_safe(i-1,j+1,k);
+                const Real v_pm = M_arr(i+1,j-1,k,1)/rho_safe(i+1,j-1,k);
+                const Real v_mm = M_arr(i-1,j-1,k,1)/rho_safe(i-1,j-1,k);
+
+                const Real inv_dx  = Real(1.0)/DX[0];
+                const Real inv_dy  = Real(1.0)/DX[1];
+                const Real inv_dx2 = inv_dx*inv_dx;
+                const Real inv_dy2 = inv_dy*inv_dy;
+                const Real inv_4dxdy = Real(0.25)*inv_dx*inv_dy;
+
+                // First derivatives (central)
+                const Real ux = (u_xp - u_xm)*Real(0.5)*inv_dx;
+                const Real uy = (u_yp - u_ym)*Real(0.5)*inv_dy;
+                const Real vx = (v_xp - v_xm)*Real(0.5)*inv_dx;
+                const Real vy = (v_yp - v_ym)*Real(0.5)*inv_dy;
+
+                // Second derivatives (central)
+                const Real uxx = (u_xp - Real(2.0)*u_c + u_xm)*inv_dx2;
+                const Real uyy = (u_yp - Real(2.0)*u_c + u_ym)*inv_dy2;
+                const Real vxx = (v_xp - Real(2.0)*v_c + v_xm)*inv_dx2;
+                const Real vyy = (v_yp - Real(2.0)*v_c + v_ym)*inv_dy2;
+
+                // Cross derivatives (standard 4-corner stencil)
+                const Real uxy = (u_pp - u_mp - u_pm + u_mm)*inv_4dxdy;
+                const Real vxy = (v_pp - v_mp - v_pm + v_mm)*inv_4dxdy;
+
+                const Real div_u = ux + vy;
+
+                const Real divtau_x = mu_*(uxx + uyy) + mu_plus_lp*(uxx + vxy);
+                const Real divtau_y = mu_*(vxx + vyy) + mu_plus_lp*(uxy + vyy);
+
+                // τ:∇u  (rate-of-strain contracted with τ; dissipation is non-negative)
+                const Real tau_gradu = Real(2.0)*mu_*(ux*ux + vy*vy)
+                                     + mu_*(uy + vx)*(uy + vx)
+                                     + lam_prime*div_u*div_u;
+
+                M_rhs(i,j,k,0) += divtau_x;
+                M_rhs(i,j,k,1) += divtau_y;
+                E_rhs(i,j,k)   += divtau_x*u_c + divtau_y*v_c + tau_gradu;
+            }
         });
     }
 }
@@ -1044,6 +1133,10 @@ Hydro2::ApplyBSSource(int lev,
     const Real epsilon_ = epsilon;
     const int  do_st    = apply_surface_tension;
 
+    // Zero surface tension plot MF each call so bulk cells (which early-return
+    // inside the ParallelFor below) don't carry stale values from prior steps.
+    Fsv_mf[lev]->setVal(0.0);
+
      amrex::Print() << "[BS] eta min/max on lev " << lev
                  << " = " << eta_mf_in.min(0) << " / " << eta_mf_in.max(0)
                  << "\n";
@@ -1086,6 +1179,7 @@ Hydro2::ApplyBSSource(int lev,
         auto q_arr   = q_mf[lev]->const_array(mfi);
 
         auto kap_arr = kappas_mf[lev]->const_array(mfi);
+        auto Fsv_out = Fsv_mf[lev]->array(mfi);
 
         auto R0 = rho0_rhs_mf.array(mfi);
         auto P0 = M0_rhs_mf.array(mfi);
@@ -1143,6 +1237,8 @@ Hydro2::ApplyBSSource(int lev,
                 Fsv_x = sigma_ * kappa * epsilon_ * grad_eta(0);
                 Fsv_y = sigma_ * kappa * epsilon_ * grad_eta(1);
             }
+            Fsv_out(i,j,k,0) = Fsv_x;
+            Fsv_out(i,j,k,1) = Fsv_y;
             Real eta_c = eta(i,j,k);
             if (eta_c < Real(0.0)) eta_c = Real(0.0);
             if (eta_c > Real(1.0)) eta_c = Real(1.0);
@@ -2621,6 +2717,7 @@ void Hydro2::ComputeGradEta(int lev)
         auto etax_arr = eta_x_mf[lev]->array(mfi);
         auto etay_arr = eta_y_mf[lev]->array(mfi);
         auto gmag_arr = gradmag_mf[lev]->array(mfi);
+        auto ge_arr   = grad_eta_mf[lev]->array(mfi);   // 2-comp (x,y) for plotting
 
         ParallelFor(tb, [=] AMREX_GPU_DEVICE(int i,int j,int k)
         {
@@ -2635,12 +2732,16 @@ void Hydro2::ComputeGradEta(int lev)
             etax_arr(i,j,k,0) = gx;
             etay_arr(i,j,k,0) = gy;
             gmag_arr(i,j,k,0) = std::sqrt(gx*gx + gy*gy);
+
+            ge_arr(i,j,k,0)   = gx;
+            ge_arr(i,j,k,1)   = gy;
         });
     }
 
     eta_x_mf[lev]->FillBoundary(geom.periodicity());
     eta_y_mf[lev]->FillBoundary(geom.periodicity());
     gradmag_mf[lev]->FillBoundary(geom.periodicity());
+    grad_eta_mf[lev]->FillBoundary(geom.periodicity());
 }
 
 void Hydro2::ComputeKappas(int lev)
@@ -3790,11 +3891,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 sol_mf[1], sol_mf[2],  // phase 0 (rho, M)
                 sol_mf[4], sol_mf[5]); // phase 1 (rho, M)
 
-        RHS_PerPhase(lev, t, gamma_eta0, pi_eta0,
+        RHS_PerPhase(lev, t, gamma_eta0, pi_eta0, mu_eta0, mu_eta0_b,
                      rhs_mf[1], rhs_mf[2], rhs_mf[3],
                      sol_mf[1], sol_mf[2], sol_mf[3]);
 
-        RHS_PerPhase(lev, t, gamma_eta1, pi_eta1,
+        RHS_PerPhase(lev, t, gamma_eta1, pi_eta1, mu_eta1, mu_eta1_b,
                      rhs_mf[4], rhs_mf[5], rhs_mf[6],
                      sol_mf[4], sol_mf[5], sol_mf[6]);
 

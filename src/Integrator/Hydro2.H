@@ -114,6 +114,8 @@ protected:
         Set::Scalar time,
         Set::Scalar gamma_k,
         Set::Scalar pi_k,
+        Set::Scalar mu_k,
+        Set::Scalar mu_k_b,
         amrex::MultiFab &rho_rhs_mf,
         amrex::MultiFab &M_rhs_mf,
         amrex::MultiFab &E_rhs_mf,
@@ -358,6 +360,7 @@ protected:
     // Booleans
     int apply_surface_tension = 1;
     int apply_weight = 0;
+    int apply_viscous = 0;     // Per-phase viscous stress in RHS_PerPhase (constant mu_k, mu_k_b)
     int static_eta = 0;
     int apply_vaporization = 0;
     int apply_bs_source = 1;   // Stage 4: BS phase-coupling sources (set 0 to test single-phase limit)
