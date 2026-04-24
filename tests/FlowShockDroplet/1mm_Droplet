@@ -58,13 +58,13 @@ epsilon = eta.ic.expression.constant.epsilon
 # Air properties (fluid 0 - surrounding vapor/gas)
 eos0.gamma = 1.4   # Air
 eos0.p0 = 0       # Ideal gas
-mu0 = 1.8e-5   # Air viscosity [Pa-s]
+mu0 = 0.0 # 1.8e-5   # Air viscosity [Pa-s]
 mu0_b = 0.0
 
 # Water properties (fluid 1 - droplet)
 eos1.gamma = 7.15  # Water
 eos1.p0 = 3.0e8   # Tammann EOS parameter for water
-mu1 = 1.0e-3   # Water viscosity [Pa-s]
+mu1 = 0.0 # 1.0e-3   # Water viscosity [Pa-s]
 mu1_b = 0.001
 
 # Densities

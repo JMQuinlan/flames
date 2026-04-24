@@ -431,7 +431,6 @@ void Hydro2::Initialize(int lev)
     KE_per_vol_mf[lev]->setVal(0.0);
     KE_per_mas_mf[lev]->setVal(0.0);
 
-
     // Calculate mixed variables based on individual fluid variables
     Mix(lev);
 
