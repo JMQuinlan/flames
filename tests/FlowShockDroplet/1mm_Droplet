@@ -131,10 +131,10 @@ momentum.bc.type.ylo = neumann neumann
 momentum.bc.type.yhi = neumann neumann
 
 # Left wall: Dirichlet (no-slip, no-penetration)
-density.bc.type.xlo = dirichlet
-density.bc.val.xlo = 2.0  # Post-shock density
+density.bc.type.xlo = neumann # dirichlet
+#density.bc.val.xlo = 2.0  # Post-shock density
 energy.bc.type.xlo = neumann
-momentum.bc.type.xlo = dirichlet neumann
+momentum.bc.type.xlo = dirichlet dirichlet
 momentum.bc.val.xlo = 0.0 0.0  # No-slip
 
 # Right wall: Neumann (outflow)
