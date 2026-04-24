@@ -9,7 +9,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 #plot_file = ./tests/FlowShockDroplet/output_Shock1mmDroplet
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_NoVisc
 #plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet
 
 ### MESHING ###
@@ -65,7 +65,7 @@ mu0_b = 0.0
 eos1.gamma = 7.15  # Water
 eos1.p0 = 3.0e8   # Tammann EOS parameter for water
 mu1 = 0.0 # 1.0e-3   # Water viscosity [Pa-s]
-mu1_b = 0.001
+mu1_b = 0.0 # 0.001
 
 # Densities
 density0.ic.type = expression
