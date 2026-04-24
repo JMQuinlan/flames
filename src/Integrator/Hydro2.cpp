@@ -89,6 +89,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("apply_viscous", value.apply_viscous, false);                // Per-phase viscous stress (constant mu_k per phase), default: false
         pp_query_default("apply_vaporization", value.apply_vaporization, false);       // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
         pp_query_default("apply_bs_source", value.apply_bs_source, true);               // Stage 4 BS phase-coupling sources (set 0 to disable for pure single-phase validation)
+        pp_query_default("p_int_method", value.p_int_method, 0);                        // BS interface-pressure closure: 0 arithmetic mean, 1 eta-weighted, 2 acoustic-impedance
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
         // PHASE eta=1 (liquid — stiffened gas)
@@ -1132,6 +1133,7 @@ Hydro2::ApplyBSSource(int lev,
     const Real sigma_   = sigma;
     const Real epsilon_ = epsilon;
     const int  do_st    = apply_surface_tension;
+    const int  p_int_method_ = p_int_method;
 
     // Zero surface tension plot MF each call so bulk cells (which early-return
     // inside the ParallelFor below) don't carry stale values from prior steps.
@@ -1212,12 +1214,66 @@ Hydro2::ApplyBSSource(int lev,
             Real p1_phase = (g1 - Real(1.0))*UE1 - g1*pi1        + pref_;   // SG
             (void)pi0;
 
-            // Interface pressure — simple arithmetic mean
-            Real p_int = Real(0.5) * (p0_phase + p1_phase);
+            // Phase velocities (used for u_int selection below and for Fsv work)
+            Real u0x_ph = M0_arr(i,j,k,0) / safe_r0;
+            Real u0y_ph = M0_arr(i,j,k,1) / safe_r0;
+            Real u1x_ph = M1_arr(i,j,k,0) / safe_r1;
+            Real u1y_ph = M1_arr(i,j,k,1) / safe_r1;
 
-            // Prescribed interface inputs
+            // eta clamp for η-weighting
+            Real eta_c = eta(i,j,k);
+            if (eta_c < Real(0.0)) eta_c = Real(0.0);
+            if (eta_c > Real(1.0)) eta_c = Real(1.0);
+            Real w0 = Real(1.0) - eta_c;
+            Real w1 = eta_c;
+
+            // Interface pressure / velocity closure (see p_int_method).
+            // All choices collapse to the common value at mechanical equilibrium
+            // (p_0 = p_1, u_0 = u_1), so the corrected BS source vanishes.
+            Real p_int, u_int_x, u_int_y;
+            if (p_int_method_ == 1)
+            {
+                // eta-weighted
+                p_int   = w0 * p0_phase + w1 * p1_phase;
+                u_int_x = w0 * u0x_ph   + w1 * u1x_ph;
+                u_int_y = w0 * u0y_ph   + w1 * u1y_ph;
+            }
+            else if (p_int_method_ == 2)
+            {
+                // acoustic-impedance weighted: p* = (Z_1 p_0 + Z_0 p_1)/(Z_0+Z_1)
+                // CPG:   c_0^2 = g_0 * p_0 / rho_0
+                // SG :   c_1^2 = g_1 * (p_1 + pi_1) / rho_1
+                Real c0sq = g0 * amrex::max(p0_phase,            Real(0.0)) / safe_r0;
+                Real c1sq = g1 * amrex::max(p1_phase + pi1,      Real(0.0)) / safe_r1;
+                Real c0_  = (c0sq > Real(0.0)) ? std::sqrt(c0sq) : Real(0.0);
+                Real c1_  = (c1sq > Real(0.0)) ? std::sqrt(c1sq) : Real(0.0);
+                Real Z0   = safe_r0 * c0_;
+                Real Z1   = safe_r1 * c1_;
+                Real Zsum = Z0 + Z1;
+                if (Zsum > Real(1e-30))
+                {
+                    p_int   = (Z1 * p0_phase + Z0 * p1_phase) / Zsum;
+                    u_int_x = (Z1 * u0x_ph   + Z0 * u1x_ph)   / Zsum;
+                    u_int_y = (Z1 * u0y_ph   + Z0 * u1y_ph)   / Zsum;
+                }
+                else
+                {
+                    p_int   = Real(0.5) * (p0_phase + p1_phase);
+                    u_int_x = Real(0.5) * (u0x_ph   + u1x_ph);
+                    u_int_y = Real(0.5) * (u0y_ph   + u1y_ph);
+                }
+            }
+            else
+            {
+                // 0: arithmetic mean (default)
+                p_int   = Real(0.5) * (p0_phase + p1_phase);
+                u_int_x = Real(0.5) * (u0x_ph   + u1x_ph);
+                u_int_y = Real(0.5) * (u0y_ph   + u1y_ph);
+            }
+
+            // Prescribed interface inputs (mass transfer / heat flux problems)
             Real mdot0 = m0_arr(i,j,k);
-            Real u0x   = u0_arr(i,j,k,0);
+            Real u0x   = u0_arr(i,j,k,0);   // prescribed interface velocity, u0_mf
             Real u0y   = u0_arr(i,j,k,1);
             Real qx    = q_arr(i,j,k,0);
             Real qy    = q_arr(i,j,k,1);
@@ -1229,7 +1285,6 @@ Hydro2::ApplyBSSource(int lev,
 
             // === Surface tension: Fsv = σ·κ·ε·∇η on the mixture ===
             // Distributed η-weighted across phases so Σ_k (contribution_k) = Fsv.
-            // Phase 0 gets (1-η)·Fsv, phase 1 gets η·Fsv. Sum = Fsv on mixture.
             Real Fsv_x = Real(0.0), Fsv_y = Real(0.0);
             if (do_st)
             {
@@ -1239,34 +1294,33 @@ Hydro2::ApplyBSSource(int lev,
             }
             Fsv_out(i,j,k,0) = Fsv_x;
             Fsv_out(i,j,k,1) = Fsv_y;
-            Real eta_c = eta(i,j,k);
-            if (eta_c < Real(0.0)) eta_c = Real(0.0);
-            if (eta_c > Real(1.0)) eta_c = Real(1.0);
-            Real w0 = Real(1.0) - eta_c;
-            Real w1 = eta_c;
 
-            // Energy work from surface tension, using each phase's own velocity.
-            // (Fsv · u_k) weighted by the same phase split.
-            Real u0x_ph = M0_arr(i,j,k,0) / safe_r0;
-            Real u0y_ph = M0_arr(i,j,k,1) / safe_r0;
-            Real u1x_ph = M1_arr(i,j,k,0) / safe_r1;
-            Real u1y_ph = M1_arr(i,j,k,1) / safe_r1;
             Real Fsv_work_0 = Fsv_x*u0x_ph + Fsv_y*u0y_ph;
             Real Fsv_work_1 = Fsv_x*u1x_ph + Fsv_y*u1y_ph;
 
-            // === Momentum: ±(p_int·∇η + ṁ₀·u₀·|∇η|)  plus  η-split Fsv ===
-            Real Smx = p_int*grad_eta(0) + mdot0*u0x*grad_eta_mag;
-            Real Smy = p_int*grad_eta(1) + mdot0*u0y*grad_eta_mag;
-            P0(i,j,k,0) += -Smx + w0*Fsv_x;
-            P0(i,j,k,1) += -Smy + w0*Fsv_y;
-            P1(i,j,k,0) += +Smx + w1*Fsv_x;
-            P1(i,j,k,1) += +Smy + w1*Fsv_y;
+            // === Momentum: pressure-imbalance form, vanishes at p_0 = p_1 = p_int.
+            //     Phase 0:  S_M = (p_0 - p_int)·∇η    (BN "effective" force)
+            //     Phase 1:  S_M = (p_int - p_1)·∇η
+            //     Plus mass-transfer momentum ±ṁ₀·u₀·|∇η| and η-split Fsv.
+            Real dp0 = p0_phase - p_int;
+            Real dp1 = p_int   - p1_phase;
+            Real Smass_mx = mdot0 * u0x * grad_eta_mag;
+            Real Smass_my = mdot0 * u0y * grad_eta_mag;
+            P0(i,j,k,0) += dp0*grad_eta(0) - Smass_mx + w0*Fsv_x;
+            P0(i,j,k,1) += dp0*grad_eta(1) - Smass_my + w0*Fsv_y;
+            P1(i,j,k,0) += dp1*grad_eta(0) + Smass_mx + w1*Fsv_x;
+            P1(i,j,k,1) += dp1*grad_eta(1) + Smass_my + w1*Fsv_y;
 
-            // === Energy: ±(p_int·u₀·∇η + q̇₀·∇η)  plus  η-split Fsv·u_k work ===
-            Real SE = p_int*(u0x*grad_eta(0) + u0y*grad_eta(1))
-                    + (qx*grad_eta(0) + qy*grad_eta(1));
-            U0(i,j,k) += -SE + w0*Fsv_work_0;
-            U1(i,j,k) += +SE + w1*Fsv_work_1;
+            // === Energy: same correction for the pressure-work part.
+            //     Phase 0:  S_E = (p_0·u_0 - p_int·u_int)·∇η
+            //     Phase 1:  S_E = (p_int·u_int - p_1·u_1)·∇η
+            //     Plus heat flux q·∇η (antisymmetric) and η-split Fsv·u_k work.
+            Real pu_int = p_int   * (u_int_x*grad_eta(0) + u_int_y*grad_eta(1));
+            Real pu_0   = p0_phase* (u0x_ph *grad_eta(0) + u0y_ph *grad_eta(1));
+            Real pu_1   = p1_phase* (u1x_ph *grad_eta(0) + u1y_ph *grad_eta(1));
+            Real SEq    = qx*grad_eta(0) + qy*grad_eta(1);
+            U0(i,j,k) += (pu_0   - pu_int) - SEq + w0*Fsv_work_0;
+            U1(i,j,k) += (pu_int - pu_1  ) + SEq + w1*Fsv_work_1;
         });
     }
 }
@@ -4069,14 +4123,22 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         auto p      = pressure_mf[lev]->array(mfi);
         auto Source = Source_mf[lev]->const_array(mfi);
 
-        // Per-phase diagnostic fields (Stage 2: computed from mixture (rho,UE)
-        // using each phase's own single-phase EOS — no Allaire blend).
+        // Per-phase diagnostic fields (Stage 3: computed from each phase's
+        // OWN (rho_k, M_k, E_k) using that phase's single-phase EOS).
         auto p_e0   = pressure_eta0_mf[lev]->array(mfi);
         auto p_e1   = pressure_eta1_mf[lev]->array(mfi);
         auto v_e0   = velocity_eta0_mf[lev]->array(mfi);
         auto v_e1   = velocity_eta1_mf[lev]->array(mfi);
         auto c_e0   = c_eta0_mf[lev]->array(mfi);
         auto c_e1   = c_eta1_mf[lev]->array(mfi);
+
+        // Per-phase conservative state (live, primary)
+        auto rho_e0 = density_eta0_mf[lev]->const_array(mfi);
+        auto rho_e1 = density_eta1_mf[lev]->const_array(mfi);
+        auto M_e0   = momentum_eta0_mf[lev]->const_array(mfi);
+        auto M_e1   = momentum_eta1_mf[lev]->const_array(mfi);
+        auto E_e0   = energy_eta0_mf[lev]->const_array(mfi);
+        auto E_e1   = energy_eta1_mf[lev]->const_array(mfi);
 
         // Set::Patch<Set::Scalar> v = velocity_mf.Patch(lev, mfi);
         // Set::Patch<Set::Scalar> press = pressure_mf.Patch(lev, mfi);
@@ -4184,33 +4246,45 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 if (!std::isfinite(a(i, j, k))) a(i, j, k) = Set::Scalar(0.0);
             }
 
-            // ---- Stage 2: per-phase diagnostics from mixture (rho, UE) ----
-            // Each phase inverts the SAME conserved state (rho, UE) with its
-            // OWN single-phase EOS. These diverge when pressures differ between
-            // phases — a quantitative measure of the Allaire mixing error.
-            // (Stage 3 will promote per-phase (rho, M, E) to primary state.)
+            // ---- Stage 3: per-phase diagnostics from each phase's own state ----
+            // Invert phase k's (rho_k, M_k, E_k) with its own single-phase EOS.
+            // No mixture (rho, UE) appears here.
             {
-                Set::Scalar UE_c      = UE_vol(i, j, k);
-                Set::Scalar safe_rho_ = (std::isfinite(rho(i,j,k)) && rho(i,j,k) > small) ? rho(i,j,k) : small;
+                // Phase 0 (gas, CPG): p = (gamma - 1) * UE_0
+                Set::Scalar r0 = rho_e0(i,j,k);
+                Set::Scalar safe_r0 = (std::isfinite(r0) && r0 > small) ? r0 : small;
+                Set::Scalar u0x = M_e0(i,j,k,0) / safe_r0;
+                Set::Scalar u0y = M_e0(i,j,k,1) / safe_r0;
+                if (!std::isfinite(u0x)) u0x = Set::Scalar(0.0);
+                if (!std::isfinite(u0y)) u0y = Set::Scalar(0.0);
+                Set::Scalar KE0 = Set::Scalar(0.5) * r0 * (u0x*u0x + u0y*u0y);
+                if (!std::isfinite(KE0)) KE0 = Set::Scalar(0.0);
+                Set::Scalar UE0 = E_e0(i,j,k) - KE0;
+                if (!std::isfinite(UE0) || UE0 < Set::Scalar(0.0)) UE0 = Set::Scalar(0.0);
+                Set::Scalar p0_ = Thermo_Interp::Pressure_CPG(UE0, gamma_eta0) + pref;
+                if (!std::isfinite(p0_) || p0_ < Set::Scalar(0.0)) p0_ = Set::Scalar(1e-6);
+                p_e0(i,j,k) = p0_;
+                c_e0(i,j,k) = Thermo_Interp::SoundSpeed_CPG(safe_r0, p0_, gamma_eta0);
+                v_e0(i,j,k,0) = u0x;
+                v_e0(i,j,k,1) = u0y;
 
-                // Phase 0 (gas, CPG): p = (gamma - 1) * UE
-                Set::Scalar p0_ = Thermo_Interp::Pressure_CPG(UE_c, gamma_eta0) + pref;
-                if (!std::isfinite(p0_) || p0_ < 0.0) p0_ = 1e-6;
-                p_e0(i, j, k) = p0_;
-                c_e0(i, j, k) = Thermo_Interp::SoundSpeed_CPG(safe_rho_, p0_, gamma_eta0);
-
-                // Phase 1 (liquid, stiffened gas): p = (gamma - 1) * UE - gamma * pi
-                Set::Scalar p1_ = Thermo_Interp::Pressure_SG_UE(UE_c, gamma_eta1, pi_eta1) + pref;
-                if (!std::isfinite(p1_) || p1_ < 0.0) p1_ = 1e-6;
-                p_e1(i, j, k) = p1_;
-                c_e1(i, j, k) = Thermo_Interp::SoundSpeed_SG(safe_rho_, p1_, gamma_eta1, pi_eta1);
-
-                // Velocity is a pure mixture kinematic quantity at Stage 2;
-                // both phases see the same u until per-phase state is live.
-                v_e0(i, j, k, 0) = v(i, j, k, 0);
-                v_e0(i, j, k, 1) = v(i, j, k, 1);
-                v_e1(i, j, k, 0) = v(i, j, k, 0);
-                v_e1(i, j, k, 1) = v(i, j, k, 1);
+                // Phase 1 (liquid, stiffened gas): p = (gamma - 1) * UE_1 - gamma * pi
+                Set::Scalar r1 = rho_e1(i,j,k);
+                Set::Scalar safe_r1 = (std::isfinite(r1) && r1 > small) ? r1 : small;
+                Set::Scalar u1x = M_e1(i,j,k,0) / safe_r1;
+                Set::Scalar u1y = M_e1(i,j,k,1) / safe_r1;
+                if (!std::isfinite(u1x)) u1x = Set::Scalar(0.0);
+                if (!std::isfinite(u1y)) u1y = Set::Scalar(0.0);
+                Set::Scalar KE1 = Set::Scalar(0.5) * r1 * (u1x*u1x + u1y*u1y);
+                if (!std::isfinite(KE1)) KE1 = Set::Scalar(0.0);
+                Set::Scalar UE1 = E_e1(i,j,k) - KE1;
+                if (!std::isfinite(UE1) || UE1 < Set::Scalar(0.0)) UE1 = Set::Scalar(0.0);
+                Set::Scalar p1_ = Thermo_Interp::Pressure_SG_UE(UE1, gamma_eta1, pi_eta1) + pref;
+                if (!std::isfinite(p1_) || p1_ < Set::Scalar(0.0)) p1_ = Set::Scalar(1e-6);
+                p_e1(i,j,k) = p1_;
+                c_e1(i,j,k) = Thermo_Interp::SoundSpeed_SG(safe_r1, p1_, gamma_eta1, pi_eta1);
+                v_e1(i,j,k,0) = u1x;
+                v_e1(i,j,k,1) = u1y;
             }
 
             // Mach Number

@@ -26,6 +26,7 @@ amr.n_cell = 32 32
 
 ### TIME STEPING ###
 timestep  = 1e-10
+# timestep  = 1e-8
 dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-0
@@ -88,7 +89,8 @@ pressure_eta1.ic.type = expression
 pressure_eta1.ic.expression.region0 = "1.0e5"
 
 pressure_eta0.ic.type = expression
-pressure_eta0.ic.expression.region0 = "1.0e5+364"
+# pressure_eta0.ic.expression.region0 = "1.0e5+364"
+pressure_eta0.ic.expression.region0 = "1.0e5"
 
 # ----------------------------
 # Specific Heats
@@ -166,6 +168,7 @@ Spec_Vol = 1
 grav = 0.0
 
 ## DEBUGGING ###
+apply_bs_source = 1
 Riemann_Solver.type = hllc
 kappa_method = 1   # 1:"Smooth Normals" (default)  2:"Height Function"  3:"Hybrid (HF+SN blend)"
 smooth_kernel_size = 5  # Gaussian normal smoothing kernel: 3 (3x3, default) or 5 (5x5)
@@ -177,7 +180,8 @@ integration.type = ForwardEuler
 # ch_mobility_nom = 1e-4  # seems to need to be smaller
 # implicit_ch = 0 # solves CH rhs explicitly (faster but dx^4 reduction in timestep needed, so only on course grids)
 implicit_ch = 2
-  ch_mobility_nom = 4e-3
+#   ch_mobility_nom = 4e-3
+  ch_mobility_nom = 4e-30
   ch_newton_iters = 5       # default, usually converges in 3
   ch_newton_tol = 1e-10     # default
   ch_W_scale = 1.0          # double-well amplitude (1.0 = standard; >1 narrows interface, <1 widens)

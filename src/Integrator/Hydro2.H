@@ -366,6 +366,13 @@ protected:
     int apply_bs_source = 1;   // Stage 4: BS phase-coupling sources (set 0 to test single-phase limit)
     int Spec_Vol = 1;
 
+    // Interface-pressure closure for the BS source (p_int).
+    // 0: arithmetic mean          p_int = 0.5 (p_0 + p_1)
+    // 1: eta-weighted             p_int = (1-eta) p_0 + eta p_1
+    // 2: acoustic-impedance       p_int = (Z_1 p_0 + Z_0 p_1)/(Z_0 + Z_1), Z_k = rho_k c_k
+    // Same weighting is applied to u_int used in the energy source.
+    int p_int_method = 0;
+
     int kappa_method = 1;        // 1: Smooth Normals (default)  2: Height Function  3: Hybrid
     int smooth_kernel_size = 3;  // Gaussian kernel for normal smoothing: 3 (3x3, default) or 5 (5x5)
     int nghost = 2;              // Ghost cell depth for MultiFab allocation and HF integration band
