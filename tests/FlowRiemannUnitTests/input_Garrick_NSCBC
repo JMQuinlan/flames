@@ -32,7 +32,7 @@ geometry.is_periodic = 0 1 0
 
 ### TIME STEP ###
 timestep  = 2.5e-4
-stop_time = 5.0
+stop_time = 10.0
 
 m0.ic.constant.value = 0.0
 u0.ic.constant.value = 0.0

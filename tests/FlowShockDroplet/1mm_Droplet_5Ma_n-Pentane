@@ -3,17 +3,17 @@
 #@ dim=2
 #@
 
-# THE Main Shock Droplet Interaction Script
+# 1mm Droplet, Ma 5 Shock, n-Pentane
 
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = ./tests/FlowShockDroplet/output_Shock1mmDroplet
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet
-#plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet
+#plot_file = ./tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_n-Pentane
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_n-Pentane
+#plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_n-Pentane
 
 ### MESHING ###
-amr.plot_dt = 0.5e-6
+amr.plot_dt = 0.1e-6
 #amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
@@ -30,7 +30,7 @@ timestep = 1e-12
 dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-4
-dynamictimestep.min = 1e-10
+dynamictimestep.min = 1e-11
 cfl = 0.5
 
 ### DIMENSIONS ###
@@ -48,7 +48,7 @@ eta.ic.expression.constant.R0 = 0.001  # 5mm droplet radius
 eta.ic.expression.constant.x_center = 0.0  # Centered at origin
 eta.ic.expression.constant.y_center = 0.0  # Centered at origin
 
-# Droplet shape definition (air is eta=0, water is eta=1)
+# Droplet shape definition (air is eta=0, n-Pentane is eta=1)
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x-x_center)**2 + (y-y_center)**2) - R0)/(2*sqrt(2)*epsilon)))"
 
 epsilon = eta.ic.expression.constant.epsilon
@@ -61,28 +61,28 @@ eos0.p0 = 0       # Ideal gas
 mu0 = 0.0 # 1.8e-5   # Air viscosity [Pa-s]
 mu0_b = 0.0
 
-# Water properties (fluid 1 - droplet)
-eos1.gamma = 7.15  # Water
-eos1.p0 = 3.0e8   # Tammann EOS parameter for water
-mu1 = 0.0 # 1.0e-3   # Water viscosity [Pa-s]
+# n-Pentane properties (fluid 1 - droplet)
+eos1.gamma = 1.05  # n-Pentane
+eos1.p0 = 2.0e8   # Tammann EOS parameter for n-Pentane
+mu1 = 0.0 # 1.0e-3   # n-Pentane viscosity [Pa-s]
 mu1_b = 0.0 # 0.001
 
 # Densities
 density0.ic.type = expression
 density0.ic.expression.constant.rho_air = 1.225
-density0.ic.expression.constant.rho_shock = 4.7
+density0.ic.expression.constant.rho_shock = 7.0
 density0.ic.expression.constant.x_shock = -0.004  # Shock region near left wall
 # Air field with shock
 density0.ic.expression.region0 = "(x < x_shock)*rho_shock + (x >= x_shock)*rho_air"
 
 density1.ic.type = expression
-density1.ic.expression.constant.rho_water = 1000.0
-# Water density (constant in droplet)
+density1.ic.expression.constant.rho_water = 620.0
+# n-Pentane density (constant in droplet)
 density1.ic.expression.region0 = "rho_water"
 
 # Velocities (initially at rest, except shock region)
 velocity0.ic.type = expression
-velocity0.ic.expression.constant.u_shock = 520.0  # Shock velocity [m/s]
+velocity0.ic.expression.constant.u_shock = 1300.0  # Shock velocity [m/s]
 velocity0.ic.expression.constant.x_shock = -0.004
 velocity0.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
 velocity0.ic.expression.region1 = "0.0"
@@ -96,27 +96,27 @@ velocity1.ic.expression.region1 = "0.0"
 # Pressures
 pressure0.ic.type = expression
 pressure0.ic.expression.constant.p_atm = 1.01325e5
-pressure0.ic.expression.constant.p_shock = 10.0e5  # High pressure shock region
+pressure0.ic.expression.constant.p_shock = 30.0e5  # High pressure shock region
 pressure0.ic.expression.constant.x_shock = -0.004
 # Air pressure with shock
 pressure0.ic.expression.region0 = "(x < x_shock)*p_shock + (x >= x_shock)*p_atm"
 
 pressure1.ic.type = expression
 pressure1.ic.expression.constant.p_atm = 1.01325e5
-# Water pressure (atmospheric in droplet)
+# n-Pentane pressure (atmospheric in droplet)
 pressure1.ic.expression.region0 = "p_atm"
 
 # Thermodynamic properties
 eos0.cp = "1005.0"  # Air specific heat [J/kg-K]
-eos1.cp = "4179.0"  # Water specific heat [J/kg-K]
+eos1.cp = "2300.0"  # n-Pentane specific heat [J/kg-K]
 eos0.cv = "717.86"  # Air cv = cp/gamma
-eos1.cv = "4179.0/7.15"  # Water cv = cp/gamma
+eos1.cv = "2200.0"  # n-Pentane cv = cp/gamma
 
 # Surface tension
-sigma = 72.8e-3  # Water-air surface tension [N/m]
+sigma = "0.016"  # n-Pentane -air surface tension [N/m]
 
 # Vapor Diffusivity
-Dv = "2.3e-5"	# Water-Vapor Diffusivity [m^2/s]
+Dv = "1.0e-5"	# n-Pentane -Vapor Diffusivity [m^2/s]
 
 # Reference pressure
 pref = 0.0

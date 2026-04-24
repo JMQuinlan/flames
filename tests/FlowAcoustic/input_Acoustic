@@ -1,0 +1,132 @@
+#@ [acoustic_wave_nscbc]
+#@ exe=hydro2
+#@ dim=2
+
+### OUTPUT ###
+plot_file = ./tests/FlowAcoustic/acoustic_wave_outflow
+amr.plot_int = 50
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.grid_eff = 0.8
+amr.n_cell = 400 4
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0  -0.01   0.0
+geometry.prob_hi = 1.0   0.01   0.0
+geometry.is_periodic = 0 1 0
+
+### TIME STEP ###
+timestep  = 1.0e-4
+stop_time = 2.0
+
+### DIFFUSE INTERFACE ###
+eta.ic.type = constant
+eta.ic.constant.value = 0.0
+epsilon = 0.005
+
+### DIFFUSE BOUNDARY SOURCES ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+### SOLVER ###
+cfl = 0.4
+Riemann_Solver.type = hllc
+Spec_Vol = 1
+static_eta = 1
+
+### EOS - IDEAL GAS (AIR) ###
+eos0.gamma = 1.4
+eos0.p0 = 0.0
+eos0.cp = 1004.5
+eos0.cv = 717.5
+
+eos1.gamma = 1.4
+eos1.p0 = 0.0
+eos1.cp = 1004.5
+eos1.cv = 717.5
+
+### VISCOSITY ###
+mu0 = 0.0
+mu1 = 0.0
+
+### SURFACE TENSION ###
+sigma = 0.0
+
+### REFERENCE PRESSURE ###
+pref = 0.0
+
+### INITIAL CONDITIONS - ACOUSTIC WAVE ###
+# Base state: rho=1.0, p=1.0, v=0.0
+# Acoustic perturbation: delta_p = 0.01 * sin(2*pi*x)
+
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_base = 1.0
+density1.ic.expression.constant.p_base = 1.0
+density1.ic.expression.constant.gamma = 1.4
+density1.ic.expression.constant.amp = 0.01
+density1.ic.expression.region0 = "rho_base * (1.0 + amp * sin(6.28318530718 * x))"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.c = 1.183216
+velocity1.ic.expression.constant.amp = 0.01
+velocity1.ic.expression.region0 = "amp * c * sin(6.28318530718 * x)"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "0.0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_base = 1.0
+pressure1.ic.expression.constant.amp = 0.02
+pressure1.ic.expression.region0 = "p_base * (1.0 + amp * sin(6.28318530718 * x))"
+
+### BOUNDARY CONDITIONS ###
+nghost = 2
+
+# Left: Neumann (reflecting)
+density.bc.type.xlo = neumann
+momentum.bc.type.xlo = neumann neumann
+energy.bc.type.xlo = neumann
+
+# Right: NSCBC (non-reflecting outflow)
+density.bc.type.xhi = neumann
+momentum.bc.type.xhi = neumann neumann
+energy.bc.type.xhi = neumann
+
+#density.bc.type.xhi = nscbc_outflow
+#momentum.bc.type.xhi = nscbc_outflow nscbc_outflow
+#energy.bc.type.xhi = nscbc_outflow
+
+# Y: Periodic
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+
+### NSCBC PARAMETERS - RIGHT BOUNDARY ###
+nscbc.xhi.type = outflow
+nscbc.xhi.target_p = 1.0
+nscbc.xhi.sigma = 0.25
+nscbc.xhi.beta = 0.6
+nscbc.xhi.L_ref = 1.0
+nscbc.xhi.target_u = 0.0
+nscbc.xhi.target_v = 0.0
+
+### REFINEMENT CRITERIA (DISABLED) ###
+eta_refinement_criterion   = 1000.0
+omega_refinement_criterion = 1000.0
+gradu_refinement_criterion = 1000.0
+rho_refinement_criterion   = 1000.0
+p_refinement_criterion     = 1000.0

@@ -1,0 +1,177 @@
+#@ [case1]
+#@ exe=hydro2
+#@ dim=2
+# alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/FlowRiemannUnitTests/output_Toro1a
+
+### MESHING ###
+#amr.plot_dt = 0.1
+amr.plot_int = 500
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.grid_eff = 0.8
+
+amr.n_cell = 800 4
+
+# Uncomment to test AMR
+#amr.max_level = 2
+
+### DIMENSIONS ###
+
+geometry.prob_lo = -1.0  -0.02   0.0 # [ m ]
+geometry.prob_hi =  1.0   0.02   0.0 # [ m ]
+
+geometry.is_periodic = 0 1 0
+
+### TIME STEP ###
+
+timestep  = 5.0e-4
+stop_time = 5.0
+
+### ETA IC ###
+
+#Ldot_0 = 0.0
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+#deltapInterface.ic.type = expression
+#deltapInterface.ic.expression.region0 = "0.0"
+
+eta.ic.type = constant
+eta.ic.expression.constant.epsilon  = 111111.0005
+eta.ic.constant.value  = 0.0
+epsilon = eta.ic.expression.constant.epsilon
+
+### Advection solver ###
+
+### HYDRO PARAM ###
+cfl   = 0.4
+
+## EOS ##
+eos0.gamma = 1.4
+eos1.gamma = 1.4
+eos0.p0 = 0.0
+eos1.p0 = 0.0
+eos0.cp = 1004.5
+eos1.cp = 1004.5
+eos0.cv = 717.5
+eos1.cv = 717.5
+
+# Viscosity
+mu0   = 0.0
+mu1   = 0.0
+
+### Surface tension coefficient ###
+sigma = 1000;
+
+### Reference pressure ###
+pref = 0.0
+
+### Other adjustable parameters that may be needed
+# small  = 1e-8
+# cutoff = 1e-100
+# small  = 1e-5
+# cutoff = 1e-5
+
+### IC State ###
+
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_L = 1.0
+density1.ic.expression.constant.rho_R = 0.125
+density1.ic.expression.region0 = "rho_L*(x<0) + rho_R*(x>0)"
+#density1.ic.expression.constant.halfdx = 1.25e-3 #0.00625 / 20;
+#density1.ic.expression.region0 = "rho_L*(x<-0) + ((rho_R-rho_L)/(2*halfdx)*x + (rho_L+halfdx*((rho_R-rho_L)/(2*halfdx))))*((x>-0)*(x<halfdx)) + rho_R*(x>halfdx)"
+#density1.ic.expression.region0 = "rho_L*(x<-0) + 0.305752*((x>-0)*(x<halfdx)) + rho_R*(x>halfdx)"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.v_L = "0.0"
+velocity1.ic.expression.constant.v_R = "0.0"
+velocity1.ic.expression.region0 = "v_L*(x<0) + v_R*(x>0)"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "0.0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_L = "1.0"
+pressure1.ic.expression.constant.p_R = "0.1"
+pressure1.ic.expression.region0 = "p_L*(x<0) + p_R*(x>0)"
+
+temperature0.ic.type = expression
+temperature0.ic.expression.region0 = "294.0"
+
+temperature1.ic.type = expression
+temperature1.ic.expression.region0 = "294.0"
+
+k0_thermal.ic.type = expression
+k0_thermal.ic.expression.region0 = "0.6"
+
+k1_thermal.ic.type = expression
+k1_thermal.ic.expression.region0 = "0.6"
+
+h0_thermal.ic.type = expression
+h0_thermal.ic.expression.region0 = "1.4"
+
+h1_thermal.ic.type = expression
+h1_thermal.ic.expression.region0 = "1.0"
+
+### HYDRO BC ###
+nghost = 4
+#======================================================================
+# BOUNDARY CONDITIONS - NSCBC
+#======================================================================
+# Use NSCBC for all boundaries (non-reflecting outflow)
+density.bc.type.xhi = neumann
+density.bc.type.xlo = nscbc_outflow
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = nscbc_outflow nscbc_outflow
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = nscbc_outflow
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+
+#======================================================================
+# NSCBC PARAMETERS - X-HI (RIGHT BOUNDARY)
+#======================================================================
+nscbc.xhi.type = outflow
+nscbc.xhi.target_p = 0.1
+nscbc.xhi.sigma = 0.25
+nscbc.xhi.beta = 0.5
+nscbc.xhi.L_ref = 0.20
+nscbc.xhi.target_u = 0.0
+nscbc.xhi.target_v = 0.0
+
+### HYDRO REFINEMENT CRITERIA ###
+
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+static_eta = 1
+Spec_Vol = 1
+
+Riemann_Solver.type = hllc
+#integration.type=RungeKutta
+#integration.rk.type=4
