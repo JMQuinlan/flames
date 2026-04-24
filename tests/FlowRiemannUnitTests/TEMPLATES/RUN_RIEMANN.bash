@@ -28,10 +28,11 @@ TESTS=(
   Toro5
   Toro6
   Toro7
+  Garrick
 )
 
 # Epsilon values for diffuse interface
-EPSILONS=("1e-1" "1e-2" "1e-3")
+EPSILONS=("1e-1" "1e-2" "1e-3" "1e-4")
 
 NP=6
 EXEC=./hydro2-2d-g++
