@@ -164,6 +164,7 @@ public:
             fl.momentum_normal = (S_R * f_L.momentum_normal - S_L * f_R.momentum_normal + S_L * S_R * (Mn_R - Mn_L)) * denom;
             fl.momentum_tangent = (S_R * f_L.momentum_tangent - S_L * f_R.momentum_tangent + S_L * S_R * (Mt_R - Mt_L)) * denom;
             fl.energy = (S_R * f_L.energy - S_L * f_R.energy + S_L * S_R * (E_R - E_L)) * denom;
+            fl.u_interface = (S_R * u_L - S_L * u_R) / (S_R - S_L);
         }
 
         // ERROR CHECKING
