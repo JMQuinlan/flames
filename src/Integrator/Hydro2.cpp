@@ -1663,6 +1663,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             KE_mas(i,j,k) = 0.5 * (v(i,j,k,0) * v(i,j,k,0) + v(i,j,k,1) * v(i,j,k,1));
         
             UE_vol(i,j,k) = E_vol(i,j,k) - KE_vol(i,j,k);
+            UE_vol(i, j, k) = (UE_vol(i, j, k) < 0.0) ? small : UE_vol(i, j, k);
             E_mas(i,j,k) = E_vol(i,j,k) / (rho(i,j,k) + small);
             UE_mas(i,j,k) = E_mas(i,j,k) - KE_mas(i,j,k);
         
@@ -2715,6 +2716,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
 
             // Internal energy
             UE(i, j, k) = E(i, j, k) - KE(i, j, k);
+            UE(i, j, k) = (UE(i, j, k) < 0.0) ? small : UE(i, j, k);
 
             // Mixed EOS properties
             gamma(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
@@ -2940,6 +2942,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             KE(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
 
             UE(i, j, k) = E(i, j, k) - KE(i, j, k);
+            UE(i, j, k) = (UE(i, j, k) < 0.0) ? small : UE(i, j, k);
 
             if (!(use_nscbc))
             {
