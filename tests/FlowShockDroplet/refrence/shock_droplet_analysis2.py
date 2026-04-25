@@ -152,7 +152,7 @@ ETA_THRESHOLD = 0.5
 
 # Schlieren parameters
 SCHLIEREN_BETA = 5.0
-SCHLIEREN_LOG_SCALE = 0
+SCHLIEREN_LOG_SCALE = 1
 SCHLIEREN_USE_MIXTURE = 1
 
 # Deformation calculation
@@ -608,36 +608,37 @@ print("\n" + "=" * 70)
 print("COMPUTING GLOBAL MIN/MAX FOR FIXED COLORBARS")
 print("=" * 70)
 
-schlieren_min = min([np.min(s) for s in schlieren_fields])
-schlieren_max = max([np.max(s) for s in schlieren_fields])
+schlieren_min = np.nanmin([np.nanmin(s) for s in schlieren_fields])
+schlieren_max = np.nanmax([np.nanmax(s) for s in schlieren_fields])
 print(f"  Schlieren range: [{schlieren_min:.6e}, {schlieren_max:.6e}]")
 
-pressure_min = min([np.min(p) for p in pressure_fields])
-pressure_max = max([np.max(p) for p in pressure_fields])
+pressure_min = np.nanmin([np.nanmin(p) for p in pressure_fields])
+pressure_max = np.nanmax([np.nanmax(p) for p in pressure_fields])
 print(f"  Pressure range: [{pressure_min:.6e}, {pressure_max:.6e}] Pa")
 
-density_min = min([np.min(rho) for rho in density_fields])
-density_max = max([np.max(rho) for rho in density_fields])
+density_min = np.nanmin([np.nanmin(rho) for rho in density_fields])
+density_max = np.nanmax([np.nanmax(rho) for rho in density_fields])
 print(f"  Density range: [{density_min:.6e}, {density_max:.6e}] kg/m^3")
 
 v_mag_min = 0.0
-v_mag_max = max([np.max(np.sqrt(vx**2 + vy**2)) for vx, vy in velocity_fields])
+v_mag_max = np.nanmax([np.nanmax(np.sqrt(vx**2 + vy**2)) for vx, vy in velocity_fields])
 print(f"  Velocity range: [{v_mag_min:.6e}, {v_mag_max:.6e}] m/s")
 
-temperature_min = min([np.min(T) for T in temperature_fields])
-temperature_max = max([np.max(T) for T in temperature_fields])
+temperature_min = np.nanmin([np.nanmin(T) for T in temperature_fields])
+temperature_max = np.nanmax([np.nanmax(T) for T in temperature_fields])
 print(f"  Temperature range: [{temperature_min:.6e}, {temperature_max:.6e}] K")
 
-vap_dot_rho_min = min([np.min(v) for v in vap_dot_rho_fields])
-vap_dot_rho_max = max([np.max(v) for v in vap_dot_rho_fields])
+vap_dot_rho_min = np.nanmin([np.nanmin(v) for v in vap_dot_rho_fields])
+vap_dot_rho_max = np.nanmax([np.nanmax(v) for v in vap_dot_rho_fields])
 print(f"  Vap_dot_rho range: [{vap_dot_rho_min:.6e}, {vap_dot_rho_max:.6e}] kg/m^3/s")
 
-# For symmetric colorbar on vap_dot_rho (mass transfer can be +/-)
+# For symmetric colorbar on vap_dot_rho
 vap_dot_rho_lim = max(abs(vap_dot_rho_min), abs(vap_dot_rho_max))
 print(f"  Vap_dot_rho symmetric range: [{-vap_dot_rho_lim:.6e}, {vap_dot_rho_lim:.6e}] kg/m^3/s")
 
 # Smart vorticity filtering (2sigma method)
 vort_all = np.concatenate([v.flatten() for v in vorticity_fields])
+vort_all = vort_all[np.isfinite(vort_all)]  # Remove NaN and Inf
 vort_mean = np.mean(vort_all)
 vort_std = np.std(vort_all)
 vort_lim = VORTICITY_STD_MULTIPLIER * vort_std
