@@ -104,13 +104,19 @@ PLOT_DENSITY_CONTOURS = 1              # Density contours at key times
 # ============================================================================
 
 # Time sampling
-TIME_STEP = 1  # Sample every Nth timestep (1=all, 2=every other, 5=every 5th, etc.)
+TIME_STEP = 4  # Sample every Nth timestep (1=all, 2=every other, 5=every 5th, etc.)
 
 # File paths
 #amrex_output_dir = r'../../../bin/tests/FlowShockDroplet/output_ShockDroplet'
 amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet'
+#amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_H2O'
+#amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_n-Pentane'
+
 #amrex_output_dir = r'/mmfs1/home/spatel6/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet'
+
 output_folder = './ShockDroplet_Analysis'
+#output_folder = './ShockDroplet_Analysis_5Ma_H20'
+#output_folder = './ShockDroplet_Analysis_5Ma_n-Pentane'
 
 # Physical parameters
 RHO_AIR = 1.225
@@ -124,7 +130,7 @@ GAMMA_WATER = 7.15
 P0_AIR = 0.0
 P0_WATER = 3.0e8
 U_SHOCK = 500.0
-D_DROPLET_INITIAL = 0.01
+D_DROPLET_INITIAL = 0.001
 P_ATM = 1.01325e5
 
 # Domain parameters
