@@ -411,15 +411,30 @@ print("=" * 70)
 plot_files = []
 for item in os.listdir(amrex_output_dir):
     item_path = os.path.join(amrex_output_dir, item)
-    if os.path.isdir(item_path) and ('plt' in item.lower() or 'cell' in item.lower()):
-        plot_files.append(item_path)
+    # Exclude backup files (.old), checkpoint files, and other non-plot directories
+    if os.path.isdir(item_path):
+        # Check if it's a valid plot file (contains 'plt' or starts with digits)
+        # Exclude .old files and other temporary files
+        if '.old' not in item and 'chk' not in item.lower():
+            # Additional check: valid AMReX plot directories typically contain Header file
+            header_file = os.path.join(item_path, 'Header')
+            if os.path.exists(header_file):
+                plot_files.append(item_path)
+            else:
+                print(f"  Skipping (no Header): {item}")
 
 if not plot_files:
-    print(f"ERROR: No plot files found in {amrex_output_dir}")
+    print(f"ERROR: No valid plot files found in {amrex_output_dir}")
+    print(f"\nDirectory contents:")
+    for item in os.listdir(amrex_output_dir):
+        print(f"  - {item}")
     exit(1)
 
 plot_files.sort(key=extract_timestep_number)
-print(f"\nFound {len(plot_files)} plot files")
+print(f"\nFound {len(plot_files)} valid plot files")
+print(f"First file: {os.path.basename(plot_files[0])}")
+print(f"Last file: {os.path.basename(plot_files[-1])}")
+
 
 # ============================================================================
 # EXTRACT DATA FROM ALL TIMESTEPS
