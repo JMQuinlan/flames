@@ -63,17 +63,17 @@ PLOT_SCHLIEREN_PRESSURE_SPLIT = 1      # Individual frames in Schlieren-Pressure
 PLOT_SCHLIEREN_PRESSURE_GRID = 0       # 1x6 horizontal grid
 PLOT_SCHLIEREN_PRESSURE_GIF = 1        # GIF from Schlieren-Pressure/
 
-PLOT_SCHLIEREN_VELOCITY_SPLIT = 0       # Individual frames in Schlieren-Velocity/
-PLOT_SCHLIEREN_VELOCITY_GIF = 0         # GIF from Schlieren-Velocity/
+PLOT_SCHLIEREN_VELOCITY_SPLIT = 1       # Individual frames in Schlieren-Velocity/
+PLOT_SCHLIEREN_VELOCITY_GIF = 1         # GIF from Schlieren-Velocity/
 
-PLOT_SCHLIEREN_VAPDOTRHO_SPLIT = 0      # Individual frames in Schlieren-VapDotRho/
-PLOT_SCHLIEREN_VAPDOTRHO_GIF = 0        # GIF from Schlieren-VapDotRho/
+PLOT_SCHLIEREN_VAPDOTRHO_SPLIT = 1      # Individual frames in Schlieren-VapDotRho/
+PLOT_SCHLIEREN_VAPDOTRHO_GIF = 1        # GIF from Schlieren-VapDotRho/
 
-PLOT_VELOCITY_VORTICITY_SPLIT = 0       # Individual frames in Velocity-Vorticity/
-PLOT_VELOCITY_VORTICITY_GIF = 0         # GIF from Velocity-Vorticity/
+PLOT_VELOCITY_VORTICITY_SPLIT = 1       # Individual frames in Velocity-Vorticity/
+PLOT_VELOCITY_VORTICITY_GIF = 1         # GIF from Velocity-Vorticity/
 
-PLOT_SCHLIEREN_TEMPERATURE_SPLIT = 0    # Individual frames in Schlieren-Temperature/
-PLOT_SCHLIEREN_TEMPERATURE_GIF = 0      # GIF from Schlieren-Temperature/
+PLOT_SCHLIEREN_TEMPERATURE_SPLIT = 1    # Individual frames in Schlieren-Temperature/
+PLOT_SCHLIEREN_TEMPERATURE_GIF = 1      # GIF from Schlieren-Temperature/
 
 # Quantitative analysis plots
 PLOT_DEFORMATION_METRICS = 1           # D(t), AR(t), centroid, area, volume
@@ -152,7 +152,7 @@ ETA_THRESHOLD = 0.5
 
 # Schlieren parameters
 SCHLIEREN_BETA = 10.0
-SCHLIEREN_LOG_SCALE = 0
+SCHLIEREN_LOG_SCALE = 1
 SCHLIEREN_USE_MIXTURE = 1
 
 # Deformation calculation
