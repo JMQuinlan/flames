@@ -1,0 +1,208 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/FlowRayleighPlesset/output_RPE_Q_202060421
+# plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE_20260416
+
+### MESHING ###
+amr.plot_dt = 0.5e-6
+# amr.plot_int = 1
+amr.max_grid_size = 500000
+amr.blocking_factor = 4 # Must be >= nghost so FillBoundary can fill all ghost layers from neighbor valid cells
+amr.regrid_int = 1
+amr.grid_eff = 0.8
+# amr.max_level = 5
+amr.max_level = 4
+# amr.max_level = 0
+amr.n_cell = 32 32
+# amr.n_cell = 256 256
+# amr.n_cell = 512 512
+# amr.n_cell = 1024 1024
+
+### TIME STEPING ###
+timestep  = 1e-10
+# timestep  = 1e-8
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1e-0
+dynamictimestep.min = 1e-10
+cfl = 0.3
+
+### DIMENSIONS ###
+geometry.prob_lo = -0.20 -0.20 0.0
+geometry.prob_hi =  0.20  0.20 0.0
+geometry.is_periodic = 0 0 0
+
+# stop_time = 1e-3
+stop_time = 1e-4
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.001
+# eta.ic.expression.constant.epsilon = 0.01
+eta.ic.expression.constant.R0 = 0.02
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(sqrt(2)*epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+
+### HYDRO INITIAL CONDITIONS ###
+
+# ----------------------------
+# Tammann EOS (water outer + gas inner)
+# ----------------------------
+
+gamma_eta1 = 7.15  # Water (liquid surrounding bubble)
+gamma_eta0 = 1.4   # Air/gas (inside bubble)
+
+# ----------------------------
+# Density ratio 1 : 10
+# ----------------------------
+
+density_eta1.ic.type = expression
+density_eta1.ic.expression.region0 = "10.0"
+
+density_eta0.ic.type = expression
+density_eta0.ic.expression.region0 = "1.0"
+
+# ----------------------------
+# Initial velocities (rest)
+# ----------------------------
+
+velocity_eta1.ic.type = expression
+velocity_eta1.ic.expression.region0 = "0.0"
+velocity_eta1.ic.expression.region1 = "0.0"
+
+velocity_eta0.ic.type = expression
+velocity_eta0.ic.expression.region0 = "0.0"
+velocity_eta0.ic.expression.region1 = "0.0"
+
+# ----------------------------
+# Lowest stable pressure
+# ----------------------------
+
+pressure_eta1.ic.type = expression
+pressure_eta1.ic.expression.region0 = "1.0e5"
+
+pressure_eta0.ic.type = expression
+# pressure_eta0.ic.expression.region0 = "1.0e5+364"
+# pressure_eta0.ic.expression.region0 = "1.0e5"
+pressure_eta0.ic.expression.region0 = "1.0e6"
+
+# ----------------------------
+# Specific Heats
+# ----------------------------
+
+cp_eta1 = "1000.0"
+cp_eta0 = "1000.0"
+cv_eta1 = "1000.0/1.4"
+cv_eta0 = "1000.0/1.4"
+
+# ----------------------------
+# Stiffened pressure (Tammann EOS pi)
+# ----------------------------
+pi_eta1 = 3.0e8   # Water Tammann pressure
+pi_eta0 = 0.0     # Ideal gas (no Tammann)
+
+# ----------------------------
+# Viscosity
+# ----------------------------
+
+mu_eta1 = 0.0
+mu_eta1_b = 0.0
+mu_eta0 = 0.0
+mu_eta0_b = 0.0
+
+# ----------------------------
+# Surface tension ON
+# ----------------------------
+
+sigma = 7.28
+
+pref = 0.0
+
+### BOUNDARY CONDITIONS ###
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+#momentum.bc.type.xhi = dirichlet dirichlet
+#momentum.bc.type.xlo = dirichlet dirichlet
+#momentum.bc.type.yhi = dirichlet dirichlet
+#momentum.bc.type.ylo = dirichlet dirichlet
+#momentum.bc.val.xhi = 0.0 0.0
+#momentum.bc.val.xlo = 0.0 0.0
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion    = 1e-3
+omega_refinement_criterion  = 10.55
+p_refinement_criterion      = 1e+4
+rho_refinement_criterion    = 1e+4
+gradu_refinement_criterion  = 1e+4
+cutoff = 1e-8
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 1
+apply_weight = 0
+apply_vaporization = 0
+Spec_Vol = 1
+grav = 0.0
+
+## DEBUGGING ###
+apply_bs_source = 1
+p_int_method = 0 # 0: Off, 1: pressure average, 2: eta weighted pressure. 3: acoustic impedance matched pressure
+Riemann_Solver.type = hllc
+kappa_method = 1   # 1:"Smooth Normals" (default)  2:"Height Function"  3:"Hybrid (HF+SN blend)"
+smooth_kernel_size = 5  # Gaussian normal smoothing kernel: 3 (3x3, default) or 5 (5x5)
+nghost = 4             # Ghost cell depth (= N_int for HF band). Requires amr.blocking_factor >= nghost.
+integration.type = ForwardEuler
+# integration.type = RungeKutta
+# implicit_ch = 1
+# ch_mobility_nom = 0.032   # optional: override auto M = 2*ε*c_max
+# ch_mobility_nom = 1e-4  # seems to need to be smaller
+# implicit_ch = 0 # solves CH rhs explicitly (faster but dx^4 reduction in timestep needed, so only on course grids)
+implicit_ch = 2
+#   ch_mobility_nom = 4e-3
+  ch_mobility_nom = 4e-30
+  ch_newton_iters = 5       # default, usually converges in 3
+  ch_newton_tol = 1e-10     # default
+  ch_W_scale = 1.0          # double-well amplitude (1.0 = standard; >1 narrows interface, <1 widens)
+
+
+nscbc.enabled   = true
+  nscbc.sigma     = 0.28   # 0.28 is a good value for shock-droplet with gamma=1.4, but may need tuning for other problems. Higher sigma means more dissipation added by NSCBC, which can help stabilize but also adds more error.
+  nscbc.beta      = 1.0    # Lodato (2008) recommended: 0 = full transverse, 1 = pure LODI
+  # NOTE: beta=0.0 (full transverse) is unstable for Tammann water because the T1/T4 terms
+  # scale as rho*a (~1.47e5 for water vs ~430 for air), amplifying tiny velocity gradients
+  # from the bubble's incompressible velocity field into large L-wave corrections that
+  # corrupt boundary ghost cells over ~15 timesteps. Use beta=1.0 (pure LODI) for stiffened
+  # EOS or any case where rho*a >> 1. The Lodato transverse terms require separate
+  # normalization by rho*a to be stable for high-impedance fluids.
+  nscbc.xlo       = outflow
+  nscbc.xlo.p_target = 1.0e5   # Pa
+  nscbc.xhi       = outflow
+  nscbc.xhi.p_target = 1.0e5   # Pa
+  nscbc.ylo       = outflow
+  nscbc.ylo.p_target = 1.0e5   # Pa
+  nscbc.yhi       = outflow
+  nscbc.yhi.p_target = 1.0e5   # Pa

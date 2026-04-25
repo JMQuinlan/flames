@@ -1,0 +1,185 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# THE Main Shock Droplet Interaction Script
+
+alamo.program = hydro2
+
+### OUTPUT ###
+# plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet
+# plot_file = /mmfs1/home/jquinlan/runs/temp4/output_kappa_method3
+# plot_file = /mmfs1/home/jquinlan/runs/temp5/output_SD_2026
+plot_file = ./tests/FlowSQR/output_shock-droplet
+
+### MESHING ###
+amr.plot_dt = 0.25e-6
+amr.plot_int = 10
+amr.max_grid_size = 500000
+amr.blocking_factor = 4  # Must be >= nghost so FillBoundary can fill all ghost layers from neighbor valid cells
+amr.regrid_int = 1
+amr.grid_eff = 0.8
+amr.max_level = 5
+amr.n_cell = 64 32  # Maintains aspect ratio for 0.02m � 0.01m domain
+
+### TIME STEPPING ###
+## Static:
+timestep = 1e-10
+
+## Adaptive
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1e-6
+dynamictimestep.min = 1e-16
+cfl = 0.3
+
+### DIMENSIONS ###
+geometry.prob_lo = -0.005 -0.005 0.0  # 1/4 tube left of droplet
+geometry.prob_hi =  0.015  0.005 0.0  # 3/4 tube right of droplet (0.02m � 0.01m)
+geometry.is_periodic = 0 0 0
+
+### TIME STEP ###
+# stop_time = 0.0002  # Shorter time for shock interaction
+# stop_time = 1.0e-5  # Shorter time for shock interaction
+stop_time = 1.0e-4  # Shorter time for shock interaction
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.00004
+eta.ic.expression.constant.R0 = 0.001  # 1mm droplet radius
+eta.ic.expression.constant.x_center = 0.0  # Centered at origin
+eta.ic.expression.constant.y_center = 0.0  # Centered at origin
+
+# Droplet shape definition (air is eta=0, water is eta=1)
+# eta.ic.expression.region0 = "1.0 - 0.5*(1 + tanh((sqrt((x-x_center)**2 + (y-y_center)**2) - R0)/(2*sqrt(2)*epsilon)))"
+# Droplet shape definition (air is eta=1, water is eta=0)
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x-x_center)**2 + (y-y_center)**2) - R0)/(2*sqrt(2)*epsilon)))"
+
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+
+# Air properties (fluid 0 - surrounding vapor/gas)
+gamma_eta1 = 1.4   # Air
+pi_eta1 = 0       # Tammann EOS parameter for air (should be zero since we use ideal gas)
+mu_eta1 = 1.8e-5   # Air viscosity [Pa-s]
+mu_eta1_b = 0.0
+
+# Water properties (fluid 1 - droplet)
+gamma_eta0 = 7.15  # Water
+pi_eta0 = 3.0e8   # Tammann EOS parameter for water
+mu_eta0 = 1.0e-3   # Water viscosity [Pa-s]
+mu_eta0_b = 0.001
+
+# Densities
+density_eta1.ic.type = expression
+density_eta1.ic.expression.constant.rho_air = 1.225
+density_eta1.ic.expression.constant.rho_shock = 20.0
+density_eta1.ic.expression.constant.x_shock = -0.0015  # Shock region near left wall
+# Air field with shock
+density_eta1.ic.expression.region0 = "(x < x_shock)*rho_shock + (x >= x_shock)*rho_air"
+
+density_eta0.ic.type = expression
+density_eta0.ic.expression.constant.rho_water = 1000.0
+# Water density (constant in droplet)
+density_eta0.ic.expression.region0 = "rho_water"
+
+# Velocities (initially at rest, except shock region)
+velocity_eta1.ic.type = expression
+velocity_eta1.ic.expression.constant.u_shock = 500.0  # Shock velocity [m/s]
+velocity_eta1.ic.expression.constant.x_shock = -0.0015
+velocity_eta1.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
+velocity_eta1.ic.expression.region1 = "0.0"
+
+velocity_eta0.ic.type = expression
+velocity_eta0.ic.expression.constant.u_shock = 500.0
+velocity_eta0.ic.expression.constant.x_shock = -0.0015
+velocity_eta0.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
+velocity_eta0.ic.expression.region1 = "0.0"
+
+# Pressures
+pressure_eta1.ic.type = expression
+pressure_eta1.ic.expression.constant.p_atm = 1.01325e5
+pressure_eta1.ic.expression.constant.p_shock = 20.0e5  # High pressure shock region
+pressure_eta1.ic.expression.constant.x_shock = -0.0015
+# Air pressure with shock
+pressure_eta1.ic.expression.region0 = "(x < x_shock)*p_shock + (x >= x_shock)*p_atm"
+
+pressure_eta0.ic.type = expression
+pressure_eta0.ic.expression.constant.p_atm = 1.01325e5
+# Water pressure (atmospheric in droplet)
+pressure_eta0.ic.expression.region0 = "p_atm"
+
+# Thermodynamic properties
+cp_eta1 = "1005.0"  # Air specific heat [J/kg-K]
+cp_eta0 = "4179.0"  # Water specific heat [J/kg-K]
+cv_eta1 = "717.86"  # Air cv = cp/gamma
+cv_eta0 = "4179.0/7.15"  # Water cv = cp/gamma
+
+# Surface tension
+sigma = 72.8e-3  # Water-air surface tension [N/m]
+
+# Vapor Diffusivity
+Dv = "2.3e-5"	# Water-Vapor Diffusivity [m^2/s]
+
+# Reference pressure
+pref = 0.0
+
+### BOUNDARY CONDITIONS ###
+# Top and bottom walls: Neumann (slip walls)
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+# Left wall: Dirichlet (no-slip, no-penetration)
+density.bc.type.xlo = dirichlet
+density.bc.val.xlo = 2.0  # Post-shock density
+energy.bc.type.xlo = neumann
+momentum.bc.type.xlo = dirichlet dirichlet
+momentum.bc.val.xlo = 0.0 0.0  # No-slip
+
+# Right wall: Neumann (outflow)
+density.bc.type.xhi = neumann
+energy.bc.type.xhi = neumann
+momentum.bc.type.xhi = neumann neumann
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion = 0.1
+omega_refinement_criterion = 10.55
+p_refinement_criterion = 1e+6
+rho_refinement_criterion = 1e+5
+gradu_refinement_criterion = 1e+5
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 1
+apply_weight = 0
+apply_vaporization = 1
+
+Spec_Vol = 1
+grav = 9.81
+
+### DEBUGGING ###
+Riemann_Solver.type = hllc
+kappa_method = 1   # 1:"Smooth Normals" (default)  2:"Height Function"  3:"Hybrid (HF+SN blend)"
+smooth_kernel_size = 5  # Gaussian normal smoothing kernel: 3 (3x3, default) or 5 (5x5)
+nghost = 4             # Ghost cell depth (= N_int for HF band). Requires amr.blocking_factor >= nghost.
+integration.type = ForwardEuler
+# integration.type = RungeKutta
+# implicit_ch = 1
+# ch_mobility_nom = 0.032   # optional: override auto M = 2*ε*c_max
+# ch_mobility_nom = 1e-4  # seems to need to be smaller
+# implicit_ch = 0 # solves CH rhs explicitly (faster but dx^4 reduction in timestep needed, so only on course grids)
+implicit_ch = 2
+  ch_mobility_nom = 1e-4
+  ch_newton_iters = 5       # default, usually converges in 3
+  ch_newton_tol = 1e-10     # default 
