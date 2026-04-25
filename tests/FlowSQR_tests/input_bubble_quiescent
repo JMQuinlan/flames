@@ -6,12 +6,12 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRayleighPlesset/output_RPE_Q_202060421
+plot_file = ./tests/FlowSQR_tests/output_Q_202060425
 # plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE_20260416
 
 ### MESHING ###
-amr.plot_dt = 0.5e-6
-# amr.plot_int = 1
+amr.plot_dt = 0.1e-6
+amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 4 # Must be >= nghost so FillBoundary can fill all ghost layers from neighbor valid cells
 amr.regrid_int = 1
@@ -107,6 +107,38 @@ cv_eta0 = "1000.0/1.4"
 # ----------------------------
 pi_eta1 = 3.0e8   # Water Tammann pressure
 pi_eta0 = 0.0     # Ideal gas (no Tammann)
+
+# ----------------------------
+# Free-energy calibration (Phase 2: dmu_bulk consistency check)
+# ----------------------------
+# With ch_thermo_consistent = 1 the integrator computes
+#   dmu_bulk(x) = f_g(rho_0, T_0) - f_l(rho_1, T_1)
+# at every cell, where T_k is recomputed locally from each phase's
+# conservatives. At t=0 every cell has the same per-phase state, so
+# dmu_bulk is constant in space and we calibrate q_eta1 to make it zero:
+#
+#   T_0 = p_0 / [(gamma_0 - 1) rho_0 cv_0]                             = 3500 K
+#   T_1 = (p_1 + gamma_1 pi_1) / [(gamma_1 - 1) rho_1 cv_1]            = 48832.80 K
+#   f_g = cv_0 T_0 (1 - ln(T_0/T_ref)) + R_eta0 T_0 ln(rho_0/rho_ref_eta0)
+#       = -3,641,839 J/kg              (rho_ref_eta0 = 1.0  -> ln=0)
+#   f_l|q_l=0 = cv_1 T_1 (1 - ln(T_1/T_ref)) + pi_1/rho_1
+#       = -112,738,665 J/kg            (rho_ref_eta1 = 10.0 -> ln=0)
+#   q_eta1 = f_g - f_l|q_l=0           ~ +1.09097e8 J/kg
+#
+# Setting rho_ref_eta{0,1} to match the bulk densities zeros out the
+# ln(rho/rho_ref) term at IC, keeping the calibration arithmetic clean.
+
+T_ref          = 300.0
+rho_ref_eta0   = 1.0
+rho_ref_eta1   = 10.0
+R_eta0         = 285.714286   # cp - cv = 1000 - 1000/1.4
+
+q_eta0         = 0.0
+qprime_eta0    = 0.0
+q_eta1         = 1.09097974e8
+qprime_eta1    = 0.0
+
+ch_thermo_consistent = 1
 
 # ----------------------------
 # Viscosity

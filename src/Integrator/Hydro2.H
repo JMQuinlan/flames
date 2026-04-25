@@ -158,6 +158,11 @@ protected:
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
     void ApplyImplicitCH(int lev, Set::Scalar dt);
     void ApplyImplicitCH_Newton(int lev, Set::Scalar dt);
+    // Phase 2 (CH-Korteweg spec §4.2): EOS-derived diagnostic
+    //   dmu_bulk = f_g(rho_0, T_0) - f_l(rho_1, T_1)
+    // and the spinodal-proximity ratio |dmu_bulk|/lambda. Purely diagnostic;
+    // does NOT modify mu_chem_mf (that wiring belongs to Phase 4).
+    void ComputeChemicalPotential(int lev);
     void ComputeHybridCurvature(int lev);
     void ComputeSmoothNormals(int lev);
     void ComputeHeightFunction(int lev);
@@ -234,6 +239,8 @@ protected:
     Set::Field<Set::Scalar> gamma_mf;       // Specific Heat Ratio
     Set::Field<Set::Scalar> pi_mf;          // Tamman Pressure
     Set::Field<Set::Scalar> mu_chem_mf;     // Allen-Cahn Chemical Potential
+    Set::Field<Set::Scalar> dmu_bulk_mf;       // EOS-only piece f_g(rho_0,T_0) - f_l(rho_1,T_1)  [diagnostic]
+    Set::Field<Set::Scalar> dmu_over_lambda_mf;// |dmu_bulk| / ch_W_scale (spinodal-proximity, see spec §1.10)
     Set::Field<Set::Scalar> a_mf;           // Speed of sound
     Set::Field<Set::Scalar> Ma_mf;          // Mach
     Set::Field<Set::Scalar> UE_per_vol_mf;  // Internal Energy (per unit volume)
@@ -394,6 +401,11 @@ protected:
     int ch_newton_iters = 5;           // max Newton iterations (implicit_ch=2)
     Set::Scalar ch_newton_tol = 1.0e-10; // Newton convergence tolerance
     Set::Scalar ch_W_scale = 1.0;        // double-well amplitude scale (W_scale=1 → equilibrium width=√2·ε)
+    // Phase 2: enables EOS-derived contribution to the diagnostic dmu_bulk.
+    // Phase 4 will reuse the same flag to gate the dynamics path inside
+    // ApplyImplicitCH and the Advance primitive loop. Default OFF: identical
+    // behavior to the legacy generic double-well.
+    int ch_thermo_consistent = 0;
 
     // Adaptive Timestep
     bool adaptive_timestep = false;

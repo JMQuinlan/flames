@@ -6,6 +6,7 @@
 #include "BC/Constant.H"
 #include "BC/Expression.H"
 #include "Numeric/Stencil.H"
+#include "Numeric/TwoPhaseFreeEnergy.H"
 #include "IC/Constant.H"
 #include "IC/Laminate.H"
 #include "IC/Expression.H"
@@ -140,6 +141,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("ch_newton_iters",  value.ch_newton_iters,  5);        // Max Newton iterations (implicit_ch=2 only)
         pp_query_default("ch_newton_tol",    value.ch_newton_tol,    1.0e-10);  // Newton convergence tolerance
         pp_query_default("ch_W_scale",       value.ch_W_scale,       1.0);      // double-well amplitude (equilibrium width = √2·ε/√W_scale)
+        // Phase 2 (CH-Korteweg spec §3.2): include f_g(rho_0,T_0) - f_l(rho_1,T_1)
+        // in the diagnostic dmu_bulk field. Default OFF; Phase 4 reuses this flag
+        // to gate the dynamics path.
+        pp_query_default("ch_thermo_consistent", value.ch_thermo_consistent, 0);
 
         // Boundry Conditions
         value.density_bc = new BC::Expression(1, pp, "density.bc");
@@ -228,6 +233,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.gamma_mf,        value.energy_bc, 1, nghost, "gamma", true, false);                 // Specific Heat Ratio
         value.RegisterNewFab(value.pi_mf,   value.energy_bc, 1, nghost, "Tamann_pi", true, false);                    // Tamman Pressure
         value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc, 1, nghost, "mu_chem", true, false);               // Chemical Potential
+        value.RegisterNewFab(value.dmu_bulk_mf,        &value.bc_nothing, 1, nghost, "dmu_bulk", true, false);          // EOS-only chemical-potential difference (Phase 2 diagnostic)
+        value.RegisterNewFab(value.dmu_over_lambda_mf, &value.bc_nothing, 1, nghost, "dmu_over_lambda", true, false);   // |dmu_bulk|/lambda — spinodal-proximity diagnostic
         value.RegisterNewFab(value.a_mf,            &value.bc_nothing,  1, nghost, "a", true, false);                    // Speed of sound
         value.RegisterNewFab(value.Ma_mf,           &value.bc_nothing,  2, nghost, "Ma", true, false, { "x", "y" });   // Mach
         value.RegisterNewFab(value.UE_per_vol_mf,   &value.bc_nothing,  1, nghost, "UE_per_vol", true, false);         // Internal Energy (per unit volume)
@@ -796,6 +803,109 @@ void Hydro2::MixDiagnostic(int lev)
     pressure_mf[lev]->FillBoundary(geom.periodicity());
     gamma_mf[lev]->FillBoundary(geom.periodicity());
     pi_mf[lev]->FillBoundary(geom.periodicity());
+
+    // Phase 2 diagnostic: EOS-only chemical-potential difference + spinodal-proximity ratio.
+    // Pure read of conservatives + EOS — does not influence dynamics.
+    ComputeChemicalPotential(lev);
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////// ComputeChemicalPotential //////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+// Populates the diagnostic fields:
+//   dmu_bulk_mf        = f_g(rho_0, T_0) - f_l(rho_1, T_1)
+//   dmu_over_lambda_mf = |dmu_bulk| / ch_W_scale
+//
+// Per-phase temperatures are recomputed locally from each phase's own
+// (rho_k, M_k, E_k) so this routine does not depend on T_mf already being
+// in-band. Alamo stores energy in the Tammann "Convention B" form
+// (UE_per_vol = rho*cv*T with pi treated as a reference pressure), so the
+// inversion is the same for both phases:
+//     T_k = (E_k - 0.5|M_k|^2/rho_k) / (rho_k * cv_k)
+// Sanity at IC: p = (gamma-1)*UE - gamma*pi gives UE = (p+gamma*pi)/(gamma-1)
+// so T = UE/(rho*cv) recovers (p + gamma*pi)/[(gamma-1) rho cv] as expected.
+//
+// When ch_thermo_consistent == 0, both fields are zeroed (legacy behavior).
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+void Hydro2::ComputeChemicalPotential(int lev)
+{
+    BL_PROFILE("Hydro2::ComputeChemicalPotential");
+
+    const Geometry& geom = this->geom[lev];
+
+    if (!ch_thermo_consistent)
+    {
+        dmu_bulk_mf       [lev]->setVal(0.0);
+        dmu_over_lambda_mf[lev]->setVal(0.0);
+        dmu_bulk_mf       [lev]->FillBoundary(geom.periodicity());
+        dmu_over_lambda_mf[lev]->FillBoundary(geom.periodicity());
+        return;
+    }
+
+    // Snapshot scalars for device capture.
+    const Real cv0_   = cv_eta0;
+    const Real R0_    = R_eta0;
+    const Real Tref0_ = T_ref;
+    const Real rref0_ = rho_ref_eta0;
+    const Real q0_    = q_eta0;
+    const Real qp0_   = qprime_eta0;
+
+    const Real cv1_   = cv_eta1;
+    const Real g1_    = gamma_eta1;
+    const Real pi1_   = pi_eta1;
+    const Real Tref1_ = T_ref;
+    const Real rref1_ = rho_ref_eta1;
+    const Real q1_    = q_eta1;
+    const Real qp1_   = qprime_eta1;
+
+    const Real lambda_ = (ch_W_scale > Real(0.0)) ? ch_W_scale : Real(1.0);
+    const Real safe_   = Real(1.0e-20);
+
+    for (MFIter mfi(*eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const Box& bx = mfi.validbox();
+
+        auto rho0 = density_eta0_mf [lev]->const_array(mfi);
+        auto rho1 = density_eta1_mf [lev]->const_array(mfi);
+        auto M0   = momentum_eta0_mf[lev]->const_array(mfi);
+        auto M1   = momentum_eta1_mf[lev]->const_array(mfi);
+        auto E0   = energy_eta0_mf  [lev]->const_array(mfi);
+        auto E1   = energy_eta1_mf  [lev]->const_array(mfi);
+
+        auto dmu  = dmu_bulk_mf       [lev]->array(mfi);
+        auto dmuL = dmu_over_lambda_mf[lev]->array(mfi);
+
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        {
+            const Real r0 = (rho0(i,j,k) > safe_) ? rho0(i,j,k) : safe_;
+            const Real r1 = (rho1(i,j,k) > safe_) ? rho1(i,j,k) : safe_;
+
+            const Real KE0 = Real(0.5) * (M0(i,j,k,0)*M0(i,j,k,0) + M0(i,j,k,1)*M0(i,j,k,1)) / r0;
+            const Real KE1 = Real(0.5) * (M1(i,j,k,0)*M1(i,j,k,0) + M1(i,j,k,1)*M1(i,j,k,1)) / r1;
+            const Real UE0 = amrex::max(Real(0.0), E0(i,j,k) - KE0);
+            const Real UE1 = amrex::max(Real(0.0), E1(i,j,k) - KE1);
+
+            // Per-phase temperatures (Alamo Convention B: UE = rho*cv*T;
+            // pi is a reference pressure, not part of internal energy).
+            Real T0 = UE0 / (r0 * cv0_ + safe_);
+            Real T1 = UE1 / (r1 * cv1_ + safe_);
+            if (!std::isfinite(T0) || T0 <= Real(0.0)) T0 = Tref0_;
+            if (!std::isfinite(T1) || T1 <= Real(0.0)) T1 = Tref1_;
+
+            const Real fg = Numeric::FreeEnergy::f_CPG(
+                r0, T0, cv0_, R0_, Tref0_, rref0_, q0_, qp0_);
+            const Real fl = Numeric::FreeEnergy::f_Tammann(
+                r1, T1, cv1_, g1_, pi1_, Tref1_, rref1_, q1_, qp1_);
+
+            const Real d = fg - fl;
+            dmu (i,j,k) = d;
+            dmuL(i,j,k) = std::abs(d) / lambda_;
+        });
+    }
+
+    dmu_bulk_mf       [lev]->FillBoundary(geom.periodicity());
+    dmu_over_lambda_mf[lev]->FillBoundary(geom.periodicity());
 }
 
 
