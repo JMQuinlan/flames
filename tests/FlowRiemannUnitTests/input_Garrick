@@ -6,7 +6,7 @@
 # Figure 4 - Gass Liquid Riemann Problem
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Garrick_GasLiquid
+plot_file = ./tests/FlowRiemannUnitTests/output_Garrick_20260423
 Riemann_Solver.type = hllc
 
 
@@ -16,7 +16,7 @@ amr.plot_int = 50
 ### MESHING ###
 amr.max_level = 0
 amr.max_grid_size = 500000
-amr.blocking_factor = 2
+amr.blocking_factor = 4
 amr.grid_eff = 0.8
 amr.n_cell = 1024 16
 
@@ -28,7 +28,7 @@ geometry.is_periodic = 0 1 0
 ### TIME STEP ###
 timestep  = 2.5e-4
 # stop_time = 0.2
-stop_time = 0.1
+stop_time = 0.2
 cfl   = 0.4
 
 ### Sources ###
@@ -127,10 +127,11 @@ sigma = 0;
 Dv = 0;
 g = 0.0;
 
+apply_bs_source = 1
 apply_surface_tension = 0
 apply_weight = 0
 apply_vaporization = 0
-
+p_int_method = 0 # 0: Off, 1: pressure average, 2: eta weighted pressure. 3: acoustic impedance matched pressure
 
 kappa_method = 1   # 1:"Smooth Normals" (default)  2:"Height Function"  3:"Hybrid (HF+SN blend)"
 smooth_kernel_size = 5  # Gaussian normal smoothing kernel: 3 (3x3, default) or 5 (5x5)

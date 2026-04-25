@@ -89,7 +89,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("apply_viscous", value.apply_viscous, false);                // Per-phase viscous stress (constant mu_k per phase), default: false
         pp_query_default("apply_vaporization", value.apply_vaporization, false);       // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
         pp_query_default("apply_bs_source", value.apply_bs_source, true);               // Stage 4 BS phase-coupling sources (set 0 to disable for pure single-phase validation)
-        pp_query_default("p_int_method", value.p_int_method, 0);                        // BS interface-pressure closure: 0 arithmetic mean, 1 eta-weighted, 2 acoustic-impedance
+        pp_query_default("p_int_method", value.p_int_method, 0);                        // BS interface-pressure closure: 0 OFF, 1 arithmetic mean, 2 eta-weighted, 3 acoustic-impedance
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
         // PHASE eta=1 (liquid — stiffened gas)
@@ -1228,17 +1228,26 @@ Hydro2::ApplyBSSource(int lev,
             Real w1 = eta_c;
 
             // Interface pressure / velocity closure (see p_int_method).
-            // All choices collapse to the common value at mechanical equilibrium
-            // (p_0 = p_1, u_0 = u_1), so the corrected BS source vanishes.
-            Real p_int, u_int_x, u_int_y;
+            // Method 0 means "no pressure-imbalance coupling" — dp0/dp1/pu_int
+            // are zeroed below so only mass/heat/Fsv contributions survive.
+            // Methods 1–3 collapse to the common value at mechanical equilibrium
+            // (p_0 = p_1, u_0 = u_1), so the BS pressure source vanishes there.
+            Real p_int = Real(0.0), u_int_x = Real(0.0), u_int_y = Real(0.0);
             if (p_int_method_ == 1)
+            {
+                // arithmetic mean
+                p_int   = Real(0.5) * (p0_phase + p1_phase);
+                u_int_x = Real(0.5) * (u0x_ph   + u1x_ph);
+                u_int_y = Real(0.5) * (u0y_ph   + u1y_ph);
+            }
+            else if (p_int_method_ == 2)
             {
                 // eta-weighted
                 p_int   = w0 * p0_phase + w1 * p1_phase;
                 u_int_x = w0 * u0x_ph   + w1 * u1x_ph;
                 u_int_y = w0 * u0y_ph   + w1 * u1y_ph;
             }
-            else if (p_int_method_ == 2)
+            else if (p_int_method_ == 3)
             {
                 // acoustic-impedance weighted: p* = (Z_1 p_0 + Z_0 p_1)/(Z_0+Z_1)
                 // CPG:   c_0^2 = g_0 * p_0 / rho_0
@@ -1263,13 +1272,8 @@ Hydro2::ApplyBSSource(int lev,
                     u_int_y = Real(0.5) * (u0y_ph   + u1y_ph);
                 }
             }
-            else
-            {
-                // 0: arithmetic mean (default)
-                p_int   = Real(0.5) * (p0_phase + p1_phase);
-                u_int_x = Real(0.5) * (u0x_ph   + u1x_ph);
-                u_int_y = Real(0.5) * (u0y_ph   + u1y_ph);
-            }
+            // else: p_int_method_ == 0 → pressure-imbalance coupling OFF
+            //       p_int and u_int stay at 0; dp0/dp1/pu_int are zeroed below.
 
             // Prescribed interface inputs (mass transfer / heat flux problems)
             Real mdot0 = m0_arr(i,j,k);
@@ -1302,8 +1306,13 @@ Hydro2::ApplyBSSource(int lev,
             //     Phase 0:  S_M = (p_0 - p_int)·∇η    (BN "effective" force)
             //     Phase 1:  S_M = (p_int - p_1)·∇η
             //     Plus mass-transfer momentum ±ṁ₀·u₀·|∇η| and η-split Fsv.
-            Real dp0 = p0_phase - p_int;
-            Real dp1 = p_int   - p1_phase;
+            //     Method 0 zeroes the pressure-imbalance part entirely.
+            Real dp0 = Real(0.0), dp1 = Real(0.0);
+            if (p_int_method_ != 0)
+            {
+                dp0 = p0_phase - p_int;
+                dp1 = p_int    - p1_phase;
+            }
             Real Smass_mx = mdot0 * u0x * grad_eta_mag;
             Real Smass_my = mdot0 * u0y * grad_eta_mag;
             P0(i,j,k,0) += dp0*grad_eta(0) - Smass_mx + w0*Fsv_x;
@@ -1315,12 +1324,20 @@ Hydro2::ApplyBSSource(int lev,
             //     Phase 0:  S_E = (p_0·u_0 - p_int·u_int)·∇η
             //     Phase 1:  S_E = (p_int·u_int - p_1·u_1)·∇η
             //     Plus heat flux q·∇η (antisymmetric) and η-split Fsv·u_k work.
-            Real pu_int = p_int   * (u_int_x*grad_eta(0) + u_int_y*grad_eta(1));
-            Real pu_0   = p0_phase* (u0x_ph *grad_eta(0) + u0y_ph *grad_eta(1));
-            Real pu_1   = p1_phase* (u1x_ph *grad_eta(0) + u1y_ph *grad_eta(1));
-            Real SEq    = qx*grad_eta(0) + qy*grad_eta(1);
-            U0(i,j,k) += (pu_0   - pu_int) - SEq + w0*Fsv_work_0;
-            U1(i,j,k) += (pu_int - pu_1  ) + SEq + w1*Fsv_work_1;
+            //     Method 0 zeroes the pressure-work part entirely.
+            Real pu_0_minus_int = Real(0.0);
+            Real pu_int_minus_1 = Real(0.0);
+            if (p_int_method_ != 0)
+            {
+                Real pu_int = p_int   * (u_int_x*grad_eta(0) + u_int_y*grad_eta(1));
+                Real pu_0   = p0_phase* (u0x_ph *grad_eta(0) + u0y_ph *grad_eta(1));
+                Real pu_1   = p1_phase* (u1x_ph *grad_eta(0) + u1y_ph *grad_eta(1));
+                pu_0_minus_int = pu_0   - pu_int;
+                pu_int_minus_1 = pu_int - pu_1;
+            }
+            Real SEq = qx*grad_eta(0) + qy*grad_eta(1);
+            U0(i,j,k) += pu_0_minus_int - SEq + w0*Fsv_work_0;
+            U1(i,j,k) += pu_int_minus_1 + SEq + w1*Fsv_work_1;
         });
     }
 }

@@ -157,9 +157,12 @@ u0.ic.constant.value = 0.0 0.0
 q.ic.constant.value = 0.0 0.0
 
 ### ADDITIONAL SOURCES ###
+apply_bs_source = 1
 apply_surface_tension = 1
 apply_weight = 0
 apply_vaporization = 0
+p_int_method = 0 # 0: Off, 1: pressure average, 2: eta weighted pressure. 3: acoustic impedance matched pressure
+
 Spec_Vol = 1
 grav = 0.0
 
