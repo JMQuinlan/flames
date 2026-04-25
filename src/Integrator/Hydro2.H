@@ -163,6 +163,11 @@ protected:
     // and the spinodal-proximity ratio |dmu_bulk|/lambda. Purely diagnostic;
     // does NOT modify mu_chem_mf (that wiring belongs to Phase 4).
     void ComputeChemicalPotential(int lev);
+    // Operator-split explicit-Euler heat-conduction step on per-phase energies.
+    //   E_k(n+1) = E_k(n) + dt * k_k * Laplacian(T_k),   T_k = UE_k / (rho_k cv_k)
+    // Per-phase k_eta{0,1} are constant scalars from input. No-op when
+    // apply_heat_conduction == 0.
+    void ApplyHeatConduction(int lev, Set::Scalar dt);
     void ComputeHybridCurvature(int lev);
     void ComputeSmoothNormals(int lev);
     void ComputeHeightFunction(int lev);
@@ -385,6 +390,11 @@ protected:
     int apply_surface_tension = 1;
     int apply_weight = 0;
     int apply_viscous = 0;     // Per-phase viscous stress in RHS_PerPhase (constant mu_k, mu_k_b)
+    // Per-phase heat conduction (operator-split explicit-Euler step).
+    // CFL constraint: dt < 0.5 * dx^2 / max(k_k / (rho_k cv_k)).
+    int apply_heat_conduction = 0;
+    Set::Scalar k_eta0 = 0.0;  // gas-phase thermal conductivity [W/(m K)]
+    Set::Scalar k_eta1 = 0.0;  // liquid-phase thermal conductivity [W/(m K)]
     int static_eta = 0;
     int apply_vaporization = 0;
     int apply_bs_source = 1;   // Stage 4: BS phase-coupling sources (set 0 to test single-phase limit)

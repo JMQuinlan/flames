@@ -32,9 +32,9 @@ except ImportError:
 # Stefan analytical parameters — must match the input files
 # ---------------------------------------------------------------------------
 BETA    = 0.058
-ALPHA_G = 2.27e-5      # m^2/s
-T_OFF   = 0.131        # s
-XHI     = 1.0e-3       # m  (matches geometry.prob_hi[0])
+ALPHA_G = 1.21e-3      # m^2/s   (matches input m0.ic.expression.constant.alpha_g)
+T_OFF   = 5.0e-5       # s       (matches input m0.ic.expression.constant.t_off)
+XHI     = 1.0e-3       # m       (matches geometry.prob_hi[0])
 
 def delta_analytical(t):
     """Vapor-layer thickness delta(t) = xhi - x_int(t)."""

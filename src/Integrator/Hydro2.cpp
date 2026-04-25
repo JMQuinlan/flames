@@ -88,6 +88,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("apply_surface_tension", value.apply_surface_tension, false); // Apply surface tension when solving, default: true --> "Apply Surface Tension"
         pp_query_default("apply_weight", value.apply_weight, false);                  // Apply weight when solving, default: false --> "No Weight"
         pp_query_default("apply_viscous", value.apply_viscous, false);                // Per-phase viscous stress (constant mu_k per phase), default: false
+        pp_query_default("apply_heat_conduction", value.apply_heat_conduction, 0);    // Per-phase heat conduction via explicit-Euler operator split
+        pp_query_default("k_eta0", value.k_eta0, 0.0);                                // [W/(m K)] gas-phase thermal conductivity
+        pp_query_default("k_eta1", value.k_eta1, 0.0);                                // [W/(m K)] liquid-phase thermal conductivity
         pp_query_default("apply_vaporization", value.apply_vaporization, false);       // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
         pp_query_default("apply_bs_source", value.apply_bs_source, true);               // Stage 4 BS phase-coupling sources (set 0 to disable for pure single-phase validation)
         pp_query_default("bs_sources_time_dependent", value.bs_sources_time_dependent, 0); // re-evaluate ic_m0/ic_u0/ic_q each Advance step at the current time (Stefan and similar)
@@ -759,9 +762,11 @@ void Hydro2::MixDiagnostic(int lev)
         auto a_mix    = a_mf[lev]->array(mfi);
         auto gamma    = gamma_mf[lev]->array(mfi);
         auto pi_out   = pi_mf[lev]->array(mfi);
+        auto T_mix    = T_mf[lev]->array(mfi);
 
         Real g0 = gamma_eta0, g1 = gamma_eta1;
         Real pi0 = pi_eta0,   pi1 = pi_eta1;
+        Real cv0 = cv_eta0,   cv1 = cv_eta1;
         Real pref_ = pref;
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
@@ -813,6 +818,17 @@ void Hydro2::MixDiagnostic(int lev)
 
             Real c2 = gm * (p_mix(i,j,k) + pm) / safe_rm;
             a_mix(i,j,k) = (c2 > Real(0.0)) ? std::sqrt(c2) : Real(0.0);
+
+            // Mixture temperature: eta-weighted blend of per-phase T's
+            // (Convention B: UE_k = rho_k * cv_k * T_k for both CPG and Tammann).
+            // This supersedes the Allaire (p + gamma*pi)/((gamma-1)*rho*cv) form
+            // computed in the Advance primitive loop, which has a known sign
+            // error on the Tammann pi term that biases liquid-phase T low.
+            Real T0_phase = (cv0 > Real(0.0)) ? UE0 / (safe_r0 * cv0) : Real(0.0);
+            Real T1_phase = (cv1 > Real(0.0)) ? UE1 / (safe_r1 * cv1) : Real(0.0);
+            if (!std::isfinite(T0_phase) || T0_phase < Real(0.0)) T0_phase = Real(0.0);
+            if (!std::isfinite(T1_phase) || T1_phase < Real(0.0)) T1_phase = Real(0.0);
+            T_mix(i,j,k) = one_e * T0_phase + e * T1_phase;
         });
     }
 
@@ -824,6 +840,7 @@ void Hydro2::MixDiagnostic(int lev)
     pressure_mf[lev]->FillBoundary(geom.periodicity());
     gamma_mf[lev]->FillBoundary(geom.periodicity());
     pi_mf[lev]->FillBoundary(geom.periodicity());
+    T_mf[lev]->FillBoundary(geom.periodicity());
 
     // Phase 2 diagnostic: EOS-only chemical-potential difference + spinodal-proximity ratio.
     // Pure read of conservatives + EOS — does not influence dynamics.
@@ -927,6 +944,102 @@ void Hydro2::ComputeChemicalPotential(int lev)
 
     dmu_bulk_mf       [lev]->FillBoundary(geom.periodicity());
     dmu_over_lambda_mf[lev]->FillBoundary(geom.periodicity());
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////// ApplyHeatConduction //////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+// Operator-split explicit-Euler conduction step on per-phase energy fields:
+//   E_k(n+1) = E_k(n) + dt * k_k * Laplacian(T_k)
+// where T_k = UE_k / (rho_k cv_k) (Convention B, both CPG and Tammann).
+//
+// Diffusion CFL must be respected by the caller's time-step choice:
+//   dt < 0.5 * dx^2 / max(k_k / (rho_k cv_k))
+//
+// Called from Advance() after the hyperbolic + source updates have produced
+// (rho_eta, M_eta, E_eta) at t+dt, and before MixDiagnostic recomputes
+// mixture quantities for the plotfile.
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+void Hydro2::ApplyHeatConduction(int lev, Set::Scalar dt)
+{
+    BL_PROFILE("Hydro2::ApplyHeatConduction");
+    if (!apply_heat_conduction) return;
+
+    const Geometry& geom = this->geom[lev];
+    const Real* DX = geom.CellSize();
+
+    // Refresh ghost cells so neighbor reads in the Laplacian stencil are valid.
+    density_eta0_mf [lev]->FillBoundary(geom.periodicity());
+    density_eta1_mf [lev]->FillBoundary(geom.periodicity());
+    momentum_eta0_mf[lev]->FillBoundary(geom.periodicity());
+    momentum_eta1_mf[lev]->FillBoundary(geom.periodicity());
+    energy_eta0_mf  [lev]->FillBoundary(geom.periodicity());
+    energy_eta1_mf  [lev]->FillBoundary(geom.periodicity());
+
+    const Real cv0_  = cv_eta0;
+    const Real cv1_  = cv_eta1;
+    const Real k0_   = k_eta0;
+    const Real k1_   = k_eta1;
+    const Real safe_ = Real(1.0e-20);
+    const Real idx2  = Real(1.0) / (DX[0] * DX[0]);
+    const Real idy2  = Real(1.0) / (DX[1] * DX[1]);
+
+    for (MFIter mfi(*eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const Box& bx = mfi.validbox();
+
+        auto rho0 = density_eta0_mf [lev]->const_array(mfi);
+        auto rho1 = density_eta1_mf [lev]->const_array(mfi);
+        auto M0   = momentum_eta0_mf[lev]->const_array(mfi);
+        auto M1   = momentum_eta1_mf[lev]->const_array(mfi);
+        auto E0   = energy_eta0_mf  [lev]->array(mfi);
+        auto E1   = energy_eta1_mf  [lev]->array(mfi);
+
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        {
+            // Per-phase temperature at (ii,jj,kk). Reads from ghost cells when
+            // (ii,jj,kk) is a neighbor of a valid cell.
+            auto T0_at = [&](int ii, int jj, int kk) -> Real
+            {
+                Real r = (rho0(ii,jj,kk) > safe_) ? rho0(ii,jj,kk) : safe_;
+                Real KE = Real(0.5) * (M0(ii,jj,kk,0)*M0(ii,jj,kk,0)
+                                     + M0(ii,jj,kk,1)*M0(ii,jj,kk,1)) / r;
+                Real UE = E0(ii,jj,kk) - KE;
+                return (cv0_ > Real(0.0)) ? UE / (r * cv0_) : Real(0.0);
+            };
+            auto T1_at = [&](int ii, int jj, int kk) -> Real
+            {
+                Real r = (rho1(ii,jj,kk) > safe_) ? rho1(ii,jj,kk) : safe_;
+                Real KE = Real(0.5) * (M1(ii,jj,kk,0)*M1(ii,jj,kk,0)
+                                     + M1(ii,jj,kk,1)*M1(ii,jj,kk,1)) / r;
+                Real UE = E1(ii,jj,kk) - KE;
+                return (cv1_ > Real(0.0)) ? UE / (r * cv1_) : Real(0.0);
+            };
+
+            const Real T0c  = T0_at(i,   j,   k);
+            const Real T0xp = T0_at(i+1, j,   k);
+            const Real T0xm = T0_at(i-1, j,   k);
+            const Real T0yp = T0_at(i,   j+1, k);
+            const Real T0ym = T0_at(i,   j-1, k);
+            const Real lap_T0 = (T0xp - Real(2.0)*T0c + T0xm) * idx2
+                              + (T0yp - Real(2.0)*T0c + T0ym) * idy2;
+
+            const Real T1c  = T1_at(i,   j,   k);
+            const Real T1xp = T1_at(i+1, j,   k);
+            const Real T1xm = T1_at(i-1, j,   k);
+            const Real T1yp = T1_at(i,   j+1, k);
+            const Real T1ym = T1_at(i,   j-1, k);
+            const Real lap_T1 = (T1xp - Real(2.0)*T1c + T1xm) * idx2
+                              + (T1yp - Real(2.0)*T1c + T1ym) * idy2;
+
+            E0(i,j,k) += dt * k0_ * lap_T0;
+            E1(i,j,k) += dt * k1_ * lap_T1;
+        });
+    }
+
+    energy_eta0_mf[lev]->FillBoundary(geom.periodicity());
+    energy_eta1_mf[lev]->FillBoundary(geom.periodicity());
 }
 
 
@@ -4214,6 +4327,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     density_eta1_mf[lev]  ->ParallelCopy(solution_new[4]);
     momentum_eta1_mf[lev] ->ParallelCopy(solution_new[5]);
     energy_eta1_mf[lev]   ->ParallelCopy(solution_new[6]);
+
+    // Per-phase heat conduction (operator-split explicit Euler step). No-op
+    // when apply_heat_conduction == 0. Caller must respect the diffusion CFL.
+    ApplyHeatConduction(lev, dt);
 
     MixDiagnostic(lev);
 

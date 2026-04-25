@@ -32,47 +32,60 @@ alamo.program = hydro2
 plot_file = ./tests/FlowSQR_tests/output_stefan_sqr
 
 ### MESHING ###
-amr.plot_dt        = 5e-3
-amr.plot_int = 1
+amr.plot_dt        = 5e-6
+# amr.plot_int = 1     # keep for first few step diagnstics
 amr.max_grid_size  = 500000
 amr.blocking_factor = 4
 amr.regrid_int     = 2
 amr.grid_eff       = 0.8
-amr.max_level      = 2
-amr.n_cell         = 200 8
+amr.max_level      = 0                          # single level — keep dt acoustic-limited only
+amr.n_cell         = 400 8
 
 ### TIME STEPING ###
-timestep                = 1e-7
+timestep                = 1e-10
 dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
-dynamictimestep.max     = 1e-3
-dynamictimestep.min     = 1e-10
+dynamictimestep.max     = 1e-8
+dynamictimestep.min     = 1e-11
 cfl                     = 0.3
 
 ### DIMENSIONS ###
 geometry.prob_lo     = 0.0     0.0     0.0
-geometry.prob_hi     = 1.0e-3  4.0e-5  0.0      # 1 mm x 40 um (effectively 1D)
+geometry.prob_hi     = 1.0e-3  2.0e-5  0.0      # 1 mm x 20 um (effectively 1D)
 geometry.is_periodic = 0       1       0        # periodic in y
 
-stop_time = 5e-2
+stop_time = 1e-4                                 # 100 us window
 
 ### SHARED CONSTANTS (Stefan analytical) ###
-# Sat-state values, model latent heat, Stefan beta (precomputed offline):
-#   c_p_g = gamma_g * c_v_g = 1.327 * 1411 = 1872.4 J/(kg K)
-#   alpha_g = k_g / (rho_g * c_p_g) ~ 2.27e-5 m^2/s   (k_g ~ 0.025 W/m/K)
-#   L_model = 9.15e5 J/kg   (calibrated, see EOS block below)
-#   T_wall - T_sat = 50 K
-#   RHS(beta) = c_p_g * (T_wall - T_sat) / (L * sqrt(pi)) = 1872.4*50/(9.15e5*1.7725) = 0.0577
-#   solving beta*exp(beta^2)*erfc(-beta) = 0.0577  ->  beta ~ 0.058
+# This is a *model fluid*, not real water-steam — k is boosted ~40x to bring
+# the diffusion timescale to within a few cell-acoustic-CFLs of the acoustic
+# timescale so the run is feasible:
+#   c_p_g = gamma_g * c_v_g = 1.327 * 1411     = 1872.4 J/(kg K)
+#   alpha_g = k_eta0 / (rho_g * c_p_g)         = 1.0/(0.5882*1872.4) ~ 1.21e-3 m^2/s
+#   c_g (sound speed)                          ~ 478 m/s
+#   diffusion CFL: dt < 0.5*dx^2/alpha_g       ~ 2.58e-9 s  (~ acoustic, OK)
+#   acoustic CFL : dt < 0.3*dx/c_g             ~ 1.57e-9 s  (limiter)
 #
-# Time offset t_off pinned so that the IC interface sits at x_int(0) = 8.0e-4:
-#   2*beta*sqrt(alpha_g * t_off) = xhi - x_int(0) = 2.0e-4
-#   t_off = (2.0e-4)^2 / (4 * beta^2 * alpha_g) = 0.131 s
+# Stefan beta (depends on physical Ste = c_p*dT/L only — same as real water):
+#   L_model = 9.15e5 J/kg                       (calibrated, see EOS block)
+#   T_wall - T_sat = 50 K
+#   RHS(beta) = c_p_g * (T_wall - T_sat) / (L * sqrt(pi)) = 0.0577
+#   beta * exp(beta^2) * erfc(-beta) = 0.0577  -> beta ~ 0.058
+#
+# t_off = 5e-5 s pins the IC vapor thickness:
+#   delta_0 = 2*beta*sqrt(alpha_g * t_off) = 0.116 * sqrt(1.21e-3 * 5e-5)
+#           = 0.116 * 7.78e-4 ~ 9.03e-5 m  (~36 cells at dx=2.5 um)
+#   x_int(0) = xhi - delta_0 = 1.0e-3 - 9.03e-5 = 9.097e-4
+#
+# Predicted motion in stop_time = 1e-4 s:
+#   delta(t_off + 1e-4) - delta(t_off)
+#     = 0.116 * sqrt(1.21e-3) * (sqrt(1.5e-4) - sqrt(5e-5))
+#     ~ 2.1e-5 m  (~ 8 cells)
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = 5e-6                # diffuse-interface width
-eta.ic.expression.constant.x_int0  = 8.0e-4              # initial interface position
+eta.ic.expression.constant.x_int0  = 9.097e-4            # initial interface position (xhi - 2*beta*sqrt(alpha*t_off))
 eta.ic.expression.region0 = "0.5*(1 - tanh((x - x_int0)/(sqrt(2)*epsilon)))"
 # eta=1 (liquid) for x<x_int0, eta=0 (vapor) for x>x_int0
 epsilon = eta.ic.expression.constant.epsilon
@@ -215,8 +228,8 @@ cutoff = 1e-8
 m0.ic.type = expression
 m0.ic.expression.constant.rho_g_ref = 0.5882
 m0.ic.expression.constant.beta      = 0.058
-m0.ic.expression.constant.alpha_g   = 2.27e-5
-m0.ic.expression.constant.t_off     = 0.131
+m0.ic.expression.constant.alpha_g   = 1.21e-3              # matches k_eta0 / (rho_g * c_p_g)
+m0.ic.expression.constant.t_off     = 5e-5
 m0.ic.expression.region0 = "rho_g_ref * beta * sqrt(alpha_g / (t + t_off))"
 
 # u0 and q held at 0 for now; the SQR source derives momentum/energy
@@ -232,6 +245,9 @@ apply_surface_tension = 0
 apply_weight          = 0
 apply_vaporization    = 0
 apply_viscous         = 0
+apply_heat_conduction = 1
+k_eta0 = 1.0          # [W/m/K] gas-phase thermal conductivity (model — boosted ~40x over real steam)
+k_eta1 = 1.0          # [W/m/K] liquid-phase thermal conductivity (matched to gas; 1-phase Stefan approx)
 Spec_Vol = 1
 grav     = 0.0
 

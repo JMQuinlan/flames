@@ -27,33 +27,33 @@ alamo.program = hydro2
 plot_file = ./tests/FlowSQR_tests/output_stefan_ch
 
 ### MESHING ###
-amr.plot_dt        = 5e-3
+amr.plot_dt        = 5e-6
 amr.max_grid_size  = 500000
 amr.blocking_factor = 4
 amr.regrid_int     = 2
 amr.grid_eff       = 0.8
-amr.max_level      = 2
-amr.n_cell         = 200 8
+amr.max_level      = 0
+amr.n_cell         = 400 8
 
 ### TIME STEPING ###
-timestep                = 1e-7
+timestep                = 1e-9
 dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
-dynamictimestep.max     = 1e-3
-dynamictimestep.min     = 1e-10
+dynamictimestep.max     = 1e-8
+dynamictimestep.min     = 1e-11
 cfl                     = 0.3
 
 ### DIMENSIONS ###
 geometry.prob_lo     = 0.0     0.0     0.0
-geometry.prob_hi     = 1.0e-3  4.0e-5  0.0
+geometry.prob_hi     = 1.0e-3  2.0e-5  0.0
 geometry.is_periodic = 0       1       0
 
-stop_time = 5e-2
+stop_time = 1e-4
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = 5e-6
-eta.ic.expression.constant.x_int0  = 8.0e-4
+eta.ic.expression.constant.x_int0  = 9.097e-4   # matches input_stefan_sqr
 eta.ic.expression.region0 = "0.5*(1 - tanh((x - x_int0)/(sqrt(2)*epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
 
@@ -162,6 +162,9 @@ apply_surface_tension = 0
 apply_weight          = 0
 apply_vaporization    = 0
 apply_viscous         = 0
+apply_heat_conduction = 1
+k_eta0 = 1.0          # match input_stefan_sqr
+k_eta1 = 1.0
 Spec_Vol = 1
 grav     = 0.0
 
