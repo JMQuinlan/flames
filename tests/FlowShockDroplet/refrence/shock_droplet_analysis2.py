@@ -612,7 +612,7 @@ schlieren_min = np.nanmin([np.nanmin(s) for s in schlieren_fields])
 schlieren_max = np.nanmax([np.nanmax(s) for s in schlieren_fields])
 print(f"  Schlieren range: [{schlieren_min:.6e}, {schlieren_max:.6e}]")
 
-pressure_min = np.nanmin([np.nanmin(p) for p in pressure_fields])
+pressure_min = 0.0 # np.nanmin([np.nanmin(p) for p in pressure_fields])
 pressure_max = np.nanmax([np.nanmax(p) for p in pressure_fields])
 print(f"  Pressure range: [{pressure_min:.6e}, {pressure_max:.6e}] Pa")
 
