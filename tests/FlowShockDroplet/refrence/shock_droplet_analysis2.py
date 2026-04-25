@@ -531,7 +531,7 @@ for i, idx in enumerate(analysis_indices):
     eta_field = np.array(frb['eta'])
     vx = np.array(frb['velocityx'])
     vy = np.array(frb['velocityy'])
-    temperature = np.array(frb['Temperature'])
+    temperature = np.array(frb['T'])
     vap_dot_rho = np.array(frb['Vap_dot_rho'])
 
     
