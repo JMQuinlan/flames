@@ -63,6 +63,18 @@ PLOT_SCHLIEREN_PRESSURE_SPLIT = 1      # Individual frames in Schlieren-Pressure
 PLOT_SCHLIEREN_PRESSURE_GRID = 1       # 1x6 horizontal grid
 PLOT_SCHLIEREN_PRESSURE_GIF = 1        # GIF from Schlieren-Pressure/
 
+PLOT_SCHLIEREN_VELOCITY_SPLIT = 1       # Individual frames in Schlieren-Velocity/
+PLOT_SCHLIEREN_VELOCITY_GIF = 1         # GIF from Schlieren-Velocity/
+
+PLOT_SCHLIEREN_VAPDOTRHO_SPLIT = 1      # Individual frames in Schlieren-VapDotRho/
+PLOT_SCHLIEREN_VAPDOTRHO_GIF = 1        # GIF from Schlieren-VapDotRho/
+
+PLOT_VELOCITY_VORTICITY_SPLIT = 1       # Individual frames in Velocity-Vorticity/
+PLOT_VELOCITY_VORTICITY_GIF = 1         # GIF from Velocity-Vorticity/
+
+PLOT_SCHLIEREN_TEMPERATURE_SPLIT = 1    # Individual frames in Schlieren-Temperature/
+PLOT_SCHLIEREN_TEMPERATURE_GIF = 1      # GIF from Schlieren-Temperature/
+
 # Quantitative analysis plots
 PLOT_DEFORMATION_METRICS = 1           # D(t), AR(t), centroid, area, volume
 PLOT_ENERGY_EVOLUTION = 1              # Max pressure, KE, surface energy vs time
@@ -97,6 +109,7 @@ TIME_STEP = 1  # Sample every Nth timestep (1=all, 2=every other, 5=every 5th, e
 # File paths
 #amrex_output_dir = r'../../../bin/tests/FlowShockDroplet/output_ShockDroplet'
 amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet'
+#amrex_output_dir = r'/mmfs1/home/spatel6/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet'
 output_folder = './ShockDroplet_Analysis'
 
 # Physical parameters
@@ -158,6 +171,8 @@ COLORMAP_PRESSURE = 'jet'
 COLORMAP_DENSITY = 'viridis'
 COLORMAP_VORTICITY = 'RdBu_r'
 COLORMAP_VELOCITY = 'plasma'
+COLORMAP_TEMPERATURE = 'hot'
+COLORMAP_VAPDOTRHO = 'coolwarm'
 FIGURE_SIZE_SINGLE = (12, 10)
 FIGURE_SIZE_GRID_1X6 = (24, 5)  # Wide for 1x6 layout
 FIGURE_SIZE_TIMESERIES = (10, 8)
@@ -189,8 +204,18 @@ if not os.path.exists(output_folder):
 subfolder_schlieren = os.path.join(output_folder, 'Schlieren-Pressure')
 subfolder_velocity = os.path.join(output_folder, 'Velocity-Streamline')
 subfolder_vorticity = os.path.join(output_folder, 'Vorticity')
+subfolder_schlieren_velocity = os.path.join(output_folder, 'Schlieren-Velocity')
+subfolder_schlieren_vapdotrho = os.path.join(output_folder, 'Schlieren-VapDotRho')
+subfolder_velocity_vorticity = os.path.join(output_folder, 'Velocity-Vorticity')
+subfolder_schlieren_temperature = os.path.join(output_folder, 'Schlieren-Temperature')
 
-for folder in [subfolder_schlieren, subfolder_velocity, subfolder_vorticity]:
+for folder in [subfolder_schlieren, 
+               subfolder_velocity, 
+               subfolder_vorticity, 
+               subfolder_schlieren_velocity, 
+               subfolder_schlieren_vapdotrho, 
+               subfolder_velocity_vorticity, 
+               subfolder_schlieren_temperature]:
     if not os.path.exists(folder):
         os.makedirs(folder)
 
@@ -460,6 +485,8 @@ pressure_fields = []
 density_fields = []
 velocity_fields = []
 vorticity_fields = []
+temperature_fields = []
+vap_dot_rho_fields = []
 eta_fields = []
 x_grids = []
 y_grids = []
@@ -489,6 +516,9 @@ for i, idx in enumerate(analysis_indices):
     eta_field = np.array(frb['eta'])
     vx = np.array(frb['velocityx'])
     vy = np.array(frb['velocityy'])
+    temperature = np.array(frb['Temperature'])
+    vap_dot_rho = np.array(frb['Vap_dot_rho'])
+
     
     try:
         vorticity = np.array(frb['vorticity'])
@@ -512,6 +542,8 @@ for i, idx in enumerate(analysis_indices):
     density_fields.append(rho)
     velocity_fields.append((vx, vy))
     vorticity_fields.append(vorticity)
+    temperature_fields.append(temperature)
+    vap_dot_rho_fields.append(vap_dot_rho)
     eta_fields.append(eta_field)
     x_grids.append(x_grid)
     y_grids.append(y_grid)
@@ -570,6 +602,18 @@ print(f"  Density range: [{density_min:.6e}, {density_max:.6e}] kg/m^3")
 v_mag_min = 0.0
 v_mag_max = max([np.max(np.sqrt(vx**2 + vy**2)) for vx, vy in velocity_fields])
 print(f"  Velocity range: [{v_mag_min:.6e}, {v_mag_max:.6e}] m/s")
+
+temperature_min = min([np.min(T) for T in temperature_fields])
+temperature_max = max([np.max(T) for T in temperature_fields])
+print(f"  Temperature range: [{temperature_min:.6e}, {temperature_max:.6e}] K")
+
+vap_dot_rho_min = min([np.min(v) for v in vap_dot_rho_fields])
+vap_dot_rho_max = max([np.max(v) for v in vap_dot_rho_fields])
+print(f"  Vap_dot_rho range: [{vap_dot_rho_min:.6e}, {vap_dot_rho_max:.6e}] kg/m^3/s")
+
+# For symmetric colorbar on vap_dot_rho (mass transfer can be +/-)
+vap_dot_rho_lim = max(abs(vap_dot_rho_min), abs(vap_dot_rho_max))
+print(f"  Vap_dot_rho symmetric range: [{-vap_dot_rho_lim:.6e}, {vap_dot_rho_lim:.6e}] kg/m^3/s")
 
 # Smart vorticity filtering (2sigma method)
 vort_all = np.concatenate([v.flatten() for v in vorticity_fields])
@@ -856,6 +900,401 @@ def plot_vorticity_field_single(idx, frame_num, save_folder):
     plt.savefig(save_path, dpi=DPI)
     plt.close()
 
+def plot_schlieren_velocity_split_single(idx, frame_num, save_folder):
+    """Plot Schlieren (top) and Velocity (bottom) split view - NO SPECIAL CHARACTERS"""
+    fig = plt.figure(figsize=FIGURE_SIZE_SINGLE)
+    gs = GridSpec(2, 1, height_ratios=[1, 1], hspace=0.0)
+    ax_top = fig.add_subplot(gs[0])
+    ax_bot = fig.add_subplot(gs[1], sharex=ax_top)
+    
+    t = times[analysis_indices[idx]]
+    schlieren = schlieren_fields[idx]
+    vx, vy = velocity_fields[idx]
+    v_mag = np.sqrt(vx**2 + vy**2)
+    eta = eta_fields[idx]
+    x_grid = x_grids[idx]
+    y_grid = y_grids[idx]
+    
+    y_vals = y_grid[:, 0]
+    x_vals = x_grid[0, :]
+    zero_idx = np.argmin(np.abs(y_vals))
+    
+    schlieren_top = schlieren[zero_idx:, :]
+    velocity_bottom = v_mag[:zero_idx + 1, :]
+    vx_bottom = vx[:zero_idx + 1, :]
+    vy_bottom = vy[:zero_idx + 1, :]
+    eta_top = eta[zero_idx:, :]
+    eta_bottom = eta[:zero_idx + 1, :]
+    y_top = y_vals[zero_idx:]
+    y_bottom = y_vals[:zero_idx + 1]
+    
+    extent_top = [x_vals.min(), x_vals.max(), y_top.min(), y_top.max()]
+    extent_bot = [x_vals.min(), x_vals.max(), y_bottom.min(), y_bottom.max()]
+    
+    centroid = deformation_data[idx]['centroid']
+    domain_width = X_MAX - X_MIN
+    domain_height = Y_MAX - Y_MIN
+    zoom_width = domain_width / PLOT_ZOOM_FACTOR
+    zoom_height = domain_height / PLOT_ZOOM_FACTOR
+    
+    x_min_zoom = centroid[0] - zoom_width / 2
+    x_max_zoom = centroid[0] + zoom_width / 2
+    y_min_zoom = centroid[1] - zoom_height / 2
+    y_max_zoom = centroid[1] + zoom_height / 2
+    
+    # TOP - SCHLIEREN
+    im1 = ax_top.imshow(schlieren_top, origin='lower', extent=extent_top,
+                        cmap=COLORMAP_SCHLIEREN + '_r', vmin=schlieren_min, vmax=schlieren_max,
+                        interpolation='bilinear', aspect='auto')
+    
+    for eta_val in ETA_CONTOURS:
+        ax_top.contour(x_vals, y_top, eta_top, levels=[eta_val], colors='red',
+                      linewidths=CONTOUR_LINE_WIDTH, linestyles='--' if eta_val != 0.5 else '-')
+    
+    ax_top.set_xlim(x_min_zoom, x_max_zoom)
+    ax_top.set_ylim(0, y_max_zoom)
+    ax_top.set_aspect('equal', adjustable='box')
+    ax_top.set_ylabel('Y (m)', fontsize=FONT_SIZE_LABEL)
+    ax_top.set_title(f't = {t:.6e} s', fontsize=FONT_SIZE_TITLE, fontweight='bold')
+    ax_top.tick_params(labelbottom=False)
+    ax_top.spines['bottom'].set_visible(False)
+    
+    cax1 = inset_axes(ax_top, width="3%", height="80%", loc='right')
+    cbar1 = fig.colorbar(im1, cax=cax1)
+    cbar1.set_label('Numerical Schlieren', fontsize=FONT_SIZE_LABEL)
+    
+    # BOTTOM - VELOCITY MAGNITUDE
+    im2 = ax_bot.imshow(velocity_bottom, origin='lower', extent=extent_bot,
+                        cmap=COLORMAP_VELOCITY, vmin=v_mag_min, vmax=v_mag_max,
+                        interpolation='bilinear', aspect='auto')
+    
+    # Add streamlines on bottom half
+    if STREAMLINE_SHOW:
+        # Create meshgrid for bottom half only
+        x_bottom_grid = x_grid[:zero_idx + 1, :]
+        y_bottom_grid = y_grid[:zero_idx + 1, :]
+        ax_bot.streamplot(x_vals, y_bottom, vx_bottom, vy_bottom, 
+                         color='white', density=STREAMLINE_DENSITY, 
+                         linewidth=0.8, arrowsize=0.8)
+    
+    for eta_val in ETA_CONTOURS:
+        ax_bot.contour(x_vals, y_bottom, eta_bottom, levels=[eta_val], colors='white',
+                      linewidths=CONTOUR_LINE_WIDTH, linestyles='--' if eta_val != 0.5 else '-')
+    
+    ax_bot.set_xlim(x_min_zoom, x_max_zoom)
+    ax_bot.set_ylim(y_min_zoom, 0)
+    ax_bot.set_aspect('equal', adjustable='box')
+    ax_bot.set_xlabel('X (m)', fontsize=FONT_SIZE_LABEL)
+    ax_bot.set_ylabel('Y (m)', fontsize=FONT_SIZE_LABEL)
+    ax_bot.spines['top'].set_visible(False)
+    
+    # TIMESTAMP OVERLAY
+    ax_bot.text(0.02, 0.02, f't = {t*1e6:.2f} us', transform=ax_bot.transAxes,
+               fontsize=FONT_SIZE_TIMESTAMP, color='white', fontweight='bold',
+               bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
+    
+    cax2 = inset_axes(ax_bot, width="3%", height="80%", loc='right')
+    cbar2 = fig.colorbar(im2, cax=cax2)
+    cbar2.set_label('|V| (m/s)', fontsize=FONT_SIZE_LABEL)
+    
+    plt.subplots_adjust(left=0.08, right=0.92, top=0.95, bottom=0.08, hspace=0.0)
+    ax_top.set_position([ax_top.get_position().x0, ax_bot.get_position().y1,
+                        ax_top.get_position().width, ax_top.get_position().height])
+    
+    save_path = os.path.join(save_folder, f'{frame_num:04d}_Schlieren_Velocity.{SAVE_FORMAT_RASTER}')
+    plt.savefig(save_path, dpi=DPI)
+    plt.close()
+
+
+def plot_schlieren_vapdotrho_split_single(idx, frame_num, save_folder):
+    """Plot Schlieren (top) and Vap_dot_rho (bottom) split view - NO SPECIAL CHARACTERS"""
+    fig = plt.figure(figsize=FIGURE_SIZE_SINGLE)
+    gs = GridSpec(2, 1, height_ratios=[1, 1], hspace=0.0)
+    ax_top = fig.add_subplot(gs[0])
+    ax_bot = fig.add_subplot(gs[1], sharex=ax_top)
+    
+    t = times[analysis_indices[idx]]
+    schlieren = schlieren_fields[idx]
+    vap_dot_rho = vap_dot_rho_fields[idx]
+    eta = eta_fields[idx]
+    x_grid = x_grids[idx]
+    y_grid = y_grids[idx]
+    
+    y_vals = y_grid[:, 0]
+    x_vals = x_grid[0, :]
+    zero_idx = np.argmin(np.abs(y_vals))
+    
+    schlieren_top = schlieren[zero_idx:, :]
+    vapdotrho_bottom = vap_dot_rho[:zero_idx + 1, :]
+    eta_top = eta[zero_idx:, :]
+    eta_bottom = eta[:zero_idx + 1, :]
+    y_top = y_vals[zero_idx:]
+    y_bottom = y_vals[:zero_idx + 1]
+    
+    extent_top = [x_vals.min(), x_vals.max(), y_top.min(), y_top.max()]
+    extent_bot = [x_vals.min(), x_vals.max(), y_bottom.min(), y_bottom.max()]
+    
+    centroid = deformation_data[idx]['centroid']
+    domain_width = X_MAX - X_MIN
+    domain_height = Y_MAX - Y_MIN
+    zoom_width = domain_width / PLOT_ZOOM_FACTOR
+    zoom_height = domain_height / PLOT_ZOOM_FACTOR
+    
+    x_min_zoom = centroid[0] - zoom_width / 2
+    x_max_zoom = centroid[0] + zoom_width / 2
+    y_min_zoom = centroid[1] - zoom_height / 2
+    y_max_zoom = centroid[1] + zoom_height / 2
+    
+    # TOP - SCHLIEREN
+    im1 = ax_top.imshow(schlieren_top, origin='lower', extent=extent_top,
+                        cmap=COLORMAP_SCHLIEREN + '_r', vmin=schlieren_min, vmax=schlieren_max,
+                        interpolation='bilinear', aspect='auto')
+    
+    for eta_val in ETA_CONTOURS:
+        ax_top.contour(x_vals, y_top, eta_top, levels=[eta_val], colors='red',
+                      linewidths=CONTOUR_LINE_WIDTH, linestyles='--' if eta_val != 0.5 else '-')
+    
+    ax_top.set_xlim(x_min_zoom, x_max_zoom)
+    ax_top.set_ylim(0, y_max_zoom)
+    ax_top.set_aspect('equal', adjustable='box')
+    ax_top.set_ylabel('Y (m)', fontsize=FONT_SIZE_LABEL)
+    ax_top.set_title(f't = {t:.6e} s', fontsize=FONT_SIZE_TITLE, fontweight='bold')
+    ax_top.tick_params(labelbottom=False)
+    ax_top.spines['bottom'].set_visible(False)
+    
+    cax1 = inset_axes(ax_top, width="3%", height="80%", loc='right')
+    cbar1 = fig.colorbar(im1, cax=cax1)
+    cbar1.set_label('Numerical Schlieren', fontsize=FONT_SIZE_LABEL)
+    
+    # BOTTOM - VAP_DOT_RHO (symmetric colorbar)
+    im2 = ax_bot.imshow(vapdotrho_bottom, origin='lower', extent=extent_bot,
+                        cmap=COLORMAP_VAPDOTRHO, vmin=-vap_dot_rho_lim, vmax=vap_dot_rho_lim,
+                        interpolation='bilinear', aspect='auto')
+    
+    for eta_val in ETA_CONTOURS:
+        ax_bot.contour(x_vals, y_bottom, eta_bottom, levels=[eta_val], colors='black',
+                      linewidths=CONTOUR_LINE_WIDTH, linestyles='--' if eta_val != 0.5 else '-')
+    
+    ax_bot.set_xlim(x_min_zoom, x_max_zoom)
+    ax_bot.set_ylim(y_min_zoom, 0)
+    ax_bot.set_aspect('equal', adjustable='box')
+    ax_bot.set_xlabel('X (m)', fontsize=FONT_SIZE_LABEL)
+    ax_bot.set_ylabel('Y (m)', fontsize=FONT_SIZE_LABEL)
+    ax_bot.spines['top'].set_visible(False)
+    
+    # TIMESTAMP OVERLAY
+    ax_bot.text(0.02, 0.02, f't = {t*1e6:.2f} us', transform=ax_bot.transAxes,
+               fontsize=FONT_SIZE_TIMESTAMP, color='white', fontweight='bold',
+               bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
+    
+    cax2 = inset_axes(ax_bot, width="3%", height="80%", loc='right')
+    cbar2 = fig.colorbar(im2, cax=cax2)
+    cbar2.set_label('Vap_dot_rho (kg/m^3/s)', fontsize=FONT_SIZE_LABEL)
+    
+    plt.subplots_adjust(left=0.08, right=0.92, top=0.95, bottom=0.08, hspace=0.0)
+    ax_top.set_position([ax_top.get_position().x0, ax_bot.get_position().y1,
+                        ax_top.get_position().width, ax_top.get_position().height])
+    
+    save_path = os.path.join(save_folder, f'{frame_num:04d}_Schlieren_VapDotRho.{SAVE_FORMAT_RASTER}')
+    plt.savefig(save_path, dpi=DPI)
+    plt.close()
+
+
+def plot_velocity_vorticity_split_single(idx, frame_num, save_folder):
+    """Plot Velocity (top) and Vorticity (bottom) split view - NO SPECIAL CHARACTERS"""
+    fig = plt.figure(figsize=FIGURE_SIZE_SINGLE)
+    gs = GridSpec(2, 1, height_ratios=[1, 1], hspace=0.0)
+    ax_top = fig.add_subplot(gs[0])
+    ax_bot = fig.add_subplot(gs[1], sharex=ax_top)
+    
+    t = times[analysis_indices[idx]]
+    vx, vy = velocity_fields[idx]
+    v_mag = np.sqrt(vx**2 + vy**2)
+    vorticity = vorticity_fields[idx]
+    eta = eta_fields[idx]
+    x_grid = x_grids[idx]
+    y_grid = y_grids[idx]
+    
+    y_vals = y_grid[:, 0]
+    x_vals = x_grid[0, :]
+    zero_idx = np.argmin(np.abs(y_vals))
+    
+    velocity_top = v_mag[zero_idx:, :]
+    vx_top = vx[zero_idx:, :]
+    vy_top = vy[zero_idx:, :]
+    vorticity_bottom = vorticity[:zero_idx + 1, :]
+    eta_top = eta[zero_idx:, :]
+    eta_bottom = eta[:zero_idx + 1, :]
+    y_top = y_vals[zero_idx:]
+    y_bottom = y_vals[:zero_idx + 1]
+    
+    extent_top = [x_vals.min(), x_vals.max(), y_top.min(), y_top.max()]
+    extent_bot = [x_vals.min(), x_vals.max(), y_bottom.min(), y_bottom.max()]
+    
+    centroid = deformation_data[idx]['centroid']
+    domain_width = X_MAX - X_MIN
+    domain_height = Y_MAX - Y_MIN
+    zoom_width = domain_width / PLOT_ZOOM_FACTOR
+    zoom_height = domain_height / PLOT_ZOOM_FACTOR
+    
+    x_min_zoom = centroid[0] - zoom_width / 2
+    x_max_zoom = centroid[0] + zoom_width / 2
+    y_min_zoom = centroid[1] - zoom_height / 2
+    y_max_zoom = centroid[1] + zoom_height / 2
+    
+    # TOP - VELOCITY MAGNITUDE
+    im1 = ax_top.imshow(velocity_top, origin='lower', extent=extent_top,
+                        cmap=COLORMAP_VELOCITY, vmin=v_mag_min, vmax=v_mag_max,
+                        interpolation='bilinear', aspect='auto')
+    
+    # Add streamlines on top half
+    if STREAMLINE_SHOW:
+        ax_top.streamplot(x_vals, y_top, vx_top, vy_top, 
+                         color='white', density=STREAMLINE_DENSITY, 
+                         linewidth=0.8, arrowsize=0.8)
+    
+    for eta_val in ETA_CONTOURS:
+        ax_top.contour(x_vals, y_top, eta_top, levels=[eta_val], colors='black',
+                      linewidths=CONTOUR_LINE_WIDTH, linestyles='--' if eta_val != 0.5 else '-')
+    
+    ax_top.set_xlim(x_min_zoom, x_max_zoom)
+    ax_top.set_ylim(0, y_max_zoom)
+    ax_top.set_aspect('equal', adjustable='box')
+    ax_top.set_ylabel('Y (m)', fontsize=FONT_SIZE_LABEL)
+    ax_top.set_title(f't = {t:.6e} s', fontsize=FONT_SIZE_TITLE, fontweight='bold')
+    ax_top.tick_params(labelbottom=False)
+    ax_top.spines['bottom'].set_visible(False)
+    
+    cax1 = inset_axes(ax_top, width="3%", height="80%", loc='right')
+    cbar1 = fig.colorbar(im1, cax=cax1)
+    cbar1.set_label('|V| (m/s)', fontsize=FONT_SIZE_LABEL)
+    
+    # BOTTOM - VORTICITY
+    im2 = ax_bot.imshow(vorticity_bottom, origin='lower', extent=extent_bot,
+                        cmap=COLORMAP_VORTICITY, vmin=-vort_lim, vmax=vort_lim,
+                        interpolation='bilinear', aspect='auto')
+    
+    for eta_val in ETA_CONTOURS:
+        ax_bot.contour(x_vals, y_bottom, eta_bottom, levels=[eta_val], colors='black',
+                      linewidths=CONTOUR_LINE_WIDTH, linestyles='--' if eta_val != 0.5 else '-')
+    
+    ax_bot.set_xlim(x_min_zoom, x_max_zoom)
+    ax_bot.set_ylim(y_min_zoom, 0)
+    ax_bot.set_aspect('equal', adjustable='box')
+    ax_bot.set_xlabel('X (m)', fontsize=FONT_SIZE_LABEL)
+    ax_bot.set_ylabel('Y (m)', fontsize=FONT_SIZE_LABEL)
+    ax_bot.spines['top'].set_visible(False)
+    
+    # TIMESTAMP OVERLAY
+    ax_bot.text(0.02, 0.02, f't = {t*1e6:.2f} us', transform=ax_bot.transAxes,
+               fontsize=FONT_SIZE_TIMESTAMP, color='white', fontweight='bold',
+               bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
+    
+    cax2 = inset_axes(ax_bot, width="3%", height="80%", loc='right')
+    cbar2 = fig.colorbar(im2, cax=cax2)
+    cbar2.set_label('Vorticity (1/s)', fontsize=FONT_SIZE_LABEL)
+    
+    plt.subplots_adjust(left=0.08, right=0.92, top=0.95, bottom=0.08, hspace=0.0)
+    ax_top.set_position([ax_top.get_position().x0, ax_bot.get_position().y1,
+                        ax_top.get_position().width, ax_top.get_position().height])
+    
+    save_path = os.path.join(save_folder, f'{frame_num:04d}_Velocity_Vorticity.{SAVE_FORMAT_RASTER}')
+    plt.savefig(save_path, dpi=DPI)
+    plt.close()
+
+
+def plot_schlieren_temperature_split_single(idx, frame_num, save_folder):
+    """Plot Schlieren (top) and Temperature (bottom) split view - NO SPECIAL CHARACTERS"""
+    fig = plt.figure(figsize=FIGURE_SIZE_SINGLE)
+    gs = GridSpec(2, 1, height_ratios=[1, 1], hspace=0.0)
+    ax_top = fig.add_subplot(gs[0])
+    ax_bot = fig.add_subplot(gs[1], sharex=ax_top)
+    
+    t = times[analysis_indices[idx]]
+    schlieren = schlieren_fields[idx]
+    temperature = temperature_fields[idx]
+    eta = eta_fields[idx]
+    x_grid = x_grids[idx]
+    y_grid = y_grids[idx]
+    
+    y_vals = y_grid[:, 0]
+    x_vals = x_grid[0, :]
+    zero_idx = np.argmin(np.abs(y_vals))
+    
+    schlieren_top = schlieren[zero_idx:, :]
+    temperature_bottom = temperature[:zero_idx + 1, :]
+    eta_top = eta[zero_idx:, :]
+    eta_bottom = eta[:zero_idx + 1, :]
+    y_top = y_vals[zero_idx:]
+    y_bottom = y_vals[:zero_idx + 1]
+    
+    extent_top = [x_vals.min(), x_vals.max(), y_top.min(), y_top.max()]
+    extent_bot = [x_vals.min(), x_vals.max(), y_bottom.min(), y_bottom.max()]
+    
+    centroid = deformation_data[idx]['centroid']
+    domain_width = X_MAX - X_MIN
+    domain_height = Y_MAX - Y_MIN
+    zoom_width = domain_width / PLOT_ZOOM_FACTOR
+    zoom_height = domain_height / PLOT_ZOOM_FACTOR
+    
+    x_min_zoom = centroid[0] - zoom_width / 2
+    x_max_zoom = centroid[0] + zoom_width / 2
+    y_min_zoom = centroid[1] - zoom_height / 2
+    y_max_zoom = centroid[1] + zoom_height / 2
+    
+    # TOP - SCHLIEREN
+    im1 = ax_top.imshow(schlieren_top, origin='lower', extent=extent_top,
+                        cmap=COLORMAP_SCHLIEREN + '_r', vmin=schlieren_min, vmax=schlieren_max,
+                        interpolation='bilinear', aspect='auto')
+    
+    for eta_val in ETA_CONTOURS:
+        ax_top.contour(x_vals, y_top, eta_top, levels=[eta_val], colors='red',
+                      linewidths=CONTOUR_LINE_WIDTH, linestyles='--' if eta_val != 0.5 else '-')
+    
+    ax_top.set_xlim(x_min_zoom, x_max_zoom)
+    ax_top.set_ylim(0, y_max_zoom)
+    ax_top.set_aspect('equal', adjustable='box')
+    ax_top.set_ylabel('Y (m)', fontsize=FONT_SIZE_LABEL)
+    ax_top.set_title(f't = {t:.6e} s', fontsize=FONT_SIZE_TITLE, fontweight='bold')
+    ax_top.tick_params(labelbottom=False)
+    ax_top.spines['bottom'].set_visible(False)
+    
+    cax1 = inset_axes(ax_top, width="3%", height="80%", loc='right')
+    cbar1 = fig.colorbar(im1, cax=cax1)
+    cbar1.set_label('Numerical Schlieren', fontsize=FONT_SIZE_LABEL)
+    
+    # BOTTOM - TEMPERATURE
+    im2 = ax_bot.imshow(temperature_bottom, origin='lower', extent=extent_bot,
+                        cmap=COLORMAP_TEMPERATURE, vmin=temperature_min, vmax=temperature_max,
+                        interpolation='bilinear', aspect='auto')
+    
+    for eta_val in ETA_CONTOURS:
+        ax_bot.contour(x_vals, y_bottom, eta_bottom, levels=[eta_val], colors='white',
+                      linewidths=CONTOUR_LINE_WIDTH, linestyles='--' if eta_val != 0.5 else '-')
+    
+    ax_bot.set_xlim(x_min_zoom, x_max_zoom)
+    ax_bot.set_ylim(y_min_zoom, 0)
+    ax_bot.set_aspect('equal', adjustable='box')
+    ax_bot.set_xlabel('X (m)', fontsize=FONT_SIZE_LABEL)
+    ax_bot.set_ylabel('Y (m)', fontsize=FONT_SIZE_LABEL)
+    ax_bot.spines['top'].set_visible(False)
+    
+    # TIMESTAMP OVERLAY
+    ax_bot.text(0.02, 0.02, f't = {t*1e6:.2f} us', transform=ax_bot.transAxes,
+               fontsize=FONT_SIZE_TIMESTAMP, color='white', fontweight='bold',
+               bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
+    
+    cax2 = inset_axes(ax_bot, width="3%", height="80%", loc='right')
+    cbar2 = fig.colorbar(im2, cax=cax2)
+    cbar2.set_label('Temperature (K)', fontsize=FONT_SIZE_LABEL)
+    
+    plt.subplots_adjust(left=0.08, right=0.92, top=0.95, bottom=0.08, hspace=0.0)
+    ax_top.set_position([ax_top.get_position().x0, ax_bot.get_position().y1,
+                        ax_top.get_position().width, ax_top.get_position().height])
+    
+    save_path = os.path.join(save_folder, f'{frame_num:04d}_Schlieren_Temperature.{SAVE_FORMAT_RASTER}')
+    plt.savefig(save_path, dpi=DPI)
+    plt.close()
 
 def plot_deformation_metrics():
     """Plot 3: Deformation parameters vs time - NO SPECIAL CHARACTERS"""
@@ -965,6 +1404,39 @@ if PLOT_DEFORMATION_METRICS:
     print("  Saved: 03_Deformation_Metrics")
     plot_count += 1
 
+if PLOT_SCHLIEREN_VELOCITY_SPLIT:
+    print("\nGenerating Schlieren/Velocity Split Views (individual frames)...")
+    for i, idx in enumerate(analysis_indices):
+        plot_schlieren_velocity_split_single(i, i+1, subfolder_schlieren_velocity)
+        if (i + 1) % 10 == 0:
+            print(f"  Saved {i + 1}/{len(analysis_indices)} frames")
+    plot_count += 1
+
+if PLOT_SCHLIEREN_VAPDOTRHO_SPLIT:
+    print("\nGenerating Schlieren/VapDotRho Split Views (individual frames)...")
+    for i, idx in enumerate(analysis_indices):
+        plot_schlieren_vapdotrho_split_single(i, i+1, subfolder_schlieren_vapdotrho)
+        if (i + 1) % 10 == 0:
+            print(f"  Saved {i + 1}/{len(analysis_indices)} frames")
+    plot_count += 1
+
+if PLOT_VELOCITY_VORTICITY_SPLIT:
+    print("\nGenerating Velocity/Vorticity Split Views (individual frames)...")
+    for i, idx in enumerate(analysis_indices):
+        plot_velocity_vorticity_split_single(i, i+1, subfolder_velocity_vorticity)
+        if (i + 1) % 10 == 0:
+            print(f"  Saved {i + 1}/{len(analysis_indices)} frames")
+    plot_count += 1
+
+if PLOT_SCHLIEREN_TEMPERATURE_SPLIT:
+    print("\nGenerating Schlieren/Temperature Split Views (individual frames)...")
+    for i, idx in enumerate(analysis_indices):
+        plot_schlieren_temperature_split_single(i, i+1, subfolder_schlieren_temperature)
+        if (i + 1) % 10 == 0:
+            print(f"  Saved {i + 1}/{len(analysis_indices)} frames")
+    plot_count += 1
+
+
 # [Add calls to other plotting functions]
 
 # ============================================================================
@@ -987,6 +1459,23 @@ if PLOT_VORTICITY_FIELD_GIF:
     print("\nCreating Vorticity GIF...")
     create_gif_from_folder('Vorticity', 'ANIM_Vorticity.gif')
 
+if PLOT_SCHLIEREN_VELOCITY_GIF:
+    print("\nCreating Schlieren/Velocity GIF...")
+    create_gif_from_folder('Schlieren-Velocity', 'ANIM_Schlieren_Velocity.gif')
+
+if PLOT_SCHLIEREN_VAPDOTRHO_GIF:
+    print("\nCreating Schlieren/VapDotRho GIF...")
+    create_gif_from_folder('Schlieren-VapDotRho', 'ANIM_Schlieren_VapDotRho.gif')
+
+if PLOT_VELOCITY_VORTICITY_GIF:
+    print("\nCreating Velocity/Vorticity GIF...")
+    create_gif_from_folder('Velocity-Vorticity', 'ANIM_Velocity_Vorticity.gif')
+
+if PLOT_SCHLIEREN_TEMPERATURE_GIF:
+    print("\nCreating Schlieren/Temperature GIF...")
+    create_gif_from_folder('Schlieren-Temperature', 'ANIM_Schlieren_Temperature.gif')
+
+
 # ============================================================================
 # SUMMARY
 # ============================================================================
@@ -999,6 +1488,10 @@ print(f"Generated {plot_count} plot types")
 print(f"Total frames: {len(analysis_indices)}")
 print(f"\nSubfolders:")
 print(f"  - Schlieren-Pressure/: {len(os.listdir(subfolder_schlieren))} files")
+print(f"  - Schlieren-Velocity/: {len(os.listdir(subfolder_schlieren_velocity))} files")
+print(f"  - Schlieren-VapDotRho/: {len(os.listdir(subfolder_schlieren_vapdotrho))} files")
 print(f"  - Velocity-Streamline/: {len(os.listdir(subfolder_velocity))} files")
+print(f"  - Velocity-Vorticity/: {len(os.listdir(subfolder_velocity_vorticity))} files")
 print(f"  - Vorticity/: {len(os.listdir(subfolder_vorticity))} files")
+print(f"  - Schlieren-Temperature/: {len(os.listdir(subfolder_schlieren_temperature))} files")
 print("\n" + "=" * 70)
