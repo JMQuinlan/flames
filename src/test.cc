@@ -4,6 +4,7 @@
 #include "Util/Util.H"
 
 #include "Test/Numeric/Stencil.H"
+#include "Test/Numeric/TwoPhaseFreeEnergy.H"
 #include "Test/Set/Matrix4.H"
 
 #include "Operator/Elastic.H"
@@ -117,6 +118,14 @@ int main (int argc, char* argv[])
         subfailed += Util::Test::SubMessage("1-2-1",test.Derivative<1,2,1>(0));
         subfailed += Util::Test::SubMessage("1-1-2",test.Derivative<1,1,2>(0));
 #endif
+        failed += Util::Test::SubFinalMessage(subfailed);
+    }
+
+    Util::Test::Message("Numeric::TwoPhaseFreeEnergy test");
+    {
+        int subfailed = 0;
+        subfailed += Util::Test::SubMessage("Calibration",      Test::Numeric::TwoPhaseFreeEnergy::Calibration(0));
+        subfailed += Util::Test::SubMessage("FiniteAtReference",Test::Numeric::TwoPhaseFreeEnergy::FiniteAtReference(0));
         failed += Util::Test::SubFinalMessage(subfailed);
     }
 

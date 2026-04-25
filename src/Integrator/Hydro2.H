@@ -335,11 +335,21 @@ protected:
     Set::Scalar gamma_eta1 = NAN, pi_eta1 = NAN, mu_eta1 = NAN, mu_eta1_b = NAN, MW0 = NAN;
     Set::Scalar b0 = NAN, q0EOS = NAN;
     Set::Scalar cp_eta1 = NAN, cv_eta1 = NAN;
+    // Free-energy calibration parameters for phase 1 (Tammann)
+    // q_eta1: reference internal energy [J/kg]; qprime_eta1: entropy reference [J/(kg·K)];
+    // rho_ref_eta1: reference density [kg/m^3] used in the ln(rho/rho_ref) term.
+    Set::Scalar q_eta1 = 0.0, qprime_eta1 = 0.0, rho_ref_eta1 = 1.0;
 
     // PHASE eta=0 (gas — CPG)
     Set::Scalar gamma_eta0 = NAN, pi_eta0 = NAN, mu_eta0 = NAN, mu_eta0_b = NAN, MW1 = NAN;
     Set::Scalar b1 = NAN, q1EOS = NAN;
     Set::Scalar cp_eta0 = NAN, cv_eta0 = NAN;
+    // Free-energy calibration parameters for phase 0 (CPG)
+    // R_eta0: specific gas constant [J/(kg·K)] for the ideal-gas free energy.
+    Set::Scalar q_eta0 = 0.0, qprime_eta0 = 0.0, rho_ref_eta0 = 1.0, R_eta0 = 287.0;
+
+    // Shared free-energy reference temperature [K]
+    Set::Scalar T_ref = 300.0;
 
     // Interaction Parameters
     Set::Scalar sigma = NAN;

@@ -99,6 +99,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("mu_eta1_b", value.mu_eta1_b, 0.0);    // bulk viscosity coefficient
         pp_query_default("cp_eta1", value.cp_eta1, 0.0);        // Constant Pressure Specific Heat [J/kg]
         pp_query_default("cv_eta1", value.cv_eta1, 0.0);        // Constant Volume Specific Heat [J/kg]
+        // Free-energy calibration (Tammann); see Numeric/TwoPhaseFreeEnergy.H for the form
+        pp_query_default("q_eta1",       value.q_eta1,       0.0); // reference internal energy [J/kg]
+        pp_query_default("qprime_eta1",  value.qprime_eta1,  0.0); // entropy reference [J/(kg·K)]
+        pp_query_default("rho_ref_eta1", value.rho_ref_eta1, 1.0); // reference density [kg/m^3]
         // pp_query_required("R0", value.R0);              // Specific Gas Constant
         // pp_query_required("MW0", value.MW0);            // Molecular Weight
 
@@ -109,6 +113,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("mu_eta0_b", value.mu_eta0_b, 0.0);    // bulk viscosity coefficient
         pp_query_default("cp_eta0", value.cp_eta0, 0.0);        // Constant Pressure Specific Heat [J/kg]
         pp_query_default("cv_eta0", value.cv_eta0, 0.0);        // Constant Volume Specific Heat [J/kg]
+        // Free-energy calibration (CPG); see Numeric/TwoPhaseFreeEnergy.H for the form
+        pp_query_default("q_eta0",       value.q_eta0,       0.0);   // reference internal energy [J/kg]
+        pp_query_default("qprime_eta0",  value.qprime_eta0,  0.0);   // entropy reference [J/(kg·K)]
+        pp_query_default("rho_ref_eta0", value.rho_ref_eta0, 1.0);   // reference density [kg/m^3]
+        pp_query_default("R_eta0",       value.R_eta0,       287.0); // specific gas constant [J/(kg·K)]
         // pp_query_required("R1", value.R1);              // Specific Gas Constant
         // pp_query_required("MW1", value.MW1);            // Molecular Weight
 
@@ -117,6 +126,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("Dv", value.Dv, 0.0);          // Vapor Diffusivity
         pp_query_required("epsilon", value.epsilon);    // diffuse interface thickness
         pp_query_default("Y_infinity", value.Y_infinity, 0.0); // Far Field Vapor Mass Fraction
+        pp_query_default("T_ref", value.T_ref, 300.0);  // shared free-energy reference temperature [K]
 
         // CURVATURE
         pp_query_default("kappa_method",        value.kappa_method,        1); // 1:"Smooth Normals" (default)  2:"Height Function"  3:"Hybrid"
