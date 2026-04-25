@@ -8,9 +8,9 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = ./tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_H20
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_H20
-#plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_H20
+#plot_file = ./tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_H2O
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_H2O
+#plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_H2O
 
 ### MESHING ###
 amr.plot_dt = 0.1e-6

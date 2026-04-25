@@ -60,20 +60,20 @@ yt.funcs.mylog.setLevel(40)
 
 # Main visualization plots
 PLOT_SCHLIEREN_PRESSURE_SPLIT = 1      # Individual frames in Schlieren-Pressure/
-PLOT_SCHLIEREN_PRESSURE_GRID = 1       # 1x6 horizontal grid
+PLOT_SCHLIEREN_PRESSURE_GRID = 0       # 1x6 horizontal grid
 PLOT_SCHLIEREN_PRESSURE_GIF = 1        # GIF from Schlieren-Pressure/
 
-PLOT_SCHLIEREN_VELOCITY_SPLIT = 1       # Individual frames in Schlieren-Velocity/
-PLOT_SCHLIEREN_VELOCITY_GIF = 1         # GIF from Schlieren-Velocity/
+PLOT_SCHLIEREN_VELOCITY_SPLIT = 0       # Individual frames in Schlieren-Velocity/
+PLOT_SCHLIEREN_VELOCITY_GIF = 0         # GIF from Schlieren-Velocity/
 
-PLOT_SCHLIEREN_VAPDOTRHO_SPLIT = 1      # Individual frames in Schlieren-VapDotRho/
-PLOT_SCHLIEREN_VAPDOTRHO_GIF = 1        # GIF from Schlieren-VapDotRho/
+PLOT_SCHLIEREN_VAPDOTRHO_SPLIT = 0      # Individual frames in Schlieren-VapDotRho/
+PLOT_SCHLIEREN_VAPDOTRHO_GIF = 0        # GIF from Schlieren-VapDotRho/
 
-PLOT_VELOCITY_VORTICITY_SPLIT = 1       # Individual frames in Velocity-Vorticity/
-PLOT_VELOCITY_VORTICITY_GIF = 1         # GIF from Velocity-Vorticity/
+PLOT_VELOCITY_VORTICITY_SPLIT = 0       # Individual frames in Velocity-Vorticity/
+PLOT_VELOCITY_VORTICITY_GIF = 0         # GIF from Velocity-Vorticity/
 
-PLOT_SCHLIEREN_TEMPERATURE_SPLIT = 1    # Individual frames in Schlieren-Temperature/
-PLOT_SCHLIEREN_TEMPERATURE_GIF = 1      # GIF from Schlieren-Temperature/
+PLOT_SCHLIEREN_TEMPERATURE_SPLIT = 0    # Individual frames in Schlieren-Temperature/
+PLOT_SCHLIEREN_TEMPERATURE_GIF = 0      # GIF from Schlieren-Temperature/
 
 # Quantitative analysis plots
 PLOT_DEFORMATION_METRICS = 1           # D(t), AR(t), centroid, area, volume
@@ -109,13 +109,13 @@ TIME_STEP = 4  # Sample every Nth timestep (1=all, 2=every other, 5=every 5th, e
 # File paths
 #amrex_output_dir = r'../../../bin/tests/FlowShockDroplet/output_ShockDroplet'
 amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet'
-#amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_H2O'
+#amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_H20'
 #amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_n-Pentane'
 
 #amrex_output_dir = r'/mmfs1/home/spatel6/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet'
 
 output_folder = './ShockDroplet_Analysis'
-#output_folder = './ShockDroplet_Analysis_5Ma_H20'
+#output_folder = './ShockDroplet_Analysis_5Ma_H2O'
 #output_folder = './ShockDroplet_Analysis_5Ma_n-Pentane'
 
 # Physical parameters
@@ -151,8 +151,8 @@ ETA_CONTOURS = [0.1, 0.5, 0.9]
 ETA_THRESHOLD = 0.5
 
 # Schlieren parameters
-SCHLIEREN_BETA = 1.0
-SCHLIEREN_LOG_SCALE = 1
+SCHLIEREN_BETA = 5.0
+SCHLIEREN_LOG_SCALE = 0
 SCHLIEREN_USE_MIXTURE = 1
 
 # Deformation calculation
