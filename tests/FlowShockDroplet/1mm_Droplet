@@ -9,7 +9,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 #plot_file = ./tests/FlowShockDroplet/output_Shock1mmDroplet
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_4Giggles
 #plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet
 
 ### MESHING ###
