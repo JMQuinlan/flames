@@ -298,6 +298,13 @@ protected:
     BC::BC<Set::Scalar>* density_bc = nullptr;
     BC::BC<Set::Scalar>* momentum_bc = nullptr;
     BC::BC<Set::Scalar>* energy_bc = nullptr;
+    // Per-phase energy BCs. Default to a copy of energy_bc when no per-phase
+    // input is given; problems like Stefan need different BCs on the spectator
+    // liquid energy at a gas-side wall (and vice versa). When set,
+    // energy_eta{0,1}_mf are registered against these instead of the shared
+    // energy_bc; the mixture energy_per_vol_mf stays on energy_bc.
+    BC::BC<Set::Scalar>* energy_eta0_bc = nullptr;
+    BC::BC<Set::Scalar>* energy_eta1_bc = nullptr;
     //BC::BC<Set::Scalar>* eta_bc = nullptr;
     BC::BC<Set::Scalar>* temperature_bc = nullptr;
 
@@ -381,6 +388,10 @@ protected:
     int static_eta = 0;
     int apply_vaporization = 0;
     int apply_bs_source = 1;   // Stage 4: BS phase-coupling sources (set 0 to test single-phase limit)
+    // If non-zero, re-evaluate ic_m0/ic_u0/ic_q each Advance step at the current
+    // simulation time. Used for prescribed-flux validation problems (e.g. Stefan)
+    // where the analytical mass flux scales as ~1/sqrt(t).
+    int bs_sources_time_dependent = 0;
     int Spec_Vol = 1;
 
     // Interface-pressure closure for the BS source (p_int).

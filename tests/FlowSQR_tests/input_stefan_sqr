@@ -1,0 +1,250 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# =============================================================================
+#  Stefan problem — SQR (prescribed-flux) mode
+# =============================================================================
+#  Configuration: 1D-ish slab, liquid water on the left (eta=1), vapor on the
+#  right (eta=0), heated wall on the +x boundary at T_wall > T_sat. Heat
+#  conducts through the vapor layer, vaporizes liquid at the interface, and
+#  the interface retreats from the wall.
+#
+#  Self-similar analytical solution:
+#    delta(t) = xhi - x_int(t) = 2*beta*sqrt(alpha_g * (t + t_off))
+#    m0(t)    = rho_g * beta * sqrt(alpha_g / (t + t_off))      [kg/m^2/s]
+#  with beta solving
+#    beta * exp(beta^2) * erfc(-beta) = c_p_g * (T_wall - T_sat) / (L * sqrt(pi))
+#  and the temperature profile in the vapor region (x > x_int)
+#    T(x,t) = T_sat + (T_wall - T_sat) * erfc((xhi - x) / (2*sqrt(alpha_g*(t+t_off)))) / erfc(beta)
+#
+#  Free-energy calibration uses water-vapor and saturated-water properties at
+#  100 deg C / 1 atm. EOS parameters were chosen self-consistent with
+#  p_sat = 101325 Pa at T_sat = 373.15 K and the given densities; the
+#  resulting model latent heat L = h_g - h_l ~ 915 kJ/kg (vs. real water
+#  2257 kJ/kg). beta below is computed for that *model* L.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/FlowSQR_tests/output_stefan_sqr
+
+### MESHING ###
+amr.plot_dt        = 5e-3
+amr.plot_int = 1
+amr.max_grid_size  = 500000
+amr.blocking_factor = 4
+amr.regrid_int     = 2
+amr.grid_eff       = 0.8
+amr.max_level      = 2
+amr.n_cell         = 200 8
+
+### TIME STEPING ###
+timestep                = 1e-7
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1e-3
+dynamictimestep.min     = 1e-10
+cfl                     = 0.3
+
+### DIMENSIONS ###
+geometry.prob_lo     = 0.0     0.0     0.0
+geometry.prob_hi     = 1.0e-3  4.0e-5  0.0      # 1 mm x 40 um (effectively 1D)
+geometry.is_periodic = 0       1       0        # periodic in y
+
+stop_time = 5e-2
+
+### SHARED CONSTANTS (Stefan analytical) ###
+# Sat-state values, model latent heat, Stefan beta (precomputed offline):
+#   c_p_g = gamma_g * c_v_g = 1.327 * 1411 = 1872.4 J/(kg K)
+#   alpha_g = k_g / (rho_g * c_p_g) ~ 2.27e-5 m^2/s   (k_g ~ 0.025 W/m/K)
+#   L_model = 9.15e5 J/kg   (calibrated, see EOS block below)
+#   T_wall - T_sat = 50 K
+#   RHS(beta) = c_p_g * (T_wall - T_sat) / (L * sqrt(pi)) = 1872.4*50/(9.15e5*1.7725) = 0.0577
+#   solving beta*exp(beta^2)*erfc(-beta) = 0.0577  ->  beta ~ 0.058
+#
+# Time offset t_off pinned so that the IC interface sits at x_int(0) = 8.0e-4:
+#   2*beta*sqrt(alpha_g * t_off) = xhi - x_int(0) = 2.0e-4
+#   t_off = (2.0e-4)^2 / (4 * beta^2 * alpha_g) = 0.131 s
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 5e-6                # diffuse-interface width
+eta.ic.expression.constant.x_int0  = 8.0e-4              # initial interface position
+eta.ic.expression.region0 = "0.5*(1 - tanh((x - x_int0)/(sqrt(2)*epsilon)))"
+# eta=1 (liquid) for x<x_int0, eta=0 (vapor) for x>x_int0
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+# Per-phase densities are uniform (each phase is at its saturation density).
+density_eta1.ic.type = expression
+density_eta1.ic.expression.region0 = "958.4"             # saturated water
+
+density_eta0.ic.type = expression
+density_eta0.ic.expression.region0 = "0.5882"            # saturated steam
+
+velocity_eta1.ic.type = expression
+velocity_eta1.ic.expression.region0 = "0.0"
+velocity_eta1.ic.expression.region1 = "0.0"
+
+velocity_eta0.ic.type = expression
+velocity_eta0.ic.expression.region0 = "0.0"
+velocity_eta0.ic.expression.region1 = "0.0"
+
+# Pressure: uniform p_sat for both phases.
+pressure_eta1.ic.type = expression
+pressure_eta1.ic.expression.region0 = "101325.0"
+pressure_eta0.ic.type = expression
+pressure_eta0.ic.expression.region0 = "101325.0"
+
+# NOTE: we are NOT yet imposing the self-similar erfc(...) temperature profile
+# in the vapor side at IC. Doing so requires per-cell temperature ICs which
+# Hydro2 currently derives from (rho, p) per phase — both uniform here. The
+# vapor T profile will develop from the heated-wall BC after a transient. This
+# means early-time X(t) will lag the analytical curve until the thermal layer
+# reaches its self-similar shape. The post-processing script reports both the
+# raw X(t) and the time-shifted comparison.
+
+### EOS / SPECIFIC HEATS ###
+gamma_eta1 = 2.35                                        # Tammann water
+gamma_eta0 = 1.327                                       # water vapor (CPG)
+
+cv_eta1 = "1816.0"
+cv_eta0 = "1411.0"
+cp_eta1 = "4267.6"                                       # gamma_l * cv_l
+cp_eta0 = "1872.4"                                       # gamma_g * cv_g
+
+pi_eta1 = 3.7313e8                                       # chosen so p_sat=101325 at T_sat=373.15, rho_l=958.4
+pi_eta0 = 0.0
+
+mu_eta1   = 0.0
+mu_eta1_b = 0.0
+mu_eta0   = 0.0
+mu_eta0_b = 0.0
+
+sigma = 0.0                                              # surface tension OFF (1D)
+pref  = 0.0
+
+### FREE-ENERGY CALIBRATION (Phase 1 / Phase 2 inputs) ###
+# dmu_bulk(x) = f_g(rho_0, T_0) - f_l(rho_1, T_1)  [HELMHOLTZ free energies,
+# NOT chemical potentials]. We zero it at the reference state by absorbing
+# the offset into q_eta1. With rho_ref set to the saturation densities so
+# ln(rho/rho_ref) = 0, and T_ref = T_sat:
+#   f_g(rho_g_sat, T_sat)|q=0 = c_v_g * T_sat                  = 526515 J/kg
+#   f_l(rho_l_sat, T_sat)|q=0 = c_v_l * T_sat + pi_l/rho_l_sat = 1066966 J/kg
+#   q_eta1 = f_g - f_l|q=0 = -540451 J/kg
+# Iterate by adding observed dmu_bulk to q_eta1 until it falls below numerical
+# noise (same procedure as bubble_quiescent).
+#
+# NOTE: Helmholtz f-equality is the right target for the CH bulk driving
+# force (dmu_bulk goes into f'(eta) in Phase 4). The Gibbs-equality / phase-
+# coexistence calibration that the standalone unit test uses is a *different*
+# target (interface equilibrium); see Numeric/TwoPhaseFreeEnergy.H.
+T_ref          = 373.15
+rho_ref_eta0   = 0.5882
+rho_ref_eta1   = 958.4
+R_eta0         = 461.4
+
+q_eta0         = 0.0
+qprime_eta0    = 0.0
+q_eta1         = -5.40469e5
+qprime_eta1    = 0.0
+
+# Phase 2 diagnostic (passive — does not affect SQR-mode dynamics).
+ch_thermo_consistent = 1
+
+### BOUNDARY CONDITIONS ###
+# Per-phase energy BCs are required at the gas-side wall: imposing T_wall on
+# the spectator liquid energy collapses rho_l/T_l into the negative-pressure
+# regime and crashes the per-phase Riemann. Set energy_eta0 (gas) Dirichlet at
+# xhi for heat input, and energy_eta1 (liquid) all-Neumann so the spectator
+# liquid energy ghost cells just follow valid-cell values.
+#
+# Convention-B energy density at T_wall = 423.15 K (gas side):
+#   E_wall_eta0 = rho_g * c_v_g * T_wall = 0.5882 * 1411 * 423.15 ~ 351200 J/m^3
+
+# Mixture energy.bc — kept all-Neumann (used by mixture energy_per_vol_mf;
+# legacy fall-through if no per-phase BC is specified).
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+# Per-phase energy_eta0 (gas): heat in at xhi.
+energy_eta0.bc.type.xlo = neumann
+energy_eta0.bc.type.xhi = dirichlet
+# energy_eta0.bc.type.xhi = neumann  # sanity check — confirms heated wall is what drives dynamics
+energy_eta0.bc.val.xhi  = 351200.0
+energy_eta0.bc.type.ylo = neumann
+energy_eta0.bc.type.yhi = neumann
+
+# Per-phase energy_eta1 (liquid spectator near gas wall): all-Neumann.
+energy_eta1.bc.type.xlo = neumann
+energy_eta1.bc.type.xhi = neumann
+energy_eta1.bc.type.ylo = neumann
+energy_eta1.bc.type.yhi = neumann
+
+# Density: zero-gradient everywhere.
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+# Momentum: no-slip walls on x; zero-gradient on y.
+momentum.bc.type.xlo = dirichlet dirichlet
+momentum.bc.val.xlo  = 0.0 0.0
+momentum.bc.type.xhi = dirichlet dirichlet
+momentum.bc.val.xhi  = 0.0 0.0
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion   = 1e-3
+omega_refinement_criterion = 1e+6
+p_refinement_criterion     = 1e+6
+rho_refinement_criterion   = 1e+6
+gradu_refinement_criterion = 1e+6
+cutoff = 1e-8
+
+### SOURCE TERMS — TIME-DEPENDENT (Stefan analytical) ###
+# m0(t) = rho_g * beta * sqrt(alpha_g / (t + t_off))   [kg/m^2/s]
+# IC::Expression evaluates the formula each Advance step at the current t when
+# bs_sources_time_dependent = 1.
+m0.ic.type = expression
+m0.ic.expression.constant.rho_g_ref = 0.5882
+m0.ic.expression.constant.beta      = 0.058
+m0.ic.expression.constant.alpha_g   = 2.27e-5
+m0.ic.expression.constant.t_off     = 0.131
+m0.ic.expression.region0 = "rho_g_ref * beta * sqrt(alpha_g / (t + t_off))"
+
+# u0 and q held at 0 for now; the SQR source derives momentum/energy
+# contributions from m0 + per-phase EOS state internally. If the test undershoots
+# the analytical, revisit u0 = m0*(1/rho_g - 1/rho_l) and q = m0*L.
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+bs_sources_time_dependent = 0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+apply_viscous         = 0
+Spec_Vol = 1
+grav     = 0.0
+
+### DEBUGGING / SOLVER ###
+apply_bs_source     = 1
+p_int_method        = 0
+Riemann_Solver.type = hllc
+kappa_method        = 1
+smooth_kernel_size  = 3
+nghost              = 4
+integration.type    = ForwardEuler
+implicit_ch         = 0
+ch_W_scale          = 1.0
+
+# NSCBC kept off — using simple Dirichlet/Neumann per the BC block above.
+nscbc.enabled = false

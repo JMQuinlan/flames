@@ -90,6 +90,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("apply_viscous", value.apply_viscous, false);                // Per-phase viscous stress (constant mu_k per phase), default: false
         pp_query_default("apply_vaporization", value.apply_vaporization, false);       // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
         pp_query_default("apply_bs_source", value.apply_bs_source, true);               // Stage 4 BS phase-coupling sources (set 0 to disable for pure single-phase validation)
+        pp_query_default("bs_sources_time_dependent", value.bs_sources_time_dependent, 0); // re-evaluate ic_m0/ic_u0/ic_q each Advance step at the current time (Stefan and similar)
         pp_query_default("p_int_method", value.p_int_method, 0);                        // BS interface-pressure closure: 0 OFF, 1 arithmetic mean, 2 eta-weighted, 3 acoustic-impedance
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
@@ -152,6 +153,26 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.momentum_bc = new BC::Expression(2, pp, "momentum.bc");
         //value.eta_bc = new BC::Constant(1, pp, "pf.eta.bc");
         value.temperature_bc = new BC::Constant(1, pp, "energy.bc"); // Change to be different if needed? ___TEMP___
+
+        // Per-phase energy BCs (Stefan and similar need different BCs on the
+        // spectator phase at a wall). If no per-phase keys are present, alias
+        // both to the shared energy_bc — backward compatible with all existing
+        // inputs that only set "energy.bc".
+        auto has_per_phase_bc = [](const char* prefix)
+        {
+            amrex::ParmParse pp_probe(prefix);
+            std::string dummy;
+            return pp_probe.query("type.xlo", dummy) || pp_probe.query("type.xhi", dummy)
+                || pp_probe.query("type.ylo", dummy) || pp_probe.query("type.yhi", dummy)
+                || pp_probe.query("type.zlo", dummy) || pp_probe.query("type.zhi", dummy);
+        };
+
+        value.energy_eta0_bc = has_per_phase_bc("energy_eta0.bc")
+            ? static_cast<BC::BC<Set::Scalar>*>(new BC::Constant(1, pp, "energy_eta0.bc"))
+            : value.energy_bc;
+        value.energy_eta1_bc = has_per_phase_bc("energy_eta1.bc")
+            ? static_cast<BC::BC<Set::Scalar>*>(new BC::Constant(1, pp, "energy_eta1.bc"))
+            : value.energy_bc;
     }
 
     // Register FabFields:
@@ -170,8 +191,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.density_eta1_mf,     value.density_bc,   1, nghost, "density_eta1",     true, true );
         value.RegisterNewFab(value.density_eta1_old_mf, value.density_bc,   1, nghost, "density_eta1_old", false, false);
 
-        value.RegisterNewFab(value.energy_eta1_mf,      value.energy_bc,    1, nghost, "energy_eta1", true, true);
-        value.RegisterNewFab(value.energy_eta1_old_mf,  value.energy_bc,    1, nghost, "energy_eta1_old" , false, false);
+        value.RegisterNewFab(value.energy_eta1_mf,      value.energy_eta1_bc, 1, nghost, "energy_eta1", true, true);
+        value.RegisterNewFab(value.energy_eta1_old_mf,  value.energy_eta1_bc, 1, nghost, "energy_eta1_old" , false, false);
 
         value.RegisterNewFab(value.momentum_eta1_mf,    value.momentum_bc,  2, nghost, "momentum_eta1", true, true, { "x", "y" });
         value.RegisterNewFab(value.momentum_eta1_old_mf,value.momentum_bc,  2, nghost, "momentum_eta1_old", false, false);
@@ -189,8 +210,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.density_eta0_mf,     value.density_bc,   1, nghost, "density_eta0", true, true);
         value.RegisterNewFab(value.density_eta0_old_mf, value.density_bc,   1, nghost, "density_eta0_old", false, false);
 
-        value.RegisterNewFab(value.energy_eta0_mf,      value.energy_bc,    1, nghost, "energy_eta0", true, true);
-        value.RegisterNewFab(value.energy_eta0_old_mf,  value.energy_bc,    1, nghost, "energy_eta0_old", false, false);
+        value.RegisterNewFab(value.energy_eta0_mf,      value.energy_eta0_bc, 1, nghost, "energy_eta0", true, true);
+        value.RegisterNewFab(value.energy_eta0_old_mf,  value.energy_eta0_bc, 1, nghost, "energy_eta0_old", false, false);
 
         value.RegisterNewFab(value.momentum_eta0_mf,    value.momentum_bc,  2, nghost, "momentum_eta0", true, true, { "x", "y" });
         value.RegisterNewFab(value.momentum_eta0_old_mf,value.momentum_bc,  2, nghost, "momentum_eta0_old", false, false);
@@ -3834,6 +3855,19 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     const Geometry& geom = this->geom[lev];
     const Real* DX = geom.CellSize();
     const Box& domain = geom.Domain();
+
+    // Time-dependent BS prescribed sources (Stefan and similar). IC::Expression
+    // already supports the `t` symbol; we just re-Initialize each step from the
+    // current simulation time. Initialize() is overwrite (setVal(0) + Add).
+    if (bs_sources_time_dependent)
+    {
+        ic_m0->Initialize(lev, m0_mf, time);
+        ic_u0->Initialize(lev, u0_mf, time);
+        ic_q ->Initialize(lev, q_mf,  time);
+        m0_mf[lev]->FillBoundary(geom.periodicity());
+        u0_mf[lev]->FillBoundary(geom.periodicity());
+        q_mf [lev]->FillBoundary(geom.periodicity());
+    }
 
     // // check MF are defined correctly
     // amrex::Print() << "CHECK MF CONSISTENCY:\n";

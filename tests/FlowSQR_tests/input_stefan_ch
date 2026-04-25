@@ -1,0 +1,184 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# =============================================================================
+#  Stefan problem — CH-emergent mode (Phase 3 smoke test)
+# =============================================================================
+#  Same geometry, EOS, and free-energy calibration as input_stefan_sqr, but:
+#    - apply_bs_source = 0  (no prescribed m0/u0/q sources)
+#    - ch_thermo_consistent = 1
+#    - implicit_ch = 2     (Newton-MLMG CH solver active)
+#
+#  In this mode the interface motion is supposed to emerge from CH dynamics
+#  driven by the EOS-derived dmu_bulk = f_g(rho_0,T_0) - f_l(rho_1,T_1).
+#  Phase 3 pass criterion: this input must run to completion without
+#  crashing. Quantitative agreement with the Stefan analytical curve is a
+#  Phase 4 deliverable (when Phase 4 wires dmu_bulk into ApplyImplicitCH's
+#  f'(eta) and the CH mobility scaling is set per Magaletti).
+#
+#  Run both inputs and use stefan_postprocess.py to compare X(t) trajectories.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/FlowSQR_tests/output_stefan_ch
+
+### MESHING ###
+amr.plot_dt        = 5e-3
+amr.max_grid_size  = 500000
+amr.blocking_factor = 4
+amr.regrid_int     = 2
+amr.grid_eff       = 0.8
+amr.max_level      = 2
+amr.n_cell         = 200 8
+
+### TIME STEPING ###
+timestep                = 1e-7
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1e-3
+dynamictimestep.min     = 1e-10
+cfl                     = 0.3
+
+### DIMENSIONS ###
+geometry.prob_lo     = 0.0     0.0     0.0
+geometry.prob_hi     = 1.0e-3  4.0e-5  0.0
+geometry.is_periodic = 0       1       0
+
+stop_time = 5e-2
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 5e-6
+eta.ic.expression.constant.x_int0  = 8.0e-4
+eta.ic.expression.region0 = "0.5*(1 - tanh((x - x_int0)/(sqrt(2)*epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+density_eta1.ic.type = expression
+density_eta1.ic.expression.region0 = "958.4"
+
+density_eta0.ic.type = expression
+density_eta0.ic.expression.region0 = "0.5882"
+
+velocity_eta1.ic.type = expression
+velocity_eta1.ic.expression.region0 = "0.0"
+velocity_eta1.ic.expression.region1 = "0.0"
+velocity_eta0.ic.type = expression
+velocity_eta0.ic.expression.region0 = "0.0"
+velocity_eta0.ic.expression.region1 = "0.0"
+
+pressure_eta1.ic.type = expression
+pressure_eta1.ic.expression.region0 = "101325.0"
+pressure_eta0.ic.type = expression
+pressure_eta0.ic.expression.region0 = "101325.0"
+
+### EOS / SPECIFIC HEATS ###
+gamma_eta1 = 2.35
+gamma_eta0 = 1.327
+cv_eta1 = "1816.0"
+cv_eta0 = "1411.0"
+cp_eta1 = "4267.6"
+cp_eta0 = "1872.4"
+pi_eta1 = 3.7313e8
+pi_eta0 = 0.0
+
+mu_eta1 = 0.0
+mu_eta1_b = 0.0
+mu_eta0 = 0.0
+mu_eta0_b = 0.0
+
+sigma = 0.0
+pref  = 0.0
+
+### FREE-ENERGY CALIBRATION (matches input_stefan_sqr) ###
+# Calibrated for f_g - f_l = 0 at (rho_g_sat, rho_l_sat, T_sat).
+# See input_stefan_sqr for derivation.
+T_ref          = 373.15
+rho_ref_eta0   = 0.5882
+rho_ref_eta1   = 958.4
+R_eta0         = 461.4
+q_eta0         = 0.0
+qprime_eta0    = 0.0
+q_eta1         = -5.40469e5
+qprime_eta1    = 0.0
+
+# CH-emergent mode flags
+ch_thermo_consistent = 1
+
+### BOUNDARY CONDITIONS ###
+# Same per-phase split as input_stefan_sqr — see that file for derivation.
+
+# Mixture energy.bc — all-Neumann (legacy fall-through).
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+# Per-phase energy_eta0 (gas): heat in at xhi.
+energy_eta0.bc.type.xlo = neumann
+energy_eta0.bc.type.xhi = dirichlet
+energy_eta0.bc.val.xhi  = 351200.0
+energy_eta0.bc.type.ylo = neumann
+energy_eta0.bc.type.yhi = neumann
+
+# Per-phase energy_eta1 (liquid spectator near gas wall): all-Neumann.
+energy_eta1.bc.type.xlo = neumann
+energy_eta1.bc.type.xhi = neumann
+energy_eta1.bc.type.ylo = neumann
+energy_eta1.bc.type.yhi = neumann
+
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+momentum.bc.type.xlo = dirichlet dirichlet
+momentum.bc.val.xlo  = 0.0 0.0
+momentum.bc.type.xhi = dirichlet dirichlet
+momentum.bc.val.xhi  = 0.0 0.0
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion   = 1e-3
+omega_refinement_criterion = 1e+6
+p_refinement_criterion     = 1e+6
+rho_refinement_criterion   = 1e+6
+gradu_refinement_criterion = 1e+6
+cutoff = 1e-8
+
+### SOURCE TERMS (all OFF — CH dynamics drive the interface) ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+bs_sources_time_dependent = 0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+apply_viscous         = 0
+Spec_Vol = 1
+grav     = 0.0
+
+### DEBUGGING / SOLVER ###
+apply_bs_source     = 0                 # SQR sources OFF
+p_int_method        = 0
+Riemann_Solver.type = hllc
+kappa_method        = 1
+smooth_kernel_size  = 3
+nghost              = 4
+integration.type    = ForwardEuler
+
+# Implicit CH active (Phase 4 will wire dmu_bulk into f'(eta) here).
+implicit_ch     = 2
+ch_mobility_nom = 1e-4
+ch_newton_iters = 5
+ch_newton_tol   = 1e-10
+ch_W_scale      = 1.0
+
+nscbc.enabled = false
