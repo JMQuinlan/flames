@@ -51,13 +51,14 @@ def interface_x(plotfile):
     ds = yt.load(plotfile)
     t  = float(ds.current_time)
 
-    # Take a ray along x at the y-midpoint of the domain.
-    ymid = 0.5 * (ds.domain_left_edge[1] + ds.domain_right_edge[1])
-    ray  = ds.r[ds.domain_left_edge[0]:ds.domain_right_edge[0]:ds.domain_dimensions[0]*1j,
-                ymid:ymid:1j, 0:0:1j]
+    # Read all cells and average eta over y/z at each unique x position.
+    ad      = ds.all_data()
+    x_all   = np.array(ad["index", "x"])
+    eta_all = np.array(ad["boxlib", "eta"])
 
-    x   = np.array(ray["index", "x"])
-    eta = np.array(ray["boxlib", "eta"])
+    x_unique = np.unique(x_all)
+    eta_mean = np.array([eta_all[x_all == xi].mean() for xi in x_unique])
+    x, eta = x_unique, eta_mean
 
     order = np.argsort(x)
     x, eta = x[order], eta[order]
