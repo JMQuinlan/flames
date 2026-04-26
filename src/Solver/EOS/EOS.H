@@ -152,9 +152,9 @@ public:
         Set::Scalar p0_eff = MixedP0(eta, eos0, eos1);
 
         Set::Scalar press = (gamma_eff - 1.0) * UE_vol - gamma_eff * p0_eff + pref;
-        //return std::max(press, small); // Doesn't look right
+        return std::max(press, small); // Doesn't look right
         //return std::max(press, -p0_eff + small); // Breaks
-        return std::max(press, -p0_eff * gamma_eff + small);
+        //return std::max(press, -p0_eff * gamma_eff + small);// Breaks
     }
 
     // Compute Tammann Pressure assuming correct mixing
@@ -167,9 +167,9 @@ public:
                                        Set::Scalar small = 1e-16)
     {
         Set::Scalar press = (gamma_eff - 1.0) * UE_vol - gamma_eff * p0_eff + pref;
-        //return std::max(press, small); // Doesn't look right
+        return std::max(press, small); // Doesn't look right
         //return std::max(press, -p0_eff + small); // Breaks
-        return std::max(press, -p0_eff * gamma_eff + small);
+        //return std::max(press, -p0_eff * gamma_eff + small); // Breaks
     }
 
     /// Compute mixture internal energy from (p, eta)

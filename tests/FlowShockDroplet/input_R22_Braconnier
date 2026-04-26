@@ -15,12 +15,12 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_R22_Brac
 ### MESHING ###
 amr.plot_dt = 1e-3
 #amr.plot_int = 1
-amr.max_grid_size = 500000
+amr.max_grid_size = 1920000
 amr.blocking_factor = 2
-amr.regrid_int = 20
+amr.regrid_int = 50
 amr.grid_eff = 0.8
-amr.max_level = 0
-amr.n_cell = 2400 800  # Maintains aspect ratio for 0.3m × 0.1m domain
+amr.max_level = 2
+amr.n_cell = 600 200  # Maintains aspect ratio for 0.3m × 0.1m domain
 
 ### TIME STEPPING ###
 ## Static:
