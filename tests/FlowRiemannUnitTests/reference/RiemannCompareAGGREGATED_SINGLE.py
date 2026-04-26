@@ -73,7 +73,7 @@ HDF5 FILE STRUCTURE:
         - internal_energy   : internal energy field
 
 OUTPUTS:
-    The script generates the following plots in ./Images/ directory:
+    The script generates the following plots in ./Images/Case_Name/ directory:
     
     1. Individual Solver Comparisons (per Riemann solver):
        - {case}__{solver}_comparison.png/eps
@@ -121,7 +121,7 @@ USAGE:
     2. Set PLOT_TO_SCREEN = True if you want interactive plots
     3. Ensure output directories follow naming convention
     4. Run script: python RiemannCompareAGGREGATED.py
-    5. Check ./Images/ for generated plots
+    5. Check ./Images/Case_Name for generated plots
     6. Review console output for error metrics
 
 DEPENDENCIES:
@@ -506,7 +506,10 @@ for solver in all_data.keys():
     print(f"  {solver}: Sharp={sharp_status}, Epsilon variants={epsilon_count}")
 
 # Create output directory for images
-os.makedirs('./Images', exist_ok=True)
+#os.makedirs(f"./Images", exist_ok=True)
+out_dir = f"./Images/{case_name}"
+os.makedirs(out_dir, exist_ok=True)
+ 
 
 # Get simulation time (from first available dataset)
 sim_time = max_stop_time if all_stop_times else None
@@ -580,7 +583,7 @@ for solver in riemann_solvers:
         ax.tick_params(labelsize=TICK_FONTSIZE)
     
     plt.tight_layout()
-    output_filename = f'./Images/{case_name}_{solver}_comparison'
+    output_filename = f'{out_dir}/{case_name}_{solver}_comparison'
     save_and_show_plot(output_filename, PLOT_TO_SCREEN)
     print(f"  Saved: {output_filename}")
     
@@ -628,7 +631,7 @@ for solver in riemann_solvers:
             ax.tick_params(labelsize=TICK_FONTSIZE)
         
         plt.tight_layout()
-        output_filename = f'./Images/{case_name}_{solver}_error'
+        output_filename = f'{out_dir}/{case_name}_{solver}_error'
         save_and_show_plot(output_filename, PLOT_TO_SCREEN)
         print(f"  Saved: {output_filename}")
 
@@ -676,7 +679,7 @@ if sharp_solvers:
         ax.tick_params(labelsize=TICK_FONTSIZE)
     
     plt.tight_layout()
-    output_filename = f'./Images/{case_name}_sharp_comparison'
+    output_filename = f'{out_dir}/{case_name}_sharp_comparison'
     save_and_show_plot(output_filename, PLOT_TO_SCREEN)
     print(f"Saved: {output_filename}")
     
@@ -711,7 +714,7 @@ if sharp_solvers:
         ax.tick_params(labelsize=TICK_FONTSIZE)
     
     plt.tight_layout()
-    output_filename = f'./Images/{case_name}_sharp_error'
+    output_filename = f'{out_dir}/{case_name}_sharp_error'
     save_and_show_plot(output_filename, PLOT_TO_SCREEN)
     print(f"Saved: {output_filename}")
 
@@ -770,7 +773,7 @@ for idx, (var, ylabel) in enumerate(zip(variables, ylabels)):
     ax.tick_params(labelsize=TICK_FONTSIZE)
 
 plt.tight_layout()
-output_filename = f'./Images/{case_name}_aggregated_comparison'
+output_filename = f'{out_dir}/{case_name}_aggregated_comparison'
 save_and_show_plot(output_filename, PLOT_TO_SCREEN)
 print(f"Saved: {output_filename}")
 
@@ -822,7 +825,7 @@ for idx, (var, ylabel) in enumerate(zip(variables, ylabels)):
     ax.tick_params(labelsize=TICK_FONTSIZE)
 
 plt.tight_layout()
-output_filename = f'./Images/{case_name}_aggregated_error'
+output_filename = f'{out_dir}/{case_name}_aggregated_error'
 save_and_show_plot(output_filename, PLOT_TO_SCREEN)
 print(f"Saved: {output_filename}")
 
@@ -858,5 +861,5 @@ for solver in riemann_solvers:
 
 print(f"\n{'=' * 80}")
 print("ANALYSIS COMPLETE!")
-print(f"All plots saved to: ./Images/")
+print(f"All plots saved to: {out_dir}")
 print("=" * 80)
