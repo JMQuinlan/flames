@@ -203,8 +203,8 @@ for case_name, group_name in case_to_group.items():
         Tammann = '.'
     
     # File paths
-    hdf5_file = fr'{Tammann}\\{case_name}.hdf5'
-    base_output_dir = fr'..\\..\\..\\bin\\tests\\FlowRiemannUnitTestsAUTO\\{case_name}'
+    hdf5_file = fr'{Tammann}\{case_name}.hdf5'
+    base_output_dir = fr'..\..\..\bin\tests\FlowRiemannUnitTestsAUTO\{case_name}'
     
     # Check if directory exists before processing
     if not os.path.exists(base_output_dir):
