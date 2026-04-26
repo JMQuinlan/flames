@@ -8,8 +8,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowShockDroplet/output_He_Braconnier
-#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_He_Braconnier
+#plot_file = ./tests/FlowShockDroplet/output_He_Braconnier
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_He_Braconnier
 #plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowShockDroplet/output_He_Braconnier
 
 ### MESHING ###
