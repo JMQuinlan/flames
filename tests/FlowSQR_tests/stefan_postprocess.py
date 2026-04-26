@@ -74,11 +74,11 @@ def interface_x(plotfile):
     return t, float(x_int)
 
 def trajectory(root):
-    plotfiles = sorted(glob.glob(f"{root}*"))
+    plotfiles = glob.glob(f"{root}*")
     plotfiles = [p for p in plotfiles if os.path.isdir(p)]
     if not plotfiles:
         sys.exit(f"No plotfiles found at {root}*")
-    times, xs = [], []
+    pairs = []
     for pf in plotfiles:
         try:
             t, x = interface_x(pf)
@@ -87,8 +87,11 @@ def trajectory(root):
             continue
         if math.isnan(x):
             continue
-        times.append(t)
-        xs.append(x)
+        pairs.append((t, x))
+    pairs.sort(key=lambda tx: tx[0])
+    if not pairs:
+        return np.array([]), np.array([])
+    times, xs = zip(*pairs)
     return np.array(times), np.array(xs)
 
 # ---------------------------------------------------------------------------
