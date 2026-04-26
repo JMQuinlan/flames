@@ -187,6 +187,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.energy_eta1_bc = has_per_phase_bc("energy_eta1.bc")
             ? static_cast<BC::BC<Set::Scalar>*>(new BC::Constant(1, pp, "energy_eta1.bc"))
             : value.energy_bc;
+
+        // Per-phase density BCs (mirrors per-phase energy BC pattern above).
+        value.density_eta0_bc = has_per_phase_bc("density_eta0.bc")
+            ? static_cast<BC::BC<Set::Scalar>*>(new BC::Expression(1, pp, "density_eta0.bc"))
+            : value.density_bc;
+        value.density_eta1_bc = has_per_phase_bc("density_eta1.bc")
+            ? static_cast<BC::BC<Set::Scalar>*>(new BC::Expression(1, pp, "density_eta1.bc"))
+            : value.density_bc;
     }
 
     // Register FabFields:
@@ -202,8 +210,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing,  2, nghost, "n_hat", false, false, { "x", "y" });
 
         // PHASE eta=1 (liquid)
-        value.RegisterNewFab(value.density_eta1_mf,     value.density_bc,   1, nghost, "density_eta1",     true, true );
-        value.RegisterNewFab(value.density_eta1_old_mf, value.density_bc,   1, nghost, "density_eta1_old", false, false);
+        value.RegisterNewFab(value.density_eta1_mf,     value.density_eta1_bc, 1, nghost, "density_eta1",     true, true );
+        value.RegisterNewFab(value.density_eta1_old_mf, value.density_eta1_bc, 1, nghost, "density_eta1_old", false, false);
 
         value.RegisterNewFab(value.energy_eta1_mf,      value.energy_eta1_bc, 1, nghost, "energy_eta1", true, true);
         value.RegisterNewFab(value.energy_eta1_old_mf,  value.energy_eta1_bc, 1, nghost, "energy_eta1_old" , false, false);
@@ -221,8 +229,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.c_eta1_mf,           &value.bc_nothing,  1, nghost, "c_eta1", true, false);
 
         // PHASE eta=0 (gas)
-        value.RegisterNewFab(value.density_eta0_mf,     value.density_bc,   1, nghost, "density_eta0", true, true);
-        value.RegisterNewFab(value.density_eta0_old_mf, value.density_bc,   1, nghost, "density_eta0_old", false, false);
+        value.RegisterNewFab(value.density_eta0_mf,     value.density_eta0_bc, 1, nghost, "density_eta0", true, true);
+        value.RegisterNewFab(value.density_eta0_old_mf, value.density_eta0_bc, 1, nghost, "density_eta0_old", false, false);
 
         value.RegisterNewFab(value.energy_eta0_mf,      value.energy_eta0_bc, 1, nghost, "energy_eta0", true, true);
         value.RegisterNewFab(value.energy_eta0_old_mf,  value.energy_eta0_bc, 1, nghost, "energy_eta0_old", false, false);

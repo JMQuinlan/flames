@@ -310,6 +310,12 @@ protected:
     // energy_bc; the mixture energy_per_vol_mf stays on energy_bc.
     BC::BC<Set::Scalar>* energy_eta0_bc = nullptr;
     BC::BC<Set::Scalar>* energy_eta1_bc = nullptr;
+    // Per-phase density BCs. Same pattern as the per-phase energy BCs above:
+    // default to the shared density_bc; problems like Stefan that pin gas-phase
+    // density at a heated wall (to keep T = UE/(ρ·cv) sensible under fixed-UE
+    // Dirichlet) need to override only one phase without polluting the spectator.
+    BC::BC<Set::Scalar>* density_eta0_bc = nullptr;
+    BC::BC<Set::Scalar>* density_eta1_bc = nullptr;
     //BC::BC<Set::Scalar>* eta_bc = nullptr;
     BC::BC<Set::Scalar>* temperature_bc = nullptr;
 

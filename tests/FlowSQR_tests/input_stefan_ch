@@ -136,6 +136,26 @@ density.bc.type.xhi = neumann
 density.bc.type.ylo = neumann
 density.bc.type.yhi = neumann
 
+# Per-phase density BC workaround for fixed-UE Dirichlet at the heated wall.
+# With energy_eta0.bc Dirichlet UE = ρ·cv·T_wall at xhi, T = UE/(ρ·cv) is only
+# correct as long as ρ_0 stays at ρ_ref. Without pinning ρ_0, the gas rarefies
+# at the wall (closed momentum BC + heating) and T runs away (visit0174.png
+# showed T ≈ 860 K at xhi, ρ_0 ≈ 0.28 kg/m³, vs intended 423 K / 0.5882).
+# Pinning ρ_0 at xhi to its IC value enforces the intended T as a workaround.
+# Spectator ρ_1 stays Neumann so dmu_bulk's f_l(ρ_1, T_1) isn't poisoned.
+# Proper fix (deferred): a Dirichlet-T BC type that computes UE_ghost from the
+# live interior ρ_0 each fill. Tracked in HYDRO2_..._post_phase_4.md §4.5.
+density_eta0.bc.type.xlo = neumann
+density_eta0.bc.type.xhi = dirichlet
+density_eta0.bc.val.xhi  = 0.5882
+density_eta0.bc.type.ylo = neumann
+density_eta0.bc.type.yhi = neumann
+
+density_eta1.bc.type.xlo = neumann
+density_eta1.bc.type.xhi = neumann
+density_eta1.bc.type.ylo = neumann
+density_eta1.bc.type.yhi = neumann
+
 momentum.bc.type.xlo = dirichlet dirichlet
 momentum.bc.val.xlo  = 0.0 0.0
 momentum.bc.type.xhi = dirichlet dirichlet
@@ -186,8 +206,8 @@ implicit_ch     = 2
 #                   you would need ch_mobility_nom ~ 4e6.
 #   "allen_cahn" -> M_eff = ch_mobility_nom * epsilon
 #   "explicit"   -> M_eff = ch_mobility_nom directly  (used here for clarity).
-ch_mobility_scaling = explicit
-ch_mobility_nom     = 1e-4
+ch_mobility_scaling = magaletti
+ch_mobility_nom     = 1.0
 ch_newton_iters     = 5
 ch_newton_tol       = 1e-10
 ch_W_scale          = 1.0
