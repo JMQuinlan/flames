@@ -253,7 +253,7 @@ grav     = 0.0
 
 ### DEBUGGING / SOLVER ###
 apply_bs_source     = 1
-p_int_method        = 0
+p_int_method        = 3 	# 0: Off, 1: pressure average, 2: eta weighted pressure. 3: acoustic impedance matched pressure
 Riemann_Solver.type = hllc
 kappa_method        = 1
 smooth_kernel_size  = 3

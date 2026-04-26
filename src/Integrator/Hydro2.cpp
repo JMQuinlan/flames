@@ -145,10 +145,21 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("ch_newton_iters",  value.ch_newton_iters,  5);        // Max Newton iterations (implicit_ch=2 only)
         pp_query_default("ch_newton_tol",    value.ch_newton_tol,    1.0e-10);  // Newton convergence tolerance
         pp_query_default("ch_W_scale",       value.ch_W_scale,       1.0);      // double-well amplitude (equilibrium width = √2·ε/√W_scale)
-        // Phase 2 (CH-Korteweg spec §3.2): include f_g(rho_0,T_0) - f_l(rho_1,T_1)
-        // in the diagnostic dmu_bulk field. Default OFF; Phase 4 reuses this flag
-        // to gate the dynamics path.
+        // Phase 2 / Phase 4 (CH-Korteweg spec §3.2): include f_g(rho_0,T_0) -
+        // f_l(rho_1,T_1) in dmu_bulk and (Phase 4) the CH solver's f'(eta).
+        // Default OFF preserves legacy generic-double-well behavior.
         pp_query_default("ch_thermo_consistent", value.ch_thermo_consistent, 0);
+
+        // Phase 4: mobility scaling.
+        pp_query_default("ch_mobility_scaling", value.ch_mobility_scaling, std::string("magaletti"));
+        if (value.ch_mobility_scaling == "magaletti")
+            value.ch_mobility_factor = value.epsilon * value.epsilon;
+        else if (value.ch_mobility_scaling == "allen_cahn")
+            value.ch_mobility_factor = value.epsilon;
+        else if (value.ch_mobility_scaling == "explicit")
+            value.ch_mobility_factor = 1.0;
+        else
+            Util::Abort(INFO, "Unknown ch_mobility_scaling: ", value.ch_mobility_scaling);
 
         // Boundry Conditions
         value.density_bc = new BC::Expression(1, pp, "density.bc");
@@ -1262,7 +1273,7 @@ Hydro2::RHS_Eta(int lev,
     const Real eps_         = epsilon;
     const Real Dv_          = Dv;
     const int  apply_vap_   = apply_vaporization;
-    const Real mob_nom_loc  = (ch_mobility_nom > Real(0.0)) ? ch_mobility_nom : Real(0.0);
+    const Real mob_nom_loc  = (ch_mobility_nom > Real(0.0)) ? ch_mobility_nom * ch_mobility_factor : Real(0.0);
     const bool do_implicit_ = (implicit_ch != 0);
 
     for (MFIter mfi(eta_rhs_mf, TilingIfNotGPU()); mfi.isValid(); ++mfi)
@@ -1883,7 +1894,7 @@ Hydro2::RHS(int lev,
         // The old code used a_arr(i,j,k)*epsilon (local sound speed), which created a
         // feedback loop: Cartesian-grid pressure anisotropy → higher a at cardinal points
         // → more CH diffusion there → amplifies anisotropy.  Use c_max instead.
-        Real mob_nom = (ch_mobility_nom > 0.0) ? ch_mobility_nom
+        Real mob_nom = (ch_mobility_nom > 0.0) ? ch_mobility_nom * ch_mobility_factor
                                                : 0.2 * epsilon * (c_max + 1.0);
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i,int j,int k)
@@ -2267,6 +2278,7 @@ static Real CH_SetupAndSolveHelmholtz(
 static void CH_ComputeMu(
     MultiFab& mu_mf,
     const MultiFab& eta_mf_in,
+    const MultiFab& dF_bulk_mf,            // EOS-derived bulk piece (zeroed when ch_thermo_consistent=0)
     BC::BC<Set::Scalar>* energy_bc,
     const Geometry& geom,
     const Real* DX,
@@ -2278,11 +2290,12 @@ static void CH_ComputeMu(
     {
         const Box& vbx = mfi.validbox();
         auto eta = eta_mf_in.const_array(mfi);
+        auto dF  = dF_bulk_mf.const_array(mfi);
         auto mu  = mu_mf.array(mfi);
         ParallelFor(vbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten  = Numeric::GetStencil(i, j, k, domain);
             Real e     = eta(i,j,k,0);
-            Real fp    = W_scale * 4.0 * e * (e - 0.5) * (e - 1.0);
+            Real fp    = W_scale * 4.0 * e * (e - 0.5) * (e - 1.0) + dF(i,j,k,0);
             Real lap_e = Numeric::Laplacian(eta, i, j, k, 0, DX, sten);
             mu(i,j,k,0) = fp - kappa_CH * lap_e;
         });
@@ -2342,7 +2355,7 @@ void Hydro2::ApplyImplicitCH(int lev, Set::Scalar dt)
     const int nghost = eta_mf[lev]->nGrow();
 
     const Real kappa_CH = epsilon * epsilon;
-    const Real M_nom    = (ch_mobility_nom > 0.0) ? ch_mobility_nom
+    const Real M_nom    = (ch_mobility_nom > 0.0) ? ch_mobility_nom * ch_mobility_factor
                                                    : 0.2 * epsilon * (c_max + 1.0);
     const Real gamma_CH = std::sqrt(dt * M_nom * kappa_CH);
 
@@ -2385,10 +2398,12 @@ void Hydro2::ApplyImplicitCH(int lev, Set::Scalar dt)
     {
         const Box& vbx = mfi.validbox();
         auto eta = eta_mf[lev]->const_array(mfi);
+        auto dF  = dmu_bulk_mf[lev]->const_array(mfi);     // EOS-derived bulk piece (zeroed when ch_thermo_consistent=0)
         auto fp  = f_prime_mf.array(mfi);
+        Real W_scale_loc = ch_W_scale;
         ParallelFor(vbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             Real e = eta(i,j,k,0);
-            fp(i,j,k,0) = ch_W_scale * 4.0 * e * (e - 0.5) * (e - 1.0);
+            fp(i,j,k,0) = W_scale_loc * 4.0 * e * (e - 0.5) * (e - 1.0) + dF(i,j,k,0);
         });
     }
     energy_bc->FillBoundary(f_prime_mf, 0, 1, 0.0, 0);   // physical BCs
@@ -2464,7 +2479,7 @@ void Hydro2::ApplyImplicitCH_Newton(int lev, Set::Scalar dt)
     const int nghost = eta_mf[lev]->nGrow();
 
     const Real kappa_CH = epsilon * epsilon;
-    const Real M_nom    = (ch_mobility_nom > 0.0) ? ch_mobility_nom
+    const Real M_nom    = (ch_mobility_nom > 0.0) ? ch_mobility_nom * ch_mobility_factor
                                                    : 0.2 * epsilon * (c_max + 1.0);
     const Real gamma_CH = std::sqrt(dt * M_nom * kappa_CH);
 
@@ -2530,7 +2545,7 @@ void Hydro2::ApplyImplicitCH_Newton(int lev, Set::Scalar dt)
         FillNaNGhostsZeroGrad(*eta_mf[lev]);  // INT_DIR/NSCBC: extrapolate so ∇²η is finite
 
         // μ^k = f'(η^k) − ε²∇²η^k  (valid cells + filled ghosts)
-        CH_ComputeMu(mu_k, *eta_mf[lev], energy_bc, geom, DX, domain, kappa_CH, ch_W_scale);
+        CH_ComputeMu(mu_k, *eta_mf[lev], *dmu_bulk_mf[lev], energy_bc, geom, DX, domain, kappa_CH, ch_W_scale);
         FillNaNGhostsZeroGrad(mu_k);  // ensure Laplacian of μ^k reads finite ghost cells
 
         // Residual r = η^k − η* − dt·M·∇²μ^k

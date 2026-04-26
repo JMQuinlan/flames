@@ -422,11 +422,16 @@ protected:
     int ch_newton_iters = 5;           // max Newton iterations (implicit_ch=2)
     Set::Scalar ch_newton_tol = 1.0e-10; // Newton convergence tolerance
     Set::Scalar ch_W_scale = 1.0;        // double-well amplitude scale (W_scale=1 → equilibrium width=√2·ε)
-    // Phase 2: enables EOS-derived contribution to the diagnostic dmu_bulk.
-    // Phase 4 will reuse the same flag to gate the dynamics path inside
-    // ApplyImplicitCH and the Advance primitive loop. Default OFF: identical
-    // behavior to the legacy generic double-well.
+    // Phase 2 / Phase 4: enables EOS-derived contribution dmu_bulk in both
+    // the diagnostic field and (Phase 4) the f'(eta) used by the CH solver.
+    // Default OFF: identical behavior to the legacy generic double-well.
     int ch_thermo_consistent = 0;
+    // Phase 4 mobility scaling for the implicit CH solver (spec §1.7, §3.2):
+    //   "magaletti"  -> M = ch_mobility_nom * epsilon^2  (default; matched-asymptotic)
+    //   "allen_cahn" -> M = ch_mobility_nom * epsilon
+    //   "explicit"   -> M = ch_mobility_nom (no scaling)
+    std::string ch_mobility_scaling = "magaletti";
+    Set::Scalar ch_mobility_factor  = 1.0;   // computed in Parse from above + epsilon
 
     // Adaptive Timestep
     bool adaptive_timestep = false;
