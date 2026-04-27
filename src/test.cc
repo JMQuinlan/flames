@@ -124,8 +124,9 @@ int main (int argc, char* argv[])
     Util::Test::Message("Numeric::TwoPhaseFreeEnergy test");
     {
         int subfailed = 0;
-        subfailed += Util::Test::SubMessage("Calibration",      Test::Numeric::TwoPhaseFreeEnergy::Calibration(0));
-        subfailed += Util::Test::SubMessage("FiniteAtReference",Test::Numeric::TwoPhaseFreeEnergy::FiniteAtReference(0));
+        subfailed += Util::Test::SubMessage("Calibration",             Test::Numeric::TwoPhaseFreeEnergy::Calibration(0));
+        subfailed += Util::Test::SubMessage("FiniteAtReference",       Test::Numeric::TwoPhaseFreeEnergy::FiniteAtReference(0));
+        subfailed += Util::Test::SubMessage("JointCalibrationTwoPoint",Test::Numeric::TwoPhaseFreeEnergy::JointCalibrationTwoPoint(1));
         failed += Util::Test::SubFinalMessage(subfailed);
     }
 

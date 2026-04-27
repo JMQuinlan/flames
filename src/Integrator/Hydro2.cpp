@@ -166,6 +166,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // ApplyImplicitCH_Newton today; explicit/Eyre paths still see constant M.
         pp_query_default("ch_mobility_degenerate", value.ch_mobility_degenerate, 0);
 
+        // CH gradient-energy coefficient kappa. Default 0.0 = auto = epsilon^2
+        // (legacy). Set explicitly to decouple kappa from epsilon when the
+        // (lambda, kappa, epsilon) triple needs joint rescaling to keep
+        // |dmu|/lambda < 0.3 with delta = sqrt(kappa/(2*lambda)) >= ~4*dx.
+        pp_query_default("ch_kappa", value.ch_kappa, 0.0);
+        value.ch_kappa_eff = (value.ch_kappa > 0.0) ? value.ch_kappa
+                                                    : value.epsilon * value.epsilon;
+
         // Boundry Conditions
         value.density_bc = new BC::Expression(1, pp, "density.bc");
         value.energy_bc = new BC::Constant(1, pp, "energy.bc");
@@ -1792,7 +1800,7 @@ Hydro2::RHS(int lev,
             Real lap_eta = Numeric::Laplacian(eta_arr, i,j,k, 0, DX, sten_ch);
 
             Real fprime = ch_W_scale * 4.0 * eta * (eta-0.5) * (eta-1.0);
-            mu_arr(i,j,k) = -epsilon*epsilon*lap_eta + fprime;
+            mu_arr(i,j,k) = -ch_kappa_eff*lap_eta + fprime;
 
             Y_arr(i,j,k) = rho0_arr(i,j,k)*eta / (rho + 1e-14);
 
@@ -2367,7 +2375,7 @@ void Hydro2::ApplyImplicitCH(int lev, Set::Scalar dt)
     const Box&      domain = geom.Domain();
     const int nghost = eta_mf[lev]->nGrow();
 
-    const Real kappa_CH = epsilon * epsilon;
+    const Real kappa_CH = ch_kappa_eff;
     const Real M_nom    = (ch_mobility_nom > 0.0) ? ch_mobility_nom * ch_mobility_factor
                                                    : 0.2 * epsilon * (c_max + 1.0);
     const Real gamma_CH = std::sqrt(dt * M_nom * kappa_CH);
@@ -2491,7 +2499,7 @@ void Hydro2::ApplyImplicitCH_Newton(int lev, Set::Scalar dt)
     const Box&      domain = geom.Domain();
     const int nghost = eta_mf[lev]->nGrow();
 
-    const Real kappa_CH = epsilon * epsilon;
+    const Real kappa_CH = ch_kappa_eff;
     const Real M_nom    = (ch_mobility_nom > 0.0) ? ch_mobility_nom * ch_mobility_factor
                                                    : 0.2 * epsilon * (c_max + 1.0);
     // Degenerate mobility: residual uses M(eta)=M_nom*eta^2*(1-eta)^2 face-averaged
@@ -4588,7 +4596,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Chemical Potential
             Set::Scalar f_prime = ch_W_scale * 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: W_scale*f'(eta)
-            Set::Scalar mu_chem_local = -epsilon * epsilon * lap_eta + f_prime;
+            Set::Scalar mu_chem_local = -ch_kappa_eff * lap_eta + f_prime;
             mu_chem(i, j, k) = mu_chem_local;
 
             // Spalding Number

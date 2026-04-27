@@ -448,6 +448,18 @@ protected:
     // RHS_Eta path (implicit_ch=0) when those modes are needed.
     int ch_mobility_degenerate = 0;
 
+    // CH gradient-energy coefficient kappa (controls equilibrium interface width
+    // delta = sqrt(kappa/(2*lambda)) and surface tension sigma = sqrt(2*kappa*lambda)/6).
+    // Historically hardwired to epsilon^2; now an independent input so we can
+    // raise lambda (=ch_W_scale) to satisfy the spinodal margin |dmu|/lambda < 0.3
+    // without collapsing the interface to sub-grid widths.
+    //
+    // ch_kappa = 0 (default): auto = epsilon^2 (legacy behavior, backward compat).
+    // ch_kappa > 0          : use this value directly.
+    // ch_kappa_eff is the resolved value used at every CH site (computed in Parse).
+    Set::Scalar ch_kappa     = 0.0;   // input; 0 means "auto = epsilon^2"
+    Set::Scalar ch_kappa_eff = 0.0;   // resolved value used in code (set in Parse)
+
     // Adaptive Timestep
     bool adaptive_timestep = false;
     Set::Scalar dt_min = NAN, dt_max = NAN, dt_growth = NAN;
