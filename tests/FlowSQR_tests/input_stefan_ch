@@ -103,8 +103,8 @@ rho_ref_eta1   = 958.4
 R_eta0         = 461.4
 q_eta0         = 0.0
 qprime_eta0    = 0.0
-q_eta1         = -5.40469e5
-qprime_eta1    = 0.0
+q_eta1      = -3.00017e+06
+qprime_eta1 = -5510.35
 
 # CH-emergent mode flags
 ch_thermo_consistent = 1
@@ -213,5 +213,8 @@ ch_newton_tol       = 1e-10
 ch_W_scale          = 1.0
 ch_mobility_degenerate = 1
 ch_mobility_nom        = 9440.0
+
+ q_eta1      = -3.00017e+06
+  │  MESSAGE: src/Test/Numeric/TwoPhaseFreeEnergy.H:181 (JointCalibrationTwoPoint)     => qprime_eta1 = -5510.35
 
 nscbc.enabled = false
