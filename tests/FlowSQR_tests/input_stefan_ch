@@ -207,9 +207,11 @@ implicit_ch     = 2
 #   "allen_cahn" -> M_eff = ch_mobility_nom * epsilon
 #   "explicit"   -> M_eff = ch_mobility_nom directly  (used here for clarity).
 ch_mobility_scaling = magaletti
-ch_mobility_nom     = 1.0
+# ch_mobility_nom     = 1.0
 ch_newton_iters     = 5
 ch_newton_tol       = 1e-10
 ch_W_scale          = 1.0
+ch_mobility_degenerate = 1
+ch_mobility_nom        = 9440.0
 
 nscbc.enabled = false

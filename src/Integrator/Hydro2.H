@@ -439,6 +439,15 @@ protected:
     std::string ch_mobility_scaling = "magaletti";
     Set::Scalar ch_mobility_factor  = 1.0;   // computed in Parse from above + epsilon
 
+    // Degenerate (interface-localized) mobility: M(eta) = M_nom * eta^2*(1-eta)^2.
+    // Peak at eta=0.5 is M_nom/16; bulk (eta=0 or 1) is exactly 0. This kills CH
+    // dynamics in bulk regions where dmu_bulk can be non-zero from spectator-phase
+    // drift (spec §6.3) and confines phase change to the interface.
+    // Currently honored only by ApplyImplicitCH_Newton (implicit_ch=2).
+    // TODO: extend to ApplyImplicitCH (Eyre, implicit_ch=1) and the explicit
+    // RHS_Eta path (implicit_ch=0) when those modes are needed.
+    int ch_mobility_degenerate = 0;
+
     // Adaptive Timestep
     bool adaptive_timestep = false;
     Set::Scalar dt_min = NAN, dt_max = NAN, dt_growth = NAN;

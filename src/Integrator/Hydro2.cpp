@@ -161,6 +161,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         else
             Util::Abort(INFO, "Unknown ch_mobility_scaling: ", value.ch_mobility_scaling);
 
+        // Degenerate mobility: M(eta) = M_nom_eff * eta^2*(1-eta)^2.
+        // Peak M_nom_eff/16 at eta=0.5, exactly 0 in bulk. Only honored by
+        // ApplyImplicitCH_Newton today; explicit/Eyre paths still see constant M.
+        pp_query_default("ch_mobility_degenerate", value.ch_mobility_degenerate, 0);
+
         // Boundry Conditions
         value.density_bc = new BC::Expression(1, pp, "density.bc");
         value.energy_bc = new BC::Constant(1, pp, "energy.bc");
@@ -2489,7 +2494,15 @@ void Hydro2::ApplyImplicitCH_Newton(int lev, Set::Scalar dt)
     const Real kappa_CH = epsilon * epsilon;
     const Real M_nom    = (ch_mobility_nom > 0.0) ? ch_mobility_nom * ch_mobility_factor
                                                    : 0.2 * epsilon * (c_max + 1.0);
-    const Real gamma_CH = std::sqrt(dt * M_nom * kappa_CH);
+    // Degenerate mobility: residual uses M(eta)=M_nom*eta^2*(1-eta)^2 face-averaged
+    // so the discrete operator is conservative (∇·(M∇μ), preserves ∫η).
+    // Preconditioner keeps the constant-coeff biharmonic factorization with the
+    // PEAK degenerate value M_nom/16 (max of g(η)=η²(1-η)² on [0,1] is 1/16 at η=0.5).
+    // Over-damped preconditioner is safe for Newton; bulk cells where actual M≈0
+    // converge fast since the residual itself is ≈0 there.
+    const bool   degenerate_M = (ch_mobility_degenerate != 0);
+    const Real   M_pc         = degenerate_M ? (M_nom / 16.0) : M_nom;
+    const Real   gamma_CH     = std::sqrt(dt * M_pc * kappa_CH);
 
     // BC and coefficient setup (same as ApplyImplicitCH)
     Array<LinOpBCType, AMREX_SPACEDIM> lo_bc, hi_bc;
@@ -2556,10 +2569,17 @@ void Hydro2::ApplyImplicitCH_Newton(int lev, Set::Scalar dt)
         CH_ComputeMu(mu_k, *eta_mf[lev], *dmu_bulk_mf[lev], energy_bc, geom, DX, domain, kappa_CH, ch_W_scale);
         FillNaNGhostsZeroGrad(mu_k);  // ensure Laplacian of μ^k reads finite ghost cells
 
-        // Residual r = η^k − η* − dt·M·∇²μ^k
-        // rhs_newton = −r = η* − η^k + dt·M·∇²μ^k
+        // Residual r = η^k − η* − dt·∇·(M(η^k)·∇μ^k)
+        // rhs_newton = −r = η* − η^k + dt·∇·(M·∇μ)
         // ||rhs_newton||_∞ → 0 at convergence
+        //
+        // Constant-M case: ∇·(M∇μ) = M·∇²μ, recovers the original form.
+        // Degenerate-M case: M(η)=M_nom*η²(1-η)², face-averaged. The face-flux
+        // divergence form is conservative (∫η preserved at the discrete level)
+        // and zeroes the η-flux in bulk regions where M(η)→0.
         Real res_norm = 0.0;
+        const Real M_nom_loc = M_nom;
+        const bool deg_loc   = degenerate_M;
         for (MFIter mfi(*eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
         {
             const Box& vbx = mfi.validbox();
@@ -2568,9 +2588,33 @@ void Hydro2::ApplyImplicitCH_Newton(int lev, Set::Scalar dt)
             auto mu   = mu_k.const_array(mfi);
             auto rhs  = rhs_mf.array(mfi);
             ParallelFor(vbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                auto sten   = Numeric::GetStencil(i, j, k, domain);
-                Real lap_mu = Numeric::Laplacian(mu, i, j, k, 0, DX, sten);
-                rhs(i,j,k,0) = es(i,j,k,0) - eta(i,j,k,0) + dt * M_nom * lap_mu;
+                Real div_M_grad_mu;
+                if (deg_loc) {
+                    auto e_c   = amrex::max(Real(0.0), amrex::min(Real(1.0), eta(i,  j,  k,0)));
+                    auto e_xp1 = amrex::max(Real(0.0), amrex::min(Real(1.0), eta(i+1,j,  k,0)));
+                    auto e_xm1 = amrex::max(Real(0.0), amrex::min(Real(1.0), eta(i-1,j,  k,0)));
+                    auto e_yp1 = amrex::max(Real(0.0), amrex::min(Real(1.0), eta(i,  j+1,k,0)));
+                    auto e_ym1 = amrex::max(Real(0.0), amrex::min(Real(1.0), eta(i,  j-1,k,0)));
+                    Real M_c   = M_nom_loc * e_c   * e_c   * (Real(1.0)-e_c)   * (Real(1.0)-e_c);
+                    Real M_xp1 = M_nom_loc * e_xp1 * e_xp1 * (Real(1.0)-e_xp1) * (Real(1.0)-e_xp1);
+                    Real M_xm1 = M_nom_loc * e_xm1 * e_xm1 * (Real(1.0)-e_xm1) * (Real(1.0)-e_xm1);
+                    Real M_yp1 = M_nom_loc * e_yp1 * e_yp1 * (Real(1.0)-e_yp1) * (Real(1.0)-e_yp1);
+                    Real M_ym1 = M_nom_loc * e_ym1 * e_ym1 * (Real(1.0)-e_ym1) * (Real(1.0)-e_ym1);
+                    Real M_xp = 0.5*(M_c + M_xp1);
+                    Real M_xm = 0.5*(M_c + M_xm1);
+                    Real M_yp = 0.5*(M_c + M_yp1);
+                    Real M_ym = 0.5*(M_c + M_ym1);
+                    Real F_xp = M_xp * (mu(i+1,j,  k,0) - mu(i,  j,  k,0)) / DX[0];
+                    Real F_xm = M_xm * (mu(i,  j,  k,0) - mu(i-1,j,  k,0)) / DX[0];
+                    Real F_yp = M_yp * (mu(i,  j+1,k,0) - mu(i,  j,  k,0)) / DX[1];
+                    Real F_ym = M_ym * (mu(i,  j,  k,0) - mu(i,  j-1,k,0)) / DX[1];
+                    div_M_grad_mu = (F_xp - F_xm)/DX[0] + (F_yp - F_ym)/DX[1];
+                } else {
+                    auto sten   = Numeric::GetStencil(i, j, k, domain);
+                    Real lap_mu = Numeric::Laplacian(mu, i, j, k, 0, DX, sten);
+                    div_M_grad_mu = M_nom_loc * lap_mu;
+                }
+                rhs(i,j,k,0) = es(i,j,k,0) - eta(i,j,k,0) + dt * div_M_grad_mu;
             });
         }
         res_norm = rhs_mf.norm0();
