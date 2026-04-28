@@ -503,8 +503,11 @@ public:
                         Set::Scalar Ly_in = (cy == 1) ? L1_y : L4_y; // Incoming wave in Y
 
                         // Relaxation coefficients (Motheau Eq. 38)
-                        Set::Scalar Kx = sigma_x * (1.0 - Mx_c * Mx_c) / (a_c * Lx_ref);
-                        Set::Scalar Ky = sigma_y * (1.0 - My_c * My_c) / (a_c * Ly_ref);
+                        // Motheau 2017 Eq. 38: K = sigma * c * (1 - M^2) / L
+                        // (matches the four edge K formulas; original divided by a_c
+                        // which made the corner relaxation 1/a^2 too weak vs the paper)
+                        Set::Scalar Kx = sigma_x * (1.0 - Mx_c * Mx_c) * a_c / Lx_ref;
+                        Set::Scalar Ky = sigma_y * (1.0 - My_c * My_c) * a_c / Ly_ref;
 
                         // Coupling coefficient (Motheau Eq. 56)
                         Set::Scalar ab = (1.0 - 0.5 * (beta_x + beta_y)) / 2.0;
@@ -555,10 +558,17 @@ public:
                         Set::Scalar xi3_x = (std::abs(vx_c) > 1.0e-14) ? L3_x / vx_c : 0.0;
                         Set::Scalar xi4_x = L4_x / (vx_c + a_c + small_local);
 
-                        Set::Scalar drho_dx_new = xi1_x + xi2_x + xi4_x;
-                        Set::Scalar dvx_dx_new = (-a_c / (rho_c + small_local)) * xi1_x + (a_c / (rho_c + small_local)) * xi4_x;
-                        Set::Scalar dvy_dx_new = xi3_x;
-                        Set::Scalar dp_dx_new = a2_c * (xi1_x + xi4_x);
+                        // Motheau Eq. 26 inversion for paper-style L (= lambda * inner_factor):
+                        //   dp/dn  = 0.5 * (xi1 + xi4)
+                        //   du/dn  = (xi4 - xi1) / (2 * rho * a)
+                        //   drho/dn = (xi2 + 0.5*(xi1+xi4)) / a^2
+                        //   dv/dn  = xi3
+                        // (Original implementation gave gradients off by 2*a^2, causing
+                        //  the boundary relaxation to be wildly over-aggressive.)
+                        Set::Scalar dp_dx_new   = 0.5 * (xi1_x + xi4_x);
+                        Set::Scalar dvx_dx_new  = (xi4_x - xi1_x) / (2.0 * (rho_c + small_local) * a_c + small_local);
+                        Set::Scalar drho_dx_new = (xi2_x + 0.5 * (xi1_x + xi4_x)) / (a2_c + small_local);
+                        Set::Scalar dvy_dx_new  = xi3_x;
 
                         // Y-direction gradients
                         Set::Scalar xi1_y = L1_y / (vy_c - a_c + small_local);
@@ -566,10 +576,10 @@ public:
                         Set::Scalar xi3_y = (std::abs(vy_c) > 1.0e-14) ? L3_y / vy_c : 0.0;
                         Set::Scalar xi4_y = L4_y / (vy_c + a_c + small_local);
 
-                        Set::Scalar drho_dy_new = xi1_y + xi2_y + xi4_y;
-                        Set::Scalar dvy_dy_new = (-a_c / (rho_c + small_local)) * xi1_y + (a_c / (rho_c + small_local)) * xi4_y;
-                        Set::Scalar dvx_dy_new = xi3_y;
-                        Set::Scalar dp_dy_new = a2_c * (xi1_y + xi4_y);
+                        Set::Scalar dp_dy_new   = 0.5 * (xi1_y + xi4_y);
+                        Set::Scalar dvy_dy_new  = (xi4_y - xi1_y) / (2.0 * (rho_c + small_local) * a_c + small_local);
+                        Set::Scalar drho_dy_new = (xi2_y + 0.5 * (xi1_y + xi4_y)) / (a2_c + small_local);
+                        Set::Scalar dvx_dy_new  = xi3_y;
 
                         // =============================================================
                         // STEP 8: Fill ghost cells using layer-appropriate formula
@@ -795,8 +805,14 @@ public:
                 int i_bnd = domain.smallEnd(0);
 
                 // Loop over j indices, EXCLUDING corners
-                int j_start = domain.smallEnd(1) + 1; // Skip bottom corner
-                int j_end = domain.bigEnd(1) - 1;     // Skip top corner
+                // Fix #4: include full transverse range. The corner *quadrant*
+                // block fills i-ghost cells at j in [smallEnd-ng, smallEnd-1]
+                // and [bigEnd+1, bigEnd+ng]; it does NOT fill (i_ghost, j=smallEnd)
+                // or (i_ghost, j=bigEnd). Skipping those rows in the edge would
+                // leave them at construction defaults, creating a stiff fictitious
+                // jump at the corner row.
+                int j_start = domain.smallEnd(1);
+                int j_end = domain.bigEnd(1);
 
                 // Only process if this box touches the boundary
                 for (int jj = j_start; jj <= j_end; ++jj)
@@ -925,10 +941,11 @@ public:
                         Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_bnd : 0.0;
                         Set::Scalar xi4 = L4 / (un_bnd + a_bnd + small_local);
 
-                        Set::Scalar drho_dx_new = xi1 + xi2 + xi4;
-                        Set::Scalar dun_dx_new = (-a_bnd / (rho_bnd + small_local)) * xi1 + (a_bnd / (rho_bnd + small_local)) * xi4;
-                        Set::Scalar dut_dx_new = xi3;
-                        Set::Scalar dp_dx_new = a2_bnd * (xi1 + xi4);
+                        // Motheau Eq. 26 inversion for paper-style L (see corner block).
+                        Set::Scalar dp_dx_new   = 0.5 * (xi1 + xi4);
+                        Set::Scalar dun_dx_new  = (xi4 - xi1) / (2.0 * (rho_bnd + small_local) * a_bnd + small_local);
+                        Set::Scalar drho_dx_new = (xi2 + 0.5 * (xi1 + xi4)) / (a2_bnd + small_local);
+                        Set::Scalar dut_dx_new  = xi3;
 
                         // =============================================================
                         // STEP 9: Fill ALL 4 ghost cell layers (Motheau Eq. 27-30)
@@ -994,8 +1011,14 @@ public:
                 int i_bnd = domain.bigEnd(0);
 
                 // Loop over j indices, EXCLUDING corners
-                int j_start = domain.smallEnd(1) + 1; // Skip bottom corner
-                int j_end = domain.bigEnd(1) - 1;     // Skip top corner
+                // Fix #4: include full transverse range. The corner *quadrant*
+                // block fills i-ghost cells at j in [smallEnd-ng, smallEnd-1]
+                // and [bigEnd+1, bigEnd+ng]; it does NOT fill (i_ghost, j=smallEnd)
+                // or (i_ghost, j=bigEnd). Skipping those rows in the edge would
+                // leave them at construction defaults, creating a stiff fictitious
+                // jump at the corner row.
+                int j_start = domain.smallEnd(1);
+                int j_end = domain.bigEnd(1);
 
                 for (int jj = j_start; jj <= j_end; ++jj)
                 {
@@ -1115,10 +1138,11 @@ public:
                         Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_bnd : 0.0;
                         Set::Scalar xi4 = L4 / (un_bnd + a_bnd + small_local);
 
-                        Set::Scalar drho_dx_new = xi1 + xi2 + xi4;
-                        Set::Scalar dun_dx_new = (-a_bnd / (rho_bnd + small_local)) * xi1 + (a_bnd / (rho_bnd + small_local)) * xi4;
-                        Set::Scalar dut_dx_new = xi3;
-                        Set::Scalar dp_dx_new = a2_bnd * (xi1 + xi4);
+                        // Motheau Eq. 26 inversion for paper-style L (see corner block).
+                        Set::Scalar dp_dx_new   = 0.5 * (xi1 + xi4);
+                        Set::Scalar dun_dx_new  = (xi4 - xi1) / (2.0 * (rho_bnd + small_local) * a_bnd + small_local);
+                        Set::Scalar drho_dx_new = (xi2 + 0.5 * (xi1 + xi4)) / (a2_bnd + small_local);
+                        Set::Scalar dut_dx_new  = xi3;
 
                         // =============================================================
                         // STEP 9: Fill ALL 4 ghost cell layers (Motheau Eq. 31-34)
@@ -1184,8 +1208,9 @@ public:
                 int j_bnd = domain.smallEnd(1);
 
                 // Loop over i indices, EXCLUDING corners
-                int i_start = domain.smallEnd(0) + 1; // Skip left corner
-                int i_end = domain.bigEnd(0) - 1;     // Skip right corner
+                // Fix #4: include full transverse range (see comment in xlo branch).
+                int i_start = domain.smallEnd(0);
+                int i_end = domain.bigEnd(0);
 
                 for (int ii = i_start; ii <= i_end; ++ii)
                 {
@@ -1315,10 +1340,11 @@ public:
                         Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_bnd : 0.0;
                         Set::Scalar xi4 = L4 / (un_bnd + a_bnd + small_local);
 
-                        Set::Scalar drho_dy_new = xi1 + xi2 + xi4;
-                        Set::Scalar dun_dy_new = (-a_bnd / (rho_bnd + small_local)) * xi1 + (a_bnd / (rho_bnd + small_local)) * xi4;
-                        Set::Scalar dut_dy_new = xi3;
-                        Set::Scalar dp_dy_new = a2_bnd * (xi1 + xi4);
+                        // Motheau Eq. 26 inversion for paper-style L (see corner block).
+                        Set::Scalar dp_dy_new   = 0.5 * (xi1 + xi4);
+                        Set::Scalar dun_dy_new  = (xi4 - xi1) / (2.0 * (rho_bnd + small_local) * a_bnd + small_local);
+                        Set::Scalar drho_dy_new = (xi2 + 0.5 * (xi1 + xi4)) / (a2_bnd + small_local);
+                        Set::Scalar dut_dy_new  = xi3;
 
                         // =============================================================
                         // STEP 9: Fill ALL 4 ghost cell layers (Motheau Eq. 27-30)
@@ -1380,8 +1406,9 @@ public:
                 int j_bnd = domain.bigEnd(1);
 
                 // Loop over i indices, EXCLUDING corners
-                int i_start = domain.smallEnd(0) + 1; // Skip left corner
-                int i_end = domain.bigEnd(0) - 1;     // Skip right corner
+                // Fix #4: include full transverse range (see comment in xlo branch).
+                int i_start = domain.smallEnd(0);
+                int i_end = domain.bigEnd(0);
 
                 for (int ii = i_start; ii <= i_end; ++ii)
                 {
@@ -1503,10 +1530,11 @@ public:
                         Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_bnd : 0.0;
                         Set::Scalar xi4 = L4 / (un_bnd + a_bnd + small_local);
 
-                        Set::Scalar drho_dy_new = xi1 + xi2 + xi4;
-                        Set::Scalar dun_dy_new = (-a_bnd / (rho_bnd + small_local)) * xi1 + (a_bnd / (rho_bnd + small_local)) * xi4;
-                        Set::Scalar dut_dy_new = xi3;
-                        Set::Scalar dp_dy_new = a2_bnd * (xi1 + xi4);
+                        // Motheau Eq. 26 inversion for paper-style L (see corner block).
+                        Set::Scalar dp_dy_new   = 0.5 * (xi1 + xi4);
+                        Set::Scalar dun_dy_new  = (xi4 - xi1) / (2.0 * (rho_bnd + small_local) * a_bnd + small_local);
+                        Set::Scalar drho_dy_new = (xi2 + 0.5 * (xi1 + xi4)) / (a2_bnd + small_local);
+                        Set::Scalar dut_dy_new  = xi3;
 
                         // =============================================================
                         // STEP 9: Fill ALL 4 ghost cell layers (Motheau Eq. 31-34)

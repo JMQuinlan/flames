@@ -2818,8 +2818,10 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
                 rho1(i, j, k) = rho(i, j, k) * (1.0 - eta(i, j, k));
 
                 // Enforce positivity
+                /*
                 rho0(i, j, k) = std::max(rho0(i, j, k), small);
                 rho1(i, j, k) = std::max(rho1(i, j, k), small);
+                */
             });
         }
 
@@ -2944,12 +2946,12 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             UE(i, j, k) = E(i, j, k) - KE(i, j, k);
             UE(i, j, k) = (UE(i, j, k) < 0.0) ? small : UE(i, j, k);
 
-            if (!(use_nscbc))
-            {
+            //if (!(use_nscbc))
+            //{
                 gamma(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
                 p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
                 press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small);
-            }
+            //}
             T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
             a(i, j, k) = Solver::EOS::EOS::TammannSoundSpeed(rho(i, j, k), press(i, j, k), gamma(i, j, k), p0_eff(i, j, k), small);
         });

@@ -1,0 +1,190 @@
+#@ [rpe_04_strong_collapse]
+#@ exe=hydro2
+#@ dim=2
+
+# =============================================================================
+# RPE Benchmark 04 - High-pressure-ratio Collapse (Coralic & Colonius 2014)
+# =============================================================================
+# Strong driven collapse: liquid at 25x atmospheric pressure compresses an
+# atmospheric air bubble to ~1/10 of its initial radius before rebounding.
+# This is the regime where Keller-Miksis (compressibility-corrected RP) starts
+# to noticeably differ from RP because the bubble-wall Mach number is no longer
+# negligible at the late-collapse stage.
+#
+#   liquid: rho_l = 1000 kg/m^3, p_inf = 2.5e6 Pa  (~25 atm)
+#           Tammann gamma = 7.15, p_inf_Tammann = 3.0e8 Pa
+#   gas:    rho_g = 1.2 kg/m^3,  p_g0 = 1.01325e5 Pa (1 atm)
+#   bubble: R0 = 1.0e-3 m
+#   sigma:  0.0728 N/m
+#   pressure ratio: p_inf / p_g0 ~= 24.7
+#
+# Reference: Keller-Miksis ODE (analyze_04_StrongCollapse.py) plus RP for
+# comparison. Compare R(t) and timing of minimum-radius (collapse moment).
+#
+# Citation: Coralic & Colonius (2014) "Finite-volume WENO scheme for viscous
+# compressible multicomponent flows", J. Comput. Phys. 274:95-121.
+# https://doi.org/10.1016/j.jcp.2014.06.002
+#
+# WARNING: Resolution requirements escalate sharply during collapse. With 256
+# cells over a +/- 5 mm domain, dx = 39 um, but R_min from RP ~= 0.05 R0 = 50 um.
+# That's ~1 cell at collapse - clearly under-resolved at the moment of
+# minimum radius. Compare with care; use this test mostly for the early
+# part of the collapse (before R drops below ~5 dx). Increase n_cell to 512
+# for a quantitative comparison through minimum.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/FlowRayleighPlesset/OtherTests/output_RPE_04_StrongCollapse
+
+### MESHING ###
+amr.plot_dt        = 5.0e-7        # 120 frames over 60 us
+amr.max_grid_size  = 500000
+amr.blocking_factor = 2
+amr.regrid_int     = 5             # tighter regridding for collapse
+amr.grid_eff       = 0.8
+amr.max_level      = 0             # bump to 1+ for better collapse resolution
+amr.n_cell         = 256 256
+
+nghost = 4
+
+### TIME STEPPING ###
+timestep                = 1.0e-10
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-8
+dynamictimestep.min     = 1.0e-14
+cfl                     = 0.2
+
+### DIMENSIONS ###
+geometry.prob_lo     = -5.0e-3 -5.0e-3 0.0
+geometry.prob_hi     =  5.0e-3  5.0e-3 0.0
+geometry.is_periodic = 0 0 0
+stop_time            = 6.0e-5                  # 60 us captures Chen 2D collapse (~40us) + rebound
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 7.8e-5
+eta.ic.expression.constant.R0      = 1.0e-3
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y) - R0)/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### EQUATION OF STATE ###
+eos0.gamma = 7.15
+eos0.p0    = 3.0e8
+eos0.cv    = 4186.0
+eos0.cp    = 4186.0
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 718.0
+eos1.cp    = 1005.0
+
+### HYDRO INITIAL CONDITIONS ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1000.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.2"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "2.5e6"      # 25 atm liquid (driving)
+
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "1.01325e5"  # 1 atm gas
+
+### VISCOSITY ###
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION (real water) ###
+sigma = 0.0728
+pref  = 0.0
+
+### BOUNDARY CONDITIONS - NSCBC4 outflow ###
+density.bc.type.xhi  = nscbc_outflow
+density.bc.type.xlo  = nscbc_outflow
+density.bc.type.ylo  = nscbc_outflow
+density.bc.type.yhi  = nscbc_outflow
+energy.bc.type.xhi   = nscbc_outflow
+energy.bc.type.xlo   = nscbc_outflow
+energy.bc.type.ylo   = nscbc_outflow
+energy.bc.type.yhi   = nscbc_outflow
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow
+momentum.bc.type.xlo = nscbc_outflow nscbc_outflow
+momentum.bc.type.ylo = nscbc_outflow nscbc_outflow
+momentum.bc.type.yhi = nscbc_outflow nscbc_outflow
+
+nscbc.xlo.type = outflow
+nscbc.xlo.target_p = 2.5e6
+nscbc.xlo.sigma = 0.15
+nscbc.xlo.beta  = 0.5
+nscbc.xlo.L_ref = 1.0e-2
+nscbc.xlo.target_u = 0.0
+nscbc.xlo.target_v = 0.0
+
+nscbc.xhi.type = outflow
+nscbc.xhi.target_p = 2.5e6
+nscbc.xhi.sigma = 0.15
+nscbc.xhi.beta  = 0.5
+nscbc.xhi.L_ref = 1.0e-2
+nscbc.xhi.target_u = 0.0
+nscbc.xhi.target_v = 0.0
+
+nscbc.ylo.type = outflow
+nscbc.ylo.target_p = 2.5e6
+nscbc.ylo.sigma = 0.15
+nscbc.ylo.beta  = 0.5
+nscbc.ylo.L_ref = 1.0e-2
+nscbc.ylo.target_u = 0.0
+nscbc.ylo.target_v = 0.0
+
+nscbc.yhi.type = outflow
+nscbc.yhi.target_p = 2.5e6
+nscbc.yhi.sigma = 0.15
+nscbc.yhi.beta  = 0.5
+nscbc.yhi.L_ref = 1.0e-2
+nscbc.yhi.target_u = 0.0
+nscbc.yhi.target_v = 0.0
+
+nscbc.small = 1.0e-10
+
+### REFINEMENT (single level by default) ###
+eta_refinement_criterion   = 1.0e+10
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS ###
+apply_surface_tension = 1
+apply_buoyancy        = 0
+apply_weight          = 0
+Spec_Vol              = 1
+grav                  = 0.0
+
+Riemann_Solver.type = hllc
+kappa_method        = 1
+
+apply_sharpening     = 0
+sharpening_frequency = 50
+reinit_max_iter      = 100
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
