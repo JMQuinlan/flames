@@ -3,27 +3,20 @@
 #@ dim=2
 
 # =============================================================================
-# RPE Benchmark 02 - Driven Bubble Collapse (Rayleigh-Plesset classical)
+# RPE Benchmark 02 - Driven Bubble Collapse (2D cylindrical, scaled units)
 # =============================================================================
-# Air bubble in water at atmospheric pressure, surrounded by elevated-pressure
-# water (10x atm). Drives collapse. Surface tension included with real
-# water-air value.
+# Pressure ratio p_inf/p_g0 = 10 with surface tension included. Scaled-units
+# analog of the Khoo et al. driven-collapse benchmark.
 #
-#   liquid: rho_l = 1000 kg/m^3, p_inf = 1.0e6 Pa  (driven, ~10 atm)
-#           Tammann gamma = 7.15, p_inf_Tammann = 3.0e8 Pa
-#   gas:    rho_g = 1.2 kg/m^3,  p_g0  = 1.01325e5 Pa  (1 atm)
-#           ideal gas, gamma = 1.4
-#   bubble: R0 = 1.0e-3 m
-#   surface tension: sigma = 0.0728 N/m (real water)
-#   pressure ratio: p_inf / p_g0 ~ 9.87
+#   liquid (water analog): rho_l = 10, p_inf = 5000  (10 x p_g0)
+#                          Tammann gamma = 7.15, pi = 5000
+#   gas    (air   analog): rho_g = 1, p_g0 = 500
+#                          ideal gas, gamma = 1.4
+#   bubble: R0 = 0.02 m
+#   sigma = 7.28 (water-air analog)
+#   mu_l  = 0
 #
-# Reference timescale: Rayleigh collapse time
-#   tau_R = 0.91468 R0 sqrt(rho_l / (p_inf - p_g0))
-#         ~= 0.91468 * 1e-3 * sqrt(1000 / 9e5) ~= 30.5 us
-#
-# Reference: Rayleigh-Plesset ODE with adiabatic gas + surface tension
-# Compare R(t), collapse time, peak pressure, rebound radius.
-# Citation: Khoo, Lim & Yeo (2020) Sec. 5.2-5.4 driven-collapse benchmark.
+# Predicted Chen 2D R_min ~= 5.9 mm at t ~= 32.5 ms.
 # =============================================================================
 
 alamo.program = hydro2
@@ -32,56 +25,54 @@ alamo.program = hydro2
 plot_file = ./tests/FlowRayleighPlesset/OtherTests/output_RPE_02_RayleighCollapse
 
 ### MESHING ###
-amr.plot_dt        = 1.0e-6        # 150 frames over 150 us
+amr.plot_dt        = 5.0e-4
 amr.max_grid_size  = 500000
 amr.blocking_factor = 2
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
 amr.max_level      = 0
-amr.n_cell         = 256 256
+amr.n_cell         = 128 128
 
 nghost = 4
 
 ### TIME STEPPING ###
-timestep                = 5.0e-10
+timestep                = 5.0e-7
 dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
-dynamictimestep.max     = 5.0e-8
-dynamictimestep.min     = 1.0e-13
+dynamictimestep.max     = 5.0e-5
+dynamictimestep.min     = 1.0e-12
 cfl                     = 0.2
 
 ### DIMENSIONS ###
-geometry.prob_lo     = -5.0e-3 -5.0e-3 0.0
-geometry.prob_hi     =  5.0e-3  5.0e-3 0.0
+geometry.prob_lo     = -0.10 -0.10 0.0
+geometry.prob_hi     =  0.10  0.10 0.0
 geometry.is_periodic = 0 0 0
-stop_time            = 1.5e-4                  # 150 us captures Chen 2D collapse + rebound
+stop_time            = 4.0e-2     # 40 ms covers Chen 2D collapse + initial rebound
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 7.8e-5
-eta.ic.expression.constant.R0      = 1.0e-3
+eta.ic.expression.constant.epsilon = 0.002
+eta.ic.expression.constant.R0      = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
 
 ### EQUATION OF STATE ###
-# Liquid (Tammann water)
 eos0.gamma = 7.15
-eos0.p0    = 3.0e8
-eos0.cv    = 4186.0
-eos0.cp    = 4186.0
+eos0.p0    = 5000.0
+eos0.cv    = 714.286
+eos0.cp    = 1000.0
 
-# Gas (ideal air)
 eos1.gamma = 1.4
 eos1.p0    = 0.0
-eos1.cv    = 718.0
-eos1.cp    = 1005.0
+eos1.cv    = 714.286
+eos1.cp    = 1000.0
 
 ### HYDRO INITIAL CONDITIONS ###
 density0.ic.type = expression
-density0.ic.expression.region0 = "1000.0"
+density0.ic.expression.region0 = "10.0"
 
 density1.ic.type = expression
-density1.ic.expression.region0 = "1.2"
+density1.ic.expression.region0 = "1.0"
 
 velocity0.ic.type = expression
 velocity0.ic.expression.region0 = "0.0"
@@ -92,19 +83,19 @@ velocity1.ic.expression.region0 = "0.0"
 velocity1.ic.expression.region1 = "0.0"
 
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "1.0e6"       # driven liquid (10 atm)
+pressure0.ic.expression.region0 = "5000.0"     # liquid driven (10x p_g0)
 
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "1.01325e5"   # gas at 1 atm
+pressure1.ic.expression.region0 = "500.0"      # gas at 1 atm analog
 
-### VISCOSITY (off, inviscid RP reference) ###
+### VISCOSITY ###
 mu0   = 0.0
 mu0_b = 0.0
 mu1   = 0.0
 mu1_b = 0.0
 
-### SURFACE TENSION (real water) ###
-sigma = 0.0728
+### SURFACE TENSION ###
+sigma = 7.28
 pref  = 0.0
 
 ### BOUNDARY CONDITIONS - NSCBC4 outflow ###
@@ -122,40 +113,40 @@ momentum.bc.type.ylo = nscbc_outflow nscbc_outflow
 momentum.bc.type.yhi = nscbc_outflow nscbc_outflow
 
 nscbc.xlo.type = outflow
-nscbc.xlo.target_p = 1.0e6
+nscbc.xlo.target_p = 5000.0
 nscbc.xlo.sigma = 0.15
 nscbc.xlo.beta  = 0.5
-nscbc.xlo.L_ref = 1.0e-2
+nscbc.xlo.L_ref = 0.20
 nscbc.xlo.target_u = 0.0
 nscbc.xlo.target_v = 0.0
 
 nscbc.xhi.type = outflow
-nscbc.xhi.target_p = 1.0e6
+nscbc.xhi.target_p = 5000.0
 nscbc.xhi.sigma = 0.15
 nscbc.xhi.beta  = 0.5
-nscbc.xhi.L_ref = 1.0e-2
+nscbc.xhi.L_ref = 0.20
 nscbc.xhi.target_u = 0.0
 nscbc.xhi.target_v = 0.0
 
 nscbc.ylo.type = outflow
-nscbc.ylo.target_p = 1.0e6
+nscbc.ylo.target_p = 5000.0
 nscbc.ylo.sigma = 0.15
 nscbc.ylo.beta  = 0.5
-nscbc.ylo.L_ref = 1.0e-2
+nscbc.ylo.L_ref = 0.20
 nscbc.ylo.target_u = 0.0
 nscbc.ylo.target_v = 0.0
 
 nscbc.yhi.type = outflow
-nscbc.yhi.target_p = 1.0e6
+nscbc.yhi.target_p = 5000.0
 nscbc.yhi.sigma = 0.15
 nscbc.yhi.beta  = 0.5
-nscbc.yhi.L_ref = 1.0e-2
+nscbc.yhi.L_ref = 0.20
 nscbc.yhi.target_u = 0.0
 nscbc.yhi.target_v = 0.0
 
 nscbc.small = 1.0e-10
 
-### REFINEMENT (single level) ###
+### REFINEMENT ###
 eta_refinement_criterion   = 1.0e+10
 omega_refinement_criterion = 1.0e+10
 p_refinement_criterion     = 1.0e+10
