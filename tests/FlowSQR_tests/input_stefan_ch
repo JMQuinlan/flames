@@ -52,7 +52,7 @@ stop_time = 1e-4
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 5e-6
+eta.ic.expression.constant.epsilon = 1.0e-5      # 4*dx; 4-cell interface for CH stability
 eta.ic.expression.constant.x_int0  = 9.097e-4   # matches input_stefan_sqr
 eta.ic.expression.region0 = "0.5*(1 - tanh((x - x_int0)/(sqrt(2)*epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
@@ -103,8 +103,8 @@ rho_ref_eta1   = 958.4
 R_eta0         = 461.4
 q_eta0         = 0.0
 qprime_eta0    = 0.0
-q_eta1      = -3.00017e+06
-qprime_eta1 = -5510.35
+q_eta1         = -3.00017e+06
+qprime_eta1    = -5510.35
 
 # CH-emergent mode flags
 ch_thermo_consistent = 1
@@ -207,14 +207,20 @@ implicit_ch     = 2
 #   "allen_cahn" -> M_eff = ch_mobility_nom * epsilon
 #   "explicit"   -> M_eff = ch_mobility_nom directly  (used here for clarity).
 ch_mobility_scaling = magaletti
-# ch_mobility_nom     = 1.0
 ch_newton_iters     = 5
 ch_newton_tol       = 1e-10
-ch_W_scale          = 1.0
-ch_mobility_degenerate = 1
-ch_mobility_nom        = 9440.0
 
- q_eta1      = -3.00017e+06
-  │  MESSAGE: src/Test/Numeric/TwoPhaseFreeEnergy.H:181 (JointCalibrationTwoPoint)     => qprime_eta1 = -5510.35
+# Spinodal-margin rescaling.  With Clausius-Clapeyron-calibrated (q,q'),
+# |dmu_bulk| at 50 K superheat is ~4e5 J/kg.  CH theory needs |dmu|/lambda
+# < 0.385 (spec §1.10), so lambda must be >= ~1.3e6.  Choose lambda = 2e6
+# to leave headroom.  Then keep delta = epsilon (=4*dx) by setting
+# kappa = 2*epsilon^2*lambda = 4e-4 (decoupled from the legacy kappa=eps^2).
+# Implied surface tension sigma = sqrt(2*kappa*lambda)/6 ~ 6.7 N/m -- about
+# 100x water's, but sigma is a spectator parameter for a planar Stefan
+# problem (no curvature), so this is fine.  Document and move on.
+ch_W_scale          = 2.0e6      # lambda
+ch_kappa            = 4.0e-4     # = 2 * epsilon^2 * lambda
+ch_mobility_degenerate = 1
+ch_mobility_nom        = 1.0     # Magaletti baseline; tune up if interface too slow
 
 nscbc.enabled = false

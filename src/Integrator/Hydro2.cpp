@@ -550,6 +550,11 @@ void Hydro2::Initialize(int lev)
     KE_per_vol_mf[lev]  ->setVal(0.0);
     KE_per_mass_mf[lev] ->setVal(0.0);
 
+    // Populate derived/diagnostic fields (T, mu_chem, dmu_bulk, gamma_mix,
+    // pi_mix, a, Ma, UE/KE, etc.) from the IC-filled conservative state so the
+    // t=0 plotfile is meaningful and the first Advance sees consistent inputs.
+    MixDiagnostic(lev);
+
     Util::ParallelMessage(INFO, "Finished initialization, begginning time iteration");
 }
 
