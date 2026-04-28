@@ -174,6 +174,15 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.ch_kappa_eff = (value.ch_kappa > 0.0) ? value.ch_kappa
                                                     : value.epsilon * value.epsilon;
 
+        // Phase 5: well-balanced Korteweg capillary force.
+        // 0 (default): legacy Brackbill Fsv = sigma*kappa_curv*epsilon*grad_eta
+        //              in ApplyBSSource (gates on apply_surface_tension).
+        // 1          : skip the Brackbill block and add the face-flux form
+        //              F_cap_face = -eta_face * grad_face(mu_chem) via
+        //              ApplyKortewegStress. mu_chem_mf must be populated and
+        //              FillBoundary'd before this fires (done by MixDiagnostic).
+        pp_query_default("korteweg_well_balanced", value.korteweg_well_balanced, 0);
+
         // Boundry Conditions
         value.density_bc = new BC::Expression(1, pp, "density.bc");
         value.energy_bc = new BC::Constant(1, pp, "energy.bc");
@@ -1423,7 +1432,11 @@ Hydro2::ApplyBSSource(int lev,
 
     const Real sigma_   = sigma;
     const Real epsilon_ = epsilon;
-    const int  do_st    = apply_surface_tension;
+    // Phase 5: when korteweg_well_balanced is on, the face-flux Korteweg force
+    // is added via ApplyKortewegStress and the legacy Brackbill block is muted
+    // here to avoid double-counting. apply_surface_tension still gates that
+    // legacy block by itself.
+    const int  do_st    = (apply_surface_tension && !korteweg_well_balanced) ? 1 : 0;
     const int  p_int_method_ = p_int_method;
 
     // Zero surface tension plot MF each call so bulk cells (which early-return
@@ -1629,6 +1642,123 @@ Hydro2::ApplyBSSource(int lev,
             Real SEq = qx*grad_eta(0) + qy*grad_eta(1);
             U0(i,j,k) += pu_0_minus_int - SEq + w0*Fsv_work_0;
             U1(i,j,k) += pu_int_minus_1 + SEq + w1*Fsv_work_1;
+        });
+    }
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////// ApplyKortewegStress //////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+// Phase 5 (CH-Korteweg spec §2.2, §4.3): well-balanced Korteweg capillary
+// force. Replaces the cell-centered Brackbill form Fsv = sigma*kappa_curv*
+// epsilon*grad_eta with a face-flux form
+//
+//     F_cap_face_(i+1/2,j) = -eta_face * (mu_chem(i+1,j) - mu_chem(i,j)) / dx
+//
+// where eta_face is the arithmetic mean of cell-centered eta. The cell-
+// centered Korteweg force is the divergence of these face fluxes; it is
+// distributed eta-weighted across phases (same w0 = 1-eta, w1 = eta split
+// used elsewhere in ApplyBSSource), and the per-phase energy update gets
+// F_cap . u_k. At static equilibrium mu_chem is uniform => discrete face
+// flux is exactly zero => no parasitic currents, by construction.
+//
+// CRITICAL: mu_chem_mf must come from a single source of truth. We read
+// the field populated by Hydro2::Advance's post-step visualization block
+// (which writes mu_chem_local = -ch_kappa_eff * lap_eta + ch_W_scale * W'(eta)
+// at every cell). Ghost cells are NOT FillBoundary'd by that block on the
+// two-full-states path, so we sync them ourselves below. Do NOT recompute
+// mu_chem from a different stencil here — the well-balancing hinges on the
+// same discrete value being used everywhere it appears (Korteweg flux,
+// CH driving force, plotfile output).
+void
+Hydro2::ApplyKortewegStress(int lev,
+                            Set::Scalar /*time*/,
+                            amrex::MultiFab &M0_rhs_mf, amrex::MultiFab &E0_rhs_mf,
+                            amrex::MultiFab &M1_rhs_mf, amrex::MultiFab &E1_rhs_mf,
+                            const amrex::MultiFab &eta_mf_in,
+                            const amrex::MultiFab &rho0_mf_in, const amrex::MultiFab &M0_mf_in,
+                            const amrex::MultiFab &rho1_mf_in, const amrex::MultiFab &M1_mf_in)
+{
+    BL_PROFILE("Hydro2::ApplyKortewegStress");
+
+    if (!korteweg_well_balanced) return;
+
+    const Geometry& geom = this->geom[lev];
+    const Real* DX = geom.CellSize();
+    const Real dx_inv = Real(1.0) / DX[0];
+    const Real dy_inv = Real(1.0) / DX[1];
+
+    // mu_chem_mf is written by the post-step visualization block in Advance()
+    // but not FillBoundary'd there for the two-full-states code path. Sync
+    // ghost cells now so the i±1 / j±1 neighbor reads below are not stale.
+    // (Cheap; one halo exchange per RHS call.)
+    mu_chem_mf[lev]->FillBoundary(geom.periodicity());
+
+    for (MFIter mfi(eta_mf_in, TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const Box& bx = mfi.validbox();
+
+        auto eta     = eta_mf_in.const_array(mfi);
+        auto mu_arr  = mu_chem_mf[lev]->const_array(mfi);
+        auto r0_arr  = rho0_mf_in.const_array(mfi);
+        auto M0_arr  = M0_mf_in.const_array(mfi);
+        auto r1_arr  = rho1_mf_in.const_array(mfi);
+        auto M1_arr  = M1_mf_in.const_array(mfi);
+
+        auto P0 = M0_rhs_mf.array(mfi);
+        auto U0 = E0_rhs_mf.array(mfi);
+        auto P1 = M1_rhs_mf.array(mfi);
+        auto U1 = E1_rhs_mf.array(mfi);
+
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        {
+            // Face-averaged eta (arithmetic mean of cell centers).
+            Real eta_xp = Real(0.5) * (eta(i  ,j,k) + eta(i+1,j,k));
+            Real eta_xm = Real(0.5) * (eta(i-1,j,k) + eta(i  ,j,k));
+            Real eta_yp = Real(0.5) * (eta(i,j  ,k) + eta(i,j+1,k));
+            Real eta_ym = Real(0.5) * (eta(i,j-1,k) + eta(i,j  ,k));
+
+            // Face gradients of mu_chem.
+            Real gmu_xp = (mu_arr(i+1,j,k) - mu_arr(i  ,j,k)) * dx_inv;
+            Real gmu_xm = (mu_arr(i  ,j,k) - mu_arr(i-1,j,k)) * dx_inv;
+            Real gmu_yp = (mu_arr(i,j+1,k) - mu_arr(i,j  ,k)) * dy_inv;
+            Real gmu_ym = (mu_arr(i,j  ,k) - mu_arr(i,j-1,k)) * dy_inv;
+
+            // Face-centered Korteweg fluxes  F_face = -eta_face * grad(mu).
+            Real Fx_p = -eta_xp * gmu_xp;
+            Real Fx_m = -eta_xm * gmu_xm;
+            Real Fy_p = -eta_yp * gmu_yp;
+            Real Fy_m = -eta_ym * gmu_ym;
+
+            // Cell-centered Korteweg force = divergence of face fluxes.
+            Real F_cap_x = (Fx_p - Fx_m) * dx_inv;
+            Real F_cap_y = (Fy_p - Fy_m) * dy_inv;
+
+            // eta-weighted split across phases (matches BS source convention).
+            Real eta_c = eta(i,j,k);
+            if (eta_c < Real(0.0)) eta_c = Real(0.0);
+            if (eta_c > Real(1.0)) eta_c = Real(1.0);
+            Real w0 = Real(1.0) - eta_c;
+            Real w1 = eta_c;
+
+            // Per-phase velocities for energy work term.
+            Real safe_r0 = amrex::max(r0_arr(i,j,k), Real(1e-20));
+            Real safe_r1 = amrex::max(r1_arr(i,j,k), Real(1e-20));
+            Real u0x = M0_arr(i,j,k,0) / safe_r0;
+            Real u0y = M0_arr(i,j,k,1) / safe_r0;
+            Real u1x = M1_arr(i,j,k,0) / safe_r1;
+            Real u1y = M1_arr(i,j,k,1) / safe_r1;
+
+            // Momentum: per-phase eta-weighted Korteweg force.
+            P0(i,j,k,0) += w0 * F_cap_x;
+            P0(i,j,k,1) += w0 * F_cap_y;
+            P1(i,j,k,0) += w1 * F_cap_x;
+            P1(i,j,k,1) += w1 * F_cap_y;
+
+            // Energy: F_cap . u_k per phase, eta-weighted.
+            U0(i,j,k) += w0 * (F_cap_x * u0x + F_cap_y * u0y);
+            U1(i,j,k) += w1 * (F_cap_x * u1x + F_cap_y * u1y);
         });
     }
 }
@@ -4327,6 +4457,19 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                           sol_mf[1], sol_mf[2], sol_mf[3],
                           sol_mf[4], sol_mf[5], sol_mf[6]);
         }
+
+        // Phase 5: well-balanced face-flux Korteweg capillary force. Internally
+        // no-ops when korteweg_well_balanced == 0. When on, the legacy Brackbill
+        // block inside ApplyBSSource is auto-muted (do_st gating in that
+        // function) so this is a clean replacement, not an additive extra.
+        // Reads mu_chem_mf as populated by MixDiagnostic / ComputeChemicalPotential
+        // at the start of the step.
+        ApplyKortewegStress(lev, t,
+                            rhs_mf[2], rhs_mf[3],   // M0_rhs, E0_rhs
+                            rhs_mf[5], rhs_mf[6],   // M1_rhs, E1_rhs
+                            sol_mf[0],
+                            sol_mf[1], sol_mf[2],   // rho0, M0
+                            sol_mf[4], sol_mf[5]);  // rho1, M1
     });
 
     //==============================================================

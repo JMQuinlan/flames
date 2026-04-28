@@ -154,6 +154,24 @@ protected:
         const amrex::MultiFab &rho0_mf_in, const amrex::MultiFab &M0_mf_in, const amrex::MultiFab &E0_mf_in,
         const amrex::MultiFab &rho1_mf_in, const amrex::MultiFab &M1_mf_in, const amrex::MultiFab &E1_mf_in);
 
+    // Phase 5 (CH-Korteweg spec §4.3): well-balanced Korteweg capillary force
+    // from the face-flux form  F_cap_face = -eta_face * (mu_chem_j - mu_chem_i)/dx.
+    // The cell-centered divergence is added to per-phase momentum (eta-weighted)
+    // and per-phase energy gets F_cap . u_k. Reads mu_chem_mf as populated by
+    // the post-step visualization block in Advance() (mu_chem = -kappa*lap_eta
+    //  + W_scale*W'(eta)). Ghost cells are FillBoundary'd internally before use.
+    // Does NOT recompute mu_chem from a different stencil — well-balancing
+    // depends on a single source of truth.
+    // Only fires when korteweg_well_balanced != 0; in that case the Brackbill
+    // Fsv block in ApplyBSSource is skipped to avoid double-counting.
+    void ApplyKortewegStress(int lev,
+        Set::Scalar time,
+        amrex::MultiFab &M0_rhs_mf, amrex::MultiFab &E0_rhs_mf,
+        amrex::MultiFab &M1_rhs_mf, amrex::MultiFab &E1_rhs_mf,
+        const amrex::MultiFab &eta_mf_in,
+        const amrex::MultiFab &rho0_mf_in, const amrex::MultiFab &M0_mf_in,
+        const amrex::MultiFab &rho1_mf_in, const amrex::MultiFab &M1_mf_in);
+
 
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
     void ApplyImplicitCH(int lev, Set::Scalar dt);
@@ -459,6 +477,19 @@ protected:
     // ch_kappa_eff is the resolved value used at every CH site (computed in Parse).
     Set::Scalar ch_kappa     = 0.0;   // input; 0 means "auto = epsilon^2"
     Set::Scalar ch_kappa_eff = 0.0;   // resolved value used in code (set in Parse)
+
+    // Phase 5 (CH-Korteweg spec §2.2, §4.3): well-balanced Korteweg surface
+    // tension via face-flux form  F_cap_face = -eta_face * (mu_chem_j - mu_chem_i)/dx.
+    // At static equilibrium mu_chem is uniform => discrete face flux is
+    // exactly zero => no parasitic currents. The legacy Brackbill form
+    // Fsv = sigma * kappa_curv * epsilon * grad_eta in ApplyBSSource is NOT
+    // well-balanced and produces parasitic flow ~ sigma/(rho*dx).
+    //
+    // 0 (default): legacy Brackbill Fsv path in ApplyBSSource (preserves
+    //              backward compat with all existing tests).
+    // 1          : skip the Brackbill block in ApplyBSSource and add the
+    //              face-flux Korteweg force via ApplyKortewegStress.
+    int korteweg_well_balanced = 0;
 
     // Adaptive Timestep
     bool adaptive_timestep = false;
