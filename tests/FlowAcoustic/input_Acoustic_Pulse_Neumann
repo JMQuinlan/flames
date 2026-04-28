@@ -1,0 +1,140 @@
+#@ [acoustic_pulse_neumann]
+#@ exe=hydro2
+#@ dim=2
+
+# ============================================================================
+# REFLECTING (NEUMANN) BASELINE - LOCALIZED RIGHT-TRAVELING ACOUSTIC PULSE
+# ============================================================================
+# Used as the reference case to compare against NSCBC / NSCBC4. With pure
+# Neumann (zero-gradient) boundaries the rightward pulse should reflect off
+# the right wall and return as a leftward pulse, eventually setting up a
+# clear standing wave / recirculating energy in the domain.
+#
+# Initial condition (right-moving acoustic pulse, Riemann invariants):
+#     rho_0 = 1.0,  p_0 = 1.0,  u_0 = 0,  gamma = 1.4
+#     c     = sqrt(gamma * p_0 / rho_0) = sqrt(1.4) ~= 1.1832
+#     dp    = amp * exp(-((x - x_c) / sigma)^2)   ; localized Gaussian
+#     drho  = dp / c^2
+#     du    = dp / (rho_0 * c)                   ; positive => rightward
+# ============================================================================
+
+### OUTPUT ###
+plot_file = ./tests/FlowAcoustic/output_Pulse_Neumann
+amr.plot_int = 25
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.grid_eff = 0.8
+amr.n_cell = 400 4
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0  -0.005   0.0
+geometry.prob_hi = 1.0   0.005   0.0
+geometry.is_periodic = 0 1 0
+
+### TIME STEP ###
+timestep  = 5.0e-4
+stop_time = 1.5
+
+### DIFFUSE INTERFACE ###
+eta.ic.type = constant
+eta.ic.constant.value = 0.0
+epsilon = 0.005
+
+### DIFFUSE BOUNDARY SOURCES ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+### SOLVER ###
+cfl = 0.4
+Riemann_Solver.type = hllc
+Spec_Vol = 1
+static_eta = 1
+
+### EOS - IDEAL GAS (AIR) ###
+eos0.gamma = 1.4
+eos0.p0 = 0.0
+eos0.cp = 1004.5
+eos0.cv = 717.5
+
+eos1.gamma = 1.4
+eos1.p0 = 0.0
+eos1.cp = 1004.5
+eos1.cv = 717.5
+
+### VISCOSITY ###
+mu0 = 0.0
+mu1 = 0.0
+
+### SURFACE TENSION ###
+sigma = 0.0
+
+### REFERENCE PRESSURE ###
+pref = 0.0
+
+### INITIAL CONDITIONS - LOCALIZED RIGHT-TRAVELING ACOUSTIC PULSE (FLUID 1) ###
+# eta=0 selects fluid 1 throughout the domain (rho = (1-eta)*rho1).
+# Pulse parameters: amplitude amp=0.05, center x_c=0.3, half-width sigma=0.05.
+
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_base = 1.0
+density1.ic.expression.constant.p_base   = 1.0
+density1.ic.expression.constant.gamma    = 1.4
+density1.ic.expression.constant.amp      = 0.05
+density1.ic.expression.constant.x_c      = 0.3
+density1.ic.expression.constant.sig      = 0.05
+density1.ic.expression.region0 = "rho_base + (amp * exp(-((x - x_c)/sig)*((x - x_c)/sig))) / (gamma * p_base / rho_base)"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.rho_base = 1.0
+velocity1.ic.expression.constant.c        = 1.1832159566
+velocity1.ic.expression.constant.amp      = 0.05
+velocity1.ic.expression.constant.x_c      = 0.3
+velocity1.ic.expression.constant.sig      = 0.05
+velocity1.ic.expression.region0 = "(amp * exp(-((x - x_c)/sig)*((x - x_c)/sig))) / (rho_base * c)"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "0.0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_base = 1.0
+pressure1.ic.expression.constant.amp    = 0.05
+pressure1.ic.expression.constant.x_c    = 0.3
+pressure1.ic.expression.constant.sig    = 0.05
+pressure1.ic.expression.region0 = "p_base + amp * exp(-((x - x_c)/sig)*((x - x_c)/sig))"
+
+### BOUNDARY CONDITIONS - PURE NEUMANN (REFLECTING) ###
+nghost = 2
+
+# Both x ends: Neumann (zero-gradient => behaves like a closed wall to acoustics)
+density.bc.type.xlo  = neumann
+density.bc.type.xhi  = neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+energy.bc.type.xlo   = neumann
+energy.bc.type.xhi   = neumann
+
+# Y: Periodic (pseudo-1D)
+density.bc.type.ylo  = periodic
+density.bc.type.yhi  = periodic
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+energy.bc.type.ylo   = periodic
+energy.bc.type.yhi   = periodic
+
+### REFINEMENT CRITERIA (DISABLED) ###
+eta_refinement_criterion   = 1000.0
+omega_refinement_criterion = 1000.0
+gradu_refinement_criterion = 1000.0
+rho_refinement_criterion   = 1000.0
+p_refinement_criterion     = 1000.0

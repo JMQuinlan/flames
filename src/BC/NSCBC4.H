@@ -99,6 +99,9 @@ public:
     /// @param momentum_mf   Momentum field [kg*m/s]
     /// @param energy_mf     Total energy field [J/m^3]
     /// @param eta_mf        Volume fraction field (for mixed EOS)
+    /// @param gamma_mf      Gamma field (written to ghost cells for Riemann solver)
+    /// @param pi_mf         Pi (Tammann p0) field (written to ghost cells)
+    /// @param pressure_mf   Pressure field (written to ghost cells)
     /// @param eos0          EOS for fluid 0
     /// @param eos1          EOS for fluid 1
     /// @param geom          Geometry object
@@ -109,6 +112,9 @@ public:
                       amrex::MultiFab &momentum_mf,
                       amrex::MultiFab &energy_mf,
                       amrex::MultiFab &eta_mf,
+                      amrex::MultiFab &gamma_mf,
+                      amrex::MultiFab &pi_mf,
+                      amrex::MultiFab &pressure_mf,
                       const EOS0 &eos0,
                       const EOS1 &eos1,
                       const amrex::Geometry &geom,
@@ -121,10 +127,7 @@ public:
         // =========================================================================
         // CAPTURE EOS PARAMETERS FOR GPU
         // =========================================================================
-        Set::Scalar g0_ = eos0.Gamma();
-        Set::Scalar g1_ = eos1.Gamma();
-        Set::Scalar pi0_ = eos0.P0();
-        Set::Scalar pi1_ = eos1.P0();
+        // (gamma/p0 captures removed - all EOS calls go through Solver::EOS::EOS::*)
         Set::Scalar cv0_ = eos0.Cv();
         Set::Scalar cv1_ = eos1.Cv();
         Set::Scalar pref_local = pref;
@@ -239,6 +242,9 @@ public:
                                   const amrex::Array4<amrex::Real> &rho_arr,
                                   const amrex::Array4<amrex::Real> &M_arr,
                                   const amrex::Array4<amrex::Real> &E_arr,
+                                  const amrex::Array4<amrex::Real> &gamma_arr,
+                                  const amrex::Array4<amrex::Real> &pi_arr,
+                                  const amrex::Array4<amrex::Real> &p_arr,
                                   int ii,
                                   int jj,
                                   int kk,
@@ -249,7 +255,10 @@ public:
                                   Set::Scalar p_val) -> void {
             Set::Scalar eta_val = eta_arr(ii, jj, kk);
 
-            Set::Scalar UE = Solver::EOS::EOS::MixedInternalEnergy(p_val, eta_val, eos0, eos1, pref_local, small_local);
+            // EOS quantities via the EOS::EOS class (consistent with compute_prim)
+            Set::Scalar gamma_mix = Solver::EOS::EOS::MixedGamma(eta_val, eos0, eos1);
+            Set::Scalar pi_mix    = Solver::EOS::EOS::MixedP0(eta_val, eos0, eos1);
+            Set::Scalar UE        = Solver::EOS::EOS::MixedInternalEnergy(p_val, eta_val, eos0, eos1, pref_local, small_local);
 
             // Velocities (convert un, ut back to vx, vy, vz)
             Set::Scalar vx, vy, vz;
@@ -289,6 +298,11 @@ public:
             M_arr(ii, jj, kk, 2) = rho_val * vz;
 #endif
             E_arr(ii, jj, kk) = UE + KE;
+
+            // Write gamma, pi, pressure for the Riemann solver to read at flux time
+            gamma_arr(ii, jj, kk) = gamma_mix;
+            pi_arr(ii, jj, kk) = pi_mix;
+            p_arr(ii, jj, kk) = p_val;
         };
 
         // =========================================================================
@@ -303,6 +317,9 @@ public:
             amrex::Array4<amrex::Real> const &rho_arr = density_mf.array(mfi);
             amrex::Array4<amrex::Real> const &M_arr = momentum_mf.array(mfi);
             amrex::Array4<amrex::Real> const &E_arr = energy_mf.array(mfi);
+            amrex::Array4<amrex::Real> const &gamma_arr = gamma_mf.array(mfi);
+            amrex::Array4<amrex::Real> const &pi_arr = pi_mf.array(mfi);
+            amrex::Array4<amrex::Real> const &p_arr = pressure_mf.array(mfi);
 
             // =====================================================================
             // STEP 1: FILL ALL 4 CORNERS FIRST (Motheau Figure 2)
@@ -733,15 +750,12 @@ public:
 
                         // =============================================================
                         // STEP 10: Write to conserved arrays
+                        // EOS quantities via the EOS::EOS class (consistent with set_ghost_cons)
                         // =============================================================
                         Set::Scalar eta_g = eta_arr(i, j, k);
-                        Set::Scalar A = eta_g / (g0_ - 1.0) + (1.0 - eta_g) / (g1_ - 1.0);
-                        Set::Scalar B = (eta_g * g0_ * pi0_) / (g0_ - 1.0)
-                                        + ((1.0 - eta_g) * g1_ * pi1_) / (g1_ - 1.0);
-                        Set::Scalar gm_g = 1.0 + 1.0 / A;
-                        Set::Scalar pi_g = (B / A) / gm_g;
-
-                        Set::Scalar UE_g = (p_g + gm_g * pi_g - pref_local) / (gm_g - 1.0);
+                        Set::Scalar gm_g  = Solver::EOS::EOS::MixedGamma(eta_g, eos0, eos1);
+                        Set::Scalar pi_g  = Solver::EOS::EOS::MixedP0(eta_g, eos0, eos1);
+                        Set::Scalar UE_g  = Solver::EOS::EOS::MixedInternalEnergy(p_g, eta_g, eos0, eos1, pref_local, small_local);
                         if (UE_g < 0.0)
                             UE_g = 0.0;
 
@@ -751,6 +765,11 @@ public:
                         M_arr(i, j, k, 0) = rho_g * vx_g;
                         M_arr(i, j, k, 1) = rho_g * vy_g;
                         E_arr(i, j, k) = UE_g + KE_g;
+
+                        // Write gamma, pi, pressure for the Riemann solver to read at flux time
+                        gamma_arr(i, j, k) = gm_g;
+                        pi_arr(i, j, k) = pi_g;
+                        p_arr(i, j, k) = p_g;
                     }); // end ParallelFor corner_box
 
                 } // end corner loops (cx, cy)
@@ -924,7 +943,7 @@ public:
 
                         rho_g1 = amrex::max(rho_g1, small_local);
                         p_g1 = amrex::max(p_g1, 1.0e-6);
-                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i_bnd - 1, j, k, idir, rho_g1, un_g1, ut_g1, p_g1);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i_bnd - 1, j, k, idir, rho_g1, un_g1, ut_g1, p_g1);
 
                         // Layer 2: Motheau Eq. 28
                         // Q_{i-2} = -2*Q_{i+1} - 3*Q_i + 6*Q_{i-1} + 6*dx*dQ/dx
@@ -935,7 +954,7 @@ public:
 
                         rho_g2 = amrex::max(rho_g2, small_local);
                         p_g2 = amrex::max(p_g2, 1.0e-6);
-                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i_bnd - 2, j, k, idir, rho_g2, un_g2, ut_g2, p_g2);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i_bnd - 2, j, k, idir, rho_g2, un_g2, ut_g2, p_g2);
 
                         // Layer 3: Motheau Eq. 29
                         // Q_{i-3} = 3*Q_{i+1} + 10*Q_i - 18*Q_{i-1} + 6*Q_{i-2} - 12*dx*dQ/dx
@@ -946,7 +965,7 @@ public:
 
                         rho_g3 = amrex::max(rho_g3, small_local);
                         p_g3 = amrex::max(p_g3, 1.0e-6);
-                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i_bnd - 3, j, k, idir, rho_g3, un_g3, ut_g3, p_g3);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i_bnd - 3, j, k, idir, rho_g3, un_g3, ut_g3, p_g3);
 
                         // Layer 4: Motheau Eq. 30
                         // Q_{i-4} = -2*Q_{i+1} - 13*Q_i + 24*Q_{i-1} - 12*Q_{i-2} + 4*Q_{i-3} + 12*dx*dQ/dx
@@ -957,7 +976,7 @@ public:
 
                         rho_g4 = amrex::max(rho_g4, small_local);
                         p_g4 = amrex::max(p_g4, 1.0e-6);
-                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i_bnd - 4, j, k, idir, rho_g4, un_g4, ut_g4, p_g4);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i_bnd - 4, j, k, idir, rho_g4, un_g4, ut_g4, p_g4);
                     }); // end ParallelFor ghost_box
                 } // end j loop
             } // end X-LO boundary
@@ -1114,7 +1133,7 @@ public:
 
                         rho_g1 = amrex::max(rho_g1, small_local);
                         p_g1 = amrex::max(p_g1, 1.0e-6);
-                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i_bnd + 1, j, k, idir, rho_g1, un_g1, ut_g1, p_g1);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i_bnd + 1, j, k, idir, rho_g1, un_g1, ut_g1, p_g1);
 
                         // Layer 2: Motheau Eq. 32
                         // Q_{i+2} = -2*Q_{i-1} - 3*Q_i + 6*Q_{i+1} - 6*dx*dQ/dx
@@ -1125,7 +1144,7 @@ public:
 
                         rho_g2 = amrex::max(rho_g2, small_local);
                         p_g2 = amrex::max(p_g2, 1.0e-6);
-                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i_bnd + 2, j, k, idir, rho_g2, un_g2, ut_g2, p_g2);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i_bnd + 2, j, k, idir, rho_g2, un_g2, ut_g2, p_g2);
 
                         // Layer 3: Motheau Eq. 33
                         // Q_{i+3} = 3*Q_{i-1} + 10*Q_i - 18*Q_{i+1} + 6*Q_{i+2} + 12*dx*dQ/dx
@@ -1136,7 +1155,7 @@ public:
 
                         rho_g3 = amrex::max(rho_g3, small_local);
                         p_g3 = amrex::max(p_g3, 1.0e-6);
-                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i_bnd + 3, j, k, idir, rho_g3, un_g3, ut_g3, p_g3);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i_bnd + 3, j, k, idir, rho_g3, un_g3, ut_g3, p_g3);
 
                         // Layer 4: Motheau Eq. 34
                         // Q_{i+4} = -2*Q_{i-1} - 13*Q_i + 24*Q_{i+1} - 12*Q_{i+2} + 4*Q_{i+3} - 12*dx*dQ/dx
@@ -1147,7 +1166,7 @@ public:
 
                         rho_g4 = amrex::max(rho_g4, small_local);
                         p_g4 = amrex::max(p_g4, 1.0e-6);
-                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i_bnd + 4, j, k, idir, rho_g4, un_g4, ut_g4, p_g4);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i_bnd + 4, j, k, idir, rho_g4, un_g4, ut_g4, p_g4);
                     }); // end ParallelFor ghost_box
                 } // end j loop
             } // end X-HI boundary
@@ -1313,7 +1332,7 @@ public:
 
                         rho_g1 = amrex::max(rho_g1, small_local);
                         p_g1 = amrex::max(p_g1, 1.0e-6);
-                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd - 1, k, idir, rho_g1, un_g1, ut_g1, p_g1);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j_bnd - 1, k, idir, rho_g1, un_g1, ut_g1, p_g1);
 
                         // Layer 2: Motheau Eq. 28
                         Set::Scalar rho_g2 = -2.0 * rho_m1 - 3.0 * rho_bnd + 6.0 * rho_g1 + 6.0 * delta * drho_dy_new;
@@ -1323,7 +1342,7 @@ public:
 
                         rho_g2 = amrex::max(rho_g2, small_local);
                         p_g2 = amrex::max(p_g2, 1.0e-6);
-                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd - 2, k, idir, rho_g2, un_g2, ut_g2, p_g2);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j_bnd - 2, k, idir, rho_g2, un_g2, ut_g2, p_g2);
 
                         // Layer 3: Motheau Eq. 29
                         Set::Scalar rho_g3 = 3.0 * rho_m1 + 10.0 * rho_bnd - 18.0 * rho_g1 + 6.0 * rho_g2 - 12.0 * delta * drho_dy_new;
@@ -1333,7 +1352,7 @@ public:
 
                         rho_g3 = amrex::max(rho_g3, small_local);
                         p_g3 = amrex::max(p_g3, 1.0e-6);
-                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd - 3, k, idir, rho_g3, un_g3, ut_g3, p_g3);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j_bnd - 3, k, idir, rho_g3, un_g3, ut_g3, p_g3);
 
                         // Layer 4: Motheau Eq. 30
                         Set::Scalar rho_g4 = -2.0 * rho_m1 - 13.0 * rho_bnd + 24.0 * rho_g1 - 12.0 * rho_g2 + 4.0 * rho_g3 + 12.0 * delta * drho_dy_new;
@@ -1343,7 +1362,7 @@ public:
 
                         rho_g4 = amrex::max(rho_g4, small_local);
                         p_g4 = amrex::max(p_g4, 1.0e-6);
-                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd - 4, k, idir, rho_g4, un_g4, ut_g4, p_g4);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j_bnd - 4, k, idir, rho_g4, un_g4, ut_g4, p_g4);
                     }); // end ParallelFor ghost_box
                 } // end i loop
             } // end Y-LO boundary
@@ -1501,7 +1520,7 @@ public:
 
                         rho_g1 = amrex::max(rho_g1, small_local);
                         p_g1 = amrex::max(p_g1, 1.0e-6);
-                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd + 1, k, idir, rho_g1, un_g1, ut_g1, p_g1);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j_bnd + 1, k, idir, rho_g1, un_g1, ut_g1, p_g1);
 
                         // Layer 2: Motheau Eq. 32
                         Set::Scalar rho_g2 = -2.0 * rho_m1 - 3.0 * rho_bnd + 6.0 * rho_g1 - 6.0 * delta * drho_dy_new;
@@ -1511,7 +1530,7 @@ public:
 
                         rho_g2 = amrex::max(rho_g2, small_local);
                         p_g2 = amrex::max(p_g2, 1.0e-6);
-                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd + 2, k, idir, rho_g2, un_g2, ut_g2, p_g2);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j_bnd + 2, k, idir, rho_g2, un_g2, ut_g2, p_g2);
 
                         // Layer 3: Motheau Eq. 33
                         Set::Scalar rho_g3 = 3.0 * rho_m1 + 10.0 * rho_bnd - 18.0 * rho_g1 + 6.0 * rho_g2 + 12.0 * delta * drho_dy_new;
@@ -1521,7 +1540,7 @@ public:
 
                         rho_g3 = amrex::max(rho_g3, small_local);
                         p_g3 = amrex::max(p_g3, 1.0e-6);
-                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd + 3, k, idir, rho_g3, un_g3, ut_g3, p_g3);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j_bnd + 3, k, idir, rho_g3, un_g3, ut_g3, p_g3);
 
                         // Layer 4: Motheau Eq. 34
                         Set::Scalar rho_g4 = -2.0 * rho_m1 - 13.0 * rho_bnd + 24.0 * rho_g1 - 12.0 * rho_g2 + 4.0 * rho_g3 - 12.0 * delta * drho_dy_new;
@@ -1531,7 +1550,7 @@ public:
 
                         rho_g4 = amrex::max(rho_g4, small_local);
                         p_g4 = amrex::max(p_g4, 1.0e-6);
-                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd + 4, k, idir, rho_g4, un_g4, ut_g4, p_g4);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j_bnd + 4, k, idir, rho_g4, un_g4, ut_g4, p_g4);
                     }); // end ParallelFor ghost_box
                 } // end i loop
             } // end Y-HI boundary

@@ -1,0 +1,144 @@
+#@ [acoustic_pulse_wall]
+#@ exe=hydro2
+#@ dim=2
+
+# ============================================================================
+# TRUE REFLECTING WALL BASELINE (reflect_even / reflect_odd)
+# ============================================================================
+# The first round of testing showed that BC type "neumann" (zero-gradient
+# extrapolation, which AMReX implements as foextrap) is actually
+# *transmissive* for hyperbolic Euler systems - the pulse just left the
+# domain instead of reflecting. That made it impossible to visually
+# distinguish Neumann from NSCBC.
+#
+# This test uses an actual reflecting wall on xhi:
+#   density   : reflect_even   (rho_ghost = rho_interior)
+#   momentum_x: reflect_odd    (Mx_ghost  = -Mx_interior  -> u flips sign)
+#   momentum_y: reflect_even   (My_ghost  =  My_interior)
+#   energy    : reflect_even
+#
+# This is what most people informally call a "Neumann wall" but it is
+# strictly speaking a slip wall / mirror BC. With this BC the rightward
+# pulse will hit xhi and bounce back as a clean leftward pulse, giving
+# the user the visual contrast they wanted.
+# ============================================================================
+
+### OUTPUT ###
+plot_file = ./tests/FlowAcoustic/output_Pulse_Wall
+amr.plot_int = 25
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.grid_eff = 0.8
+amr.n_cell = 400 4
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0  -0.005   0.0
+geometry.prob_hi = 1.0   0.005   0.0
+geometry.is_periodic = 0 1 0
+
+### TIME STEP ###
+timestep  = 5.0e-4
+stop_time = 1.5
+
+### DIFFUSE INTERFACE ###
+eta.ic.type = constant
+eta.ic.constant.value = 0.0
+epsilon = 0.005
+
+### DIFFUSE BOUNDARY SOURCES ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+### SOLVER ###
+cfl = 0.4
+Riemann_Solver.type = hllc
+Spec_Vol = 1
+static_eta = 1
+
+### EOS - IDEAL GAS (AIR) ###
+eos0.gamma = 1.4
+eos0.p0 = 0.0
+eos0.cp = 1004.5
+eos0.cv = 717.5
+
+eos1.gamma = 1.4
+eos1.p0 = 0.0
+eos1.cp = 1004.5
+eos1.cv = 717.5
+
+### VISCOSITY ###
+mu0 = 0.0
+mu1 = 0.0
+
+### SURFACE TENSION ###
+sigma = 0.0
+
+### REFERENCE PRESSURE ###
+pref = 0.0
+
+### INITIAL CONDITIONS - LOCALIZED RIGHT-TRAVELING ACOUSTIC PULSE ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_base = 1.0
+density1.ic.expression.constant.p_base   = 1.0
+density1.ic.expression.constant.gamma    = 1.4
+density1.ic.expression.constant.amp      = 0.05
+density1.ic.expression.constant.x_c      = 0.3
+density1.ic.expression.constant.sig      = 0.05
+density1.ic.expression.region0 = "rho_base + (amp * exp(-((x - x_c)/sig)*((x - x_c)/sig))) / (gamma * p_base / rho_base)"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.rho_base = 1.0
+velocity1.ic.expression.constant.c        = 1.1832159566
+velocity1.ic.expression.constant.amp      = 0.05
+velocity1.ic.expression.constant.x_c      = 0.3
+velocity1.ic.expression.constant.sig      = 0.05
+velocity1.ic.expression.region0 = "(amp * exp(-((x - x_c)/sig)*((x - x_c)/sig))) / (rho_base * c)"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "0.0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_base = 1.0
+pressure1.ic.expression.constant.amp    = 0.05
+pressure1.ic.expression.constant.x_c    = 0.3
+pressure1.ic.expression.constant.sig    = 0.05
+pressure1.ic.expression.region0 = "p_base + amp * exp(-((x - x_c)/sig)*((x - x_c)/sig))"
+
+### BOUNDARY CONDITIONS - REFLECTING WALL ON xhi ###
+nghost = 2
+
+# Left wall: Neumann (transmissive, lets any leftward wave leave)
+density.bc.type.xlo  = neumann
+momentum.bc.type.xlo = neumann neumann
+energy.bc.type.xlo   = neumann
+
+# Right: TRUE REFLECTING WALL (mirror)
+density.bc.type.xhi  = REFLECT_EVEN
+momentum.bc.type.xhi = REFLECT_ODD REFLECT_EVEN
+energy.bc.type.xhi   = REFLECT_EVEN
+
+# Y: Periodic
+density.bc.type.ylo  = periodic
+density.bc.type.yhi  = periodic
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+energy.bc.type.ylo   = periodic
+energy.bc.type.yhi   = periodic
+
+### REFINEMENT CRITERIA (DISABLED) ###
+eta_refinement_criterion   = 1000.0
+omega_refinement_criterion = 1000.0
+gradu_refinement_criterion = 1000.0
+rho_refinement_criterion   = 1000.0
+p_refinement_criterion     = 1000.0

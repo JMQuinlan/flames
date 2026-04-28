@@ -1,0 +1,161 @@
+#@ [acoustic_pulse_nscbc_ptarget_drift]
+#@ exe=hydro2
+#@ dim=2
+
+# ============================================================================
+# NSCBC P_TARGET DEBUG CASE  (target_p BELOW p_base => stable rarefaction)
+# ============================================================================
+# This test isolates the LODI pressure-relaxation term by deliberately
+# mismatching target_p from the base pressure. After the rightward pulse
+# exits, the domain should see the boundary pressure drift toward target_p.
+#
+#   p_base   = 1.0   (initial uniform pressure, away from pulse)
+#   target_p = 0.8   (20% LOWER than base => boundary acts as a slow
+#                     rarefaction, fluid leaves through xhi (u > 0)).
+#                     IMPORTANT: target_p > p_base reverses the flow
+#                     (u < 0) and the subsonic-outflow handler does not
+#                     gracefully transition to inflow - it runs away.
+#                     If you want to push pressure UP at xhi, use an
+#                     nscbc_inflow boundary instead.
+#   sigma    = 0.25  (default Rudy/Strikwerda gain - stable)
+#
+# Expected outcome IF p_target is working:
+#   * The Gaussian pulse propagates rightward and largely exits.
+#   * Pressure near xhi drifts down from 1.0 toward 0.8 over ~3 s.
+#   * That drift propagates upstream as a slow rarefaction.
+#
+# Expected outcome IF p_target is silently ignored:
+#   * Boundary pressure stays at 1.0 indefinitely after the pulse leaves.
+# ============================================================================
+
+### OUTPUT ###
+plot_file = ./tests/FlowAcoustic/output_Pulse_NSCBC_PtargetDrift
+amr.plot_int = 25
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.grid_eff = 0.8
+amr.n_cell = 400 4
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0  -0.005   0.0
+geometry.prob_hi = 1.0   0.005   0.0
+geometry.is_periodic = 0 1 0
+
+### TIME STEP ###
+timestep  = 5.0e-4
+stop_time = 3.0
+
+### DIFFUSE INTERFACE ###
+eta.ic.type = constant
+eta.ic.constant.value = 0.0
+epsilon = 0.005
+
+### DIFFUSE BOUNDARY SOURCES ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+### SOLVER ###
+cfl = 0.4
+Riemann_Solver.type = hllc
+Spec_Vol = 1
+static_eta = 1
+
+### EOS - IDEAL GAS (AIR) ###
+eos0.gamma = 1.4
+eos0.p0 = 0.0
+eos0.cp = 1004.5
+eos0.cv = 717.5
+
+eos1.gamma = 1.4
+eos1.p0 = 0.0
+eos1.cp = 1004.5
+eos1.cv = 717.5
+
+### VISCOSITY ###
+mu0 = 0.0
+mu1 = 0.0
+
+### SURFACE TENSION ###
+sigma = 0.0
+
+### REFERENCE PRESSURE ###
+pref = 0.0
+
+### INITIAL CONDITIONS - LOCALIZED RIGHT-TRAVELING ACOUSTIC PULSE ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_base = 1.0
+density1.ic.expression.constant.p_base   = 1.0
+density1.ic.expression.constant.gamma    = 1.4
+density1.ic.expression.constant.amp      = 0.05
+density1.ic.expression.constant.x_c      = 0.3
+density1.ic.expression.constant.sig      = 0.05
+density1.ic.expression.region0 = "rho_base + (amp * exp(-((x - x_c)/sig)*((x - x_c)/sig))) / (gamma * p_base / rho_base)"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.rho_base = 1.0
+velocity1.ic.expression.constant.c        = 1.1832159566
+velocity1.ic.expression.constant.amp      = 0.05
+velocity1.ic.expression.constant.x_c      = 0.3
+velocity1.ic.expression.constant.sig      = 0.05
+velocity1.ic.expression.region0 = "(amp * exp(-((x - x_c)/sig)*((x - x_c)/sig))) / (rho_base * c)"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "0.0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_base = 1.0
+pressure1.ic.expression.constant.amp    = 0.05
+pressure1.ic.expression.constant.x_c    = 0.3
+pressure1.ic.expression.constant.sig    = 0.05
+pressure1.ic.expression.region0 = "p_base + amp * exp(-((x - x_c)/sig)*((x - x_c)/sig))"
+
+### BOUNDARY CONDITIONS ###
+nghost = 2
+
+# Left wall: Neumann
+density.bc.type.xlo  = neumann
+momentum.bc.type.xlo = neumann neumann
+energy.bc.type.xlo   = neumann
+
+# Right wall: NSCBC outflow with mismatched target_p
+density.bc.type.xhi  = nscbc_outflow
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow
+energy.bc.type.xhi   = nscbc_outflow
+
+# Y: Periodic
+density.bc.type.ylo  = periodic
+density.bc.type.yhi  = periodic
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+energy.bc.type.ylo   = periodic
+energy.bc.type.yhi   = periodic
+
+### NSCBC PARAMETERS - RIGHT BOUNDARY ###
+# Mismatched target_p is the whole point of this case.
+nscbc.xhi.type     = outflow
+nscbc.xhi.target_p = 0.8
+nscbc.xhi.target_u = 0.0
+nscbc.xhi.target_v = 0.0
+nscbc.xhi.sigma    = 0.25
+nscbc.xhi.beta     = 0.0
+nscbc.xhi.L_ref    = 1.0
+
+nscbc.small = 1.0e-10
+
+### REFINEMENT CRITERIA (DISABLED) ###
+eta_refinement_criterion   = 1000.0
+omega_refinement_criterion = 1000.0
+gradu_refinement_criterion = 1000.0
+rho_refinement_criterion   = 1000.0
+p_refinement_criterion     = 1000.0

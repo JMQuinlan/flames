@@ -1,0 +1,149 @@
+#@ [acoustic_pulse_nscbc]
+#@ exe=hydro2
+#@ dim=2
+
+# ============================================================================
+# NSCBC (2-cell variant) - LOCALIZED RIGHT-TRAVELING ACOUSTIC PULSE
+# ============================================================================
+# Same IC as input_Acoustic_Pulse_Neumann. The xhi boundary is replaced with
+# the NSCBC subsonic outflow condition. The pulse should largely *exit* the
+# domain through xhi and the residual reflection should be small.
+#
+# nghost=2 selects the BC::NSCBC implementation
+# (Hydro2.cpp picks NSCBC vs NSCBC4 based on nghost).
+# ============================================================================
+
+### OUTPUT ###
+plot_file = ./tests/FlowAcoustic/output_Pulse_NSCBC
+amr.plot_int = 25
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.grid_eff = 0.8
+amr.n_cell = 400 4
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0  -0.005   0.0
+geometry.prob_hi = 1.0   0.005   0.0
+geometry.is_periodic = 0 1 0
+
+### TIME STEP ###
+timestep  = 5.0e-4
+stop_time = 1.5
+
+### DIFFUSE INTERFACE ###
+eta.ic.type = constant
+eta.ic.constant.value = 0.0
+epsilon = 0.005
+
+### DIFFUSE BOUNDARY SOURCES ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+### SOLVER ###
+cfl = 0.4
+Riemann_Solver.type = hllc
+Spec_Vol = 1
+static_eta = 1
+
+### EOS - IDEAL GAS (AIR) ###
+eos0.gamma = 1.4
+eos0.p0 = 0.0
+eos0.cp = 1004.5
+eos0.cv = 717.5
+
+eos1.gamma = 1.4
+eos1.p0 = 0.0
+eos1.cp = 1004.5
+eos1.cv = 717.5
+
+### VISCOSITY ###
+mu0 = 0.0
+mu1 = 0.0
+
+### SURFACE TENSION ###
+sigma = 0.0
+
+### REFERENCE PRESSURE ###
+pref = 0.0
+
+### INITIAL CONDITIONS - LOCALIZED RIGHT-TRAVELING ACOUSTIC PULSE ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_base = 1.0
+density1.ic.expression.constant.p_base   = 1.0
+density1.ic.expression.constant.gamma    = 1.4
+density1.ic.expression.constant.amp      = 0.05
+density1.ic.expression.constant.x_c      = 0.3
+density1.ic.expression.constant.sig      = 0.05
+density1.ic.expression.region0 = "rho_base + (amp * exp(-((x - x_c)/sig)*((x - x_c)/sig))) / (gamma * p_base / rho_base)"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.rho_base = 1.0
+velocity1.ic.expression.constant.c        = 1.1832159566
+velocity1.ic.expression.constant.amp      = 0.05
+velocity1.ic.expression.constant.x_c      = 0.3
+velocity1.ic.expression.constant.sig      = 0.05
+velocity1.ic.expression.region0 = "(amp * exp(-((x - x_c)/sig)*((x - x_c)/sig))) / (rho_base * c)"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "0.0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_base = 1.0
+pressure1.ic.expression.constant.amp    = 0.05
+pressure1.ic.expression.constant.x_c    = 0.3
+pressure1.ic.expression.constant.sig    = 0.05
+pressure1.ic.expression.region0 = "p_base + amp * exp(-((x - x_c)/sig)*((x - x_c)/sig))"
+
+### BOUNDARY CONDITIONS ###
+# nghost=2 -> Hydro2.cpp instantiates BC::NSCBC (the 2-cell ghost version).
+nghost = 2
+
+# Left wall: Neumann (treats as solid wall - waves *should* reflect here)
+density.bc.type.xlo  = neumann
+momentum.bc.type.xlo = neumann neumann
+energy.bc.type.xlo   = neumann
+
+# Right wall: NSCBC subsonic outflow (non-reflecting, target_p drives p_b -> target_p)
+density.bc.type.xhi  = nscbc_outflow
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow
+energy.bc.type.xhi   = nscbc_outflow
+
+# Y: Periodic
+density.bc.type.ylo  = periodic
+density.bc.type.yhi  = periodic
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+energy.bc.type.ylo   = periodic
+energy.bc.type.yhi   = periodic
+
+### NSCBC PARAMETERS - RIGHT BOUNDARY ###
+# target_p MUST equal base pressure here so pulse exits cleanly without
+# any imposed drift. Compare against input_Acoustic_Pulse_NSCBC_PtargetDrift
+# to confirm the relaxation term is actually doing something.
+nscbc.xhi.type     = outflow
+nscbc.xhi.target_p = 1.0
+nscbc.xhi.target_u = 0.0
+nscbc.xhi.target_v = 0.0
+nscbc.xhi.sigma    = 0.25
+nscbc.xhi.beta     = 0.0
+nscbc.xhi.L_ref    = 1.0
+
+nscbc.small = 1.0e-10
+
+### REFINEMENT CRITERIA (DISABLED) ###
+eta_refinement_criterion   = 1000.0
+omega_refinement_criterion = 1000.0
+gradu_refinement_criterion = 1000.0
+rho_refinement_criterion   = 1000.0
+p_refinement_criterion     = 1000.0

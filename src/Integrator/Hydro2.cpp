@@ -1135,7 +1135,7 @@ Hydro2::RHS(int lev,
             // ------------------------------------------------------------
             // Conservative Allen-Cahn
             // ------------------------------------------------------------
-            // d(eta)/dt = -u·grad(eta) + Mob * laplacian(mu)
+            // d(eta)/dt = -u*grad(eta) + Mob * laplacian(mu)
             // Laplacian of Chemical Potential (conservative form)
             /*
             Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
@@ -1149,9 +1149,9 @@ Hydro2::RHS(int lev,
             */
 
             // ------------------------------------------------------------
-            // Cahn–Hilliard
+            // Cahn-Hilliard
             // ------------------------------------------------------------
-            // d(eta)/dt = -u·grad(eta) + div( M*grad(mu) )
+            // d(eta)/dt = -u*grad(eta) + div( M*grad(mu) )
             Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
             // Set::Scalar Mob = a(i, j, k) * 0.7 * DX[0]; // Mob = u_max * epsilon
             Set::Scalar Mob = a(i, j, k) * epsilon;// *epsilon / DX[0]; // Mob = u_max * epsilon
@@ -2613,7 +2613,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     // ------------------------------------------------------------
     // STEP 1: Determine BC strategy based on nghost and NSCBC flag
     // ------------------------------------------------------------
-    bool use_nscbc = (nscbc_bc != nullptr);
+    bool use_nscbc = (nscbc_bc != nullptr) || (nscbc4_bc != nullptr);
     int effective_nghost = nghost;
 
     if (use_nscbc)
@@ -2790,7 +2790,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         }
         else if (nghost == 4 && nscbc4_bc != nullptr)
         {
-            nscbc4_bc->FillBoundary(rho_total, M_copy, E_copy, *eta_mf[lev], eos0, eos1, geom[lev], time, pref);
+            nscbc4_bc->FillBoundary(rho_total, M_copy, E_copy, *eta_mf[lev], *gamma_mf[lev], *p0_mf[lev], *pressure_mf[lev], eos0, eos1, geom[lev], time, pref);
         }
 
         // Copy modified conservatives back to main arrays
