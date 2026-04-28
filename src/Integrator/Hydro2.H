@@ -154,6 +154,15 @@ protected:
         const amrex::MultiFab &rho0_mf_in, const amrex::MultiFab &M0_mf_in, const amrex::MultiFab &E0_mf_in,
         const amrex::MultiFab &rho1_mf_in, const amrex::MultiFab &M1_mf_in, const amrex::MultiFab &E1_mf_in);
 
+    // Phase 6 (CH-Korteweg spec §1.8, §4.4): populate the CH-derived effective
+    // BS source fields (m0_eff_mf, u0_eff_mf, q_eff_mf) from the current
+    // hydrodynamic + CH state. Always runs (called at the end of MixDiagnostic).
+    // In BSMode::CH_Emergent the integrator subsequently routes these into
+    // m0_mf/u0_mf/q_mf so ApplyBSSource consumes them; in BSMode::Prescribed
+    // they are diagnostic-only (visible in plotfiles for comparison against
+    // the prescribed values).
+    void ComputeEffectiveBSSources(int lev);
+
     // Phase 5 (CH-Korteweg spec §2.2, §4.3): well-balanced Korteweg capillary
     // force computed as the discrete divergence of the Korteweg stress tensor
     //   Sigma_K = -kappa * grad_eta (x) grad_eta
@@ -311,6 +320,19 @@ protected:
     Set::Field<Set::Scalar> u0_mf;
     Set::Field<Set::Scalar> q_mf;
 
+    // Phase 6 (CH-Korteweg spec §1.8, §4.4): CH-emergent BS source diagnostics.
+    // Populated by Hydro2::ComputeEffectiveBSSources at the end of MixDiagnostic
+    // from the current CH state. In bs_source_mode == CH_Emergent these are
+    // copied into m0_mf/u0_mf/q_mf before ApplyBSSource runs; in Prescribed
+    // mode they are populated as a diagnostic for offline comparison against
+    // the user-prescribed values.
+    //   m0_eff [kg/m^2/s] : from div(M*rho_mix*grad(mu_chem)) / max(|grad eta|,floor)
+    //   u0_eff [m/s,2c]   : mass-flux-weighted mixture velocity
+    //   q_eff  [W/m^2,2c] : m0_eff * L_vap(T) * n_hat
+    Set::Field<Set::Scalar> m0_eff_mf;
+    Set::Field<Set::Scalar> u0_eff_mf;
+    Set::Field<Set::Scalar> q_eff_mf;
+
 protected:
     Set::Field<Set::Scalar> eta_mf;
     Set::Field<Set::Scalar> eta_mf_in;
@@ -425,7 +447,17 @@ protected:
     Set::Scalar k_eta1 = 0.0;  // liquid-phase thermal conductivity [W/(m K)]
     int static_eta = 0;
     int apply_vaporization = 0;
-    int apply_bs_source = 1;   // Stage 4: BS phase-coupling sources (set 0 to test single-phase limit)
+
+    // Phase 6 (CH-Korteweg spec §3.3): BS phase-coupling source mode.
+    //   Off          : no phase-coupling sources at all (single-phase limit / debugging).
+    //   Prescribed   : default; m0_mf/u0_mf/q_mf set from ic_m0/ic_u0/ic_q (legacy
+    //                  apply_bs_source=1 behavior).
+    //   CH_Emergent  : m0_mf/u0_mf/q_mf are overwritten each step with the CH-derived
+    //                  effective values (m0_eff_mf etc.) before ApplyBSSource runs.
+    // Replaces the legacy boolean `apply_bs_source`. The legacy key is still
+    // accepted at parse time and mapped onto Off/Prescribed for back-compat.
+    enum class BSMode { Off = 0, Prescribed = 1, CH_Emergent = 2 };
+    BSMode bs_source_mode = BSMode::Prescribed;
     // If non-zero, re-evaluate ic_m0/ic_u0/ic_q each Advance step at the current
     // simulation time. Used for prescribed-flux validation problems (e.g. Stefan)
     // where the analytical mass flux scales as ~1/sqrt(t).

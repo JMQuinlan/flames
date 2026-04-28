@@ -181,11 +181,10 @@ apply_heat_conduction = 0
 Spec_Vol              = 1
 grav                  = 0.0
 
-# BS source pressure-imbalance closure. p_int_method = 0 turns off the
-# pressure/velocity-imbalance contributions; only mass/heat/Korteweg
-# (or legacy Brackbill) remain. With ic_m0 = ic_q = 0, this is the
-# right-hand side for an inert two-fluid problem.
-apply_bs_source = 1
+# BS source mode (Phase 6): "off" | "prescribed" | "ch_emergent".
+# For the static droplet we use prescribed (default behavior); ic_m0/ic_q
+# are zero, so only the pressure-imbalance + Korteweg/Brackbill terms fire.
+bs_source_mode  = prescribed
 p_int_method    = 0
 
 # *** Phase 5 switch ***

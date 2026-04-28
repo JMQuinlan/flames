@@ -92,7 +92,31 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("k_eta0", value.k_eta0, 0.0);                                // [W/(m K)] gas-phase thermal conductivity
         pp_query_default("k_eta1", value.k_eta1, 0.0);                                // [W/(m K)] liquid-phase thermal conductivity
         pp_query_default("apply_vaporization", value.apply_vaporization, false);       // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
-        pp_query_default("apply_bs_source", value.apply_bs_source, true);               // Stage 4 BS phase-coupling sources (set 0 to disable for pure single-phase validation)
+        // Phase 6: BS phase-coupling source mode (replaces apply_bs_source bool).
+        //   "off"          : no BS sources (single-phase / debugging)
+        //   "prescribed"   : default; m0/u0/q from ic_m0/ic_u0/ic_q
+        //   "ch_emergent"  : m0/u0/q overwritten each step from ComputeEffectiveBSSources
+        // Back-compat: if the legacy key apply_bs_source is set, it is mapped onto
+        // Off (=0) / Prescribed (=non-zero) and overrides any bs_source_mode.
+        std::string bs_mode_str = "prescribed";
+        pp_query_default("bs_source_mode", bs_mode_str, std::string("prescribed"));
+        if      (bs_mode_str == "off")         value.bs_source_mode = Hydro2::BSMode::Off;
+        else if (bs_mode_str == "prescribed")  value.bs_source_mode = Hydro2::BSMode::Prescribed;
+        else if (bs_mode_str == "ch_emergent") value.bs_source_mode = Hydro2::BSMode::CH_Emergent;
+        else
+            Util::Abort(INFO, "Unknown bs_source_mode: ", bs_mode_str,
+                        "  (expected: off | prescribed | ch_emergent)");
+        {
+            int legacy = -1;
+            amrex::ParmParse pp_probe;
+            if (pp_probe.query("apply_bs_source", legacy))
+            {
+                value.bs_source_mode = (legacy != 0) ? Hydro2::BSMode::Prescribed
+                                                     : Hydro2::BSMode::Off;
+                Util::Warning(INFO, "apply_bs_source is deprecated; use bs_source_mode = ",
+                              (legacy != 0 ? "prescribed" : "off"));
+            }
+        }
         pp_query_default("bs_sources_time_dependent", value.bs_sources_time_dependent, 0); // re-evaluate ic_m0/ic_u0/ic_q each Advance step at the current time (Stefan and similar)
         pp_query_default("p_int_method", value.p_int_method, 0);                        // BS interface-pressure closure: 0 OFF, 1 arithmetic mean, 2 eta-weighted, 3 acoustic-impedance
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
@@ -286,6 +310,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.m0_mf,           &value.bc_nothing,  1, nghost, "m0", false, false);
         value.RegisterNewFab(value.u0_mf,           &value.bc_nothing, 2, nghost, "u0", false, false, { "x", "y" });
         value.RegisterNewFab(value.q_mf,            &value.bc_nothing, 2, nghost, "q0", false, false, { "x", "y" });
+
+        // Phase 6: CH-derived effective BS source diagnostics. Always
+        // registered regardless of bs_source_mode so the plotfile shows them
+        // for offline comparison against the prescribed values.
+        value.RegisterNewFab(value.m0_eff_mf,       &value.bc_nothing, 1, nghost, "m0_eff", true, false);
+        value.RegisterNewFab(value.u0_eff_mf,       &value.bc_nothing, 2, nghost, "u0_eff", true, false, { "x", "y" });
+        value.RegisterNewFab(value.q_eff_mf,        &value.bc_nothing, 2, nghost, "q_eff",  true, false, { "x", "y" });
         value.RegisterNewFab(value.Source_mf,       &value.bc_nothing,  4, nghost, "Source", true, false, { "_rho", "_Mx", "_My","_E" });
         value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, nghost, "Fsv", true, false, { "x", "y" });  // Surface Tension
         value.RegisterNewFab(value.Fw_mf,           &value.bc_nothing,  2, nghost, "Fw", true, false, { "x", "y" });   // Weight
@@ -548,6 +579,12 @@ void Hydro2::Initialize(int lev)
     kappas_mf[lev]  ->setVal(0.0);
     grad_mag_grad_eta_mf[lev]->setVal(0.0);
     Bm_mf[lev]      ->setVal(0.0);  // Spalding Number
+
+    // Phase 6: CH-derived BS source diagnostics (cleared before MixDiagnostic
+    // runs, which then populates them from the IC state).
+    m0_eff_mf[lev]   ->setVal(0.0);
+    u0_eff_mf[lev]   ->setVal(0.0);
+    q_eff_mf[lev]    ->setVal(0.0);
 
     // MIXED PROPERTIES (setVal also clears ghost cells, preventing NaN from debug-mode allocation)
     mu_chem_mf[lev]     ->setVal(0.0);
@@ -891,6 +928,11 @@ void Hydro2::MixDiagnostic(int lev)
     // Phase 2 diagnostic: EOS-only chemical-potential difference + spinodal-proximity ratio.
     // Pure read of conservatives + EOS — does not influence dynamics.
     ComputeChemicalPotential(lev);
+
+    // Phase 6: CH-derived BS source diagnostics (m0_eff, u0_eff, q_eff).
+    // Always populated; routed into m0_mf/u0_mf/q_mf only when bs_source_mode
+    // == CH_Emergent (in Advance, before ApplyBSSource).
+    ComputeEffectiveBSSources(lev);
 }
 
 
@@ -990,6 +1032,233 @@ void Hydro2::ComputeChemicalPotential(int lev)
 
     dmu_bulk_mf       [lev]->FillBoundary(geom.periodicity());
     dmu_over_lambda_mf[lev]->FillBoundary(geom.periodicity());
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////// ComputeEffectiveBSSources //////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+// Phase 6 (CH-Korteweg spec §1.8, §4.4). Populates the CH-emergent BS source
+// fields from the current hydrodynamic + CH state, in three pieces:
+//
+//   m0_eff(x) = div( M(eta) * rho_mix * grad(mu_chem) ) / max(|grad eta|, floor)
+//   u0_eff(x) = (w0 rho_0 u_0 + w1 rho_1 u_1) / (w0 rho_0 + w1 rho_1)
+//   q_eff (x) = m0_eff * L_vap(T) * n_hat
+//
+// where:
+//   - mu_chem is the FULL chemical potential as written by the post-step viz
+//     block in Advance ( -kappa*lap_eta + lambda*W'(eta) ; with +dmu_bulk
+//     when ch_thermo_consistent=1 — that branch is wired in ApplyImplicitCH,
+//     so mu_chem_mf already carries the right thing for the CH solver. To
+//     keep "what the CH solver does" and "what the BS bridge sees" in
+//     lockstep, we recompute the same combination locally here.)
+//   - M(eta) is the same mobility the CH solver uses: M_nom * mobility_factor,
+//     with the η²(1-η)² interface localizer applied when ch_mobility_degenerate.
+//   - rho_mix is η-weighted: (1-η) ρ_0 + η ρ_1  (matches density_mf).
+//   - n_hat is the unit normal n_hat_mf (already populated upstream).
+//   - L_vap(T) uses the FreeEnergy helper: (q_l - q_g) - T (q'_l - q'_g).
+//
+// Sign convention (matches ApplyBSSource):
+//   m0_eff > 0 means mass flowing phase 0 (gas, eta=0) -> phase 1 (liquid, eta=1).
+//
+// Diagnostic-only by default. The integrator routes m0_eff -> m0_mf (etc.)
+// only when bs_source_mode == CH_Emergent (handled in Advance, not here).
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+void Hydro2::ComputeEffectiveBSSources(int lev)
+{
+    BL_PROFILE("Hydro2::ComputeEffectiveBSSources");
+
+    const Geometry& geom = this->geom[lev];
+    const Real* DX = geom.CellSize();
+    const Box& domain = geom.Domain();
+    const Real dx_inv = Real(1.0) / DX[0];
+    const Real dy_inv = Real(1.0) / DX[1];
+
+    // CH solver parameters — same combination used inside ApplyImplicitCH /
+    // ApplyImplicitCH_Newton so the bridge stays in lockstep with what the
+    // CH solver "sees" as it moves eta.
+    const Real lambda_      = ch_W_scale;
+    const Real kappa_       = ch_kappa_eff;
+    const Real M_nom_eff    = (ch_mobility_nom > Real(0.0))
+                              ? ch_mobility_nom * ch_mobility_factor
+                              : Real(0.0);
+    const int  M_degen      = ch_mobility_degenerate;
+    const int  thermo_      = ch_thermo_consistent;
+
+    // Free-energy / latent-heat parameters
+    const Real cv0_   = cv_eta0;
+    const Real cv1_   = cv_eta1;
+    const Real R0_    = R_eta0;
+    const Real g1_    = gamma_eta1;
+    const Real pi1_   = pi_eta1;
+    const Real Tref_  = T_ref;
+    const Real rref0_ = rho_ref_eta0;
+    const Real rref1_ = rho_ref_eta1;
+    const Real q0_    = q_eta0,    qp0_ = qprime_eta0;
+    const Real q1_    = q_eta1,    qp1_ = qprime_eta1;
+
+    // Floor for |grad eta| in the m0_eff = (per-volume rate)/|grad eta| step.
+    // Keeps m0_eff bounded in the bulk where |grad eta| -> 0; the per-volume
+    // rate is also -> 0 there so the cell still reports ~0 mass flux.
+    const Real grad_eta_floor = Real(1.0e-8);
+    const Real safe_          = Real(1.0e-20);
+
+    for (MFIter mfi(*eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const Box& bx = mfi.validbox();
+
+        auto eta   = eta_mf[lev]          ->const_array(mfi);
+        auto rho0  = density_eta0_mf[lev] ->const_array(mfi);
+        auto rho1  = density_eta1_mf[lev] ->const_array(mfi);
+        auto M0    = momentum_eta0_mf[lev]->const_array(mfi);
+        auto M1    = momentum_eta1_mf[lev]->const_array(mfi);
+        auto E0    = energy_eta0_mf[lev]  ->const_array(mfi);
+        auto E1    = energy_eta1_mf[lev]  ->const_array(mfi);
+        auto rho_m = density_mf[lev]      ->const_array(mfi);
+        auto T_arr = T_mf[lev]            ->const_array(mfi);
+        auto n_hat = n_hat_mf[lev]        ->const_array(mfi);
+
+        auto m0e   = m0_eff_mf[lev]->array(mfi);
+        auto u0e   = u0_eff_mf[lev]->array(mfi);
+        auto qe    = q_eff_mf [lev]->array(mfi);
+
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        {
+            auto sten = Numeric::GetStencil(i, j, k, domain);
+
+            // -------- Local mu_chem (matches CH solver's f' + gradient) --------
+            // mu_chem(x) = -kappa*lap(eta) + lambda*W'(eta)  [+ dF_bulk if thermo]
+            auto mu_local = [=] AMREX_GPU_DEVICE (int ii, int jj, int kk) -> Real
+            {
+                auto stl = Numeric::GetStencil(ii, jj, kk, domain);
+                Real e_  = eta(ii,jj,kk);
+                Real lap = Numeric::Laplacian(eta, ii, jj, kk, 0, DX, stl);
+                Real Wp  = lambda_ * Real(4.0) * e_ * (e_ - Real(0.5)) * (e_ - Real(1.0));
+                Real mu  = -kappa_ * lap + Wp;
+                if (thermo_)
+                {
+                    // dF_bulk = f_g(rho_0, T_0) - f_l(rho_1, T_1); same expression
+                    // as ComputeChemicalPotential. Per-phase temperatures are
+                    // recomputed locally (Convention B).
+                    Real r0_ = (rho0(ii,jj,kk) > safe_) ? rho0(ii,jj,kk) : safe_;
+                    Real r1_ = (rho1(ii,jj,kk) > safe_) ? rho1(ii,jj,kk) : safe_;
+                    Real KE0 = Real(0.5) * (M0(ii,jj,kk,0)*M0(ii,jj,kk,0)
+                                          + M0(ii,jj,kk,1)*M0(ii,jj,kk,1)) / r0_;
+                    Real KE1 = Real(0.5) * (M1(ii,jj,kk,0)*M1(ii,jj,kk,0)
+                                          + M1(ii,jj,kk,1)*M1(ii,jj,kk,1)) / r1_;
+                    Real UE0 = amrex::max(Real(0.0), E0(ii,jj,kk) - KE0);
+                    Real UE1 = amrex::max(Real(0.0), E1(ii,jj,kk) - KE1);
+                    Real T0_ = UE0 / (r0_ * cv0_ + safe_);
+                    Real T1_ = UE1 / (r1_ * cv1_ + safe_);
+                    if (!std::isfinite(T0_) || T0_ <= Real(0.0)) T0_ = Tref_;
+                    if (!std::isfinite(T1_) || T1_ <= Real(0.0)) T1_ = Tref_;
+                    Real fg = Numeric::FreeEnergy::f_CPG(
+                        r0_, T0_, cv0_, R0_, Tref_, rref0_, q0_, qp0_);
+                    Real fl = Numeric::FreeEnergy::f_Tammann(
+                        r1_, T1_, cv1_, g1_, pi1_, Tref_, rref1_, q1_, qp1_);
+                    mu += (fg - fl);
+                }
+                return mu;
+            };
+
+            // -------- Mobility M(eta) on cell, with degenerate option --------
+            auto M_cell = [=] AMREX_GPU_DEVICE (int ii, int jj, int kk) -> Real
+            {
+                if (M_nom_eff <= Real(0.0)) return Real(0.0);
+                if (!M_degen)               return M_nom_eff;
+                Real e_ = eta(ii,jj,kk);
+                if (e_ < Real(0.0)) e_ = Real(0.0);
+                if (e_ > Real(1.0)) e_ = Real(1.0);
+                Real interp = e_ * (Real(1.0) - e_);
+                return M_nom_eff * interp * interp; // η²(1-η)² localizer
+            };
+
+            // -------- Face flux  J_face = M_face * rho_mix_face * grad_face(mu) --------
+            // Use upstream-style symmetric averaging (arithmetic mean for M and
+            // rho_mix at the face). Centered difference for grad(mu).
+            // x-face (i+1/2): between (i,j) and (i+1,j)
+            Real M_xp    = Real(0.5) * (M_cell(i,j,k)   + M_cell(i+1,j,k));
+            Real M_xm    = Real(0.5) * (M_cell(i-1,j,k) + M_cell(i,j,k));
+            Real M_yp    = Real(0.5) * (M_cell(i,j,k)   + M_cell(i,j+1,k));
+            Real M_ym    = Real(0.5) * (M_cell(i,j-1,k) + M_cell(i,j,k));
+
+            Real rm_xp   = Real(0.5) * (rho_m(i,j,k)   + rho_m(i+1,j,k));
+            Real rm_xm   = Real(0.5) * (rho_m(i-1,j,k) + rho_m(i,j,k));
+            Real rm_yp   = Real(0.5) * (rho_m(i,j,k)   + rho_m(i,j+1,k));
+            Real rm_ym   = Real(0.5) * (rho_m(i,j-1,k) + rho_m(i,j,k));
+
+            Real mu_c    = mu_local(i,   j,   k);
+            Real mu_xp   = mu_local(i+1, j,   k);
+            Real mu_xm   = mu_local(i-1, j,   k);
+            Real mu_yp   = mu_local(i,   j+1, k);
+            Real mu_ym   = mu_local(i,   j-1, k);
+
+            Real gmu_xp  = (mu_xp - mu_c)  * dx_inv;
+            Real gmu_xm  = (mu_c  - mu_xm) * dx_inv;
+            Real gmu_yp  = (mu_yp - mu_c)  * dy_inv;
+            Real gmu_ym  = (mu_c  - mu_ym) * dy_inv;
+
+            Real Jx_p = M_xp * rm_xp * gmu_xp;
+            Real Jx_m = M_xm * rm_xm * gmu_xm;
+            Real Jy_p = M_yp * rm_yp * gmu_yp;
+            Real Jy_m = M_ym * rm_ym * gmu_ym;
+
+            // Per-volume mass-exchange rate density [kg/m^3/s]:
+            //   div(M rho grad mu) > 0  =>  mass entering phase 1 (the eta=1
+            //   side accumulates eta), so the BS-source convention
+            //   "m0 = mass flux phase 0 -> phase 1" gets a positive m0 from
+            //   a positive divergence.
+            Real div_J = (Jx_p - Jx_m) * dx_inv + (Jy_p - Jy_m) * dy_inv;
+
+            // |grad eta| for the per-area conversion. Use the same Stencil
+            // helper the rest of the integrator uses for consistency.
+            Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX, sten);
+            Real ge_mag = grad_eta.lpNorm<2>();
+            Real ge_eff = (ge_mag > grad_eta_floor) ? ge_mag : grad_eta_floor;
+
+            // m0_eff is per-area mass flux [kg/m^2/s]; ApplyBSSource will
+            // multiply back by |grad eta| when it computes the per-volume
+            // mass-exchange contribution, so the round-trip recovers div_J
+            // wherever |grad eta| > floor (i.e. in the diffuse band).
+            Real m0_loc = div_J / ge_eff;
+            if (!std::isfinite(m0_loc)) m0_loc = Real(0.0);
+            m0e(i,j,k) = m0_loc;
+
+            // -------- u0_eff: mass-flux-weighted mixture velocity --------
+            Real e_ = eta(i,j,k);
+            if (e_ < Real(0.0)) e_ = Real(0.0);
+            if (e_ > Real(1.0)) e_ = Real(1.0);
+            Real w0 = Real(1.0) - e_;
+            Real w1 = e_;
+            Real safe_r0 = (rho0(i,j,k) > safe_) ? rho0(i,j,k) : safe_;
+            Real safe_r1 = (rho1(i,j,k) > safe_) ? rho1(i,j,k) : safe_;
+            Real u0x = M0(i,j,k,0) / safe_r0;
+            Real u0y = M0(i,j,k,1) / safe_r0;
+            Real u1x = M1(i,j,k,0) / safe_r1;
+            Real u1y = M1(i,j,k,1) / safe_r1;
+            Real denom = w0 * safe_r0 + w1 * safe_r1;
+            denom = (denom > safe_) ? denom : safe_;
+            Real u_eff_x = (w0 * safe_r0 * u0x + w1 * safe_r1 * u1x) / denom;
+            Real u_eff_y = (w0 * safe_r0 * u0y + w1 * safe_r1 * u1y) / denom;
+            if (!std::isfinite(u_eff_x)) u_eff_x = Real(0.0);
+            if (!std::isfinite(u_eff_y)) u_eff_y = Real(0.0);
+            u0e(i,j,k,0) = u_eff_x;
+            u0e(i,j,k,1) = u_eff_y;
+
+            // -------- q_eff: latent-heat flux carried with m0_eff --------
+            Real T_loc  = T_arr(i,j,k);
+            if (!std::isfinite(T_loc) || T_loc <= Real(0.0)) T_loc = Tref_;
+            Real Lvap = Numeric::FreeEnergy::L_vap(T_loc, q0_, qp0_, q1_, qp1_);
+            Real nx   = n_hat(i,j,k,0);
+            Real ny   = n_hat(i,j,k,1);
+            qe(i,j,k,0) = m0_loc * Lvap * nx;
+            qe(i,j,k,1) = m0_loc * Lvap * ny;
+        });
+    }
+
+    m0_eff_mf[lev]->FillBoundary(geom.periodicity());
+    u0_eff_mf[lev]->FillBoundary(geom.periodicity());
+    q_eff_mf [lev]->FillBoundary(geom.periodicity());
 }
 
 
@@ -4240,14 +4509,36 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     const Real* DX = geom.CellSize();
     const Box& domain = geom.Domain();
 
-    // Time-dependent BS prescribed sources (Stefan and similar). IC::Expression
-    // already supports the `t` symbol; we just re-Initialize each step from the
-    // current simulation time. Initialize() is overwrite (setVal(0) + Add).
-    if (bs_sources_time_dependent)
+    // BS source population for the upcoming step.
+    //
+    //  Prescribed mode (default): if bs_sources_time_dependent, re-evaluate
+    //    ic_m0/ic_u0/ic_q at the current simulation time. IC::Expression
+    //    already supports the `t` symbol; Initialize() is setVal(0)+Add.
+    //
+    //  CH_Emergent mode (Phase 6): overwrite m0/u0/q with the CH-derived
+    //    effective fields populated by ComputeEffectiveBSSources at the end
+    //    of the previous Advance step (or by Initialize for the first step).
+    //    ApplyBSSource then consumes them via the existing prescribed-source
+    //    machinery — single coupling path, no parallel implementation.
+    //
+    //  Off: nothing to do; ApplyBSSource is gated off below.
+    if (bs_source_mode == BSMode::Prescribed && bs_sources_time_dependent)
     {
         ic_m0->Initialize(lev, m0_mf, time);
         ic_u0->Initialize(lev, u0_mf, time);
         ic_q ->Initialize(lev, q_mf,  time);
+        m0_mf[lev]->FillBoundary(geom.periodicity());
+        u0_mf[lev]->FillBoundary(geom.periodicity());
+        q_mf [lev]->FillBoundary(geom.periodicity());
+    }
+    else if (bs_source_mode == BSMode::CH_Emergent)
+    {
+        amrex::MultiFab::Copy(*m0_mf[lev], *m0_eff_mf[lev], 0, 0,
+                              m0_mf[lev]->nComp(), m0_mf[lev]->nGrow());
+        amrex::MultiFab::Copy(*u0_mf[lev], *u0_eff_mf[lev], 0, 0,
+                              u0_mf[lev]->nComp(), u0_mf[lev]->nGrow());
+        amrex::MultiFab::Copy(*q_mf [lev], *q_eff_mf [lev], 0, 0,
+                              q_mf [lev]->nComp(), q_mf [lev]->nGrow());
         m0_mf[lev]->FillBoundary(geom.periodicity());
         u0_mf[lev]->FillBoundary(geom.periodicity());
         q_mf [lev]->FillBoundary(geom.periodicity());
@@ -4510,7 +4801,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
         // Stage 4: BS phase-coupling source terms, added to both phases'
         // RHS with sum-to-zero signs so mixture conservation holds identically.
-        if (apply_bs_source) {
+        // Phase 6: gated by bs_source_mode. m0/u0/q already point at the right
+        // values (prescribed IC or CH-emergent copy) — see top of Advance().
+        if (bs_source_mode != BSMode::Off) {
             ApplyBSSource(lev, t,
                           rhs_mf[1], rhs_mf[2], rhs_mf[3],
                           rhs_mf[4], rhs_mf[5], rhs_mf[6],
