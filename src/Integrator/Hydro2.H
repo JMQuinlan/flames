@@ -154,14 +154,18 @@ protected:
         const amrex::MultiFab &rho0_mf_in, const amrex::MultiFab &M0_mf_in, const amrex::MultiFab &E0_mf_in,
         const amrex::MultiFab &rho1_mf_in, const amrex::MultiFab &M1_mf_in, const amrex::MultiFab &E1_mf_in);
 
-    // Phase 5 (CH-Korteweg spec §4.3): well-balanced Korteweg capillary force
-    // from the face-flux form  F_cap_face = -eta_face * (mu_chem_j - mu_chem_i)/dx.
-    // The cell-centered divergence is added to per-phase momentum (eta-weighted)
-    // and per-phase energy gets F_cap . u_k. Reads mu_chem_mf as populated by
-    // the post-step visualization block in Advance() (mu_chem = -kappa*lap_eta
-    //  + W_scale*W'(eta)). Ghost cells are FillBoundary'd internally before use.
-    // Does NOT recompute mu_chem from a different stencil — well-balancing
-    // depends on a single source of truth.
+    // Phase 5 (CH-Korteweg spec §2.2, §4.3): well-balanced Korteweg capillary
+    // force computed as the discrete divergence of the Korteweg stress tensor
+    //   Sigma_K = -kappa * grad_eta (x) grad_eta
+    //             + ( kappa * eta * lap_eta + (kappa/2) |grad_eta|^2 ) I
+    // taken in face-flux form. First derivatives of eta are evaluated exactly
+    // on faces (with vertex-averaging for the face-tangential component); the
+    // cell-centered ∇²η that goes into Sigma_K uses a 9-point isotropic
+    // Laplacian (4th-order accurate, anisotropy O(dx^4) instead of the 5-point
+    // stencil's O(dx^2) C4 grid bias). Per-phase momentum gets eta-weighted
+    // F_cap; per-phase energy gets F_cap . u_k. The lambda*W'(eta) double-
+    // well term is part of CH dynamics and does NOT enter the momentum eq —
+    // the Korteweg stress only carries the kappa gradient-energy contribution.
     // Only fires when korteweg_well_balanced != 0; in that case the Brackbill
     // Fsv block in ApplyBSSource is skipped to avoid double-counting.
     void ApplyKortewegStress(int lev,

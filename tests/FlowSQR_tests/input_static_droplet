@@ -3,28 +3,34 @@
 #@ dim=2
 #@
 
-# Phase 5 (CH-Korteweg spec §4.3): well-balanced Korteweg static-droplet test.
+# Phase 5 (CH-Korteweg spec §2.2, §4.3): well-balanced Korteweg static-
+# droplet test.
 #
 # A circular liquid droplet in a quiescent gas atmosphere should sit in
 # mechanical equilibrium with no parasitic flow. The Brackbill form
 #   Fsv = sigma * kappa_curv * epsilon * grad_eta
 # is NOT well-balanced and produces parasitic currents ~ sigma/(rho_g * dx).
-# The face-flux Korteweg form
-#   F_cap_face = -eta_face * (mu_chem_j - mu_chem_i)/dx
-# is exactly zero at static equilibrium (mu_chem uniform), so max|u| should
-# stay at machine precision over many steps.
+# The face-flux Korteweg-stress-tensor form
+#   Sigma_K = -kappa * grad_eta (x) grad_eta
+#             + ( kappa*eta*lap_eta + (kappa/2)|grad_eta|^2 ) I
+#   F_cap   = div(Sigma_K)
+# is computed by evaluating Sigma_K on faces (first derivatives of eta exact
+# on faces; ∇²η on faces uses a 9-point isotropic cell Laplacian averaged to
+# face) and taking the discrete divergence. The 9-point isotropic stencil is
+# 4th-order accurate, suppressing the C4 grid-aligned anisotropy that the
+# 5-point Laplacian injects (which manifested as 4-fold parasitic acoustic
+# emission on circular interfaces in an earlier pass).
 #
 # Pass criteria (spec §5):
 #   korteweg_well_balanced = 0 : max|u| -> O(sigma/(rho_g*dx)) ~ O(10) m/s
-#   korteweg_well_balanced = 1 : max|u| stays at ~1e-12 for the run
+#   korteweg_well_balanced = 1 : max|u| stays small over the run
 #   Laplace pressure jump  Δp = sigma/R = 144 Pa inside droplet, matches analytical
 #
 # The CH solver is silenced (implicit_ch = 0, ch_thermo_consistent = 0) so
-# the test isolates the Korteweg discretization. With ch_thermo_consistent=0
-# the cell-centered mu_chem_mf populated in MixDiagnostic is exactly
-#   mu_chem = lambda * W'(eta) - kappa * Laplacian(eta)
-# which matches the legacy CH driving expression — the face-flux Korteweg
-# divergence is provably zero on the equilibrium tanh.
+# the test isolates the Korteweg discretization. The Korteweg stress no
+# longer reads mu_chem_mf — it is computed directly from eta on faces, so
+# the lambda*W'(eta) double-well term (CH-only, not in the momentum eq) does
+# not pollute the force.
 
 alamo.program = hydro2
 
@@ -40,6 +46,7 @@ amr.regrid_int = 1
 amr.grid_eff = 0.8
 amr.max_level = 0
 amr.n_cell = 200 200
+# amr.n_cell = 400 400
 
 ### TIME STEPING ###
 timestep = 1.0e-9
@@ -92,7 +99,7 @@ velocity_eta0.ic.expression.region1 = "0.0"
 # Equal pressure at IC; the Korteweg force itself sets up the Laplace
 # pressure jump Δp = sigma/R0 = 0.072 / 0.5e-3 = 144 Pa
 pressure_eta1.ic.type = expression
-pressure_eta1.ic.expression.region0 = "1.01325e5"
+pressure_eta1.ic.expression.region0 = "1.01325e5+144"
 
 pressure_eta0.ic.type = expression
 pressure_eta0.ic.expression.region0 = "1.01325e5"

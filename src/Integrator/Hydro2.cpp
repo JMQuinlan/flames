@@ -1651,26 +1651,44 @@ Hydro2::ApplyBSSource(int lev,
 //////////////////////////////////////// ApplyKortewegStress //////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 // Phase 5 (CH-Korteweg spec §2.2, §4.3): well-balanced Korteweg capillary
-// force. Replaces the cell-centered Brackbill form Fsv = sigma*kappa_curv*
-// epsilon*grad_eta with a face-flux form
+// force. Replaces the cell-centered Brackbill form
+//   Fsv = sigma * kappa_curv * epsilon * grad_eta
+// with a face-flux discretization of the Korteweg stress tensor
 //
-//     F_cap_face_(i+1/2,j) = -eta_face * (mu_chem(i+1,j) - mu_chem(i,j)) / dx
+//   Sigma_K = -kappa * grad_eta (x) grad_eta
+//             + ( kappa * eta * lap_eta + (kappa/2) |grad_eta|^2 ) I
 //
-// where eta_face is the arithmetic mean of cell-centered eta. The cell-
-// centered Korteweg force is the divergence of these face fluxes; it is
-// distributed eta-weighted across phases (same w0 = 1-eta, w1 = eta split
-// used elsewhere in ApplyBSSource), and the per-phase energy update gets
-// F_cap . u_k. At static equilibrium mu_chem is uniform => discrete face
-// flux is exactly zero => no parasitic currents, by construction.
+// (continuum identity:  div(Sigma_K) = kappa * eta * grad(lap_eta) ).
+// The cell-centered force is the discrete divergence of the face stresses:
 //
-// CRITICAL: mu_chem_mf must come from a single source of truth. We read
-// the field populated by Hydro2::Advance's post-step visualization block
-// (which writes mu_chem_local = -ch_kappa_eff * lap_eta + ch_W_scale * W'(eta)
-// at every cell). Ghost cells are NOT FillBoundary'd by that block on the
-// two-full-states path, so we sync them ourselves below. Do NOT recompute
-// mu_chem from a different stencil here — the well-balancing hinges on the
-// same discrete value being used everywhere it appears (Korteweg flux,
-// CH driving force, plotfile output).
+//   F_cap_(i,j) = (Sigma_K_xx_(i+1/2,j) - Sigma_K_xx_(i-1/2,j))/dx
+//               + (Sigma_K_xy_(i,j+1/2) - Sigma_K_xy_(i,j-1/2))/dy   (x-comp)
+//
+// and similarly for the y-component. F_cap is split eta-weighted across the
+// two phases (w0 = 1-eta, w1 = eta — same convention as ApplyBSSource), and
+// per-phase energy gets F_cap . u_k.
+//
+// Why this instead of the simpler  F = -eta * grad(mu_chem)  form: with the
+// full mu_chem = lambda*W'(eta) - kappa*lap_eta, the two terms cancel to
+// ~12 orders of magnitude across the equilibrium tanh, so any anisotropy in
+// the cell-centered Laplacian (5-point stencil has C4 grid-aligned bias) is
+// preserved as a tangential pollution in grad(mu_chem). On a circular drop,
+// that produces 4-fold-symmetric tangential force at the cardinal axes,
+// which excites grid-aligned acoustic modes (the symptom we saw at static-
+// droplet validation). Computing Sigma_K directly on faces avoids the cell-
+// to-cell stencil mismatch, and using a 9-point isotropic Laplacian for the
+// cell-centered ∇²η that goes into Sigma_K gets the leading anisotropy down
+// to O(dx^4/delta^4).
+//
+// The lambda*W'(eta) double-well term is NOT included here — that is part
+// of the bulk thermodynamic potential and shows up in CH dynamics, not in
+// the momentum equation. The Korteweg stress only carries the gradient-
+// energy (kappa) contribution.
+//
+// Stencil width: face values use cell ∇²η at the two cells flanking the face,
+// each of which is a 9-point stencil reaching i±1, j±1. So the face at
+// (i+1/2, j) reads eta out to (i-1..i+2, j-1..j+1), and a cell-centered
+// force update reads eta out to (i±2, j±2). Requires nghost >= 2.
 void
 Hydro2::ApplyKortewegStress(int lev,
                             Set::Scalar /*time*/,
@@ -1686,21 +1704,24 @@ Hydro2::ApplyKortewegStress(int lev,
 
     const Geometry& geom = this->geom[lev];
     const Real* DX = geom.CellSize();
-    const Real dx_inv = Real(1.0) / DX[0];
-    const Real dy_inv = Real(1.0) / DX[1];
-
-    // mu_chem_mf is written by the post-step visualization block in Advance()
-    // but not FillBoundary'd there for the two-full-states code path. Sync
-    // ghost cells now so the i±1 / j±1 neighbor reads below are not stale.
-    // (Cheap; one halo exchange per RHS call.)
-    mu_chem_mf[lev]->FillBoundary(geom.periodicity());
+    const Real dx     = DX[0];
+    const Real dy     = DX[1];
+    const Real dx_inv = Real(1.0) / dx;
+    const Real dy_inv = Real(1.0) / dy;
+    // Inverse-of-(6 dx^2) prefactor for the 9-point isotropic Laplacian.
+    // The closed-form weights (4*ortho + diag - 20*center)/(6 dx^2) assume
+    // square cells; if dy != dx the proper isotropic form has separate
+    // weights. Hydro2 is 2D-square in practice — assert and bail otherwise.
+    AMREX_ASSERT_WITH_MESSAGE(std::abs(dx - dy) < Real(1.0e-14),
+        "ApplyKortewegStress: 9-point isotropic Laplacian assumes dx == dy");
+    const Real lap9_pref = Real(1.0) / (Real(6.0) * dx * dx);
+    const Real kappa_    = ch_kappa_eff;
 
     for (MFIter mfi(eta_mf_in, TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
         const Box& bx = mfi.validbox();
 
         auto eta     = eta_mf_in.const_array(mfi);
-        auto mu_arr  = mu_chem_mf[lev]->const_array(mfi);
         auto r0_arr  = rho0_mf_in.const_array(mfi);
         auto M0_arr  = M0_mf_in.const_array(mfi);
         auto r1_arr  = rho1_mf_in.const_array(mfi);
@@ -1713,27 +1734,67 @@ Hydro2::ApplyKortewegStress(int lev,
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
-            // Face-averaged eta (arithmetic mean of cell centers).
-            Real eta_xp = Real(0.5) * (eta(i  ,j,k) + eta(i+1,j,k));
-            Real eta_xm = Real(0.5) * (eta(i-1,j,k) + eta(i  ,j,k));
-            Real eta_yp = Real(0.5) * (eta(i,j  ,k) + eta(i,j+1,k));
-            Real eta_ym = Real(0.5) * (eta(i,j-1,k) + eta(i,j  ,k));
+            // Cell-centered 9-point isotropic Laplacian:
+            //   L = (1/(6 dx^2)) * [ 4*(E+W+N+S) + (NE+NW+SE+SW) - 20*C ]
+            // 4th-order accurate; leading anisotropy is O(dx^4) — vs the
+            // 5-point stencil's O(dx^2) C4 grid-aligned bias.
+            // (Assumes dx=dy here. For aspect-ratio cells this would need
+            // separate x/y prefactors.)
+            auto lap9 = [=] AMREX_GPU_DEVICE (int ii, int jj, int kk) -> Real
+            {
+                Real s_ortho = eta(ii+1,jj,kk) + eta(ii-1,jj,kk)
+                             + eta(ii,jj+1,kk) + eta(ii,jj-1,kk);
+                Real s_diag  = eta(ii+1,jj+1,kk) + eta(ii-1,jj+1,kk)
+                             + eta(ii+1,jj-1,kk) + eta(ii-1,jj-1,kk);
+                return (Real(4.0)*s_ortho + s_diag - Real(20.0)*eta(ii,jj,kk))
+                       * lap9_pref;
+            };
 
-            // Face gradients of mu_chem.
-            Real gmu_xp = (mu_arr(i+1,j,k) - mu_arr(i  ,j,k)) * dx_inv;
-            Real gmu_xm = (mu_arr(i  ,j,k) - mu_arr(i-1,j,k)) * dx_inv;
-            Real gmu_yp = (mu_arr(i,j+1,k) - mu_arr(i,j  ,k)) * dy_inv;
-            Real gmu_ym = (mu_arr(i,j  ,k) - mu_arr(i,j-1,k)) * dy_inv;
+            // ============ x-face (i+1/2, j) ============
+            Real eta_face_xp = Real(0.5)*(eta(i,j,k) + eta(i+1,j,k));
+            Real dxe_xp      = (eta(i+1,j,k) - eta(i,j,k)) * dx_inv;
+            Real dye_xp      = Real(0.25) * (eta(i,j+1,k) + eta(i+1,j+1,k)
+                                           - eta(i,j-1,k) - eta(i+1,j-1,k)) * dy_inv;
+            Real lap_face_xp = Real(0.5) * (lap9(i,j,k) + lap9(i+1,j,k));
+            Real ge2_xp      = dxe_xp*dxe_xp + dye_xp*dye_xp;
+            Real Sxx_xp = -kappa_*dxe_xp*dxe_xp + kappa_*eta_face_xp*lap_face_xp + Real(0.5)*kappa_*ge2_xp;
+            Real Sxy_xp = -kappa_*dxe_xp*dye_xp;
 
-            // Face-centered Korteweg fluxes  F_face = -eta_face * grad(mu).
-            Real Fx_p = -eta_xp * gmu_xp;
-            Real Fx_m = -eta_xm * gmu_xm;
-            Real Fy_p = -eta_yp * gmu_yp;
-            Real Fy_m = -eta_ym * gmu_ym;
+            // ============ x-face (i-1/2, j) ============
+            Real eta_face_xm = Real(0.5)*(eta(i-1,j,k) + eta(i,j,k));
+            Real dxe_xm      = (eta(i,j,k) - eta(i-1,j,k)) * dx_inv;
+            Real dye_xm      = Real(0.25) * (eta(i-1,j+1,k) + eta(i,j+1,k)
+                                           - eta(i-1,j-1,k) - eta(i,j-1,k)) * dy_inv;
+            Real lap_face_xm = Real(0.5) * (lap9(i-1,j,k) + lap9(i,j,k));
+            Real ge2_xm      = dxe_xm*dxe_xm + dye_xm*dye_xm;
+            Real Sxx_xm = -kappa_*dxe_xm*dxe_xm + kappa_*eta_face_xm*lap_face_xm + Real(0.5)*kappa_*ge2_xm;
+            Real Sxy_xm = -kappa_*dxe_xm*dye_xm;
 
-            // Cell-centered Korteweg force = divergence of face fluxes.
-            Real F_cap_x = (Fx_p - Fx_m) * dx_inv;
-            Real F_cap_y = (Fy_p - Fy_m) * dy_inv;
+            // ============ y-face (i, j+1/2) ============
+            Real eta_face_yp = Real(0.5)*(eta(i,j,k) + eta(i,j+1,k));
+            Real dxe_yp      = Real(0.25) * (eta(i+1,j,k) + eta(i+1,j+1,k)
+                                           - eta(i-1,j,k) - eta(i-1,j+1,k)) * dx_inv;
+            Real dye_yp      = (eta(i,j+1,k) - eta(i,j,k)) * dy_inv;
+            Real lap_face_yp = Real(0.5) * (lap9(i,j,k) + lap9(i,j+1,k));
+            Real ge2_yp      = dxe_yp*dxe_yp + dye_yp*dye_yp;
+            Real Syx_yp = -kappa_*dxe_yp*dye_yp;          // == Sxy by symmetry of Sigma_K
+            Real Syy_yp = -kappa_*dye_yp*dye_yp + kappa_*eta_face_yp*lap_face_yp + Real(0.5)*kappa_*ge2_yp;
+
+            // ============ y-face (i, j-1/2) ============
+            Real eta_face_ym = Real(0.5)*(eta(i,j-1,k) + eta(i,j,k));
+            Real dxe_ym      = Real(0.25) * (eta(i+1,j-1,k) + eta(i+1,j,k)
+                                           - eta(i-1,j-1,k) - eta(i-1,j,k)) * dx_inv;
+            Real dye_ym      = (eta(i,j,k) - eta(i,j-1,k)) * dy_inv;
+            Real lap_face_ym = Real(0.5) * (lap9(i,j-1,k) + lap9(i,j,k));
+            Real ge2_ym      = dxe_ym*dxe_ym + dye_ym*dye_ym;
+            Real Syx_ym = -kappa_*dxe_ym*dye_ym;
+            Real Syy_ym = -kappa_*dye_ym*dye_ym + kappa_*eta_face_ym*lap_face_ym + Real(0.5)*kappa_*ge2_ym;
+
+            // Cell-centered force = divergence of the Korteweg stress tensor.
+            //   (div Sigma)_x = d_x Sxx + d_y Sxy
+            //   (div Sigma)_y = d_x Syx + d_y Syy   (Syx == Sxy by tensor symmetry)
+            Real F_cap_x = (Sxx_xp - Sxx_xm) * dx_inv + (Syx_yp - Syx_ym) * dy_inv;
+            Real F_cap_y = (Sxy_xp - Sxy_xm) * dx_inv + (Syy_yp - Syy_ym) * dy_inv;
 
             // eta-weighted split across phases (matches BS source convention).
             Real eta_c = eta(i,j,k);
@@ -1742,7 +1803,7 @@ Hydro2::ApplyKortewegStress(int lev,
             Real w0 = Real(1.0) - eta_c;
             Real w1 = eta_c;
 
-            // Per-phase velocities for energy work term.
+            // Per-phase velocities for the energy-work term.
             Real safe_r0 = amrex::max(r0_arr(i,j,k), Real(1e-20));
             Real safe_r1 = amrex::max(r1_arr(i,j,k), Real(1e-20));
             Real u0x = M0_arr(i,j,k,0) / safe_r0;
