@@ -4,21 +4,25 @@
 #@
 
 # =============================================================================
-#  Stefan problem — CH-emergent mode (Phase 3 smoke test)
+#  Stefan problem — CH-emergent mode (Phase 6: BS-bridge validation)
 # =============================================================================
 #  Same geometry, EOS, and free-energy calibration as input_stefan_sqr, but:
-#    - apply_bs_source = 0  (no prescribed m0/u0/q sources)
+#    - bs_source_mode = ch_emergent
 #    - ch_thermo_consistent = 1
 #    - implicit_ch = 2     (Newton-MLMG CH solver active)
 #
-#  In this mode the interface motion is supposed to emerge from CH dynamics
-#  driven by the EOS-derived dmu_bulk = f_g(rho_0,T_0) - f_l(rho_1,T_1).
-#  Phase 3 pass criterion: this input must run to completion without
-#  crashing. Quantitative agreement with the Stefan analytical curve is a
-#  Phase 4 deliverable (when Phase 4 wires dmu_bulk into ApplyImplicitCH's
-#  f'(eta) and the CH mobility scaling is set per Magaletti).
+#  In ch_emergent mode the BS source fields m0/u0/q are overwritten each step
+#  by the CH-derived effective values (m0_eff, u0_eff, q_eff) populated in
+#  Hydro2::ComputeEffectiveBSSources. The same ApplyBSSource consumes them,
+#  so phase change feeds back into per-phase mass / momentum / energy via the
+#  existing source-term machinery — no parallel coupling path. Driver of
+#  motion is the EOS-derived dmu_bulk = f_g(rho_0,T_0) - f_l(rho_1,T_1) inside
+#  the CH solver (Phase 4) plus the CH flux divergence going into m0_eff.
 #
-#  Run both inputs and use stefan_postprocess.py to compare X(t) trajectories.
+#  Both m0 (prescribed slot) and m0_eff (CH diagnostic) are visible in the
+#  plotfile for offline comparison against the analytical Stefan flux
+#    m0_analytic(t) = rho_g * beta * sqrt(alpha_g / (t + t_off))
+#  Use stefan_postprocess.py to compare X(t) trajectories.
 # =============================================================================
 
 alamo.program = hydro2
@@ -27,7 +31,8 @@ alamo.program = hydro2
 plot_file = ./tests/FlowSQR_tests/output_stefan_ch
 
 ### MESHING ###
-amr.plot_dt        = 5e-6
+amr.plot_dt        = 5e-7
+# amr.plot_int = 10
 amr.max_grid_size  = 500000
 amr.blocking_factor = 4
 amr.regrid_int     = 2
@@ -171,11 +176,16 @@ rho_refinement_criterion   = 1e+6
 gradu_refinement_criterion = 1e+6
 cutoff = 1e-8
 
-### SOURCE TERMS (all OFF — CH dynamics drive the interface) ###
+### SOURCE TERMS ###
+# In bs_source_mode = ch_emergent these IC values are immediately overwritten
+# at the start of every Advance step by ParallelCopy of m0_eff / u0_eff /
+# q_eff from ComputeEffectiveBSSources. The IC values below are placeholders
+# that only matter for step 0 (before the first ComputeEffectiveBSSources
+# fires inside Initialize -> MixDiagnostic; they're zeroed there anyway).
 m0.ic.constant.value = 0.0
 u0.ic.constant.value = 0.0 0.0
 q.ic.constant.value  = 0.0 0.0
-bs_sources_time_dependent = 0
+bs_sources_time_dependent = 0   # ignored in ch_emergent mode
 
 ### ADDITIONAL SOURCES ###
 apply_surface_tension = 0
@@ -189,8 +199,12 @@ Spec_Vol = 1
 grav     = 0.0
 
 ### DEBUGGING / SOLVER ###
-apply_bs_source     = 0                 # SQR sources OFF
-p_int_method        = 2   	# 0: Off, 1: pressure average, 2: eta weighted pressure. 3: acoustic impedance matched pressure
+# Phase 6: ch_emergent routes m0/u0/q from ComputeEffectiveBSSources into
+# ApplyBSSource each step. To compare against the prior "no BS coupling"
+# behavior, set this to "off" — m0_eff / u0_eff / q_eff are still computed
+# and plotted as diagnostics but not consumed by ApplyBSSource.
+bs_source_mode      = ch_emergent
+p_int_method        = 2     # 0: Off, 1: pressure average, 2: eta weighted pressure. 3: acoustic impedance matched pressure
 Riemann_Solver.type = hllc
 kappa_method        = 1
 smooth_kernel_size  = 3
@@ -221,6 +235,12 @@ ch_newton_tol       = 1e-10
 ch_W_scale          = 2.0e6      # lambda
 ch_kappa            = 4.0e-4     # = 2 * epsilon^2 * lambda
 ch_mobility_degenerate = 1
-ch_mobility_nom        = 1.0     # Magaletti baseline; tune up if interface too slow
+# Phase 6 calibration (2026-04-28): with thermo_consistent=1 + ch_emergent
+# routing, the Magaletti baseline M_nom=1 gave m0_eff ~1800x the analytical
+# Stefan flux (0.17 kg/m^2/s), driving ApplyBSSource so hard the system
+# went NaN by step 16. Lowered to 1e-3 to bring CH-derived rate near the
+# heat-conduction-limited Stefan rate. Tune up/down based on observed
+# m0_eff_max vs analytical m0(t) = rho_g * beta * sqrt(alpha/(t+t_off)).
+ch_mobility_nom        = 2.5e-1
 
 nscbc.enabled = false

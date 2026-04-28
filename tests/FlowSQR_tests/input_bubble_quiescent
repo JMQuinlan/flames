@@ -201,7 +201,7 @@ Spec_Vol = 1
 grav = 0.0
 
 ## DEBUGGING ###
-apply_bs_source = 1
+bs_source_mode = prescribed
 p_int_method = 0 # 0: Off, 1: pressure average, 2: eta weighted pressure. 3: acoustic impedance matched pressure
 Riemann_Solver.type = hllc
 kappa_method = 1   # 1:"Smooth Normals" (default)  2:"Height Function"  3:"Hybrid (HF+SN blend)"

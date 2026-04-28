@@ -1069,6 +1069,7 @@ void Hydro2::ComputeEffectiveBSSources(int lev)
     BL_PROFILE("Hydro2::ComputeEffectiveBSSources");
 
     const Geometry& geom = this->geom[lev];
+
     const Real* DX = geom.CellSize();
     const Box& domain = geom.Domain();
     const Real dx_inv = Real(1.0) / DX[0];

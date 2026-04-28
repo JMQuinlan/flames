@@ -127,7 +127,7 @@ sigma = 0;
 Dv = 0;
 g = 0.0;
 
-apply_bs_source = 1
+bs_source_mode = prescribed
 apply_surface_tension = 0
 apply_weight = 0
 apply_vaporization = 0

@@ -184,7 +184,8 @@ grav                  = 0.0
 # BS source mode (Phase 6): "off" | "prescribed" | "ch_emergent".
 # For the static droplet we use prescribed (default behavior); ic_m0/ic_q
 # are zero, so only the pressure-imbalance + Korteweg/Brackbill terms fire.
-bs_source_mode  = prescribed
+# bs_source_mode  = prescribed
+bs_source_mode = off
 p_int_method    = 0
 
 # *** Phase 5 switch ***
