@@ -16,7 +16,7 @@ yt.funcs.mylog.setLevel(40)
 # ============================================================================
 
 # Specify the AMReX output directory containing the *cell folders
-amrex_output_dir = r'..\..\..\bin\tests\FlowRiemannUnitTests\output_Garrick_GasLiquid13'
+amrex_output_dir = r'..\..\..\bin\tests\FlowRiemannUnitTests\output_Garrick_GasLiquid14'
 
 # Specify the output folder for saving plots
 output_folder = r'./Images'

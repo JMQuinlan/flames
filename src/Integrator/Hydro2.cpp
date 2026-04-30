@@ -698,16 +698,18 @@ void Hydro2::SurfaceTension(Set::Scalar time, int lev)
 ///////////////////////////////////////////////// RHS /////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 void
-Hydro2::RHS(int lev, 
-    Set::Scalar time, 
-    amrex::MultiFab &rho_eta0_rhs_mf, 
-    amrex::MultiFab &rho_eta1_rhs_mf, 
-    amrex::MultiFab &M_rhs_mf, 
-    amrex::MultiFab &E_rhs_mf, 
+Hydro2::RHS(int lev,
+    Set::Scalar time,
+    amrex::MultiFab &rho_eta0_rhs_mf,
+    amrex::MultiFab &rho_eta1_rhs_mf,
+    amrex::MultiFab &M_rhs_mf,
+    amrex::MultiFab &E_rhs_mf,
+    amrex::MultiFab &eta_rhs_mf,
     const amrex::MultiFab &rho_eta0_mf_in,
     const amrex::MultiFab &rho_eta1_mf_in,
-    const amrex::MultiFab &M_mf_in, 
-    const amrex::MultiFab &E_mf_in) //, const amrex::MultiFab &velocity_mf_in, const amrex::MultiFab &pressure_mf_in, const amrex::MultiFab &T_mf_in)
+    const amrex::MultiFab &M_mf_in,
+    const amrex::MultiFab &E_mf_in,
+    const amrex::MultiFab &eta_mf_in)
 {
     BL_PROFILE("Integrator::Hydro2::RHS");
 
@@ -719,32 +721,21 @@ Hydro2::RHS(int lev,
     amrex::MultiFab::Copy(*rho_eta1_mf[lev], rho_eta1_mf_in, 0, 0, 1, 0);
     amrex::MultiFab::Copy(*momentum_mf[lev], M_mf_in, 0, 0, AMREX_SPACEDIM, 0);
     amrex::MultiFab::Copy(*energy_per_vol_mf[lev], E_mf_in, 0, 0, 1, 0);
-
+    amrex::MultiFab::Copy(*eta_mf[lev], eta_mf_in, 0, 0, 1, 0);
 
     // Eta Fields
-    // for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
 
-        // CONSERVATIVE
         auto rho_eta0 = rho_eta0_mf[lev]->array(mfi);
         auto rho_eta1 = rho_eta1_mf[lev]->array(mfi);
         Set::Patch<Set::Scalar> rho = density_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> eta = eta_mf.Patch(lev, mfi);
 
-        
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            auto sten = Numeric::GetStencil(i, j, k, domain);
-
             rho(i, j, k) = std::max(rho_eta0(i, j, k) + rho_eta1(i, j, k), small);
-
-            // eta(i, j, k) = (rho(i, j, k) - rho_eta1(i, j, k)) / (rho_eta0(i, j, k) - rho_eta1(i, j, k) + small);
-            eta(i, j, k) = rho_eta0(i, j, k) / rho(i, j, k);
-
-            // CUTOFFS
-            eta(i, j, k) = std::max(0.0, std::min(1.0, (eta(i, j, k) - cutoff) / (1.0 - 2.0 * cutoff)));
-            
+            eta(i, j, k) = std::max(0.0, std::min(1.0, eta(i, j, k)));
         });
     }
     
@@ -932,8 +923,9 @@ Hydro2::RHS(int lev,
         // OUTPUTS
         Set::Patch<Set::Scalar> rho_eta0_rhs = rho_eta0_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> rho_eta1_rhs = rho_eta1_rhs_mf.array(mfi);
-        Set::Patch<Set::Scalar> M_rhs = M_rhs_mf.array(mfi);
-        Set::Patch<Set::Scalar> E_rhs = E_rhs_mf.array(mfi);
+        Set::Patch<Set::Scalar> M_rhs       = M_rhs_mf.array(mfi);
+        Set::Patch<Set::Scalar> E_rhs       = E_rhs_mf.array(mfi);
+        Set::Patch<Set::Scalar> eta_rhs     = eta_rhs_mf.array(mfi);
 
         // SOURCES
         Set::Patch<Set::Scalar> omega = vorticity_mf.Patch(lev, mfi);
@@ -1373,11 +1365,28 @@ Hydro2::RHS(int lev,
                 Util::Abort(INFO);
             }
 
-            // Upwind volume fractions
+            // Upwind volume fractions (face-centered alpha, advected by HLLC contact wave speed u*)
             Set::Scalar eta_face_xlo = (flux_xlo.u_interface > 0.0) ? eta(i - 1, j, k) : eta(i, j, k);
             Set::Scalar eta_face_xhi = (flux_xhi.u_interface > 0.0) ? eta(i, j, k) : eta(i + 1, j, k);
             Set::Scalar eta_face_ylo = (flux_ylo.u_interface > 0.0) ? eta(i, j - 1, k) : eta(i, j, k);
             Set::Scalar eta_face_yhi = (flux_yhi.u_interface > 0.0) ? eta(i, j, k) : eta(i, j + 1, k);
+
+            // ------------------------------------------------------------
+            // Non-conservative volume-fraction advection (Saurel & Abgrall 1999, Eq. 41)
+            //   D(eta)/Dt = deta/dt + u*∇eta = 0
+            // Discretized as
+            //   deta/dt = -div(u eta) + eta * divu
+            // ------------------------------------------------------------
+            {
+                Set::Scalar div_uA_x = (flux_xhi.u_interface * eta_face_xhi
+                                      - flux_xlo.u_interface * eta_face_xlo) / DX[0];
+                Set::Scalar div_uA_y = (flux_yhi.u_interface * eta_face_yhi
+                                      - flux_ylo.u_interface * eta_face_ylo) / DX[1];
+                Set::Scalar div_u_x  = (flux_xhi.u_interface - flux_xlo.u_interface) / DX[0];
+                Set::Scalar div_u_y  = (flux_yhi.u_interface - flux_ylo.u_interface) / DX[1];
+                eta_rhs(i, j, k) = -(div_uA_x + div_uA_y)
+                                   + eta(i, j, k) * (div_u_x + div_u_y);
+            }
 
 
             // UPDATE MIXED FLUID VARIABLES
@@ -1500,16 +1509,18 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // ------------------------------------------------------------
 
     amrex::Vector<amrex::MultiFab> solution_new;
-    solution_new.emplace_back(*rho_eta0_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
-    solution_new.emplace_back(*rho_eta1_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
-    solution_new.emplace_back(*momentum_mf[lev].get(), amrex::MakeType::make_alias, 0, 2);
+    solution_new.emplace_back(*rho_eta0_mf[lev].get(),       amrex::MakeType::make_alias, 0, 1);
+    solution_new.emplace_back(*rho_eta1_mf[lev].get(),       amrex::MakeType::make_alias, 0, 1);
+    solution_new.emplace_back(*momentum_mf[lev].get(),       amrex::MakeType::make_alias, 0, 2);
     solution_new.emplace_back(*energy_per_vol_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
+    solution_new.emplace_back(*eta_mf[lev].get(),            amrex::MakeType::make_alias, 0, 1);
 
     amrex::Vector<amrex::MultiFab> solution_old;
-    solution_old.emplace_back(*rho_eta0_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
-    solution_old.emplace_back(*rho_eta1_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
-    solution_old.emplace_back(*momentum_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 2);
+    solution_old.emplace_back(*rho_eta0_old_mf[lev].get(),       amrex::MakeType::make_alias, 0, 1);
+    solution_old.emplace_back(*rho_eta1_old_mf[lev].get(),       amrex::MakeType::make_alias, 0, 1);
+    solution_old.emplace_back(*momentum_old_mf[lev].get(),       amrex::MakeType::make_alias, 0, 2);
     solution_old.emplace_back(*energy_per_vol_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
+    solution_old.emplace_back(*eta_old_mf[lev].get(),            amrex::MakeType::make_alias, 0, 1);
 
     amrex::TimeIntegrator timeintegrator(solution_new, time);
 
@@ -1517,24 +1528,40 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                                amrex::Vector<amrex::MultiFab> &rhs_mf,
                                amrex::Vector<amrex::MultiFab> &solution_mf,
                                const Set::Scalar time) {
-        RHS(lev, time, rhs_mf[0], rhs_mf[1], rhs_mf[2], rhs_mf[3], solution_mf[0], solution_mf[1], solution_mf[2], solution_mf[3]);
+        // rhs_mf:      [0]=rho_eta0_rhs, [1]=rho_eta1_rhs, [2]=M_rhs, [3]=E_rhs, [4]=eta_rhs
+        // solution_mf: [0]=rho_eta0,     [1]=rho_eta1,     [2]=M,     [3]=E,     [4]=eta
+        RHS(lev, time,
+            rhs_mf[0], rhs_mf[1], rhs_mf[2], rhs_mf[3], rhs_mf[4],
+            solution_mf[0], solution_mf[1], solution_mf[2], solution_mf[3], solution_mf[4]);
     });
 
     timeintegrator.set_post_stage_action([&](amrex::Vector<amrex::MultiFab> &stage_mf, Set::Scalar time) {
         // Copy stage data to working arrays
-        amrex::MultiFab::Copy(*rho_eta0_mf[lev], stage_mf[0], 0, 0, 1, nghost);
-        amrex::MultiFab::Copy(*rho_eta1_mf[lev], stage_mf[1], 0, 0, 1, nghost);
-        amrex::MultiFab::Copy(*momentum_mf[lev], stage_mf[2], 0, 0, AMREX_SPACEDIM, nghost);
-        amrex::MultiFab::Copy(*energy_per_vol_mf[lev], stage_mf[3], 0, 0, 1, nghost);
+        amrex::MultiFab::Copy(*rho_eta0_mf[lev],       stage_mf[0], 0, 0, 1,              nghost);
+        amrex::MultiFab::Copy(*rho_eta1_mf[lev],       stage_mf[1], 0, 0, 1,              nghost);
+        amrex::MultiFab::Copy(*momentum_mf[lev],       stage_mf[2], 0, 0, AMREX_SPACEDIM, nghost);
+        amrex::MultiFab::Copy(*energy_per_vol_mf[lev], stage_mf[3], 0, 0, 1,              nghost);
+        amrex::MultiFab::Copy(*eta_mf[lev],            stage_mf[4], 0, 0, 1,              nghost);
+
+        // Clamp eta in domain prior to ghost fill (state can drift slightly outside [0,1])
+        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto eta = eta_mf[lev]->array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                eta(i, j, k) = std::max(0.0, std::min(1.0, eta(i, j, k)));
+            });
+        }
 
         // Fill all ghost cells
         FillGhost4BC(lev, time);
 
         // Copy back
-        amrex::MultiFab::Copy(stage_mf[0], *rho_eta0_mf[lev], 0, 0, 1, nghost);
-        amrex::MultiFab::Copy(stage_mf[1], *rho_eta1_mf[lev], 0, 0, 1, nghost);
-        amrex::MultiFab::Copy(stage_mf[2], *momentum_mf[lev], 0, 0, AMREX_SPACEDIM, nghost);
-        amrex::MultiFab::Copy(stage_mf[3], *energy_per_vol_mf[lev], 0, 0, 1, nghost);
+        amrex::MultiFab::Copy(stage_mf[0], *rho_eta0_mf[lev],       0, 0, 1,              nghost);
+        amrex::MultiFab::Copy(stage_mf[1], *rho_eta1_mf[lev],       0, 0, 1,              nghost);
+        amrex::MultiFab::Copy(stage_mf[2], *momentum_mf[lev],       0, 0, AMREX_SPACEDIM, nghost);
+        amrex::MultiFab::Copy(stage_mf[3], *energy_per_vol_mf[lev], 0, 0, 1,              nghost);
+        amrex::MultiFab::Copy(stage_mf[4], *eta_mf[lev],            0, 0, 1,              nghost);
 
     });
 
@@ -1580,17 +1607,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
-            rho(i, j, k) = rho_eta0(i, j, k) + rho_eta1(i, j, k);
-            eta_new(i, j, k) = rho_eta0(i, j, k) / (rho(i, j, k) + small);
+            rho(i, j, k) = std::max(rho_eta0(i, j, k) + rho_eta1(i, j, k), small);
+            eta_new(i, j, k) = std::max(0.0, std::min(1.0, eta_new(i, j, k)));
 
-            eta_new(i, j, k) = std::max(0.0, std::min(1.0, (eta_new(i, j, k) - cutoff) / (1.0 - 2.0 * cutoff)));
-            rho(i, j, k) = std::max(rho(i, j, k), small);
-
-            check4nans(time, lev, i, j, k, "ERROR IN Advance(): Conservative Variable Check", { 
-                { "eta_new", eta_new(i, j, k) }, 
-                { "rho_eta0", rho_eta0(i, j, k) }, 
-                { "rho_eta1", rho_eta1(i, j, k) }, 
-                { "rho", rho(i, j, k) } 
+            check4nans(time, lev, i, j, k, "ERROR IN Advance(): Conservative Variable Check", {
+                { "eta_new", eta_new(i, j, k) },
+                { "rho_eta0", rho_eta0(i, j, k) },
+                { "rho_eta1", rho_eta1(i, j, k) },
+                { "rho", rho(i, j, k) }
             });
         });
     } // end rho, eta solver loop
@@ -1790,17 +1814,67 @@ void Hydro2::Regrid(int lev, Set::Scalar regrid_time)
 {
     BL_PROFILE("Integrator::Hydro2::Regrid");
 
-    if (lev < finest_level)
-        return;
+    // -------------------------------------------------------------------
+    // The Alamo / AMReX framework has already reallocated EVERY registered
+    // MultiFab at this level (see Integrator::MakeNewLevelFromCoarse and
+    // Integrator::RemakeLevel) and run FillCoarsePatch / FillPatch on each
+    // one. State fabs (rho_eta0, rho_eta1, M, E, eta, ...) therefore hold
+    // valid coarse-interpolated or copied data on the new grid.
+    //
+    // What the framework does NOT do correctly for us:
+    //
+    //   (a) Derived "scratch" fabs registered with &bc_nothing (Source,
+    //       Fsv, Fw, kappas, fluxes, gradients, ...) get FillCoarsePatched
+    //       through a no-op BC, which can leave garbage in physical-boundary
+    //       and coarse-fine ghost cells.  Even though RHS overwrites these
+    //       every call, plotfiles, CFL queries, and any reduction that runs
+    //       between regrid and the next Advance can see those bad values
+    //       (which is what manifests as "Fsv/Fw break when refinement is
+    //       enabled").
+    //
+    //   (b) Ghost cells for the conservative state on the regridded level
+    //       are not necessarily filled to the full nghost stencil width
+    //       that NSCBC4 (nghost=4) needs.  The next RHS will call
+    //       FillGhost4BC anyway, but doing it here closes the window where
+    //       diagnostic / refinement-tagging code reads stale ghosts.
+    //
+    // The previous implementation early-exited with
+    //     if (lev < finest_level) return;
+    // which skipped both fixes on any level that wasn't currently the
+    // finest -- i.e. on every coarser level that gets regridded. That is
+    // exactly when Fsv/Fw break. The early-exit is gone; this routine now
+    // runs on every level the framework asks us to regrid.
+    // -------------------------------------------------------------------
 
-    // Fill BCs and ghost cells after regridding
+    // (a) Zero derived scratch fields that are unconditionally written each
+    //     RHS call. We zero rather than touch them because they have no
+    //     meaningful BC and their interpolated values are not physical.
+    Source_mf[lev]              ->setVal(0.0);   // RHS source / forcing
+    Fsv_mf[lev]                 ->setVal(0.0);   // surface tension
+    Fw_mf[lev]                  ->setVal(0.0);   // weight / body force
+    Ldot_mf[lev]                ->setVal(0.0);   // Lagrange / IB term
+    Vap_dot_mf[lev]             ->setVal(0.0);   // vaporization tracker
+    rho_flux_mf[lev]            ->setVal(0.0);   // Riemann mass flux divergence
+    M_flux_mf[lev]              ->setVal(0.0);   // Riemann momentum flux divergence
+    E_flux_mf[lev]              ->setVal(0.0);   // Riemann energy flux divergence
+    div_tau_mf[lev]             ->setVal(0.0);   // viscous stress divergence
+    hess_u_mf[lev]              ->setVal(0.0);   // velocity Hessian (debug)
+    grad_eta_mf[lev]            ->setVal(0.0);   // grad(eta) (debug / forcing input)
+    kappas_mf[lev]              ->setVal(0.0);   // curvature
+    grad_mag_grad_eta_mf[lev]   ->setVal(0.0);   // |grad(eta)| gradient (debug)
+    n_hat_mf[lev]               ->setVal(0.0);   // interface normal
+    hess_eta_mf[lev]            ->setVal(0.0);   // Hessian of eta
+    mu_chem_mf[lev]             ->setVal(0.0);   // chemical potential
+    Bm_mf[lev]                  ->setVal(0.0);   // Spalding number
+    Y_mf[lev]                   ->setVal(0.0);   // mass fraction (diagnostic)
+
+    // (b) Refill ghost cells for the conservative state on this level so
+    //     anything that runs between now and the next RHS sees consistent
+    //     ghosts (TagCellsForRefinement, plotfile output, CFL queries).
     FillGhost4BC(lev, regrid_time);
 
-    Source_mf[lev]->setVal(0.0);
-    Fsv_mf[lev]->setVal(0.0);
-    Fw_mf[lev]->setVal(0.0); 
-
-    Util::Message(INFO, "Regridding on level", lev);
+    Util::Message(INFO, "Regridding on level", lev,
+                  "(derived scratch fields zeroed; ghosts refilled)");
 }// end regrid
 
 //void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray &a_tags, Set::Scalar time, int ngrow)
@@ -2342,6 +2416,14 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
     // ============================================================================
     // STEP 6: Update eta from corrected densities
     // ============================================================================
+    // WARNING: This recovery (eta = rho_eta0 / rho_total) is the legacy
+    // mass-fraction form that the new state model deliberately abandons.
+    // It is dead code while apply_sharpening=0. If sharpening is re-enabled,
+    // the sharpening algorithm needs to be reworked to operate on the
+    // independent volume-fraction state (eta_mf) directly rather than via
+    // the conservative phase masses; otherwise it will silently overwrite
+    // the volume fraction with the mass fraction every sharpening pass.
+    // ============================================================================
 
     for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
     {
@@ -2644,7 +2726,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     }
 
     // ------------------------------------------------------------
-    // STEP 2: Compute mixed quantities (rho, eta) in DOMAIN
+    // STEP 2: Compute total density in DOMAIN; clamp eta.
     // ------------------------------------------------------------
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
@@ -2656,14 +2738,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         auto eta = eta_mf[lev]->array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            // Total density
-            rho(i, j, k) = rho_eta0(i, j, k) + rho_eta1(i, j, k);
-            rho(i, j, k) = std::max(rho(i, j, k), small);
-
-            // Volume fraction
-            eta(i, j, k) = rho_eta0(i, j, k) / rho(i, j, k);
-
-            // Clamp eta to [0, 1] to prevent NaN in EOS
+            rho(i, j, k) = std::max(rho_eta0(i, j, k) + rho_eta1(i, j, k), small);
             eta(i, j, k) = std::max(0.0, std::min(1.0, eta(i, j, k)));
         });
     }
@@ -2889,7 +2964,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     }
 
     // ------------------------------------------------------------
-    // STEP 6: Compute mixed quantities in GHOST CELLS
+    // STEP 6: Update total density in GHOST CELLS; clamp eta.
     // ------------------------------------------------------------
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
@@ -2901,14 +2976,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         auto eta = eta_mf[lev]->array(mfi);
 
         amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            // Total density
-            rho(i, j, k) = rho_eta0(i, j, k) + rho_eta1(i, j, k);
-            rho(i, j, k) = std::max(rho(i, j, k), small);
-
-            // Volume fraction
-            eta(i, j, k) = rho_eta0(i, j, k) / rho(i, j, k);
-
-            // Clamp to [0, 1]
+            rho(i, j, k) = std::max(rho_eta0(i, j, k) + rho_eta1(i, j, k), small);
             eta(i, j, k) = std::max(0.0, std::min(1.0, eta(i, j, k)));
         });
     }
