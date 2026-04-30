@@ -16,11 +16,18 @@
 #   sigma = 7.28
 #   mu_l  = 0
 #
-# Predicted Chen 2D R_min ~= 4.3 mm at t ~= 21 ms.
-# Wall Mach number peaks at ~0.35 (compressibility starts to matter).
-# At minimum the bubble is ~22% of R0, well-resolved on 128 cells per
-# 200 mm box (cells per radius at minimum ~3 - bordering under-resolved,
-# good enough for early/mid collapse, bump to 256 for tighter validation).
+# COLLAPSE IS VERY FAST - first minimum within ~1 ms:
+#   t = 0.000 ms  ->  R/R0 = 1.000  (initial)
+#   t = 0.050 ms  ->  R/R0 = 0.998
+#   t = 0.100 ms  ->  R/R0 = 0.990
+#   t = 0.500 ms  ->  R/R0 = 0.771
+#   t = 1.000 ms  ->  R/R0 = 0.261  (first minimum)
+#   t = 2.000 ms  ->  R/R0 = 0.953  (rebound)
+# Wall Mach number peaks ~0.35 (compressibility starts to matter).
+# Plot every 0.05 ms to resolve the collapse cleanly.
+# At minimum, bubble is ~25% of R0, ~3 cells per radius - bordering
+# under-resolved on 128^2; bump to 256^2 if you want tighter validation
+# through the minimum.
 # =============================================================================
 
 alamo.program = hydro2
@@ -29,7 +36,7 @@ alamo.program = hydro2
 plot_file = ./tests/FlowRayleighPlesset/OtherTests/output_RPE_04_StrongCollapse
 
 ### MESHING ###
-amr.plot_dt        = 2.0e-4
+amr.plot_dt        = 5.0e-5         # 0.05 ms - collapse is very fast
 amr.max_grid_size  = 500000
 amr.blocking_factor = 2
 amr.regrid_int     = 5
@@ -51,7 +58,7 @@ cfl                     = 0.2
 geometry.prob_lo     = -0.10 -0.10 0.0
 geometry.prob_hi     =  0.10  0.10 0.0
 geometry.is_periodic = 0 0 0
-stop_time            = 2.5e-2     # 25 ms covers Chen 2D collapse + initial rebound
+stop_time            = 5.0e-3     # 5 ms covers first collapse + rebound
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression

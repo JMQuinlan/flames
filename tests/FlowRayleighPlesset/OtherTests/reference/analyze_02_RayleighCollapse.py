@@ -32,7 +32,7 @@ P = Params(
     Rdot0=0.0,
     r_inf=0.10,
 )
-T_END = 4.0e-2
+T_END = 1.5e-2     # 15 ms covers first collapse + rebound (matches input)
 
 OUTPUT_DIR = os.path.normpath(
     os.path.join(_HERE, "..", "..", "..", "..", "bin", "tests",

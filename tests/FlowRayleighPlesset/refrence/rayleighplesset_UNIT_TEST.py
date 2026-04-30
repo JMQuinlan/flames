@@ -62,7 +62,7 @@ bubble_center_y = 0.0     # Y-coordinate of bubble center [m]
 eta_contour = 0.5         # Interface location (0.5 = midpoint)
 
 # File paths
-amrex_output_dir = r'../../../bin/tests/RayleighPlesset/output_RayleighPlesset_UNIT_TEST'  # Directory containing AMReX plot files
+amrex_output_dir = r'../../../bin/tests/RayleighPlesset/output_RayleighPlesset_UNIT_TEST_Comp'  # Directory containing AMReX plot files
 
 # Analytical RPE solver parameters
 r_inf = 5.0 * R0          # Far-field boundary for RPE

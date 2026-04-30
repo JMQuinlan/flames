@@ -16,7 +16,18 @@
 #   sigma = 7.28 (water-air analog)
 #   mu_l  = 0
 #
-# Predicted Chen 2D R_min ~= 5.9 mm at t ~= 32.5 ms.
+# COLLAPSE DYNAMICS ARE FAST. From the Chen 2D ODE:
+#   t = 0.0  ms  ->  R/R0 = 1.000  (initial)
+#   t = 0.1  ms  ->  R/R0 = 0.996
+#   t = 0.5  ms  ->  R/R0 = 0.907
+#   t = 1.0  ms  ->  R/R0 = 0.654
+#   t = 2.0  ms  ->  R/R0 = 0.388
+#   t = 5.0  ms  ->  R/R0 = 0.319  (near first minimum)
+#   t = 10.0 ms  ->  R/R0 = 0.972  (rebound)
+# Plot every 0.1 ms to resolve the collapse. The first non-zero plot frame
+# (at t = 0.1 ms) shows R/R0 = 0.996 - very close to 1.0. If your previous
+# run jumped from R0 to ~0.91 in one frame, the cause was plot_dt too coarse,
+# not an IC mismatch (verified: input and analyze script both use R0=0.02).
 # =============================================================================
 
 alamo.program = hydro2
@@ -25,7 +36,7 @@ alamo.program = hydro2
 plot_file = ./tests/FlowRayleighPlesset/OtherTests/output_RPE_02_RayleighCollapse
 
 ### MESHING ###
-amr.plot_dt        = 5.0e-4
+amr.plot_dt        = 1.0e-4         # 0.1 ms - tight enough to resolve the rapid collapse
 amr.max_grid_size  = 500000
 amr.blocking_factor = 2
 amr.regrid_int     = 10
@@ -47,7 +58,7 @@ cfl                     = 0.2
 geometry.prob_lo     = -0.10 -0.10 0.0
 geometry.prob_hi     =  0.10  0.10 0.0
 geometry.is_periodic = 0 0 0
-stop_time            = 4.0e-2     # 40 ms covers Chen 2D collapse + initial rebound
+stop_time            = 1.5e-2     # 15 ms covers first collapse + rebound + ~half of next
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression

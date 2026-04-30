@@ -5,7 +5,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/RayleighPlesset/output_RayleighPlesset_UNIT_TEST
+plot_file = ./tests/RayleighPlesset/output_RayleighPlesset_UNIT_TEST_Comp
 
 ### MESHING ###
 amr.plot_dt = 5e-4
@@ -15,7 +15,7 @@ amr.blocking_factor = 2
 amr.regrid_int = 10
 amr.grid_eff = 0.8
 amr.max_level = 0
-amr.n_cell = 128 128
+amr.n_cell = 512 512
 nghost = 4
 
 ### TIME STEPPING ###
@@ -27,8 +27,8 @@ dynamictimestep.min = 1e-12
 cfl = 0.2
 
 ### DIMENSIONS ###
-geometry.prob_lo = -0.10 -0.10 0.0
-geometry.prob_hi =  0.10  0.10 0.0
+geometry.prob_lo = -0.40 -0.40 0.0
+geometry.prob_hi =  0.40  0.40 0.0
 geometry.is_periodic = 0 0 0
 stop_time = 50e-3
 
@@ -43,7 +43,7 @@ epsilon = eta.ic.expression.constant.epsilon
 # EQUATION OF STATE - FLUID 0 (LIQUID)
 #======================================================================
 eos0.gamma = 7.15
-eos0.p0 = 5000.0         # Stiffened gas pressure [Pa]
+eos0.p0 = 0.0 # 5000.0         # Stiffened gas pressure [Pa]
 eos0.cv = 714.286        # cv = cp/gamma = 1000.0/1.4
 eos0.cp = 1000.0         # Specific heat at constant pressure [J/(kg·K)]
 

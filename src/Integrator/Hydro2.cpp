@@ -1099,8 +1099,8 @@ Hydro2::RHS(int lev,
                     //Fsv_vector(0) = sigma_eff * kappa * n_hat(0) * UFFDA;    // / (grad_eta_mag + small)); // / (DX[0] + small);
                     //Fsv_vector(1) = sigma_eff * kappa * n_hat(1) * UFFDA; // / (grad_eta_mag + small)); // / (DX[1] + small);
                     
-                    Fsv_vector(0) = sigma_eff * kappa * grad_eta(0) * epsilon; // / (grad_eta_mag + small)); // / (DX[1] + small);
-                    Fsv_vector(1) = sigma_eff * kappa * grad_eta(1) * epsilon; // / (grad_eta_mag + small)); // / (DX[1] + small);
+                    Fsv_vector(0) = sigma_eff * kappa * grad_eta(0); // * epsilon; // / (grad_eta_mag + small)); // / (DX[1] + small);
+                    Fsv_vector(1) = sigma_eff * kappa * grad_eta(1); // * epsilon; // / (grad_eta_mag + small)); // / (DX[1] + small);
                 } 
             }
             Fsv(i, j, k, 0) = Fsv_vector(0);
