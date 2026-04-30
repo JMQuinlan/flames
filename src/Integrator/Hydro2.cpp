@@ -1073,7 +1073,7 @@ Hydro2::RHS(int lev,
             // ------------------------------------------------------------
             // Surface Tension
             // ------------------------------------------------------------
-            // Fsv =  simga * kappa * n_hat
+            // Fsv =  simga * kappa * grad_eta
             Set::Vector Fsv_vector = Set::Vector(0.0, 0.0);
             if (apply_surface_tension)
             {
@@ -1814,67 +1814,32 @@ void Hydro2::Regrid(int lev, Set::Scalar regrid_time)
 {
     BL_PROFILE("Integrator::Hydro2::Regrid");
 
-    // -------------------------------------------------------------------
-    // The Alamo / AMReX framework has already reallocated EVERY registered
-    // MultiFab at this level (see Integrator::MakeNewLevelFromCoarse and
-    // Integrator::RemakeLevel) and run FillCoarsePatch / FillPatch on each
-    // one. State fabs (rho_eta0, rho_eta1, M, E, eta, ...) therefore hold
-    // valid coarse-interpolated or copied data on the new grid.
-    //
-    // What the framework does NOT do correctly for us:
-    //
-    //   (a) Derived "scratch" fabs registered with &bc_nothing (Source,
-    //       Fsv, Fw, kappas, fluxes, gradients, ...) get FillCoarsePatched
-    //       through a no-op BC, which can leave garbage in physical-boundary
-    //       and coarse-fine ghost cells.  Even though RHS overwrites these
-    //       every call, plotfiles, CFL queries, and any reduction that runs
-    //       between regrid and the next Advance can see those bad values
-    //       (which is what manifests as "Fsv/Fw break when refinement is
-    //       enabled").
-    //
-    //   (b) Ghost cells for the conservative state on the regridded level
-    //       are not necessarily filled to the full nghost stencil width
-    //       that NSCBC4 (nghost=4) needs.  The next RHS will call
-    //       FillGhost4BC anyway, but doing it here closes the window where
-    //       diagnostic / refinement-tagging code reads stale ghosts.
-    //
-    // The previous implementation early-exited with
-    //     if (lev < finest_level) return;
-    // which skipped both fixes on any level that wasn't currently the
-    // finest -- i.e. on every coarser level that gets regridded. That is
-    // exactly when Fsv/Fw break. The early-exit is gone; this routine now
-    // runs on every level the framework asks us to regrid.
-    // -------------------------------------------------------------------
+    // Multifabs to Zero Fill (only matters in domain)
+    FillBoundariesWithZero(lev, {
+        Source_mf[lev].get(),               // RHS source / forcing
+        Fsv_mf[lev].get(),                  // surface tension
+        Fw_mf[lev].get(),                   // weight / body force
+        Ldot_mf[lev].get(),                 // Lagrange / IB term
+        Vap_dot_mf[lev].get(),              // vaporization tracker
+        rho_flux_mf[lev].get(),             // Riemann mass flux divergence
+        M_flux_mf[lev].get(),               // Riemann momentum flux divergence
+        E_flux_mf[lev].get(),               // Riemann energy flux divergence
+        div_tau_mf[lev].get(),              // viscous stress divergence
+        hess_u_mf[lev].get(),               // velocity Hessian (debug)
+        grad_eta_mf[lev].get(),             // grad(eta)
+        kappas_mf[lev].get(),               // curvature
+        grad_mag_grad_eta_mf[lev].get(),    // |grad(eta)| gradient
+        n_hat_mf[lev].get(),                // interface normal
+        hess_eta_mf[lev].get(),             // Hessian of eta
+        mu_chem_mf[lev].get(),              // chemical potential
+        Bm_mf[lev].get(),                   // Spalding number
+        Y_mf[lev].get()                     // mass fraction (diagnostic)
+    });
 
-    // (a) Zero derived scratch fields that are unconditionally written each
-    //     RHS call. We zero rather than touch them because they have no
-    //     meaningful BC and their interpolated values are not physical.
-    Source_mf[lev]              ->setVal(0.0);   // RHS source / forcing
-    Fsv_mf[lev]                 ->setVal(0.0);   // surface tension
-    Fw_mf[lev]                  ->setVal(0.0);   // weight / body force
-    Ldot_mf[lev]                ->setVal(0.0);   // Lagrange / IB term
-    Vap_dot_mf[lev]             ->setVal(0.0);   // vaporization tracker
-    rho_flux_mf[lev]            ->setVal(0.0);   // Riemann mass flux divergence
-    M_flux_mf[lev]              ->setVal(0.0);   // Riemann momentum flux divergence
-    E_flux_mf[lev]              ->setVal(0.0);   // Riemann energy flux divergence
-    div_tau_mf[lev]             ->setVal(0.0);   // viscous stress divergence
-    hess_u_mf[lev]              ->setVal(0.0);   // velocity Hessian (debug)
-    grad_eta_mf[lev]            ->setVal(0.0);   // grad(eta) (debug / forcing input)
-    kappas_mf[lev]              ->setVal(0.0);   // curvature
-    grad_mag_grad_eta_mf[lev]   ->setVal(0.0);   // |grad(eta)| gradient (debug)
-    n_hat_mf[lev]               ->setVal(0.0);   // interface normal
-    hess_eta_mf[lev]            ->setVal(0.0);   // Hessian of eta
-    mu_chem_mf[lev]             ->setVal(0.0);   // chemical potential
-    Bm_mf[lev]                  ->setVal(0.0);   // Spalding number
-    Y_mf[lev]                   ->setVal(0.0);   // mass fraction (diagnostic)
-
-    // (b) Refill ghost cells for the conservative state on this level so
-    //     anything that runs between now and the next RHS sees consistent
-    //     ghosts (TagCellsForRefinement, plotfile output, CFL queries).
+    // Multifabs to fill with BC args (actually matter, mainly conservative but applicable to primative too) 
     FillGhost4BC(lev, regrid_time);
 
-    Util::Message(INFO, "Regridding on level", lev,
-                  "(derived scratch fields zeroed; ghosts refilled)");
+    Util::Message(INFO, "Regridding on level", lev);
 }// end regrid
 
 //void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray &a_tags, Set::Scalar time, int ngrow)
@@ -2659,6 +2624,30 @@ void Hydro2::FillBoundariesWithBC(int lev, Set::Scalar time, BC::BC<Set::Scalar>
         {
             Util::ParallelMessage(INFO, "-------------------------------");
             Util::ParallelMessage(INFO, "NaNs after FillBoundariesWithBC");
+            Util::Abort(INFO);
+        }
+    }
+}
+
+// FillBoundariesWithZero(): Fill Boundries with Zero
+// Example Usage: FillBoundariesWithZero(lev, { x_mf[lev].get(), y_mf[lev].get() });
+void Hydro2::FillBoundariesWithZero(int lev, std::initializer_list<amrex::MultiFab *> mfs)
+{
+    BL_PROFILE("Integrator::Hydro2::FillBoundariesWithZero");
+    (void)lev;
+    for (auto *mf : mfs)
+    {
+        if (mf != nullptr)
+        {
+            mf->setVal(0.0);
+        }
+
+        // Checking
+        bool err_verbose = false;
+        if (err_verbose && mf != nullptr && mf->contains_nan())
+        {
+            Util::ParallelMessage(INFO, "-------------------------------");
+            Util::ParallelMessage(INFO, "NaNs after FillBoundariesWithZero");
             Util::Abort(INFO);
         }
     }

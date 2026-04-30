@@ -36,8 +36,8 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 10
 amr.grid_eff = 0.8
-amr.max_level = 0
-amr.n_cell = 256 256
+amr.max_level = 8
+amr.n_cell = 16 16
 
 nghost = 4
 
@@ -186,12 +186,12 @@ nscbc.yhi.target_v = 0.0
 nscbc.small = 1.0e-10
 
 ### REFINEMENT CRITERIA ###
-eta_refinement_criterion = 1e+10
-omega_refinement_criterion = 1e+10
-p_refinement_criterion = 1e+10
-rho_refinement_criterion = 1e+10
-gradu_refinement_criterion = 1e+10
-cutoff = 1e-4
+eta_refinement_criterion = 1e-1
+omega_refinement_criterion = 10.55
+p_refinement_criterion = 1e+7
+rho_refinement_criterion = 1e+6
+gradu_refinement_criterion = 1e+6
+cutoff = 1e-16
 
 ### SOURCE TERMS ###
 m0.ic.constant.value = 0.0
