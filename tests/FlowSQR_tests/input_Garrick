@@ -6,12 +6,9 @@
 # Figure 4 - Gass Liquid Riemann Problem
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Garrick_20260423
-Riemann_Solver.type = hllc
+plot_file = ./tests/FlowSQR_tests/output_Garrick_20260428
 
-
-
-amr.plot_int = 50
+amr.plot_int = 1
 
 ### MESHING ###
 amr.max_level = 0
@@ -55,13 +52,6 @@ gamma_eta1 = 5.5
 pi_eta1    = 1.505
 mu_eta1   = 0.0
 
-
-
-
-
-### Surface tension coefficient ###
-sigma = 1000
-
 ### Reference pressure ###
 pref = 0.0
 
@@ -80,7 +70,8 @@ cv_eta0 = "1.0"
 
 ### IC State - eta=1 phase (RHS, x > 0): liquid ###
 density_eta1.ic.type = constant
-density_eta1.ic.constant.value = 0.991
+# density_eta1.ic.constant.value = 0.991
+density_eta1.ic.constant.value = 1.241
 
 velocity_eta1.ic.type = constant
 velocity_eta1.ic.constant.value = 0.0 0.0
@@ -121,32 +112,61 @@ rho_refinement_criterion   = 100000.0
 p_refinement_criterion     = 100000.0
 
 Spec_Vol = 1
-kappa_method = 1
 
 sigma = 0;
 Dv = 0;
 g = 0.0;
 
-bs_source_mode = prescribed
 apply_surface_tension = 0
 apply_weight = 0
 apply_vaporization = 0
-p_int_method = 0 # 0: Off, 1: pressure average, 2: eta weighted pressure. 3: acoustic impedance matched pressure
 
-kappa_method = 1   # 1:"Smooth Normals" (default)  2:"Height Function"  3:"Hybrid (HF+SN blend)"
-smooth_kernel_size = 5  # Gaussian normal smoothing kernel: 3 (3x3, default) or 5 (5x5)
-nghost = 4             # Ghost cell depth (= N_int for HF band). Requires amr.blocking_factor >= nghost.
+### DEBUGGING / SOLVER ###
+# Phase 6: ch_emergent routes m0/u0/q from ComputeEffectiveBSSources into
+# ApplyBSSource each step. To compare against the prior "no BS coupling"
+# behavior, set this to "off" — m0_eff / u0_eff / q_eff are still computed
+# and plotted as diagnostics but not consumed by ApplyBSSource.
+bs_source_mode      = ch_emergent
+# bs_source_mode      = off
+korteweg_well_balanced = 0
+p_int_method        = 2     # 0: Off, 1: pressure average, 2: eta weighted pressure. 3: acoustic impedance matched pressure
+Riemann_Solver.type = hllc
+kappa_method        = 1
+smooth_kernel_size  = 3
+nghost              = 4
+integration.type    = ForwardEuler
 
-integration.type = ForwardEuler
-# integration.type = RungeKutta
+# Implicit CH active (Phase 4 will wire dmu_bulk into f'(eta) here).
+implicit_ch     = 0
+# Phase 4 mobility (spec §1.7): the new ch_mobility_scaling param controls
+# how ch_mobility_nom is interpreted.
+#   "magaletti"  -> M_eff = ch_mobility_nom * epsilon^2  (default; matched-asymptotic)
+#                   With epsilon = 5e-6, factor = 2.5e-11, so for M_eff ~ 1e-4
+#                   you would need ch_mobility_nom ~ 4e6.
+#   "allen_cahn" -> M_eff = ch_mobility_nom * epsilon
+#   "explicit"   -> M_eff = ch_mobility_nom directly  (used here for clarity).
+# ch_mobility_scaling = magaletti
+ch_mobility_scaling = explicit
+ch_newton_iters     = 5
+ch_newton_tol       = 1e-10
 
-# implicit_ch = 1
-# ch_mobility_nom = 0.032   # optional: override auto M = 2*ε*c_max
-# ch_mobility_nom = 1e-4  # seems to need to be smaller
-# implicit_ch = 0 # solves CH rhs explicitly (faster but dx^4 reduction in timestep needed, so only on course grids)
-implicit_ch = 2
-#   ch_mobility_nom = 4e-3
-  ch_mobility_nom = 0
-  ch_newton_iters = 5       # default, usually converges in 3
-  ch_newton_tol = 1e-10     # default
-  ch_W_scale = 1.0          # double-well amplitude (1.0 = standard; >1 narrows interface, <1 widens)
+# Spinodal-margin rescaling.  With Clausius-Clapeyron-calibrated (q,q'),
+# |dmu_bulk| at 50 K superheat is ~4e5 J/kg.  CH theory needs |dmu|/lambda
+# < 0.385 (spec §1.10), so lambda must be >= ~1.3e6.  Choose lambda = 2e6
+# to leave headroom.  Then keep delta = epsilon (=4*dx) by setting
+# kappa = 2*epsilon^2*lambda = 4e-4 (decoupled from the legacy kappa=eps^2).
+# Implied surface tension sigma = sqrt(2*kappa*lambda)/6 ~ 6.7 N/m -- about
+# 100x water's, but sigma is a spectator parameter for a planar Stefan
+# problem (no curvature), so this is fine.  Document and move on.
+ch_W_scale          = 2.0e6      # lambda
+ch_kappa            = 4.0e-4     # = 2 * epsilon^2 * lambda
+ch_mobility_degenerate = 1
+# Phase 6 calibration (2026-04-28): with thermo_consistent=1 + ch_emergent
+# routing, the Magaletti baseline M_nom=1 gave m0_eff ~1800x the analytical
+# Stefan flux (0.17 kg/m^2/s), driving ApplyBSSource so hard the system
+# went NaN by step 16. Lowered to 1e-3 to bring CH-derived rate near the
+# heat-conduction-limited Stefan rate. Tune up/down based on observed
+# m0_eff_max vs analytical m0(t) = rho_g * beta * sqrt(alpha/(t+t_off)).
+ch_mobility_nom        = 0
+
+nscbc.enabled = false

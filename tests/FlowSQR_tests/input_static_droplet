@@ -39,7 +39,7 @@ plot_file = ./tests/FlowSQR_tests/output_static_droplet
 
 ### MESHING ###
 amr.plot_dt = 1.0e-6
-amr.plot_int = 100
+amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 4
 amr.regrid_int = 1

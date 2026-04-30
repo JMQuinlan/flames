@@ -32,16 +32,17 @@ plot_file = ./tests/FlowSQR_tests/output_stefan_ch
 
 ### MESHING ###
 amr.plot_dt        = 5e-7
-# amr.plot_int = 10
+amr.plot_int = 1
 amr.max_grid_size  = 500000
 amr.blocking_factor = 4
-amr.regrid_int     = 2
+amr.regrid_int     = 1
 amr.grid_eff       = 0.8
 amr.max_level      = 0
 amr.n_cell         = 400 8
+# amr.n_cell         = 200 4
 
 ### TIME STEPING ###
-timestep                = 1e-9
+timestep                = 1e-10
 dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
 dynamictimestep.max     = 1e-8
@@ -241,6 +242,6 @@ ch_mobility_degenerate = 1
 # went NaN by step 16. Lowered to 1e-3 to bring CH-derived rate near the
 # heat-conduction-limited Stefan rate. Tune up/down based on observed
 # m0_eff_max vs analytical m0(t) = rho_g * beta * sqrt(alpha/(t+t_off)).
-ch_mobility_nom        = 2.5e-1
+ch_mobility_nom        = 10.e-1
 
 nscbc.enabled = false

@@ -250,7 +250,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // DIFFUSE PARAMETERS
         value.RegisterNewFab(value.eta_mf,          value.energy_bc, 1, nghost, "eta", true, true);
-        value.RegisterNewFab(value.eta_old_mf,      value.energy_bc, 1, nghost, "eta_old", false, true);
+        value.RegisterNewFab(value.eta_old_mf,      value.energy_bc, 1, nghost, "eta_old", true, true);
         value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing, 1, nghost, "etadot", true, false);
         value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing, 4, nghost, "hess_eta", false, false, { "00", "01", "10", "11" });
         value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing,  2, nghost, "n_hat", false, false, { "x", "y" });
