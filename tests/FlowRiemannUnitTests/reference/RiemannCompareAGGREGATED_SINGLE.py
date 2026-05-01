@@ -196,6 +196,8 @@ case_to_group = {
     'Tammann_cavitation': 'cavitation',
     'Tammann_bubble_expansion': 'bubble_expansion',
     'Tammann_bubble_collapse': 'bubble_collapse',
+    # Mixed
+    'Garrick' : 'Garrick',
 }
 
 # ============================================================================

@@ -12,7 +12,7 @@ import os
 yt.funcs.mylog.setLevel(40)
 
 # Configuration
-case_name = 'Toro1a'
+case_name = 'Garrick'
 Tammann = '.' # Change to "." for not Tammann and "TammannEOS" for Tamman
 #Tammann = '.' # Change to "." for not Tammann and "TammannEOS" for Tamman
 hdf5_file = fr'{Tammann}\{case_name}.hdf5'
@@ -37,6 +37,8 @@ case_to_group = {
     'Tammann_cavitation' : 'cavitation',
     'Tammann_bubble_expansion' : 'bubble_expansion',
     'Tammann_bubble_collapse' : 'bubble_collapse',
+    # Mixed
+    'Garrick' : 'Garrick',
 }
 group_name = case_to_group.get(case_name, case_name)
 
