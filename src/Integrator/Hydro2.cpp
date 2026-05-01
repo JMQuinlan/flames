@@ -954,7 +954,7 @@ Hydro2::RHS(int lev,
         Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
 
 
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) 
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
@@ -1192,7 +1192,7 @@ Hydro2::RHS(int lev,
                 //B_M = std::max(B_M, 0.0); // Only evaporation, no condensation in this formulation
 
                 // Gas density from fluid 0 (eta=1 corresponds to fluid 0)
-                Set::Scalar rho_g = rho_eta0(i, j, k) / std::max(eta(i, j, k), small);
+                Set::Scalar rho_g = rho0(i, j, k);
 
                 // Scaling density choice: using rho_eta = rho_g makes RHS independent of mixture density
                 // This is consistent with the document recommendation
@@ -1231,7 +1231,7 @@ Hydro2::RHS(int lev,
             Set::Vector Total_Force = Set::Vector(Fsv_vector(0) + Fw_vector(0),
                                                   Fsv_vector(1) + Fw_vector(1));
             
-            Source(i, j, k, 0) = mdot0 + m_dot_Vap;
+            Source(i, j, k, 0) = mdot0;
             /*
             Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0);// + M_dot_Vap(0);
             Source(i, j, k, 2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1);// + M_dot_Vap(1);
@@ -1376,7 +1376,8 @@ Hydro2::RHS(int lev,
                 Set::Scalar div_u_x  = (flux_xhi.u_interface - flux_xlo.u_interface) / DX[0];
                 Set::Scalar div_u_y  = (flux_yhi.u_interface - flux_ylo.u_interface) / DX[1];
                 eta_rhs(i, j, k) = -(div_uA_x + div_uA_y)
-                                   + eta(i, j, k) * (div_u_x + div_u_y);
+                                   + eta(i, j, k) * (div_u_x + div_u_y)
+                                   + eta_dot_Vap;
             }
 
 
@@ -1403,8 +1404,13 @@ Hydro2::RHS(int lev,
             Set::Scalar rho_eta1_flux = (F_rho_eta1_xlo - F_rho_eta1_xhi) / DX[0]
                                         + (F_rho_eta1_ylo - F_rho_eta1_yhi) / DX[1];
 
-            rho_eta0_rhs(i, j, k) = rho_eta0_flux + Source(i, j, k, 0) * (eta(i, j, k));
-            rho_eta1_rhs(i, j, k) = rho_eta1_flux + Source(i, j, k, 0) * (1.0 - eta(i, j, k));
+            // NF-1 fix: vaporization is an ANTISYMMETRIC mass transfer between phases,
+            // not a mixture-mass source. Sign convention follows the existing comment in
+            // the vaporization block ("rho0 / eta=1 SHOULD BE THE GAS PHASE"): m_dot_Vap > 0
+            // means mass is created in phase 0 (gas) at the cost of phase 1 (liquid).
+            // Total mixture mass change from vaporization is (+m_dot_Vap) + (-m_dot_Vap) = 0.
+            rho_eta0_rhs(i, j, k) = rho_eta0_flux + Source(i, j, k, 0) * (eta(i, j, k))       + m_dot_Vap;
+            rho_eta1_rhs(i, j, k) = rho_eta1_flux + Source(i, j, k, 0) * (1.0 - eta(i, j, k)) - m_dot_Vap;
             
             // Momentum
             M_rhs(i, j, k, 0) = M_flux(i, j, k, 0) + Source(i, j, k, 1); //(mu * (lap_ux * eta(i, j, k))) +
@@ -2712,6 +2718,16 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     else
     {
         effective_nghost = 2;
+    }
+
+    // Fill Patches for regridding
+    if (lev > 0)
+    {
+        FillPatch(lev, time, rho_eta0_mf,        *rho_eta0_mf[lev],       *density_bc,  0);
+        FillPatch(lev, time, rho_eta1_mf,        *rho_eta1_mf[lev],       *density_bc,  0);
+        FillPatch(lev, time, momentum_mf,        *momentum_mf[lev],       *momentum_bc, 0);
+        FillPatch(lev, time, energy_per_vol_mf,  *energy_per_vol_mf[lev], *energy_bc,   0);
+        FillPatch(lev, time, eta_mf,             *eta_mf[lev],            *energy_bc,   0);
     }
 
     // ------------------------------------------------------------

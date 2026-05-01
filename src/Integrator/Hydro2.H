@@ -239,7 +239,7 @@ protected:
     Set::Field<Set::Scalar> hess_eta_mf;
     Set::Field<Set::Scalar> n_hat_mf;
 protected:
-   
+
     int n_step = 0;
 
     BC::BC<Set::Scalar>* density_bc = nullptr;

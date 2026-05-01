@@ -363,14 +363,20 @@ private:
     virtual void ClearLevel(int lev) override;
     virtual void ErrorEst(int lev, amrex::TagBoxArray& tags, amrex::Real time, int ngrow) override;
 
-
+protected:
     /// This is the function that is responsible for updating patch data.
+    /// Promoted from private to protected so derived integrators can refresh
+    /// coarse-fine ghost cells from inside Advance (e.g., between RK stages
+    /// of a sub-cycled AMR run, where the framework's once-per-Advance
+    /// FillPatch is not enough).
     void FillPatch(int lev, amrex::Real time,
         amrex::Vector<std::unique_ptr<amrex::MultiFab>>& source_mf,
         amrex::MultiFab& destination_multifab,
         BC::BC<Set::Scalar>& physbc,
         int icomp);
-    /// Simple utility to count cells 
+
+private:
+    /// Simple utility to count cells
     long CountCells(int lev);
     /// Timestep marching
     void TimeStep(int lev, amrex::Real time, int iteration);

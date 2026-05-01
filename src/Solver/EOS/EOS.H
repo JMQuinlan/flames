@@ -29,11 +29,11 @@ public:
     AMREX_GPU_HOST_DEVICE
     virtual Set::Scalar P0() const = 0;
 
-    /// Get specific heat at constant volume [J/(kg·K)]
+    /// Get specific heat at constant volume [J/(kgï¿½K)]
     AMREX_GPU_HOST_DEVICE
     virtual Set::Scalar Cv() const = 0;
 
-    /// Get specific heat at constant pressure [J/(kg·K)]
+    /// Get specific heat at constant pressure [J/(kgï¿½K)]
     AMREX_GPU_HOST_DEVICE
     virtual Set::Scalar Cp() const = 0;
 
@@ -217,9 +217,13 @@ public:
         return (p + gamma_eff * p0_eff) / (rho * cv_eff * (gamma_eff - 1.0));
     }
 
-    /// Compute mixture sound speed from (rho, p, eta)
+    /// Compute mixture sound speed from (rho, p, eta) -- ORIGINAL FROZEN FORM.
     /// Uses: a = sqrt(gamma_eff * (p + p0_eff) / rho)
-    /// This is your current formulation from Mix() function
+    /// This treats the diffuse band as a single Tammann fluid with effective
+    /// gamma and p0. It does NOT exhibit the two-phase sound-speed dip that
+    /// the true mechanical-equilibrium mixture has at intermediate alpha.
+    /// Kept here for reference / fallback; superseded by the Wood-form below.
+    /*
     AMREX_GPU_HOST_DEVICE
     static Set::Scalar MixedSoundSpeed(Set::Scalar rho,
                                        Set::Scalar p,
@@ -241,6 +245,57 @@ public:
         {
             return std::sqrt(gamma_eff * (p + p0_eff) / rho);
         }
+    }
+    */
+
+    /// Compute mixture sound speed from (rho, p, eta) -- Wood (Kapila) form.
+    ///
+    /// Bulk-modulus mixing rule for a mechanical-equilibrium two-phase mixture:
+    ///     1/(rho_mix * a_W^2) = alpha / (rho_0 a_0^2) + (1-alpha) / (rho_1 a_1^2)
+    /// For Tammann pure phase k:  rho_k a_k^2 = gamma_k (p + pi_k), so
+    ///     1/(rho_mix * a_W^2) = alpha / (gamma_0 (p + pi_0))
+    ///                         + (1-alpha) / (gamma_1 (p + pi_1))
+    ///
+    /// Reduces to the pure-phase Tammann sound speed in the alpha->0 / alpha->1
+    /// limits and produces the well-known sound-speed dip at intermediate alpha
+    /// (Wood 1930; Saurel-Petitpas-Berry 2009 Fig. 2).
+    AMREX_GPU_HOST_DEVICE
+    static Set::Scalar MixedSoundSpeed(Set::Scalar rho,
+                                       Set::Scalar p,
+                                       Set::Scalar eta,
+                                       const EOS &eos0,
+                                       const EOS &eos1,
+                                       Set::Scalar pref = 0.0,
+                                       Set::Scalar small = 1e-16)
+    {
+        (void)pref;
+
+        Set::Scalar gamma0 = eos0.Gamma();
+        Set::Scalar gamma1 = eos1.Gamma();
+        Set::Scalar p0_0   = eos0.P0();
+        Set::Scalar p0_1   = eos1.P0();
+
+        // Per-phase (p + pi); guard against unphysical (p + pi) <= 0.
+        Set::Scalar pp_0 = p + p0_0;
+        Set::Scalar pp_1 = p + p0_1;
+        if (pp_0 <= 0.0 || pp_1 <= 0.0)
+        {
+            return small;
+        }
+
+        // Per-phase compressibilities 1/(rho_k a_k^2) = 1/(gamma_k (p + pi_k))
+        Set::Scalar invK0 = 1.0 / (gamma0 * pp_0);
+        Set::Scalar invK1 = 1.0 / (gamma1 * pp_1);
+
+        Set::Scalar invK_mix = eta * invK0 + (1.0 - eta) * invK1;
+
+        if (rho <= small || invK_mix <= 0.0)
+        {
+            return small;
+        }
+
+        // a_W^2 = 1 / (rho_mix * invK_mix)
+        return std::sqrt(1.0 / (rho * invK_mix));
     }
 
     /// Safe sound speed calculation with error checking
