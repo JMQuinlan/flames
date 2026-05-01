@@ -11,14 +11,14 @@ alamo.program = hydro2
 plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowPatel/Test2_Vaporization
 
 ### MESHING ###
-amr.plot_dt = 1e-2
+amr.plot_dt = 10e-6 # 1e-2
 #amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
-amr.regrid_int = 20
+amr.regrid_int = 5
 amr.grid_eff = 0.8
 amr.max_level = 0
-amr.n_cell = 512 512  # Maintains aspect ratio for 0.02m � 0.01m domain
+amr.n_cell = 256 256 Maintains aspect ratio for 0.02m � 0.01m domain
 
 ### TIME STEPPING ###
 ## Static:
@@ -32,8 +32,8 @@ dynamictimestep.min = 1e-16
 cfl = 0.5
 
 ### DIMENSIONS ###
-geometry.prob_lo = -0.005 -0.005 0.0  # 1/4 tube left of droplet
-geometry.prob_hi =  0.005  0.005 0.0  # 3/4 tube right of droplet (0.02m � 0.01m)
+geometry.prob_lo = -0.0025 -0.0025 0.0  # 1/4 tube left of droplet
+geometry.prob_hi =  0.0025  0.0025 0.0  # 3/4 tube right of droplet (0.02m * 0.01m)
 geometry.is_periodic = 0 0 0
  
 ### TIME STEP ###
@@ -124,7 +124,7 @@ energy.bc.type.ylo = neumann
 energy.bc.type.yhi = neumann
 
 ### REFINEMENT CRITERIA ###
-eta_refinement_criterion = 1e-1
+eta_refinement_criterion = 1e-2
 omega_refinement_criterion = 10.55
 p_refinement_criterion = 1e+7
 rho_refinement_criterion = 1e+6

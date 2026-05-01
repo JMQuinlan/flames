@@ -49,6 +49,24 @@
 namespace Integrator
 {
 
+// Spalding mass-transfer number  B_M = (Y_local - Y_inf) / (1 - Y_local).
+// Single source of truth for both the Mix() and the RHS() pre-source loop --
+// avoids the previous bug where the two computations had drifted to a wrong
+// (1 + Y_inf) denominator. (Spalding 1953; Sirignano 2010 Eq. 2.18;
+// Abramzon-Sirignano IJHMT 1989 Eq. 18.)
+//
+// `Y_local` here is whatever vapor mass-fraction the caller chose to use --
+// in the simplified Spalding closure used in this code, that is the cell
+// mass fraction Y(i,j,k). A more rigorous implementation would evaluate
+// the saturation mass fraction via Antoine + Clausius-Clapeyron at the
+// interface temperature; out of scope for this fix (see F-2 in
+// bin/Spalding_Rep.md).
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+static Set::Scalar SpaldingBM(Set::Scalar Y_local, Set::Scalar Y_inf, Set::Scalar small)
+{
+    return (Y_local - Y_inf) / (1.0 - Y_local + small);
+}
+
 Hydro2::Hydro2(IO::ParmParse& pp) : Hydro2()
 {
     pp.queryclass(*this);
@@ -588,9 +606,9 @@ void Hydro2::Mix(int lev)
             // Mass Fraction
             Y(i, j, k) = rho_eta0(i, j, k) / (rho(i, j, k));
 
-            // Spalding Number
-            Bm(i, j, k) = (Y(i, j, k) - Y_infinity) / (1 + Y_infinity + small);
-            
+            // Spalding Number  (F-1 / F-10: single canonical helper, denominator (1 - Y))
+            Bm(i, j, k) = SpaldingBM(Y(i, j, k), Y_infinity, small);
+
             // Temperature
             T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
 
@@ -790,9 +808,9 @@ Hydro2::RHS(int lev,
 
             // Mass Fraction
             Y(i, j, k) = rho_eta0(i, j, k) / (rho(i, j, k));
-            
-            // Spalding Number
-            Bm(i, j, k) = (Y(i, j, k) - Y_infinity) / (1 + Y_infinity + small);
+
+            // Spalding Number  (F-1 / F-10: single canonical helper, denominator (1 - Y))
+            Bm(i, j, k) = SpaldingBM(Y(i, j, k), Y_infinity, small);
 
             // Curvature
             Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
@@ -1157,7 +1175,6 @@ Hydro2::RHS(int lev,
             // NOTE: rho0 (OR eta = 1) SHOULD BE THE GAS PHASE
             Set::Scalar eta_dot_Vap = 0.0;
             Set::Scalar m_dot_Vap = 0.0;
-            Set::Vector M_dot_Vap = Set::Vector(0.0, 0.0);
             Set::Scalar E_dot_Vap = 0.0;
             if (apply_vaporization == 1)
             {
@@ -1194,36 +1211,39 @@ Hydro2::RHS(int lev,
                 // Gas density from fluid 0 (eta=1 corresponds to fluid 0)
                 Set::Scalar rho_g = rho0(i, j, k);
 
-                // Scaling density choice: using rho_eta = rho_g makes RHS independent of mixture density
-                // This is consistent with the document recommendation
-                // Set::Scalar rho_eta = rho_g;
-                //Set::Scalar rho_eta = rho(i, j, k);//rho_g;
+                // Mass-transfer rate (volumetric) -- simplified Spalding form.
+                // m_dot_Vap = rho_g * D_v * (B_M / (1+B_M)) * |grad(eta)|     [kg/m^3/s]
+                // (We keep the simplified (B_M/(1+B_M)) factor instead of ln(1+B_M)
+                // and omit the Sherwood/length-scale prefactor for now -- see F-3.)
+                m_dot_Vap = rho_g * Dv * (B_M / (1.0 + B_M + small)) * grad_eta_mag;
 
-                // Vaporization source for eta equation (Equation 7):
-                // source_vap = (1/epsilon) * (rho_g * D_v / rho_eta) * (B_M/(1+B_M)) * |grad(eta)|
-                Set::Scalar vap_coeff = (rho_g * Dv / (rho_eta0(i, j, k) + small)) * (B_M / (1.0 + B_M + small));
-                eta_dot_Vap = (1.0 / epsilon) * vap_coeff * grad_eta_mag;
+                // Volume-fraction source from phase change (F-4 fix).
+                // Canonical 5-eq Allaire form (Saurel-Petitpas-Abgrall JFM 2008
+                // Eq. 44; Le Metayer-Massoni-Saurel IJMF 2013 Eq. 28; Schmidmayer
+                // JCP 2020 Eq. 8):
+                //     D(alpha_gas)/Dt |_phase = m_dot_vol * (1/rho_l - 1/rho_g)
+                // For evaporation (m_dot_Vap > 0) with rho_l > rho_g, this is
+                // positive, so the gas volume fraction grows. Phase 0 = gas
+                // (per the comment above); phase 1 = liquid in this code's
+                // convention.
+                Set::Scalar inv_rho_g = 1.0 / std::max(rho0(i, j, k), small);
+                Set::Scalar inv_rho_l = 1.0 / std::max(rho1(i, j, k), small);
+                eta_dot_Vap = m_dot_Vap * (inv_rho_l - inv_rho_g);
 
-                // FLUXES
-                m_dot_Vap = rho_g * Dv * (B_M / (1.0 + B_M + small)) * grad_eta_mag; // Mass Flux
-                M_dot_Vap = u * m_dot_Vap * grad_eta_mag;                            // Momentum Flux
-                E_dot_Vap = u.dot(M_dot_Vap) * grad_eta_mag;                         // Energy Flux
-
-                /*
-                m_dot_Vap = m_dot_Vap * (1.0 / epsilon);                             // Mass Flux
-                M_dot_Vap = M_dot_Vap * (1.0 / epsilon); // Momentum Flux
-                E_dot_Vap = E_dot_Vap * (1.0 / epsilon);                             // Energy Flux
-                */
-                m_dot_Vap = m_dot_Vap;
-                M_dot_Vap = M_dot_Vap;
-                E_dot_Vap = E_dot_Vap;
-                
+                // Energy "flux" diagnostic -- NOT applied to Source[3] (commented
+                // out at line 1259-ish below). Kept inactive per F-6 ignore;
+                // formula reproduced below without referencing the deleted
+                // M_dot_Vap (F-5) so it stays compileable. Mathematically
+                // identical to the previous u.dot(u * m_dot_Vap * |grad_eta|) * |grad_eta|.
+                E_dot_Vap = m_dot_Vap * (u(0)*u(0) + u(1)*u(1)) * grad_eta_mag * grad_eta_mag;
             }
-            // Vaporization Trackers
+            // Vaporization Trackers (Vap_dot[2..3] used to hold M_dot_Vap which
+            // has been removed per F-5; left as zero so the plotfile field
+            // shape is preserved without changing the registration).
             Vap_dot(i, j, k, 0) = eta_dot_Vap;
             Vap_dot(i, j, k, 1) = m_dot_Vap;
-            Vap_dot(i, j, k, 2) = M_dot_Vap(0);
-            Vap_dot(i, j, k, 3) = M_dot_Vap(1);
+            Vap_dot(i, j, k, 2) = 0.0;
+            Vap_dot(i, j, k, 3) = 0.0;
             Vap_dot(i, j, k, 4) = E_dot_Vap;
 
 
@@ -1232,15 +1252,13 @@ Hydro2::RHS(int lev,
                                                   Fsv_vector(1) + Fw_vector(1));
             
             Source(i, j, k, 0) = mdot0;
-            /*
-            Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0);// + M_dot_Vap(0);
-            Source(i, j, k, 2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1);// + M_dot_Vap(1);
-            Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force);// + E_dot_Vap;
-            */
 
-            Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0) + M_dot_Vap(0);
-            Source(i, j, k, 2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1) + M_dot_Vap(1);
-            Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force) + E_dot_Vap;
+            // Momentum source from phase change is ZERO in 5-eq velocity-equilibrium
+            // (vapor leaves at the local fluid velocity -- Saurel-Petitpas JFM 2008
+            // Eq. 3). M_dot_Vap was removed per F-5.
+            Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0);
+            Source(i, j, k, 2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1);
+            Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force);// + E_dot_Vap;
 
             // Lagrange terms to enforce no-penetration
             Source(i, j, k, 1) = Source(i, j, k, 1) - lagrange * u.dot(grad_eta) * grad_eta(0);
@@ -1409,7 +1427,7 @@ Hydro2::RHS(int lev,
             // the vaporization block ("rho0 / eta=1 SHOULD BE THE GAS PHASE"): m_dot_Vap > 0
             // means mass is created in phase 0 (gas) at the cost of phase 1 (liquid).
             // Total mixture mass change from vaporization is (+m_dot_Vap) + (-m_dot_Vap) = 0.
-            rho_eta0_rhs(i, j, k) = rho_eta0_flux + Source(i, j, k, 0) * (eta(i, j, k))       + m_dot_Vap;
+            rho_eta0_rhs(i, j, k) = rho_eta0_flux + Source(i, j, k, 0) * (eta(i, j, k)) + m_dot_Vap;
             rho_eta1_rhs(i, j, k) = rho_eta1_flux + Source(i, j, k, 0) * (1.0 - eta(i, j, k)) - m_dot_Vap;
             
             // Momentum
