@@ -1209,7 +1209,7 @@ Hydro2::RHS(int lev,
                 //B_M = std::max(B_M, 0.0); // Only evaporation, no condensation in this formulation
 
                 // Gas density from fluid 0 (eta=1 corresponds to fluid 0)
-                Set::Scalar rho_g = rho0(i, j, k);
+                Set::Scalar rho_g = rho_eta0(i, j, k);
 
                 // Mass-transfer rate (volumetric) -- simplified Spalding form.
                 // m_dot_Vap = rho_g * D_v * (B_M / (1+B_M)) * |grad(eta)|     [kg/m^3/s]
@@ -1226,8 +1226,8 @@ Hydro2::RHS(int lev,
                 // positive, so the gas volume fraction grows. Phase 0 = gas
                 // (per the comment above); phase 1 = liquid in this code's
                 // convention.
-                Set::Scalar inv_rho_g = 1.0 / std::max(rho0(i, j, k), small);
-                Set::Scalar inv_rho_l = 1.0 / std::max(rho1(i, j, k), small);
+                Set::Scalar inv_rho_g = 1.0 / std::max(rho_eta0(i, j, k), small);
+                Set::Scalar inv_rho_l = 1.0 / std::max(rho_eta1(i, j, k), small);
                 eta_dot_Vap = m_dot_Vap * (inv_rho_l - inv_rho_g);
 
                 // Energy "flux" diagnostic -- NOT applied to Source[3] (commented
@@ -1382,9 +1382,9 @@ Hydro2::RHS(int lev,
 
             // ------------------------------------------------------------
             // Non-conservative volume-fraction advection (Saurel & Abgrall 1999, Eq. 41)
-            //   D(eta)/Dt = deta/dt + u*∇eta = 0
+            //   D(eta)/Dt = deta/dt + u*grad(eta) = 0
             // Discretized as
-            //   deta/dt = -div(u eta) + eta * divu
+            //   deta/dt = -div(u eta) + eta * div(u)
             // ------------------------------------------------------------
             {
                 Set::Scalar div_uA_x = (flux_xhi.u_interface * eta_face_xhi
@@ -1422,11 +1422,7 @@ Hydro2::RHS(int lev,
             Set::Scalar rho_eta1_flux = (F_rho_eta1_xlo - F_rho_eta1_xhi) / DX[0]
                                         + (F_rho_eta1_ylo - F_rho_eta1_yhi) / DX[1];
 
-            // NF-1 fix: vaporization is an ANTISYMMETRIC mass transfer between phases,
-            // not a mixture-mass source. Sign convention follows the existing comment in
-            // the vaporization block ("rho0 / eta=1 SHOULD BE THE GAS PHASE"): m_dot_Vap > 0
-            // means mass is created in phase 0 (gas) at the cost of phase 1 (liquid).
-            // Total mixture mass change from vaporization is (+m_dot_Vap) + (-m_dot_Vap) = 0.
+            // Mass
             rho_eta0_rhs(i, j, k) = rho_eta0_flux + Source(i, j, k, 0) * (eta(i, j, k)) + m_dot_Vap;
             rho_eta1_rhs(i, j, k) = rho_eta1_flux + Source(i, j, k, 0) * (1.0 - eta(i, j, k)) - m_dot_Vap;
             

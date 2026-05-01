@@ -6,13 +6,13 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = ./tests/FlowPatel/Test2_Vaporization
+plot_file = ./tests/FlowPatel/Test2_Vaporization
 #plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowPatel/Test2_Vaporization
-plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowPatel/Test2_Vaporization
+#plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowPatel/Test2_Vaporization
 
 ### MESHING ###
-amr.plot_dt = 10e-6 # 1e-2
-#amr.plot_int = 1
+#amr.plot_dt = 10e-6 # 1e-2
+amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 5
