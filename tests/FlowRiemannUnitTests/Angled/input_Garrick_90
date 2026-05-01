@@ -1,0 +1,130 @@
+#@ [case1]
+#@ exe=hydro2
+#@ dim=2
+
+# Garrick et al. (2017) Section 4.1 - Gas-Liquid Riemann Problem, ROTATED at 90 deg
+# Verifies x/y coupling: the 1D Riemann profile, when projected onto the
+# propagation direction n = (cos theta, sin theta), should be identical for any theta.
+
+### OUTPUT ###
+plot_file = ./tests/FlowRiemannUnitTests/Angled/output_Garrick_Angled_90
+Riemann_Solver.type = hllc
+
+# Rotated interface: s = x*cth + y*sth = 0
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = "1.25e-3"
+eta.ic.expression.constant.cth     = "0.0"
+eta.ic.expression.constant.sth     = "1.0"
+eta.ic.expression.region0 = "0.5 * (1.0 + tanh((x*cth + y*sth) / epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+amr.plot_int = 50
+
+### MESHING ###
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.grid_eff = 0.8
+amr.n_cell = 400 400
+
+### DIMENSIONS ###
+geometry.prob_lo = -1.0  -1.0   0.0 # [ m ]
+geometry.prob_hi =  1.0   1.0   0.0 # [ m ]
+geometry.is_periodic = 0 0 0
+
+### TIME STEP ###
+timestep  = 2.5e-4
+stop_time = 0.2
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+### HYDRO PARAM ###
+cfl   = 0.4
+
+## EOS ##
+eos0.gamma = 5.5
+eos1.gamma = 1.4
+eos0.p0 = 1.505
+eos1.p0 = 0.0
+eos0.cp = 1004.5
+eos1.cp = 1004.5
+eos0.cv = 717.5
+eos1.cv = 717.5
+
+## Viscosity ##
+mu0   = 0.0
+mu1   = 0.0
+
+### Surface tension coefficient ###
+sigma = 0.0
+
+### Reference pressure ###
+pref = 0.0
+
+### IC State - Fluid 0 (s < 0 side) - LIQUID ###
+density0.ic.type = constant
+density0.ic.constant.value = 0.991
+
+velocity0.ic.type = constant
+velocity0.ic.constant.value = 0.0 0.0
+
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 3.059e-4
+
+cp0 = 1.4
+cv0 = 1.0
+
+### IC State - Fluid 1 (s > 0 side) - GAS ###
+density1.ic.type = constant
+density1.ic.constant.value = 1.241
+
+velocity1.ic.type = constant
+velocity1.ic.constant.value = 0.0 0.0
+
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 2.753
+
+cp1 = 1.4
+cv1 = 1.0
+
+### HYDRO BC - neumann on all sides ###
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### HYDRO REFINEMENT CRITERIA ###
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+Spec_Vol = 1
+kappa_method = 1
+Dv = 0
+g = 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+
+nghost = 2
+
+apply_sharpening = 0
+sharpening_frequency = 100
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+omega_relax = 0.5;
