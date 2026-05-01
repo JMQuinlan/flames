@@ -131,6 +131,8 @@ private:
     void FillBoundariesWithZero(int lev, std::initializer_list<amrex::MultiFab *> mfs);
     // Wrapper Function for BCs and Primative Fields
     void FillGhost4BC(int lev, Set::Scalar time);
+    // Zero every derived/scratch MultiFabs
+    void ZeroDerivedScratchFields(int lev);
 
 protected:
     // FLUID 0

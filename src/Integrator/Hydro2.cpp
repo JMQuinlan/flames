@@ -198,10 +198,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // DIFFUSE PARAMETERS
         value.RegisterNewFab(value.eta_mf,           value.energy_bc, 1, nghost, "eta", true, true);
         value.RegisterNewFab(value.eta_old_mf,       value.energy_bc, 1, nghost, "eta_old", false, true);
-        value.RegisterNewFab(value.rho_eta0_mf,      value.density_bc, 1, nghost, "rho_eta0", true, false);
-        value.RegisterNewFab(value.rho_eta1_mf,      value.density_bc, 1, nghost, "rho_eta1", true, false);
-        value.RegisterNewFab(value.rho_eta0_old_mf,  value.density_bc, 1, nghost, "rho_eta0_old", false, false);
-        value.RegisterNewFab(value.rho_eta1_old_mf,  value.density_bc, 1, nghost, "rho_eta1_old", false, false);
+        value.RegisterNewFab(value.rho_eta0_mf,      value.density_bc, 1, nghost, "rho_eta0", true, true);
+        value.RegisterNewFab(value.rho_eta1_mf,      value.density_bc, 1, nghost, "rho_eta1", true, true);
+        value.RegisterNewFab(value.rho_eta0_old_mf,  value.density_bc, 1, nghost, "rho_eta0_old", false, true);
+        value.RegisterNewFab(value.rho_eta1_old_mf,  value.density_bc, 1, nghost, "rho_eta1_old", false, true);
 
         value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing, 1, 0, "etadot", true, false);
         value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing, 4, 0, "hess_eta", false, false, { "00", "01", "10", "11" });
@@ -434,19 +434,10 @@ void Hydro2::Initialize(int lev)
     // Calculate mixed variables based on individual fluid variables
     Mix(lev);
 
-    // NATURAL SOURCE
-    Source_mf[lev]  ->setVal(0.0);
-    Fsv_mf[lev]     ->setVal(0.0);
-    Fw_mf[lev]      ->setVal(0.0); 
-    Ldot_mf[lev]    ->setVal(0.0);
-    Vap_dot_mf[lev] ->setVal(0.0); 
+    // Zero Common Fields
+    ZeroDerivedScratchFields(lev);
 
-    // BOUNDRY CURVATURE AND THINGS
-    kappas_mf[lev]  ->setVal(0.0);
-    grad_mag_grad_eta_mf[lev]->setVal(0.0);
-    Bm_mf[lev]      ->setVal(0.0);  // Spalding Number
-
-    // MIXED PROPERTIES
+    // Initialize Riemander
     a_mf[lev]           ->setVal(0.0);
     Ma_mf[lev]          ->setVal(0.0);
     UE_per_vol_mf[lev]  ->setVal(0.0);
@@ -1814,29 +1805,10 @@ void Hydro2::Regrid(int lev, Set::Scalar regrid_time)
 {
     BL_PROFILE("Integrator::Hydro2::Regrid");
 
-    // Multifabs to Zero Fill (only matters in domain)
-    FillBoundariesWithZero(lev, {
-        Source_mf[lev].get(),               // RHS source / forcing
-        Fsv_mf[lev].get(),                  // surface tension
-        Fw_mf[lev].get(),                   // weight / body force
-        Ldot_mf[lev].get(),                 // Lagrange / IB term
-        Vap_dot_mf[lev].get(),              // vaporization tracker
-        rho_flux_mf[lev].get(),             // Riemann mass flux divergence
-        M_flux_mf[lev].get(),               // Riemann momentum flux divergence
-        E_flux_mf[lev].get(),               // Riemann energy flux divergence
-        div_tau_mf[lev].get(),              // viscous stress divergence
-        hess_u_mf[lev].get(),               // velocity Hessian (debug)
-        grad_eta_mf[lev].get(),             // grad(eta)
-        kappas_mf[lev].get(),               // curvature
-        grad_mag_grad_eta_mf[lev].get(),    // |grad(eta)| gradient
-        n_hat_mf[lev].get(),                // interface normal
-        hess_eta_mf[lev].get(),             // Hessian of eta
-        mu_chem_mf[lev].get(),              // chemical potential
-        Bm_mf[lev].get(),                   // Spalding number
-        Y_mf[lev].get()                     // mass fraction (diagnostic)
-    });
+    // Zero fill fields
+    ZeroDerivedScratchFields(lev);
 
-    // Multifabs to fill with BC args (actually matter, mainly conservative but applicable to primative too) 
+    // Apply BC
     FillGhost4BC(lev, regrid_time);
 
     Util::Message(INFO, "Regridding on level", lev);
@@ -2627,6 +2599,34 @@ void Hydro2::FillBoundariesWithBC(int lev, Set::Scalar time, BC::BC<Set::Scalar>
             Util::Abort(INFO);
         }
     }
+}
+
+// ZeroDerivedScratchFields(): Single source of truth for the list of
+// derived/scratch MultiFabs that need to be zeroed at IC time and after
+// every regrid
+void Hydro2::ZeroDerivedScratchFields(int lev)
+{
+    BL_PROFILE("Integrator::Hydro2::ZeroDerivedScratchFields");
+    FillBoundariesWithZero(lev, {
+        Source_mf[lev].get(),               // RHS source / forcing
+        Fsv_mf[lev].get(),                  // surface tension
+        Fw_mf[lev].get(),                   // weight / body force
+        Ldot_mf[lev].get(),                 // Lagrange / IB term
+        Vap_dot_mf[lev].get(),              // vaporization tracker
+        rho_flux_mf[lev].get(),             // Riemann mass flux divergence
+        M_flux_mf[lev].get(),               // Riemann momentum flux divergence
+        E_flux_mf[lev].get(),               // Riemann energy flux divergence
+        div_tau_mf[lev].get(),              // viscous stress divergence
+        hess_u_mf[lev].get(),               // velocity Hessian (debug)
+        grad_eta_mf[lev].get(),             // grad(eta)
+        kappas_mf[lev].get(),               // curvature
+        grad_mag_grad_eta_mf[lev].get(),    // |grad(eta)| gradient
+        n_hat_mf[lev].get(),                // interface normal
+        hess_eta_mf[lev].get(),             // Hessian of eta
+        mu_chem_mf[lev].get(),              // chemical potential
+        Bm_mf[lev].get(),                   // Spalding number
+        Y_mf[lev].get()                     // mass fraction (diagnostic)
+    });
 }
 
 // FillBoundariesWithZero(): Fill Boundries with Zero
