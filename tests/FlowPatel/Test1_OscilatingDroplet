@@ -7,8 +7,8 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 #plot_file = ./tests/FlowPatel/Test1_OscilatingDroplet
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowPatel/Test1_OscilatingDroplet
-#plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowPatel/Test1_OscilatingDroplet
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowPatel/Test1_OscilatingDroplet
+plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowPatel/Test1_OscilatingDroplet
 
 ### MESHING ###
 amr.plot_dt = 1e-3
@@ -18,7 +18,7 @@ amr.blocking_factor = 2
 amr.regrid_int = 20
 amr.grid_eff = 0.8
 amr.max_level = 0
-amr.n_cell = 512 512  # Maintains aspect ratio for 0.02m × 0.01m domain
+amr.n_cell = 512 512  # Maintains aspect ratio for 0.02m ï¿½ 0.01m domain
 
 ### TIME STEPPING ###
 ## Static:
@@ -33,7 +33,7 @@ cfl = 0.5
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.005 -0.005 0.0  # 1/4 tube left of droplet
-geometry.prob_hi =  0.005  0.005 0.0  # 3/4 tube right of droplet (0.02m × 0.01m)
+geometry.prob_hi =  0.005  0.005 0.0  # 3/4 tube right of droplet (0.02m ï¿½ 0.01m)
 geometry.is_periodic = 0 0 0
  
 ### TIME STEP ###
@@ -68,7 +68,7 @@ mu1_b = 0.001
 # Densities
 density0.ic.type = expression
 density0.ic.expression.constant.rho_air = 1.225
-density0.ic.expression.region0 = "*rho_air"
+density0.ic.expression.region0 = "rho_air"
 
 density1.ic.type = expression
 density1.ic.expression.constant.rho_water = 1000.0
