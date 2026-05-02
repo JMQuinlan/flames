@@ -35,7 +35,8 @@ import numpy as np
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_THIS_DIR, '..'))
 from shock_droplet_sweep_common import (
-    load_case, plot_radii_overlay, plot_contour_overlay,
+    load_case, plot_radii_overlay, plot_metric_overlay,
+    plot_contour_overlay,
 )
 
 # ============================================================================
@@ -97,9 +98,12 @@ EXTRACT_CONTOURS = True      # set False to skip the contour overlay (faster)
 # PLOT TOGGLES
 # ============================================================================
 
-PLOT_RADII_OVERLAY   = 1
-PLOT_CONTOUR_OVERLAY = 1
-NUM_CONTOUR_PANELS   = 6
+PLOT_RADII_OVERLAY      = 1   # overlaid R_x, R_y, AR vs t (one stacked figure)
+PLOT_MDOT_OVERLAY       = 1   # mdot(t) vs time, all Ma overlaid (own figure)
+PLOT_CUMMASS_OVERLAY    = 1   # cumulative mass vs time, all Ma overlaid (own figure)
+PLOT_AREA_OVERLAY       = 1   # A(t)/A0 vs time, all Ma overlaid (own figure)
+PLOT_CONTOUR_OVERLAY    = 1   # eta=0.5 multi-panel contour comparison
+NUM_CONTOUR_PANELS      = 6
 
 # ============================================================================
 # PLOT STYLING (publish-ready knobs)
@@ -179,8 +183,51 @@ def main():
         print(f"  Saved: {os.path.basename(png)}")
         print(f"  Saved: {os.path.basename(vec)}")
 
+    common_kw = dict(
+        title_suffix = f'  (We = {FIXED_WE}, Ma sweep)',
+        font_size_title  = FONT_SIZE_TITLE,
+        font_size_label  = FONT_SIZE_LABEL,
+        font_size_legend = FONT_SIZE_LEGEND,
+        font_size_tick   = FONT_SIZE_TICK,
+        line_width = LINE_WIDTH, dpi = DPI,
+        save_format_vector = SAVE_FORMAT_VECTOR,
+    )
+
+    if PLOT_MDOT_OVERLAY:
+        out = os.path.join(output_folder, '02_Mdot_Overlay_MaSweep')
+        png, vec = plot_metric_overlay(
+            case_data, metric_key='mdot_total', output_path=out,
+            ylabel='mdot (kg / s)',
+            title='Vaporization Mass-Transfer Rate',
+            ref_line=0.0, ref_label=None, **common_kw,
+        )
+        print(f"  Saved: {os.path.basename(png)}")
+        print(f"  Saved: {os.path.basename(vec)}")
+
+    if PLOT_CUMMASS_OVERLAY:
+        out = os.path.join(output_folder, '03_CumMass_Overlay_MaSweep')
+        png, vec = plot_metric_overlay(
+            case_data, metric_key='cum_mass', output_path=out,
+            ylabel='Cumulative mass transferred (kg)',
+            title='Cumulative Vaporization Mass Transfer',
+            ref_line=0.0, ref_label=None, **common_kw,
+        )
+        print(f"  Saved: {os.path.basename(png)}")
+        print(f"  Saved: {os.path.basename(vec)}")
+
+    if PLOT_AREA_OVERLAY:
+        out = os.path.join(output_folder, '04_InterfacialArea_Overlay_MaSweep')
+        png, vec = plot_metric_overlay(
+            case_data, metric_key='A_normalized', output_path=out,
+            ylabel='A(t) / A0',
+            title='Normalized Interfacial Area',
+            ref_line=1.0, ref_label='A0 (initial)', **common_kw,
+        )
+        print(f"  Saved: {os.path.basename(png)}")
+        print(f"  Saved: {os.path.basename(vec)}")
+
     if PLOT_CONTOUR_OVERLAY:
-        out = os.path.join(output_folder, '02_Contour_Overlay_MaSweep')
+        out = os.path.join(output_folder, '05_Contour_Overlay_MaSweep')
         png, vec = plot_contour_overlay(
             case_data, out,
             x_min = X_MIN, x_max = X_MAX,

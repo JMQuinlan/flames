@@ -116,18 +116,32 @@ def load_case(amrex_output_dir,
               resolution=512,
               droplet_center=(0.0, 0.0),
               extract_contours=True,
+              extract_vap_diagnostics=True,
+              vap_dot_rho_field='Vap_dot_rho',
               verbose=True):
     """Load a single simulation directory and return per-time arrays.
 
     Returns a dict with keys:
-        'times'      : (N,) array of physical times [s]
-        'R_x'        : (N,) array of streamwise half-extent [m]
-        'R_y'        : (N,) array of crossflow  half-extent [m]
-        'AR_yx'      : (N,) array of R_y / R_x
-        'centroids'  : (N, 2) array of (x_c, y_c) [m]
-        'contours'   : list of length N; each entry is a list of [P, 2] arrays
-                       holding the eta = eta_threshold contour segments [m]
-        'amrex_dir'  : echo of input path (for diagnostics)
+        'times'           : (N,) physical times [s]
+        'R_x'             : (N,) streamwise half-extent [m]
+        'R_y'             : (N,) crossflow  half-extent [m]
+        'AR_yx'           : (N,) R_y / R_x
+        'centroids'       : (N, 2) (x_c, y_c) [m]
+        'contours'        : list of length N; each entry is a list of [P, 2]
+                            arrays holding the eta = eta_threshold contour
+                            segments [m]
+        'mdot_total'      : (N,) volumetric mdot integrated over the domain
+                            [kg / s] (per unit out-of-plane depth in 2D).
+                            Computed as sum(Vap_dot_rho) * dx * dy.
+        'cum_mass'        : (N,) trapezoidal int_0^t mdot_total dt' [kg]
+        'interface_area'  : (N,) sum(|grad eta|) * dx * dy [m^1 in 2D]
+        'A_normalized'    : (N,) interface_area / interface_area[0]
+        'amrex_dir'       : echo of input path (for diagnostics)
+
+    If `extract_vap_diagnostics=False`, the vap / area arrays are zero-filled
+    so downstream plotters can still call them safely.
+    If the AMReX field name for the volumetric vaporization rate differs
+    from 'Vap_dot_rho', pass `vap_dot_rho_field='YourFieldName'`.
     """
     plot_files = _list_plot_files(amrex_output_dir)
     indices = list(range(0, len(plot_files), max(1, time_step)))
@@ -138,6 +152,8 @@ def load_case(amrex_output_dir,
     AR_yx_list  = []
     centroids   = []
     contours_all = []
+    mdot_list   = []
+    area_list   = []
 
     domain_w = x_max - x_min
     domain_h = y_max - y_min
@@ -160,6 +176,8 @@ def load_case(amrex_output_dir,
         x_1d = np.linspace(x_min, x_max, resolution)
         y_1d = np.linspace(y_min, y_max, resolution)
         x_grid, y_grid = np.meshgrid(x_1d, y_1d)
+        dx = x_1d[1] - x_1d[0]
+        dy = y_1d[1] - y_1d[0]
 
         Rx, Ry, ARyx, centroid = _bbox_metrics(eta, x_grid, y_grid,
                                                eta_threshold, droplet_center)
@@ -176,18 +194,53 @@ def load_case(amrex_output_dir,
         else:
             contours_all.append([])
 
+        # ---- Vaporization mdot integrated over the domain ----------------
+        # If the field is missing (e.g. older plotfiles), default to 0.
+        mdot_val = 0.0
+        if extract_vap_diagnostics:
+            try:
+                vap_dot_rho = np.array(frb[vap_dot_rho_field])
+                mdot_val = float(np.sum(vap_dot_rho)) * dx * dy
+            except Exception:
+                mdot_val = 0.0
+        mdot_list.append(mdot_val)
+
+        # ---- Interfacial area (diffuse: int |grad eta| dx dy) ------------
+        deta_dx = np.gradient(eta, dx, axis=1)   # axis 1 = x
+        deta_dy = np.gradient(eta, dy, axis=0)   # axis 0 = y
+        grad_eta_mag = np.sqrt(deta_dx * deta_dx + deta_dy * deta_dy)
+        area_list.append(float(np.sum(grad_eta_mag)) * dx * dy)
+
         if verbose and ((k + 1) % 10 == 0 or k == len(indices) - 1):
             print(f"    frame {k + 1:4d}/{len(indices)}: t = {t:.4e} s   "
-                  f"R_x={Rx*1e3:.3f} mm  R_y={Ry*1e3:.3f} mm  AR={ARyx:.3f}")
+                  f"R_x={Rx*1e3:.3f}mm  R_y={Ry*1e3:.3f}mm  AR={ARyx:.3f}  "
+                  f"mdot={mdot_val:.3e}")
+
+    times_arr = np.array(times)
+    mdot_arr  = np.array(mdot_list)
+    area_arr  = np.array(area_list)
+
+    # Trapezoidal cumulative integral of mdot over time.
+    cum_mass = np.zeros_like(times_arr)
+    for i in range(1, len(times_arr)):
+        dt_step = times_arr[i] - times_arr[i - 1]
+        cum_mass[i] = cum_mass[i - 1] + 0.5 * (mdot_arr[i] + mdot_arr[i - 1]) * dt_step
+
+    A0 = area_arr[0] if area_arr.size > 0 and area_arr[0] > 0 else 1.0
+    A_norm = area_arr / A0
 
     return {
-        'times':     np.array(times),
-        'R_x':       np.array(R_x_list),
-        'R_y':       np.array(R_y_list),
-        'AR_yx':     np.array(AR_yx_list),
-        'centroids': np.array(centroids),
-        'contours':  contours_all,
-        'amrex_dir': amrex_output_dir,
+        'times':          times_arr,
+        'R_x':            np.array(R_x_list),
+        'R_y':            np.array(R_y_list),
+        'AR_yx':          np.array(AR_yx_list),
+        'centroids':      np.array(centroids),
+        'contours':       contours_all,
+        'mdot_total':     mdot_arr,
+        'cum_mass':       cum_mass,
+        'interface_area': area_arr,
+        'A_normalized':   A_norm,
+        'amrex_dir':      amrex_output_dir,
     }
 
 
@@ -314,6 +367,117 @@ def plot_radii_overlay_grouped(case_data, group_key, line_key, output_path,
     fig.suptitle(f'Sweep Comparison{title_suffix}',
                  fontsize=font_size_title + 2, fontweight='bold', y=1.005)
     plt.tight_layout()
+    raster_path = output_path + '.png'
+    vector_path = output_path + '.' + save_format_vector
+    plt.savefig(raster_path, dpi=dpi, bbox_inches='tight')
+    plt.savefig(vector_path,             bbox_inches='tight')
+    plt.close()
+    return raster_path, vector_path
+
+
+def plot_metric_overlay(case_data, metric_key, output_path,
+                        ylabel, title,
+                        ref_line=None, ref_label=None,
+                        title_suffix='',
+                        font_size_title=16, font_size_label=14,
+                        font_size_legend=12, font_size_tick=11,
+                        line_width=2.0, dpi=300,
+                        save_format_vector='eps',
+                        figsize=(11, 6.5)):
+    """Single-panel overlay of one scalar metric vs time, all cases overlaid.
+
+    `case_data` is the list of dicts produced by load_case(); each must carry
+    'label' and 'color' (and optionally 'linestyle'). `metric_key` selects
+    which array in each dict to plot on the y-axis (e.g. 'mdot_total',
+    'cum_mass', 'A_normalized', 'R_x', ...).
+
+    `ref_line` (optional) draws a horizontal reference, with label `ref_label`.
+    Use ref_line=0.0 for mdot/cum-mass, ref_line=1.0 for A/A0, etc.
+    """
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+    for cd in case_data:
+        t_us = cd['times'] * 1e6
+        ax.plot(t_us, cd[metric_key],
+                color=cd['color'], linewidth=line_width,
+                linestyle=cd.get('linestyle', '-'),
+                label=cd['label'])
+
+    if ref_line is not None:
+        ax.axhline(ref_line, color='k', linestyle=':',
+                   linewidth=1.0, alpha=0.6,
+                   label=ref_label if ref_label is not None else None)
+
+    ax.set_xlabel('Time (us)', fontsize=font_size_label)
+    ax.set_ylabel(ylabel,      fontsize=font_size_label)
+    ax.set_title(f'{title}{title_suffix}',
+                 fontsize=font_size_title, fontweight='bold')
+    ax.tick_params(labelsize=font_size_tick)
+    ax.grid(alpha=0.3)
+    ax.legend(fontsize=font_size_legend, loc='best')
+
+    plt.tight_layout()
+    raster_path = output_path + '.png'
+    vector_path = output_path + '.' + save_format_vector
+    plt.savefig(raster_path, dpi=dpi, bbox_inches='tight')
+    plt.savefig(vector_path,             bbox_inches='tight')
+    plt.close()
+    return raster_path, vector_path
+
+
+def plot_metric_overlay_grouped(case_data, metric_key, group_key, line_key,
+                                output_path, ylabel, title,
+                                ref_line=None,
+                                title_suffix='',
+                                font_size_title=16, font_size_label=14,
+                                font_size_legend=11, font_size_tick=10,
+                                line_width=2.0, dpi=300,
+                                save_format_vector='eps',
+                                figsize_per_panel=(4.8, 5.5)):
+    """Paneled version (Test 7) of plot_metric_overlay.
+
+    Produces ONE figure with one panel per `group_key` value, lines coloured
+    by `line_key`. All panels share the same y-axis (single-row, N-col).
+    """
+    group_vals = sorted({cd[group_key] for cd in case_data})
+    line_vals  = sorted({cd[line_key]  for cd in case_data})
+    n_cols = len(group_vals)
+
+    cmap = plt.get_cmap('viridis')
+    line_colors = {v: cmap(i / max(1, len(line_vals) - 1))
+                   for i, v in enumerate(line_vals)}
+
+    fig_w = figsize_per_panel[0] * n_cols
+    fig_h = figsize_per_panel[1]
+    fig, axes = plt.subplots(1, n_cols, figsize=(fig_w, fig_h),
+                             sharey=True, squeeze=False)
+    axes = axes[0]   # flatten to 1D
+
+    for col, gval in enumerate(group_vals):
+        ax = axes[col]
+        for cd in case_data:
+            if cd[group_key] != gval:
+                continue
+            t_us = cd['times'] * 1e6
+            ax.plot(t_us, cd[metric_key],
+                    color=line_colors[cd[line_key]], linewidth=line_width,
+                    label=f'{line_key} = {cd[line_key]}')
+        if ref_line is not None:
+            ax.axhline(ref_line, color='k', linestyle=':',
+                       linewidth=1.0, alpha=0.6)
+        ax.set_title(f'{group_key} = {gval}',
+                     fontsize=font_size_title, fontweight='bold')
+        ax.set_xlabel('Time (us)', fontsize=font_size_label)
+        ax.tick_params(labelsize=font_size_tick)
+        ax.grid(alpha=0.3)
+
+    axes[0].set_ylabel(ylabel, fontsize=font_size_label)
+    axes[-1].legend(fontsize=font_size_legend, loc='best')
+
+    fig.suptitle(f'{title}{title_suffix}',
+                 fontsize=font_size_title + 2, fontweight='bold', y=1.005)
+    plt.tight_layout()
+
     raster_path = output_path + '.png'
     vector_path = output_path + '.' + save_format_vector
     plt.savefig(raster_path, dpi=dpi, bbox_inches='tight')

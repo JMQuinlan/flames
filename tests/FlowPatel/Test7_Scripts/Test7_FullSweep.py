@@ -46,6 +46,7 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_THIS_DIR, '..'))
 from shock_droplet_sweep_common import (
     load_case, plot_radii_overlay, plot_radii_overlay_grouped,
+    plot_metric_overlay, plot_metric_overlay_grouped,
     plot_contour_overlay,
 )
 
@@ -112,10 +113,12 @@ EXTRACT_CONTOURS = True
 # PLOT TOGGLES
 # ============================================================================
 
-PLOT_RADII_OVERLAY_SINGLE  = 1   # all 9 lines on one figure (headline)
-PLOT_RADII_OVERLAY_GROUPED = 1   # 3-panel-per-Ma grouping (trend reading)
-PLOT_CONTOUR_OVERLAY       = 1   # eta=0.5 multi-panel contour comparison
-NUM_CONTOUR_PANELS         = 6
+PLOT_RADII_OVERLAY_SINGLE     = 1   # all 9 lines on one stacked R_x/R_y/AR figure
+PLOT_RADII_OVERLAY_GROUPED    = 1   # 3-row x 3-col paneled radii (by Ma and by We)
+PLOT_VAP_OVERLAY_SINGLE       = 1   # mdot, cum mass, A/A0 -- 3 separate figures, 9 lines each
+PLOT_VAP_OVERLAY_GROUPED      = 1   # mdot, cum mass, A/A0 -- 3 separate paneled figures (per grouping)
+PLOT_CONTOUR_OVERLAY          = 1   # eta=0.5 multi-panel contour comparison
+NUM_CONTOUR_PANELS            = 6
 
 # ============================================================================
 # PLOT STYLING (publish-ready knobs)
@@ -231,8 +234,90 @@ def main():
         print(f"  Saved: {os.path.basename(png2)}")
         print(f"  Saved: {os.path.basename(vec2)}")
 
+    common_overlay_kw = dict(
+        title_suffix     = '  (Ma x We grid -- color = We, linestyle = Ma)',
+        font_size_title  = FONT_SIZE_TITLE,
+        font_size_label  = FONT_SIZE_LABEL,
+        font_size_legend = FONT_SIZE_LEGEND,
+        font_size_tick   = FONT_SIZE_TICK,
+        line_width = LINE_WIDTH, dpi = DPI,
+        save_format_vector = SAVE_FORMAT_VECTOR,
+    )
+
+    if PLOT_VAP_OVERLAY_SINGLE:
+        # mdot
+        png, vec = plot_metric_overlay(
+            case_data, metric_key='mdot_total',
+            output_path=os.path.join(output_folder, '04_Mdot_Overlay_FullSweep'),
+            ylabel='mdot (kg / s)',
+            title='Vaporization Mass-Transfer Rate',
+            ref_line=0.0, ref_label=None, **common_overlay_kw,
+        )
+        print(f"  Saved: {os.path.basename(png)}, {os.path.basename(vec)}")
+
+        # cumulative mass
+        png, vec = plot_metric_overlay(
+            case_data, metric_key='cum_mass',
+            output_path=os.path.join(output_folder, '05_CumMass_Overlay_FullSweep'),
+            ylabel='Cumulative mass transferred (kg)',
+            title='Cumulative Vaporization Mass Transfer',
+            ref_line=0.0, ref_label=None, **common_overlay_kw,
+        )
+        print(f"  Saved: {os.path.basename(png)}, {os.path.basename(vec)}")
+
+        # A(t)/A0
+        png, vec = plot_metric_overlay(
+            case_data, metric_key='A_normalized',
+            output_path=os.path.join(output_folder, '06_InterfacialArea_Overlay_FullSweep'),
+            ylabel='A(t) / A0',
+            title='Normalized Interfacial Area',
+            ref_line=1.0, ref_label='A0 (initial)', **common_overlay_kw,
+        )
+        print(f"  Saved: {os.path.basename(png)}, {os.path.basename(vec)}")
+
+    if PLOT_VAP_OVERLAY_GROUPED:
+        common_grp_kw = dict(
+            font_size_title  = FONT_SIZE_TITLE,
+            font_size_label  = FONT_SIZE_LABEL,
+            font_size_legend = FONT_SIZE_LEGEND,
+            font_size_tick   = FONT_SIZE_TICK,
+            line_width = LINE_WIDTH, dpi = DPI,
+            save_format_vector = SAVE_FORMAT_VECTOR,
+        )
+
+        # Three metrics x two groupings (by Ma, by We) = 6 figures
+        for metric_key, ylabel, title, refline in [
+            ('mdot_total',   'mdot (kg / s)',
+             'Vaporization Mass-Transfer Rate', 0.0),
+            ('cum_mass',     'Cumulative mass transferred (kg)',
+             'Cumulative Vaporization Mass Transfer', 0.0),
+            ('A_normalized', 'A(t) / A0',
+             'Normalized Interfacial Area', 1.0),
+        ]:
+            for group_key, line_key, idx_byMa, suffix in [
+                ('Ma', 'We', True, '  (one panel per Ma, lines = We)'),
+                ('We', 'Ma', False, '  (one panel per We, lines = Ma)'),
+            ]:
+                tag = 'byMa' if idx_byMa else 'byWe'
+                base = {
+                    'mdot_total':   '07_Mdot',
+                    'cum_mass':     '08_CumMass',
+                    'A_normalized': '09_InterfacialArea',
+                }[metric_key]
+                # Append _byMa / _byWe to the file name
+                out = os.path.join(output_folder,
+                                   f'{base}_Grouped_{tag}_FullSweep')
+                png, vec = plot_metric_overlay_grouped(
+                    case_data, metric_key=metric_key,
+                    group_key=group_key, line_key=line_key,
+                    output_path=out, ylabel=ylabel, title=title,
+                    ref_line=refline,
+                    title_suffix=suffix, **common_grp_kw,
+                )
+                print(f"  Saved: {os.path.basename(png)}, {os.path.basename(vec)}")
+
     if PLOT_CONTOUR_OVERLAY:
-        out = os.path.join(output_folder, '04_Contour_Overlay_FullSweep')
+        out = os.path.join(output_folder, '10_Contour_Overlay_FullSweep')
         png, vec = plot_contour_overlay(
             case_data, out,
             x_min = X_MIN, x_max = X_MAX,

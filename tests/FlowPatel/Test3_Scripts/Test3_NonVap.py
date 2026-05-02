@@ -92,6 +92,11 @@ PLOT_STREAMWISE_RADIUS = 1             # Rx(t) = (max_x - min_x)/2 of eta-band
 PLOT_CROSSFLOW_RADIUS  = 1             # Ry(t) = (max_y - min_y)/2 of eta-band
 PLOT_ASPECT_RATIO_YX   = 1             # AR(t) = Ry / Rx
 
+# Vaporization / interface diagnostics
+PLOT_MDOT_TIMESERIES   = 1             # mdot(t) = sum_i Vap_dot_rho * dx * dy
+PLOT_MASS_CUMULATIVE   = 1             # int_0^t mdot dt' (trapezoidal)
+PLOT_INTERFACIAL_AREA  = 1             # A(t) / A0 with A = sum_i |grad eta| dx dy
+
 # Flow field visualizations
 PLOT_VELOCITY_FIELD = 1                # Individual frames in Velocity-Streamline/
 PLOT_VELOCITY_FIELD_GIF = 1            # GIF from Velocity-Streamline/
@@ -536,6 +541,10 @@ energy_data = []
 shock_positions = []
 dimensionless_data = []
 
+# Per-timestep scalar diagnostics for the new vap / interface plots
+mdot_total_series      = []   # sum_i Vap_dot_rho * dx * dy   [kg/s]
+interface_area_series  = []   # sum_i |grad eta| * dx * dy    [m^1 in 2D]
+
 schlieren_fields = []
 pressure_fields = []
 density_fields = []
@@ -618,7 +627,18 @@ for i, idx in enumerate(analysis_indices):
         'x_min': x_min_band, 'x_max': x_max_band,
         'y_min': y_min_band, 'y_max': y_max_band,
     })
-    
+
+    # ---- Vaporization rate, integrated over the domain --------------------
+    # Vap_dot_rho is the volumetric mass-transfer rate [kg / m^3 / s].
+    # Integrating over the 2D slab (per unit depth) gives total mass / s [kg/s].
+    mdot_total_series.append(float(np.sum(vap_dot_rho)) * dx * dy)
+
+    # ---- Interfacial area (diffuse: int |grad eta| dx dy) -----------------
+    deta_dx = np.gradient(eta_field, dx, axis=1)   # axis 1 = x
+    deta_dy = np.gradient(eta_field, dy, axis=0)   # axis 0 = y
+    grad_eta_mag = np.sqrt(deta_dx * deta_dx + deta_dy * deta_dy)
+    interface_area_series.append(float(np.sum(grad_eta_mag)) * dx * dy)
+
     KE = compute_kinetic_energy(rho, vx, vy, dx, dy)
     SE = compute_surface_energy(eta_field, x_grid, y_grid, SIGMA, ETA_THRESHOLD)
     p_max = np.max(pressure)
@@ -1451,6 +1471,99 @@ def plot_aspect_ratio_yx():
     plt.close()
 
 
+def plot_mdot_timeseries():
+    """Vaporization mass-transfer rate vs time.
+
+    mdot(t) = sum_cells Vap_dot_rho(i,j) * dx * dy   [kg/s]
+    For the no-vaporization run this is identically zero, but the plot is
+    still emitted for symmetry with Test 4 (and as a sanity check).
+    """
+    t_analysis = times[analysis_indices] * 1e6
+    mdot = np.array(mdot_total_series)
+
+    fig, ax = plt.subplots(1, 1, figsize=FIGURE_SIZE_TIMESERIES)
+    ax.plot(t_analysis, mdot, 'b-', linewidth=LINE_WIDTH_NORMAL,
+            label='mdot = int Vap_dot_rho dV')
+    ax.axhline(0.0, color='k', linestyle=':', linewidth=LINE_WIDTH_THIN, alpha=0.5)
+    ax.set_xlabel('Time (us)', fontsize=FONT_SIZE_LABEL)
+    ax.set_ylabel('mdot (kg/s)', fontsize=FONT_SIZE_LABEL)
+    ax.set_title('Vaporization Mass-Transfer Rate',
+                 fontsize=FONT_SIZE_TITLE, fontweight='bold')
+    ax.tick_params(labelsize=FONT_SIZE_TICK)
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=FONT_SIZE_LEGEND, loc='best')
+    plt.tight_layout()
+
+    plt.savefig(os.path.join(output_folder, f'07_Mdot_Timeseries.{SAVE_FORMAT_RASTER}'), dpi=DPI)
+    plt.savefig(os.path.join(output_folder, f'07_Mdot_Timeseries.{SAVE_FORMAT_VECTOR}'))
+    plt.close()
+
+
+def plot_mass_cumulative():
+    """Cumulative mass transferred by vaporization vs time.
+
+    M_vap(t) = int_0^t mdot(t') dt'    (trapezoidal cumulative)
+    Reports the running total of mass converted from one phase to the other.
+    """
+    t_analysis = times[analysis_indices]
+    mdot = np.array(mdot_total_series)
+
+    # Trapezoidal cumulative integral
+    cum = np.zeros_like(t_analysis)
+    for i in range(1, len(t_analysis)):
+        dt = t_analysis[i] - t_analysis[i - 1]
+        cum[i] = cum[i - 1] + 0.5 * (mdot[i] + mdot[i - 1]) * dt
+
+    fig, ax = plt.subplots(1, 1, figsize=FIGURE_SIZE_TIMESERIES)
+    ax.plot(t_analysis * 1e6, cum, 'r-', linewidth=LINE_WIDTH_NORMAL,
+            label='M_vap = int_0^t mdot dt')
+    ax.axhline(0.0, color='k', linestyle=':', linewidth=LINE_WIDTH_THIN, alpha=0.5)
+    ax.set_xlabel('Time (us)', fontsize=FONT_SIZE_LABEL)
+    ax.set_ylabel('Cumulative mass transferred (kg)', fontsize=FONT_SIZE_LABEL)
+    ax.set_title('Cumulative Vaporization Mass Transfer',
+                 fontsize=FONT_SIZE_TITLE, fontweight='bold')
+    ax.tick_params(labelsize=FONT_SIZE_TICK)
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=FONT_SIZE_LEGEND, loc='best')
+    plt.tight_layout()
+
+    plt.savefig(os.path.join(output_folder, f'08_Mass_Cumulative.{SAVE_FORMAT_RASTER}'), dpi=DPI)
+    plt.savefig(os.path.join(output_folder, f'08_Mass_Cumulative.{SAVE_FORMAT_VECTOR}'))
+    plt.close()
+
+
+def plot_interfacial_area_normalized():
+    """Normalized interfacial area A(t) / A0.
+
+    A(t) = sum_cells |grad eta|(i,j) * dx * dy    (diffuse-interface 2D length)
+    A0   = A(t = first sampled timestep)
+    Drops below 1 if the interface contracts (e.g. droplet relaxes back toward
+    a circle or shrinks via vaporization), exceeds 1 if it stretches / shears.
+    """
+    t_analysis = times[analysis_indices] * 1e6
+    A = np.array(interface_area_series)
+    A0 = A[0] if A.size > 0 and A[0] > 0 else 1.0
+    A_norm = A / A0
+
+    fig, ax = plt.subplots(1, 1, figsize=FIGURE_SIZE_TIMESERIES)
+    ax.plot(t_analysis, A_norm, 'g-', linewidth=LINE_WIDTH_NORMAL,
+            label='A(t) / A0')
+    ax.axhline(1.0, color='k', linestyle=':', linewidth=LINE_WIDTH_THIN,
+               alpha=0.5, label='A0 (initial)')
+    ax.set_xlabel('Time (us)', fontsize=FONT_SIZE_LABEL)
+    ax.set_ylabel('A(t) / A0', fontsize=FONT_SIZE_LABEL)
+    ax.set_title('Normalized Interfacial Area',
+                 fontsize=FONT_SIZE_TITLE, fontweight='bold')
+    ax.tick_params(labelsize=FONT_SIZE_TICK)
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=FONT_SIZE_LEGEND, loc='best')
+    plt.tight_layout()
+
+    plt.savefig(os.path.join(output_folder, f'09_Interfacial_Area.{SAVE_FORMAT_RASTER}'), dpi=DPI)
+    plt.savefig(os.path.join(output_folder, f'09_Interfacial_Area.{SAVE_FORMAT_VECTOR}'))
+    plt.close()
+
+
 def plot_deformation_metrics():
     """Plot 3: Deformation parameters vs time - NO SPECIAL CHARACTERS"""
     t_analysis = times[analysis_indices]
@@ -1575,6 +1688,24 @@ if PLOT_ASPECT_RATIO_YX:
     print("\nGenerating Aspect Ratio (R_y / R_x)...")
     plot_aspect_ratio_yx()
     print("  Saved: 06_Aspect_Ratio_YX")
+    plot_count += 1
+
+if PLOT_MDOT_TIMESERIES:
+    print("\nGenerating mdot timeseries...")
+    plot_mdot_timeseries()
+    print("  Saved: 07_Mdot_Timeseries")
+    plot_count += 1
+
+if PLOT_MASS_CUMULATIVE:
+    print("\nGenerating cumulative vaporization mass...")
+    plot_mass_cumulative()
+    print("  Saved: 08_Mass_Cumulative")
+    plot_count += 1
+
+if PLOT_INTERFACIAL_AREA:
+    print("\nGenerating normalized interfacial area A(t)/A0...")
+    plot_interfacial_area_normalized()
+    print("  Saved: 09_Interfacial_Area")
     plot_count += 1
 
 if PLOT_SCHLIEREN_VELOCITY_SPLIT:
