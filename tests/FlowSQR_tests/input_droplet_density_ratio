@@ -3,44 +3,39 @@
 #@ dim=2
 #@
 
-# Well-balanced Korteweg + Q-trace static-droplet test.
+# Density-ratio sanity test (Phase C4 of HYDRO2_CONSERVATIVE_HLLC_SPEC).
 #
-# A circular liquid droplet in a quiescent gas atmosphere should sit in
-# mechanical equilibrium with the Laplace pressure jump Δp = σ/R = 144 Pa
-# (for σ = 0.072 N/m, R = 0.5 mm). The flux-form Korteweg stress in the
-# new HLLC path:
-#   Σ_K_wb = -κ ∇η⊗∇η + (κη∇²η + (κ/2)|∇η|²)I − Q(η)·I
-#   Q(η)   = λ·η²·(3η−1)·(η−1)         (well-balanced trace correction)
-# evaluates Σ_K on faces, with ∇²η from a 9-point isotropic cell
-# Laplacian averaged to faces (4th-order accurate; suppresses the C4
-# grid-aligned anisotropy that the 5-point stencil injects on circular
-# interfaces). At static CH equilibrium of η (which is what the IC tanh
-# is, by construction below), the Korteweg flux divergence cancels Q's
-# trace gradient identically, so spurious parasitic currents are at
-# truncation only.
+# A static circular droplet at a 1000:1 density ratio (water-like in a
+# light-gas atmosphere) — sister to input_static_droplet but with a
+# round 1:1000 ratio specifically chosen to expose the difference
+# between mass-fraction and volume-fraction Korteweg splits.
 #
-# Surface tension is set by the CH parameters κ, λ via
-#   σ_implied = √(2κλ)/6
-# rather than by the legacy `sigma` knob (which used to drive the now-
-# deleted Brackbill block). Choose κ, λ to satisfy BOTH:
-#   1. CH equilibrium for the IC tanh form 0.5*(1 − tanh(r/(√2·ε))):
-#      λ = κ/ε²
-#   2. Required σ_implied = 0.072 N/m:
-#      κ·λ = (6σ)²/2 = 0.0933
-# Solving simultaneously: κ = √(0.0933·ε²) = 1.222e-5,  λ = 7637.5.
+# Why this test:
+#   The new flux-form Korteweg + Q-trace path in HLLC carries
+#     kfd.kappa = Y_k_face · κ_global,
+#     kfd.q_eta = Y_k_face · Q_global,
+#   where Y_k_face = (α_k ρ_k)_face / ρ_mix_face is the mass-fraction
+#   weight at the face. The two phases sum to the full mixture stress
+#   regardless of split choice, but PER-PHASE acceleration depends on
+#   it: with mass-fraction Y_k both phases see the same a = F/m, while
+#   volume-fraction α_k would give the lighter phase O(ρ_heavy/ρ_light)
+#   excess acceleration — here, ~1000× excess on the gas side.
 #
 # Pass criteria:
-#   max|u| stays at truncation level over the run
-#   Δp = σ/R = 144 Pa inside the droplet, matches analytical Laplace
+#   * Δp = σ/R = 144 Pa across the interface (matches Laplace), same
+#     value as input_static_droplet — the Korteweg formulation should
+#     be density-ratio-invariant for the equilibrium pressure jump.
+#   * max|u_eta0| ≈ max|u_eta1| at the interface, both at truncation
+#     level — equal acceleration on both phases.
+#   * No 1000× blow-up on the gas side. (Volume-fraction split would
+#     show this; mass-fraction shouldn't.)
 #
-# The CH solver is silenced (implicit_ch = 0, static_eta = 1,
-# ch_mobility_nom = 0, ch_thermo_consistent = 0) so η is held at the
-# IC tanh and the test isolates the Korteweg + Q discretization.
+# CH config and equilibrium-width tuning identical to input_static_droplet.
 
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowSQR_tests/output_static_droplet
+plot_file = ./tests/FlowSQR_tests/output_droplet_density_ratio
 
 ### MESHING ###
 amr.plot_dt = 1.0e-6
@@ -51,7 +46,6 @@ amr.regrid_int = 1
 amr.grid_eff = 0.8
 amr.max_level = 0
 amr.n_cell = 200 200
-# amr.n_cell = 400 400
 
 ### TIME STEPING ###
 timestep = 1.0e-9
@@ -69,8 +63,8 @@ geometry.is_periodic = 0 0 0
 stop_time = 1.0e-4
 
 ### ETA INITIAL CONDITIONS ###
-# Circular droplet of radius R0 centered at origin. eta=1 inside (liquid),
-# eta=0 outside (gas). dx = 2 mm / 200 = 1e-5 m, so epsilon = 4*dx = 4e-5 m
+# Circular droplet of radius R0 centered at origin. eta=1 inside (heavy),
+# eta=0 outside (light). dx = 2 mm / 200 = 1e-5 m, so epsilon = 4*dx = 4e-5 m
 # resolves the diffuse interface across ~6-8 cells.
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = 4.0e-5
@@ -81,7 +75,8 @@ epsilon = eta.ic.expression.constant.epsilon
 ### HYDRO INITIAL CONDITIONS ###
 
 # ----------------------------
-# Water (liquid, eta=1) + air (gas, eta=0)
+# 1000:1 density ratio. Round numbers chosen to make the ratio exact;
+# physical units roughly water-air at room conditions.
 # ----------------------------
 gamma_eta1 = 7.15
 gamma_eta0 = 1.4
@@ -90,9 +85,9 @@ density_eta1.ic.type = expression
 density_eta1.ic.expression.region0 = "1000.0"
 
 density_eta0.ic.type = expression
-density_eta0.ic.expression.region0 = "1.225"
+density_eta0.ic.expression.region0 = "1.0"
 
-# Initial velocity zero everywhere — any growth comes from the discretization
+# Initial velocity zero on both phases — any growth is from the discretization.
 velocity_eta1.ic.type = expression
 velocity_eta1.ic.expression.region0 = "0.0"
 velocity_eta1.ic.expression.region1 = "0.0"
@@ -101,8 +96,8 @@ velocity_eta0.ic.type = expression
 velocity_eta0.ic.expression.region0 = "0.0"
 velocity_eta0.ic.expression.region1 = "0.0"
 
-# Equal pressure at IC; the Korteweg force itself sets up the Laplace
-# pressure jump Δp = sigma/R0 = 0.072 / 0.5e-3 = 144 Pa
+# Pressure jump at IC matches the Laplace prediction Δp = σ/R = 144 Pa,
+# so the steady state is "do nothing" if the formulation is correct.
 pressure_eta1.ic.type = expression
 pressure_eta1.ic.expression.region0 = "1.01325e5+144"
 
@@ -119,11 +114,9 @@ cv_eta0 = 1005.0/1.4
 pi_eta1 = 3.0e8
 pi_eta0 = 0.0
 
-# Free-energy parameters: silenced (ch_thermo_consistent = 0). The CH
-# bulk EOS contribution is muted, leaving the standard double-well
-# only — keeps mu_chem_mf consistent with the Korteweg discretization.
+# Free-energy parameters: silenced (ch_thermo_consistent = 0).
 T_ref          = 300.0
-rho_ref_eta0   = 1.225
+rho_ref_eta0   = 1.0
 rho_ref_eta1   = 1000.0
 R_eta0         = 287.0
 q_eta0         = 0.0
@@ -133,19 +126,16 @@ qprime_eta1    = 0.0
 
 ch_thermo_consistent = 0
 
-# No viscosity — isolate the capillary force
+# No viscosity — isolate the capillary force.
 mu_eta1   = 0.0
 mu_eta1_b = 0.0
 mu_eta0   = 0.0
 mu_eta0_b = 0.0
 
-# ----------------------------
 # Surface tension: water-air at 20°C, sigma = 0.072 N/m.
 # Laplace pressure Δp = sigma/R = 0.072 / 0.5e-3 = 144 Pa.
-# NOTE: the `sigma` knob is informational only — the legacy Brackbill
-# block that consumed it has been muted. Actual surface tension is set
-# by ch_kappa, ch_W_scale below via σ_implied = √(2κλ)/6.
-# ----------------------------
+# `sigma` knob is informational — the legacy Brackbill block is muted.
+# Actual surface tension is set by ch_kappa, ch_W_scale below.
 sigma = 0.072
 
 pref = 0.0
@@ -180,11 +170,6 @@ u0.ic.constant.value = 0.0 0.0
 q.ic.constant.value  = 0.0 0.0
 
 ### ADDITIONAL SOURCES ###
-# apply_surface_tension is now informational — the legacy Brackbill
-# block in ApplyBSSource has been permanently muted (do_st = 0).
-# Surface tension is delivered by the flux-form Korteweg + Q-trace
-# path inside RHS_PerPhase, gated only by the CH parameters
-# (ch_kappa, ch_W_scale).
 apply_surface_tension = 1
 apply_weight          = 0
 apply_vaporization    = 0
@@ -192,11 +177,8 @@ apply_heat_conduction = 0
 Spec_Vol              = 1
 grav                  = 0.0
 
-# BS source mode (Phase 6): "off" | "prescribed" | "ch_emergent".
-# For the static droplet ic_m0/ic_q are zero so the source is silent
-# anyway; "off" makes that explicit.
 bs_source_mode = off
-p_int_method    = 0
+p_int_method   = 0
 
 Riemann_Solver.type = hllc
 kappa_method        = 1
@@ -204,8 +186,7 @@ smooth_kernel_size  = 5
 nghost              = 4
 integration.type    = ForwardEuler
 
-# CH solver silenced; eta is only advected. Static-droplet equilibrium
-# is set by the IC tanh and held there.
+# CH solver silenced; eta is held at the IC tanh.
 implicit_ch     = 0
 static_eta      = 1
 ch_mobility_nom = 0.0

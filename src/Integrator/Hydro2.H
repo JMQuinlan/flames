@@ -110,8 +110,12 @@ protected:
     // Produces drho/dt, dM/dt, dE/dt for one phase, using that phase's own
     // conserved state. No Allaire blend, no Kapila sources, no diagnostics.
     // Phase coupling (BS source terms) is applied separately in Stage 4.
+    // phase_idx: 0 ⇒ α_k = 1−η,  1 ⇒ α_k = η.  rho_other_mf is the OTHER
+    // phase's (intrinsic) density field, needed at faces to form
+    // ρ_mix_face for the mass-fraction Korteweg weight Y_k_face.
     void RHS_PerPhase(int lev,
         Set::Scalar time,
+        int phase_idx,
         Set::Scalar gamma_k,
         Set::Scalar pi_k,
         Set::Scalar mu_k,
@@ -121,7 +125,9 @@ protected:
         amrex::MultiFab &E_rhs_mf,
         const amrex::MultiFab &rho_mf,
         const amrex::MultiFab &M_mf,
-        const amrex::MultiFab &E_mf);
+        const amrex::MultiFab &E_mf,
+        const amrex::MultiFab &eta_mf,
+        const amrex::MultiFab &rho_other_mf);
 
     // Stage 3: η evolution (advection + CH + vaporization) driven by
     // per-phase conserved state. Advection uses a mass-flux-weighted
@@ -169,23 +175,6 @@ protected:
     //             + ( kappa * eta * lap_eta + (kappa/2) |grad_eta|^2 ) I
     // taken in face-flux form. First derivatives of eta are evaluated exactly
     // on faces (with vertex-averaging for the face-tangential component); the
-    // cell-centered ∇²η that goes into Sigma_K uses a 9-point isotropic
-    // Laplacian (4th-order accurate, anisotropy O(dx^4) instead of the 5-point
-    // stencil's O(dx^2) C4 grid bias). Per-phase momentum gets eta-weighted
-    // F_cap; per-phase energy gets F_cap . u_k. The lambda*W'(eta) double-
-    // well term is part of CH dynamics and does NOT enter the momentum eq —
-    // the Korteweg stress only carries the kappa gradient-energy contribution.
-    // Only fires when korteweg_well_balanced != 0; in that case the Brackbill
-    // Fsv block in ApplyBSSource is skipped to avoid double-counting.
-    void ApplyKortewegStress(int lev,
-        Set::Scalar time,
-        amrex::MultiFab &M0_rhs_mf, amrex::MultiFab &E0_rhs_mf,
-        amrex::MultiFab &M1_rhs_mf, amrex::MultiFab &E1_rhs_mf,
-        const amrex::MultiFab &eta_mf_in,
-        const amrex::MultiFab &rho0_mf_in, const amrex::MultiFab &M0_mf_in,
-        const amrex::MultiFab &rho1_mf_in, const amrex::MultiFab &M1_mf_in);
-
-
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
     void ApplyImplicitCH(int lev, Set::Scalar dt);
     void ApplyImplicitCH_Newton(int lev, Set::Scalar dt);
@@ -513,19 +502,6 @@ protected:
     // ch_kappa_eff is the resolved value used at every CH site (computed in Parse).
     Set::Scalar ch_kappa     = 0.0;   // input; 0 means "auto = epsilon^2"
     Set::Scalar ch_kappa_eff = 0.0;   // resolved value used in code (set in Parse)
-
-    // Phase 5 (CH-Korteweg spec §2.2, §4.3): well-balanced Korteweg surface
-    // tension via face-flux form  F_cap_face = -eta_face * (mu_chem_j - mu_chem_i)/dx.
-    // At static equilibrium mu_chem is uniform => discrete face flux is
-    // exactly zero => no parasitic currents. The legacy Brackbill form
-    // Fsv = sigma * kappa_curv * epsilon * grad_eta in ApplyBSSource is NOT
-    // well-balanced and produces parasitic flow ~ sigma/(rho*dx).
-    //
-    // 0 (default): legacy Brackbill Fsv path in ApplyBSSource (preserves
-    //              backward compat with all existing tests).
-    // 1          : skip the Brackbill block in ApplyBSSource and add the
-    //              face-flux Korteweg force via ApplyKortewegStress.
-    int korteweg_well_balanced = 0;
 
     // Adaptive Timestep
     bool adaptive_timestep = false;

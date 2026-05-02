@@ -225,16 +225,28 @@ ch_mobility_scaling = magaletti
 ch_newton_iters     = 5
 ch_newton_tol       = 1e-10
 
-# Spinodal-margin rescaling.  With Clausius-Clapeyron-calibrated (q,q'),
-# |dmu_bulk| at 50 K superheat is ~4e5 J/kg.  CH theory needs |dmu|/lambda
-# < 0.385 (spec §1.10), so lambda must be >= ~1.3e6.  Choose lambda = 2e6
-# to leave headroom.  Then keep delta = epsilon (=4*dx) by setting
-# kappa = 2*epsilon^2*lambda = 4e-4 (decoupled from the legacy kappa=eps^2).
-# Implied surface tension sigma = sqrt(2*kappa*lambda)/6 ~ 6.7 N/m -- about
-# 100x water's, but sigma is a spectator parameter for a planar Stefan
-# problem (no curvature), so this is fine.  Document and move on.
-ch_W_scale          = 2.0e6      # lambda
-ch_kappa            = 4.0e-4     # = 2 * epsilon^2 * lambda
+# CH equilibrium-width relation (well-balanced Korteweg + Q-trace path).
+# IC eta(x) = 0.5*(1 - tanh((x-x_int0)/(sqrt(2)*epsilon))) with
+# W = eta^2*(1-eta)^2  ==>  CH equilibrium kappa nabla^2 eta = lambda W'(eta)
+# reduces to:
+#   lambda = kappa / epsilon^2
+# For epsilon = 1e-5 and kappa = 4e-4:
+#   lambda = 4e-4 / 1e-10 = 4e6
+#
+# Spinodal-margin check: with Clausius-Clapeyron-calibrated (q,q'),
+# |dmu_bulk| at 50 K superheat is ~4e5 J/kg. CH theory needs
+# |dmu_bulk|/lambda < 0.385 (spec §1.10), giving lambda >= ~1.04e6.
+# The equilibrium-width value lambda = 4e6 sits comfortably above that,
+# so equilibrium width and spinodal margin are simultaneously satisfied.
+# (The earlier value lambda = 2e6 satisfied spinodal margin but missed
+# the equilibrium width by a factor of 2 — small in this regime, but
+# now corrected so the new Korteweg + Q-trace path produces zero
+# transient force at IC.)
+# Implied surface tension sigma = sqrt(2*kappa*lambda)/6 ~ 9.4 N/m;
+# sigma is a spectator parameter for a planar Stefan problem (no
+# curvature), so this is fine.
+ch_W_scale          = 4.0e6      # lambda = kappa / epsilon^2
+ch_kappa            = 4.0e-4     # = lambda * epsilon^2  (consistent)
 ch_mobility_degenerate = 1
 # Phase 6 calibration (2026-04-28): with thermo_consistent=1 + ch_emergent
 # routing, the Magaletti baseline M_nom=1 gave m0_eff ~1800x the analytical

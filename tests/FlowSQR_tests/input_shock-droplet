@@ -182,4 +182,15 @@ integration.type = ForwardEuler
 implicit_ch = 2
   ch_mobility_nom = 1e-4
   ch_newton_iters = 5       # default, usually converges in 3
-  ch_newton_tol = 1e-10     # default 
+  ch_newton_tol = 1e-10     # default
+  # CH gradient-energy + double-well, sized for σ_implied = √(2κλ)/6 = 0.0728
+  # AND CH equilibrium for IC eta(r) = 0.5*(1 + tanh((r−R0)/(2√2·ε))) with
+  # W = η²(1−η)². The tanh argument here is divided by L = 2√2·ε (not √2·ε
+  # like the other tests), so the equilibrium relation picks up an extra
+  # factor of 4:
+  #   λ = κ / (4 ε²)        (equilibrium for tanh(r/(2√2·ε)) form)
+  #   κ·λ = (6σ)²/2 = 0.0954 (target Laplace σ = 72.8e-3 N/m)
+  # ⇒ κ = √(4·0.0954·ε²) = 2.47e-5,  λ = κ/(4ε²) = 3861
+  # (legacy `sigma` knob above is informational only — Brackbill is muted.)
+  ch_W_scale = 3861         # lambda
+  ch_kappa   = 2.47e-5      # kappa  (= 4 * lambda * epsilon^2)

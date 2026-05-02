@@ -40,6 +40,13 @@ struct State
     Set::Scalar pi;
     Set::Scalar T;
 
+    // Volume fraction of the phase this State represents.
+    // Default 1.0: rho/M/E are interpreted as single-phase (intrinsic
+    // == partial). For two-phase callers, set alpha = α_k_face after
+    // construction; rho/M/E are then interpreted as partial densities
+    // (α_k · intrinsic) and the EOS recovers intrinsic via /alpha.
+    Set::Scalar alpha = Set::Scalar(1.0);
+
     // --------------------------------------------------------------
     // Default
     // --------------------------------------------------------------
@@ -177,7 +184,8 @@ struct State
            << "E="   << s.E << ", "
            << "gam=" << s.gam << ", "
            << "pi="  << s.pi << ", "
-           << "T="   << s.T;
+           << "T="   << s.T  << ", "
+           << "alpha=" << s.alpha;
         return os;
     }
 
@@ -194,6 +202,7 @@ struct State
         gam += b.gam;
         pi  += b.pi;
         T   += b.T;
+        alpha += b.alpha;
     }
 
     AMREX_GPU_HOST_DEVICE
@@ -206,6 +215,7 @@ struct State
         gam -= b.gam;
         pi  -= b.pi;
         T   -= b.T;
+        alpha -= b.alpha;
     }
 
     AMREX_GPU_HOST_DEVICE
@@ -218,6 +228,7 @@ struct State
         gam *= a;
         pi *= a;
         T *= a;
+        alpha *= a;
     }
 
     AMREX_GPU_HOST_DEVICE
@@ -230,6 +241,7 @@ struct State
         gam /= a;
         pi /= a;
         T /= a;
+        alpha /= a;
     }
 };
 
@@ -397,10 +409,58 @@ struct Flux
     }
 };
 
+// --------------------------------------------------------------
+// Korteweg face data — optional input to Riemann solvers that
+// support flux-form capillary stress. Caller passes nullptr to
+// disable. eta_face / dn_eta / dt_eta / lap_eta are face-evaluated
+// (caller chooses stencil); kappa is the gradient-energy
+// coefficient already weighted by the per-phase mass fraction
+// (kappa = Y_k_face · κ_global). The two phases' Korteweg flux
+// contributions then sum to the full Σ_K flux on the mixture.
+// --------------------------------------------------------------
+struct KortewegFaceData
+{
+    Set::Scalar eta_face;   // η at the face
+    Set::Scalar dn_eta;     // ∂_n η  (face-normal direction)
+    Set::Scalar dt_eta;     // ∂_t η  (face-tangential direction)
+    Set::Scalar lap_eta;    // ∇²η at the face
+    Set::Scalar kappa;      // gradient-energy coefficient × phase weight
+    // Bulk-thermo trace correction (well-balanced compensation):
+    //   Σ_K_wb_nn = Σ_K_nn − q_eta.
+    // Caller computes q_eta = Y_k_face · λ·[ηW'(η) − W(η)] at the face;
+    // the per-phase mass-fraction weight Y_k goes here too so the two
+    // phases' contributions sum to the full mixture trace correction.
+    // Default 0 ⇒ no correction (legacy / pure-gradient-stress mode).
+    Set::Scalar q_eta = Set::Scalar(0.0);
+};
+
 class FluidRiemann
 {
 public:
+    // Legacy single-phase Riemann solve. Each derived solver overrides.
     virtual Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol) = 0;
+
+    // Extended solve: passive scalars (advect with the contact wave) and
+    // optional Korteweg face data (added to momentum/energy flux as a
+    // flux-form capillary stress). Default implementation in the base
+    // class dispatches to legacy Solve, zeros passive fluxes, and ignores
+    // kfd — derived solvers that support the new path override this.
+    //
+    //   n_passive : number of passive conservative scalars at this face
+    //   q_lo, q_hi: [n_passive] L/R conservative values (e.g., α_k ρ_k η)
+    //   q_flux    : [n_passive] output flux array (caller-allocated)
+    //   kfd       : nullptr ⇒ no Korteweg contribution
+    virtual Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small,
+                       int n_passive,
+                       Set::Scalar const* /*q_lo*/, Set::Scalar const* /*q_hi*/,
+                       Set::Scalar* q_flux,
+                       KortewegFaceData const* /*kfd*/,
+                       int Spec_Vol)
+    {
+        for (int s = 0; s < n_passive; ++s) q_flux[s] = Set::Scalar(0.0);
+        return Solve(lo, hi, p_ref, small, Spec_Vol);
+    }
+
     virtual ~FluidRiemann() = default;
 };
 

@@ -263,7 +263,13 @@ smooth_kernel_size  = 3
 nghost              = 4
 integration.type    = ForwardEuler
 implicit_ch         = 0
-ch_W_scale          = 1.0
+# CH equilibrium-width relation (well-balanced Korteweg + Q-trace path).
+# IC eta(x) = 0.5*(1 - tanh((x-x_int0)/(sqrt(2)*epsilon))) with W = eta^2*(1-eta)^2
+# ==> lambda = kappa / epsilon^2.  ch_kappa default = epsilon^2 (auto), so
+# lambda = 1.0 matches CH equilibrium for any epsilon.
+# Implied sigma = sqrt(2*kappa*lambda)/6 ~ 1.2e-6 N/m; sigma is a spectator
+# parameter for this 1D problem (no curvature), so this is fine.
+ch_W_scale          = 1.0   # lambda = kappa / epsilon^2
 
 # NSCBC kept off — using simple Dirichlet/Neumann per the BC block above.
 nscbc.enabled = false

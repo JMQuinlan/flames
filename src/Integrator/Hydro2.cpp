@@ -198,15 +198,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.ch_kappa_eff = (value.ch_kappa > 0.0) ? value.ch_kappa
                                                     : value.epsilon * value.epsilon;
 
-        // Phase 5: well-balanced Korteweg capillary force.
-        // 0 (default): legacy Brackbill Fsv = sigma*kappa_curv*epsilon*grad_eta
-        //              in ApplyBSSource (gates on apply_surface_tension).
-        // 1          : skip the Brackbill block and add the face-flux form
-        //              F_cap_face = -eta_face * grad_face(mu_chem) via
-        //              ApplyKortewegStress. mu_chem_mf must be populated and
-        //              FillBoundary'd before this fires (done by MixDiagnostic).
-        pp_query_default("korteweg_well_balanced", value.korteweg_well_balanced, 0);
-
         // Boundry Conditions
         value.density_bc = new BC::Expression(1, pp, "density.bc");
         value.energy_bc = new BC::Constant(1, pp, "energy.bc");
@@ -1369,6 +1360,7 @@ void Hydro2::ApplyHeatConduction(int lev, Set::Scalar dt)
 //
 void Hydro2::RHS_PerPhase(int lev,
                           Set::Scalar /*time*/,
+                          int phase_idx,
                           Set::Scalar gamma_k,
                           Set::Scalar pi_k,
                           Set::Scalar mu_k,
@@ -1378,7 +1370,9 @@ void Hydro2::RHS_PerPhase(int lev,
                           amrex::MultiFab &E_rhs_mf,
                           const amrex::MultiFab &rho_mf_in,
                           const amrex::MultiFab &M_mf_in,
-                          const amrex::MultiFab &E_mf_in)
+                          const amrex::MultiFab &E_mf_in,
+                          const amrex::MultiFab &eta_mf_in,
+                          const amrex::MultiFab &rho_other_mf_in)
 {
     BL_PROFILE("Hydro2::RHS_PerPhase");
 
@@ -1398,13 +1392,25 @@ void Hydro2::RHS_PerPhase(int lev,
     const Real lam_prime   = mu_b_ - (Real(2.0)/Real(3.0))*mu_;
     const Real mu_plus_lp  = mu_ + lam_prime;   // = mu_b + mu/3
 
+    // Korteweg face-flux: gradient-energy coefficient (mixture-level) and
+    // double-well coefficient (for the bulk-thermo trace correction Q(η)).
+    // Per-phase weighting Y_k_face is applied per-face below.
+    const Real kappa_ch_   = ch_kappa_eff;
+    const Real lambda_W_   = ch_W_scale;
+    const int  pidx_       = phase_idx;
+    AMREX_ASSERT_WITH_MESSAGE(std::abs(DX[0] - DX[1]) < Real(1.0e-14),
+        "RHS_PerPhase Korteweg path assumes dx == dy (9-point isotropic Lap).");
+    const Real lap9_pref_  = Real(1.0) / (Real(6.0) * DX[0] * DX[0]);
+
     for (MFIter mfi(rho_mf_in, TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
         const Box& bx = mfi.validbox();
 
-        auto rho_arr  = rho_mf_in.const_array(mfi);
-        auto M_arr    = M_mf_in.const_array(mfi);
-        auto E_arr    = E_mf_in.const_array(mfi);
+        auto rho_arr   = rho_mf_in.const_array(mfi);
+        auto M_arr     = M_mf_in.const_array(mfi);
+        auto E_arr     = E_mf_in.const_array(mfi);
+        auto eta_arr   = eta_mf_in.const_array(mfi);
+        auto rhoO_arr  = rho_other_mf_in.const_array(mfi);
 
         auto rho_rhs  = rho_rhs_mf.array(mfi);
         auto M_rhs    = M_rhs_mf.array(mfi);
@@ -1414,19 +1420,119 @@ void Hydro2::RHS_PerPhase(int lev,
         {
             namespace FR = Solver::Local::FluidRiemann;
 
+            // 9-point isotropic Laplacian of η at a cell. Reads η at i±1, j±1
+            // around (ii,jj,kk); face KFDs read this at the two cells
+            // bracketing the face, so the full footprint is i±2, j±2.
+            auto lap9 = [=] AMREX_GPU_DEVICE (int ii, int jj, int kk) -> Real {
+                Real s_ortho = eta_arr(ii+1,jj,kk) + eta_arr(ii-1,jj,kk)
+                             + eta_arr(ii,jj+1,kk) + eta_arr(ii,jj-1,kk);
+                Real s_diag  = eta_arr(ii+1,jj+1,kk) + eta_arr(ii-1,jj+1,kk)
+                             + eta_arr(ii+1,jj-1,kk) + eta_arr(ii-1,jj-1,kk);
+                return (Real(4.0)*s_ortho + s_diag - Real(20.0)*eta_arr(ii,jj,kk))
+                       * lap9_pref_;
+            };
+
             // ----- face Riemann states (scalar gamma/pi constructor) -----
+            // States stay intrinsic (State.alpha = 1.0 default) — the
+            // base inviscid HLLC flux remains in its existing intrinsic
+            // form. The flux-form Korteweg contribution (added inside HLLC
+            // when kfd != nullptr) carries the mass-fraction split via
+            // kfd.kappa = Y_k_face · κ_global; that is what makes the
+            // per-phase Σ_K contribution sum to the full mixture stress
+            // and give equal acceleration on both phases.
             FR::State Sxm(rho_arr, M_arr, E_arr, gamma_k, pi_k, i-1, j, k, 0);
             FR::State Sxc(rho_arr, M_arr, E_arr, gamma_k, pi_k, i,   j, k, 0);
             FR::State Sxp(rho_arr, M_arr, E_arr, gamma_k, pi_k, i+1, j, k, 0);
-
             FR::State Sym(rho_arr, M_arr, E_arr, gamma_k, pi_k, i, j-1, k, 1);
             FR::State Syc(rho_arr, M_arr, E_arr, gamma_k, pi_k, i, j,   k, 1);
             FR::State Syp(rho_arr, M_arr, E_arr, gamma_k, pi_k, i, j+1, k, 1);
 
-            FR::Flux fxm = rsolver->Solve(Sxm, Sxc, pref_, small_, Spec_Vol_);
-            FR::Flux fym = rsolver->Solve(Sym, Syc, pref_, small_, Spec_Vol_);
-            FR::Flux fxp = rsolver->Solve(Sxc, Sxp, pref_, small_, Spec_Vol_);
-            FR::Flux fyp = rsolver->Solve(Syc, Syp, pref_, small_, Spec_Vol_);
+            // ----- KortewegFaceData per face -----
+            // Mass-fraction κ-weight per face: kappa = Y_self_face · κ_global.
+            // Y_self_face = (α_self · ρ_self_int) / ρ_mix at the face.
+            //   ρ_self_int_face  ≈ 0.5 (ρ_self(lo) + ρ_self(hi))   (intrinsic stored)
+            //   ρ_other_int_face ≈ 0.5 (ρ_other(lo) + ρ_other(hi))
+            //   ρ_mix_face       = α_self_face·ρ_self_int_face + α_other_face·ρ_other_int_face
+            const Real dx_inv = Real(1.0) / DX[0];
+            const Real dy_inv = Real(1.0) / DX[1];
+
+            // Bulk-thermo trace correction Q(η) = λ·[ηW'(η) − W(η)] for the
+            // double-well W(η) = η²(1−η)² used in this branch. Closed form:
+            //   Q(η) = λ · η²·(3η−1)·(η−1)
+            // This is the well-balanced compensation that makes div(Σ_K_wb)
+            // vanish on a static CH-equilibrium tanh. For the EOS-Helmholtz
+            // mode, the dmu_bulk part cancels in η·μ−F when dmu_bulk is
+            // η-locally-constant at the face (true for uniform-(ρ,T)
+            // interfaces; first-order for varying ones), so the same
+            // closed form applies in both ch_thermo_consistent settings.
+            auto Q_global = [=] AMREX_GPU_DEVICE (Real e) -> Real {
+                return lambda_W_ * e * e * (Real(3.0)*e - Real(1.0)) * (e - Real(1.0));
+            };
+
+            auto build_kfd_x = [=] AMREX_GPU_DEVICE (int lo_i, int hi_i, int jj, int kk,
+                                                    FR::KortewegFaceData &kfd)
+            {
+                Real eta_face = Real(0.5) * (eta_arr(lo_i,jj,kk) + eta_arr(hi_i,jj,kk));
+                Real dn       = (eta_arr(hi_i,jj,kk) - eta_arr(lo_i,jj,kk)) * dx_inv;
+                Real dt       = Real(0.25) * (eta_arr(lo_i,jj+1,kk) + eta_arr(hi_i,jj+1,kk)
+                                            - eta_arr(lo_i,jj-1,kk) - eta_arr(hi_i,jj-1,kk)) * dy_inv;
+                Real lapf     = Real(0.5) * (lap9(lo_i,jj,kk) + lap9(hi_i,jj,kk));
+                Real a_self   = (pidx_ == 0) ? (Real(1.0) - eta_face) : eta_face;
+                Real a_other  = Real(1.0) - a_self;
+                Real rho_s    = Real(0.5) * (rho_arr (lo_i,jj,kk) + rho_arr (hi_i,jj,kk));
+                Real rho_o    = Real(0.5) * (rhoO_arr(lo_i,jj,kk) + rhoO_arr(hi_i,jj,kk));
+                Real rho_mix  = a_self * rho_s + a_other * rho_o;
+                Real Y_self   = (a_self * rho_s) / amrex::max(rho_mix, Real(1e-20));
+                kfd.eta_face  = eta_face;
+                kfd.dn_eta    = dn;
+                kfd.dt_eta    = dt;
+                kfd.lap_eta   = lapf;
+                kfd.kappa     = Y_self * kappa_ch_;
+                kfd.q_eta     = Y_self * Q_global(eta_face);
+            };
+
+            auto build_kfd_y = [=] AMREX_GPU_DEVICE (int ii, int lo_j, int hi_j, int kk,
+                                                    FR::KortewegFaceData &kfd)
+            {
+                Real eta_face = Real(0.5) * (eta_arr(ii,lo_j,kk) + eta_arr(ii,hi_j,kk));
+                Real dn       = (eta_arr(ii,hi_j,kk) - eta_arr(ii,lo_j,kk)) * dy_inv;
+                Real dt       = Real(0.25) * (eta_arr(ii+1,lo_j,kk) + eta_arr(ii+1,hi_j,kk)
+                                            - eta_arr(ii-1,lo_j,kk) - eta_arr(ii-1,hi_j,kk)) * dx_inv;
+                Real lapf     = Real(0.5) * (lap9(ii,lo_j,kk) + lap9(ii,hi_j,kk));
+                Real a_self   = (pidx_ == 0) ? (Real(1.0) - eta_face) : eta_face;
+                Real a_other  = Real(1.0) - a_self;
+                Real rho_s    = Real(0.5) * (rho_arr (ii,lo_j,kk) + rho_arr (ii,hi_j,kk));
+                Real rho_o    = Real(0.5) * (rhoO_arr(ii,lo_j,kk) + rhoO_arr(ii,hi_j,kk));
+                Real rho_mix  = a_self * rho_s + a_other * rho_o;
+                Real Y_self   = (a_self * rho_s) / amrex::max(rho_mix, Real(1e-20));
+                kfd.eta_face  = eta_face;
+                kfd.dn_eta    = dn;
+                kfd.dt_eta    = dt;
+                kfd.lap_eta   = lapf;
+                kfd.kappa     = Y_self * kappa_ch_;
+                kfd.q_eta     = Y_self * Q_global(eta_face);
+            };
+
+            FR::KortewegFaceData kfd_xm, kfd_xp, kfd_ym, kfd_yp;
+            build_kfd_x(i-1, i,   j, k, kfd_xm);
+            build_kfd_x(i,   i+1, j, k, kfd_xp);
+            build_kfd_y(i, j-1, j,   k, kfd_ym);
+            build_kfd_y(i, j,   j+1, k, kfd_yp);
+
+            FR::Flux fxm = rsolver->Solve(Sxm, Sxc, pref_, small_,
+                                          /*n_passive=*/0,
+                                          /*q_lo=*/nullptr, /*q_hi=*/nullptr,
+                                          /*q_flux=*/nullptr,
+                                          &kfd_xm, Spec_Vol_);
+            FR::Flux fym = rsolver->Solve(Sym, Syc, pref_, small_,
+                                          0, nullptr, nullptr, nullptr,
+                                          &kfd_ym, Spec_Vol_);
+            FR::Flux fxp = rsolver->Solve(Sxc, Sxp, pref_, small_,
+                                          0, nullptr, nullptr, nullptr,
+                                          &kfd_xp, Spec_Vol_);
+            FR::Flux fyp = rsolver->Solve(Syc, Syp, pref_, small_,
+                                          0, nullptr, nullptr, nullptr,
+                                          &kfd_yp, Spec_Vol_);
 
             rho_rhs(i,j,k) = (fxm.mass             - fxp.mass)            /DX[0]
                            + (fym.mass             - fyp.mass)            /DX[1];
@@ -1702,11 +1808,13 @@ Hydro2::ApplyBSSource(int lev,
 
     const Real sigma_   = sigma;
     const Real epsilon_ = epsilon;
-    // Phase 5: when korteweg_well_balanced is on, the face-flux Korteweg force
-    // is added via ApplyKortewegStress and the legacy Brackbill block is muted
-    // here to avoid double-counting. apply_surface_tension still gates that
-    // legacy block by itself.
-    const int  do_st    = (apply_surface_tension && !korteweg_well_balanced) ? 1 : 0;
+    // Surface tension is applied in flux form via the per-phase HLLC
+    // Korteweg path inside RHS_PerPhase; the legacy cell-centered Brackbill
+    // block in ApplyBSSource is permanently muted here to prevent
+    // double-counting. The block is left in place for now so the
+    // surrounding diagnostics (Fsv_mf, etc.) keep compiling — once the
+    // flux-form path is fully validated, the dead branch can be deleted.
+    const int  do_st    = 0;
     const int  p_int_method_ = p_int_method;
 
     // Zero surface tension plot MF each call so bulk cells (which early-return
@@ -1912,184 +2020,6 @@ Hydro2::ApplyBSSource(int lev,
             Real SEq = qx*grad_eta(0) + qy*grad_eta(1);
             U0(i,j,k) += pu_0_minus_int - SEq + w0*Fsv_work_0;
             U1(i,j,k) += pu_int_minus_1 + SEq + w1*Fsv_work_1;
-        });
-    }
-}
-
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////// ApplyKortewegStress //////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////
-// Phase 5 (CH-Korteweg spec §2.2, §4.3): well-balanced Korteweg capillary
-// force. Replaces the cell-centered Brackbill form
-//   Fsv = sigma * kappa_curv * epsilon * grad_eta
-// with a face-flux discretization of the Korteweg stress tensor
-//
-//   Sigma_K = -kappa * grad_eta (x) grad_eta
-//             + ( kappa * eta * lap_eta + (kappa/2) |grad_eta|^2 ) I
-//
-// (continuum identity:  div(Sigma_K) = kappa * eta * grad(lap_eta) ).
-// The cell-centered force is the discrete divergence of the face stresses:
-//
-//   F_cap_(i,j) = (Sigma_K_xx_(i+1/2,j) - Sigma_K_xx_(i-1/2,j))/dx
-//               + (Sigma_K_xy_(i,j+1/2) - Sigma_K_xy_(i,j-1/2))/dy   (x-comp)
-//
-// and similarly for the y-component. F_cap is split eta-weighted across the
-// two phases (w0 = 1-eta, w1 = eta — same convention as ApplyBSSource), and
-// per-phase energy gets F_cap . u_k.
-//
-// Why this instead of the simpler  F = -eta * grad(mu_chem)  form: with the
-// full mu_chem = lambda*W'(eta) - kappa*lap_eta, the two terms cancel to
-// ~12 orders of magnitude across the equilibrium tanh, so any anisotropy in
-// the cell-centered Laplacian (5-point stencil has C4 grid-aligned bias) is
-// preserved as a tangential pollution in grad(mu_chem). On a circular drop,
-// that produces 4-fold-symmetric tangential force at the cardinal axes,
-// which excites grid-aligned acoustic modes (the symptom we saw at static-
-// droplet validation). Computing Sigma_K directly on faces avoids the cell-
-// to-cell stencil mismatch, and using a 9-point isotropic Laplacian for the
-// cell-centered ∇²η that goes into Sigma_K gets the leading anisotropy down
-// to O(dx^4/delta^4).
-//
-// The lambda*W'(eta) double-well term is NOT included here — that is part
-// of the bulk thermodynamic potential and shows up in CH dynamics, not in
-// the momentum equation. The Korteweg stress only carries the gradient-
-// energy (kappa) contribution.
-//
-// Stencil width: face values use cell ∇²η at the two cells flanking the face,
-// each of which is a 9-point stencil reaching i±1, j±1. So the face at
-// (i+1/2, j) reads eta out to (i-1..i+2, j-1..j+1), and a cell-centered
-// force update reads eta out to (i±2, j±2). Requires nghost >= 2.
-void
-Hydro2::ApplyKortewegStress(int lev,
-                            Set::Scalar /*time*/,
-                            amrex::MultiFab &M0_rhs_mf, amrex::MultiFab &E0_rhs_mf,
-                            amrex::MultiFab &M1_rhs_mf, amrex::MultiFab &E1_rhs_mf,
-                            const amrex::MultiFab &eta_mf_in,
-                            const amrex::MultiFab &rho0_mf_in, const amrex::MultiFab &M0_mf_in,
-                            const amrex::MultiFab &rho1_mf_in, const amrex::MultiFab &M1_mf_in)
-{
-    BL_PROFILE("Hydro2::ApplyKortewegStress");
-
-    if (!korteweg_well_balanced) return;
-
-    const Geometry& geom = this->geom[lev];
-    const Real* DX = geom.CellSize();
-    const Real dx     = DX[0];
-    const Real dy     = DX[1];
-    const Real dx_inv = Real(1.0) / dx;
-    const Real dy_inv = Real(1.0) / dy;
-    // Inverse-of-(6 dx^2) prefactor for the 9-point isotropic Laplacian.
-    // The closed-form weights (4*ortho + diag - 20*center)/(6 dx^2) assume
-    // square cells; if dy != dx the proper isotropic form has separate
-    // weights. Hydro2 is 2D-square in practice — assert and bail otherwise.
-    AMREX_ASSERT_WITH_MESSAGE(std::abs(dx - dy) < Real(1.0e-14),
-        "ApplyKortewegStress: 9-point isotropic Laplacian assumes dx == dy");
-    const Real lap9_pref = Real(1.0) / (Real(6.0) * dx * dx);
-    const Real kappa_    = ch_kappa_eff;
-
-    for (MFIter mfi(eta_mf_in, TilingIfNotGPU()); mfi.isValid(); ++mfi)
-    {
-        const Box& bx = mfi.validbox();
-
-        auto eta     = eta_mf_in.const_array(mfi);
-        auto r0_arr  = rho0_mf_in.const_array(mfi);
-        auto M0_arr  = M0_mf_in.const_array(mfi);
-        auto r1_arr  = rho1_mf_in.const_array(mfi);
-        auto M1_arr  = M1_mf_in.const_array(mfi);
-
-        auto P0 = M0_rhs_mf.array(mfi);
-        auto U0 = E0_rhs_mf.array(mfi);
-        auto P1 = M1_rhs_mf.array(mfi);
-        auto U1 = E1_rhs_mf.array(mfi);
-
-        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
-        {
-            // Cell-centered 9-point isotropic Laplacian:
-            //   L = (1/(6 dx^2)) * [ 4*(E+W+N+S) + (NE+NW+SE+SW) - 20*C ]
-            // 4th-order accurate; leading anisotropy is O(dx^4) — vs the
-            // 5-point stencil's O(dx^2) C4 grid-aligned bias.
-            // (Assumes dx=dy here. For aspect-ratio cells this would need
-            // separate x/y prefactors.)
-            auto lap9 = [=] AMREX_GPU_DEVICE (int ii, int jj, int kk) -> Real
-            {
-                Real s_ortho = eta(ii+1,jj,kk) + eta(ii-1,jj,kk)
-                             + eta(ii,jj+1,kk) + eta(ii,jj-1,kk);
-                Real s_diag  = eta(ii+1,jj+1,kk) + eta(ii-1,jj+1,kk)
-                             + eta(ii+1,jj-1,kk) + eta(ii-1,jj-1,kk);
-                return (Real(4.0)*s_ortho + s_diag - Real(20.0)*eta(ii,jj,kk))
-                       * lap9_pref;
-            };
-
-            // ============ x-face (i+1/2, j) ============
-            Real eta_face_xp = Real(0.5)*(eta(i,j,k) + eta(i+1,j,k));
-            Real dxe_xp      = (eta(i+1,j,k) - eta(i,j,k)) * dx_inv;
-            Real dye_xp      = Real(0.25) * (eta(i,j+1,k) + eta(i+1,j+1,k)
-                                           - eta(i,j-1,k) - eta(i+1,j-1,k)) * dy_inv;
-            Real lap_face_xp = Real(0.5) * (lap9(i,j,k) + lap9(i+1,j,k));
-            Real ge2_xp      = dxe_xp*dxe_xp + dye_xp*dye_xp;
-            Real Sxx_xp = -kappa_*dxe_xp*dxe_xp + kappa_*eta_face_xp*lap_face_xp + Real(0.5)*kappa_*ge2_xp;
-            Real Sxy_xp = -kappa_*dxe_xp*dye_xp;
-
-            // ============ x-face (i-1/2, j) ============
-            Real eta_face_xm = Real(0.5)*(eta(i-1,j,k) + eta(i,j,k));
-            Real dxe_xm      = (eta(i,j,k) - eta(i-1,j,k)) * dx_inv;
-            Real dye_xm      = Real(0.25) * (eta(i-1,j+1,k) + eta(i,j+1,k)
-                                           - eta(i-1,j-1,k) - eta(i,j-1,k)) * dy_inv;
-            Real lap_face_xm = Real(0.5) * (lap9(i-1,j,k) + lap9(i,j,k));
-            Real ge2_xm      = dxe_xm*dxe_xm + dye_xm*dye_xm;
-            Real Sxx_xm = -kappa_*dxe_xm*dxe_xm + kappa_*eta_face_xm*lap_face_xm + Real(0.5)*kappa_*ge2_xm;
-            Real Sxy_xm = -kappa_*dxe_xm*dye_xm;
-
-            // ============ y-face (i, j+1/2) ============
-            Real eta_face_yp = Real(0.5)*(eta(i,j,k) + eta(i,j+1,k));
-            Real dxe_yp      = Real(0.25) * (eta(i+1,j,k) + eta(i+1,j+1,k)
-                                           - eta(i-1,j,k) - eta(i-1,j+1,k)) * dx_inv;
-            Real dye_yp      = (eta(i,j+1,k) - eta(i,j,k)) * dy_inv;
-            Real lap_face_yp = Real(0.5) * (lap9(i,j,k) + lap9(i,j+1,k));
-            Real ge2_yp      = dxe_yp*dxe_yp + dye_yp*dye_yp;
-            Real Syx_yp = -kappa_*dxe_yp*dye_yp;          // == Sxy by symmetry of Sigma_K
-            Real Syy_yp = -kappa_*dye_yp*dye_yp + kappa_*eta_face_yp*lap_face_yp + Real(0.5)*kappa_*ge2_yp;
-
-            // ============ y-face (i, j-1/2) ============
-            Real eta_face_ym = Real(0.5)*(eta(i,j-1,k) + eta(i,j,k));
-            Real dxe_ym      = Real(0.25) * (eta(i+1,j-1,k) + eta(i+1,j,k)
-                                           - eta(i-1,j-1,k) - eta(i-1,j,k)) * dx_inv;
-            Real dye_ym      = (eta(i,j,k) - eta(i,j-1,k)) * dy_inv;
-            Real lap_face_ym = Real(0.5) * (lap9(i,j-1,k) + lap9(i,j,k));
-            Real ge2_ym      = dxe_ym*dxe_ym + dye_ym*dye_ym;
-            Real Syx_ym = -kappa_*dxe_ym*dye_ym;
-            Real Syy_ym = -kappa_*dye_ym*dye_ym + kappa_*eta_face_ym*lap_face_ym + Real(0.5)*kappa_*ge2_ym;
-
-            // Cell-centered force = divergence of the Korteweg stress tensor.
-            //   (div Sigma)_x = d_x Sxx + d_y Sxy
-            //   (div Sigma)_y = d_x Syx + d_y Syy   (Syx == Sxy by tensor symmetry)
-            Real F_cap_x = (Sxx_xp - Sxx_xm) * dx_inv + (Syx_yp - Syx_ym) * dy_inv;
-            Real F_cap_y = (Sxy_xp - Sxy_xm) * dx_inv + (Syy_yp - Syy_ym) * dy_inv;
-
-            // eta-weighted split across phases (matches BS source convention).
-            Real eta_c = eta(i,j,k);
-            if (eta_c < Real(0.0)) eta_c = Real(0.0);
-            if (eta_c > Real(1.0)) eta_c = Real(1.0);
-            Real w0 = Real(1.0) - eta_c;
-            Real w1 = eta_c;
-
-            // Per-phase velocities for the energy-work term.
-            Real safe_r0 = amrex::max(r0_arr(i,j,k), Real(1e-20));
-            Real safe_r1 = amrex::max(r1_arr(i,j,k), Real(1e-20));
-            Real u0x = M0_arr(i,j,k,0) / safe_r0;
-            Real u0y = M0_arr(i,j,k,1) / safe_r0;
-            Real u1x = M1_arr(i,j,k,0) / safe_r1;
-            Real u1y = M1_arr(i,j,k,1) / safe_r1;
-
-            // Momentum: per-phase eta-weighted Korteweg force.
-            P0(i,j,k,0) += w0 * F_cap_x;
-            P0(i,j,k,1) += w0 * F_cap_y;
-            P1(i,j,k,0) += w1 * F_cap_x;
-            P1(i,j,k,1) += w1 * F_cap_y;
-
-            // Energy: F_cap . u_k per phase, eta-weighted.
-            U0(i,j,k) += w0 * (F_cap_x * u0x + F_cap_y * u0y);
-            U1(i,j,k) += w1 * (F_cap_x * u1x + F_cap_y * u1y);
         });
     }
 }
@@ -4792,18 +4722,29 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 sol_mf[1], sol_mf[2],  // phase 0 (rho, M)
                 sol_mf[4], sol_mf[5]); // phase 1 (rho, M)
 
-        RHS_PerPhase(lev, t, gamma_eta0, pi_eta0, mu_eta0, mu_eta0_b,
+        // Phase 0: α_0 = 1−η, "other" phase density = phase 1 (sol_mf[4]).
+        RHS_PerPhase(lev, t, /*phase_idx=*/0,
+                     gamma_eta0, pi_eta0, mu_eta0, mu_eta0_b,
                      rhs_mf[1], rhs_mf[2], rhs_mf[3],
-                     sol_mf[1], sol_mf[2], sol_mf[3]);
+                     sol_mf[1], sol_mf[2], sol_mf[3],
+                     sol_mf[0],   // η
+                     sol_mf[4]);  // ρ_other = ρ_1
 
-        RHS_PerPhase(lev, t, gamma_eta1, pi_eta1, mu_eta1, mu_eta1_b,
+        // Phase 1: α_1 = η, "other" phase density = phase 0 (sol_mf[1]).
+        RHS_PerPhase(lev, t, /*phase_idx=*/1,
+                     gamma_eta1, pi_eta1, mu_eta1, mu_eta1_b,
                      rhs_mf[4], rhs_mf[5], rhs_mf[6],
-                     sol_mf[4], sol_mf[5], sol_mf[6]);
+                     sol_mf[4], sol_mf[5], sol_mf[6],
+                     sol_mf[0],   // η
+                     sol_mf[1]);  // ρ_other = ρ_0
 
         // Stage 4: BS phase-coupling source terms, added to both phases'
         // RHS with sum-to-zero signs so mixture conservation holds identically.
         // Phase 6: gated by bs_source_mode. m0/u0/q already point at the right
         // values (prescribed IC or CH-emergent copy) — see top of Advance().
+        // Korteweg capillary stress is now folded into the per-phase HLLC
+        // flux inside RHS_PerPhase (mass-fraction-split flux form); no
+        // separate cell-centered Korteweg block runs here.
         if (bs_source_mode != BSMode::Off) {
             ApplyBSSource(lev, t,
                           rhs_mf[1], rhs_mf[2], rhs_mf[3],
@@ -4812,19 +4753,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                           sol_mf[1], sol_mf[2], sol_mf[3],
                           sol_mf[4], sol_mf[5], sol_mf[6]);
         }
-
-        // Phase 5: well-balanced face-flux Korteweg capillary force. Internally
-        // no-ops when korteweg_well_balanced == 0. When on, the legacy Brackbill
-        // block inside ApplyBSSource is auto-muted (do_st gating in that
-        // function) so this is a clean replacement, not an additive extra.
-        // Reads mu_chem_mf as populated by MixDiagnostic / ComputeChemicalPotential
-        // at the start of the step.
-        ApplyKortewegStress(lev, t,
-                            rhs_mf[2], rhs_mf[3],   // M0_rhs, E0_rhs
-                            rhs_mf[5], rhs_mf[6],   // M1_rhs, E1_rhs
-                            sol_mf[0],
-                            sol_mf[1], sol_mf[2],   // rho0, M0
-                            sol_mf[4], sol_mf[5]);  // rho1, M1
     });
 
     //==============================================================
@@ -5095,7 +5023,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Pressure — NaN-safe clamp
             p(i, j, k) = (gmix - 1.0) * UE_vol(i, j, k) - gmix * pimix + pref; // pressure Tammann EOS modification
             if (!std::isfinite(p(i, j, k)) || p(i, j, k) < 0.0)
-                p(i, j, k) = 1e-6;
+                p(i, j, k) = 1e-10;
 
             // Chemical Potential
             Set::Scalar f_prime = ch_W_scale * 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: W_scale*f'(eta)
@@ -5202,10 +5130,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             {
                 UE_vol_new = 0.0;
             }
+            // TODO: move to after InterpolateGammaPi_Stiffened call and use gmix_new and pimix_new instead of A_new and B_new, respectively.
+            // Would be more consistent with the actual EOS form used for pressure and sound speed, and would allow for non-Tammann EOS where the gamma_mix interpolation is not just a function of A.
             Set::Scalar p_new = (UE_vol_new - B_new) / A_new;
             if (!std::isfinite(p_new) || p_new < 0.0)
             {
-                p_new = 1e-6;
+                p_new = 1e-10;
             }
             // Set::Scalar pi_mix_new = (B_new / A_new) / gmix_new;
             double gmix_new, pimix_new;

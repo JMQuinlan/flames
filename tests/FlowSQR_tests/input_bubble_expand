@@ -181,7 +181,14 @@ implicit_ch = 2
   ch_mobility_nom = 4e-3
   ch_newton_iters = 5       # default, usually converges in 3
   ch_newton_tol = 1e-10     # default
-  ch_W_scale = 1.0          # double-well amplitude (1.0 = standard; >1 narrows interface, <1 widens)
+  # CH equilibrium-width relation (well-balanced Korteweg + Q-trace path).
+  # IC eta = 0.5*(1 + tanh((r - R0)/(sqrt(2)*epsilon))) with W = eta^2*(1-eta)^2
+  # ==> equilibrium needs   lambda = kappa / epsilon^2
+  # ch_kappa default = epsilon^2 (auto when ch_kappa = 0).
+  # With epsilon = 1e-3 ⇒ kappa = 1e-6,  lambda must be 1.0 to match.
+  # Implied sigma = sqrt(2*kappa*lambda)/6 ~ 2.4e-4 N/m (the legacy `sigma`
+  # knob set above is informational only — Brackbill is muted.)
+  ch_W_scale = 1.0          # lambda = kappa / epsilon^2  (matches equilibrium)
 
 
 nscbc.enabled   = true

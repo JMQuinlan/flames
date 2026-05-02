@@ -6,7 +6,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowSQR_tests/output_Q_202060425
+plot_file = ./tests/FlowSQR_tests/output_Q_202060428
 # plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE_20260416
 
 ### MESHING ###
@@ -17,11 +17,11 @@ amr.blocking_factor = 4 # Must be >= nghost so FillBoundary can fill all ghost l
 amr.regrid_int = 1
 amr.grid_eff = 0.8
 # amr.max_level = 5
-amr.max_level = 4
-# amr.max_level = 0
-amr.n_cell = 32 32
+# amr.max_level = 3
+amr.max_level = 0
+# amr.n_cell = 32 32
 # amr.n_cell = 256 256
-# amr.n_cell = 512 512
+amr.n_cell = 512 512
 # amr.n_cell = 1024 1024
 
 ### TIME STEPING ###
@@ -135,8 +135,20 @@ R_eta0         = 285.714286   # cp - cv = 1000 - 1000/1.4
 
 q_eta0         = 0.0
 qprime_eta0    = 0.0
-q_eta1         = 1.09097974e8
-qprime_eta1    = 0.0
+# q_eta1         = 1.09097974e8
+# qprime_eta1    = 0.0
+
+# ### FREE-ENERGY CALIBRATION (matches input_stefan_sqr) ###
+# # Calibrated for f_g - f_l = 0 at (rho_g_sat, rho_l_sat, T_sat).
+# # See input_stefan_sqr for derivation.
+# T_ref          = 373.15
+# rho_ref_eta0   = 0.5882
+# rho_ref_eta1   = 958.4
+# R_eta0         = 461.4
+# q_eta0         = 0.0
+# qprime_eta0    = 0.0
+q_eta1         = -3.00017e+06
+qprime_eta1    = -5510.35
 
 ch_thermo_consistent = 1
 
@@ -194,32 +206,63 @@ u0.ic.constant.value = 0.0 0.0
 q.ic.constant.value = 0.0 0.0
 
 ### ADDITIONAL SOURCES ###
-apply_surface_tension = 1
+apply_surface_tension = 0
 apply_weight = 0
 apply_vaporization = 0
 Spec_Vol = 1
 grav = 0.0
 
-## DEBUGGING ###
-bs_source_mode = prescribed
-p_int_method = 0 # 0: Off, 1: pressure average, 2: eta weighted pressure. 3: acoustic impedance matched pressure
+### DEBUGGING / SOLVER ###
+# Phase 6: ch_emergent routes m0/u0/q from ComputeEffectiveBSSources into
+# ApplyBSSource each step. To compare against the prior "no BS coupling"
+# behavior, set this to "off" — m0_eff / u0_eff / q_eff are still computed
+# and plotted as diagnostics but not consumed by ApplyBSSource.
+bs_source_mode      = ch_emergent
+p_int_method        = 2     # 0: Off, 1: pressure average, 2: eta weighted pressure. 3: acoustic impedance matched pressure
 Riemann_Solver.type = hllc
-kappa_method = 1   # 1:"Smooth Normals" (default)  2:"Height Function"  3:"Hybrid (HF+SN blend)"
-smooth_kernel_size = 5  # Gaussian normal smoothing kernel: 3 (3x3, default) or 5 (5x5)
-nghost = 4             # Ghost cell depth (= N_int for HF band). Requires amr.blocking_factor >= nghost.
-integration.type = ForwardEuler
-# integration.type = RungeKutta
-# implicit_ch = 1
-# ch_mobility_nom = 0.032   # optional: override auto M = 2*ε*c_max
-# ch_mobility_nom = 1e-4  # seems to need to be smaller
-# implicit_ch = 0 # solves CH rhs explicitly (faster but dx^4 reduction in timestep needed, so only on course grids)
-implicit_ch = 2
-#   ch_mobility_nom = 4e-3
-  ch_mobility_nom = 4e-30
-  ch_newton_iters = 5       # default, usually converges in 3
-  ch_newton_tol = 1e-10     # default
-  ch_W_scale = 1.0          # double-well amplitude (1.0 = standard; >1 narrows interface, <1 widens)
+kappa_method        = 1
+smooth_kernel_size  = 3
+nghost              = 4
+integration.type    = ForwardEuler
 
+# Implicit CH active (Phase 4 will wire dmu_bulk into f'(eta) here).
+implicit_ch     = 2
+# Phase 4 mobility (spec §1.7): the new ch_mobility_scaling param controls
+# how ch_mobility_nom is interpreted.
+#   "magaletti"  -> M_eff = ch_mobility_nom * epsilon^2  (default; matched-asymptotic)
+#                   With epsilon = 5e-6, factor = 2.5e-11, so for M_eff ~ 1e-4
+#                   you would need ch_mobility_nom ~ 4e6.
+#   "allen_cahn" -> M_eff = ch_mobility_nom * epsilon
+#   "explicit"   -> M_eff = ch_mobility_nom directly  (used here for clarity).
+ch_mobility_scaling = magaletti
+ch_newton_iters     = 5
+ch_newton_tol       = 1e-10
+
+# CH equilibrium-width relation (well-balanced Korteweg + Q-trace path).
+# For IC eta(x) = 0.5*(1 + tanh(arg/(sqrt(2)*epsilon))) with W = eta^2*(1-eta)^2,
+# CH equilibrium kappa nabla^2 eta = lambda W'(eta) reduces to:
+#   lambda = kappa / epsilon^2
+# For epsilon = 1e-3:
+#   lambda = 4e-4 / 1e-6 = 400  (with kappa = 4e-4)
+# Implied surface tension sigma = sqrt(2*kappa*lambda)/6 ~ 0.094 N/m.
+#
+# (Earlier value lambda = 2e6 was carried over from a thermo-consistent
+#  spinodal-margin tuning that does NOT apply here once q_eta1 has been
+#  swapped from the calibration constant +1.09e8 to the Clausius-Clapeyron
+#  value -3e6 below. With the new Korteweg path applied unconditionally
+#  in RHS_PerPhase, lambda far above kappa/epsilon^2 leaves the IC tanh
+#  far from CH equilibrium and produces large transient forces; matching
+#  the equilibrium width recovers the quiescent behavior this test wants.)
+ch_W_scale          = 400        # lambda = kappa / epsilon^2
+ch_kappa            = 4.0e-4     # = lambda * epsilon^2  (consistent)
+ch_mobility_degenerate = 1
+# Phase 6 calibration (2026-04-28): with thermo_consistent=1 + ch_emergent
+# routing, the Magaletti baseline M_nom=1 gave m0_eff ~1800x the analytical
+# Stefan flux (0.17 kg/m^2/s), driving ApplyBSSource so hard the system
+# went NaN by step 16. Lowered to 1e-3 to bring CH-derived rate near the
+# heat-conduction-limited Stefan rate. Tune up/down based on observed
+# m0_eff_max vs analytical m0(t) = rho_g * beta * sqrt(alpha/(t+t_off)).
+ch_mobility_nom        = 0
 
 nscbc.enabled   = true
   nscbc.sigma     = 0.28   # 0.28 is a good value for shock-droplet with gamma=1.4, but may need tuning for other problems. Higher sigma means more dissipation added by NSCBC, which can help stabilize but also adds more error.
