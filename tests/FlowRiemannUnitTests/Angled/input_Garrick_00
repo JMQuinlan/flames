@@ -2,18 +2,21 @@
 #@ exe=hydro2
 #@ dim=2
 
-# Garrick et al. (2017) Section 4.1 - Gas-Liquid Riemann Problem
+# Garrick et al. (2017) Section 4.1 - Gas-Liquid Riemann Problem, ROTATED at 0 deg
+# Verifies x/y coupling: the 1D Riemann profile, when projected onto the
+# propagation direction n = (cos theta, sin theta), should be identical for any theta.
 # Reference: https://www.sciencedirect.com/science/article/pii/S0021999117301948
-# Equation 68
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRiemannUnitTests/output_Garrick
+plot_file = ./tests/FlowRiemannUnitTests/Angled/output_Garrick_Angled_00
 Riemann_Solver.type = hllc
 
-# Interface at x=0 (sharp transition)
+# Rotated interface: s = x*cth + y*sth = 0
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = "1.25e-3"
-eta.ic.expression.region0 = "0.5 * (1.0 + tanh(x / epsilon))" 
+eta.ic.expression.constant.cth     = "1.0"
+eta.ic.expression.constant.sth     = "0.0"
+eta.ic.expression.region0 = "0.5 * (1.0 + tanh((x*cth + y*sth) / epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
 
 amr.plot_int = 50
@@ -23,16 +26,15 @@ amr.max_level = 0
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.grid_eff = 0.8
-amr.n_cell = 800 16
+amr.n_cell = 400 400
 
 ### DIMENSIONS ###
-geometry.prob_lo = -1.0  -0.02   0.0 # [ m ]
-geometry.prob_hi =  1.0   0.02   0.0 # [ m ]
-geometry.is_periodic = 0 1 0
+geometry.prob_lo = -1.0  -1.0   0.0 # [ m ]
+geometry.prob_hi =  1.0   1.0   0.0 # [ m ]
+geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
 timestep  = 2.5e-4
-#stop_time = 0.2
 stop_time = 0.2
 
 m0.ic.constant.value = 0.0
@@ -58,54 +60,52 @@ mu0   = 0.0
 mu1   = 0.0
 
 ### Surface tension coefficient ###
-sigma = 0.0       # No surface tension in this test
+sigma = 0.0
 
 ### Reference pressure ###
 pref = 0.0
 
-### IC State - Fluid 0 (LEFT side, x < 0) - LIQUID ###
-
+### IC State - Fluid 0 (s < 0 side) - LIQUID ###
 density0.ic.type = constant
-density0.ic.constant.value = 0.991    
+density0.ic.constant.value = 0.991
 
 velocity0.ic.type = constant
 velocity0.ic.constant.value = 0.0 0.0
 
 pressure0.ic.type = constant
-pressure0.ic.constant.value = 3.059e-4  
+pressure0.ic.constant.value = 3.059e-4
 
 cp0 = 1.4
 cv0 = 1.0
 
-### IC State - Fluid 1 (RIGHT side, x > 0) - GAS ###
+### IC State - Fluid 1 (s > 0 side) - GAS ###
 density1.ic.type = constant
-density1.ic.constant.value = 1.241  
+density1.ic.constant.value = 1.241
 
 velocity1.ic.type = constant
 velocity1.ic.constant.value = 0.0 0.0
 
 pressure1.ic.type = constant
-pressure1.ic.constant.value = 2.753 
+pressure1.ic.constant.value = 2.753
 
 cp1 = 1.4
 cv1 = 1.0
 
-### ETA BC  ###
-### HYDRO BC ###
+### HYDRO BC - neumann on all sides ###
 density.bc.type.xhi = neumann
 density.bc.type.xlo = neumann
-density.bc.type.ylo = periodic
-density.bc.type.yhi = periodic
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
 
 energy.bc.type.xhi = neumann
 energy.bc.type.xlo = neumann
-energy.bc.type.ylo = periodic
-energy.bc.type.yhi = periodic
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
 
 momentum.bc.type.xhi = neumann neumann
 momentum.bc.type.xlo = neumann neumann
-momentum.bc.type.ylo = periodic periodic
-momentum.bc.type.yhi = periodic periodic
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
 
 ### HYDRO REFINEMENT CRITERIA ###
 eta_refinement_criterion   = 100000.1
@@ -128,4 +128,4 @@ apply_sharpening = 0
 sharpening_frequency = 100
 reinit_max_iter = 50
 reinit_tolerance = 1e-6
-omega_relax = 0.5; 
+omega_relax = 0.5;
