@@ -6,9 +6,9 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = ./tests/FlowPatel/Test3_ShockDroplet_SinVap
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowPatel/Test3_ShockDroplet_SinVap
-#plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowPatel/Test3_ShockDroplet_SinVap
+#plot_file = ./tests/FlowPatel/1mm_ShockDroplet_Ma2.0_We100
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowPatel/1mm_ShockDroplet_Ma2.0_We100
+#plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowPatel/1mm_ShockDroplet_Ma2.0_We100
 
 ### MESHING ###
 amr.plot_dt = 0.5e-6
@@ -18,7 +18,7 @@ amr.blocking_factor = 2
 amr.regrid_int = 20
 amr.grid_eff = 0.8
 amr.max_level = 0
-amr.n_cell = 512 512  # Maintains aspect ratio for 0.02m � 0.01m domain
+amr.n_cell = 512 512  # Maintains aspect ratio for 0.02m x 0.01m domain
 
 ### TIME STEPPING ###
 ## Static:
@@ -33,16 +33,16 @@ cfl = 0.3
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.005 -0.005 0.0  # 1/4 tube left of droplet
-geometry.prob_hi =  0.005  0.005 0.0  # 3/4 tube right of droplet (0.02m � 0.01m)
+geometry.prob_hi =  0.005  0.005 0.0  # 3/4 tube right of droplet (0.02m x 0.01m)
 geometry.is_periodic = 0 0 0
- 
+
 ### TIME STEP ###
 stop_time = 0.0002  # Shorter time for shock interaction
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = 0.00002
-eta.ic.expression.constant.R0 = 0.001  # 5mm droplet radius
+eta.ic.expression.constant.R0 = 0.001  # 1mm droplet radius (D_0 = 0.002 m)
 eta.ic.expression.constant.x_center = 0.0  # Centered at origin
 eta.ic.expression.constant.y_center = 0.0  # Centered at origin
 
@@ -68,7 +68,7 @@ mu1_b = 0.001
 # Densities
 density0.ic.type = expression
 density0.ic.expression.constant.rho_air = 1.225
-density0.ic.expression.constant.rho_shock = 2.281    # Post-shock density rho_2 (M_s = 1.5)
+density0.ic.expression.constant.rho_shock = 3.2667    # Post-shock density rho_2 (M_s = 2.0)
 density0.ic.expression.constant.x_shock = -0.004  # Shock region near left wall
 density0.ic.expression.region0 = "(x < x_shock)*rho_shock + (x >= x_shock)*rho_air"
 
@@ -78,8 +78,7 @@ density1.ic.expression.region0 = "rho_water"
 
 # Velocities (initially at rest, except shock region)
 velocity0.ic.type = expression
-#velocity0.ic.expression.constant.u_shock = 520.0  # Shock velocity [m/s]
-velocity0.ic.expression.constant.u_shock = 236.32  # Post-shock gas velocity u_2 [m/s] (M_s = 1.5)
+velocity0.ic.expression.constant.u_shock = 425.37  # Post-shock gas velocity u_2 [m/s] (M_s = 2.0)
 velocity0.ic.expression.constant.x_shock = -0.004
 velocity0.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
 velocity0.ic.expression.region1 = "0.0"
@@ -93,7 +92,7 @@ velocity1.ic.expression.region1 = "0.0"
 # Pressures
 pressure0.ic.type = expression
 pressure0.ic.expression.constant.p_atm = 1.01325e5
-pressure0.ic.expression.constant.p_shock = 2.4909e5  # Post-shock pressure p_2 [Pa] (M_s = 1.5)
+pressure0.ic.expression.constant.p_shock = 4.5596e5  # Post-shock pressure p_2 [Pa] (M_s = 2.0)
 pressure0.ic.expression.constant.x_shock = -0.004
 pressure0.ic.expression.region0 = "(x < x_shock)*p_shock + (x >= x_shock)*p_atm"
 
@@ -108,7 +107,7 @@ eos0.cv = "717.86"  # Air cv = cp/gamma
 eos1.cv = "4179.0/7.15"  # Water cv = cp/gamma
 
 # Surface tension
-sigma = 2.548 # For We = rho_2*u_2^2*D_0/sigma = 100  (D_0 = 0.002 m, M_s = 1.5)
+sigma = 11.82 # For We = rho_2*u_2^2*D_0/sigma = 100  (D_0 = 0.002 m, M_s = 2.0)
 
 # Vapor Diffusivity
 Dv = "2.3e-5"	# Water-Vapor Diffusivity [m^2/s]
@@ -127,7 +126,7 @@ momentum.bc.type.yhi = neumann neumann
 
 # Left wall: Dirichlet (no-slip, no-penetration)
 density.bc.type.xlo = dirichlet
-density.bc.val.xlo = 2.281  # Post-shock density rho_2 (M_s = 1.5)
+density.bc.val.xlo = 3.2667  # Post-shock density rho_2 (M_s = 2.0)
 energy.bc.type.xlo = neumann
 momentum.bc.type.xlo = dirichlet dirichlet
 momentum.bc.val.xlo = 0.0 0.0  # No-slip
@@ -154,11 +153,11 @@ q.ic.constant.value = 0.0 0.0
 ### ADDITIONAL SOURCES ###
 apply_surface_tension = 1
 apply_weight = 0
-apply_vaporization = 0
+apply_vaporization = 1
 
 Spec_Vol = 1
 grav = 9.81
 
-### DEBUGGING ### 
+### DEBUGGING ###
 Riemann_Solver.type = hllc
 kappa_method = 1   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
