@@ -132,7 +132,7 @@ bs_source_mode      = ch_emergent
 #  path is now the only Σ_K implementation, applied unconditionally inside
 #  RHS_PerPhase. ApplyKortewegStress and the legacy Brackbill block have
 #  both been deleted from Hydro2.)
-p_int_method        = 2     # 0: Off, 1: pressure average, 2: eta weighted pressure. 3: acoustic impedance matched pressure
+p_int_method        = 4     # 0: Off, 1: pressure average, 2: eta weighted pressure. 3: acoustic impedance matched pressure 4: mass-fraction weighted pressure
 Riemann_Solver.type = hllc
 kappa_method        = 1
 smooth_kernel_size  = 3

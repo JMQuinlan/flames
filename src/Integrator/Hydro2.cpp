@@ -118,7 +118,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             }
         }
         pp_query_default("bs_sources_time_dependent", value.bs_sources_time_dependent, 0); // re-evaluate ic_m0/ic_u0/ic_q each Advance step at the current time (Stefan and similar)
-        pp_query_default("p_int_method", value.p_int_method, 0);                        // BS interface-pressure closure: 0 OFF, 1 arithmetic mean, 2 eta-weighted, 3 acoustic-impedance
+        pp_query_default("p_int_method", value.p_int_method, 0);                        // BS interface-pressure closure: 0 OFF, 1 arithmetic mean, 2 eta-weighted, 3 acoustic-impedance, 4 mass-fraction weighted
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
         // PHASE eta=1 (liquid — stiffened gas)
@@ -2035,6 +2035,31 @@ Hydro2::ApplyBSSource(int lev,
                     p_int   = (Z1 * p0_phase + Z0 * p1_phase) / Zsum;
                     u_int_x = (Z1 * u0x_ph   + Z0 * u1x_ph)   / Zsum;
                     u_int_y = (Z1 * u0y_ph   + Z0 * u1y_ph)   / Zsum;
+                }
+                else
+                {
+                    p_int   = Real(0.5) * (p0_phase + p1_phase);
+                    u_int_x = Real(0.5) * (u0x_ph   + u1x_ph);
+                    u_int_y = Real(0.5) * (u0y_ph   + u1y_ph);
+                }
+            }
+            else if (p_int_method_ == 4)
+            {
+                // mass-fraction weighted: consistent with mass-fraction blending
+                // used elsewhere in the integrator. Y_k = alpha_k * rho_k / rho_mix
+                // with alpha_0 = 1 - eta, alpha_1 = eta.
+                //   rho_0 = rho_1            -> reduces to method 2 (eta-weighted)
+                //   large rho contrast       -> p*, u* pulled toward heavier phase
+                Real a0   = w0 * safe_r0;
+                Real a1   = w1 * safe_r1;
+                Real asum = a0 + a1;
+                if (asum > Real(1e-30))
+                {
+                    Real Y0 = a0 / asum;
+                    Real Y1 = a1 / asum;
+                    p_int   = Y0 * p0_phase + Y1 * p1_phase;
+                    u_int_x = Y0 * u0x_ph   + Y1 * u1x_ph;
+                    u_int_y = Y0 * u0y_ph   + Y1 * u1y_ph;
                 }
                 else
                 {
