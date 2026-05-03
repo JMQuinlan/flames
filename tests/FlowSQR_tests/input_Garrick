@@ -3,7 +3,7 @@
 #@ dim=2
 
 # See https://www.sciencedirect.com/science/article/pii/S0021999117301948
-# Figure 4 - Gass Liquid Riemann Problem
+# Figure 4 - Gas-Liquid Riemann Problem
 
 ### OUTPUT ###
 plot_file = ./tests/FlowSQR_tests/output_Garrick_20260501
@@ -24,8 +24,8 @@ geometry.is_periodic = 0 1 0
 
 ### TIME STEP ###
 timestep  = 2.5e-4
-# stop_time = 0.2
 stop_time = 0.2
+# stop_time = 0.1
 cfl   = 0.4
 
 ### Sources ###
@@ -117,7 +117,8 @@ sigma = 0;
 Dv = 0;
 g = 0.0;
 
-apply_surface_tension = 0
+# apply_surface_tension = 1
+apply_surface_tension = 0 # 0: false
 apply_weight = 0
 apply_vaporization = 0
 

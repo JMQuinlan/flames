@@ -236,6 +236,73 @@ namespace Thermo_Interp
     }
 
     // -------------------------------------------------------------------------
+    // 7a) Mass-fraction mixing (BS dual-state closure)
+    //
+    // The volume-fraction (Allaire/Kapila pressure-equilibrium) blend in
+    // Section 7 assumes both phases share a common pressure and that eta is
+    // a volume fraction.  In the BS dual-state formulation each phase carries
+    // its own (rho, M, E) and we instead blend per-phase intensives by
+    // mass fraction:
+    //
+    //   alpha_0 = 1 - eta,   alpha_1 = eta            (volume fractions)
+    //   rho_mix = (1-eta) * rho_0 + eta * rho_1
+    //   Y_0     = (1-eta) * rho_0 / rho_mix
+    //   Y_1     =     eta * rho_1 / rho_mix
+    //
+    // For a Y-weighted scalar q_mix = Y_0 * q_0 + Y_1 * q_1 (used for p, u
+    // in p_int_method=4 and now for diagnostic mixture p, a, T as well).
+    // Convention: subscript "0" = phase at eta=0, "1" = phase at eta=1.
+    // -------------------------------------------------------------------------
+
+    inline void Mix_MassFraction_A_B(
+        Scalar eta,
+        Scalar rho0, Scalar rho1,
+        Scalar &Y0, Scalar &Y1, Scalar &rho_mix)
+    {
+        eta = clamp01(eta);
+        Scalar a0   = (Scalar(1.0) - eta) * rho0;
+        Scalar a1   = eta * rho1;
+        Scalar asum = a0 + a1;
+        if (asum > Scalar(1e-30))
+        {
+            Y0      = a0 / asum;
+            Y1      = a1 / asum;
+            rho_mix = asum;
+        }
+        else
+        {
+            Y0      = Scalar(0.5);
+            Y1      = Scalar(0.5);
+            rho_mix = Scalar(1e-30);
+        }
+    }
+
+    // Y-weighted (gamma, pi) closure — mass-fraction analogue of the
+    // Allaire A/B blend in Section 7:
+    //   1/(gamma_Y - 1) = Y_0/(g_0-1) + Y_1/(g_1-1)
+    //   pi_Y            = (Y_0 g_0 pi_0/(g_0-1) + Y_1 g_1 pi_1/(g_1-1))
+    //                   / ( Y_0/(g_0-1) + Y_1/(g_1-1) + 1 )
+    // Reduces exactly to (g_i, pi_i) at the pure-phase limit Y_i = 1.
+    // Note: this is a closure for plot/Riemann diagnostics; the BS source
+    // and per-phase EOS in Section 7b remain the load-bearing path.
+    inline void MixGammaPi_MassFraction(
+        Scalar Y0, Scalar Y1,
+        Scalar gamma0, Scalar gamma1,
+        Scalar pi0,    Scalar pi1,
+        Scalar &gamma_Y,
+        Scalar &pi_Y)
+    {
+        Scalar A = Y0 / (gamma0 - Scalar(1.0))
+                 + Y1 / (gamma1 - Scalar(1.0));
+
+        Scalar B = Y0 * gamma0 * pi0 / (gamma0 - Scalar(1.0))
+                 + Y1 * gamma1 * pi1 / (gamma1 - Scalar(1.0));
+
+        gamma_Y = Scalar(1.0) + Scalar(1.0) / A;
+        pi_Y    = B / (A + Scalar(1.0));
+    }
+
+    // -------------------------------------------------------------------------
     // 7b) Per-phase single-phase EOS inversions on (rho, UE)
     //     UE = rho * e (volumetric internal energy)
     //     These are used in the dual-state BS formulation where each phase

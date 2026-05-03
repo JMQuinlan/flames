@@ -330,6 +330,14 @@ protected:
     Set::Field<Set::Scalar> u0_eff_mf;
     Set::Field<Set::Scalar> q_eff_mf;
 
+    // BS source diagnostic plot fields (populated inside ApplyBSSource).
+    //   bs_dp_mf      [Pa,2c]      : per-phase pressure imbalance dp_k = ±(p_k - p_int)
+    //   bs_mom_src_mf [N/m^3,4c]   : per-phase momentum source dp_k * grad(eta)
+    //   bs_eng_src_mf [W/m^3,2c]   : per-phase energy source (p_k u_k - p* u*) * grad(eta)
+    Set::Field<Set::Scalar> bs_dp_mf;
+    Set::Field<Set::Scalar> bs_mom_src_mf;
+    Set::Field<Set::Scalar> bs_eng_src_mf;
+
 protected:
     Set::Field<Set::Scalar> eta_mf;
     Set::Field<Set::Scalar> eta_mf_in;

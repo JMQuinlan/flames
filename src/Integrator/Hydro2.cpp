@@ -308,6 +308,12 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.m0_eff_mf,       &value.bc_nothing, 1, nghost, "m0_eff", true, false);
         value.RegisterNewFab(value.u0_eff_mf,       &value.bc_nothing, 2, nghost, "u0_eff", true, false, { "x", "y" });
         value.RegisterNewFab(value.q_eff_mf,        &value.bc_nothing, 2, nghost, "q_eff",  true, false, { "x", "y" });
+
+        // BS source diagnostic plot fields (populated inside ApplyBSSource).
+        value.RegisterNewFab(value.bs_dp_mf,        &value.bc_nothing, 2, nghost, "bs_dp",      true, false, { "0", "1" });
+        value.RegisterNewFab(value.bs_mom_src_mf,   &value.bc_nothing, 4, nghost, "bs_mom_src", true, false, { "0_x", "0_y", "1_x", "1_y" });
+        value.RegisterNewFab(value.bs_eng_src_mf,   &value.bc_nothing, 2, nghost, "bs_eng_src", true, false, { "0", "1" });
+
         value.RegisterNewFab(value.Source_mf,       &value.bc_nothing,  4, nghost, "Source", true, false, { "_rho", "_Mx", "_My","_E" });
         value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, nghost, "Fsv", true, false, { "x", "y" });  // Surface Tension
         value.RegisterNewFab(value.Fw_mf,           &value.bc_nothing,  2, nghost, "Fw", true, false, { "x", "y" });   // Weight
@@ -577,6 +583,11 @@ void Hydro2::Initialize(int lev)
     u0_eff_mf[lev]   ->setVal(0.0);
     q_eff_mf[lev]    ->setVal(0.0);
 
+    // BS source diagnostic plot fields
+    bs_dp_mf[lev]      ->setVal(0.0);
+    bs_mom_src_mf[lev] ->setVal(0.0);
+    bs_eng_src_mf[lev] ->setVal(0.0);
+
     // MIXED PROPERTIES (setVal also clears ghost cells, preventing NaN from debug-mode allocation)
     mu_chem_mf[lev]     ->setVal(0.0);
     T_mf[lev]           ->setVal(0.0);
@@ -741,25 +752,33 @@ void Hydro2::Mix(int lev)
 
 
             //--------------------------------------------------------------
-            // 6. Mixture gamma and pi (use your interpolation function)
+            // 6. Mass-fraction weights and Y-weighted (gamma, pi) for the
+            //    mixture diagnostic mfabs. Local convention here:
+            //      r0 = rho at eta=1 phase   (legacy)
+            //      r1 = rho at eta=0 phase   (legacy)
             //--------------------------------------------------------------
+            double Y_eta0_, Y_eta1_, rho_mix_unused;
+            Thermo_Interp::Mix_MassFraction_A_B(
+                e, /*rho0_eta=*/r1, /*rho1_eta=*/r0,
+                Y_eta0_, Y_eta1_, rho_mix_unused);
+
             double gmix, pimix;
-            Thermo_Interp::InterpolateGammaPi_Stiffened(
-                e, gamma_eta0, gamma_eta1, pi_eta0, pi_eta1, gmix, pimix);
+            Thermo_Interp::MixGammaPi_MassFraction(
+                Y_eta0_, Y_eta1_,
+                gamma_eta0, gamma_eta1,
+                pi_eta0,    pi_eta1,
+                gmix, pimix);
 
             gamma_mix(i,j,k) = gmix;
             pi_mix(i,j,k)    = pimix;
 
 
             //--------------------------------------------------------------
-            // 7. Mixture pressure from stiffened EOS (energy-primary)
+            // 7. Mixture pressure: Y-weighted of per-phase pressures.
+            //    p0(i,j,k) = p_eta1, p1(i,j,k) = p_eta0 (local naming).
             //--------------------------------------------------------------
-            Real KE = 0.5 * rm * (vx*vx + vy*vy);
-            Real UE = Ev - KE;
-            if (UE < 0) UE = 0;
-
-            Real p = (gmix - 1.0)*UE - gmix*pimix + pref;
-            if (p < 0) p = 1e-6;
+            Real p = Y_eta0_ * p1(i,j,k) + Y_eta1_ * p0(i,j,k) + pref;
+            if (!std::isfinite(p) || p < 0) p = 1e-6;
 
             p_mix(i,j,k) = p;
         });
@@ -880,18 +899,27 @@ void Hydro2::MixDiagnostic(int lev)
             if (!std::isfinite(p0_) || p0_ < Real(0.0)) p0_ = Real(1e-6);
             if (!std::isfinite(p1_) || p1_ < Real(0.0)) p1_ = Real(1e-6);
 
-            p_mix(i,j,k) = one_e*p0_ + e*p1_;
+            // Mass-fraction weights (subscript 0 = eta=0 phase).
+            Real Y0_, Y1_, rho_mix_chk;
+            Thermo_Interp::Mix_MassFraction_A_B(
+                e, safe_r0, safe_r1, Y0_, Y1_, rho_mix_chk);
 
-            // Mixture gamma/pi kept for plotfile parity (Allaire A/B blend).
-            Real A = e/(g1-Real(1.0)) + one_e/(g0-Real(1.0));
-            Real B = e*g1*pi1/(g1-Real(1.0)) + one_e*g0*pi0/(g0-Real(1.0));
-            Real gm = Real(1.0) + Real(1.0)/A;
-            Real pm = B / (A + Real(1.0));
+            // Y-weighted mixture pressure (TODO: revisit alongside a more
+            // complete two-phase sound-speed theory).
+            p_mix(i,j,k) = Y0_ * p0_ + Y1_ * p1_;
+
+            // Y-weighted (gamma, pi) — mass-fraction analogue of Allaire A/B.
+            Real gm, pm;
+            Thermo_Interp::MixGammaPi_MassFraction(
+                Y0_, Y1_, g0, g1, pi0, pi1, gm, pm);
             gamma(i,j,k)  = gm;
             pi_out(i,j,k) = pm;
 
-            Real c2 = gm * (p_mix(i,j,k) + pm) / safe_rm;
-            a_mix(i,j,k) = (c2 > Real(0.0)) ? std::sqrt(c2) : Real(0.0);
+            // Y-weighted mixture sound speed from per-phase c_k.
+            // For CFL we use max(c_0, c_1) elsewhere; this mfab is diagnostic.
+            Real c0_ = Thermo_Interp::SoundSpeed_CPG(safe_r0, p0_, g0);
+            Real c1_ = Thermo_Interp::SoundSpeed_SG (safe_r1, p1_, g1, pi1);
+            a_mix(i,j,k) = Y0_ * c0_ + Y1_ * c1_;
 
             // Mixture temperature: eta-weighted blend of per-phase T's
             // (Convention B: UE_k = rho_k * cv_k * T_k for both CPG and Tammann).
@@ -1911,6 +1939,13 @@ Hydro2::ApplyBSSource(int lev,
     // inside the ParallelFor below) don't carry stale values from prior steps.
     Fsv_mf[lev]->setVal(0.0);
 
+    // Zero BS source diagnostic plot MFs for the same reason. They are written
+    // inside the band-only ParallelFor below and would otherwise carry stale
+    // values in bulk cells.
+    bs_dp_mf[lev]      ->setVal(0.0);
+    bs_mom_src_mf[lev] ->setVal(0.0);
+    bs_eng_src_mf[lev] ->setVal(0.0);
+
      amrex::Print() << "[BS] eta min/max on lev " << lev
                  << " = " << eta_mf_in.min(0) << " / " << eta_mf_in.max(0)
                  << "\n";
@@ -1953,6 +1988,10 @@ Hydro2::ApplyBSSource(int lev,
         auto q_arr   = q_mf[lev]->const_array(mfi);
 
         auto Fsv_out = Fsv_mf[lev]->array(mfi);
+
+        auto bs_dp_out      = bs_dp_mf[lev]->array(mfi);
+        auto bs_mom_src_out = bs_mom_src_mf[lev]->array(mfi);
+        auto bs_eng_src_out = bs_eng_src_mf[lev]->array(mfi);
 
         auto R0 = rho0_rhs_mf.array(mfi);
         auto P0 = M0_rhs_mf.array(mfi);
@@ -2050,23 +2089,12 @@ Hydro2::ApplyBSSource(int lev,
                 // with alpha_0 = 1 - eta, alpha_1 = eta.
                 //   rho_0 = rho_1            -> reduces to method 2 (eta-weighted)
                 //   large rho contrast       -> p*, u* pulled toward heavier phase
-                Real a0   = w0 * safe_r0;
-                Real a1   = w1 * safe_r1;
-                Real asum = a0 + a1;
-                if (asum > Real(1e-30))
-                {
-                    Real Y0 = a0 / asum;
-                    Real Y1 = a1 / asum;
-                    p_int   = Y0 * p0_phase + Y1 * p1_phase;
-                    u_int_x = Y0 * u0x_ph   + Y1 * u1x_ph;
-                    u_int_y = Y0 * u0y_ph   + Y1 * u1y_ph;
-                }
-                else
-                {
-                    p_int   = Real(0.5) * (p0_phase + p1_phase);
-                    u_int_x = Real(0.5) * (u0x_ph   + u1x_ph);
-                    u_int_y = Real(0.5) * (u0y_ph   + u1y_ph);
-                }
+                Real Y0_, Y1_, rho_mix_;
+                Thermo_Interp::Mix_MassFraction_A_B(
+                    eta_c, safe_r0, safe_r1, Y0_, Y1_, rho_mix_);
+                p_int   = Y0_ * p0_phase + Y1_ * p1_phase;
+                u_int_x = Y0_ * u0x_ph   + Y1_ * u1x_ph;
+                u_int_y = Y0_ * u0y_ph   + Y1_ * u1y_ph;
             }
             // else: p_int_method_ == 0 → pressure-imbalance coupling OFF
             //       p_int and u_int stay at 0; dp0/dp1/pu_int are zeroed below.
@@ -2103,10 +2131,22 @@ Hydro2::ApplyBSSource(int lev,
             }
             Real Smass_mx = mdot0 * u0x * grad_eta_mag;
             Real Smass_my = mdot0 * u0y * grad_eta_mag;
-            P0(i,j,k,0) += dp0*grad_eta(0) - Smass_mx;
-            P0(i,j,k,1) += dp0*grad_eta(1) - Smass_my;
-            P1(i,j,k,0) += dp1*grad_eta(0) + Smass_mx;
-            P1(i,j,k,1) += dp1*grad_eta(1) + Smass_my;
+            Real P0_src_x = dp0*grad_eta(0) - Smass_mx;
+            Real P0_src_y = dp0*grad_eta(1) - Smass_my;
+            Real P1_src_x = dp1*grad_eta(0) + Smass_mx;
+            Real P1_src_y = dp1*grad_eta(1) + Smass_my;
+            P0(i,j,k,0) += P0_src_x;
+            P0(i,j,k,1) += P0_src_y;
+            P1(i,j,k,0) += P1_src_x;
+            P1(i,j,k,1) += P1_src_y;
+
+            // Diagnostic plot fields: pressure imbalance and momentum source per phase.
+            bs_dp_out(i,j,k,0)      = dp0;
+            bs_dp_out(i,j,k,1)      = dp1;
+            bs_mom_src_out(i,j,k,0) = P0_src_x;
+            bs_mom_src_out(i,j,k,1) = P0_src_y;
+            bs_mom_src_out(i,j,k,2) = P1_src_x;
+            bs_mom_src_out(i,j,k,3) = P1_src_y;
 
             // === Energy: same correction for the pressure-work part.
             //     Phase 0:  S_E = (p_0·u_0 - p_int·u_int)·∇η
@@ -2124,8 +2164,14 @@ Hydro2::ApplyBSSource(int lev,
                 pu_int_minus_1 = pu_int - pu_1;
             }
             Real SEq = qx*grad_eta(0) + qy*grad_eta(1);
-            U0(i,j,k) += pu_0_minus_int - SEq;
-            U1(i,j,k) += pu_int_minus_1 + SEq;
+            Real U0_src = pu_0_minus_int - SEq;
+            Real U1_src = pu_int_minus_1 + SEq;
+            U0(i,j,k) += U0_src;
+            U1(i,j,k) += U1_src;
+
+            // Diagnostic plot field: energy source per phase.
+            bs_eng_src_out(i,j,k,0) = U0_src;
+            bs_eng_src_out(i,j,k,1) = U1_src;
         });
     }
 }
@@ -2206,6 +2252,13 @@ Hydro2::RHS(int lev,
         auto rho0_arr = density_eta1_mf[lev]->array(mfi);
         auto rho1_arr = density_eta0_mf[lev]->array(mfi);
 
+        // Per-phase E and M for Y-weighted mixture closure (BS dual-state).
+        // Convention: e0 -> eta=0 phase (CPG), e1 -> eta=1 phase (SG).
+        auto E_e0_arr = energy_eta0_mf[lev]->const_array(mfi);
+        auto E_e1_arr = energy_eta1_mf[lev]->const_array(mfi);
+        auto M_e0_arr = momentum_eta0_mf[lev]->const_array(mfi);
+        auto M_e1_arr = momentum_eta1_mf[lev]->const_array(mfi);
+
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i,int j,int k)
         {
             //------------------------------------------------------------------
@@ -2232,38 +2285,50 @@ Hydro2::RHS(int lev,
             KE_arr(i,j,k) = KE;
 
             //------------------------------------------------------------------
-            // Gamma-law mixture + Tammann EOS  (computed BEFORE energy floor)
+            // Per-phase pressures (single-phase EOS, no Allaire mixing).
+            // rho0_arr = density_eta1_mf (eta=1 phase, SG / liquid)
+            // rho1_arr = density_eta0_mf (eta=0 phase, CPG / gas)   -- legacy.
             //------------------------------------------------------------------
+            const Real rho_e0_phase = rho1_arr(i,j,k); // eta=0 phase
+            const Real rho_e1_phase = rho0_arr(i,j,k); // eta=1 phase
+            Real safe_re0 = (rho_e0_phase > Real(1e-20)) ? rho_e0_phase : Real(1e-20);
+            Real safe_re1 = (rho_e1_phase > Real(1e-20)) ? rho_e1_phase : Real(1e-20);
+            Real KE_e0 = Real(0.5)*(M_e0_arr(i,j,k,0)*M_e0_arr(i,j,k,0)
+                                  + M_e0_arr(i,j,k,1)*M_e0_arr(i,j,k,1)) / safe_re0;
+            Real KE_e1 = Real(0.5)*(M_e1_arr(i,j,k,0)*M_e1_arr(i,j,k,0)
+                                  + M_e1_arr(i,j,k,1)*M_e1_arr(i,j,k,1)) / safe_re1;
+            Real UE_e0 = amrex::max(Real(0.0), E_e0_arr(i,j,k) - KE_e0);
+            Real UE_e1 = amrex::max(Real(0.0), E_e1_arr(i,j,k) - KE_e1);
+            Real p_e0_loc = Thermo_Interp::Pressure_CPG  (UE_e0, gamma_eta0)             + pref;
+            Real p_e1_loc = Thermo_Interp::Pressure_SG_UE(UE_e1, gamma_eta1, pi_eta1)    + pref;
+            if (!std::isfinite(p_e0_loc) || p_e0_loc < Real(0.0)) p_e0_loc = Real(1e-6);
+            if (!std::isfinite(p_e1_loc) || p_e1_loc < Real(0.0)) p_e1_loc = Real(1e-6);
+
+            //------------------------------------------------------------------
+            // Y-weighted mixture (gamma, pi) — diagnostic mfab values.
+            //------------------------------------------------------------------
+            Real Y0_, Y1_, rho_mix_chk;
+            Thermo_Interp::Mix_MassFraction_A_B(
+                eta, safe_re0, safe_re1, Y0_, Y1_, rho_mix_chk);
+
             double gmix, pimix;
-            Thermo_Interp::InterpolateGammaPi_Stiffened(
-                eta, gamma_eta0, gamma_eta1, pi_eta0, pi_eta1, gmix, pimix);
+            Thermo_Interp::MixGammaPi_MassFraction(
+                Y0_, Y1_, gamma_eta0, gamma_eta1, pi_eta0, pi_eta1, gmix, pimix);
             gamma_mix(i,j,k) = gmix;
-            pi_mix(i,j,k) = pimix;
+            pi_mix(i,j,k)    = pimix;
 
             // Internal Energy — EOS-consistent floor before Riemann solver sees E.
             //
             // The stiffened-gas EOS has a condition number of γπ/p ≈ 2×10⁴ at
             // the water interface: a 0.005% error in E creates a 100% error in p.
-            // When UE drifts negative (from AMR interpolation, RK stages, etc.),
-            // the OLD code floored UE→0 in UE_arr but left E_arr unchanged.
-            // The Riemann solver then recomputed pL from E_arr → catastrophically
-            // negative → floored to small≈1e-14 Pa.  A cell at p≈0 next to a
-            // neighbor at p=1e5 Pa has a 1e5/dx momentum imbalance that drives
-            // spurious flow, first at the 4 cardinal points of the bubble
-            // (sharpest EOS jump), then spreading around the entire interface.
-            //
-            // Fix: when p < p_floor, compute the EOS-consistent UE_min and write
-            // it back to E_arr so the Riemann solver sees a physically bounded E.
+            // The floor below uses the Y-weighted (gamma, pi) heuristically; a
+            // rigorous per-phase floor on UE_e0/UE_e1 would be the proper fix
+            // when the Stage 3 BS dual-state refactor is finished.
             Real E = E_arr(i,j,k);
             Real UE = E - KE;
             if (!std::isfinite(UE)) UE = 0.0;
             if (UE > Real(1e20)) UE = Real(1e20);
 
-            // p_floor guards NaN/negative pressure from EOS ill-conditioning
-            // (γπ/p can be O(1e4) for stiffened liquids at low non-dimensional p).
-            // Must stay well below the minimum physical pressure in any problem —
-            // the previous value of 1.0 assumed SI Pa and broke non-dimensional
-            // cases where liquid pressure is O(1e-4).
             const Real p_floor_eos = Real(1.0e-10);
             Real p_raw = (Real(gmix) - 1.0)*UE - Real(gmix)*Real(pimix) + pref;
             if (!std::isfinite(p_raw) || p_raw < p_floor_eos) {
@@ -2272,28 +2337,41 @@ Hydro2::RHS(int lev,
 
             UE_arr(i,j,k) = UE;
 
-            // Pressure (for diagnostics / sound speed / temperature)
-            Real p_mix_local = (Real(gmix) - 1.0)*UE - Real(gmix)*Real(pimix) + pref;
-            if (p_mix_local > Real(1e15)) p_mix_local = Real(1e15); // upper cap
+            //------------------------------------------------------------------
+            // Y-weighted mixture pressure / sound speed / temperature.
+            // (TODO: revisit alongside a more complete two-phase sound-speed
+            //  theory; max(c_e0, c_e1) is used for CFL elsewhere.)
+            //------------------------------------------------------------------
+            Real p_mix_local = Y0_ * p_e0_loc + Y1_ * p_e1_loc;
+            if (p_mix_local > Real(1e15)) p_mix_local = Real(1e15);
+            if (p_mix_local < p_floor_eos) p_mix_local = p_floor_eos;
             p_arr(i,j,k) = p_mix_local;
 
-            // Specific heats
+            // Specific heats (eta-weighted; cv consistent with Convention B
+            // T_k = UE_k / (rho_k * cv_k) used below).
             cp_arr(i,j,k) = eta*cp_eta1 + (1.0 - eta)*cp_eta0;
             cv_arr(i,j,k) = eta*cv_eta1 + (1.0 - eta)*cv_eta0;
 
-            // Temperature — guard against Inf/NaN and unrealistically large values
-            // (large T can overflow to Inf during AMR FillCoarsePatch interpolation).
+            // Y-weighted temperature from per-phase T_k = UE_k / (rho_k * cv_k)
+            // (Convention B). Supersedes the Allaire (p+gamma*pi)/((g-1)*rho*cv)
+            // form, which has a sign issue on the Tammann pi term.
             {
-                Set::Scalar T_denom = rho * cv_arr(i,j,k) * (gmix - 1.0) + 1e-14;
-                if (T_denom <= Real(0.0)) T_denom = Real(1e-14);
-                Set::Scalar T_val = (p_mix_local + pimix) / T_denom;
+                Real T0_phase = (cv_eta0 > Real(0.0)) ? UE_e0 / (safe_re0 * cv_eta0) : Real(0.0);
+                Real T1_phase = (cv_eta1 > Real(0.0)) ? UE_e1 / (safe_re1 * cv_eta1) : Real(0.0);
+                if (!std::isfinite(T0_phase) || T0_phase < Real(0.0)) T0_phase = Real(0.0);
+                if (!std::isfinite(T1_phase) || T1_phase < Real(0.0)) T1_phase = Real(0.0);
+                Real T_val = Y0_ * T0_phase + Y1_ * T1_phase;
                 if (!std::isfinite(T_val) || T_val > Real(1e15)) T_val = Real(0.0);
                 T_arr(i,j,k) = T_val;
             }
 
-            // Speed of sound — use safe_rho to prevent astronomical a when rho→0,
-            // which would collapse DynamicTimestep to dt_min indefinitely.
-            a_arr(i,j,k) = std::sqrt(gmix * (p_mix_local + pimix) / safe_rho);
+            // Y-weighted mixture sound speed (diagnostic). CFL elsewhere uses
+            // max(c_e0, c_e1) for safety.
+            {
+                Real c0_ = Thermo_Interp::SoundSpeed_CPG(safe_re0, p_e0_loc, gamma_eta0);
+                Real c1_ = Thermo_Interp::SoundSpeed_SG (safe_re1, p_e1_loc, gamma_eta1, pi_eta1);
+                a_arr(i,j,k) = Y0_ * c0_ + Y1_ * c1_;
+            }
 
             //------------------------------------------------------------------
             // Chemical potential + mass fraction
@@ -5086,14 +5164,28 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
 
-            // gamma
-            Set::Scalar A = (eta(i, j, k)) / (gamma_eta1 - 1.0) + (1.0 - eta(i, j, k)) / (gamma_eta0 - 1.0);
-            Set::Scalar B = (eta(i, j, k) * gamma_eta1 * pi_eta1) / (gamma_eta1 - 1.0) + ((1.0 - eta(i, j, k)) * gamma_eta0 * pi_eta0) / (gamma_eta0 - 1.0);
-            // gamma(i, j, k) = 1.0 + (1.0 / A);
+            // Per-phase pressures (Y-weighted mixture closure, no Allaire).
+            Set::Scalar safe_re0_loc = (rho_e0(i,j,k) > small) ? rho_e0(i,j,k) : small;
+            Set::Scalar safe_re1_loc = (rho_e1(i,j,k) > small) ? rho_e1(i,j,k) : small;
+            Set::Scalar KE0_loc = Set::Scalar(0.5)*(M_e0(i,j,k,0)*M_e0(i,j,k,0)
+                                                  + M_e0(i,j,k,1)*M_e0(i,j,k,1)) / safe_re0_loc;
+            Set::Scalar KE1_loc = Set::Scalar(0.5)*(M_e1(i,j,k,0)*M_e1(i,j,k,0)
+                                                  + M_e1(i,j,k,1)*M_e1(i,j,k,1)) / safe_re1_loc;
+            Set::Scalar UE0_loc = std::max(Set::Scalar(0.0), E_e0(i,j,k) - KE0_loc);
+            Set::Scalar UE1_loc = std::max(Set::Scalar(0.0), E_e1(i,j,k) - KE1_loc);
+            Set::Scalar p_e0_loc = Thermo_Interp::Pressure_CPG  (UE0_loc, gamma_eta0)             + pref;
+            Set::Scalar p_e1_loc = Thermo_Interp::Pressure_SG_UE(UE1_loc, gamma_eta1, pi_eta1)    + pref;
+            if (!std::isfinite(p_e0_loc) || p_e0_loc < 0.0) p_e0_loc = Set::Scalar(1e-6);
+            if (!std::isfinite(p_e1_loc) || p_e1_loc < 0.0) p_e1_loc = Set::Scalar(1e-6);
+
+            // Mass-fraction weights and Y-weighted (gamma, pi).
+            Set::Scalar Y0_loc, Y1_loc, rho_mix_chk_loc;
+            Thermo_Interp::Mix_MassFraction_A_B(
+                eta(i,j,k), safe_re0_loc, safe_re1_loc, Y0_loc, Y1_loc, rho_mix_chk_loc);
 
             double gmix, pimix;
-            Thermo_Interp::InterpolateGammaPi_Stiffened(
-                eta(i,j,k), gamma_eta0, gamma_eta1, pi_eta0, pi_eta1, gmix, pimix);
+            Thermo_Interp::MixGammaPi_MassFraction(
+                Y0_loc, Y1_loc, gamma_eta0, gamma_eta1, pi_eta0, pi_eta1, gmix, pimix);
             gamma_mix(i,j,k) = gmix;
             pi_mix(i,j,k) = pimix;
 
@@ -5137,8 +5229,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             if (!std::isfinite(UE_mass(i, j, k)) || UE_mass(i, j, k) < 0.0)
                 UE_mass(i, j, k) = 0.0;
 
-            // Pressure — NaN-safe clamp
-            p(i, j, k) = (gmix - 1.0) * UE_vol(i, j, k) - gmix * pimix + pref; // pressure Tammann EOS modification
+            // Y-weighted mixture pressure from per-phase EOS. NaN-safe clamp.
+            // (TODO: revisit as part of a more complete two-phase pressure /
+            //  sound-speed theory.)
+            p(i, j, k) = Y0_loc * p_e0_loc + Y1_loc * p_e1_loc;
             if (!std::isfinite(p(i, j, k)) || p(i, j, k) < 0.0)
                 p(i, j, k) = 1e-10;
 
@@ -5150,10 +5244,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // Spalding Number
             Bm(i, j, k) = eta(i, j, k) / (1.0 - eta(i, j, k) + small);
 
-            // Speed of sound:
+            // Y-weighted mixture sound speed from per-phase c_k. CFL elsewhere
+            // uses max(c_e0, c_e1) for safety; this is the diagnostic blend.
             {
-                Set::Scalar safe_rho_a = (std::isfinite(rho(i,j,k)) && rho(i,j,k) > small) ? rho(i,j,k) : small;
-                a(i, j, k) = sqrt(gamma_mix(i, j, k) * (p(i, j, k) + pi_mix(i, j, k)) / safe_rho_a);
+                Set::Scalar c0_loc = Thermo_Interp::SoundSpeed_CPG(safe_re0_loc, p_e0_loc, gamma_eta0);
+                Set::Scalar c1_loc = Thermo_Interp::SoundSpeed_SG (safe_re1_loc, p_e1_loc, gamma_eta1, pi_eta1);
+                a(i, j, k) = Y0_loc * c0_loc + Y1_loc * c1_loc;
                 if (!std::isfinite(a(i, j, k))) a(i, j, k) = Set::Scalar(0.0);
             }
 
@@ -5226,12 +5322,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
 
             // ------------------------------------------------------------
-            // Adaptive Timestepping
+            // Adaptive Timestepping (CFL).
+            //   Sound speed: max(c_e0, c_e1) — fastest local signal. The
+            //   Y-weighted a(i,j,k) computed above is a diagnostic blend,
+            //   not a CFL-safe wave speed. TODO: revisit alongside a more
+            //   complete two-phase sound-speed theory.
+            //   Pressure (for shock-speed correction below): p(i,j,k), the
+            //   Y-weighted mixture pressure already written above.
             // ------------------------------------------------------------
-            // Solving for new states
-            Set::Scalar A_new = (eta(i, j, k)) / (gamma_eta1 - 1.0) + (1.0 - eta(i, j, k)) / (gamma_eta0 - 1.0);
-            Set::Scalar B_new = (eta(i, j, k) * gamma_eta1 * pi_eta1) / (gamma_eta1 - 1.0) + ((1.0 - eta(i, j, k)) * gamma_eta0 * pi_eta0) / (gamma_eta0 - 1.0);
-            // Set::Scalar gmix_new = 1.0 + (1.0 / A_new);
             Set::Scalar safe_rho_dt = (std::isfinite(rho(i,j,k)) && rho(i,j,k) > small) ? rho(i,j,k) : small;
             Set::Vector v_new = Set::Vector(M(i, j, k, 0) / safe_rho_dt, M(i, j, k, 1) / safe_rho_dt);
             if (!std::isfinite(v_new(0))) v_new(0) = Set::Scalar(0.0);
@@ -5240,27 +5338,15 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             if (v_new(0) < -Set::Scalar(1e8)) v_new(0) = -Set::Scalar(1e8);
             if (v_new(1) >  Set::Scalar(1e8)) v_new(1) =  Set::Scalar(1e8);
             if (v_new(1) < -Set::Scalar(1e8)) v_new(1) = -Set::Scalar(1e8);
-            Set::Scalar KE_vol_new = 0.5 * safe_rho_dt * (v_new(0) * v_new(0) + v_new(1) * v_new(1));
 
-            Set::Scalar UE_vol_new = E_vol(i, j, k) - KE_vol_new;
-            if (!std::isfinite(UE_vol_new) || UE_vol_new < 0.0)
-            {
-                UE_vol_new = 0.0;
-            }
-            // TODO: move to after InterpolateGammaPi_Stiffened call and use gmix_new and pimix_new instead of A_new and B_new, respectively.
-            // Would be more consistent with the actual EOS form used for pressure and sound speed, and would allow for non-Tammann EOS where the gamma_mix interpolation is not just a function of A.
-            Set::Scalar p_new = (UE_vol_new - B_new) / A_new;
-            if (!std::isfinite(p_new) || p_new < 0.0)
-            {
-                p_new = 1e-10;
-            }
-            // Set::Scalar pi_mix_new = (B_new / A_new) / gmix_new;
-            double gmix_new, pimix_new;
-            Thermo_Interp::InterpolateGammaPi_Stiffened(
-                eta(i,j,k), gamma_eta0, gamma_eta1, pi_eta0, pi_eta1, gmix_new, pimix_new);
-            // gamma_mix(i,j,k) = gmix;
-            // pi_mix_new(i,j,k) = pimix;
-            Set::Scalar sound_speed_new = sqrt(gmix_new * (p_new + pimix_new) / safe_rho_dt);
+            Set::Scalar p_new = p(i,j,k);
+            if (!std::isfinite(p_new) || p_new < Set::Scalar(0.0)) p_new = Set::Scalar(1e-10);
+
+            Set::Scalar c0_dt = c_e0(i,j,k);
+            Set::Scalar c1_dt = c_e1(i,j,k);
+            if (!std::isfinite(c0_dt) || c0_dt < Set::Scalar(0.0)) c0_dt = Set::Scalar(0.0);
+            if (!std::isfinite(c1_dt) || c1_dt < Set::Scalar(0.0)) c1_dt = Set::Scalar(0.0);
+            Set::Scalar sound_speed_new = std::max(c0_dt, c1_dt);
 
             // Shock-speed correction (Rankine-Hugoniot):
             //   W_s = u + a * sqrt( (γ+1)/(2γ) * p_neighbor/p_cell + (γ-1)/(2γ) )
@@ -5279,7 +5365,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Real p_yp = std::max(p(i,   j+1, k),   Real(1e-6));
                 Real p_ratio = std::max({p_xm/p_c, p_xp/p_c, p_ym/p_c, p_yp/p_c});
 
-                Real gm = gmix_new;
+                Real gm = gamma_mix(i,j,k); // Y-weighted, written above
                 // Cap p_ratio to prevent interface pressure floors (e.g. 1e-6 from
                 // negative UE in stiffened-gas cells) from inflating the shock factor
                 // by a factor of 1e11 and collapsing dt to machine epsilon.
