@@ -53,7 +53,7 @@ cat run_bubble.slurm
 # cat ./tests/FlowVortexShedLarge/input
 # cat ./tests/FlowShockbubble/1mm_droplet
 # cat ./tests/FlowRayleighPlesset/Bubble_UNIT_TEST2_Expand_Real
-cat ./tests/FlowRayleighPlesset/Bubble_UNIT_TEST2_Expand
+cat ./tests/FlowSQR_tests/input_bubble_expand
 
 
 # Set thread count (default value is 1)...
@@ -65,5 +65,5 @@ export OMP_NUM_THREADS=1
 # mpirun ./bin/hydro-2d-g++ ./tests/FlowVortexShedLarge/input
 # mpirun ./bin/hydro2-2d-g++ ./tests/FlowShockbubble/1mm_bubble
 # mpirun ./bin/hydro2-2d-g++ ./tests/FlowRayleighPlesset/Bubble_UNIT_TEST2_Expand_Real
-mpirun ./bin/hydro2-2d-g++ ./tests/FlowRayleighPlesset/Bubble_UNIT_TEST2_Expand
+mpirun ./bin/hydro2-2d-g++ ./tests/FlowSQR_tests/input_bubble_expand
 # ---------------------------------------------------

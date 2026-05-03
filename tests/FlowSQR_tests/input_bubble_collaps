@@ -17,7 +17,7 @@ amr.blocking_factor = 4 # Must be >= nghost so FillBoundary can fill all ghost l
 amr.regrid_int = 1
 amr.grid_eff = 0.8
 # amr.max_level = 5
-amr.max_level = 4
+amr.max_level = 5
 amr.n_cell = 32 32
 # amr.n_cell = 256 256
 # amr.n_cell = 1024 1024
@@ -87,7 +87,7 @@ pressure_eta1.ic.type = expression
 pressure_eta1.ic.expression.region0 = "1.0e5"
 
 pressure_eta0.ic.type = expression
-pressure_eta0.ic.expression.region0 = "1.0e6"
+pressure_eta0.ic.expression.region0 = "1.0e2"
 
 # ----------------------------
 # Specific Heats
@@ -179,7 +179,8 @@ integration.type = ForwardEuler
 # ch_mobility_nom = 1e-4  # seems to need to be smaller
 # implicit_ch = 0 # solves CH rhs explicitly (faster but dx^4 reduction in timestep needed, so only on course grids)
 implicit_ch = 2
-  ch_mobility_nom = 4e-3
+#   ch_mobility_nom = 4e-3
+  ch_mobility_nom = 0
   ch_newton_iters = 5       # default, usually converges in 3
   ch_newton_tol = 1e-10     # default
   # CH equilibrium-width relation (well-balanced Korteweg + Q-trace path).

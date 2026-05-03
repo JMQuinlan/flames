@@ -141,7 +141,8 @@ nghost              = 4
 integration.type    = ForwardEuler
 
 # Implicit CH active (Phase 4 will wire dmu_bulk into f'(eta) here).
-implicit_ch     = 0
+# implicit_ch     = 0 # should this be 2 for this case?
+implicit_ch     = 2 # should this be 2 for this case?
 # Phase 4 mobility (spec §1.7): the new ch_mobility_scaling param controls
 # how ch_mobility_nom is interpreted.
 #   "magaletti"  -> M_eff = ch_mobility_nom * epsilon^2  (default; matched-asymptotic)

@@ -6,7 +6,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowSQR_tests/output_Q_202060428
+plot_file = ./tests/FlowSQR_tests/output_Q_202060502
 # plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE_20260416
 
 ### MESHING ###
