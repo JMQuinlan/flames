@@ -1395,8 +1395,11 @@ void Hydro2::RHS_PerPhase(int lev,
     // Korteweg face-flux: gradient-energy coefficient (mixture-level) and
     // double-well coefficient (for the bulk-thermo trace correction Q(η)).
     // Per-phase weighting Y_k_face is applied per-face below.
-    const Real kappa_ch_   = ch_kappa_eff;
-    const Real lambda_W_   = ch_W_scale;
+    // apply_surface_tension is the master interfacial-stress kill switch:
+    // setting it 0 zeros κ and λ here, so kfd.kappa and kfd.q_eta both
+    // collapse to 0 and the HLLC Korteweg flux contribution vanishes.
+    const Real kappa_ch_   = apply_surface_tension ? ch_kappa_eff : Real(0.0);
+    const Real lambda_W_   = apply_surface_tension ? ch_W_scale   : Real(0.0);
     const int  pidx_       = phase_idx;
     AMREX_ASSERT_WITH_MESSAGE(std::abs(DX[0] - DX[1]) < Real(1.0e-14),
         "RHS_PerPhase Korteweg path assumes dx == dy (9-point isotropic Lap).");
@@ -1806,15 +1809,11 @@ Hydro2::ApplyBSSource(int lev,
     const Real pi0 = pi_eta0,   pi1 = pi_eta1;
     const Real pref_ = pref;
 
-    const Real sigma_   = sigma;
-    const Real epsilon_ = epsilon;
-    // Surface tension is applied in flux form via the per-phase HLLC
-    // Korteweg path inside RHS_PerPhase; the legacy cell-centered Brackbill
-    // block in ApplyBSSource is permanently muted here to prevent
-    // double-counting. The block is left in place for now so the
-    // surrounding diagnostics (Fsv_mf, etc.) keep compiling — once the
-    // flux-form path is fully validated, the dead branch can be deleted.
-    const int  do_st    = 0;
+    // Surface tension is delivered in flux form via the per-phase HLLC
+    // Korteweg+Q path inside RHS_PerPhase, gated by apply_surface_tension.
+    // The legacy cell-centered Brackbill block here has been deleted;
+    // Fsv_mf is kept for plot-file compatibility and is just zeroed each
+    // call.
     const int  p_int_method_ = p_int_method;
 
     // Zero surface tension plot MF each call so bulk cells (which early-return
@@ -1862,7 +1861,6 @@ Hydro2::ApplyBSSource(int lev,
         auto u0_arr  = u0_mf[lev]->const_array(mfi);
         auto q_arr   = q_mf[lev]->const_array(mfi);
 
-        auto kap_arr = kappas_mf[lev]->const_array(mfi);
         auto Fsv_out = Fsv_mf[lev]->array(mfi);
 
         auto R0 = rho0_rhs_mf.array(mfi);
@@ -1969,20 +1967,12 @@ Hydro2::ApplyBSSource(int lev,
             R0(i,j,k) += -Smass;
             R1(i,j,k) += +Smass;
 
-            // === Surface tension: Fsv = σ·κ·ε·∇η on the mixture ===
-            // Distributed η-weighted across phases so Σ_k (contribution_k) = Fsv.
-            Real Fsv_x = Real(0.0), Fsv_y = Real(0.0);
-            if (do_st)
-            {
-                Real kappa = kap_arr(i,j,k,0);
-                Fsv_x = sigma_ * kappa * epsilon_ * grad_eta(0);
-                Fsv_y = sigma_ * kappa * epsilon_ * grad_eta(1);
-            }
-            Fsv_out(i,j,k,0) = Fsv_x;
-            Fsv_out(i,j,k,1) = Fsv_y;
-
-            Real Fsv_work_0 = Fsv_x*u0x_ph + Fsv_y*u0y_ph;
-            Real Fsv_work_1 = Fsv_x*u1x_ph + Fsv_y*u1y_ph;
+            // Legacy Brackbill block deleted. Fsv_out is kept zero for
+            // plot-file compatibility (Fsv_mf is set to 0 above), and the
+            // momentum/energy phase splits below no longer carry the
+            // surface-tension term.
+            Fsv_out(i,j,k,0) = Real(0.0);
+            Fsv_out(i,j,k,1) = Real(0.0);
 
             // === Momentum: pressure-imbalance form, vanishes at p_0 = p_1 = p_int.
             //     Phase 0:  S_M = (p_0 - p_int)·∇η    (BN "effective" force)
@@ -1997,10 +1987,10 @@ Hydro2::ApplyBSSource(int lev,
             }
             Real Smass_mx = mdot0 * u0x * grad_eta_mag;
             Real Smass_my = mdot0 * u0y * grad_eta_mag;
-            P0(i,j,k,0) += dp0*grad_eta(0) - Smass_mx + w0*Fsv_x;
-            P0(i,j,k,1) += dp0*grad_eta(1) - Smass_my + w0*Fsv_y;
-            P1(i,j,k,0) += dp1*grad_eta(0) + Smass_mx + w1*Fsv_x;
-            P1(i,j,k,1) += dp1*grad_eta(1) + Smass_my + w1*Fsv_y;
+            P0(i,j,k,0) += dp0*grad_eta(0) - Smass_mx;
+            P0(i,j,k,1) += dp0*grad_eta(1) - Smass_my;
+            P1(i,j,k,0) += dp1*grad_eta(0) + Smass_mx;
+            P1(i,j,k,1) += dp1*grad_eta(1) + Smass_my;
 
             // === Energy: same correction for the pressure-work part.
             //     Phase 0:  S_E = (p_0·u_0 - p_int·u_int)·∇η
@@ -2018,8 +2008,8 @@ Hydro2::ApplyBSSource(int lev,
                 pu_int_minus_1 = pu_int - pu_1;
             }
             Real SEq = qx*grad_eta(0) + qy*grad_eta(1);
-            U0(i,j,k) += pu_0_minus_int - SEq + w0*Fsv_work_0;
-            U1(i,j,k) += pu_int_minus_1 + SEq + w1*Fsv_work_1;
+            U0(i,j,k) += pu_0_minus_int - SEq;
+            U1(i,j,k) += pu_int_minus_1 + SEq;
         });
     }
 }

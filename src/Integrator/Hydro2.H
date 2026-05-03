@@ -426,6 +426,12 @@ protected:
     Set::Scalar lagrange=NAN;
 
     // Booleans
+    // Master interfacial-stress kill switch. Default = 1.
+    // Set 0 to zero out the flux-form Korteweg + Q-trace contribution in
+    // RHS_PerPhase (κ_face → 0, q_eta → 0 inside KortewegFaceData), which
+    // disables ALL interfacial stresses delivered by the new HLLC path.
+    // The legacy Brackbill block in ApplyBSSource is dead and not gated by
+    // this flag.
     int apply_surface_tension = 1;
     int apply_weight = 0;
     int apply_viscous = 0;     // Per-phase viscous stress in RHS_PerPhase (constant mu_k, mu_k_b)

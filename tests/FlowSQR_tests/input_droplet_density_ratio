@@ -38,7 +38,7 @@ alamo.program = hydro2
 plot_file = ./tests/FlowSQR_tests/output_droplet_density_ratio
 
 ### MESHING ###
-amr.plot_dt = 1.0e-6
+amr.plot_dt = 5.0e-7
 amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 4
@@ -60,7 +60,7 @@ geometry.prob_lo = -1.0e-3 -1.0e-3 0.0
 geometry.prob_hi =  1.0e-3  1.0e-3 0.0
 geometry.is_periodic = 0 0 0
 
-stop_time = 1.0e-4
+stop_time = 1.0e-5
 
 ### ETA INITIAL CONDITIONS ###
 # Circular droplet of radius R0 centered at origin. eta=1 inside (heavy),
@@ -96,10 +96,12 @@ velocity_eta0.ic.type = expression
 velocity_eta0.ic.expression.region0 = "0.0"
 velocity_eta0.ic.expression.region1 = "0.0"
 
-# Pressure jump at IC matches the Laplace prediction Δp = σ/R = 144 Pa,
-# so the steady state is "do nothing" if the formulation is correct.
+# Flat IC pressure on both phases. The well-balanced Korteweg+Q path
+# delivers Δp = σ/R = 144 Pa as an emergent steady state; presetting
+# the jump in the IC stacks on top and gives ~2σ/R (verified on
+# input_static_droplet).
 pressure_eta1.ic.type = expression
-pressure_eta1.ic.expression.region0 = "1.01325e5+144"
+pressure_eta1.ic.expression.region0 = "1.01325e5"
 
 pressure_eta0.ic.type = expression
 pressure_eta0.ic.expression.region0 = "1.01325e5"
