@@ -1255,6 +1255,97 @@ void Hydro2::ComputeEffectiveBSSources(int lev)
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////// ClampPerPhaseState ///////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+// In-place floor on the per-phase conservative state so that downstream EOS
+// inversions cannot produce p+pi<0 (negative sound-speed argument) or NaN.
+// Replaces non-finite rho/M/E rather than masking them, since the diagnostic
+// clamp at the end of MixDiagnostic only protected the mixture/diagnostic
+// scalars while leaving the storage fabs unbounded -- which let a single bad
+// cell leak into the next Riemann sweep, the BS-source m0_eff path, and the
+// heat-conduction Laplacian.
+//
+// Floors:
+//   rho_k          >= small
+//   M_k            finite (NaN/Inf -> 0)
+//   UE_0 (CPG)     >= small                (=> p_0 >= small*(gamma_0 - 1))
+//   UE_1 (Tammann) >= pi_eta1 + small      (=> p_1 + pi_eta1 = (g-1)(UE-pi) > 0)
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+void Hydro2::ClampPerPhaseState(int lev)
+{
+    BL_PROFILE("Hydro2::ClampPerPhaseState");
+
+    const Real small_   = small;
+    const Real UE0_min  = small;                 // CPG: any tiny positive UE
+    const Real UE1_min  = pi_eta1 + small;       // Tammann: UE >= pi for c^2 >= 0
+
+    for (MFIter mfi(*eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const Box& bx = mfi.validbox();
+
+        auto rho0 = density_eta0_mf [lev]->array(mfi);
+        auto rho1 = density_eta1_mf [lev]->array(mfi);
+        auto M0   = momentum_eta0_mf[lev]->array(mfi);
+        auto M1   = momentum_eta1_mf[lev]->array(mfi);
+        auto E0   = energy_eta0_mf  [lev]->array(mfi);
+        auto E1   = energy_eta1_mf  [lev]->array(mfi);
+
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        {
+            // -------- Phase 0 (CPG gas) --------
+            Real r0 = rho0(i,j,k);
+            if (!std::isfinite(r0) || r0 < small_) r0 = small_;
+            rho0(i,j,k) = r0;
+
+            Real m0x = M0(i,j,k,0);
+            Real m0y = M0(i,j,k,1);
+            if (!std::isfinite(m0x)) m0x = Real(0.0);
+            if (!std::isfinite(m0y)) m0y = Real(0.0);
+            M0(i,j,k,0) = m0x;
+            M0(i,j,k,1) = m0y;
+
+            Real KE0 = Real(0.5) * (m0x*m0x + m0y*m0y) / r0;
+            if (!std::isfinite(KE0)) KE0 = Real(0.0);
+
+            Real e0 = E0(i,j,k);
+            if (!std::isfinite(e0)) e0 = KE0 + UE0_min;
+            Real UE0 = e0 - KE0;
+            if (UE0 < UE0_min) e0 = KE0 + UE0_min;
+            E0(i,j,k) = e0;
+
+            // -------- Phase 1 (Tammann liquid) --------
+            Real r1 = rho1(i,j,k);
+            if (!std::isfinite(r1) || r1 < small_) r1 = small_;
+            rho1(i,j,k) = r1;
+
+            Real m1x = M1(i,j,k,0);
+            Real m1y = M1(i,j,k,1);
+            if (!std::isfinite(m1x)) m1x = Real(0.0);
+            if (!std::isfinite(m1y)) m1y = Real(0.0);
+            M1(i,j,k,0) = m1x;
+            M1(i,j,k,1) = m1y;
+
+            Real KE1 = Real(0.5) * (m1x*m1x + m1y*m1y) / r1;
+            if (!std::isfinite(KE1)) KE1 = Real(0.0);
+
+            Real e1 = E1(i,j,k);
+            if (!std::isfinite(e1)) e1 = KE1 + UE1_min;
+            Real UE1 = e1 - KE1;
+            if (UE1 < UE1_min) e1 = KE1 + UE1_min;
+            E1(i,j,k) = e1;
+        });
+    }
+
+    density_eta0_mf [lev]->FillBoundary(geom[lev].periodicity());
+    density_eta1_mf [lev]->FillBoundary(geom[lev].periodicity());
+    momentum_eta0_mf[lev]->FillBoundary(geom[lev].periodicity());
+    momentum_eta1_mf[lev]->FillBoundary(geom[lev].periodicity());
+    energy_eta0_mf  [lev]->FillBoundary(geom[lev].periodicity());
+    energy_eta1_mf  [lev]->FillBoundary(geom[lev].periodicity());
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////// ApplyHeatConduction //////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 // Operator-split explicit-Euler conduction step on per-phase energy fields:
@@ -4824,9 +4915,20 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     momentum_eta1_mf[lev] ->ParallelCopy(solution_new[5]);
     energy_eta1_mf[lev]   ->ParallelCopy(solution_new[6]);
 
+    // Floor the per-phase conservative state in place so the EOS inversions in
+    // ApplyHeatConduction, MixDiagnostic, and the next Riemann sweep cannot
+    // see UE < 0 (CPG) or UE < pi_eta1 (Tammann -> negative c^2). Without this
+    // a single bad cell at the initial-interface location persists in storage
+    // and grows through the BS-source / heat-conduction reads.
+    ClampPerPhaseState(lev);
+
     // Per-phase heat conduction (operator-split explicit Euler step). No-op
     // when apply_heat_conduction == 0. Caller must respect the diffusion CFL.
     ApplyHeatConduction(lev, dt);
+
+    // Heat conduction adds dt*k*lap(T) to E_k; that increment can drive UE
+    // below floor in cells with strong temperature gradients, so re-clamp.
+    ClampPerPhaseState(lev);
 
     MixDiagnostic(lev);
 

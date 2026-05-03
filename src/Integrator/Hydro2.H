@@ -188,6 +188,14 @@ protected:
     // Per-phase k_eta{0,1} are constant scalars from input. No-op when
     // apply_heat_conduction == 0.
     void ApplyHeatConduction(int lev, Set::Scalar dt);
+    // In-place floor on the per-phase conservative state. Enforces:
+    //   rho_eta{0,1} >= small,    finite |M_eta{0,1}|,
+    //   UE_0 = E_0 - KE_0 >= small             (CPG, ensures p_0 >= 0)
+    //   UE_1 = E_1 - KE_1 >= pi_eta1 + small   (Tammann, ensures p_1 + pi >= 0
+    //                                           so c_1^2 = gamma*(p+pi)/rho > 0)
+    // Run after every operator-split write to the per-phase fabs. NaN-safe
+    // (non-finite values are replaced, not just compared).
+    void ClampPerPhaseState(int lev);
     void ComputeHybridCurvature(int lev);
     void ComputeSmoothNormals(int lev);
     void ComputeHeightFunction(int lev);
