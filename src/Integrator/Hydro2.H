@@ -175,6 +175,7 @@ protected:
     //             + ( kappa * eta * lap_eta + (kappa/2) |grad_eta|^2 ) I
     // taken in face-flux form. First derivatives of eta are evaluated exactly
     // on faces (with vertex-averaging for the face-tangential component); the
+    void WriteIntegrals(Set::Scalar time);
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
     void ApplyImplicitCH(int lev, Set::Scalar dt);
     void ApplyImplicitCH_Newton(int lev, Set::Scalar dt);
@@ -524,6 +525,8 @@ protected:
     // ch_kappa_eff is the resolved value used at every CH site (computed in Parse).
     Set::Scalar ch_kappa     = 0.0;   // input; 0 means "auto = epsilon^2"
     Set::Scalar ch_kappa_eff = 0.0;   // resolved value used in code (set in Parse)
+
+    int write_integrals = 1;
 
     // Adaptive Timestep
     bool adaptive_timestep = false;

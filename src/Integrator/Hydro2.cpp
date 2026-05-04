@@ -33,6 +33,8 @@
 //#include "Solver/Local/Limiter/Minmod.H"
 //#include "Solver/Local/Limiter/VanLeer.H"
 
+#include <fstream>
+#include <iomanip>
 #include <AMReX_Math.H>
 #include "AMReX_TimeIntegrator.H"
 #include <AMReX.H>
@@ -89,6 +91,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("apply_weight", value.apply_weight, false);                  // Apply weight when solving, default: false --> "No Weight"
         pp_query_default("apply_viscous", value.apply_viscous, false);                // Per-phase viscous stress (constant mu_k per phase), default: false
         pp_query_default("apply_heat_conduction", value.apply_heat_conduction, 0);    // Per-phase heat conduction via explicit-Euler operator split
+        pp_query_default("write_integrals", value.write_integrals, 1);               // Write volume-integrated conserved quantities to integrals.dat each coarse step
         pp_query_default("k_eta0", value.k_eta0, 0.0);                                // [W/(m K)] gas-phase thermal conductivity
         pp_query_default("k_eta1", value.k_eta1, 0.0);                                // [W/(m K)] liquid-phase thermal conductivity
         pp_query_default("apply_vaporization", value.apply_vaporization, false);       // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
@@ -1766,6 +1769,141 @@ void Hydro2::TimeStepComplete(Set::Scalar time, int lev)
     if (dynamictimestep.on)
     {
         Integrator::DynamicTimestep_Update();
+    }
+    if (write_integrals) WriteIntegrals(time);
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////// WriteIntegrals ///////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+void Hydro2::WriteIntegrals(Set::Scalar time)
+{
+    BL_PROFILE("Hydro2::WriteIntegrals");
+
+    Set::Scalar M_total  = 0.0, M_gas    = 0.0, M_liq    = 0.0;
+    Set::Scalar Px_total = 0.0, Py_total = 0.0;
+    Set::Scalar Px_gas   = 0.0, Py_gas   = 0.0;
+    Set::Scalar Px_liq   = 0.0, Py_liq   = 0.0;
+    Set::Scalar UE_total = 0.0, UE_gas   = 0.0, UE_liq   = 0.0;
+    Set::Scalar KE_total = 0.0, KE_gas   = 0.0, KE_liq   = 0.0;
+
+    for (int lev = 0; lev <= finest_level; ++lev)
+    {
+        const Geometry& geom  = this->geom[lev];
+        const Real*     DX    = geom.CellSize();
+        const Real      dV    = DX[0] * DX[1];
+
+        amrex::iMultiFab fine_mask;
+        if (lev < finest_level)
+        {
+            fine_mask = amrex::makeFineMask(
+                *eta_mf[lev],
+                *eta_mf[lev + 1],
+                amrex::IntVect(0),
+                ref_ratio[lev],
+                1, 0);
+        }
+
+        for (MFIter mfi(*eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+        {
+            const Box& bx = mfi.validbox();
+
+            auto eta_arr  = eta_mf[lev]->const_array(mfi);
+            auto rho0_arr = density_eta0_mf[lev]->const_array(mfi);
+            auto rho1_arr = density_eta1_mf[lev]->const_array(mfi);
+            auto M0_arr   = momentum_eta0_mf[lev]->const_array(mfi);
+            auto M1_arr   = momentum_eta1_mf[lev]->const_array(mfi);
+            auto E0_arr   = energy_eta0_mf[lev]->const_array(mfi);
+            auto E1_arr   = energy_eta1_mf[lev]->const_array(mfi);
+
+            const auto mask_arr = (lev < finest_level)
+                ? fine_mask.const_array(mfi) : amrex::Array4<const int>{};
+
+            amrex::LoopOnCpu(bx, [&](int i, int j, int k)
+            {
+                if (lev < finest_level && mask_arr(i, j, k) == 0) return;
+
+                Real eta  = eta_arr(i, j, k);
+                Real om   = Real(1.0) - eta;
+
+                Real rho0 = rho0_arr(i, j, k);
+                Real rho1 = rho1_arr(i, j, k);
+                Real rho  = om * rho0 + eta * rho1;
+
+                Real Mx0  = M0_arr(i, j, k, 0);
+                Real My0  = M0_arr(i, j, k, 1);
+                Real Mx1  = M1_arr(i, j, k, 0);
+                Real My1  = M1_arr(i, j, k, 1);
+                Real Mx   = om * Mx0 + eta * Mx1;
+                Real My   = om * My0 + eta * My1;
+
+                Real UE0  = E0_arr(i, j, k);
+                Real UE1  = E1_arr(i, j, k);
+                Real UE   = om * UE0 + eta * UE1;
+
+                Real KE0  = (rho0 > Real(0.0)) ? Real(0.5) * (Mx0*Mx0 + My0*My0) / rho0 : Real(0.0);
+                Real KE1  = (rho1 > Real(0.0)) ? Real(0.5) * (Mx1*Mx1 + My1*My1) / rho1 : Real(0.0);
+                Real KE   = om * KE0 + eta * KE1;
+
+                M_total  += rho  * dV;
+                M_gas    += om * rho0 * dV;
+                M_liq    += eta * rho1 * dV;
+                Px_total += Mx  * dV;
+                Py_total += My  * dV;
+                Px_gas   += om * Mx0 * dV;
+                Py_gas   += om * My0 * dV;
+                Px_liq   += eta * Mx1 * dV;
+                Py_liq   += eta * My1 * dV;
+                UE_total += UE  * dV;
+                UE_gas   += om * UE0 * dV;
+                UE_liq   += eta * UE1 * dV;
+                KE_total += KE  * dV;
+                KE_gas   += om * KE0 * dV;
+                KE_liq   += eta * KE1 * dV;
+            });
+        }
+    }
+
+    amrex::ParallelDescriptor::ReduceRealSum(M_total);
+    amrex::ParallelDescriptor::ReduceRealSum(M_gas);
+    amrex::ParallelDescriptor::ReduceRealSum(M_liq);
+    amrex::ParallelDescriptor::ReduceRealSum(Px_total);
+    amrex::ParallelDescriptor::ReduceRealSum(Py_total);
+    amrex::ParallelDescriptor::ReduceRealSum(Px_gas);
+    amrex::ParallelDescriptor::ReduceRealSum(Py_gas);
+    amrex::ParallelDescriptor::ReduceRealSum(Px_liq);
+    amrex::ParallelDescriptor::ReduceRealSum(Py_liq);
+    amrex::ParallelDescriptor::ReduceRealSum(UE_total);
+    amrex::ParallelDescriptor::ReduceRealSum(UE_gas);
+    amrex::ParallelDescriptor::ReduceRealSum(UE_liq);
+    amrex::ParallelDescriptor::ReduceRealSum(KE_total);
+    amrex::ParallelDescriptor::ReduceRealSum(KE_gas);
+    amrex::ParallelDescriptor::ReduceRealSum(KE_liq);
+
+    if (amrex::ParallelDescriptor::IOProcessor())
+    {
+        std::string fname = plot_file + "/integrals.dat";
+        std::ifstream test(fname);
+        bool write_header = (test.peek() == std::ifstream::traits_type::eof() || !test.good());
+        test.close();
+
+        std::ofstream outfile(fname, std::ios_base::app);
+        if (write_header)
+            outfile << "# 1:Time 2:M_total 3:M_gas 4:M_liq"
+                    << " 5:Px_total 6:Py_total 7:Px_gas 8:Py_gas 9:Px_liq 10:Py_liq"
+                    << " 11:UE_total 12:UE_gas 13:UE_liq"
+                    << " 14:KE_total 15:KE_gas 16:KE_liq\n";
+
+        outfile << std::setprecision(12) << time;
+        outfile << std::setprecision(8)
+                << "\t" << M_total  << "\t" << M_gas    << "\t" << M_liq
+                << "\t" << Px_total << "\t" << Py_total
+                << "\t" << Px_gas   << "\t" << Py_gas
+                << "\t" << Px_liq   << "\t" << Py_liq
+                << "\t" << UE_total << "\t" << UE_gas   << "\t" << UE_liq
+                << "\t" << KE_total << "\t" << KE_gas   << "\t" << KE_liq
+                << "\n";
+        outfile.close();
     }
 }
 

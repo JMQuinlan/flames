@@ -6,7 +6,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowSQR_tests/output_RPE_20260502_7
+plot_file = ./tests/FlowSQR_tests/output_RPE_20260502_5
 # plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE_20260502
 
 ### MESHING ###
@@ -36,7 +36,7 @@ geometry.prob_lo = -0.20 -0.20 0.0
 geometry.prob_hi =  0.20  0.20 0.0
 geometry.is_periodic = 0 0 0
 
-stop_time = 1e-3
+stop_time = 7e-5
 # stop_time = 1e-7
 
 ### ETA INITIAL CONDITIONS ###
@@ -185,8 +185,8 @@ integration.type = ForwardEuler
 # implicit_ch = 1
 # ch_mobility_nom = 0.032   # optional: override auto M = 2*ε*c_max
 # ch_mobility_nom = 1e-4  # seems to need to be smaller
-# implicit_ch = 0 # solves CH rhs explicitly (faster but dx^4 reduction in timestep needed, so only on course grids)
-implicit_ch = 2
+implicit_ch = 0 # solves CH rhs explicitly (faster but dx^4 reduction in timestep needed, so only on course grids)
+# implicit_ch = 2
 #   ch_mobility_nom = 4e-3
   ch_mobility_nom = 0
   ch_newton_iters = 5       # default, usually converges in 3
