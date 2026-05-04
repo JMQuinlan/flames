@@ -6,7 +6,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowSQR_tests/output_RPE_20260502
+plot_file = ./tests/FlowSQR_tests/output_RPE_20260502_7
 # plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE_20260502
 
 ### MESHING ###
@@ -16,8 +16,8 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 4 # Must be >= nghost so FillBoundary can fill all ghost layers from neighbor valid cells
 amr.regrid_int = 1
 amr.grid_eff = 0.8
-# amr.max_level = 5
 amr.max_level = 5
+# amr.max_level = 7
 amr.n_cell = 32 32
 # amr.n_cell = 256 256
 # amr.n_cell = 1024 1024
@@ -41,8 +41,9 @@ stop_time = 1e-3
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.001
-# eta.ic.expression.constant.epsilon = 0.01
+eta.ic.expression.constant.epsilon = 0.001      # used with 5 levels of AMR
+# eta.ic.expression.constant.epsilon = 0.0005     # used with 6 levels of AMR
+# eta.ic.expression.constant.epsilon = 0.00025    # used with 7 levels of AMR
 eta.ic.expression.constant.R0 = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(sqrt(2)*epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
@@ -158,7 +159,13 @@ u0.ic.constant.value = 0.0 0.0
 q.ic.constant.value = 0.0 0.0
 
 ### ADDITIONAL SOURCES ###
-bs_source_mode = prescribed
+# Phase 6: ch_emergent routes m0/u0/q from ComputeEffectiveBSSources into
+# ApplyBSSource each step. To compare against the prior "no BS coupling"
+# behavior, set this to "off" — m0_eff / u0_eff / q_eff are still computed
+# and plotted as diagnostics but not consumed by ApplyBSSource.
+bs_source_mode      = ch_emergent
+# bs_source_mode = prescribed
+# bs_source_mode      = off
 apply_surface_tension = 1
 apply_weight = 0
 apply_vaporization = 0
@@ -174,6 +181,7 @@ smooth_kernel_size = 5  # Gaussian normal smoothing kernel: 3 (3x3, default) or 
 nghost = 4             # Ghost cell depth (= N_int for HF band). Requires amr.blocking_factor >= nghost.
 integration.type = ForwardEuler
 # integration.type = RungeKutta
+
 # implicit_ch = 1
 # ch_mobility_nom = 0.032   # optional: override auto M = 2*ε*c_max
 # ch_mobility_nom = 1e-4  # seems to need to be smaller
@@ -191,7 +199,7 @@ implicit_ch = 2
   # Implied sigma = sqrt(2*kappa*lambda)/6 ~ 2.4e-4 N/m (the legacy `sigma`
   # knob set above is informational only — Brackbill is muted.)
   ch_W_scale = 1.0          # lambda = kappa / epsilon^2  (matches equilibrium)
-
+  ch_mobility_degenerate = 0  # 0: mobility applies everwhere, 1: mobility only effects the solution in the interface
 
 nscbc.enabled   = true
   nscbc.sigma     = 0.28   # 0.28 is a good value for shock-droplet with gamma=1.4, but may need tuning for other problems. Higher sigma means more dissipation added by NSCBC, which can help stabilize but also adds more error.
