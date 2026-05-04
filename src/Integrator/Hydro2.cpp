@@ -1797,9 +1797,9 @@ void Hydro2::WriteIntegrals(Set::Scalar time)
         if (lev < finest_level)
         {
             fine_mask = amrex::makeFineMask(
-                *eta_mf[lev],
-                *eta_mf[lev + 1],
-                amrex::IntVect(0),
+                eta_mf[lev]->boxArray(),
+                eta_mf[lev]->DistributionMap(),
+                eta_mf[lev + 1]->boxArray(),
                 ref_ratio[lev],
                 1, 0);
         }
