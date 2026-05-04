@@ -6,17 +6,18 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowSQR_tests/output_RPE_20260502_5
+plot_file = ./tests/FlowSQR_tests/output_RPE_20260502_6
 # plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE_20260502
 
 ### MESHING ###
-amr.plot_dt = 0.5e-6
+amr.plot_dt = 1e-6
 # amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 4 # Must be >= nghost so FillBoundary can fill all ghost layers from neighbor valid cells
 amr.regrid_int = 1
 amr.grid_eff = 0.8
-amr.max_level = 5
+# amr.max_level = 5
+amr.max_level = 6
 # amr.max_level = 7
 amr.n_cell = 32 32
 # amr.n_cell = 256 256
@@ -36,13 +37,13 @@ geometry.prob_lo = -0.20 -0.20 0.0
 geometry.prob_hi =  0.20  0.20 0.0
 geometry.is_periodic = 0 0 0
 
-stop_time = 7e-5
+stop_time = 1e-4
 # stop_time = 1e-7
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.001      # used with 5 levels of AMR
-# eta.ic.expression.constant.epsilon = 0.0005     # used with 6 levels of AMR
+# eta.ic.expression.constant.epsilon = 0.001      # used with 5 levels of AMR
+eta.ic.expression.constant.epsilon = 0.0005     # used with 6 levels of AMR
 # eta.ic.expression.constant.epsilon = 0.00025    # used with 7 levels of AMR
 eta.ic.expression.constant.R0 = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(sqrt(2)*epsilon)))"
@@ -133,17 +134,17 @@ energy.bc.type.xlo = neumann
 energy.bc.type.ylo = neumann
 energy.bc.type.yhi = neumann
 
-momentum.bc.type.xhi = neumann neumann
-momentum.bc.type.xlo = neumann neumann
-momentum.bc.type.ylo = neumann neumann
-momentum.bc.type.yhi = neumann neumann
+# momentum.bc.type.xhi = neumann neumann
+# momentum.bc.type.xlo = neumann neumann
+# momentum.bc.type.ylo = neumann neumann
+# momentum.bc.type.yhi = neumann neumann
 
-#momentum.bc.type.xhi = dirichlet dirichlet
-#momentum.bc.type.xlo = dirichlet dirichlet
-#momentum.bc.type.yhi = dirichlet dirichlet
-#momentum.bc.type.ylo = dirichlet dirichlet
-#momentum.bc.val.xhi = 0.0 0.0
-#momentum.bc.val.xlo = 0.0 0.0
+momentum.bc.type.xhi = dirichlet dirichlet
+momentum.bc.type.xlo = dirichlet dirichlet
+momentum.bc.type.yhi = dirichlet dirichlet
+momentum.bc.type.ylo = dirichlet dirichlet
+momentum.bc.val.xhi = 0.0 0.0
+momentum.bc.val.xlo = 0.0 0.0
 
 ### REFINEMENT CRITERIA ###
 eta_refinement_criterion    = 1e-3
@@ -201,7 +202,8 @@ implicit_ch = 2
   ch_W_scale = 1.0          # lambda = kappa / epsilon^2  (matches equilibrium)
   ch_mobility_degenerate = 0  # 0: mobility applies everwhere, 1: mobility only effects the solution in the interface
 
-nscbc.enabled   = true
+# nscbc.enabled   = true
+nscbc.enabled   = false
   nscbc.sigma     = 0.28   # 0.28 is a good value for shock-droplet with gamma=1.4, but may need tuning for other problems. Higher sigma means more dissipation added by NSCBC, which can help stabilize but also adds more error.
   nscbc.beta      = 1.0    # Lodato (2008) recommended: 0 = full transverse, 1 = pure LODI
   # NOTE: beta=0.0 (full transverse) is unstable for Tammann water because the T1/T4 terms
