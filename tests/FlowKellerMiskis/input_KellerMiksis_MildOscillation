@@ -43,7 +43,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowKellerMiskis/output_KellerMiksis_MildOscillation
+#plot_file = ./tests/FlowKellerMiskis/output_KellerMiksis_MildOscillation
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowKellerMiskis/output_KellerMiksis_MildOscillation
 
 ### MESHING ###
 amr.plot_dt        = 2.5e-5         # 0.025 ms -- tighter sampling for oscillations
