@@ -78,7 +78,7 @@ T_END = 6.0e-3      # 5 ms -- 2-3 oscillation cycles
 
 OUTPUT_DIR = os.path.normpath(os.path.join(
     _HERE, "..", "..", "..", "bin", "tests",
-    "FlowKellerMiskis", "output_KellerMiksis_MildOscillation",
+    "FlowKellerMiksis", "output_KellerMiksis_MildOscillation",
 ))
 
 IMG_DIR = os.path.join(_HERE, "Images")

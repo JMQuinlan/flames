@@ -1,59 +1,63 @@
-#@ [keller_miksis_mild_oscillation]
+#@ [keller_miksis_driven_collapse]
 #@ exe=hydro2
 #@ dim=2
 
 # =============================================================================
-# Keller-Miksis Benchmark -- MILD Oscillation (2D Cartesian, scaled units)
+# Keller-Miksis Benchmark -- Driven Bubble Collapse (2D Cartesian, scaled units)
 # =============================================================================
-# Companion to input_KellerMiksis_DrivenCollapse, but tuned for OSCILLATION
-# rather than violent collapse:
-#
-#   - p_inf / p_g0 = 3  (vs 20 in the driven-collapse case)
-#   - peak wall Mach |R'|/c_l ~ 0.05-0.10  (KM regime, but mild)
-#   - bubble undergoes 2-3 visible cycles before BC reflections contaminate
-#   - amplitude decay across cycles is the headline KM-vs-RP signature
-#     (incompressible RP has no acoustic radiation -> zero damping; KM has
-#     ~ omega_0 * R_eq / (2 * c_l) per cycle)
+# Purpose:
+#   Validate the Hydro2 compressible 5-eq diffuse-interface solver against the
+#   Keller-Miksis ODE (1st-order-in-Mach compressibility-corrected RP). KM is
+#   the right reference once wall Mach exceeds ~0.05; this case is tuned so
+#   |R'|/c_l peaks around 0.20-0.25, where KM and incompressible RP are
+#   meaningfully different but the simulation is still well-resolved.
 #
 # Setup:
-#   liquid (water analog): rho_l = 10, p_inf = 1500   (3 x p_g0)
+#   liquid (water analog): rho_l = 10, p_inf = 10000  (20 x p_g0)
 #                          Tammann gamma = 7.15, pi = 5000
 #   gas    (air   analog): rho_g = 1, p_g0 = 500
 #                          ideal gas, gamma = 1.4
-#   bubble: R0 = 0.02 m  (1/5 of half-domain --> 5*R0 to wall)
-#   sigma = 7.28
+#   bubble: R0 = 0.02 m   (1/5 of half-domain --> 5*R0 to wall)
+#   sigma = 7.28 (water-air analog)
 #   mu_l  = 0
 #
-# Expected dynamics (from KM ODE in rayleigh_plesset_solver.py):
-#   - first collapse:  R_min/R0 ~ 0.65,  wall Mach peak ~ 0.07
-#   - rebound to R/R0 ~ 0.95
-#   - second collapse: R_min/R0 ~ 0.75,  wall Mach ~ 0.04
-#   - oscillation period ~ 1.2-1.5 ms
-#   - 2-3 cycles in 5 ms before round-trip noise from NSCBC4
+# Expected dynamics (from Keller-Miksis ODE, see
+# tests/FlowRayleighPlesset/OtherTests/reference/rayleigh_plesset_solver.py):
 #
-# Domain & duration:
-#   The acoustic round-trip across the 0.20 m domain at c_l = 63 m/s is ~ 3.2 ms.
-#   stop_time = 5.0 ms catches the first 2-3 oscillations cleanly. Treat data
-#   beyond ~ 3 ms with caution -- BC reflections may distort.
+#   t = 0.0   ms ->  R/R0 = 1.000  (initial)
+#   t = 0.5   ms ->  R/R0 = 0.870
+#   t = 1.0   ms ->  R/R0 = 0.625
+#   t = 1.5   ms ->  R/R0 = 0.300  (KM ~10% behind classical Rayleigh tau_c)
+#   t = 1.7   ms ->  R/R0 = 0.150  (first minimum, KM)
+#   t = 2.5   ms ->  R/R0 = 0.95   (rebound)
 #
-# Reference: Schmidmayer-Bryngelson-Colonius JCP 402 (2020) 109080, Sec. 5.2
-#            ("acoustically forced bubble", same protocol).
+# Wall Mach |R'|/c_l peaks around 0.2-0.25 -- comfortably in the regime where
+# KM is the right reference and incompressible RP is ~5-15% off.
+#
+# Domain: small (5*R0 from center to wall) so a single first-collapse cycle
+# completes before NSCBC4 reflections arrive. This matches Saurel-Petitpas-Berry
+# 2009 / Johnsen-Colonius 2006 first-collapse-only validation strategy. Do NOT
+# trust rebound or subsequent oscillations -- read only collapse time, R_min,
+# and peak wall Mach off this run.
+#
+# Reference paper for this kind of compressible KM benchmark:
+#   Tiwari, Freund, Pantano JCP 252 (2013) 290-309 -- KM comparison protocol
+#   Schmidmayer et al. JCP 402 (2020) 109080      -- closest 2D Cartesian
 # =============================================================================
 
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = ./tests/FlowKellerMiskis/output_KellerMiksis_MildOscillation
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowKellerMiskis/output_KellerMiksis_MildOscillation
+plot_file = ./tests/FlowKellerMiksis/output_KellerMiksis_DrivenCollapse
 
 ### MESHING ###
-amr.plot_dt        = 2.5e-5         # 0.025 ms -- tighter sampling for oscillations
+amr.plot_dt        = 5.0e-5         # 0.05 ms -- collapse is fast, sample tightly
 amr.max_grid_size  = 500000
 amr.blocking_factor = 2
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
 amr.max_level      = 0
-amr.n_cell         = 1024 1024     # match the converged-resolution KM-collapse run
+amr.n_cell         = 1024 1024
 
 nghost = 4
 
@@ -69,11 +73,11 @@ cfl                     = 0.5
 geometry.prob_lo     = -0.10 -0.10 0.0
 geometry.prob_hi     =  0.10  0.10 0.0
 geometry.is_periodic = 0 0 0
-stop_time            = 6.0e-3     # 5 ms -- captures 2-3 oscillation cycles
+stop_time            = 3.0e-3     # 3 ms -- covers first collapse + rebound start
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.0008
+eta.ic.expression.constant.epsilon = 0.002
 eta.ic.expression.constant.R0      = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
@@ -105,7 +109,7 @@ velocity1.ic.expression.region0 = "0.0"
 velocity1.ic.expression.region1 = "0.0"
 
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "1500.0"   # liquid driven (3x p_g0) -- MILD
+pressure0.ic.expression.region0 = "10000.0"   # liquid driven (20x p_g0)
 
 pressure1.ic.type = expression
 pressure1.ic.expression.region0 = "500.0"
@@ -134,9 +138,9 @@ momentum.bc.type.xlo = nscbc_outflow nscbc_outflow
 momentum.bc.type.ylo = nscbc_outflow nscbc_outflow
 momentum.bc.type.yhi = nscbc_outflow nscbc_outflow
 
-# Far-field target = liquid pressure (mild driving)
+# Far-field target = liquid pressure (drives the collapse)
 nscbc.xlo.type = outflow
-nscbc.xlo.target_p = 1500.0
+nscbc.xlo.target_p = 10000.0
 nscbc.xlo.sigma = 0.15
 nscbc.xlo.beta  = 0.5
 nscbc.xlo.L_ref = 0.20
@@ -144,7 +148,7 @@ nscbc.xlo.target_u = 0.0
 nscbc.xlo.target_v = 0.0
 
 nscbc.xhi.type = outflow
-nscbc.xhi.target_p = 1500.0
+nscbc.xhi.target_p = 10000.0
 nscbc.xhi.sigma = 0.15
 nscbc.xhi.beta  = 0.5
 nscbc.xhi.L_ref = 0.20
@@ -152,7 +156,7 @@ nscbc.xhi.target_u = 0.0
 nscbc.xhi.target_v = 0.0
 
 nscbc.ylo.type = outflow
-nscbc.ylo.target_p = 1500.0
+nscbc.ylo.target_p = 10000.0
 nscbc.ylo.sigma = 0.15
 nscbc.ylo.beta  = 0.5
 nscbc.ylo.L_ref = 0.20
@@ -160,7 +164,7 @@ nscbc.ylo.target_u = 0.0
 nscbc.ylo.target_v = 0.0
 
 nscbc.yhi.type = outflow
-nscbc.yhi.target_p = 1500.0
+nscbc.yhi.target_p = 10000.0
 nscbc.yhi.sigma = 0.15
 nscbc.yhi.beta  = 0.5
 nscbc.yhi.L_ref = 0.20
@@ -170,11 +174,11 @@ nscbc.yhi.target_v = 0.0
 nscbc.small = 1.0e-10
 
 ### REFINEMENT (off for first validation) ###
-eta_refinement_criterion   = 1.0e+10
-omega_refinement_criterion = 1.0e+10
-p_refinement_criterion     = 1.0e+10
-rho_refinement_criterion   = 1.0e+10
-gradu_refinement_criterion = 1.0e+10
+eta_refinement_criterion = 1e-1
+omega_refinement_criterion = 10.55
+p_refinement_criterion = 1e+7
+rho_refinement_criterion = 1e+6
+gradu_refinement_criterion = 1e+6
 cutoff = 1.0e-4
 
 ### SOURCE TERMS ###

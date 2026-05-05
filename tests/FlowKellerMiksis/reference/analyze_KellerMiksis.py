@@ -76,7 +76,7 @@ T_END = 3.0e-3      # 3 ms
 # (relative to repo root when invoked as recommended)
 OUTPUT_DIR = os.path.normpath(os.path.join(
     _HERE, "..", "..", "..", "bin", "tests",
-    "FlowKellerMiskis", "output_KellerMiksis_DrivenCollapse",
+    "FlowKellerMiksis", "output_KellerMiksis_DrivenCollapse",
 ))
 
 # Image output directory
