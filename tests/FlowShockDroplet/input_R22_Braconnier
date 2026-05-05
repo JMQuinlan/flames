@@ -20,7 +20,7 @@ amr.blocking_factor = 2
 amr.regrid_int = 50
 amr.grid_eff = 0.8
 amr.max_level = 2
-amr.n_cell = 600 200  # Maintains aspect ratio for 0.3m × 0.1m domain
+amr.n_cell = 600 100  # Maintains aspect ratio for 0.3m × 0.1m domain
 
 ### TIME STEPPING ###
 ## Static:
@@ -34,9 +34,9 @@ dynamictimestep.min = 1e-10
 cfl = 0.1
 
 ### DIMENSIONS ###
-geometry.prob_lo =  0.00 0.00 0.0  # 30cm x 10cm
+geometry.prob_lo =  0.00 0.05 0.0  # 30cm x 10cm
 geometry.prob_hi =  0.30 0.10 0.0 
-geometry.is_periodic = 0 0 0
+geometry.is_periodic = 1 0 0
  
 ### TIME STEP ###
 stop_time = 0.24  # Shorter time for shock interaction
@@ -57,14 +57,14 @@ epsilon = eta.ic.expression.constant.epsilon
 
 # Air properties (fluid 0 - surrounding vapor/gas)
 eos0.gamma = 1.4   # Air
-eos0.p0 = 0       # Ideal gas
-mu0 = 0.0 # 1.8e-5   # Air viscosity [Pa-s]
+eos0.p0 = 0        # Ideal gas
+mu0 = 0.0 # 1.8e-5 # Air viscosity [Pa-s]
 mu0_b = 0.0
 
 # R22 properties (fluid 1 - droplet)
 eos1.gamma = 1.25  # R22
-eos1.p0 = 0.0     # Tammann EOS parameter for R22
-mu1 = 0.0         # R22 viscosity [Pa-s]
+eos1.p0 = 0.0      # Tammann EOS parameter for R22
+mu1 = 0.0          # R22 viscosity [Pa-s]
 mu1_b = 0.0
 
 # Densities
