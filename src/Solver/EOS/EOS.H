@@ -319,6 +319,27 @@ public:
             return std::sqrt(gamma_eff * (p + p0_eff) / rho);
         }
     }
+
+    /// Compute interfacial relaxation
+    /// FROM: 
+    ///     Schmidmayer-Bryngelson-Colonius 2020
+    ///     Beig - Johnsen 2018
+    AMREX_GPU_HOST_DEVICE
+    static Set::Scalar K_interfaceRelax(Set::Scalar rho,
+                                        Set::Scalar p,
+                                        Set::Scalar eta,
+                                        const EOS &eos0,
+                                        const EOS &eos1,
+                                        Set::Scalar pref = 0.0)
+    {
+        Set::Scalar gamma_eff = MixedGamma(eta, eos0, eos1);
+        Set::Scalar p0_eff = MixedP0(eta, eos0, eos1);
+        Set::Scalar cv_eff = MixedCv(eta, eos0, eos1);
+
+        return (alpha * rho0) ....
+
+
+    }
 };
 
 } // namespace EOS

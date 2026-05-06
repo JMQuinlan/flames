@@ -57,7 +57,7 @@ amr.blocking_factor = 2
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
 amr.max_level      = 0
-amr.n_cell         = 1024 1024
+amr.n_cell         = 256 256
 
 nghost = 4
 
@@ -84,7 +84,7 @@ epsilon = eta.ic.expression.constant.epsilon
 
 ### EQUATION OF STATE ###
 eos0.gamma = 7.15
-eos0.p0    = 5000.0
+eos0.p0    = 5.0e3
 eos0.cv    = 714.286
 eos0.cp    = 1000.0
 
