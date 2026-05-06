@@ -1,0 +1,204 @@
+#@ [case1]
+#@ exe=hydro2
+#@ dim=2
+
+# 1-D acoustic wave in air impinging on a normal air/water interface.
+# Purpose: verify the acoustic impedance mismatch (pressure-velocity coupling)
+# at the diffuse interface — i.e. that the simulated reflection / transmission
+# coefficients match the analytical 1-D plane-wave values.
+#
+# Phases (SI units):
+#   eta=0  air   (CPG):           rho=1.225 kg/m^3, p=101325 Pa, gamma=1.4, pi=0
+#                                 c_air   = sqrt(gamma*p/rho)        ~  340.27 m/s
+#                                 Z_air   = rho*c                    ~  416.8  kg/(m^2 s)
+#   eta=1  water (stiffened gas): rho=1000  kg/m^3, p=101325 Pa, gamma=5.5, pi=6.0e8 Pa
+#                                 c_water = sqrt(gamma*(p+pi)/rho)   ~ 1817    m/s
+#                                 Z_water = rho*c                    ~ 1.817e6 kg/(m^2 s)
+#
+# Analytical plane-wave reflection / transmission across the interface
+# (right-traveling pulse in air hitting water):
+#   R_p =  (Z_w - Z_a) / (Z_w + Z_a)  ~  +0.999542   (pressure reflection)
+#   T_p =   2 Z_w      / (Z_w + Z_a)  ~  +1.999542   (pressure transmission)
+#   R_u = -(Z_w - Z_a) / (Z_w + Z_a)  ~  -0.999542   (velocity reflection — sign flips)
+#   T_u =   2 Z_a      / (Z_w + Z_a)  ~  +4.585e-4   (velocity transmission — small)
+#
+# The high impedance ratio (~4360) means almost the entire pulse should reflect
+# back into the air with the same pressure sign; the water sees essentially
+# zero motion but ~2x pressure amplitude in the (small) transmitted wave.
+
+### OUTPUT ###
+plot_file   = ./tests/FlowSQR_tests/output_acoustic_1d
+amr.plot_dt = 2.0e-4
+amr.plot_int = 200
+
+### MESHING ###
+amr.max_level      = 0
+amr.max_grid_size  = 500000
+amr.blocking_factor = 4
+amr.grid_eff       = 0.8
+amr.n_cell         = 1024 16
+
+### DIMENSIONS ###
+# 2-m-wide channel in x; very thin in y (periodic) so the run is effectively 1-D.
+geometry.prob_lo     = -1.0  -0.015625  0.0   # [ m ]
+geometry.prob_hi     =  1.0   0.015625  0.0   # [ m ]
+geometry.is_periodic =  0     1         0
+
+### TIME STEP ###
+# dx = 2.0/1024 ~ 1.95e-3 m;  c_max = c_water ~ 1817 m/s
+# CFL=0.4  =>  dt_max ~ 4.3e-7 s
+# Pulse travel time x0=-0.5  ->  x=0  is 0.5/340  ~ 1.47 ms.
+# Stopping at 2.0 ms gives ~0.5 ms after the strike: reflected wave is at
+# x ~ -0.18 m (still well inside the air domain, away from xlo).
+timestep  = 1.0e-7
+stop_time = 2.0e-3
+cfl       = 0.4
+
+### Sources ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type            = constant
+q.ic.constant.value  = 0.0
+
+### HYDRO PARAM ###
+# Diffuse interface eta(x) = 0.5*(1 + tanh(x/epsilon)).
+# epsilon = 0.01 m  =>  ~5 cells across the interface for the chosen mesh.
+eta.ic.type                            = expression
+eta.ic.expression.constant.epsilon     = 1.0e-2
+eta.ic.expression.region0              = "(0.5 * (1.0 + tanh(x / epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+# eta=0 phase (LHS, x<0): air — calorically perfect gas
+gamma_eta0 = 1.4
+pi_eta0    = 0.0
+mu_eta0    = 0.0
+
+# eta=1 phase (RHS, x>0): water — stiffened gas (Tammann)
+gamma_eta1 = 5.5
+pi_eta1    = 6.0e8
+mu_eta1    = 0.0
+
+### Reference pressure (vestigial — slated for removal) ###
+pref = 0.0
+
+### IC State - eta=0 phase (air) ###
+# Right-traveling acoustic Gaussian pulse centered at x0 = -0.5 m, width sigma = 0.05 m.
+#   delta_p   = dp_max * exp(-(x-x0)^2 / (2 sigma^2))
+#   delta_u   = (dp_max / (rho0 c0)) * exp(...)    (right-traveling: dp and du in phase, same sign)
+#   delta_rho = (dp_max / c0^2)      * exp(...)
+# Amplitude dp_max = 100 Pa  (~0.001 * p0)  -> linear-acoustic regime.
+density_eta0.ic.type                          = expression
+density_eta0.ic.expression.constant.rho0      = 1.225
+density_eta0.ic.expression.constant.dp_max    = 100.0
+density_eta0.ic.expression.constant.c0        = 340.2706
+density_eta0.ic.expression.constant.x0        = -0.5
+density_eta0.ic.expression.constant.sigma     = 0.05
+density_eta0.ic.expression.region0            = "rho0 + (dp_max/(c0*c0)) * exp(-(x-x0)*(x-x0)/(2.0*sigma*sigma))"
+
+velocity_eta0.ic.type                          = expression
+velocity_eta0.ic.expression.constant.rho0      = 1.225
+velocity_eta0.ic.expression.constant.dp_max    = 100.0
+velocity_eta0.ic.expression.constant.c0        = 340.2706
+velocity_eta0.ic.expression.constant.x0        = -0.5
+velocity_eta0.ic.expression.constant.sigma     = 0.05
+velocity_eta0.ic.expression.region0            = "(dp_max/(rho0*c0)) * exp(-(x-x0)*(x-x0)/(2.0*sigma*sigma))"
+velocity_eta0.ic.expression.region1            = "0.0"
+
+pressure_eta0.ic.type                          = expression
+pressure_eta0.ic.expression.constant.p0        = 101325.0
+pressure_eta0.ic.expression.constant.dp_max    = 100.0
+pressure_eta0.ic.expression.constant.x0        = -0.5
+pressure_eta0.ic.expression.constant.sigma     = 0.05
+pressure_eta0.ic.expression.region0            = "p0 + dp_max * exp(-(x-x0)*(x-x0)/(2.0*sigma*sigma))"
+
+# CPG calibration for air: cv = R / (gamma-1) = 287/0.4 = 717.5,  cp = gamma*cv = 1004.5
+cp_eta0 = "1004.5"
+cv_eta0 = "717.5"
+
+### IC State - eta=1 phase (water at rest, matched pressure) ###
+density_eta1.ic.type           = constant
+density_eta1.ic.constant.value = 1000.0
+
+velocity_eta1.ic.type                = expression
+velocity_eta1.ic.expression.region0  = "0.0"
+velocity_eta1.ic.expression.region1  = "0.0"
+
+pressure_eta1.ic.type           = constant
+pressure_eta1.ic.constant.value = 101325.0
+
+# Stiffened-gas calibration for water: take cv such that cv ~ liquid-water value (4180 J/kg/K).
+# cp = gamma*cv keeps the EOS-internal cp/cv ratio consistent with gamma_eta1=5.5.
+cp_eta1 = "22990.0"
+cv_eta1 = "4180.0"
+
+### ETA BC ###
+pf.eta.bc.type.xlo = neumann
+pf.eta.bc.type.xhi = neumann
+pf.eta.bc.type.ylo = periodic
+pf.eta.bc.type.yhi = periodic
+
+### HYDRO BC ###
+# Neumann (zero-gradient) outflow on x.  In 2.0 ms the reflected (air-side)
+# wave travels back at most ~0.5 m, so it does not reach xlo at -1.0.
+# The transmitted (water-side) wave travels c_w*0.5 ms ~ 0.91 m by stop_time
+# and may interact with xhi=+1.0 at the very end of the run; its amplitude is
+# tiny in velocity (T_u ~ 5e-4) so any reflection there is a small correction.
+density.bc.type.xhi  = neumann
+density.bc.type.xlo  = neumann
+density.bc.type.ylo  = periodic
+density.bc.type.yhi  = periodic
+
+energy.bc.type.xhi   = neumann
+energy.bc.type.xlo   = neumann
+energy.bc.type.ylo   = periodic
+energy.bc.type.yhi   = periodic
+
+momentum.bc.type.xhi = neumann  periodic
+momentum.bc.type.xlo = neumann  periodic
+momentum.bc.type.ylo = neumann  periodic
+momentum.bc.type.yhi = neumann  periodic
+
+### HYDRO REFINEMENT CRITERIA (single-level run) ###
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+Spec_Vol = 1
+
+sigma = 0;
+Dv    = 0;
+g     = 0.0;
+
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+
+### DEBUGGING / SOLVER ###
+# Pure-hydro acoustic test: turn off the BS source coupling and freeze the CH
+# field (mobility = 0).  The interface profile sits at its IC tanh; only the
+# compressible Euler system carries the acoustic pulse across the interface.
+bs_source_mode      = CH_Emergent
+p_int_method        = 3       # acoustic-impedance-matched interface pressure
+                              # (this is the closure being validated here)
+Riemann_Solver.type = hllc
+kappa_method        = 1
+smooth_kernel_size  = 3
+nghost              = 4
+integration.type    = ForwardEuler
+
+# CH parameters: present for consistency, but mobility = 0 freezes the field.
+implicit_ch         = 0
+ch_mobility_scaling = explicit
+ch_newton_iters     = 5
+ch_newton_tol       = 1e-10
+
+# Equilibrium-tanh match: lambda = 2*kappa/epsilon^2.
+# epsilon = 1e-2  =>  for lambda = 12.5,  kappa = 12.5 * (1e-2)^2 / 2 = 6.25e-4.
+ch_W_scale             = 12.5
+ch_kappa               = 6.25e-4
+ch_mobility_degenerate = 1
+ch_mobility_nom        = 0     # freeze CH — interface is stationary
+
+nscbc.enabled = false

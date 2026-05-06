@@ -781,7 +781,7 @@ void Hydro2::Mix(int lev)
             //    p0(i,j,k) = p_eta1, p1(i,j,k) = p_eta0 (local naming).
             //--------------------------------------------------------------
             Real p = Y_eta0_ * p1(i,j,k) + Y_eta1_ * p0(i,j,k) + pref;
-            if (!std::isfinite(p) || p < 0) p = 1e-6;
+            if (!std::isfinite(p) || p < 0) p = 1e-10;
 
             p_mix(i,j,k) = p;
         });
@@ -899,8 +899,8 @@ void Hydro2::MixDiagnostic(int lev)
             Real UE1 = amrex::max(Real(0.0), E1(i,j,k) - KE1);
             Real p0_ = (g0 - Real(1.0))*UE0                 + pref_;                  // CPG
             Real p1_ = (g1 - Real(1.0))*UE1 - g1*pi1        + pref_;                  // SG
-            if (!std::isfinite(p0_) || p0_ < Real(0.0)) p0_ = Real(1e-6);
-            if (!std::isfinite(p1_) || p1_ < Real(0.0)) p1_ = Real(1e-6);
+            if (!std::isfinite(p0_) || p0_ < Real(0.0)) p0_ = Real(1e-10);
+            if (!std::isfinite(p1_) || p1_ < Real(0.0)) p1_ = Real(1e-10);
 
             // Mass-fraction weights (subscript 0 = eta=0 phase).
             Real Y0_, Y1_, rho_mix_chk;
@@ -2439,8 +2439,8 @@ Hydro2::RHS(int lev,
             Real UE_e1 = amrex::max(Real(0.0), E_e1_arr(i,j,k) - KE_e1);
             Real p_e0_loc = Thermo_Interp::Pressure_CPG  (UE_e0, gamma_eta0)             + pref;
             Real p_e1_loc = Thermo_Interp::Pressure_SG_UE(UE_e1, gamma_eta1, pi_eta1)    + pref;
-            if (!std::isfinite(p_e0_loc) || p_e0_loc < Real(0.0)) p_e0_loc = Real(1e-6);
-            if (!std::isfinite(p_e1_loc) || p_e1_loc < Real(0.0)) p_e1_loc = Real(1e-6);
+            if (!std::isfinite(p_e0_loc) || p_e0_loc < Real(0.0)) p_e0_loc = Real(1e-10);
+            if (!std::isfinite(p_e1_loc) || p_e1_loc < Real(0.0)) p_e1_loc = Real(1e-10);
 
             //------------------------------------------------------------------
             // Y-weighted mixture (gamma, pi) — diagnostic mfab values.
@@ -5313,8 +5313,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar UE1_loc = std::max(Set::Scalar(0.0), E_e1(i,j,k) - KE1_loc);
             Set::Scalar p_e0_loc = Thermo_Interp::Pressure_CPG  (UE0_loc, gamma_eta0)             + pref;
             Set::Scalar p_e1_loc = Thermo_Interp::Pressure_SG_UE(UE1_loc, gamma_eta1, pi_eta1)    + pref;
-            if (!std::isfinite(p_e0_loc) || p_e0_loc < 0.0) p_e0_loc = Set::Scalar(1e-6);
-            if (!std::isfinite(p_e1_loc) || p_e1_loc < 0.0) p_e1_loc = Set::Scalar(1e-6);
+            if (!std::isfinite(p_e0_loc) || p_e0_loc < 0.0) p_e0_loc = Set::Scalar(1e-10);
+            if (!std::isfinite(p_e1_loc) || p_e1_loc < 0.0) p_e1_loc = Set::Scalar(1e-10);
 
             // Mass-fraction weights and Y-weighted (gamma, pi).
             Set::Scalar Y0_loc, Y1_loc, rho_mix_chk_loc;
@@ -5407,7 +5407,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Set::Scalar UE0 = E_e0(i,j,k) - KE0;
                 if (!std::isfinite(UE0) || UE0 < Set::Scalar(0.0)) UE0 = Set::Scalar(0.0);
                 Set::Scalar p0_ = Thermo_Interp::Pressure_CPG(UE0, gamma_eta0) + pref;
-                if (!std::isfinite(p0_) || p0_ < Set::Scalar(0.0)) p0_ = Set::Scalar(1e-6);
+                if (!std::isfinite(p0_) || p0_ < Set::Scalar(0.0)) p0_ = Set::Scalar(1e-10);
                 p_e0(i,j,k) = p0_;
                 c_e0(i,j,k) = Thermo_Interp::SoundSpeed_CPG(safe_r0, p0_, gamma_eta0);
                 v_e0(i,j,k,0) = u0x;
@@ -5425,7 +5425,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Set::Scalar UE1 = E_e1(i,j,k) - KE1;
                 if (!std::isfinite(UE1) || UE1 < Set::Scalar(0.0)) UE1 = Set::Scalar(0.0);
                 Set::Scalar p1_ = Thermo_Interp::Pressure_SG_UE(UE1, gamma_eta1, pi_eta1) + pref;
-                if (!std::isfinite(p1_) || p1_ < Set::Scalar(0.0)) p1_ = Set::Scalar(1e-6);
+                if (!std::isfinite(p1_) || p1_ < Set::Scalar(0.0)) p1_ = Set::Scalar(1e-10);
                 p_e1(i,j,k) = p1_;
                 c_e1(i,j,k) = Thermo_Interp::SoundSpeed_SG(safe_r1, p1_, gamma_eta1, pi_eta1);
                 v_e1(i,j,k,0) = u1x;
@@ -5496,15 +5496,15 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // p(i,j,k) was computed above as p_new; read neighbors from pressure_mf
             // (filled at end of previous step and in the ghost-fill above).
             {
-                Real p_c  = std::max(p_new, Real(1e-6));
-                Real p_xm = std::max(p(i-1, j,   k),   Real(1e-6));
-                Real p_xp = std::max(p(i+1, j,   k),   Real(1e-6));
-                Real p_ym = std::max(p(i,   j-1, k),   Real(1e-6));
-                Real p_yp = std::max(p(i,   j+1, k),   Real(1e-6));
+                Real p_c  = std::max(p_new, Real(1e-10));
+                Real p_xm = std::max(p(i-1, j,   k),   Real(1e-10));
+                Real p_xp = std::max(p(i+1, j,   k),   Real(1e-10));
+                Real p_ym = std::max(p(i,   j-1, k),   Real(1e-10));
+                Real p_yp = std::max(p(i,   j+1, k),   Real(1e-10));
                 Real p_ratio = std::max({p_xm/p_c, p_xp/p_c, p_ym/p_c, p_yp/p_c});
 
                 Real gm = gamma_mix(i,j,k); // Y-weighted, written above
-                // Cap p_ratio to prevent interface pressure floors (e.g. 1e-6 from
+                // Cap p_ratio to prevent interface pressure floors (e.g. 1e-10 from
                 // negative UE in stiffened-gas cells) from inflating the shock factor
                 // by a factor of 1e11 and collapsing dt to machine epsilon.
                 // A cap of 10 allows for genuine strong shocks while excluding the

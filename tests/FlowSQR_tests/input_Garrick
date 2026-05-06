@@ -6,9 +6,9 @@
 # Figure 4 - Gas-Liquid Riemann Problem
 
 ### OUTPUT ###
-plot_file = ./tests/FlowSQR_tests/output_Garrick_20260501
-amr.plot_dt = 0.05
-# amr.plot_int = 1
+plot_file = ./tests/FlowSQR_tests/output_Garrick_HP_20260504
+amr.plot_dt = 0.01
+amr.plot_int = 113
 
 ### MESHING ###
 amr.max_level = 0
@@ -24,8 +24,8 @@ geometry.is_periodic = 0 1 0
 
 ### TIME STEP ###
 timestep  = 2.5e-4
-stop_time = 0.2
-# stop_time = 0.1
+# stop_time = 0.2
+stop_time = 0.1
 cfl   = 0.4
 
 ### Sources ###
@@ -63,7 +63,8 @@ velocity_eta0.ic.type = constant
 velocity_eta0.ic.constant.value = 0.0 0.0
 
 pressure_eta0.ic.type = constant
-pressure_eta0.ic.constant.value = 2.753
+# pressure_eta0.ic.constant.value = 2.753
+pressure_eta0.ic.constant.value = 5.753
 
 cp_eta0 = "1.4"
 cv_eta0 = "1.0"
