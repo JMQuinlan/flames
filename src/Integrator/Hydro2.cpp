@@ -1391,28 +1391,31 @@ Hydro2::RHS(int lev,
             // Schmidmayer Eq. 11 form
             //   K = (rho_2 a_2^2 - rho_1 a_1^2)
             //       / ( rho_1 a_1^2/alpha_1 + rho_2 a_2^2/alpha_2 ).
+            //
+            // div_u and K_kapila are hoisted to lambda scope because they
+            // are also used as a source on the phase-mass equations below
+            // (rho_eta0 = rho*eta must track eta with its K correction;
+            // see derivation note before rho_eta{0,1}_rhs).
             // ------------------------------------------------------------
-            {
-                Set::Scalar div_uA_x = (flux_xhi.u_interface * eta_face_xhi
-                                      - flux_xlo.u_interface * eta_face_xlo) / DX[0];
-                Set::Scalar div_uA_y = (flux_yhi.u_interface * eta_face_yhi
-                                      - flux_ylo.u_interface * eta_face_ylo) / DX[1];
-                Set::Scalar div_u_x  = (flux_xhi.u_interface - flux_xlo.u_interface) / DX[0];
-                Set::Scalar div_u_y  = (flux_yhi.u_interface - flux_ylo.u_interface) / DX[1];
-                Set::Scalar div_u    = div_u_x + div_u_y;
+            Set::Scalar div_uA_x = (flux_xhi.u_interface * eta_face_xhi
+                                  - flux_xlo.u_interface * eta_face_xlo) / DX[0];
+            Set::Scalar div_uA_y = (flux_yhi.u_interface * eta_face_yhi
+                                  - flux_ylo.u_interface * eta_face_ylo) / DX[1];
+            Set::Scalar div_u_x  = (flux_xhi.u_interface - flux_xlo.u_interface) / DX[0];
+            Set::Scalar div_u_y  = (flux_yhi.u_interface - flux_ylo.u_interface) / DX[1];
+            Set::Scalar div_u    = div_u_x + div_u_y;
 
-                Set::Scalar eta_advect = -(div_uA_x + div_uA_y) + eta(i, j, k) * div_u;
+            Set::Scalar eta_advect = -(div_uA_x + div_uA_y) + eta(i, j, k) * div_u;
 
-                Set::Scalar K_kapila = Solver::EOS::EOS::KapilaK(press(i, j, k),
-                                                                eta(i, j, k),
-                                                                eos0_local,
-                                                                eos1_local,
-                                                                small);
+            Set::Scalar K_kapila = Solver::EOS::EOS::KapilaK(press(i, j, k),
+                                                            eta(i, j, k),
+                                                            eos0_local,
+                                                            eos1_local,
+                                                            small);
 
-                eta_rhs(i, j, k) = eta_advect
-                                 + K_kapila * div_u
-                                 + eta_dot_Vap;
-            }
+            eta_rhs(i, j, k) = eta_advect
+                             + K_kapila * div_u
+                             + eta_dot_Vap;
 
 
             // UPDATE MIXED FLUID VARIABLES
@@ -1438,9 +1441,20 @@ Hydro2::RHS(int lev,
             Set::Scalar rho_eta1_flux = (F_rho_eta1_xlo - F_rho_eta1_xhi) / DX[0]
                                         + (F_rho_eta1_ylo - F_rho_eta1_yhi) / DX[1];
 
+            // Kapila K source on phase masses.
+            // In this codebase rho_eta0 = rho_mix * eta (not the canonical
+            // (alpha rho_pure)). Using D/Dt eta = K div u (Kapila) and
+            // d(rho)/dt + div(rho u) = 0 gives
+            //     d(rho eta)/dt + div(rho eta u) = +rho K div u
+            //     d(rho (1-eta))/dt + div(rho (1-eta) u) = -rho K div u
+            // The two sources cancel in their sum, so total mass is still
+            // conserved; without this term rho_eta0 drifts away from
+            // rho_mix*eta after a few steps once K is non-zero.
+            Set::Scalar rho_K_divu = rho(i, j, k) * K_kapila * div_u;
+
             // Mass
-            rho_eta0_rhs(i, j, k) = rho_eta0_flux + Source(i, j, k, 0) * (eta(i, j, k)) + m_dot_Vap;
-            rho_eta1_rhs(i, j, k) = rho_eta1_flux + Source(i, j, k, 0) * (1.0 - eta(i, j, k)) - m_dot_Vap;
+            rho_eta0_rhs(i, j, k) = rho_eta0_flux + rho_K_divu + Source(i, j, k, 0) * (eta(i, j, k)) + m_dot_Vap;
+            rho_eta1_rhs(i, j, k) = rho_eta1_flux - rho_K_divu + Source(i, j, k, 0) * (1.0 - eta(i, j, k)) - m_dot_Vap;
             
             // Momentum
             M_rhs(i, j, k, 0) = M_flux(i, j, k, 0) + Source(i, j, k, 1); //(mu * (lap_ux * eta(i, j, k))) +
