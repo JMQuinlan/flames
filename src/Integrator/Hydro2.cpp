@@ -971,7 +971,6 @@ Hydro2::RHS(int lev,
         Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
 
-
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
@@ -1381,10 +1380,17 @@ Hydro2::RHS(int lev,
             Set::Scalar eta_face_yhi = (flux_yhi.u_interface > 0.0) ? eta(i, j, k) : eta(i, j + 1, k);
 
             // ------------------------------------------------------------
-            // Non-conservative volume-fraction advection (Saurel & Abgrall 1999, Eq. 41)
-            //   D(eta)/Dt = deta/dt + u*grad(eta) = 0
-            // Discretized as
-            //   deta/dt = -div(u eta) + eta * div(u)
+            // Volume-fraction advection -- Kapila augmented 5-equation form.
+            //
+            // Base Saurel-Abgrall 1999 (Eq. 41):  D(eta)/Dt = -u . grad(eta) = 0
+            // Discretized as     deta/dt = -div(u eta) + eta * div(u)
+            //
+            // Kapila correction (Schmidmayer-Bryngelson-Colonius JCP 2020,
+            // Eqs. 10/11; Beig-Johnsen Eq. 2.4) adds + K * div(u), with K
+            // defined by Solver::EOS::EOS::KapilaK using the literal
+            // Schmidmayer Eq. 11 form
+            //   K = (rho_2 a_2^2 - rho_1 a_1^2)
+            //       / ( rho_1 a_1^2/alpha_1 + rho_2 a_2^2/alpha_2 ).
             // ------------------------------------------------------------
             {
                 Set::Scalar div_uA_x = (flux_xhi.u_interface * eta_face_xhi
@@ -1393,9 +1399,19 @@ Hydro2::RHS(int lev,
                                       - flux_ylo.u_interface * eta_face_ylo) / DX[1];
                 Set::Scalar div_u_x  = (flux_xhi.u_interface - flux_xlo.u_interface) / DX[0];
                 Set::Scalar div_u_y  = (flux_yhi.u_interface - flux_ylo.u_interface) / DX[1];
-                eta_rhs(i, j, k) = -(div_uA_x + div_uA_y)
-                                   + eta(i, j, k) * (div_u_x + div_u_y)
-                                   + eta_dot_Vap;
+                Set::Scalar div_u    = div_u_x + div_u_y;
+
+                Set::Scalar eta_advect = -(div_uA_x + div_uA_y) + eta(i, j, k) * div_u;
+
+                Set::Scalar K_kapila = Solver::EOS::EOS::KapilaK(press(i, j, k),
+                                                                eta(i, j, k),
+                                                                eos0_local,
+                                                                eos1_local,
+                                                                small);
+
+                eta_rhs(i, j, k) = eta_advect
+                                 + K_kapila * div_u
+                                 + eta_dot_Vap;
             }
 
 

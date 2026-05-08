@@ -69,7 +69,7 @@ cfl                     = 0.5
 geometry.prob_lo     = -0.10 -0.10 0.0
 geometry.prob_hi     =  0.10  0.10 0.0
 geometry.is_periodic = 0 0 0
-stop_time            = 6.0e-3     # 5 ms -- captures 2-3 oscillation cycles
+stop_time            = 12.0e-3     # 5 ms -- captures 2-3 oscillation cycles
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
@@ -80,7 +80,7 @@ epsilon = eta.ic.expression.constant.epsilon
 
 ### EQUATION OF STATE ###
 eos0.gamma = 7.15
-eos0.p0    = 1.0e5
+eos0.p0    = 2.0e5
 eos0.cv    = 714.286
 eos0.cp    = 1000.0
 

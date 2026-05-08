@@ -298,6 +298,52 @@ public:
         return std::sqrt(1.0 / (rho * invK_mix));
     }
 
+    /// Kapila interfacial-relaxation coefficient K for the augmented
+    /// 5-equation alpha advection (Schmidmayer-Bryngelson-Colonius JCP 2020,
+    /// Eqs. 10/11; equivalent to Beig-Johnsen 2018 Eq. 2.4):
+    ///
+    ///     d(alpha_1)/dt + u . grad(alpha_1) = K div(u)
+    ///
+    ///     K = (rho_2 a_2^2 - rho_1 a_1^2)
+    ///         / ( rho_1 a_1^2 / alpha_1 + rho_2 a_2^2 / alpha_2 )
+    ///
+    /// Per-phase Tammann/ideal-gas bulk modulus rho_k * a_k^2 = gamma_k (p + pi_k)
+    /// (rho cancels analytically, so we only need EOS constants and pressure).
+    ///
+    /// Convention: eta = alpha for phase 0 (matches MixedSoundSpeed signature),
+    ///   so phase 0 plays the role of Schmidmayer's "phase 1" and phase 1 plays
+    ///   his "phase 2". The 1/alpha singularities at alpha->0 or alpha->1 are
+    ///   regularized by flooring alpha and (1-alpha) at small; the denominator
+    ///   then diverges and K -> 0 in the pure-phase limits, which is the
+    ///   correct physical limit (no interfacial relaxation away from the band).
+    AMREX_GPU_HOST_DEVICE
+    static Set::Scalar KapilaK(Set::Scalar p,
+                               Set::Scalar eta,
+                               const EOS &eos0,
+                               const EOS &eos1,
+                               Set::Scalar small = 1e-16)
+    {
+        Set::Scalar gamma0 = eos0.Gamma();
+        Set::Scalar gamma1 = eos1.Gamma();
+        Set::Scalar p0_0   = eos0.P0();
+        Set::Scalar p0_1   = eos1.P0();
+
+        // rho_k a_k^2 = gamma_k (p + pi_k), floored to keep things finite
+        // if p drifts into the unphysical region under a strong rarefaction.
+        Set::Scalar rhoa2_0 = gamma0 * std::max(p + p0_0, small);
+        Set::Scalar rhoa2_1 = gamma1 * std::max(p + p0_1, small);
+
+        // Floor alpha and (1-alpha) so the 1/alpha denominator stays finite;
+        // K -> 0 in those limits naturally.
+        Set::Scalar a0 = std::max(eta,         small);
+        Set::Scalar a1 = std::max(1.0 - eta,   small);
+
+        Set::Scalar numerator   = rhoa2_1 - rhoa2_0;
+        Set::Scalar denominator = rhoa2_0 / a0 + rhoa2_1 / a1;
+
+        return numerator / denominator;
+    }
+
     /// Safe sound speed calculation with error checking
     /// Prevents NaN from negative arguments or division by zero
     AMREX_GPU_HOST_DEVICE
@@ -320,26 +366,6 @@ public:
         }
     }
 
-    /// Compute interfacial relaxation
-    /// FROM: 
-    ///     Schmidmayer-Bryngelson-Colonius 2020
-    ///     Beig - Johnsen 2018
-    AMREX_GPU_HOST_DEVICE
-    static Set::Scalar K_interfaceRelax(Set::Scalar rho,
-                                        Set::Scalar p,
-                                        Set::Scalar eta,
-                                        const EOS &eos0,
-                                        const EOS &eos1,
-                                        Set::Scalar pref = 0.0)
-    {
-        Set::Scalar gamma_eff = MixedGamma(eta, eos0, eos1);
-        Set::Scalar p0_eff = MixedP0(eta, eos0, eos1);
-        Set::Scalar cv_eff = MixedCv(eta, eos0, eos1);
-
-        return (alpha * rho0) ....
-
-
-    }
 };
 
 } // namespace EOS

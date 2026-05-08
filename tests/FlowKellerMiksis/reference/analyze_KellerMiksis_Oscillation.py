@@ -74,7 +74,7 @@ P = Params(
     r_inf     = 0.10,
 )
 
-T_END = 6.0e-3      # 5 ms -- 2-3 oscillation cycles
+T_END = 12.0e-3      # 5 ms -- 2-3 oscillation cycles
 
 OUTPUT_DIR = os.path.normpath(os.path.join(
     _HERE, "..", "..", "..", "bin", "tests",
@@ -398,7 +398,7 @@ def main():
     ax.axhline(0.10, color='r', lw=0.4, ls=':', alpha=0.5, label='M = 0.10')
     ax.set_xlabel('time [ms]', fontsize=FONT_SIZE_LABEL)
     ax.set_ylabel("|R'| / c_l", fontsize=FONT_SIZE_LABEL)
-    ax.set_title('Wall Mach number  (should stay < 0.10 in mild regime)',
+    ax.set_title('Wall Mach number',
                  fontsize=FONT_SIZE_TITLE, fontweight='bold')
     ax.tick_params(labelsize=FONT_SIZE_TICK)
     ax.grid(True, alpha=0.3)
