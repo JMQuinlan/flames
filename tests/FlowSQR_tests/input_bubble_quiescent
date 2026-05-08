@@ -217,7 +217,7 @@ grav = 0.0
 # ApplyBSSource each step. To compare against the prior "no BS coupling"
 # behavior, set this to "off" — m0_eff / u0_eff / q_eff are still computed
 # and plotted as diagnostics but not consumed by ApplyBSSource.
-bs_source_mode      = ch_emergent
+sqr_source_mode      = ch_emergent
 p_int_method        = 2     # 0: Off, 1: pressure average, 2: eta weighted pressure. 3: acoustic impedance matched pressure
 Riemann_Solver.type = hllc
 kappa_method        = 1

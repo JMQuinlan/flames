@@ -164,9 +164,9 @@ q.ic.constant.value = 0.0 0.0
 # ApplyBSSource each step. To compare against the prior "no BS coupling"
 # behavior, set this to "off" — m0_eff / u0_eff / q_eff are still computed
 # and plotted as diagnostics but not consumed by ApplyBSSource.
-bs_source_mode      = ch_emergent
-# bs_source_mode = prescribed
-# bs_source_mode      = off
+sqr_source_mode      = ch_emergent
+# sqr_source_mode = prescribed
+# sqr_source_mode      = off
 apply_surface_tension = 1
 apply_weight = 0
 apply_vaporization = 0

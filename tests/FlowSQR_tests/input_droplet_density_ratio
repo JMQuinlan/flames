@@ -179,7 +179,7 @@ apply_heat_conduction = 0
 Spec_Vol              = 1
 grav                  = 0.0
 
-bs_source_mode = off
+sqr_source_mode = off
 p_int_method   = 0
 
 Riemann_Solver.type = hllc

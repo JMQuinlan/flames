@@ -158,7 +158,7 @@ u0.ic.constant.value = 0.0 0.0
 q.ic.constant.value = 0.0 0.0
 
 ### ADDITIONAL SOURCES ###
-bs_source_mode = prescribed
+sqr_source_mode = prescribed
 apply_surface_tension = 1
 apply_weight = 0
 apply_vaporization = 0

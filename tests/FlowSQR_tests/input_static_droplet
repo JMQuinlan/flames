@@ -197,7 +197,7 @@ grav                  = 0.0
 # BS source mode (Phase 6): "off" | "prescribed" | "ch_emergent".
 # For the static droplet ic_m0/ic_q are zero so the source is silent
 # anyway; "off" makes that explicit.
-bs_source_mode = off
+sqr_source_mode = off
 p_int_method    = 0
 
 Riemann_Solver.type = hllc

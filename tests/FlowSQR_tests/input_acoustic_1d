@@ -179,7 +179,7 @@ apply_vaporization    = 0
 # Pure-hydro acoustic test: turn off the BS source coupling and freeze the CH
 # field (mobility = 0).  The interface profile sits at its IC tanh; only the
 # compressible Euler system carries the acoustic pulse across the interface.
-bs_source_mode      = CH_Emergent
+sqr_source_mode      = CH_Emergent
 p_int_method        = 3       # acoustic-impedance-matched interface pressure
                               # (this is the closure being validated here)
 Riemann_Solver.type = hllc

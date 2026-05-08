@@ -95,32 +95,32 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("k_eta0", value.k_eta0, 0.0);                                // [W/(m K)] gas-phase thermal conductivity
         pp_query_default("k_eta1", value.k_eta1, 0.0);                                // [W/(m K)] liquid-phase thermal conductivity
         pp_query_default("apply_vaporization", value.apply_vaporization, false);       // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
-        // Phase 6: BS phase-coupling source mode (replaces apply_bs_source bool).
-        //   "off"          : no BS sources (single-phase / debugging)
+        // Phase 6: SQR phase-coupling source mode (replaces apply_sqr_source bool).
+        //   "off"          : no SQR sources (single-phase / debugging)
         //   "prescribed"   : default; m0/u0/q from ic_m0/ic_u0/ic_q
-        //   "ch_emergent"  : m0/u0/q overwritten each step from ComputeEffectiveBSSources
-        // Back-compat: if the legacy key apply_bs_source is set, it is mapped onto
-        // Off (=0) / Prescribed (=non-zero) and overrides any bs_source_mode.
+        //   "ch_emergent"  : m0/u0/q overwritten each step from ComputeEffectiveSQRSources
+        // Back-compat: if the legacy key apply_sqr_source is set, it is mapped onto
+        // Off (=0) / Prescribed (=non-zero) and overrides any sqr_source_mode.
         std::string bs_mode_str = "prescribed";
-        pp_query_default("bs_source_mode", bs_mode_str, std::string("prescribed"));
-        if      (bs_mode_str == "off")         value.bs_source_mode = Hydro2::BSMode::Off;
-        else if (bs_mode_str == "prescribed")  value.bs_source_mode = Hydro2::BSMode::Prescribed;
-        else if (bs_mode_str == "ch_emergent") value.bs_source_mode = Hydro2::BSMode::CH_Emergent;
+        pp_query_default("sqr_source_mode", bs_mode_str, std::string("prescribed"));
+        if      (bs_mode_str == "off")         value.sqr_source_mode = Hydro2::SQRMode::Off;
+        else if (bs_mode_str == "prescribed")  value.sqr_source_mode = Hydro2::SQRMode::Prescribed;
+        else if (bs_mode_str == "ch_emergent") value.sqr_source_mode = Hydro2::SQRMode::CH_Emergent;
         else
-            Util::Abort(INFO, "Unknown bs_source_mode: ", bs_mode_str,
+            Util::Abort(INFO, "Unknown sqr_source_mode: ", bs_mode_str,
                         "  (expected: off | prescribed | ch_emergent)");
         {
             int legacy = -1;
             amrex::ParmParse pp_probe;
-            if (pp_probe.query("apply_bs_source", legacy))
+            if (pp_probe.query("apply_sqr_source", legacy))
             {
-                value.bs_source_mode = (legacy != 0) ? Hydro2::BSMode::Prescribed
-                                                     : Hydro2::BSMode::Off;
-                Util::Warning(INFO, "apply_bs_source is deprecated; use bs_source_mode = ",
+                value.sqr_source_mode = (legacy != 0) ? Hydro2::SQRMode::Prescribed
+                                                     : Hydro2::SQRMode::Off;
+                Util::Warning(INFO, "apply_sqr_source is deprecated; use sqr_source_mode = ",
                               (legacy != 0 ? "prescribed" : "off"));
             }
         }
-        pp_query_default("bs_sources_time_dependent", value.bs_sources_time_dependent, 0); // re-evaluate ic_m0/ic_u0/ic_q each Advance step at the current time (Stefan and similar)
+        pp_query_default("sqr_sources_time_dependent", value.sqr_sources_time_dependent, 0); // re-evaluate ic_m0/ic_u0/ic_q each Advance step at the current time (Stefan and similar)
         pp_query_default("p_int_method", value.p_int_method, 0);                        // BS interface-pressure closure: 0 OFF, 1 arithmetic mean, 2 eta-weighted, 3 acoustic-impedance, 4 mass-fraction weighted
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
@@ -305,14 +305,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.u0_mf,           &value.bc_nothing, 2, nghost, "u0", false, false, { "x", "y" });
         value.RegisterNewFab(value.q_mf,            &value.bc_nothing, 2, nghost, "q0", false, false, { "x", "y" });
 
-        // Phase 6: CH-derived effective BS source diagnostics. Always
-        // registered regardless of bs_source_mode so the plotfile shows them
+        // Phase 6: CH-derived effective SQR source diagnostics. Always
+        // registered regardless of sqr_source_mode so the plotfile shows them
         // for offline comparison against the prescribed values.
         value.RegisterNewFab(value.m0_eff_mf,       &value.bc_nothing, 1, nghost, "m0_eff", true, false);
         value.RegisterNewFab(value.u0_eff_mf,       &value.bc_nothing, 2, nghost, "u0_eff", true, false, { "x", "y" });
         value.RegisterNewFab(value.q_eff_mf,        &value.bc_nothing, 2, nghost, "q_eff",  true, false, { "x", "y" });
 
-        // BS source diagnostic plot fields (populated inside ApplyBSSource).
+        // SQR source diagnostic plot fields (populated inside ApplySQRSource).
         value.RegisterNewFab(value.bs_dp_mf,        &value.bc_nothing, 2, nghost, "bs_dp",      true, false, { "0", "1" });
         value.RegisterNewFab(value.bs_mom_src_mf,   &value.bc_nothing, 4, nghost, "bs_mom_src", true, false, { "0_x", "0_y", "1_x", "1_y" });
         value.RegisterNewFab(value.bs_eng_src_mf,   &value.bc_nothing, 2, nghost, "bs_eng_src", true, false, { "0", "1" });
@@ -580,13 +580,13 @@ void Hydro2::Initialize(int lev)
     grad_mag_grad_eta_mf[lev]->setVal(0.0);
     Bm_mf[lev]      ->setVal(0.0);  // Spalding Number
 
-    // Phase 6: CH-derived BS source diagnostics (cleared before MixDiagnostic
+    // Phase 6: CH-derived SQR source diagnostics (cleared before MixDiagnostic
     // runs, which then populates them from the IC state).
     m0_eff_mf[lev]   ->setVal(0.0);
     u0_eff_mf[lev]   ->setVal(0.0);
     q_eff_mf[lev]    ->setVal(0.0);
 
-    // BS source diagnostic plot fields
+    // SQR source diagnostic plot fields
     bs_dp_mf[lev]      ->setVal(0.0);
     bs_mom_src_mf[lev] ->setVal(0.0);
     bs_eng_src_mf[lev] ->setVal(0.0);
@@ -951,10 +951,10 @@ void Hydro2::MixDiagnostic(int lev)
     // Pure read of conservatives + EOS — does not influence dynamics.
     ComputeChemicalPotential(lev);
 
-    // Phase 6: CH-derived BS source diagnostics (m0_eff, u0_eff, q_eff).
-    // Always populated; routed into m0_mf/u0_mf/q_mf only when bs_source_mode
-    // == CH_Emergent (in Advance, before ApplyBSSource).
-    ComputeEffectiveBSSources(lev);
+    // Phase 6: CH-derived SQR source diagnostics (m0_eff, u0_eff, q_eff).
+    // Always populated; routed into m0_mf/u0_mf/q_mf only when sqr_source_mode
+    // == CH_Emergent (in Advance, before ApplySQRSource).
+    ComputeEffectiveSQRSources(lev);
 }
 
 
@@ -1058,9 +1058,9 @@ void Hydro2::ComputeChemicalPotential(int lev)
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////// ComputeEffectiveBSSources //////////////////////////////////////
+////////////////////////////////////// ComputeEffectiveSQRSources //////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-// Phase 6 (CH-Korteweg spec §1.8, §4.4). Populates the CH-emergent BS source
+// Phase 6 (CH-Korteweg spec §1.8, §4.4). Populates the CH-emergent SQR source
 // fields from the current hydrodynamic + CH state, in three pieces:
 //
 //   m0_eff(x) = div( M(eta) * rho_mix * grad(mu_chem) ) / max(|grad eta|, floor)
@@ -1080,15 +1080,15 @@ void Hydro2::ComputeChemicalPotential(int lev)
 //   - n_hat is the unit normal n_hat_mf (already populated upstream).
 //   - L_vap(T) uses the FreeEnergy helper: (q_l - q_g) - T (q'_l - q'_g).
 //
-// Sign convention (matches ApplyBSSource):
+// Sign convention (matches ApplySQRSource):
 //   m0_eff > 0 means mass flowing phase 0 (gas, eta=0) -> phase 1 (liquid, eta=1).
 //
 // Diagnostic-only by default. The integrator routes m0_eff -> m0_mf (etc.)
-// only when bs_source_mode == CH_Emergent (handled in Advance, not here).
+// only when sqr_source_mode == CH_Emergent (handled in Advance, not here).
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-void Hydro2::ComputeEffectiveBSSources(int lev)
+void Hydro2::ComputeEffectiveSQRSources(int lev)
 {
-    BL_PROFILE("Hydro2::ComputeEffectiveBSSources");
+    BL_PROFILE("Hydro2::ComputeEffectiveSQRSources");
 
     const Geometry& geom = this->geom[lev];
 
@@ -1239,7 +1239,7 @@ void Hydro2::ComputeEffectiveBSSources(int lev)
             Real ge_mag = grad_eta.lpNorm<2>();
             Real ge_eff = (ge_mag > grad_eta_floor) ? ge_mag : grad_eta_floor;
 
-            // m0_eff is per-area mass flux [kg/m^2/s]; ApplyBSSource will
+            // m0_eff is per-area mass flux [kg/m^2/s]; ApplySQRSource will
             // multiply back by |grad eta| when it computes the per-volume
             // mass-exchange contribution, so the round-trip recovers div_J
             // wherever |grad eta| > floor (i.e. in the diffuse band).
@@ -1478,7 +1478,7 @@ void Hydro2::ApplyHeatConduction(int lev, Set::Scalar dt)
 // Single-phase Euler RHS for one phase with its own (gamma_k, pi_k).
 // Produces (rho_rhs, M_rhs, E_rhs) for that phase from its own conserved
 // state (rho, M, E). No Allaire blend, no Kapila sources, no diagnostics.
-// BS phase-coupling source terms are added externally (Stage 4).
+// SQR phase-coupling source terms are added externally (Stage 4).
 //
 void Hydro2::RHS_PerPhase(int lev,
                           Set::Scalar /*time*/,
@@ -2025,9 +2025,9 @@ Hydro2::RHS_Eta(int lev,
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////// ApplyBSSource ///////////////////////////////////////////
+///////////////////////////////////////////// ApplySQRSource ///////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-// Boyd-Schmidt phase-coupling source terms. Additive contributions to the
+// Schmidt-Quinlan-Runnels (SQR) phase-coupling source terms. Additive contributions to the
 // per-phase RHS over the diffuse interface region. Signs are sum-to-zero
 // so that total mixture mass/momentum/energy are conserved identically.
 //
@@ -2048,7 +2048,7 @@ Hydro2::RHS_Eta(int lev,
 // TODO (vaporization/deflagration): add the convective specific-enthalpy
 // contribution ±ṁ₀·h₀·|∇η| to the energy source when ṁ₀ ≠ 0.
 void
-Hydro2::ApplyBSSource(int lev,
+Hydro2::ApplySQRSource(int lev,
                       Set::Scalar /*time*/,
                       amrex::MultiFab &rho0_rhs_mf, amrex::MultiFab &M0_rhs_mf, amrex::MultiFab &E0_rhs_mf,
                       amrex::MultiFab &rho1_rhs_mf, amrex::MultiFab &M1_rhs_mf, amrex::MultiFab &E1_rhs_mf,
@@ -2056,7 +2056,7 @@ Hydro2::ApplyBSSource(int lev,
                       const amrex::MultiFab &rho0_mf_in, const amrex::MultiFab &M0_mf_in, const amrex::MultiFab &E0_mf_in,
                       const amrex::MultiFab &rho1_mf_in, const amrex::MultiFab &M1_mf_in, const amrex::MultiFab &E1_mf_in)
 {
-    BL_PROFILE("Hydro2::ApplyBSSource");
+    BL_PROFILE("Hydro2::ApplySQRSource");
 
     const Geometry& geom = this->geom[lev];
     const Real* DX = geom.CellSize();
@@ -2077,7 +2077,7 @@ Hydro2::ApplyBSSource(int lev,
     // inside the ParallelFor below) don't carry stale values from prior steps.
     Fsv_mf[lev]->setVal(0.0);
 
-    // Zero BS source diagnostic plot MFs for the same reason. They are written
+    // Zero SQR source diagnostic plot MFs for the same reason. They are written
     // inside the band-only ParallelFor below and would otherwise carry stale
     // values in bulk cells.
     bs_dp_mf[lev]      ->setVal(0.0);
@@ -4762,20 +4762,20 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     const Real* DX = geom.CellSize();
     const Box& domain = geom.Domain();
 
-    // BS source population for the upcoming step.
+    // SQR source population for the upcoming step.
     //
-    //  Prescribed mode (default): if bs_sources_time_dependent, re-evaluate
+    //  Prescribed mode (default): if sqr_sources_time_dependent, re-evaluate
     //    ic_m0/ic_u0/ic_q at the current simulation time. IC::Expression
     //    already supports the `t` symbol; Initialize() is setVal(0)+Add.
     //
     //  CH_Emergent mode (Phase 6): overwrite m0/u0/q with the CH-derived
-    //    effective fields populated by ComputeEffectiveBSSources at the end
+    //    effective fields populated by ComputeEffectiveSQRSources at the end
     //    of the previous Advance step (or by Initialize for the first step).
-    //    ApplyBSSource then consumes them via the existing prescribed-source
+    //    ApplySQRSource then consumes them via the existing prescribed-source
     //    machinery — single coupling path, no parallel implementation.
     //
-    //  Off: nothing to do; ApplyBSSource is gated off below.
-    if (bs_source_mode == BSMode::Prescribed && bs_sources_time_dependent)
+    //  Off: nothing to do; ApplySQRSource is gated off below.
+    if (sqr_source_mode == SQRMode::Prescribed && sqr_sources_time_dependent)
     {
         ic_m0->Initialize(lev, m0_mf, time);
         ic_u0->Initialize(lev, u0_mf, time);
@@ -4784,7 +4784,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         u0_mf[lev]->FillBoundary(geom.periodicity());
         q_mf [lev]->FillBoundary(geom.periodicity());
     }
-    else if (bs_source_mode == BSMode::CH_Emergent)
+    else if (sqr_source_mode == SQRMode::CH_Emergent)
     {
         amrex::MultiFab::Copy(*m0_mf[lev], *m0_eff_mf[lev], 0, 0,
                               m0_mf[lev]->nComp(), m0_mf[lev]->nGrow());
@@ -5060,15 +5060,15 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                      sol_mf[0],   // η
                      sol_mf[1]);  // ρ_other = ρ_0
 
-        // Stage 4: BS phase-coupling source terms, added to both phases'
+        // Stage 4: SQR phase-coupling source terms, added to both phases'
         // RHS with sum-to-zero signs so mixture conservation holds identically.
-        // Phase 6: gated by bs_source_mode. m0/u0/q already point at the right
+        // Phase 6: gated by sqr_source_mode. m0/u0/q already point at the right
         // values (prescribed IC or CH-emergent copy) — see top of Advance().
         // Korteweg capillary stress is now folded into the per-phase HLLC
         // flux inside RHS_PerPhase (mass-fraction-split flux form); no
         // separate cell-centered Korteweg block runs here.
-        if (bs_source_mode != BSMode::Off) {
-            ApplyBSSource(lev, t,
+        if (sqr_source_mode != SQRMode::Off) {
+            ApplySQRSource(lev, t,
                           rhs_mf[1], rhs_mf[2], rhs_mf[3],
                           rhs_mf[4], rhs_mf[5], rhs_mf[6],
                           sol_mf[0],

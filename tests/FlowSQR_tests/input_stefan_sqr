@@ -224,7 +224,7 @@ cutoff = 1e-8
 ### SOURCE TERMS — TIME-DEPENDENT (Stefan analytical) ###
 # m0(t) = rho_g * beta * sqrt(alpha_g / (t + t_off))   [kg/m^2/s]
 # IC::Expression evaluates the formula each Advance step at the current t when
-# bs_sources_time_dependent = 1.
+# sqr_sources_time_dependent = 1.
 m0.ic.type = expression
 m0.ic.expression.constant.rho_g_ref = 0.5882
 m0.ic.expression.constant.beta      = 0.058
@@ -238,7 +238,7 @@ m0.ic.expression.region0 = "rho_g_ref * beta * sqrt(alpha_g / (t + t_off))"
 u0.ic.constant.value = 0.0 0.0
 q.ic.constant.value  = 0.0 0.0
 
-bs_sources_time_dependent = 0
+sqr_sources_time_dependent = 0
 
 ### ADDITIONAL SOURCES ###
 apply_surface_tension = 0
@@ -253,9 +253,9 @@ grav     = 0.0
 
 ### DEBUGGING / SOLVER ###
 # Phase 6: prescribed mode = legacy SQR behavior (m0/u0/q from ic_*).
-# bs_sources_time_dependent above re-evaluates ic_m0(t) each step for the
+# sqr_sources_time_dependent above re-evaluates ic_m0(t) each step for the
 # Stefan analytical mass flux ~ rho_g * beta * sqrt(alpha/t).
-bs_source_mode      = prescribed
+sqr_source_mode      = prescribed
 p_int_method        = 3     # 0: Off, 1: pressure average, 2: eta weighted pressure. 3: acoustic impedance matched pressure
 Riemann_Solver.type = hllc
 kappa_method        = 1

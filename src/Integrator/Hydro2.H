@@ -109,7 +109,7 @@ protected:
     // Stage 3: single-phase Euler RHS with a scalar (gamma, pi) EOS.
     // Produces drho/dt, dM/dt, dE/dt for one phase, using that phase's own
     // conserved state. No Allaire blend, no Kapila sources, no diagnostics.
-    // Phase coupling (BS source terms) is applied separately in Stage 4.
+    // Phase coupling (SQR source terms) is applied separately in Stage 4.
     // phase_idx: 0 ⇒ α_k = 1−η,  1 ⇒ α_k = η.  rho_other_mf is the OTHER
     // phase's (intrinsic) density field, needed at faces to form
     // ρ_mix_face for the mass-fraction Korteweg weight Y_k_face.
@@ -142,7 +142,7 @@ protected:
         const amrex::MultiFab &rho1_mf_in,
         const amrex::MultiFab &M1_mf_in);
 
-    // Stage 4: Boyd-Schmidt (BS) phase-coupling source terms, additive
+    // Stage 4: Schmidt-Quinlan-Runnels (SQR) phase-coupling source terms, additive
     // contributions to the per-phase conservation laws over the diffuse
     // interface region. Uses sum-to-zero signs (phase 0 and phase 1
     // sources cancel in mixture sums) so total mixture mass/momentum/
@@ -152,7 +152,7 @@ protected:
     //   q_mf  (prescribed interface heat flux vector, 2-comp)
     // For inert fluid-fluid (m0.ic = 0, q.ic = 0) reduces to the
     // natural-BC pressure-balance momentum/energy coupling.
-    void ApplyBSSource(int lev,
+    void ApplySQRSource(int lev,
         Set::Scalar time,
         amrex::MultiFab &rho0_rhs_mf, amrex::MultiFab &M0_rhs_mf, amrex::MultiFab &E0_rhs_mf,
         amrex::MultiFab &rho1_rhs_mf, amrex::MultiFab &M1_rhs_mf, amrex::MultiFab &E1_rhs_mf,
@@ -161,13 +161,13 @@ protected:
         const amrex::MultiFab &rho1_mf_in, const amrex::MultiFab &M1_mf_in, const amrex::MultiFab &E1_mf_in);
 
     // Phase 6 (CH-Korteweg spec §1.8, §4.4): populate the CH-derived effective
-    // BS source fields (m0_eff_mf, u0_eff_mf, q_eff_mf) from the current
+    // SQR source fields (m0_eff_mf, u0_eff_mf, q_eff_mf) from the current
     // hydrodynamic + CH state. Always runs (called at the end of MixDiagnostic).
-    // In BSMode::CH_Emergent the integrator subsequently routes these into
-    // m0_mf/u0_mf/q_mf so ApplyBSSource consumes them; in BSMode::Prescribed
+    // In SQRMode::CH_Emergent the integrator subsequently routes these into
+    // m0_mf/u0_mf/q_mf so ApplySQRSource consumes them; in SQRMode::Prescribed
     // they are diagnostic-only (visible in plotfiles for comparison against
     // the prescribed values).
-    void ComputeEffectiveBSSources(int lev);
+    void ComputeEffectiveSQRSources(int lev);
 
     // Phase 5 (CH-Korteweg spec §2.2, §4.3): well-balanced Korteweg capillary
     // force computed as the discrete divergence of the Korteweg stress tensor
@@ -318,10 +318,10 @@ protected:
     Set::Field<Set::Scalar> u0_mf;
     Set::Field<Set::Scalar> q_mf;
 
-    // Phase 6 (CH-Korteweg spec §1.8, §4.4): CH-emergent BS source diagnostics.
-    // Populated by Hydro2::ComputeEffectiveBSSources at the end of MixDiagnostic
-    // from the current CH state. In bs_source_mode == CH_Emergent these are
-    // copied into m0_mf/u0_mf/q_mf before ApplyBSSource runs; in Prescribed
+    // Phase 6 (CH-Korteweg spec §1.8, §4.4): CH-emergent SQR source diagnostics.
+    // Populated by Hydro2::ComputeEffectiveSQRSources at the end of MixDiagnostic
+    // from the current CH state. In sqr_source_mode == CH_Emergent these are
+    // copied into m0_mf/u0_mf/q_mf before ApplySQRSource runs; in Prescribed
     // mode they are populated as a diagnostic for offline comparison against
     // the user-prescribed values.
     //   m0_eff [kg/m^2/s] : from div(M*rho_mix*grad(mu_chem)) / max(|grad eta|,floor)
@@ -331,7 +331,7 @@ protected:
     Set::Field<Set::Scalar> u0_eff_mf;
     Set::Field<Set::Scalar> q_eff_mf;
 
-    // BS source diagnostic plot fields (populated inside ApplyBSSource).
+    // SQR source diagnostic plot fields (populated inside ApplySQRSource).
     //   bs_dp_mf      [Pa,2c]      : per-phase pressure imbalance dp_k = ±(p_k - p_int)
     //   bs_mom_src_mf [N/m^3,4c]   : per-phase momentum source dp_k * grad(eta)
     //   bs_eng_src_mf [W/m^3,2c]   : per-phase energy source (p_k u_k - p* u*) * grad(eta)
@@ -447,7 +447,7 @@ protected:
     // Set 0 to zero out the flux-form Korteweg + Q-trace contribution in
     // RHS_PerPhase (κ_face → 0, q_eta → 0 inside KortewegFaceData), which
     // disables ALL interfacial stresses delivered by the new HLLC path.
-    // The legacy Brackbill block in ApplyBSSource is dead and not gated by
+    // The legacy Brackbill block in ApplySQRSource is dead and not gated by
     // this flag.
     int apply_surface_tension = 1;
     int apply_weight = 0;
@@ -460,23 +460,23 @@ protected:
     int static_eta = 0;
     int apply_vaporization = 0;
 
-    // Phase 6 (CH-Korteweg spec §3.3): BS phase-coupling source mode.
+    // Phase 6 (CH-Korteweg spec §3.3): SQR phase-coupling source mode.
     //   Off          : no phase-coupling sources at all (single-phase limit / debugging).
     //   Prescribed   : default; m0_mf/u0_mf/q_mf set from ic_m0/ic_u0/ic_q (legacy
-    //                  apply_bs_source=1 behavior).
+    //                  apply_sqr_source=1 behavior).
     //   CH_Emergent  : m0_mf/u0_mf/q_mf are overwritten each step with the CH-derived
-    //                  effective values (m0_eff_mf etc.) before ApplyBSSource runs.
-    // Replaces the legacy boolean `apply_bs_source`. The legacy key is still
+    //                  effective values (m0_eff_mf etc.) before ApplySQRSource runs.
+    // Replaces the legacy boolean `apply_sqr_source`. The legacy key is still
     // accepted at parse time and mapped onto Off/Prescribed for back-compat.
-    enum class BSMode { Off = 0, Prescribed = 1, CH_Emergent = 2 };
-    BSMode bs_source_mode = BSMode::Prescribed;
+    enum class SQRMode { Off = 0, Prescribed = 1, CH_Emergent = 2 };
+    SQRMode sqr_source_mode = SQRMode::Prescribed;
     // If non-zero, re-evaluate ic_m0/ic_u0/ic_q each Advance step at the current
     // simulation time. Used for prescribed-flux validation problems (e.g. Stefan)
     // where the analytical mass flux scales as ~1/sqrt(t).
-    int bs_sources_time_dependent = 0;
+    int sqr_sources_time_dependent = 0;
     int Spec_Vol = 1;
 
-    // Interface-pressure closure for the BS source (p_int).
+    // Interface-pressure closure for the SQR source (p_int).
     // 0: OFF — no pressure-imbalance coupling (mass/heat/ST terms still apply)
     // 1: arithmetic mean          p_int = 0.5 (p_0 + p_1)
     // 2: eta-weighted             p_int = (1-eta) p_0 + eta p_1
