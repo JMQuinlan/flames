@@ -56,8 +56,8 @@ epsilon = eta.ic.expression.constant.epsilon
 # Tammann EOS (water outer + gas inner)
 # ----------------------------
 
-gamma_eta1 = 7.15  # Water (liquid surrounding bubble)
-gamma_eta0 = 1.4   # Air/gas (inside bubble)
+gamma_1 = 7.15  # Water (liquid surrounding bubble)
+gamma_0 = 1.4   # Air/gas (inside bubble)
 
 # ----------------------------
 # Density ratio 1 : 10
@@ -95,25 +95,25 @@ pressure_eta0.ic.expression.region0 = "1.0e2"
 # Specific Heats
 # ----------------------------
 
-cp_eta1 = "1000.0"
-cp_eta0 = "1000.0"
-cv_eta1 = "1000.0/1.4"
-cv_eta0 = "1000.0/1.4"
+cp_1 = "1000.0"
+cp_0 = "1000.0"
+cv_1 = "1000.0/1.4"
+cv_0 = "1000.0/1.4"
 
 # ----------------------------
 # Stiffened pressure (Tammann EOS pi)
 # ----------------------------
-pi_eta1 = 3.0e8   # Water Tammann pressure
-pi_eta0 = 0.0     # Ideal gas (no Tammann)
+pi_1 = 3.0e8   # Water Tammann pressure
+pi_0 = 0.0     # Ideal gas (no Tammann)
 
 # ----------------------------
 # Viscosity
 # ----------------------------
 
-mu_eta1 = 0.0
-mu_eta1_b = 0.0
-mu_eta0 = 0.0
-mu_eta0_b = 0.0
+mu_1 = 0.0
+mu_1_b = 0.0
+mu_0 = 0.0
+mu_0_b = 0.0
 
 # ----------------------------
 # Surface tension ON

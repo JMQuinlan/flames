@@ -61,7 +61,7 @@ stop_time = 1e-4                                 # 100 us window
 # the diffusion timescale to within a few cell-acoustic-CFLs of the acoustic
 # timescale so the run is feasible:
 #   c_p_g = gamma_g * c_v_g = 1.327 * 1411     = 1872.4 J/(kg K)
-#   alpha_g = k_eta0 / (rho_g * c_p_g)         = 1.0/(0.5882*1872.4) ~ 1.21e-3 m^2/s
+#   alpha_g = k_0 / (rho_g * c_p_g)         = 1.0/(0.5882*1872.4) ~ 1.21e-3 m^2/s
 #   c_g (sound speed)                          ~ 478 m/s
 #   diffusion CFL: dt < 0.5*dx^2/alpha_g       ~ 2.58e-9 s  (~ acoustic, OK)
 #   acoustic CFL : dt < 0.3*dx/c_g             ~ 1.57e-9 s  (limiter)
@@ -121,21 +121,21 @@ pressure_eta0.ic.expression.region0 = "101325.0"
 # raw X(t) and the time-shifted comparison.
 
 ### EOS / SPECIFIC HEATS ###
-gamma_eta1 = 2.35                                        # Tammann water
-gamma_eta0 = 1.327                                       # water vapor (CPG)
+gamma_1 = 2.35                                        # Tammann water
+gamma_0 = 1.327                                       # water vapor (CPG)
 
-cv_eta1 = "1816.0"
-cv_eta0 = "1411.0"
-cp_eta1 = "4267.6"                                       # gamma_l * cv_l
-cp_eta0 = "1872.4"                                       # gamma_g * cv_g
+cv_1 = "1816.0"
+cv_0 = "1411.0"
+cp_1 = "4267.6"                                       # gamma_l * cv_l
+cp_0 = "1872.4"                                       # gamma_g * cv_g
 
-pi_eta1 = 3.7313e8                                       # chosen so p_sat=101325 at T_sat=373.15, rho_l=958.4
-pi_eta0 = 0.0
+pi_1 = 3.7313e8                                       # chosen so p_sat=101325 at T_sat=373.15, rho_l=958.4
+pi_0 = 0.0
 
-mu_eta1   = 0.0
-mu_eta1_b = 0.0
-mu_eta0   = 0.0
-mu_eta0_b = 0.0
+mu_1   = 0.0
+mu_1_b = 0.0
+mu_0   = 0.0
+mu_0_b = 0.0
 
 sigma = 0.0                                              # surface tension OFF (1D)
 pref  = 0.0
@@ -143,12 +143,12 @@ pref  = 0.0
 ### FREE-ENERGY CALIBRATION (Phase 1 / Phase 2 inputs) ###
 # dmu_bulk(x) = f_g(rho_0, T_0) - f_l(rho_1, T_1)  [HELMHOLTZ free energies,
 # NOT chemical potentials]. We zero it at the reference state by absorbing
-# the offset into q_eta1. With rho_ref set to the saturation densities so
+# the offset into q_1. With rho_ref set to the saturation densities so
 # ln(rho/rho_ref) = 0, and T_ref = T_sat:
 #   f_g(rho_g_sat, T_sat)|q=0 = c_v_g * T_sat                  = 526515 J/kg
 #   f_l(rho_l_sat, T_sat)|q=0 = c_v_l * T_sat + pi_l/rho_l_sat = 1066966 J/kg
-#   q_eta1 = f_g - f_l|q=0 = -540451 J/kg
-# Iterate by adding observed dmu_bulk to q_eta1 until it falls below numerical
+#   q_1 = f_g - f_l|q=0 = -540451 J/kg
+# Iterate by adding observed dmu_bulk to q_1 until it falls below numerical
 # noise (same procedure as bubble_quiescent).
 #
 # NOTE: Helmholtz f-equality is the right target for the CH bulk driving
@@ -156,14 +156,14 @@ pref  = 0.0
 # coexistence calibration that the standalone unit test uses is a *different*
 # target (interface equilibrium); see Numeric/TwoPhaseFreeEnergy.H.
 T_ref          = 373.15
-rho_ref_eta0   = 0.5882
-rho_ref_eta1   = 958.4
-R_eta0         = 461.4
+rho_ref_0   = 0.5882
+rho_ref_1   = 958.4
+R_0         = 461.4
 
-q_eta0         = 0.0
-qprime_eta0    = 0.0
-q_eta1         = -5.40469e5
-qprime_eta1    = 0.0
+q_0         = 0.0
+qprime_0    = 0.0
+q_1         = -5.40469e5
+qprime_1    = 0.0
 
 # Phase 2 diagnostic (passive — does not affect SQR-mode dynamics).
 ch_thermo_consistent = 1
@@ -228,7 +228,7 @@ cutoff = 1e-8
 m0.ic.type = expression
 m0.ic.expression.constant.rho_g_ref = 0.5882
 m0.ic.expression.constant.beta      = 0.058
-m0.ic.expression.constant.alpha_g   = 1.21e-3              # matches k_eta0 / (rho_g * c_p_g)
+m0.ic.expression.constant.alpha_g   = 1.21e-3              # matches k_0 / (rho_g * c_p_g)
 m0.ic.expression.constant.t_off     = 5e-5
 m0.ic.expression.region0 = "rho_g_ref * beta * sqrt(alpha_g / (t + t_off))"
 
@@ -246,8 +246,8 @@ apply_weight          = 0
 apply_vaporization    = 0
 apply_viscous         = 0
 apply_heat_conduction = 1
-k_eta0 = 1.0          # [W/m/K] gas-phase thermal conductivity (model — boosted ~40x over real steam)
-k_eta1 = 1.0          # [W/m/K] liquid-phase thermal conductivity (matched to gas; 1-phase Stefan approx)
+k_0 = 1.0          # [W/m/K] gas-phase thermal conductivity (model — boosted ~40x over real steam)
+k_1 = 1.0          # [W/m/K] liquid-phase thermal conductivity (matched to gas; 1-phase Stefan approx)
 Spec_Vol = 1
 grav     = 0.0
 

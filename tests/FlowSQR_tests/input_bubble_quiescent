@@ -56,8 +56,8 @@ epsilon = eta.ic.expression.constant.epsilon
 # Tammann EOS (water outer + gas inner)
 # ----------------------------
 
-gamma_eta1 = 7.15  # Water (liquid surrounding bubble)
-gamma_eta0 = 1.4   # Air/gas (inside bubble)
+gamma_1 = 7.15  # Water (liquid surrounding bubble)
+gamma_0 = 1.4   # Air/gas (inside bubble)
 
 # ----------------------------
 # Density ratio 1 : 10
@@ -97,16 +97,16 @@ pressure_eta0.ic.expression.region0 = "1.0e6"
 # Specific Heats
 # ----------------------------
 
-cp_eta1 = "1000.0"
-cp_eta0 = "1000.0"
-cv_eta1 = "1000.0/1.4"
-cv_eta0 = "1000.0/1.4"
+cp_1 = "1000.0"
+cp_0 = "1000.0"
+cv_1 = "1000.0/1.4"
+cv_0 = "1000.0/1.4"
 
 # ----------------------------
 # Stiffened pressure (Tammann EOS pi)
 # ----------------------------
-pi_eta1 = 3.0e8   # Water Tammann pressure
-pi_eta0 = 0.0     # Ideal gas (no Tammann)
+pi_1 = 3.0e8   # Water Tammann pressure
+pi_0 = 0.0     # Ideal gas (no Tammann)
 
 # ----------------------------
 # Free-energy calibration (Phase 2: dmu_bulk consistency check)
@@ -115,40 +115,40 @@ pi_eta0 = 0.0     # Ideal gas (no Tammann)
 #   dmu_bulk(x) = f_g(rho_0, T_0) - f_l(rho_1, T_1)
 # at every cell, where T_k is recomputed locally from each phase's
 # conservatives. At t=0 every cell has the same per-phase state, so
-# dmu_bulk is constant in space and we calibrate q_eta1 to make it zero:
+# dmu_bulk is constant in space and we calibrate q_1 to make it zero:
 #
 #   T_0 = p_0 / [(gamma_0 - 1) rho_0 cv_0]                             = 3500 K
 #   T_1 = (p_1 + gamma_1 pi_1) / [(gamma_1 - 1) rho_1 cv_1]            = 48832.80 K
-#   f_g = cv_0 T_0 (1 - ln(T_0/T_ref)) + R_eta0 T_0 ln(rho_0/rho_ref_eta0)
-#       = -3,641,839 J/kg              (rho_ref_eta0 = 1.0  -> ln=0)
+#   f_g = cv_0 T_0 (1 - ln(T_0/T_ref)) + R_0 T_0 ln(rho_0/rho_ref_0)
+#       = -3,641,839 J/kg              (rho_ref_0 = 1.0  -> ln=0)
 #   f_l|q_l=0 = cv_1 T_1 (1 - ln(T_1/T_ref)) + pi_1/rho_1
-#       = -112,738,665 J/kg            (rho_ref_eta1 = 10.0 -> ln=0)
-#   q_eta1 = f_g - f_l|q_l=0           ~ +1.09097e8 J/kg
+#       = -112,738,665 J/kg            (rho_ref_1 = 10.0 -> ln=0)
+#   q_1 = f_g - f_l|q_l=0           ~ +1.09097e8 J/kg
 #
 # Setting rho_ref_eta{0,1} to match the bulk densities zeros out the
 # ln(rho/rho_ref) term at IC, keeping the calibration arithmetic clean.
 
 T_ref          = 300.0
-rho_ref_eta0   = 1.0
-rho_ref_eta1   = 10.0
-R_eta0         = 285.714286   # cp - cv = 1000 - 1000/1.4
+rho_ref_0   = 1.0
+rho_ref_1   = 10.0
+R_0         = 285.714286   # cp - cv = 1000 - 1000/1.4
 
-q_eta0         = 0.0
-qprime_eta0    = 0.0
-# q_eta1         = 1.09097974e8
-# qprime_eta1    = 0.0
+q_0         = 0.0
+qprime_0    = 0.0
+# q_1         = 1.09097974e8
+# qprime_1    = 0.0
 
 # ### FREE-ENERGY CALIBRATION (matches input_stefan_sqr) ###
 # # Calibrated for f_g - f_l = 0 at (rho_g_sat, rho_l_sat, T_sat).
 # # See input_stefan_sqr for derivation.
 # T_ref          = 373.15
-# rho_ref_eta0   = 0.5882
-# rho_ref_eta1   = 958.4
-# R_eta0         = 461.4
-# q_eta0         = 0.0
-# qprime_eta0    = 0.0
-q_eta1         = -3.00017e+06
-qprime_eta1    = -5510.35
+# rho_ref_0   = 0.5882
+# rho_ref_1   = 958.4
+# R_0         = 461.4
+# q_0         = 0.0
+# qprime_0    = 0.0
+q_1         = -3.00017e+06
+qprime_1    = -5510.35
 
 ch_thermo_consistent = 1
 
@@ -156,10 +156,10 @@ ch_thermo_consistent = 1
 # Viscosity
 # ----------------------------
 
-mu_eta1 = 0.0
-mu_eta1_b = 0.0
-mu_eta0 = 0.0
-mu_eta0_b = 0.0
+mu_1 = 0.0
+mu_1_b = 0.0
+mu_0 = 0.0
+mu_0_b = 0.0
 
 # ----------------------------
 # Surface tension ON
@@ -247,7 +247,7 @@ ch_newton_tol       = 1e-10
 # Implied surface tension sigma = sqrt(2*kappa*lambda)/6 ~ 0.094 N/m.
 #
 # (Earlier value lambda = 2e6 was carried over from a thermo-consistent
-#  spinodal-margin tuning that does NOT apply here once q_eta1 has been
+#  spinodal-margin tuning that does NOT apply here once q_1 has been
 #  swapped from the calibration constant +1.09e8 to the Clausius-Clapeyron
 #  value -3e6 below. With the new Korteweg path applied unconditionally
 #  in RHS_PerPhase, lambda far above kappa/epsilon^2 leaves the IC tanh

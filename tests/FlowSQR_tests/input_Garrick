@@ -43,14 +43,14 @@ eta.ic.expression.region0 = "(0.5 * (1.0 + tanh(x / epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
 
 # eta=0 (LHS, x < 0): compressed gas (ideal, gamma_g=1.4, pi_g=0)
-gamma_eta0 = 1.4
-pi_eta0    = 0.0
-mu_eta0   = 0.0
+gamma_0 = 1.4
+pi_0    = 0.0
+mu_0   = 0.0
 
 # eta=1 (RHS, x > 0): liquid (stiffened gas, gamma_l=5.5, pi_l=1.505)
-gamma_eta1 = 5.5
-pi_eta1    = 1.505
-mu_eta1   = 0.0
+gamma_1 = 5.5
+pi_1    = 1.505
+mu_1   = 0.0
 
 ### Reference pressure ###
 pref = 0.0
@@ -66,8 +66,8 @@ pressure_eta0.ic.type = constant
 # pressure_eta0.ic.constant.value = 2.753
 pressure_eta0.ic.constant.value = 5.753
 
-cp_eta0 = "1.4"
-cv_eta0 = "1.0"
+cp_0 = "1.4"
+cv_0 = "1.0"
 
 ### IC State - eta=1 phase (RHS, x > 0): liquid ###
 density_eta1.ic.type = constant
@@ -80,8 +80,8 @@ velocity_eta1.ic.constant.value = 0.0 0.0
 pressure_eta1.ic.type = constant
 pressure_eta1.ic.constant.value = 3.059e-4
 
-cp_eta1 = "1.4"
-cv_eta1 = "1.0"
+cp_1 = "1.4"
+cv_1 = "1.0"
 
 ### ETA BC  ###
 pf.eta.bc.type.xlo = neumann

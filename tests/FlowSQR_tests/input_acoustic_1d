@@ -69,14 +69,14 @@ eta.ic.expression.region0              = "(0.5 * (1.0 + tanh(x / epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
 
 # eta=0 phase (LHS, x<0): air — calorically perfect gas
-gamma_eta0 = 1.4
-pi_eta0    = 0.0
-mu_eta0    = 0.0
+gamma_0 = 1.4
+pi_0    = 0.0
+mu_0    = 0.0
 
 # eta=1 phase (RHS, x>0): water — stiffened gas (Tammann)
-gamma_eta1 = 5.5
-pi_eta1    = 6.0e8
-mu_eta1    = 0.0
+gamma_1 = 5.5
+pi_1    = 6.0e8
+mu_1    = 0.0
 
 ### Reference pressure (vestigial — slated for removal) ###
 pref = 0.0
@@ -112,8 +112,8 @@ pressure_eta0.ic.expression.constant.sigma     = 0.05
 pressure_eta0.ic.expression.region0            = "p0 + dp_max * exp(-(x-x0)*(x-x0)/(2.0*sigma*sigma))"
 
 # CPG calibration for air: cv = R / (gamma-1) = 287/0.4 = 717.5,  cp = gamma*cv = 1004.5
-cp_eta0 = "1004.5"
-cv_eta0 = "717.5"
+cp_0 = "1004.5"
+cv_0 = "717.5"
 
 ### IC State - eta=1 phase (water at rest, matched pressure) ###
 density_eta1.ic.type           = constant
@@ -127,9 +127,9 @@ pressure_eta1.ic.type           = constant
 pressure_eta1.ic.constant.value = 101325.0
 
 # Stiffened-gas calibration for water: take cv such that cv ~ liquid-water value (4180 J/kg/K).
-# cp = gamma*cv keeps the EOS-internal cp/cv ratio consistent with gamma_eta1=5.5.
-cp_eta1 = "22990.0"
-cv_eta1 = "4180.0"
+# cp = gamma*cv keeps the EOS-internal cp/cv ratio consistent with gamma_1=5.5.
+cp_1 = "22990.0"
+cv_1 = "4180.0"
 
 ### ETA BC ###
 pf.eta.bc.type.xlo = neumann

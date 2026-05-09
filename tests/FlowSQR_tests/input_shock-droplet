@@ -61,16 +61,16 @@ epsilon = eta.ic.expression.constant.epsilon
 ### HYDRO INITIAL CONDITIONS ###
 
 # Air properties (fluid 0 - surrounding vapor/gas)
-gamma_eta1 = 1.4   # Air
-pi_eta1 = 0       # Tammann EOS parameter for air (should be zero since we use ideal gas)
-mu_eta1 = 1.8e-5   # Air viscosity [Pa-s]
-mu_eta1_b = 0.0
+gamma_1 = 1.4   # Air
+pi_1 = 0       # Tammann EOS parameter for air (should be zero since we use ideal gas)
+mu_1 = 1.8e-5   # Air viscosity [Pa-s]
+mu_1_b = 0.0
 
 # Water properties (fluid 1 - droplet)
-gamma_eta0 = 7.15  # Water
-pi_eta0 = 3.0e8   # Tammann EOS parameter for water
-mu_eta0 = 1.0e-3   # Water viscosity [Pa-s]
-mu_eta0_b = 0.001
+gamma_0 = 7.15  # Water
+pi_0 = 3.0e8   # Tammann EOS parameter for water
+mu_0 = 1.0e-3   # Water viscosity [Pa-s]
+mu_0_b = 0.001
 
 # Densities
 density_eta1.ic.type = expression
@@ -112,10 +112,10 @@ pressure_eta0.ic.expression.constant.p_atm = 1.01325e5
 pressure_eta0.ic.expression.region0 = "p_atm"
 
 # Thermodynamic properties
-cp_eta1 = "1005.0"  # Air specific heat [J/kg-K]
-cp_eta0 = "4179.0"  # Water specific heat [J/kg-K]
-cv_eta1 = "717.86"  # Air cv = cp/gamma
-cv_eta0 = "4179.0/7.15"  # Water cv = cp/gamma
+cp_1 = "1005.0"  # Air specific heat [J/kg-K]
+cp_0 = "4179.0"  # Water specific heat [J/kg-K]
+cv_1 = "717.86"  # Air cv = cp/gamma
+cv_0 = "4179.0/7.15"  # Water cv = cp/gamma
 
 # Surface tension
 sigma = 72.8e-3  # Water-air surface tension [N/m]

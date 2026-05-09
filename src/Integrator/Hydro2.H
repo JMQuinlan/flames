@@ -54,19 +54,19 @@ public:
         // ETA
         delete eta_ic;
         delete etadot_ic;
-        // PHASE eta=1 (liquid)
-        delete density_eta1_ic;
-        delete velocity_eta1_ic;
-        delete pressure_eta1_ic;
-        delete energy_eta1_ic;
+        // PHASE 1 (liquid)
+        delete density_1_ic;
+        delete velocity_1_ic;
+        delete pressure_1_ic;
+        delete energy_1_ic;
         //delete temperature0_ic; // Temperature
         //delete k0_thermal_ic;   // Thermal Conductivity
         //delete h0_thermal_ic;   // Thermal Convectivity
-        // PHASE eta=0 (gas)
-        delete density_eta0_ic;
-        delete velocity_eta0_ic;
-        delete pressure_eta0_ic;
-        delete energy_eta0_ic;
+        // PHASE 0 (gas)
+        delete density_0_ic;
+        delete velocity_0_ic;
+        delete pressure_0_ic;
+        delete energy_0_ic;
         //delete temperature1_ic; // Temperature
        // delete k1_thermal_ic;   // Thermal Conductivity
         //delete h1_thermal_ic;   // Thermal Convectivity
@@ -192,7 +192,7 @@ protected:
     // In-place floor on the per-phase conservative state. Enforces:
     //   rho_eta{0,1} >= small,    finite |M_eta{0,1}|,
     //   UE_0 = E_0 - KE_0 >= small             (CPG, ensures p_0 >= 0)
-    //   UE_1 = E_1 - KE_1 >= pi_eta1 + small   (Tammann, ensures p_1 + pi >= 0
+    //   UE_1 = E_1 - KE_1 >= pi_1 + small   (Tammann, ensures p_1 + pi >= 0
     //                                           so c_1^2 = gamma*(p+pi)/rho > 0)
     // Run after every operator-split write to the per-phase fabs. NaN-safe
     // (non-finite values are replaced, not just compared).
@@ -213,44 +213,44 @@ protected:
                     amrex::Real time);
 
 protected:
-    // PHASE eta=1 (liquid — stiffened gas)
-    Set::Field<Set::Scalar> density_eta1_mf;
-    Set::Field<Set::Scalar> density_eta1_old_mf;
+    // PHASE 1 (liquid — stiffened gas)
+    Set::Field<Set::Scalar> density_1_mf;
+    Set::Field<Set::Scalar> density_1_old_mf;
 
-    Set::Field<Set::Scalar> energy_eta1_mf;
-    Set::Field<Set::Scalar> energy_eta1_old_mf;
+    Set::Field<Set::Scalar> energy_1_mf;
+    Set::Field<Set::Scalar> energy_1_old_mf;
 
-    Set::Field<Set::Scalar> momentum_eta1_mf;
-    Set::Field<Set::Scalar> momentum_eta1_old_mf;
+    Set::Field<Set::Scalar> momentum_1_mf;
+    Set::Field<Set::Scalar> momentum_1_old_mf;
 
     //Set::Field<Set::Scalar> T0_mf;
     //Set::Field<Set::Scalar> k0_thermal_mf;
     //Set::Field<Set::Scalar> h0_thermal_mf;
-    //Set::Field<Set::Scalar> gamma_eta1_mf;
+    //Set::Field<Set::Scalar> gamma_1_mf;
 
-    Set::Field<Set::Scalar> velocity_eta1_mf;
-    Set::Field<Set::Scalar> pressure_eta1_mf;
-    Set::Field<Set::Scalar> vorticity_eta1_mf;
-    Set::Field<Set::Scalar> c_eta1_mf;
+    Set::Field<Set::Scalar> velocity_1_mf;
+    Set::Field<Set::Scalar> pressure_1_mf;
+    Set::Field<Set::Scalar> vorticity_1_mf;
+    Set::Field<Set::Scalar> c_1_mf;
 
-    // PHASE eta=0 (gas — CPG)
-    Set::Field<Set::Scalar> density_eta0_mf;
-    Set::Field<Set::Scalar> density_eta0_old_mf;
+    // PHASE 0 (gas — CPG)
+    Set::Field<Set::Scalar> density_0_mf;
+    Set::Field<Set::Scalar> density_0_old_mf;
 
-    Set::Field<Set::Scalar> energy_eta0_mf;
-    Set::Field<Set::Scalar> energy_eta0_old_mf;
+    Set::Field<Set::Scalar> energy_0_mf;
+    Set::Field<Set::Scalar> energy_0_old_mf;
 
-    Set::Field<Set::Scalar> momentum_eta0_mf;
-    Set::Field<Set::Scalar> momentum_eta0_old_mf;
+    Set::Field<Set::Scalar> momentum_0_mf;
+    Set::Field<Set::Scalar> momentum_0_old_mf;
 
     //Set::Field<Set::Scalar> T1_mf;
     //Set::Field<Set::Scalar> k1_thermal_mf;
     //Set::Field<Set::Scalar> h1_thermal_mf;
-    //Set::Field<Set::Scalar> gamma_eta0_mf;
-    Set::Field<Set::Scalar> velocity_eta0_mf;
-    Set::Field<Set::Scalar> pressure_eta0_mf;
-    Set::Field<Set::Scalar> vorticity_eta0_mf;
-    Set::Field<Set::Scalar> c_eta0_mf;
+    //Set::Field<Set::Scalar> gamma_0_mf;
+    Set::Field<Set::Scalar> velocity_0_mf;
+    Set::Field<Set::Scalar> pressure_0_mf;
+    Set::Field<Set::Scalar> vorticity_0_mf;
+    Set::Field<Set::Scalar> c_0_mf;
 
     // Mixture
     Set::Field<Set::Scalar> density_mf;
@@ -356,36 +356,36 @@ protected:
     // Per-phase energy BCs. Default to a copy of energy_bc when no per-phase
     // input is given; problems like Stefan need different BCs on the spectator
     // liquid energy at a gas-side wall (and vice versa). When set,
-    // energy_eta{0,1}_mf are registered against these instead of the shared
+    // energy_{0,1}_mf are registered against these instead of the shared
     // energy_bc; the mixture energy_per_vol_mf stays on energy_bc.
-    BC::BC<Set::Scalar>* energy_eta0_bc = nullptr;
-    BC::BC<Set::Scalar>* energy_eta1_bc = nullptr;
+    BC::BC<Set::Scalar>* energy_0_bc = nullptr;
+    BC::BC<Set::Scalar>* energy_1_bc = nullptr;
     // Per-phase density BCs. Same pattern as the per-phase energy BCs above:
     // default to the shared density_bc; problems like Stefan that pin gas-phase
     // density at a heated wall (to keep T = UE/(ρ·cv) sensible under fixed-UE
     // Dirichlet) need to override only one phase without polluting the spectator.
-    BC::BC<Set::Scalar>* density_eta0_bc = nullptr;
-    BC::BC<Set::Scalar>* density_eta1_bc = nullptr;
+    BC::BC<Set::Scalar>* density_0_bc = nullptr;
+    BC::BC<Set::Scalar>* density_1_bc = nullptr;
     //BC::BC<Set::Scalar>* eta_bc = nullptr;
     BC::BC<Set::Scalar>* temperature_bc = nullptr;
 
-    IC::IC<Set::Scalar>* velocity_eta1_ic = nullptr;
-    IC::IC<Set::Scalar>* pressure_eta1_ic = nullptr;
-    IC::IC<Set::Scalar>* density_eta1_ic  = nullptr;
-    IC::IC<Set::Scalar>* energy_eta1_ic = nullptr;
+    IC::IC<Set::Scalar>* velocity_1_ic = nullptr;
+    IC::IC<Set::Scalar>* pressure_1_ic = nullptr;
+    IC::IC<Set::Scalar>* density_1_ic  = nullptr;
+    IC::IC<Set::Scalar>* energy_1_ic = nullptr;
     //IC::IC<Set::Scalar>* temperature0_ic  = nullptr;
     //IC::IC<Set::Scalar>* k0_thermal_ic  = nullptr;
     //IC::IC<Set::Scalar>* h0_thermal_ic  = nullptr;
-    //IC::IC<Set::Scalar>* gamma_eta1_ic  = nullptr;
+    //IC::IC<Set::Scalar>* gamma_1_ic  = nullptr;
 
-    IC::IC<Set::Scalar>* velocity_eta0_ic = nullptr;
-    IC::IC<Set::Scalar>* pressure_eta0_ic = nullptr;
-    IC::IC<Set::Scalar>* density_eta0_ic = nullptr;
-    IC::IC<Set::Scalar>* energy_eta0_ic = nullptr;
+    IC::IC<Set::Scalar>* velocity_0_ic = nullptr;
+    IC::IC<Set::Scalar>* pressure_0_ic = nullptr;
+    IC::IC<Set::Scalar>* density_0_ic = nullptr;
+    IC::IC<Set::Scalar>* energy_0_ic = nullptr;
     //IC::IC<Set::Scalar>* temperature1_ic = nullptr;
     //IC::IC<Set::Scalar>* k1_thermal_ic  = nullptr;
     //IC::IC<Set::Scalar>* h1_thermal_ic  = nullptr;
-    //IC::IC<Set::Scalar>* gamma_eta0_ic  = nullptr;
+    //IC::IC<Set::Scalar>* gamma_0_ic  = nullptr;
 
     IC::IC<Set::Scalar>* ic_m0 = nullptr;
     IC::IC<Set::Scalar>* ic_u0 = nullptr;
@@ -406,22 +406,22 @@ protected:
     Set::Scalar rho_min = 1e10;
 
     Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion=NAN;
-    // PHASE eta=1 (liquid — stiffened gas)
-    Set::Scalar gamma_eta1 = NAN, pi_eta1 = NAN, mu_eta1 = NAN, mu_eta1_b = NAN, MW0 = NAN;
+    // PHASE 1 (liquid — stiffened gas)
+    Set::Scalar gamma_1 = NAN, pi_1 = NAN, mu_1 = NAN, mu_1_b = NAN, MW0 = NAN;
     Set::Scalar b0 = NAN, q0EOS = NAN;
-    Set::Scalar cp_eta1 = NAN, cv_eta1 = NAN;
+    Set::Scalar cp_1 = NAN, cv_1 = NAN;
     // Free-energy calibration parameters for phase 1 (Tammann)
-    // q_eta1: reference internal energy [J/kg]; qprime_eta1: entropy reference [J/(kg·K)];
-    // rho_ref_eta1: reference density [kg/m^3] used in the ln(rho/rho_ref) term.
-    Set::Scalar q_eta1 = 0.0, qprime_eta1 = 0.0, rho_ref_eta1 = 1.0;
+    // q_1: reference internal energy [J/kg]; qprime_1: entropy reference [J/(kg·K)];
+    // rho_ref_1: reference density [kg/m^3] used in the ln(rho/rho_ref) term.
+    Set::Scalar q_1 = 0.0, qprime_1 = 0.0, rho_ref_1 = 1.0;
 
-    // PHASE eta=0 (gas — CPG)
-    Set::Scalar gamma_eta0 = NAN, pi_eta0 = NAN, mu_eta0 = NAN, mu_eta0_b = NAN, MW1 = NAN;
+    // PHASE 0 (gas — CPG)
+    Set::Scalar gamma_0 = NAN, pi_0 = NAN, mu_0 = NAN, mu_0_b = NAN, MW1 = NAN;
     Set::Scalar b1 = NAN, q1EOS = NAN;
-    Set::Scalar cp_eta0 = NAN, cv_eta0 = NAN;
+    Set::Scalar cp_0 = NAN, cv_0 = NAN;
     // Free-energy calibration parameters for phase 0 (CPG)
-    // R_eta0: specific gas constant [J/(kg·K)] for the ideal-gas free energy.
-    Set::Scalar q_eta0 = 0.0, qprime_eta0 = 0.0, rho_ref_eta0 = 1.0, R_eta0 = 287.0;
+    // R_0: specific gas constant [J/(kg·K)] for the ideal-gas free energy.
+    Set::Scalar q_0 = 0.0, qprime_0 = 0.0, rho_ref_0 = 1.0, R_0 = 287.0;
 
     // Shared free-energy reference temperature [K]
     Set::Scalar T_ref = 300.0;
@@ -455,8 +455,8 @@ protected:
     // Per-phase heat conduction (operator-split explicit-Euler step).
     // CFL constraint: dt < 0.5 * dx^2 / max(k_k / (rho_k cv_k)).
     int apply_heat_conduction = 0;
-    Set::Scalar k_eta0 = 0.0;  // gas-phase thermal conductivity [W/(m K)]
-    Set::Scalar k_eta1 = 0.0;  // liquid-phase thermal conductivity [W/(m K)]
+    Set::Scalar k_0 = 0.0;  // gas-phase thermal conductivity [W/(m K)]
+    Set::Scalar k_1 = 0.0;  // liquid-phase thermal conductivity [W/(m K)]
     int static_eta = 0;
     int apply_vaporization = 0;
 

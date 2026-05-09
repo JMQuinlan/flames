@@ -83,19 +83,19 @@ pressure_eta0.ic.type = expression
 pressure_eta0.ic.expression.region0 = "101325.0"
 
 ### EOS / SPECIFIC HEATS ###
-gamma_eta1 = 2.35
-gamma_eta0 = 1.327
-cv_eta1 = "1816.0"
-cv_eta0 = "1411.0"
-cp_eta1 = "4267.6"
-cp_eta0 = "1872.4"
-pi_eta1 = 3.7313e8
-pi_eta0 = 0.0
+gamma_1 = 2.35
+gamma_0 = 1.327
+cv_1 = "1816.0"
+cv_0 = "1411.0"
+cp_1 = "4267.6"
+cp_0 = "1872.4"
+pi_1 = 3.7313e8
+pi_0 = 0.0
 
-mu_eta1 = 0.0
-mu_eta1_b = 0.0
-mu_eta0 = 0.0
-mu_eta0_b = 0.0
+mu_1 = 0.0
+mu_1_b = 0.0
+mu_0 = 0.0
+mu_0_b = 0.0
 
 sigma = 0.0
 pref  = 0.0
@@ -104,13 +104,13 @@ pref  = 0.0
 # Calibrated for f_g - f_l = 0 at (rho_g_sat, rho_l_sat, T_sat).
 # See input_stefan_sqr for derivation.
 T_ref          = 373.15
-rho_ref_eta0   = 0.5882
-rho_ref_eta1   = 958.4
-R_eta0         = 461.4
-q_eta0         = 0.0
-qprime_eta0    = 0.0
-q_eta1         = -3.00017e+06
-qprime_eta1    = -5510.35
+rho_ref_0   = 0.5882
+rho_ref_1   = 958.4
+R_0         = 461.4
+q_0         = 0.0
+qprime_0    = 0.0
+q_1         = -3.00017e+06
+qprime_1    = -5510.35
 
 # CH-emergent mode flags
 ch_thermo_consistent = 1
@@ -194,8 +194,8 @@ apply_weight          = 0
 apply_vaporization    = 0
 apply_viscous         = 0
 apply_heat_conduction = 1
-k_eta0 = 1.0          # match input_stefan_sqr
-k_eta1 = 1.0
+k_0 = 1.0          # match input_stefan_sqr
+k_1 = 1.0
 Spec_Vol = 1
 grav     = 0.0
 

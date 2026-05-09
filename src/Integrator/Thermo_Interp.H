@@ -184,18 +184,18 @@ namespace Thermo_Interp
     // Equivalently: at pure phase i, pimix = pi_i (correct single-phase limit).
     inline void InterpolateGammaPi_Stiffened(
         Scalar eta,
-        Scalar gamma_eta0, Scalar gamma_eta1,
-        Scalar pi_eta0,    Scalar pi_eta1,
+        Scalar gamma_0, Scalar gamma_1,
+        Scalar pi_0,    Scalar pi_1,
         Scalar &gamma_mix,
         Scalar &pi_mix)
     {
         eta = clamp01(eta);
 
-        Scalar A = eta / (gamma_eta1 - Scalar(1.0))
-                 + (Scalar(1.0) - eta) / (gamma_eta0 - Scalar(1.0));
+        Scalar A = eta / (gamma_1 - Scalar(1.0))
+                 + (Scalar(1.0) - eta) / (gamma_0 - Scalar(1.0));
 
-        Scalar B = eta * gamma_eta1 * pi_eta1 / (gamma_eta1 - Scalar(1.0))
-                 + (Scalar(1.0) - eta) * gamma_eta0 * pi_eta0 / (gamma_eta0 - Scalar(1.0));
+        Scalar B = eta * gamma_1 * pi_1 / (gamma_1 - Scalar(1.0))
+                 + (Scalar(1.0) - eta) * gamma_0 * pi_0 / (gamma_0 - Scalar(1.0));
 
         gamma_mix = Scalar(1.0) + Scalar(1.0) / A;
         pi_mix    = B / (A + Scalar(1.0));
@@ -218,18 +218,18 @@ namespace Thermo_Interp
     //   - p_mix from stiffened-gas EOS
     inline Scalar InterpolatePressure_Stiffened(
         Scalar eta,
-        Scalar rho_eta0, Scalar rho_eta1,
-        Scalar e_eta0,   Scalar e_eta1,
-        Scalar gamma_eta0, Scalar gamma_eta1,
-        Scalar pi_eta0,    Scalar pi_eta1)
+        Scalar rho_0, Scalar rho_1,
+        Scalar e_0,   Scalar e_1,
+        Scalar gamma_0, Scalar gamma_1,
+        Scalar pi_0,    Scalar pi_1)
     {
         eta = clamp01(eta);
 
-        Scalar rho_mix = (Scalar(1.0) - eta) * rho_eta0 + eta * rho_eta1;
-        Scalar e_mix   = (Scalar(1.0) - eta) * e_eta0   + eta * e_eta1;
+        Scalar rho_mix = (Scalar(1.0) - eta) * rho_0 + eta * rho_1;
+        Scalar e_mix   = (Scalar(1.0) - eta) * e_0   + eta * e_1;
 
         Scalar gamma_mix, pi_mix;
-        InterpolateGammaPi_Stiffened(eta, gamma_eta0, gamma_eta1, pi_eta0, pi_eta1,
+        InterpolateGammaPi_Stiffened(eta, gamma_0, gamma_1, pi_0, pi_1,
                                      gamma_mix, pi_mix);
 
         return Pressure_Stiffened(rho_mix, e_mix, gamma_mix, pi_mix);

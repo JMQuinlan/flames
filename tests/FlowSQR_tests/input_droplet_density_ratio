@@ -78,8 +78,8 @@ epsilon = eta.ic.expression.constant.epsilon
 # 1000:1 density ratio. Round numbers chosen to make the ratio exact;
 # physical units roughly water-air at room conditions.
 # ----------------------------
-gamma_eta1 = 7.15
-gamma_eta0 = 1.4
+gamma_1 = 7.15
+gamma_0 = 1.4
 
 density_eta1.ic.type = expression
 density_eta1.ic.expression.region0 = "1000.0"
@@ -107,32 +107,32 @@ pressure_eta0.ic.type = expression
 pressure_eta0.ic.expression.region0 = "1.01325e5"
 
 # Specific heats (water/air canonical)
-cp_eta1 = 4180.0
-cp_eta0 = 1005.0
-cv_eta1 = 4180.0/7.15
-cv_eta0 = 1005.0/1.4
+cp_1 = 4180.0
+cp_0 = 1005.0
+cv_1 = 4180.0/7.15
+cv_0 = 1005.0/1.4
 
 # Tammann stiffened-gas pressure for water; ideal gas has pi=0
-pi_eta1 = 3.0e8
-pi_eta0 = 0.0
+pi_1 = 3.0e8
+pi_0 = 0.0
 
 # Free-energy parameters: silenced (ch_thermo_consistent = 0).
 T_ref          = 300.0
-rho_ref_eta0   = 1.0
-rho_ref_eta1   = 1000.0
-R_eta0         = 287.0
-q_eta0         = 0.0
-qprime_eta0    = 0.0
-q_eta1         = 0.0
-qprime_eta1    = 0.0
+rho_ref_0   = 1.0
+rho_ref_1   = 1000.0
+R_0         = 287.0
+q_0         = 0.0
+qprime_0    = 0.0
+q_1         = 0.0
+qprime_1    = 0.0
 
 ch_thermo_consistent = 0
 
 # No viscosity — isolate the capillary force.
-mu_eta1   = 0.0
-mu_eta1_b = 0.0
-mu_eta0   = 0.0
-mu_eta0_b = 0.0
+mu_1   = 0.0
+mu_1_b = 0.0
+mu_0   = 0.0
+mu_0_b = 0.0
 
 # Surface tension: water-air at 20°C, sigma = 0.072 N/m.
 # Laplace pressure Δp = sigma/R = 0.072 / 0.5e-3 = 144 Pa.
