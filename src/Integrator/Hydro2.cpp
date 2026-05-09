@@ -1409,8 +1409,8 @@ Hydro2::RHS(int lev,
 
             Set::Scalar K_kapila = Solver::EOS::EOS::KapilaK(press(i, j, k),
                                                             eta(i, j, k),
-                                                            eos0_local,
-                                                            eos1_local,
+                                                            eos0,
+                                                            eos1,
                                                             small);
 
             eta_rhs(i, j, k) = eta_advect
