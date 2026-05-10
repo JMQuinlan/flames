@@ -28,8 +28,8 @@
 
 ### OUTPUT ###
 plot_file   = ./tests/FlowSQR_tests/output_acoustic_1d
-# amr.plot_dt = 2.0e-4
-amr.plot_int = 1
+amr.plot_dt = 2.0e-4
+# amr.plot_int = 1
 
 ### MESHING ###
 amr.max_level      = 0
@@ -201,12 +201,23 @@ ch_kappa               = 6.25e-4
 ch_mobility_degenerate = 1
 ch_mobility_nom        = 0     # freeze CH — interface is stationary
 
-# HYDRO CLOSURE STRATEGIES (Phase B.5+)
-# The `hydro2.closure.*_strategy` knobs select the closure formulation for the
-# momentum and energy BS sources. The default "constitutive_symmetric" is the
-# new S1' variant that restores strict per-cell action-reaction while keeping
-# the same equilibrium as the original S1 (Open Q9) path. The legacy p
-hydro2.closure.un_strategy = constitutive_symmetric
-hydro2.closure.E_strategy  = constitutive_symmetric
+# HYDRO CLOSURE STRATEGIES (Phase B+)
+# `hydro2.closure.{un,E}_strategy` selects the per-quantity SQR closure for
+# momentum and energy. Default "constitutive" uses the (p_k - p_int) ∇η
+# (resp. (p_k u_k - p_int u_int)·∇η) form that vanishes at intensive
+# equilibrium — so the per-phase pressure ground state survives and the
+# spurious interfacial waves seen with the asymmetric pillbox (S1) closure
+# do not get excited. The interface average p_int / u_int is selected by
+# `closure.{un,E}_pint_method`: 1=arith (default), 2=eta-weighted,
+# 3=acoustic-impedance, 4=mass-fraction. Method 2 was previously confirmed
+# to clear the spurious-wave failure under the legacy
+# `sqr_legacy_p_int_method=1 + p_int_method=2` switch — set it explicitly
+# here so the new-framework run reproduces that fix.
+# Other strategies: jump (S2), relax (S3), pillbox (asymmetric S1, research),
+# pillbox_symmetric (S1', research) — see Hydro2.H closure-strategy block.
+hydro2.closure.un_strategy    = constitutive
+hydro2.closure.E_strategy     = constitutive
+hydro2.closure.un_pint_method = 2
+hydro2.closure.E_pint_method  = 2
 
 nscbc.enabled = false

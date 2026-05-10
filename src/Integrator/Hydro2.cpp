@@ -56,6 +56,83 @@ using namespace amrex;
 namespace Integrator
 {
 
+namespace {
+// Compute the interface average (p_int, u_int) for the SQR closure given the
+// per-phase intensives and the chosen averaging method:
+//   1: arithmetic mean
+//   2: eta-weighted        ( w0 = 1-eta, w1 = eta )
+//   3: acoustic-impedance  ( p* = (Z_1 p_0 + Z_0 p_1)/(Z_0+Z_1) ),
+//                          c_0^2 = g_0 p_0 / rho_0  (CPG),
+//                          c_1^2 = g_1 (p_1 + pi_1) / rho_1  (Tammann).
+//   4: mass-fraction weighted (Y_k = alpha_k rho_k / rho_mix)
+// Method 0 (or any unrecognized value) returns (0,0,0).
+// Used by both the legacy p_int_method-gated path and the new constitutive
+// closure-strategy branches in ApplySQRSource.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+void Hydro2_InterfaceAverage(
+    int method,
+    amrex::Real p0, amrex::Real p1,
+    amrex::Real u0x, amrex::Real u0y,
+    amrex::Real u1x, amrex::Real u1y,
+    amrex::Real safe_r0, amrex::Real safe_r1,
+    amrex::Real eta_c,
+    amrex::Real g0, amrex::Real g1, amrex::Real pi1,
+    amrex::Real& p_int, amrex::Real& u_int_x, amrex::Real& u_int_y)
+{
+    using amrex::Real;
+    if (method == 1)
+    {
+        p_int   = Real(0.5) * (p0 + p1);
+        u_int_x = Real(0.5) * (u0x + u1x);
+        u_int_y = Real(0.5) * (u0y + u1y);
+    }
+    else if (method == 2)
+    {
+        Real w0 = Real(1.0) - eta_c;
+        Real w1 = eta_c;
+        p_int   = w0 * p0  + w1 * p1;
+        u_int_x = w0 * u0x + w1 * u1x;
+        u_int_y = w0 * u0y + w1 * u1y;
+    }
+    else if (method == 3)
+    {
+        Real c0sq = g0 * amrex::max(p0,       Real(0.0)) / safe_r0;
+        Real c1sq = g1 * amrex::max(p1 + pi1, Real(0.0)) / safe_r1;
+        Real c0_  = (c0sq > Real(0.0)) ? std::sqrt(c0sq) : Real(0.0);
+        Real c1_  = (c1sq > Real(0.0)) ? std::sqrt(c1sq) : Real(0.0);
+        Real Z0   = safe_r0 * c0_;
+        Real Z1   = safe_r1 * c1_;
+        Real Zsum = Z0 + Z1;
+        if (Zsum > Real(1e-30))
+        {
+            p_int   = (Z1 * p0  + Z0 * p1)  / Zsum;
+            u_int_x = (Z1 * u0x + Z0 * u1x) / Zsum;
+            u_int_y = (Z1 * u0y + Z0 * u1y) / Zsum;
+        }
+        else
+        {
+            p_int   = Real(0.5) * (p0 + p1);
+            u_int_x = Real(0.5) * (u0x + u1x);
+            u_int_y = Real(0.5) * (u0y + u1y);
+        }
+    }
+    else if (method == 4)
+    {
+        Real Y0_, Y1_, rho_mix_;
+        Thermo_Interp::Mix_MassFraction_A_B(eta_c, safe_r0, safe_r1, Y0_, Y1_, rho_mix_);
+        p_int   = Y0_ * p0  + Y1_ * p1;
+        u_int_x = Y0_ * u0x + Y1_ * u1x;
+        u_int_y = Y0_ * u0y + Y1_ * u1y;
+    }
+    else
+    {
+        p_int   = Real(0.0);
+        u_int_x = Real(0.0);
+        u_int_y = Real(0.0);
+    }
+}
+} // anonymous namespace
+
 Hydro2::Hydro2(IO::ParmParse& pp) : Hydro2()
 {
     pp.queryclass(*this);
@@ -126,21 +203,33 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
         // === Closure-strategy framework (Phase B onwards) ===
-        // Select per-quantity SQR closure: constitutive (S1, default — theory's
-        // per-phase pillbox flux), jump (S2 — J_Q = -lambda*intensive_jump,
-        // symmetric), relax (S3 — Landau-Teller on intensive jump, symmetric).
-        // Non-default strategies require explicit lambda or tau; we error out
-        // rather than silently fall through, since a missing-coefficient
-        // default (lambda=0 or tau=inf) is numerically equivalent to S1 and
-        // would mask a config bug. See plan Phase B step 6 + Open Q7.
+        // Select per-quantity SQR closure:
+        //   constitutive (default) — symmetric (p_k - p_int) ∇η /
+        //                            (p_k u_k - p_int u_int)·∇η flux; vanishes
+        //                            at intensive equilibrium. Sub-knob
+        //                            closure.{un,E}_pint_method picks the
+        //                            interface average (1 arith, 2 eta,
+        //                            3 acoustic-impedance, 4 mass-fraction).
+        //   jump         — S2: J_Q = -lambda * intensive_jump.
+        //   relax        — S3: Landau-Teller on intensive jump.
+        //   pillbox             — S1 asymmetric per-phase pillbox flux
+        //                         (research / theory comparison only;
+        //                         does *not* vanish at equilibrium).
+        //   pillbox_symmetric   — S1' antisymmetrized variant of pillbox
+        //                         (research / theory comparison only).
+        // Non-default strategies that require coefficients (jump/relax) error
+        // out if those coefficients are missing rather than silently falling
+        // through, since a missing default would mask a config bug. See plan
+        // Phase B step 6 + Open Q7.
         {
             std::string s_un = "constitutive";
             pp.query("closure.un_strategy", s_un);
-            if      (s_un == "constitutive")           value.un_close.strategy = Hydro2::ClosureStrategy::Constitutive;
-            else if (s_un == "constitutive_symmetric") value.un_close.strategy = Hydro2::ClosureStrategy::ConstitutiveSymmetric;
-            else if (s_un == "jump")                   value.un_close.strategy = Hydro2::ClosureStrategy::Jump;
-            else if (s_un == "relax")                  value.un_close.strategy = Hydro2::ClosureStrategy::Relax;
-            else Util::Abort(INFO, "closure.un_strategy must be one of: constitutive, constitutive_symmetric, jump, relax (got '", s_un, "')");
+            if      (s_un == "constitutive")        value.un_close.strategy = Hydro2::ClosureStrategy::Constitutive;
+            else if (s_un == "jump")                value.un_close.strategy = Hydro2::ClosureStrategy::Jump;
+            else if (s_un == "relax")               value.un_close.strategy = Hydro2::ClosureStrategy::Relax;
+            else if (s_un == "pillbox")             value.un_close.strategy = Hydro2::ClosureStrategy::Pillbox;
+            else if (s_un == "pillbox_symmetric")   value.un_close.strategy = Hydro2::ClosureStrategy::PillboxSymmetric;
+            else Util::Abort(INFO, "closure.un_strategy must be one of: constitutive, jump, relax, pillbox, pillbox_symmetric (got '", s_un, "')");
 
             Set::Scalar tmp_l = -1.0, tmp_t = -1.0;
             pp.query("closure.un_lambda", tmp_l);
@@ -151,15 +240,21 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                 Util::Abort(INFO, "closure.un_strategy=relax requires closure.un_tau > 0");
             if (tmp_l > 0.0) value.un_close.lambda = tmp_l;
             if (tmp_t > 0.0) value.un_close.tau    = tmp_t;
+
+            pp.query("closure.un_pint_method", value.un_close.pint_method);
+            if (value.un_close.strategy == Hydro2::ClosureStrategy::Constitutive
+                && (value.un_close.pint_method < 1 || value.un_close.pint_method > 4))
+                Util::Abort(INFO, "closure.un_pint_method must be 1 (arithmetic), 2 (eta-weighted), 3 (acoustic-impedance), or 4 (mass-fraction) when un_strategy=constitutive (got ", value.un_close.pint_method, ")");
         }
         {
             std::string s_E = "constitutive";
             pp.query("closure.E_strategy", s_E);
-            if      (s_E == "constitutive")           value.E_close.strategy = Hydro2::ClosureStrategy::Constitutive;
-            else if (s_E == "constitutive_symmetric") value.E_close.strategy = Hydro2::ClosureStrategy::ConstitutiveSymmetric;
-            else if (s_E == "jump")                   value.E_close.strategy = Hydro2::ClosureStrategy::Jump;
-            else if (s_E == "relax")                  value.E_close.strategy = Hydro2::ClosureStrategy::Relax;
-            else Util::Abort(INFO, "closure.E_strategy must be one of: constitutive, constitutive_symmetric, jump, relax (got '", s_E, "')");
+            if      (s_E == "constitutive")        value.E_close.strategy = Hydro2::ClosureStrategy::Constitutive;
+            else if (s_E == "jump")                value.E_close.strategy = Hydro2::ClosureStrategy::Jump;
+            else if (s_E == "relax")               value.E_close.strategy = Hydro2::ClosureStrategy::Relax;
+            else if (s_E == "pillbox")             value.E_close.strategy = Hydro2::ClosureStrategy::Pillbox;
+            else if (s_E == "pillbox_symmetric")   value.E_close.strategy = Hydro2::ClosureStrategy::PillboxSymmetric;
+            else Util::Abort(INFO, "closure.E_strategy must be one of: constitutive, jump, relax, pillbox, pillbox_symmetric (got '", s_E, "')");
 
             Set::Scalar tmp_l = -1.0, tmp_t = -1.0;
             pp.query("closure.E_lambda", tmp_l);
@@ -170,6 +265,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                 Util::Abort(INFO, "closure.E_strategy=relax requires closure.E_tau > 0");
             if (tmp_l > 0.0) value.E_close.lambda = tmp_l;
             if (tmp_t > 0.0) value.E_close.tau    = tmp_t;
+
+            pp.query("closure.E_pint_method", value.E_close.pint_method);
+            if (value.E_close.strategy == Hydro2::ClosureStrategy::Constitutive
+                && (value.E_close.pint_method < 1 || value.E_close.pint_method > 4))
+                Util::Abort(INFO, "closure.E_pint_method must be 1 (arithmetic), 2 (eta-weighted), 3 (acoustic-impedance), or 4 (mass-fraction) when E_strategy=constitutive (got ", value.E_close.pint_method, ")");
         }
 
         // PHASE 1 (liquid — stiffened gas)
@@ -2125,12 +2225,14 @@ Hydro2::ApplySQRSource(int lev,
     // Strategies are passed into the device lambda as ints to keep the
     // capture trivially copyable on GPU; (0=Constitutive, 1=Jump, 2=Relax).
     const bool sqr_legacy_p_int_method_ = sqr_legacy_p_int_method;
-    const int  un_strat_  = static_cast<int>(un_close.strategy);
-    const Real un_lambda_ = un_close.lambda;
-    const Real un_tau_    = un_close.tau;
-    const int  E_strat_   = static_cast<int>(E_close.strategy);
-    const Real E_lambda_  = E_close.lambda;
-    const Real E_tau_     = E_close.tau;
+    const int  un_strat_       = static_cast<int>(un_close.strategy);
+    const Real un_lambda_      = un_close.lambda;
+    const Real un_tau_         = un_close.tau;
+    const int  un_pint_method_ = un_close.pint_method;
+    const int  E_strat_        = static_cast<int>(E_close.strategy);
+    const Real E_lambda_       = E_close.lambda;
+    const Real E_tau_          = E_close.tau;
+    const int  E_pint_method_  = E_close.pint_method;
     const Real cv0_       = cv_0;
     const Real cv1_       = cv_1;
 
@@ -2229,74 +2331,18 @@ Hydro2::ApplySQRSource(int lev,
             Real u1x_ph = M1_arr(i,j,k,0) / safe_r1;
             Real u1y_ph = M1_arr(i,j,k,1) / safe_r1;
 
-            // eta clamp for η-weighting
+            // eta clamp (passed to Hydro2_InterfaceAverage for η/mass-fraction weighting)
             Real eta_c = eta(i,j,k);
             if (eta_c < Real(0.0)) eta_c = Real(0.0);
             if (eta_c > Real(1.0)) eta_c = Real(1.0);
-            Real w0 = Real(1.0) - eta_c;
-            Real w1 = eta_c;
 
-            // Interface pressure / velocity closure (see p_int_method).
-            // Method 0 means "no pressure-imbalance coupling" — dp0/dp1/pu_int
-            // are zeroed below so only mass/heat/Fsv contributions survive.
-            // Methods 1–3 collapse to the common value at mechanical equilibrium
-            // (p_0 = p_1, u_0 = u_1), so the BS pressure source vanishes there.
-            Real p_int = Real(0.0), u_int_x = Real(0.0), u_int_y = Real(0.0);
-            if (p_int_method_ == 1)
-            {
-                // arithmetic mean
-                p_int   = Real(0.5) * (p0_phase + p1_phase);
-                u_int_x = Real(0.5) * (u0x_ph   + u1x_ph);
-                u_int_y = Real(0.5) * (u0y_ph   + u1y_ph);
-            }
-            else if (p_int_method_ == 2)
-            {
-                // eta-weighted
-                p_int   = w0 * p0_phase + w1 * p1_phase;
-                u_int_x = w0 * u0x_ph   + w1 * u1x_ph;
-                u_int_y = w0 * u0y_ph   + w1 * u1y_ph;
-            }
-            else if (p_int_method_ == 3)
-            {
-                // acoustic-impedance weighted: p* = (Z_1 p_0 + Z_0 p_1)/(Z_0+Z_1)
-                // CPG:   c_0^2 = g_0 * p_0 / rho_0
-                // SG :   c_1^2 = g_1 * (p_1 + pi_1) / rho_1
-                Real c0sq = g0 * amrex::max(p0_phase,            Real(0.0)) / safe_r0;
-                Real c1sq = g1 * amrex::max(p1_phase + pi1,      Real(0.0)) / safe_r1;
-                Real c0_  = (c0sq > Real(0.0)) ? std::sqrt(c0sq) : Real(0.0);
-                Real c1_  = (c1sq > Real(0.0)) ? std::sqrt(c1sq) : Real(0.0);
-                Real Z0   = safe_r0 * c0_;
-                Real Z1   = safe_r1 * c1_;
-                Real Zsum = Z0 + Z1;
-                if (Zsum > Real(1e-30))
-                {
-                    p_int   = (Z1 * p0_phase + Z0 * p1_phase) / Zsum;
-                    u_int_x = (Z1 * u0x_ph   + Z0 * u1x_ph)   / Zsum;
-                    u_int_y = (Z1 * u0y_ph   + Z0 * u1y_ph)   / Zsum;
-                }
-                else
-                {
-                    p_int   = Real(0.5) * (p0_phase + p1_phase);
-                    u_int_x = Real(0.5) * (u0x_ph   + u1x_ph);
-                    u_int_y = Real(0.5) * (u0y_ph   + u1y_ph);
-                }
-            }
-            else if (p_int_method_ == 4)
-            {
-                // mass-fraction weighted: consistent with mass-fraction blending
-                // used elsewhere in the integrator. Y_k = alpha_k * rho_k / rho_mix
-                // with alpha_0 = 1 - eta, alpha_1 = eta.
-                //   rho_0 = rho_1            -> reduces to method 2 (eta-weighted)
-                //   large rho contrast       -> p*, u* pulled toward heavier phase
-                Real Y0_, Y1_, rho_mix_;
-                Thermo_Interp::Mix_MassFraction_A_B(
-                    eta_c, safe_r0, safe_r1, Y0_, Y1_, rho_mix_);
-                p_int   = Y0_ * p0_phase + Y1_ * p1_phase;
-                u_int_x = Y0_ * u0x_ph   + Y1_ * u1x_ph;
-                u_int_y = Y0_ * u0y_ph   + Y1_ * u1y_ph;
-            }
-            // else: p_int_method_ == 0 → pressure-imbalance coupling OFF
-            //       p_int and u_int stay at 0; dp0/dp1/pu_int are zeroed below.
+            // Interface pressure / velocity averages are computed on demand
+            // via Hydro2_InterfaceAverage:
+            //   * Legacy branch (sqr_legacy_p_int_method_)        -> p_int_method_
+            //   * New Constitutive branches (un / E)              -> un_pint_method_, E_pint_method_
+            // Method 0 returns (0,0,0). Methods 1-4 collapse to the common value
+            // at mechanical equilibrium (p_0 = p_1, u_0 = u_1), so a constitutive
+            // (p_k - p_int) source vanishes there.
 
             // Prescribed interface inputs (mass transfer / heat flux problems)
             Real mdot0 = m0_arr(i,j,k);
@@ -2323,17 +2369,23 @@ Hydro2::ApplySQRSource(int lev,
             //   true  -> legacy p_int-averaged closure (S_M^k = (p_k - p_int) ∇η,
             //            S_E^k = (p_k u_k - p_int u_int) · ∇η). Kill-switch path
             //            for bit-for-bit regression with the pre-Phase-B baseline.
-            //   false -> theory-faithful S1/S1'/S2/S3 framework (Phase B+):
+            //   false -> per-quantity closure-strategy framework (Phase B+):
             //            * un_close.strategy selects the normal-velocity (momentum) closure.
             //            * E_close .strategy selects the energy/temperature closure.
-            //            * Constitutive (S1) is asymmetric per-phase pillbox flux.
-            //            * ConstitutiveSymmetric (S1', Phase B.5) is the
-            //              antisymmetrized variant of S1: replaces (-p_1, +p_0)
-            //              with (-p_bar, +p_bar) and analogously for energy
-            //              flux, restoring strict per-cell action-reaction
-            //              while keeping S1's equilibrium fixed point.
-            //            * Jump (S2) and Relax (S3) are symmetric — strict
-            //              action-reaction on the band by construction.
+            //            * Constitutive (default) — symmetric (p_k - p_int) ∇η /
+            //              (p_k u_k - p_int u_int)·∇η flux. Vanishes at intensive
+            //              equilibrium, so the per-phase pressure ground state
+            //              survives. Averaging method selected per quantity by
+            //              {un,E}_pint_method (1 arith / 2 eta / 3 Z / 4 mass-frac).
+            //            * Pillbox (S1) — asymmetric per-phase pillbox flux,
+            //              theory-faithful in the eps -> 0 limit but does *not*
+            //              vanish at equilibrium. Research mode only.
+            //            * PillboxSymmetric (S1', Phase B.5) — antisymmetrized
+            //              variant of Pillbox; per-cell strict action-reaction
+            //              but same ground-state pathology as Pillbox.
+            //            * Jump (S2) and Relax (S3) — symmetric, strict
+            //              action-reaction on the band by construction; vanish
+            //              at intensive equilibrium.
             //
             // Mass-transfer ride-along (Smass*u*|∇η|) is appended in both paths,
             // so prescribed ṁ₀ and the future Phase-C Stefan/CH closures slot in
@@ -2341,11 +2393,11 @@ Hydro2::ApplySQRSource(int lev,
             //
             // Action-reaction (plan B step 5):
             //   * Mass:     R0 + R1 = 0 by construction (-Smass / +Smass).
-            //   * Momentum: ΣP_k = (p_0-p_1)∇η for asymmetric S1 — equals the
-            //               surface-tension force on the mixture in the sharp limit;
-            //               not strictly zero on the band at finite ε. S1' (the
-            //               symmetric variant, Phase B.5) and S2/S3 paths are strict.
-            //   * Energy:   analogous; S2/S3 paths strict.
+            //   * Momentum: ΣP_k = 0 strict in Constitutive, S1', S2, S3 paths.
+            //               Pillbox sums to (p_0-p_1)∇η — the unbalanced jump
+            //               feeding mixture momentum, equal to the
+            //               surface-tension force in the sharp limit.
+            //   * Energy:   analogous; Constitutive / S1' / S2 / S3 strict.
             // A per-step entropy/conservation monitor is deferred to Phase F.
 
             Real Smass_mx = mdot0 * u0x * grad_eta_mag;
@@ -2360,8 +2412,15 @@ Hydro2::ApplySQRSource(int lev,
             if (sqr_legacy_p_int_method_)
             {
                 // ----- Legacy: pressure-imbalance vs. p_int (averaged via p_int_method) -----
+                Real p_int = Real(0.0), u_int_x = Real(0.0), u_int_y = Real(0.0);
                 if (p_int_method_ != 0)
                 {
+                    Hydro2_InterfaceAverage(p_int_method_,
+                                            p0_phase, p1_phase,
+                                            u0x_ph, u0y_ph, u1x_ph, u1y_ph,
+                                            safe_r0, safe_r1, eta_c,
+                                            g0, g1, pi1,
+                                            p_int, u_int_x, u_int_y);
                     dp0 = p0_phase - p_int;
                     dp1 = p_int    - p1_phase;
                 }
@@ -2385,20 +2444,42 @@ Hydro2::ApplySQRSource(int lev,
             }
             else
             {
-                // ----- Phase-B framework: S1 (constitutive) | S2 (jump) | S3 (relax) -----
+                // ----- New framework: Constitutive (default) | Jump | Relax | Pillbox | PillboxSymmetric -----
 
                 // u_n closure -> momentum SQR source
                 Real S_un_0_x = Real(0.0), S_un_0_y = Real(0.0);
                 Real S_un_1_x = Real(0.0), S_un_1_y = Real(0.0);
-                if (un_strat_ == 0)        // Constitutive (S1, asymmetric)
+                if (un_strat_ == 0)        // Constitutive (default): (p_k - p_int) ∇η
+                {
+                    // S_M^0 = (p_0 - p_int) ∇η,   S_M^1 = (p_int - p_1) ∇η.
+                    // Vanishes at p_0 = p_1 = p_int, so the per-phase pressure
+                    // ground state survives. Same form as the legacy
+                    // p_int_method closure but lives inside the new framework
+                    // and uses un_pint_method_ to pick the average.
+                    Real p_int_un = Real(0.0), u_int_un_x = Real(0.0), u_int_un_y = Real(0.0);
+                    Hydro2_InterfaceAverage(un_pint_method_,
+                                            p0_phase, p1_phase,
+                                            u0x_ph, u0y_ph, u1x_ph, u1y_ph,
+                                            safe_r0, safe_r1, eta_c,
+                                            g0, g1, pi1,
+                                            p_int_un, u_int_un_x, u_int_un_y);
+                    dp0 = p0_phase - p_int_un;
+                    dp1 = p_int_un - p1_phase;
+                    S_un_0_x = dp0 * grad_eta(0);
+                    S_un_0_y = dp0 * grad_eta(1);
+                    S_un_1_x = dp1 * grad_eta(0);
+                    S_un_1_y = dp1 * grad_eta(1);
+                }
+                else if (un_strat_ == 3)   // Pillbox (S1, asymmetric — research mode)
                 {
                     // Inviscid impermeable baseline (theory Eq.\ P_baseline):
                     //   P_1 = +p_0 n̂   ->  S_M^(1) = +p_0 ∇η     (since n̂|∇η|=∇η)
                     //   P_0 = -p_1 n̂   ->  S_M^(0) = -p_1 ∇η
                     // Sum (p_0-p_1)∇η is the unbalanced jump force feeding mixture
                     // momentum; surface tension cancels it via Korteweg ∇·Σ_K
-                    // (delivered in flux form by RHS_PerPhase). Asymmetric — see
-                    // Open Q9 in the Phase-B plan.
+                    // (delivered in flux form by RHS_PerPhase). Does *not* vanish
+                    // at p_0 = p_1, so the per-phase pressure ground state is
+                    // corrupted under the two-full-states LHS — research only.
                     S_un_0_x = -p1_phase * grad_eta(0);
                     S_un_0_y = -p1_phase * grad_eta(1);
                     S_un_1_x = +p0_phase * grad_eta(0);
@@ -2406,16 +2487,15 @@ Hydro2::ApplySQRSource(int lev,
                     dp0 = -p1_phase;
                     dp1 = +p0_phase;
                 }
-                else if (un_strat_ == 3)   // ConstitutiveSymmetric (S1', Phase B.5)
+                else if (un_strat_ == 4)   // PillboxSymmetric (S1', research mode)
                 {
-                    // Antisymmetrized S1: replace the per-phase pressures
+                    // Antisymmetrized Pillbox: replace the per-phase pressures
                     //   (-p_1, +p_0) with the average p_bar = (p_0+p_1)/2 so
-                    //   S_M^0 + S_M^1 = 0 per cell by construction. At
-                    //   mechanical equilibrium (p_0 = p_1 = p) this reduces
-                    //   to (-p ∇η, +p ∇η), agreeing with asymmetric S1.
-                    //   In transients it removes the (p_0-p_1) ∇η ghost
-                    //   source that radiates spurious interfacial waves
-                    //   (acoustic_1d). See Phase B.5 patch / plan Open Q9.
+                    //   S_M^0 + S_M^1 = 0 per cell by construction. Same
+                    //   ground-state pathology as Pillbox — magnitude p_bar
+                    //   ∇η does not vanish at p_0 = p_1, so the per-phase
+                    //   pressure profile is still corrupted across the band.
+                    //   Kept as a research/comparison option.
                     Real p_avg = Real(0.5) * (p0_phase + p1_phase);
                     S_un_0_x = -p_avg * grad_eta(0);
                     S_un_0_y = -p_avg * grad_eta(1);
@@ -2457,16 +2537,36 @@ Hydro2::ApplySQRSource(int lev,
 
                 // E closure -> energy SQR source
                 Real S_E_0 = Real(0.0), S_E_1 = Real(0.0);
-                if (E_strat_ == 0)         // Constitutive (S1, asymmetric)
+                if (E_strat_ == 0)         // Constitutive (default): (p_k u_k - p_int u_int) · ∇η
+                {
+                    // S_E^0 = (p_0 u_0 - p_int u_int) · ∇η,
+                    // S_E^1 = (p_int u_int - p_1 u_1) · ∇η.
+                    // Vanishes at p_0 u_0 = p_1 u_1 = p_int u_int. Same form as
+                    // the legacy p_int_method energy closure; uses
+                    // E_pint_method_ to pick the interface average.
+                    Real p_int_E = Real(0.0), u_int_E_x = Real(0.0), u_int_E_y = Real(0.0);
+                    Hydro2_InterfaceAverage(E_pint_method_,
+                                            p0_phase, p1_phase,
+                                            u0x_ph, u0y_ph, u1x_ph, u1y_ph,
+                                            safe_r0, safe_r1, eta_c,
+                                            g0, g1, pi1,
+                                            p_int_E, u_int_E_x, u_int_E_y);
+                    Real pu_int = p_int_E  * (u_int_E_x*grad_eta(0) + u_int_E_y*grad_eta(1));
+                    Real pu_0   = p0_phase * (u0x_ph   *grad_eta(0) + u0y_ph   *grad_eta(1));
+                    Real pu_1   = p1_phase * (u1x_ph   *grad_eta(0) + u1y_ph   *grad_eta(1));
+                    S_E_0 = pu_0   - pu_int;
+                    S_E_1 = pu_int - pu_1;
+                }
+                else if (E_strat_ == 3)    // Pillbox (S1, asymmetric — research mode)
                 {
                     // Inviscid impermeable baseline (theory Eq.\ Q_close at V_I=0,
                     // tau_k=0, q_k=0):
                     //   Q̃_1 = ½ρ_0|u_0|² (u_0·n̂) + (U_0+p_0)(u_0·n̂)
                     //   Q̃_0 = -[½ρ_1|u_1|² (u_1·n̂) + (U_1+p_1)(u_1·n̂)]
-                    // Phase C will replace (u_k·n̂) in the KE-flux factor with
-                    // (u_k·n̂ - V_I); the enthalpy-flux factor (U_k+p_k)(u_k·n̂)
-                    // is unchanged. E_arr stores the conserved total energy
-                    // density U_k = ρe + ½ρ|u|², so KE + E_arr + p = ρe + ρ|u|² + p.
+                    // E_arr stores the conserved total energy density U_k =
+                    // ρe + ½ρ|u|², so KE + E_arr + p = ρe + ρ|u|² + p. Does
+                    // *not* vanish at H_0 u_0 = H_1 u_1, so the per-phase
+                    // energy ground state is corrupted — research only.
                     Real u0_dot_geta = u0x_ph*grad_eta(0) + u0y_ph*grad_eta(1);
                     Real u1_dot_geta = u1x_ph*grad_eta(0) + u1y_ph*grad_eta(1);
                     Real H0_coef     = KE0 + E0_arr(i,j,k) + p0_phase;
@@ -2474,15 +2574,12 @@ Hydro2::ApplySQRSource(int lev,
                     S_E_0 = -H1_coef * u1_dot_geta;
                     S_E_1 = +H0_coef * u0_dot_geta;
                 }
-                else if (E_strat_ == 3)    // ConstitutiveSymmetric (S1', Phase B.5)
+                else if (E_strat_ == 4)    // PillboxSymmetric (S1', research mode)
                 {
-                    // Antisymmetrized S1: average the per-phase enthalpy+KE
-                    //   fluxes so S_E^0 + S_E^1 = 0 per cell. Hu_avg is the
-                    //   arithmetic mean of (KE_k + E_k + p_k)(u_k·∇η). At
-                    //   mechanical equilibrium (H_0 u_0 = H_1 u_1) this gives
-                    //   the same magnitude as S1; in transients it removes
-                    //   the (H_0 u_0 - H_1 u_1)·∇η mixture-energy ghost
-                    //   source. See Phase B.5 patch / plan Open Q9.
+                    // Antisymmetrized Pillbox: average the per-phase enthalpy+KE
+                    //   fluxes so S_E^0 + S_E^1 = 0 per cell. Same ground-state
+                    //   pathology as Pillbox — magnitude does not vanish at
+                    //   intensive equilibrium. Research/comparison option.
                     Real u0_dot_geta = u0x_ph*grad_eta(0) + u0y_ph*grad_eta(1);
                     Real u1_dot_geta = u1x_ph*grad_eta(0) + u1y_ph*grad_eta(1);
                     Real H0_coef     = KE0 + E0_arr(i,j,k) + p0_phase;
@@ -4998,8 +5095,8 @@ void Hydro2::ApplyNSCBC(
 //  | A1  | State variable form: intrinsic ρ_k, ρ_k u_k, E_k                | Phase A.0 verdict (rename applied)       | match                 |
 //  | A2  | Per-phase Euler flux divergence ∇·F_k                           | RHS_PerPhase, Hydro2.cpp:1647-1672       | match (depends on A1) |
 //  | A3  | Mass SQR ±ṁ|∇η|, ṁ_0+ṁ_1=0                                      | ApplySQRSource, Hydro2.cpp:2247-2250     | match (form); closure in A6 |
-//  | A4  | Inviscid momentum closure P_1 = p_0 n̂, P_0 = -p_1 n̂            | ApplySQRSource (Phase B S1 path)         | match (default un_close=Constitutive); legacy via sqr_legacy_p_int_method |
-//  | A5  | Energy Q̃_k: other-phase enthalpy + KE flux (V_I=0 in Phase B)   | ApplySQRSource (Phase B S1 path)         | match (default E_close=Constitutive); legacy via sqr_legacy_p_int_method  |
+//  | A4  | Inviscid momentum closure (p_k - p_int)·∇η                      | ApplySQRSource (Constitutive default)    | match (un_close=Constitutive, un_pint_method); legacy via sqr_legacy_p_int_method; Pillbox / PillboxSymmetric kept as research opts |
+//  | A5  | Energy (p_k u_k - p_int u_int)·∇η                               | ApplySQRSource (Constitutive default)    | match (E_close=Constitutive, E_pint_method); legacy via sqr_legacy_p_int_method; Pillbox / PillboxSymmetric kept as research opts |
 //  | A6  | Phase-change ṁ_1 = -ρ_0(u_0·n̂ - V_I)                            | ic_m0 / ComputeEffectiveSQRSources       | unknown / inequivalent |
 //  | A7  | Korteweg per-phase weight = mass fraction Y_k = (η_k ρ_k)/ρ_mix | RHS_PerPhase Y_self, Hydro2.cpp:1610,1632 | match                |
 //  | A8  | Korteweg stress Σ_K = K[½|∇η|² I − ∇η⊗∇η]                        | Hydro2.cpp:1593-1645, HLLC.H             | match                 |

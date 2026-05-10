@@ -488,46 +488,66 @@ protected:
     // === Closure-strategy framework (Phase B onwards) ===
     // For each per-phase nonequilibrium quantity (u_n, E in Phase B; rho added
     // in Phase C, u_t in Phase D) the interface flux J_Q is computed by one of
-    // three strategies:
-    //   Constitutive (S1): theory's per-phase constitutive flux from the
-    //                      pillbox SQR derivation. Asymmetric — each phase
-    //                      receives the *other* phase's constitutive flux.
-    //                      Faithful to Schmidt-2022 / SQR_fluid_fluid theory
-    //                      in the sharp-interface (eps -> 0) limit, but at
-    //                      finite eps the per-cell sum is (p_0 - p_1) ∇η
-    //                      (resp. (H_0 u_0 - H_1 u_1)·∇η) — a transient
-    //                      mixture-momentum / mixture-energy "ghost source"
-    //                      that radiates spurious waves when phase pressures
-    //                      or velocities differ (acoustic_1d).
-    //   ConstitutiveSymmetric (S1', Phase B.5):
-    //                      antisymmetrized variant of S1. p_0, p_1 are
+    // these strategies. The chosen closure must vanish at full equilibrium
+    // (matching intensives across the interface), otherwise the per-phase
+    // momentum/energy ground state is corrupted under the two-full-states LHS
+    // (spurious-wave radiation in transients — see acoustic_1d).
+    //
+    //   Constitutive (default): symmetric pressure/velocity-imbalance flux,
+    //                      S_M^k = (p_k - p_int) ∇η,
+    //                      S_E^k = (p_k u_k - p_int u_int) · ∇η,
+    //                      with the interface average (p_int, u_int) selected
+    //                      per quantity by `pint_method`:
+    //                        1: arithmetic mean (default)
+    //                        2: eta-weighted
+    //                        3: acoustic-impedance weighted
+    //                        4: mass-fraction weighted
+    //                      Vanishes at p_0=p_1 (resp. p_0u_0=p_1u_1), so the
+    //                      per-phase pressure ground state survives. Same form
+    //                      as the legacy p_int closure but lives inside the
+    //                      new framework rather than gated on
+    //                      sqr_legacy_p_int_method.
+    //   Pillbox     (S1): theory's per-phase constitutive flux from the
+    //                      pillbox SQR derivation. Asymmetric — phase 0 sees
+    //                      -p_1 ∇η, phase 1 sees +p_0 ∇η; analogous H_k u_k
+    //                      flux for energy. Theory-faithful in the eps -> 0
+    //                      limit, but at finite eps it does *not* vanish at
+    //                      mechanical equilibrium and forces ∇p_k = ±p_other
+    //                      ∇η, driving phase pressures away from atmospheric
+    //                      across the band. Research mode only.
+    //   PillboxSymmetric (S1', Phase B.5):
+    //                      antisymmetrized variant of Pillbox. p_0, p_1 are
     //                      replaced by p_bar = (p_0+p_1)/2 (and analogously
     //                      H_k u_k by their arithmetic mean) so the per-cell
-    //                      momentum / energy split is strict action-reaction
-    //                      by construction. Recovers the spirit of the
-    //                      legacy p_int_method=1 path while staying in the
-    //                      new closure framework. At mechanical equilibrium
-    //                      (p_0 = p_1, u_0 = u_1) it agrees with S1; in
-    //                      transients it removes the ghost source. Theory
-    //                      consistency in the eps -> 0 limit is identical
-    //                      to S1 (both reduce to natural-BC SQR).
+    //                      momentum / energy split is strict action-reaction.
+    //                      Same ground-state pathology as Pillbox — kept as a
+    //                      research/comparison option.
     //   Jump        (S2): J_Q = -lambda * jump(intensive)  (Lagrange-multiplier
     //                      transfer coefficient on the conjugate intensive
     //                      variable: u_n, T, etc.). Symmetric — strict
-    //                      action-reaction on the band by construction.
+    //                      action-reaction on the band by construction. Vanishes
+    //                      at intensive equilibrium.
     //   Relax       (S3): J_Q = -C_Q * jump(intensive)/tau  (Landau-Teller;
     //                      intensive jump decays as exp(-t/tau_Q) in
     //                      continuous time). Symmetric. C_Q from harmonic
     //                      means: rho_eff = rho_0 rho_1/(rho_0+rho_1) for u_n;
     //                      C_E = (rho_0 cv_0)(rho_1 cv_1)/(rho_0 cv_0+rho_1 cv_1) for E.
-    // Default is Constitutive (S1, asymmetric) — theory-faithful at finite
-    // eps. Switch to ConstitutiveSymmetric for transient cases until the
-    // entropy proof in Phase F clears S1.
-    enum class ClosureStrategy { Constitutive = 0, Jump = 1, Relax = 2, ConstitutiveSymmetric = 3 };
+    //                      Vanishes at intensive equilibrium.
+    // Default is Constitutive — vanishes at equilibrium, so pressure agreement
+    // emerges automatically through the EOS once velocity / temperature have
+    // equilibrated. Pillbox / PillboxSymmetric are kept for research only.
+    enum class ClosureStrategy {
+        Constitutive     = 0,
+        Jump             = 1,
+        Relax            = 2,
+        Pillbox          = 3,
+        PillboxSymmetric = 4
+    };
     struct ClosureSpec {
         ClosureStrategy strategy = ClosureStrategy::Constitutive;
         Set::Scalar lambda = 0.0;  // S2 transfer coefficient (must be > 0 if strategy=Jump)
         Set::Scalar tau    = 0.0;  // S3 relaxation time      (must be > 0 if strategy=Relax)
+        int pint_method    = 1;    // Constitutive averaging: 1 arith, 2 eta, 3 Z, 4 mass-fraction
     };
     ClosureSpec un_close;   // normal-velocity closure (Phase B)
     ClosureSpec E_close;    // energy/temperature closure (Phase B; Fourier flux added in Phase E)
