@@ -129,3 +129,6 @@ sharpening_frequency = 100
 reinit_max_iter = 50
 reinit_tolerance = 1e-6
 omega_relax = 0.5; 
+
+
+Mob = 0.1

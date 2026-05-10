@@ -317,6 +317,92 @@ public:
     virtual ~FluidRiemann() = default;
 };
 
+// ============================================================================
+// 7-equation Baer-Nunziato types (per-phase mass / momentum / energy + alpha)
+//
+// State7 carries per-phase primitives + EOS parameters at one cell. The
+// Riemann solver consumes a left and right State7 across a face, and returns
+// per-phase fluxes plus the interface star-state (u_I*, p_I*) needed to
+// assemble the non-conservative product terms p_I grad(alpha_k) and the
+// alpha-equation upwind face value.
+//
+// Layout deliberately mirrors the 5-eqn State for the per-phase block so the
+// Riemann implementations can reuse pure-phase HLLC machinery.
+//
+// Reference: Saurel, Petitpas, Berry, JCP 228:1678-1712 (2009);
+//            Tokareva & Toro, JCP 229:3573-3604 (2010) for an explicit
+//            HLLC-type wave structure on the BN system.
+// ============================================================================
+struct State7
+{
+    // Volume fraction of phase 0 (alpha1 = 1 - alpha0 implicit)
+    Set::Scalar alpha0 = NAN;
+
+    // Phase 0 (e.g. liquid) primitives
+    Set::Scalar rho0       = NAN;
+    Set::Scalar M0_normal  = NAN;   // rho0 * u0_n  (per-phase momentum, NOT alpha-weighted)
+    Set::Scalar M0_tangent = NAN;   // rho0 * u0_t
+    Set::Scalar E0         = NAN;   // rho0 * (e0 + 0.5 |u0|^2)  per unit phase volume
+    Set::Scalar gam0       = NAN;
+    Set::Scalar p_inf_0    = NAN;   // Tammann reference pressure for phase 0
+    Set::Scalar T0         = NAN;
+
+    // Phase 1 (e.g. gas) primitives
+    Set::Scalar rho1       = NAN;
+    Set::Scalar M1_normal  = NAN;
+    Set::Scalar M1_tangent = NAN;
+    Set::Scalar E1         = NAN;
+    Set::Scalar gam1       = NAN;
+    Set::Scalar p_inf_1    = NAN;
+    Set::Scalar T1         = NAN;
+
+    State7() = default;
+
+    friend std::ostream &
+    operator<<(std::ostream &os, const State7 &s)
+    {
+        os << "alpha0=" << s.alpha0
+           << " | phase0: rho=" << s.rho0 << ", Mn=" << s.M0_normal << ", Mt=" << s.M0_tangent
+           << ", E=" << s.E0 << ", gam=" << s.gam0 << ", p_inf=" << s.p_inf_0 << ", T=" << s.T0
+           << " | phase1: rho=" << s.rho1 << ", Mn=" << s.M1_normal << ", Mt=" << s.M1_tangent
+           << ", E=" << s.E1 << ", gam=" << s.gam1 << ", p_inf=" << s.p_inf_1 << ", T=" << s.T1;
+        return os;
+    }
+};
+
+struct Flux7
+{
+    // Phase 0 fluxes (multiply by alpha0 face value when assembling the
+    // alpha_k * F_k flux divergence in the integrator)
+    Set::Scalar mass0  = 0.0;
+    Set::Scalar momn0  = 0.0;   // alpha0 * (rho0 u0_n^2 + p0)  (or BN-HLLC star state form)
+    Set::Scalar momt0  = 0.0;
+    Set::Scalar E_0    = 0.0;   // alpha0 * (rho0 E0 + p0) u0_n
+
+    // Phase 1 fluxes
+    Set::Scalar mass1  = 0.0;
+    Set::Scalar momn1  = 0.0;
+    Set::Scalar momt1  = 0.0;
+    Set::Scalar E_1    = 0.0;
+
+    // Interface (star) state - exposed for the integrator's non-conservative
+    // product assembly: p_I grad(alpha_k) in momentum,
+    //                   p_I u_I . grad(alpha_k) in energy,
+    //                   D(alpha_k)/Dt = u_I . grad(alpha_k).
+    Set::Scalar u_I    = 0.0;
+    Set::Scalar p_I    = 0.0;
+
+    Flux7() = default;
+};
+
+class FluidRiemann7
+{
+public:
+    virtual Flux7 Solve(const State7& L, const State7& R,
+                        Set::Scalar p_ref, Set::Scalar small) = 0;
+    virtual ~FluidRiemann7() = default;
+};
+
 }
 }
 }
