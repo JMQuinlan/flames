@@ -121,8 +121,56 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             }
         }
         pp_query_default("sqr_sources_time_dependent", value.sqr_sources_time_dependent, 0); // re-evaluate ic_m0/ic_u0/ic_q each Advance step at the current time (Stefan and similar)
-        pp_query_default("p_int_method", value.p_int_method, 0);                        // BS interface-pressure closure: 0 OFF, 1 arithmetic mean, 2 eta-weighted, 3 acoustic-impedance, 4 mass-fraction weighted
+        pp_query_default("p_int_method", value.p_int_method, 0);                        // BS interface-pressure closure: 0 OFF, 1 arithmetic mean, 2 eta-weighted, 3 acoustic-impedance, 4 mass-fraction weighted (legacy; only consulted when sqr_legacy_p_int_method=true)
+        pp_query_default("sqr_legacy_p_int_method", value.sqr_legacy_p_int_method, false); // if true, ApplySQRSource uses legacy p_int_method-averaged closure (Phase B kill-switch)
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
+
+        // === Closure-strategy framework (Phase B onwards) ===
+        // Select per-quantity SQR closure: constitutive (S1, default — theory's
+        // per-phase pillbox flux), jump (S2 — J_Q = -lambda*intensive_jump,
+        // symmetric), relax (S3 — Landau-Teller on intensive jump, symmetric).
+        // Non-default strategies require explicit lambda or tau; we error out
+        // rather than silently fall through, since a missing-coefficient
+        // default (lambda=0 or tau=inf) is numerically equivalent to S1 and
+        // would mask a config bug. See plan Phase B step 6 + Open Q7.
+        {
+            std::string s_un = "constitutive";
+            pp.query("closure.un_strategy", s_un);
+            if      (s_un == "constitutive")           value.un_close.strategy = Hydro2::ClosureStrategy::Constitutive;
+            else if (s_un == "constitutive_symmetric") value.un_close.strategy = Hydro2::ClosureStrategy::ConstitutiveSymmetric;
+            else if (s_un == "jump")                   value.un_close.strategy = Hydro2::ClosureStrategy::Jump;
+            else if (s_un == "relax")                  value.un_close.strategy = Hydro2::ClosureStrategy::Relax;
+            else Util::Abort(INFO, "closure.un_strategy must be one of: constitutive, constitutive_symmetric, jump, relax (got '", s_un, "')");
+
+            Set::Scalar tmp_l = -1.0, tmp_t = -1.0;
+            pp.query("closure.un_lambda", tmp_l);
+            pp.query("closure.un_tau",    tmp_t);
+            if (value.un_close.strategy == Hydro2::ClosureStrategy::Jump  && !(tmp_l > 0.0))
+                Util::Abort(INFO, "closure.un_strategy=jump requires closure.un_lambda > 0");
+            if (value.un_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_t > 0.0))
+                Util::Abort(INFO, "closure.un_strategy=relax requires closure.un_tau > 0");
+            if (tmp_l > 0.0) value.un_close.lambda = tmp_l;
+            if (tmp_t > 0.0) value.un_close.tau    = tmp_t;
+        }
+        {
+            std::string s_E = "constitutive";
+            pp.query("closure.E_strategy", s_E);
+            if      (s_E == "constitutive")           value.E_close.strategy = Hydro2::ClosureStrategy::Constitutive;
+            else if (s_E == "constitutive_symmetric") value.E_close.strategy = Hydro2::ClosureStrategy::ConstitutiveSymmetric;
+            else if (s_E == "jump")                   value.E_close.strategy = Hydro2::ClosureStrategy::Jump;
+            else if (s_E == "relax")                  value.E_close.strategy = Hydro2::ClosureStrategy::Relax;
+            else Util::Abort(INFO, "closure.E_strategy must be one of: constitutive, constitutive_symmetric, jump, relax (got '", s_E, "')");
+
+            Set::Scalar tmp_l = -1.0, tmp_t = -1.0;
+            pp.query("closure.E_lambda", tmp_l);
+            pp.query("closure.E_tau",    tmp_t);
+            if (value.E_close.strategy == Hydro2::ClosureStrategy::Jump  && !(tmp_l > 0.0))
+                Util::Abort(INFO, "closure.E_strategy=jump requires closure.E_lambda > 0");
+            if (value.E_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_t > 0.0))
+                Util::Abort(INFO, "closure.E_strategy=relax requires closure.E_tau > 0");
+            if (tmp_l > 0.0) value.E_close.lambda = tmp_l;
+            if (tmp_t > 0.0) value.E_close.tau    = tmp_t;
+        }
 
         // PHASE 1 (liquid — stiffened gas)
         pp_query_required("gamma_1", value.gamma_1);      // gamma for gamma law
@@ -2073,6 +2121,19 @@ Hydro2::ApplySQRSource(int lev,
     // call.
     const int  p_int_method_ = p_int_method;
 
+    // Phase-B closure-framework captures (see Hydro2::ClosureSpec).
+    // Strategies are passed into the device lambda as ints to keep the
+    // capture trivially copyable on GPU; (0=Constitutive, 1=Jump, 2=Relax).
+    const bool sqr_legacy_p_int_method_ = sqr_legacy_p_int_method;
+    const int  un_strat_  = static_cast<int>(un_close.strategy);
+    const Real un_lambda_ = un_close.lambda;
+    const Real un_tau_    = un_close.tau;
+    const int  E_strat_   = static_cast<int>(E_close.strategy);
+    const Real E_lambda_  = E_close.lambda;
+    const Real E_tau_     = E_close.tau;
+    const Real cv0_       = cv_0;
+    const Real cv1_       = cv_1;
+
     // Zero surface tension plot MF each call so bulk cells (which early-return
     // inside the ParallelFor below) don't carry stale values from prior steps.
     Fsv_mf[lev]->setVal(0.0);
@@ -2256,58 +2317,226 @@ Hydro2::ApplySQRSource(int lev,
             Fsv_out(i,j,k,0) = Real(0.0);
             Fsv_out(i,j,k,1) = Real(0.0);
 
-            // === Momentum: pressure-imbalance form, vanishes at p_0 = p_1 = p_int.
-            //     Phase 0:  S_M = (p_0 - p_int)·∇η    (BN "effective" force)
-            //     Phase 1:  S_M = (p_int - p_1)·∇η
-            //     Plus mass-transfer momentum ±ṁ₀·u₀·|∇η| and η-split Fsv.
-            //     Method 0 zeroes the pressure-imbalance part entirely.
-            Real dp0 = Real(0.0), dp1 = Real(0.0);
-            if (p_int_method_ != 0)
-            {
-                dp0 = p0_phase - p_int;
-                dp1 = p_int    - p1_phase;
-            }
+            // === Momentum + Energy SQR closure ===
+            //
+            // Two paths gated by sqr_legacy_p_int_method_:
+            //   true  -> legacy p_int-averaged closure (S_M^k = (p_k - p_int) ∇η,
+            //            S_E^k = (p_k u_k - p_int u_int) · ∇η). Kill-switch path
+            //            for bit-for-bit regression with the pre-Phase-B baseline.
+            //   false -> theory-faithful S1/S1'/S2/S3 framework (Phase B+):
+            //            * un_close.strategy selects the normal-velocity (momentum) closure.
+            //            * E_close .strategy selects the energy/temperature closure.
+            //            * Constitutive (S1) is asymmetric per-phase pillbox flux.
+            //            * ConstitutiveSymmetric (S1', Phase B.5) is the
+            //              antisymmetrized variant of S1: replaces (-p_1, +p_0)
+            //              with (-p_bar, +p_bar) and analogously for energy
+            //              flux, restoring strict per-cell action-reaction
+            //              while keeping S1's equilibrium fixed point.
+            //            * Jump (S2) and Relax (S3) are symmetric — strict
+            //              action-reaction on the band by construction.
+            //
+            // Mass-transfer ride-along (Smass*u*|∇η|) is appended in both paths,
+            // so prescribed ṁ₀ and the future Phase-C Stefan/CH closures slot in
+            // unchanged.
+            //
+            // Action-reaction (plan B step 5):
+            //   * Mass:     R0 + R1 = 0 by construction (-Smass / +Smass).
+            //   * Momentum: ΣP_k = (p_0-p_1)∇η for asymmetric S1 — equals the
+            //               surface-tension force on the mixture in the sharp limit;
+            //               not strictly zero on the band at finite ε. S1' (the
+            //               symmetric variant, Phase B.5) and S2/S3 paths are strict.
+            //   * Energy:   analogous; S2/S3 paths strict.
+            // A per-step entropy/conservation monitor is deferred to Phase F.
+
             Real Smass_mx = mdot0 * u0x * grad_eta_mag;
             Real Smass_my = mdot0 * u0y * grad_eta_mag;
-            Real P0_src_x = dp0*grad_eta(0) - Smass_mx;
-            Real P0_src_y = dp0*grad_eta(1) - Smass_my;
-            Real P1_src_x = dp1*grad_eta(0) + Smass_mx;
-            Real P1_src_y = dp1*grad_eta(1) + Smass_my;
+            Real SEq      = qx*grad_eta(0) + qy*grad_eta(1);
+
+            Real dp0 = Real(0.0), dp1 = Real(0.0);
+            Real P0_src_x = Real(0.0), P0_src_y = Real(0.0);
+            Real P1_src_x = Real(0.0), P1_src_y = Real(0.0);
+            Real U0_src   = Real(0.0), U1_src   = Real(0.0);
+
+            if (sqr_legacy_p_int_method_)
+            {
+                // ----- Legacy: pressure-imbalance vs. p_int (averaged via p_int_method) -----
+                if (p_int_method_ != 0)
+                {
+                    dp0 = p0_phase - p_int;
+                    dp1 = p_int    - p1_phase;
+                }
+                P0_src_x = dp0*grad_eta(0) - Smass_mx;
+                P0_src_y = dp0*grad_eta(1) - Smass_my;
+                P1_src_x = dp1*grad_eta(0) + Smass_mx;
+                P1_src_y = dp1*grad_eta(1) + Smass_my;
+
+                Real pu_0_minus_int = Real(0.0);
+                Real pu_int_minus_1 = Real(0.0);
+                if (p_int_method_ != 0)
+                {
+                    Real pu_int = p_int   * (u_int_x*grad_eta(0) + u_int_y*grad_eta(1));
+                    Real pu_0   = p0_phase* (u0x_ph *grad_eta(0) + u0y_ph *grad_eta(1));
+                    Real pu_1   = p1_phase* (u1x_ph *grad_eta(0) + u1y_ph *grad_eta(1));
+                    pu_0_minus_int = pu_0   - pu_int;
+                    pu_int_minus_1 = pu_int - pu_1;
+                }
+                U0_src = pu_0_minus_int - SEq;
+                U1_src = pu_int_minus_1 + SEq;
+            }
+            else
+            {
+                // ----- Phase-B framework: S1 (constitutive) | S2 (jump) | S3 (relax) -----
+
+                // u_n closure -> momentum SQR source
+                Real S_un_0_x = Real(0.0), S_un_0_y = Real(0.0);
+                Real S_un_1_x = Real(0.0), S_un_1_y = Real(0.0);
+                if (un_strat_ == 0)        // Constitutive (S1, asymmetric)
+                {
+                    // Inviscid impermeable baseline (theory Eq.\ P_baseline):
+                    //   P_1 = +p_0 n̂   ->  S_M^(1) = +p_0 ∇η     (since n̂|∇η|=∇η)
+                    //   P_0 = -p_1 n̂   ->  S_M^(0) = -p_1 ∇η
+                    // Sum (p_0-p_1)∇η is the unbalanced jump force feeding mixture
+                    // momentum; surface tension cancels it via Korteweg ∇·Σ_K
+                    // (delivered in flux form by RHS_PerPhase). Asymmetric — see
+                    // Open Q9 in the Phase-B plan.
+                    S_un_0_x = -p1_phase * grad_eta(0);
+                    S_un_0_y = -p1_phase * grad_eta(1);
+                    S_un_1_x = +p0_phase * grad_eta(0);
+                    S_un_1_y = +p0_phase * grad_eta(1);
+                    dp0 = -p1_phase;
+                    dp1 = +p0_phase;
+                }
+                else if (un_strat_ == 3)   // ConstitutiveSymmetric (S1', Phase B.5)
+                {
+                    // Antisymmetrized S1: replace the per-phase pressures
+                    //   (-p_1, +p_0) with the average p_bar = (p_0+p_1)/2 so
+                    //   S_M^0 + S_M^1 = 0 per cell by construction. At
+                    //   mechanical equilibrium (p_0 = p_1 = p) this reduces
+                    //   to (-p ∇η, +p ∇η), agreeing with asymmetric S1.
+                    //   In transients it removes the (p_0-p_1) ∇η ghost
+                    //   source that radiates spurious interfacial waves
+                    //   (acoustic_1d). See Phase B.5 patch / plan Open Q9.
+                    Real p_avg = Real(0.5) * (p0_phase + p1_phase);
+                    S_un_0_x = -p_avg * grad_eta(0);
+                    S_un_0_y = -p_avg * grad_eta(1);
+                    S_un_1_x = +p_avg * grad_eta(0);
+                    S_un_1_y = +p_avg * grad_eta(1);
+                    dp0 = -p_avg;
+                    dp1 = +p_avg;
+                }
+                else                       // Jump (S2) or Relax (S3) — symmetric on (u_n,0 - u_n,1)
+                {
+                    Real n_x  = grad_eta(0) / grad_eta_mag;
+                    Real n_y  = grad_eta(1) / grad_eta_mag;
+                    Real u0_n = u0x_ph*n_x + u0y_ph*n_y;
+                    Real u1_n = u1x_ph*n_x + u1y_ph*n_y;
+                    Real du_n = u0_n - u1_n;
+                    Real J_un;
+                    if (un_strat_ == 1)    // Jump (S2)
+                    {
+                        J_un = -un_lambda_ * du_n;
+                    }
+                    else                   // Relax (S3): C_un = harmonic(rho_k)
+                    {
+                        Real rho_eff = (safe_r0 * safe_r1) / (safe_r0 + safe_r1);
+                        J_un = -rho_eff * du_n / un_tau_;
+                    }
+                    // ApplyInterfaceFlux: phase 0 receives +J_un n̂ |∇η|, phase 1 the
+                    // negative — strict action-reaction on the band.
+                    S_un_0_x = +J_un * grad_eta(0);
+                    S_un_0_y = +J_un * grad_eta(1);
+                    S_un_1_x = -J_un * grad_eta(0);
+                    S_un_1_y = -J_un * grad_eta(1);
+                    dp0 = +J_un;
+                    dp1 = -J_un;
+                }
+                P0_src_x = S_un_0_x - Smass_mx;
+                P0_src_y = S_un_0_y - Smass_my;
+                P1_src_x = S_un_1_x + Smass_mx;
+                P1_src_y = S_un_1_y + Smass_my;
+
+                // E closure -> energy SQR source
+                Real S_E_0 = Real(0.0), S_E_1 = Real(0.0);
+                if (E_strat_ == 0)         // Constitutive (S1, asymmetric)
+                {
+                    // Inviscid impermeable baseline (theory Eq.\ Q_close at V_I=0,
+                    // tau_k=0, q_k=0):
+                    //   Q̃_1 = ½ρ_0|u_0|² (u_0·n̂) + (U_0+p_0)(u_0·n̂)
+                    //   Q̃_0 = -[½ρ_1|u_1|² (u_1·n̂) + (U_1+p_1)(u_1·n̂)]
+                    // Phase C will replace (u_k·n̂) in the KE-flux factor with
+                    // (u_k·n̂ - V_I); the enthalpy-flux factor (U_k+p_k)(u_k·n̂)
+                    // is unchanged. E_arr stores the conserved total energy
+                    // density U_k = ρe + ½ρ|u|², so KE + E_arr + p = ρe + ρ|u|² + p.
+                    Real u0_dot_geta = u0x_ph*grad_eta(0) + u0y_ph*grad_eta(1);
+                    Real u1_dot_geta = u1x_ph*grad_eta(0) + u1y_ph*grad_eta(1);
+                    Real H0_coef     = KE0 + E0_arr(i,j,k) + p0_phase;
+                    Real H1_coef     = KE1 + E1_arr(i,j,k) + p1_phase;
+                    S_E_0 = -H1_coef * u1_dot_geta;
+                    S_E_1 = +H0_coef * u0_dot_geta;
+                }
+                else if (E_strat_ == 3)    // ConstitutiveSymmetric (S1', Phase B.5)
+                {
+                    // Antisymmetrized S1: average the per-phase enthalpy+KE
+                    //   fluxes so S_E^0 + S_E^1 = 0 per cell. Hu_avg is the
+                    //   arithmetic mean of (KE_k + E_k + p_k)(u_k·∇η). At
+                    //   mechanical equilibrium (H_0 u_0 = H_1 u_1) this gives
+                    //   the same magnitude as S1; in transients it removes
+                    //   the (H_0 u_0 - H_1 u_1)·∇η mixture-energy ghost
+                    //   source. See Phase B.5 patch / plan Open Q9.
+                    Real u0_dot_geta = u0x_ph*grad_eta(0) + u0y_ph*grad_eta(1);
+                    Real u1_dot_geta = u1x_ph*grad_eta(0) + u1y_ph*grad_eta(1);
+                    Real H0_coef     = KE0 + E0_arr(i,j,k) + p0_phase;
+                    Real H1_coef     = KE1 + E1_arr(i,j,k) + p1_phase;
+                    Real Hu_avg      = Real(0.5) * (H0_coef * u0_dot_geta
+                                                  + H1_coef * u1_dot_geta);
+                    S_E_0 = -Hu_avg;
+                    S_E_1 = +Hu_avg;
+                }
+                else                       // Jump (S2) or Relax (S3) — symmetric on (T_0 - T_1)
+                {
+                    // Convention B: UE = ρ cv T  ->  T = UE/(ρ cv) for both
+                    // CPG and Tammann (no pi subtraction; see project memory).
+                    // S2 / S3 target the *intensive* jump T_0 - T_1, not E_0 - E_1
+                    // — equal-energy fixed point is wrong when cv differs.
+                    Real safe_cv0 = (cv0_ > Real(1e-30)) ? cv0_ : Real(1.0);
+                    Real safe_cv1 = (cv1_ > Real(1e-30)) ? cv1_ : Real(1.0);
+                    Real T0 = UE0 / (safe_r0 * safe_cv0);
+                    Real T1 = UE1 / (safe_r1 * safe_cv1);
+                    Real dT = T0 - T1;
+                    Real J_E;
+                    if (E_strat_ == 1)     // Jump (S2)
+                    {
+                        J_E = -E_lambda_ * dT;
+                    }
+                    else                   // Relax (S3): C_E = harmonic(ρ_k cv_k)
+                    {
+                        Real C0  = safe_r0 * safe_cv0;
+                        Real C1  = safe_r1 * safe_cv1;
+                        Real C_E = (C0 * C1) / (C0 + C1);
+                        J_E = -C_E * dT / E_tau_;
+                    }
+                    S_E_0 = +J_E * grad_eta_mag;
+                    S_E_1 = -J_E * grad_eta_mag;
+                }
+                U0_src = S_E_0 - SEq;
+                U1_src = S_E_1 + SEq;
+            }
+
+            // Apply
             P0(i,j,k,0) += P0_src_x;
             P0(i,j,k,1) += P0_src_y;
             P1(i,j,k,0) += P1_src_x;
             P1(i,j,k,1) += P1_src_y;
+            U0(i,j,k)   += U0_src;
+            U1(i,j,k)   += U1_src;
 
-            // Diagnostic plot fields: pressure imbalance and momentum source per phase.
+            // Diagnostic plot fields (single block, both paths feed the same fields).
             bs_dp_out(i,j,k,0)      = dp0;
             bs_dp_out(i,j,k,1)      = dp1;
             bs_mom_src_out(i,j,k,0) = P0_src_x;
             bs_mom_src_out(i,j,k,1) = P0_src_y;
             bs_mom_src_out(i,j,k,2) = P1_src_x;
             bs_mom_src_out(i,j,k,3) = P1_src_y;
-
-            // === Energy: same correction for the pressure-work part.
-            //     Phase 0:  S_E = (p_0·u_0 - p_int·u_int)·∇η
-            //     Phase 1:  S_E = (p_int·u_int - p_1·u_1)·∇η
-            //     Plus heat flux q·∇η (antisymmetric) and η-split Fsv·u_k work.
-            //     Method 0 zeroes the pressure-work part entirely.
-            Real pu_0_minus_int = Real(0.0);
-            Real pu_int_minus_1 = Real(0.0);
-            if (p_int_method_ != 0)
-            {
-                Real pu_int = p_int   * (u_int_x*grad_eta(0) + u_int_y*grad_eta(1));
-                Real pu_0   = p0_phase* (u0x_ph *grad_eta(0) + u0y_ph *grad_eta(1));
-                Real pu_1   = p1_phase* (u1x_ph *grad_eta(0) + u1y_ph *grad_eta(1));
-                pu_0_minus_int = pu_0   - pu_int;
-                pu_int_minus_1 = pu_int - pu_1;
-            }
-            Real SEq = qx*grad_eta(0) + qy*grad_eta(1);
-            Real U0_src = pu_0_minus_int - SEq;
-            Real U1_src = pu_int_minus_1 + SEq;
-            U0(i,j,k) += U0_src;
-            U1(i,j,k) += U1_src;
-
-            // Diagnostic plot field: energy source per phase.
             bs_eng_src_out(i,j,k,0) = U0_src;
             bs_eng_src_out(i,j,k,1) = U1_src;
         });
@@ -4754,9 +4983,55 @@ void Hydro2::ApplyNSCBC(
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////// ADVANCE ///////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// =====================================================================================
+//  Phase A audit: Hydro2 code-vs-theory parity table
+// =====================================================================================
+//
+//  Spec of record: ../SQR_fluid_fluid/SQR_fluid_fluid_theory.tex (mirrored as an
+//  appendix table for traceability). Status legend: match | partial | missing |
+//  unknown. Update the row's status (and theory-side appendix) as each Phase B–E
+//  conversion lands.
+//
+//  | #   | Theory                                                          | Code site                                | Status                |
+//  |-----|-----------------------------------------------------------------|------------------------------------------|-----------------------|
+//  | A1  | State variable form: intrinsic ρ_k, ρ_k u_k, E_k                | Phase A.0 verdict (rename applied)       | match                 |
+//  | A2  | Per-phase Euler flux divergence ∇·F_k                           | RHS_PerPhase, Hydro2.cpp:1647-1672       | match (depends on A1) |
+//  | A3  | Mass SQR ±ṁ|∇η|, ṁ_0+ṁ_1=0                                      | ApplySQRSource, Hydro2.cpp:2247-2250     | match (form); closure in A6 |
+//  | A4  | Inviscid momentum closure P_1 = p_0 n̂, P_0 = -p_1 n̂            | ApplySQRSource (Phase B S1 path)         | match (default un_close=Constitutive); legacy via sqr_legacy_p_int_method |
+//  | A5  | Energy Q̃_k: other-phase enthalpy + KE flux (V_I=0 in Phase B)   | ApplySQRSource (Phase B S1 path)         | match (default E_close=Constitutive); legacy via sqr_legacy_p_int_method  |
+//  | A6  | Phase-change ṁ_1 = -ρ_0(u_0·n̂ - V_I)                            | ic_m0 / ComputeEffectiveSQRSources       | unknown / inequivalent |
+//  | A7  | Korteweg per-phase weight = mass fraction Y_k = (η_k ρ_k)/ρ_mix | RHS_PerPhase Y_self, Hydro2.cpp:1610,1632 | match                |
+//  | A8  | Korteweg stress Σ_K = K[½|∇η|² I − ∇η⊗∇η]                        | Hydro2.cpp:1593-1645, HLLC.H             | match                 |
+//  | A9  | 9-point isotropic ∂²η stencil (lap9)                            | RHS_PerPhase, Hydro2.cpp:1551-1558       | match                 |
+//  | A10 | Angular-momentum no-slip (M_k)(u_k − u_other) ∂²η               | (would live near) Hydro2.cpp:1691-1750   | missing               |
+//  | A11 | Stress NOT symmetric in diffuse layer                           | n/a (follows A10)                        | follows A10           |
+//  | A12 | Symmetric thermal SQR ė_1 = -k_0 ∂T_0/∂n, ė_0 = +k_1 ∂T_1/∂n    | ApplyHeatConduction, Hydro2.cpp:1393     | missing               |
+//  | A13 | Body force f_κ^(k) = Y_k ∇·Σ_K                                  | follows A7                               | match                 |
+//  | A14 | Capillary work g_κ^(k) = Y_k u_k·∇·Σ_K                          | follows A7                               | match                 |
+//  | A15 | Interstitial working g_{κ,int}^(k)                              | none                                     | missing (Phase F)     |
+//  | A16 | Discrete action-reaction sums (Σ_k mass/mom/E SQR ≈ 0)          | needs runtime assertion in ApplySQRSource | unknown              |
+//  | A17 | Vestigial pref threading                                        | HLLC Solve, energy floor                 | match-but-legacy (Phase F) |
+//  | A18 | Closure-strategy selector S1/S2/S3 per quantity (ρ, u_n, u_t, E)| Phase B: un_close, E_close in Hydro2.H   | partial (u_n, E wired; rho Phase C, u_t Phase D) |
+//
+//  Sign convention: n̂ = +∇η/|∇η| points 0→1 (subject to Open Q2). Per A.0,
+//  per-phase MultiFabs store intrinsic fields; η factors enter only at coupling
+//  and mixture-reassembly sites. Line numbers above are post-rename
+//  (two-full-states branch, 2026-05-09); re-verify before each Phase B–E edit.
+//
+// =====================================================================================
+//
 void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 {
     BL_PROFILE("Integrator::Hydro2::Advance");
+
+    // === Per-phase state-variable invariant (Phase A.0 verdict) ===
+    // density_{0,1}_mf, momentum_{0,1}_mf, energy_{0,1}_mf store INTRINSIC
+    // single-phase quantities (ρ_k, ρ_k u_k, U_k = ρ_k e_k + ½ρ_k|u_k|²),
+    // NOT η-weighted (η_k ρ_k, etc.). η factors enter only at coupling sites
+    // (HLLC Korteweg face data via Y_self mass fraction; SQR sources via
+    // ∇η, |∇η|) and at mixture-reassembly diagnostics. Do not multiply η_k
+    // into the per-phase Euler flux divergence in RHS_PerPhase.
 
     const Geometry& geom = this->geom[lev];
     const Real* DX = geom.CellSize();

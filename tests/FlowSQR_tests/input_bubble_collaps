@@ -63,33 +63,33 @@ gamma_0 = 1.4   # Air/gas (inside bubble)
 # Density ratio 1 : 10
 # ----------------------------
 
-density_eta1.ic.type = expression
-density_eta1.ic.expression.region0 = "10.0"
+density_1.ic.type = expression
+density_1.ic.expression.region0 = "10.0"
 
-density_eta0.ic.type = expression
-density_eta0.ic.expression.region0 = "1.0"
+density_0.ic.type = expression
+density_0.ic.expression.region0 = "1.0"
 
 # ----------------------------
 # Initial velocities (rest)
 # ----------------------------
 
-velocity_eta1.ic.type = expression
-velocity_eta1.ic.expression.region0 = "0.0"
-velocity_eta1.ic.expression.region1 = "0.0"
+velocity_1.ic.type = expression
+velocity_1.ic.expression.region0 = "0.0"
+velocity_1.ic.expression.region1 = "0.0"
 
-velocity_eta0.ic.type = expression
-velocity_eta0.ic.expression.region0 = "0.0"
-velocity_eta0.ic.expression.region1 = "0.0"
+velocity_0.ic.type = expression
+velocity_0.ic.expression.region0 = "0.0"
+velocity_0.ic.expression.region1 = "0.0"
 
 # ----------------------------
 # Lowest stable pressure
 # ----------------------------
 
-pressure_eta1.ic.type = expression
-pressure_eta1.ic.expression.region0 = "1.0e5"
+pressure_1.ic.type = expression
+pressure_1.ic.expression.region0 = "1.0e5"
 
-pressure_eta0.ic.type = expression
-pressure_eta0.ic.expression.region0 = "1.0e2"
+pressure_0.ic.type = expression
+pressure_0.ic.expression.region0 = "1.0e2"
 
 # ----------------------------
 # Specific Heats

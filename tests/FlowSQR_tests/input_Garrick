@@ -56,29 +56,29 @@ mu_1   = 0.0
 pref = 0.0
 
 ### IC State - eta=0 phase (LHS, x < 0): compressed gas ###
-density_eta0.ic.type = constant
-density_eta0.ic.constant.value = 1.241
+density_0.ic.type = constant
+density_0.ic.constant.value = 1.241
 
-velocity_eta0.ic.type = constant
-velocity_eta0.ic.constant.value = 0.0 0.0
+velocity_0.ic.type = constant
+velocity_0.ic.constant.value = 0.0 0.0
 
-pressure_eta0.ic.type = constant
-# pressure_eta0.ic.constant.value = 2.753
-pressure_eta0.ic.constant.value = 5.753
+pressure_0.ic.type = constant
+# pressure_0.ic.constant.value = 2.753
+pressure_0.ic.constant.value = 5.753
 
 cp_0 = "1.4"
 cv_0 = "1.0"
 
 ### IC State - eta=1 phase (RHS, x > 0): liquid ###
-density_eta1.ic.type = constant
-density_eta1.ic.constant.value = 0.991
-# density_eta1.ic.constant.value = 1.241
+density_1.ic.type = constant
+density_1.ic.constant.value = 0.991
+# density_1.ic.constant.value = 1.241
 
-velocity_eta1.ic.type = constant
-velocity_eta1.ic.constant.value = 0.0 0.0
+velocity_1.ic.type = constant
+velocity_1.ic.constant.value = 0.0 0.0
 
-pressure_eta1.ic.type = constant
-pressure_eta1.ic.constant.value = 3.059e-4
+pressure_1.ic.type = constant
+pressure_1.ic.constant.value = 3.059e-4
 
 cp_1 = "1.4"
 cv_1 = "1.0"

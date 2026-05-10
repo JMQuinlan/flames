@@ -482,7 +482,64 @@ protected:
     // 2: eta-weighted             p_int = (1-eta) p_0 + eta p_1
     // 3: acoustic-impedance       p_int = (Z_1 p_0 + Z_0 p_1)/(Z_0 + Z_1), Z_k = rho_k c_k
     // Same weighting is applied to u_int used in the energy source.
+    // Legacy path: only consulted when sqr_legacy_p_int_method = true (Phase B).
     int p_int_method = 0;
+
+    // === Closure-strategy framework (Phase B onwards) ===
+    // For each per-phase nonequilibrium quantity (u_n, E in Phase B; rho added
+    // in Phase C, u_t in Phase D) the interface flux J_Q is computed by one of
+    // three strategies:
+    //   Constitutive (S1): theory's per-phase constitutive flux from the
+    //                      pillbox SQR derivation. Asymmetric — each phase
+    //                      receives the *other* phase's constitutive flux.
+    //                      Faithful to Schmidt-2022 / SQR_fluid_fluid theory
+    //                      in the sharp-interface (eps -> 0) limit, but at
+    //                      finite eps the per-cell sum is (p_0 - p_1) ∇η
+    //                      (resp. (H_0 u_0 - H_1 u_1)·∇η) — a transient
+    //                      mixture-momentum / mixture-energy "ghost source"
+    //                      that radiates spurious waves when phase pressures
+    //                      or velocities differ (acoustic_1d).
+    //   ConstitutiveSymmetric (S1', Phase B.5):
+    //                      antisymmetrized variant of S1. p_0, p_1 are
+    //                      replaced by p_bar = (p_0+p_1)/2 (and analogously
+    //                      H_k u_k by their arithmetic mean) so the per-cell
+    //                      momentum / energy split is strict action-reaction
+    //                      by construction. Recovers the spirit of the
+    //                      legacy p_int_method=1 path while staying in the
+    //                      new closure framework. At mechanical equilibrium
+    //                      (p_0 = p_1, u_0 = u_1) it agrees with S1; in
+    //                      transients it removes the ghost source. Theory
+    //                      consistency in the eps -> 0 limit is identical
+    //                      to S1 (both reduce to natural-BC SQR).
+    //   Jump        (S2): J_Q = -lambda * jump(intensive)  (Lagrange-multiplier
+    //                      transfer coefficient on the conjugate intensive
+    //                      variable: u_n, T, etc.). Symmetric — strict
+    //                      action-reaction on the band by construction.
+    //   Relax       (S3): J_Q = -C_Q * jump(intensive)/tau  (Landau-Teller;
+    //                      intensive jump decays as exp(-t/tau_Q) in
+    //                      continuous time). Symmetric. C_Q from harmonic
+    //                      means: rho_eff = rho_0 rho_1/(rho_0+rho_1) for u_n;
+    //                      C_E = (rho_0 cv_0)(rho_1 cv_1)/(rho_0 cv_0+rho_1 cv_1) for E.
+    // Default is Constitutive (S1, asymmetric) — theory-faithful at finite
+    // eps. Switch to ConstitutiveSymmetric for transient cases until the
+    // entropy proof in Phase F clears S1.
+    enum class ClosureStrategy { Constitutive = 0, Jump = 1, Relax = 2, ConstitutiveSymmetric = 3 };
+    struct ClosureSpec {
+        ClosureStrategy strategy = ClosureStrategy::Constitutive;
+        Set::Scalar lambda = 0.0;  // S2 transfer coefficient (must be > 0 if strategy=Jump)
+        Set::Scalar tau    = 0.0;  // S3 relaxation time      (must be > 0 if strategy=Relax)
+    };
+    ClosureSpec un_close;   // normal-velocity closure (Phase B)
+    ClosureSpec E_close;    // energy/temperature closure (Phase B; Fourier flux added in Phase E)
+    // ClosureSpec rho_close;  // density / phase change closure (added in Phase C)
+    // ClosureSpec ut_close;   // tangential-velocity closure (added in Phase D)
+
+    // If true, ApplySQRSource uses the legacy p_int_method-averaged momentum
+    // and energy sources instead of the new theory-faithful S1/S2/S3 closure
+    // path. Enables the kill-switch regression (set p_int_method=2 +
+    // sqr_legacy_p_int_method=1 to reproduce the pre-Phase-B baseline
+    // bit-for-bit). Mass and prescribed-heat-flux paths are unchanged.
+    bool sqr_legacy_p_int_method = false;
 
     int kappa_method = 1;        // 1: Smooth Normals (default)  2: Height Function  3: Hybrid
     int smooth_kernel_size = 3;  // Gaussian kernel for normal smoothing: 3 (3x3, default) or 5 (5x5)

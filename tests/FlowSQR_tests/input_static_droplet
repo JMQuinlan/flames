@@ -86,30 +86,30 @@ epsilon = eta.ic.expression.constant.epsilon
 gamma_1 = 7.15
 gamma_0 = 1.4
 
-density_eta1.ic.type = expression
-density_eta1.ic.expression.region0 = "1000.0"
+density_1.ic.type = expression
+density_1.ic.expression.region0 = "1000.0"
 
-density_eta0.ic.type = expression
-density_eta0.ic.expression.region0 = "1.225"
+density_0.ic.type = expression
+density_0.ic.expression.region0 = "1.225"
 
 # Initial velocity zero everywhere — any growth comes from the discretization
-velocity_eta1.ic.type = expression
-velocity_eta1.ic.expression.region0 = "0.0"
-velocity_eta1.ic.expression.region1 = "0.0"
+velocity_1.ic.type = expression
+velocity_1.ic.expression.region0 = "0.0"
+velocity_1.ic.expression.region1 = "0.0"
 
-velocity_eta0.ic.type = expression
-velocity_eta0.ic.expression.region0 = "0.0"
-velocity_eta0.ic.expression.region1 = "0.0"
+velocity_0.ic.type = expression
+velocity_0.ic.expression.region0 = "0.0"
+velocity_0.ic.expression.region1 = "0.0"
 
 # Flat IC pressure on both phases. The well-balanced Korteweg+Q path
 # delivers the Laplace jump Δp = σ/R = 144 Pa as an EMERGENT steady
 # state — presetting the jump in the IC stacks on top of the
 # formulation's contribution and gives ~2σ/R.
-pressure_eta1.ic.type = expression
-pressure_eta1.ic.expression.region0 = "1.01325e5"
+pressure_1.ic.type = expression
+pressure_1.ic.expression.region0 = "1.01325e5"
 
-pressure_eta0.ic.type = expression
-pressure_eta0.ic.expression.region0 = "1.01325e5"
+pressure_0.ic.type = expression
+pressure_0.ic.expression.region0 = "1.01325e5"
 
 # Specific heats (water/air canonical)
 cp_1 = 4180.0
@@ -220,5 +220,14 @@ ch_mobility_nom = 0.0
 # ⇒ κ = √(0.0933·ε²) = 1.222e-5,  λ = κ/ε² = 7637.5
 ch_W_scale      = 7637.5      # lambda
 ch_kappa        = 1.222e-5    # kappa  (= lambda * epsilon^2)
+
+# HYDRO CLOSURE STRATEGIES (Phase B.5+)
+# The `hydro2.closure.*_strategy` knobs select the closure formulation for the
+# momentum and energy BS sources. The default "constitutive_symmetric" is the
+# new S1' variant that restores strict per-cell action-reaction while keeping
+# the same equilibrium as the original S1 (Open Q9) path. The legacy p
+hydro2.closure.un_strategy = constitutive_symmetric
+hydro2.closure.E_strategy  = constitutive_symmetric
+
 
 nscbc.enabled = false

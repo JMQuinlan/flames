@@ -28,8 +28,8 @@
 
 ### OUTPUT ###
 plot_file   = ./tests/FlowSQR_tests/output_acoustic_1d
-amr.plot_dt = 2.0e-4
-amr.plot_int = 200
+# amr.plot_dt = 2.0e-4
+amr.plot_int = 1
 
 ### MESHING ###
 amr.max_level      = 0
@@ -87,44 +87,44 @@ pref = 0.0
 #   delta_u   = (dp_max / (rho0 c0)) * exp(...)    (right-traveling: dp and du in phase, same sign)
 #   delta_rho = (dp_max / c0^2)      * exp(...)
 # Amplitude dp_max = 100 Pa  (~0.001 * p0)  -> linear-acoustic regime.
-density_eta0.ic.type                          = expression
-density_eta0.ic.expression.constant.rho0      = 1.225
-density_eta0.ic.expression.constant.dp_max    = 100.0
-density_eta0.ic.expression.constant.c0        = 340.2706
-density_eta0.ic.expression.constant.x0        = -0.5
-density_eta0.ic.expression.constant.sigma     = 0.05
-density_eta0.ic.expression.region0            = "rho0 + (dp_max/(c0*c0)) * exp(-(x-x0)*(x-x0)/(2.0*sigma*sigma))"
+density_0.ic.type                          = expression
+density_0.ic.expression.constant.rho0      = 1.225
+density_0.ic.expression.constant.dp_max    = 100.0
+density_0.ic.expression.constant.c0        = 340.2706
+density_0.ic.expression.constant.x0        = -0.5
+density_0.ic.expression.constant.sigma     = 0.05
+density_0.ic.expression.region0            = "rho0 + (dp_max/(c0*c0)) * exp(-(x-x0)*(x-x0)/(2.0*sigma*sigma))"
 
-velocity_eta0.ic.type                          = expression
-velocity_eta0.ic.expression.constant.rho0      = 1.225
-velocity_eta0.ic.expression.constant.dp_max    = 100.0
-velocity_eta0.ic.expression.constant.c0        = 340.2706
-velocity_eta0.ic.expression.constant.x0        = -0.5
-velocity_eta0.ic.expression.constant.sigma     = 0.05
-velocity_eta0.ic.expression.region0            = "(dp_max/(rho0*c0)) * exp(-(x-x0)*(x-x0)/(2.0*sigma*sigma))"
-velocity_eta0.ic.expression.region1            = "0.0"
+velocity_0.ic.type                          = expression
+velocity_0.ic.expression.constant.rho0      = 1.225
+velocity_0.ic.expression.constant.dp_max    = 100.0
+velocity_0.ic.expression.constant.c0        = 340.2706
+velocity_0.ic.expression.constant.x0        = -0.5
+velocity_0.ic.expression.constant.sigma     = 0.05
+velocity_0.ic.expression.region0            = "(dp_max/(rho0*c0)) * exp(-(x-x0)*(x-x0)/(2.0*sigma*sigma))"
+velocity_0.ic.expression.region1            = "0.0"
 
-pressure_eta0.ic.type                          = expression
-pressure_eta0.ic.expression.constant.p0        = 101325.0
-pressure_eta0.ic.expression.constant.dp_max    = 100.0
-pressure_eta0.ic.expression.constant.x0        = -0.5
-pressure_eta0.ic.expression.constant.sigma     = 0.05
-pressure_eta0.ic.expression.region0            = "p0 + dp_max * exp(-(x-x0)*(x-x0)/(2.0*sigma*sigma))"
+pressure_0.ic.type                          = expression
+pressure_0.ic.expression.constant.p0        = 101325.0
+pressure_0.ic.expression.constant.dp_max    = 100.0
+pressure_0.ic.expression.constant.x0        = -0.5
+pressure_0.ic.expression.constant.sigma     = 0.05
+pressure_0.ic.expression.region0            = "p0 + dp_max * exp(-(x-x0)*(x-x0)/(2.0*sigma*sigma))"
 
 # CPG calibration for air: cv = R / (gamma-1) = 287/0.4 = 717.5,  cp = gamma*cv = 1004.5
 cp_0 = "1004.5"
 cv_0 = "717.5"
 
 ### IC State - eta=1 phase (water at rest, matched pressure) ###
-density_eta1.ic.type           = constant
-density_eta1.ic.constant.value = 1000.0
+density_1.ic.type           = constant
+density_1.ic.constant.value = 1000.0
 
-velocity_eta1.ic.type                = expression
-velocity_eta1.ic.expression.region0  = "0.0"
-velocity_eta1.ic.expression.region1  = "0.0"
+velocity_1.ic.type                = expression
+velocity_1.ic.expression.region0  = "0.0"
+velocity_1.ic.expression.region1  = "0.0"
 
-pressure_eta1.ic.type           = constant
-pressure_eta1.ic.constant.value = 101325.0
+pressure_1.ic.type           = constant
+pressure_1.ic.constant.value = 101325.0
 
 # Stiffened-gas calibration for water: take cv such that cv ~ liquid-water value (4180 J/kg/K).
 # cp = gamma*cv keeps the EOS-internal cp/cv ratio consistent with gamma_1=5.5.
@@ -171,7 +171,7 @@ sigma = 0;
 Dv    = 0;
 g     = 0.0;
 
-apply_surface_tension = 0
+apply_surface_tension = 1
 apply_weight          = 0
 apply_vaporization    = 0
 
@@ -179,8 +179,8 @@ apply_vaporization    = 0
 # Pure-hydro acoustic test: turn off the BS source coupling and freeze the CH
 # field (mobility = 0).  The interface profile sits at its IC tanh; only the
 # compressible Euler system carries the acoustic pulse across the interface.
-sqr_source_mode      = CH_Emergent
-p_int_method        = 3       # acoustic-impedance-matched interface pressure
+sqr_source_mode     = ch_emergent
+# p_int_method        = 3       # acoustic-impedance-matched interface pressure
                               # (this is the closure being validated here)
 Riemann_Solver.type = hllc
 kappa_method        = 1
@@ -200,5 +200,13 @@ ch_W_scale             = 12.5
 ch_kappa               = 6.25e-4
 ch_mobility_degenerate = 1
 ch_mobility_nom        = 0     # freeze CH — interface is stationary
+
+# HYDRO CLOSURE STRATEGIES (Phase B.5+)
+# The `hydro2.closure.*_strategy` knobs select the closure formulation for the
+# momentum and energy BS sources. The default "constitutive_symmetric" is the
+# new S1' variant that restores strict per-cell action-reaction while keeping
+# the same equilibrium as the original S1 (Open Q9) path. The legacy p
+hydro2.closure.un_strategy = constitutive_symmetric
+hydro2.closure.E_strategy  = constitutive_symmetric
 
 nscbc.enabled = false
