@@ -1,3 +1,16 @@
+// 6-equation diffuse-interface Riemann state and flux.
+//
+// State and Flux carry the conservative variables of the six-equation
+// (two-pressure, two-energy) model:
+//     q = ( alpha, (alpha rho)_0, (alpha rho)_1,
+//           rho u, rho v,
+//           (alpha rho e)_0, (alpha rho e)_1,
+//           rho E_redundant )
+//
+// Reference (state vector / flux): Schmidmayer-Bryngelson-Colonius JCP 402 (2020)
+// eq. (13), plus the redundant total-energy row from eq. (16).  HLLC star-state
+// algebra follows Saurel-Petitpas-Berry JCP 228 (2009) Section 3.1.2.
+
 #ifndef SOLVER_LOCAL_FLUIDRIEMANN_H
 #define SOLVER_LOCAL_FLUIDRIEMANN_H
 
@@ -11,302 +24,118 @@ namespace Local
 namespace FluidRiemann
 {
 
+/// Riemann-problem state for the 6-equation model.
+///
+/// All members are the CONSERVATIVE primary variables (the per-phase
+/// internal energies and the redundant total energy are PRIMARIES in
+/// the 6-eq formulation - Saurel 2009 eq. (II.6); Schmidmayer 2020
+/// eq. (13)+(16)).
 struct State
 {
-    Set::Scalar rho = NAN;
-    Set::Scalar M_normal = NAN;
-    Set::Scalar M_tangent = NAN;
-    Set::Scalar E = NAN;
-    Set::Scalar gam = NAN;
-    Set::Scalar p0 = NAN;
-    Set::Scalar T = NAN;
+    // Volume fraction
+    Set::Scalar alpha       = 0.0;    // alpha_1
 
-    // Default constructor
-    State()
+    // Phase masses (canonical)
+    Set::Scalar alpha_rho_0 = 0.0;    // (alpha_1 rho_1)
+    Set::Scalar alpha_rho_1 = 0.0;    // (alpha_2 rho_2)
+
+    // Mixture momentum
+    Set::Scalar M_normal    = 0.0;
+    Set::Scalar M_tangent   = 0.0;
+
+    // Per-phase internal energies (canonical)
+    Set::Scalar E0          = 0.0;    // (alpha_1 rho_1 e_1)
+    Set::Scalar E1          = 0.0;    // (alpha_2 rho_2 e_2)
+
+    // Redundant mixture total energy (for shock fix-up via reinit)
+    Set::Scalar E_total     = 0.0;    // rho E
+
+    // Per-phase Tammann/stiffened-gas constants (not advected; copied per call).
+    Set::Scalar gamma0      = NAN;
+    Set::Scalar pi0         = NAN;
+    Set::Scalar gamma1      = NAN;
+    Set::Scalar pi1         = NAN;
+
+    State() = default;
+
+    State(Set::Scalar a_alpha,
+          Set::Scalar a_alpha_rho_0,
+          Set::Scalar a_alpha_rho_1,
+          Set::Scalar a_M_normal,
+          Set::Scalar a_M_tangent,
+          Set::Scalar a_E0,
+          Set::Scalar a_E1,
+          Set::Scalar a_E_total,
+          Set::Scalar a_gamma0 = NAN,
+          Set::Scalar a_pi0    = NAN,
+          Set::Scalar a_gamma1 = NAN,
+          Set::Scalar a_pi1    = NAN)
+        : alpha(a_alpha),
+          alpha_rho_0(a_alpha_rho_0),
+          alpha_rho_1(a_alpha_rho_1),
+          M_normal(a_M_normal),
+          M_tangent(a_M_tangent),
+          E0(a_E0),
+          E1(a_E1),
+          E_total(a_E_total),
+          gamma0(a_gamma0),
+          pi0(a_pi0),
+          gamma1(a_gamma1),
+          pi1(a_pi1)
     {
-        rho = 0.0;
-        M_normal = 0.0;
-        M_tangent = 0.0;
-        E = 0.0;
-        gam = NAN;
-        p0 = NAN;
-        T = NAN;
-    }
-
-    // Constructor with optional temperature
-    State(Set::Scalar a_rho, Set::Scalar a_M_normal, Set::Scalar a_M_tangent, Set::Scalar a_E, Set::Scalar a_gam = NAN, Set::Scalar a_p0 = NAN, Set::Scalar a_T = NAN)
-        : rho(a_rho), M_normal(a_M_normal), M_tangent(a_M_tangent), E(a_E), gam(a_gam), p0(a_p0), T(a_T) {}
-
-    // Constructor without temperature_mf
-    State(Set::Patch<const Set::Scalar> density_mf, Set::Patch<const Set::Scalar> momentum_mf, Set::Patch<const Set::Scalar> energy_mf, int i, int j, int k, int direction)
-    {
-        rho = density_mf(i, j, k);
-        if (direction == 0)
-        {
-            M_normal = momentum_mf(i, j, k, 0);
-            M_tangent = momentum_mf(i, j, k, 1);
-        }
-        else if (direction == 1)
-        {
-            M_normal = momentum_mf(i, j, k, 1);
-            M_tangent = momentum_mf(i, j, k, 0);
-        }
-        else
-        {
-            Util::Abort(INFO, "Not supported yet");
-        }
-        E = energy_mf(i, j, k);
-        gam = NAN;
-        p0 = NAN;
-        T = NAN;
-    }
-
-    // Original constructor with temperature_mf
-    State(Set::Patch<const Set::Scalar> density_mf, Set::Patch<const Set::Scalar> momentum_mf, Set::Patch<const Set::Scalar> energy_mf, Set::Patch<const Set::Scalar> gam_mf, Set::Patch<const Set::Scalar> p0_mf, Set::Patch<const Set::Scalar> temperature_mf, int i, int j, int k, int direction)
-    {
-        rho = density_mf(i, j, k);
-        if (direction == 0)
-        {
-            M_normal = momentum_mf(i, j, k, 0);
-            M_tangent = momentum_mf(i, j, k, 1);
-        }
-        else if (direction == 1)
-        {
-            M_normal = momentum_mf(i, j, k, 1);
-            M_tangent = momentum_mf(i, j, k, 0);
-        }
-        else
-        {
-            Util::Abort(INFO, "Not supported yet");
-        }
-        E = energy_mf(i, j, k);
-        gam = gam_mf(i, j, k);
-        p0 = p0_mf(i, j, k);
-        T = temperature_mf(i, j, k);
     }
 
     friend std::ostream &
-    operator<<(std::ostream &os, const State &state)
+    operator<<(std::ostream &os, const State &s)
     {
-        os << "rho=" << state.rho << ", ";
-        os << "Mn=" << state.M_normal << ", ";
-        os << "Mt=" << state.M_tangent << ", ";
-        os << "E=" << state.E << ", ";
-        os << "gam=" << state.gam << ", ";
-        os << "p0=" << state.p0 << ", ";
-        os << "T=" << state.T << ", ";
+        os << "alpha=" << s.alpha
+           << ", arh0=" << s.alpha_rho_0
+           << ", arh1=" << s.alpha_rho_1
+           << ", Mn="   << s.M_normal
+           << ", Mt="   << s.M_tangent
+           << ", E0="   << s.E0
+           << ", E1="   << s.E1
+           << ", E="    << s.E_total
+           << ", g0="   << s.gamma0
+           << ", pi0="  << s.pi0
+           << ", g1="   << s.gamma1
+           << ", pi1="  << s.pi1;
         return os;
-    }
-
-    void
-    operator+=(const State &a)
-    {
-        rho += a.rho;
-        M_normal += a.M_normal;
-        M_tangent += a.M_tangent;
-        E += a.E;
-        gam += a.gam;
-        p0 += a.p0;
-        T += a.T;
-    };
-
-    void
-    operator-=(const State &a)
-    {
-        rho -= a.rho;
-        M_normal -= a.M_normal;
-        M_tangent -= a.M_tangent;
-        E -= a.E;
-        gam -= a.gam;
-        p0 -= a.p0;
-        T -= a.T;
-    };
-
-    void
-    operator*=(const Set::Scalar alpha)
-    {
-        rho *= alpha;
-        M_normal *= alpha;
-        M_tangent *= alpha;
-        E *= alpha;
-        gam *= alpha;
-        p0 *= alpha;
-        T *= alpha;
-    };
-
-    void
-    operator/=(const Set::Scalar alpha)
-    {
-        rho /= alpha;
-        M_normal /= alpha;
-        M_tangent /= alpha;
-        E /= alpha;
-        gam /= alpha;
-        p0 /= alpha;
-        T /= alpha;
-    };
-
-    friend State
-    operator+(const State &a, const State &b)
-    {
-        return State(a.rho + b.rho, a.M_normal + b.M_normal, a.M_tangent + b.M_tangent, a.E + b.E, a.gam + b.gam, a.p0 + b.p0, a.T + b.T);
-    }
-
-    friend State
-    operator-(const State &a, const State &b)
-    {
-        return State(a.rho - b.rho, a.M_normal - b.M_normal, a.M_tangent - b.M_tangent, a.E - b.E, a.gam - b.gam, a.p0 - b.p0, a.T - b.T);
-    }
-
-    friend State
-    operator*(const Set::Scalar alpha, const State &b)
-    {
-        return State(b.rho * alpha, b.M_normal * alpha, b.M_tangent * alpha, b.E * alpha, b.gam * alpha, b.p0 * alpha, b.T * alpha);
-    }
-
-    friend State
-    operator*(const State &b, const Set::Scalar alpha)
-    {
-        return State(b.rho * alpha, b.M_normal * alpha, b.M_tangent * alpha, b.E * alpha, b.gam * alpha, b.p0 * alpha, b.T * alpha);
-    }
-
-    friend State
-    operator/(const State &b, const Set::Scalar alpha)
-    {
-        return State(b.rho / alpha, b.M_normal / alpha, b.M_tangent / alpha, b.E / alpha, b.gam / alpha, b.p0 / alpha, b.T / alpha);
     }
 };
 
+/// HLLC flux for the 6-equation model.
+///
+/// All components except `u_interface` are face fluxes consistent with
+/// the conservative state vector above.  `u_interface` is the HLLC
+/// contact-wave speed S_M, used by the non-conservative discretization
+/// of the alpha row and the per-phase energy rows (Saurel 2009 lines
+/// 836 / 852).
 struct Flux
 {
-    Set::Scalar mass;
-    Set::Scalar momentum_normal;
-    Set::Scalar momentum_tangent;
-    Set::Scalar energy;
-    Set::Scalar Gam;
-    Set::Scalar P0;
-    Set::Scalar temperature;
-    Set::Scalar u_interface; // NEW: HLLC interface velocity
+    Set::Scalar mass0            = 0.0;  // (alpha_1 rho_1) u
+    Set::Scalar mass1            = 0.0;  // (alpha_2 rho_2) u
+    Set::Scalar momentum_normal  = 0.0;  // rho u_n^2 + p
+    Set::Scalar momentum_tangent = 0.0;  // rho u_n u_t
+    Set::Scalar energy_total     = 0.0;  // (rho E + p) u_n (for redundant rho E)
+    Set::Scalar energy0          = 0.0;  // (alpha_1 rho_1 e_1) u_n
+    Set::Scalar energy1          = 0.0;  // (alpha_2 rho_2 e_2) u_n
+    Set::Scalar u_interface      = 0.0;  // HLLC contact speed S_M
 
-    Flux() : mass(0.0), momentum_normal(0.0), momentum_tangent(0.0), energy(0.0), Gam(0.0), P0(0.0), temperature(0.0), u_interface(0.0) {}
-
-    // Constructor without u_interface (for backward compatibility)
-    Flux(Set::Scalar a_mass, Set::Scalar a_momentum_normal, Set::Scalar a_momentum_tangent, Set::Scalar a_energy, Set::Scalar a_Gam = NAN, Set::Scalar a_P0 = NAN, Set::Scalar a_temperature = NAN)
-        : mass(a_mass), momentum_normal(a_momentum_normal),
-          momentum_tangent(a_momentum_tangent), energy(a_energy), Gam(a_Gam), P0(a_P0), temperature(a_temperature), u_interface(0.0) {}
-
-    // Constructor with u_interface
-    Flux(Set::Scalar a_mass, Set::Scalar a_momentum_normal, Set::Scalar a_momentum_tangent, Set::Scalar a_energy, Set::Scalar a_Gam, Set::Scalar a_P0, Set::Scalar a_temperature, Set::Scalar a_u_interface)
-        : mass(a_mass), momentum_normal(a_momentum_normal),
-          momentum_tangent(a_momentum_tangent), energy(a_energy),
-          Gam(a_Gam), P0(a_P0), temperature(a_temperature),
-          u_interface(a_u_interface) {}
-
-    Flux(const State &in) : mass(in.rho),
-                            momentum_normal(in.M_normal),
-                            momentum_tangent(in.M_tangent),
-                            energy(in.E),
-                            Gam(in.gam),
-                            P0(in.p0),
-                            temperature(in.T),
-                            u_interface(0.0) {}
+    Flux() = default;
 
     friend std::ostream &
-    operator<<(std::ostream &os, const Flux &flux)
+    operator<<(std::ostream &os, const Flux &f)
     {
-        os << "mass=" << flux.mass << ", ";
-        os << "Mn=" << flux.momentum_normal << ", ";
-        os << "Mt=" << flux.momentum_tangent << ", ";
-        os << "E=" << flux.energy << ", ";
-        os << "gam=" << flux.Gam << ", ";
-        os << "p0=" << flux.P0 << ", ";
-        os << "T=" << flux.temperature << ", ";
-        os << "u_int=" << flux.u_interface; // NEW
+        os << "m0=" << f.mass0
+           << ", m1=" << f.mass1
+           << ", Mn=" << f.momentum_normal
+           << ", Mt=" << f.momentum_tangent
+           << ", E="  << f.energy_total
+           << ", E0=" << f.energy0
+           << ", E1=" << f.energy1
+           << ", u*=" << f.u_interface;
         return os;
-    }
-
-    void
-    operator+=(const Flux &a)
-    {
-        mass += a.mass;
-        momentum_normal += a.momentum_normal;
-        momentum_tangent += a.momentum_tangent;
-        energy += a.energy;
-        Gam += a.Gam;
-        P0 += a.P0;
-        temperature += a.temperature;
-        u_interface += a.u_interface; // NEW
-    }
-
-    void
-    operator-=(const Flux &a)
-    {
-        mass -= a.mass;
-        momentum_normal -= a.momentum_normal;
-        momentum_tangent -= a.momentum_tangent;
-        energy -= a.energy;
-        Gam -= a.Gam;
-        P0 -= a.P0;
-        temperature -= a.temperature;
-        u_interface -= a.u_interface; // NEW
-    }
-
-    void
-    operator*=(const Set::Scalar alpha)
-    {
-        mass *= alpha;
-        momentum_normal *= alpha;
-        momentum_tangent *= alpha;
-        energy *= alpha;
-        Gam *= alpha; // FIXED (was Gam *= Gam)
-        P0 *= alpha;  // FIXED (was P0 *= P0)
-        temperature *= alpha;
-        u_interface *= alpha; // NEW
-    }
-
-    void
-    operator/=(const Set::Scalar alpha)
-    {
-        mass /= alpha;
-        momentum_normal /= alpha;
-        momentum_tangent /= alpha;
-        energy /= alpha;
-        Gam /= alpha;
-        P0 /= alpha;
-        temperature /= alpha;
-        u_interface /= alpha; // NEW
-    }
-
-    friend Flux
-    operator+(const Flux &a, const Flux &b)
-    {
-        return Flux(a.mass + b.mass, a.momentum_normal + b.momentum_normal, a.momentum_tangent + b.momentum_tangent, a.energy + b.energy, a.Gam + b.Gam, a.P0 + b.P0, a.temperature + b.temperature,
-                    a.u_interface + b.u_interface); // NEW
-    }
-
-    friend Flux
-    operator-(const Flux &a, const Flux &b)
-    {
-        return Flux(a.mass - b.mass, a.momentum_normal - b.momentum_normal, a.momentum_tangent - b.momentum_tangent, a.energy - b.energy, a.Gam - b.Gam, a.P0 - b.P0, a.temperature - b.temperature,
-                    a.u_interface - b.u_interface); // NEW
-    }
-
-    friend Flux
-    operator*(const Flux &a, const Set::Scalar beta)
-    {
-        return Flux(a.mass * beta, a.momentum_normal * beta, a.momentum_tangent * beta, a.energy * beta, a.Gam * beta, a.P0 * beta, a.temperature * beta, a.u_interface * beta); // NEW
-    }
-
-    friend Flux
-    operator*(const Set::Scalar beta, const Flux &a)
-    {
-        return Flux(a.mass * beta, a.momentum_normal * beta, a.momentum_tangent * beta, a.energy * beta, a.Gam * beta, a.P0 * beta, a.temperature * beta, a.u_interface * beta); // NEW
-    }
-
-    friend Flux
-    operator/(const Flux &a, const Set::Scalar beta)
-    {
-        return Flux(a.mass / beta, a.momentum_normal / beta, a.momentum_tangent / beta, a.energy / beta, a.Gam / beta, a.P0 / beta, a.temperature / beta, a.u_interface / beta); // NEW
     }
 };
 

@@ -99,6 +99,13 @@ protected:
     void Advance(int lev, Set::Scalar time, Set::Scalar dt) override;
     void TagCellsForRefinement(int lev, amrex::TagBoxArray& tags, amrex::Real /*time*/, int /*ngrow*/) override;
     void Regrid(int lev, Set::Scalar time) override;
+    // RHS signature carries the 6-equation primaries:
+    //   eta              = alpha_1
+    //   rho_eta{0,1}     = (alpha_k rho_k)  (canonical phase mass, NOT rho*eta)
+    //   M                = mixture momentum
+    //   E                = redundant total energy rho E (for shock fix-up reinit)
+    //   E{0,1}           = (alpha_k rho_k e_k)  per-phase internal energy primaries
+    // Schmidmayer-Bryngelson-Colonius JCP 2020, eqs (13) + (16).
     void RHS(int lev,
         Set::Scalar time,
         amrex::MultiFab &rho_eta0_rhs_mf,
@@ -106,11 +113,20 @@ protected:
         amrex::MultiFab &M_rhs_mf,
         amrex::MultiFab &E_rhs_mf,
         amrex::MultiFab &eta_rhs_mf,
+        amrex::MultiFab &E0_rhs_mf,
+        amrex::MultiFab &E1_rhs_mf,
         const amrex::MultiFab &rho_eta0_mf_in,
         const amrex::MultiFab &rho_eta1_mf_in,
         const amrex::MultiFab &M_mf,
         const amrex::MultiFab &E_mf,
-        const amrex::MultiFab &eta_mf_in);
+        const amrex::MultiFab &eta_mf_in,
+        const amrex::MultiFab &E0_mf_in,
+        const amrex::MultiFab &E1_mf_in);
+
+    // Post-stage pressure relaxation + reinitialization (Saurel-Petitpas-Berry
+    // 2009 §3.5 / Schmidmayer 2020 §3.3).  Runs in-place on the working
+    // MultiFabs after each RK stage and before the ghost-cell fill.
+    void RelaxAndReinit(int lev);
 
 
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);

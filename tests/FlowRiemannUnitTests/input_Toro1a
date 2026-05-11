@@ -28,7 +28,7 @@ geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
 
-timestep  = 1.0e-4
+timestep  = 4.0e-4
 stop_time = 0.25
 
 ### ETA IC ###

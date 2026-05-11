@@ -158,6 +158,17 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         Util::Message(INFO, "uses_nscbc=", uses_nscbc);
 
+        // 6-eq branch: NSCBC has not yet been ported to the two-pressure
+        // model.  The characteristic decomposition needs the per-phase
+        // EOS constants and the frozen mixture sound speed (Sch20 eq. 17),
+        // and the ghost-cell fill must populate the per-phase energies
+        // consistently with the imposed primitives.  Until that port is
+        // complete, refuse to run with NSCBC.
+        if (uses_nscbc)
+        {
+            Util::Abort(INFO, "NSCBC is not yet ported to the 6-equation model. Use Expression BC for now (see bin/6Eqn.md §4.6).");
+        }
+
         // Initialize boundary conditions based on whether NSCBC is used
         if (uses_nscbc)
         {
@@ -471,10 +482,29 @@ void Hydro2::Initialize(int lev)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 void Hydro2::Mix(int lev)
 {
+    // Six-equation initial-condition construction.
+    // ------------------------------------------------------------------------
+    // Inputs (per-phase IC fields populated by Initialize()):
+    //   eta_mf       = alpha_1            (Schmidmayer 2020 eq. 13 first row)
+    //   density{0,1} = rho_k (pure)       (per-phase IC)
+    //   velocity{0,1}= u_k    (per-phase IC; mechanical equilibrium assumed)
+    //   pressure{0,1}= p_k    (per-phase IC; usually equal at IC)
+    //
+    // Outputs (canonical 6-eq conservative primaries):
+    //   eta            = alpha_1                          (Sch20 eq. 13)
+    //   rho_eta0       = (alpha_1 rho_1)                  (canonical phase mass)
+    //   rho_eta1       = (alpha_2 rho_2)
+    //   density (mix)  = alpha_1 rho_1 + alpha_2 rho_2    (Sch20 eq. 8)
+    //   M              = mixture momentum  rho u
+    //   energy0        = alpha_1 (p + gam0 pi0)/(gam0-1)  (Sau09 eq. III.5)
+    //   energy1        = alpha_2 (p + gam1 pi1)/(gam1-1)
+    //   energy_per_vol = E0 + E1 + KE     = redundant rho E   (Sch20 eq. 16)
+    // ------------------------------------------------------------------------
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
-    
-    // Function is for the diffusive mixing terms. I.E: rho = eta*rho0 + (1-eta)*rho1
+    (void)domain;
+
+    // Function is for the diffusive mixing terms (6-eq canonical form).
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.growntilebox();
@@ -486,28 +516,28 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar> rho_eta0_old = rho_eta0_old_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> rho_eta1_old = rho_eta1_old_mf.Patch(lev, mfi);
 
-        // FLUID 0
+        // FLUID 0 (per-phase IC and primary canonical (alpha rho e)_0 written)
         Set::Patch<const Set::Scalar>   v0          = velocity0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   p0          = pressure0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   rho0        = density0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   rho0_old    = density0_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   M0          = momentum0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   M0_old      = momentum0_old_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar>   E0          = energy0_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar>   E0_old      = energy0_old_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar>         E0_arr      = energy0_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar>         E0_old_arr  = energy0_old_mf.Patch(lev, mfi);
         //Set::Patch<const Set::Scalar>   T0          = T0_mf.Patch(lev, mfi);
         //Set::Patch<const Set::Scalar>   k0_thermal  = k0_thermal_mf.Patch(lev, mfi);
         //Set::Patch<const Set::Scalar>   h0_thermal  = h0_thermal_mf.Patch(lev, mfi);
 
-        // FLUID 1
+        // FLUID 1 (per-phase IC and primary canonical (alpha rho e)_1 written)
         Set::Patch<const Set::Scalar>   v1          = velocity1_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   p1          = pressure1_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   rho1        = density1_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   rho1_old    = density1_old_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   M1          = momentum1_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar>   M1_old      = momentum1_old_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar>   E1          = energy1_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar>   E1_old      = energy1_old_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar>         E1_arr      = energy1_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar>         E1_old_arr  = energy1_old_mf.Patch(lev, mfi);
         //Set::Patch<const Set::Scalar>   T1          = T1_mf.Patch(lev, mfi);
         //Set::Patch<const Set::Scalar>   k1_thermal  = k1_thermal_mf.Patch(lev, mfi);
         //Set::Patch<const Set::Scalar>   h1_thermal  = h1_thermal_mf.Patch(lev, mfi);
@@ -546,56 +576,74 @@ void Hydro2::Mix(int lev)
         const Solver::EOS::Tammann eos0_local = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
 
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            auto sten = Numeric::GetStencil(i, j, k, domain);
+        // EOS constants (Tammann/SG) for the per-phase initialization.
+        const Set::Scalar gam0 = eos0_local.Gamma();
+        const Set::Scalar pi0_ = eos0_local.P0();
+        const Set::Scalar gam1 = eos1_local.Gamma();
+        const Set::Scalar pi1_ = eos1_local.P0();
 
-            // Derivative Function Calls
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+
+            // Eta laplacian (used below for the chemical-potential diagnostic).
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
 
-            // Calculate State Variables 
-            rho(i, j, k) = eta(i, j, k) * rho0(i, j, k) + (1.0 - eta(i, j, k)) * rho1(i, j, k);
-            //rho(i, j, k) = 1.0 / (eta(i, j, k) / (rho0(i, j, k)) + (1.0 - eta(i, j, k)) / (rho1(i, j, k)));
-            rho_old(i, j, k) = rho(i, j, k);  
+            // --- 6-equation canonical state at IC (Schmidmayer 2020 §2.3) ---
+            // Volume fractions:
+            const Set::Scalar a1 = eta(i, j, k);              // alpha_1
+            const Set::Scalar a2 = 1.0 - a1;                  // alpha_2
 
-            rho_eta0(i, j, k) = rho(i, j, k) * eta(i, j, k);
-            rho_eta1(i, j, k) = rho(i, j, k) * (1.0 - eta(i, j, k));
-
+            // Phase masses (canonical):
+            rho_eta0(i, j, k)     = a1 * rho0(i, j, k);       // (alpha_1 rho_1)
+            rho_eta1(i, j, k)     = a2 * rho1(i, j, k);       // (alpha_2 rho_2)
             rho_eta0_old(i, j, k) = rho_eta0(i, j, k);
             rho_eta1_old(i, j, k) = rho_eta1(i, j, k);
 
-            M(i, j, k, 0) = (rho0(i, j, k) * v0(i, j, k, 0)) * eta(i, j, k) + (rho1(i, j, k) * v1(i, j, k, 0)) * (1.0 - eta(i, j, k));
-            M(i, j, k, 1) = (rho0(i, j, k) * v0(i, j, k, 1)) * eta(i, j, k) + (rho1(i, j, k) * v1(i, j, k, 1)) * (1.0 - eta(i, j, k));
+            // Mixture density (Schmidmayer 2020 eq. 8):
+            rho(i, j, k)     = rho_eta0(i, j, k) + rho_eta1(i, j, k);
+            rho_old(i, j, k) = rho(i, j, k);
+
+            // Mixture momentum from per-phase mass-weighted velocities:
+            //   M = (alpha_1 rho_1) u_0 + (alpha_2 rho_2) u_1
+            M(i, j, k, 0) = rho_eta0(i, j, k) * v0(i, j, k, 0) + rho_eta1(i, j, k) * v1(i, j, k, 0);
+            M(i, j, k, 1) = rho_eta0(i, j, k) * v0(i, j, k, 1) + rho_eta1(i, j, k) * v1(i, j, k, 1);
             M_old(i, j, k, 0) = M(i, j, k, 0);
             M_old(i, j, k, 1) = M(i, j, k, 1);
 
-            // Kinetic Energy
-            KE_vol(i, j, k) = (0.5 * ((v0(i, j, k, 0) * v0(i, j, k, 0)) + (v0(i, j, k, 1) * v0(i, j, k, 1))) * rho0(i, j, k)) * eta(i, j, k)
-                            + (0.5 * ((v1(i, j, k, 0) * v1(i, j, k, 0)) + (v1(i, j, k, 1) * v1(i, j, k, 1))) * rho1(i, j, k)) * (1.0 - eta(i, j, k));
-            KE_mas(i, j, k) = (0.5 * ((v0(i, j, k, 0) * v0(i, j, k, 0)) + (v0(i, j, k, 1) * v0(i, j, k, 1)))) * eta(i, j, k)
-                            + (0.5 * ((v1(i, j, k, 0) * v1(i, j, k, 0)) + (v1(i, j, k, 1) * v1(i, j, k, 1)))) * (1.0 - eta(i, j, k));
+            // Mixture velocity (diagnostic):
+            v(i, j, k, 0) = M(i, j, k, 0) / std::max(rho(i, j, k), small);
+            v(i, j, k, 1) = M(i, j, k, 1) / std::max(rho(i, j, k), small);
 
-            // Internal Energy
-            Set::Scalar p_eff = p0(i, j, k) * (eta(i, j, k)) + p1(i, j, k) * (1.0 - eta(i, j, k));
-            UE_vol(i, j, k) = Solver::EOS::EOS::MixedInternalEnergy(p_eff, eta(i, j, k), eos0_local, eos1_local, pref, small);
-            UE_mas(i, j, k) = UE_vol(i, j, k) / rho(i, j, k);
-            
-            // Kinetic Energy
-            E_vol(i, j, k) = KE_vol(i, j, k) + UE_vol(i, j, k);
+            // Mixture kinetic energy (consistent with rho E):
+            KE_vol(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0)
+                                                  + v(i, j, k, 1) * v(i, j, k, 1));
+            KE_mas(i, j, k) = (rho(i, j, k) > small) ? KE_vol(i, j, k) / rho(i, j, k) : 0.0;
+
+            // Per-phase canonical internal energies (Saurel 2009 eq. III.5 /
+            // Schmidmayer 2020 §3.3 reinit form -- same formula at IC):
+            //   (alpha rho e)_k = alpha_k (p_k + gamma_k pi_k) / (gamma_k - 1)
+            E0_arr(i, j, k)     = Solver::EOS::EOS::PhasicEnergyFromPressure(p0(i, j, k), a1, gam0, pi0_, small);
+            E1_arr(i, j, k)     = Solver::EOS::EOS::PhasicEnergyFromPressure(p1(i, j, k), a2, gam1, pi1_, small);
+            E0_old_arr(i, j, k) = E0_arr(i, j, k);
+            E1_old_arr(i, j, k) = E1_arr(i, j, k);
+
+            // Mixture internal energy (sum of canonical per-phase energies):
+            UE_vol(i, j, k) = E0_arr(i, j, k) + E1_arr(i, j, k);
+            UE_mas(i, j, k) = (rho(i, j, k) > small) ? UE_vol(i, j, k) / rho(i, j, k) : 0.0;
+
+            // Redundant total energy rho E (Schmidmayer 2020 eq. 16):
+            E_vol(i, j, k)     = KE_vol(i, j, k) + UE_vol(i, j, k);
             E_vol_old(i, j, k) = E_vol(i, j, k);
-            E_mas(i, j, k) = KE_mas(i, j, k) + UE_mas(i, j, k);
+            E_mas(i, j, k)     = KE_mas(i, j, k) + UE_mas(i, j, k);
             E_mas_old(i, j, k) = E_mas(i, j, k);
 
-            // Initialize extra fields - (not directly used to solve)
-            // Velocity
-            v(i, j, k, 0) = v0(i, j, k, 0) * eta(i, j, k) + v1(i, j, k, 0) * (1.0 - eta(i, j, k));
-            v(i, j, k, 1) = v0(i, j, k, 1) * eta(i, j, k) + v1(i, j, k, 1) * (1.0 - eta(i, j, k));
+            // Diagnostic specific-heat-ratio and ref-pressure (for plotfile only;
+            // hyperbolic step uses per-phase constants directly, not these).
+            gammaf(i, j, k) = Solver::EOS::EOS::MixedGamma(a1, eos0_local, eos1_local);
+            p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(a1, eos0_local, eos1_local);
 
-            // Specific Heat Ratio
-            gammaf(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
-
-            // Pressure
-            p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
-            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE_vol(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small);
+            // Mixture pressure (Schmidmayer 2020 eq. 8):
+            // p = alpha_1 p_1 + alpha_2 p_2.  At IC p_1 = p_2 typically.
+            press(i, j, k) = a1 * p0(i, j, k) + a2 * p1(i, j, k);
 
             // Chemical Potential
             // Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
@@ -609,17 +657,21 @@ void Hydro2::Mix(int lev)
             // Spalding Number  (F-1 / F-10: single canonical helper, denominator (1 - Y))
             Bm(i, j, k) = SpaldingBM(Y(i, j, k), Y_infinity, small);
 
-            // Temperature
+            // Temperature (diagnostic; not used by hyperbolic step)
             T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
 
-            // Thermal Conductivity
-            //k_thermal(i, j, k) = eta(i, j, k) * k0_thermal(i, j, k) + (1.0 - eta(i, j, k)) * k1_thermal(i, j, k);
-
-            // Thermal Convectivity
-            //h_thermal(i, j, k) = eta(i, j, k) * h0_thermal(i, j, k) + (1.0 - eta(i, j, k)) * h1_thermal(i, j, k);
-
-            // Speed of Sound
-            a(i, j, k) = Solver::EOS::EOS::TammannSoundSpeed(rho(i, j, k), press(i, j, k), gammaf(i, j, k), p0_eff(i, j, k), small);
+            // Speed of sound -- FROZEN mixture sound speed.
+            // Schmidmayer 2020 eq. 17 / Saurel 2009 eq. III.2:
+            //   c^2 = Y_1 c_1^2 + Y_2 c_2^2
+            {
+                const Set::Scalar Y0 = rho_eta0(i, j, k) / std::max(rho(i, j, k), small);
+                const Set::Scalar Y1 = 1.0 - Y0;
+                const Set::Scalar rho1pure = rho_eta0(i, j, k) / std::max(a1, small);
+                const Set::Scalar rho2pure = rho_eta1(i, j, k) / std::max(a2, small);
+                const Set::Scalar c0_ph = Solver::EOS::EOS::PhasicSoundSpeed(rho1pure, p0(i, j, k), gam0, pi0_, small);
+                const Set::Scalar c1_ph = Solver::EOS::EOS::PhasicSoundSpeed(rho2pure, p1(i, j, k), gam1, pi1_, small);
+                a(i, j, k) = Solver::EOS::EOS::FrozenMixtureSoundSpeed(Y0, Y1, c0_ph, c1_ph);
+            }
 
             // Mach Number
             Ma(i, j, k, 0) = v(i, j, k, 0) / a(i, j, k);
@@ -714,23 +766,29 @@ Hydro2::RHS(int lev,
     amrex::MultiFab &M_rhs_mf,
     amrex::MultiFab &E_rhs_mf,
     amrex::MultiFab &eta_rhs_mf,
+    amrex::MultiFab &E0_rhs_mf,
+    amrex::MultiFab &E1_rhs_mf,
     const amrex::MultiFab &rho_eta0_mf_in,
     const amrex::MultiFab &rho_eta1_mf_in,
     const amrex::MultiFab &M_mf_in,
     const amrex::MultiFab &E_mf_in,
-    const amrex::MultiFab &eta_mf_in)
+    const amrex::MultiFab &eta_mf_in,
+    const amrex::MultiFab &E0_mf_in,
+    const amrex::MultiFab &E1_mf_in)
 {
     BL_PROFILE("Integrator::Hydro2::RHS");
 
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
 
-    // Converting Array to mf
-    amrex::MultiFab::Copy(*rho_eta0_mf[lev], rho_eta0_mf_in, 0, 0, 1, 0);
-    amrex::MultiFab::Copy(*rho_eta1_mf[lev], rho_eta1_mf_in, 0, 0, 1, 0);
-    amrex::MultiFab::Copy(*momentum_mf[lev], M_mf_in, 0, 0, AMREX_SPACEDIM, 0);
-    amrex::MultiFab::Copy(*energy_per_vol_mf[lev], E_mf_in, 0, 0, 1, 0);
-    amrex::MultiFab::Copy(*eta_mf[lev], eta_mf_in, 0, 0, 1, 0);
+    // Converting Array to mf  (6-eq primaries -- Sch20 eq. 13 + 16)
+    amrex::MultiFab::Copy(*rho_eta0_mf[lev],       rho_eta0_mf_in, 0, 0, 1,              0);
+    amrex::MultiFab::Copy(*rho_eta1_mf[lev],       rho_eta1_mf_in, 0, 0, 1,              0);
+    amrex::MultiFab::Copy(*momentum_mf[lev],       M_mf_in,        0, 0, AMREX_SPACEDIM, 0);
+    amrex::MultiFab::Copy(*energy_per_vol_mf[lev], E_mf_in,        0, 0, 1,              0);
+    amrex::MultiFab::Copy(*eta_mf[lev],            eta_mf_in,      0, 0, 1,              0);
+    amrex::MultiFab::Copy(*energy0_mf[lev],        E0_mf_in,       0, 0, 1,              0);
+    amrex::MultiFab::Copy(*energy1_mf[lev],        E1_mf_in,       0, 0, 1,              0);
 
     // Eta Fields
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
@@ -935,6 +993,12 @@ Hydro2::RHS(int lev,
         Set::Patch<Set::Scalar> M_rhs       = M_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> E_rhs       = E_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> eta_rhs     = eta_rhs_mf.array(mfi);
+        Set::Patch<Set::Scalar> E0_rhs      = E0_rhs_mf.array(mfi);    // per-phase internal energy
+        Set::Patch<Set::Scalar> E1_rhs      = E1_rhs_mf.array(mfi);
+
+        // PER-PHASE INTERNAL ENERGIES (canonical primaries)
+        Set::Patch<const Set::Scalar> E0_arr = energy0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> E1_arr = energy1_mf.Patch(lev, mfi);
 
         // SOURCES
         Set::Patch<Set::Scalar> omega = vorticity_mf.Patch(lev, mfi);
@@ -1275,66 +1339,59 @@ Hydro2::RHS(int lev,
                 { "Source[3]",  Source(i, j, k, 3) }
             }); // end check4nans
 
-            // Riemann solver for mixed fluid
-            const int X = 0, Y = 1;
+            // ============================================================
+            // 6-equation HLLC face fluxes (Saurel 2009 §3.1.2 /
+            // Schmidmayer 2020 §3).
+            // ============================================================
+            const int X = 0, Y_dir = 1;
 
-            // Create arrays to store cell states for reconstruction
-            std::vector<Solver::Local::FluidRiemann::State> x_states(3);
-            std::vector<Solver::Local::FluidRiemann::State> y_states(3);
-
-            // Fill the arrays with cell states
-            x_states[0] = Solver::Local::FluidRiemann::State(rho, M, E, gammaf, p0_eff, T, i - 1, j, k, X); // x_lo
-            x_states[1] = Solver::Local::FluidRiemann::State(rho, M, E, gammaf, p0_eff, T, i, j, k, X);     // x
-            x_states[2] = Solver::Local::FluidRiemann::State(rho, M, E, gammaf, p0_eff, T, i + 1, j, k, X); // x_hi
-
-            y_states[0] = Solver::Local::FluidRiemann::State(rho, M, E, gammaf, p0_eff, T, i, j - 1, k, Y); // y_lo
-            y_states[1] = Solver::Local::FluidRiemann::State(rho, M, E, gammaf, p0_eff, T, i, j, k, Y);     // y
-            y_states[2] = Solver::Local::FluidRiemann::State(rho, M, E, gammaf, p0_eff, T, i, j + 1, k, Y); // y_hi
-
-            // Variables to store reconstructed states at interfaces
-            std::vector<Solver::Local::FluidRiemann::State> x_leftStates(3), x_rightStates(3);
-            std::vector<Solver::Local::FluidRiemann::State> y_leftStates(3), y_rightStates(3);
-
-            if (Limiter == 0)
+            // Build per-face State (6-eq).  EOS constants are per-phase and
+            // identical L/R per cell (same eos0/eos1).
+            auto make_state = [&](int ii, int jj, int kk, int dir)
+                -> Solver::Local::FluidRiemann::State
             {
-                // No limiter - use cell-centered values directly
-                // x_leftStates.resize(3);
-                // x_rightStates.resize(3);
-                // y_leftStates.resize(3);
-                // y_rightStates.resize(3);
+                Solver::Local::FluidRiemann::State s;
+                s.alpha       = std::min(std::max(eta(ii, jj, kk), 0.0), 1.0);
+                s.alpha_rho_0 = rho_eta0(ii, jj, kk);
+                s.alpha_rho_1 = rho_eta1(ii, jj, kk);
+                if (dir == X)
+                {
+                    s.M_normal  = M(ii, jj, kk, 0);
+                    s.M_tangent = M(ii, jj, kk, 1);
+                }
+                else
+                {
+                    s.M_normal  = M(ii, jj, kk, 1);
+                    s.M_tangent = M(ii, jj, kk, 0);
+                }
+                s.E0      = E0_arr(ii, jj, kk);
+                s.E1      = E1_arr(ii, jj, kk);
+                s.E_total = E(ii, jj, kk);
+                s.gamma0  = eos0.Gamma();
+                s.pi0     = eos0.P0();
+                s.gamma1  = eos1.Gamma();
+                s.pi1     = eos1.P0();
+                return s;
+            };
 
-                // For x-direction
-                x_leftStates[1] = x_states[0];  // i-1/2
-                x_rightStates[1] = x_states[1]; // i
-                x_leftStates[2] = x_states[1];  // i
-                x_rightStates[2] = x_states[2]; // i+1/2
+            // First-order Godunov (Limiter == 0).  Higher-order limiters
+            // remain disabled in this branch (commented in the source).
+            Solver::Local::FluidRiemann::State sL_x = make_state(i - 1, j, k, X);
+            Solver::Local::FluidRiemann::State sR_x = make_state(i,     j, k, X);
+            Solver::Local::FluidRiemann::State sL_x2= make_state(i,     j, k, X);
+            Solver::Local::FluidRiemann::State sR_x2= make_state(i + 1, j, k, X);
 
-                // For y-direction
-                y_leftStates[1] = y_states[0];  // j-1/2
-                y_rightStates[1] = y_states[1]; // j
-                y_leftStates[2] = y_states[1];  // j
-                y_rightStates[2] = y_states[2]; // j+1/2
-            }
-            else if (Limiter == 1)
-            {
-                // Minmod limiter
-                // limiter_minmod->reconstructCharacteristicStates(x_states, x_leftStates, x_rightStates, pref, small);
-                // limiter_minmod->reconstructCharacteristicStates(y_states, y_leftStates, y_rightStates, pref, small);
-            }
-            else if (Limiter == 2)
-            {
-                // Van Leer limiter
-                // limiter_vanleer->reconstructCharacteristicStates(x_states, x_leftStates, x_rightStates, pref, small);
-                // limiter_vanleer->reconstructCharacteristicStates(y_states, y_leftStates, y_rightStates, pref, small);
-            }
+            Solver::Local::FluidRiemann::State sL_y = make_state(i, j - 1, k, Y_dir);
+            Solver::Local::FluidRiemann::State sR_y = make_state(i, j,     k, Y_dir);
+            Solver::Local::FluidRiemann::State sL_y2= make_state(i, j,     k, Y_dir);
+            Solver::Local::FluidRiemann::State sR_y2= make_state(i, j + 1, k, Y_dir);
 
-            // Calculate fluxes using the mixed fluid approach
             Solver::Local::FluidRiemann::Flux flux_xlo, flux_ylo, flux_xhi, flux_yhi;
-            
+
             // ------------------------------------------------------------
             // Error Checking
             // ------------------------------------------------------------
-            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Conservative Variable Check", { 
+            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Conservative Variable Check", {
                 { "eta", eta(i, j, k) },
                 { "rho_eta0", rho_eta0(i, j, k) },
                 { "rho_eta1", rho_eta1(i, j, k) },
@@ -1342,126 +1399,130 @@ Hydro2::RHS(int lev,
                 { "M[0]", M(i, j, k, 0) },
                 { "M[1]", M(i, j, k, 1) },
                 { "E", E(i, j, k) },
-                { "gammaf", gammaf(i, j, k) },
+                { "E0", E0_arr(i, j, k) },
+                { "E1", E1_arr(i, j, k) },
                 { "press", press(i, j, k) },
             }); // end check4nans
 
-
             try
             {
-                flux_xlo = riemannsolver->Solve(x_leftStates[1], x_rightStates[1], pref, small, Spec_Vol);
-                flux_ylo = riemannsolver->Solve(y_leftStates[1], y_rightStates[1], pref, small, Spec_Vol);
-                flux_xhi = riemannsolver->Solve(x_leftStates[2], x_rightStates[2], pref, small, Spec_Vol);
-                flux_yhi = riemannsolver->Solve(y_leftStates[2], y_rightStates[2], pref, small, Spec_Vol);
+                flux_xlo = riemannsolver->Solve(sL_x , sR_x , pref, small, Spec_Vol);
+                flux_xhi = riemannsolver->Solve(sL_x2, sR_x2, pref, small, Spec_Vol);
+                flux_ylo = riemannsolver->Solve(sL_y , sR_y , pref, small, Spec_Vol);
+                flux_yhi = riemannsolver->Solve(sL_y2, sR_y2, pref, small, Spec_Vol);
             }
             catch (...)
             {
                 Util::ParallelMessage(INFO, "-------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN RIEMANN SOLVERS");
-                Util::ParallelMessage(INFO, "lev=", lev);
-                Util::ParallelMessage(INFO, "i=", i, "j=", j);
-                Util::ParallelMessage(INFO, "dx=", DX[0], "dy=", DX[1]);
-
-                Util::ParallelMessage(INFO, "x_states[0]=", x_states[0]);
-                Util::ParallelMessage(INFO, "x_states[1]=", x_states[1]);
-                Util::ParallelMessage(INFO, "x_states[2]=", x_states[2]);
-
-                Util::ParallelMessage(INFO, "y_states[0]=", y_states[0]);
-                Util::ParallelMessage(INFO, "y_states[1]=", y_states[1]);
-                Util::ParallelMessage(INFO, "y_states[2]=", y_states[2]);
-
+                Util::ParallelMessage(INFO, "ERROR IN RIEMANN SOLVERS (6-eq)");
+                Util::ParallelMessage(INFO, "lev=", lev, " i=", i, " j=", j);
                 Util::Abort(INFO);
             }
 
-            // Upwind volume fractions (face-centered alpha, advected by HLLC contact wave speed u*)
-            Set::Scalar eta_face_xlo = (flux_xlo.u_interface > 0.0) ? eta(i - 1, j, k) : eta(i, j, k);
-            Set::Scalar eta_face_xhi = (flux_xhi.u_interface > 0.0) ? eta(i, j, k) : eta(i + 1, j, k);
-            Set::Scalar eta_face_ylo = (flux_ylo.u_interface > 0.0) ? eta(i, j - 1, k) : eta(i, j, k);
-            Set::Scalar eta_face_yhi = (flux_yhi.u_interface > 0.0) ? eta(i, j, k) : eta(i, j + 1, k);
+            // ============================================================
+            // Saurel-Abgrall non-conservative discretization for alpha and
+            // per-phase internal energies (Saurel 2009 lines 836 / 852):
+            //
+            //   div(alpha u) computed from FACE-UPWIND alpha_face and
+            //                S_M (= flux.u_interface).
+            //   div(u)       from S_M.
+            //   eta_rhs      = -div(alpha u) + alpha_C * div(u)
+            //                = - u . grad(alpha)             (Sch20 row 1)
+            //   E_k_rhs      = -div(alpha rho e_k u)
+            //                  - alpha_k_C * p_k_C * div(u)  (Sau09 line 852)
+            // where C subscript indicates CELL-CENTERED, TIME-n FROZEN
+            // (the Saurel-Abgrall trick that makes the Abgrall uniform-flow
+            //  test pass exactly).
+            // ============================================================
+
+            // Cell-centered per-phase pressures at time n (frozen for the
+            // non-conservative source).
+            const Set::Scalar a1_C   = std::min(std::max(eta(i, j, k), 0.0), 1.0);
+            const Set::Scalar a2_C   = 1.0 - a1_C;
+            const Set::Scalar p0_C   = Solver::EOS::EOS::PhasicPressureFromEnergy(E0_arr(i, j, k), a1_C, eos0.Gamma(), eos0.P0(), small);
+            const Set::Scalar p1_C   = Solver::EOS::EOS::PhasicPressureFromEnergy(E1_arr(i, j, k), a2_C, eos1.Gamma(), eos1.P0(), small);
+
+            // Face-upwind alpha (constant across acoustic; advected at S_M).
+            Set::Scalar a_face_xlo = (flux_xlo.u_interface > 0.0) ? eta(i - 1, j, k) : eta(i,     j, k);
+            Set::Scalar a_face_xhi = (flux_xhi.u_interface > 0.0) ? eta(i,     j, k) : eta(i + 1, j, k);
+            Set::Scalar a_face_ylo = (flux_ylo.u_interface > 0.0) ? eta(i, j - 1, k) : eta(i, j,     k);
+            Set::Scalar a_face_yhi = (flux_yhi.u_interface > 0.0) ? eta(i, j,     k) : eta(i, j + 1, k);
+            a_face_xlo = std::min(std::max(a_face_xlo, 0.0), 1.0);
+            a_face_xhi = std::min(std::max(a_face_xhi, 0.0), 1.0);
+            a_face_ylo = std::min(std::max(a_face_ylo, 0.0), 1.0);
+            a_face_yhi = std::min(std::max(a_face_yhi, 0.0), 1.0);
+
+            // div(alpha u) and div(u) (from S_M = flux.u_interface).
+            const Set::Scalar div_uA_x = (flux_xhi.u_interface * a_face_xhi
+                                        - flux_xlo.u_interface * a_face_xlo) / DX[0];
+            const Set::Scalar div_uA_y = (flux_yhi.u_interface * a_face_yhi
+                                        - flux_ylo.u_interface * a_face_ylo) / DX[1];
+            const Set::Scalar div_u_x  = (flux_xhi.u_interface - flux_xlo.u_interface) / DX[0];
+            const Set::Scalar div_u_y  = (flux_yhi.u_interface - flux_ylo.u_interface) / DX[1];
+            const Set::Scalar div_u    = div_u_x + div_u_y;
 
             // ------------------------------------------------------------
-            // Volume-fraction advection -- Kapila augmented 5-equation form.
-            //
-            // Base Saurel-Abgrall 1999 (Eq. 41):  D(eta)/Dt = -u . grad(eta) = 0
-            // Discretized as     deta/dt = -div(u eta) + eta * div(u)
-            //
-            // Kapila correction (Schmidmayer-Bryngelson-Colonius JCP 2020,
-            // Eqs. 10/11; Beig-Johnsen Eq. 2.4) adds + K * div(u), with K
-            // defined by Solver::EOS::EOS::KapilaK using the literal
-            // Schmidmayer Eq. 11 form
-            //   K = (rho_2 a_2^2 - rho_1 a_1^2)
-            //       / ( rho_1 a_1^2/alpha_1 + rho_2 a_2^2/alpha_2 ).
-            //
-            // div_u and K_kapila are hoisted to lambda scope because they
-            // are also used as a source on the phase-mass equations below
-            // (rho_eta0 = rho*eta must track eta with its K correction;
-            // see derivation note before rho_eta{0,1}_rhs).
+            // Volume fraction (alpha_1) row -- Saurel 2009 line 836:
+            //   d(alpha)/dt + u . grad(alpha) = 0
+            //   discretized as -div(alpha u) + alpha_C div(u).
+            // The 6-eq model REPLACES the 5-eq Kapila K-source with the
+            // stiff relaxation source (handled in the post-stage hook).
             // ------------------------------------------------------------
-            Set::Scalar div_uA_x = (flux_xhi.u_interface * eta_face_xhi
-                                  - flux_xlo.u_interface * eta_face_xlo) / DX[0];
-            Set::Scalar div_uA_y = (flux_yhi.u_interface * eta_face_yhi
-                                  - flux_ylo.u_interface * eta_face_ylo) / DX[1];
-            Set::Scalar div_u_x  = (flux_xhi.u_interface - flux_xlo.u_interface) / DX[0];
-            Set::Scalar div_u_y  = (flux_yhi.u_interface - flux_ylo.u_interface) / DX[1];
-            Set::Scalar div_u    = div_u_x + div_u_y;
+            const Set::Scalar eta_advect = -(div_uA_x + div_uA_y) + eta(i, j, k) * div_u;
+            eta_rhs(i, j, k) = eta_advect + eta_dot_Vap;
 
-            Set::Scalar eta_advect = -(div_uA_x + div_uA_y) + eta(i, j, k) * div_u;
+            // ------------------------------------------------------------
+            // Phase-mass rows (pure conservation, no source from h):
+            //   d(alpha rho)_k / dt + div((alpha rho)_k u) = 0
+            // ------------------------------------------------------------
+            const Set::Scalar rho_eta0_flux = (flux_xlo.mass0 - flux_xhi.mass0) / DX[0]
+                                            + (flux_ylo.mass0 - flux_yhi.mass0) / DX[1];
+            const Set::Scalar rho_eta1_flux = (flux_xlo.mass1 - flux_xhi.mass1) / DX[0]
+                                            + (flux_ylo.mass1 - flux_yhi.mass1) / DX[1];
 
-            Set::Scalar K_kapila = Solver::EOS::EOS::KapilaK(press(i, j, k),
-                                                            eta(i, j, k),
-                                                            eos0,
-                                                            eos1,
-                                                            small);
+            rho_eta0_rhs(i, j, k) = rho_eta0_flux + Source(i, j, k, 0) * (eta(i, j, k))         + m_dot_Vap;
+            rho_eta1_rhs(i, j, k) = rho_eta1_flux + Source(i, j, k, 0) * (1.0 - eta(i, j, k))   - m_dot_Vap;
 
-            eta_rhs(i, j, k) = eta_advect
-                             + K_kapila * div_u
-                             + eta_dot_Vap;
+            // Diagnostic mass flux (kept for plotfile compatibility):
+            rho_flux(i, j, k) = rho_eta0_flux + rho_eta1_flux;
 
+            // ------------------------------------------------------------
+            // Mixture momentum (pure conservation, with body sources):
+            // ------------------------------------------------------------
+            // In RHS we accumulate as (F_lo - F_hi)/dx.  X-direction:
+            //   M[0] takes momentum_normal from x-faces and momentum_tangent
+            //   from y-faces.
+            M_flux(i, j, k, 0) = (flux_xlo.momentum_normal  - flux_xhi.momentum_normal ) / DX[0]
+                               + (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / DX[1];
+            M_flux(i, j, k, 1) = (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / DX[0]
+                               + (flux_ylo.momentum_normal  - flux_yhi.momentum_normal ) / DX[1];
 
-            // UPDATE MIXED FLUID VARIABLES
-            rho_flux(i, j, k) = (flux_xlo.mass - flux_xhi.mass) / (DX[0]) + (flux_ylo.mass - flux_yhi.mass) / (DX[1]);
-            M_flux(i, j, k, 0) = (flux_xlo.momentum_normal - flux_xhi.momentum_normal) / (DX[0]) + (flux_ylo.momentum_tangent - flux_yhi.momentum_tangent) / (DX[1]);
-            M_flux(i, j, k, 1) = (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / (DX[0]) + (flux_ylo.momentum_normal - flux_yhi.momentum_normal) / (DX[1]);
-            E_flux(i, j, k) = (flux_xlo.energy - flux_xhi.energy) / (DX[0]) + (flux_ylo.energy - flux_yhi.energy) / (DX[1]);
+            M_rhs(i, j, k, 0) = M_flux(i, j, k, 0) + Source(i, j, k, 1);
+            M_rhs(i, j, k, 1) = M_flux(i, j, k, 1) + Source(i, j, k, 2);
 
-            // Density
-            Set::Scalar F_rho_eta0_xlo = eta_face_xlo * flux_xlo.mass;
-            Set::Scalar F_rho_eta0_xhi = eta_face_xhi * flux_xhi.mass;
-            Set::Scalar F_rho_eta0_ylo = eta_face_ylo * flux_ylo.mass;
-            Set::Scalar F_rho_eta0_yhi = eta_face_yhi * flux_yhi.mass;
+            // ------------------------------------------------------------
+            // Redundant mixture total energy (pure conservation):
+            //   d(rho E)/dt + div((rho E + p) u) = 0     (Sch20 eq. 16)
+            // ------------------------------------------------------------
+            E_flux(i, j, k) = (flux_xlo.energy_total - flux_xhi.energy_total) / DX[0]
+                            + (flux_ylo.energy_total - flux_yhi.energy_total) / DX[1];
+            E_rhs(i, j, k)  = E_flux(i, j, k) + Source(i, j, k, 3);
 
-            Set::Scalar F_rho_eta1_xlo = (1.0 - eta_face_xlo) * flux_xlo.mass;
-            Set::Scalar F_rho_eta1_xhi = (1.0 - eta_face_xhi) * flux_xhi.mass;
-            Set::Scalar F_rho_eta1_ylo = (1.0 - eta_face_ylo) * flux_ylo.mass;
-            Set::Scalar F_rho_eta1_yhi = (1.0 - eta_face_yhi) * flux_yhi.mass;
+            // ------------------------------------------------------------
+            // Per-phase internal energies (Sch20 eq. 13 last two rows /
+            // Sau09 line 852):
+            //   d(alpha rho e)_k/dt + div((alpha rho e)_k u)
+            //                       + alpha_k_C p_k_C div(u) = 0
+            // (The +/- mu p_I (p_1-p_2) relaxation source is deferred to
+            //  the post-stage hook, in the stiff-relaxation limit.)
+            // ------------------------------------------------------------
+            const Set::Scalar E0_flux_div = (flux_xlo.energy0 - flux_xhi.energy0) / DX[0]
+                                          + (flux_ylo.energy0 - flux_yhi.energy0) / DX[1];
+            const Set::Scalar E1_flux_div = (flux_xlo.energy1 - flux_xhi.energy1) / DX[0]
+                                          + (flux_ylo.energy1 - flux_yhi.energy1) / DX[1];
 
-            Set::Scalar rho_eta0_flux = (F_rho_eta0_xlo - F_rho_eta0_xhi) / DX[0]
-                                        + (F_rho_eta0_ylo - F_rho_eta0_yhi) / DX[1];
-
-            Set::Scalar rho_eta1_flux = (F_rho_eta1_xlo - F_rho_eta1_xhi) / DX[0]
-                                        + (F_rho_eta1_ylo - F_rho_eta1_yhi) / DX[1];
-
-            // Kapila K source on phase masses.
-            // In this codebase rho_eta0 = rho_mix * eta (not the canonical
-            // (alpha rho_pure)). Using D/Dt eta = K div u (Kapila) and
-            // d(rho)/dt + div(rho u) = 0 gives
-            //     d(rho eta)/dt + div(rho eta u) = +rho K div u
-            //     d(rho (1-eta))/dt + div(rho (1-eta) u) = -rho K div u
-            // The two sources cancel in their sum, so total mass is still
-            // conserved; without this term rho_eta0 drifts away from
-            // rho_mix*eta after a few steps once K is non-zero.
-            Set::Scalar rho_K_divu = rho(i, j, k) * K_kapila * div_u;
-
-            // Mass
-            rho_eta0_rhs(i, j, k) = rho_eta0_flux + rho_K_divu + Source(i, j, k, 0) * (eta(i, j, k)) + m_dot_Vap;
-            rho_eta1_rhs(i, j, k) = rho_eta1_flux - rho_K_divu + Source(i, j, k, 0) * (1.0 - eta(i, j, k)) - m_dot_Vap;
-            
-            // Momentum
-            M_rhs(i, j, k, 0) = M_flux(i, j, k, 0) + Source(i, j, k, 1); //(mu * (lap_ux * eta(i, j, k))) +
-            M_rhs(i, j, k, 1) = M_flux(i, j, k, 1) + Source(i, j, k, 2); //(mu * (lap_uy * eta(i, j, k))) +
-
-            // Energy
-            E_rhs(i, j, k) = E_flux(i, j, k) + Source(i, j, k, 3);
+            E0_rhs(i, j, k) = E0_flux_div - a1_C * p0_C * div_u;
+            E1_rhs(i, j, k) = E1_flux_div - a2_C * p1_C * div_u;
 
            // ------------------------------------------------------------
            // Error Checking
@@ -1469,55 +1530,27 @@ Hydro2::RHS(int lev,
            if ( (M_rhs(i, j, k, 0) != M_rhs(i, j, k, 0))
                 or (M_rhs(i, j, k, 1) != M_rhs(i, j, k, 1))
                 or (E_rhs(i, j, k) != E_rhs(i, j, k))
+                or (E0_rhs(i, j, k) != E0_rhs(i, j, k))
+                or (E1_rhs(i, j, k) != E1_rhs(i, j, k))
+                or (eta_rhs(i, j, k) != eta_rhs(i, j, k))
                 or (rho_eta0_rhs(i, j, k) != rho_eta0_rhs(i, j, k))
                 or (rho_eta1_rhs(i, j, k) != rho_eta1_rhs(i, j, k)))
             {
                 Util::ParallelMessage(INFO, "-------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN HYDRO2");
-                Util::ParallelMessage(INFO, "time=", time);
-                Util::ParallelMessage(INFO, "lev=", lev);
-                Util::ParallelMessage(INFO, "i=", i, ", j=", j);
-                Util::ParallelMessage(INFO, "flux_xlo.mass=", flux_xlo.mass);
-                Util::ParallelMessage(INFO, "flux_xhi.mass=", flux_xhi.mass);
-                Util::ParallelMessage(INFO, "flux_ylo.mass=", flux_ylo.mass);
-                Util::ParallelMessage(INFO, "flux_yhi.mass=", flux_yhi.mass);
+                Util::ParallelMessage(INFO, "ERROR IN HYDRO2 (6-eq RHS)");
+                Util::ParallelMessage(INFO, "time=", time, " lev=", lev, " i=", i, " j=", j);
+                Util::ParallelMessage(INFO, "flux_xlo: ", flux_xlo);
+                Util::ParallelMessage(INFO, "flux_xhi: ", flux_xhi);
+                Util::ParallelMessage(INFO, "flux_ylo: ", flux_ylo);
+                Util::ParallelMessage(INFO, "flux_yhi: ", flux_yhi);
                 Util::ParallelMessage(INFO, "Source=", Source(i, j, k, 0), ", ", Source(i, j, k, 1), ", ", Source(i, j, k, 2), ", ", Source(i, j, k, 3));
-                Util::ParallelMessage(INFO, "x_states[1] ", x_states[1]);           // Center cell in x-direction
-                Util::ParallelMessage(INFO, "y_states[1] ", y_states[1]);           // Center cell in y-direction
-                Util::ParallelMessage(INFO, "x_rightStates[2] ", x_rightStates[2]); // Right interface in x-direction
-                Util::ParallelMessage(INFO, "y_rightStates[2] ", y_rightStates[2]); // Right interface in y-direction
-                Util::ParallelMessage(INFO, "x_rightStates[1] ", x_rightStates[1]); // Left interface in x-direction
-                Util::ParallelMessage(INFO, "y_rightStates[1] ", y_rightStates[1]); // Left interface in y-direction
-                Util::ParallelMessage(INFO, "gamma_eff=", gammaf(i, j, k));
                 Util::ParallelMessage(INFO, "drhoeta0/dt=", rho_eta0_rhs(i, j, k));
                 Util::ParallelMessage(INFO, "drhoeta1/dt=", rho_eta1_rhs(i, j, k));
                 Util::ParallelMessage(INFO, "dM/dt=", M_rhs(i, j, k, 0), ", ", M_rhs(i, j, k, 1));
                 Util::ParallelMessage(INFO, "dE/dt=", E_rhs(i, j, k));
+                Util::ParallelMessage(INFO, "dE0/dt=", E0_rhs(i, j, k), " dE1/dt=", E1_rhs(i, j, k));
+                Util::ParallelMessage(INFO, "deta/dt=", eta_rhs(i, j, k));
                 Util::Abort(INFO);
-            }
-
-            if ((time <= 1e-7 && i == 0 && j == 0) && false)
-            { // First timestep~ish~, first cell
-                Util::ParallelMessage(INFO, "=== FIRST CELL DIAGNOSTICS ===");
-                Util::ParallelMessage(INFO, "eta = ", eta(i, j, k));
-                Util::ParallelMessage(INFO, "rho = ", rho(i, j, k));
-                Util::ParallelMessage(INFO, "M = ", M(i, j, k, 0), ", ", M(i, j, k, 1));
-                Util::ParallelMessage(INFO, "E = ", E(i, j, k));
-                Util::ParallelMessage(INFO, "press = ", press(i, j, k));
-
-                // Check flux calculation
-                Util::ParallelMessage(INFO, "flux_xlo.mass = ", flux_xlo.mass);
-                Util::ParallelMessage(INFO, "flux_xhi.mass = ", flux_xhi.mass);
-                Util::ParallelMessage(INFO, "flux_xlo.momentum_normal = ", flux_xlo.momentum_normal);
-                Util::ParallelMessage(INFO, "flux_xhi.momentum_normal = ", flux_xhi.momentum_normal);
-                Util::ParallelMessage(INFO, "flux_xlo.energy = ", flux_xlo.energy);
-                Util::ParallelMessage(INFO, "flux_xhi.energy = ", flux_xhi.energy);
-
-                Util::ParallelMessage(INFO, "drhoeta0/dt=", rho_eta0_rhs(i, j, k));
-                Util::ParallelMessage(INFO, "drhoeta1/dt=", rho_eta1_rhs(i, j, k));
-                Util::ParallelMessage(INFO, "dM/dt=", M_rhs(i, j, k, 0), ", ", M_rhs(i, j, k, 1));
-                Util::ParallelMessage(INFO, "dE/dt=", E_rhs(i, j, k));
-                
             }
 
             // Calculate vorticity for visualization
@@ -1536,17 +1569,28 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
     step_counter[lev]++;
 
-    // Swapping pointers
-    std::swap(density_old_mf[lev], density_mf[lev]);
-    std::swap(momentum_old_mf[lev], momentum_mf[lev]);
-    std::swap(energy_per_vol_old_mf[lev], energy_per_vol_mf[lev]);
-    std::swap(energy_per_mas_old_mf[lev], energy_per_mas_mf[lev]);
-    std::swap(eta_old_mf, eta_mf);
-    std::swap(rho_eta0_old_mf, rho_eta0_mf);
-    std::swap(rho_eta1_old_mf, rho_eta1_mf);
+    // Swapping pointers (6-eq primaries -- canonical set)
+    std::swap(density_old_mf[lev],         density_mf[lev]);
+    std::swap(momentum_old_mf[lev],        momentum_mf[lev]);
+    std::swap(energy_per_vol_old_mf[lev],  energy_per_vol_mf[lev]);
+    std::swap(energy_per_mas_old_mf[lev],  energy_per_mas_mf[lev]);
+    std::swap(eta_old_mf,                  eta_mf);
+    std::swap(rho_eta0_old_mf,             rho_eta0_mf);
+    std::swap(rho_eta1_old_mf,             rho_eta1_mf);
+    std::swap(energy0_old_mf,              energy0_mf);
+    std::swap(energy1_old_mf,              energy1_mf);
 
     // ------------------------------------------------------------
     // Time Integration
+    //
+    // 6-equation primary set (Schmidmayer 2020 eqs. 13 + 16):
+    //   [0] rho_eta0       = alpha_1 rho_1
+    //   [1] rho_eta1       = alpha_2 rho_2
+    //   [2] momentum       = rho u (2-component)
+    //   [3] energy_per_vol = rho E (redundant)
+    //   [4] eta            = alpha_1
+    //   [5] energy0        = alpha_1 rho_1 e_1
+    //   [6] energy1        = alpha_2 rho_2 e_2
     // ------------------------------------------------------------
 
     amrex::Vector<amrex::MultiFab> solution_new;
@@ -1555,6 +1599,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     solution_new.emplace_back(*momentum_mf[lev].get(),       amrex::MakeType::make_alias, 0, 2);
     solution_new.emplace_back(*energy_per_vol_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
     solution_new.emplace_back(*eta_mf[lev].get(),            amrex::MakeType::make_alias, 0, 1);
+    solution_new.emplace_back(*energy0_mf[lev].get(),        amrex::MakeType::make_alias, 0, 1);
+    solution_new.emplace_back(*energy1_mf[lev].get(),        amrex::MakeType::make_alias, 0, 1);
 
     amrex::Vector<amrex::MultiFab> solution_old;
     solution_old.emplace_back(*rho_eta0_old_mf[lev].get(),       amrex::MakeType::make_alias, 0, 1);
@@ -1562,6 +1608,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     solution_old.emplace_back(*momentum_old_mf[lev].get(),       amrex::MakeType::make_alias, 0, 2);
     solution_old.emplace_back(*energy_per_vol_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
     solution_old.emplace_back(*eta_old_mf[lev].get(),            amrex::MakeType::make_alias, 0, 1);
+    solution_old.emplace_back(*energy0_old_mf[lev].get(),        amrex::MakeType::make_alias, 0, 1);
+    solution_old.emplace_back(*energy1_old_mf[lev].get(),        amrex::MakeType::make_alias, 0, 1);
 
     amrex::TimeIntegrator timeintegrator(solution_new, time);
 
@@ -1569,11 +1617,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                                amrex::Vector<amrex::MultiFab> &rhs_mf,
                                amrex::Vector<amrex::MultiFab> &solution_mf,
                                const Set::Scalar time) {
-        // rhs_mf:      [0]=rho_eta0_rhs, [1]=rho_eta1_rhs, [2]=M_rhs, [3]=E_rhs, [4]=eta_rhs
-        // solution_mf: [0]=rho_eta0,     [1]=rho_eta1,     [2]=M,     [3]=E,     [4]=eta
+        // rhs_mf:      [0]=rho_eta0_rhs, [1]=rho_eta1_rhs, [2]=M_rhs, [3]=E_rhs, [4]=eta_rhs, [5]=E0_rhs, [6]=E1_rhs
+        // solution_mf: [0]=rho_eta0,     [1]=rho_eta1,     [2]=M,     [3]=E,     [4]=eta,     [5]=E0,     [6]=E1
         RHS(lev, time,
-            rhs_mf[0], rhs_mf[1], rhs_mf[2], rhs_mf[3], rhs_mf[4],
-            solution_mf[0], solution_mf[1], solution_mf[2], solution_mf[3], solution_mf[4]);
+            rhs_mf[0], rhs_mf[1], rhs_mf[2], rhs_mf[3], rhs_mf[4], rhs_mf[5], rhs_mf[6],
+            solution_mf[0], solution_mf[1], solution_mf[2], solution_mf[3], solution_mf[4], solution_mf[5], solution_mf[6]);
     });
 
     timeintegrator.set_post_stage_action([&](amrex::Vector<amrex::MultiFab> &stage_mf, Set::Scalar time) {
@@ -1583,6 +1631,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         amrex::MultiFab::Copy(*momentum_mf[lev],       stage_mf[2], 0, 0, AMREX_SPACEDIM, nghost);
         amrex::MultiFab::Copy(*energy_per_vol_mf[lev], stage_mf[3], 0, 0, 1,              nghost);
         amrex::MultiFab::Copy(*eta_mf[lev],            stage_mf[4], 0, 0, 1,              nghost);
+        amrex::MultiFab::Copy(*energy0_mf[lev],        stage_mf[5], 0, 0, 1,              nghost);
+        amrex::MultiFab::Copy(*energy1_mf[lev],        stage_mf[6], 0, 0, 1,              nghost);
 
         // Clamp eta in domain prior to ghost fill (state can drift slightly outside [0,1])
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
@@ -1594,7 +1644,16 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             });
         }
 
-        // Fill all ghost cells
+        // ===========================================================
+        // 6-eq STIFF PRESSURE RELAXATION + REINITIALIZATION.
+        // (Saurel 2009 §3.5 / Schmidmayer 2020 §3.3.)
+        // Per RK stage:  hyperbolic step -> relax -> reinit -> next stage.
+        // Schmidmayer line 466-470: "performed at each stage. Thus there is
+        // only one pressure at the end of each stage."
+        // ===========================================================
+        RelaxAndReinit(lev);
+
+        // Fill all ghost cells (uses 6-eq primitive recovery internally)
         FillGhost4BC(lev, time);
 
         // Copy back
@@ -1603,6 +1662,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         amrex::MultiFab::Copy(stage_mf[2], *momentum_mf[lev],       0, 0, AMREX_SPACEDIM, nghost);
         amrex::MultiFab::Copy(stage_mf[3], *energy_per_vol_mf[lev], 0, 0, 1,              nghost);
         amrex::MultiFab::Copy(stage_mf[4], *eta_mf[lev],            0, 0, 1,              nghost);
+        amrex::MultiFab::Copy(stage_mf[5], *energy0_mf[lev],        0, 0, 1,              nghost);
+        amrex::MultiFab::Copy(stage_mf[6], *energy1_mf[lev],        0, 0, 1,              nghost);
 
     });
 
@@ -1698,24 +1759,32 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
+        // 6-eq per-phase internal energies (canonical primaries)
+        Set::Patch<const Set::Scalar> E0_p = energy0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> E1_p = energy1_mf.Patch(lev, mfi);
 
         // Local EOS Copy
         const Solver::EOS::Tammann eos0_local = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
-    
-        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &F_max_local, &rho_min_local] AMREX_GPU_DEVICE(int i, int j, int k) 
+        const Set::Scalar gam0_ = eos0_local.Gamma();
+        const Set::Scalar pi0_  = eos0_local.P0();
+        const Set::Scalar gam1_ = eos1_local.Gamma();
+        const Set::Scalar pi1_  = eos1_local.P0();
+        const Set::Scalar alpha_floor = 1.0e-6;
+
+        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &F_max_local, &rho_min_local] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
-        
+
             Set::Vector grad_eta = Numeric::Gradient(eta_new, i, j, k, 0, DX);
             Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
             Set::Matrix hess_eta = Numeric::Hessian(eta_new, i, j, k, 0, DX, sten);
             Set::Scalar lap_eta = Numeric::Laplacian(eta_new, i, j, k, 0, DX);
 
             gammaf(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
-        
+
             etadot(i,j,k) = (eta_new(i,j,k) - eta(i,j,k)) / dt;
-        
+
             v(i,j,k,0) = M(i,j,k,0) / (rho(i,j,k));
             v(i,j,k,1) = M(i,j,k,1) / (rho(i,j,k));
 
@@ -1723,25 +1792,41 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar u_limit = 1e8;
             v(i, j, k, 0) = (v(i, j, k, 0) < 0.0) ? std::max(v(i, j, k, 0), -u_limit) : std::min(v(i, j, k, 0), u_limit);
             v(i, j, k, 1) = (v(i, j, k, 1) < 0.0) ? std::max(v(i, j, k, 1), -u_limit) : std::min(v(i, j, k, 1), u_limit);
-        
+
             KE_vol(i,j,k) = 0.5 * rho(i,j,k) * (v(i,j,k,0) * v(i,j,k,0) + v(i,j,k,1) * v(i,j,k,1));
             KE_mas(i,j,k) = 0.5 * (v(i,j,k,0) * v(i,j,k,0) + v(i,j,k,1) * v(i,j,k,1));
-        
+
             UE_vol(i,j,k) = E_vol(i,j,k) - KE_vol(i,j,k);
             UE_vol(i, j, k) = (UE_vol(i, j, k) < 0.0) ? small : UE_vol(i, j, k);
             E_mas(i,j,k) = E_vol(i,j,k) / (rho(i,j,k) + small);
             UE_mas(i,j,k) = E_mas(i,j,k) - KE_mas(i,j,k);
-        
-            p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
-            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE_vol(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small);
-        
+
+            // 6-eq mixture pressure and frozen sound speed.
+            // p   = alpha_1 p_1 + alpha_2 p_2          (Sch20 eq. 8)
+            // c^2 = Y_1 c_1^2  + Y_2 c_2^2             (Sch20 eq. 17)
+            {
+                Set::Scalar a1 = std::min(std::max(eta_new(i, j, k), alpha_floor), 1.0 - alpha_floor);
+                Set::Scalar a2 = 1.0 - a1;
+                Set::Scalar arh0 = std::max(rho_eta0(i, j, k), small);
+                Set::Scalar arh1 = std::max(rho_eta1(i, j, k), small);
+                Set::Scalar r0p  = arh0 / a1;
+                Set::Scalar r1p  = arh1 / a2;
+                Set::Scalar p0_loc = Solver::EOS::EOS::PhasicPressureFromEnergy(E0_p(i, j, k), a1, gam0_, pi0_, small);
+                Set::Scalar p1_loc = Solver::EOS::EOS::PhasicPressureFromEnergy(E1_p(i, j, k), a2, gam1_, pi1_, small);
+                Set::Scalar c0_loc = Solver::EOS::EOS::PhasicSoundSpeed(r0p, p0_loc, gam0_, pi0_, small);
+                Set::Scalar c1_loc = Solver::EOS::EOS::PhasicSoundSpeed(r1p, p1_loc, gam1_, pi1_, small);
+                Set::Scalar Y0 = arh0 / std::max(rho(i, j, k), small);
+                Set::Scalar Y1 = 1.0 - Y0;
+                press(i, j, k) = a1 * p0_loc + a2 * p1_loc;
+                a(i, j, k)     = Solver::EOS::EOS::FrozenMixtureSoundSpeed(Y0, Y1, c0_loc, c1_loc);
+                p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(a1, eos0_local, eos1_local); // diagnostic only
+            }
+
             Set::Scalar f_prime = 4.0 * eta_new(i,j,k) * (eta_new(i,j,k) - 0.5) * (eta_new(i,j,k) - 1.0);
             Set::Scalar mu_chem = -epsilon * epsilon * lap_eta + f_prime;
             mu_chem_(i,j,k) = mu_chem;
-        
+
             Bm(i,j,k) = eta(i,j,k) / (1.0 - eta(i,j,k) + small);
-        
-            a(i, j, k) = Solver::EOS::EOS::TammannSoundSpeed(rho(i, j, k), press(i, j, k), gammaf(i, j, k), p0_eff(i, j, k), small);
 
             Ma(i,j,k,0) = v(i,j,k,0) / (a(i,j,k) + small);
             Ma(i,j,k,1) = v(i,j,k,1) / (a(i,j,k) + small);
@@ -2801,59 +2886,106 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
 
 
     // ------------------------------------------------------------
-    // STEP 4: Compute primitives in DOMAIN
+    // STEP 4: Compute primitives in DOMAIN (6-equation recovery).
+    //
+    // From the canonical primaries (eta, (alpha rho)_k, M, rho E, E_k) we
+    // derive per-phase rho_k, e_k, p_k, c_k and the mixture rho, u, p, c.
+    //   - p_k uses Sau09 eq. (II.3) inverted (PhasicPressureFromEnergy).
+    //   - p   uses Schmidmayer 2020 eq. (8): p = alpha_1 p_1 + alpha_2 p_2.
+    //   - c   uses Schmidmayer 2020 eq. (17): c^2 = Y_1 c_1^2 + Y_2 c_2^2.
     // ------------------------------------------------------------
     for (amrex::MFIter mfi(*velocity_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox(); // DOMAIN ONLY
 
-        auto rho = density_mf[lev]->array(mfi);
-        auto eta = eta_mf[lev]->array(mfi);
-        auto M = momentum_mf[lev]->array(mfi);
-        auto E = energy_per_vol_mf[lev]->array(mfi);
-        auto v = velocity_mf[lev]->array(mfi);
-        auto press = pressure_mf[lev]->array(mfi);
-        auto T = T_mf[lev]->array(mfi);
-        auto a = a_mf[lev]->array(mfi);
-        auto gamma = gamma_mf[lev]->array(mfi);
-        auto p0_eff = p0_mf[lev]->array(mfi);
-        auto UE = UE_per_vol_mf[lev]->array(mfi);
-        auto KE = KE_per_vol_mf[lev]->array(mfi);
+        auto rho       = density_mf[lev]->array(mfi);
+        auto eta       = eta_mf[lev]->array(mfi);
+        auto arh0_arr  = rho_eta0_mf[lev]->array(mfi);
+        auto arh1_arr  = rho_eta1_mf[lev]->array(mfi);
+        auto M         = momentum_mf[lev]->array(mfi);
+        auto E         = energy_per_vol_mf[lev]->array(mfi);
+        auto E0_arr    = energy0_mf[lev]->array(mfi);
+        auto E1_arr    = energy1_mf[lev]->array(mfi);
+        auto v         = velocity_mf[lev]->array(mfi);
+        auto press     = pressure_mf[lev]->array(mfi);
+        auto T         = T_mf[lev]->array(mfi);
+        auto a         = a_mf[lev]->array(mfi);
+        auto gamma     = gamma_mf[lev]->array(mfi);
+        auto p0_eff    = p0_mf[lev]->array(mfi);
+        auto UE        = UE_per_vol_mf[lev]->array(mfi);
+        auto KE        = KE_per_vol_mf[lev]->array(mfi);
+        auto rho0_arr  = density0_mf[lev]->array(mfi);
+        auto rho1_arr  = density1_mf[lev]->array(mfi);
+        auto p0_arr    = pressure0_mf[lev]->array(mfi);
+        auto p1_arr    = pressure1_mf[lev]->array(mfi);
+        auto v0_arr    = velocity0_mf[lev]->array(mfi);
+        auto v1_arr    = velocity1_mf[lev]->array(mfi);
 
         const Solver::EOS::Tammann eos0_local = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
+        const Set::Scalar gam0 = eos0_local.Gamma();
+        const Set::Scalar pi0_ = eos0_local.P0();
+        const Set::Scalar gam1 = eos1_local.Gamma();
+        const Set::Scalar pi1_ = eos1_local.P0();
+        const Set::Scalar alpha_floor = 1.0e-6;
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            // Velocity
-            v(i, j, k, 0) = M(i, j, k, 0) / rho(i, j, k);
-            v(i, j, k, 1) = M(i, j, k, 1) / rho(i, j, k);
+            // Volume fraction with floor.
+            Set::Scalar a1 = std::min(std::max(eta(i, j, k), alpha_floor), 1.0 - alpha_floor);
+            Set::Scalar a2 = 1.0 - a1;
 
-            // Limiting Velocity
-            /*
-            Set::Scalar u_limit = 1e8;
-            v(i, j, k, 0) = (v(i, j, k, 0) < 0.0) ? std::max(v(i, j, k, 0), -u_limit) : std::min(v(i, j, k, 0), u_limit);
-            v(i, j, k, 1) = (v(i, j, k, 1) < 0.0) ? std::max(v(i, j, k, 1), -u_limit) : std::min(v(i, j, k, 1), u_limit);
-            */
+            // Phase masses (canonical).
+            Set::Scalar arh0 = std::max(arh0_arr(i, j, k), small);
+            Set::Scalar arh1 = std::max(arh1_arr(i, j, k), small);
 
-            // Kinetic energy
-            KE(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
+            // Mixture density (Sch20 eq. 8 RHS).
+            rho(i, j, k) = arh0 + arh1;
 
-            // Internal energy
-            UE(i, j, k) = E(i, j, k) - KE(i, j, k);
-            UE(i, j, k) = (UE(i, j, k) < 0.0) ? small : UE(i, j, k);
+            // Velocity from mixture momentum.
+            v(i, j, k, 0) = M(i, j, k, 0) / std::max(rho(i, j, k), small);
+            v(i, j, k, 1) = M(i, j, k, 1) / std::max(rho(i, j, k), small);
 
-            // Mixed EOS properties
-            gamma(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
-            p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
+            // Kinetic energy.
+            KE(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0)
+                                              + v(i, j, k, 1) * v(i, j, k, 1));
 
-            // Pressure from Tammann EOS
-            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small);
+            // Pure-phase densities for per-phase EOS evaluation.
+            Set::Scalar rho0_pure = arh0 / a1;
+            Set::Scalar rho1_pure = arh1 / a2;
 
-            // Temperature
-            T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
+            // Per-phase pressures from canonical (alpha rho e)_k (Sau09 II.3).
+            Set::Scalar p0_loc = Solver::EOS::EOS::PhasicPressureFromEnergy(E0_arr(i, j, k), a1, gam0, pi0_, small);
+            Set::Scalar p1_loc = Solver::EOS::EOS::PhasicPressureFromEnergy(E1_arr(i, j, k), a2, gam1, pi1_, small);
 
-            // Sound speed
-            a(i, j, k) = Solver::EOS::EOS::TammannSoundSpeed(rho(i, j, k), press(i, j, k), gamma(i, j, k), p0_eff(i, j, k), small);
+            // Per-phase sound speeds.
+            Set::Scalar c0_loc = Solver::EOS::EOS::PhasicSoundSpeed(rho0_pure, p0_loc, gam0, pi0_, small);
+            Set::Scalar c1_loc = Solver::EOS::EOS::PhasicSoundSpeed(rho1_pure, p1_loc, gam1, pi1_, small);
+
+            // Mass fractions.
+            Set::Scalar Y0 = arh0 / std::max(rho(i, j, k), small);
+            Set::Scalar Y1 = 1.0 - Y0;
+
+            // Mixture pressure (Sch20 eq. 8) and frozen sound speed (Sch20 eq. 17).
+            press(i, j, k) = a1 * p0_loc + a2 * p1_loc;
+            a(i, j, k)     = Solver::EOS::EOS::FrozenMixtureSoundSpeed(Y0, Y1, c0_loc, c1_loc);
+
+            // Per-phase diagnostic primitives (plotfile).
+            rho0_arr(i, j, k) = rho0_pure;
+            rho1_arr(i, j, k) = rho1_pure;
+            p0_arr(i, j, k)   = p0_loc;
+            p1_arr(i, j, k)   = p1_loc;
+            v0_arr(i, j, k, 0) = v(i, j, k, 0);   // mechanical equilibrium (one velocity)
+            v0_arr(i, j, k, 1) = v(i, j, k, 1);
+            v1_arr(i, j, k, 0) = v(i, j, k, 0);
+            v1_arr(i, j, k, 1) = v(i, j, k, 1);
+
+            // Internal energy (sum of canonical per-phase energies).
+            UE(i, j, k) = E0_arr(i, j, k) + E1_arr(i, j, k);
+
+            // Diagnostic gamma / p0_eff (NOT used by hyperbolic step).
+            gamma(i, j, k)  = Solver::EOS::EOS::MixedGamma(a1, eos0_local, eos1_local);
+            p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(a1, eos0_local, eos1_local);
+            T(i, j, k)      = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), a1, eos0_local, eos1_local, pref);
         });
     }
 
@@ -2954,18 +3086,21 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     }
     else
     {
-        // Density
+        // Phase masses (canonical).
         FillBoundariesWithBC(lev, time, density_bc, {
             rho_eta0_mf[lev].get(),
             rho_eta1_mf[lev].get()
         });
-        // Momentum
+        // Mixture momentum.
         FillBoundariesWithBC(lev, time, momentum_bc, {
             momentum_mf[lev].get()
         });
-        // Energy
+        // Redundant total energy AND per-phase internal energies (6-eq primaries
+        // -- Schmidmayer 2020 eq. 13 last two rows + eq. 16).
         FillBoundariesWithBC(lev, time, energy_bc, {
-            energy_per_vol_mf[lev].get()
+            energy_per_vol_mf[lev].get(),
+            energy0_mf[lev].get(),
+            energy1_mf[lev].get()
         });
 
         // Zero Gradient Fill
@@ -3031,46 +3166,91 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     }
 
     // ------------------------------------------------------------
-    // STEP 7: Compute primitives in GHOST CELLS
+    // STEP 7: Compute primitives in GHOST CELLS (6-eq primitive recovery).
+    //
+    // Also OVERWRITE the BC-supplied rho E in ghosts with the
+    // thermodynamically consistent value  rho E = E0 + E1 + KE.
+    // This avoids the prior BC-inconsistency bug class where a
+    // user-supplied rho E in ghosts disagrees with the per-phase
+    // energies, leading the reinit step to overwrite p with garbage.
     // ------------------------------------------------------------
     for (amrex::MFIter mfi(*velocity_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &ghostbox = mfi.growntilebox(nghost);
 
-        auto rho = density_mf[lev]->array(mfi);
-        auto eta = eta_mf[lev]->array(mfi);
-        auto M = momentum_mf[lev]->array(mfi);
-        auto E = energy_per_vol_mf[lev]->array(mfi);
-        auto v = velocity_mf[lev]->array(mfi);
-        auto press = pressure_mf[lev]->array(mfi);
-        auto T = T_mf[lev]->array(mfi);
-        auto a = a_mf[lev]->array(mfi);
-        auto gamma = gamma_mf[lev]->array(mfi);
-        auto p0_eff = p0_mf[lev]->array(mfi);
-        auto UE = UE_per_vol_mf[lev]->array(mfi);
-        auto KE = KE_per_vol_mf[lev]->array(mfi);
+        auto rho       = density_mf[lev]->array(mfi);
+        auto eta       = eta_mf[lev]->array(mfi);
+        auto arh0_arr  = rho_eta0_mf[lev]->array(mfi);
+        auto arh1_arr  = rho_eta1_mf[lev]->array(mfi);
+        auto M         = momentum_mf[lev]->array(mfi);
+        auto E         = energy_per_vol_mf[lev]->array(mfi);
+        auto E0_arr    = energy0_mf[lev]->array(mfi);
+        auto E1_arr    = energy1_mf[lev]->array(mfi);
+        auto v         = velocity_mf[lev]->array(mfi);
+        auto press     = pressure_mf[lev]->array(mfi);
+        auto T         = T_mf[lev]->array(mfi);
+        auto a         = a_mf[lev]->array(mfi);
+        auto gamma     = gamma_mf[lev]->array(mfi);
+        auto p0_eff    = p0_mf[lev]->array(mfi);
+        auto UE        = UE_per_vol_mf[lev]->array(mfi);
+        auto KE        = KE_per_vol_mf[lev]->array(mfi);
+        auto rho0_arr  = density0_mf[lev]->array(mfi);
+        auto rho1_arr  = density1_mf[lev]->array(mfi);
+        auto p0_arr    = pressure0_mf[lev]->array(mfi);
+        auto p1_arr    = pressure1_mf[lev]->array(mfi);
 
         const Solver::EOS::Tammann eos0_local = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
+        const Set::Scalar gam0 = eos0_local.Gamma();
+        const Set::Scalar pi0_ = eos0_local.P0();
+        const Set::Scalar gam1 = eos1_local.Gamma();
+        const Set::Scalar pi1_ = eos1_local.P0();
+        const Set::Scalar alpha_floor = 1.0e-6;
 
-        // Compute 
         amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            v(i, j, k, 0) = M(i, j, k, 0) / rho(i, j, k);
-            v(i, j, k, 1) = M(i, j, k, 1) / rho(i, j, k);
+            Set::Scalar a1 = std::min(std::max(eta(i, j, k), alpha_floor), 1.0 - alpha_floor);
+            Set::Scalar a2 = 1.0 - a1;
 
-            KE(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
+            Set::Scalar arh0 = std::max(arh0_arr(i, j, k), small);
+            Set::Scalar arh1 = std::max(arh1_arr(i, j, k), small);
+            rho(i, j, k) = arh0 + arh1;
 
-            UE(i, j, k) = E(i, j, k) - KE(i, j, k);
-            UE(i, j, k) = (UE(i, j, k) < 0.0) ? small : UE(i, j, k);
+            v(i, j, k, 0) = M(i, j, k, 0) / std::max(rho(i, j, k), small);
+            v(i, j, k, 1) = M(i, j, k, 1) / std::max(rho(i, j, k), small);
 
-            //if (!(use_nscbc))
-            //{
-                gamma(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
-                p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
-                press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small);
-            //}
-            T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
-            a(i, j, k) = Solver::EOS::EOS::TammannSoundSpeed(rho(i, j, k), press(i, j, k), gamma(i, j, k), p0_eff(i, j, k), small);
+            KE(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0)
+                                              + v(i, j, k, 1) * v(i, j, k, 1));
+
+            // Per-phase pure densities, pressures, and sound speeds.
+            Set::Scalar rho0_pure = arh0 / a1;
+            Set::Scalar rho1_pure = arh1 / a2;
+            Set::Scalar p0_loc = Solver::EOS::EOS::PhasicPressureFromEnergy(E0_arr(i, j, k), a1, gam0, pi0_, small);
+            Set::Scalar p1_loc = Solver::EOS::EOS::PhasicPressureFromEnergy(E1_arr(i, j, k), a2, gam1, pi1_, small);
+            Set::Scalar c0_loc = Solver::EOS::EOS::PhasicSoundSpeed(rho0_pure, p0_loc, gam0, pi0_, small);
+            Set::Scalar c1_loc = Solver::EOS::EOS::PhasicSoundSpeed(rho1_pure, p1_loc, gam1, pi1_, small);
+
+            Set::Scalar Y0 = arh0 / std::max(rho(i, j, k), small);
+            Set::Scalar Y1 = 1.0 - Y0;
+
+            press(i, j, k) = a1 * p0_loc + a2 * p1_loc;
+            a(i, j, k)     = Solver::EOS::EOS::FrozenMixtureSoundSpeed(Y0, Y1, c0_loc, c1_loc);
+
+            // Total energy in the ghost CONSISTENT with the per-phase energies:
+            // rho E = sum_k (alpha rho e)_k + 0.5 rho |u|^2  (Sch20 eq. 16).
+            // This overwrite is the BC-consistency guarantee for the 6-eq model.
+            UE(i, j, k) = E0_arr(i, j, k) + E1_arr(i, j, k);
+            E(i, j, k)  = UE(i, j, k) + KE(i, j, k);
+
+            // Diagnostic per-phase primitives.
+            rho0_arr(i, j, k) = rho0_pure;
+            rho1_arr(i, j, k) = rho1_pure;
+            p0_arr(i, j, k)   = p0_loc;
+            p1_arr(i, j, k)   = p1_loc;
+
+            // Diagnostic mixture gamma / p0 / T (NOT used by hyperbolic step).
+            gamma(i, j, k)  = Solver::EOS::EOS::MixedGamma(a1, eos0_local, eos1_local);
+            p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(a1, eos0_local, eos1_local);
+            T(i, j, k)      = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), a1, eos0_local, eos1_local, pref);
         });
     }
 
@@ -3420,6 +3600,152 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         Util::Abort(INFO, "NaN detected in FillGhost4BC - see details above");
     }
 } // end FillGhost4BC()
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////// RELAXATION + REINITIALIZATION //////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// Stiff pressure-relaxation (mu -> infinity) + reinitialization step for the
+// 6-equation diffuse-interface model.
+//
+//   Step 1 (relaxation, Schmidmayer 2020 §3.3, eq. (24)+(25); Saurel 2009 §3.3,
+//   eq. (III.4)):  per-cell Newton on
+//                     f(p) = sum_k (alpha rho)_k v_k(p) - 1 = 0
+//   with v_k from Saurel eq. (III.4) (frozen-p_hat_I form).  Updates alpha_k
+//   holding (alpha rho)_k, momentum, and rho E fixed.
+//
+//   Step 2 (reinit, Schmidmayer 2020 eq. (26); Saurel 2009 eq. (III.5)):
+//   recompute mixture p from the redundant rho E using the post-relaxation
+//   alpha_k; then reset each per-phase (alpha rho e)_k from
+//   (alpha rho e)_k = alpha_k (p + gamma_k pi_k)/(gamma_k - 1).
+//
+// Schmidmayer line 466-470: "performed at each stage. Thus there is only one
+// pressure at the end of each stage."
+//
+void Hydro2::RelaxAndReinit(int lev)
+{
+    BL_PROFILE("Integrator::Hydro2::RelaxAndReinit");
+
+    const Set::Scalar alpha_floor = 1.0e-6;
+    const Set::Scalar small_loc   = small;
+
+    const Set::Scalar gam0 = eos0.Gamma();
+    const Set::Scalar pi0_ = eos0.P0();
+    const Set::Scalar gam1 = eos1.Gamma();
+    const Set::Scalar pi1_ = eos1.P0();
+
+    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
+
+        auto eta   = eta_mf[lev]->array(mfi);
+        auto arh0  = rho_eta0_mf[lev]->array(mfi);
+        auto arh1  = rho_eta1_mf[lev]->array(mfi);
+        auto M_    = momentum_mf[lev]->array(mfi);
+        auto E_    = energy_per_vol_mf[lev]->array(mfi);
+        auto E0_   = energy0_mf[lev]->array(mfi);
+        auto E1_   = energy1_mf[lev]->array(mfi);
+
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            // -----------------------------------------------------------
+            // Pre-relax state.
+            // -----------------------------------------------------------
+            Set::Scalar a1 = std::min(std::max(eta(i, j, k), alpha_floor), 1.0 - alpha_floor);
+            Set::Scalar a2 = 1.0 - a1;
+
+            Set::Scalar arh0_loc = std::max(arh0(i, j, k), small_loc);
+            Set::Scalar arh1_loc = std::max(arh1(i, j, k), small_loc);
+
+            // Pure-phase densities (alpha_floor protects the divide).
+            Set::Scalar rho0_pre = arh0_loc / a1;
+            Set::Scalar rho1_pre = arh1_loc / a2;
+
+            // Pre-relax per-phase pressures from canonical (alpha rho e)_k.
+            // Sau09 eq. II.3 inverted:
+            Set::Scalar p0_pre = Solver::EOS::EOS::PhasicPressureFromEnergy(E0_(i, j, k), a1, gam0, pi0_, small_loc);
+            Set::Scalar p1_pre = Solver::EOS::EOS::PhasicPressureFromEnergy(E1_(i, j, k), a2, gam1, pi1_, small_loc);
+
+            // Frozen interfacial pressure (Sch20 eq. 14) -- used in the
+            // Saurel form of v_k(p).  Sau09 §4.4: difference vs. self-consistent
+            // is negligible.
+            Set::Scalar c0_pre = Solver::EOS::EOS::PhasicSoundSpeed(rho0_pre, p0_pre, gam0, pi0_, small_loc);
+            Set::Scalar c1_pre = Solver::EOS::EOS::PhasicSoundSpeed(rho1_pre, p1_pre, gam1, pi1_, small_loc);
+            Set::Scalar Z0     = rho0_pre * c0_pre;
+            Set::Scalar Z1     = rho1_pre * c1_pre;
+            Set::Scalar pHat   = Solver::EOS::EOS::InterfacialPressureZ(p0_pre, p1_pre, Z0, Z1, small_loc);
+
+            // -----------------------------------------------------------
+            // Newton on f(p) = arh0*v0(p) + arh1*v1(p) - 1 = 0
+            // (Schmidmayer 2020 eq. 24; v_k from Saurel 2009 eq. III.4.)
+            // -----------------------------------------------------------
+            const Set::Scalar p_min = -std::min(gam0 * pi0_, gam1 * pi1_) + small_loc;
+            Set::Scalar p = std::max(pHat, p_min);
+
+            const int    max_iter = 30;
+            const Set::Scalar tol = 1.0e-10;
+            for (int it = 0; it < max_iter; ++it)
+            {
+                Set::Scalar v0_p = Solver::EOS::EOS::RelaxationVolume_SG(p, p0_pre, rho0_pre, gam0, pi0_, pHat, small_loc);
+                Set::Scalar v1_p = Solver::EOS::EOS::RelaxationVolume_SG(p, p1_pre, rho1_pre, gam1, pi1_, pHat, small_loc);
+                Set::Scalar f    = arh0_loc * v0_p + arh1_loc * v1_p - 1.0;
+
+                Set::Scalar dv0 = Solver::EOS::EOS::RelaxationVolume_SG_dvdp(p, p0_pre, rho0_pre, gam0, pi0_, pHat, small_loc);
+                Set::Scalar dv1 = Solver::EOS::EOS::RelaxationVolume_SG_dvdp(p, p1_pre, rho1_pre, gam1, pi1_, pHat, small_loc);
+                Set::Scalar df  = arh0_loc * dv0 + arh1_loc * dv1;
+
+                if (std::abs(df) < small_loc) break;
+                Set::Scalar dp = -f / df;
+                Set::Scalar p_new = p + dp;
+                // Keep p + gam pi + (gam-1) pHat > 0 for both phases.
+                if (p_new < p_min) p_new = 0.5 * (p + p_min);
+                if (std::abs(dp) < tol * std::max(std::abs(p_new), 1.0)) { p = p_new; break; }
+                p = p_new;
+            }
+
+            Set::Scalar p_relaxed = p;
+
+            // Post-relax volume fractions.
+            Set::Scalar v0_r = Solver::EOS::EOS::RelaxationVolume_SG(p_relaxed, p0_pre, rho0_pre, gam0, pi0_, pHat, small_loc);
+            Set::Scalar v1_r = Solver::EOS::EOS::RelaxationVolume_SG(p_relaxed, p1_pre, rho1_pre, gam1, pi1_, pHat, small_loc);
+            Set::Scalar a1_new = arh0_loc * v0_r;
+            Set::Scalar a2_new = arh1_loc * v1_r;
+            Set::Scalar asum   = a1_new + a2_new;
+            if (asum > small_loc) { a1_new /= asum; a2_new /= asum; }
+            a1_new = std::min(std::max(a1_new, alpha_floor), 1.0 - alpha_floor);
+            a2_new = 1.0 - a1_new;
+
+            // -----------------------------------------------------------
+            // Reinit: recompute mixture p from the (CONSERVED) redundant
+            // rho E using the POST-relaxation alpha_k.
+            // Schmidmayer 2020 eq. 26 / Saurel 2009 eq. III.5.
+            // -----------------------------------------------------------
+            Set::Scalar rho_loc = arh0_loc + arh1_loc;
+            Set::Scalar ke      = 0.5 * (M_(i, j, k, 0) * M_(i, j, k, 0)
+                                       + M_(i, j, k, 1) * M_(i, j, k, 1)) / std::max(rho_loc, small_loc);
+            Set::Scalar rho_e   = std::max(E_(i, j, k) - ke, small_loc);
+
+            Set::Scalar p_reinit = Solver::EOS::EOS::ReinitMixturePressure(rho_e, a1_new, a2_new,
+                                                                          gam0, pi0_, gam1, pi1_, small_loc);
+
+            // Floor: keep p + gam_k pi_k > 0 for both phases (SG positivity).
+            const Set::Scalar p_min_ph = -std::min(pi0_, pi1_) + small_loc;
+            p_reinit = std::max(p_reinit, p_min_ph);
+
+            // -----------------------------------------------------------
+            // Reset per-phase canonical energies from p_reinit.
+            // (Sau09 eq. III.5: e_k = (p + gam pi)/((gam-1) rho_k), so
+            //  (alpha rho e)_k = alpha_k (p + gam pi)/(gam - 1).)
+            // -----------------------------------------------------------
+            eta(i, j, k) = a1_new;
+            E0_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_reinit, a1_new, gam0, pi0_, small_loc);
+            E1_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_reinit, a2_new, gam1, pi1_, small_loc);
+
+            // rho_eta{0,1}, momentum, energy_per_vol are NOT touched
+            // (they are conserved through relaxation by construction).
+        });
+    }
+} // end RelaxAndReinit()
 
 
 

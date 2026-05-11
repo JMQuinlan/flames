@@ -366,6 +366,180 @@ public:
         }
     }
 
+    // ========================================================================
+    // SIX-EQUATION DIFFUSE-INTERFACE HELPERS (Saurel-Petitpas-Berry 2009 /
+    // Schmidmayer-Bryngelson-Colonius 2020). All static, AMReX-GPU-safe.
+    // Each helper documents the source equation in a one-line tag.
+    // Symbol key:
+    //   alpha   = alpha_k  (volume fraction of phase k)
+    //   arh     = (alpha rho)_k  (canonical conservative phase mass)
+    //   E_k     = (alpha rho e)_k  (canonical conservative per-phase internal energy)
+    //   gam     = gamma_k         (per-phase adiabatic index)
+    //   pi_k    = stiffened-gas reference pressure (Tammann pi_k = P0())
+    //   Z_k     = rho_k c_k       (acoustic impedance)
+    // ========================================================================
+
+    /// Per-phase pressure from the canonical conservative (alpha rho e)_k.
+    /// Saurel-Petitpas-Berry 2009 eq. (II.3):  p_k = (gamma_k - 1) rho_k e_k - gamma_k pi_k.
+    /// Substituting rho_k e_k = E_k / alpha gives:
+    ///     p_k = (gamma_k - 1) * E_k / alpha  -  gamma_k pi_k
+    /// Floor: clamp p_k so that p_k + pi_k >= small (keeps c_k^2 = gamma_k(p+pi)/rho real).
+    AMREX_GPU_HOST_DEVICE
+    static Set::Scalar PhasicPressureFromEnergy(Set::Scalar E_k,
+                                                Set::Scalar alpha,
+                                                Set::Scalar gam,
+                                                Set::Scalar pi_k,
+                                                Set::Scalar small = 1e-16)
+    {
+        Set::Scalar a_safe = std::max(alpha, small);
+        Set::Scalar p_k = (gam - 1.0) * (E_k / a_safe) - gam * pi_k;
+        // Keep p_k + pi_k > 0 (Saurel 2009 §3 stiffened-gas positivity).
+        return std::max(p_k, -pi_k + small);
+    }
+
+    /// Canonical conservative per-phase internal energy from per-phase pressure.
+    /// Saurel-Petitpas-Berry 2009 eq. (III.5) / Schmidmayer-Bryngelson-Colonius 2020
+    /// post-reinit reset:  (alpha rho e)_k = alpha_k (p + gamma_k pi_k) / (gamma_k - 1).
+    AMREX_GPU_HOST_DEVICE
+    static Set::Scalar PhasicEnergyFromPressure(Set::Scalar p_k,
+                                                Set::Scalar alpha,
+                                                Set::Scalar gam,
+                                                Set::Scalar pi_k,
+                                                Set::Scalar small = 1e-16)
+    {
+        Set::Scalar numer = std::max(p_k + gam * pi_k, small);
+        return alpha * numer / (gam - 1.0);
+    }
+
+    /// Per-phase Tammann/stiffened-gas sound speed in PURE-PHASE quantities.
+    /// c_k = sqrt( gamma_k (p_k + pi_k) / rho_k )
+    /// Saurel-Petitpas-Berry 2009 just above eq. (III.2) (per-phase form).
+    AMREX_GPU_HOST_DEVICE
+    static Set::Scalar PhasicSoundSpeed(Set::Scalar rho_k,
+                                        Set::Scalar p_k,
+                                        Set::Scalar gam,
+                                        Set::Scalar pi_k,
+                                        Set::Scalar small = 1e-16)
+    {
+        Set::Scalar r = std::max(rho_k, small);
+        Set::Scalar pp = std::max(p_k + pi_k, small);
+        return std::sqrt(gam * pp / r);
+    }
+
+    /// Frozen mixture sound speed used by the 6-eq hyperbolic step.
+    /// Schmidmayer-Bryngelson-Colonius 2020 eq. (17) /
+    /// Saurel-Petitpas-Berry 2009 eq. (III.2):
+    ///     c^2 = Y_1 c_1^2 + Y_2 c_2^2          (Y_k = mass fraction)
+    /// MONOTONIC in alpha - the central robustness lever vs the Wood form.
+    AMREX_GPU_HOST_DEVICE
+    static Set::Scalar FrozenMixtureSoundSpeed(Set::Scalar Y0,
+                                               Set::Scalar Y1,
+                                               Set::Scalar c0,
+                                               Set::Scalar c1)
+    {
+        return std::sqrt(Y0 * c0 * c0 + Y1 * c1 * c1);
+    }
+
+    /// Interfacial pressure (acoustic-impedance-weighted).
+    /// Schmidmayer 2020 eq. (14) / Saurel 2009 just below eq. (II.6):
+    ///     p_I = (Z_1 p_0 + Z_0 p_1) / (Z_0 + Z_1),  Z_k = rho_k c_k.
+    /// Note the cross-pairing of subscripts (Z_1 multiplies p_0).
+    AMREX_GPU_HOST_DEVICE
+    static Set::Scalar InterfacialPressureZ(Set::Scalar p0,
+                                            Set::Scalar p1,
+                                            Set::Scalar Z0,
+                                            Set::Scalar Z1,
+                                            Set::Scalar small = 1e-16)
+    {
+        Set::Scalar denom = std::max(Z0 + Z1, small);
+        return (Z1 * p0 + Z0 * p1) / denom;
+    }
+
+    /// HLLC per-phase Hugoniot pressure star-state.
+    /// Saurel-Petitpas-Berry 2009 eq. (II.8) inverted for SG/Tammann (lines ~812):
+    ///   p_k*(rho_k*) = (p_k + pi_k) * [(gam+1) rho_k* - (gam-1) rho_k]
+    ///                / [(gam+1) rho_k  - (gam-1) rho_k*]   - pi_k
+    /// Used to get the per-phase internal energy across the acoustic star
+    /// (the volume fraction alpha_k is constant across acoustic waves -
+    /// Saurel 2009 line 798).
+    AMREX_GPU_HOST_DEVICE
+    static Set::Scalar PhasicHugoniotPressure(Set::Scalar rho_star,
+                                              Set::Scalar rho,
+                                              Set::Scalar p,
+                                              Set::Scalar gam,
+                                              Set::Scalar pi_k,
+                                              Set::Scalar small = 1e-16)
+    {
+        Set::Scalar gp1 = gam + 1.0;
+        Set::Scalar gm1 = gam - 1.0;
+        Set::Scalar numer = gp1 * rho_star - gm1 * rho;
+        Set::Scalar denom = gp1 * rho      - gm1 * rho_star;
+        // Guard against the singular limit (rare; happens only for near-vacuum).
+        if (std::abs(denom) < small) return p; // fall back to isentropic
+        return (p + pi_k) * (numer / denom) - pi_k;
+    }
+
+    /// Relaxation specific-volume (Saurel-Petitpas-Berry 2009 eq. (III.4),
+    /// frozen-p_hat_I form): v_k(p) = v_k^0 (p_k^0 + gam pi + (gam-1) pHat)
+    ///                                / (p     + gam pi + (gam-1) pHat).
+    /// Returns v_k(p). Used inside the Newton iteration on
+    /// Schmidmayer 2020 eq. (24):  sum_k (alpha rho)_k v_k(p) = 1.
+    AMREX_GPU_HOST_DEVICE
+    static Set::Scalar RelaxationVolume_SG(Set::Scalar p,
+                                           Set::Scalar p_k0,
+                                           Set::Scalar rho_k0,
+                                           Set::Scalar gam,
+                                           Set::Scalar pi_k,
+                                           Set::Scalar pHat,
+                                           Set::Scalar small = 1e-16)
+    {
+        Set::Scalar v_k0 = 1.0 / std::max(rho_k0, small);
+        Set::Scalar denom = p + gam * pi_k + (gam - 1.0) * pHat;
+        denom = std::max(denom, small);
+        Set::Scalar numer = p_k0 + gam * pi_k + (gam - 1.0) * pHat;
+        return v_k0 * numer / denom;
+    }
+
+    /// Derivative of RelaxationVolume_SG with respect to p (for Newton-Raphson).
+    /// d v_k / dp = - v_k(p) / [p + gam pi + (gam-1) pHat]
+    /// (Direct differentiation of eq. (III.4) in p.)
+    AMREX_GPU_HOST_DEVICE
+    static Set::Scalar RelaxationVolume_SG_dvdp(Set::Scalar p,
+                                                Set::Scalar p_k0,
+                                                Set::Scalar rho_k0,
+                                                Set::Scalar gam,
+                                                Set::Scalar pi_k,
+                                                Set::Scalar pHat,
+                                                Set::Scalar small = 1e-16)
+    {
+        Set::Scalar v_k = RelaxationVolume_SG(p, p_k0, rho_k0, gam, pi_k, pHat, small);
+        Set::Scalar denom = p + gam * pi_k + (gam - 1.0) * pHat;
+        denom = std::max(denom, small);
+        return -v_k / denom;
+    }
+
+    /// Reinitialization mixture pressure from the redundant total energy.
+    /// Schmidmayer 2020 eq. (26) / Saurel 2009 eq. (III.5):
+    ///     p = ( rho e  - sum_k alpha_k gam_k pi_k / (gam_k - 1) )
+    ///         / sum_k ( alpha_k / (gam_k - 1) )
+    /// where rho e = rho E - 0.5 rho |u|^2 is the (conserved) mixture internal
+    /// energy from the redundant ROE-var. Uses POST-RELAXATION alpha_k.
+    AMREX_GPU_HOST_DEVICE
+    static Set::Scalar ReinitMixturePressure(Set::Scalar rho_e,
+                                             Set::Scalar alpha0,
+                                             Set::Scalar alpha1,
+                                             Set::Scalar gam0,
+                                             Set::Scalar pi0,
+                                             Set::Scalar gam1,
+                                             Set::Scalar pi1,
+                                             Set::Scalar small = 1e-16)
+    {
+        Set::Scalar A = alpha0 / (gam0 - 1.0) + alpha1 / (gam1 - 1.0);
+        Set::Scalar B = alpha0 * gam0 * pi0 / (gam0 - 1.0)
+                      + alpha1 * gam1 * pi1 / (gam1 - 1.0);
+        return (rho_e - B) / std::max(A, small);
+    }
+
 };
 
 } // namespace EOS
