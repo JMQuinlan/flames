@@ -472,9 +472,13 @@ public:
     {
         Set::Scalar gp1 = gam + 1.0;
         Set::Scalar gm1 = gam - 1.0;
-        Set::Scalar numer = gp1 * rho_star - gm1 * rho;
-        Set::Scalar denom = gp1 * rho      - gm1 * rho_star;
-        // Guard against the singular limit (rare; happens only for near-vacuum).
+        // Cap rho_star at 0.99 * (gamma+1)/(gamma-1) * rho to avoid the
+        // strong-shock pole at the asymptotic compression ratio.  Without
+        // this, p_star blows up when rho_star is close to the asymptote.
+        Set::Scalar rho_max = 0.99 * gp1 / std::max(gm1, small) * std::max(rho, small);
+        Set::Scalar rho_s   = std::min(std::max(rho_star, small), rho_max);
+        Set::Scalar numer   = gp1 * rho_s - gm1 * rho;
+        Set::Scalar denom   = gp1 * rho   - gm1 * rho_s;
         if (std::abs(denom) < small) return p; // fall back to isentropic
         return (p + pi_k) * (numer / denom) - pi_k;
     }
@@ -516,6 +520,47 @@ public:
         Set::Scalar denom = p + gam * pi_k + (gam - 1.0) * pHat;
         denom = std::max(denom, small);
         return -v_k / denom;
+    }
+
+    /// Self-consistent relaxation specific-volume from Schmidmayer-Bryngelson-
+    /// Colonius 2020 eq. (25):
+    ///     v_k(p) = v_k^0 * (p_k^0 + gam_k pi_k + (gam_k - 1) p) / (gam_k (p + pi_k)).
+    /// This is the same as Saurel 2009 eq. (III.4) substituted with p_hat_I = p
+    /// (the self-consistent / "relaxed" choice).  Used inside the Newton on
+    /// Schmidmayer 2020 eq. (24):  sum_k (alpha rho)_k v_k(p) = 1.
+    /// Saurel 2009 §4.4 calls this the "negligibly different" alternative to
+    /// the frozen-p_hat_I form; in practice they agree to 4+ digits but are
+    /// not bit-identical for high pressure ratios.
+    AMREX_GPU_HOST_DEVICE
+    static Set::Scalar RelaxationVolume_SG_SC(Set::Scalar p,
+                                              Set::Scalar p_k0,
+                                              Set::Scalar rho_k0,
+                                              Set::Scalar gam,
+                                              Set::Scalar pi_k,
+                                              Set::Scalar small = 1e-16)
+    {
+        Set::Scalar v_k0  = 1.0 / std::max(rho_k0, small);
+        Set::Scalar numer = p_k0 + gam * pi_k + (gam - 1.0) * p;
+        Set::Scalar denom = gam * (p + pi_k);
+        denom = std::max(denom, small);
+        return v_k0 * numer / denom;
+    }
+
+    /// Total derivative of RelaxationVolume_SG_SC with respect to p
+    /// (Schmidmayer 2020 eq. 25, self-consistent).  Direct differentiation:
+    ///     dv/dp = -v_k^0 (p_k^0 + pi_k) / (gam_k (p + pi_k)^2).
+    AMREX_GPU_HOST_DEVICE
+    static Set::Scalar RelaxationVolume_SG_SC_dvdp(Set::Scalar p,
+                                                   Set::Scalar p_k0,
+                                                   Set::Scalar rho_k0,
+                                                   Set::Scalar gam,
+                                                   Set::Scalar pi_k,
+                                                   Set::Scalar small = 1e-16)
+    {
+        Set::Scalar v_k0  = 1.0 / std::max(rho_k0, small);
+        Set::Scalar denom = (p + pi_k);
+        denom = std::max(std::abs(denom), small) * (denom >= 0.0 ? 1.0 : -1.0);
+        return -v_k0 * (p_k0 + pi_k) / (gam * denom * denom);
     }
 
     /// Reinitialization mixture pressure from the redundant total energy.

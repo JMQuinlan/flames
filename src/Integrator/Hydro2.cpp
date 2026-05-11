@@ -618,11 +618,33 @@ void Hydro2::Mix(int lev)
                                                   + v(i, j, k, 1) * v(i, j, k, 1));
             KE_mas(i, j, k) = (rho(i, j, k) > small) ? KE_vol(i, j, k) / rho(i, j, k) : 0.0;
 
-            // Per-phase canonical internal energies (Saurel 2009 eq. III.5 /
-            // Schmidmayer 2020 §3.3 reinit form -- same formula at IC):
-            //   (alpha rho e)_k = alpha_k (p_k + gamma_k pi_k) / (gamma_k - 1)
-            E0_arr(i, j, k)     = Solver::EOS::EOS::PhasicEnergyFromPressure(p0(i, j, k), a1, gam0, pi0_, small);
-            E1_arr(i, j, k)     = Solver::EOS::EOS::PhasicEnergyFromPressure(p1(i, j, k), a2, gam1, pi1_, small);
+            // ===========================================================
+            // MECHANICAL-EQUILIBRIUM INITIAL CONDITION (Schmidmayer 2020
+            // §3.3, line 538-541: "the conservative variables follow from
+            // simple mixture relations, allowing thermodynamic consistency").
+            //
+            // In input files the per-phase IC pressures (pressure0_ic,
+            // pressure1_ic) are typically set to the bulk values of the
+            // two pure phases (e.g., Garrick eq. 68: p0 = 3.059e-4 liquid,
+            // p1 = 2.753 gas).  In a diffuse-interface cell with intermediate
+            // alpha the literal per-phase IC pressures are NOT in mechanical
+            // equilibrium.  Schmidmayer's 6-eq model assumes mechanical-
+            // equilibrium IC where p_1 = p_2 = p_mix.  Build that here:
+            //
+            //   p_mix = alpha_1 p0_ic + alpha_2 p1_ic    (Schmidmayer eq. 8)
+            //   (alpha rho e)_k = alpha_k (p_mix + gamma_k pi_k) / (gamma_k - 1)
+            //                                              (Sau09 eq. III.5)
+            //
+            // In pure-phase cells (alpha = 0 or 1) this reduces to the
+            // active-phase IC pressure, so pure-phase tests (Toro1a) are
+            // unchanged.  In diffuse-interface cells it produces the
+            // correct mechanical-equilibrium IC that the 5-eq reference
+            // uses.
+            // ===========================================================
+            const Set::Scalar p_mix_IC = a1 * p0(i, j, k) + a2 * p1(i, j, k);
+
+            E0_arr(i, j, k)     = Solver::EOS::EOS::PhasicEnergyFromPressure(p_mix_IC, a1, gam0, pi0_, small);
+            E1_arr(i, j, k)     = Solver::EOS::EOS::PhasicEnergyFromPressure(p_mix_IC, a2, gam1, pi1_, small);
             E0_old_arr(i, j, k) = E0_arr(i, j, k);
             E1_old_arr(i, j, k) = E1_arr(i, j, k);
 
@@ -641,9 +663,10 @@ void Hydro2::Mix(int lev)
             gammaf(i, j, k) = Solver::EOS::EOS::MixedGamma(a1, eos0_local, eos1_local);
             p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(a1, eos0_local, eos1_local);
 
-            // Mixture pressure (Schmidmayer 2020 eq. 8):
-            // p = alpha_1 p_1 + alpha_2 p_2.  At IC p_1 = p_2 typically.
-            press(i, j, k) = a1 * p0(i, j, k) + a2 * p1(i, j, k);
+            // Mixture pressure (Schmidmayer 2020 eq. 8).  In mechanical
+            // equilibrium IC this equals p_mix_IC (both per-phase pressures
+            // are the same here).
+            press(i, j, k) = p_mix_IC;
 
             // Chemical Potential
             // Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
@@ -663,13 +686,15 @@ void Hydro2::Mix(int lev)
             // Speed of sound -- FROZEN mixture sound speed.
             // Schmidmayer 2020 eq. 17 / Saurel 2009 eq. III.2:
             //   c^2 = Y_1 c_1^2 + Y_2 c_2^2
+            // Use the mechanical-equilibrium IC pressure p_mix_IC (both
+            // per-phase pressures are = p_mix_IC at this point).
             {
                 const Set::Scalar Y0 = rho_eta0(i, j, k) / std::max(rho(i, j, k), small);
                 const Set::Scalar Y1 = 1.0 - Y0;
                 const Set::Scalar rho1pure = rho_eta0(i, j, k) / std::max(a1, small);
                 const Set::Scalar rho2pure = rho_eta1(i, j, k) / std::max(a2, small);
-                const Set::Scalar c0_ph = Solver::EOS::EOS::PhasicSoundSpeed(rho1pure, p0(i, j, k), gam0, pi0_, small);
-                const Set::Scalar c1_ph = Solver::EOS::EOS::PhasicSoundSpeed(rho2pure, p1(i, j, k), gam1, pi1_, small);
+                const Set::Scalar c0_ph = Solver::EOS::EOS::PhasicSoundSpeed(rho1pure, p_mix_IC, gam0, pi0_, small);
+                const Set::Scalar c1_ph = Solver::EOS::EOS::PhasicSoundSpeed(rho2pure, p_mix_IC, gam1, pi1_, small);
                 a(i, j, k) = Solver::EOS::EOS::FrozenMixtureSoundSpeed(Y0, Y1, c0_ph, c1_ph);
             }
 
@@ -3666,38 +3691,42 @@ void Hydro2::RelaxAndReinit(int lev)
             Set::Scalar p0_pre = Solver::EOS::EOS::PhasicPressureFromEnergy(E0_(i, j, k), a1, gam0, pi0_, small_loc);
             Set::Scalar p1_pre = Solver::EOS::EOS::PhasicPressureFromEnergy(E1_(i, j, k), a2, gam1, pi1_, small_loc);
 
-            // Frozen interfacial pressure (Sch20 eq. 14) -- used in the
-            // Saurel form of v_k(p).  Sau09 §4.4: difference vs. self-consistent
-            // is negligible.
+            // Pre-relax sound speeds and impedances (kept for the Newton's
+            // initial guess via the impedance-weighted interfacial pressure).
             Set::Scalar c0_pre = Solver::EOS::EOS::PhasicSoundSpeed(rho0_pre, p0_pre, gam0, pi0_, small_loc);
             Set::Scalar c1_pre = Solver::EOS::EOS::PhasicSoundSpeed(rho1_pre, p1_pre, gam1, pi1_, small_loc);
             Set::Scalar Z0     = rho0_pre * c0_pre;
             Set::Scalar Z1     = rho1_pre * c1_pre;
-            Set::Scalar pHat   = Solver::EOS::EOS::InterfacialPressureZ(p0_pre, p1_pre, Z0, Z1, small_loc);
+            Set::Scalar pHat0  = Solver::EOS::EOS::InterfacialPressureZ(p0_pre, p1_pre, Z0, Z1, small_loc);
 
             // -----------------------------------------------------------
-            // Newton on f(p) = arh0*v0(p) + arh1*v1(p) - 1 = 0
-            // (Schmidmayer 2020 eq. 24; v_k from Saurel 2009 eq. III.4.)
+            // Newton on f(p) = arh0*v0(p) + arh1*v1(p) - 1 = 0.
+            //
+            // Schmidmayer 2020 eq. 24 + eq. 25 (SELF-CONSISTENT form):
+            //   v_k(p) = v_k^0 * [p_k^0 + gam pi + (gam-1) p] / [gam (p + pi)]
+            // (Equivalent to Saurel 2009 eq. III.4 with p_hat_I = p, the
+            //  unknown relaxed pressure.)  Saurel §4.4 calls this the
+            //  "negligibly different" alternative to the frozen-p_hat_I form.
             // -----------------------------------------------------------
-            const Set::Scalar p_min = -std::min(gam0 * pi0_, gam1 * pi1_) + small_loc;
-            Set::Scalar p = std::max(pHat, p_min);
+            const Set::Scalar p_min = -std::min(pi0_, pi1_) + small_loc;
+            Set::Scalar p = std::max(pHat0, p_min);
 
             const int    max_iter = 30;
             const Set::Scalar tol = 1.0e-10;
             for (int it = 0; it < max_iter; ++it)
             {
-                Set::Scalar v0_p = Solver::EOS::EOS::RelaxationVolume_SG(p, p0_pre, rho0_pre, gam0, pi0_, pHat, small_loc);
-                Set::Scalar v1_p = Solver::EOS::EOS::RelaxationVolume_SG(p, p1_pre, rho1_pre, gam1, pi1_, pHat, small_loc);
+                Set::Scalar v0_p = Solver::EOS::EOS::RelaxationVolume_SG_SC(p, p0_pre, rho0_pre, gam0, pi0_, small_loc);
+                Set::Scalar v1_p = Solver::EOS::EOS::RelaxationVolume_SG_SC(p, p1_pre, rho1_pre, gam1, pi1_, small_loc);
                 Set::Scalar f    = arh0_loc * v0_p + arh1_loc * v1_p - 1.0;
 
-                Set::Scalar dv0 = Solver::EOS::EOS::RelaxationVolume_SG_dvdp(p, p0_pre, rho0_pre, gam0, pi0_, pHat, small_loc);
-                Set::Scalar dv1 = Solver::EOS::EOS::RelaxationVolume_SG_dvdp(p, p1_pre, rho1_pre, gam1, pi1_, pHat, small_loc);
+                Set::Scalar dv0 = Solver::EOS::EOS::RelaxationVolume_SG_SC_dvdp(p, p0_pre, rho0_pre, gam0, pi0_, small_loc);
+                Set::Scalar dv1 = Solver::EOS::EOS::RelaxationVolume_SG_SC_dvdp(p, p1_pre, rho1_pre, gam1, pi1_, small_loc);
                 Set::Scalar df  = arh0_loc * dv0 + arh1_loc * dv1;
 
                 if (std::abs(df) < small_loc) break;
                 Set::Scalar dp = -f / df;
                 Set::Scalar p_new = p + dp;
-                // Keep p + gam pi + (gam-1) pHat > 0 for both phases.
+                // Keep (p + pi_k) > 0 for both phases (denominator of eq. 25).
                 if (p_new < p_min) p_new = 0.5 * (p + p_min);
                 if (std::abs(dp) < tol * std::max(std::abs(p_new), 1.0)) { p = p_new; break; }
                 p = p_new;
@@ -3705,9 +3734,9 @@ void Hydro2::RelaxAndReinit(int lev)
 
             Set::Scalar p_relaxed = p;
 
-            // Post-relax volume fractions.
-            Set::Scalar v0_r = Solver::EOS::EOS::RelaxationVolume_SG(p_relaxed, p0_pre, rho0_pre, gam0, pi0_, pHat, small_loc);
-            Set::Scalar v1_r = Solver::EOS::EOS::RelaxationVolume_SG(p_relaxed, p1_pre, rho1_pre, gam1, pi1_, pHat, small_loc);
+            // Post-relax volume fractions (using self-consistent v_k(p)).
+            Set::Scalar v0_r = Solver::EOS::EOS::RelaxationVolume_SG_SC(p_relaxed, p0_pre, rho0_pre, gam0, pi0_, small_loc);
+            Set::Scalar v1_r = Solver::EOS::EOS::RelaxationVolume_SG_SC(p_relaxed, p1_pre, rho1_pre, gam1, pi1_, small_loc);
             Set::Scalar a1_new = arh0_loc * v0_r;
             Set::Scalar a2_new = arh1_loc * v1_r;
             Set::Scalar asum   = a1_new + a2_new;

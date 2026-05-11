@@ -65,8 +65,15 @@ public:
         //    Each State carries (alpha, (alpha rho)_k, M_n, M_t, E_k, rho E,
         //    gamma_k, pi_k).  Derive: mixture rho/u/v/p, per-phase rho_k/e_k/p_k/c_k,
         //    mass fractions Y_k, FROZEN mixture sound speed c.
+        //
+        // Use a single, *consistent* alpha floor (alpha_floor) for EVERY
+        // per-phase divide so the (rho_k_pure, p_k) pair stays
+        // thermodynamically consistent.  An aggressive floor (1e-6) feeds
+        // measurable noise into c_k, Z_k, Y_k that biases velocity in
+        // mixed gas/liquid Riemann problems (Garrick).  1e-12 is the value
+        // used in the prior 6-eq stash that produced correct velocities.
         // ====================================================================
-        const Set::Scalar alpha_floor = 1e-6;
+        const Set::Scalar alpha_floor = 1.0e-12;
 
         auto recover = [&](const State &s,
                            Set::Scalar &alpha,    Set::Scalar &alpha2,
@@ -121,9 +128,23 @@ public:
         recover(hi, aR, a2R, arh0R, arh1R, rhoR, uR, vR, pR, cR,
                 rho0R, rho1R, p0R, p1R, c0R, c1R, Y0R, Y1R);
 
+        // Reconstruct total energy per unit volume from the per-phase
+        // canonical primaries: E = (alpha rho e)_0 + (alpha rho e)_1 + 0.5 rho |u|^2.
+        // This keeps the HLLC energy flux self-consistent with the per-phase
+        // primaries even when the independently-advected redundant rho E in
+        // lo.E_total / hi.E_total has drifted away (the post-stage reinit
+        // step uses lo.E_total to find p_reinit; here we want the HLLC
+        // flux to reflect the energy actually carried by E0 + E1 + KE).
+        const Set::Scalar keL = 0.5 * rhoL * (uL * uL + vL * vL);
+        const Set::Scalar keR = 0.5 * rhoR * (uR * uR + vR * vR);
+        const Set::Scalar ETotL = lo.E0 + lo.E1 + keL;
+        const Set::Scalar ETotR = hi.E0 + hi.E1 + keR;
+
         // ====================================================================
-        // 2. Davis wave-speed estimates (Saurel 2009 §3.1.2).
-        //    S_L = min(u_L - c_L, u_R - c_R),  S_R = max(u_L + c_L, u_R + c_R).
+        // 2. Davis wave-speed estimates (Saurel 2009 §3.1.2 line 764):
+        //         S_L = min(u_L - c_L, u_R - c_R)
+        //         S_R = max(u_L + c_L, u_R + c_R)
+        // The prior 6-eq stash used Davis and produced correct velocities.
         // ====================================================================
         Set::Scalar S_L = std::min(uL - cL, uR - cR);
         Set::Scalar S_R = std::max(uL + cL, uR + cR);
@@ -184,8 +205,8 @@ public:
             if (std::abs(denom_inner) < small) denom_inner = (denom_inner >= 0.0 ? small : -small);
             return rho_star * ( E / rho + (S_M - u) * (S_M + p / denom_inner) );
         };
-        Set::Scalar E_starL = energy_star(rhoL, uL, pL, S_L, lo.E_total, rho_starL);
-        Set::Scalar E_starR = energy_star(rhoR, uR, pR, S_R, hi.E_total, rho_starR);
+        Set::Scalar E_starL = energy_star(rhoL, uL, pL, S_L, ETotL, rho_starL);
+        Set::Scalar E_starR = energy_star(rhoR, uR, pR, S_R, ETotR, rho_starR);
 
         // Star tangential momentum (pure linear advection: v unchanged across acoustic).
         Set::Scalar Mt_starL = rho_starL * vL;
@@ -237,8 +258,8 @@ public:
             return f;
         };
 
-        Flux F_L = build_flux(uL, vL, pL, arh0L, arh1L, lo.E0, lo.E1, lo.E_total, rhoL);
-        Flux F_R = build_flux(uR, vR, pR, arh0R, arh1R, hi.E0, hi.E1, hi.E_total, rhoR);
+        Flux F_L = build_flux(uL, vL, pL, arh0L, arh1L, lo.E0, lo.E1, ETotL, rhoL);
+        Flux F_R = build_flux(uR, vR, pR, arh0R, arh1R, hi.E0, hi.E1, ETotR, rhoR);
 
         // Star fluxes via the HLLC formula F*_K = F_K + S_K (U*_K - U_K).
         auto add_star = [&](const Flux &F_K,
@@ -267,21 +288,34 @@ public:
                                 E_starL,    E0_starL,    E1_starL,
                                 arh0L, arh1L,
                                 lo.M_normal, lo.M_tangent,
-                                lo.E_total,  lo.E0, lo.E1);
+                                ETotL,  lo.E0, lo.E1);
         Flux Fstar_R = add_star(F_R, S_R,
                                 arh0_starR, arh1_starR,
                                 Mn_starR,   Mt_starR,
                                 E_starR,    E0_starR,    E1_starR,
                                 arh0R, arh1R,
                                 hi.M_normal, hi.M_tangent,
-                                hi.E_total,  hi.E0, hi.E1);
+                                ETotR,  hi.E0, hi.E1);
 
         // ====================================================================
-        // 9. HLLC dispatch by wave positions (standard).
-        //    u_interface = S_M in the star regions; u_K in the supersonic
-        //    branches.  This is what the integrator uses for the
-        //    Saurel-Abgrall non-conservative discretization of alpha and
-        //    per-phase internal energy (Saurel 2009 lines 836 / 852).
+        // 9. HLLC dispatch by wave positions.
+        //
+        // u_interface (the consistent advective velocity for the
+        // Saurel-Abgrall non-conservative discretization of alpha and the
+        // per-phase internal energies) is NOT simply S_M.  Per
+        // Johnsen-Colonius JCP 2006 / Garrick-Owkes-Regele JCP 2017
+        // eq. 48, the consistent face velocity in the star region is
+        //
+        //   u_hat_L = u_L + S_L * (S_M - u_L) / (S_L - S_M)        (L*)
+        //   u_hat_R = u_R + S_R * (S_M - u_R) / (S_R - S_M)        (R*)
+        //
+        // which satisfies rho_K * u_hat_K = rho_K_star * S_M = HLLC
+        // mass flux through the face.  Using S_M directly produces a
+        // discretization mismatch between the conservative rho*E flux and
+        // the non-conservative alpha_k p_k div(u) source -- it shows up
+        // as a localized pressure/velocity bias at the IC discontinuity
+        // and is the source of the magnitude-too-high velocity in
+        // gas-liquid Riemann tests (Garrick).
         // ====================================================================
         Flux fl;
         if (0.0 <= S_L)
@@ -292,12 +326,18 @@ public:
         else if (0.0 <= S_M)
         {
             fl = Fstar_L;
-            fl.u_interface = S_M;
+            Set::Scalar denom_uh = (S_L - S_M);
+            if (std::abs(denom_uh) < small) denom_uh = (denom_uh >= 0.0 ? small : -small);
+            Set::Scalar u_hat_L = uL + S_L * (S_M - uL) / denom_uh;
+            fl.u_interface = u_hat_L;     // Garrick eq. 48, NOT S_M
         }
         else if (0.0 <= S_R)
         {
             fl = Fstar_R;
-            fl.u_interface = S_M;
+            Set::Scalar denom_uh = (S_R - S_M);
+            if (std::abs(denom_uh) < small) denom_uh = (denom_uh >= 0.0 ? small : -small);
+            Set::Scalar u_hat_R = uR + S_R * (S_M - uR) / denom_uh;
+            fl.u_interface = u_hat_R;     // Garrick eq. 48, NOT S_M
         }
         else
         {
