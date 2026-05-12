@@ -1,0 +1,179 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# R22-like volatile droplet, Mach 5 shock, surface tension and vaporization on.
+# This is an intentionally aggressive breakup/vaporization case derived from
+# input_R22_Braconnier. It keeps the same nondimensional R22 material style, but
+# uses a stronger normal-shock state and weaker nonzero surface tension.
+
+alamo.program = hydro2
+
+### OUTPUT ###
+#plot_file = ./tests/FlowShockDroplet/output_R22_Ma5_breakup_vaporization
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_R22_Ma5_breakup_vaporization
+plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowPatel/output_R22_Ma5_NoVap
+
+### MESHING ###
+amr.plot_dt = 5e-4
+#amr.plot_int = 1
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.regrid_int = 10
+amr.grid_eff = 0.8
+amr.max_level = 2
+amr.n_cell = 1000 200  # Maintains dx=dy=5e-4 on a 0.50m x 0.10m domain
+
+### TIME STEPPING ###
+## Static:
+timestep = 1e-12
+
+## Adaptive
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 5e-5
+dynamictimestep.min = 1e-11
+cfl = 0.1
+
+### DIMENSIONS ###
+geometry.prob_lo =  0.00 0.00 0.0
+geometry.prob_hi =  0.50 0.10 0.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEP ###
+# D = 0.07, rho_l = 3.154, rho_g,2 = 5.0, u_2 = 4.73286 gives
+# t_break = D*sqrt(rho_l/rho_g,2)/u_2 = 1.1747e-2. stop_time = 0.10
+# covers about 8.5 breakup times from start and about 8.2 after leading-edge impact.
+stop_time = 0.10
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.0004
+eta.ic.expression.constant.R0 = 0.035
+eta.ic.expression.constant.x_center = 0.10
+eta.ic.expression.constant.y_center = 0.05
+
+# Code convention for this eta expression: eta ~ 0 inside droplet, eta ~ 1 in gas.
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x-x_center)**2 + (y-y_center)**2) - R0)/(2*sqrt(2)*epsilon)))"
+
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+
+# Air properties (fluid 0 - surrounding gas)
+eos0.gamma = 1.4
+eos0.p0 = 0
+mu0 = 0.0
+mu0_b = 0.0
+
+# R22-like volatile droplet properties (fluid 1)
+eos1.gamma = 1.25
+eos1.p0 = 0.0
+mu1 = 0.0
+mu1_b = 0.0
+
+# Densities
+density0.ic.type = expression
+density0.ic.expression.constant.rho_air = 1.0
+density0.ic.expression.constant.rho_shock = 5.0
+density0.ic.expression.constant.x_shock = 0.04
+density0.ic.expression.region0 = "(x < x_shock)*rho_shock + (x >= x_shock)*rho_air"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_R22 = 3.154
+density1.ic.expression.region0 = "rho_R22"
+
+# Velocities: Mach-5 normal-shock post-shock gas velocity for gamma=1.4, p1=rho1=1.
+velocity0.ic.type = expression
+velocity0.ic.expression.constant.u_shock = 4.73286382648
+velocity0.ic.expression.constant.x_shock = 0.04
+velocity0.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.u_shock = 0.0
+velocity1.ic.expression.constant.x_shock = 0.04
+velocity1.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Pressures: Mach-5 normal-shock post-shock pressure ratio for gamma=1.4.
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_atm = 1.0
+pressure0.ic.expression.constant.p_shock = 29.0
+pressure0.ic.expression.constant.x_shock = 0.04
+pressure0.ic.expression.region0 = "(x < x_shock)*p_shock + (x >= x_shock)*p_atm"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_atm = 1.0
+pressure1.ic.expression.region0 = "p_atm"
+
+# Thermodynamic properties
+eos0.cp = "1005.0"
+eos1.cp = "1257.0"
+eos0.cv = "717.86"
+eos1.cv = "662.00"
+
+# Surface tension: nonzero but reduced from 8.11e-3 to target high-We stripping.
+# With rho_g,2=5, u_2=4.73286, D=0.07, sigma=1e-3 gives We ~ 7.84e3.
+sigma = 1.0e-3
+
+# Vapor diffusivity: nonzero so apply_vaporization produces mass transfer.
+# This is deliberately larger than the R22 template value of 0.0 for visible vaporization.
+Dv = "0.0"
+Y_infinity = 0.0
+
+# Reference pressure
+pref = 0.0
+
+### BOUNDARY CONDITIONS ###
+# Top and bottom: slip/outflow style
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+# Left: open driver boundary to avoid an artificial no-slip reflection near the shock driver.
+density.bc.type.xlo = neumann
+energy.bc.type.xlo = neumann
+momentum.bc.type.xlo = neumann neumann
+
+# Right: outflow
+density.bc.type.xhi = neumann
+energy.bc.type.xhi = neumann
+momentum.bc.type.xhi = neumann neumann
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion = 1e-1
+omega_refinement_criterion = 10.55
+p_refinement_criterion = 1e+7
+rho_refinement_criterion = 1e+6
+gradu_refinement_criterion = 1e+6
+cutoff = 1e-16
+small = 1e-6;
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 1
+apply_weight = 0
+apply_vaporization = 0
+
+Spec_Vol = 1
+grav = 9.81
+
+### DEBUGGING ###
+Riemann_Solver.type = hllc
+kappa_method = 1
+
+## Interface Sharpening ##
+apply_sharpening = 0
+sharpening_frequency = 100
+reinit_max_iter = 20
+reinit_tolerance = 1e-6
+omega_relax = 0.5

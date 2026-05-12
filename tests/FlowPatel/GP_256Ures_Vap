@@ -1,0 +1,712 @@
+#!/usr/bin/env python3
+"""
+===============================================================================
+KHARE 2022 CASE I n-DODECANE SHOCK-DROPLET ANALYSIS
+===============================================================================
+
+Purpose
+-------
+Analyze AMReX/yt plot files for the Redding and Khare 2022 Case I style setup:
+    n-dodecane droplet, Ms = 6.5 shock, vaporization enabled.
+
+This script is written specifically from the uploaded input file
+"UResKhare2022_CaseI" and the requested result directory:
+
+    /mmfs1/home/spatel6/flames/bin/tests/FlowPatel/
+    256Ultra_Res_CFL_0.1_Khare2022_CaseI_nDodecane_Ms6p5_Vap
+
+Notes from the input file
+-------------------------
+    Domain:                 x,y in [0.020, 0.060] m
+    Droplet center:          (0.040, 0.040) m
+    Initial droplet radius:  R0 = 4.4e-3 m
+    Initial droplet diameter D0 = 8.8e-3 m
+    Eta convention:          eta approximately 0 inside liquid,
+                             eta approximately 1 in surrounding vapor/gas
+    Liquid density:          rho_l = 749.5 kg/m3
+    Gas/vapor density:       rho_vapor = 1.35598311723 kg/m3 pre-shock,
+                             rho_shock = 39.0 kg/m3 post-shock
+    Surface tension:         sigma = 0.025 N/m
+    Vaporization:            apply_vaporization = 1
+
+Outputs
+-------
+1. Time-series plots:
+    - Projected liquid area vs time
+    - Aspect ratio vs time
+    - Surface area proxy vs time
+    - Liquid and vapor mass fractions vs time
+    - Liquid remaining and vapor mass change vs time
+    - diagnostics.csv
+
+2. Field visualizations:
+    - Numerical schlieren of pressure
+    - Numerical schlieren of temperature
+    - Numerical schlieren of velocity magnitude
+    - Optional GIFs for each schlieren sequence
+
+Important interpretation
+------------------------
+This is a 2D calculation. The quantity labeled "surface area" here is the
+2D diffuse-interface measure
+
+    A_2D = integral |grad eta| dA
+
+which has units of length in a 2D simulation. It is best interpreted as
+interface length, or surface area per unit out-of-plane depth. It is not a
+true 3D droplet surface area unless an additional geometric assumption is made.
+
+===============================================================================
+"""
+
+import csv
+import glob
+import os
+import re
+from pathlib import Path
+
+import numpy as np
+import matplotlib.pyplot as plt
+import yt
+
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except Exception:
+    PIL_AVAILABLE = False
+
+# Keep yt quiet.
+yt.funcs.mylog.setLevel(40)
+
+# =============================================================================
+# USER CONFIGURATION
+# =============================================================================
+
+AMREX_OUTPUT_DIR = Path(
+    "/mmfs1/home/spatel6/flames/bin/tests/FlowPatel/"
+    "256Ultra_Res_CFL_0.1_Khare2022_CaseI_nDodecane_Ms6p5_Vap"
+)
+
+OUTPUT_DIR = Path("./Khare2022_CaseI_256Ultra_Analysis")
+
+# Use every Nth plot file. With amr.plot_dt = 2.0e-6 and stop_time = 1.2e-4,
+# TIME_STRIDE = 1 is usually only about 60 frames.
+TIME_STRIDE = 1
+
+# Fixed-resolution buffer used for analysis and plotting. This does not change
+# the simulation data. It only controls how fields are sampled onto a uniform grid.
+FRB_RESOLUTION = 1024
+
+# Create GIFs from the schlieren frames. Set to False if you only want PNGs.
+CREATE_GIFS = True
+GIF_FPS = 8
+
+# Numerical schlieren scaling. The script computes gradient magnitude first,
+# then uses log10(1 + SCHLIEREN_GAIN * grad / global_grad_max).
+SCHLIEREN_GAIN = 99.0
+
+# Interface thresholds and contours.
+ETA_LIQUID_THRESHOLD = 0.5
+ETA_CONTOURS = [0.1, 0.5, 0.9]
+
+# If True, plots are cropped around the liquid material. If False, full domain.
+ZOOM_TO_DROPLET = False
+ZOOM_PADDING_DIAMETERS = 1.5
+
+# Plot quality.
+DPI = 300
+SAVE_VECTOR_COPY = False
+
+# =============================================================================
+# CASE CONSTANTS FROM UResKhare2022_CaseI
+# =============================================================================
+
+X_MIN, Y_MIN = 0.020, 0.020
+X_MAX, Y_MAX = 0.060, 0.060
+Z_SLICE = 0.0
+
+DROPLET_CENTER_X = 0.040
+DROPLET_CENTER_Y = 0.040
+R0 = 4.4e-3
+D0 = 8.8e-3
+
+RHO_VAPOR_PRE = 1.35598311723
+RHO_VAPOR_POST = 39.0
+RHO_LIQUID = 749.5
+SIGMA = 0.025
+
+# =============================================================================
+# OUTPUT FOLDERS
+# =============================================================================
+
+TS_DIR = OUTPUT_DIR / "TimeSeries"
+SCHL_P_DIR = OUTPUT_DIR / "NumericalSchlieren_Pressure"
+SCHL_T_DIR = OUTPUT_DIR / "NumericalSchlieren_Temperature"
+SCHL_U_DIR = OUTPUT_DIR / "NumericalSchlieren_Velocity"
+
+for folder in [OUTPUT_DIR, TS_DIR, SCHL_P_DIR, SCHL_T_DIR, SCHL_U_DIR]:
+    folder.mkdir(parents=True, exist_ok=True)
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+
+def timestep_number(path):
+    """Extract an integer timestep from an AMReX plot directory name."""
+    name = Path(path).name
+    matches = re.findall(r"\d+", name)
+    if not matches:
+        return -1
+    return int(matches[-1])
+
+
+def find_plot_files(output_dir):
+    """Return sorted AMReX plot directories containing a Header file."""
+    if not output_dir.exists():
+        raise FileNotFoundError(f"AMReX output directory does not exist: {output_dir}")
+
+    plot_dirs = []
+    for item in output_dir.iterdir():
+        if not item.is_dir():
+            continue
+        lower = item.name.lower()
+        if "chk" in lower or ".old" in lower:
+            continue
+        if (item / "Header").exists():
+            plot_dirs.append(item)
+
+    plot_dirs = sorted(plot_dirs, key=timestep_number)
+    if not plot_dirs:
+        raise RuntimeError(f"No AMReX plot files with Header found in: {output_dir}")
+    return plot_dirs
+
+
+def get_array(frb, names, required=True, default=None):
+    """Read a field from a yt FRB using the first available name."""
+    for name in names:
+        try:
+            return np.asarray(frb[name], dtype=float)
+        except Exception:
+            pass
+    if required:
+        raise KeyError(f"Could not find any of these fields in the plot file: {names}")
+    if default is None:
+        return None
+    return np.asarray(default, dtype=float)
+
+
+def safe_minmax(values):
+    """Return finite min and max from a list of arrays."""
+    finite_values = []
+    for arr in values:
+        a = np.asarray(arr)
+        finite_values.append(a[np.isfinite(a)])
+    finite_values = [a for a in finite_values if a.size > 0]
+    if not finite_values:
+        return 0.0, 1.0
+    joined = np.concatenate(finite_values)
+    vmin = float(np.min(joined))
+    vmax = float(np.max(joined))
+    if np.isclose(vmin, vmax):
+        vmax = vmin + 1.0
+    return vmin, vmax
+
+
+def gradient_magnitude(field, dx, dy):
+    """Compute |grad field| on a 2D uniform grid."""
+    dfield_dx = np.gradient(field, dx, axis=1)
+    dfield_dy = np.gradient(field, dy, axis=0)
+    return np.sqrt(dfield_dx * dfield_dx + dfield_dy * dfield_dy)
+
+
+def make_log_schlieren(grad_mag, global_grad_max):
+    """Convert gradient magnitude to a normalized log numerical schlieren field."""
+    if global_grad_max <= 0.0 or not np.isfinite(global_grad_max):
+        return np.zeros_like(grad_mag)
+    return np.log10(1.0 + SCHLIEREN_GAIN * grad_mag / global_grad_max)
+
+
+def compute_shape_metrics(eta, rho0, rho1, x_grid, y_grid, dx, dy):
+    """Compute area, aspect ratio, interface length, and phase masses.
+
+    Eta convention from the input file:
+        eta approx 0: liquid droplet
+        eta approx 1: surrounding vapor/gas
+    """
+    alpha_liquid = np.clip(1.0 - eta, 0.0, 1.0)
+    alpha_vapor = np.clip(eta, 0.0, 1.0)
+    cell_area = dx * dy
+
+    # Smooth projected liquid area. This is more stable than counting only cells
+    # with eta < 0.5, especially when the interface is diffuse.
+    liquid_area = float(np.sum(alpha_liquid) * cell_area)
+
+    # Bbox and aspect ratio use a thresholded liquid mask, because the very thin
+    # tails of eta can otherwise pollute the extents.
+    liquid_mask = eta <= ETA_LIQUID_THRESHOLD
+    if np.any(liquid_mask):
+        xs = x_grid[liquid_mask]
+        ys = y_grid[liquid_mask]
+        x_min, x_max = float(np.min(xs)), float(np.max(xs))
+        y_min, y_max = float(np.min(ys)), float(np.max(ys))
+        length_x = max(x_max - x_min, 0.0)
+        length_y = max(y_max - y_min, 0.0)
+        aspect_y_over_x = length_y / length_x if length_x > 0.0 else np.nan
+        aspect_x_over_y = length_x / length_y if length_y > 0.0 else np.nan
+    else:
+        x_min = x_max = DROPLET_CENTER_X
+        y_min = y_max = DROPLET_CENTER_Y
+        length_x = length_y = 0.0
+        aspect_y_over_x = np.nan
+        aspect_x_over_y = np.nan
+
+    # Weighted centroid and PCA aspect ratio. PCA is helpful for severe breakup,
+    # but it still describes the whole liquid cloud, not each fragment.
+    weight_sum = float(np.sum(alpha_liquid))
+    if weight_sum > 0.0:
+        x_c = float(np.sum(alpha_liquid * x_grid) / weight_sum)
+        y_c = float(np.sum(alpha_liquid * y_grid) / weight_sum)
+        x_dev = x_grid - x_c
+        y_dev = y_grid - y_c
+        cov_xx = float(np.sum(alpha_liquid * x_dev * x_dev) / weight_sum)
+        cov_yy = float(np.sum(alpha_liquid * y_dev * y_dev) / weight_sum)
+        cov_xy = float(np.sum(alpha_liquid * x_dev * y_dev) / weight_sum)
+        cov = np.array([[cov_xx, cov_xy], [cov_xy, cov_yy]])
+        eigvals = np.linalg.eigvalsh(cov)
+        eigvals = np.maximum(eigvals, 0.0)
+        if eigvals[0] > 0.0:
+            pca_aspect_major_minor = float(np.sqrt(eigvals[1] / eigvals[0]))
+        else:
+            pca_aspect_major_minor = np.nan
+    else:
+        x_c, y_c = DROPLET_CENTER_X, DROPLET_CENTER_Y
+        pca_aspect_major_minor = np.nan
+
+    # Diffuse-interface surface-area proxy. In 2D this is interface length,
+    # equivalent to surface area per unit out-of-plane depth.
+    grad_eta = gradient_magnitude(eta, dx, dy)
+    interface_length = float(np.sum(grad_eta) * cell_area)
+
+    # Phase masses per unit out-of-plane depth.
+    liquid_mass = float(np.sum(alpha_liquid * rho1) * cell_area)
+    vapor_mass = float(np.sum(alpha_vapor * rho0) * cell_area)
+    total_phase_mass = liquid_mass + vapor_mass
+    if total_phase_mass > 0.0:
+        liquid_mass_fraction = liquid_mass / total_phase_mass
+        vapor_mass_fraction = vapor_mass / total_phase_mass
+    else:
+        liquid_mass_fraction = np.nan
+        vapor_mass_fraction = np.nan
+
+    return {
+        "liquid_area": liquid_area,
+        "interface_length": interface_length,
+        "length_x": length_x,
+        "length_y": length_y,
+        "aspect_y_over_x": aspect_y_over_x,
+        "aspect_x_over_y": aspect_x_over_y,
+        "pca_aspect_major_minor": pca_aspect_major_minor,
+        "x_centroid": x_c,
+        "y_centroid": y_c,
+        "x_min": x_min,
+        "x_max": x_max,
+        "y_min": y_min,
+        "y_max": y_max,
+        "liquid_mass": liquid_mass,
+        "vapor_mass": vapor_mass,
+        "liquid_mass_fraction": liquid_mass_fraction,
+        "vapor_mass_fraction": vapor_mass_fraction,
+    }
+
+
+def plot_line(x, y, xlabel, ylabel, title, filename, labels=None):
+    """Simple single-axis time-series plot."""
+    fig, ax = plt.subplots(figsize=(9, 6))
+    if isinstance(y, (list, tuple)):
+        for k, yy in enumerate(y):
+            label = labels[k] if labels is not None else None
+            ax.plot(x, yy, linewidth=2.0, label=label)
+        if labels is not None:
+            ax.legend(fontsize=11)
+    else:
+        ax.plot(x, y, linewidth=2.0)
+    ax.set_xlabel(xlabel, fontsize=12)
+    ax.set_ylabel(ylabel, fontsize=12)
+    ax.set_title(title, fontsize=14, fontweight="bold")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(filename, dpi=DPI)
+    if SAVE_VECTOR_COPY:
+        fig.savefig(str(filename).replace(".png", ".eps"))
+    plt.close(fig)
+
+
+def plot_schlieren_frame(schlieren, eta, x_grid, y_grid, t, folder, frame_id, title, cbar_label):
+    """Plot one numerical schlieren frame with eta contours."""
+    fig, ax = plt.subplots(figsize=(9, 8))
+
+    extent = [X_MIN, X_MAX, Y_MIN, Y_MAX]
+    im = ax.imshow(
+        schlieren,
+        origin="lower",
+        extent=extent,
+        cmap="gray_r",
+        interpolation="bilinear",
+        aspect="auto",
+        vmin=0.0,
+        vmax=np.log10(1.0 + SCHLIEREN_GAIN),
+    )
+
+    for eta_level in ETA_CONTOURS:
+        color = "red" if np.isclose(eta_level, 0.5) else "orange"
+        style = "-" if np.isclose(eta_level, 0.5) else "--"
+        try:
+            ax.contour(
+                x_grid,
+                y_grid,
+                eta,
+                levels=[eta_level],
+                colors=color,
+                linewidths=1.3,
+                linestyles=style,
+            )
+        except Exception:
+            pass
+
+    if ZOOM_TO_DROPLET:
+        mask = eta <= ETA_LIQUID_THRESHOLD
+        if np.any(mask):
+            x_c = 0.5 * (float(np.min(x_grid[mask])) + float(np.max(x_grid[mask])))
+            y_c = 0.5 * (float(np.min(y_grid[mask])) + float(np.max(y_grid[mask])))
+        else:
+            x_c, y_c = DROPLET_CENTER_X, DROPLET_CENTER_Y
+        half_width = ZOOM_PADDING_DIAMETERS * D0
+        ax.set_xlim(x_c - half_width, x_c + half_width)
+        ax.set_ylim(y_c - half_width, y_c + half_width)
+    else:
+        ax.set_xlim(X_MIN, X_MAX)
+        ax.set_ylim(Y_MIN, Y_MAX)
+
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlabel("x (m)", fontsize=12)
+    ax.set_ylabel("y (m)", fontsize=12)
+    ax.set_title(f"{title}, t = {t * 1.0e6:.2f} us", fontsize=14, fontweight="bold")
+    ax.text(
+        0.02,
+        0.02,
+        f"t = {t * 1.0e6:.2f} us",
+        transform=ax.transAxes,
+        fontsize=11,
+        color="white",
+        fontweight="bold",
+        bbox=dict(boxstyle="round", facecolor="black", alpha=0.65),
+    )
+
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label(cbar_label, fontsize=11)
+
+    fig.tight_layout()
+    fig.savefig(folder / f"{frame_id:04d}_{title.replace(' ', '_')}.png", dpi=DPI)
+    plt.close(fig)
+
+
+def create_gif_from_pngs(folder, gif_name):
+    """Create a GIF from PNG files in folder."""
+    if not CREATE_GIFS:
+        return
+    if not PIL_AVAILABLE:
+        print(f"Pillow is not available. Skipping GIF: {gif_name}")
+        return
+
+    pngs = sorted(glob.glob(str(folder / "*.png")))
+    if not pngs:
+        return
+
+    frames = []
+    for png in pngs:
+        with Image.open(png) as im:
+            frames.append(im.convert("P", palette=Image.ADAPTIVE))
+
+    gif_path = OUTPUT_DIR / gif_name
+    duration_ms = int(1000 / GIF_FPS)
+    frames[0].save(
+        gif_path,
+        save_all=True,
+        append_images=frames[1:],
+        duration=duration_ms,
+        loop=0,
+        optimize=True,
+    )
+    print(f"Created GIF: {gif_path}")
+
+
+# =============================================================================
+# MAIN ANALYSIS
+# =============================================================================
+
+
+def main():
+    print("=" * 78)
+    print("KHARE 2022 CASE I n-DODECANE SHOCK-DROPLET ANALYSIS")
+    print("=" * 78)
+    print(f"Reading plot files from: {AMREX_OUTPUT_DIR}")
+    print(f"Writing analysis output to: {OUTPUT_DIR}")
+
+    plot_files = find_plot_files(AMREX_OUTPUT_DIR)
+    plot_files = plot_files[::TIME_STRIDE]
+    print(f"Using {len(plot_files)} plot files after TIME_STRIDE = {TIME_STRIDE}")
+    print(f"First: {plot_files[0].name}")
+    print(f"Last:  {plot_files[-1].name}")
+
+    domain_width = X_MAX - X_MIN
+    domain_height = Y_MAX - Y_MIN
+    x_1d = np.linspace(X_MIN, X_MAX, FRB_RESOLUTION)
+    y_1d = np.linspace(Y_MIN, Y_MAX, FRB_RESOLUTION)
+    x_grid, y_grid = np.meshgrid(x_1d, y_1d)
+    dx = x_1d[1] - x_1d[0]
+    dy = y_1d[1] - y_1d[0]
+
+    times = []
+    diagnostics = []
+
+    pressure_gradients = []
+    temperature_gradients = []
+    velocity_gradients = []
+
+    pressure_schlieren_inputs = []
+    temperature_schlieren_inputs = []
+    velocity_schlieren_inputs = []
+    eta_fields = []
+
+    print("\nLoading fields and computing diagnostics...")
+    for i, plot_file in enumerate(plot_files):
+        ds = yt.load(str(plot_file))
+        t = float(ds.current_time)
+        times.append(t)
+
+        slc = ds.slice("z", Z_SLICE)
+        frb = slc.to_frb(
+            (domain_width, "code_length"),
+            FRB_RESOLUTION,
+            center=[0.5 * (X_MIN + X_MAX), 0.5 * (Y_MIN + Y_MAX), 0.0],
+            height=(domain_height, "code_length"),
+        )
+
+        eta = get_array(frb, ["eta"])
+        pressure = get_array(frb, ["pressure", "p"])
+        temperature = get_array(frb, ["T", "temperature"])
+        vx = get_array(frb, ["velocityx", "velocity_x", "x_velocity", "velx"])
+        vy = get_array(frb, ["velocityy", "velocity_y", "y_velocity", "vely"])
+        velocity_magnitude = np.sqrt(vx * vx + vy * vy)
+
+        rho0 = get_array(
+            frb,
+            ["density0", "rho0"],
+            required=False,
+            default=np.full_like(eta, RHO_VAPOR_PRE),
+        )
+        rho1 = get_array(
+            frb,
+            ["density1", "rho1"],
+            required=False,
+            default=np.full_like(eta, RHO_LIQUID),
+        )
+
+        metrics = compute_shape_metrics(eta, rho0, rho1, x_grid, y_grid, dx, dy)
+        metrics["time_s"] = t
+        metrics["time_us"] = t * 1.0e6
+        metrics["plot_file"] = plot_file.name
+        diagnostics.append(metrics)
+
+        p_grad = gradient_magnitude(pressure, dx, dy)
+        T_grad = gradient_magnitude(temperature, dx, dy)
+        u_grad = gradient_magnitude(velocity_magnitude, dx, dy)
+
+        pressure_gradients.append(p_grad)
+        temperature_gradients.append(T_grad)
+        velocity_gradients.append(u_grad)
+
+        pressure_schlieren_inputs.append(p_grad)
+        temperature_schlieren_inputs.append(T_grad)
+        velocity_schlieren_inputs.append(u_grad)
+        eta_fields.append(eta)
+
+        if (i + 1) % 10 == 0 or i == len(plot_files) - 1:
+            print(f"  Processed {i + 1}/{len(plot_files)} frames")
+
+    times = np.asarray(times)
+    time_us = times * 1.0e6
+
+    print("\nComputing global schlieren normalization...")
+    p_grad_max = max(float(np.nanmax(g)) for g in pressure_gradients if np.size(g) > 0)
+    T_grad_max = max(float(np.nanmax(g)) for g in temperature_gradients if np.size(g) > 0)
+    u_grad_max = max(float(np.nanmax(g)) for g in velocity_gradients if np.size(g) > 0)
+    print(f"  max |grad p| = {p_grad_max:.6e}")
+    print(f"  max |grad T| = {T_grad_max:.6e}")
+    print(f"  max |grad |u|| = {u_grad_max:.6e}")
+
+    # -------------------------------------------------------------------------
+    # Write diagnostics CSV
+    # -------------------------------------------------------------------------
+    csv_path = TS_DIR / "diagnostics.csv"
+    fieldnames = [
+        "plot_file",
+        "time_s",
+        "time_us",
+        "liquid_area",
+        "interface_length",
+        "length_x",
+        "length_y",
+        "aspect_y_over_x",
+        "aspect_x_over_y",
+        "pca_aspect_major_minor",
+        "x_centroid",
+        "y_centroid",
+        "x_min",
+        "x_max",
+        "y_min",
+        "y_max",
+        "liquid_mass",
+        "vapor_mass",
+        "liquid_mass_fraction",
+        "vapor_mass_fraction",
+    ]
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in diagnostics:
+            writer.writerow({key: row.get(key, "") for key in fieldnames})
+    print(f"Wrote: {csv_path}")
+
+    # -------------------------------------------------------------------------
+    # Time-series arrays
+    # -------------------------------------------------------------------------
+    liquid_area = np.asarray([d["liquid_area"] for d in diagnostics])
+    interface_length = np.asarray([d["interface_length"] for d in diagnostics])
+    aspect_y_over_x = np.asarray([d["aspect_y_over_x"] for d in diagnostics])
+    aspect_x_over_y = np.asarray([d["aspect_x_over_y"] for d in diagnostics])
+    pca_aspect = np.asarray([d["pca_aspect_major_minor"] for d in diagnostics])
+    liquid_mass = np.asarray([d["liquid_mass"] for d in diagnostics])
+    vapor_mass = np.asarray([d["vapor_mass"] for d in diagnostics])
+    liquid_mass_fraction = np.asarray([d["liquid_mass_fraction"] for d in diagnostics])
+    vapor_mass_fraction = np.asarray([d["vapor_mass_fraction"] for d in diagnostics])
+
+    area0 = liquid_area[0] if liquid_area[0] > 0 else np.nan
+    interface0 = interface_length[0] if interface_length[0] > 0 else np.nan
+    liquid_mass0 = liquid_mass[0] if liquid_mass[0] > 0 else np.nan
+    vapor_mass0 = vapor_mass[0] if vapor_mass[0] > 0 else np.nan
+
+    # -------------------------------------------------------------------------
+    # Time-series plots requested by the user
+    # -------------------------------------------------------------------------
+    print("\nWriting time-series plots...")
+
+    plot_line(
+        time_us,
+        [liquid_area * 1.0e6, liquid_area / area0],
+        "Time (us)",
+        "Projected liquid area: mm2 and A/A0",
+        "Projected liquid area vs time",
+        TS_DIR / "01_Project_Liquid_Area_vs_Time.png",
+        labels=["Area (mm2)", "A/A0"],
+    )
+
+    plot_line(
+        time_us,
+        [aspect_y_over_x, aspect_x_over_y, pca_aspect],
+        "Time (us)",
+        "Aspect ratio",
+        "Droplet aspect ratio vs time",
+        TS_DIR / "02_Aspect_Ratio_vs_Time.png",
+        labels=["bbox Ly/Lx", "bbox Lx/Ly", "PCA major/minor"],
+    )
+
+    plot_line(
+        time_us,
+        [interface_length * 1.0e3, interface_length / interface0],
+        "Time (us)",
+        "Interface length: mm and A2D/A2D0",
+        "Surface area proxy vs time",
+        TS_DIR / "03_Surface_Area_Proxy_vs_Time.png",
+        labels=["A2D = integral |grad eta| dA (mm)", "A2D/A2D0"],
+    )
+
+    plot_line(
+        time_us,
+        [liquid_mass_fraction, vapor_mass_fraction],
+        "Time (us)",
+        "Mass fraction in domain",
+        "Liquid and vapor mass fractions vs time",
+        TS_DIR / "04_Liquid_and_Vapor_Mass_Fractions_vs_Time.png",
+        labels=["liquid mass / total phase mass", "vapor mass / total phase mass"],
+    )
+
+    vapor_change = (vapor_mass - vapor_mass0) / liquid_mass0
+    plot_line(
+        time_us,
+        [liquid_mass / liquid_mass0, vapor_change],
+        "Time (us)",
+        "Normalized mass",
+        "Liquid remaining and vapor mass change vs time",
+        TS_DIR / "05_Liquid_Remaining_and_Vapor_Change_vs_Time.png",
+        labels=["liquid mass / initial liquid mass", "vapor mass change / initial liquid mass"],
+    )
+
+    # -------------------------------------------------------------------------
+    # Numerical schlieren frames and GIFs
+    # -------------------------------------------------------------------------
+    print("\nWriting numerical schlieren frames...")
+    for i, t in enumerate(times):
+        eta = eta_fields[i]
+        schl_p = make_log_schlieren(pressure_schlieren_inputs[i], p_grad_max)
+        schl_T = make_log_schlieren(temperature_schlieren_inputs[i], T_grad_max)
+        schl_u = make_log_schlieren(velocity_schlieren_inputs[i], u_grad_max)
+
+        plot_schlieren_frame(
+            schl_p,
+            eta,
+            x_grid,
+            y_grid,
+            t,
+            SCHL_P_DIR,
+            i,
+            "Numerical Schlieren Pressure",
+            "log numerical schlieren of pressure",
+        )
+        plot_schlieren_frame(
+            schl_T,
+            eta,
+            x_grid,
+            y_grid,
+            t,
+            SCHL_T_DIR,
+            i,
+            "Numerical Schlieren Temperature",
+            "log numerical schlieren of temperature",
+        )
+        plot_schlieren_frame(
+            schl_u,
+            eta,
+            x_grid,
+            y_grid,
+            t,
+            SCHL_U_DIR,
+            i,
+            "Numerical Schlieren Velocity",
+            "log numerical schlieren of velocity magnitude",
+        )
+
+        if (i + 1) % 10 == 0 or i == len(times) - 1:
+            print(f"  Wrote schlieren frames {i + 1}/{len(times)}")
+
+    create_gif_from_pngs(SCHL_P_DIR, "ANIM_Numerical_Schlieren_Pressure.gif")
+    create_gif_from_pngs(SCHL_T_DIR, "ANIM_Numerical_Schlieren_Temperature.gif")
+    create_gif_from_pngs(SCHL_U_DIR, "ANIM_Numerical_Schlieren_Velocity.gif")
+
+    print("\nDone.")
+    print(f"All outputs are in: {OUTPUT_DIR.resolve()}")
+
+
+if __name__ == "__main__":
+    main()
