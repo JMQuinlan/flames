@@ -194,12 +194,7 @@ public:
             if (!(p_val > 0.0))
                 p_val = 1.0e-6;
 
-            // Sound speed (Motheau Eq. 6) — mixture-effective Tammann form.
-            // NSCBC LODI operates on mixture quantities only (per the 5-eq
-            // formulation that is validated for this code path); the per-phase
-            // primaries are reconstructed post-NSCBC in Hydro2::FillGhost4BC
-            // via eta partition.  Do NOT swap in the frozen mixture sound
-            // speed here.
+            // Sound speed (Motheau Eq. 6)
             Set::Scalar a_val = std::sqrt(gamma_mix * (p_val + pi_mix) / rho_val);
 
             // Output based on direction

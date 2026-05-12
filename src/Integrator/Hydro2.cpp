@@ -3040,6 +3040,35 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         const bool y_periodic = geom[lev].isPeriodic(1);
 
         // --------------------------------------------------------------------
+        // PRE-NSCBC: refresh periodic ghosts on ALL 6-eq conservative
+        // primaries.  Without this, periodic ghosts of (alpha rho)_k,
+        // momentum, rho E, E_0, E_1 carry stale values from the previous
+        // timestep (the post-stage MultiFab::Copy copies the integrator's
+        // stage ghosts which are never advanced).  The downstream RHS reads
+        // ghost cells at y-edge interior cells to build Riemann states; if
+        // those are stale, the flux divergence is wrong, the error feeds
+        // back into the domain, and after O(60) steps the state explodes.
+        //
+        // FillBoundariesWithBC unconditionally runs mf->FillBoundary(
+        // periodicity) on each MF; the bc->FillBoundary call is a no-op
+        // for nscbc_outflow / nscbc_inflow faces (Expression doesn't handle
+        // those types) — so this DOES fill periodic ghosts and is harmless
+        // for the NSCBC faces (NSCBC overwrites those further down).
+        // --------------------------------------------------------------------
+        FillBoundariesWithBC(lev, time, density_bc, {
+            rho_eta0_mf[lev].get(),
+            rho_eta1_mf[lev].get()
+        });
+        FillBoundariesWithBC(lev, time, momentum_bc, {
+            momentum_mf[lev].get()
+        });
+        FillBoundariesWithBC(lev, time, energy_bc, {
+            energy_per_vol_mf[lev].get(),
+            energy0_mf[lev].get(),
+            energy1_mf[lev].get()
+        });
+
+        // --------------------------------------------------------------------
         // PRE-NSCBC: extrapolate eta into NSCBC ghost cells by constant
         // copy from the boundary cell.  Periodic-direction ghosts are
         // skipped because they are already filled by FillBoundary's
