@@ -120,9 +120,30 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("Dv", value.Dv, 0.0);          // Vapor Diffusivity
         pp_query_required("epsilon", value.epsilon);    // diffuse interface thickness Y_infinity
         pp_query_default("Y_infinity", value.Y_infinity, 0.0); // Far Field Vapor Mass Fraction
+        pp_query_default("Mob", value.Mob_user, 0.0);   // CHAN HILLARD MOBILITY (CH MOB)
 
         // CURVATURE
         pp_query_default("kappa_method", value.kappa_method, 2); // Method to solve for curvature
+
+        // ===========================================================
+        // 7-EQUATION (Baer-Nunziato) SCAFFOLDING SWITCHES
+        //   equation_count = 5  -> existing Allaire-style model (default)
+        //   equation_count = 7  -> per-phase mass/momentum/energy + alpha
+        //
+        // Phase A: parsing wired, MultiFabs registered, Riemann/NSCBC stubs
+        //          available, but the RHS, Mix, and BC paths still operate
+        //          on the 5-eqn state. Selecting equation_count=7 will
+        //          abort with a clear "not yet implemented" message in the
+        //          first integrator stage that touches the 7-eqn path.
+        // ===========================================================
+        pp_query_default("equation_count",       value.equation_count,       5);
+        pp_query_default("relax_pressure_stiff", value.relax_pressure_stiff, 1);
+        pp_query_default("relax_velocity_stiff", value.relax_velocity_stiff, 1);
+        pp_query_default("surface_tension_form", value.surface_tension_form, 0);
+        if (value.equation_count != 5 && value.equation_count != 7)
+        {
+            Util::Abort(INFO, "equation_count must be 5 or 7; got ", value.equation_count);
+        }
 
         // INTERFACE COMPRESSION
         pp_query_default("apply_sharpening", value.apply_sharpening, false);
@@ -312,7 +333,37 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                                                                                                      "110","111",
                                                                                                     }); // hess_u Flux
         value.RegisterNewFab(value.Vap_dot_mf, &value.bc_nothing, 5, 0, "Vap_dot", true, false, { "_eta", "_rho", "_Mx", "_My", "_E" }); // Momentum Flux
-        
+
+        // ====================================================================
+        // 7-EQUATION (Baer-Nunziato) PER-PHASE CONSERVATIVES
+        //
+        // Registered only when equation_count == 7 so the 5-eqn build is
+        // bit-identical to the pre-conversion behavior. Components match
+        // the layout declared in Hydro2.H.
+        // ====================================================================
+        if (value.equation_count == 7)
+        {
+            // Phase 0 (liquid)
+            value.RegisterNewFab(value.alpha_rho_0_mf,     value.density_bc,  1, nghost, "alpha_rho_0",      true,  true);
+            value.RegisterNewFab(value.alpha_rho_0_old_mf, value.density_bc,  1, nghost, "alpha_rho_0_old",  false, true);
+            value.RegisterNewFab(value.alpha_rho_M0_mf,    value.momentum_bc, 2, nghost, "alpha_rho_M0",     true,  true, { "x", "y" });
+            value.RegisterNewFab(value.alpha_rho_M0_old_mf,value.momentum_bc, 2, nghost, "alpha_rho_M0_old", false, true, { "x", "y" });
+            value.RegisterNewFab(value.alpha_rho_E0_mf,    value.energy_bc,   1, nghost, "alpha_rho_E0",     true,  true);
+            value.RegisterNewFab(value.alpha_rho_E0_old_mf,value.energy_bc,   1, nghost, "alpha_rho_E0_old", false, true);
+
+            // Phase 1 (gas)
+            value.RegisterNewFab(value.alpha_rho_1_mf,     value.density_bc,  1, nghost, "alpha_rho_1",      true,  true);
+            value.RegisterNewFab(value.alpha_rho_1_old_mf, value.density_bc,  1, nghost, "alpha_rho_1_old",  false, true);
+            value.RegisterNewFab(value.alpha_rho_M1_mf,    value.momentum_bc, 2, nghost, "alpha_rho_M1",     true,  true, { "x", "y" });
+            value.RegisterNewFab(value.alpha_rho_M1_old_mf,value.momentum_bc, 2, nghost, "alpha_rho_M1_old", false, true, { "x", "y" });
+            value.RegisterNewFab(value.alpha_rho_E1_mf,    value.energy_bc,   1, nghost, "alpha_rho_E1",     true,  true);
+            value.RegisterNewFab(value.alpha_rho_E1_old_mf,value.energy_bc,   1, nghost, "alpha_rho_E1_old", false, true);
+
+            // Volume fraction (advected, non-conservative). Distinct field from
+            // eta_mf so the existing 5-eqn diagnostics keep working unchanged.
+            value.RegisterNewFab(value.alpha0_mf,     value.energy_bc, 1, nghost, "alpha0",     true,  true);
+            value.RegisterNewFab(value.alpha0_old_mf, value.energy_bc, 1, nghost, "alpha0_old", false, true);
+        }
     }
 
     // INITIAL CONDITIONS
@@ -395,13 +446,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 void Hydro2::Initialize(int lev)
 {
     BL_PROFILE("Integrator::Hydro2::Initialize");
-    // Initialize step counter
+
+    // Initialize step counter (shared between 5-eqn and 7-eqn paths)
     if (step_counter.size() <= (size_t)lev)
     {
         step_counter.resize(lev + 1, 0);
     }
     step_counter[lev] = 0;
-
 
     // Initialize individual fluid variables
     // DIFFUSIVE BOUNDRY
@@ -1154,8 +1205,8 @@ Hydro2::RHS(int lev,
             // ------------------------------------------------------------
             // d(eta)/dt = -u*grad(eta) + div( M*grad(mu) )
             Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
-            // Set::Scalar Mob = a(i, j, k) * 0.7 * DX[0]; // Mob = u_max * epsilon
-            Set::Scalar Mob = a(i, j, k) * epsilon;// *epsilon / DX[0]; // Mob = u_max * epsilon
+            Set::Scalar Mob = a(i, j, k) * 0.7 * DX[0] * Mob_user; // Mob = u_max * epsilon
+            //Set::Scalar Mob = a(i, j, k) * epsilon * Mob_user;// *epsilon / DX[0]; // Mob = u_max * epsilon
             //Set::Scalar advection = -u.dot(grad_eta);
             Set::Scalar eta_dot_CH = Mob * lap_mu_chem * 0.2;
 
@@ -1395,7 +1446,8 @@ Hydro2::RHS(int lev,
                 Set::Scalar div_u_y  = (flux_yhi.u_interface - flux_ylo.u_interface) / DX[1];
                 eta_rhs(i, j, k) = -(div_uA_x + div_uA_y)
                                    + eta(i, j, k) * (div_u_x + div_u_y)
-                                   + eta_dot_Vap;
+                                   + eta_dot_Vap
+                                   + eta_dot_CH; // CHAN HILLARD (CH)
             }
 
 
@@ -1501,6 +1553,7 @@ Hydro2::RHS(int lev,
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 {
+
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
 

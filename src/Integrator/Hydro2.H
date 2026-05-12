@@ -11,6 +11,7 @@
 #include "BC/Nothing.H"
 #include "BC/NSCBC.H"
 #include "BC/NSCBC4.H"
+#include "BC/NSCBC7.H"
 #include "IC/IC.H"
 
 #include "Set/Base.H"
@@ -18,6 +19,7 @@
 // Solvers
 #include "Solver/Local/FluidRiemann/Roe.H"
 #include "Solver/Local/FluidRiemann/HLLC.H"
+#include "Solver/Local/FluidRiemann/HLLC7.H"
 #include "Solver/Local/FluidRiemann/HLLC_All_Mach.H"
 #include "Solver/Local/FluidRiemann/HLLC_All_Mach_Furfaro.H"
 #include "Solver/Local/FluidRiemann/HLLC_WENO5.H"
@@ -86,9 +88,8 @@ public:
         // delete limiter_vanleer;
 
         delete riemannsolver;
-
-
-        
+        delete riemannsolver7;
+        delete nscbc7_bc;
     }
 
 protected:
@@ -111,6 +112,33 @@ protected:
         const amrex::MultiFab &M_mf,
         const amrex::MultiFab &E_mf,
         const amrex::MultiFab &eta_mf_in);
+
+    // ========================================================================
+    // 7-EQUATION (Baer-Nunziato) entry points.
+    // Wired via dispatch in Initialize() / Advance() based on equation_count.
+    // Phase-B implementation: phase-by-phase HLLC, NO relaxation, NO ST,
+    // NO vaporization. Single-phase regions (alpha = 0 or 1) must reduce to
+    // the 5-eqn Allaire result.
+    // ========================================================================
+    void Initialize7eqn(int lev);
+    void PrimitivesFromConservatives7eqn(int lev);
+    void Advance7eqn(int lev, Set::Scalar time, Set::Scalar dt);
+    void RHS7eqn(int lev,
+        Set::Scalar time,
+        amrex::MultiFab &alpha_rho_0_rhs_mf,
+        amrex::MultiFab &alpha_rho_M0_rhs_mf,
+        amrex::MultiFab &alpha_rho_E0_rhs_mf,
+        amrex::MultiFab &alpha_rho_1_rhs_mf,
+        amrex::MultiFab &alpha_rho_M1_rhs_mf,
+        amrex::MultiFab &alpha_rho_E1_rhs_mf,
+        amrex::MultiFab &alpha0_rhs_mf,
+        const amrex::MultiFab &alpha_rho_0_in,
+        const amrex::MultiFab &alpha_rho_M0_in,
+        const amrex::MultiFab &alpha_rho_E0_in,
+        const amrex::MultiFab &alpha_rho_1_in,
+        const amrex::MultiFab &alpha_rho_M1_in,
+        const amrex::MultiFab &alpha_rho_E1_in,
+        const amrex::MultiFab &alpha0_in);
 
 
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
@@ -233,6 +261,30 @@ protected:
     Set::Field<Set::Scalar> rho_eta0_old_mf;
     Set::Field<Set::Scalar> rho_eta1_old_mf;
 
+    // ========================================================================
+    // 7-EQUATION (Baer-Nunziato) CONSERVATIVE STATE
+    //
+    // Allocated only when equation_count == 7. The 5-eqn fields above remain
+    // populated as diagnostics so plot files and post-processing scripts
+    // continue to work, but they are no longer the primary state.
+    //
+    // Layout (per-phase, 9 components in 2D, 11 in 3D):
+    //     alpha_rho_k_mf      :  alpha_k * rho_k             [1 component]
+    //     alpha_rho_Mk_mf     :  alpha_k * rho_k * u_k       [SPACEDIM]
+    //     alpha_rho_Ek_mf     :  alpha_k * rho_k * E_k       [1 component]
+    //     alpha0_mf           :  volume fraction of phase 0  [1 component]
+    //
+    // Phase 0 is the liquid (eos0, Tammann). Phase 1 is the gas (eos1).
+    // alpha_1 = 1 - alpha_0 is implicit.
+    // ========================================================================
+    Set::Field<Set::Scalar> alpha_rho_0_mf,    alpha_rho_0_old_mf;
+    Set::Field<Set::Scalar> alpha_rho_M0_mf,   alpha_rho_M0_old_mf;
+    Set::Field<Set::Scalar> alpha_rho_E0_mf,   alpha_rho_E0_old_mf;
+    Set::Field<Set::Scalar> alpha_rho_1_mf,    alpha_rho_1_old_mf;
+    Set::Field<Set::Scalar> alpha_rho_M1_mf,   alpha_rho_M1_old_mf;
+    Set::Field<Set::Scalar> alpha_rho_E1_mf,   alpha_rho_E1_old_mf;
+    Set::Field<Set::Scalar> alpha0_mf,         alpha0_old_mf;
+
     //Set::Field<Set::Scalar> eta_mf_in;
     Set::Field<Set::Scalar> etadot_mf;
     Set::Field<Set::Scalar> eta_old_mf;
@@ -278,6 +330,7 @@ protected:
 
     BC::NSCBC *nscbc_bc = nullptr;
     BC::NSCBC4 *nscbc4_bc = nullptr;
+    BC::NSCBC7 *nscbc7_bc = nullptr;   // 7-eqn per-phase NSCBC (Phase E)
 
 
     Set::Scalar c_max = 0.0;
@@ -309,6 +362,7 @@ protected:
 
     // CFD Properties
     Set::Scalar cfl = NAN, cfl_v = NAN, pref = NAN;
+    Set::Scalar Mob_user = NAN;
     Set::Scalar small=NAN;
     Set::Scalar cutoff=NAN;
     Set::Scalar lagrange=NAN;
@@ -332,7 +386,8 @@ protected:
     //Solver::Local::Limiter::VanLeer *limiter_vanleer = nullptr;
 
     // Solvers
-    Solver::Local::FluidRiemann::FluidRiemann *riemannsolver = nullptr;
+    Solver::Local::FluidRiemann::FluidRiemann  *riemannsolver  = nullptr; // 5-eqn
+    Solver::Local::FluidRiemann::FluidRiemann7 *riemannsolver7 = nullptr; // 7-eqn (Phase C)
 
     // IntegrationScheme
     enum IntegrationScheme
@@ -361,6 +416,23 @@ protected:
     // NGHOST
     int nghost = 2;
 
+    // ========================================================================
+    // 7-EQUATION SWITCHES (Phase A scaffolding)
+    //
+    //   equation_count            : 5 (default, current Allaire model) or 7
+    //                               (Baer-Nunziato per-phase)
+    //   relax_pressure_stiff      : when 7, use SPB-2009 instantaneous
+    //                               pressure relaxation between RK stages
+    //   relax_velocity_stiff      : same, for the velocity-equilibrium step
+    //   surface_tension_form      : 0 = Brackbill source (current default,
+    //                                   matches existing 5-eqn behavior)
+    //                               1 = Schmidmayer 2017 conservative
+    //                                   capillary tensor (Phase D)
+    // ========================================================================
+    int equation_count        = 5;
+    int relax_pressure_stiff  = 1;
+    int relax_velocity_stiff  = 1;
+    int surface_tension_form  = 0;
 };
 }
 
