@@ -201,7 +201,11 @@ public:
             // Pressure (Tammann EOS)
             Set::Scalar p_val = Solver::EOS::EOS::MixedPressure(rho_val, UE, eta_val, eos0, eos1, pref, small_local);
 
-            // Sound speed
+            // Sound speed (mixture-effective Tammann form).  NSCBC LODI
+            // operates on mixture quantities only (the validated 5-eq form);
+            // the per-phase primaries are reconstructed post-NSCBC in
+            // Hydro2::FillGhost4BC via eta partition.  Do NOT swap in the
+            // frozen mixture sound speed here.
             Set::Scalar a_val = Solver::EOS::EOS::TammannSoundSpeed(rho_val, p_val, gamma_mix, pi_mix, small_local);
 
             // Output based on direction

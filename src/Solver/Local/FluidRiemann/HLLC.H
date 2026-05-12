@@ -128,17 +128,19 @@ public:
         recover(hi, aR, a2R, arh0R, arh1R, rhoR, uR, vR, pR, cR,
                 rho0R, rho1R, p0R, p1R, c0R, c1R, Y0R, Y1R);
 
-        // Reconstruct total energy per unit volume from the per-phase
-        // canonical primaries: E = (alpha rho e)_0 + (alpha rho e)_1 + 0.5 rho |u|^2.
-        // This keeps the HLLC energy flux self-consistent with the per-phase
-        // primaries even when the independently-advected redundant rho E in
-        // lo.E_total / hi.E_total has drifted away (the post-stage reinit
-        // step uses lo.E_total to find p_reinit; here we want the HLLC
-        // flux to reflect the energy actually carried by E0 + E1 + KE).
-        const Set::Scalar keL = 0.5 * rhoL * (uL * uL + vL * vL);
-        const Set::Scalar keR = 0.5 * rhoR * (uR * uR + vR * vR);
-        const Set::Scalar ETotL = lo.E0 + lo.E1 + keL;
-        const Set::Scalar ETotR = hi.E0 + hi.E1 + keR;
+        // Redundant total energy rho E. Use the INDEPENDENTLY-advected
+        // primary directly, per Schmidmayer 2020 line 330-333:
+        //   "We note that (16) is redundant when the internal energy
+        //    equations are also computed. However, in practice we include
+        //    it in our computations to ensure that the total energy is
+        //    numerically conserved, and thus preserve a correct treatment
+        //    of shock waves."
+        // The post-stage reinit step (Sch20 eq. 26 / Sau09 eq. III.5) then
+        // uses this rho E to recover p and reset the per-phase E_k.  If we
+        // overrode the HLLC ρE flux with E_0+E_1+KE we would conservatively
+        // advect a different quantity than the "ρE" the reinit step expects.
+        const Set::Scalar ETotL = lo.E_total;
+        const Set::Scalar ETotR = hi.E_total;
 
         // ====================================================================
         // 2. Davis wave-speed estimates (Saurel 2009 §3.1.2 line 764):
@@ -300,22 +302,12 @@ public:
         // ====================================================================
         // 9. HLLC dispatch by wave positions.
         //
-        // u_interface (the consistent advective velocity for the
-        // Saurel-Abgrall non-conservative discretization of alpha and the
-        // per-phase internal energies) is NOT simply S_M.  Per
-        // Johnsen-Colonius JCP 2006 / Garrick-Owkes-Regele JCP 2017
-        // eq. 48, the consistent face velocity in the star region is
-        //
-        //   u_hat_L = u_L + S_L * (S_M - u_L) / (S_L - S_M)        (L*)
-        //   u_hat_R = u_R + S_R * (S_M - u_R) / (S_R - S_M)        (R*)
-        //
-        // which satisfies rho_K * u_hat_K = rho_K_star * S_M = HLLC
-        // mass flux through the face.  Using S_M directly produces a
-        // discretization mismatch between the conservative rho*E flux and
-        // the non-conservative alpha_k p_k div(u) source -- it shows up
-        // as a localized pressure/velocity bias at the IC discontinuity
-        // and is the source of the magnitude-too-high velocity in
-        // gas-liquid Riemann tests (Garrick).
+        // u_interface is the contact-wave velocity used by the Saurel-Abgrall
+        // non-conservative discretization (alpha row and per-phase internal-
+        // energy rows). Saurel 2009 line 836 prescribes the HLLC contact
+        // speed S_M in the star region, and the upwind cell velocity u_K
+        // outside the star fan. Schmidmayer 2020 eq. 18 follows the same
+        // convention (u_s = HLLC contact velocity).
         // ====================================================================
         Flux fl;
         if (0.0 <= S_L)
@@ -326,18 +318,12 @@ public:
         else if (0.0 <= S_M)
         {
             fl = Fstar_L;
-            Set::Scalar denom_uh = (S_L - S_M);
-            if (std::abs(denom_uh) < small) denom_uh = (denom_uh >= 0.0 ? small : -small);
-            Set::Scalar u_hat_L = uL + S_L * (S_M - uL) / denom_uh;
-            fl.u_interface = u_hat_L;     // Garrick eq. 48, NOT S_M
+            fl.u_interface = S_M;   // Sau09 line 836 / Sch20 eq. 18
         }
         else if (0.0 <= S_R)
         {
             fl = Fstar_R;
-            Set::Scalar denom_uh = (S_R - S_M);
-            if (std::abs(denom_uh) < small) denom_uh = (denom_uh >= 0.0 ? small : -small);
-            Set::Scalar u_hat_R = uR + S_R * (S_M - uR) / denom_uh;
-            fl.u_interface = u_hat_R;     // Garrick eq. 48, NOT S_M
+            fl.u_interface = S_M;   // Sau09 line 836 / Sch20 eq. 18
         }
         else
         {

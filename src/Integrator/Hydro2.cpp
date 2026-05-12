@@ -158,16 +158,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         Util::Message(INFO, "uses_nscbc=", uses_nscbc);
 
-        // 6-eq branch: NSCBC has not yet been ported to the two-pressure
-        // model.  The characteristic decomposition needs the per-phase
-        // EOS constants and the frozen mixture sound speed (Sch20 eq. 17),
-        // and the ghost-cell fill must populate the per-phase energies
-        // consistently with the imposed primitives.  Until that port is
-        // complete, refuse to run with NSCBC.
-        if (uses_nscbc)
-        {
-            Util::Abort(INFO, "NSCBC is not yet ported to the 6-equation model. Use Expression BC for now (see bin/6Eqn.md §4.6).");
-        }
+        // NSCBC ported to the 6-equation model: characteristic decomposition
+        // now uses the FROZEN mixture sound speed (Sch20 eq. 17 / Sau09
+        // eq. III.2) inside NSCBC::compute_prim, consistent with the
+        // hyperbolic-step HLLC.  After NSCBC modifies the mixture (rho, M, ρE)
+        // ghosts, FillGhost4BC re-derives per-phase (αρ)_k and E_k from the
+        // updated mixture state and the extrapolated alpha (linearly
+        // degenerate; see post-NSCBC block in FillGhost4BC).
 
         // Initialize boundary conditions based on whether NSCBC is used
         if (uses_nscbc)
@@ -3023,8 +3020,53 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         // NSCBC PATH: Use characteristic-based boundary conditions
         // ====================================================================
 
-        // NSCBC operates on total density, not phase densities
-        // Compute rho_total in domain + ghosts
+        // ====================================================================
+        // 6-eq <-> NSCBC bridge.  Strategy: NSCBC operates on MIXTURE
+        // quantities only (rho_total, M, E_total, gamma_mix, pi_mix,
+        // pressure_mix) — exactly as in the validated 5-equation code path.
+        // The per-phase 6-eq primaries ((alpha rho)_k, E_k) are reconstructed
+        // here from (rho_total, eta, p_ghost) AFTER NSCBC finishes.  Eta is
+        // a linearly-degenerate field at the boundary, so we extrapolate it
+        // from the boundary cell into the NSCBC ghosts before NSCBC runs
+        // (Expression::FillBoundary is a no-op for nscbc_* types and would
+        // otherwise leave eta uninitialized).
+        // ====================================================================
+
+        const int ib_lo = geom[lev].Domain().smallEnd(0);
+        const int ib_hi = geom[lev].Domain().bigEnd(0);
+        const int jb_lo = geom[lev].Domain().smallEnd(1);
+        const int jb_hi = geom[lev].Domain().bigEnd(1);
+        const bool x_periodic = geom[lev].isPeriodic(0);
+        const bool y_periodic = geom[lev].isPeriodic(1);
+
+        // --------------------------------------------------------------------
+        // PRE-NSCBC: extrapolate eta into NSCBC ghost cells by constant
+        // copy from the boundary cell.  Periodic-direction ghosts are
+        // skipped because they are already filled by FillBoundary's
+        // periodic copy in STEP 3 above.
+        // --------------------------------------------------------------------
+        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &ghostbox = mfi.growntilebox(nghost);
+            auto eta = eta_mf[lev]->array(mfi);
+
+            amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                const bool x_outside = (i < ib_lo) || (i > ib_hi);
+                const bool y_outside = (j < jb_lo) || (j > jb_hi);
+                if (!x_outside && !y_outside) return;                // interior — leave alone
+                if (x_outside && x_periodic)  return;                // periodic — leave alone
+                if (y_outside && y_periodic)  return;                // periodic — leave alone
+
+                const int ib = std::min(std::max(i, ib_lo), ib_hi);
+                const int jb = std::min(std::max(j, jb_lo), jb_hi);
+                eta(i, j, k) = eta(ib, jb, k);
+            });
+        }
+
+        // --------------------------------------------------------------------
+        // Build mixture rho_total in domain + ghosts.  NSCBC's LODI uses
+        // ONLY mixture quantities; the per-phase fields are re-derived after.
+        // --------------------------------------------------------------------
         amrex::MultiFab rho_total(rho_eta0_mf[lev]->boxArray(),
                                   rho_eta0_mf[lev]->DistributionMap(),
                                   1,
@@ -3033,7 +3075,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         for (amrex::MFIter mfi(rho_total); mfi.isValid(); ++mfi)
         {
             const amrex::Box &bx = mfi.growntilebox(nghost);
-            auto rho = rho_total.array(mfi);
+            auto rho  = rho_total.array(mfi);
             auto rho0 = rho_eta0_mf[lev]->array(mfi);
             auto rho1 = rho_eta1_mf[lev]->array(mfi);
 
@@ -3042,7 +3084,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             });
         }
 
-        // Create working copies for NSCBC (it modifies them in-place)
+        // Working copies for momentum and total energy (NSCBC modifies in-place).
         amrex::MultiFab M_copy(momentum_mf[lev]->boxArray(),
                                momentum_mf[lev]->DistributionMap(),
                                AMREX_SPACEDIM,
@@ -3051,58 +3093,80 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
                                energy_per_vol_mf[lev]->DistributionMap(),
                                1,
                                nghost);
+        amrex::MultiFab::Copy(M_copy, *momentum_mf[lev],       0, 0, AMREX_SPACEDIM, nghost);
+        amrex::MultiFab::Copy(E_copy, *energy_per_vol_mf[lev], 0, 0, 1,              nghost);
 
-        amrex::MultiFab::Copy(M_copy, *momentum_mf[lev], 0, 0, AMREX_SPACEDIM, nghost);
-        amrex::MultiFab::Copy(E_copy, *energy_per_vol_mf[lev], 0, 0, 1, nghost);
-
-        // ====================================================================
-        // CALL NSCBC TO FILL GHOST CELLS
-        // ====================================================================
-        // NSCBC will:
-        //   - Read eta, gamma, p0, pressure from domain (computed above)
-        //   - Compute characteristic waves from interior gradients
-        //   - Modify incoming waves based on BC type
-        //   - Fill rho_total, M, E in ghost cells
-        //   - Write gamma, p0, pressure to ghost cells
-        // ====================================================================
+        // --------------------------------------------------------------------
+        // Run NSCBC LODI.  Uses the mixture-effective EOS internally (Tammann
+        // form, validated against the 5-equation code path).  Modifies
+        // rho_total, M_copy, E_copy in ghosts; writes gamma_mf, p0_mf,
+        // pressure_mf in ghosts as well.
+        // --------------------------------------------------------------------
         if (nghost == 2 && nscbc_bc != nullptr)
         {
-            nscbc_bc->FillBoundary(rho_total, M_copy, E_copy, *eta_mf[lev], *gamma_mf[lev], *p0_mf[lev], *pressure_mf[lev], eos0, eos1, geom[lev], time, pref);
+            nscbc_bc->FillBoundary(rho_total, M_copy, E_copy,
+                                   *eta_mf[lev], *gamma_mf[lev], *p0_mf[lev], *pressure_mf[lev],
+                                   eos0, eos1, geom[lev], time, pref);
         }
         else if (nghost == 4 && nscbc4_bc != nullptr)
         {
-            nscbc4_bc->FillBoundary(rho_total, M_copy, E_copy, *eta_mf[lev], *gamma_mf[lev], *p0_mf[lev], *pressure_mf[lev], eos0, eos1, geom[lev], time, pref);
+            nscbc4_bc->FillBoundary(rho_total, M_copy, E_copy,
+                                    *eta_mf[lev], *gamma_mf[lev], *p0_mf[lev], *pressure_mf[lev],
+                                    eos0, eos1, geom[lev], time, pref);
         }
 
-        // Copy modified conservatives back to main arrays
-        amrex::MultiFab::Copy(*momentum_mf[lev], M_copy, 0, 0, AMREX_SPACEDIM, nghost);
-        amrex::MultiFab::Copy(*energy_per_vol_mf[lev], E_copy, 0, 0, 1, nghost);
+        amrex::MultiFab::Copy(*momentum_mf[lev],       M_copy, 0, 0, AMREX_SPACEDIM, nghost);
+        amrex::MultiFab::Copy(*energy_per_vol_mf[lev], E_copy, 0, 0, 1,              nghost);
 
-        // ====================================================================
-        // Update phase densities from NSCBC-modified rho_total
-        // ====================================================================
-        // NSCBC filled rho_total in ghosts, but we need rho_eta0, rho_eta1
-        // Partition using eta: rho_eta0 = rho_total * eta
-        // ====================================================================
+        // --------------------------------------------------------------------
+        // POST-NSCBC partition: build the 6-eq per-phase ghosts from the
+        // NSCBC-filled mixture and the (pre-extrapolated) eta.  Identical
+        // ideology to the 5-equation form — split mass and internal energy
+        // by alpha alone, with mechanical-equilibrium pressure:
+        //
+        //   (alpha rho)_0_ghost = rho_total_ghost * eta_ghost
+        //   (alpha rho)_1_ghost = rho_total_ghost * (1 - eta_ghost)
+        //   E_0_ghost           = eta_ghost     * (p_g + gamma_0 pi_0)/(gamma_0 - 1)
+        //   E_1_ghost           = (1-eta_ghost) * (p_g + gamma_1 pi_1)/(gamma_1 - 1)
+        //
+        // The E_k formulas are Sau09 eq. III.5 / Sch20 eq. 13 init evaluated
+        // at the NSCBC-set ghost pressure and the boundary-extrapolated eta.
+        // For periodic-direction ghosts the fields are already correct via
+        // FillBoundary periodicity — skip.
+        // --------------------------------------------------------------------
+        const Set::Scalar g0_ns = eos0.Gamma();
+        const Set::Scalar pi0_ns = eos0.P0();
+        const Set::Scalar g1_ns = eos1.Gamma();
+        const Set::Scalar pi1_ns = eos1.P0();
+        const Set::Scalar small_ns = small;
+
         for (amrex::MFIter mfi(rho_total); mfi.isValid(); ++mfi)
         {
             const amrex::Box &ghostbox = mfi.growntilebox(nghost);
-
-            auto rho = rho_total.array(mfi);
-            auto eta = eta_mf[lev]->array(mfi);
-            auto rho0 = rho_eta0_mf[lev]->array(mfi);
-            auto rho1 = rho_eta1_mf[lev]->array(mfi);
+            auto rho   = rho_total.array(mfi);
+            auto eta   = eta_mf[lev]->array(mfi);
+            auto rho0  = rho_eta0_mf[lev]->array(mfi);
+            auto rho1  = rho_eta1_mf[lev]->array(mfi);
+            auto press = pressure_mf[lev]->array(mfi);
+            auto E0    = energy0_mf[lev]->array(mfi);
+            auto E1    = energy1_mf[lev]->array(mfi);
 
             amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                // Partition total density by volume fraction
-                rho0(i, j, k) = rho(i, j, k) * eta(i, j, k);
-                rho1(i, j, k) = rho(i, j, k) * (1.0 - eta(i, j, k));
+                const bool x_outside = (i < ib_lo) || (i > ib_hi);
+                const bool y_outside = (j < jb_lo) || (j > jb_hi);
+                if (!x_outside && !y_outside) return;                // interior — leave alone
+                if (x_outside && x_periodic)  return;                // periodic — leave alone
+                if (y_outside && y_periodic)  return;                // periodic — leave alone
 
-                // Enforce positivity
-                /*
-                rho0(i, j, k) = std::max(rho0(i, j, k), small);
-                rho1(i, j, k) = std::max(rho1(i, j, k), small);
-                */
+                const Set::Scalar a1 = std::min(std::max(eta(i, j, k), 0.0), 1.0);
+                const Set::Scalar a2 = 1.0 - a1;
+                const Set::Scalar rho_g = std::max(rho(i, j, k), small_ns);
+                const Set::Scalar p_g   = std::max(press(i, j, k), small_ns);
+
+                rho0(i, j, k) = a1 * rho_g;
+                rho1(i, j, k) = a2 * rho_g;
+                E0(i, j, k)   = a1 * (p_g + g0_ns * pi0_ns) / std::max(g0_ns - 1.0, small_ns);
+                E1(i, j, k)   = a2 * (p_g + g1_ns * pi1_ns) / std::max(g1_ns - 1.0, small_ns);
             });
         }
 

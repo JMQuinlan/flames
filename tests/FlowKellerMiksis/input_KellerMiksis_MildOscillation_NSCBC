@@ -120,21 +120,54 @@ mu1_b = 0.0
 sigma = 7.28
 pref  = 0.0
 
-### BOUNDARY CONDITIONS - Neumann on all 4 sides ###
-density.bc.type.xhi = neumann
-density.bc.type.xlo = neumann
-density.bc.type.ylo = neumann
-density.bc.type.yhi = neumann
+### BOUNDARY CONDITIONS - NSCBC4 outflow on all 4 sides ###
+density.bc.type.xhi  = nscbc_outflow
+density.bc.type.xlo  = nscbc_outflow
+density.bc.type.ylo  = nscbc_outflow
+density.bc.type.yhi  = nscbc_outflow
+energy.bc.type.xhi   = nscbc_outflow
+energy.bc.type.xlo   = nscbc_outflow
+energy.bc.type.ylo   = nscbc_outflow
+energy.bc.type.yhi   = nscbc_outflow
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow
+momentum.bc.type.xlo = nscbc_outflow nscbc_outflow
+momentum.bc.type.ylo = nscbc_outflow nscbc_outflow
+momentum.bc.type.yhi = nscbc_outflow nscbc_outflow
 
-energy.bc.type.xhi = neumann
-energy.bc.type.xlo = neumann
-energy.bc.type.ylo = neumann
-energy.bc.type.yhi = neumann
+# Far-field target = liquid pressure (mild driving)
+nscbc.xlo.type = outflow
+nscbc.xlo.target_p = 1500.0
+nscbc.xlo.sigma = 0.15
+nscbc.xlo.beta  = 0.5
+nscbc.xlo.L_ref = 0.20
+nscbc.xlo.target_u = 0.0
+nscbc.xlo.target_v = 0.0
 
-momentum.bc.type.xhi = neumann neumann
-momentum.bc.type.xlo = neumann neumann
-momentum.bc.type.ylo = neumann neumann
-momentum.bc.type.yhi = neumann neumann
+nscbc.xhi.type = outflow
+nscbc.xhi.target_p = 1500.0
+nscbc.xhi.sigma = 0.15
+nscbc.xhi.beta  = 0.5
+nscbc.xhi.L_ref = 0.20
+nscbc.xhi.target_u = 0.0
+nscbc.xhi.target_v = 0.0
+
+nscbc.ylo.type = outflow
+nscbc.ylo.target_p = 1500.0
+nscbc.ylo.sigma = 0.15
+nscbc.ylo.beta  = 0.5
+nscbc.ylo.L_ref = 0.20
+nscbc.ylo.target_u = 0.0
+nscbc.ylo.target_v = 0.0
+
+nscbc.yhi.type = outflow
+nscbc.yhi.target_p = 1500.0
+nscbc.yhi.sigma = 0.15
+nscbc.yhi.beta  = 0.5
+nscbc.yhi.L_ref = 0.20
+nscbc.yhi.target_u = 0.0
+nscbc.yhi.target_v = 0.0
+
+nscbc.small = 1.0e-10
 
 ### REFINEMENT (off for first validation) ###
 eta_refinement_criterion   = 1.0e+10
