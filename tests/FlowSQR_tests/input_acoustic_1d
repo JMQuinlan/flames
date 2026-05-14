@@ -27,7 +27,7 @@
 # zero motion but ~2x pressure amplitude in the (small) transmitted wave.
 
 ### OUTPUT ###
-plot_file   = ./tests/FlowSQR_tests/output_acoustic_1d_pillbox
+plot_file   = ./tests/FlowSQR_tests/output_acoustic_1d
 amr.plot_dt = 1.0e-4
 # amr.plot_int = 1
 
@@ -219,17 +219,25 @@ ch_mobility_nom        = 0     # freeze CH — interface is stationary
 # hydro2.closure.un_strategy    = constitutive
 # hydro2.closure.E_strategy     = constitutive
 #
-# --- S3 (Landau-Teller relaxation) validation ---------------------------------
+# --- S3 (capacity-scaled transfer flux) validation ---------------------------
 # IMPORTANT: relax/jump only take effect on the new-framework path, i.e. with
 # sqr_legacy_p_int_method = 0 (set below). With the legacy switch nonzero the
 # un/E/rho/ut_close dispatch is bypassed entirely.
 #
-# Normal velocity (S3): J_un = -rho_eff * (u_n,0 - u_n,1) / un_tau
+# S3 form: J_Q = -C_Q * v_Q * <<phi>>, applied via the |grad eta| flux template.
+# The intensive jump then decays at the band-local rate v_Q*|grad eta|, i.e. an
+# emergent relaxation time tau_loc = 1/(v_Q*|grad eta|). Here |grad eta|_max =
+# 0.5/epsilon = 50, so v_Q = 2e4 gives tau_loc ~ 1e-6 s at the band center;
+# explicit Euler with dt = 1e-7 => dt/tau_loc ~ 0.1 (stable, ~10 steps to relax).
+#
+# Normal velocity (S3): J_un = -rho_eff * v_un * (u_n,0 - u_n,1).
+# NB <<u_n>> = 0 is an exact kinematic constraint, so this is a stiff penalty
+# (faithful only as v_un -> inf), not a physical finite-resistance interface.
 hydro2.closure.un_strategy    = relax
-hydro2.closure.un_tau         = 1e-6   # relaxation time; explicit Euler => keep dt well below un_tau
-# Energy / temperature (S3): J_E = -C_E * (T_0 - T_1) / E_tau
+hydro2.closure.un_vel         = 2e4    # transfer velocity [m/s]; tau_loc ~ 1/(v_un*|grad eta|)
+# Energy / temperature (S3): J_E = -C_E * v_E * (T_0 - T_1).
 hydro2.closure.E_strategy     = relax
-hydro2.closure.E_tau          = 1e-6   # relaxation time; explicit Euler => keep dt well below E_tau
+hydro2.closure.E_vel          = 2e4    # transfer velocity [m/s]; tau_loc ~ 1/(v_E*|grad eta|)
 # Tangential velocity: inviscid case here, u_t is unconstrained — leave at the
 # Constitutive no-op stub (S1/angular-momentum, A10, not yet implemented).
 hydro2.closure.ut_strategy    = constitutive
@@ -239,7 +247,7 @@ hydro2.closure.ut_strategy    = constitutive
 # acoustic test into acoustic + phase change, so uncomment deliberately:
 # ch_thermo_consistent          = 1
 # hydro2.closure.rho_strategy   = relax
-# hydro2.closure.rho_tau        = 1e-6   # starting guess — tune to the dmu_bulk decay rate
+# hydro2.closure.rho_vel        = 2e4    # transfer velocity [m/s]
 #
 sqr_legacy_p_int_method       = 0      # 0 = new closure-strategy framework (REQUIRED for relax/jump)
 hydro2.closure.un_pint_method = 2      # only used by the Constitutive strategy; ignored under relax

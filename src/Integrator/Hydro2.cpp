@@ -231,15 +231,15 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             else if (s_un == "pillbox_symmetric")   value.un_close.strategy = Hydro2::ClosureStrategy::PillboxSymmetric;
             else Util::Abort(INFO, "closure.un_strategy must be one of: constitutive, jump, relax, pillbox, pillbox_symmetric (got '", s_un, "')");
 
-            Set::Scalar tmp_l = -1.0, tmp_t = -1.0;
+            Set::Scalar tmp_l = -1.0, tmp_v = -1.0;
             pp.query("closure.un_lambda", tmp_l);
-            pp.query("closure.un_tau",    tmp_t);
+            pp.query("closure.un_vel",    tmp_v);
             if (value.un_close.strategy == Hydro2::ClosureStrategy::Jump  && !(tmp_l > 0.0))
                 Util::Abort(INFO, "closure.un_strategy=jump requires closure.un_lambda > 0");
-            if (value.un_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_t > 0.0))
-                Util::Abort(INFO, "closure.un_strategy=relax requires closure.un_tau > 0");
+            if (value.un_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_v > 0.0))
+                Util::Abort(INFO, "closure.un_strategy=relax requires closure.un_vel > 0");
             if (tmp_l > 0.0) value.un_close.lambda = tmp_l;
-            if (tmp_t > 0.0) value.un_close.tau    = tmp_t;
+            if (tmp_v > 0.0) value.un_close.vel    = tmp_v;
 
             pp.query("closure.un_pint_method", value.un_close.pint_method);
             if (value.un_close.strategy == Hydro2::ClosureStrategy::Constitutive
@@ -256,15 +256,15 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             else if (s_E == "pillbox_symmetric")   value.E_close.strategy = Hydro2::ClosureStrategy::PillboxSymmetric;
             else Util::Abort(INFO, "closure.E_strategy must be one of: constitutive, jump, relax, pillbox, pillbox_symmetric (got '", s_E, "')");
 
-            Set::Scalar tmp_l = -1.0, tmp_t = -1.0;
+            Set::Scalar tmp_l = -1.0, tmp_v = -1.0;
             pp.query("closure.E_lambda", tmp_l);
-            pp.query("closure.E_tau",    tmp_t);
+            pp.query("closure.E_vel",    tmp_v);
             if (value.E_close.strategy == Hydro2::ClosureStrategy::Jump  && !(tmp_l > 0.0))
                 Util::Abort(INFO, "closure.E_strategy=jump requires closure.E_lambda > 0");
-            if (value.E_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_t > 0.0))
-                Util::Abort(INFO, "closure.E_strategy=relax requires closure.E_tau > 0");
+            if (value.E_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_v > 0.0))
+                Util::Abort(INFO, "closure.E_strategy=relax requires closure.E_vel > 0");
             if (tmp_l > 0.0) value.E_close.lambda = tmp_l;
-            if (tmp_t > 0.0) value.E_close.tau    = tmp_t;
+            if (tmp_v > 0.0) value.E_close.vel    = tmp_v;
 
             pp.query("closure.E_pint_method", value.E_close.pint_method);
             if (value.E_close.strategy == Hydro2::ClosureStrategy::Constitutive
@@ -279,15 +279,15 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             else if (s_rho == "relax")         value.rho_close.strategy = Hydro2::ClosureStrategy::Relax;
             else Util::Abort(INFO, "closure.rho_strategy must be one of: constitutive, jump, relax (got '", s_rho, "')");
 
-            Set::Scalar tmp_l = -1.0, tmp_t = -1.0;
+            Set::Scalar tmp_l = -1.0, tmp_v = -1.0;
             pp.query("closure.rho_lambda", tmp_l);
-            pp.query("closure.rho_tau",    tmp_t);
+            pp.query("closure.rho_vel",    tmp_v);
             if (value.rho_close.strategy == Hydro2::ClosureStrategy::Jump  && !(tmp_l > 0.0))
                 Util::Abort(INFO, "closure.rho_strategy=jump requires closure.rho_lambda > 0");
-            if (value.rho_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_t > 0.0))
-                Util::Abort(INFO, "closure.rho_strategy=relax requires closure.rho_tau > 0");
+            if (value.rho_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_v > 0.0))
+                Util::Abort(INFO, "closure.rho_strategy=relax requires closure.rho_vel > 0");
             if (tmp_l > 0.0) value.rho_close.lambda = tmp_l;
-            if (tmp_t > 0.0) value.rho_close.tau    = tmp_t;
+            if (tmp_v > 0.0) value.rho_close.vel    = tmp_v;
         }
         {
             std::string s_ut = "constitutive";
@@ -297,15 +297,15 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             else if (s_ut == "relax")         value.ut_close.strategy = Hydro2::ClosureStrategy::Relax;
             else Util::Abort(INFO, "closure.ut_strategy must be one of: constitutive, jump, relax (got '", s_ut, "')");
 
-            Set::Scalar tmp_l = -1.0, tmp_t = -1.0;
+            Set::Scalar tmp_l = -1.0, tmp_v = -1.0;
             pp.query("closure.ut_lambda", tmp_l);
-            pp.query("closure.ut_tau",    tmp_t);
+            pp.query("closure.ut_vel",    tmp_v);
             if (value.ut_close.strategy == Hydro2::ClosureStrategy::Jump  && !(tmp_l > 0.0))
                 Util::Abort(INFO, "closure.ut_strategy=jump requires closure.ut_lambda > 0");
-            if (value.ut_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_t > 0.0))
-                Util::Abort(INFO, "closure.ut_strategy=relax requires closure.ut_tau > 0");
+            if (value.ut_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_v > 0.0))
+                Util::Abort(INFO, "closure.ut_strategy=relax requires closure.ut_vel > 0");
             if (tmp_l > 0.0) value.ut_close.lambda = tmp_l;
-            if (tmp_t > 0.0) value.ut_close.tau    = tmp_t;
+            if (tmp_v > 0.0) value.ut_close.vel    = tmp_v;
         }
 
         // PHASE 1 (liquid — stiffened gas)
@@ -2263,11 +2263,11 @@ Hydro2::ApplySQRSource(int lev,
     const bool sqr_legacy_p_int_method_ = sqr_legacy_p_int_method;
     const int  un_strat_       = static_cast<int>(un_close.strategy);
     const Real un_lambda_      = un_close.lambda;
-    const Real un_tau_         = un_close.tau;
+    const Real un_vel_         = un_close.vel;
     const int  un_pint_method_ = un_close.pint_method;
     const int  E_strat_        = static_cast<int>(E_close.strategy);
     const Real E_lambda_       = E_close.lambda;
-    const Real E_tau_          = E_close.tau;
+    const Real E_vel_          = E_close.vel;
     const int  E_pint_method_  = E_close.pint_method;
     // Phase-C (density / phase-change) and Phase-D (tangential velocity)
     // closures. rho_close selects how the interface mass flux mdot0 is
@@ -2275,10 +2275,10 @@ Hydro2::ApplySQRSource(int lev,
     // (0=Constitutive, 1=Jump, 2=Relax) as above.
     const int  rho_strat_      = static_cast<int>(rho_close.strategy);
     const Real rho_lambda_     = rho_close.lambda;
-    const Real rho_tau_        = rho_close.tau;
+    const Real rho_vel_        = rho_close.vel;
     const int  ut_strat_       = static_cast<int>(ut_close.strategy);
     const Real ut_lambda_      = ut_close.lambda;
-    const Real ut_tau_         = ut_close.tau;
+    const Real ut_vel_         = ut_close.vel;
     const Real cv0_       = cv_0;
     const Real cv1_       = cv_1;
 
@@ -2399,8 +2399,8 @@ Hydro2::ApplySQRSource(int lev,
             //              ComputeEffectiveSQRSources value, or prescribed ic_m0.
             //              Keeps the legacy path bit-for-bit.
             //   Jump  (S2): mdot0 = lambda_rho * dmu_bulk.
-            //   Relax (S3): mdot0 = (C_rho / tau_rho) * dmu_bulk — Landau-Teller
-            //              relaxation of the chemical-potential jump
+            //   Relax (S3): mdot0 = C_rho * v_rho * dmu_bulk — capacity-scaled
+            //              transfer flux on the chemical-potential jump
             //              <<mu_chem>> = dmu_bulk = f_g - f_l. Capacity
             //              C_rho = chi0*chi1/(chi0+chi1) is the harmonic mean of
             //              the per-phase susceptibilities
@@ -2408,7 +2408,7 @@ Hydro2::ApplySQRSource(int lev,
             //              exact thermodynamic identity d f / d rho |_T = p/rho^2
             //              (EOS-agnostic; verified against f_CPG and f_Tammann).
             // Sign: with mdot0 as below and the -Smass/+Smass split, one finds
-            // d(dmu_bulk)/dt = -dmu_bulk*|grad eta|/tau_rho (chi_k > 0), i.e.
+            // d(dmu_bulk)/dt = -v_rho*dmu_bulk*|grad eta| (chi_k > 0), i.e.
             // strictly dissipative — the fixed point is dmu_bulk = 0 (equal
             // chemical potential), the correct interface equilibrium.
             Real mdot0 = m0_arr(i,j,k);
@@ -2416,14 +2416,14 @@ Hydro2::ApplySQRSource(int lev,
             {
                 mdot0 = rho_lambda_ * dmu_arr(i,j,k);
             }
-            else if (rho_strat_ == 2)  // Relax (S3): Landau-Teller on <<mu_chem>>
+            else if (rho_strat_ == 2)  // Relax (S3): capacity-scaled transfer on <<mu_chem>>
             {
                 Real p0_safe = amrex::max(p0_phase, Real(1e-10));
                 Real p1_safe = amrex::max(p1_phase, Real(1e-10));
                 Real chi0    = safe_r0 * safe_r0 / p0_safe;
                 Real chi1    = safe_r1 * safe_r1 / p1_safe;
                 Real C_rho   = (chi0 * chi1) / (chi0 + chi1);
-                mdot0 = C_rho * dmu_arr(i,j,k) / rho_tau_;
+                mdot0 = C_rho * rho_vel_ * dmu_arr(i,j,k);
             }
             Real u0x   = u0_arr(i,j,k,0);   // prescribed interface velocity, u0_mf
             Real u0y   = u0_arr(i,j,k,1);
@@ -2599,10 +2599,10 @@ Hydro2::ApplySQRSource(int lev,
                     {
                         J_un = -un_lambda_ * du_n;
                     }
-                    else                   // Relax (S3): C_un = harmonic(rho_k)
+                    else                   // Relax (S3): chi_un = rho_eff * v_un
                     {
                         Real rho_eff = (safe_r0 * safe_r1) / (safe_r0 + safe_r1);
-                        J_un = -rho_eff * du_n / un_tau_;
+                        J_un = -rho_eff * un_vel_ * du_n;
                     }
                     // ApplyInterfaceFlux: phase 0 receives +J_un n̂ |∇η|, phase 1 the
                     // negative — strict action-reaction on the band.
@@ -2643,11 +2643,11 @@ Hydro2::ApplySQRSource(int lev,
                         J_ut_x = -ut_lambda_ * dut_x;
                         J_ut_y = -ut_lambda_ * dut_y;
                     }
-                    else                   // Relax (S3): C_ut = harmonic(rho_k)
+                    else                   // Relax (S3): chi_ut = rho_eff * v_ut
                     {
                         Real rho_eff = (safe_r0 * safe_r1) / (safe_r0 + safe_r1);
-                        J_ut_x = -rho_eff * dut_x / ut_tau_;
-                        J_ut_y = -rho_eff * dut_y / ut_tau_;
+                        J_ut_x = -rho_eff * ut_vel_ * dut_x;
+                        J_ut_y = -rho_eff * ut_vel_ * dut_y;
                     }
                     // phase 0 receives +J_ut |∇η|, phase 1 the negative.
                     S_ut_0_x = +J_ut_x * grad_eta_mag;
@@ -2731,12 +2731,12 @@ Hydro2::ApplySQRSource(int lev,
                     {
                         J_E = -E_lambda_ * dT;
                     }
-                    else                   // Relax (S3): C_E = harmonic(ρ_k cv_k)
+                    else                   // Relax (S3): chi_E = C_E * v_E, C_E = harmonic(ρ_k cv_k)
                     {
                         Real C0  = safe_r0 * safe_cv0;
                         Real C1  = safe_r1 * safe_cv1;
                         Real C_E = (C0 * C1) / (C0 + C1);
-                        J_E = -C_E * dT / E_tau_;
+                        J_E = -C_E * E_vel_ * dT;
                     }
                     S_E_0 = +J_E * grad_eta_mag;
                     S_E_1 = -J_E * grad_eta_mag;
@@ -5235,7 +5235,7 @@ void Hydro2::ApplyNSCBC(
 //  | A15 | Interstitial working g_{κ,int}^(k)                              | none                                     | missing (Phase F)     |
 //  | A16 | Discrete action-reaction sums (Σ_k mass/mom/E SQR ≈ 0)          | needs runtime assertion in ApplySQRSource | unknown              |
 //  | A17 | Vestigial pref threading                                        | HLLC Solve, energy floor                 | match-but-legacy (Phase F) |
-//  | A18 | Closure-strategy selector S1/S2/S3 per quantity (ρ, u_n, u_t, E)| un/E/rho/ut_close in Hydro2.H; ApplySQRSource | match (S2/S3 wired all 4; S1 for ρ/u_n/E; u_t S1=angular-mom A10 stub) |
+//  | A18 | Closure-strategy selector S1/S2/S3 per quantity (ρ, u_n, u_t, E)| un/E/rho/ut_close in Hydro2.H; ApplySQRSource | match (S2/S3 wired all 4; S3 = χ_Q=C_Q·v_Q capacity-scaled transfer flux; S1 for ρ/u_n/E; u_t S1=angular-mom A10 stub) |
 //
 //  Sign convention: n̂ = +∇η/|∇η| points 0→1 (subject to Open Q2). Per A.0,
 //  per-phase MultiFabs store intrinsic fields; η factors enter only at coupling

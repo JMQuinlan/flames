@@ -527,12 +527,20 @@ protected:
     //                      variable: u_n, T, etc.). Symmetric — strict
     //                      action-reaction on the band by construction. Vanishes
     //                      at intensive equilibrium.
-    //   Relax       (S3): J_Q = -C_Q * jump(intensive)/tau  (Landau-Teller;
-    //                      intensive jump decays as exp(-t/tau_Q) in
-    //                      continuous time). Symmetric. C_Q from harmonic
-    //                      means: rho_eff = rho_0 rho_1/(rho_0+rho_1) for u_n;
-    //                      C_E = (rho_0 cv_0)(rho_1 cv_1)/(rho_0 cv_0+rho_1 cv_1) for E.
-    //                      Vanishes at intensive equilibrium.
+    //   Relax       (S3): J_Q = -C_Q * v_Q * jump(intensive)  (capacity-scaled
+    //                      transfer flux; chi_Q = C_Q v_Q is a genuine per-area
+    //                      transfer coefficient — heat-transfer coeff / impedance
+    //                      / mass-transfer coeff). Symmetric. Through the |grad
+    //                      eta| flux template the intensive jump decays at the
+    //                      band-local rate v_Q*|grad eta| (emergent relaxation
+    //                      time tau_loc ~ eps/v_Q). C_Q from harmonic (series)
+    //                      means: rho_eff = rho_0 rho_1/(rho_0+rho_1) for u_n/u_t;
+    //                      C_E = (rho_0 cv_0)(rho_1 cv_1)/(rho_0 cv_0+rho_1 cv_1) for E;
+    //                      C_rho = chi_0 chi_1/(chi_0+chi_1), chi_k = rho_k^2/p_k for rho.
+    //                      Vanishes at intensive equilibrium. v_Q -> inf is the
+    //                      S1/continuity corner; for u_n (kinematic jump(u_n)=0 is
+    //                      exact) finite v_Q is a stiff penalty, not a physical
+    //                      finite-resistance interface.
     // Default is Constitutive — vanishes at equilibrium, so pressure agreement
     // emerges automatically through the EOS once velocity / temperature have
     // equilibrated. Pillbox / PillboxSymmetric are kept for research only.
@@ -546,7 +554,7 @@ protected:
     struct ClosureSpec {
         ClosureStrategy strategy = ClosureStrategy::Constitutive;
         Set::Scalar lambda = 0.0;  // S2 transfer coefficient (must be > 0 if strategy=Jump)
-        Set::Scalar tau    = 0.0;  // S3 relaxation time      (must be > 0 if strategy=Relax)
+        Set::Scalar vel    = 0.0;  // S3 transfer velocity v_Q (must be > 0 if strategy=Relax)
         int pint_method    = 1;    // Constitutive averaging: 1 arith, 2 eta, 3 Z, 4 mass-fraction
     };
     ClosureSpec un_close;   // normal-velocity closure (Phase B)
