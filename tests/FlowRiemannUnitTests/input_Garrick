@@ -9,6 +9,8 @@
 ### OUTPUT ###
 plot_file = ./tests/FlowRiemannUnitTests/output_Garrick
 Riemann_Solver.type = hllc
+Limiter.type        = minmod
+nghost = 4
 
 # Interface at x=0 (sharp transition)
 eta.ic.type = expression
@@ -42,6 +44,7 @@ q.ic.constant.value = 0.0
 
 ### HYDRO PARAM ###
 cfl   = 0.4
+relax_diag = 1
 
 ## EOS ##
 eos0.gamma = 5.5
@@ -122,10 +125,28 @@ apply_surface_tension = 0
 apply_weight = 0
 apply_vaporization = 0
 
-nghost = 2
-
 apply_sharpening = 0
 sharpening_frequency = 100
 reinit_max_iter = 50
 reinit_tolerance = 1e-6
 omega_relax = 0.5; 
+
+#Sch20 stiff-limit (no shock correction; matches Sch20 paper exactly):
+apply_ahe   = 1
+ahe.method  = 0
+
+#Sch20 finite-mu r-source (+/-mu p_I dp):
+#apply_ahe            = 1
+#ahe.method           = 1
+#ahe.use_const_mu     = 1
+#ahe.mu_const         = 0.001     # this form is unstable; small mu only
+#ahe.compression_only = 0
+#ahe.apply_alpha_src  = 1
+#ahe.max_frac         = 0.1
+
+#Sau09 5.3 qdu/dx form (your "almost perfect" one at mu = 0.2):
+#apply_ahe        = 1
+#ahe.method       = 2
+#ahe.use_const_mu = 1
+#ahe.mu_const     = 0.2
+#ahe.max_frac     = 0.1

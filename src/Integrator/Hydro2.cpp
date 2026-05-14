@@ -1,5 +1,6 @@
 // Base
 #include "Hydro2.H"
+#include <memory>
 // Parsing and Input Handeling
 #include "AMReX_MultiFab.H"
 #include "IO/ParmParse.H"
@@ -30,9 +31,13 @@
 #include "Solver/Local/FluidRiemann/Lax_Friedrich.H"
 
 
-// Limiters
-//#include "Solver/Local/Limiter/Minmod.H"
-//#include "Solver/Local/Limiter/VanLeer.H"
+// Limiters / primitive-variable reconstruction (Sch20 §3.2)
+#include "Solver/Local/Limiter/Limiter.H"
+#include "Solver/Local/Limiter/Godunov.H"
+#include "Solver/Local/Limiter/Minmod.H"
+#include "Solver/Local/Limiter/VanLeer.H"
+#include "Solver/Local/Limiter/WENO3.H"
+#include "Solver/Local/Limiter/WENO5.H"
 
 //EOS
 #include "Solver/EOS/EOS.H"
@@ -103,6 +108,52 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("apply_vaporization", value.apply_vaporization, false);       // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
+        // Artificial heat exchange (AHE) on per-phase internal energy rows.
+        // See bin/AHE.md for derivation: Schmidmayer 2020 eq. 13 r-source
+        // structural form with Saurel-Petitpas-Berry 2009 §5.3 Fig. 21
+        // curve fit for mu(v).
+        // ahe.method: top-level switch that maps to (apply_ahe, ahe.form).
+        //   0 = Sch20 stiff-limit only (no explicit AHE source)
+        //   1 = Sch20 finite-mu r-source (+/- mu p_I Dp)
+        //   2 = Sau09 sec.5.3 q*@u/@x form
+        // When set (>= 0) overrides the legacy apply_ahe / ahe.form parses.
+        int ahe_method_in = -1;
+        pp_query_default("ahe.method", ahe_method_in, -1);
+
+        pp_query_default("apply_ahe",             value.apply_ahe,             0);
+        pp_query_default("ahe.use_const_mu",      value.ahe_use_const_mu,      0);
+        pp_query_default("ahe.mu_const",          value.ahe_mu_const,          0.0);
+        pp_query_default("ahe.mu_scale",          value.ahe_mu_scale,          1.0);
+        pp_query_default("ahe.mu_a",              value.ahe_mu_a,             -5.64e7);
+        pp_query_default("ahe.mu_b",              value.ahe_mu_b,              5.34e3);
+        pp_query_default("ahe.mu_c",              value.ahe_mu_c,            -25.6);
+        pp_query_default("ahe.v_min",             value.ahe_v_min,             2.65e-4);
+        pp_query_default("ahe.v_max",             value.ahe_v_max,             4.61e-4);
+        pp_query_default("ahe.compression_only",  value.ahe_compression_only,  0);
+        pp_query_default("ahe.apply_alpha_src",   value.ahe_apply_alpha_src,   1);
+        pp_query_default("ahe.max_frac",          value.ahe_max_frac,          0.1);
+        pp_query_default("ahe.form",              value.ahe_form,              1);
+
+        // Apply ahe.method override if the user set it.
+        if (ahe_method_in == 0)
+        {
+            value.ahe_method = 0;
+            value.apply_ahe  = 0;            // Sch20 stiff limit -- RelaxAndReinit only
+        }
+        else if (ahe_method_in == 1)
+        {
+            value.ahe_method = 1;
+            value.apply_ahe  = 1;
+            value.ahe_form   = 0;            // Sch20 r-source (antisymmetric)
+        }
+        else if (ahe_method_in == 2)
+        {
+            value.ahe_method = 2;
+            value.apply_ahe  = 1;
+            value.ahe_form   = 1;            // Sau09 q*du/dx
+        }
+        // else (ahe_method_in == -1): unset -> fall back to legacy flags as parsed.
+
         // FLUID 0
         pp_query_required("mu0", value.mu0); // linear viscosity coefficient
         pp_query_default("mu0_b", value.mu0_b, 0.0); // bulk viscosity coefficient
@@ -136,6 +187,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     
         // Boundry Conditions
         pp_query_default("nghost", value.nghost, 2); // Number of Ghost Cells
+
+        // Newton diagnostic for stiff pressure relaxation.
+        // 1 = print per-stage {max_iters, max_residual, count_unconverged}.
+        pp_query_default("relax_diag", value.relax_diag, 0);
 
         bool uses_nscbc = false;
         std::vector<std::string> bc_faces = { "xlo", "xhi", "ylo", "yhi" };
@@ -371,29 +426,20 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     Util::Message(INFO, "Selected Riemann solver: ", typeid(*value.riemannsolver).name());
 
 
-    // LIMITERS
-    pp_query_default("Limiter", value.Limiter, 0); // Type of solver
-    if (value.Limiter == 0)
+    // LIMITER / primitive-variable reconstruction.
+    // Selected by name: Limiter.type = godunov | minmod | vanleer | weno3 | weno5
+    // Default = godunov (no reconstruction; first-order behavior preserved).
     {
-        // No Limiter
-    }
-    else if (value.Limiter == 1)
-    {
-        // pp.select_default<Solver::Local::Limiter::Minmod>("Limiter", value.limiter_minmod);
-    }
-    else if (value.Limiter == 2)
-    {
-        // pp.select_default<Solver::Local::Limiter::VanLeer>("Limiter", value.limiter_vanleer);
-    }
-    else
-    {
-        Util::ParallelMessage(INFO, "-------------------------------");
-        Util::ParallelMessage(INFO, "Invalid Limiter: ", value.Limiter);
-        Util::ParallelMessage(INFO, "Acceptable Methods: ");
-        Util::ParallelMessage(INFO, "None       : 0");
-        Util::ParallelMessage(INFO, "MinMod     : 1");
-        Util::ParallelMessage(INFO, "Van Leer   : 2");
-        Util::Abort(INFO);
+        std::string limiter_name;
+        pp.query("Limiter.type", limiter_name);
+        Util::Message(INFO, "Input file has Limiter.type = ", limiter_name);
+        pp.select_default<Solver::Local::Limiter::Godunov,  // 1st Order (i.e. no limiter)
+                          Solver::Local::Limiter::Minmod,
+                          Solver::Local::Limiter::VanLeer,
+                          Solver::Local::Limiter::WENO3,    // 3rd Order
+                          Solver::Local::Limiter::WENO5     // 5th Order
+        >("Limiter", value.limiter);
+        Util::Message(INFO, "Selected Limiter: ", typeid(*value.limiter).name());
     }
 }
 
@@ -827,8 +873,11 @@ Hydro2::RHS(int lev,
             eta(i, j, k) = std::max(0.0, std::min(1.0, eta(i, j, k)));
         });
     }
-    
-    // Primitive Fields (with BC)
+
+    // Primitive Fields (with BC) -- RelaxAndReinit is called inside
+    // FillGhost4BC after STEP 4 primitive recovery (see comment block
+    // there).  Was briefly called here at top of RHS but moved into
+    // FillGhost4BC to match the user's 5-eq workflow ordering.
     FillGhost4BC(lev, time);
 
     // Pre-Source Terms
@@ -1396,22 +1445,9 @@ Hydro2::RHS(int lev,
                 return s;
             };
 
-            // First-order Godunov (Limiter == 0).  Higher-order limiters
-            // remain disabled in this branch (commented in the source).
-            Solver::Local::FluidRiemann::State sL_x = make_state(i - 1, j, k, X);
-            Solver::Local::FluidRiemann::State sR_x = make_state(i,     j, k, X);
-            Solver::Local::FluidRiemann::State sL_x2= make_state(i,     j, k, X);
-            Solver::Local::FluidRiemann::State sR_x2= make_state(i + 1, j, k, X);
-
-            Solver::Local::FluidRiemann::State sL_y = make_state(i, j - 1, k, Y_dir);
-            Solver::Local::FluidRiemann::State sR_y = make_state(i, j,     k, Y_dir);
-            Solver::Local::FluidRiemann::State sL_y2= make_state(i, j,     k, Y_dir);
-            Solver::Local::FluidRiemann::State sR_y2= make_state(i, j + 1, k, Y_dir);
-
-            Solver::Local::FluidRiemann::Flux flux_xlo, flux_ylo, flux_xhi, flux_yhi;
-
             // ------------------------------------------------------------
-            // Error Checking
+            // Error Checking (must come before face reconstruction so we
+            // catch NaN in the cell BEFORE limiter touches it).
             // ------------------------------------------------------------
             check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Conservative Variable Check", {
                 { "eta", eta(i, j, k) },
@@ -1426,12 +1462,49 @@ Hydro2::RHS(int lev,
                 { "press", press(i, j, k) },
             }); // end check4nans
 
+            // ------------------------------------------------------------
+            // Reconstruct face states using the selected limiter (Sch20
+            // §3.2: PRIMITIVE-variable reconstruction; never conservatives).
+            // For face between cell `lo` and cell `hi` in normal direction
+            // `dir`, gather 6-cell window {lo-2, lo-1, lo, hi, hi+1, hi+2},
+            // convert to primitives, and reconstruct Q_L (right edge of
+            // `lo`) and Q_R (left edge of `hi`, via reversed-stencil trick).
+            // Default Limiter=Godunov returns the cell-center value
+            // unchanged -- equivalent to the original first-order flux.
+            // ------------------------------------------------------------
+            auto compute_face = [&](int lo_i, int lo_j, int hi_i, int hi_j, int dir)
+                -> Solver::Local::FluidRiemann::Flux
+            {
+                const int di = hi_i - lo_i;
+                const int dj = hi_j - lo_j;
+                Solver::Local::Limiter::Primitive prim[6];
+                for (int s = -2; s <= 3; ++s)
+                {
+                    Solver::Local::FluidRiemann::State raw =
+                        make_state(lo_i + s * di, lo_j + s * dj, k, dir);
+                    prim[s + 2] = Solver::Local::Limiter::ToPrimitive(raw, small);
+                }
+                // Q_L: right-edge of cell `lo` (stencil centered on prim[2]).
+                Solver::Local::Limiter::Primitive stencil_L[5] =
+                    { prim[0], prim[1], prim[2], prim[3], prim[4] };
+                // Q_R: left-edge of cell `hi` (stencil centered on prim[3],
+                //      reversed so right-edge reconstruction returns left-edge).
+                Solver::Local::Limiter::Primitive stencil_R[5] =
+                    { prim[5], prim[4], prim[3], prim[2], prim[1] };
+                Solver::Local::Limiter::Primitive pL = limiter->Reconstruct(stencil_L);
+                Solver::Local::Limiter::Primitive pR = limiter->Reconstruct(stencil_R);
+                Solver::Local::FluidRiemann::State sL_face = Solver::Local::Limiter::ToState(pL, small);
+                Solver::Local::FluidRiemann::State sR_face = Solver::Local::Limiter::ToState(pR, small);
+                return riemannsolver->Solve(sL_face, sR_face, pref, small, Spec_Vol);
+            };
+
+            Solver::Local::FluidRiemann::Flux flux_xlo, flux_ylo, flux_xhi, flux_yhi;
             try
             {
-                flux_xlo = riemannsolver->Solve(sL_x , sR_x , pref, small, Spec_Vol);
-                flux_xhi = riemannsolver->Solve(sL_x2, sR_x2, pref, small, Spec_Vol);
-                flux_ylo = riemannsolver->Solve(sL_y , sR_y , pref, small, Spec_Vol);
-                flux_yhi = riemannsolver->Solve(sL_y2, sR_y2, pref, small, Spec_Vol);
+                flux_xlo = compute_face(i - 1, j,     i,     j,     X    );
+                flux_xhi = compute_face(i,     j,     i + 1, j,     X    );
+                flux_ylo = compute_face(i,     j - 1, i,     j,     Y_dir);
+                flux_yhi = compute_face(i,     j,     i,     j + 1, Y_dir);
             }
             catch (...)
             {
@@ -1545,6 +1618,123 @@ Hydro2::RHS(int lev,
 
             E0_rhs(i, j, k) = E0_flux_div - a1_C * p0_C * div_u;
             E1_rhs(i, j, k) = E1_flux_div - a2_C * p1_C * div_u;
+
+            // ------------------------------------------------------------
+            // Artificial heat exchange (AHE) -- Schmidmayer 2020 eq. 13
+            // r-source on per-phase internal energies:
+            //     E0_rhs += -mu p_I (p_0 - p_1)
+            //     E1_rhs += +mu p_I (p_0 - p_1)
+            //
+            // HYBRID (see bin/AHE.md): Sch20 does NOT specify a finite mu
+            // (they take the stiff limit inside operator-split Newton); the
+            // Saurel-Petitpas-Berry 2009 sec. 5.3 curve fit used here for
+            // mu(v) was originally calibrated for the q*@u/@x form, NOT the
+            // antisymmetric Sch20 form.  Magnitudes are a starting point
+            // and must be re-calibrated for the target mixture.
+            //
+            // NOT the most conservative method in this codebase.  Pairwise
+            // conservative across the two energy rows (sources sum to zero),
+            // but per-phase energy is only conserved pairwise; total mixture
+            // energy is maintained via the redundant rho-E reinit step.  If
+            // the reinit step were disabled the per-phase energies would
+            // drift -- the AHE source intentionally trades that property
+            // for non-stiff pressure relaxation dynamics.
+            // ------------------------------------------------------------
+            if (apply_ahe)
+            {
+                // ----------------------------------------------------------
+                // Local quantities shared by both AHE forms.
+                // ----------------------------------------------------------
+                const Set::Scalar rho0_pure = std::max(rho_eta0(i,j,k) / std::max(a1_C, small), small);
+                const Set::Scalar rho1_pure = std::max(rho_eta1(i,j,k) / std::max(a2_C, small), small);
+
+                const Set::Scalar c0_C = Solver::EOS::EOS::PhasicSoundSpeed(
+                    rho0_pure, p0_C, eos0.Gamma(), eos0.P0(), small);
+                const Set::Scalar c1_C = Solver::EOS::EOS::PhasicSoundSpeed(
+                    rho1_pure, p1_C, eos1.Gamma(), eos1.P0(), small);
+
+                // mu (or q*-coefficient in Sau09 form) -- either constant or
+                // Sau09 sec.5.3 curve fit.
+                Set::Scalar mu_ahe;
+                if (ahe_use_const_mu)
+                {
+                    mu_ahe = ahe_mu_const;
+                }
+                else
+                {
+                    const Set::Scalar rho_mix_loc = std::max(rho_eta0(i,j,k) + rho_eta1(i,j,k), small);
+                    const Set::Scalar v_mix       = 1.0 / rho_mix_loc;
+                    mu_ahe = ahe_mu_scale * Solver::EOS::EOS::AHE_mu_Saurel(
+                        v_mix, ahe_mu_a, ahe_mu_b, ahe_mu_c, ahe_v_min, ahe_v_max);
+                }
+
+                // Acoustic-CFL based source cap (used by both forms).
+                const Set::Scalar E0_loc = std::max(E0_arr(i, j, k), small);
+                const Set::Scalar E1_loc = std::max(E1_arr(i, j, k), small);
+                const Set::Scalar E_min  = std::min(E0_loc, E1_loc);
+                const Set::Scalar rho_loc_lim = std::max(rho_eta0(i,j,k) + rho_eta1(i,j,k), small);
+                const Set::Scalar u_mag_lim = std::sqrt(  M(i, j, k, 0) * M(i, j, k, 0)
+                                                       +  M(i, j, k, 1) * M(i, j, k, 1)) / rho_loc_lim;
+                const Set::Scalar c_local = std::max(c0_C, c1_C);
+                const Set::Scalar dx_min  = std::min(DX[0], DX[1]);
+                const Set::Scalar src_cap = ahe_max_frac * E_min * (u_mag_lim + c_local) / std::max(dx_min, small);
+
+                if (ahe_form == 0)
+                {
+                    // ======================================================
+                    // Sch20 r-source form (antisymmetric +/- mu p_I Dp).
+                    // ======================================================
+                    const Set::Scalar Z0_C = rho0_pure * c0_C;
+                    const Set::Scalar Z1_C = rho1_pure * c1_C;
+                    const Set::Scalar p_I  = Solver::EOS::EOS::InterfacialPressureZ(
+                        p0_C, p1_C, Z0_C, Z1_C, small);
+                    const Set::Scalar delta_p = p0_C - p1_C;
+
+                    const bool gate_on = (!ahe_compression_only) || (div_u < 0.0);
+                    Set::Scalar ahe_src = gate_on ? (mu_ahe * p_I * delta_p) : 0.0;
+                    ahe_src = std::max(std::min(ahe_src, src_cap), -src_cap);
+
+                    E0_rhs(i, j, k) += -ahe_src;
+                    E1_rhs(i, j, k) += +ahe_src;
+
+                    if (ahe_apply_alpha_src && gate_on)
+                    {
+                        Set::Scalar eta_src = mu_ahe * delta_p;
+                        const Set::Scalar eta_src_cap = ahe_max_frac * (u_mag_lim + c_local) / std::max(dx_min, small);
+                        eta_src = std::max(std::min(eta_src, eta_src_cap), -eta_src_cap);
+                        eta_rhs(i, j, k) += eta_src;
+                    }
+                }
+                else
+                {
+                    // ======================================================
+                    // Sau09 sec.5.3 q*@u/@x form (default).
+                    //
+                    // Sau09 eq. (above 5.3):
+                    //   d(a_k rho_k e_k)/dt + d(a_k rho_k e_k u)/dx
+                    //                       + (a_k p_k + q*) du/dx = 0,
+                    //   q* = g(du/dx) * mu(v),
+                    //   g  = 1 if du/dx < 0 else 0       (compression only).
+                    //
+                    // Both phases get the SAME -q* div(u) on the RHS (NOT
+                    // antisymmetric).  q* acts as an extra effective pressure
+                    // active only in the shock layer.  The Newton inside
+                    // RelaxAndReinit sees Sau09-modified per-phase energies
+                    // and produces a consistent shocked state -- this is
+                    // the form used to obtain Sau09 Fig. 22 convergence.
+                    //
+                    // No alpha source in this form.
+                    // ======================================================
+                    const Set::Scalar g_ind = (div_u < 0.0) ? 1.0 : 0.0;
+                    const Set::Scalar q_star = g_ind * mu_ahe;
+
+                    Set::Scalar q_src = q_star * div_u;   // = -q*|div_u| <= 0 in compression
+                    q_src = std::max(std::min(q_src, src_cap), -src_cap);
+
+                    E0_rhs(i, j, k) += -q_src;
+                    E1_rhs(i, j, k) += -q_src;
+                }
+            }
 
            // ------------------------------------------------------------
            // Error Checking
@@ -1668,12 +1858,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
         // ===========================================================
         // 6-eq STIFF PRESSURE RELAXATION + REINITIALIZATION.
-        // (Saurel 2009 §3.5 / Schmidmayer 2020 §3.3.)
-        // Per RK stage:  hyperbolic step -> relax -> reinit -> next stage.
-        // Schmidmayer line 466-470: "performed at each stage. Thus there is
-        // only one pressure at the end of each stage."
+        // MOVED to top of RHS().  AMReX_RKIntegrator.H:217 only invokes
+        // post_stage_action when stage index i > 0, so this lambda is
+        // never called for forward-Euler and never after the final stage
+        // of any RK scheme -- i.e., this whole block was dead code.
+        // The probe message below confirmed it was never firing.
         // ===========================================================
-        RelaxAndReinit(lev);
+        // Util::Message(INFO, "RelaxAndReinit -- vvvvv");  // dead probe
+        // RelaxAndReinit(lev);                              // -> moved into RHS()
 
         // Fill all ghost cells (uses 6-eq primitive recovery internally)
         FillGhost4BC(lev, time);
@@ -3011,6 +3203,23 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         });
     }
 
+    // ============================================================
+    // 6-eq STIFF PRESSURE RELAXATION + REINIT (Sch20 §3.3 / Sau09 §3.5)
+    // Placed here per the user's 5-eq workflow: primitives are computed
+    // first (STEP 4 above), then the Newton enforces p_0 = p_1 on the
+    // canonical primaries (eta, E_0, E_1) before any source/flux work.
+    //
+    // CAVEAT: subsequent STEPs 5-9 below (NSCBC ghost fill, ghost-cell
+    // primitive recovery, NaN repair, positivity) read pressure_mf /
+    // pressure0_mf / pressure1_mf, which are now one-relax-step stale
+    // relative to the post-relax conservatives.  Downstream RHS source
+    // and flux loops re-derive p_k locally from E_k per cell so they
+    // see the fresh state -- but if a future change makes a downstream
+    // consumer rely on pressure_mf, refresh primitives after the relax.
+    // ============================================================
+    Util::Message(INFO, "FillGhost4BC pre-relax: relax_diag=", relax_diag, " lev=", lev);
+    RelaxAndReinit(lev);
+
     // ------------------------------------------------------------
     // STEP 5: Fill CONSERVATIVE ghost cells (rho, M, E)
     // ------------------------------------------------------------
@@ -3744,14 +3953,37 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
 void Hydro2::RelaxAndReinit(int lev)
 {
     BL_PROFILE("Integrator::Hydro2::RelaxAndReinit");
+    Util::Message(INFO, "RelaxAndReinit");
+
 
     const Set::Scalar alpha_floor = 1.0e-6;
     const Set::Scalar small_loc   = small;
+    const int         max_iter    = 30;
+    const Set::Scalar newton_tol  = 1.0e-10;
 
     const Set::Scalar gam0 = eos0.Gamma();
     const Set::Scalar pi0_ = eos0.P0();
     const Set::Scalar gam1 = eos1.Gamma();
     const Set::Scalar pi1_ = eos1.P0();
+
+    // Optional Newton diagnostic.  Per cell write {iter_count, |f(p_final)|};
+    // after the ParallelFor reduce to {max iters, max residual, unconverged
+    // cell count} and print a one-line summary.
+    const bool diag_on = true; //(relax_diag != 0.0);
+    std::unique_ptr<amrex::MultiFab> diag_mf;
+    if (diag_on)
+    {
+        // 3 components: [0]=Newton iter count, [1]=|f(p_relaxed)|,
+        //               [2]=|p_relaxed - p_reinit|
+        // Component 2 detects whether the eq.26 reinit step is amplifying
+        // cell-local noise.  If max(|p_relaxed - p_reinit|) is large or
+        // correlates with checker artifacts, the reinit step is the noise
+        // source (Newton's volume-constraint p disagrees with the energy-
+        // consistent p from rho E and the new alpha).
+        diag_mf = std::make_unique<amrex::MultiFab>(
+            eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 3, 0);
+        diag_mf->setVal(0.0);
+    }
 
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
@@ -3764,6 +3996,11 @@ void Hydro2::RelaxAndReinit(int lev)
         auto E_    = energy_per_vol_mf[lev]->array(mfi);
         auto E0_   = energy0_mf[lev]->array(mfi);
         auto E1_   = energy1_mf[lev]->array(mfi);
+
+        // Diagnostic array (only used if diag_on).
+        amrex::Array4<Set::Scalar> diag_arr = diag_on
+            ? (*diag_mf)[mfi].array()
+            : amrex::Array4<Set::Scalar>{};
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             // -----------------------------------------------------------
@@ -3804,28 +4041,41 @@ void Hydro2::RelaxAndReinit(int lev)
             const Set::Scalar p_min = -std::min(pi0_, pi1_) + small_loc;
             Set::Scalar p = std::max(pHat0, p_min);
 
-            const int    max_iter = 30;
-            const Set::Scalar tol = 1.0e-10;
+            int iters_used = max_iter;
+            Set::Scalar f_final = 0.0;
             for (int it = 0; it < max_iter; ++it)
             {
                 Set::Scalar v0_p = Solver::EOS::EOS::RelaxationVolume_SG_SC(p, p0_pre, rho0_pre, gam0, pi0_, small_loc);
                 Set::Scalar v1_p = Solver::EOS::EOS::RelaxationVolume_SG_SC(p, p1_pre, rho1_pre, gam1, pi1_, small_loc);
                 Set::Scalar f    = arh0_loc * v0_p + arh1_loc * v1_p - 1.0;
+                f_final = f;
 
                 Set::Scalar dv0 = Solver::EOS::EOS::RelaxationVolume_SG_SC_dvdp(p, p0_pre, rho0_pre, gam0, pi0_, small_loc);
                 Set::Scalar dv1 = Solver::EOS::EOS::RelaxationVolume_SG_SC_dvdp(p, p1_pre, rho1_pre, gam1, pi1_, small_loc);
                 Set::Scalar df  = arh0_loc * dv0 + arh1_loc * dv1;
 
-                if (std::abs(df) < small_loc) break;
+                if (std::abs(df) < small_loc) { iters_used = it + 1; break; }
                 Set::Scalar dp = -f / df;
                 Set::Scalar p_new = p + dp;
                 // Keep (p + pi_k) > 0 for both phases (denominator of eq. 25).
                 if (p_new < p_min) p_new = 0.5 * (p + p_min);
-                if (std::abs(dp) < tol * std::max(std::abs(p_new), 1.0)) { p = p_new; break; }
+                if (std::abs(dp) < newton_tol * std::max(std::abs(p_new), 1.0))
+                {
+                    p = p_new;
+                    iters_used = it + 1;
+                    break;
+                }
                 p = p_new;
             }
 
             Set::Scalar p_relaxed = p;
+
+            // Write diagnostic: (iter count, |f| at final p).
+            if (diag_on)
+            {
+                diag_arr(i, j, k, 0) = static_cast<Set::Scalar>(iters_used);
+                diag_arr(i, j, k, 1) = std::abs(f_final);
+            }
 
             // Post-relax volume fractions (using self-consistent v_k(p)).
             Set::Scalar v0_r = Solver::EOS::EOS::RelaxationVolume_SG_SC(p_relaxed, p0_pre, rho0_pre, gam0, pi0_, small_loc);
@@ -3854,6 +4104,15 @@ void Hydro2::RelaxAndReinit(int lev)
             const Set::Scalar p_min_ph = -std::min(pi0_, pi1_) + small_loc;
             p_reinit = std::max(p_reinit, p_min_ph);
 
+            // Diagnostic: gap between Newton's converged p and reinit p.
+            // Nonzero gap means the volume-constraint root and the energy-
+            // consistent root disagree -- per-cell noise from the upwind
+            // flux feeding into a cell-local Newton, or vice versa.
+            if (diag_on)
+            {
+                diag_arr(i, j, k, 2) = std::abs(p_relaxed - p_reinit);
+            }
+
             // -----------------------------------------------------------
             // Reset per-phase canonical energies from p_reinit.
             // (Sau09 eq. III.5: e_k = (p + gam pi)/((gam-1) rho_k), so
@@ -3866,6 +4125,51 @@ void Hydro2::RelaxAndReinit(int lev)
             // rho_eta{0,1}, momentum, energy_per_vol are NOT touched
             // (they are conserved through relaxation by construction).
         });
+    }
+
+    // ----------------------------------------------------------------
+    // Diagnostic summary.
+    // ----------------------------------------------------------------
+    if (diag_on)
+    {
+        const Set::Scalar max_iters = diag_mf->max(0);   // already MPI-reduced
+        const Set::Scalar max_res   = diag_mf->max(1);
+        const Set::Scalar max_pgap  = diag_mf->max(2);   // |p_relaxed - p_reinit|
+
+        // Count cells that hit max_iter without converging.
+        int unconv = 0;
+        for (amrex::MFIter mfi(*diag_mf, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            const auto arr = (*diag_mf)[mfi].array();
+            const auto lo = amrex::lbound(bx);
+            const auto hi = amrex::ubound(bx);
+            for (int k = lo.z; k <= hi.z; ++k)
+                for (int j = lo.y; j <= hi.y; ++j)
+                    for (int i = lo.x; i <= hi.x; ++i)
+                    {
+                        if (static_cast<int>(arr(i, j, k, 0)) >= max_iter
+                            && arr(i, j, k, 1) > newton_tol)
+                            ++unconv;
+                    }
+        }
+        amrex::ParallelDescriptor::ReduceIntSum(unconv);
+
+        Util::Message(INFO, "RelaxAndReinit lev=", lev,
+                      " step=", step_counter[lev],
+                      " max_iters=", static_cast<int>(max_iters),
+                      "/", max_iter,
+                      " max_residual=", max_res,
+                      " max|p_relaxed-p_reinit|=", max_pgap,
+                      " unconverged_cells=", unconv);
+
+        if (unconv > 0)
+        {
+            Util::Message(INFO,
+                "  ** WARNING: ", unconv,
+                " cell(s) hit max_iter without satisfying |f(p)| < ",
+                newton_tol, ".  Newton is failing to relax pressure in those cells.");
+        }
     }
 } // end RelaxAndReinit()
 

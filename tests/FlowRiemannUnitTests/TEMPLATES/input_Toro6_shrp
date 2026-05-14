@@ -6,6 +6,7 @@
 ### OUTPUT ###
 plot_file = OUTPUT_PATH
 Riemann_Solver.type = SOLVER_NAME
+Limiter.type = LIMITER_NAME
 
 eta.ic.type = constant
 eta.ic.expression.constant.epsilon  = 111111.0005
@@ -14,7 +15,7 @@ epsilon = eta.ic.expression.constant.epsilon
 
 ### MESHING ###
 #amr.plot_dt = 0.1
-amr.plot_int = 500
+amr.plot_int = 99999999
 amr.max_level = 0
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
@@ -34,7 +35,7 @@ geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
 
-timestep  = 1.0e-3
+timestep  = 4.0e-4
 stop_time = 2.0
 
 ### ETA IC ###

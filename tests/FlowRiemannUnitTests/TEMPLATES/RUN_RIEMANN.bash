@@ -6,7 +6,7 @@ set -e  # Exit on any error
 # INPUTS
 # -----------------------------
 
-# Solvers
+# Riemann Solvers
 SOLVER_LABELS=(
   Roe
   HLLE
@@ -14,6 +14,17 @@ SOLVER_LABELS=(
   HLLC_Oomar_Jaiman
   HLLC_All_Mach
   HLLC_All_Mach_Furfaro
+)
+
+# Limiters / spatial reconstruction
+# (godunov = 1st-order baseline; minmod/vanleer = MUSCL2;
+#  weno3/weno5 = high-order non-oscillatory)
+LIMITER_LABELS=(
+  Godunov
+  Minmod
+  VanLeer
+  WENO3
+  WENO5
 )
 
 # Test cases
@@ -46,8 +57,6 @@ TEMPLATE_DIR=../tests/FlowRiemannUnitTests/TEMPLATES  # folder containing test-s
 for test in "${TESTS[@]}"; do
 
   # Determine base test name (if needed for template, e.g., Toro1a -> Toro1)
-  # If each test has its own template, skip this line
-  # base_test=$(echo "$test" | sed 's/[a-z]$//')
   base_test=$test
 
   TEMPLATE_SHARP="${TEMPLATE_DIR}/input_${base_test}_shrp"
@@ -67,37 +76,45 @@ for test in "${TESTS[@]}"; do
     # Convert to lowercase to call riemann class
     solver=${solver_label,,}
 
-    # =============================
-    # SHARP CASE
-    # =============================
-    echo "=== Running $test | $solver_label | SHARP ==="
+    for limiter_label in "${LIMITER_LABELS[@]}"; do
+      # Convert to lowercase to call limiter class (matches name= in C++)
+      limiter=${limiter_label,,}
 
-    INPUT_FILE="tmp_${test}_${solver}_sharp.in"
-    OUTPUT_PATH="${OUTDIR}/${test}/output_${test}_${solver_label}_Sharp_Interface"
+      # =============================
+      # SHARP CASE
+      # =============================
+      echo "=== Running $test | $solver_label | $limiter_label | SHARP ==="
 
-    sed -e "s|SOLVER_NAME|$solver|g" \
-        -e "s|OUTPUT_PATH|$OUTPUT_PATH|g" \
-        "$TEMPLATE_SHARP" > "$INPUT_FILE"
-
-    mpirun -np $NP $EXEC "$INPUT_FILE" || true # Run shrp case
-    rm "$INPUT_FILE" # Remove file to clean work space
-
-    # =============================
-    # DIFFUSE CASES
-    # =============================
-    for eps in "${EPSILONS[@]}"; do
-      echo "=== Running $test | $solver_label | DIFFUSE | eps=$eps ==="
-
-      INPUT_FILE="tmp_${test}_${solver}_diff_eps${eps}.in"
-      OUTPUT_PATH="${OUTDIR}/${test}/output_${test}_${solver_label}_epsilon_${eps}"
+      INPUT_FILE="tmp_${test}_${solver}_${limiter}_sharp.in"
+      OUTPUT_PATH="${OUTDIR}/${test}/output_${test}_${solver_label}_${limiter_label}_Sharp_Interface"
 
       sed -e "s|SOLVER_NAME|$solver|g" \
+          -e "s|LIMITER_NAME|$limiter|g" \
           -e "s|OUTPUT_PATH|$OUTPUT_PATH|g" \
-          -e "s|EPSILON|$eps|g" \
-          "$TEMPLATE_DIFFUSE" > "$INPUT_FILE"
+          "$TEMPLATE_SHARP" > "$INPUT_FILE"
 
-      mpirun -np $NP $EXEC "$INPUT_FILE" || true # Run diff case
+      mpirun -np $NP $EXEC "$INPUT_FILE" || true # Run shrp case
       rm "$INPUT_FILE" # Remove file to clean work space
+
+      # =============================
+      # DIFFUSE CASES
+      # =============================
+      for eps in "${EPSILONS[@]}"; do
+        echo "=== Running $test | $solver_label | $limiter_label | DIFFUSE | eps=$eps ==="
+
+        INPUT_FILE="tmp_${test}_${solver}_${limiter}_diff_eps${eps}.in"
+        OUTPUT_PATH="${OUTDIR}/${test}/output_${test}_${solver_label}_${limiter_label}_epsilon_${eps}"
+
+        sed -e "s|SOLVER_NAME|$solver|g" \
+            -e "s|LIMITER_NAME|$limiter|g" \
+            -e "s|OUTPUT_PATH|$OUTPUT_PATH|g" \
+            -e "s|EPSILON|$eps|g" \
+            "$TEMPLATE_DIFFUSE" > "$INPUT_FILE"
+
+        mpirun -np $NP $EXEC "$INPUT_FILE" || true # Run diff case
+        rm "$INPUT_FILE" # Remove file to clean work space
+
+      done
 
     done
 

@@ -35,8 +35,12 @@
 #include "Solver/EOS/CPG.H"
 
 // Limiters
-// #include "Solver/Local/Limiter/Minmod.H"
-// #include "Solver/Local/Limiter/VanLeer.H"
+#include "Solver/Local/Limiter/Limiter.H"
+#include "Solver/Local/Limiter/Godunov.H"
+#include "Solver/Local/Limiter/Minmod.H"
+#include "Solver/Local/Limiter/VanLeer.H"
+#include "Solver/Local/Limiter/WENO3.H"
+#include "Solver/Local/Limiter/WENO5.H"
 
 
 
@@ -81,10 +85,7 @@ public:
         delete ic_m0;
         delete ic_u0;
         delete ic_q;
-        // Flux Limiters
-        // delete limiter_minmod;
-        // delete limiter_vanleer;
-
+        delete limiter;
         delete riemannsolver;
 
 
@@ -336,16 +337,51 @@ protected:
     int apply_vaporization = 0;
     int Spec_Vol = 1;
 
+    // ------------------------------------------------------------------
+    // Artificial heat exchange (AHE) - Schmidmayer 2020 eq. 13 r-source
+    //     E0_rhs += -mu p_I (p_0 - p_1)
+    //     E1_rhs += +mu p_I (p_0 - p_1)
+    // with mu from the Saurel-Petitpas-Berry 2009 sec. 5.3 Fig. 21 curve
+    // fit mu(v) = exp(a v^2 + b v + c).  HYBRID: Sch20 does NOT specify
+    // a finite mu (they take the stiff limit) and the Sau09 curve fit
+    // was originally calibrated for the q*@u/@x form, not the Sch20
+    // antisymmetric form.  See bin/AHE.md for the rationale.
+    //
+    // Pairwise conservative (sources sum to zero), but per-phase energy
+    // is only conserved pairwise - total mixture energy is maintained
+    // via the redundant rho-E reinit.  NOT the most conservative method
+    // in this codebase; see the comment block in Hydro2::RHS.
+    // ------------------------------------------------------------------
+    // ahe.method (preferred top-level switch; overrides apply_ahe/ahe.form):
+    //   0 = Sch20 stiff-limit only        (no explicit AHE source; RelaxAndReinit Newton)
+    //   1 = Sch20 finite-mu r-source      (+/- mu p_I Dp; antisymmetric)
+    //   2 = Sau09 sec.5.3 q*@u/@x form    (q* = mu(v), gated on div(u)<0)
+    int         ahe_method           = 0;
+    int         apply_ahe            = 0;
+    int         ahe_use_const_mu     = 0;         // 1 = use ahe_mu_const, skip curve fit
+    Set::Scalar ahe_mu_const         = 0.0;       // constant mu when ahe_use_const_mu=1
+    Set::Scalar ahe_mu_scale         = 1.0;       // multiplicative scale on curve fit
+    Set::Scalar ahe_mu_a             = -5.64e7;   // Sau09 Fig. 21 epoxy-spinel (dim'l)
+    Set::Scalar ahe_mu_b             =  5.34e3;
+    Set::Scalar ahe_mu_c             = -25.6;
+    Set::Scalar ahe_v_min            =  2.65e-4;  // [m^3/kg] valid range lower
+    Set::Scalar ahe_v_max            =  4.61e-4;  // [m^3/kg] valid range upper
+    int         ahe_compression_only = 0;         // 1 = gate on div(u)<0 (Sch20 form only; Sau09 form is gated by design)
+    int         ahe_apply_alpha_src  = 1;         // 1 = also apply +mu Dp to eta_rhs (Sch20 row 1)
+    Set::Scalar ahe_max_frac         = 0.1;       // |dE_AHE| < max_frac * E_min * (|u|+c)/dx
+    int         ahe_form             = 1;         // 0 = Sch20 r-source (+/- mu p_I Dp);
+                                                  // 1 = Sau09 sec.5.3 q*@u/@x form (default).
+
     int kappa_method = 2;
 
     // Adaptive Timestep
     bool adaptive_timestep = false;
     Set::Scalar dt_min = NAN, dt_max = NAN, dt_growth = NAN;
 
-    // Limiters
-    int Limiter = 0;
-    //Solver::Local::Limiter::Minmod *limiter_minmod = nullptr;
-    //Solver::Local::Limiter::VanLeer *limiter_vanleer = nullptr;
+    // Limiters / reconstruction (Sch20 §3.2 primitive-variable
+    // reconstruction).  Selected by name in input via:
+    //     Limiter.type = godunov | minmod | vanleer | weno3 | weno5
+    Solver::Local::Limiter::Limiter *limiter = nullptr;
 
     // Solvers
     Solver::Local::FluidRiemann::FluidRiemann *riemannsolver = nullptr;
@@ -376,6 +412,12 @@ protected:
 
     // NGHOST
     int nghost = 2;
+
+    // Newton diagnostic for RelaxAndReinit.
+    //   relax_diag = 0  : off (default; no diagnostic overhead)
+    //   relax_diag = 1  : every stage print {max_iters, max_residual}
+    //                     plus AUTO-warn if any cell hits max_iter without converging.
+    int relax_diag = 0;
 
 };
 }

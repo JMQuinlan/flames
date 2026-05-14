@@ -563,6 +563,34 @@ public:
         return -v_k0 * (p_k0 + pi_k) / (gam * denom * denom);
     }
 
+    /// Saurel-Petitpas-Berry 2009 §5.3 Fig. 21 heat-exchange curve fit:
+    ///     mu(v) = exp(a v^2 + b v + c)
+    /// Fig. 21 caption gives, for epoxy-spinel,
+    ///     a = -5.64e7, b = 5.34e3, c = -25.6
+    /// in the specific-volume window v in [2.65e-4, 4.61e-4] m^3/kg.
+    /// Originally calibrated for the Sau09 q*@u/@x form of the AHE source.
+    /// In flames2 we repurpose it inside the Schmidmayer-Bryngelson-Colonius
+    /// 2020 eq. 13 r-source (-/+ mu p_I Dp on per-phase internal energies);
+    /// the magnitudes are not transferable without re-calibration but it is
+    /// a defensible starting point.  Sch20 itself does NOT specify a finite
+    /// mu - they take the stiff limit mu -> infinity inside the
+    /// operator-split Newton on eq. 24.
+    ///
+    /// v is clamped to [v_min, v_max] before evaluation: outside that window
+    /// the quadratic explodes (Fig. 21 only certifies the fit inside the
+    /// epoxy-spinel piston-velocity sweep that produced it).
+    AMREX_GPU_HOST_DEVICE
+    static Set::Scalar AHE_mu_Saurel(Set::Scalar v,
+                                     Set::Scalar a,
+                                     Set::Scalar b,
+                                     Set::Scalar c,
+                                     Set::Scalar v_min,
+                                     Set::Scalar v_max)
+    {
+        Set::Scalar v_clamped = std::min(std::max(v, v_min), v_max);
+        return std::exp(a * v_clamped * v_clamped + b * v_clamped + c);
+    }
+
     /// Reinitialization mixture pressure from the redundant total energy.
     /// Schmidmayer 2020 eq. (26) / Saurel 2009 eq. (III.5):
     ///     p = ( rho e  - sum_k alpha_k gam_k pi_k / (gam_k - 1) )

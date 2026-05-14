@@ -41,6 +41,7 @@ q.ic.constant.value = 0.0
 
 ### HYDRO PARAM ###
 cfl   = 0.4
+relax_diag = 1
 
 ## EOS ##
 eos0.gamma = 5.5

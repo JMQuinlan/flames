@@ -5,12 +5,13 @@
 ### OUTPUT ###
 plot_file = OUTPUT_PATH
 Riemann_Solver.type = SOLVER_NAME
+Limiter.type = LIMITER_NAME
 
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = EPSILON
 eta.ic.expression.region0 = "1.0 - (0.5 * (1.0 + tanh(x / epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
-amr.plot_int = 100
+amr.plot_int = 99999999
 
 ### MESHING ###
 amr.max_level = 0
@@ -25,7 +26,9 @@ geometry.prob_hi =  1.0   0.02   0.0 # [ m ]
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
-timestep  = 4.0e-3
+# Reduced from 4e-3 to 4e-4 -- with dx=2.5e-3 and a~1, CFL was 1.6 (>>1)
+# and the simulation was unstable / no diffuse data was being written.
+timestep  = 4.0e-4
 stop_time = 2.0
 
 m0.ic.constant.value = 0.0

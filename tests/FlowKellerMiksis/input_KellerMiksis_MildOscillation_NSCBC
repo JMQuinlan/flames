@@ -73,7 +73,7 @@ stop_time            = 12.0e-3     # 5 ms -- captures 2-3 oscillation cycles
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.0008
+eta.ic.expression.constant.epsilon = 0.0024 # 0.0008
 eta.ic.expression.constant.R0      = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
@@ -198,3 +198,7 @@ sharpening_frequency = 50
 reinit_max_iter      = 100
 reinit_tolerance     = 1e-6
 omega_relax          = 0.5
+
+apply_ahe   = 1
+ahe.method  = 0
+relax_diag = 1
