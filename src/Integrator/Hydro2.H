@@ -332,12 +332,12 @@ protected:
     Set::Field<Set::Scalar> q_eff_mf;
 
     // SQR source diagnostic plot fields (populated inside ApplySQRSource).
-    //   bs_dp_mf      [Pa,2c]      : per-phase pressure imbalance dp_k = ±(p_k - p_int)
-    //   bs_mom_src_mf [N/m^3,4c]   : per-phase momentum source dp_k * grad(eta)
-    //   bs_eng_src_mf [W/m^3,2c]   : per-phase energy source (p_k u_k - p* u*) * grad(eta)
-    Set::Field<Set::Scalar> bs_dp_mf;
-    Set::Field<Set::Scalar> bs_mom_src_mf;
-    Set::Field<Set::Scalar> bs_eng_src_mf;
+    //   sqr_dp_mf      [Pa,2c]      : per-phase pressure imbalance dp_k = ±(p_k - p_int)
+    //   sqr_mom_src_mf [N/m^3,4c]   : per-phase momentum source dp_k * grad(eta)
+    //   sqr_eng_src_mf [W/m^3,2c]   : per-phase energy source (p_k u_k - p* u*) * grad(eta)
+    Set::Field<Set::Scalar> sqr_dp_mf;
+    Set::Field<Set::Scalar> sqr_mom_src_mf;
+    Set::Field<Set::Scalar> sqr_eng_src_mf;
 
 protected:
     Set::Field<Set::Scalar> eta_mf;
@@ -486,8 +486,8 @@ protected:
     int p_int_method = 0;
 
     // === Closure-strategy framework (Phase B onwards) ===
-    // For each per-phase nonequilibrium quantity (u_n, E in Phase B; rho added
-    // in Phase C, u_t in Phase D) the interface flux J_Q is computed by one of
+    // For each per-phase nonequilibrium quantity (rho, u_n, u_t, E — rho/u_t
+    // added in Phase C/D) the interface flux J_Q is computed by one of
     // these strategies. The chosen closure must vanish at full equilibrium
     // (matching intensives across the interface), otherwise the per-phase
     // momentum/energy ground state is corrupted under the two-full-states LHS
@@ -551,8 +551,8 @@ protected:
     };
     ClosureSpec un_close;   // normal-velocity closure (Phase B)
     ClosureSpec E_close;    // energy/temperature closure (Phase B; Fourier flux added in Phase E)
-    // ClosureSpec rho_close;  // density / phase change closure (added in Phase C)
-    // ClosureSpec ut_close;   // tangential-velocity closure (added in Phase D)
+    ClosureSpec rho_close;  // density / phase-change closure: Constitutive = mdot0 from existing m0_mf (CH-emergent / prescribed); Jump/Relax = dmu_bulk-driven mass flux.
+    ClosureSpec ut_close;   // tangential-velocity closure: Constitutive = angular-momentum no-slip (S1, currently a no-op stub — A10 not yet implemented); Jump/Relax = ⟦u_t⟧-driven flux.
 
     // If true, ApplySQRSource uses the legacy p_int_method-averaged momentum
     // and energy sources instead of the new theory-faithful S1/S2/S3 closure

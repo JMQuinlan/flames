@@ -178,13 +178,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //   "ch_emergent"  : m0/u0/q overwritten each step from ComputeEffectiveSQRSources
         // Back-compat: if the legacy key apply_sqr_source is set, it is mapped onto
         // Off (=0) / Prescribed (=non-zero) and overrides any sqr_source_mode.
-        std::string bs_mode_str = "prescribed";
-        pp_query_default("sqr_source_mode", bs_mode_str, std::string("prescribed"));
-        if      (bs_mode_str == "off")         value.sqr_source_mode = Hydro2::SQRMode::Off;
-        else if (bs_mode_str == "prescribed")  value.sqr_source_mode = Hydro2::SQRMode::Prescribed;
-        else if (bs_mode_str == "ch_emergent") value.sqr_source_mode = Hydro2::SQRMode::CH_Emergent;
+        std::string sqr_mode_str = "prescribed";
+        pp_query_default("sqr_source_mode", sqr_mode_str, std::string("prescribed"));
+        if      (sqr_mode_str == "off")         value.sqr_source_mode = Hydro2::SQRMode::Off;
+        else if (sqr_mode_str == "prescribed")  value.sqr_source_mode = Hydro2::SQRMode::Prescribed;
+        else if (sqr_mode_str == "ch_emergent") value.sqr_source_mode = Hydro2::SQRMode::CH_Emergent;
         else
-            Util::Abort(INFO, "Unknown sqr_source_mode: ", bs_mode_str,
+            Util::Abort(INFO, "Unknown sqr_source_mode: ", sqr_mode_str,
                         "  (expected: off | prescribed | ch_emergent)");
         {
             int legacy = -1;
@@ -198,7 +198,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             }
         }
         pp_query_default("sqr_sources_time_dependent", value.sqr_sources_time_dependent, 0); // re-evaluate ic_m0/ic_u0/ic_q each Advance step at the current time (Stefan and similar)
-        pp_query_default("p_int_method", value.p_int_method, 0);                        // BS interface-pressure closure: 0 OFF, 1 arithmetic mean, 2 eta-weighted, 3 acoustic-impedance, 4 mass-fraction weighted (legacy; only consulted when sqr_legacy_p_int_method=true)
+        pp_query_default("p_int_method", value.p_int_method, 0);                        // SQR interface-pressure closure: 0 OFF, 1 arithmetic mean, 2 eta-weighted, 3 acoustic-impedance, 4 mass-fraction weighted (legacy; only consulted when sqr_legacy_p_int_method=true)
         pp_query_default("sqr_legacy_p_int_method", value.sqr_legacy_p_int_method, false); // if true, ApplySQRSource uses legacy p_int_method-averaged closure (Phase B kill-switch)
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
@@ -270,6 +270,42 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             if (value.E_close.strategy == Hydro2::ClosureStrategy::Constitutive
                 && (value.E_close.pint_method < 1 || value.E_close.pint_method > 4))
                 Util::Abort(INFO, "closure.E_pint_method must be 1 (arithmetic), 2 (eta-weighted), 3 (acoustic-impedance), or 4 (mass-fraction) when E_strategy=constitutive (got ", value.E_close.pint_method, ")");
+        }
+        {
+            std::string s_rho = "constitutive";
+            pp.query("closure.rho_strategy", s_rho);
+            if      (s_rho == "constitutive")  value.rho_close.strategy = Hydro2::ClosureStrategy::Constitutive;
+            else if (s_rho == "jump")          value.rho_close.strategy = Hydro2::ClosureStrategy::Jump;
+            else if (s_rho == "relax")         value.rho_close.strategy = Hydro2::ClosureStrategy::Relax;
+            else Util::Abort(INFO, "closure.rho_strategy must be one of: constitutive, jump, relax (got '", s_rho, "')");
+
+            Set::Scalar tmp_l = -1.0, tmp_t = -1.0;
+            pp.query("closure.rho_lambda", tmp_l);
+            pp.query("closure.rho_tau",    tmp_t);
+            if (value.rho_close.strategy == Hydro2::ClosureStrategy::Jump  && !(tmp_l > 0.0))
+                Util::Abort(INFO, "closure.rho_strategy=jump requires closure.rho_lambda > 0");
+            if (value.rho_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_t > 0.0))
+                Util::Abort(INFO, "closure.rho_strategy=relax requires closure.rho_tau > 0");
+            if (tmp_l > 0.0) value.rho_close.lambda = tmp_l;
+            if (tmp_t > 0.0) value.rho_close.tau    = tmp_t;
+        }
+        {
+            std::string s_ut = "constitutive";
+            pp.query("closure.ut_strategy", s_ut);
+            if      (s_ut == "constitutive")  value.ut_close.strategy = Hydro2::ClosureStrategy::Constitutive;
+            else if (s_ut == "jump")          value.ut_close.strategy = Hydro2::ClosureStrategy::Jump;
+            else if (s_ut == "relax")         value.ut_close.strategy = Hydro2::ClosureStrategy::Relax;
+            else Util::Abort(INFO, "closure.ut_strategy must be one of: constitutive, jump, relax (got '", s_ut, "')");
+
+            Set::Scalar tmp_l = -1.0, tmp_t = -1.0;
+            pp.query("closure.ut_lambda", tmp_l);
+            pp.query("closure.ut_tau",    tmp_t);
+            if (value.ut_close.strategy == Hydro2::ClosureStrategy::Jump  && !(tmp_l > 0.0))
+                Util::Abort(INFO, "closure.ut_strategy=jump requires closure.ut_lambda > 0");
+            if (value.ut_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_t > 0.0))
+                Util::Abort(INFO, "closure.ut_strategy=relax requires closure.ut_tau > 0");
+            if (tmp_l > 0.0) value.ut_close.lambda = tmp_l;
+            if (tmp_t > 0.0) value.ut_close.tau    = tmp_t;
         }
 
         // PHASE 1 (liquid — stiffened gas)
@@ -461,9 +497,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.q_eff_mf,        &value.bc_nothing, 2, nghost, "q_eff",  true, false, { "x", "y" });
 
         // SQR source diagnostic plot fields (populated inside ApplySQRSource).
-        value.RegisterNewFab(value.bs_dp_mf,        &value.bc_nothing, 2, nghost, "bs_dp",      true, false, { "0", "1" });
-        value.RegisterNewFab(value.bs_mom_src_mf,   &value.bc_nothing, 4, nghost, "bs_mom_src", true, false, { "0_x", "0_y", "1_x", "1_y" });
-        value.RegisterNewFab(value.bs_eng_src_mf,   &value.bc_nothing, 2, nghost, "bs_eng_src", true, false, { "0", "1" });
+        value.RegisterNewFab(value.sqr_dp_mf,        &value.bc_nothing, 2, nghost, "sqr_dp",      true, false, { "0", "1" });
+        value.RegisterNewFab(value.sqr_mom_src_mf,   &value.bc_nothing, 4, nghost, "sqr_mom_src", true, false, { "0_x", "0_y", "1_x", "1_y" });
+        value.RegisterNewFab(value.sqr_eng_src_mf,   &value.bc_nothing, 2, nghost, "sqr_eng_src", true, false, { "0", "1" });
 
         value.RegisterNewFab(value.Source_mf,       &value.bc_nothing,  4, nghost, "Source", true, false, { "_rho", "_Mx", "_My","_E" });
         value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, nghost, "Fsv", true, false, { "x", "y" });  // Surface Tension
@@ -735,9 +771,9 @@ void Hydro2::Initialize(int lev)
     q_eff_mf[lev]    ->setVal(0.0);
 
     // SQR source diagnostic plot fields
-    bs_dp_mf[lev]      ->setVal(0.0);
-    bs_mom_src_mf[lev] ->setVal(0.0);
-    bs_eng_src_mf[lev] ->setVal(0.0);
+    sqr_dp_mf[lev]      ->setVal(0.0);
+    sqr_mom_src_mf[lev] ->setVal(0.0);
+    sqr_eng_src_mf[lev] ->setVal(0.0);
 
     // MIXED PROPERTIES (setVal also clears ghost cells, preventing NaN from debug-mode allocation)
     mu_chem_mf[lev]     ->setVal(0.0);
@@ -969,7 +1005,7 @@ void Hydro2::Mix(int lev)
 ////////////////////////////////////////// MIX DIAGNOSTIC /////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 // Derive mixture (rho, M, E, p, v, a) from the per-phase conserved state.
-// In the Stage-3 BS formulation the per-phase states (rho_k, M_k, E_k) are
+// In the Stage-3 SQR formulation the per-phase states (rho_k, M_k, E_k) are
 // the primary evolving variables; the mixture is a post-compute diagnostic
 // used only for plotting and integral reporting.
 //
@@ -1220,7 +1256,7 @@ void Hydro2::ComputeChemicalPotential(int lev)
 //     block in Advance ( -kappa*lap_eta + lambda*W'(eta) ; with +dmu_bulk
 //     when ch_thermo_consistent=1 — that branch is wired in ApplyImplicitCH,
 //     so mu_chem_mf already carries the right thing for the CH solver. To
-//     keep "what the CH solver does" and "what the BS bridge sees" in
+//     keep "what the CH solver does" and "what the SQR bridge sees" in
 //     lockstep, we recompute the same combination locally here.)
 //   - M(eta) is the same mobility the CH solver uses: M_nom * mobility_factor,
 //     with the η²(1-η)² interface localizer applied when ch_mobility_degenerate.
@@ -1376,7 +1412,7 @@ void Hydro2::ComputeEffectiveSQRSources(int lev)
 
             // Per-volume mass-exchange rate density [kg/m^3/s]:
             //   div(M rho grad mu) > 0  =>  mass entering phase 1 (the eta=1
-            //   side accumulates eta), so the BS-source convention
+            //   side accumulates eta), so the SQR-source convention
             //   "m0 = mass flux phase 0 -> phase 1" gets a positive m0 from
             //   a positive divergence.
             Real div_J = (Jx_p - Jx_m) * dx_inv + (Jy_p - Jy_m) * dy_inv;
@@ -1441,7 +1477,7 @@ void Hydro2::ComputeEffectiveSQRSources(int lev)
 // Replaces non-finite rho/M/E rather than masking them, since the diagnostic
 // clamp at the end of MixDiagnostic only protected the mixture/diagnostic
 // scalars while leaving the storage fabs unbounded -- which let a single bad
-// cell leak into the next Riemann sweep, the BS-source m0_eff path, and the
+// cell leak into the next Riemann sweep, the SQR-source m0_eff path, and the
 // heat-conduction Laplacian.
 //
 // Floors:
@@ -2233,6 +2269,16 @@ Hydro2::ApplySQRSource(int lev,
     const Real E_lambda_       = E_close.lambda;
     const Real E_tau_          = E_close.tau;
     const int  E_pint_method_  = E_close.pint_method;
+    // Phase-C (density / phase-change) and Phase-D (tangential velocity)
+    // closures. rho_close selects how the interface mass flux mdot0 is
+    // computed; ut_close adds a tangential momentum exchange. Strategy ints
+    // (0=Constitutive, 1=Jump, 2=Relax) as above.
+    const int  rho_strat_      = static_cast<int>(rho_close.strategy);
+    const Real rho_lambda_     = rho_close.lambda;
+    const Real rho_tau_        = rho_close.tau;
+    const int  ut_strat_       = static_cast<int>(ut_close.strategy);
+    const Real ut_lambda_      = ut_close.lambda;
+    const Real ut_tau_         = ut_close.tau;
     const Real cv0_       = cv_0;
     const Real cv1_       = cv_1;
 
@@ -2243,11 +2289,11 @@ Hydro2::ApplySQRSource(int lev,
     // Zero SQR source diagnostic plot MFs for the same reason. They are written
     // inside the band-only ParallelFor below and would otherwise carry stale
     // values in bulk cells.
-    bs_dp_mf[lev]      ->setVal(0.0);
-    bs_mom_src_mf[lev] ->setVal(0.0);
-    bs_eng_src_mf[lev] ->setVal(0.0);
+    sqr_dp_mf[lev]      ->setVal(0.0);
+    sqr_mom_src_mf[lev] ->setVal(0.0);
+    sqr_eng_src_mf[lev] ->setVal(0.0);
 
-     amrex::Print() << "[BS] eta min/max on lev " << lev
+     amrex::Print() << "[SQR] eta min/max on lev " << lev
                  << " = " << eta_mf_in.min(0) << " / " << eta_mf_in.max(0)
                  << "\n";
 
@@ -2267,7 +2313,7 @@ Hydro2::ApplySQRSource(int lev,
       }
       amrex::ParallelDescriptor::ReduceRealMax(gmax);
       amrex::ParallelDescriptor::ReduceIntSum(n_band);
-      amrex::Print() << "[BS] lev=" << lev
+      amrex::Print() << "[SQR] lev=" << lev
                      << "  max|grad_eta|=" << gmax
                      << "  n_band_cells=" << n_band << "\n";
     }
@@ -2287,12 +2333,13 @@ Hydro2::ApplySQRSource(int lev,
         auto m0_arr  = m0_mf[lev]->const_array(mfi);
         auto u0_arr  = u0_mf[lev]->const_array(mfi);
         auto q_arr   = q_mf[lev]->const_array(mfi);
+        auto dmu_arr = dmu_bulk_mf[lev]->const_array(mfi);   // <<mu_chem>> = f_g - f_l, for rho_close S2/S3
 
         auto Fsv_out = Fsv_mf[lev]->array(mfi);
 
-        auto bs_dp_out      = bs_dp_mf[lev]->array(mfi);
-        auto bs_mom_src_out = bs_mom_src_mf[lev]->array(mfi);
-        auto bs_eng_src_out = bs_eng_src_mf[lev]->array(mfi);
+        auto sqr_dp_out      = sqr_dp_mf[lev]->array(mfi);
+        auto sqr_mom_src_out = sqr_mom_src_mf[lev]->array(mfi);
+        auto sqr_eng_src_out = sqr_eng_src_mf[lev]->array(mfi);
 
         auto R0 = rho0_rhs_mf.array(mfi);
         auto P0 = M0_rhs_mf.array(mfi);
@@ -2308,7 +2355,7 @@ Hydro2::ApplySQRSource(int lev,
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX, sten);
             Real grad_eta_mag = grad_eta.lpNorm<2>();
 
-            // Skip work where interface gradient is negligible. Keeps the BS
+            // Skip work where interface gradient is negligible. Keeps the SQR
             // source truly localized to the diffuse region.
             if (grad_eta_mag < Real(1e-30)) return;
 
@@ -2344,8 +2391,40 @@ Hydro2::ApplySQRSource(int lev,
             // at mechanical equilibrium (p_0 = p_1, u_0 = u_1), so a constitutive
             // (p_k - p_int) source vanishes there.
 
-            // Prescribed interface inputs (mass transfer / heat flux problems)
+            // === Mass-exchange closure (rho_close) -> mdot0 ===
+            // The density / phase-change closure selects *how* the interface
+            // mass flux mdot0 is computed; the mass source and the
+            // momentum/energy ride-along machinery downstream are unchanged.
+            //   Constitutive (default): mdot0 from m0_mf — the CH-emergent
+            //              ComputeEffectiveSQRSources value, or prescribed ic_m0.
+            //              Keeps the legacy path bit-for-bit.
+            //   Jump  (S2): mdot0 = lambda_rho * dmu_bulk.
+            //   Relax (S3): mdot0 = (C_rho / tau_rho) * dmu_bulk — Landau-Teller
+            //              relaxation of the chemical-potential jump
+            //              <<mu_chem>> = dmu_bulk = f_g - f_l. Capacity
+            //              C_rho = chi0*chi1/(chi0+chi1) is the harmonic mean of
+            //              the per-phase susceptibilities
+            //              chi_k = d rho_k / d mu_chem = rho_k^2 / p_k, using the
+            //              exact thermodynamic identity d f / d rho |_T = p/rho^2
+            //              (EOS-agnostic; verified against f_CPG and f_Tammann).
+            // Sign: with mdot0 as below and the -Smass/+Smass split, one finds
+            // d(dmu_bulk)/dt = -dmu_bulk*|grad eta|/tau_rho (chi_k > 0), i.e.
+            // strictly dissipative — the fixed point is dmu_bulk = 0 (equal
+            // chemical potential), the correct interface equilibrium.
             Real mdot0 = m0_arr(i,j,k);
+            if (rho_strat_ == 1)        // Jump (S2)
+            {
+                mdot0 = rho_lambda_ * dmu_arr(i,j,k);
+            }
+            else if (rho_strat_ == 2)  // Relax (S3): Landau-Teller on <<mu_chem>>
+            {
+                Real p0_safe = amrex::max(p0_phase, Real(1e-10));
+                Real p1_safe = amrex::max(p1_phase, Real(1e-10));
+                Real chi0    = safe_r0 * safe_r0 / p0_safe;
+                Real chi1    = safe_r1 * safe_r1 / p1_safe;
+                Real C_rho   = (chi0 * chi1) / (chi0 + chi1);
+                mdot0 = C_rho * dmu_arr(i,j,k) / rho_tau_;
+            }
             Real u0x   = u0_arr(i,j,k,0);   // prescribed interface velocity, u0_mf
             Real u0y   = u0_arr(i,j,k,1);
             Real qx    = q_arr(i,j,k,0);
@@ -2372,6 +2451,10 @@ Hydro2::ApplySQRSource(int lev,
             //   false -> per-quantity closure-strategy framework (Phase B+):
             //            * un_close.strategy selects the normal-velocity (momentum) closure.
             //            * E_close .strategy selects the energy/temperature closure.
+            //            * ut_close.strategy selects the tangential-velocity closure
+            //              (additive tangential momentum source; see u_t block below).
+            //            * rho_close.strategy selects the mass-exchange closure
+            //              (sets mdot0 above, before this branch).
             //            * Constitutive (default) — symmetric (p_k - p_int) ∇η /
             //              (p_k u_k - p_int u_int)·∇η flux. Vanishes at intensive
             //              equilibrium, so the per-phase pressure ground state
@@ -2388,8 +2471,8 @@ Hydro2::ApplySQRSource(int lev,
             //              at intensive equilibrium.
             //
             // Mass-transfer ride-along (Smass*u*|∇η|) is appended in both paths,
-            // so prescribed ṁ₀ and the future Phase-C Stefan/CH closures slot in
-            // unchanged.
+            // so prescribed ṁ₀ and the rho_close S2/S3 mass-exchange closures
+            // (which just set mdot0 above) slot in unchanged.
             //
             // Action-reaction (plan B step 5):
             //   * Mass:     R0 + R1 = 0 by construction (-Smass / +Smass).
@@ -2530,10 +2613,53 @@ Hydro2::ApplySQRSource(int lev,
                     dp0 = +J_un;
                     dp1 = -J_un;
                 }
-                P0_src_x = S_un_0_x - Smass_mx;
-                P0_src_y = S_un_0_y - Smass_my;
-                P1_src_x = S_un_1_x + Smass_mx;
-                P1_src_y = S_un_1_y + Smass_my;
+
+                // u_t closure -> tangential momentum SQR source (additive to
+                // the u_n source above; u_n and u_t are independent closures).
+                //   Constitutive (S1) — angular-momentum no-slip — is the
+                //   theory-faithful form but needs the d^2 eta stencil (A10),
+                //   not yet implemented, so ut_strat_ == 0 is a no-op stub.
+                //   Jump (S2) / Relax (S3) drive the tangential jump
+                //   <<u_t>> = u_t,0 - u_t,1 to zero via the symmetric flux
+                //   template, strict action-reaction on the band.
+                Real S_ut_0_x = Real(0.0), S_ut_0_y = Real(0.0);
+                Real S_ut_1_x = Real(0.0), S_ut_1_y = Real(0.0);
+                if (ut_strat_ == 1 || ut_strat_ == 2)
+                {
+                    Real n_x   = grad_eta(0) / grad_eta_mag;
+                    Real n_y   = grad_eta(1) / grad_eta_mag;
+                    Real u0_n  = u0x_ph*n_x + u0y_ph*n_y;
+                    Real u1_n  = u1x_ph*n_x + u1y_ph*n_y;
+                    // tangential component = full velocity minus normal part
+                    Real u0t_x = u0x_ph - u0_n*n_x;
+                    Real u0t_y = u0y_ph - u0_n*n_y;
+                    Real u1t_x = u1x_ph - u1_n*n_x;
+                    Real u1t_y = u1y_ph - u1_n*n_y;
+                    Real dut_x = u0t_x - u1t_x;
+                    Real dut_y = u0t_y - u1t_y;
+                    Real J_ut_x, J_ut_y;
+                    if (ut_strat_ == 1)    // Jump (S2)
+                    {
+                        J_ut_x = -ut_lambda_ * dut_x;
+                        J_ut_y = -ut_lambda_ * dut_y;
+                    }
+                    else                   // Relax (S3): C_ut = harmonic(rho_k)
+                    {
+                        Real rho_eff = (safe_r0 * safe_r1) / (safe_r0 + safe_r1);
+                        J_ut_x = -rho_eff * dut_x / ut_tau_;
+                        J_ut_y = -rho_eff * dut_y / ut_tau_;
+                    }
+                    // phase 0 receives +J_ut |∇η|, phase 1 the negative.
+                    S_ut_0_x = +J_ut_x * grad_eta_mag;
+                    S_ut_0_y = +J_ut_y * grad_eta_mag;
+                    S_ut_1_x = -J_ut_x * grad_eta_mag;
+                    S_ut_1_y = -J_ut_y * grad_eta_mag;
+                }
+
+                P0_src_x = S_un_0_x + S_ut_0_x - Smass_mx;
+                P0_src_y = S_un_0_y + S_ut_0_y - Smass_my;
+                P1_src_x = S_un_1_x + S_ut_1_x + Smass_mx;
+                P1_src_y = S_un_1_y + S_ut_1_y + Smass_my;
 
                 // E closure -> energy SQR source
                 Real S_E_0 = Real(0.0), S_E_1 = Real(0.0);
@@ -2628,14 +2754,14 @@ Hydro2::ApplySQRSource(int lev,
             U1(i,j,k)   += U1_src;
 
             // Diagnostic plot fields (single block, both paths feed the same fields).
-            bs_dp_out(i,j,k,0)      = dp0;
-            bs_dp_out(i,j,k,1)      = dp1;
-            bs_mom_src_out(i,j,k,0) = P0_src_x;
-            bs_mom_src_out(i,j,k,1) = P0_src_y;
-            bs_mom_src_out(i,j,k,2) = P1_src_x;
-            bs_mom_src_out(i,j,k,3) = P1_src_y;
-            bs_eng_src_out(i,j,k,0) = U0_src;
-            bs_eng_src_out(i,j,k,1) = U1_src;
+            sqr_dp_out(i,j,k,0)      = dp0;
+            sqr_dp_out(i,j,k,1)      = dp1;
+            sqr_mom_src_out(i,j,k,0) = P0_src_x;
+            sqr_mom_src_out(i,j,k,1) = P0_src_y;
+            sqr_mom_src_out(i,j,k,2) = P1_src_x;
+            sqr_mom_src_out(i,j,k,3) = P1_src_y;
+            sqr_eng_src_out(i,j,k,0) = U0_src;
+            sqr_eng_src_out(i,j,k,1) = U1_src;
         });
     }
 }
@@ -2716,7 +2842,7 @@ Hydro2::RHS(int lev,
         auto rho0_arr = density_1_mf[lev]->array(mfi);
         auto rho1_arr = density_0_mf[lev]->array(mfi);
 
-        // Per-phase E and M for Y-weighted mixture closure (BS dual-state).
+        // Per-phase E and M for Y-weighted mixture closure (SQR dual-state).
         // Convention: e0 -> eta=0 phase (CPG), e1 -> eta=1 phase (SG).
         auto E_e0_arr = energy_0_mf[lev]->const_array(mfi);
         auto E_e1_arr = energy_1_mf[lev]->const_array(mfi);
@@ -2787,7 +2913,7 @@ Hydro2::RHS(int lev,
             // the water interface: a 0.005% error in E creates a 100% error in p.
             // The floor below uses the Y-weighted (gamma, pi) heuristically; a
             // rigorous per-phase floor on UE_e0/UE_e1 would be the proper fix
-            // when the Stage 3 BS dual-state refactor is finished.
+            // when the Stage 3 SQR dual-state refactor is finished.
             Real E = E_arr(i,j,k);
             Real UE = E - KE;
             if (!std::isfinite(UE)) UE = 0.0;
@@ -3272,7 +3398,7 @@ Hydro2::RHS(int lev,
 
             // Kapila / isobaric-UE correction removed: those are 5-equation
             // (Murrone-Guillard) machinery that compensate for Allaire EOS
-            // mixing. In the Stage-3 BS formulation each phase carries its
+            // mixing. In the Stage-3 SQR formulation each phase carries its
             // own conserved state and its own single-phase EOS, so there is
             // no cross-phase pressure closure to enforce via eta_dot_kapila
             // or a dE = (dA p + dB) dη energy patch.
@@ -5109,7 +5235,7 @@ void Hydro2::ApplyNSCBC(
 //  | A15 | Interstitial working g_{κ,int}^(k)                              | none                                     | missing (Phase F)     |
 //  | A16 | Discrete action-reaction sums (Σ_k mass/mom/E SQR ≈ 0)          | needs runtime assertion in ApplySQRSource | unknown              |
 //  | A17 | Vestigial pref threading                                        | HLLC Solve, energy floor                 | match-but-legacy (Phase F) |
-//  | A18 | Closure-strategy selector S1/S2/S3 per quantity (ρ, u_n, u_t, E)| Phase B: un_close, E_close in Hydro2.H   | partial (u_n, E wired; rho Phase C, u_t Phase D) |
+//  | A18 | Closure-strategy selector S1/S2/S3 per quantity (ρ, u_n, u_t, E)| un/E/rho/ut_close in Hydro2.H; ApplySQRSource | match (S2/S3 wired all 4; S1 for ρ/u_n/E; u_t S1=angular-mom A10 stub) |
 //
 //  Sign convention: n̂ = +∇η/|∇η| points 0→1 (subject to Open Q2). Per A.0,
 //  per-phase MultiFabs store intrinsic fields; η factors enter only at coupling
@@ -5532,7 +5658,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // ApplyHeatConduction, MixDiagnostic, and the next Riemann sweep cannot
     // see UE < 0 (CPG) or UE < pi_1 (Tammann -> negative c^2). Without this
     // a single bad cell at the initial-interface location persists in storage
-    // and grows through the BS-source / heat-conduction reads.
+    // and grows through the SQR-source / heat-conduction reads.
     ClampPerPhaseState(lev);
 
     // Per-phase heat conduction (operator-split explicit Euler step). No-op

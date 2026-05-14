@@ -27,8 +27,8 @@
 # zero motion but ~2x pressure amplitude in the (small) transmitted wave.
 
 ### OUTPUT ###
-plot_file   = ./tests/FlowSQR_tests/output_acoustic_1d
-amr.plot_dt = 2.0e-4
+plot_file   = ./tests/FlowSQR_tests/output_acoustic_1d_pillbox
+amr.plot_dt = 1.0e-4
 # amr.plot_int = 1
 
 ### MESHING ###
@@ -36,7 +36,8 @@ amr.max_level      = 0
 amr.max_grid_size  = 500000
 amr.blocking_factor = 4
 amr.grid_eff       = 0.8
-amr.n_cell         = 1024 16
+amr.n_cell         = 512 8
+# amr.n_cell         = 1024 16
 
 ### DIMENSIONS ###
 # 2-m-wide channel in x; very thin in y (periodic) so the run is effectively 1-D.
@@ -215,9 +216,33 @@ ch_mobility_nom        = 0     # freeze CH — interface is stationary
 # here so the new-framework run reproduces that fix.
 # Other strategies: jump (S2), relax (S3), pillbox (asymmetric S1, research),
 # pillbox_symmetric (S1', research) — see Hydro2.H closure-strategy block.
-hydro2.closure.un_strategy    = constitutive
-hydro2.closure.E_strategy     = constitutive
-hydro2.closure.un_pint_method = 2
-hydro2.closure.E_pint_method  = 2
+# hydro2.closure.un_strategy    = constitutive
+# hydro2.closure.E_strategy     = constitutive
+#
+# --- S3 (Landau-Teller relaxation) validation ---------------------------------
+# IMPORTANT: relax/jump only take effect on the new-framework path, i.e. with
+# sqr_legacy_p_int_method = 0 (set below). With the legacy switch nonzero the
+# un/E/rho/ut_close dispatch is bypassed entirely.
+#
+# Normal velocity (S3): J_un = -rho_eff * (u_n,0 - u_n,1) / un_tau
+hydro2.closure.un_strategy    = relax
+hydro2.closure.un_tau         = 1e-6   # relaxation time; explicit Euler => keep dt well below un_tau
+# Energy / temperature (S3): J_E = -C_E * (T_0 - T_1) / E_tau
+hydro2.closure.E_strategy     = relax
+hydro2.closure.E_tau          = 1e-6   # relaxation time; explicit Euler => keep dt well below E_tau
+# Tangential velocity: inviscid case here, u_t is unconstrained — leave at the
+# Constitutive no-op stub (S1/angular-momentum, A10, not yet implemented).
+hydro2.closure.ut_strategy    = constitutive
+# Density / phase change (S3): relaxes the chemical-potential jump
+# <<mu_chem>> = dmu_bulk = f_g - f_l toward zero. Needs ch_thermo_consistent = 1
+# (else dmu_bulk is zeroed and this is inert). Enabling it turns the pure-
+# acoustic test into acoustic + phase change, so uncomment deliberately:
+# ch_thermo_consistent          = 1
+# hydro2.closure.rho_strategy   = relax
+# hydro2.closure.rho_tau        = 1e-6   # starting guess — tune to the dmu_bulk decay rate
+#
+sqr_legacy_p_int_method       = 0      # 0 = new closure-strategy framework (REQUIRED for relax/jump)
+hydro2.closure.un_pint_method = 2      # only used by the Constitutive strategy; ignored under relax
+hydro2.closure.E_pint_method  = 2      # only used by the Constitutive strategy; ignored under relax
 
 nscbc.enabled = false
