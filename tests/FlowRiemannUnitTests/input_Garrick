@@ -9,7 +9,7 @@
 ### OUTPUT ###
 plot_file = ./tests/FlowRiemannUnitTests/output_Garrick
 Riemann_Solver.type = hllc
-Limiter.type        = minmod
+Limiter.type        = weno3
 nghost = 4
 
 # Interface at x=0 (sharp transition)
@@ -33,7 +33,7 @@ geometry.prob_hi =  1.0   0.02   0.0 # [ m ]
 geometry.is_periodic = 0 1 0
 
 ### TIME STEP ###
-timestep  = 2.5e-4
+timestep  = 1.0e-4 # 2.5e-4
 #stop_time = 0.2
 stop_time = 0.2
 
