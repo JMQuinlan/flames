@@ -1897,6 +1897,28 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             rho_eta1(i, j, k) = std::max(rho_eta1(i, j, k), small_local);
         });
     }
+
+    // ============================================================
+    // POST-INTEGRATION PRIMITIVE REFRESH.
+    // AMReX's RKIntegrator never re-evaluates RHS at the FINAL
+    // assembled state (S_new = S_old + sum w_i dt F_i); the last
+    // RHS call was at the last INTERMEDIATE stage state.  So all
+    // diagnostic primitives -- pressure_mf, density_mf, velocity_mf,
+    // pressure0/1_mf, density0/1_mf, T_mf, etc. -- are still those
+    // of the last substage (e.g., t + dt/2 for SSPRK3, not t + dt).
+    // Plotfiles written between Advance() calls would show this
+    // stale pressure.  FillGhost4BC re-derives all primitives from
+    // the current (final-step) conservative state.
+    //
+    // Side effect: RelaxAndReinit is invoked once more here (since
+    // it lives inside FillGhost4BC).  This is essentially a no-op
+    // when the state is already in mechanical equilibrium from the
+    // last substage's relax (Newton converges in 0-1 iters), so
+    // the cost is the ghost-fill work only.  It also enforces a
+    // clean p_0 = p_1 in the final assembled state, which serves
+    // as the start of the next step.
+    // ============================================================
+    FillGhost4BC(lev, time + dt);
     
 
 

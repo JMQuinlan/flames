@@ -1,31 +1,33 @@
 """
 ===============================================================================
-RIEMANN SOLVER + LIMITER COMPARISON ANALYSIS SCRIPT  (ALL CASES)
+RIEMANN SOLVER + LIMITER + INTEGRATION COMPARISON ANALYSIS SCRIPT  (ALL CASES)
 ===============================================================================
 
 PURPOSE:
     Loop over every case in case_to_group and compare numerical solutions
     from multiple Riemann solvers, multiple spatial-reconstruction limiters,
-    and multiple interface thicknesses against exact solutions. Generates
-    comprehensive comparison plots and error analysis on the cross product
-    of these axes.
+    multiple time-integration schemes, and multiple interface thicknesses
+    against exact solutions. Generates comprehensive comparison plots and
+    error analysis on the cross product of these axes.
 
 DIRECTORY NAMING CONVENTION (NEW):
-    output_{TestCase}_{RiemannSolver}_{Limiter}_Sharp_Interface
-    output_{TestCase}_{RiemannSolver}_{Limiter}_epsilon_{value}
+    output_{TestCase}_{RiemannSolver}_{Limiter}_{Integration}_Sharp_Interface
+    output_{TestCase}_{RiemannSolver}_{Limiter}_{Integration}_epsilon_{value}
 
 LEGACY FALLBACK:
-    If the trailing token does not match a known limiter, the script falls
-    back to limiter='Godunov' so legacy data still parses.
+    If the trailing token does not match a known integration label, the
+    script falls back to integration='ForwardEuler'.  If the next token does
+    not match a known limiter, the script falls back to limiter='Godunov'.
 
-KNOWN LIMITERS:
-    Godunov, Minmod, VanLeer, WENO3, WENO5
+KNOWN LIMITERS:      Godunov, Minmod, VanLeer, WENO3, WENO5
+KNOWN INTEGRATIONS:  ForwardEuler, Trapezoid, SSPRK3, RK4
 
 OUTPUT LAYOUT (per case):
-    ./Images/{case}/{Limiter}/  - existing-style plots, one set per limiter
-    ./Images/{case}/limiters/   - per-solver limiter comparison plots
-    ./Images/{case}/solvers/    - per-limiter solver comparison plots
-    ./Images/{case}/            - grand aggregated plots + errors CSV
+    ./Images/{case}/{Integration}/{Limiter}/  - per-(integration,limiter) plots
+    ./Images/{case}/{Integration}/limiters/   - per-(integration,solver) limiter cmp
+    ./Images/{case}/{Integration}/solvers/    - per-(integration,limiter) solver cmp
+    ./Images/{case}/integrations/             - integration-axis comparison plots
+    ./Images/{case}/                          - mega aggregated plots + errors CSV
 
 ===============================================================================
 """
@@ -84,6 +86,20 @@ LIMITER_LINESTYLES = {
     'WENO3':   ':',
     'WENO5':   (0, (3, 1, 1, 1)),
 }
+
+# Integration schemes known to the test harness (must match RUN_RIEMANN.bash capitalization)
+KNOWN_INTEGRATIONS = ['ForwardEuler', 'Trapezoid', 'SSPRK3', 'RK4']
+INTEGRATION_FALLBACK = 'ForwardEuler'
+
+INTEGRATION_LINESTYLES = {
+    'ForwardEuler': 'solid',
+    'Trapezoid':    'dashed',
+    'SSPRK3':       'dashdot',
+    'RK4':          'dotted',
+}
+
+# Linestyles cycled across limiters on integration-axis plots
+LIMITER_CYCLE_LINESTYLES = ['solid', 'dashed', 'dotted', 'dashdot', (0, (5, 1))]
 
 # List of all tests to run
 case_to_group = {
@@ -152,15 +168,35 @@ def _strip_trailing_limiter(token_str):
     return token_str, None
 
 
+def _strip_trailing_integration(token_str):
+    """
+    Given a string ending in possibly _{Integration} (case-insensitive),
+    return (head_part, integration_canonical_or_None).
+    """
+    if '_' in token_str:
+        head, tail = token_str.rsplit('_', 1)
+        for known in KNOWN_INTEGRATIONS:
+            if tail.lower() == known.lower():
+                return head, known
+    else:
+        for known in KNOWN_INTEGRATIONS:
+            if token_str.lower() == known.lower():
+                return '', known
+    return token_str, None
+
+
 def parse_output_directory(dir_name, case_name):
     """
-    Parse output directory name to extract Riemann solver, limiter, and interface type.
+    Parse output directory name to extract Riemann solver, limiter, integration
+    scheme, and interface type.
 
     Expected NEW formats:
-    - output_{TestCase}_{RiemannSolver}_{Limiter}_Sharp_Interface
-    - output_{TestCase}_{RiemannSolver}_{Limiter}_epsilon_{value}
+    - output_{TestCase}_{RiemannSolver}_{Limiter}_{Integration}_Sharp_Interface
+    - output_{TestCase}_{RiemannSolver}_{Limiter}_{Integration}_epsilon_{value}
 
-    Legacy fallback: limiter -> LIMITER_FALLBACK.
+    Legacy fallbacks:
+    - missing integration token -> INTEGRATION_FALLBACK ('ForwardEuler')
+    - missing limiter     token -> LIMITER_FALLBACK     ('Godunov')
     """
     prefix = f'output_{case_name}_'
     if not dir_name.startswith(prefix):
@@ -168,15 +204,24 @@ def parse_output_directory(dir_name, case_name):
 
     remainder = dir_name[len(prefix):]
 
-    if 'Sharp_Interface' in remainder:
-        solver_plus_limiter = remainder.split('_Sharp_Interface')[0]
-        solver, limiter = _strip_trailing_limiter(solver_plus_limiter)
+    def _split_solver_limiter_integration(suffix):
+        head_after_int, integration = _strip_trailing_integration(suffix)
+        if integration is None:
+            integration = INTEGRATION_FALLBACK
+            head_after_int = suffix
+        solver, limiter = _strip_trailing_limiter(head_after_int)
         if limiter is None:
-            solver = solver_plus_limiter
+            solver = head_after_int
             limiter = LIMITER_FALLBACK
+        return solver, limiter, integration
+
+    if 'Sharp_Interface' in remainder:
+        prefix_str = remainder.split('_Sharp_Interface')[0]
+        solver, limiter, integration = _split_solver_limiter_integration(prefix_str)
         return {
             'riemann_solver': solver,
             'limiter': limiter,
+            'integration': integration,
             'interface_type': 'Sharp_Interface',
             'epsilon_value': None,
             'is_sharp': True,
@@ -192,15 +237,13 @@ def parse_output_directory(dir_name, case_name):
             print(f"Warning: Could not parse epsilon value '{epsilon_str}' in '{dir_name}'")
             return None
 
-        solver_plus_limiter = remainder.split('_epsilon_')[0]
-        solver, limiter = _strip_trailing_limiter(solver_plus_limiter)
-        if limiter is None:
-            solver = solver_plus_limiter
-            limiter = LIMITER_FALLBACK
+        prefix_str = remainder.split('_epsilon_')[0]
+        solver, limiter, integration = _split_solver_limiter_integration(prefix_str)
 
         return {
             'riemann_solver': solver,
             'limiter': limiter,
+            'integration': integration,
             'interface_type': f'epsilon_{epsilon_str}',
             'epsilon_value': epsilon_value,
             'is_sharp': False,
@@ -297,6 +340,40 @@ def generate_limiter_color_map(limiters):
     return color_map
 
 
+def generate_integration_color_map(integrations):
+    """Distinct colors per integration scheme using matplotlib Set2."""
+    cmap = plt.get_cmap('Set2')
+    color_map = {}
+    for idx, integ in enumerate(integrations):
+        color_map[integ] = cmap(idx % 8)
+    return color_map
+
+
+def integration_linestyle(integration):
+    return INTEGRATION_LINESTYLES.get(integration, 'solid')
+
+
+def limiter_cycle_linestyle(limiter, ordered_limiters):
+    """Linestyle cycled by index of limiter in ordered_limiters."""
+    try:
+        idx = ordered_limiters.index(limiter)
+    except ValueError:
+        return 'solid'
+    return LIMITER_CYCLE_LINESTYLES[idx % len(LIMITER_CYCLE_LINESTYLES)]
+
+
+def interface_alpha(epsilon_value, all_epsilons, sharp_alpha=1.0):
+    """Alpha by interface type: sharp = 1.0, epsilons descending."""
+    if epsilon_value is None:
+        return sharp_alpha
+    sorted_eps = sorted([e for e in all_epsilons if e is not None])
+    if not sorted_eps:
+        return 0.6
+    idx = sorted_eps.index(epsilon_value)
+    n = max(len(sorted_eps) - 1, 1)
+    return max(0.3, 0.75 - 0.45 * idx / n)
+
+
 def get_color_shade(base_color, epsilon_value, epsilon_values):
     """Get color shade based on epsilon value (darker to lighter)"""
     if epsilon_value is None:
@@ -337,8 +414,12 @@ def save_and_show_plot(output_filename, plot_to_screen=False):
 # DATA-LOADING + FILTERING
 # ============================================================================
 
+def _new_sli_dict():
+    return {'sharp': None, 'epsilon': {}}
+
+
 def collect_all_data(case_name, base_output_dir):
-    all_data = defaultdict(lambda: defaultdict(lambda: {'sharp': None, 'epsilon': {}}))
+    all_data = defaultdict(lambda: defaultdict(lambda: defaultdict(_new_sli_dict)))
     all_stop_times = []
 
     for item in sorted(os.listdir(base_output_dir)):
@@ -350,11 +431,13 @@ def collect_all_data(case_name, base_output_dir):
         if not parsed:
             continue
 
-        solver  = parsed['riemann_solver']
-        limiter = parsed['limiter']
+        solver      = parsed['riemann_solver']
+        limiter     = parsed['limiter']
+        integration = parsed['integration']
         print(f"\nFound: {item}")
         print(f"  Riemann Solver: {solver}")
         print(f"  Limiter:        {limiter}")
+        print(f"  Integration:    {integration}")
         print(f"  Interface Type: {parsed['interface_type']}")
 
         data = load_amrex_data(item_path)
@@ -365,46 +448,74 @@ def collect_all_data(case_name, base_output_dir):
         all_stop_times.append(stop_time)
 
         if parsed['is_sharp']:
-            all_data[solver][limiter]['sharp'] = data
+            all_data[solver][limiter][integration]['sharp'] = data
             print(f"  Loaded sharp interface data: {len(data['x'])} points, t={stop_time:.6e}s")
         else:
-            all_data[solver][limiter]['epsilon'][parsed['epsilon_value']] = data
+            all_data[solver][limiter][integration]['epsilon'][parsed['epsilon_value']] = data
             print(f"  Loaded epsilon={parsed['epsilon_value']} data: {len(data['x'])} points, t={stop_time:.6e}s")
 
     return all_data, all_stop_times
 
 
 def filter_by_stop_time(all_data, max_stop_time, tolerance=1e-10):
-    filtered = defaultdict(lambda: defaultdict(lambda: {'sharp': None, 'epsilon': {}}))
+    filtered = defaultdict(lambda: defaultdict(lambda: defaultdict(_new_sli_dict)))
 
     for solver, lim_dict in all_data.items():
-        for limiter, sl_data in lim_dict.items():
-            kept_anything = False
+        for limiter, integ_dict in lim_dict.items():
+            for integration, sli_data in integ_dict.items():
+                kept_anything = False
 
-            if sl_data['sharp']:
-                if abs(sl_data['sharp']['time'] - max_stop_time) < tolerance:
-                    filtered[solver][limiter]['sharp'] = sl_data['sharp']
-                    kept_anything = True
-                else:
-                    print(f"  Excluding {solver} / {limiter} Sharp_Interface "
-                          f"(stopped at t={sl_data['sharp']['time']:.6e}s)")
+                if sli_data['sharp']:
+                    if abs(sli_data['sharp']['time'] - max_stop_time) < tolerance:
+                        filtered[solver][limiter][integration]['sharp'] = sli_data['sharp']
+                        kept_anything = True
+                    else:
+                        print(f"  Excluding {solver} / {limiter} / {integration} Sharp_Interface "
+                              f"(stopped at t={sli_data['sharp']['time']:.6e}s)")
 
-            for eps_val, eps_data in sl_data['epsilon'].items():
-                if abs(eps_data['time'] - max_stop_time) < tolerance:
-                    filtered[solver][limiter]['epsilon'][eps_val] = eps_data
-                    kept_anything = True
-                else:
-                    print(f"  Excluding {solver} / {limiter} epsilon={eps_val} "
-                          f"(stopped at t={eps_data['time']:.6e}s)")
+                for eps_val, eps_data in sli_data['epsilon'].items():
+                    if abs(eps_data['time'] - max_stop_time) < tolerance:
+                        filtered[solver][limiter][integration]['epsilon'][eps_val] = eps_data
+                        kept_anything = True
+                    else:
+                        print(f"  Excluding {solver} / {limiter} / {integration} epsilon={eps_val} "
+                              f"(stopped at t={eps_data['time']:.6e}s)")
 
-            if not kept_anything:
-                if limiter in filtered[solver]:
-                    del filtered[solver][limiter]
+                if not kept_anything:
+                    if integration in filtered[solver][limiter]:
+                        del filtered[solver][limiter][integration]
+
+            if limiter in filtered[solver] and not filtered[solver][limiter]:
+                del filtered[solver][limiter]
 
         if solver in filtered and not filtered[solver]:
             del filtered[solver]
 
     return filtered
+
+
+def sort_integrations(present_set):
+    return ([i for i in KNOWN_INTEGRATIONS if i in present_set]
+            + sorted([i for i in present_set if i not in KNOWN_INTEGRATIONS]))
+
+
+def sort_limiters(present_set):
+    return ([l for l in KNOWN_LIMITERS if l in present_set]
+            + sorted([l for l in present_set if l not in KNOWN_LIMITERS]))
+
+
+def slice_by_integration(all_data, integration):
+    """Return {solver: {limiter: sli_dict}} restricted to one integration."""
+    sliced = {}
+    for solver, lim_dict in all_data.items():
+        for limiter, integ_dict in lim_dict.items():
+            if integration not in integ_dict:
+                continue
+            sli = integ_dict[integration]
+            if not sli['sharp'] and not sli['epsilon']:
+                continue
+            sliced.setdefault(solver, {})[limiter] = sli
+    return sliced
 
 
 # ============================================================================
@@ -803,8 +914,12 @@ def generate_per_limiter_solver_plots(case_name, all_data, exact_data, sim_time,
         print(f"  Saved: {fname}")
 
 
-def generate_grand_aggregated_plots(case_name, all_data, exact_data, sim_time,
+def generate_grand_aggregated_plots(case_name, all_data_sliced, exact_data, sim_time,
                                     solver_color_map, base_out_dir):
+    """
+    Operates on integration-sliced data {solver: {limiter: sli_dict}}.
+    """
+    all_data = all_data_sliced
     all_epsilons = set()
     for solver, lim_dict in all_data.items():
         for limiter, sl in lim_dict.items():
@@ -887,46 +1002,329 @@ def generate_grand_aggregated_plots(case_name, all_data, exact_data, sim_time,
     print(f"  Saved: {fname}")
 
 
+def generate_per_solver_limiter_integration_plots(case_name, all_data, exact_data,
+                                                  sim_time, integration_color_map,
+                                                  base_out_dir):
+    """One (comparison + error) plot per (solver, limiter), all integration
+    schemes x all interface types."""
+    out_dir = os.path.join(base_out_dir, 'integrations')
+    os.makedirs(out_dir, exist_ok=True)
+
+    all_epsilons = set()
+    for solver, lim_dict in all_data.items():
+        for limiter, integ_dict in lim_dict.items():
+            for integration, sli in integ_dict.items():
+                for eps in sli['epsilon'].keys():
+                    all_epsilons.add(eps)
+    all_epsilons = sorted(all_epsilons)
+
+    for solver in sorted(all_data.keys()):
+        for limiter in sort_limiters(set(all_data[solver].keys())):
+            integ_dict = all_data[solver][limiter]
+            present_integrations = sort_integrations(set(integ_dict.keys()))
+            if not present_integrations:
+                continue
+
+            # Comparison
+            fig, axes = plt.subplots(3, 1, figsize=(13, 15))
+            title = (f'{format_label(case_name)} - {format_label(solver)} '
+                     f'[{limiter}] - Integration Comparison')
+            if sim_time is not None:
+                title += f' at t={sim_time:.6f}s'
+            fig.suptitle(title, fontsize=TITLE_FONTSIZE, fontweight='bold')
+
+            for idx, (var, ylabel) in enumerate(zip(VARIABLES, YLABELS)):
+                ax = axes[idx]
+                _plot_exact(ax, exact_data, var, EXACT_SOLUTION_LINEWIDTH)
+                for integration in present_integrations:
+                    sli = integ_dict[integration]
+                    color = integration_color_map.get(integration, 'black')
+                    ls = integration_linestyle(integration)
+                    if sli['sharp']:
+                        sd = sli['sharp']
+                        ax.plot(sd['x'], sd[var], linestyle=ls, color=color,
+                                linewidth=SHARP_INTERFACE_LINEWIDTH,
+                                label=f'{integration} - Sharp',
+                                alpha=interface_alpha(None, all_epsilons))
+                    for eps_val in sorted(sli['epsilon'].keys()):
+                        eps_data = sli['epsilon'][eps_val]
+                        ax.plot(eps_data['x'], eps_data[var], linestyle=ls, color=color,
+                                linewidth=EPSILON_LINEWIDTH,
+                                label=f'{integration} - $\\epsilon={eps_val}$',
+                                alpha=interface_alpha(eps_val, all_epsilons))
+                _finalize_axis(ax, idx, ylabel, exact_data,
+                               legend_kwargs={'fontsize': LEGEND_FONTSIZE - 1,
+                                              'loc': 'best', 'ncol': 2})
+            plt.tight_layout()
+            fname = os.path.join(out_dir,
+                                 f'{case_name}_{solver}_{limiter}_integration_comparison')
+            save_and_show_plot(fname, PLOT_TO_SCREEN)
+            print(f"  Saved: {fname}")
+
+            # Error
+            fig, axes = plt.subplots(3, 1, figsize=(13, 15))
+            title = (f'{format_label(case_name)} - {format_label(solver)} '
+                     f'[{limiter}] - Integration Error Analysis')
+            fig.suptitle(title, fontsize=TITLE_FONTSIZE, fontweight='bold')
+
+            for idx, (var, ylabel) in enumerate(zip(VARIABLES, YLABELS)):
+                ax = axes[idx]
+                for integration in present_integrations:
+                    sli = integ_dict[integration]
+                    color = integration_color_map.get(integration, 'black')
+                    ls = integration_linestyle(integration)
+                    if sli['sharp']:
+                        sd = sli['sharp']
+                        exact_interp = np.interp(sd['x'], exact_data['x'], exact_data[var])
+                        err = np.abs(sd[var] - exact_interp)
+                        ax.semilogy(sd['x'], err, linestyle=ls, color=color,
+                                    linewidth=ERROR_SHARP_LINEWIDTH,
+                                    label=f'{integration} - Sharp',
+                                    alpha=interface_alpha(None, all_epsilons))
+                    for eps_val in sorted(sli['epsilon'].keys()):
+                        eps_data = sli['epsilon'][eps_val]
+                        exact_interp = np.interp(eps_data['x'], exact_data['x'], exact_data[var])
+                        err = np.abs(eps_data[var] - exact_interp)
+                        ax.semilogy(eps_data['x'], err, linestyle=ls, color=color,
+                                    linewidth=ERROR_EPSILON_LINEWIDTH,
+                                    label=f'{integration} - $\\epsilon={eps_val}$',
+                                    alpha=interface_alpha(eps_val, all_epsilons))
+                ax.set_xlabel('Position (x)', fontsize=AXIS_LABEL_FONTSIZE)
+                ax.set_ylabel(f'{ylabel.split("(")[0].strip()} Error',
+                              fontsize=AXIS_LABEL_FONTSIZE)
+                if idx == 0:
+                    ax.legend(fontsize=LEGEND_FONTSIZE - 1, loc='best', ncol=2)
+                ax.grid(True, alpha=0.3, which='both')
+                ax.set_xlim([exact_data['x'][0], exact_data['x'][-1]])
+                ax.tick_params(labelsize=TICK_FONTSIZE)
+            plt.tight_layout()
+            fname = os.path.join(out_dir,
+                                 f'{case_name}_{solver}_{limiter}_integration_error')
+            save_and_show_plot(fname, PLOT_TO_SCREEN)
+            print(f"  Saved: {fname}")
+
+
+def generate_per_integration_overview_plots(case_name, all_data, exact_data,
+                                            sim_time, solver_color_map,
+                                            ordered_limiters, base_out_dir):
+    """One (comparison + error) plot per integration scheme, sharp-only over
+    all (solver, limiter) combos."""
+    out_dir = os.path.join(base_out_dir, 'integrations')
+    os.makedirs(out_dir, exist_ok=True)
+
+    integ_set = set()
+    for solver, lim_dict in all_data.items():
+        for limiter, integ_dict in lim_dict.items():
+            integ_set.update(integ_dict.keys())
+    ordered_integrations = sort_integrations(integ_set)
+
+    for integration in ordered_integrations:
+        pairs = []
+        for solver in sorted(all_data.keys()):
+            for limiter in sort_limiters(set(all_data[solver].keys())):
+                sli = all_data[solver][limiter].get(integration)
+                if sli and sli['sharp']:
+                    pairs.append((solver, limiter, sli['sharp']))
+        if not pairs:
+            continue
+
+        # Comparison
+        fig, axes = plt.subplots(3, 1, figsize=(14, 16))
+        title = (f'{format_label(case_name)} - {integration} - '
+                 f'Solver x Limiter Overview (Sharp Interface)')
+        if sim_time is not None:
+            title += f' at t={sim_time:.6f}s'
+        fig.suptitle(title, fontsize=TITLE_FONTSIZE, fontweight='bold')
+
+        for idx, (var, ylabel) in enumerate(zip(VARIABLES, YLABELS)):
+            ax = axes[idx]
+            _plot_exact(ax, exact_data, var, AGGREGATED_EXACT_LINEWIDTH)
+            for solver, limiter, sd in pairs:
+                color = solver_color_map[solver]
+                ls = limiter_cycle_linestyle(limiter, ordered_limiters)
+                ax.plot(sd['x'], sd[var], linestyle=ls, color=color,
+                        linewidth=AGGREGATED_SHARP_LINEWIDTH,
+                        label=f'{format_label(solver)} / {limiter}',
+                        alpha=0.85)
+            ax.set_xlabel('Position (x)', fontsize=AXIS_LABEL_FONTSIZE)
+            ax.set_ylabel(ylabel, fontsize=AXIS_LABEL_FONTSIZE)
+            if idx == 0:
+                ax.legend(fontsize=LEGEND_FONTSIZE - 1, loc='best', ncol=2)
+            ax.grid(True, alpha=0.3)
+            ax.set_xlim([exact_data['x'][0], exact_data['x'][-1]])
+            ax.tick_params(labelsize=TICK_FONTSIZE)
+        plt.tight_layout()
+        fname = os.path.join(out_dir, f'{case_name}_{integration}_overview_comparison')
+        save_and_show_plot(fname, PLOT_TO_SCREEN)
+        print(f"  Saved: {fname}")
+
+        # Error
+        fig, axes = plt.subplots(3, 1, figsize=(14, 16))
+        title = (f'{format_label(case_name)} - {integration} - '
+                 f'Solver x Limiter Overview Error (Sharp Interface)')
+        fig.suptitle(title, fontsize=TITLE_FONTSIZE, fontweight='bold')
+
+        for idx, (var, ylabel) in enumerate(zip(VARIABLES, YLABELS)):
+            ax = axes[idx]
+            for solver, limiter, sd in pairs:
+                color = solver_color_map[solver]
+                ls = limiter_cycle_linestyle(limiter, ordered_limiters)
+                exact_interp = np.interp(sd['x'], exact_data['x'], exact_data[var])
+                err = np.abs(sd[var] - exact_interp)
+                ax.semilogy(sd['x'], err, linestyle=ls, color=color,
+                            linewidth=ERROR_SHARP_LINEWIDTH,
+                            label=f'{format_label(solver)} / {limiter}',
+                            alpha=0.85)
+            ax.set_xlabel('Position (x)', fontsize=AXIS_LABEL_FONTSIZE)
+            ax.set_ylabel(f'{ylabel.split("(")[0].strip()} Error',
+                          fontsize=AXIS_LABEL_FONTSIZE)
+            if idx == 0:
+                ax.legend(fontsize=LEGEND_FONTSIZE - 1, loc='best', ncol=2)
+            ax.grid(True, alpha=0.3, which='both')
+            ax.set_xlim([exact_data['x'][0], exact_data['x'][-1]])
+            ax.tick_params(labelsize=TICK_FONTSIZE)
+        plt.tight_layout()
+        fname = os.path.join(out_dir, f'{case_name}_{integration}_overview_error')
+        save_and_show_plot(fname, PLOT_TO_SCREEN)
+        print(f"  Saved: {fname}")
+
+
+def generate_mega_aggregated_plots(case_name, all_data, exact_data, sim_time,
+                                   solver_color_map, integration_color_map,
+                                   ordered_limiters, base_out_dir):
+    """Every (solver, limiter, integration, interface) on one busy figure."""
+    all_epsilons = set()
+    for solver, lim_dict in all_data.items():
+        for limiter, integ_dict in lim_dict.items():
+            for integration, sli in integ_dict.items():
+                for eps in sli['epsilon'].keys():
+                    all_epsilons.add(eps)
+    all_epsilons = sorted(all_epsilons)
+
+    def _draw(ax, var, semilog):
+        if not semilog:
+            _plot_exact(ax, exact_data, var, GRAND_EXACT_LINEWIDTH)
+        for solver in sorted(all_data.keys()):
+            for limiter in sort_limiters(set(all_data[solver].keys())):
+                ls = limiter_cycle_linestyle(limiter, ordered_limiters)
+                for integration in sort_integrations(set(all_data[solver][limiter].keys())):
+                    sli = all_data[solver][limiter][integration]
+                    color = integration_color_map.get(integration, 'black')
+                    if sli['sharp']:
+                        sd = sli['sharp']
+                        a = interface_alpha(None, all_epsilons)
+                        if semilog:
+                            ei = np.interp(sd['x'], exact_data['x'], exact_data[var])
+                            ax.semilogy(sd['x'], np.abs(sd[var] - ei),
+                                        linestyle=ls, color=color,
+                                        linewidth=GRAND_SHARP_LINEWIDTH, alpha=a,
+                                        label=f'{format_label(solver)} / {limiter} / '
+                                              f'{integration} / Sharp')
+                        else:
+                            ax.plot(sd['x'], sd[var], linestyle=ls, color=color,
+                                    linewidth=GRAND_SHARP_LINEWIDTH, alpha=a,
+                                    label=f'{format_label(solver)} / {limiter} / '
+                                          f'{integration} / Sharp')
+                    for eps_val in sorted(sli['epsilon'].keys()):
+                        eps_data = sli['epsilon'][eps_val]
+                        a = interface_alpha(eps_val, all_epsilons)
+                        if semilog:
+                            ei = np.interp(eps_data['x'], exact_data['x'], exact_data[var])
+                            ax.semilogy(eps_data['x'], np.abs(eps_data[var] - ei),
+                                        linestyle=ls, color=color,
+                                        linewidth=GRAND_EPSILON_LINEWIDTH, alpha=a,
+                                        label=f'{format_label(solver)} / {limiter} / '
+                                              f'{integration} / $\\epsilon={eps_val}$')
+                        else:
+                            ax.plot(eps_data['x'], eps_data[var], linestyle=ls, color=color,
+                                    linewidth=GRAND_EPSILON_LINEWIDTH, alpha=a,
+                                    label=f'{format_label(solver)} / {limiter} / '
+                                          f'{integration} / $\\epsilon={eps_val}$')
+
+    # Comparison
+    fig, axes = plt.subplots(3, 1, figsize=(18, 20))
+    title = (f'{format_label(case_name)} - Mega Aggregated Comparison '
+             f'(solver x limiter x integration x interface)')
+    if sim_time is not None:
+        title += f' at t={sim_time:.6f}s'
+    fig.suptitle(title, fontsize=TITLE_FONTSIZE, fontweight='bold')
+    for idx, (var, ylabel) in enumerate(zip(VARIABLES, YLABELS)):
+        ax = axes[idx]
+        _draw(ax, var, semilog=False)
+        ax.set_xlabel('Position (x)', fontsize=AXIS_LABEL_FONTSIZE)
+        ax.set_ylabel(ylabel, fontsize=AXIS_LABEL_FONTSIZE)
+        if idx == 0:
+            ax.legend(fontsize=max(5, LEGEND_FONTSIZE - 4), loc='best', ncol=4)
+        ax.grid(True, alpha=0.3)
+        ax.set_xlim([exact_data['x'][0], exact_data['x'][-1]])
+        ax.tick_params(labelsize=TICK_FONTSIZE)
+    plt.tight_layout()
+    fname = os.path.join(base_out_dir, f'{case_name}_mega_aggregated_comparison')
+    save_and_show_plot(fname, PLOT_TO_SCREEN)
+    print(f"  Saved: {fname}")
+
+    # Error
+    fig, axes = plt.subplots(3, 1, figsize=(18, 20))
+    title = f'{format_label(case_name)} - Mega Aggregated Error Analysis'
+    fig.suptitle(title, fontsize=TITLE_FONTSIZE, fontweight='bold')
+    for idx, (var, ylabel) in enumerate(zip(VARIABLES, YLABELS)):
+        ax = axes[idx]
+        _draw(ax, var, semilog=True)
+        ax.set_xlabel('Position (x)', fontsize=AXIS_LABEL_FONTSIZE)
+        ax.set_ylabel(f'{ylabel.split("(")[0].strip()} Error',
+                      fontsize=AXIS_LABEL_FONTSIZE)
+        if idx == 0:
+            ax.legend(fontsize=max(5, LEGEND_FONTSIZE - 4), loc='best', ncol=4)
+        ax.grid(True, alpha=0.3, which='both')
+        ax.set_xlim([exact_data['x'][0], exact_data['x'][-1]])
+        ax.tick_params(labelsize=TICK_FONTSIZE)
+    plt.tight_layout()
+    fname = os.path.join(base_out_dir, f'{case_name}_mega_aggregated_error')
+    save_and_show_plot(fname, PLOT_TO_SCREEN)
+    print(f"  Saved: {fname}")
+
+
 def report_and_dump_errors(case_name, all_data, exact_data, base_out_dir):
     print(f"\n{'=' * 80}")
-    print("ERROR METRICS SUMMARY  (solver / limiter / interface)")
+    print("ERROR METRICS SUMMARY  (solver / limiter / integration / interface)")
     print("=" * 80)
 
     csv_path = os.path.join(base_out_dir, f'{case_name}_errors.csv')
     with open(csv_path, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['solver', 'limiter', 'interface_type', 'epsilon',
+        writer.writerow(['solver', 'limiter', 'integration', 'interface_type', 'epsilon',
                          'velocity_l2', 'velocity_linf',
                          'pressure_l2', 'pressure_linf',
                          'density_l2',  'density_linf'])
 
         for solver in sorted(all_data.keys()):
-            for limiter in sorted(all_data[solver].keys()):
-                sl = all_data[solver][limiter]
-                print(f"\n{solver}  /  {limiter}")
-                print("-" * 60)
+            for limiter in sort_limiters(set(all_data[solver].keys())):
+                for integration in sort_integrations(set(all_data[solver][limiter].keys())):
+                    sli = all_data[solver][limiter][integration]
+                    print(f"\n{solver}  /  {limiter}  /  {integration}")
+                    print("-" * 60)
 
-                if sl['sharp']:
-                    errs = calculate_errors(sl['sharp'], exact_data)
-                    print(f"  Sharp Interface:")
-                    print(f"    Density  - L2: {errs['density_l2']:.6e}, Linf: {errs['density_linf']:.6e}")
-                    print(f"    Velocity - L2: {errs['velocity_l2']:.6e}, Linf: {errs['velocity_linf']:.6e}")
-                    print(f"    Pressure - L2: {errs['pressure_l2']:.6e}, Linf: {errs['pressure_linf']:.6e}")
-                    writer.writerow([solver, limiter, 'Sharp_Interface', '',
-                                     errs['velocity_l2'], errs['velocity_linf'],
-                                     errs['pressure_l2'], errs['pressure_linf'],
-                                     errs['density_l2'],  errs['density_linf']])
+                    if sli['sharp']:
+                        errs = calculate_errors(sli['sharp'], exact_data)
+                        print(f"  Sharp Interface:")
+                        print(f"    Density  - L2: {errs['density_l2']:.6e}, Linf: {errs['density_linf']:.6e}")
+                        print(f"    Velocity - L2: {errs['velocity_l2']:.6e}, Linf: {errs['velocity_linf']:.6e}")
+                        print(f"    Pressure - L2: {errs['pressure_l2']:.6e}, Linf: {errs['pressure_linf']:.6e}")
+                        writer.writerow([solver, limiter, integration, 'Sharp_Interface', '',
+                                         errs['velocity_l2'], errs['velocity_linf'],
+                                         errs['pressure_l2'], errs['pressure_linf'],
+                                         errs['density_l2'],  errs['density_linf']])
 
-                for eps_val in sorted(sl['epsilon'].keys()):
-                    errs = calculate_errors(sl['epsilon'][eps_val], exact_data)
-                    print(f"  epsilon = {eps_val}:")
-                    print(f"    Density  - L2: {errs['density_l2']:.6e}, Linf: {errs['density_linf']:.6e}")
-                    print(f"    Velocity - L2: {errs['velocity_l2']:.6e}, Linf: {errs['velocity_linf']:.6e}")
-                    print(f"    Pressure - L2: {errs['pressure_l2']:.6e}, Linf: {errs['pressure_linf']:.6e}")
-                    writer.writerow([solver, limiter, f'epsilon_{eps_val}', eps_val,
-                                     errs['velocity_l2'], errs['velocity_linf'],
-                                     errs['pressure_l2'], errs['pressure_linf'],
-                                     errs['density_l2'],  errs['density_linf']])
+                    for eps_val in sorted(sli['epsilon'].keys()):
+                        errs = calculate_errors(sli['epsilon'][eps_val], exact_data)
+                        print(f"  epsilon = {eps_val}:")
+                        print(f"    Density  - L2: {errs['density_l2']:.6e}, Linf: {errs['density_linf']:.6e}")
+                        print(f"    Velocity - L2: {errs['velocity_l2']:.6e}, Linf: {errs['velocity_linf']:.6e}")
+                        print(f"    Pressure - L2: {errs['pressure_l2']:.6e}, Linf: {errs['pressure_linf']:.6e}")
+                        writer.writerow([solver, limiter, integration, f'epsilon_{eps_val}', eps_val,
+                                         errs['velocity_l2'], errs['velocity_linf'],
+                                         errs['pressure_l2'], errs['pressure_linf'],
+                                         errs['density_l2'],  errs['density_linf']])
 
     print(f"\nWrote error CSV: {csv_path}")
 
@@ -983,15 +1381,15 @@ for case_name, group_name in case_to_group.items():
 
     if not all_data:
         print("\nWARNING: No matching output directories found! Skipping case.")
-        print(f"Expected pattern: output_{case_name}_{{Solver}}_{{Limiter}}_Sharp_Interface")
-        print(f"                  output_{case_name}_{{Solver}}_{{Limiter}}_epsilon_{{value}}")
+        print(f"Expected pattern: output_{case_name}_{{Solver}}_{{Limiter}}_{{Integration}}_Sharp_Interface")
+        print(f"                  output_{case_name}_{{Solver}}_{{Limiter}}_{{Integration}}_epsilon_{{value}}")
         continue
 
     if all_stop_times:
         max_stop_time = max(all_stop_times)
         print(f"\n{'=' * 80}")
         print(f"Maximum stop time found: {max_stop_time:.6e}s")
-        print(f"Filtering out (solver, limiter) combos that stopped early ...")
+        print(f"Filtering out (solver, limiter, integration) combos that stopped early ...")
         all_data = filter_by_stop_time(all_data, max_stop_time)
         if not all_data:
             print("\nWARNING: No simulations reached the maximum stop time! Skipping case.")
@@ -1002,15 +1400,19 @@ for case_name, group_name in case_to_group.items():
     print(f"\n{'=' * 80}")
     print(f"Found {len(all_data)} solver(s) with complete simulations")
     all_limiter_set = set()
+    all_integration_set = set()
     for solver in sorted(all_data.keys()):
-        lims = sorted(all_data[solver].keys())
+        lims = sort_limiters(set(all_data[solver].keys()))
         print(f"  {solver}: limiters = {lims}")
         for lim in lims:
-            sl = all_data[solver][lim]
-            sharp_status = "YES" if sl['sharp'] else "NO"
-            eps_count = len(sl['epsilon'])
-            print(f"      [{lim}]  Sharp={sharp_status},  epsilon variants={eps_count}")
+            integ_dict = all_data[solver][lim]
             all_limiter_set.add(lim)
+            for integ in sort_integrations(set(integ_dict.keys())):
+                sli = integ_dict[integ]
+                sharp_status = "YES" if sli['sharp'] else "NO"
+                eps_count = len(sli['epsilon'])
+                print(f"      [{lim} / {integ}]  Sharp={sharp_status},  epsilon variants={eps_count}")
+                all_integration_set.add(integ)
 
     out_dir = f"./Images/{case_name}"
     os.makedirs(out_dir, exist_ok=True)
@@ -1021,39 +1423,75 @@ for case_name, group_name in case_to_group.items():
     riemann_solvers = sorted(all_data.keys())
     solver_color_map = generate_color_palette(riemann_solvers)
 
-    all_limiters_sorted = ([lim for lim in KNOWN_LIMITERS if lim in all_limiter_set]
-                           + sorted([lim for lim in all_limiter_set if lim not in KNOWN_LIMITERS]))
-    limiter_color_map = generate_limiter_color_map(all_limiters_sorted)
+    all_limiters_sorted     = sort_limiters(all_limiter_set)
+    all_integrations_sorted = sort_integrations(all_integration_set)
 
-    # (A) Legacy plots, replicated per limiter
-    print(f"\n{'=' * 80}")
-    print("GENERATING LEGACY-STYLE PLOTS PER LIMITER")
-    print("=" * 80)
-    for limiter in all_limiters_sorted:
-        print(f"\n--- Limiter: {limiter} ---")
-        generate_legacy_plots_for_limiter(case_name, limiter, all_data, exact_data,
-                                          sim_time, solver_color_map, out_dir)
+    limiter_color_map     = generate_limiter_color_map(all_limiters_sorted)
+    integration_color_map = generate_integration_color_map(all_integrations_sorted)
 
-    # (B) Per-solver limiter comparison
+    # (A,B,C) Existing limiter/solver-axis plots — generated PER integration
     print(f"\n{'=' * 80}")
-    print("GENERATING PER-SOLVER LIMITER COMPARISON PLOTS")
+    print("GENERATING LEGACY-STYLE PLOTS PER INTEGRATION x LIMITER")
     print("=" * 80)
-    generate_per_solver_limiter_plots(case_name, all_data, exact_data, sim_time,
-                                      limiter_color_map, out_dir)
+    for integration in all_integrations_sorted:
+        sliced = slice_by_integration(all_data, integration)
+        if not sliced:
+            continue
+        integ_out_dir = os.path.join(out_dir, integration)
+        os.makedirs(integ_out_dir, exist_ok=True)
 
-    # (C) Per-limiter solver comparison
-    print(f"\n{'=' * 80}")
-    print("GENERATING PER-LIMITER SOLVER COMPARISON PLOTS")
-    print("=" * 80)
-    generate_per_limiter_solver_plots(case_name, all_data, exact_data, sim_time,
-                                      solver_color_map, out_dir, all_limiters_sorted)
+        print(f"\n=== Integration: {integration} ===")
 
-    # (D) Grand aggregated
+        for limiter in all_limiters_sorted:
+            if not any(limiter in sliced[s] for s in sliced):
+                continue
+            print(f"\n--- [{integration}] Limiter: {limiter} ---")
+            generate_legacy_plots_for_limiter(case_name, limiter, sliced, exact_data,
+                                              sim_time, solver_color_map, integ_out_dir)
+
+        print(f"\n[{integration}] Per-solver limiter comparison ...")
+        generate_per_solver_limiter_plots(case_name, sliced, exact_data, sim_time,
+                                          limiter_color_map, integ_out_dir)
+
+        print(f"\n[{integration}] Per-limiter solver comparison ...")
+        integration_limiters = sort_limiters({lim for s in sliced for lim in sliced[s]})
+        generate_per_limiter_solver_plots(case_name, sliced, exact_data, sim_time,
+                                          solver_color_map, integ_out_dir,
+                                          integration_limiters)
+
+    # (D) Legacy grand aggregated — fixed at ForwardEuler for backward compatibility
+    if INTEGRATION_FALLBACK in all_integrations_sorted:
+        print(f"\n{'=' * 80}")
+        print(f"GENERATING GRAND AGGREGATED PLOT ({INTEGRATION_FALLBACK} only)")
+        print("=" * 80)
+        fe_slice = slice_by_integration(all_data, INTEGRATION_FALLBACK)
+        if fe_slice:
+            generate_grand_aggregated_plots(case_name, fe_slice, exact_data, sim_time,
+                                            solver_color_map, out_dir)
+
+    # (E) Per-(solver, limiter) integration comparison
     print(f"\n{'=' * 80}")
-    print("GENERATING GRAND AGGREGATED PLOT (solver x limiter x interface)")
+    print("GENERATING PER-(SOLVER, LIMITER) INTEGRATION COMPARISON PLOTS")
     print("=" * 80)
-    generate_grand_aggregated_plots(case_name, all_data, exact_data, sim_time,
-                                    solver_color_map, out_dir)
+    generate_per_solver_limiter_integration_plots(case_name, all_data, exact_data,
+                                                  sim_time, integration_color_map,
+                                                  out_dir)
+
+    # (F) Per-integration solver+limiter overview (sharp only)
+    print(f"\n{'=' * 80}")
+    print("GENERATING PER-INTEGRATION SOLVER+LIMITER OVERVIEW PLOTS")
+    print("=" * 80)
+    generate_per_integration_overview_plots(case_name, all_data, exact_data, sim_time,
+                                            solver_color_map, all_limiters_sorted,
+                                            out_dir)
+
+    # (G) Mega aggregated (full cross product)
+    print(f"\n{'=' * 80}")
+    print("GENERATING MEGA AGGREGATED PLOT (solver x limiter x integration x interface)")
+    print("=" * 80)
+    generate_mega_aggregated_plots(case_name, all_data, exact_data, sim_time,
+                                   solver_color_map, integration_color_map,
+                                   all_limiters_sorted, out_dir)
 
     # Errors + CSV dump
     report_and_dump_errors(case_name, all_data, exact_data, out_dir)

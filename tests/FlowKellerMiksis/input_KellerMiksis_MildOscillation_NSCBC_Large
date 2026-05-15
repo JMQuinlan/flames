@@ -43,14 +43,14 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowKellerMiksis/output_KellerMiksis_MildOscillation
-#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowKellerMiksis/output_KellerMiksis_MildOscillation
+#plot_file = ./tests/FlowKellerMiksis/output_KellerMiksis_MildOscillation
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowKellerMiksis/output_KellerMiksis_MildOscillation
 
 Riemann_Solver.type = hllc
 #Limiter.type        = weno3
 nghost = 4
-#integration.type    = RungeKutta
-#integration.rk.type = 3
+integration.type    = RungeKutta
+integration.rk.type = 3
 
 ### MESHING ###
 amr.plot_dt        = 2.5e-5         # 0.025 ms -- tighter sampling for oscillations
@@ -59,7 +59,7 @@ amr.blocking_factor = 2
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
 amr.max_level      = 0
-amr.n_cell         = 256 256     # match the converged-resolution KM-collapse run
+amr.n_cell         = 4096 4096     # match the converged-resolution KM-collapse run
 
 ### TIME STEPPING ###
 timestep                = 1.0e-7
@@ -70,8 +70,8 @@ dynamictimestep.min     = 1.0e-13
 cfl                     = 0.1 # 0.5
 
 ### DIMENSIONS ###
-geometry.prob_lo     = -0.10 -0.10 0.0
-geometry.prob_hi     =  0.10  0.10 0.0
+geometry.prob_lo     = -0.40 -0.40 0.0
+geometry.prob_hi     =  0.40  0.40 0.0
 geometry.is_periodic = 0 0 0
 stop_time            = 12.0e-3     # 5 ms -- captures 2-3 oscillation cycles
 

@@ -11,6 +11,8 @@ plot_file = ./tests/FlowRiemannUnitTests/output_Garrick
 Riemann_Solver.type = hllc
 Limiter.type        = weno3
 nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
 
 # Interface at x=0 (sharp transition)
 eta.ic.type = expression

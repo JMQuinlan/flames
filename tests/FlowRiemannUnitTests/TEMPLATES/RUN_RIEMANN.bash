@@ -27,6 +27,27 @@ LIMITER_LABELS=(
   WENO5
 )
 
+# Time integration schemes (AMReX_RKIntegrator.H tableau types).
+# Format used in input substitution:
+#   integration.type    = ${INTEGRATION_TYPE}
+#   integration.rk.type = ${INTEGRATION_RK_TYPE}
+# For ForwardEuler the rk.type is ignored by AMReX (we still set it to a
+# dummy 1 so the placeholder is always replaced).
+INTEGRATION_LABELS=(
+  ForwardEuler
+  Trapezoid
+  SSPRK3
+  RK4
+)
+
+# Map label -> (integration.type, integration.rk.type)
+declare -A INT_TYPE
+declare -A INT_RK_TYPE
+INT_TYPE[ForwardEuler]=ForwardEuler;   INT_RK_TYPE[ForwardEuler]=1
+INT_TYPE[Trapezoid]=RungeKutta;        INT_RK_TYPE[Trapezoid]=2
+INT_TYPE[SSPRK3]=RungeKutta;           INT_RK_TYPE[SSPRK3]=3
+INT_TYPE[RK4]=RungeKutta;              INT_RK_TYPE[RK4]=4
+
 # Test cases
 TESTS=(
   Toro1a
@@ -56,13 +77,11 @@ TEMPLATE_DIR=../tests/FlowRiemannUnitTests/TEMPLATES  # folder containing test-s
 
 for test in "${TESTS[@]}"; do
 
-  # Determine base test name (if needed for template, e.g., Toro1a -> Toro1)
   base_test=$test
 
   TEMPLATE_SHARP="${TEMPLATE_DIR}/input_${base_test}_shrp"
   TEMPLATE_DIFFUSE="${TEMPLATE_DIR}/input_${base_test}_diff"
 
-  # Checking to see if file exsists
   if [ ! -f "$TEMPLATE_SHARP" ]; then
     echo "Missing template: $TEMPLATE_SHARP"
     exit 1
@@ -73,51 +92,57 @@ for test in "${TESTS[@]}"; do
   fi
 
   for solver_label in "${SOLVER_LABELS[@]}"; do
-    # Convert to lowercase to call riemann class
     solver=${solver_label,,}
 
     for limiter_label in "${LIMITER_LABELS[@]}"; do
-      # Convert to lowercase to call limiter class (matches name= in C++)
       limiter=${limiter_label,,}
 
-      # =============================
-      # SHARP CASE
-      # =============================
-      echo "=== Running $test | $solver_label | $limiter_label | SHARP ==="
+      for integration_label in "${INTEGRATION_LABELS[@]}"; do
+        integration_type="${INT_TYPE[$integration_label]}"
+        integration_rk_type="${INT_RK_TYPE[$integration_label]}"
 
-      INPUT_FILE="tmp_${test}_${solver}_${limiter}_sharp.in"
-      OUTPUT_PATH="${OUTDIR}/${test}/output_${test}_${solver_label}_${limiter_label}_Sharp_Interface"
+        # =============================
+        # SHARP CASE
+        # =============================
+        echo "=== Running $test | $solver_label | $limiter_label | $integration_label | SHARP ==="
 
-      sed -e "s|SOLVER_NAME|$solver|g" \
-          -e "s|LIMITER_NAME|$limiter|g" \
-          -e "s|OUTPUT_PATH|$OUTPUT_PATH|g" \
-          "$TEMPLATE_SHARP" > "$INPUT_FILE"
-
-      mpirun -np $NP $EXEC "$INPUT_FILE" || true # Run shrp case
-      rm "$INPUT_FILE" # Remove file to clean work space
-
-      # =============================
-      # DIFFUSE CASES
-      # =============================
-      for eps in "${EPSILONS[@]}"; do
-        echo "=== Running $test | $solver_label | $limiter_label | DIFFUSE | eps=$eps ==="
-
-        INPUT_FILE="tmp_${test}_${solver}_${limiter}_diff_eps${eps}.in"
-        OUTPUT_PATH="${OUTDIR}/${test}/output_${test}_${solver_label}_${limiter_label}_epsilon_${eps}"
+        INPUT_FILE="tmp_${test}_${solver}_${limiter}_${integration_label,,}_sharp.in"
+        OUTPUT_PATH="${OUTDIR}/${test}/output_${test}_${solver_label}_${limiter_label}_${integration_label}_Sharp_Interface"
 
         sed -e "s|SOLVER_NAME|$solver|g" \
             -e "s|LIMITER_NAME|$limiter|g" \
+            -e "s|INTEGRATION_TYPE|$integration_type|g" \
+            -e "s|INTEGRATION_RK_TYPE|$integration_rk_type|g" \
             -e "s|OUTPUT_PATH|$OUTPUT_PATH|g" \
-            -e "s|EPSILON|$eps|g" \
-            "$TEMPLATE_DIFFUSE" > "$INPUT_FILE"
+            "$TEMPLATE_SHARP" > "$INPUT_FILE"
 
-        mpirun -np $NP $EXEC "$INPUT_FILE" || true # Run diff case
-        rm "$INPUT_FILE" # Remove file to clean work space
+        mpirun -np $NP $EXEC "$INPUT_FILE" || true # Run shrp case
+        rm "$INPUT_FILE"
+
+        # =============================
+        # DIFFUSE CASES
+        # =============================
+        for eps in "${EPSILONS[@]}"; do
+          echo "=== Running $test | $solver_label | $limiter_label | $integration_label | DIFFUSE | eps=$eps ==="
+
+          INPUT_FILE="tmp_${test}_${solver}_${limiter}_${integration_label,,}_diff_eps${eps}.in"
+          OUTPUT_PATH="${OUTDIR}/${test}/output_${test}_${solver_label}_${limiter_label}_${integration_label}_epsilon_${eps}"
+
+          sed -e "s|SOLVER_NAME|$solver|g" \
+              -e "s|LIMITER_NAME|$limiter|g" \
+              -e "s|INTEGRATION_TYPE|$integration_type|g" \
+              -e "s|INTEGRATION_RK_TYPE|$integration_rk_type|g" \
+              -e "s|OUTPUT_PATH|$OUTPUT_PATH|g" \
+              -e "s|EPSILON|$eps|g" \
+              "$TEMPLATE_DIFFUSE" > "$INPUT_FILE"
+
+          mpirun -np $NP $EXEC "$INPUT_FILE" || true
+          rm "$INPUT_FILE"
+
+        done
 
       done
-
     done
-
   done
 done
 

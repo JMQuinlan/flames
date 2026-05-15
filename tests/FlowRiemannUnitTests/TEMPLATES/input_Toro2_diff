@@ -6,12 +6,15 @@
 plot_file = OUTPUT_PATH
 Riemann_Solver.type = SOLVER_NAME
 Limiter.type = LIMITER_NAME
+integration.type    = INTEGRATION_TYPE
+integration.rk.type = INTEGRATION_RK_TYPE
 
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = EPSILON
 eta.ic.expression.region0 = "1.0 - (0.5 * (1.0 + tanh(x / epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
-amr.plot_int = 99999999
+amr.plot_int = -1
+amr.plot_dt   = 0.15
 
 ### MESHING ###
 amr.max_level = 0
@@ -29,6 +32,11 @@ geometry.is_periodic = 0 0 0
 timestep  = 5.0e-4
 stop_time = 0.15
 
+# Dynamic timestepping (CFL-driven; uses original timestep as upper cap)
+dynamictimestep.on  = 1
+dynamictimestep.max = 5.0e-4
+dynamictimestep.min = 1.0e-12
+
 m0.ic.constant.value = 0.0
 u0.ic.constant.value = 0.0
 q.ic.type = constant
@@ -37,7 +45,7 @@ q.ic.constant.value = 0.0
 ### HYDRO PARAM ###
 eos0.gamma = 1.4
 eos1.gamma = 1.4
-cfl   = 0.4
+cfl   = 0.5
 mu0   = 0.0
 mu1   = 0.0
 eos0.p0 = "0.0"
