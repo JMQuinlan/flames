@@ -81,6 +81,8 @@ OUTPUT_DIR = os.path.normpath(os.path.join(
     "FlowKellerMiksis", "output_KellerMiksis_MildOscillation",
 ))
 
+OUTPUT_DIR = os.path.normpath("mmfs1/home/ttryon/flames/bin/tests/FlowKellerMiksis/output_KellerMiksis_MildOscillation")
+
 IMG_DIR = os.path.join(_HERE, "Images")
 os.makedirs(IMG_DIR, exist_ok=True)
 

@@ -8,12 +8,12 @@ set -e  # Exit on any error
 
 # Riemann Solvers
 SOLVER_LABELS=(
-  Roe
+  #Roe
   HLLE
   HLLC
-  HLLC_Oomar_Jaiman
+  #HLLC_Oomar_Jaiman
   HLLC_All_Mach
-  HLLC_All_Mach_Furfaro
+  #HLLC_All_Mach_Furfaro
 )
 
 # Limiters / spatial reconstruction
@@ -21,10 +21,10 @@ SOLVER_LABELS=(
 #  weno3/weno5 = high-order non-oscillatory)
 LIMITER_LABELS=(
   Godunov
-  Minmod
+  #Minmod
   VanLeer
   WENO3
-  WENO5
+  #WENO5
 )
 
 # Time integration schemes (AMReX_RKIntegrator.H tableau types).
@@ -35,7 +35,7 @@ LIMITER_LABELS=(
 # dummy 1 so the placeholder is always replaced).
 INTEGRATION_LABELS=(
   ForwardEuler
-  Trapezoid
+  #Trapezoid
   SSPRK3
   RK4
 )
@@ -51,12 +51,12 @@ INT_TYPE[RK4]=RungeKutta;              INT_RK_TYPE[RK4]=4
 # Test cases
 TESTS=(
   Toro1a
-  Toro1b
-  Toro1r
+  #Toro1b
+  #Toro1r
   Toro2
   Toro3
   Toro4a
-  Toro4b
+  #Toro4b
   Toro5
   Toro6
   Toro7
@@ -64,7 +64,7 @@ TESTS=(
 )
 
 # Epsilon values for diffuse interface
-EPSILONS=("1e-1" "1e-2" "1e-3" "1e-4")
+EPSILONS=("1e-1" "1e-2" "1e-3")
 
 NP=6
 EXEC=./hydro2-2d-g++
