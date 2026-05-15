@@ -134,7 +134,10 @@ sqr_source_mode      = ch_emergent
 #  path is now the only Σ_K implementation, applied unconditionally inside
 #  RHS_PerPhase. ApplyKortewegStress and the legacy Brackbill block have
 #  both been deleted from Hydro2.)
-p_int_method        = 4     # 0: Off, 1: pressure average, 2: eta weighted pressure. 3: acoustic impedance matched pressure 4: mass-fraction weighted pressure
+# p_int_method = 4   (legacy key; inert when sqr_legacy_p_int_method = 0 below.)
+#                    Replaced by closure.{un,E}_pint_method under the new
+#                    framework — see HYDRO CLOSURE STRATEGIES block below.
+#                    Ignored under the active Relax (S3) strategy regardless.
 Riemann_Solver.type = hllc
 kappa_method        = 1
 smooth_kernel_size  = 3
@@ -189,5 +192,62 @@ ch_mobility_degenerate = 1
 # heat-conduction-limited Stefan rate. Tune up/down based on observed
 # m0_eff_max vs analytical m0(t) = rho_g * beta * sqrt(alpha/(t+t_off)).
 ch_mobility_nom        = 0
+
+# HYDRO CLOSURE STRATEGIES (Phase B+)
+# `closure.{un,E}_strategy` selects the per-quantity SQR closure for
+# momentum and energy. Default "constitutive" uses the (p_k - p_int) ∇η
+# (resp. (p_k u_k - p_int u_int)·∇η) form that vanishes at intensive
+# equilibrium — so the per-phase pressure ground state survives and the
+# spurious interfacial waves seen with the asymmetric pillbox (S1) closure
+# do not get excited. The interface average p_int / u_int is selected by
+# `closure.{un,E}_pint_method`: 1=arith (default), 2=eta-weighted,
+# 3=acoustic-impedance, 4=mass-fraction. For this gas-liquid Riemann test
+# the historical legacy choice was `p_int_method = 4` (mass-fraction);
+# carried over below as `closure.{un,E}_pint_method = 4` for documentation,
+# inert under the active Relax (S3) strategy.
+# Other strategies: jump (S2), relax (S3), pillbox (asymmetric S1, research),
+# pillbox_symmetric (S1', research) — see Hydro2.H closure-strategy block.
+# closure.un_strategy    = constitutive
+# closure.E_strategy     = constitutive
+#
+# --- S3 (capacity-scaled transfer flux) validation ---------------------------
+# IMPORTANT: relax/jump only take effect on the new-framework path, i.e. with
+# sqr_legacy_p_int_method = 0 (set below). With the legacy switch nonzero the
+# un/E/rho/ut_close dispatch is bypassed entirely.
+#
+# S3 form: J_Q = -C_Q * v_Q * <<phi>>, applied via the |grad eta| flux template.
+# The intensive jump decays at the band-local rate v_Q*|grad eta|, i.e. an
+# emergent relaxation time tau_loc = 1/(v_Q*|grad eta|). Here |grad eta|_max =
+# 0.5/epsilon = 62.5 (epsilon = 8e-3) and dt = 2.5e-4 (cfl = 0.4 cap). For
+# explicit-Euler stability with dt/tau_loc ~ 0.1 (~10 steps to relax),
+#   v_Q = 0.1 / (dt * |grad eta|_max) ≈ 6.4 m/s.
+# Shock-band transit (~6*epsilon at c ~ 2.5–3 m/s) is ~64 dt ~ 6 tau_loc, so a
+# fluid element fully equilibrates while crossing the diffuse band.
+# NB this is a *soft* relaxation choice (v_Q ~ 2–3 × c). A stiffer near-sharp
+# limit (v_Q >> c) would require implicit / sub-stepped relaxation to stay
+# stable under the explicit hydro dt — not yet implemented.
+#
+# Normal velocity (S3): J_un = -rho_eff * v_un * (u_n,0 - u_n,1).
+# NB <<u_n>> = 0 is an exact kinematic constraint, so this is a stiff penalty
+# (faithful only as v_un -> inf), not a physical finite-resistance interface.
+closure.un_strategy    = relax
+closure.un_vel         = 6.4    # transfer velocity [m/s]; tau_loc ~ 1/(v_un*|grad eta|)
+# Energy / temperature (S3): J_E = -C_E * v_E * (T_0 - T_1).
+closure.E_strategy     = relax
+closure.E_vel          = 6.4    # transfer velocity [m/s]; tau_loc ~ 1/(v_E*|grad eta|)
+# Tangential velocity: inviscid case here, u_t is unconstrained — leave at the
+# Constitutive no-op stub (S1/angular-momentum, A10, not yet implemented).
+closure.ut_strategy    = constitutive
+# Density / phase change (S3): relaxes the chemical-potential jump
+# <<mu_chem>> = dmu_bulk = f_g - f_l toward zero. Needs ch_thermo_consistent = 1
+# (else dmu_bulk is zeroed and this is inert). Enabling it turns the pure-
+# Riemann test into Riemann + phase change, so uncomment deliberately:
+# ch_thermo_consistent          = 1
+# closure.rho_strategy   = relax
+# closure.rho_vel        = 6.4    # transfer velocity [m/s]
+#
+sqr_legacy_p_int_method       = 0      # 0 = new closure-strategy framework (REQUIRED for relax/jump)
+closure.un_pint_method = 4      # only used by the Constitutive strategy; ignored under relax
+closure.E_pint_method  = 4      # only used by the Constitutive strategy; ignored under relax
 
 nscbc.enabled = false
