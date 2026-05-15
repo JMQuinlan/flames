@@ -221,9 +221,12 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // out if those coefficients are missing rather than silently falling
         // through, since a missing default would mask a config bug. See plan
         // Phase B step 6 + Open Q7.
+        // TODO (cleanup): consider replacing the explicit string→if-else→Util::Abort
+        // dispatch below with `pp_query_validate(...)` for the *_strategy keys; would
+        // move the allowed-set check into Alamo's input validator and improve docs.
         {
             std::string s_un = "constitutive";
-            pp.query("closure.un_strategy", s_un);
+            pp.query_default("closure.un_strategy", s_un, std::string("constitutive"));
             if      (s_un == "constitutive")        value.un_close.strategy = Hydro2::ClosureStrategy::Constitutive;
             else if (s_un == "jump")                value.un_close.strategy = Hydro2::ClosureStrategy::Jump;
             else if (s_un == "relax")               value.un_close.strategy = Hydro2::ClosureStrategy::Relax;
@@ -232,8 +235,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             else Util::Abort(INFO, "closure.un_strategy must be one of: constitutive, jump, relax, pillbox, pillbox_symmetric (got '", s_un, "')");
 
             Set::Scalar tmp_l = -1.0, tmp_v = -1.0;
-            pp.query("closure.un_lambda", tmp_l);
-            pp.query("closure.un_vel",    tmp_v);
+            pp.query_default("closure.un_lambda", tmp_l, Set::Scalar(-1.0));
+            pp.query_default("closure.un_vel",    tmp_v, Set::Scalar(-1.0));
             if (value.un_close.strategy == Hydro2::ClosureStrategy::Jump  && !(tmp_l > 0.0))
                 Util::Abort(INFO, "closure.un_strategy=jump requires closure.un_lambda > 0");
             if (value.un_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_v > 0.0))
@@ -241,14 +244,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             if (tmp_l > 0.0) value.un_close.lambda = tmp_l;
             if (tmp_v > 0.0) value.un_close.vel    = tmp_v;
 
-            pp.query("closure.un_pint_method", value.un_close.pint_method);
+            pp.query_default("closure.un_pint_method", value.un_close.pint_method, 1);
             if (value.un_close.strategy == Hydro2::ClosureStrategy::Constitutive
                 && (value.un_close.pint_method < 1 || value.un_close.pint_method > 4))
                 Util::Abort(INFO, "closure.un_pint_method must be 1 (arithmetic), 2 (eta-weighted), 3 (acoustic-impedance), or 4 (mass-fraction) when un_strategy=constitutive (got ", value.un_close.pint_method, ")");
         }
         {
             std::string s_E = "constitutive";
-            pp.query("closure.E_strategy", s_E);
+            pp.query_default("closure.E_strategy", s_E, std::string("constitutive"));
             if      (s_E == "constitutive")        value.E_close.strategy = Hydro2::ClosureStrategy::Constitutive;
             else if (s_E == "jump")                value.E_close.strategy = Hydro2::ClosureStrategy::Jump;
             else if (s_E == "relax")               value.E_close.strategy = Hydro2::ClosureStrategy::Relax;
@@ -257,8 +260,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             else Util::Abort(INFO, "closure.E_strategy must be one of: constitutive, jump, relax, pillbox, pillbox_symmetric (got '", s_E, "')");
 
             Set::Scalar tmp_l = -1.0, tmp_v = -1.0;
-            pp.query("closure.E_lambda", tmp_l);
-            pp.query("closure.E_vel",    tmp_v);
+            pp.query_default("closure.E_lambda", tmp_l, Set::Scalar(-1.0));
+            pp.query_default("closure.E_vel",    tmp_v, Set::Scalar(-1.0));
             if (value.E_close.strategy == Hydro2::ClosureStrategy::Jump  && !(tmp_l > 0.0))
                 Util::Abort(INFO, "closure.E_strategy=jump requires closure.E_lambda > 0");
             if (value.E_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_v > 0.0))
@@ -266,22 +269,22 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             if (tmp_l > 0.0) value.E_close.lambda = tmp_l;
             if (tmp_v > 0.0) value.E_close.vel    = tmp_v;
 
-            pp.query("closure.E_pint_method", value.E_close.pint_method);
+            pp.query_default("closure.E_pint_method", value.E_close.pint_method, 1);
             if (value.E_close.strategy == Hydro2::ClosureStrategy::Constitutive
                 && (value.E_close.pint_method < 1 || value.E_close.pint_method > 4))
                 Util::Abort(INFO, "closure.E_pint_method must be 1 (arithmetic), 2 (eta-weighted), 3 (acoustic-impedance), or 4 (mass-fraction) when E_strategy=constitutive (got ", value.E_close.pint_method, ")");
         }
         {
             std::string s_rho = "constitutive";
-            pp.query("closure.rho_strategy", s_rho);
+            pp.query_default("closure.rho_strategy", s_rho, std::string("constitutive"));
             if      (s_rho == "constitutive")  value.rho_close.strategy = Hydro2::ClosureStrategy::Constitutive;
             else if (s_rho == "jump")          value.rho_close.strategy = Hydro2::ClosureStrategy::Jump;
             else if (s_rho == "relax")         value.rho_close.strategy = Hydro2::ClosureStrategy::Relax;
             else Util::Abort(INFO, "closure.rho_strategy must be one of: constitutive, jump, relax (got '", s_rho, "')");
 
             Set::Scalar tmp_l = -1.0, tmp_v = -1.0;
-            pp.query("closure.rho_lambda", tmp_l);
-            pp.query("closure.rho_vel",    tmp_v);
+            pp.query_default("closure.rho_lambda", tmp_l, Set::Scalar(-1.0));
+            pp.query_default("closure.rho_vel",    tmp_v, Set::Scalar(-1.0));
             if (value.rho_close.strategy == Hydro2::ClosureStrategy::Jump  && !(tmp_l > 0.0))
                 Util::Abort(INFO, "closure.rho_strategy=jump requires closure.rho_lambda > 0");
             if (value.rho_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_v > 0.0))
@@ -291,15 +294,15 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         }
         {
             std::string s_ut = "constitutive";
-            pp.query("closure.ut_strategy", s_ut);
+            pp.query_default("closure.ut_strategy", s_ut, std::string("constitutive"));
             if      (s_ut == "constitutive")  value.ut_close.strategy = Hydro2::ClosureStrategy::Constitutive;
             else if (s_ut == "jump")          value.ut_close.strategy = Hydro2::ClosureStrategy::Jump;
             else if (s_ut == "relax")         value.ut_close.strategy = Hydro2::ClosureStrategy::Relax;
             else Util::Abort(INFO, "closure.ut_strategy must be one of: constitutive, jump, relax (got '", s_ut, "')");
 
             Set::Scalar tmp_l = -1.0, tmp_v = -1.0;
-            pp.query("closure.ut_lambda", tmp_l);
-            pp.query("closure.ut_vel",    tmp_v);
+            pp.query_default("closure.ut_lambda", tmp_l, Set::Scalar(-1.0));
+            pp.query_default("closure.ut_vel",    tmp_v, Set::Scalar(-1.0));
             if (value.ut_close.strategy == Hydro2::ClosureStrategy::Jump  && !(tmp_l > 0.0))
                 Util::Abort(INFO, "closure.ut_strategy=jump requires closure.ut_lambda > 0");
             if (value.ut_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_v > 0.0))
@@ -2313,6 +2316,9 @@ Hydro2::ApplySQRSource(int lev,
       }
       amrex::ParallelDescriptor::ReduceRealMax(gmax);
       amrex::ParallelDescriptor::ReduceIntSum(n_band);
+      amrex::Print() << "[SQR] un_strat=" << un_strat_
+                 << "  E_strat=" << E_strat_
+                 << "  un_vel=" << un_vel_ << "\n";
       amrex::Print() << "[SQR] lev=" << lev
                      << "  max|grad_eta|=" << gmax
                      << "  n_band_cells=" << n_band << "\n";
