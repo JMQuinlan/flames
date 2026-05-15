@@ -6,9 +6,9 @@
 # Figure 4 - Gas-Liquid Riemann Problem
 
 ### OUTPUT ###
-plot_file = ./tests/FlowSQR_tests/output_Garrick_HP_20260504
+plot_file = ./tests/FlowSQR_tests/output_Garrick
 amr.plot_dt = 0.01
-amr.plot_int = 113
+amr.plot_int = 47
 
 ### MESHING ###
 amr.max_level = 0
