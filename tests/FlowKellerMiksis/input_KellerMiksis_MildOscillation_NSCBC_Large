@@ -49,8 +49,8 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowKellerMiksis/output_KellerMi
 Riemann_Solver.type = hllc
 #Limiter.type        = weno3
 nghost = 4
-integration.type    = RungeKutta
-integration.rk.type = 3
+#integration.type    = RungeKutta
+#integration.rk.type = 3
 
 ### MESHING ###
 amr.plot_dt        = 2.5e-5         # 0.025 ms -- tighter sampling for oscillations
