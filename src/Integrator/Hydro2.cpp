@@ -448,7 +448,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //value.RegisterNewFab(value.h0_thermal_mf,   &value.bc_nothing, 1, nghost, "h0_thermal", false, false);
 
         value.RegisterNewFab(value.pressure_1_mf,    value.energy_bc,  1, nghost, "pressure_1", true, false);
-        value.RegisterNewFab(value.velocity_1_mf,    &value.bc_nothing,  2, nghost, "velocity_1", false, false, { "x", "y" });
+        value.RegisterNewFab(value.velocity_1_mf,    &value.bc_nothing,  2, nghost, "velocity_1", true, false, { "x", "y" });
         value.RegisterNewFab(value.vorticity_1_mf,   &value.bc_nothing,  1, nghost, "vorticity_1", false, false);
         value.RegisterNewFab(value.c_1_mf,           &value.bc_nothing,  1, nghost, "c_1", true, false);
 
@@ -467,7 +467,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //value.RegisterNewFab(value.h1_thermal_mf,   &value.bc_nothing, 1, nghost, "h1_thermal", false, false);
 
         value.RegisterNewFab(value.pressure_0_mf,    value.energy_bc,  1, nghost, "pressure_0", true, false);
-        value.RegisterNewFab(value.velocity_0_mf,    &value.bc_nothing,  2, nghost, "velocity_0", false, false, { "x", "y" });
+        value.RegisterNewFab(value.velocity_0_mf,    &value.bc_nothing,  2, nghost, "velocity_0", true, false, { "x", "y" });
         value.RegisterNewFab(value.vorticity_0_mf,   &value.bc_nothing,  1, nghost, "vorticity_0", false, false);
         value.RegisterNewFab(value.c_0_mf,           &value.bc_nothing,  1, nghost, "c_0", true, false);
 
