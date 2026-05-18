@@ -167,6 +167,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("apply_surface_tension", value.apply_surface_tension, false); // Apply surface tension when solving, default: true --> "Apply Surface Tension"
         pp_query_default("apply_weight", value.apply_weight, false);                  // Apply weight when solving, default: false --> "No Weight"
         pp_query_default("apply_viscous", value.apply_viscous, false);                // Per-phase viscous stress (constant mu_k per phase), default: false
+        pp_query_default("apply_nc_pressure", value.apply_nc_pressure, false);        // Non-conservative pressure -(F_k·∇η_k)/η_k (SQR volume-fraction flux correction)
         pp_query_default("apply_heat_conduction", value.apply_heat_conduction, 0);    // Per-phase heat conduction via explicit-Euler operator split
         pp_query_default("write_integrals", value.write_integrals, 1);               // Write volume-integrated conserved quantities to integrals.dat each coarse step
         pp_query_default("k_0", value.k_0, 0.0);                                // [W/(m K)] gas-phase thermal conductivity
@@ -1725,6 +1726,7 @@ void Hydro2::RHS_PerPhase(int lev,
     const Real g_          = g;
     const int  do_weight   = apply_weight;
     const int  do_viscous  = apply_viscous;
+    const int  do_nc_press = apply_nc_pressure;
     const Real mu_         = mu_k;
     const Real mu_b_       = mu_k_b;
     const Real lam_prime   = mu_b_ - (Real(2.0)/Real(3.0))*mu_;
@@ -2076,6 +2078,58 @@ void Hydro2::RHS_PerPhase(int lev,
                 M_rhs(i,j,k,0) += divtau_x;
                 M_rhs(i,j,k,1) += divtau_y;
                 E_rhs(i,j,k)   += divtau_x*u_c + divtau_y*v_c + tau_gradu;
+            }
+
+            // ----- Non-conservative pressure: -(F_k · ∇η_k) / η_k -----
+            // The SQR theory (§4) writes per-phase equations in the
+            // volume-fraction-weighted form η_k ∂_t q_k + ∇·(η_k F_k) = …,
+            // but the HLLC Riemann solve above computes the intrinsic flux
+            // divergence ∇·F_k. The non-conservative pressure is the
+            // difference between the two:
+            //   (1/η_k)∇·(η_k F_k) = ∇·F_k + (F_k · ∇η_k)/η_k.
+            // This correction adds the missing -(F_k · ∇η_k)/η_k to each
+            // conserved equation (mass, momentum, energy). Without it, the
+            // mixture pressure gradient (p_0 − p_1)∇η that drives inter-phase
+            // Riemann problems is absent from the per-phase RHS under
+            // non-constitutive SQR closures (relax, jump).
+            //
+            // The ratio |∇η_k|/η_k remains bounded (~2/ε) on the equilibrium
+            // tanh profile, so no true singularity exists; eta_k_safe is a
+            // discrete safety floor only.
+            if (do_nc_press)
+            {
+                // Cell-centered ∇η (central differences)
+                Real deta_dx = (eta_arr(i+1,j,k) - eta_arr(i-1,j,k)) * Real(0.5) * dx_inv;
+                Real deta_dy = (eta_arr(i,j+1,k) - eta_arr(i,j-1,k)) * Real(0.5) * dy_inv;
+
+                // η_k and ∇η_k: phase 1 → (η, +∇η), phase 0 → (1−η, −∇η)
+                Real eta_loc = eta_arr(i,j,k);
+                Real eta_k_val  = (pidx_ == 1) ? eta_loc : (Real(1.0) - eta_loc);
+                Real eta_k_safe = amrex::max(eta_k_val, Real(1.0e-8));
+                Real sign_k     = (pidx_ == 1) ? Real(1.0) : Real(-1.0);
+                Real deta_k_dx  = sign_k * deta_dx;
+                Real deta_k_dy  = sign_k * deta_dy;
+
+                // Per-phase pressure from EOS:
+                //   CPG (phase 0): p = (γ−1)UE + pref
+                //   Tammann (phase 1): p = (γ−1)UE − γπ + pref
+                Real KE_loc = Real(0.5) * (M_arr(i,j,k,0)*M_arr(i,j,k,0)
+                                         + M_arr(i,j,k,1)*M_arr(i,j,k,1)) / rho_c;
+                Real UE_loc = E_arr(i,j,k) - KE_loc;
+                Real p_k    = (gamma_k - Real(1.0)) * UE_loc - gamma_k * pi_k + pref_;
+
+                // u_k · ∇η_k
+                Real u_dot_deta_k = u_c * deta_k_dx + v_c * deta_k_dy;
+
+                // Mass:     -(ρ_k u_k · ∇η_k) / η_k
+                rho_rhs(i,j,k) += -(rho_arr(i,j,k) * u_dot_deta_k) / eta_k_safe;
+
+                // Momentum: -[ρ_k u_{k,i} (u_k · ∇η_k) + p_k (∇η_k)_i] / η_k
+                M_rhs(i,j,k,0) += -(M_arr(i,j,k,0) * u_dot_deta_k + p_k * deta_k_dx) / eta_k_safe;
+                M_rhs(i,j,k,1) += -(M_arr(i,j,k,1) * u_dot_deta_k + p_k * deta_k_dy) / eta_k_safe;
+
+                // Energy:   -[(E_k + p_k)(u_k · ∇η_k)] / η_k
+                E_rhs(i,j,k) += -((E_arr(i,j,k) + p_k) * u_dot_deta_k) / eta_k_safe;
             }
         });
     }

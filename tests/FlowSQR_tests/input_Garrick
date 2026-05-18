@@ -8,7 +8,7 @@
 ### OUTPUT ###
 plot_file = ./tests/FlowSQR_tests/output_Garrick
 amr.plot_dt = 0.01
-# amr.plot_int = 1
+amr.plot_int = 1
 
 ### MESHING ###
 amr.max_level = 0
@@ -80,7 +80,8 @@ velocity_1.ic.constant.value = 0.0 0.0
 pressure_1.ic.type = constant
 pressure_1.ic.constant.value = 3.059e-4
 
-cp_1 = "1.4"
+# cp_1 = "1.4"
+cp_1 = "5.5"
 cv_1 = "1.0"
 
 ### ETA BC  ###
@@ -222,9 +223,11 @@ ch_mobility_nom        = 0.1
 # (faithful only as v_un -> inf), not a physical finite-resistance interface.
 closure.un_strategy    = relax
 closure.un_vel         = 6.4e-4    # transfer velocity [m/s]; tau_loc ~ 1/(v_un*|grad eta|)
+# closure.un_strategy    = constitutive
 # Energy / temperature (S3): J_E = -C_E * v_E * (T_0 - T_1).
 closure.E_strategy     = relax
 closure.E_vel          = 6.4e-4    # transfer velocity [m/s]; tau_loc ~ 1/(v_E*|grad eta|)
+# closure.E_strategy     = constitutive
 # Tangential velocity: inviscid case here, u_t is unconstrained — leave at the
 # Constitutive no-op stub (S1/angular-momentum, A10, not yet implemented).
 closure.ut_strategy    = constitutive
