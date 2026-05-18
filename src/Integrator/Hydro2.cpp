@@ -998,10 +998,10 @@ void Hydro2::Mix(int lev)
 
 
             //--------------------------------------------------------------
-            // 7. Mixture pressure: Y-weighted of per-phase pressures.
+            // 7. Mixture pressure: volume-weighted (α_k) of per-phase pressures.
             //    p0(i,j,k) = p_1, p1(i,j,k) = p_0 (local naming).
             //--------------------------------------------------------------
-            Real p = Y_0_ * p1(i,j,k) + Y_1_ * p0(i,j,k) + pref;
+            Real p = (Real(1.0) - e) * p1(i,j,k) + e * p0(i,j,k) + pref;
             if (!std::isfinite(p) || p < 0) p = 1e-10;
 
             p_mix(i,j,k) = p;
@@ -1128,9 +1128,10 @@ void Hydro2::MixDiagnostic(int lev)
             Thermo_Interp::Mix_MassFraction_A_B(
                 e, safe_r0, safe_r1, Y0_, Y1_, rho_mix_chk);
 
-            // Y-weighted mixture pressure (TODO: revisit alongside a more
-            // complete two-phase sound-speed theory).
-            p_mix(i,j,k) = Y0_ * p0_ + Y1_ * p1_;
+            // Volume-weighted mixture pressure: α_0 p_0 + α_1 p_1.
+            // This is the physical mixture pressure that appears in the
+            // mixture momentum flux Σ α_k (ρ_k u_k⊗u_k + p_k I).
+            p_mix(i,j,k) = one_e * p0_ + e * p1_;
 
             // Y-weighted (gamma, pi) — mass-fraction analogue of Allaire A/B.
             Real gm, pm;
@@ -3081,11 +3082,11 @@ Hydro2::RHS(int lev,
             UE_arr(i,j,k) = UE;
 
             //------------------------------------------------------------------
-            // Y-weighted mixture pressure / sound speed / temperature.
-            // (TODO: revisit alongside a more complete two-phase sound-speed
-            //  theory; max(c_e0, c_e1) is used for CFL elsewhere.)
+            // Volume-weighted mixture pressure: α_0 p_0 + α_1 p_1.
+            // This is the physical mixture pressure from the momentum flux
+            // Σ α_k (ρ_k u_k⊗u_k + p_k I).
             //------------------------------------------------------------------
-            Real p_mix_local = Y0_ * p_e0_loc + Y1_ * p_e1_loc;
+            Real p_mix_local = (Real(1.0) - eta) * p_e0_loc + eta * p_e1_loc;
             if (p_mix_local > Real(1e15)) p_mix_local = Real(1e15);
             if (p_mix_local < p_floor_eos) p_mix_local = p_floor_eos;
             p_arr(i,j,k) = p_mix_local;
@@ -6018,10 +6019,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             if (!std::isfinite(UE_mass(i, j, k)) || UE_mass(i, j, k) < 0.0)
                 UE_mass(i, j, k) = 0.0;
 
-            // Y-weighted mixture pressure from per-phase EOS. NaN-safe clamp.
-            // (TODO: revisit as part of a more complete two-phase pressure /
-            //  sound-speed theory.)
-            p(i, j, k) = Y0_loc * p_e0_loc + Y1_loc * p_e1_loc;
+            // Volume-weighted mixture pressure: α_0 p_0 + α_1 p_1.
+            Set::Scalar eta_loc = eta(i,j,k);
+            p(i, j, k) = (Set::Scalar(1.0) - eta_loc) * p_e0_loc + eta_loc * p_e1_loc;
             if (!std::isfinite(p(i, j, k)) || p(i, j, k) < 0.0)
                 p(i, j, k) = 1e-10;
 
