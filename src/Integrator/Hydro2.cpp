@@ -844,27 +844,27 @@ void Hydro2::Mix(int lev)
     {
         const Box& bx = mfi.validbox();
 
-        // Inputs
+        // Inputs — subscript matches phase: 0 = eta=0 (CPG/gas), 1 = eta=1 (SG/liquid)
         auto eta    = eta_mf[lev]->const_array(mfi);
 
-        auto rho0   = density_1_mf[lev]->const_array(mfi);
-        auto rho1   = density_0_mf[lev]->const_array(mfi);
+        auto rho0   = density_0_mf[lev]->const_array(mfi);
+        auto rho1   = density_1_mf[lev]->const_array(mfi);
 
-        auto v0     = velocity_1_mf[lev]->const_array(mfi);
-        auto v1     = velocity_0_mf[lev]->const_array(mfi);
+        auto v0     = velocity_0_mf[lev]->const_array(mfi);
+        auto v1     = velocity_1_mf[lev]->const_array(mfi);
 
-        auto p0     = pressure_1_mf[lev]->const_array(mfi);
-        auto p1     = pressure_0_mf[lev]->const_array(mfi);
+        auto p0     = pressure_0_mf[lev]->const_array(mfi);
+        auto p1     = pressure_1_mf[lev]->const_array(mfi);
 
-        // Outputs (per-phase conserved — will become primary state in Stage 3)
-        auto E0     = energy_1_mf[lev]->array(mfi);
-        auto E1     = energy_0_mf[lev]->array(mfi);
-        auto M0     = momentum_1_mf[lev]->array(mfi);
-        auto M0_old = momentum_1_old_mf[lev]->array(mfi);
-        auto M1     = momentum_0_mf[lev]->array(mfi);
-        auto M1_old = momentum_0_old_mf[lev]->array(mfi);
-        auto E0_old = energy_1_old_mf[lev]->array(mfi);
-        auto E1_old = energy_0_old_mf[lev]->array(mfi);
+        // Outputs (per-phase conserved — primary state in Stage 3)
+        auto E0     = energy_0_mf[lev]->array(mfi);
+        auto E1     = energy_1_mf[lev]->array(mfi);
+        auto M0     = momentum_0_mf[lev]->array(mfi);
+        auto M0_old = momentum_0_old_mf[lev]->array(mfi);
+        auto M1     = momentum_1_mf[lev]->array(mfi);
+        auto M1_old = momentum_1_old_mf[lev]->array(mfi);
+        auto E0_old = energy_0_old_mf[lev]->array(mfi);
+        auto E1_old = energy_1_old_mf[lev]->array(mfi);
 
         // Mixture fields
         auto rho      = density_mf[lev]->array(mfi);
@@ -891,41 +891,39 @@ void Hydro2::Mix(int lev)
             Real e = eta(i,j,k);
 
             //--------------------------------------------------------------
-            // 1. Compute energy of each phase from pressure (your request)
+            // 1. Compute energy of each phase from pressure
             //--------------------------------------------------------------
 
-            // ---------------- Phase 0 ----------------
+            // ---------------- Phase 0 (eta=0, CPG) ----------------
             Real r0 = rho0(i,j,k);
             Real u0x = v0(i,j,k,0);
             Real u0y = v0(i,j,k,1);
 
             Real KE0 = 0.5 * r0 * (u0x*u0x + u0y*u0y);
-            Real UE0 = (p0(i,j,k) + gamma_1*pi_1) / (gamma_1 - 1.0);
+            Real UE0 = (p0(i,j,k) + gamma_0*pi_0) / (gamma_0 - 1.0);
             if (UE0 < 0) UE0 = 0;
 
-            E0(i,j,k) = KE0 + UE0;       // total energy per volume
+            E0(i,j,k) = KE0 + UE0;
             E0_old(i,j,k) = E0(i,j,k);
 
-            // Per-phase momentum (primary conserved field for Stage 3)
             M0(i,j,k,0) = r0 * u0x;
             M0(i,j,k,1) = r0 * u0y;
             M0_old(i,j,k,0) = M0(i,j,k,0);
             M0_old(i,j,k,1) = M0(i,j,k,1);
 
 
-            // ---------------- Phase 1 ----------------
+            // ---------------- Phase 1 (eta=1, SG) ----------------
             Real r1 = rho1(i,j,k);
             Real u1x = v1(i,j,k,0);
             Real u1y = v1(i,j,k,1);
 
             Real KE1 = 0.5 * r1 * (u1x*u1x + u1y*u1y);
-            Real UE1 = (p1(i,j,k) + gamma_0*pi_0) / (gamma_0 - 1.0);
+            Real UE1 = (p1(i,j,k) + gamma_1*pi_1) / (gamma_1 - 1.0);
             if (UE1 < 0) UE1 = 0;
 
-            E1(i,j,k) = KE1 + UE1;       // total energy per volume
+            E1(i,j,k) = KE1 + UE1;
             E1_old(i,j,k) = E1(i,j,k);
 
-            // Per-phase momentum (primary conserved field for Stage 3)
             M1(i,j,k,0) = r1 * u1x;
             M1(i,j,k,1) = r1 * u1y;
             M1_old(i,j,k,0) = M1(i,j,k,0);
@@ -935,7 +933,7 @@ void Hydro2::Mix(int lev)
             //--------------------------------------------------------------
             // 2. Mixture density (linear in η)
             //--------------------------------------------------------------
-            Real rm = e*r0 + (1.0-e)*r1;
+            Real rm = (1.0-e)*r0 + e*r1;
             rho(i,j,k)     = rm;
             rho_old(i,j,k) = rm;
 
@@ -943,8 +941,8 @@ void Hydro2::Mix(int lev)
             //--------------------------------------------------------------
             // 3. Mixture momentum (conservative mixing)
             //--------------------------------------------------------------
-            Real Mx = e*r0*u0x + (1.0-e)*r1*u1x;
-            Real My = e*r0*u0y + (1.0-e)*r1*u1y;
+            Real Mx = (1.0-e)*r0*u0x + e*r1*u1x;
+            Real My = (1.0-e)*r0*u0y + e*r1*u1y;
 
             M(i,j,k,0)      = Mx;
             M(i,j,k,1)      = My;
@@ -965,7 +963,7 @@ void Hydro2::Mix(int lev)
             //--------------------------------------------------------------
             // 5. Mixture total energy (linear in η)
             //--------------------------------------------------------------
-            Real Ev = e*E0(i,j,k) + (1.0-e)*E1(i,j,k);
+            Real Ev = (1.0-e)*E0(i,j,k) + e*E1(i,j,k);
 
             E_vol(i,j,k)      = Ev;
             E_vol_old(i,j,k)  = Ev;
@@ -977,14 +975,11 @@ void Hydro2::Mix(int lev)
 
             //--------------------------------------------------------------
             // 6. Mass-fraction weights and Y-weighted (gamma, pi) for the
-            //    mixture diagnostic mfabs. Local convention here:
-            //      r0 = rho at eta=1 phase   (legacy)
-            //      r1 = rho at eta=0 phase   (legacy)
+            //    mixture diagnostic mfabs.
             //--------------------------------------------------------------
             double Y_0_, Y_1_, rho_mix_unused;
             Thermo_Interp::Mix_MassFraction_A_B(
-                e, /*rho0_eta=*/r1, /*rho1_eta=*/r0,
-                Y_0_, Y_1_, rho_mix_unused);
+                e, r0, r1, Y_0_, Y_1_, rho_mix_unused);
 
             double gmix, pimix;
             Thermo_Interp::MixGammaPi_MassFraction(
@@ -998,10 +993,9 @@ void Hydro2::Mix(int lev)
 
 
             //--------------------------------------------------------------
-            // 7. Mixture pressure: volume-weighted (α_k) of per-phase pressures.
-            //    p0(i,j,k) = p_1, p1(i,j,k) = p_0 (local naming).
+            // 7. Mixture pressure: volume-weighted α_0 p_0 + α_1 p_1.
             //--------------------------------------------------------------
-            Real p = (Real(1.0) - e) * p1(i,j,k) + e * p0(i,j,k) + pref;
+            Real p = (Real(1.0) - e) * p0(i,j,k) + e * p1(i,j,k) + pref;
             if (!std::isfinite(p) || p < 0) p = 1e-10;
 
             p_mix(i,j,k) = p;
