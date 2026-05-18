@@ -1864,8 +1864,9 @@ void Hydro2::RHS_PerPhase(int lev,
                 kfd.dn_eta    = dn;
                 kfd.dt_eta    = dt;
                 kfd.lap_eta   = lapf;
-                kfd.kappa     = Y_self * kappa_ch_;
-                kfd.q_eta     = Y_self * Q_global(eta_face);
+                kfd.kappa        = Y_self * kappa_ch_;
+                kfd.q_eta        = Y_self * Q_global(eta_face);
+                kfd.skip_energy  = 1;  // energy handled via non-conservative (div Σ_K)·u + Σ_K:∇u below
             };
 
             auto build_kfd_y = [=] AMREX_GPU_DEVICE (int ii, int lo_j, int hi_j, int kk,
@@ -1888,8 +1889,9 @@ void Hydro2::RHS_PerPhase(int lev,
                 kfd.dn_eta    = dn;
                 kfd.dt_eta    = dt;
                 kfd.lap_eta   = lapf;
-                kfd.kappa     = Y_self * kappa_ch_;
-                kfd.q_eta     = Y_self * Q_global(eta_face);
+                kfd.kappa        = Y_self * kappa_ch_;
+                kfd.q_eta        = Y_self * Q_global(eta_face);
+                kfd.skip_energy  = 1;  // energy handled via non-conservative (div Σ_K)·u + Σ_K:∇u below
             };
 
             FR::KortewegFaceData kfd_xm, kfd_xp, kfd_ym, kfd_yp;
@@ -1968,6 +1970,45 @@ void Hydro2::RHS_PerPhase(int lev,
             const Real rho_c = amrex::max(rho_arr(i,j,k), Real(1.0e-14));
             const Real u_c   = M_arr(i,j,k,0)/rho_c;
             const Real v_c   = M_arr(i,j,k,1)/rho_c;
+
+            // ----- Non-conservative Korteweg energy coupling -----
+            // Replace the HLLC flux-form energy (S_nn·S_star, disabled via
+            // kfd.skip_energy=1) with the non-conservative decomposition:
+            //   div(Σ_K·u) = (div Σ_K)·u  +  Σ_K : ∇u
+            //
+            // At planar CH equilibrium, div Σ_K ≈ 0 (well-balanced) and
+            // u_cell = 0 (static), so term 1 vanishes independently of the
+            // per-face Σ_nn residual — eliminating the S_star amplification
+            // that causes the pressure dip. Term 2 (Reynolds/deformation
+            // work) is retained for off-equilibrium dynamics (shock-droplet).
+            // See tests/FlowSQR_tests/theory/korteweg_well_balanced.tex §5.
+            {
+                // Term 1: body-force work  (div Σ_K)·u
+                Real E_K = dSK_arr(i,j,k,0) * u_c + dSK_arr(i,j,k,1) * v_c;
+
+                // Term 2: Reynolds work  Σ_K : ∇u = Σ_xx ∂u/∂x + Σ_xy(∂v/∂x + ∂u/∂y) + Σ_yy ∂v/∂y
+                // Cell-centered stress from face averages:
+                //   Σ_xx from x-face normals, Σ_yy from y-face normals,
+                //   Σ_xy from all four face tangentials (symmetric stress).
+                Real Sxx_c = Real(0.5) * (Snn_xm + Snn_xp);
+                Real Syy_c = Real(0.5) * (Snn_ym + Snn_yp);
+                Real Sxy_c = Real(0.25) * (Snt_xm + Snt_xp + Snt_ym + Snt_yp);
+
+                // Cell-centered velocity gradients via central differences
+                Real rho_ip = amrex::max(rho_arr(i+1,j,k), Real(1e-14));
+                Real rho_im = amrex::max(rho_arr(i-1,j,k), Real(1e-14));
+                Real rho_jp = amrex::max(rho_arr(i,j+1,k), Real(1e-14));
+                Real rho_jm = amrex::max(rho_arr(i,j-1,k), Real(1e-14));
+
+                Real dudx = (M_arr(i+1,j,k,0)/rho_ip - M_arr(i-1,j,k,0)/rho_im) * Real(0.5) * dx_inv;
+                Real dvdx = (M_arr(i+1,j,k,1)/rho_ip - M_arr(i-1,j,k,1)/rho_im) * Real(0.5) * dx_inv;
+                Real dudy = (M_arr(i,j+1,k,0)/rho_jp - M_arr(i,j-1,k,0)/rho_jm) * Real(0.5) * dy_inv;
+                Real dvdy = (M_arr(i,j+1,k,1)/rho_jp - M_arr(i,j-1,k,1)/rho_jm) * Real(0.5) * dy_inv;
+
+                E_K += Sxx_c * dudx + Sxy_c * (dvdx + dudy) + Syy_c * dvdy;
+
+                E_rhs(i,j,k) += E_K;
+            }
 
             // ----- Weight (per-phase body force): F_w,k = -ρ_k g ĵ -----
             if (do_weight)

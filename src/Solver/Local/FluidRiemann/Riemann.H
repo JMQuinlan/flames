@@ -432,6 +432,11 @@ struct KortewegFaceData
     // phases' contributions sum to the full mixture trace correction.
     // Default 0 ⇒ no correction (legacy / pure-gradient-stress mode).
     Set::Scalar q_eta = Set::Scalar(0.0);
+    // When set to 1, the Riemann solver modifies momentum but NOT energy.
+    // The caller is responsible for the Korteweg energy coupling (e.g.
+    // via the non-conservative form (div Σ_K)·u + Σ_K:∇u at cell
+    // centers, which avoids the S_star amplification of face residuals).
+    int skip_energy = 0;
 };
 
 class FluidRiemann

@@ -256,10 +256,10 @@ ch_mobility_nom        = 0     # freeze CH — interface is stationary
 # NB <<u_n>> = 0 is an exact kinematic constraint, so this is a stiff penalty
 # (faithful only as v_un -> inf), not a physical finite-resistance interface.
 closure.un_strategy    = relax
-closure.un_vel         = 2e-14    # transfer velocity [m/s]; tau_loc ~ 1/(v_un*|grad eta|)
+closure.un_vel         = 2e4    # transfer velocity [m/s]; tau_loc ~ 1/(v_un*|grad eta|)
 # Energy / temperature (S3): J_E = -C_E * v_E * (T_0 - T_1).
 closure.E_strategy     = relax
-closure.E_vel          = 2e-14    # transfer velocity [m/s]; tau_loc ~ 1/(v_E*|grad eta|)
+closure.E_vel          = 2e4    # transfer velocity [m/s]; tau_loc ~ 1/(v_E*|grad eta|)
 # Tangential velocity: inviscid case here, u_t is unconstrained — leave at the
 # Constitutive no-op stub (S1/angular-momentum, A10, not yet implemented).
 closure.ut_strategy    = constitutive

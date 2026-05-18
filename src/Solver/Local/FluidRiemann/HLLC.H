@@ -280,7 +280,8 @@ public:
 
             f.momentum_normal  -= S_nn;
             f.momentum_tangent -= S_nt;
-            f.energy           -= S_nn * S_star + S_nt * ut_face;
+            if (!kfd->skip_energy)
+                f.energy       -= S_nn * S_star + S_nt * ut_face;
         }
 
         return f;
