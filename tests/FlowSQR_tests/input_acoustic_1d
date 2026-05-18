@@ -188,6 +188,16 @@ apply_surface_tension = 1
 apply_weight          = 0
 apply_vaporization    = 0
 
+# Korteweg stress-tensor form (see tests/FlowSQR_tests/theory/korteweg_well_balanced.tex):
+#   chempot  (default): Σ_K = κ[½|∇η|² I − ∇η⊗∇η] + κη∇²η I; WB trace λ[ηW' − W].
+#   gradient          : Σ_K = κ[½|∇η|² I − ∇η⊗∇η];          WB trace −λW(η).
+# Run both and compare the diagnostic plot variables korteweg_Snn_{0,1} and
+# korteweg_divSigmaK_{0,1} to quantify the per-face residual on the planar
+# CH-equilibrium tanh.
+# korteweg_form = chempot   # current Form B (default)
+korteweg_form = gradient  # Form A (TeX writeup)
+
+
 ### DEBUGGING / SOLVER ###
 # Pure-hydro acoustic test: turn off the BS source coupling and freeze the CH
 # field (mobility = 0).  The interface profile sits at its IC tanh; only the
@@ -246,10 +256,10 @@ ch_mobility_nom        = 0     # freeze CH — interface is stationary
 # NB <<u_n>> = 0 is an exact kinematic constraint, so this is a stiff penalty
 # (faithful only as v_un -> inf), not a physical finite-resistance interface.
 closure.un_strategy    = relax
-closure.un_vel         = 2e4    # transfer velocity [m/s]; tau_loc ~ 1/(v_un*|grad eta|)
+closure.un_vel         = 2e-14    # transfer velocity [m/s]; tau_loc ~ 1/(v_un*|grad eta|)
 # Energy / temperature (S3): J_E = -C_E * v_E * (T_0 - T_1).
 closure.E_strategy     = relax
-closure.E_vel          = 2e4    # transfer velocity [m/s]; tau_loc ~ 1/(v_E*|grad eta|)
+closure.E_vel          = 2e-14    # transfer velocity [m/s]; tau_loc ~ 1/(v_E*|grad eta|)
 # Tangential velocity: inviscid case here, u_t is unconstrained — leave at the
 # Constitutive no-op stub (S1/angular-momentum, A10, not yet implemented).
 closure.ut_strategy    = constitutive

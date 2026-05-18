@@ -1,0 +1,531 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{bm}
+\usepackage{listings}
+\usepackage{xcolor}
+\geometry{margin=1in}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!10},
+  showstringspaces=false,
+}
+
+\newcommand{\dive}{\nabla\!\cdot\!}
+\newcommand{\grad}{\nabla}
+\newcommand{\nn}{\mathbf{n}}
+\newcommand{\uu}{\mathbf{u}}
+\newcommand{\II}{\mathbf{I}}
+\newcommand{\SK}{\boldsymbol{\Sigma}_K}
+\newcommand{\dxn}{\partial_n}
+\newcommand{\Wb}{W_{\!\mathrm{wb}}}
+
+\title{Well-Balanced Korteweg Capillary Stress for Diffuse Two-Phase
+Flow: \\ Two Equivalent Forms and Their Discrete Cancellation Requirements}
+\author{FLAMES / Alamo working notes}
+\date{2026-05-15}
+
+\begin{document}
+\maketitle
+
+\section{Goal}
+
+The FLAMES Hydro2 inviscid path adds a Korteweg flux-form contribution
+$-\SK\!\cdot\!\nn$ to the per-face HLLC momentum flux and
+$-\SK\!\cdot\!\uu$ to the energy flux
+(\texttt{Solver/Local/FluidRiemann/HLLC.H:263--284}). The intent is that on
+the IC tanh, which is set up to be at Cahn--Hilliard (CH) equilibrium
+($\lambda=2\kappa/\epsilon^2$ for the input convention $\eta=\tfrac12[1
++\tanh(x/\epsilon)]$), the Korteweg flux contribution to a planar interface
+should be \emph{well-balanced} --- producing no net force, no net energy
+work, and no observable interface signature in either pressure or velocity.
+
+This note works through two algebraically distinct stress tensors that
+appear in the literature, derives the well-balanced trace correction
+required by each, and identifies the discrete cancellation property the
+implementation must preserve so that no spurious pressure or velocity
+features appear at the diffuse interface. We then map the analysis back
+to the actual code in HLLC.H and Hydro2.cpp.
+
+\paragraph{Convention.} Throughout, $W(\eta)=\eta^2(1-\eta)^2$ is the
+standard symmetric double-well; $\lambda$ is the well height
+(\texttt{ch\_W\_scale}); $\kappa$ is the gradient-energy coefficient
+(\texttt{ch\_kappa\_eff}); $\mu_{\mathrm{chem}}\equiv-\kappa\grad^2\eta+\lambda W'(\eta)$
+is the CH chemical potential. The Cahn--Hilliard equilibrium is
+$\mu_{\mathrm{chem}}\equiv\mathrm{const}$. With $\mu_{\mathrm{chem}}=0$,
+the planar tanh profile in the input convention satisfies
+\begin{equation}
+\kappa\,\grad^2\eta \;=\; \lambda\,W'(\eta), \qquad
+\eta(x) = \tfrac12\!\left[1+\tanh\!\big(x/\epsilon\big)\right],
+\qquad \lambda = \frac{2\kappa}{\epsilon^2}.
+\label{eq:eq_relation}
+\end{equation}
+
+\section{Two candidate Korteweg stresses}
+
+\subsection{Form~A --- classical binary-fluid (Anderson 1998 Eq.~19, no
+\texorpdfstring{$\rho\grad^2\rho$}{rho grad squared rho} term)}
+
+The form used in our theory writeup
+(\texttt{theory/SQR\_source\_term\_derivation.tex}, Eq.~Sigmak):
+\begin{equation}
+\SK^{(A)} \;=\; \kappa\,\Big[\tfrac{1}{2}|\grad\eta|^2\,\II \;-\; \grad\eta\!\otimes\!\grad\eta\Big].
+\label{eq:SigmaA}
+\end{equation}
+The components in a face-aligned $(n,t)$ frame are
+\begin{equation}
+\SK^{(A)}_{nn} = \tfrac{1}{2}\kappa|\grad\eta|^2 - \kappa(\dxn\eta)^2,
+\qquad
+\SK^{(A)}_{nt} = -\kappa(\dxn\eta)(\partial_t\eta).
+\label{eq:SigmaAcomp}
+\end{equation}
+
+\subsection{Form~B --- ``thermo-consistent'' / Anderson 1998 Eq.~16
+\texorpdfstring{$+$}{plus} CH-pressure}
+
+The form actually implemented in \texttt{HLLC.H:276}, written without the
+trace correction:
+\begin{equation}
+\SK^{(B)} \;=\; \kappa\,\Big[\tfrac{1}{2}|\grad\eta|^2\,\II \;-\; \grad\eta\!\otimes\!\grad\eta\Big] \;+\; \kappa\,\eta\,\grad^2\eta\,\II.
+\label{eq:SigmaB}
+\end{equation}
+The extra diagonal term $+\kappa\eta\grad^2\eta\,\II$ does not appear in
+the binary-fluid Korteweg stress used in our \S5 pillbox argument. Its
+provenance is Cahn--Hilliard / Anderson Eq.~16: a $\rho\grad^2\rho$
+analogue rewritten in $\eta$-variables when the gradient-energy is
+written as $\tfrac{1}{2}\kappa|\grad\eta|^2$ inside the free energy
+functional.
+
+Components:
+\begin{equation}
+\SK^{(B)}_{nn} = \tfrac{1}{2}\kappa|\grad\eta|^2 - \kappa(\dxn\eta)^2 + \kappa\,\eta\,\grad^2\eta,
+\qquad
+\SK^{(B)}_{nt} = -\kappa(\dxn\eta)(\partial_t\eta).
+\label{eq:SigmaBcomp}
+\end{equation}
+The off-diagonal $\SK_{nt}$ is identical between the two forms.
+
+\section{Body force from the divergence}
+
+We need two vector calculus identities:
+\begin{align}
+\dive(\grad\eta\!\otimes\!\grad\eta)
+   &= (\grad^2\eta)\grad\eta + \tfrac{1}{2}\grad|\grad\eta|^2,
+\label{eq:id1}\\
+\dive\!\big(\phi\,\II\big) &= \grad\phi.
+\label{eq:id2}
+\end{align}
+
+\subsection{Form~A}
+
+Applying \eqref{eq:id1}--\eqref{eq:id2} to \eqref{eq:SigmaA}:
+\begin{equation}
+\dive\SK^{(A)}
+   = \tfrac{1}{2}\kappa\grad|\grad\eta|^2 - \kappa(\grad^2\eta)\grad\eta - \tfrac{1}{2}\kappa\grad|\grad\eta|^2
+   = -\,\kappa(\grad^2\eta)\grad\eta.
+\label{eq:divA}
+\end{equation}
+
+This is the potential form $\fk = -\mu_K\grad\eta$ with $\mu_K=\kappa\grad^2\eta$
+(the gradient-energy piece of $\mu_{\mathrm{chem}}$, opposite sign).
+
+\subsection{Form~B}
+
+Form~B differs from Form~A by $\kappa\eta\grad^2\eta\,\II$, whose divergence is
+\begin{equation}
+\dive(\kappa\eta\grad^2\eta\,\II) = \kappa\,\grad(\eta\grad^2\eta)
+   = \kappa(\grad\eta)(\grad^2\eta) + \kappa\,\eta\,\grad(\grad^2\eta).
+\label{eq:divextra}
+\end{equation}
+Adding to \eqref{eq:divA}: the $-\kappa(\grad^2\eta)\grad\eta$ from Form~A
+\emph{cancels exactly} with the $+\kappa(\grad\eta)(\grad^2\eta)$ from
+\eqref{eq:divextra} (they are the same vector with opposite sign), leaving
+\begin{equation}
+\boxed{\,\dive\SK^{(B)} \;=\; \kappa\,\eta\,\grad(\grad^2\eta).\,}
+\label{eq:divB}
+\end{equation}
+This is \emph{not} the binary-fluid body force from \S5 of the theory
+writeup; it is the gradient-energy piece of $-\eta\grad\mu_{\mathrm{chem}}$:
+\begin{equation}
+\dive\SK^{(B)} = -\,\eta\,\grad\!\big[-\kappa\grad^2\eta\big]
+              = -\,\eta\,\grad\mu_K^{\!(B)},\qquad \mu_K^{\!(B)}\equiv-\kappa\grad^2\eta.
+\label{eq:divBalt}
+\end{equation}
+
+\paragraph{Why this distinction matters.} At a planar interface in CH
+equilibrium ($\grad^2\eta\ne 0$ pointwise inside the band but
+$\mu_{\mathrm{chem}}=\mathrm{const}$), Form~A's body force is
+$-\kappa(\grad^2\eta)\grad\eta = -\lambda W'(\eta)\grad\eta = -\grad[\lambda W(\eta)]$ ---
+a gradient, but \emph{not zero}. Form~B's body force is
+$\kappa\eta\grad(\grad^2\eta)$ which equals $\eta\,\lambda W''(\eta)\grad\eta$
+at equilibrium (using \eqref{eq:eq_relation}). Neither form is
+``well-balanced'' on its own. A trace correction must be added to each
+so the residual body force vanishes at planar CH equilibrium.
+
+\section{Bulk-thermo trace correction}
+
+We choose a scalar $\Wb(\eta)$ and define
+\begin{equation}
+\SK^{\!\mathrm{wb}} \;=\; \SK \;-\; \Wb(\eta)\,\II,
+\label{eq:SKwb}
+\end{equation}
+with the sign convention that the diagonal of $\SK^{\!\mathrm{wb}}$ is
+the original diagonal \emph{minus} $\Wb$. The divergence picks up
+$-\grad\Wb = -\Wb'(\eta)\grad\eta$. The well-balanced requirement is
+\begin{equation}
+\dive\SK^{\!\mathrm{wb}}\big|_{\mathrm{CH\;eq}} = 0.
+\label{eq:wb}
+\end{equation}
+
+\subsection{Form~A: \texorpdfstring{$\Wb^{(A)}(\eta) = -\lambda W(\eta)$}{Wb(A) = -lambda W}}
+
+Using \eqref{eq:divA} and \eqref{eq:eq_relation}:
+\begin{equation}
+\dive\SK^{(A,\mathrm{wb})}
+   = -\kappa(\grad^2\eta)\grad\eta - \Wb'(\eta)\grad\eta
+   = -[\kappa\grad^2\eta + \Wb'(\eta)]\grad\eta.
+\end{equation}
+At CH equilibrium $\kappa\grad^2\eta = \lambda W'(\eta)$, so the bracket
+vanishes iff $\Wb'(\eta) = -\lambda W'(\eta)$, i.e.\
+$\Wb^{(A)}(\eta) = -\lambda W(\eta) + \mathrm{const}$. Dropping the constant
+(absorbed into the bulk pressure):
+\begin{equation}
+\boxed{\,\Wb^{(A)}(\eta) = -\lambda W(\eta),\qquad
+\SK^{(A,\mathrm{wb})} = \kappa\big[\tfrac12|\grad\eta|^2\II - \grad\eta\!\otimes\!\grad\eta\big] + \lambda W(\eta)\,\II.\,}
+\label{eq:Awb}
+\end{equation}
+
+\subsection{Form~B: \texorpdfstring{$\Wb^{(B)}(\eta) = \lambda[\eta W'(\eta)-W(\eta)]$}{Wb(B) = lambda(eta W' - W)}}
+
+Using \eqref{eq:divB}:
+\begin{equation}
+\dive\SK^{(B,\mathrm{wb})} = \kappa\eta\grad(\grad^2\eta) - \Wb'(\eta)\grad\eta.
+\end{equation}
+At CH equilibrium, $\kappa\grad^2\eta = \lambda W'(\eta)$ so
+$\grad(\kappa\grad^2\eta) = \lambda W''(\eta)\grad\eta$, hence
+$\kappa\eta\grad(\grad^2\eta) = \lambda\eta W''(\eta)\grad\eta$.
+The well-balanced requirement becomes
+\begin{equation}
+\Wb'(\eta) = \lambda\eta W''(\eta).
+\end{equation}
+Integrating: $\Wb(\eta) = \lambda\eta W'(\eta) - \lambda W(\eta) + \mathrm{const}$
+(integration by parts), so
+\begin{equation}
+\boxed{\,\Wb^{(B)}(\eta) = \lambda\big[\eta W'(\eta) - W(\eta)\big],\qquad
+\SK^{(B,\mathrm{wb})} = \SK^{(B)} - \Wb^{(B)}(\eta)\,\II.\,}
+\label{eq:Bwb}
+\end{equation}
+For the double-well $W(\eta)=\eta^2(1-\eta)^2$:
+\begin{equation}
+\Wb^{(B)}(\eta) = \lambda\,\eta^2(3\eta-1)(\eta-1).
+\label{eq:Wb_explicit}
+\end{equation}
+\textbf{This is exactly the form coded as} \texttt{q\_eta} \textbf{at} \texttt{Hydro2.cpp:1780--1782}\textbf{:}
+\begin{lstlisting}
+auto Q_global = [=] AMREX_GPU_DEVICE (Real e) -> Real {
+    return lambda_W_ * e * e * (Real(3.0)*e - Real(1.0)) * (e - Real(1.0));
+};
+\end{lstlisting}
+and \texttt{HLLC.H:276} encodes the full WB stress as
+\begin{lstlisting}
+Set::Scalar S_nn = -k*dn*dn + k*etaf*lapf + 0.5*k*ge2 - q;
+\end{lstlisting}
+i.e.\ $\SK^{(B,\mathrm{wb})}_{nn} = -\kappa(\dxn\eta)^2 + \kappa\eta\grad^2\eta + \tfrac12\kappa|\grad\eta|^2 - \lambda(\eta W' - W)$.
+
+\subsection{The two well-balanced forms differ by an irrotational piece}
+
+By construction both satisfy $\dive\SK^{(\cdot,\mathrm{wb})}=0$ at CH
+equilibrium. Their difference is purely diagonal:
+\begin{align}
+\SK^{(B,\mathrm{wb})} - \SK^{(A,\mathrm{wb})}
+   &= \kappa\eta\grad^2\eta\,\II - \big[\Wb^{(B)} - \Wb^{(A)}\big]\II \nonumber\\
+   &= \kappa\eta\grad^2\eta\,\II - \big[\lambda(\eta W' - W) + \lambda W\big]\II \nonumber\\
+   &= \kappa\eta\grad^2\eta\,\II - \lambda\eta W'(\eta)\,\II \nonumber\\
+   &= \eta\big[\kappa\grad^2\eta - \lambda W'(\eta)\big]\II \nonumber\\
+   &= -\,\eta\,\mu_{\mathrm{chem}}\,\II.
+\label{eq:diff}
+\end{align}
+At CH equilibrium $\mu_{\mathrm{chem}}\equiv\mathrm{const}$, so the
+difference is a constant scalar times $\II$ at equilibrium (absorbed into
+the pressure; if $\mu_{\mathrm{chem}}=0$, the two forms agree pointwise on
+the band). Off equilibrium they differ by a real pressure-like term
+$-\eta\mu_{\mathrm{chem}}\II$.
+
+\section{Pointwise vanishing on the planar tanh (1D equipartition)}
+
+The well-balanced property \eqref{eq:wb} says only that the
+\emph{divergence} of the stress vanishes at equilibrium. For 1D
+\emph{planar} interfaces we can prove a stronger result: the normal
+component of the stress vanishes \emph{pointwise} on the band.
+
+\subsection{The CH equipartition identity}
+
+For the 1D planar profile satisfying \eqref{eq:eq_relation} with
+$\mu_{\mathrm{chem}}=0$, multiplying $\kappa\eta''=\lambda W'(\eta)$ by
+$\eta'$ and integrating once (using $\eta'\to 0$ at $x\to\pm\infty$):
+\begin{equation}
+\boxed{\,\tfrac{1}{2}\kappa(\eta')^2 \;=\; \lambda\,W(\eta) \quad\text{(equipartition).}\,}
+\label{eq:equipart}
+\end{equation}
+This is the standard Cahn--Hilliard result: at the planar minimizer the
+gradient energy density equals the bulk double-well energy density pointwise.
+
+\subsection{Form~A: \texorpdfstring{$\SK^{(A,\mathrm{wb})}_{nn}=0$ pointwise}{normal stress vanishes pointwise}}
+
+In 1D, $|\grad\eta|^2 = (\eta')^2 = (\dxn\eta)^2$. From \eqref{eq:Awb}:
+\begin{align}
+\SK^{(A,\mathrm{wb})}_{nn}
+   &= -\kappa(\eta')^2 + \tfrac12\kappa(\eta')^2 + \lambda W(\eta) \nonumber\\
+   &= -\tfrac12\kappa(\eta')^2 + \lambda W(\eta) \nonumber\\
+   &\stackrel{\eqref{eq:equipart}}{=} -\lambda W(\eta) + \lambda W(\eta) \;=\; 0.
+\label{eq:An0}
+\end{align}
+
+\subsection{Form~B: \texorpdfstring{$\SK^{(B,\mathrm{wb})}_{nn}=0$ pointwise}{normal stress vanishes pointwise}}
+
+Substituting $\kappa\eta''=\lambda W'(\eta)$ from \eqref{eq:eq_relation}:
+\begin{align}
+\SK^{(B,\mathrm{wb})}_{nn}
+   &= -\kappa(\eta')^2 + \kappa\eta\eta'' + \tfrac12\kappa(\eta')^2 - \lambda(\eta W' - W) \nonumber\\
+   &= -\tfrac12\kappa(\eta')^2 + \lambda\eta W'(\eta) - \lambda\eta W'(\eta) + \lambda W(\eta) \nonumber\\
+   &= -\tfrac12\kappa(\eta')^2 + \lambda W(\eta) \nonumber\\
+   &\stackrel{\eqref{eq:equipart}}{=} 0.
+\label{eq:Bn0}
+\end{align}
+
+\paragraph{Consequence.} On the IC tanh in 1D, every face-evaluated
+$\SK^{(\cdot,\mathrm{wb})}_{nn}$ is \emph{identically zero in the
+continuum}. The Korteweg momentum-flux modifier $-\SK\!\cdot\!\nn$ at every
+face is zero. The Korteweg energy-flux modifier $-(\SK\!\cdot\!\uu)\!\cdot\!\nn$
+is zero regardless of $\uu$, since it is $-\SK_{nn}\,u_n - \SK_{nt}\,u_t = 0
+-0$ (in 1D $\SK_{nt}=0$ trivially).
+
+\subsection{What planar 1D equipartition tells us about the dip}
+
+If the IC is at CH equilibrium and the Korteweg flux modifier is zero
+pointwise in continuum, the implementation must produce a nonzero
+contribution only via \emph{one of the following sources of discrete
+inconsistency}:
+
+\begin{enumerate}
+\item[(D1)] \textbf{Discrete equipartition violation.} The face stencils
+for $|\grad\eta|^2$, $\eta\grad^2\eta$, and $\Wb^{(B)}(\eta)$ don't
+combine to give discrete zero on the IC tanh. They will not, in general,
+because the 9-point isotropic Laplacian, the central first-difference,
+and the face-averaged $\eta$ have different leading truncation errors.
+\item[(D2)] \textbf{IC tanh is not exactly at the discrete CH
+minimizer.} The continuum relation $\lambda=2\kappa/\epsilon^2$ is
+exact only for the continuum tanh; the discrete minimizer of the
+Hydro2 CH operator differs at $O(dx^2/\epsilon^2)$.
+\item[(D3)] \textbf{Coupling to the Riemann state through $S_*$.} The
+energy flux uses the HLLC contact velocity $S_*$. If
+$\SK_{nn}\ne 0$ discretely on \emph{some} faces, the modifier
+$-\SK_{nn}\,S_*$ varies with the local hydro state, and a passing wave
+modulates the residual. This converts (D1)--(D2) into a
+state-dependent energy artifact.
+\end{enumerate}
+
+(D3) is the path by which a small discrete residual in $\SK_{nn}$ ---
+even at $O(\epsilon^2)$ truncation --- can be \emph{amplified} into an
+observable pressure feature when a wave is present, because the
+amplification factor is the wave's local velocity rather than the
+asymptotically small interface velocity. This is consistent with the
+empirical observation in
+\texttt{input\_acoustic\_1d}: the dip appears only after the wave arrives
+at the interface, not at $t=0$.
+
+\section{Energy flux and the interstitial-working concern}
+
+The Korteweg energy contribution at a face is
+\begin{equation}
+F_E^{(K)} = -\SK\!\cdot\!\uu\big|_{\mathrm{face}}\!\cdot\!\nn = -\SK_{nn}\,u_n - \SK_{nt}\,u_t.
+\end{equation}
+Its cell divergence in continuum is
+\begin{equation}
+\dive(\SK\!\cdot\!\uu) = (\dive\SK)\!\cdot\!\uu + \SK\!:\!\grad\uu.
+\label{eq:edivflux}
+\end{equation}
+At CH equilibrium $(\dive\SK^{(\cdot,\mathrm{wb})}) = 0$, so the only
+energy contribution from a perfectly well-balanced stress is the
+\emph{Reynolds work} term $\SK\!:\!\grad\uu$.
+
+In 1D planar, equipartition gives $\SK^{(\cdot,\mathrm{wb})}_{nn}=0$
+pointwise (\S5.2--5.3), so $\SK^{(\cdot,\mathrm{wb})}\!:\!\grad\uu = 0$ as well.
+\textbf{The Reynolds-work term is identically zero in continuum on the
+planar CH-equilibrium band, even with a passing wave.} The dip cannot
+come from the continuum Reynolds-work term --- only from its
+\emph{discrete} residual.
+
+\paragraph{Anderson interstitial working.} Anderson et al.\ (1998,
+Eq.~16b) note that off-equilibrium 2nd-law consistency requires an
+additional energy flux $\mathbf q_E^{\mathrm{int}} = -K_E (D\eta/Dt)\grad\eta$.
+With \texttt{ch\_mobility\_nom}$=0$ (frozen $\eta$) and zero advection,
+$D\eta/Dt = 0$ and the interstitial-working flux vanishes. This term is
+\emph{not} the source of the dip in \texttt{input\_acoustic\_1d}.
+
+\section{Discrete cancellation: what the implementation must preserve}
+
+Translating the continuum analysis into a discrete fidelity criterion:
+
+\begin{enumerate}
+\item[(R1)] \textbf{Pointwise $\SK_{nn}$-zero on the IC tanh.} On the IC
+profile evaluated at every face, the face stencils for
+$(\dxn\eta)^2$, $|\grad\eta|^2$, $\eta\grad^2\eta$, and $\Wb(\eta)$
+must combine to a value of $\SK_{nn}$ that is small enough that
+$|\SK_{nn}^{\mathrm{disc}}|\!\cdot\!|u_{\mathrm{wave}}|$ stays below the
+desired pressure tolerance once the wave has amplitude $u_{\mathrm{wave}}$.
+\item[(R2)] \textbf{Telescoping cancellation between adjacent faces.}
+Even if (R1) is only approximately satisfied, the discrete divergence
+$(F_{n+}-F_{n-})/\Delta x$ should cancel to at least one order higher
+than the per-face residual. This requires the same face stencil to be
+used on both the $+$ and $-$ faces of a cell with no asymmetric
+boundary treatment.
+\item[(R3)] \textbf{State-independent face stress.} The Korteweg flux
+modifier is computed from $\eta$ alone (lines 265--277 of
+\texttt{HLLC.H}). This is correct --- but it means the face stress is
+not symmetrized with the local hydro state, so any per-face residual
+multiplies the local wave velocity through the energy update.
+\end{enumerate}
+
+\subsection{Face stencil in Hydro2.cpp:1784--1825}
+
+The implementation uses, at the $x$-face between cells $(i,j)$ and
+$(i+1,j)$:
+\begin{align}
+\eta_{\mathrm{face}}
+   &= \tfrac12\big[\eta_{i,j} + \eta_{i+1,j}\big], \label{eq:disc_etaf}\\
+\dxn\eta\big|_{\mathrm{face}}
+   &= (\eta_{i+1,j} - \eta_{i,j}) / \Delta x, \label{eq:disc_dn}\\
+\partial_t\eta\big|_{\mathrm{face}}
+   &= \tfrac14\big[\eta_{i,j+1}+\eta_{i+1,j+1}-\eta_{i,j-1}-\eta_{i+1,j-1}\big]/\Delta y,
+   \label{eq:disc_dt}\\
+\grad^2\eta\big|_{\mathrm{face}}
+   &= \tfrac12\big[L_9(\eta)_{i,j} + L_9(\eta)_{i+1,j}\big], \label{eq:disc_lap}
+\end{align}
+where $L_9$ is the 9-point isotropic Laplacian
+$L_9(\eta)_{i,j} = \big[4(\eta_{i\pm1,j}+\eta_{i,j\pm1}) + (\eta_{i\pm1,j\pm1}) - 20\eta_{i,j}\big] / (6\Delta x^2)$
+(\texttt{Hydro2.cpp:1738--1744}).
+
+For the IC tanh $\eta(x)=\tfrac12[1+\tanh(x/\epsilon)]$, each operator
+has the following continuum-vs-discrete behavior on the band:
+\begin{itemize}
+\item \eqref{eq:disc_etaf}: $\eta_{\mathrm{face}} = \eta(x_{\mathrm{face}}) + \tfrac18\Delta x^2\,\eta''(x_{\mathrm{face}}) + O(\Delta x^4)$. The leading correction is $O(\Delta x^2/\epsilon^2)$.
+\item \eqref{eq:disc_dn}: $(\eta_{i+1}-\eta_i)/\Delta x = \eta'(x_{\mathrm{face}}) + \tfrac{1}{24}\Delta x^2\,\eta'''(x_{\mathrm{face}}) + O(\Delta x^4)$, also $O(\Delta x^2/\epsilon^2)$.
+\item \eqref{eq:disc_lap}: $L_9(\eta) = \eta''(x) + O(\Delta x^4)$ \emph{when} $\eta''$ is along the grid axis (1D test). 4th-order accurate.
+\end{itemize}
+
+The mismatch in truncation order between \eqref{eq:disc_etaf}--\eqref{eq:disc_dn}
+($O(\Delta x^2)$) and \eqref{eq:disc_lap} ($O(\Delta x^4)$) is the key
+ingredient of (D1): the equipartition relation \eqref{eq:equipart}, which
+the continuum analysis uses to cancel
+$-\tfrac12\kappa|\grad\eta|^2 + \lambda W = 0$, does not hold discretely
+to the same order on both sides. The face evaluation of $|\grad\eta|^2$
+carries $O(\Delta x^2/\epsilon^2)$ residue; the evaluation of
+$\lambda W(\eta_{\mathrm{face}})$ carries a different $O(\Delta x^2/\epsilon^2)$
+residue from the face-averaging of $\eta$.
+
+A small calculation: for $\eta = \tfrac12[1+\tanh(\xi)]$ with $\xi=x/\epsilon$,
+\begin{align}
+\eta'(\xi) &= \tfrac12\,\mathrm{sech}^2\xi = 2\eta(1-\eta), \\
+\eta''(\xi) &= -\mathrm{sech}^2\xi\,\tanh\xi = -2(2\eta-1)\eta(1-\eta), \\
+\tfrac12\kappa(\eta')^2 - \lambda W(\eta)
+   &= 2\kappa\eta^2(1-\eta)^2/\epsilon^2 - \lambda\eta^2(1-\eta)^2
+   \;\stackrel{\eqref{eq:eq_relation}}{=}\; 0,
+\end{align}
+so equipartition holds in continuum. Discretely, replacing $\eta'$ by
+$(\eta_{i+1}-\eta_i)/\Delta x$ introduces a relative error of order
+$\Delta x^2/\epsilon^2$ on $(\eta')^2$, while the face-averaged
+$\eta_{\mathrm{face}}$ enters $W(\eta_{\mathrm{face}})$ with a different
+$\Delta x^2/\epsilon^2$ error.
+
+For the FLAMES \texttt{input\_acoustic\_1d} parameters
+($\Delta x \approx 1.95\!\times\!10^{-3}$, $\epsilon=10^{-2}$,
+$\Delta x/\epsilon \approx 0.195$), the per-face discrete $\SK^{(B,\mathrm{wb})}_{nn}$ residual scales as
+\begin{equation}
+|\SK^{\mathrm{disc}}_{nn}|
+ \sim \kappa\,(\eta')^2\,(\Delta x/\epsilon)^2
+ \sim \kappa\,\cdot\,(1/2\epsilon)^2\,\cdot\,(\Delta x/\epsilon)^2
+ = \frac{\kappa\,\Delta x^2}{4\epsilon^4}.
+\label{eq:dscale}
+\end{equation}
+Numerically: $\kappa=6.25\!\times\!10^{-4}$, $\Delta x^2 = 3.8\!\times\!10^{-6}$,
+$\epsilon^4 = 10^{-8}$, giving $|\SK^{\mathrm{disc}}_{nn}|$ of order
+$0.06$ Pa per face. This is too small by itself to explain a $\sim 30$ Pa
+pressure dip. \textbf{However}, the energy update couples to the wave
+velocity $S_*$ at line~283 of \texttt{HLLC.H}; the
+\emph{state-dependent energy injection} from a $0.06$ Pa
+$\SK^{\mathrm{disc}}_{nn}$ residue times an $O(1)$ contact velocity (in
+the dimensionless interpretation of the pulse) and integrated over the
+$\sim 10^3$-step interaction window is plausibly the right order of
+magnitude.
+
+\subsection{Comparison with Form~A as a regression target}
+
+If we were to implement Form~A instead (which is what our \S5 pillbox
+argument actually uses), the face stress would be:
+\begin{equation}
+\SK^{(A,\mathrm{wb})}_{nn} = -\kappa(\dxn\eta)^2 + \tfrac12\kappa|\grad\eta|^2 + \lambda W(\eta_{\mathrm{face}}).
+\label{eq:Afaces}
+\end{equation}
+Compared to Form~B's face stress
+\begin{equation}
+\SK^{(B,\mathrm{wb})}_{nn} = -\kappa(\dxn\eta)^2 + \kappa\,\eta_{\mathrm{face}}\,L_9(\eta) + \tfrac12\kappa|\grad\eta|^2 - \lambda[\eta W' - W](\eta_{\mathrm{face}}),
+\label{eq:Bfaces}
+\end{equation}
+Form~A:
+\begin{itemize}
+\item Does \emph{not} use $L_9(\eta)$ at the face (no $\eta\grad^2\eta$ term). The face stencil drops from a 9-point isotropic Laplacian footprint (i.e.\ a $4\!\times\!4$ stencil for the face plus its $\pm1$ neighbors) to a 2-point face-centered difference plus a face-averaged $\eta$. This is a strictly smaller footprint.
+\item Discrete equipartition between $(\dxn\eta)^2$ and $W(\eta_{\mathrm{face}})$ requires only that two
+$O(\Delta x^2/\epsilon^2)$-truncated quantities combine correctly. There is one less floating-point cancellation than Form~B.
+\item Has off-equilibrium behavior differing from Form~B by $-\eta\mu_{\mathrm{chem}}\,\II$ (Eq.\ \ref{eq:diff}). For a pure planar Riemann test ($\mu_{\mathrm{chem}}=0$ at the IC and remains 0 because $\eta$ doesn't advect to a new equilibrium), this difference is purely a small $O(\epsilon)$ correction; for phase-change runs where $\mu_{\mathrm{chem}}\ne 0$ off equilibrium, the two forms genuinely encode different physics.
+\end{itemize}
+
+\section{Conclusions and recommended next steps}
+
+\paragraph{The two forms.} Form~A
+$\SK^{(A,\mathrm{wb})} = \kappa[\tfrac12|\grad\eta|^2\II - \grad\eta\otimes\grad\eta] + \lambda W(\eta)\II$
+and Form~B
+$\SK^{(B,\mathrm{wb})} = \kappa[\tfrac12|\grad\eta|^2\II - \grad\eta\otimes\grad\eta] + [\kappa\eta\grad^2\eta - \lambda(\eta W'-W)]\II$
+are both well-balanced at planar CH equilibrium. They differ
+off-equilibrium by $-\eta\mu_{\mathrm{chem}}\II$ \eqref{eq:diff}. In 1D
+both give pointwise $\SK_{nn}=0$ on the planar tanh via equipartition
+\eqref{eq:An0}--\eqref{eq:Bn0}.
+
+\paragraph{What the implementation does.} \texttt{HLLC.H:276} together
+with \texttt{Hydro2.cpp:1780--1803} implements Form~B with the trace
+correction $\Wb^{(B)}(\eta)=\lambda[\eta W' - W]$. The sign is correct.
+The construction is consistent. There is \emph{no sign error}.
+
+\paragraph{The likely source of the dip.}
+Discrete equipartition fails at $O(\Delta x^2/\epsilon^2)$ because the
+9-point Laplacian (4th order), the two-point first-difference (2nd
+order), and the face-averaged $\eta$ (2nd order) have differently
+ordered leading errors. The Form~B face stress involves all three
+operators \eqref{eq:Bfaces}, so its discrete residual on the IC tanh is
+the sum of three distinct $O(\Delta x^2/\epsilon^2)$ contributions
+that do not cancel by construction. Form~A \eqref{eq:Afaces} would
+involve only two of those three operators and has fewer floating-point
+cancellations to satisfy.
+
+\paragraph{Proposed numerical diagnostics.}
+\begin{enumerate}
+\item[(N1)] At $t=0$, dump the per-face $\SK^{(B,\mathrm{wb})}_{nn}$ values for every face in the band region of \texttt{input\_acoustic\_1d}. Plot them. If they are not zero to machine precision, (D1)/(D2) is confirmed.
+\item[(N2)] Repeat (N1) under Form~A (compile-time switch or runtime flag). Compare the residuals.
+\item[(N3)] Compute the implied cell-divergence
+$(\SK_{nn,i+1/2} - \SK_{nn,i-1/2})/\Delta x$ at every cell on the band. The integral of this over the band should be zero (well-balanced), but individual cells will have non-zero residuals.
+\item[(N4)] If (N1)--(N3) show non-trivial residuals, the dip-eliminating fix is one of: (i) use Form~A, (ii) tighten the discrete equipartition by matching truncation orders (use a 2nd-order Laplacian to match the 2nd-order first-difference, or a higher-order first-difference), or (iii) post-correct $L_9(\eta)$ on the IC at $t=0$ so the discrete equipartition is exact.
+\end{enumerate}
+
+\paragraph{Recommended order of work.}
+\begin{enumerate}
+\item Run (N1) and (N3) on \texttt{input\_acoustic\_1d} to quantify the discrete residual under Form~B.
+\item Implement Form~A as an alternate path (flag-selected) and rerun (N1)/(N3) to compare residuals.
+\item Whichever form gives smaller residuals AND continues to give the correct sharp-limit pressure jump in a static-droplet curvature test should be the production form.
+\item Document the choice in this writeup and in the \texttt{HLLC.H} comment block at line~250.
+\end{enumerate}
+
+\end{document}

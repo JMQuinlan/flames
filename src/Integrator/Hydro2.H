@@ -282,6 +282,23 @@ protected:
     Set::Field<Set::Scalar> KE_per_vol_mf;  // Kinetic Energy (per unit volume)
     Set::Field<Set::Scalar> KE_per_mass_mf; // Kinetic Energy (per unit mass)
 
+    // Korteweg-stress diagnostics (per phase). Populated during RHS_PerPhase.
+    //   korteweg_Snn_{0,1}_mf       : cell-avg of the four face Σ_K^wb normal stresses
+    //                                  (kfd.S_nn as computed in HLLC.H) under the active
+    //                                  korteweg_form. On a 1D planar CH-equilibrium tanh
+    //                                  these should be 0 to discretization order; the
+    //                                  observed magnitude quantifies the discrete
+    //                                  equipartition residual (see N1 in the theory note).
+    //   korteweg_divSigmaK_{0,1}_mf : cell-centered discrete ∇·Σ_K^wb for phase k
+    //                                  (2 components: x, y). At planar CH equilibrium
+    //                                  the integral over the band must vanish; per-cell
+    //                                  values quantify the residual body force the
+    //                                  Korteweg block injects (N3 in the theory note).
+    Set::Field<Set::Scalar> korteweg_Snn_0_mf;
+    Set::Field<Set::Scalar> korteweg_Snn_1_mf;
+    Set::Field<Set::Scalar> korteweg_divSigmaK_0_mf;
+    Set::Field<Set::Scalar> korteweg_divSigmaK_1_mf;
+
     Set::Field<Set::Scalar> Source_mf;      // Sumation of Source Terms
     Set::Field<Set::Scalar> flux_mf;        // Riemann Solver Fluxes
     Set::Field<Set::Scalar> Fsv_mf;         // Surface Tension
@@ -610,6 +627,33 @@ protected:
     // ch_kappa_eff is the resolved value used at every CH site (computed in Parse).
     Set::Scalar ch_kappa     = 0.0;   // input; 0 means "auto = epsilon^2"
     Set::Scalar ch_kappa_eff = 0.0;   // resolved value used in code (set in Parse)
+
+    // Korteweg stress-tensor form selector.
+    //
+    //   ChemPot (default; current code):
+    //     Σ_K = κ [½|∇η|² I − ∇η⊗∇η]  +  κ η ∇²η I
+    //     ∇·Σ_K = −η ∇μ_K,  μ_K ≡ −κ∇²η
+    //     Well-balanced trace correction: W_wb = λ[η W'(η) − W(η)]
+    //     (Subtracted as −W_wb I; coded as -q in HLLC.H:276 with
+    //      q_eta = Y_self · λ · η²(3η−1)(η−1) at Hydro2.cpp:1780.)
+    //
+    //   Gradient (alternative; matches theory writeup §5):
+    //     Σ_K = κ [½|∇η|² I − ∇η⊗∇η]
+    //     ∇·Σ_K = −κ(∇²η)∇η  =  −μ_K ∇η
+    //     Well-balanced trace correction: W_wb = −λ W(η)
+    //     (Subtracted as −W_wb I, i.e. added as +λW(η) I; coded by setting
+    //      kfd.lap_eta = 0 and q_eta = −Y_self · λ · η²(1−η)² at the kfd
+    //      build step. HLLC.H's flux formula is unchanged.)
+    //
+    // The two forms are well-balanced (both give Σ_nn = 0 pointwise) on the
+    // planar CH-equilibrium tanh in the continuum; they differ off equilibrium
+    // by −η μ_chem I (see tests/FlowSQR_tests/theory/korteweg_well_balanced.tex
+    // for the full derivation and discrete cancellation analysis).
+    enum class KortewegForm {
+        ChemPot  = 0,   // Form B in the theory writeup; current default
+        Gradient = 1    // Form A in the theory writeup
+    };
+    KortewegForm korteweg_form = KortewegForm::ChemPot;
 
     int write_integrals = 1;
 

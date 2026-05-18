@@ -388,6 +388,26 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.ch_kappa_eff = (value.ch_kappa > 0.0) ? value.ch_kappa
                                                     : value.epsilon * value.epsilon;
 
+        // Korteweg stress-tensor form (see Hydro2.H KortewegForm enum and
+        // tests/FlowSQR_tests/theory/korteweg_well_balanced.tex for the
+        // derivation).
+        //   chempot  (default) : Σ_K = κ[½|∇η|² I − ∇η⊗∇η] + κη∇²η I,
+        //                        ∇·Σ_K = −η ∇μ_K. WB trace: λ(ηW' − W).
+        //   gradient           : Σ_K = κ[½|∇η|² I − ∇η⊗∇η],
+        //                        ∇·Σ_K = −κ(∇²η)∇η. WB trace: −λW.
+        // The two agree pointwise on the planar CH-equilibrium tanh (both
+        // give Σ_nn = 0 via equipartition). The per-phase mass-fraction
+        // split Y_self · κ_global remains the same under either form.
+        {
+            std::string kform_str;
+            pp_query_default("korteweg_form", kform_str, std::string("chempot"));
+            if      (kform_str == "chempot")  value.korteweg_form = Hydro2::KortewegForm::ChemPot;
+            else if (kform_str == "gradient") value.korteweg_form = Hydro2::KortewegForm::Gradient;
+            else
+                Util::Abort(INFO, "Unknown korteweg_form: '", kform_str,
+                            "' (expected 'chempot' or 'gradient')");
+        }
+
         // Boundry Conditions
         value.density_bc = new BC::Expression(1, pp, "density.bc");
         value.energy_bc = new BC::Constant(1, pp, "energy.bc");
@@ -491,6 +511,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.m0_mf,           &value.bc_nothing,  1, nghost, "m0", false, false);
         value.RegisterNewFab(value.u0_mf,           &value.bc_nothing, 2, nghost, "u0", false, false, { "x", "y" });
         value.RegisterNewFab(value.q_mf,            &value.bc_nothing, 2, nghost, "q0", false, false, { "x", "y" });
+
+        // KORTEWEG DIAGNOSTICS (populated inside RHS_PerPhase under the active
+        // korteweg_form). 1-component Σ_nn (cell-avg of the 4 face values) and
+        // 2-component ∇·Σ_K (per-phase body force) for each phase.
+        value.RegisterNewFab(value.korteweg_Snn_0_mf,        &value.bc_nothing, 1, nghost, "korteweg_Snn_0",        true, false);
+        value.RegisterNewFab(value.korteweg_Snn_1_mf,        &value.bc_nothing, 1, nghost, "korteweg_Snn_1",        false, false);
+        value.RegisterNewFab(value.korteweg_divSigmaK_0_mf,  &value.bc_nothing, 2, nghost, "korteweg_divSigmaK_0",  true, false, { "x", "y" });
+        value.RegisterNewFab(value.korteweg_divSigmaK_1_mf,  &value.bc_nothing, 2, nghost, "korteweg_divSigmaK_1",  false, false, { "x", "y" });
 
         // Phase 6: CH-derived effective SQR source diagnostics. Always
         // registered regardless of sqr_source_mode so the plotfile shows them
@@ -777,6 +805,12 @@ void Hydro2::Initialize(int lev)
     sqr_dp_mf[lev]      ->setVal(0.0);
     sqr_mom_src_mf[lev] ->setVal(0.0);
     sqr_eng_src_mf[lev] ->setVal(0.0);
+
+    // Korteweg diagnostic plot fields (populated by RHS_PerPhase)
+    korteweg_Snn_0_mf[lev]       ->setVal(0.0);
+    korteweg_Snn_1_mf[lev]       ->setVal(0.0);
+    korteweg_divSigmaK_0_mf[lev] ->setVal(0.0);
+    korteweg_divSigmaK_1_mf[lev] ->setVal(0.0);
 
     // MIXED PROPERTIES (setVal also clears ghost cells, preventing NaN from debug-mode allocation)
     mu_chem_mf[lev]     ->setVal(0.0);
@@ -1710,9 +1744,21 @@ void Hydro2::RHS_PerPhase(int lev,
     const Real kappa_ch_   = apply_surface_tension ? ch_kappa_eff : Real(0.0);
     const Real lambda_W_   = apply_surface_tension ? ch_W_scale   : Real(0.0);
     const int  pidx_       = phase_idx;
+    // Korteweg stress-tensor form (see Hydro2.H KortewegForm enum):
+    //   0 = ChemPot  (current Form B; lap_eta kept,  q_eta = λ·η²(3η−1)(η−1))
+    //   1 = Gradient (Form A;          lap_eta = 0,  q_eta = −λ·η²(1−η)²)
+    // Captured as a plain int so the GPU-side lambdas can branch on it.
+    const int  korteweg_form_ = static_cast<int>(korteweg_form);
     AMREX_ASSERT_WITH_MESSAGE(std::abs(DX[0] - DX[1]) < Real(1.0e-14),
         "RHS_PerPhase Korteweg path assumes dx == dy (9-point isotropic Lap).");
     const Real lap9_pref_  = Real(1.0) / (Real(6.0) * DX[0] * DX[0]);
+
+    // Diagnostic multifabs (per phase; selected by phase_idx).
+    // Always populated, even when apply_surface_tension=0 — in that case the
+    // values quantify the trivial "all zeros" baseline and confirm the kill
+    // switch is doing what it should.
+    amrex::MultiFab &Snn_mf  = (phase_idx == 0) ? *korteweg_Snn_0_mf[lev]       : *korteweg_Snn_1_mf[lev];
+    amrex::MultiFab &dSK_mf  = (phase_idx == 0) ? *korteweg_divSigmaK_0_mf[lev] : *korteweg_divSigmaK_1_mf[lev];
 
     for (MFIter mfi(rho_mf_in, TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
@@ -1727,6 +1773,9 @@ void Hydro2::RHS_PerPhase(int lev,
         auto rho_rhs  = rho_rhs_mf.array(mfi);
         auto M_rhs    = M_rhs_mf.array(mfi);
         auto E_rhs    = E_rhs_mf.array(mfi);
+
+        auto Snn_arr  = Snn_mf.array(mfi);
+        auto dSK_arr  = dSK_mf.array(mfi);
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
@@ -1768,18 +1817,32 @@ void Hydro2::RHS_PerPhase(int lev,
             const Real dx_inv = Real(1.0) / DX[0];
             const Real dy_inv = Real(1.0) / DX[1];
 
-            // Bulk-thermo trace correction Q(η) = λ·[ηW'(η) − W(η)] for the
-            // double-well W(η) = η²(1−η)² used in this branch. Closed form:
-            //   Q(η) = λ · η²·(3η−1)·(η−1)
-            // This is the well-balanced compensation that makes div(Σ_K_wb)
-            // vanish on a static CH-equilibrium tanh. For the EOS-Helmholtz
-            // mode, the dmu_bulk part cancels in η·μ−F when dmu_bulk is
-            // η-locally-constant at the face (true for uniform-(ρ,T)
-            // interfaces; first-order for varying ones), so the same
-            // closed form applies in both ch_thermo_consistent settings.
+            // Bulk-thermo trace correction Q(η) chosen by the active Korteweg
+            // form (see Hydro2.H KortewegForm and theory writeup). HLLC.H
+            // applies this as `S_nn -= q_eta` to the diagonal of Σ_K, so
+            // Σ_K_wb_nn = Σ_K_nn − Q_global(eta_face).
+            //
+            //   ChemPot  (Form B, default): Q = λ·[ηW'(η) − W(η)] = λ·η²(3η−1)(η−1).
+            //   Gradient (Form A):          Q = −λ·W(η)            = −λ·η²(1−η)².
+            //
+            // The Gradient form ALSO requires zeroing the κ·η·∇²η piece in
+            // S_nn, which is done by setting kfd.lap_eta = 0 in build_kfd_*
+            // (HLLC.H reads only kfd.lap_eta for that term, so this kills it
+            // without touching the HLLC code).
             auto Q_global = [=] AMREX_GPU_DEVICE (Real e) -> Real {
+                if (korteweg_form_ == 1) {
+                    // Gradient form: W_wb = −λW(η)  →  q_eta = −λ·η²(1−η)²
+                    Real omeg = Real(1.0) - e;
+                    return -lambda_W_ * e * e * omeg * omeg;
+                }
+                // ChemPot form (default): W_wb = λ(ηW'−W)  →  q_eta = λ·η²(3η−1)(η−1)
                 return lambda_W_ * e * e * (Real(3.0)*e - Real(1.0)) * (e - Real(1.0));
             };
+
+            // Whether to populate kfd.lap_eta. ChemPot uses it (κη∇²η term);
+            // Gradient drops it entirely. Pulled out so build_kfd_x/y stay in
+            // lockstep.
+            const bool kfd_use_lap = (korteweg_form_ != 1);
 
             auto build_kfd_x = [=] AMREX_GPU_DEVICE (int lo_i, int hi_i, int jj, int kk,
                                                     FR::KortewegFaceData &kfd)
@@ -1788,7 +1851,9 @@ void Hydro2::RHS_PerPhase(int lev,
                 Real dn       = (eta_arr(hi_i,jj,kk) - eta_arr(lo_i,jj,kk)) * dx_inv;
                 Real dt       = Real(0.25) * (eta_arr(lo_i,jj+1,kk) + eta_arr(hi_i,jj+1,kk)
                                             - eta_arr(lo_i,jj-1,kk) - eta_arr(hi_i,jj-1,kk)) * dy_inv;
-                Real lapf     = Real(0.5) * (lap9(lo_i,jj,kk) + lap9(hi_i,jj,kk));
+                Real lapf     = kfd_use_lap
+                                ? Real(0.5) * (lap9(lo_i,jj,kk) + lap9(hi_i,jj,kk))
+                                : Real(0.0);
                 Real a_self   = (pidx_ == 0) ? (Real(1.0) - eta_face) : eta_face;
                 Real a_other  = Real(1.0) - a_self;
                 Real rho_s    = Real(0.5) * (rho_arr (lo_i,jj,kk) + rho_arr (hi_i,jj,kk));
@@ -1810,7 +1875,9 @@ void Hydro2::RHS_PerPhase(int lev,
                 Real dn       = (eta_arr(ii,hi_j,kk) - eta_arr(ii,lo_j,kk)) * dy_inv;
                 Real dt       = Real(0.25) * (eta_arr(ii+1,lo_j,kk) + eta_arr(ii+1,hi_j,kk)
                                             - eta_arr(ii-1,lo_j,kk) - eta_arr(ii-1,hi_j,kk)) * dx_inv;
-                Real lapf     = Real(0.5) * (lap9(ii,lo_j,kk) + lap9(ii,hi_j,kk));
+                Real lapf     = kfd_use_lap
+                                ? Real(0.5) * (lap9(ii,lo_j,kk) + lap9(ii,hi_j,kk))
+                                : Real(0.0);
                 Real a_self   = (pidx_ == 0) ? (Real(1.0) - eta_face) : eta_face;
                 Real a_other  = Real(1.0) - a_self;
                 Real rho_s    = Real(0.5) * (rho_arr (ii,lo_j,kk) + rho_arr (ii,hi_j,kk));
@@ -1830,6 +1897,45 @@ void Hydro2::RHS_PerPhase(int lev,
             build_kfd_x(i,   i+1, j, k, kfd_xp);
             build_kfd_y(i, j-1, j,   k, kfd_ym);
             build_kfd_y(i, j,   j+1, k, kfd_yp);
+
+            // ----- KORTEWEG DIAGNOSTICS (N1 + N3 in theory writeup) -----
+            // Mirror exactly the Σ_K_wb_nn / Σ_K_wb_nt formulas applied inside
+            // HLLC.H:276-277 (kept in lockstep — if HLLC.H changes, this must
+            // change too). These are the per-phase, Y_self-weighted face stresses;
+            // the mixture stress is the sum over phases.
+            //
+            //   Σ_nn^wb = -κ·(∂_n η)² + κ·η·∇²η + ½·κ·|∇η|² − q_eta
+            //   Σ_nt^wb = -κ·(∂_n η)(∂_t η)
+            //
+            // The κ·η·∇²η term collapses to 0 under the Gradient form because
+            // kfd.lap_eta was already zeroed by build_kfd_* above.
+            auto eval_Snn = [] AMREX_GPU_DEVICE (const FR::KortewegFaceData &kfd) -> Real {
+                Real ge2 = kfd.dn_eta*kfd.dn_eta + kfd.dt_eta*kfd.dt_eta;
+                return -kfd.kappa*kfd.dn_eta*kfd.dn_eta
+                       + kfd.kappa*kfd.eta_face*kfd.lap_eta
+                       + Real(0.5)*kfd.kappa*ge2
+                       - kfd.q_eta;
+            };
+            auto eval_Snt = [] AMREX_GPU_DEVICE (const FR::KortewegFaceData &kfd) -> Real {
+                return -kfd.kappa*kfd.dn_eta*kfd.dt_eta;
+            };
+
+            Real Snn_xm = eval_Snn(kfd_xm), Snn_xp = eval_Snn(kfd_xp);
+            Real Snn_ym = eval_Snn(kfd_ym), Snn_yp = eval_Snn(kfd_yp);
+            Real Snt_xm = eval_Snt(kfd_xm), Snt_xp = eval_Snt(kfd_xp);
+            Real Snt_ym = eval_Snt(kfd_ym), Snt_yp = eval_Snt(kfd_yp);
+
+            // N1: cell-avg of the four face Σ_nn values.
+            Snn_arr(i,j,k,0) = Real(0.25)*(Snn_xm + Snn_xp + Snn_ym + Snn_yp);
+
+            // N3: per-cell ∇·Σ_K. For a symmetric stress with x-face giving
+            // (Σ_xx, Σ_yx) and y-face giving (Σ_xy, Σ_yy) = (Σ_yx, Σ_yy):
+            //   (∇·Σ)_x = [Σ_xx(xp) − Σ_xx(xm)]/dx + [Σ_xy(yp) − Σ_xy(ym)]/dy
+            //   (∇·Σ)_y = [Σ_yx(xp) − Σ_yx(xm)]/dx + [Σ_yy(yp) − Σ_yy(ym)]/dy
+            // At x-faces, Σ_xx = Snn and Σ_yx = Snt; at y-faces, Σ_yy = Snn
+            // and Σ_xy = Snt.
+            dSK_arr(i,j,k,0) = (Snn_xp - Snn_xm) * dx_inv + (Snt_yp - Snt_ym) * dy_inv;
+            dSK_arr(i,j,k,1) = (Snt_xp - Snt_xm) * dx_inv + (Snn_yp - Snn_ym) * dy_inv;
 
             FR::Flux fxm = rsolver->Solve(Sxm, Sxc, pref_, small_,
                                           /*n_passive=*/0,

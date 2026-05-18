@@ -8,7 +8,7 @@
 ### OUTPUT ###
 plot_file = ./tests/FlowSQR_tests/output_Garrick
 amr.plot_dt = 0.01
-amr.plot_int = 47
+# amr.plot_int = 1
 
 ### MESHING ###
 amr.max_level = 0
@@ -25,7 +25,7 @@ geometry.is_periodic = 0 1 0
 ### TIME STEP ###
 timestep  = 2.5e-4
 # stop_time = 0.2
-stop_time = 0.1
+stop_time = 0.5
 cfl   = 0.4
 
 ### Sources ###
@@ -123,35 +123,31 @@ apply_surface_tension = 0 # 0: false
 apply_weight = 0
 apply_vaporization = 0
 
+# Korteweg stress-tensor form (see tests/FlowSQR_tests/theory/korteweg_well_balanced.tex):
+#   chempot  (default): Σ_K = κ[½|∇η|² I − ∇η⊗∇η] + κη∇²η I,
+#                       WB trace correction λ[ηW' − W].  ∇·Σ_K = −η ∇μ_K.
+#   gradient          : Σ_K = κ[½|∇η|² I − ∇η⊗∇η],
+#                       WB trace correction −λW(η).      ∇·Σ_K = −μ_K ∇η.
+# Both are well-balanced on the planar CH-equilibrium tanh (Σ_nn = 0 pointwise).
+# Compare residuals via the korteweg_Snn_{0,1} and korteweg_divSigmaK_{0,1}
+# plot variables. apply_surface_tension = 0 zeros Σ_K under either form.
+# korteweg_form = chempot
+# korteweg_form = gradient
+
 ### DEBUGGING / SOLVER ###
-# Phase 6: ch_emergent routes m0/u0/q from ComputeEffectiveBSSources into
-# ApplyBSSource each step. To compare against the prior "no BS coupling"
-# behavior, set this to "off" — m0_eff / u0_eff / q_eff are still computed
-# and plotted as diagnostics but not consumed by ApplyBSSource.
+
 sqr_source_mode      = ch_emergent
-# sqr_source_mode      = off
-# (korteweg_well_balanced flag removed: the well-balanced face-flux Korteweg
-#  path is now the only Σ_K implementation, applied unconditionally inside
-#  RHS_PerPhase. ApplyKortewegStress and the legacy Brackbill block have
-#  both been deleted from Hydro2.)
-# p_int_method = 4   (legacy key; inert when sqr_legacy_p_int_method = 0 below.)
-#                    Replaced by closure.{un,E}_pint_method under the new
-#                    framework — see HYDRO CLOSURE STRATEGIES block below.
-#                    Ignored under the active Relax (S3) strategy regardless.
+
 Riemann_Solver.type = hllc
 kappa_method        = 1
 smooth_kernel_size  = 3
 nghost              = 4
 integration.type    = ForwardEuler
 
-# Implicit CH active (Phase 4 will wire dmu_bulk into f'(eta) here).
-# implicit_ch     = 0 # should this be 2 for this case?
-implicit_ch     = 2 # should this be 2 for this case?
+implicit_ch     = 2
 # Phase 4 mobility (spec §1.7): the new ch_mobility_scaling param controls
 # how ch_mobility_nom is interpreted.
 #   "magaletti"  -> M_eff = ch_mobility_nom * epsilon^2  (default; matched-asymptotic)
-#                   With epsilon = 5e-6, factor = 2.5e-11, so for M_eff ~ 1e-4
-#                   you would need ch_mobility_nom ~ 4e6.
 #   "allen_cahn" -> M_eff = ch_mobility_nom * epsilon
 #   "explicit"   -> M_eff = ch_mobility_nom directly  (used here for clarity).
 ch_mobility_scaling = magaletti
@@ -185,13 +181,7 @@ ch_newton_tol       = 1e-10
 ch_W_scale          = 12.5       # lambda = 2 * kappa / epsilon^2
 ch_kappa            = 4.0e-4     # = lambda * epsilon^2 / 2  (consistent)
 ch_mobility_degenerate = 1
-# Phase 6 calibration (2026-04-28): with thermo_consistent=1 + ch_emergent
-# routing, the Magaletti baseline M_nom=1 gave m0_eff ~1800x the analytical
-# Stefan flux (0.17 kg/m^2/s), driving ApplyBSSource so hard the system
-# went NaN by step 16. Lowered to 1e-3 to bring CH-derived rate near the
-# heat-conduction-limited Stefan rate. Tune up/down based on observed
-# m0_eff_max vs analytical m0(t) = rho_g * beta * sqrt(alpha/(t+t_off)).
-ch_mobility_nom        = 0
+ch_mobility_nom        = 0.1
 
 # HYDRO CLOSURE STRATEGIES (Phase B+)
 # `closure.{un,E}_strategy` selects the per-quantity SQR closure for
@@ -231,10 +221,10 @@ ch_mobility_nom        = 0
 # NB <<u_n>> = 0 is an exact kinematic constraint, so this is a stiff penalty
 # (faithful only as v_un -> inf), not a physical finite-resistance interface.
 closure.un_strategy    = relax
-closure.un_vel         = 6.4    # transfer velocity [m/s]; tau_loc ~ 1/(v_un*|grad eta|)
+closure.un_vel         = 6.4e-4    # transfer velocity [m/s]; tau_loc ~ 1/(v_un*|grad eta|)
 # Energy / temperature (S3): J_E = -C_E * v_E * (T_0 - T_1).
 closure.E_strategy     = relax
-closure.E_vel          = 6.4    # transfer velocity [m/s]; tau_loc ~ 1/(v_E*|grad eta|)
+closure.E_vel          = 6.4e-4    # transfer velocity [m/s]; tau_loc ~ 1/(v_E*|grad eta|)
 # Tangential velocity: inviscid case here, u_t is unconstrained — leave at the
 # Constitutive no-op stub (S1/angular-momentum, A10, not yet implemented).
 closure.ut_strategy    = constitutive
