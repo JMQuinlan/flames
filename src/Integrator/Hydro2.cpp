@@ -120,7 +120,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("Dv", value.Dv, 0.0);          // Vapor Diffusivity
         pp_query_required("epsilon", value.epsilon);    // diffuse interface thickness Y_infinity
         pp_query_default("Y_infinity", value.Y_infinity, 0.0); // Far Field Vapor Mass Fraction
-        pp_query_default("Mob", value.Mob_user, 0.0);   // CHAN HILLARD MOBILITY (CH MOB)
+        pp_query_default("Mob", value.Mob_user, 0.0);   // CH mobility scale M0: M = M0 * epsilon^2
+        if (value.epsilon <= 0.0)
+        {
+            Util::Abort(INFO, "epsilon must be positive for Hydro2 Cahn-Hilliard mobility; got ", value.epsilon);
+        }
 
         // CURVATURE
         pp_query_default("kappa_method", value.kappa_method, 2); // Method to solve for curvature
@@ -1203,18 +1207,26 @@ Hydro2::RHS(int lev,
             // ------------------------------------------------------------
             // Cahn-Hilliard
             // ------------------------------------------------------------
-            // d(eta)/dt = -u*grad(eta) + div( M*grad(mu) )
+            // Dr. Q mobility scaling:
+            //   Pe_CH = (U / epsilon) / (M * sigma / epsilon^3)
+            //         = U * epsilon^2 / (M * sigma).
+            // Setting Pe_CH = O(1) gives M = M0 * epsilon^2 with
+            // M0 = O(U / sigma).  The chemical potential stored here is
+            // mu = f'(eta) - epsilon^2 lap(eta), so the dimensional
+            // coefficient multiplying lap(mu) is M * sigma / epsilon.
             Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
-            Set::Scalar Mob = a(i, j, k) * 0.7 * DX[0] * Mob_user; // Mob = u_max * epsilon
-            //Set::Scalar Mob = a(i, j, k) * epsilon * Mob_user;// *epsilon / DX[0]; // Mob = u_max * epsilon
-            //Set::Scalar advection = -u.dot(grad_eta);
-            Set::Scalar eta_dot_CH = Mob * lap_mu_chem * 0.2;
+            Set::Scalar M0_CH = Mob_user;
+            Set::Scalar M_CH = M0_CH * epsilon * epsilon;
+            Set::Scalar Mob = M_CH * sigma / epsilon;
+            Set::Scalar eta_dot_CH = Mob * lap_mu_chem;
 
             // ERROR CHECKING
             check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Cahn-Hillard solving", {
                 { "mu_chem",  mu_chem_(i, j, k) },
                 { "lap_mu_chem",  lap_mu_chem },
                 { "a",  a(i, j, k) },
+                { "M0_CH",  M0_CH },
+                { "M_CH",  M_CH },
                 { "Mob",  Mob },
                 { "eta_dot_CH",  eta_dot_CH }
             }); // end check4nans

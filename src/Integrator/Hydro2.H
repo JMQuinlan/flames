@@ -362,6 +362,7 @@ protected:
 
     // CFD Properties
     Set::Scalar cfl = NAN, cfl_v = NAN, pref = NAN;
+    // Cahn-Hilliard mobility scale M0 in M = M0 * epsilon^2.
     Set::Scalar Mob_user = NAN;
     Set::Scalar small=NAN;
     Set::Scalar cutoff=NAN;
