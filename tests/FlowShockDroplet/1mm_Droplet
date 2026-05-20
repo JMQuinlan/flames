@@ -8,13 +8,13 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = ./tests/FlowShockDroplet/output_Shock1mmDroplet
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_minmod_rk3
+plot_file = ./tests/FlowShockDroplet/output_Shock1mmDroplet
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_minmod_rk3
 #plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet
 
 ### MESHING ###
 amr.plot_dt = 0.5e-6
-#amr.plot_int = 1
+amr.plot_int = 10
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 20

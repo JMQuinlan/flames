@@ -105,7 +105,7 @@ T_END = 1.0e-2
 # and edited for a different machine / scratch location.
 OUTPUT_DIR = os.path.normpath(os.path.join(
     _HERE, "..", "..", "..", "bin", "tests",
-    "FlowRayleighPlesset", "output_Sch20_Oscillating",
+    "FlowRayleighPlesset", "output_Sch20_Oscillating_minmod",
 ))
 # OVERRIDE (uncomment + edit for your machine):
 # OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating")

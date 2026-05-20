@@ -3978,10 +3978,26 @@ void Hydro2::RelaxAndReinit(int lev)
     Util::Message(INFO, "RelaxAndReinit");
 
 
-    const Set::Scalar alpha_floor = 1.0e-6;
-    const Set::Scalar small_loc   = small;
+    // alpha_floor TIGHTENED to 1e-12 (was 1e-6) to match the Limiter
+    // framework's convention.  At the old 1e-6 floor, pure-other-phase
+    // cells saw rho_k = arh_k_floored / 1e-6 wildly different from the
+    // physical pure-phase density, producing bad pre-relax sound speeds,
+    // a wildly wrong impedance-weighted pHat0 initial guess, and Newton
+    // divergence on ~400 interface cells per call (Sch20 Oscillating
+    // post-mortem: see bin/log.txt -- residual=1330, |p_relaxed-p_reinit|
+    // =102350 Pa, reinit then injected that 1e5 Pa perturbation into the
+    // bubble dynamics every step).  DIV_FLOOR (1e-30) is the divide-by-
+    // zero floor used in inlined EOS calls -- decoupled from the
+    // integrator's `small` (~1e-8), which is sized for HLLC flux
+    // positivity guards and is far too coarse to use as a divisor for
+    // pure-phase-density inversion of canonical (alpha rho)_k.
+    const Set::Scalar alpha_floor = 1.0e-12;
+    const Set::Scalar DIV_FLOOR   = 1.0e-30;
+    const Set::Scalar small_loc   = small;        // kept for legacy callers
     const int         max_iter    = 30;
     const Set::Scalar newton_tol  = 1.0e-10;
+    const int         bisect_max  = 80;           // log2(1e-15 / 1e9) ~ 80
+    const Set::Scalar bisect_tol  = 1.0e-12;
 
     const Set::Scalar gam0 = eos0.Gamma();
     const Set::Scalar pi0_ = eos0.P0();
@@ -4026,68 +4042,165 @@ void Hydro2::RelaxAndReinit(int lev)
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             // -----------------------------------------------------------
-            // Pre-relax state.
+            // Pre-relax state.  ALL divides use DIV_FLOOR (1e-30), NEVER
+            // `small`.  Same lesson as the Limiter Garrick post-mortem:
+            // using `small`=1e-8 as a divisor for canonical (alpha rho)_k
+            // -> rho_k produces 10000x discontinuities in p_k between
+            // cells whose alpha straddles the small floor, which then
+            // destroys the Newton's initial guess and convergence.
             // -----------------------------------------------------------
             Set::Scalar a1 = std::min(std::max(eta(i, j, k), alpha_floor), 1.0 - alpha_floor);
             Set::Scalar a2 = 1.0 - a1;
 
-            Set::Scalar arh0_loc = std::max(arh0(i, j, k), small_loc);
-            Set::Scalar arh1_loc = std::max(arh1(i, j, k), small_loc);
+            // Conservative partial densities -- NO `small` floor here.
+            Set::Scalar arh0_loc = std::max(arh0(i, j, k), 0.0);
+            Set::Scalar arh1_loc = std::max(arh1(i, j, k), 0.0);
 
-            // Pure-phase densities (alpha_floor protects the divide).
-            Set::Scalar rho0_pre = arh0_loc / a1;
-            Set::Scalar rho1_pre = arh1_loc / a2;
+            // Pure-phase densities with DIV_FLOOR (1e-30).  In pure-other-
+            // phase cells where alpha_k = alpha_floor (1e-12) and arh_k
+            // is also ~1e-12 (consistent IC), this gives rho_k ~ physical
+            // density.  Old code's `arh = max(arh,small=1e-8)` made
+            // rho_k = 1e-8/1e-12 = 1e4 = garbage.
+            Set::Scalar rho0_pre = arh0_loc / std::max(a1, DIV_FLOOR);
+            Set::Scalar rho1_pre = arh1_loc / std::max(a2, DIV_FLOOR);
 
-            // Pre-relax per-phase pressures from canonical (alpha rho e)_k.
-            // Sau09 eq. II.3 inverted:
-            Set::Scalar p0_pre = Solver::EOS::EOS::PhasicPressureFromEnergy(E0_(i, j, k), a1, gam0, pi0_, small_loc);
-            Set::Scalar p1_pre = Solver::EOS::EOS::PhasicPressureFromEnergy(E1_(i, j, k), a2, gam1, pi1_, small_loc);
-
-            // Pre-relax sound speeds and impedances (kept for the Newton's
-            // initial guess via the impedance-weighted interfacial pressure).
-            Set::Scalar c0_pre = Solver::EOS::EOS::PhasicSoundSpeed(rho0_pre, p0_pre, gam0, pi0_, small_loc);
-            Set::Scalar c1_pre = Solver::EOS::EOS::PhasicSoundSpeed(rho1_pre, p1_pre, gam1, pi1_, small_loc);
-            Set::Scalar Z0     = rho0_pre * c0_pre;
-            Set::Scalar Z1     = rho1_pre * c1_pre;
-            Set::Scalar pHat0  = Solver::EOS::EOS::InterfacialPressureZ(p0_pre, p1_pre, Z0, Z1, small_loc);
+            // Pre-relax per-phase pressures (Sau09 eq. II.3 inverted) --
+            // inlined so we control the divide-floor directly instead of
+            // routing through EOS::PhasicPressureFromEnergy which uses
+            // the integrator's `small` for BOTH divide-floor and SG
+            // positivity floor (conflating two concerns).
+            Set::Scalar p0_pre = (gam0 - 1.0) * E0_(i, j, k) / std::max(a1, DIV_FLOOR) - gam0 * pi0_;
+            Set::Scalar p1_pre = (gam1 - 1.0) * E1_(i, j, k) / std::max(a2, DIV_FLOOR) - gam1 * pi1_;
+            // SG positivity floor (Sau09 §3): p_k + pi_k > 0.
+            p0_pre = std::max(p0_pre, -pi0_ + DIV_FLOOR);
+            p1_pre = std::max(p1_pre, -pi1_ + DIV_FLOOR);
 
             // -----------------------------------------------------------
-            // Newton on f(p) = arh0*v0(p) + arh1*v1(p) - 1 = 0.
+            // Newton on f(p) = arh0*v0(p) + arh1*v1(p) - 1 = 0, with
+            // bisection fallback when Newton stalls.
             //
-            // Schmidmayer 2020 eq. 24 + eq. 25 (SELF-CONSISTENT form):
+            // SC form (Sch20 eq. 24+25):
             //   v_k(p) = v_k^0 * [p_k^0 + gam pi + (gam-1) p] / [gam (p + pi)]
-            // (Equivalent to Saurel 2009 eq. III.4 with p_hat_I = p, the
-            //  unknown relaxed pressure.)  Saurel §4.4 calls this the
-            //  "negligibly different" alternative to the frozen-p_hat_I form.
+            //
+            // Monotonicity (proven in Pressure_Relaxation.tex):
+            //   dv_k/dp = -v_k^0 (p_k^0+pi_k)/(gam_k (p+pi_k)^2) < 0
+            // strictly, given SG positivity p_k^0 + pi_k > 0.  Hence
+            // f(p) is monotone-decreasing and its root is UNIQUE on
+            // (-min_k(pi_k), +infty).  Therefore bisection is bulletproof
+            // for cells where Newton fails to converge -- which it does
+            // when the Tammann liquid Jacobian arh0*dv0/dp ~ 4e-13
+            // dwarfs the convergence test scale (problematic for
+            // interface cells with conflicting per-phase pressures).
             // -----------------------------------------------------------
-            const Set::Scalar p_min = -std::min(pi0_, pi1_) + small_loc;
-            Set::Scalar p = std::max(pHat0, p_min);
+            const Set::Scalar p_min = -std::min(pi0_, pi1_) + DIV_FLOOR;
+
+            // Sch20 eq. 8 mixture pressure as the initial guess --
+            // exact for the mechanical-equilibrium IC (p0_pre == p1_pre
+            // -> p_init == p_mix == root), and a sensible interpolation
+            // for general states.  Bounded away from p=0 by virtue of
+            // SG positivity on both pre-relax phases.
+            Set::Scalar p_init = a1 * p0_pre + a2 * p1_pre;
+            // Lower bracket: a hair above p_min (avoid the gas v -> inf
+            // pole at p -> -pi_gas).  For typical gas/liquid: p_min ~ 0,
+            // p_lo ~ small positive.  For all-liquid pair: p_min ~ -pi,
+            // p_lo > p_min.
+            Set::Scalar p_lo = std::max(p_min, 1.0e-3 * std::max(std::abs(p_init), 1.0));
+            // Upper bracket: generously above the maximum pre-relax p.
+            Set::Scalar p_hi = 1.0e4 * std::max(std::max(std::abs(p0_pre), std::abs(p1_pre)), 1.0);
+
+            // Local evaluator (captures pre-relax state from this cell).
+            auto eval_f = [&](Set::Scalar p) -> Set::Scalar
+            {
+                Set::Scalar v0 = Solver::EOS::EOS::RelaxationVolume_SG_SC(p, p0_pre, rho0_pre, gam0, pi0_, DIV_FLOOR);
+                Set::Scalar v1 = Solver::EOS::EOS::RelaxationVolume_SG_SC(p, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
+                return arh0_loc * v0 + arh1_loc * v1 - 1.0;
+            };
+
+            // Start Newton at p_init clamped into [p_lo, p_hi].
+            Set::Scalar p = std::max(std::min(p_init, p_hi), p_lo);
 
             int iters_used = max_iter;
-            Set::Scalar f_final = 0.0;
+            Set::Scalar f_final = eval_f(p);
+            bool newton_ok = false;
             for (int it = 0; it < max_iter; ++it)
             {
-                Set::Scalar v0_p = Solver::EOS::EOS::RelaxationVolume_SG_SC(p, p0_pre, rho0_pre, gam0, pi0_, small_loc);
-                Set::Scalar v1_p = Solver::EOS::EOS::RelaxationVolume_SG_SC(p, p1_pre, rho1_pre, gam1, pi1_, small_loc);
+                Set::Scalar v0_p = Solver::EOS::EOS::RelaxationVolume_SG_SC(p, p0_pre, rho0_pre, gam0, pi0_, DIV_FLOOR);
+                Set::Scalar v1_p = Solver::EOS::EOS::RelaxationVolume_SG_SC(p, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
                 Set::Scalar f    = arh0_loc * v0_p + arh1_loc * v1_p - 1.0;
                 f_final = f;
 
-                Set::Scalar dv0 = Solver::EOS::EOS::RelaxationVolume_SG_SC_dvdp(p, p0_pre, rho0_pre, gam0, pi0_, small_loc);
-                Set::Scalar dv1 = Solver::EOS::EOS::RelaxationVolume_SG_SC_dvdp(p, p1_pre, rho1_pre, gam1, pi1_, small_loc);
+                Set::Scalar dv0 = Solver::EOS::EOS::RelaxationVolume_SG_SC_dvdp(p, p0_pre, rho0_pre, gam0, pi0_, DIV_FLOOR);
+                Set::Scalar dv1 = Solver::EOS::EOS::RelaxationVolume_SG_SC_dvdp(p, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
                 Set::Scalar df  = arh0_loc * dv0 + arh1_loc * dv1;
 
-                if (std::abs(df) < small_loc) { iters_used = it + 1; break; }
+                if (std::abs(df) < DIV_FLOOR) break;       // bail to bisection
                 Set::Scalar dp = -f / df;
                 Set::Scalar p_new = p + dp;
-                // Keep (p + pi_k) > 0 for both phases (denominator of eq. 25).
-                if (p_new < p_min) p_new = 0.5 * (p + p_min);
+                // Clamp Newton step into the bracket -- prevents the
+                // Tammann-stiff cells from taking 10^9-scale steps that
+                // overshoot into the gas singularity at p -> 0.
+                if (p_new < p_lo) p_new = 0.5 * (p + p_lo);
+                if (p_new > p_hi) p_new = 0.5 * (p + p_hi);
                 if (std::abs(dp) < newton_tol * std::max(std::abs(p_new), 1.0))
                 {
                     p = p_new;
+                    f_final = eval_f(p);
                     iters_used = it + 1;
+                    newton_ok = true;
                     break;
                 }
                 p = p_new;
+            }
+
+            // -----------------------------------------------------------
+            // Bisection fallback.  Triggered when Newton ran the full
+            // max_iter without satisfying the convergence test OR when
+            // Newton bailed early on a degenerate Jacobian.  f(p) is
+            // monotone-decreasing so bracketing is robust: we just need
+            // f(p_lo) > 0 and f(p_hi) < 0.  If the bracket is broken
+            // (rare degenerate states), expand outward.
+            // -----------------------------------------------------------
+            if (!newton_ok)
+            {
+                Set::Scalar f_lo = eval_f(p_lo);
+                Set::Scalar f_hi = eval_f(p_hi);
+
+                // Walk the upper bound out if we don't bracket -- happens
+                // if pre-relax state has anomalously high partial densities.
+                int expand = 0;
+                while (f_hi > 0.0 && expand < 20)
+                {
+                    p_hi *= 10.0;
+                    f_hi  = eval_f(p_hi);
+                    ++expand;
+                }
+                // Walk lower bound in if needed.
+                while (f_lo < 0.0 && p_lo > p_min && expand < 40)
+                {
+                    p_lo = std::max(0.5 * p_lo, p_min);
+                    f_lo = eval_f(p_lo);
+                    ++expand;
+                }
+
+                if (f_lo * f_hi <= 0.0)
+                {
+                    // Standard bisection -- f monotone-decreasing.
+                    Set::Scalar p_mid = 0.5 * (p_lo + p_hi);
+                    Set::Scalar f_mid = 0.0;
+                    int bit = 0;
+                    for (bit = 0; bit < bisect_max; ++bit)
+                    {
+                        p_mid = 0.5 * (p_lo + p_hi);
+                        f_mid = eval_f(p_mid);
+                        if (f_mid > 0.0) p_lo = p_mid;
+                        else             p_hi = p_mid;
+                        if ((p_hi - p_lo) < bisect_tol * std::max(std::abs(p_mid), 1.0)) break;
+                    }
+                    p = p_mid;
+                    f_final = f_mid;
+                    iters_used = max_iter + bit + 1;   // distinguishable from Newton-only count
+                }
+                // else: degenerate (no root in bracket); leave p at last Newton iterate.
             }
 
             Set::Scalar p_relaxed = p;
@@ -4100,12 +4213,13 @@ void Hydro2::RelaxAndReinit(int lev)
             }
 
             // Post-relax volume fractions (using self-consistent v_k(p)).
-            Set::Scalar v0_r = Solver::EOS::EOS::RelaxationVolume_SG_SC(p_relaxed, p0_pre, rho0_pre, gam0, pi0_, small_loc);
-            Set::Scalar v1_r = Solver::EOS::EOS::RelaxationVolume_SG_SC(p_relaxed, p1_pre, rho1_pre, gam1, pi1_, small_loc);
+            // DIV_FLOOR matches the pre-relax / Newton-loop convention.
+            Set::Scalar v0_r = Solver::EOS::EOS::RelaxationVolume_SG_SC(p_relaxed, p0_pre, rho0_pre, gam0, pi0_, DIV_FLOOR);
+            Set::Scalar v1_r = Solver::EOS::EOS::RelaxationVolume_SG_SC(p_relaxed, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
             Set::Scalar a1_new = arh0_loc * v0_r;
             Set::Scalar a2_new = arh1_loc * v1_r;
             Set::Scalar asum   = a1_new + a2_new;
-            if (asum > small_loc) { a1_new /= asum; a2_new /= asum; }
+            if (asum > DIV_FLOOR) { a1_new /= asum; a2_new /= asum; }
             a1_new = std::min(std::max(a1_new, alpha_floor), 1.0 - alpha_floor);
             a2_new = 1.0 - a1_new;
 
