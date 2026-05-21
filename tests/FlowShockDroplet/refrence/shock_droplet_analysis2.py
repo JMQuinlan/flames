@@ -108,11 +108,11 @@ TIME_STEP = 4  # Sample every Nth timestep (1=all, 2=every other, 5=every 5th, e
 
 # File paths
 #amrex_output_dir = r'../../../bin/tests/FlowShockDroplet/output_ShockDroplet'
-amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet'
+#amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet'
 #amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_H20'
-#amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_n-Pentane'
+amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_minmod_rk3'
 
-#amrex_output_dir = r'/mmfs1/home/spatel6/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet'
+#amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_n-Pentane'
 
 output_folder = './ShockDroplet_Analysis'
 #output_folder = './ShockDroplet_Analysis_5Ma_H2O'
