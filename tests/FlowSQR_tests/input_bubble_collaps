@@ -13,21 +13,21 @@ plot_file = ./tests/FlowSQR_tests/output_RPE
 # plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE_20260502
 
 ### MESHING ###
-amr.plot_dt = 1e-6
+amr.plot_dt = 0.25e-6
 # amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 4 # Must be >= nghost so FillBoundary can fill all ghost layers from neighbor valid cells
 amr.regrid_int = 1
 amr.grid_eff = 0.8
-# amr.max_level = 5
-amr.max_level = 6
+amr.max_level = 5
+# amr.max_level = 6
 # amr.max_level = 7
 amr.n_cell = 32 32
 # amr.n_cell = 256 256
 # amr.n_cell = 1024 1024
 
 ### TIME STEPING ###
-timestep  = 1e-10
+timestep  = 5e-10
 dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-0
@@ -46,8 +46,8 @@ stop_time = 2e-4     # captures collapse + start of rebound
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-# eta.ic.expression.constant.epsilon = 0.001      # used with 5 levels of AMR
-eta.ic.expression.constant.epsilon = 0.0005     # used with 6 levels of AMR
+eta.ic.expression.constant.epsilon = 0.001      # used with 5 levels of AMR
+# eta.ic.expression.constant.epsilon = 0.0005     # used with 6 levels of AMR
 # eta.ic.expression.constant.epsilon = 0.00025    # used with 7 levels of AMR
 eta.ic.expression.constant.R0 = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(sqrt(2)*epsilon)))"
@@ -64,14 +64,14 @@ gamma_1 = 7.15  # Water (liquid surrounding bubble)
 gamma_0 = 1.4   # Air/gas (inside bubble)
 
 # ----------------------------
-# Density (water 10 kg/m³; gas from ideal gas law at p₀=100 Pa, T=290 K)
+# Density (water 1000 kg/m³; gas from ideal gas law at p₀=100000 Pa, T=290 K)
 # ----------------------------
 
 density_1.ic.type = expression
-density_1.ic.expression.region0 = "10.0"
+density_1.ic.expression.region0 = "1000.0"
 
 density_0.ic.type = expression
-density_0.ic.expression.region0 = "0.001207"
+density_0.ic.expression.region0 = "1.207"
 
 # ----------------------------
 # Initial velocities (rest)
@@ -157,7 +157,7 @@ momentum.bc.val.xlo = 0.0 0.0
 
 ### REFINEMENT CRITERIA ###
 eta_refinement_criterion    = 1e-3
-omega_refinement_criterion  = 10.55
+omega_refinement_criterion  = 1e10
 p_refinement_criterion      = 1e+4
 rho_refinement_criterion    = 1e+4
 gradu_refinement_criterion  = 1e+4
@@ -224,8 +224,8 @@ integration.type = ForwardEuler
 # ch_mobility_nom = 1e-4  # seems to need to be smaller
 # implicit_ch = 0 # solves CH rhs explicitly (faster but dx^4 reduction in timestep needed, so only on course grids)
 implicit_ch = 2
-#   ch_mobility_nom = 4e-3
-  ch_mobility_nom = 0
+  ch_mobility_nom = 10.0
+#   ch_mobility_nom = 0
   ch_newton_iters = 5       # default, usually converges in 3
   ch_newton_tol = 1e-10     # default
   # CH equilibrium-width relation (well-balanced Korteweg + Q-trace path).

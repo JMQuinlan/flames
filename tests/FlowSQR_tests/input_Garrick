@@ -188,7 +188,8 @@ ch_newton_tol       = 1e-10
 ch_W_scale          = 12.5       # lambda = 2 * kappa / epsilon^2
 ch_kappa            = 4.0e-4     # = lambda * epsilon^2 / 2  (consistent)
 ch_mobility_degenerate = 1
-ch_mobility_nom        = 1.1
+# ch_mobility_nom convention:  <0 = auto (0.2*ε*c_max),  0 = off (frozen η),  >0 = user value
+ch_mobility_nom        = 0
 
 # HYDRO CLOSURE STRATEGIES (Phase B+)
 # `closure.{un,E}_strategy` selects the per-quantity SQR closure for

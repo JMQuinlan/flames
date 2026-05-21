@@ -593,7 +593,7 @@ protected:
 
     // Implicit CH
     int implicit_ch = 0;               // 0: explicit  1: Eyre MLMG  2: Newton-MLMG
-    Set::Scalar ch_mobility_nom = 0.0; // nominal mobility for implicit solve (0 = auto)
+    Set::Scalar ch_mobility_nom = -1.0; // nominal mobility (<0 = auto: 0.2*ε*c_max, 0 = off, >0 = user value)
     int ch_newton_iters = 5;           // max Newton iterations (implicit_ch=2)
     Set::Scalar ch_newton_tol = 1.0e-10; // Newton convergence tolerance
     Set::Scalar ch_W_scale = 1.0;        // double-well amplitude scale (W_scale=1 → equilibrium width=√2·ε)

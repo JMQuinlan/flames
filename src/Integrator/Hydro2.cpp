@@ -356,7 +356,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // IMPLICIT CAHN-HILLIARD
         // 0 = explicit, 1 = Eyre double-Helmholtz MLMG, 2 = Newton-MLMG (full nonlinear)
         pp_query_default("implicit_ch",      value.implicit_ch,      0);        // 0: explicit  1: Eyre MLMG  2: Newton-MLMG
-        pp_query_default("ch_mobility_nom",  value.ch_mobility_nom,  0.0);      // Nominal mobility [m^2/s] (0 = auto: 0.2*ε*c_max)
+        pp_query_default("ch_mobility_nom",  value.ch_mobility_nom,  -1.0);     // Nominal mobility [m²/s] (<0 = auto: 0.2*ε*c_max, 0 = off, >0 = user value)
         pp_query_default("ch_newton_iters",  value.ch_newton_iters,  5);        // Max Newton iterations (implicit_ch=2 only)
         pp_query_default("ch_newton_tol",    value.ch_newton_tol,    1.0e-10);  // Newton convergence tolerance
         pp_query_default("ch_W_scale",       value.ch_W_scale,       1.0);      // double-well amplitude (equilibrium width = √2·ε/√W_scale)
@@ -1321,7 +1321,9 @@ void Hydro2::ComputeEffectiveSQRSources(int lev)
     const Real kappa_       = ch_kappa_eff;
     const Real M_nom_eff    = (ch_mobility_nom > Real(0.0))
                               ? ch_mobility_nom * ch_mobility_factor
-                              : Real(0.0);
+                              : (ch_mobility_nom < Real(0.0))
+                                ? Real(0.2) * epsilon * (c_max + Real(1.0))
+                                : Real(0.0);
     const int  M_degen      = ch_mobility_degenerate;
     const int  thermo_      = ch_thermo_consistent;
 
@@ -2288,7 +2290,9 @@ Hydro2::RHS_Eta(int lev,
     const Real eps_         = epsilon;
     const Real Dv_          = Dv;
     const int  apply_vap_   = apply_vaporization;
-    const Real mob_nom_loc  = (ch_mobility_nom > Real(0.0)) ? ch_mobility_nom * ch_mobility_factor : Real(0.0);
+    const Real mob_nom_loc  = (ch_mobility_nom > Real(0.0)) ? ch_mobility_nom * ch_mobility_factor
+                            : (ch_mobility_nom < Real(0.0)) ? Real(0.2) * epsilon * (c_max + Real(1.0))
+                            : Real(0.0);
     const bool do_implicit_ = (implicit_ch != 0);
 
     for (MFIter mfi(eta_rhs_mf, TilingIfNotGPU()); mfi.isValid(); ++mfi)
@@ -3286,7 +3290,8 @@ Hydro2::RHS(int lev,
         // feedback loop: Cartesian-grid pressure anisotropy → higher a at cardinal points
         // → more CH diffusion there → amplifies anisotropy.  Use c_max instead.
         Real mob_nom = (ch_mobility_nom > 0.0) ? ch_mobility_nom * ch_mobility_factor
-                                               : 0.2 * epsilon * (c_max + 1.0);
+                     : (ch_mobility_nom < 0.0) ? 0.2 * epsilon * (c_max + 1.0)
+                     : 0.0;
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i,int j,int k)
         {
@@ -3747,7 +3752,8 @@ void Hydro2::ApplyImplicitCH(int lev, Set::Scalar dt)
 
     const Real kappa_CH = ch_kappa_eff;
     const Real M_nom    = (ch_mobility_nom > 0.0) ? ch_mobility_nom * ch_mobility_factor
-                                                   : 0.2 * epsilon * (c_max + 1.0);
+                        : (ch_mobility_nom < 0.0) ? 0.2 * epsilon * (c_max + 1.0)
+                        : 0.0;
     const Real gamma_CH = std::sqrt(dt * M_nom * kappa_CH);
 
     // BC arrays (Neumann at walls)
@@ -3871,7 +3877,8 @@ void Hydro2::ApplyImplicitCH_Newton(int lev, Set::Scalar dt)
 
     const Real kappa_CH = ch_kappa_eff;
     const Real M_nom    = (ch_mobility_nom > 0.0) ? ch_mobility_nom * ch_mobility_factor
-                                                   : 0.2 * epsilon * (c_max + 1.0);
+                        : (ch_mobility_nom < 0.0) ? 0.2 * epsilon * (c_max + 1.0)
+                        : 0.0;
     // Degenerate mobility: residual uses M(eta)=M_nom*eta^2*(1-eta)^2 face-averaged
     // so the discrete operator is conservative (∇·(M∇μ), preserves ∫η).
     // Preconditioner keeps the constant-coeff biharmonic factorization with the
