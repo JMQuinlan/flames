@@ -107,10 +107,10 @@ PLOT_DENSITY_CONTOURS = 1              # Density contours at key times
 TIME_STEP = 4  # Sample every Nth timestep (1=all, 2=every other, 5=every 5th, etc.)
 
 # File paths
-#amrex_output_dir = r'../../../bin/tests/FlowShockDroplet/output_ShockDroplet'
+amrex_output_dir = r'../../../bin/tests/FlowShockDroplet/output_ShockDroplet'
 #amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet'
 #amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_H20'
-amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_minmod_rk3'
+#amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_minmod_rk3'
 
 #amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_n-Pentane'
 

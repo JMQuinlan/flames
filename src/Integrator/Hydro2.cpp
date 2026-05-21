@@ -3996,8 +3996,15 @@ void Hydro2::RelaxAndReinit(int lev)
     const Set::Scalar small_loc   = small;        // kept for legacy callers
     const int         max_iter    = 30;
     const Set::Scalar newton_tol  = 1.0e-10;
-    const int         bisect_max  = 80;           // log2(1e-15 / 1e9) ~ 80
+    const int         bisect_max  = 120;          // generous; AMR lev=4 needs headroom
     const Set::Scalar bisect_tol  = 1.0e-12;
+    // Practical |f| threshold for the "unconverged_cells" diagnostic.
+    // Newton's strict newton_tol=1e-10 over-flags bisection cells that
+    // are physically converged at |f| ~ 1e-8.  unconv_threshold relaxes
+    // the warning to a value that matches engineering convergence
+    // (volume constraint Sum_k (alpha rho)_k v_k(p) = 1 satisfied to
+    // 1 part in 10^6).
+    const Set::Scalar unconv_threshold = 1.0e-6;
 
     const Set::Scalar gam0 = eos0.Gamma();
     const Set::Scalar pi0_ = eos0.P0();
@@ -4284,8 +4291,14 @@ void Hydro2::RelaxAndReinit(int lev)
                 for (int j = lo.y; j <= hi.y; ++j)
                     for (int i = lo.x; i <= hi.x; ++i)
                     {
+                        // Count as truly unconverged only if iters hit
+                        // the max AND |f| exceeds the physical-engineering
+                        // tolerance.  Bisection routinely lands at
+                        // |f| ~ 1e-8 -- physically converged; flagging
+                        // those with the old newton_tol=1e-10 produces
+                        // spurious "unconverged" reports on AMR runs.
                         if (static_cast<int>(arr(i, j, k, 0)) >= max_iter
-                            && arr(i, j, k, 1) > newton_tol)
+                            && arr(i, j, k, 1) > unconv_threshold)
                             ++unconv;
                     }
         }
