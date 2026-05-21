@@ -8,7 +8,7 @@
 ### OUTPUT ###
 plot_file = ./tests/FlowSQR_tests/output_Garrick
 amr.plot_dt = 0.01
-amr.plot_int = 1
+# amr.plot_int = 1
 
 ### MESHING ###
 amr.max_level = 0
@@ -72,8 +72,9 @@ cv_0 = "1.0"
 
 ### IC State - eta=1 phase (RHS, x > 0): liquid ###
 density_1.ic.type = constant
-density_1.ic.constant.value = 0.991
+# density_1.ic.constant.value = 0.991
 # density_1.ic.constant.value = 1.241
+density_1.ic.constant.value = 0.331 # For same \Delta p but T=const
 
 velocity_1.ic.type = constant
 velocity_1.ic.constant.value = 0.0 0.0
@@ -232,7 +233,7 @@ closure.un_vel         = 6.4 #e-1    # transfer velocity [m/s]; tau_loc ~ 1/(v_u
 # Energy / temperature (S3): J_E = -C_E * v_E * (T_0 - T_1).
 closure.E_strategy     = relax
 closure.E_vel          = 6.4 #e-1    # transfer velocity [m/s]; tau_loc ~ 1/(v_E*|grad eta|)
-# closure.E_strategy     = constitutive
+# closure.E_strategy     = const0itutive
 # Tangential velocity: inviscid case here, u_t is unconstrained — leave at the
 # Constitutive no-op stub (S1/angular-momentum, A10, not yet implemented).
 closure.ut_strategy    = constitutive

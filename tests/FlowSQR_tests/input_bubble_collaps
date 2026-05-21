@@ -3,10 +3,13 @@
 #@ dim=2
 #@
 
+### Rayleigh-Plesset equation test case
+
+
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowSQR_tests/output_RPE_20260502_6
+plot_file = ./tests/FlowSQR_tests/output_RPE
 # plot_file = /mmfs1/home/jquinlan/runs/temp5/output_RPE_20260502
 
 ### MESHING ###
@@ -37,7 +40,8 @@ geometry.prob_lo = -0.20 -0.20 0.0
 geometry.prob_hi =  0.20  0.20 0.0
 geometry.is_periodic = 0 0 0
 
-stop_time = 1e-4
+# stop_time = 1e-4   # captures ~50% of Rayleigh collapse
+stop_time = 2e-4     # captures collapse + start of rebound
 # stop_time = 1e-7
 
 ### ETA INITIAL CONDITIONS ###
@@ -60,14 +64,14 @@ gamma_1 = 7.15  # Water (liquid surrounding bubble)
 gamma_0 = 1.4   # Air/gas (inside bubble)
 
 # ----------------------------
-# Density ratio 1 : 10
+# Density (water 10 kg/m³; gas from ideal gas law at p₀=100 Pa, T=290 K)
 # ----------------------------
 
 density_1.ic.type = expression
 density_1.ic.expression.region0 = "10.0"
 
 density_0.ic.type = expression
-density_0.ic.expression.region0 = "1.0"
+density_0.ic.expression.region0 = "0.001207"
 
 # ----------------------------
 # Initial velocities (rest)
@@ -82,8 +86,13 @@ velocity_0.ic.expression.region0 = "0.0"
 velocity_0.ic.expression.region1 = "0.0"
 
 # ----------------------------
-# Lowest stable pressure
+# Initial pressures
 # ----------------------------
+# Temperature check (thermal: T = (UE - π)/(ρ cv) = (p + π)/((γ-1) ρ cv)):
+#   T_0 = p_0 / ((γ_0-1) ρ_0 cv_0)        = 100 / (0.4 × 0.001207 × 714.3)   ≈ 290
+#   T_1 = (p_1+π_1)/((γ_1-1) ρ_1 cv_1)    = 3.001e8 / (6.15 × 10 × 16827)    ≈ 290
+# Both phases at ~290 K: S3 energy relaxation (E_vel > 0) is safe.
+# Rayleigh collapse time: t_c ≈ 0.915 R_0 sqrt(ρ_1/(p_1-p_0)) ≈ 1.9e-4 s.
 
 pressure_1.ic.type = expression
 pressure_1.ic.expression.region0 = "1.0e5"
@@ -92,13 +101,13 @@ pressure_0.ic.type = expression
 pressure_0.ic.expression.region0 = "1.0e2"
 
 # ----------------------------
-# Specific Heats
+# Specific Heats (γ = cp/cv, so cv = cp/γ)
 # ----------------------------
 
-cp_1 = "1000.0"
+cp_1 = "120315.0"       # = gamma_1 * cv_1 (calibrated for T_1 ≈ 290 K)
 cp_0 = "1000.0"
-cv_1 = "1000.0/1.4"
-cv_0 = "1000.0/1.4"
+cv_1 = "16827.0"        # = (p_1+pi_1)/((gamma_1-1)*rho_1*290) ≈ 16827
+cv_0 = "1000.0/1.4"     # = cp_0/gamma_0
 
 # ----------------------------
 # Stiffened pressure (Tammann EOS pi)
@@ -170,7 +179,34 @@ sqr_source_mode      = ch_emergent
 apply_surface_tension = 1
 apply_weight = 0
 apply_vaporization = 0
-p_int_method = 4 # 0: Off, 1: pressure average, 2: eta weighted pressure. 3: acoustic impedance matched pressure 4: mass-fraction weighted
+
+# --- S3 closure framework (replaces legacy p_int_method) ---
+sqr_legacy_p_int_method = 0    # 0 = new closure-strategy framework (REQUIRED for S2/S3)
+# p_int_method = 4             # legacy (superseded)
+
+# Normal velocity (S3): pressure equilibrium baseline (p₀-p₁)∇η compensates
+# HLLC nozzling; J_un drives the kinematic constraint u_n,0 → u_n,1.
+# v_un sizing: explicit stability needs v_un × dt × |∇η|_max < 1.
+#   ε = 5e-4, |∇η|_max ≈ 1/(2√2 ε) = 707 (tanh with √2 argument).
+#   a_1 = √(γ_1(p_1+π_1)/ρ_1) ≈ 14,650 m/s (stiffened water).
+#   dt_CFL ≈ 0.3 dx_fine/a_1 ≈ 4e-9 s (dx_fine ≈ 1.95e-4 m at level 6).
+#   v_un = 0.1/(dt×|∇η|_max) ≈ 35,400 → use 15,000 (≈ a_1, stiff penalty).
+closure.un_strategy    = relax
+closure.un_vel         = 15000.0   # [m/s]; τ_loc ~ 1/(v_un×|∇η|) ~ 9.4e-8 s
+
+# Energy (S3): pressure-work baseline (p₀u₀-p₁u₁)·∇η is active (nozzling
+# compensation); J_E temperature relaxation drives T₀ → T₁.
+# With thermal T convention and calibrated cv, T₀ ≈ T₁ ≈ 290 K at IC,
+# so energy relaxation is safe.  Scale E_vel like v_un for stiff coupling.
+closure.E_strategy     = relax
+closure.E_vel          = 15000.0   # [m/s]; thermal T relaxation active (T₀ ≈ T₁ ≈ 290 K)
+
+# Tangential velocity: inviscid → no tangential coupling.
+closure.ut_strategy    = constitutive
+
+# Interface-average methods (only used by Constitutive strategy; inert under S3):
+closure.un_pint_method = 4
+closure.E_pint_method  = 4
 
 Spec_Vol = 1
 grav = 0.0

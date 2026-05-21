@@ -265,8 +265,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             pp.query_default("closure.E_vel",    tmp_v, Set::Scalar(-1.0));
             if (value.E_close.strategy == Hydro2::ClosureStrategy::Jump  && !(tmp_l > 0.0))
                 Util::Abort(INFO, "closure.E_strategy=jump requires closure.E_lambda > 0");
-            if (value.E_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_v > 0.0))
-                Util::Abort(INFO, "closure.E_strategy=relax requires closure.E_vel > 0");
+            if (value.E_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_v >= 0.0))
+                Util::Abort(INFO, "closure.E_strategy=relax requires closure.E_vel > or = 0");
             if (tmp_l > 0.0) value.E_close.lambda = tmp_l;
             if (tmp_v > 0.0) value.E_close.vel    = tmp_v;
 
@@ -1141,13 +1141,12 @@ void Hydro2::MixDiagnostic(int lev)
             Real c1_ = Thermo_Interp::SoundSpeed_SG (safe_r1, p1_, g1, pi1);
             a_mix(i,j,k) = Y0_ * c0_ + Y1_ * c1_;
 
-            // Mixture temperature: eta-weighted blend of per-phase T's
-            // (Convention B: UE_k = rho_k * cv_k * T_k for both CPG and Tammann).
-            // This supersedes the Allaire (p + gamma*pi)/((gamma-1)*rho*cv) form
-            // computed in the Advance primitive loop, which has a known sign
-            // error on the Tammann pi term that biases liquid-phase T low.
-            Real T0_phase = (cv0 > Real(0.0)) ? UE0 / (safe_r0 * cv0) : Real(0.0);
-            Real T1_phase = (cv1 > Real(0.0)) ? UE1 / (safe_r1 * cv1) : Real(0.0);
+            // Mixture temperature: eta-weighted blend of per-phase thermal T's.
+            // T_k = (UE_k - pi_k) / (rho_k * cv_k) subtracts the Tammann
+            // binding energy so temperature reflects only thermal DOF.
+            // For CPG (pi0 = 0) this reduces to UE/(rho*cv).
+            Real T0_phase = (cv0 > Real(0.0)) ? (UE0 - pi0) / (safe_r0 * cv0) : Real(0.0);
+            Real T1_phase = (cv1 > Real(0.0)) ? (UE1 - pi1) / (safe_r1 * cv1) : Real(0.0);
             if (!std::isfinite(T0_phase) || T0_phase < Real(0.0)) T0_phase = Real(0.0);
             if (!std::isfinite(T1_phase) || T1_phase < Real(0.0)) T1_phase = Real(0.0);
             T_mix(i,j,k) = one_e * T0_phase + e * T1_phase;
@@ -1184,12 +1183,12 @@ void Hydro2::MixDiagnostic(int lev)
 //
 // Per-phase temperatures are recomputed locally from each phase's own
 // (rho_k, M_k, E_k) so this routine does not depend on T_mf already being
-// in-band. Alamo stores energy in the Tammann "Convention B" form
-// (UE_per_vol = rho*cv*T with pi treated as a reference pressure), so the
-// inversion is the same for both phases:
-//     T_k = (E_k - 0.5|M_k|^2/rho_k) / (rho_k * cv_k)
-// Sanity at IC: p = (gamma-1)*UE - gamma*pi gives UE = (p+gamma*pi)/(gamma-1)
-// so T = UE/(rho*cv) recovers (p + gamma*pi)/[(gamma-1) rho cv] as expected.
+// in-band. Temperature is the *thermal* temperature:
+//     T_k = (UE_k - pi_k) / (rho_k * cv_k)
+//         = (p_k + pi_k) / ((gamma_k - 1) * rho_k * cv_k)
+// The Tammann binding energy pi is subtracted from UE so that T reflects
+// only thermal degrees of freedom. For CPG phases pi_k = 0 and the
+// formula reduces to T = UE/(rho*cv) as before.
 //
 // When ch_thermo_consistent == 0, both fields are zeroed (legacy behavior).
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1216,6 +1215,7 @@ void Hydro2::ComputeChemicalPotential(int lev)
     const Real q0_    = q_0;
     const Real qp0_   = qprime_0;
 
+    const Real pi0_   = pi_0;
     const Real cv1_   = cv_1;
     const Real g1_    = gamma_1;
     const Real pi1_   = pi_1;
@@ -1251,10 +1251,10 @@ void Hydro2::ComputeChemicalPotential(int lev)
             const Real UE0 = amrex::max(Real(0.0), E0(i,j,k) - KE0);
             const Real UE1 = amrex::max(Real(0.0), E1(i,j,k) - KE1);
 
-            // Per-phase temperatures (Alamo Convention B: UE = rho*cv*T;
-            // pi is a reference pressure, not part of internal energy).
-            Real T0 = UE0 / (r0 * cv0_ + safe_);
-            Real T1 = UE1 / (r1 * cv1_ + safe_);
+            // Per-phase thermal temperatures: T = (UE - pi) / (rho * cv).
+            // Subtracts Tammann binding energy so T reflects thermal DOF only.
+            Real T0 = (UE0 - pi0_) / (r0 * cv0_ + safe_);
+            Real T1 = (UE1 - pi1_) / (r1 * cv1_ + safe_);
             if (!std::isfinite(T0) || T0 <= Real(0.0)) T0 = Tref0_;
             if (!std::isfinite(T1) || T1 <= Real(0.0)) T1 = Tref1_;
 
@@ -1330,6 +1330,7 @@ void Hydro2::ComputeEffectiveSQRSources(int lev)
     const Real cv1_   = cv_1;
     const Real R0_    = R_0;
     const Real g1_    = gamma_1;
+    const Real pi0_   = pi_0;
     const Real pi1_   = pi_1;
     const Real Tref_  = T_ref;
     const Real rref0_ = rho_ref_0;
@@ -1388,8 +1389,8 @@ void Hydro2::ComputeEffectiveSQRSources(int lev)
                                           + M1(ii,jj,kk,1)*M1(ii,jj,kk,1)) / r1_;
                     Real UE0 = amrex::max(Real(0.0), E0(ii,jj,kk) - KE0);
                     Real UE1 = amrex::max(Real(0.0), E1(ii,jj,kk) - KE1);
-                    Real T0_ = UE0 / (r0_ * cv0_ + safe_);
-                    Real T1_ = UE1 / (r1_ * cv1_ + safe_);
+                    Real T0_ = (UE0 - pi0_) / (r0_ * cv0_ + safe_);
+                    Real T1_ = (UE1 - pi1_) / (r1_ * cv1_ + safe_);
                     if (!std::isfinite(T0_) || T0_ <= Real(0.0)) T0_ = Tref_;
                     if (!std::isfinite(T1_) || T1_ <= Real(0.0)) T1_ = Tref_;
                     Real fg = Numeric::FreeEnergy::f_CPG(
@@ -1598,7 +1599,8 @@ void Hydro2::ClampPerPhaseState(int lev)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 // Operator-split explicit-Euler conduction step on per-phase energy fields:
 //   E_k(n+1) = E_k(n) + dt * k_k * Laplacian(T_k)
-// where T_k = UE_k / (rho_k cv_k) (Convention B, both CPG and Tammann).
+// where T_k = (UE_k - pi_k) / (rho_k cv_k) (thermal temperature; pi
+// subtracted so Tammann binding energy does not enter T).
 //
 // Diffusion CFL must be respected by the caller's time-step choice:
 //   dt < 0.5 * dx^2 / max(k_k / (rho_k cv_k))
@@ -1627,6 +1629,8 @@ void Hydro2::ApplyHeatConduction(int lev, Set::Scalar dt)
     const Real cv1_  = cv_1;
     const Real k0_   = k_0;
     const Real k1_   = k_1;
+    const Real pi0_  = pi_0;
+    const Real pi1_  = pi_1;
     const Real safe_ = Real(1.0e-20);
     const Real idx2  = Real(1.0) / (DX[0] * DX[0]);
     const Real idy2  = Real(1.0) / (DX[1] * DX[1]);
@@ -1644,15 +1648,16 @@ void Hydro2::ApplyHeatConduction(int lev, Set::Scalar dt)
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
-            // Per-phase temperature at (ii,jj,kk). Reads from ghost cells when
-            // (ii,jj,kk) is a neighbor of a valid cell.
+            // Per-phase thermal temperature at (ii,jj,kk). Reads from ghost
+            // cells when (ii,jj,kk) is a neighbor of a valid cell.
+            // T = (UE - pi) / (rho * cv): subtracts Tammann binding energy.
             auto T0_at = [&](int ii, int jj, int kk) -> Real
             {
                 Real r = (rho0(ii,jj,kk) > safe_) ? rho0(ii,jj,kk) : safe_;
                 Real KE = Real(0.5) * (M0(ii,jj,kk,0)*M0(ii,jj,kk,0)
                                      + M0(ii,jj,kk,1)*M0(ii,jj,kk,1)) / r;
                 Real UE = E0(ii,jj,kk) - KE;
-                return (cv0_ > Real(0.0)) ? UE / (r * cv0_) : Real(0.0);
+                return (cv0_ > Real(0.0)) ? (UE - pi0_) / (r * cv0_) : Real(0.0);
             };
             auto T1_at = [&](int ii, int jj, int kk) -> Real
             {
@@ -1660,7 +1665,7 @@ void Hydro2::ApplyHeatConduction(int lev, Set::Scalar dt)
                 Real KE = Real(0.5) * (M1(ii,jj,kk,0)*M1(ii,jj,kk,0)
                                      + M1(ii,jj,kk,1)*M1(ii,jj,kk,1)) / r;
                 Real UE = E1(ii,jj,kk) - KE;
-                return (cv1_ > Real(0.0)) ? UE / (r * cv1_) : Real(0.0);
+                return (cv1_ > Real(0.0)) ? (UE - pi1_) / (r * cv1_) : Real(0.0);
             };
 
             const Real T0c  = T0_at(i,   j,   k);
@@ -2898,14 +2903,16 @@ Hydro2::ApplySQRSource(int lev,
                 else                       // Jump (S2) or Relax (S3)
                 {
                     // --- Temperature relaxation: symmetric on (T_0 - T_1) ---
-                    // Convention B: UE = ρ cv T  ->  T = UE/(ρ cv) for both
-                    // CPG and Tammann (no pi subtraction; see project memory).
+                    // Thermal temperature: T = (UE - pi) / (ρ cv).
+                    // Subtracting the Tammann binding energy pi avoids the
+                    // enormous Convention-B T₁ that would cause catastrophic
+                    // energy transfer with stiffened-gas water.
                     // S2 / S3 target the *intensive* jump T_0 - T_1, not E_0 - E_1
                     // — equal-energy fixed point is wrong when cv differs.
                     Real safe_cv0 = (cv0_ > Real(1e-30)) ? cv0_ : Real(1.0);
                     Real safe_cv1 = (cv1_ > Real(1e-30)) ? cv1_ : Real(1.0);
-                    Real T0 = UE0 / (safe_r0 * safe_cv0);
-                    Real T1 = UE1 / (safe_r1 * safe_cv1);
+                    Real T0 = (UE0 - pi0) / (safe_r0 * safe_cv0);
+                    Real T1 = (UE1 - pi1) / (safe_r1 * safe_cv1);
                     Real dT = T0 - T1;
                     Real J_E;
                     if (E_strat_ == 1)     // Jump (S2)
@@ -3130,17 +3137,17 @@ Hydro2::RHS(int lev,
             if (p_mix_local < p_floor_eos) p_mix_local = p_floor_eos;
             p_arr(i,j,k) = p_mix_local;
 
-            // Specific heats (eta-weighted; cv consistent with Convention B
-            // T_k = UE_k / (rho_k * cv_k) used below).
+            // Specific heats (eta-weighted; cv consistent with thermal
+            // T_k = (UE_k - pi_k) / (rho_k * cv_k) used below).
             cp_arr(i,j,k) = eta*cp_1 + (1.0 - eta)*cp_0;
             cv_arr(i,j,k) = eta*cv_1 + (1.0 - eta)*cv_0;
 
-            // Y-weighted temperature from per-phase T_k = UE_k / (rho_k * cv_k)
-            // (Convention B). Supersedes the Allaire (p+gamma*pi)/((g-1)*rho*cv)
-            // form, which has a sign issue on the Tammann pi term.
+            // Y-weighted thermal temperature from per-phase
+            // T_k = (UE_k - pi_k) / (rho_k * cv_k).
+            // Subtracts Tammann binding energy; for CPG (pi_0=0) unchanged.
             {
-                Real T0_phase = (cv_0 > Real(0.0)) ? UE_e0 / (safe_re0 * cv_0) : Real(0.0);
-                Real T1_phase = (cv_1 > Real(0.0)) ? UE_e1 / (safe_re1 * cv_1) : Real(0.0);
+                Real T0_phase = (cv_0 > Real(0.0)) ? (UE_e0 - pi_0) / (safe_re0 * cv_0) : Real(0.0);
+                Real T1_phase = (cv_1 > Real(0.0)) ? (UE_e1 - pi_1) / (safe_re1 * cv_1) : Real(0.0);
                 if (!std::isfinite(T0_phase) || T0_phase < Real(0.0)) T0_phase = Real(0.0);
                 if (!std::isfinite(T1_phase) || T1_phase < Real(0.0)) T1_phase = Real(0.0);
                 Real T_val = Y0_ * T0_phase + Y1_ * T1_phase;
