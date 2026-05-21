@@ -167,7 +167,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("apply_surface_tension", value.apply_surface_tension, false); // Apply surface tension when solving, default: true --> "Apply Surface Tension"
         pp_query_default("apply_weight", value.apply_weight, false);                  // Apply weight when solving, default: false --> "No Weight"
         pp_query_default("apply_viscous", value.apply_viscous, false);                // Per-phase viscous stress (constant mu_k per phase), default: false
-        pp_query_default("apply_nc_pressure", value.apply_nc_pressure, false);        // Non-conservative pressure -(F_k·∇η_k)/η_k (SQR volume-fraction flux correction)
+        // apply_nc_pressure removed: nozzling now handled by pressure equilibrium in ApplySQRSource
         pp_query_default("apply_heat_conduction", value.apply_heat_conduction, 0);    // Per-phase heat conduction via explicit-Euler operator split
         pp_query_default("write_integrals", value.write_integrals, 1);               // Write volume-integrated conserved quantities to integrals.dat each coarse step
         pp_query_default("k_0", value.k_0, 0.0);                                // [W/(m K)] gas-phase thermal conductivity
@@ -1726,7 +1726,8 @@ void Hydro2::RHS_PerPhase(int lev,
     const Real g_          = g;
     const int  do_weight   = apply_weight;
     const int  do_viscous  = apply_viscous;
-    const int  do_nc_press = apply_nc_pressure;
+    // apply_nc_pressure removed: nozzling is now handled by pressure
+    // equilibrium baseline in ApplySQRSource (S2/S3 closures).
     const Real mu_         = mu_k;
     const Real mu_b_       = mu_k_b;
     const Real lam_prime   = mu_b_ - (Real(2.0)/Real(3.0))*mu_;
@@ -2080,57 +2081,12 @@ void Hydro2::RHS_PerPhase(int lev,
                 E_rhs(i,j,k)   += divtau_x*u_c + divtau_y*v_c + tau_gradu;
             }
 
-            // ----- Non-conservative pressure: -(F_k · ∇η_k) / η_k -----
-            // The SQR theory (§4) writes per-phase equations in the
-            // volume-fraction-weighted form η_k ∂_t q_k + ∇·(η_k F_k) = …,
-            // but the HLLC Riemann solve above computes the intrinsic flux
-            // divergence ∇·F_k. The non-conservative pressure is the
-            // difference between the two:
-            //   (1/η_k)∇·(η_k F_k) = ∇·F_k + (F_k · ∇η_k)/η_k.
-            // This correction adds the missing -(F_k · ∇η_k)/η_k to each
-            // conserved equation (mass, momentum, energy). Without it, the
-            // mixture pressure gradient (p_0 − p_1)∇η that drives inter-phase
-            // Riemann problems is absent from the per-phase RHS under
-            // non-constitutive SQR closures (relax, jump).
-            //
-            // The ratio |∇η_k|/η_k remains bounded (~2/ε) on the equilibrium
-            // tanh profile, so no true singularity exists; eta_k_safe is a
-            // discrete safety floor only.
-            if (do_nc_press)
-            {
-                // Cell-centered ∇η (central differences)
-                Real deta_dx = (eta_arr(i+1,j,k) - eta_arr(i-1,j,k)) * Real(0.5) * dx_inv;
-                Real deta_dy = (eta_arr(i,j+1,k) - eta_arr(i,j-1,k)) * Real(0.5) * dy_inv;
-
-                // η_k and ∇η_k: phase 1 → (η, +∇η), phase 0 → (1−η, −∇η)
-                Real eta_loc = eta_arr(i,j,k);
-                Real eta_k_val  = (pidx_ == 1) ? eta_loc : (Real(1.0) - eta_loc);
-                Real eta_k_safe = amrex::max(eta_k_val, Real(1.0e-8));
-                Real sign_k     = (pidx_ == 1) ? Real(1.0) : Real(-1.0);
-                Real deta_k_dx  = sign_k * deta_dx;
-                Real deta_k_dy  = sign_k * deta_dy;
-
-                // Per-phase pressure from EOS:
-                //   CPG (phase 0): p = (γ−1)UE + pref
-                //   Tammann (phase 1): p = (γ−1)UE − γπ + pref
-                Real KE_loc = Real(0.5) * (M_arr(i,j,k,0)*M_arr(i,j,k,0)
-                                         + M_arr(i,j,k,1)*M_arr(i,j,k,1)) / rho_c;
-                Real UE_loc = E_arr(i,j,k) - KE_loc;
-                Real p_k    = (gamma_k - Real(1.0)) * UE_loc - gamma_k * pi_k + pref_;
-
-                // u_k · ∇η_k
-                Real u_dot_deta_k = u_c * deta_k_dx + v_c * deta_k_dy;
-
-                // Mass:     -(ρ_k u_k · ∇η_k) / η_k
-                rho_rhs(i,j,k) += -(rho_arr(i,j,k) * u_dot_deta_k) / eta_k_safe;
-
-                // Momentum: -[ρ_k u_{k,i} (u_k · ∇η_k) + p_k (∇η_k)_i] / η_k
-                M_rhs(i,j,k,0) += -(M_arr(i,j,k,0) * u_dot_deta_k + p_k * deta_k_dx) / eta_k_safe;
-                M_rhs(i,j,k,1) += -(M_arr(i,j,k,1) * u_dot_deta_k + p_k * deta_k_dy) / eta_k_safe;
-
-                // Energy:   -[(E_k + p_k)(u_k · ∇η_k)] / η_k
-                E_rhs(i,j,k) += -((E_arr(i,j,k) + p_k) * u_dot_deta_k) / eta_k_safe;
-            }
+            // NOTE: The non-conservative pressure correction -(F_k·∇η_k)/η_k
+            // that was previously here has been removed. The HLLC nozzling is
+            // now compensated by the pressure equilibrium baseline (p₀−p₁)∇η
+            // in ApplySQRSource (S2/S3 closures), which is bounded (no 1/η_k
+            // singularity) and mixture-conservative. See the momentum and
+            // energy S2/S3 branches in ApplySQRSource.
         });
     }
 }
@@ -2668,9 +2624,15 @@ Hydro2::ApplySQRSource(int lev,
             //            * PillboxSymmetric (S1', Phase B.5) — antisymmetrized
             //              variant of Pillbox; per-cell strict action-reaction
             //              but same ground-state pathology as Pillbox.
-            //            * Jump (S2) and Relax (S3) — symmetric, strict
-            //              action-reaction on the band by construction; vanish
-            //              at intensive equilibrium.
+            //            * Jump (S2) and Relax (S3) — pressure equilibrium
+            //              baseline (p₀−p₁)∇η (momentum) / (p₀u₀−p₁u₁)·∇η
+            //              (energy) plus action-reaction relaxation J·∇η.
+            //              The baseline compensates the HLLC nozzling
+            //              (intrinsic ∇·F_k vs η-weighted ∇·(η_k F_k)) and
+            //              provides the isotropic Cauchy stress coupling.
+            //              Bounded (no 1/η_k), mixture-conservative,
+            //              sharp-limit → Rankine-Hugoniot. Relaxation drives
+            //              the intensive jump (u_n or T) to zero.
             //
             // Mass-transfer ride-along (Smass*u*|∇η|) is appended in both paths,
             // so prescribed ṁ₀ and the rho_close S2/S3 mass-exchange closures
@@ -2678,11 +2640,11 @@ Hydro2::ApplySQRSource(int lev,
             //
             // Action-reaction (plan B step 5):
             //   * Mass:     R0 + R1 = 0 by construction (-Smass / +Smass).
-            //   * Momentum: ΣP_k = 0 strict in Constitutive, S1', S2, S3 paths.
-            //               Pillbox sums to (p_0-p_1)∇η — the unbalanced jump
-            //               feeding mixture momentum, equal to the
-            //               surface-tension force in the sharp limit.
-            //   * Energy:   analogous; Constitutive / S1' / S2 / S3 strict.
+            //   * Momentum: Constitutive / S1' strict action-reaction. S2/S3
+            //               and Pillbox sum to (p_0-p_1)∇η — the nozzling
+            //               that feeds mixture momentum (cancelled by the
+            //               HLLC nozzling for mixture conservation).
+            //   * Energy:   analogous structure.
             // A per-step entropy/conservation monitor is deferred to Phase F.
 
             Real Smass_mx = mdot0 * u0x * grad_eta_mag;
@@ -2789,8 +2751,9 @@ Hydro2::ApplySQRSource(int lev,
                     dp0 = -p_avg;
                     dp1 = +p_avg;
                 }
-                else                       // Jump (S2) or Relax (S3) — symmetric on (u_n,0 - u_n,1)
+                else                       // Jump (S2) or Relax (S3)
                 {
+                    // --- Velocity relaxation: symmetric on (u_n,0 - u_n,1) ---
                     Real n_x  = grad_eta(0) / grad_eta_mag;
                     Real n_y  = grad_eta(1) / grad_eta_mag;
                     Real u0_n = u0x_ph*n_x + u0y_ph*n_y;
@@ -2806,14 +2769,29 @@ Hydro2::ApplySQRSource(int lev,
                         Real rho_eff = (safe_r0 * safe_r1) / (safe_r0 + safe_r1);
                         J_un = -rho_eff * un_vel_ * du_n;
                     }
-                    // ApplyInterfaceFlux: phase 0 receives +J_un n̂ |∇η|, phase 1 the
-                    // negative — strict action-reaction on the band.
-                    S_un_0_x = +J_un * grad_eta(0);
-                    S_un_0_y = +J_un * grad_eta(1);
-                    S_un_1_x = -J_un * grad_eta(0);
-                    S_un_1_y = -J_un * grad_eta(1);
-                    dp0 = +J_un;
-                    dp1 = -J_un;
+
+                    // --- Pressure equilibrium: (p_other − p_own)∇η_k ---
+                    // The HLLC Riemann solve computes the intrinsic flux
+                    // divergence ∇·F_k, but the SQR per-phase equation has
+                    // (1/η_k)∇·(η_k F_k). The difference — the "nozzling"
+                    // — is F_k·∇η_k/η_k, whose isotropic part is p_k∇η_k/η_k.
+                    // Combining this with the SQR isotropic Cauchy stress
+                    // coupling (p_other ∇η_k) yields the bounded source
+                    //   (p_other − p_own) ∇η_k = (p₀−p₁) ∇η  for both phases.
+                    // No 1/η_k singularity. The η-weighted sum (p₀−p₁)∇η
+                    // exactly cancels the HLLC nozzling in the mixture equation
+                    // (conservative). In the sharp limit, ∫(p₀−p₁)|∇η|dx →
+                    // p₀−p₁, recovering the Rankine-Hugoniot jump condition.
+                    // The J_un relaxation (action-reaction, conservative by
+                    // itself) is additive and drives u_n,0 → u_n,1.
+                    Real dp_press = p0_phase - p1_phase;
+
+                    S_un_0_x = dp_press * grad_eta(0) + J_un * grad_eta(0);
+                    S_un_0_y = dp_press * grad_eta(1) + J_un * grad_eta(1);
+                    S_un_1_x = dp_press * grad_eta(0) - J_un * grad_eta(0);
+                    S_un_1_y = dp_press * grad_eta(1) - J_un * grad_eta(1);
+                    dp0 = dp_press + J_un;
+                    dp1 = dp_press - J_un;
                 }
 
                 // u_t closure -> tangential momentum SQR source (additive to
@@ -2917,8 +2895,9 @@ Hydro2::ApplySQRSource(int lev,
                     S_E_0 = -Hu_avg;
                     S_E_1 = +Hu_avg;
                 }
-                else                       // Jump (S2) or Relax (S3) — symmetric on (T_0 - T_1)
+                else                       // Jump (S2) or Relax (S3)
                 {
+                    // --- Temperature relaxation: symmetric on (T_0 - T_1) ---
                     // Convention B: UE = ρ cv T  ->  T = UE/(ρ cv) for both
                     // CPG and Tammann (no pi subtraction; see project memory).
                     // S2 / S3 target the *intensive* jump T_0 - T_1, not E_0 - E_1
@@ -2940,8 +2919,20 @@ Hydro2::ApplySQRSource(int lev,
                         Real C_E = (C0 * C1) / (C0 + C1);
                         J_E = -C_E * E_vel_ * dT;
                     }
-                    S_E_0 = +J_E * grad_eta_mag;
-                    S_E_1 = -J_E * grad_eta_mag;
+
+                    // --- Pressure-work equilibrium: (p₀u₀ − p₁u₁)·∇η ---
+                    // Energy analog of the momentum pressure equilibrium.
+                    // Compensates the pressure-work part of the HLLC energy
+                    // nozzling (p_k u_k · ∇η_k) and provides the isotropic
+                    // Cauchy stress energy coupling (p_other u_other · ∇η_k).
+                    // Vanishes when u₀ = u₁ = 0 (no effect at rest); the J_E
+                    // temperature relaxation is additive and drives T₀ → T₁.
+                    Real pu0_dot_geta = p0_phase * (u0x_ph*grad_eta(0) + u0y_ph*grad_eta(1));
+                    Real pu1_dot_geta = p1_phase * (u1x_ph*grad_eta(0) + u1y_ph*grad_eta(1));
+                    Real S_E_press   = pu0_dot_geta - pu1_dot_geta;
+
+                    S_E_0 = S_E_press + J_E * grad_eta_mag;
+                    S_E_1 = S_E_press - J_E * grad_eta_mag;
                 }
                 U0_src = S_E_0 - SEq;
                 U1_src = S_E_1 + SEq;

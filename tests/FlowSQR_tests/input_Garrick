@@ -38,7 +38,8 @@ q.ic.constant.value = 0.0
 
 ### HYDRO PARAM ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 8.0e-3
+# eta.ic.expression.constant.epsilon = 8.0e-3
+eta.ic.expression.constant.epsilon = 4.0e-3
 eta.ic.expression.region0 = "(0.5 * (1.0 + tanh(x / epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
 
@@ -63,8 +64,8 @@ velocity_0.ic.type = constant
 velocity_0.ic.constant.value = 0.0 0.0
 
 pressure_0.ic.type = constant
-# pressure_0.ic.constant.value = 2.753
-pressure_0.ic.constant.value = 5.753
+pressure_0.ic.constant.value = 2.753
+# pressure_0.ic.constant.value = 5.753
 
 cp_0 = "1.4"
 cv_0 = "1.0"
@@ -179,10 +180,14 @@ ch_newton_tol       = 1e-10
 # and the only constraint on lambda is the equilibrium-width match above.
 # Implied surface tension sigma = sqrt(2*kappa*lambda)/6 ~ 1.7e-2 N/m;
 # sigma is a spectator parameter for a planar Riemann test (no curvature).
+# ch_W_scale          = 12.5       # lambda = 2 * kappa / epsilon^2
+# ch_kappa            = 4.0e-4     # = lambda * epsilon^2 / 2  (consistent)
+# ch_mobility_degenerate = 1
+# ch_mobility_nom        = 0.1
 ch_W_scale          = 12.5       # lambda = 2 * kappa / epsilon^2
 ch_kappa            = 4.0e-4     # = lambda * epsilon^2 / 2  (consistent)
 ch_mobility_degenerate = 1
-ch_mobility_nom        = 0.1
+ch_mobility_nom        = 1.1
 
 # HYDRO CLOSURE STRATEGIES (Phase B+)
 # `closure.{un,E}_strategy` selects the per-quantity SQR closure for
@@ -222,11 +227,11 @@ ch_mobility_nom        = 0.1
 # NB <<u_n>> = 0 is an exact kinematic constraint, so this is a stiff penalty
 # (faithful only as v_un -> inf), not a physical finite-resistance interface.
 closure.un_strategy    = relax
-closure.un_vel         = 6.4e-4    # transfer velocity [m/s]; tau_loc ~ 1/(v_un*|grad eta|)
+closure.un_vel         = 6.4 #e-1    # transfer velocity [m/s]; tau_loc ~ 1/(v_un*|grad eta|)
 # closure.un_strategy    = constitutive
 # Energy / temperature (S3): J_E = -C_E * v_E * (T_0 - T_1).
 closure.E_strategy     = relax
-closure.E_vel          = 6.4e-4    # transfer velocity [m/s]; tau_loc ~ 1/(v_E*|grad eta|)
+closure.E_vel          = 6.4 #e-1    # transfer velocity [m/s]; tau_loc ~ 1/(v_E*|grad eta|)
 # closure.E_strategy     = constitutive
 # Tangential velocity: inviscid case here, u_t is unconstrained — leave at the
 # Constitutive no-op stub (S1/angular-momentum, A10, not yet implemented).

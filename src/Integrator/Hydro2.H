@@ -469,7 +469,7 @@ protected:
     int apply_surface_tension = 1;
     int apply_weight = 0;
     int apply_viscous = 0;     // Per-phase viscous stress in RHS_PerPhase (constant mu_k, mu_k_b)
-    int apply_nc_pressure = 0; // Non-conservative pressure -(F_k·∇η_k)/η_k in RHS_PerPhase
+    // apply_nc_pressure removed: nozzling handled by pressure equilibrium in ApplySQRSource
     // Per-phase heat conduction (operator-split explicit-Euler step).
     // CFL constraint: dt < 0.5 * dx^2 / max(k_k / (rho_k cv_k)).
     int apply_heat_conduction = 0;
