@@ -8,7 +8,7 @@
 ### OUTPUT ###
 plot_file = ./tests/FlowSQR_tests/output_Garrick
 amr.plot_dt = 0.01
-amr.plot_int = 413
+amr.plot_int = 1806
 
 ### MESHING ###
 amr.max_level = 0
@@ -23,14 +23,19 @@ geometry.prob_hi =  1.0   0.015625   0.0 # [ m ]
 geometry.is_periodic = 0 1 0
 
 ### TIME STEP ###
-timestep  = 2.5e-4
+# timestep  = 2.5e-4
 # timestep  = 1.25e-4
 # timestep  = 0.625e-4
 # timestep  = 0.3125e-4
 # timestep  = 0.15625e-4
+timestep  = 1.0e-5
 # stop_time = 0.2
 stop_time = 0.5
 cfl   = 0.4
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1e-0
+dynamictimestep.min = 1e-12
 
 ### Sources ###
 m0.ic.constant.value = 0.0
@@ -146,6 +151,9 @@ apply_vaporization = 0
 sqr_source_mode      = ch_emergent
 
 Riemann_Solver.type = hllc
+# Riemann_Solver.type = hllc_all_mach
+#     Riemann_Solver.ma_cutoff = 0.3
+#     Riemann_Solver.alpha_min = 0.0
 kappa_method        = 1
 smooth_kernel_size  = 3
 nghost              = 4
@@ -193,7 +201,7 @@ ch_W_scale          = 12.5       # lambda = 2 * kappa / epsilon^2
 ch_kappa            = 4.0e-4     # = lambda * epsilon^2 / 2  (consistent)
 ch_mobility_degenerate = 1
 # ch_mobility_nom convention:  <0 = auto (0.2*ε*c_max),  0 = off (frozen η),  >0 = user value
-ch_mobility_nom        = 10.0
+ch_mobility_nom        = 100.0
 
 # HYDRO CLOSURE STRATEGIES (Phase B+)
 # `closure.{un,E}_strategy` selects the per-quantity SQR closure for
@@ -238,7 +246,7 @@ closure.un_vel         = 6.4
 # closure.un_strategy    = constitutive
 # Energy / temperature (S3): J_E = -C_E * v_E * (T_0 - T_1).
 closure.E_strategy     = relax
-closure.E_vel          = 0    # no thermal coupling — pure Riemann benchmark (T₀ ≠ T₁ accepted)
+closure.E_vel          = 1.0    # no thermal coupling — pure Riemann benchmark (T₀ ≠ T₁ accepted)
 # closure.E_strategy     = const0itutive
 # Tangential velocity: inviscid case here, u_t is unconstrained — leave at the
 # Constitutive no-op stub (S1/angular-momentum, A10, not yet implemented).

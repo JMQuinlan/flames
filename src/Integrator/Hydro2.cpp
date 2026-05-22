@@ -2142,99 +2142,9 @@ void Hydro2::TimeStepComplete(Set::Scalar time, int lev)
         Integrator::DynamicTimestep_Update();
     }
 
-    // --- Ghost-fluid relaxation: damp minority-phase state toward IC ---
-    // Weight w_k = 1 - alpha_k: full-strength in the opposite-phase bulk,
-    // zero in the own-phase bulk.  Exponential decay is unconditionally stable.
-    //   Q_new = Q_ref + (Q - Q_ref) * exp(-w * dt / tau)
-    // Convention: τ < 0 = disabled (default), τ = 0 = error, τ > 0 = active.
-    bool ghost_active = (ghost_tau_rho_0 > 0.0) || (ghost_tau_rho_1 > 0.0)
-                     || (ghost_tau_mom_0 > 0.0) || (ghost_tau_mom_1 > 0.0)
-                     || (ghost_tau_eng_0 > 0.0) || (ghost_tau_eng_1 > 0.0);
-    if (ghost_tau_rho_0 == 0.0 || ghost_tau_rho_1 == 0.0 ||
-        ghost_tau_mom_0 == 0.0 || ghost_tau_mom_1 == 0.0 ||
-        ghost_tau_eng_0 == 0.0 || ghost_tau_eng_1 == 0.0)
-        Util::Abort(INFO, "ghost_tau_* = 0 is invalid (division by zero). Use < 0 to disable, > 0 to enable.");
-    if (ghost_active)
-    {
-        const Real ref_r0   = ghost_ref_rho_0, ref_r1   = ghost_ref_rho_1;
-        const Real ref_M0x  = ghost_ref_M0x,   ref_M0y  = ghost_ref_M0y;
-        const Real ref_M1x  = ghost_ref_M1x,   ref_M1y  = ghost_ref_M1y;
-        const Real ref_E0   = ghost_ref_E0,     ref_E1   = ghost_ref_E1;
-        const Real tau_r0   = ghost_tau_rho_0,  tau_r1   = ghost_tau_rho_1;
-        const Real tau_m0   = ghost_tau_mom_0,  tau_m1   = ghost_tau_mom_1;
-        const Real tau_e0   = ghost_tau_eng_0,  tau_e1   = ghost_tau_eng_1;
-
-        // NOTE: the 'lev' parameter of TimeStepComplete is actually the
-        // step counter (not AMR level), so loop over all active levels.
-        for (int glev = 0; glev <= finest_level; ++glev)
-        {
-            if (eta_mf[glev] == nullptr) continue;
-            const Real dt_ = dt[glev];
-
-            for (MFIter mfi(*eta_mf[glev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
-            {
-                const Box& bx = mfi.validbox();
-                auto eta_arr = eta_mf[glev]->const_array(mfi);
-                auto rho0    = density_0_mf[glev]->array(mfi);
-                auto rho1    = density_1_mf[glev]->array(mfi);
-                auto M0      = momentum_0_mf[glev]->array(mfi);
-                auto M1      = momentum_1_mf[glev]->array(mfi);
-                auto E0      = energy_0_mf[glev]->array(mfi);
-                auto E1      = energy_1_mf[glev]->array(mfi);
-
-                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
-                {
-                    Real e = eta_arr(i,j,k);
-                    if (e < Real(0.0)) e = Real(0.0);
-                    if (e > Real(1.0)) e = Real(1.0);
-
-                    // Hard cutoff: relaxation is exactly zero anywhere inside
-                    // the support of ∇η (i.e. the diffuse interface band) to
-                    // avoid corrupting conservation.  Only activate in the
-                    // pure-bulk ghost regions where η is within 1e-6 of 0 or 1.
-                    constexpr Real ghost_cut = Real(1.0e-6);
-
-                    // Phase 0: relax only where η > 1−cutoff (phase 1 pure bulk)
-                    Real w0 = (e > Real(1.0) - ghost_cut) ? Real(1.0) : Real(0.0);
-                    if (w0 > Real(0.0))
-                    {
-                        if (tau_r0 > Real(0.0)) {
-                            Real f = std::exp(-w0 * dt_ / tau_r0);
-                            rho0(i,j,k) = ref_r0 + (rho0(i,j,k) - ref_r0) * f;
-                        }
-                        if (tau_m0 > Real(0.0)) {
-                            Real f = std::exp(-w0 * dt_ / tau_m0);
-                            M0(i,j,k,0) = ref_M0x + (M0(i,j,k,0) - ref_M0x) * f;
-                            M0(i,j,k,1) = ref_M0y + (M0(i,j,k,1) - ref_M0y) * f;
-                        }
-                        if (tau_e0 > Real(0.0)) {
-                            Real f = std::exp(-w0 * dt_ / tau_e0);
-                            E0(i,j,k) = ref_E0 + (E0(i,j,k) - ref_E0) * f;
-                        }
-                    }
-
-                    // Phase 1: relax only where η < cutoff (phase 0 pure bulk)
-                    Real w1 = (e < ghost_cut) ? Real(1.0) : Real(0.0);
-                    if (w1 > Real(0.0))
-                    {
-                        if (tau_r1 > Real(0.0)) {
-                            Real f = std::exp(-w1 * dt_ / tau_r1);
-                            rho1(i,j,k) = ref_r1 + (rho1(i,j,k) - ref_r1) * f;
-                        }
-                        if (tau_m1 > Real(0.0)) {
-                            Real f = std::exp(-w1 * dt_ / tau_m1);
-                            M1(i,j,k,0) = ref_M1x + (M1(i,j,k,0) - ref_M1x) * f;
-                            M1(i,j,k,1) = ref_M1y + (M1(i,j,k,1) - ref_M1y) * f;
-                        }
-                        if (tau_e1 > Real(0.0)) {
-                            Real f = std::exp(-w1 * dt_ / tau_e1);
-                            E1(i,j,k) = ref_E1 + (E1(i,j,k) - ref_E1) * f;
-                        }
-                    }
-                });
-            }
-        }
-    }
+    // Ghost-fluid relaxation moved to Advance() (after solution copy, before
+    // ClampPerPhaseState) so the CFL diagnostic and plotfile see the same
+    // relaxed state.
 
     if (write_integrals) WriteIntegrals(time);
 }
@@ -2646,20 +2556,43 @@ Hydro2::ApplySQRSource(int lev,
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX, sten);
             Real grad_eta_mag = grad_eta.lpNorm<2>();
 
-            // Band taper: SQR sources are unmodified in the main interface body
-            // and smoothly tapered to zero at the extreme tail where minority-
-            // phase density is tiny and perturbations amplify (oscillatory
-            // μ_chem, velocity blowup). For the tanh profile |∇η|_max = 1/(2ε);
-            // the taper window spans 1e-4 to 1e-3 of peak (≈ 3.8ε to 5.3ε from
-            // center, η > 0.999), so conservation impact is negligible.
+            // Band taper: two independent guards that both must pass.
+            //
+            // (1) |∇η|-based: tapers to zero at the extreme tail of the tanh
+            //     profile where minority-phase density is tiny and SQR sources
+            //     amplify perturbations.  Window: |∇η| ∈ [1e-4, 1e-3]/(2ε).
+            //
+            // (2) η-based: tapers to zero in the bulk where min(η,1-η) is
+            //     tiny.  This guards against spurious ∇η from CH evolution
+            //     (non-degenerate mobility) or numerical diffusion activating
+            //     SQR sources on cells with vanishing minority-phase density.
+            //     Window: min(η,1-η) ∈ [1e-6, 1e-3].
+            //
+            // Both use C² quintic smootherstep (zero 1st/2nd derivatives at
+            // endpoints).  Conservation impact is negligible: the tapered
+            // region corresponds to η > 0.999 (|∇η| taper) or η > 0.999999
+            // (η taper), far from the interface body.
+
+            // --- (1) |∇η| taper ---
             Real geta_lo = Real(1e-4) / (Real(2.0) * eps_sqr_);  // taper starts
             Real geta_hi = Real(1e-3) / (Real(2.0) * eps_sqr_);  // taper ends (full weight)
             if (grad_eta_mag < geta_lo) return;  // fully outside band
             Real band_t  = amrex::min(Real(1.0),
                            (grad_eta_mag - geta_lo) / (geta_hi - geta_lo));
-            // C² quintic smootherstep: zero first and second derivatives at 0 and 1
             Real band_wt = band_t * band_t * band_t
                          * (band_t * (Real(6.0)*band_t - Real(15.0)) + Real(10.0));
+
+            // --- (2) η-based bulk guard ---
+            Real eta_clamped = amrex::max(Real(0.0), amrex::min(Real(1.0), eta(i,j,k)));
+            Real eta_min = amrex::min(eta_clamped, Real(1.0) - eta_clamped);
+            Real eta_lo  = Real(1e-6);   // below: pure bulk, no SQR
+            Real eta_hi  = Real(1e-3);   // above: full weight
+            if (eta_min < eta_lo) return;
+            Real eta_t   = amrex::min(Real(1.0),
+                           (eta_min - eta_lo) / (eta_hi - eta_lo));
+            Real eta_wt  = eta_t * eta_t * eta_t
+                         * (eta_t * (Real(6.0)*eta_t - Real(15.0)) + Real(10.0));
+            band_wt *= eta_wt;
 
             // Per-phase pressures at this cell (single-phase EOS, no Allaire)
             Real safe_r0 = amrex::max(r0_arr(i,j,k), Real(1e-20));
@@ -6015,6 +5948,88 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     momentum_1_mf[lev] ->ParallelCopy(solution_new[5]);
     energy_1_mf[lev]   ->ParallelCopy(solution_new[6]);
 
+    //==============================================================
+    // 7a. Ghost-fluid relaxation (moved from TimeStepComplete so
+    //     the CFL diagnostic and plotfile see the same relaxed state).
+    //     Damp minority-phase state toward IC reference in the bulk.
+    //==============================================================
+    {
+        bool ghost_active = (ghost_tau_rho_0 > 0.0) || (ghost_tau_rho_1 > 0.0)
+                         || (ghost_tau_mom_0 > 0.0) || (ghost_tau_mom_1 > 0.0)
+                         || (ghost_tau_eng_0 > 0.0) || (ghost_tau_eng_1 > 0.0);
+        if (ghost_tau_rho_0 == 0.0 || ghost_tau_rho_1 == 0.0 ||
+            ghost_tau_mom_0 == 0.0 || ghost_tau_mom_1 == 0.0 ||
+            ghost_tau_eng_0 == 0.0 || ghost_tau_eng_1 == 0.0)
+            Util::Abort(INFO, "ghost_tau_* = 0 is invalid (division by zero). Use < 0 to disable, > 0 to enable.");
+        if (ghost_active)
+        {
+            const Real ref_r0   = ghost_ref_rho_0, ref_r1   = ghost_ref_rho_1;
+            const Real ref_M0x  = ghost_ref_M0x,   ref_M0y  = ghost_ref_M0y;
+            const Real ref_M1x  = ghost_ref_M1x,   ref_M1y  = ghost_ref_M1y;
+            const Real ref_E0   = ghost_ref_E0,     ref_E1   = ghost_ref_E1;
+            const Real tau_r0   = ghost_tau_rho_0,  tau_r1   = ghost_tau_rho_1;
+            const Real tau_m0   = ghost_tau_mom_0,  tau_m1   = ghost_tau_mom_1;
+            const Real tau_e0   = ghost_tau_eng_0,  tau_e1   = ghost_tau_eng_1;
+
+            for (MFIter mfi(*eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+            {
+                const Box& bx = mfi.validbox();
+                auto eta_arr = eta_mf[lev]->const_array(mfi);
+                auto rho0    = density_0_mf[lev]->array(mfi);
+                auto rho1    = density_1_mf[lev]->array(mfi);
+                auto M0      = momentum_0_mf[lev]->array(mfi);
+                auto M1      = momentum_1_mf[lev]->array(mfi);
+                auto E0      = energy_0_mf[lev]->array(mfi);
+                auto E1      = energy_1_mf[lev]->array(mfi);
+
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+                {
+                    Real e = eta_arr(i,j,k);
+                    if (e < Real(0.0)) e = Real(0.0);
+                    if (e > Real(1.0)) e = Real(1.0);
+
+                    constexpr Real ghost_band = Real(0.10);
+
+                    // Phase 0: relax where η > 1−ghost_band (gas ghost in liquid bulk)
+                    Real w0 = (e > Real(1.0) - ghost_band)
+                            ? (e - (Real(1.0) - ghost_band)) / ghost_band
+                            : Real(0.0);
+                    if (w0 > Real(0.0))
+                    {
+                        if (tau_r0 > Real(0.0)) {
+                            rho0(i,j,k) = w0 * ref_r0 + (Real(1.0) - w0) * rho0(i,j,k);
+                        }
+                        if (tau_m0 > Real(0.0)) {
+                            M0(i,j,k,0) = w0 * ref_M0x + (Real(1.0) - w0) * M0(i,j,k,0);
+                            M0(i,j,k,1) = w0 * ref_M0y + (Real(1.0) - w0) * M0(i,j,k,1);
+                        }
+                        if (tau_e0 > Real(0.0)) {
+                            E0(i,j,k) = w0 * ref_E0 + (Real(1.0) - w0) * E0(i,j,k);
+                        }
+                    }
+
+                    // Phase 1: relax where η < ghost_band (liquid ghost in gas bulk)
+                    Real w1 = (e < ghost_band)
+                            ? (Real(1.0) - e / ghost_band)
+                            : Real(0.0);
+                    if (w1 > Real(0.0))
+                    {
+                        if (tau_r1 > Real(0.0)) {
+                            rho1(i,j,k) = w1 * ref_r1 + (Real(1.0) - w1) * rho1(i,j,k);
+                        }
+                        if (tau_m1 > Real(0.0)) {
+                            M1(i,j,k,0) = w1 * ref_M1x + (Real(1.0) - w1) * M1(i,j,k,0);
+                            M1(i,j,k,1) = w1 * ref_M1y + (Real(1.0) - w1) * M1(i,j,k,1);
+                        }
+                        if (tau_e1 > Real(0.0)) {
+                            E1(i,j,k) = w1 * ref_E1 + (Real(1.0) - w1) * E1(i,j,k);
+                        }
+                    }
+                });
+            }
+        }
+    }
+
     // Floor the per-phase conservative state in place so the EOS inversions in
     // ApplyHeatConduction, MixDiagnostic, and the next Riemann sweep cannot
     // see UE < 0 (CPG) or UE < pi_1 (Tammann -> negative c^2). Without this
@@ -6058,6 +6073,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     vy_max  = 0.0;
     F_max   = 0.0;
     rho_min = 1e10;
+    // Per-phase CFL diagnostics
+    Set::Scalar c0_max_diag = 0.0, c1_max_diag = 0.0;
+    Set::Scalar rho0_min_diag = 1e10, rho1_min_diag = 1e10;
 
     for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi)
     {
@@ -6342,6 +6360,19 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar c1_dt = c_e1(i,j,k);
             if (!std::isfinite(c0_dt) || c0_dt < Set::Scalar(0.0)) c0_dt = Set::Scalar(0.0);
             if (!std::isfinite(c1_dt) || c1_dt < Set::Scalar(0.0)) c1_dt = Set::Scalar(0.0);
+
+            // Volume-fraction gating: only count a phase's sound speed in the
+            // CFL where it has significant volume fraction. Ghost phases can
+            // have degenerate sound speeds — for stiffened gas (π > 0),
+            // c = sqrt(γ(p+π)/ρ) → ∞ as ρ → 0 (rarefied ghost) even when
+            // p → 0, because the Tammann pressure π provides a floor. Without
+            // this gate, a single near-vacuum ghost cell collapses dt globally.
+            {
+                Real eta_cfl = std::max(Real(0.0), std::min(Real(1.0), eta(i,j,k)));
+                constexpr Real alpha_cfl_min = Real(0.10);
+                if ((Real(1.0) - eta_cfl) < alpha_cfl_min) c0_dt = Real(0.0);
+                if (eta_cfl < alpha_cfl_min)                c1_dt = Real(0.0);
+            }
             Set::Scalar sound_speed_new = std::max(c0_dt, c1_dt);
 
             // Shock-speed correction (Rankine-Hugoniot):
@@ -6388,6 +6419,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             if (std::isfinite(F_mag)) F_max = std::max(F_max, F_mag);
             if (std::isfinite(rho(i, j, k))) rho_min = std::min(rho_min, rho(i, j, k));
 
+            // (Per-phase diagnostics computed below via MultiFab min/max)
+
         });
     }
 
@@ -6403,6 +6436,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     Set::Scalar dt_max = std::numeric_limits<Set::Scalar>::max();
 
     // Update adaptive timestep
+    // Per-phase diagnostics from MultiFab min/max (valid cells only)
+    c0_max_diag   = c_0_mf[lev]->max(0);
+    c1_max_diag   = c_1_mf[lev]->max(0);
+    rho0_min_diag = density_0_mf[lev]->min(0);
+    rho1_min_diag = density_1_mf[lev]->min(0);
+
     amrex::ParallelDescriptor::ReduceRealMax(c_max);
     amrex::ParallelDescriptor::ReduceRealMax(vx_max);
     amrex::ParallelDescriptor::ReduceRealMax(vy_max);
@@ -6444,24 +6483,23 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // Safety factor
     dt_max = dt_max * 0.9;
 
-    // Timestep diagnostics
-    bool timestep_verbose = false;
-    if (timestep_verbose == true)
+    // Compact CFL diagnostic: always print which constraint limits dt
     {
-        Util::ParallelMessage(INFO, "\n=== CFL TIMESTEP DIAGNOSTICS ===");
-        Util::ParallelMessage(INFO, "Grid spacing: ", dx_min, " m");
-        Util::ParallelMessage(INFO, "Sound speed max: ", c_max, " m/s");
-        Util::ParallelMessage(INFO, "Velocity max: ", std::max(vx_max, vy_max), " m/s");
-        Util::ParallelMessage(INFO, "Force max: ", F_max, " N/m^3");
-        Util::ParallelMessage(INFO, "Density min: ", rho_min, " kg/m^3");
-        Util::ParallelMessage(INFO, "");
-        Util::ParallelMessage(INFO, "dt_acoustic: ", dt_acoustic, " s");
-        Util::ParallelMessage(INFO, "dt_viscous: ", dt_viscous, " s");
-        Util::ParallelMessage(INFO, "dt_force: ", dt_force, " s");
-        Util::ParallelMessage(INFO, "dt_allen_cahn: ", dt_allen_cahn, " s");
-        Util::ParallelMessage(INFO, "");
-        Util::ParallelMessage(INFO, "Final dt_max: ", dt_max, " s");
-        Util::ParallelMessage(INFO, "================================\n");
+        const char* limiter = "acoustic";
+        Set::Scalar dt_lim = dt_acoustic;
+        if (dt_viscous < dt_lim)    { dt_lim = dt_viscous;    limiter = "viscous"; }
+        if (dt_force < dt_lim)      { dt_lim = dt_force;      limiter = "force"; }
+        if (dt_allen_cahn < dt_lim) { dt_lim = dt_allen_cahn; limiter = "allen_cahn"; }
+        amrex::Print() << "[CFL] lev=" << lev
+                       << "  limiter=" << limiter
+                       << "  dt_ac=" << dt_acoustic
+                       << "  c_max=" << c_max
+                       << "  c0_max=" << c0_max_diag
+                       << "  c1_max=" << c1_max_diag
+                       << "  rho0_min=" << rho0_min_diag
+                       << "  rho1_min=" << rho1_min_diag
+                       << "  dt_max=" << dt_max
+                       << "\n";
     }
     if (dynamictimestep.on)
     {
