@@ -1,2 +1,0 @@
-solver,limiter,integration,interface_type,epsilon,velocity_l2,velocity_linf,pressure_l2,pressure_linf,density_l2,density_linf
-HLLE,VanLeer,ForwardEuler,epsilon_0.001,0.001,1.6548273762191748,0.24955155321804878,0.6345790901388477,0.1276765593908848,1.2361373913892115,0.2401496480294374
