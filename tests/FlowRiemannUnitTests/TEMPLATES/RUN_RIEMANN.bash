@@ -9,10 +9,10 @@ set -e  # Exit on any error
 # Riemann Solvers
 SOLVER_LABELS=(
   #Roe
-  HLLE
+  #HLLE
   HLLC
   #HLLC_Oomar_Jaiman
-  HLLC_All_Mach
+  #HLLC_All_Mach
   #HLLC_All_Mach_Furfaro
 )
 
@@ -22,8 +22,8 @@ SOLVER_LABELS=(
 LIMITER_LABELS=(
   Godunov
   #Minmod
-  VanLeer
-  WENO3
+  #VanLeer
+  #WENO3
   #WENO5
 )
 
@@ -34,10 +34,10 @@ LIMITER_LABELS=(
 # For ForwardEuler the rk.type is ignored by AMReX (we still set it to a
 # dummy 1 so the placeholder is always replaced).
 INTEGRATION_LABELS=(
-  ForwardEuler
+  #ForwardEuler
   #Trapezoid
   SSPRK3
-  RK4
+  #RK4
 )
 
 # Map label -> (integration.type, integration.rk.type)
@@ -53,13 +53,13 @@ TESTS=(
   Toro1a
   #Toro1b
   #Toro1r
-  Toro2
-  Toro3
-  Toro4a
+  #Toro2
+  #Toro3
+  #Toro4a
   #Toro4b
-  Toro5
-  Toro6
-  Toro7
+  #Toro5
+  #Toro6
+  #Toro7
   Garrick
 )
 

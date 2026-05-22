@@ -50,14 +50,14 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20
 
 
 ### MESHING ###
-amr.plot_int       = -1
+#amr.plot_int       = -1
 amr.plot_dt        = 1.0e-4        # ~ tau_c/18 -> ~100 frames over the run
 amr.max_grid_size  = 500000
 amr.blocking_factor = 2
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
-amr.max_level      = 0
-amr.n_cell         = 2560 2560
+amr.max_level      = 2
+amr.n_cell         = 640 640
 
 nghost = 4
 
@@ -167,12 +167,13 @@ momentum.bc.type.ylo = neumann neumann
 momentum.bc.type.yhi = neumann neumann
 
 ### REFINEMENT (off for the nominal validation run) ###
-eta_refinement_criterion   = 1.0e+10
-omega_refinement_criterion = 1.0e+10
-p_refinement_criterion     = 1.0e+10
-rho_refinement_criterion   = 1.0e+10
-gradu_refinement_criterion = 1.0e+10
-cutoff = 1.0e-4
+eta_refinement_criterion = 1e-1
+omega_refinement_criterion = 10.55
+p_refinement_criterion = 1e+7
+rho_refinement_criterion = 1e+6
+gradu_refinement_criterion = 1e+6
+cutoff = 1e-16
+small = 1e-6;
 
 ### SOURCE TERMS ###
 m0.ic.constant.value = 0.0
