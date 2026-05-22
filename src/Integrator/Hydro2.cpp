@@ -2568,6 +2568,7 @@ Hydro2::ApplySQRSource(int lev,
     const Real cv1_       = cv_1;
     const Real dt_        = dt;
     const int  sqr_implicit_pressure_ = sqr_implicit_pressure;
+    const Real eps_sqr_   = epsilon;  // interface half-width for SQR band cutoff
 
     // Zero surface tension plot MF each call so bulk cells (which early-return
     // inside the ParallelFor below) don't carry stale values from prior steps.
@@ -2645,9 +2646,20 @@ Hydro2::ApplySQRSource(int lev,
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX, sten);
             Real grad_eta_mag = grad_eta.lpNorm<2>();
 
-            // Skip work where interface gradient is negligible. Keeps the SQR
-            // source truly localized to the diffuse region.
-            if (grad_eta_mag < Real(1e-30)) return;
+            // Band taper: SQR sources are unmodified in the main interface body
+            // and smoothly tapered to zero at the extreme tail where minority-
+            // phase density is tiny and perturbations amplify (oscillatory
+            // μ_chem, velocity blowup). For the tanh profile |∇η|_max = 1/(2ε);
+            // the taper window spans 1e-4 to 1e-3 of peak (≈ 3.8ε to 5.3ε from
+            // center, η > 0.999), so conservation impact is negligible.
+            Real geta_lo = Real(1e-4) / (Real(2.0) * eps_sqr_);  // taper starts
+            Real geta_hi = Real(1e-3) / (Real(2.0) * eps_sqr_);  // taper ends (full weight)
+            if (grad_eta_mag < geta_lo) return;  // fully outside band
+            Real band_t  = amrex::min(Real(1.0),
+                           (grad_eta_mag - geta_lo) / (geta_hi - geta_lo));
+            // C² quintic smootherstep: zero first and second derivatives at 0 and 1
+            Real band_wt = band_t * band_t * band_t
+                         * (band_t * (Real(6.0)*band_t - Real(15.0)) + Real(10.0));
 
             // Per-phase pressures at this cell (single-phase EOS, no Allaire)
             Real safe_r0 = amrex::max(r0_arr(i,j,k), Real(1e-20));
@@ -2721,7 +2733,7 @@ Hydro2::ApplySQRSource(int lev,
             Real qy    = q_arr(i,j,k,1);
 
             // === Mass: ±ṁ₀·|∇η| ===
-            Real Smass = mdot0 * grad_eta_mag;
+            Real Smass = mdot0 * grad_eta_mag * band_wt;
             R0(i,j,k) += -Smass;
             R1(i,j,k) += +Smass;
 
@@ -2928,7 +2940,7 @@ Hydro2::ApplySQRSource(int lev,
                     {
                         Real dtb = dt_ * beta;
                         Real D = Real(1.0) - (g0 - Real(1.0))*(g1 - Real(1.0))*dtb*dtb;
-                        if (amrex::Math::abs(D) > Real(1e-12))
+                        if (D > Real(1e-12))
                         {
                             Real invD = Real(1.0) / D;
                             p0_impl = (p0_phase + (g0 - Real(1.0))*dtb * p1_phase) * invD;
@@ -3091,23 +3103,23 @@ Hydro2::ApplySQRSource(int lev,
                 U1_src = S_E_1 + SEq;
             }
 
-            // Apply
-            P0(i,j,k,0) += P0_src_x;
-            P0(i,j,k,1) += P0_src_y;
-            P1(i,j,k,0) += P1_src_x;
-            P1(i,j,k,1) += P1_src_y;
-            U0(i,j,k)   += U0_src;
-            U1(i,j,k)   += U1_src;
+            // Apply (band_wt tapers sources to zero at extreme tail)
+            P0(i,j,k,0) += P0_src_x * band_wt;
+            P0(i,j,k,1) += P0_src_y * band_wt;
+            P1(i,j,k,0) += P1_src_x * band_wt;
+            P1(i,j,k,1) += P1_src_y * band_wt;
+            U0(i,j,k)   += U0_src   * band_wt;
+            U1(i,j,k)   += U1_src   * band_wt;
 
-            // Diagnostic plot fields (single block, both paths feed the same fields).
-            sqr_dp_out(i,j,k,0)      = dp0;
-            sqr_dp_out(i,j,k,1)      = dp1;
-            sqr_mom_src_out(i,j,k,0) = P0_src_x;
-            sqr_mom_src_out(i,j,k,1) = P0_src_y;
-            sqr_mom_src_out(i,j,k,2) = P1_src_x;
-            sqr_mom_src_out(i,j,k,3) = P1_src_y;
-            sqr_eng_src_out(i,j,k,0) = U0_src;
-            sqr_eng_src_out(i,j,k,1) = U1_src;
+            // Diagnostic plot fields (reflect band_wt-tapered values actually applied).
+            sqr_dp_out(i,j,k,0)      = dp0      * band_wt;
+            sqr_dp_out(i,j,k,1)      = dp1      * band_wt;
+            sqr_mom_src_out(i,j,k,0) = P0_src_x * band_wt;
+            sqr_mom_src_out(i,j,k,1) = P0_src_y * band_wt;
+            sqr_mom_src_out(i,j,k,2) = P1_src_x * band_wt;
+            sqr_mom_src_out(i,j,k,3) = P1_src_y * band_wt;
+            sqr_eng_src_out(i,j,k,0) = U0_src   * band_wt;
+            sqr_eng_src_out(i,j,k,1) = U1_src   * band_wt;
         });
     }
 }

@@ -8,7 +8,7 @@
 ### OUTPUT ###
 plot_file = ./tests/FlowSQR_tests/output_Garrick
 amr.plot_dt = 0.01
-amr.plot_int = 2924
+amr.plot_int = 413
 
 ### MESHING ###
 amr.max_level = 0
@@ -23,9 +23,9 @@ geometry.prob_hi =  1.0   0.015625   0.0 # [ m ]
 geometry.is_periodic = 0 1 0
 
 ### TIME STEP ###
-# timestep  = 2.5e-4
+timestep  = 2.5e-4
 # timestep  = 1.25e-4
-timestep  = 0.625e-4
+# timestep  = 0.625e-4
 # timestep  = 0.3125e-4
 # timestep  = 0.15625e-4
 # stop_time = 0.2
