@@ -252,13 +252,13 @@ closure.un_pint_method = 4      # only used by the Constitutive strategy; ignore
 closure.E_pint_method  = 4      # only used by the Constitutive strategy; ignored under relax
 
 # Ghost-fluid relaxation: damp minority-phase state toward IC.
-  # τ [s]; 0 = disabled.  Weight = (1-α_k), so strongest in opposite-phase bulk.
-  ghost_tau_rho_0 = 1e-16
-  ghost_tau_rho_1 = 1e-16
-  ghost_tau_mom_0 = 1e-16
-  ghost_tau_mom_1 = 1e-16
-  ghost_tau_eng_0 = 1e-16
-  ghost_tau_eng_1 = 1e-16
+  # Convention: τ < 0 = disabled, τ = 0 = error, τ > 0 = active [s].
+  ghost_tau_rho_0 = -1e-3
+  ghost_tau_rho_1 = -1e-3
+  ghost_tau_mom_0 = -1e-3
+  ghost_tau_mom_1 = -1e-3
+  ghost_tau_eng_0 = -1e-3
+  ghost_tau_eng_1 = -1e-3
 
 
 nscbc.enabled = false

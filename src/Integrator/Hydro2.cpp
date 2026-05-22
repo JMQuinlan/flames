@@ -314,13 +314,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // GHOST-FLUID RELAXATION toward IC
         // Damps minority-phase state in the other phase's bulk.
-        // τ [s] = e-folding time; 0 = disabled (default).
-        pp_query_default("ghost_tau_rho_0", value.ghost_tau_rho_0, 0.0);
-        pp_query_default("ghost_tau_rho_1", value.ghost_tau_rho_1, 0.0);
-        pp_query_default("ghost_tau_mom_0", value.ghost_tau_mom_0, 0.0);
-        pp_query_default("ghost_tau_mom_1", value.ghost_tau_mom_1, 0.0);
-        pp_query_default("ghost_tau_eng_0", value.ghost_tau_eng_0, 0.0);
-        pp_query_default("ghost_tau_eng_1", value.ghost_tau_eng_1, 0.0);
+        // Convention: τ < 0 = disabled (default), τ = 0 = error, τ > 0 = active [s].
+        pp_query_default("ghost_tau_rho_0", value.ghost_tau_rho_0, -1.0);
+        pp_query_default("ghost_tau_rho_1", value.ghost_tau_rho_1, -1.0);
+        pp_query_default("ghost_tau_mom_0", value.ghost_tau_mom_0, -1.0);
+        pp_query_default("ghost_tau_mom_1", value.ghost_tau_mom_1, -1.0);
+        pp_query_default("ghost_tau_eng_0", value.ghost_tau_eng_0, -1.0);
+        pp_query_default("ghost_tau_eng_1", value.ghost_tau_eng_1, -1.0);
 
         // PHASE 1 (liquid — stiffened gas)
         pp_query_required("gamma_1", value.gamma_1);      // gamma for gamma law
@@ -2145,9 +2145,14 @@ void Hydro2::TimeStepComplete(Set::Scalar time, int lev)
     // Weight w_k = 1 - alpha_k: full-strength in the opposite-phase bulk,
     // zero in the own-phase bulk.  Exponential decay is unconditionally stable.
     //   Q_new = Q_ref + (Q - Q_ref) * exp(-w * dt / tau)
+    // Convention: τ < 0 = disabled (default), τ = 0 = error, τ > 0 = active.
     bool ghost_active = (ghost_tau_rho_0 > 0.0) || (ghost_tau_rho_1 > 0.0)
                      || (ghost_tau_mom_0 > 0.0) || (ghost_tau_mom_1 > 0.0)
                      || (ghost_tau_eng_0 > 0.0) || (ghost_tau_eng_1 > 0.0);
+    if (ghost_tau_rho_0 == 0.0 || ghost_tau_rho_1 == 0.0 ||
+        ghost_tau_mom_0 == 0.0 || ghost_tau_mom_1 == 0.0 ||
+        ghost_tau_eng_0 == 0.0 || ghost_tau_eng_1 == 0.0)
+        Util::Abort(INFO, "ghost_tau_* = 0 is invalid (division by zero). Use < 0 to disable, > 0 to enable.");
     if (ghost_active)
     {
         const Real ref_r0   = ghost_ref_rho_0, ref_r1   = ghost_ref_rho_1;
