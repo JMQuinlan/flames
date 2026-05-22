@@ -166,6 +166,18 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         Solver::EOS::Tammann::Parse(value.eos0, pp, "eos0.");
         Solver::EOS::Tammann::Parse(value.eos1, pp, "eos1.");
 
+        // EOS backend selection: routes the gas-branch PhasicPressureFromEnergy /
+        // PhasicEnergyFromPressure / PhasicSoundSpeed calls (pi_k == 0) to either
+        // the native Tammann+CPG implementation (default) or the PelePhysics
+        // shim (Solver::EOS::PelePhysicsEOS, requires PELE_ENABLED build).
+        // Tammann liquid (pi_k > 0) always stays native.
+        //   eos.backend = tammann   (default; equivalent to "native")
+        //   eos.backend = pelephysics
+        // See bin/PeleC.md for the integration plan.
+        std::string eos_backend_str = "tammann";
+        pp_query_default("eos.backend", eos_backend_str, "tammann");
+        Solver::EOS::SetBackend(eos_backend_str);
+
         // INTERACTIONS
         pp_query_default("sigma", value.sigma, 0.0);    // Surface tension condition
         pp_query_default("Dv", value.Dv, 0.0);          // Vapor Diffusivity

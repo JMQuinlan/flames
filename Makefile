@@ -50,6 +50,37 @@ LINKER_FLAGS += -Bsymbolic-functions -lstdc++fs
 ALAMO_INCLUDE += $(if ${EIGEN}, -isystem ${EIGEN})  $(if ${AMREX_TARGET}, -isystem ${AMREX_TARGET}/include/) -I./src/ $(for pth in ${CPLUS_INCLUDE_PATH}; do echo -I"$pth"; done)
 LIB     += ${AMREX_TARGET}/lib/libamrex.a -lpthread
 
+# =============================================================================
+# PelePhysics integration (Phase 1+2 scaffolding).
+# Gated on PELE_ENABLED so existing builds are completely unaffected unless
+# the user opts in.
+#
+# To enable:
+#   1. Run scripts/build_pele_deps.sh (clones+builds SUNDIALS, configures PelePhysics)
+#   2. export SUNDIALS_TARGET=$(pwd)/ext/sundials/install
+#      export PELE_PHYSICS_HOME=$(pwd)/ext/pelephysics
+#      export PELE_ENABLED=1
+#   3. make hydro2-2d-g++
+#
+# See bin/PeleC.md for the full integration plan and roadmap.
+# =============================================================================
+ifdef PELE_ENABLED
+    # NOTE: do NOT -DNUM_SPECIES=...; the mechanism.H of the selected
+    # PelePhysics mechanism owns that define (air mechanism gives 2:
+    # O2 + N2).  Overriding it from the command line causes a redefinition
+    # conflict.
+    CXX_COMPILE_FLAGS += -DPELE_ENABLED -DUSE_GAMMALAW_EOS
+    ALAMO_INCLUDE += -isystem ${PELE_PHYSICS_HOME}/Source \
+                     -isystem ${PELE_PHYSICS_HOME}/Source/Eos \
+                     -isystem ${PELE_PHYSICS_HOME}/Source/Utility/BlackBoxFunction \
+                     -isystem ${PELE_PHYSICS_HOME}/Mechanisms/air \
+                     -isystem ${SUNDIALS_TARGET}/include
+    LIB += ${SUNDIALS_TARGET}/lib/libsundials_cvode.a \
+           ${SUNDIALS_TARGET}/lib/libsundials_nvecserial.a \
+           ${SUNDIALS_TARGET}/lib/libsundials_core.a
+    $(info >>> PELE_ENABLED: compiling with PelePhysics GammaLaw EOS, mechanism = air (NUM_SPECIES=2))
+endif
+
 HDR_ALL = $(shell find src/ -name *.H)
 HDR_TEST = $(shell find src/ -name *Test.H)
 HDR = $(filter-out $(HDR_TEST),$(HDR_ALL))
@@ -156,7 +187,7 @@ obj/obj-$(POSTFIX)/%.cpp.d: src/%.cpp  ${AMREX_TARGET}
 	@printf '%9s' "($(CTR_DEP)/$(NUM)) " 
 	@printf "$(RESET)$<\n"
 	@mkdir -p $(dir $@)
-	$(QUIET)$(CC) -Wno-unused-command-line-argument -I./src/ $< ${ALAMO_INCLUDE} ${CXX_COMPILE_FLAGS}-MM -MT $(@:.cpp.d=.cpp.o) -MF $@
+	$(QUIET)$(CC) -Wno-unused-command-line-argument -I./src/ $< ${ALAMO_INCLUDE} ${CXX_COMPILE_FLAGS} -MM -MT $(@:.cpp.d=.cpp.o) -MF $@
 
 obj/obj-$(POSTFIX)/%.cc.d: src/%.cc ${AMREX_TARGET}
 	$(eval CTR_DEP=$(shell echo $$(($(CTR_DEP)+1))))

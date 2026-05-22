@@ -3,11 +3,77 @@
 
 #include "AMReX.H"
 #include "Set/Set.H"
+// NOTE: do NOT add `#include "Util/Util.H"` here -- it causes a dependency
+// cycle through Set/Set.H -> ... -> Util.H -> ... -> EOS.H that breaks
+// Make's .d generation with a cryptic "must specify -M or -MM" error from
+// cc1plus.  Util::Message / Util::Abort are reachable transitively via
+// AMReX.H + Set/Set.H in every TU that uses EOS.H in practice; verified.
+
+#ifdef PELE_ENABLED
+#include "Solver/EOS/PelePhysicsEOS.H"
+#endif
 
 namespace Solver
 {
 namespace EOS
 {
+
+// ============================================================================
+// EOS BACKEND SELECTION (input file: eos.backend = tammann | pelephysics)
+// ============================================================================
+// The static EOS::Phasic* methods below dispatch into either the native
+// Tammann/CPG math (default) or the PelePhysicsEOS shim (when built with
+// PELE_ENABLED and selected at runtime).  The PelePhysics route is only
+// taken on the GAS branch (pi_k == 0) since PelePhysics has no stiffened
+// gas; Tammann liquid (pi_k > 0) ALWAYS stays native.
+//
+// GPU CAVEAT: the runtime check below reads a host-side static variable
+// from inside potential ParallelFor lambdas.  Works on CPU only.  When/if
+// this codebase grows GPU support (AMREX_USE_CUDA), the dispatch will
+// need to move to compile-time (template the EOS choice) or use a device
+// constant.  See bin/PeleC.md for the long-term plan.
+// ============================================================================
+enum class Backend
+{
+    Native,       // existing Tammann + CPG implementation (default)
+    PelePhysics   // gas-branch routes to PelePhysicsEOS shim
+};
+
+/// Singleton accessor for the active backend.  Set once at Hydro2::Parse
+/// time from the `eos.backend` input parameter.
+inline Backend& current_backend()
+{
+    static Backend b = Backend::Native;
+    return b;
+}
+
+/// Parse and set from input-file string.  Aborts on unknown names or
+/// when "pelephysics" is requested in a non-PELE_ENABLED binary.
+inline void SetBackend(const std::string& name)
+{
+    if (name.empty() || name == "tammann" || name == "native")
+    {
+        current_backend() = Backend::Native;
+        Util::Message(INFO, "EOS backend: native (Tammann + CPG)");
+    }
+    else if (name == "pelephysics")
+    {
+#ifdef PELE_ENABLED
+        current_backend() = Backend::PelePhysics;
+        Util::Message(INFO, "EOS backend: pelephysics (gas branch routed through "
+                            "Solver::EOS::PelePhysicsEOS; Tammann liquid stays native)");
+#else
+        Util::Abort(INFO, "eos.backend=pelephysics requested but this binary was "
+                          "not built with PELE_ENABLED.  Rebuild after "
+                          "`export PELE_ENABLED=1` (see bin/PeleC.md).");
+#endif
+    }
+    else
+    {
+        Util::Abort(INFO, "Unknown eos.backend = '", name,
+                          "'.  Allowed: tammann | native | pelephysics.");
+    }
+}
 
 /// Base class for Equation of State
 /// Provides interface for single-phase thermodynamics and diffuse interface mixing
@@ -391,6 +457,14 @@ public:
                                                 Set::Scalar pi_k,
                                                 Set::Scalar small = 1e-16)
     {
+#ifdef PELE_ENABLED
+        // Gas branch (pi_k == 0) -> PelePhysics shim when selected.
+        // Liquid branch (pi_k > 0) always stays native (PelePhysics has no SG).
+        if (current_backend() == Backend::PelePhysics && pi_k == 0.0)
+        {
+            return PelePhysicsEOS::PhasicPressureFromEnergy(E_k, alpha, gam, pi_k, small);
+        }
+#endif
         Set::Scalar a_safe = std::max(alpha, small);
         Set::Scalar p_k = (gam - 1.0) * (E_k / a_safe) - gam * pi_k;
         // Keep p_k + pi_k > 0 (Saurel 2009 §3 stiffened-gas positivity).
@@ -407,6 +481,12 @@ public:
                                                 Set::Scalar pi_k,
                                                 Set::Scalar small = 1e-16)
     {
+#ifdef PELE_ENABLED
+        if (current_backend() == Backend::PelePhysics && pi_k == 0.0)
+        {
+            return PelePhysicsEOS::PhasicEnergyFromPressure(p_k, alpha, gam, pi_k, small);
+        }
+#endif
         Set::Scalar numer = std::max(p_k + gam * pi_k, small);
         return alpha * numer / (gam - 1.0);
     }
@@ -421,6 +501,12 @@ public:
                                         Set::Scalar pi_k,
                                         Set::Scalar small = 1e-16)
     {
+#ifdef PELE_ENABLED
+        if (current_backend() == Backend::PelePhysics && pi_k == 0.0)
+        {
+            return PelePhysicsEOS::PhasicSoundSpeed(rho_k, p_k, gam, pi_k, small);
+        }
+#endif
         Set::Scalar r = std::max(rho_k, small);
         Set::Scalar pp = std::max(p_k + pi_k, small);
         return std::sqrt(gam * pp / r);
