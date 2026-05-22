@@ -154,6 +154,7 @@ protected:
     // natural-BC pressure-balance momentum/energy coupling.
     void ApplySQRSource(int lev,
         Set::Scalar time,
+        Set::Scalar dt,
         amrex::MultiFab &rho0_rhs_mf, amrex::MultiFab &M0_rhs_mf, amrex::MultiFab &E0_rhs_mf,
         amrex::MultiFab &rho1_rhs_mf, amrex::MultiFab &M1_rhs_mf, amrex::MultiFab &E1_rhs_mf,
         const amrex::MultiFab &eta_mf_in,
@@ -586,6 +587,12 @@ protected:
     // sqr_legacy_p_int_method=1 to reproduce the pre-Phase-B baseline
     // bit-for-bit). Mass and prescribed-heat-flux paths are unchanged.
     bool sqr_legacy_p_int_method = false;
+
+    // Semi-implicit pressure-equilibrium baseline for S2/S3 closures.
+    // Treats p_k implicitly in the (p0-p1)*grad_eta baseline to break
+    // the explicit KE -> UE -> p feedback loop. 1 = enabled (default),
+    // 0 = fully explicit (for comparison/debugging).
+    int sqr_implicit_pressure = 1;
 
     int kappa_method = 1;        // 1: Smooth Normals (default)  2: Height Function  3: Hybrid
     int smooth_kernel_size = 3;  // Gaussian kernel for normal smoothing: 3 (3x3, default) or 5 (5x5)

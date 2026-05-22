@@ -201,6 +201,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("sqr_sources_time_dependent", value.sqr_sources_time_dependent, 0); // re-evaluate ic_m0/ic_u0/ic_q each Advance step at the current time (Stefan and similar)
         pp_query_default("p_int_method", value.p_int_method, 0);                        // SQR interface-pressure closure: 0 OFF, 1 arithmetic mean, 2 eta-weighted, 3 acoustic-impedance, 4 mass-fraction weighted (legacy; only consulted when sqr_legacy_p_int_method=true)
         pp_query_default("sqr_legacy_p_int_method", value.sqr_legacy_p_int_method, false); // if true, ApplySQRSource uses legacy p_int_method-averaged closure (Phase B kill-switch)
+        pp_query_default("sqr_implicit_pressure", value.sqr_implicit_pressure, 1);       // 1 = semi-implicit pressure baseline (S2/S3), 0 = explicit
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
         // === Closure-strategy framework (Phase B onwards) ===
@@ -2517,6 +2518,7 @@ Hydro2::RHS_Eta(int lev,
 void
 Hydro2::ApplySQRSource(int lev,
                       Set::Scalar /*time*/,
+                      Set::Scalar dt,
                       amrex::MultiFab &rho0_rhs_mf, amrex::MultiFab &M0_rhs_mf, amrex::MultiFab &E0_rhs_mf,
                       amrex::MultiFab &rho1_rhs_mf, amrex::MultiFab &M1_rhs_mf, amrex::MultiFab &E1_rhs_mf,
                       const amrex::MultiFab &eta_mf_in,
@@ -2564,6 +2566,8 @@ Hydro2::ApplySQRSource(int lev,
     const Real ut_vel_         = ut_close.vel;
     const Real cv0_       = cv_0;
     const Real cv1_       = cv_1;
+    const Real dt_        = dt;
+    const int  sqr_implicit_pressure_ = sqr_implicit_pressure;
 
     // Zero surface tension plot MF each call so bulk cells (which early-return
     // inside the ParallelFor below) don't carry stale values from prior steps.
@@ -2780,6 +2784,8 @@ Hydro2::ApplySQRSource(int lev,
             Real SEq      = qx*grad_eta(0) + qy*grad_eta(1);
 
             Real dp0 = Real(0.0), dp1 = Real(0.0);
+            Real p0_impl = p0_phase;   // default to explicit; overwritten by S2/S3 semi-implicit solve
+            Real p1_impl = p1_phase;
             Real P0_src_x = Real(0.0), P0_src_y = Real(0.0);
             Real P1_src_x = Real(0.0), P1_src_y = Real(0.0);
             Real U0_src   = Real(0.0), U1_src   = Real(0.0);
@@ -2912,7 +2918,24 @@ Hydro2::ApplySQRSource(int lev,
                     // p₀−p₁, recovering the Rankine-Hugoniot jump condition.
                     // The J_un relaxation (action-reaction, conservative by
                     // itself) is additive and drives u_n,0 → u_n,1.
-                    Real dp_press = p0_phase - p1_phase;
+                    // Semi-implicit pressure equilibrium: treat p_k implicitly
+                    // to break the explicit KE -> UE -> p feedback loop.
+                    // Velocities are lagged (current-stage values).
+                    Real beta = (u0x_ph - u1x_ph)*grad_eta(0)
+                              + (u0y_ph - u1y_ph)*grad_eta(1);
+
+                    if (sqr_implicit_pressure_)
+                    {
+                        Real dtb = dt_ * beta;
+                        Real D = Real(1.0) - (g0 - Real(1.0))*(g1 - Real(1.0))*dtb*dtb;
+                        if (amrex::Math::abs(D) > Real(1e-12))
+                        {
+                            Real invD = Real(1.0) / D;
+                            p0_impl = (p0_phase + (g0 - Real(1.0))*dtb * p1_phase) * invD;
+                            p1_impl = (p1_phase + (g1 - Real(1.0))*dtb * p0_phase) * invD;
+                        }
+                    }
+                    Real dp_press = p0_impl - p1_impl;
 
                     S_un_0_x = dp_press * grad_eta(0) + J_un * grad_eta(0);
                     S_un_0_y = dp_press * grad_eta(1) + J_un * grad_eta(1);
@@ -3057,8 +3080,8 @@ Hydro2::ApplySQRSource(int lev,
                     // Cauchy stress energy coupling (p_other u_other · ∇η_k).
                     // Vanishes when u₀ = u₁ = 0 (no effect at rest); the J_E
                     // temperature relaxation is additive and drives T₀ → T₁.
-                    Real pu0_dot_geta = p0_phase * (u0x_ph*grad_eta(0) + u0y_ph*grad_eta(1));
-                    Real pu1_dot_geta = p1_phase * (u1x_ph*grad_eta(0) + u1y_ph*grad_eta(1));
+                    Real pu0_dot_geta = p0_impl * (u0x_ph*grad_eta(0) + u0y_ph*grad_eta(1));
+                    Real pu1_dot_geta = p1_impl * (u1x_ph*grad_eta(0) + u1y_ph*grad_eta(1));
                     Real S_E_press   = pu0_dot_geta - pu1_dot_geta;
 
                     S_E_0 = S_E_press + J_E * grad_eta_mag;
@@ -5892,7 +5915,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         // flux inside RHS_PerPhase (mass-fraction-split flux form); no
         // separate cell-centered Korteweg block runs here.
         if (sqr_source_mode != SQRMode::Off) {
-            ApplySQRSource(lev, t,
+            ApplySQRSource(lev, t, dt,
                           rhs_mf[1], rhs_mf[2], rhs_mf[3],
                           rhs_mf[4], rhs_mf[5], rhs_mf[6],
                           sol_mf[0],
