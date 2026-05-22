@@ -3097,7 +3097,16 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         effective_nghost = 2;
     }
 
-    // Fill Patches for regridding
+    // Fill Patches for regridding -- AMR coarse-fine ghost interpolation
+    // for the FULL 6-eq conservative state.  Missing energy0_mf or
+    // energy1_mf here causes the flux-loop make_state to pick up STALE
+    // (unfilled) per-phase E_k ghost values at coarse-fine interfaces;
+    // when a wave reaches a fine patch whose ghosts sit at the corner
+    // of (coarse-fine) and (physical-boundary), the BC fills neighbor
+    // ghosts on top of those garbage E_k cells -> garbage flux -> NaN.
+    // Symptom: AMR-only NaNs in FillGhost4BC when waves hit the boundary,
+    // BC-agnostic (Neumann and NSCBC both affected).  See bin/AMR_NaN.md
+    // / memory feedback_amr_fillpatch_missing_E_k.md.
     if (lev > 0)
     {
         FillPatch(lev, time, rho_eta0_mf,        *rho_eta0_mf[lev],       *density_bc,  0);
@@ -3105,6 +3114,8 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         FillPatch(lev, time, momentum_mf,        *momentum_mf[lev],       *momentum_bc, 0);
         FillPatch(lev, time, energy_per_vol_mf,  *energy_per_vol_mf[lev], *energy_bc,   0);
         FillPatch(lev, time, eta_mf,             *eta_mf[lev],            *energy_bc,   0);
+        FillPatch(lev, time, energy0_mf,         *energy0_mf[lev],        *energy_bc,   0);
+        FillPatch(lev, time, energy1_mf,         *energy1_mf[lev],        *energy_bc,   0);
     }
 
     // ------------------------------------------------------------

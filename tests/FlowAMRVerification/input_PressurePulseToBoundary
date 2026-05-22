@@ -1,0 +1,189 @@
+#@ [pressure_pulse_to_boundary]
+#@ exe=hydro2
+#@ dim=2
+
+# =============================================================================
+# AMR REGRESSION TEST: pressure-pulse-to-physical-boundary, AMR enabled
+# =============================================================================
+# Targets the specific bug pattern fixed by adding energy0_mf / energy1_mf
+# to the FillPatch block at refined levels in Hydro2::FillGhost4BC.
+# (See memory note: feedback_amr_fillpatch_missing_E_k.md.)
+#
+# Pre-fix symptom: AMR-only NaNs in FillGhost4BC when a pressure wave
+#   reached a fine patch whose ghost cells sat at the corner of
+#   (coarse-fine boundary) AND (physical boundary).  Single-level runs
+#   on the same problem at the same effective resolution worked fine.
+#
+# Test recipe:
+#   1. 2D square domain with a sharp Gaussian pressure pulse at the center.
+#   2. AMR: 3 levels, refining on pressure gradient -- the pulse will
+#      drag fine patches along with the outgoing acoustic wave.
+#   3. Neumann BCs on all four faces (no NSCBC -- want to verify the bug
+#      is fixed for the BASE BC class, not just the custom one).
+#   4. Run for ~3 sound-crossing times of the half-domain so the wave
+#      hits all four physical boundaries while still being refined.
+#   5. Test PASSES if no NaN propagates back into the interior.
+#      Test FAILS if Hydro2 aborts via its STEP 10 NaN-detection
+#      block in FillGhost4BC, OR if the metadata file is missing
+#      (which happens when the run crashes mid-step).
+#
+# With the pre-fix Hydro2 (E0/E1 NOT in the FillPatch list), this input
+# crashed with "NaN DETECTED IN FillGhost4BC" within ~0.5-1.0 ms.
+# With the fix applied, it should complete to stop_time cleanly.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/FlowAMRVerification/output_PressurePulseToBoundary
+
+### MESHING ###
+amr.plot_int      = -1
+amr.plot_dt       = 1.0e-4         # IC + ~10 frames
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.regrid_int    = 5              # regrid often so fine patches track the wave
+amr.grid_eff      = 0.8
+
+# 3 levels of refinement -- enough to exhibit coarse-fine + physical-boundary
+# corner cells but cheap enough to run as a regression in seconds.
+amr.max_level     = 3
+amr.n_cell        = 64 64          # coarse: 64x64 over 0.04 m -> dx = 6.25e-4 m
+                                   # effective finest: 512x512 at lev 3
+
+nghost = 4
+
+### TIME STEPPING ###
+timestep                = 1.0e-7
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-6
+dynamictimestep.min     = 1.0e-12
+cfl                     = 0.4
+
+### DIMENSIONS ###
+geometry.prob_lo     = -0.02 -0.02 0.0
+geometry.prob_hi     =  0.02  0.02 0.0
+geometry.is_periodic = 0 0 0
+
+# Sound speed in pure air: ~340 m/s. Half-domain = 0.02 m. Sound-crossing time
+# ~ 0.02 / 340 = 5.9e-5 s.  stop_time covers ~5 crossings, well after the
+# initial pulse has hit all four boundaries.
+stop_time            = 3.0e-4
+
+### ETA INITIAL CONDITIONS ###
+# Pure single-phase air everywhere.  eta = 1 (all phase 0) is fine; the
+# bug is about per-phase E_k handling at coarse-fine ghosts, not about
+# multiphase mixing.  Keep both phases on so all code paths exercise.
+eta.ic.type = expression
+eta.ic.expression.region0 = "1.0"
+epsilon = 1.0e-4
+
+### EQUATION OF STATE -- pure ideal gas on both phases ###
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cv    = 717.86
+eos0.cp    = 1005.0
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 717.86
+eos1.cp    = 1005.0
+
+### HYDRO INITIAL CONDITIONS ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.225"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.225"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Sharp Gaussian pressure pulse at the center.  Width = 1.5 mm.
+# Peak amplitude = +50% over background.  Sharp enough to refine on,
+# weak enough that the wave-front Mach stays well below 1.
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_amb   = 1.01325e5
+pressure0.ic.expression.constant.p_peak  = 5.0e4
+pressure0.ic.expression.constant.sigma_r = 1.5e-3
+pressure0.ic.expression.region0 = "p_amb + p_peak*exp(-(x*x + y*y)/(sigma_r*sigma_r))"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_amb   = 1.01325e5
+pressure1.ic.expression.constant.p_peak  = 5.0e4
+pressure1.ic.expression.constant.sigma_r = 1.5e-3
+pressure1.ic.expression.region0 = "p_amb + p_peak*exp(-(x*x + y*y)/(sigma_r*sigma_r))"
+
+### VISCOSITY ###
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION ###
+sigma = 0.0
+pref  = 0.0
+
+### BOUNDARY CONDITIONS -- base AMReX Neumann on all four faces ###
+# Deliberately NOT NSCBC -- the regression target is the BASE BC class,
+# so any user can run this without the custom BC machinery being right.
+# The bug pattern (coarse-fine ghost garbage at corner cells) is
+# BC-agnostic so Neumann is sufficient to expose it.
+density.bc.type.xhi  = neumann
+density.bc.type.xlo  = neumann
+density.bc.type.ylo  = neumann
+density.bc.type.yhi  = neumann
+energy.bc.type.xhi   = neumann
+energy.bc.type.xlo   = neumann
+energy.bc.type.ylo   = neumann
+energy.bc.type.yhi   = neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA -- aggressive on pressure gradient ###
+# Refine wherever |grad p| crosses the threshold.  With the wave amplitude
+# above (50% over ambient) the pulse triggers all three levels of
+# refinement, dragging fine patches outward as the wave propagates.
+# When the wave hits a physical boundary, the fine patch's ghost cells
+# at THAT boundary are what triggered the pre-fix NaN.
+eta_refinement_criterion   = 1.0e+10
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e3    # ~1% of background; aggressive
+rho_refinement_criterion   = 1.0e-2
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS ###
+apply_surface_tension = 0
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+Spec_Vol              = 1
+grav                  = 0.0
+
+### NUMERICS ###
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+integration.type    = RungeKutta
+integration.rk.type = 3
+kappa_method        = 1
+
+apply_sharpening     = 0
+sharpening_frequency = 50
+reinit_max_iter      = 100
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+relax_diag           = 0
