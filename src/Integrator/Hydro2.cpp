@@ -240,8 +240,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             pp.query_default("closure.un_vel",    tmp_v, Set::Scalar(-1.0));
             if (value.un_close.strategy == Hydro2::ClosureStrategy::Jump  && !(tmp_l > 0.0))
                 Util::Abort(INFO, "closure.un_strategy=jump requires closure.un_lambda > 0");
-            if (value.un_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_v > 0.0))
-                Util::Abort(INFO, "closure.un_strategy=relax requires closure.un_vel > 0");
+            if (value.un_close.strategy == Hydro2::ClosureStrategy::Relax && !(tmp_v >= 0.0))
+                Util::Abort(INFO, "closure.un_strategy=relax requires closure.un_vel > or = 0");
             if (tmp_l > 0.0) value.un_close.lambda = tmp_l;
             if (tmp_v > 0.0) value.un_close.vel    = tmp_v;
 
@@ -311,6 +311,16 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             if (tmp_l > 0.0) value.ut_close.lambda = tmp_l;
             if (tmp_v > 0.0) value.ut_close.vel    = tmp_v;
         }
+
+        // GHOST-FLUID RELAXATION toward IC
+        // Damps minority-phase state in the other phase's bulk.
+        // τ [s] = e-folding time; 0 = disabled (default).
+        pp_query_default("ghost_tau_rho_0", value.ghost_tau_rho_0, 0.0);
+        pp_query_default("ghost_tau_rho_1", value.ghost_tau_rho_1, 0.0);
+        pp_query_default("ghost_tau_mom_0", value.ghost_tau_mom_0, 0.0);
+        pp_query_default("ghost_tau_mom_1", value.ghost_tau_mom_1, 0.0);
+        pp_query_default("ghost_tau_eng_0", value.ghost_tau_eng_0, 0.0);
+        pp_query_default("ghost_tau_eng_1", value.ghost_tau_eng_1, 0.0);
 
         // PHASE 1 (liquid — stiffened gas)
         pp_query_required("gamma_1", value.gamma_1);      // gamma for gamma law
@@ -1001,6 +1011,20 @@ void Hydro2::Mix(int lev)
 
             p_mix(i,j,k) = p;
         });
+    }
+
+    // Capture IC reference values for ghost-fluid relaxation (level 0 only,
+    // spatially uniform per phase — any cell gives the correct reference).
+    if (lev == 0)
+    {
+        ghost_ref_rho_0 = density_0_mf[0]->max(0);    // single-component
+        ghost_ref_rho_1 = density_1_mf[0]->max(0);
+        ghost_ref_M0x   = momentum_0_mf[0]->max(0);   // comp 0 = x
+        ghost_ref_M0y   = momentum_0_mf[0]->max(1);   // comp 1 = y
+        ghost_ref_M1x   = momentum_1_mf[0]->max(0);
+        ghost_ref_M1y   = momentum_1_mf[0]->max(1);
+        ghost_ref_E0    = energy_0_mf[0]->max(0);     // single-component
+        ghost_ref_E1    = energy_1_mf[0]->max(0);
     }
 
     // Fill ghost cells
@@ -2116,6 +2140,96 @@ void Hydro2::TimeStepComplete(Set::Scalar time, int lev)
     {
         Integrator::DynamicTimestep_Update();
     }
+
+    // --- Ghost-fluid relaxation: damp minority-phase state toward IC ---
+    // Weight w_k = 1 - alpha_k: full-strength in the opposite-phase bulk,
+    // zero in the own-phase bulk.  Exponential decay is unconditionally stable.
+    //   Q_new = Q_ref + (Q - Q_ref) * exp(-w * dt / tau)
+    bool ghost_active = (ghost_tau_rho_0 > 0.0) || (ghost_tau_rho_1 > 0.0)
+                     || (ghost_tau_mom_0 > 0.0) || (ghost_tau_mom_1 > 0.0)
+                     || (ghost_tau_eng_0 > 0.0) || (ghost_tau_eng_1 > 0.0);
+    if (ghost_active)
+    {
+        const Real ref_r0   = ghost_ref_rho_0, ref_r1   = ghost_ref_rho_1;
+        const Real ref_M0x  = ghost_ref_M0x,   ref_M0y  = ghost_ref_M0y;
+        const Real ref_M1x  = ghost_ref_M1x,   ref_M1y  = ghost_ref_M1y;
+        const Real ref_E0   = ghost_ref_E0,     ref_E1   = ghost_ref_E1;
+        const Real tau_r0   = ghost_tau_rho_0,  tau_r1   = ghost_tau_rho_1;
+        const Real tau_m0   = ghost_tau_mom_0,  tau_m1   = ghost_tau_mom_1;
+        const Real tau_e0   = ghost_tau_eng_0,  tau_e1   = ghost_tau_eng_1;
+
+        // NOTE: the 'lev' parameter of TimeStepComplete is actually the
+        // step counter (not AMR level), so loop over all active levels.
+        for (int glev = 0; glev <= finest_level; ++glev)
+        {
+            if (eta_mf[glev] == nullptr) continue;
+            const Real dt_ = dt[glev];
+
+            for (MFIter mfi(*eta_mf[glev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+            {
+                const Box& bx = mfi.validbox();
+                auto eta_arr = eta_mf[glev]->const_array(mfi);
+                auto rho0    = density_0_mf[glev]->array(mfi);
+                auto rho1    = density_1_mf[glev]->array(mfi);
+                auto M0      = momentum_0_mf[glev]->array(mfi);
+                auto M1      = momentum_1_mf[glev]->array(mfi);
+                auto E0      = energy_0_mf[glev]->array(mfi);
+                auto E1      = energy_1_mf[glev]->array(mfi);
+
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+                {
+                    Real e = eta_arr(i,j,k);
+                    if (e < Real(0.0)) e = Real(0.0);
+                    if (e > Real(1.0)) e = Real(1.0);
+
+                    // Hard cutoff: relaxation is exactly zero anywhere inside
+                    // the support of ∇η (i.e. the diffuse interface band) to
+                    // avoid corrupting conservation.  Only activate in the
+                    // pure-bulk ghost regions where η is within 1e-6 of 0 or 1.
+                    constexpr Real ghost_cut = Real(1.0e-6);
+
+                    // Phase 0: relax only where η > 1−cutoff (phase 1 pure bulk)
+                    Real w0 = (e > Real(1.0) - ghost_cut) ? Real(1.0) : Real(0.0);
+                    if (w0 > Real(0.0))
+                    {
+                        if (tau_r0 > Real(0.0)) {
+                            Real f = std::exp(-w0 * dt_ / tau_r0);
+                            rho0(i,j,k) = ref_r0 + (rho0(i,j,k) - ref_r0) * f;
+                        }
+                        if (tau_m0 > Real(0.0)) {
+                            Real f = std::exp(-w0 * dt_ / tau_m0);
+                            M0(i,j,k,0) = ref_M0x + (M0(i,j,k,0) - ref_M0x) * f;
+                            M0(i,j,k,1) = ref_M0y + (M0(i,j,k,1) - ref_M0y) * f;
+                        }
+                        if (tau_e0 > Real(0.0)) {
+                            Real f = std::exp(-w0 * dt_ / tau_e0);
+                            E0(i,j,k) = ref_E0 + (E0(i,j,k) - ref_E0) * f;
+                        }
+                    }
+
+                    // Phase 1: relax only where η < cutoff (phase 0 pure bulk)
+                    Real w1 = (e < ghost_cut) ? Real(1.0) : Real(0.0);
+                    if (w1 > Real(0.0))
+                    {
+                        if (tau_r1 > Real(0.0)) {
+                            Real f = std::exp(-w1 * dt_ / tau_r1);
+                            rho1(i,j,k) = ref_r1 + (rho1(i,j,k) - ref_r1) * f;
+                        }
+                        if (tau_m1 > Real(0.0)) {
+                            Real f = std::exp(-w1 * dt_ / tau_m1);
+                            M1(i,j,k,0) = ref_M1x + (M1(i,j,k,0) - ref_M1x) * f;
+                            M1(i,j,k,1) = ref_M1y + (M1(i,j,k,1) - ref_M1y) * f;
+                        }
+                        if (tau_e1 > Real(0.0)) {
+                            Real f = std::exp(-w1 * dt_ / tau_e1);
+                            E1(i,j,k) = ref_E1 + (E1(i,j,k) - ref_E1) * f;
+                        }
+                    }
+                });
+            }
+        }
+    }
+
     if (write_integrals) WriteIntegrals(time);
 }
 

@@ -656,6 +656,20 @@ protected:
     };
     KortewegForm korteweg_form = KortewegForm::ChemPot;
 
+    // Ghost-fluid relaxation: exponentially damps minority-phase state toward
+    // IC reference values in regions where α_k → 0.  Weight = (1 − α_k), so
+    // full-strength in the single-phase bulk, zero in the own-phase bulk.
+    // τ [s] is the e-folding time; 0 = disabled.  Six independent constants
+    // allow separate tuning of density, momentum, and energy for each phase.
+    Set::Scalar ghost_tau_rho_0 = 0.0, ghost_tau_rho_1 = 0.0;
+    Set::Scalar ghost_tau_mom_0 = 0.0, ghost_tau_mom_1 = 0.0;
+    Set::Scalar ghost_tau_eng_0 = 0.0, ghost_tau_eng_1 = 0.0;
+    // IC reference values (set once during Initialize from the first cell)
+    Set::Scalar ghost_ref_rho_0 = 0.0, ghost_ref_rho_1 = 0.0;
+    Set::Scalar ghost_ref_M0x = 0.0, ghost_ref_M0y = 0.0;
+    Set::Scalar ghost_ref_M1x = 0.0, ghost_ref_M1y = 0.0;
+    Set::Scalar ghost_ref_E0 = 0.0, ghost_ref_E1 = 0.0;
+
     int write_integrals = 1;
 
     // Adaptive Timestep

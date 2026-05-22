@@ -8,7 +8,7 @@
 ### OUTPUT ###
 plot_file = ./tests/FlowSQR_tests/output_Garrick
 amr.plot_dt = 0.01
-# amr.plot_int = 1
+amr.plot_int = 1
 
 ### MESHING ###
 amr.max_level = 0
@@ -72,9 +72,9 @@ cv_0 = "1.0"
 
 ### IC State - eta=1 phase (RHS, x > 0): liquid ###
 density_1.ic.type = constant
-# density_1.ic.constant.value = 0.991
+density_1.ic.constant.value = 0.991
 # density_1.ic.constant.value = 1.241
-density_1.ic.constant.value = 0.331 # For same \Delta p but T=const
+# density_1.ic.constant.value = 0.06031 # T=const under thermal T, but ρ₁ too light — blows up
 
 velocity_1.ic.type = constant
 velocity_1.ic.constant.value = 0.0 0.0
@@ -189,7 +189,7 @@ ch_W_scale          = 12.5       # lambda = 2 * kappa / epsilon^2
 ch_kappa            = 4.0e-4     # = lambda * epsilon^2 / 2  (consistent)
 ch_mobility_degenerate = 1
 # ch_mobility_nom convention:  <0 = auto (0.2*ε*c_max),  0 = off (frozen η),  >0 = user value
-ch_mobility_nom        = 0
+ch_mobility_nom        = -1
 
 # HYDRO CLOSURE STRATEGIES (Phase B+)
 # `closure.{un,E}_strategy` selects the per-quantity SQR closure for
@@ -229,11 +229,12 @@ ch_mobility_nom        = 0
 # NB <<u_n>> = 0 is an exact kinematic constraint, so this is a stiff penalty
 # (faithful only as v_un -> inf), not a physical finite-resistance interface.
 closure.un_strategy    = relax
-closure.un_vel         = 6.4 #e-1    # transfer velocity [m/s]; tau_loc ~ 1/(v_un*|grad eta|)
+# closure.un_vel         = 6.4 #e-1    # transfer velocity [m/s]; tau_loc ~ 1/(v_un*|grad eta|)
+closure.un_vel         = 6.4
 # closure.un_strategy    = constitutive
 # Energy / temperature (S3): J_E = -C_E * v_E * (T_0 - T_1).
 closure.E_strategy     = relax
-closure.E_vel          = 6.4 #e-1    # transfer velocity [m/s]; tau_loc ~ 1/(v_E*|grad eta|)
+closure.E_vel          = 0    # no thermal coupling — pure Riemann benchmark (T₀ ≠ T₁ accepted)
 # closure.E_strategy     = const0itutive
 # Tangential velocity: inviscid case here, u_t is unconstrained — leave at the
 # Constitutive no-op stub (S1/angular-momentum, A10, not yet implemented).
@@ -249,5 +250,15 @@ closure.ut_strategy    = constitutive
 sqr_legacy_p_int_method       = 0      # 0 = new closure-strategy framework (REQUIRED for relax/jump)
 closure.un_pint_method = 4      # only used by the Constitutive strategy; ignored under relax
 closure.E_pint_method  = 4      # only used by the Constitutive strategy; ignored under relax
+
+# Ghost-fluid relaxation: damp minority-phase state toward IC.
+  # τ [s]; 0 = disabled.  Weight = (1-α_k), so strongest in opposite-phase bulk.
+  ghost_tau_rho_0 = 1e-16
+  ghost_tau_rho_1 = 1e-16
+  ghost_tau_mom_0 = 1e-16
+  ghost_tau_mom_1 = 1e-16
+  ghost_tau_eng_0 = 1e-16
+  ghost_tau_eng_1 = 1e-16
+
 
 nscbc.enabled = false
