@@ -15,8 +15,8 @@ amr.max_level = 0
 amr.max_grid_size = 500000
 amr.blocking_factor = 4
 amr.grid_eff = 0.8
-amr.n_cell = 1024 16
-# amr.n_cell = 2048 32
+# amr.n_cell = 1024 16
+amr.n_cell = 2048 32
 
 ### DIMENSIONS ###
 geometry.prob_lo = -1.0  -0.015625   0.0 # [ m ]
@@ -49,7 +49,8 @@ q.ic.constant.value = 0.0
 ### HYDRO PARAM ###
 eta.ic.type = expression
 # eta.ic.expression.constant.epsilon = 8.0e-3
-eta.ic.expression.constant.epsilon = 4.0e-3
+# eta.ic.expression.constant.epsilon = 4.0e-3
+eta.ic.expression.constant.epsilon = 1.0e-3
 eta.ic.expression.region0 = "(0.5 * (1.0 + tanh(x / epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
 
@@ -247,7 +248,7 @@ closure.un_vel         = 6.4
 # closure.un_strategy    = constitutive
 # Energy / temperature (S3): J_E = -C_E * v_E * (T_0 - T_1).
 closure.E_strategy     = relax
-closure.E_vel          = 0.0    # no thermal coupling — pure Riemann benchmark (T₀ ≠ T₁ accepted)
+closure.E_vel          = 1.0    # no thermal coupling — pure Riemann benchmark (T₀ ≠ T₁ accepted)
 # closure.E_strategy     = const0itutive
 # Tangential velocity: inviscid case here, u_t is unconstrained — leave at the
 # Constitutive no-op stub (S1/angular-momentum, A10, not yet implemented).
@@ -267,8 +268,8 @@ closure.E_pint_method  = 4      # only used by the Constitutive strategy; ignore
 # Ghost-fluid relaxation: damp minority-phase state toward IC.
   # Convention: τ < 0 = disabled, τ = 0 = error, τ > 0 = active [s].
   # ghost_band controls the η window (default 1e-3).
-  ghost_band      = 1e-3
-  ghost_tau_rho_0 = 1e-2
+  ghost_band      = 1e-2 # density_1 is dipping too much on the gas side, so be a bit more agressive here
+  ghost_tau_rho_0 = 1e-2 # These relatively slow relaxation times seem to work okay
   ghost_tau_rho_1 = 1e-2
   ghost_tau_mom_0 = 1e-2
   ghost_tau_mom_1 = 1e-2
