@@ -75,9 +75,12 @@ ifdef PELE_ENABLED
                      -isystem ${PELE_PHYSICS_HOME}/Source/Utility/BlackBoxFunction \
                      -isystem ${PELE_PHYSICS_HOME}/Mechanisms/air \
                      -isystem ${SUNDIALS_TARGET}/include
-    LIB += ${SUNDIALS_TARGET}/lib/libsundials_cvode.a \
-           ${SUNDIALS_TARGET}/lib/libsundials_nvecserial.a \
-           ${SUNDIALS_TARGET}/lib/libsundials_core.a
+    # CMake installs to lib64/ on RHEL/CentOS/Rocky (GNUInstallDirs default for
+    # 64-bit) and lib/ on Debian/Ubuntu/macOS. Detect which one exists.
+    SUNDIALS_LIBDIR := $(if $(wildcard ${SUNDIALS_TARGET}/lib64/libsundials_core.a),lib64,lib)
+    LIB += ${SUNDIALS_TARGET}/$(SUNDIALS_LIBDIR)/libsundials_cvode.a \
+           ${SUNDIALS_TARGET}/$(SUNDIALS_LIBDIR)/libsundials_nvecserial.a \
+           ${SUNDIALS_TARGET}/$(SUNDIALS_LIBDIR)/libsundials_core.a
     $(info >>> PELE_ENABLED: compiling with PelePhysics GammaLaw EOS, mechanism = air (NUM_SPECIES=2))
 endif
 
