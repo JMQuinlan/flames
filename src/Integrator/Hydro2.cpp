@@ -753,6 +753,19 @@ void Hydro2::Initialize(int lev)
     const Real* dx = geom.CellSize();
     const Box& domain = geom.Domain();
 
+    // BC objects need the level geometry for FillBoundary calls below.
+    // The base Integrator calls physbc->define(geom) AFTER Initialize(),
+    // so we must define them here before any physical BC fill.
+    energy_bc   ->define(geom);
+    density_bc  ->define(geom);
+    momentum_bc ->define(geom);
+    density_0_bc ->define(geom);
+    density_1_bc ->define(geom);
+    momentum_0_bc->define(geom);
+    momentum_1_bc->define(geom);
+    energy_0_bc  ->define(geom);
+    energy_1_bc  ->define(geom);
+
     // Initialize individual fluid variables
     // DIFFUSE BOUNDARY
     eta_ic          ->Initialize(lev, eta_mf, 0.0);
@@ -787,28 +800,39 @@ void Hydro2::Initialize(int lev)
     amrex::Print() << "rho0 AFTER IC, BEFORE MIX: "
                 << density_1_mf[lev]->min(0) << " "
                 << density_1_mf[lev]->max(0) << "\n";
-    amrex::Print() << "eta AFTER IC, BEFORE MIX: "
-                << eta_mf[lev]->min(0) << " "
+    amrex::Print() << "eta AFTER IC, BEFORE MIX (valid): "
+                << eta_mf[lev]->min(0) << " / "
                 << eta_mf[lev]->max(0) << "\n";
-    amrex::Print() << "eta NaN after IC (incl ghost): " << eta_mf[lev]->contains_nan() << "\n";
-    amrex::Print() << "eta NaN valid-only after IC:   " << eta_mf[lev]->contains_nan(0,1,0) << "\n";
+    amrex::Print() << "eta AFTER IC, BEFORE MIX (incl " << eta_mf[lev]->nGrow() << " ghost): "
+                << eta_mf[lev]->min(0, eta_mf[lev]->nGrow()) << " / "
+                << eta_mf[lev]->max(0, eta_mf[lev]->nGrow()) << "\n";
 
     // Calculate mixed variables based on individual fluid variables
     Mix(lev);
     amrex::Print() << "eta NaN after Mix (incl ghost):" << eta_mf[lev]->contains_nan() << "\n";
 
     // Make sure ghost cells are consistent with initial conditions.
-    // Physical BC fills (not just periodicity) are required for non-periodic
-    // boundaries: IC Initialize only writes valid cells, leaving ghost cells
-    // at their MakeNewLevelFromScratch value (zero or uninitialised).
-    // ComputeEffectiveSQRSources (inside MixDiagnostic below) reads eta_mf
-    // and density_mf at neighbor positions — stale ghosts produce garbage
-    // m0_eff on the first step.
-    energy_bc ->FillBoundary(*eta_mf[lev],            0, eta_mf[lev]->nComp(),            0.0, 0);
-    density_bc->FillBoundary(*density_mf[lev],        0, density_mf[lev]->nComp(),        0.0, 0);
-    momentum_bc->FillBoundary(*momentum_mf[lev],      0, momentum_mf[lev]->nComp(),      0.0, 0);
-    energy_bc ->FillBoundary(*energy_per_vol_mf[lev], 0, energy_per_vol_mf[lev]->nComp(), 0.0, 0);
+    // IC Initialize writes valid+ghost via growntilebox for fields it touches
+    // directly (eta, density_k, velocity_k, pressure_k). But Mix() computes
+    // per-phase conserved fields (E_k, M_k) and mixture fields (density_mf,
+    // momentum_mf, energy_per_vol_mf) on validbox only, leaving ghost cells
+    // at their MakeNewLevelFromScratch value (zero). Physical BC fills ensure
+    // all ghost cells reflect the interior state before ComputeEffectiveSQRSources
+    // (inside MixDiagnostic below) reads at neighbor positions.
+    energy_bc    ->FillBoundary(*eta_mf[lev],            0, eta_mf[lev]->nComp(),            0.0, 0);
+    density_bc   ->FillBoundary(*density_mf[lev],        0, density_mf[lev]->nComp(),        0.0, 0);
+    momentum_bc  ->FillBoundary(*momentum_mf[lev],       0, momentum_mf[lev]->nComp(),       0.0, 0);
+    energy_bc    ->FillBoundary(*energy_per_vol_mf[lev],  0, energy_per_vol_mf[lev]->nComp(), 0.0, 0);
+    // Per-phase conserved fields: Mix() wrote valid cells only.
+    density_0_bc ->FillBoundary(*density_0_mf[lev],  0, density_0_mf[lev]->nComp(),  0.0, 0);
+    density_1_bc ->FillBoundary(*density_1_mf[lev],  0, density_1_mf[lev]->nComp(),  0.0, 0);
+    momentum_0_bc->FillBoundary(*momentum_0_mf[lev], 0, momentum_0_mf[lev]->nComp(), 0.0, 0);
+    momentum_1_bc->FillBoundary(*momentum_1_mf[lev], 0, momentum_1_mf[lev]->nComp(), 0.0, 0);
+    energy_0_bc  ->FillBoundary(*energy_0_mf[lev],   0, energy_0_mf[lev]->nComp(),   0.0, 0);
+    energy_1_bc  ->FillBoundary(*energy_1_mf[lev],   0, energy_1_mf[lev]->nComp(),   0.0, 0);
     amrex::Print() << "eta NaN after FillBoundary (incl ghost): " << eta_mf[lev]->contains_nan() << "\n";
+    amrex::Print() << "eta min/max after init BC fill: "
+                   << eta_mf[lev]->min(0) << " / " << eta_mf[lev]->max(0) << "\n";
 
     // NATURAL SOURCE
     Source_mf[lev]  ->setVal(0.0);
