@@ -17,7 +17,7 @@ amr.plot_dt = 0.5e-6
 #amr.plot_int = 10
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
-amr.regrid_int = 10
+amr.regrid_int = 20
 amr.grid_eff = 0.8
 amr.max_level = 3
 amr.n_cell = 256 128  # Maintains aspect ratio for 0.02m × 0.01m domain
@@ -143,7 +143,7 @@ energy.bc.type.xhi = neumann
 momentum.bc.type.xhi = neumann neumann
 
 ### REFINEMENT CRITERIA ###
-eta_refinement_criterion = 1e-2
+eta_refinement_criterion = 1e-4
 omega_refinement_criterion = 1e+5
 p_refinement_criterion = 1e+6
 rho_refinement_criterion = 1e+5
