@@ -1,0 +1,168 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowPatel/tr14_gradu
+#plot_file = /mnt/c/Users/samar/Downloads/CloneResearch/flames/bin/tests/FlowPatel/4CL_test_longdomain
+
+### MESHING ###
+amr.plot_dt = 2.0e-6
+#amr.plot_int = 1
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.regrid_int = 10
+amr.grid_eff = 0.8
+amr.max_level = 3
+amr.n_cell = 1050 300 
+
+### TIME STEPPING ###
+## Static:
+timestep = 1e-13
+
+## Adaptive
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 2.5e-9
+dynamictimestep.min = 1e-14
+cfl = 0.1
+
+### DIMENSIONS ###
+#geometry.prob_lo = 0.000 0.000 0.0
+#geometry.prob_hi = 0.160 0.080 0.0
+geometry.prob_lo = 0.020 0.020 0.0
+geometry.prob_hi = 0.160 0.060 0.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEP ###
+stop_time = 1.2e-4
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 2.0e-5
+eta.ic.expression.constant.R0 = 4.4e-3
+eta.ic.expression.constant.x_center = 0.040
+eta.ic.expression.constant.y_center = 0.040
+
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x-x_center)**2 + (y-y_center)**2) - R0)/(2*sqrt(2)*epsilon)))"
+
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+
+# n-dodecane vapor properties (fluid 0 - surrounding gas, eta ~ 1)
+eos0.gamma = 1.023
+eos0.p0 = 0.0
+mu0 = 5.27529422768e-5
+mu0_b = 0.0
+
+# liquid n-dodecane properties (fluid 1 - droplet, eta ~ 0)
+eos1.gamma = 2.358
+eos1.p0 = 4.01e8
+mu1 = 1.35e-3
+mu1_b = 0.0
+
+# Densities
+density0.ic.type = expression
+density0.ic.expression.constant.rho_vapor = 1.35598311723
+density0.ic.expression.constant.rho_shock = 39.0
+density0.ic.expression.constant.x_shock = 0.033
+density0.ic.expression.region0 = "(x < x_shock)*rho_shock + (x >= x_shock)*rho_vapor"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_nDodecane = 749.5
+density1.ic.expression.region0 = "rho_nDodecane"
+
+# Velocities: post-shock gas velocity from normal-shock jump for Ms=6.5.
+velocity0.ic.type = expression
+velocity0.ic.expression.constant.u_shock = 1025.23929192
+velocity0.ic.expression.constant.x_shock = 0.033
+velocity0.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.u_shock = 0.0
+velocity1.ic.expression.constant.x_shock = 0.033
+velocity1.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Pressures: pre/post shock vapor pressure consistent with the density states.
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_vapor = 3.53948205141e4
+pressure0.ic.expression.constant.p_shock = 1.51203069018e6
+pressure0.ic.expression.constant.x_shock = 0.033
+pressure0.ic.expression.region0 = "(x < x_shock)*p_shock + (x >= x_shock)*p_vapor"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_vapor = 3.53948205141e4
+pressure1.ic.expression.region0 = "p_vapor"
+
+eos0.cv = "1.95e3"
+eos0.cp = "1994.85"
+eos1.cv = "1.08e3"
+eos1.cp = "2546.64"
+
+sigma = 0.025
+
+Dv = "1.0e-5"
+Y_infinity = 0.0
+
+# Reference pressure
+pref = 0.0
+
+### BOUNDARY CONDITIONS ###
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+density.bc.type.xlo = neumann
+energy.bc.type.xlo = neumann
+momentum.bc.type.xlo = neumann neumann
+
+density.bc.type.xhi = neumann
+energy.bc.type.xhi = neumann
+momentum.bc.type.xhi = neumann neumann
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion = 1e-1
+omega_refinement_criterion = 1e+10
+p_refinement_criterion = 1e+10
+rho_refinement_criterion = 1e+10
+gradu_refinement_criterion = 1e+3
+cutoff = 1e-16
+small = 1e-6;
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 1
+apply_weight = 0
+apply_vaporization = 1
+
+Spec_Vol = 1
+grav = 9.81
+
+### DEBUGGING ###
+Riemann_Solver.type = hllc
+kappa_method = 1
+
+## Interface Sharpening ##
+apply_sharpening = 0
+sharpening_frequency = 100
+reinit_max_iter = 20
+reinit_tolerance = 1e-6
+omega_relax = 0.5
+
+# Cahn-Hilliard mobility scale from interface Peclet estimate:
+Mob = 4.1e2
+
