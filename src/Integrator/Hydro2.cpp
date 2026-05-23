@@ -322,6 +322,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("ghost_tau_mom_1", value.ghost_tau_mom_1, -1.0);
         pp_query_default("ghost_tau_eng_0", value.ghost_tau_eng_0, -1.0);
         pp_query_default("ghost_tau_eng_1", value.ghost_tau_eng_1, -1.0);
+        pp_query_default("ghost_band", value.ghost_band, 1e-3);
 
         // PHASE 1 (liquid — stiffened gas)
         pp_query_required("gamma_1", value.gamma_1);      // gamma for gamma law
@@ -454,6 +455,15 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.density_1_bc = has_per_phase_bc("density_1.bc")
             ? static_cast<BC::BC<Set::Scalar>*>(new BC::Expression(1, pp, "density_1.bc"))
             : value.density_bc;
+
+        // Per-phase momentum BCs (mirrors per-phase density/energy BC pattern).
+        // Momentum is 2-component (x,y), so use Expression(2,...).
+        value.momentum_0_bc = has_per_phase_bc("momentum_0.bc")
+            ? static_cast<BC::BC<Set::Scalar>*>(new BC::Expression(2, pp, "momentum_0.bc"))
+            : value.momentum_bc;
+        value.momentum_1_bc = has_per_phase_bc("momentum_1.bc")
+            ? static_cast<BC::BC<Set::Scalar>*>(new BC::Expression(2, pp, "momentum_1.bc"))
+            : value.momentum_bc;
     }
 
     // Register FabFields:
@@ -475,8 +485,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.energy_1_mf,      value.energy_1_bc, 1, nghost, "energy_1", true, true);
         value.RegisterNewFab(value.energy_1_old_mf,  value.energy_1_bc, 1, nghost, "energy_1_old" , false, false);
 
-        value.RegisterNewFab(value.momentum_1_mf,    value.momentum_bc,  2, nghost, "momentum_1", true, true, { "x", "y" });
-        value.RegisterNewFab(value.momentum_1_old_mf,value.momentum_bc,  2, nghost, "momentum_1_old", false, false);
+        value.RegisterNewFab(value.momentum_1_mf,    value.momentum_1_bc,  2, nghost, "momentum_1", true, true, { "x", "y" });
+        value.RegisterNewFab(value.momentum_1_old_mf,value.momentum_1_bc,  2, nghost, "momentum_1_old", false, false);
 
         //value.RegisterNewFab(value.T0_mf,           value.temperature_bc, 1, nghost, "T0", false, false);
         //value.RegisterNewFab(value.k0_thermal_mf,   &value.bc_nothing, 1, nghost, "k0_thermal", false, false);
@@ -494,8 +504,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.energy_0_mf,      value.energy_0_bc, 1, nghost, "energy_0", true, true);
         value.RegisterNewFab(value.energy_0_old_mf,  value.energy_0_bc, 1, nghost, "energy_0_old", false, false);
 
-        value.RegisterNewFab(value.momentum_0_mf,    value.momentum_bc,  2, nghost, "momentum_0", true, true, { "x", "y" });
-        value.RegisterNewFab(value.momentum_0_old_mf,value.momentum_bc,  2, nghost, "momentum_0_old", false, false);
+        value.RegisterNewFab(value.momentum_0_mf,    value.momentum_0_bc,  2, nghost, "momentum_0", true, true, { "x", "y" });
+        value.RegisterNewFab(value.momentum_0_old_mf,value.momentum_0_bc,  2, nghost, "momentum_0_old", false, false);
 
         //value.RegisterNewFab(value.T1_mf,           value.temperature_bc, 1, nghost, "T1", false, false);
         //value.RegisterNewFab(value.k1_thermal_mf,   &value.bc_nothing, 1, nghost, "k1_thermal", false, false);
@@ -787,11 +797,17 @@ void Hydro2::Initialize(int lev)
     Mix(lev);
     amrex::Print() << "eta NaN after Mix (incl ghost):" << eta_mf[lev]->contains_nan() << "\n";
 
-    // Make sure ghost cells are consistent with initial conditions
-    eta_mf[lev]->FillBoundary(geom.periodicity());
-    density_mf[lev]->FillBoundary(geom.periodicity());
-    momentum_mf[lev]->FillBoundary(geom.periodicity());
-    energy_per_vol_mf[lev]->FillBoundary(geom.periodicity());
+    // Make sure ghost cells are consistent with initial conditions.
+    // Physical BC fills (not just periodicity) are required for non-periodic
+    // boundaries: IC Initialize only writes valid cells, leaving ghost cells
+    // at their MakeNewLevelFromScratch value (zero or uninitialised).
+    // ComputeEffectiveSQRSources (inside MixDiagnostic below) reads eta_mf
+    // and density_mf at neighbor positions — stale ghosts produce garbage
+    // m0_eff on the first step.
+    energy_bc ->FillBoundary(*eta_mf[lev],            0, eta_mf[lev]->nComp(),            0.0, 0);
+    density_bc->FillBoundary(*density_mf[lev],        0, density_mf[lev]->nComp(),        0.0, 0);
+    momentum_bc->FillBoundary(*momentum_mf[lev],      0, momentum_mf[lev]->nComp(),      0.0, 0);
+    energy_bc ->FillBoundary(*energy_per_vol_mf[lev], 0, energy_per_vol_mf[lev]->nComp(), 0.0, 0);
     amrex::Print() << "eta NaN after FillBoundary (incl ghost): " << eta_mf[lev]->contains_nan() << "\n";
 
     // NATURAL SOURCE
@@ -1187,6 +1203,16 @@ void Hydro2::MixDiagnostic(int lev)
     gamma_mf[lev]->FillBoundary(geom.periodicity());
     pi_mf[lev]->FillBoundary(geom.periodicity());
     T_mf[lev]->FillBoundary(geom.periodicity());
+
+    // Physical BC fills for fields read at neighbor positions by
+    // ComputeEffectiveSQRSources (mu_local Laplacian reads eta at ±2;
+    // face-average rho reads density_mf at ±1). FillBoundary(periodicity())
+    // above only handles inter-fab / periodic exchange; for non-periodic
+    // boundaries we must also fill physical-BC ghost cells, otherwise the
+    // stale y-boundary ghosts produce wrong m0_eff that feeds back into
+    // ApplySQRSource via CH_Emergent mode.
+    energy_bc ->FillBoundary(*eta_mf[lev],     0, eta_mf[lev]->nComp(),     0.0, 0);
+    density_bc->FillBoundary(*density_mf[lev], 0, density_mf[lev]->nComp(), 0.0, 0);
 
     // Phase 2 diagnostic: EOS-only chemical-potential difference + spinodal-proximity ratio.
     // Pure read of conservatives + EOS — does not influence dynamics.
@@ -1645,12 +1671,14 @@ void Hydro2::ApplyHeatConduction(int lev, Set::Scalar dt)
     const Real* DX = geom.CellSize();
 
     // Refresh ghost cells so neighbor reads in the Laplacian stencil are valid.
-    density_0_mf [lev]->FillBoundary(geom.periodicity());
-    density_1_mf [lev]->FillBoundary(geom.periodicity());
-    momentum_0_mf[lev]->FillBoundary(geom.periodicity());
-    momentum_1_mf[lev]->FillBoundary(geom.periodicity());
-    energy_0_mf  [lev]->FillBoundary(geom.periodicity());
-    energy_1_mf  [lev]->FillBoundary(geom.periodicity());
+    // Physical BCs are needed (not just periodicity) because the pop-back
+    // ParallelCopy only writes valid cells, leaving y-boundary ghosts stale.
+    density_0_bc ->FillBoundary(*density_0_mf [lev], 0, density_0_mf [lev]->nComp(), 0.0, 0);
+    density_1_bc ->FillBoundary(*density_1_mf [lev], 0, density_1_mf [lev]->nComp(), 0.0, 0);
+    momentum_0_bc->FillBoundary(*momentum_0_mf[lev], 0, momentum_0_mf[lev]->nComp(), 0.0, 0);
+    momentum_1_bc->FillBoundary(*momentum_1_mf[lev], 0, momentum_1_mf[lev]->nComp(), 0.0, 0);
+    energy_0_bc  ->FillBoundary(*energy_0_mf  [lev], 0, energy_0_mf  [lev]->nComp(), 0.0, 0);
+    energy_1_bc  ->FillBoundary(*energy_1_mf  [lev], 0, energy_1_mf  [lev]->nComp(), 0.0, 0);
 
     const Real cv0_  = cv_0;
     const Real cv1_  = cv_1;
@@ -2585,8 +2613,8 @@ Hydro2::ApplySQRSource(int lev,
             // --- (2) η-based bulk guard ---
             Real eta_clamped = amrex::max(Real(0.0), amrex::min(Real(1.0), eta(i,j,k)));
             Real eta_min = amrex::min(eta_clamped, Real(1.0) - eta_clamped);
-            Real eta_lo  = Real(1e-6);   // below: pure bulk, no SQR
-            Real eta_hi  = Real(1e-3);   // above: full weight
+            Real eta_lo  = Real(1e-8);   // below: pure bulk, no SQR
+            Real eta_hi  = Real(1e-5);   // above: full weight
             if (eta_min < eta_lo) return;
             Real eta_t   = amrex::min(Real(1.0),
                            (eta_min - eta_lo) / (eta_hi - eta_lo));
@@ -5717,15 +5745,15 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             }
         }
     }
-    // η uses energy_bc convention (as before); per-phase (ρ,M,E) reuse the
-    // mixture-style BC objects until phase-specific BCs are introduced.
-    energy_bc  ->FillBoundary(solution_new[0], 0, solution_new[0].nComp(), time, 0); // eta
-    density_bc ->FillBoundary(solution_new[1], 0, solution_new[1].nComp(), time, 0); // rho_0
-    momentum_bc->FillBoundary(solution_new[2], 0, solution_new[2].nComp(), time, 0); // M_0
-    energy_bc  ->FillBoundary(solution_new[3], 0, solution_new[3].nComp(), time, 0); // E_0
-    density_bc ->FillBoundary(solution_new[4], 0, solution_new[4].nComp(), time, 0); // rho_1
-    momentum_bc->FillBoundary(solution_new[5], 0, solution_new[5].nComp(), time, 0); // M_1
-    energy_bc  ->FillBoundary(solution_new[6], 0, solution_new[6].nComp(), time, 0); // E_1
+    // η uses energy_bc convention (phase-field, not a conserved fluid field).
+    // Per-phase conserved variables use their own phase-specific BCs.
+    energy_bc    ->FillBoundary(solution_new[0], 0, solution_new[0].nComp(), time, 0); // eta
+    density_0_bc ->FillBoundary(solution_new[1], 0, solution_new[1].nComp(), time, 0); // rho_0
+    momentum_0_bc->FillBoundary(solution_new[2], 0, solution_new[2].nComp(), time, 0); // M_0
+    energy_0_bc  ->FillBoundary(solution_new[3], 0, solution_new[3].nComp(), time, 0); // E_0
+    density_1_bc ->FillBoundary(solution_new[4], 0, solution_new[4].nComp(), time, 0); // rho_1
+    momentum_1_bc->FillBoundary(solution_new[5], 0, solution_new[5].nComp(), time, 0); // M_1
+    energy_1_bc  ->FillBoundary(solution_new[6], 0, solution_new[6].nComp(), time, 0); // E_1
 
     // Fill any NaN ghost cells not reached by same-level FillBoundary
     // (coarse-fine gap regions when nghost > 2) by zero-gradient extrapolation
@@ -5875,14 +5903,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     timeintegrator.set_post_stage_action(
         [&](amrex::Vector<amrex::MultiFab>& stage, Real t)
     {
-        // Apply physical BCs to all 7 stage MFs (FillBoundary handles same-level comms)
-        energy_bc  ->FillBoundary(stage[0], 0, stage[0].nComp(), t, 0); // eta
-        density_bc ->FillBoundary(stage[1], 0, stage[1].nComp(), t, 0); // rho_0
-        momentum_bc->FillBoundary(stage[2], 0, stage[2].nComp(), t, 0); // M_0
-        energy_bc  ->FillBoundary(stage[3], 0, stage[3].nComp(), t, 0); // E_0
-        density_bc ->FillBoundary(stage[4], 0, stage[4].nComp(), t, 0); // rho_1
-        momentum_bc->FillBoundary(stage[5], 0, stage[5].nComp(), t, 0); // M_1
-        energy_bc  ->FillBoundary(stage[6], 0, stage[6].nComp(), t, 0); // E_1
+        // Apply per-phase physical BCs to all 7 stage MFs
+        energy_bc    ->FillBoundary(stage[0], 0, stage[0].nComp(), t, 0); // eta
+        density_0_bc ->FillBoundary(stage[1], 0, stage[1].nComp(), t, 0); // rho_0
+        momentum_0_bc->FillBoundary(stage[2], 0, stage[2].nComp(), t, 0); // M_0
+        energy_0_bc  ->FillBoundary(stage[3], 0, stage[3].nComp(), t, 0); // E_0
+        density_1_bc ->FillBoundary(stage[4], 0, stage[4].nComp(), t, 0); // rho_1
+        momentum_1_bc->FillBoundary(stage[5], 0, stage[5].nComp(), t, 0); // M_1
+        energy_1_bc  ->FillBoundary(stage[6], 0, stage[6].nComp(), t, 0); // E_1
 
         {
             for (int n = 0; n < 7; n++)
@@ -5970,6 +5998,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             const Real tau_r0   = ghost_tau_rho_0,  tau_r1   = ghost_tau_rho_1;
             const Real tau_m0   = ghost_tau_mom_0,  tau_m1   = ghost_tau_mom_1;
             const Real tau_e0   = ghost_tau_eng_0,  tau_e1   = ghost_tau_eng_1;
+            const Real gb       = ghost_band;
+            const Real dt_      = dt;
 
             for (MFIter mfi(*eta_mf[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
             {
@@ -5988,41 +6018,47 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     if (e < Real(0.0)) e = Real(0.0);
                     if (e > Real(1.0)) e = Real(1.0);
 
-                    constexpr Real ghost_band = Real(0.10);
-
                     // Phase 0: relax where η > 1−ghost_band (gas ghost in liquid bulk)
-                    Real w0 = (e > Real(1.0) - ghost_band)
-                            ? (e - (Real(1.0) - ghost_band)) / ghost_band
+                    // Smooth linear ramp: w0 = 0 at η = 1−gb, w0 = 1 at η = 1.
+                    // Exponential decay: Q = Q_ref + (Q - Q_ref)*exp(-w*dt/tau).
+                    Real w0 = (e > Real(1.0) - gb)
+                            ? (e - (Real(1.0) - gb)) / gb
                             : Real(0.0);
                     if (w0 > Real(0.0))
                     {
                         if (tau_r0 > Real(0.0)) {
-                            rho0(i,j,k) = w0 * ref_r0 + (Real(1.0) - w0) * rho0(i,j,k);
+                            Real f = std::exp(-w0 * dt_ / tau_r0);
+                            rho0(i,j,k) = ref_r0 + (rho0(i,j,k) - ref_r0) * f;
                         }
                         if (tau_m0 > Real(0.0)) {
-                            M0(i,j,k,0) = w0 * ref_M0x + (Real(1.0) - w0) * M0(i,j,k,0);
-                            M0(i,j,k,1) = w0 * ref_M0y + (Real(1.0) - w0) * M0(i,j,k,1);
+                            Real f = std::exp(-w0 * dt_ / tau_m0);
+                            M0(i,j,k,0) = ref_M0x + (M0(i,j,k,0) - ref_M0x) * f;
+                            M0(i,j,k,1) = ref_M0y + (M0(i,j,k,1) - ref_M0y) * f;
                         }
                         if (tau_e0 > Real(0.0)) {
-                            E0(i,j,k) = w0 * ref_E0 + (Real(1.0) - w0) * E0(i,j,k);
+                            Real f = std::exp(-w0 * dt_ / tau_e0);
+                            E0(i,j,k) = ref_E0 + (E0(i,j,k) - ref_E0) * f;
                         }
                     }
 
                     // Phase 1: relax where η < ghost_band (liquid ghost in gas bulk)
-                    Real w1 = (e < ghost_band)
-                            ? (Real(1.0) - e / ghost_band)
+                    Real w1 = (e < gb)
+                            ? (Real(1.0) - e / gb)
                             : Real(0.0);
                     if (w1 > Real(0.0))
                     {
                         if (tau_r1 > Real(0.0)) {
-                            rho1(i,j,k) = w1 * ref_r1 + (Real(1.0) - w1) * rho1(i,j,k);
+                            Real f = std::exp(-w1 * dt_ / tau_r1);
+                            rho1(i,j,k) = ref_r1 + (rho1(i,j,k) - ref_r1) * f;
                         }
                         if (tau_m1 > Real(0.0)) {
-                            M1(i,j,k,0) = w1 * ref_M1x + (Real(1.0) - w1) * M1(i,j,k,0);
-                            M1(i,j,k,1) = w1 * ref_M1y + (Real(1.0) - w1) * M1(i,j,k,1);
+                            Real f = std::exp(-w1 * dt_ / tau_m1);
+                            M1(i,j,k,0) = ref_M1x + (M1(i,j,k,0) - ref_M1x) * f;
+                            M1(i,j,k,1) = ref_M1y + (M1(i,j,k,1) - ref_M1y) * f;
                         }
                         if (tau_e1 > Real(0.0)) {
-                            E1(i,j,k) = w1 * ref_E1 + (Real(1.0) - w1) * E1(i,j,k);
+                            Real f = std::exp(-w1 * dt_ / tau_e1);
+                            E1(i,j,k) = ref_E1 + (E1(i,j,k) - ref_E1) * f;
                         }
                     }
                 });
@@ -6059,8 +6095,15 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
     //==============================================================
     // 8. Fill ghosts after final update
+    //    Physical BCs on eta_mf: the implicit CH solver (step 7b) fills
+    //    eta ghosts at each Newton iteration, but after the solver finishes
+    //    the valid cells carry the final Newton update while the ghosts
+    //    are from the penultimate iteration. Applying the physical BC here
+    //    ensures the next step's ComputeKappas (inside the RHS lambda)
+    //    sees consistent y-boundary ghosts for the gradient/normal
+    //    computation.
     //==============================================================
-    eta_mf[lev]->FillBoundary(geom.periodicity());
+    energy_bc->FillBoundary(*eta_mf[lev], 0, eta_mf[lev]->nComp(), 0.0, 0);
     density_mf[lev]->FillBoundary(geom.periodicity());
     momentum_mf[lev]->FillBoundary(geom.periodicity());
     energy_per_vol_mf[lev]->FillBoundary(geom.periodicity());
@@ -6369,7 +6412,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // this gate, a single near-vacuum ghost cell collapses dt globally.
             {
                 Real eta_cfl = std::max(Real(0.0), std::min(Real(1.0), eta(i,j,k)));
-                constexpr Real alpha_cfl_min = Real(0.10);
+                constexpr Real alpha_cfl_min = Real(0.05);
                 if ((Real(1.0) - eta_cfl) < alpha_cfl_min) c0_dt = Real(0.0);
                 if (eta_cfl < alpha_cfl_min)                c1_dt = Real(0.0);
             }

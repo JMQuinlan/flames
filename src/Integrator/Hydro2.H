@@ -44,6 +44,14 @@ public:
     virtual ~Hydro2()
     {
         /// Boundry Conditions
+        // Per-phase BCs: only delete if independently allocated (not aliased
+        // to the shared BC pointer, which is deleted below).
+        if (density_0_bc  && density_0_bc  != density_bc)  delete density_0_bc;
+        if (density_1_bc  && density_1_bc  != density_bc)  delete density_1_bc;
+        if (energy_0_bc   && energy_0_bc   != energy_bc)   delete energy_0_bc;
+        if (energy_1_bc   && energy_1_bc   != energy_bc)   delete energy_1_bc;
+        if (momentum_0_bc && momentum_0_bc != momentum_bc) delete momentum_0_bc;
+        if (momentum_1_bc && momentum_1_bc != momentum_bc) delete momentum_1_bc;
         delete density_bc;
         delete momentum_bc;
         delete energy_bc;
@@ -384,6 +392,11 @@ protected:
     // Dirichlet) need to override only one phase without polluting the spectator.
     BC::BC<Set::Scalar>* density_0_bc = nullptr;
     BC::BC<Set::Scalar>* density_1_bc = nullptr;
+    // Per-phase momentum BCs. Same fallback pattern as density/energy:
+    // default to the shared momentum_bc; problems with wall BCs where
+    // one phase is specular and the other is no-slip need overrides.
+    BC::BC<Set::Scalar>* momentum_0_bc = nullptr;
+    BC::BC<Set::Scalar>* momentum_1_bc = nullptr;
     //BC::BC<Set::Scalar>* eta_bc = nullptr;
     BC::BC<Set::Scalar>* temperature_bc = nullptr;
 
@@ -671,6 +684,10 @@ protected:
     Set::Scalar ghost_tau_rho_0 = -1.0, ghost_tau_rho_1 = -1.0;
     Set::Scalar ghost_tau_mom_0 = -1.0, ghost_tau_mom_1 = -1.0;
     Set::Scalar ghost_tau_eng_0 = -1.0, ghost_tau_eng_1 = -1.0;
+    // Ghost-fluid band cutoff: relaxation activates where η > 1−ghost_band
+    // (for phase 0) or η < ghost_band (for phase 1). Default 1e-3 restricts
+    // relaxation to the extreme bulk tails (η > 0.999 or η < 0.001).
+    Set::Scalar ghost_band = 1e-3;
     // IC reference values (set once during Initialize from the first cell)
     Set::Scalar ghost_ref_rho_0 = 0.0, ghost_ref_rho_1 = 0.0;
     Set::Scalar ghost_ref_M0x = 0.0, ghost_ref_M0y = 0.0;
