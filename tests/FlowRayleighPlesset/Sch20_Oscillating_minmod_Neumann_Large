@@ -46,7 +46,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 #plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Oscillating_minmod
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_minmod
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_minmod_morerefinement
 
 
 ### MESHING ###
@@ -56,7 +56,7 @@ amr.max_grid_size  = 500000
 amr.blocking_factor = 2
 amr.regrid_int     = 20
 amr.grid_eff       = 0.8
-amr.max_level      = 4
+amr.max_level      = 5
 amr.n_cell         = 160 160
 
 nghost = 4
