@@ -16,7 +16,7 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.regrid_int = 1
 amr.grid_eff = 0.8
-amr.max_level = 3
+amr.max_level = 4
 amr.n_cell = 1050 300
 
 ### TIME STEPPING ###
@@ -28,7 +28,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 2.5e-8
 dynamictimestep.min = 1e-15
-cfl = 0.1
+cfl = 0.3
 
 ### DIMENSIONS ###
 #geometry.prob_lo = 0.000 0.000 0.0
@@ -38,8 +38,8 @@ geometry.prob_hi = 0.160 0.060 0.0
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
-# stop_time = 1.2e-4
-stop_time = 1.0e-5
+stop_time = 2.0e-4
+# stop_time = 1.0e-5
 
 
 ### ETA INITIAL CONDITIONS ###
@@ -133,10 +133,10 @@ momentum.bc.type.yhi = neumann neumann
 density.bc.type.xlo = dirichlet
 density.bc.val.xlo  = "39.0"
 energy.bc.type.xlo = dirichlet
-energy.bc.val.xlo  = "1686.0"
-# momentum.bc..type.xlo = neumann neumann
+energy.bc.val.xlo  = "1685653.0"
+# momentum.bc.type.xlo = neumann neumann
 momentum.bc.type.xlo = dirichlet neumann
-momentum.bc.val.xlo  = "1025.0" "0.0"
+momentum.bc.val.xlo  = "39975.0" "0.0"
 
 
 density.bc.type.xhi = neumann
@@ -144,7 +144,7 @@ energy.bc.type.xhi = neumann
 momentum.bc.type.xhi = neumann neumann
 
 ### REFINEMENT CRITERIA ###
-eta_refinement_criterion = 1e-2
+eta_refinement_criterion = 1e-3
 omega_refinement_criterion = 1e+10
 p_refinement_criterion = 1.7e+6
 rho_refinement_criterion = 5e+1
