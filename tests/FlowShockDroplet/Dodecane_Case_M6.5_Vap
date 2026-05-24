@@ -16,13 +16,13 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 16
 amr.regrid_int = 4
 amr.grid_eff = 0.8
-amr.n_error_buf = 4
-amr.max_level = 2
+amr.n_error_buf = 8
+amr.max_level = 3
 amr.n_cell = 1024 256
 
 ### TIME STEPPING ###
 ## Static:
-timestep = 1e-13
+timestep = 1e-11
 
 ## Adaptive
 dynamictimestep.on = 1
@@ -152,7 +152,7 @@ eta_refinement_criterion = 1e-3
 omega_refinement_criterion = 1e+10
 p_refinement_criterion = 1.7e+6
 rho_refinement_criterion = 5e+1
-gradu_refinement_criterion = 1.3e+3
+gradu_refinement_criterion = 5e+2
 
 
 cutoff = 1e-16
@@ -186,4 +186,4 @@ omega_relax = 0.5
 # Pe_CH = U*epsilon^2/(M*sigma), M = M0*epsilon^2, M0 ~ U/sigma.
 # With sigma = 0.025 N/m, M0 = 1025.239/0.025 = 4.10095716768e4
 # Mob = 4.1e4
-Mob = 10000.0
+Mob = 4000.0

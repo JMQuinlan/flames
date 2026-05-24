@@ -1675,9 +1675,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     std::swap(momentum_old_mf[lev], momentum_mf[lev]);
     std::swap(energy_per_vol_old_mf[lev], energy_per_vol_mf[lev]);
     std::swap(energy_per_mas_old_mf[lev], energy_per_mas_mf[lev]);
-    std::swap(eta_old_mf, eta_mf);
-    std::swap(rho_eta0_old_mf, rho_eta0_mf);
-    std::swap(rho_eta1_old_mf, rho_eta1_mf);
+    std::swap(eta_old_mf[lev], eta_mf[lev]);
+    std::swap(rho_eta0_old_mf[lev], rho_eta0_mf[lev]);
+    std::swap(rho_eta1_old_mf[lev], rho_eta1_mf[lev]);
 
     // ------------------------------------------------------------
     // Time Integration
