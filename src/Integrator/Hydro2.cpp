@@ -316,7 +316,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //value.RegisterNewFab(value.h_thermal_mf,    &value.bc_nothing,  1, nghost, "h_thermal", false, true);         // Thermal Convectivity
         value.RegisterNewFab(value.gamma_mf,        value.energy_bc, 1, nghost, "gamma", true, false);                 // Specific Heat Ratio
         value.RegisterNewFab(value.p0_mf,           value.energy_bc, 1, nghost, "p0", true, true);                    // Tamman Pressure
-        value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc, 1, nghost, "mu_chem", true, false);               // Chemical Potential
+        value.RegisterNewFab(value.mu_chem_mf,      value.eta_bc, 1, nghost, "mu_chem", true, false);               // Chemical Potential
         value.RegisterNewFab(value.a_mf,            &value.bc_nothing,  1, nghost, "a", true, false);                    // Speed of sound
         value.RegisterNewFab(value.Ma_mf,           &value.bc_nothing,  2, nghost, "Ma", true, false, { "x", "y" });   // Mach
         value.RegisterNewFab(value.UE_per_vol_mf,   value.energy_bc,  1, nghost, "UE_per_vol", true, false);         // Internal Energy (per unit volume)
@@ -968,11 +968,12 @@ Hydro2::RHS(int lev,
         }); // end parallelfor
     } // end Primative field
 
-    // Fill mu_chem ghost cells with physical BCs before the main loop
-    // computes lap(mu_chem) via central differences. Without this,
-    // boundary cells read stale (zero) ghost values, creating a spurious
-    // CH source that causes eta to drift along domain boundaries.
-    FillBoundariesWithBC(lev, time, energy_bc, { mu_chem_mf[lev].get() });
+    // Fill mu_chem ghost cells with zero-neumann BCs before the main loop
+    // computes lap(mu_chem) via central differences. Must use eta_bc
+    // (zero-neumann), NOT energy_bc — energy_bc has dirichlet values
+    // (e.g. 86M at xlo) that would create a massive spurious lap(mu_chem)
+    // and corrupt eta across the entire domain via the CH term.
+    FillBoundariesWithBC(lev, time, eta_bc, { mu_chem_mf[lev].get() });
 
     // Main time integration loop
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)

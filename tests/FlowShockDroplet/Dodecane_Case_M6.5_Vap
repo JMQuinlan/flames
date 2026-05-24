@@ -7,7 +7,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = /mmfs1/home/spatel6/flames/bin/tests/output/Dodecane_Case_M6.5_Vap
-plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_M6_5_fix
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_M6_5_fix_AMR_4
 
 ### MESHING ###
 amr.plot_dt = 0.25e-6
@@ -133,7 +133,7 @@ momentum.bc.type.yhi = neumann neumann
 density.bc.type.xlo = dirichlet
 density.bc.val.xlo  = "39.0"
 energy.bc.type.xlo = dirichlet
-energy.bc.val.xlo  = "1685653.0"
+energy.bc.val.xlo  = "86227652.0"
 # momentum.bc.type.xlo = neumann neumann
 momentum.bc.type.xlo = dirichlet neumann
 momentum.bc.val.xlo  = "39975.0" "0.0"
