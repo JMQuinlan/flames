@@ -3768,7 +3768,8 @@ void Hydro2::PostSubcycleReflux(int lev, Set::Scalar /*time*/, Set::Scalar /*dt_
                                1,
                                geom[lev]);
 
-    // After refluxing total density, re-partition into rho_eta0 / rho_eta1.
+    // After refluxing, re-partition rho_eta0/rho_eta1 and recompute velocity
+    // from the corrected conserved variables so output is consistent.
     for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
@@ -3776,10 +3777,14 @@ void Hydro2::PostSubcycleReflux(int lev, Set::Scalar /*time*/, Set::Scalar /*dt_
         auto eta  = eta_mf[lev]->array(mfi);
         auto rho0 = rho_eta0_mf[lev]->array(mfi);
         auto rho1 = rho_eta1_mf[lev]->array(mfi);
+        auto mom  = momentum_mf[lev]->array(mfi);
+        auto vel  = velocity_mf[lev]->array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             rho0(i, j, k) = rho(i, j, k) * eta(i, j, k);
             rho1(i, j, k) = rho(i, j, k) * (1.0 - eta(i, j, k));
+            vel(i, j, k, 0) = mom(i, j, k, 0) / rho(i, j, k);
+            vel(i, j, k, 1) = mom(i, j, k, 1) / rho(i, j, k);
         });
     }
 }
