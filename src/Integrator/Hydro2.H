@@ -100,6 +100,7 @@ protected:
     void Advance(int lev, Set::Scalar time, Set::Scalar dt) override;
     void TagCellsForRefinement(int lev, amrex::TagBoxArray& tags, amrex::Real /*time*/, int /*ngrow*/) override;
     void Regrid(int lev, Set::Scalar time) override;
+    void PostSubcycleReflux(int lev, Set::Scalar time, Set::Scalar dt_coarse) override;
     void RHS(int lev,
         Set::Scalar time,
         amrex::MultiFab &rho_eta0_rhs_mf,
@@ -416,6 +417,27 @@ protected:
 
     // NGHOST
     int nghost = 2;
+
+    // ------------------------------------------------------------------
+    // Flux registers for conservative reflux at coarse-fine boundaries.
+    // flux_reg[lev] sits between level lev-1 (coarse) and lev (fine).
+    // Element [0] is unused; valid indices are [1 .. max_level].
+    // ------------------------------------------------------------------
+    amrex::Vector<std::unique_ptr<amrex::FluxRegister>> flux_reg;
+
+    // Cell-centered flux MultiFabs storing hi-face Riemann fluxes.
+    // cc_fluxes[lev].mass[d]: cell (i,j) stores mass flux at face (i+1/2,j)
+    //   for d=0, or (i,j+1/2) for d=1.  1 component.
+    // cc_fluxes[lev].mom[d]:  AMREX_SPACEDIM components (x-mom, y-mom).
+    // cc_fluxes[lev].energy[d]: 1 component.  1 ghost cell for FillBoundary.
+    // Converted to temporary face-centered MultiFabs in Advance() for
+    // FluxRegister CrseInit/FineAdd.
+    struct CellFluxes {
+        amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> mass;
+        amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> mom;
+        amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> energy;
+    };
+    amrex::Vector<CellFluxes> cc_fluxes;  // indexed by level
 
     // ========================================================================
     // 7-EQUATION SWITCHES (Phase A scaffolding)

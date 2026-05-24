@@ -189,6 +189,11 @@ protected:
     virtual void Regrid(int /* amrlev */, Set::Scalar /* time */)
     {}
 
+    /// Called after all fine sub-steps complete and before average_down.
+    /// Override in derived classes to apply FluxRegister reflux corrections.
+    virtual void PostSubcycleReflux(int /*coarse_lev*/, Set::Scalar /*time*/, Set::Scalar /*dt_coarse*/)
+    {}
+
 
     inline void StopClock()
     {

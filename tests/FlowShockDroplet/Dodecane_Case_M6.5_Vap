@@ -7,17 +7,18 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = /mmfs1/home/spatel6/flames/bin/tests/output/Dodecane_Case_M6.5_Vap
-plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_M6_5_fix_AMR_4
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_reflux
 
 ### MESHING ###
 amr.plot_dt = 0.25e-6
-# amr.plot_int = 100
+# amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
-amr.regrid_int = 1
+amr.regrid_int = 4
 amr.grid_eff = 0.8
-amr.max_level = 4
-amr.n_cell = 1050 300
+amr.n_error_buf = 4
+amr.max_level = 2
+amr.n_cell = 1024 256
 
 ### TIME STEPPING ###
 ## Static:
@@ -26,15 +27,15 @@ timestep = 1e-13
 ## Adaptive
 dynamictimestep.on = 1
 dynamictimestep.verbose = 1
-dynamictimestep.max = 2.5e-7
-dynamictimestep.min = 1e-15
+dynamictimestep.max = 1.0e-7
+dynamictimestep.min = 1.0e-15
 cfl = 0.3
 
 ### DIMENSIONS ###
 #geometry.prob_lo = 0.000 0.000 0.0
 #geometry.prob_hi = 0.160 0.080 0.0
-geometry.prob_lo = 0.020 0.020 0.0
-geometry.prob_hi = 0.160 0.060 0.0
+geometry.prob_lo = -0.020 -0.0175 0.0
+geometry.prob_hi =  0.120  0.0175 0.0
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
@@ -46,8 +47,8 @@ stop_time = 2.0e-4
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = 2.0e-5
 eta.ic.expression.constant.R0 = 4.4e-3
-eta.ic.expression.constant.x_center = 0.040
-eta.ic.expression.constant.y_center = 0.040
+eta.ic.expression.constant.x_center = 0.0
+eta.ic.expression.constant.y_center = 0.0
 
 # convention for this expression: eta ~ 0 inside liquid, eta ~ 1 in gas.
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x-x_center)**2 + (y-y_center)**2) - R0)/(2*sqrt(2)*epsilon)))"
@@ -72,8 +73,9 @@ mu1_b = 0.0
 density0.ic.type = expression
 density0.ic.expression.constant.rho_vapor = 1.35598311723
 density0.ic.expression.constant.rho_shock = 39.0
-density0.ic.expression.constant.x_shock = 0.033
-density0.ic.expression.region0 = "(x < x_shock)*rho_shock + (x >= x_shock)*rho_vapor"
+density0.ic.expression.constant.x_shock = -0.005
+density0.ic.expression.constant.delta = 2.0e-5
+density0.ic.expression.region0 = "rho_shock + (rho_vapor - rho_shock)*0.5*(1.0 + tanh((x - x_shock)/delta))"
 
 density1.ic.type = expression
 density1.ic.expression.constant.rho_nDodecane = 749.5
@@ -82,13 +84,14 @@ density1.ic.expression.region0 = "rho_nDodecane"
 # Velocities: post-shock gas velocity from normal-shock jump for Ms=6.5.
 velocity0.ic.type = expression
 velocity0.ic.expression.constant.u_shock = 1025.23929192
-velocity0.ic.expression.constant.x_shock = 0.033
-velocity0.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
+velocity0.ic.expression.constant.x_shock = -0.005
+velocity0.ic.expression.constant.delta = 2.0e-5
+velocity0.ic.expression.region0 = "u_shock*0.5*(1.0 - tanh((x - x_shock)/delta))"
 velocity0.ic.expression.region1 = "0.0"
 
 velocity1.ic.type = expression
 velocity1.ic.expression.constant.u_shock = 0.0
-velocity1.ic.expression.constant.x_shock = 0.033
+velocity1.ic.expression.constant.x_shock = -0.005
 velocity1.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
 velocity1.ic.expression.region1 = "0.0"
 
@@ -96,8 +99,9 @@ velocity1.ic.expression.region1 = "0.0"
 pressure0.ic.type = expression
 pressure0.ic.expression.constant.p_vapor = 3.53948205141e4
 pressure0.ic.expression.constant.p_shock = 1.51203069018e6
-pressure0.ic.expression.constant.x_shock = 0.033
-pressure0.ic.expression.region0 = "(x < x_shock)*p_shock + (x >= x_shock)*p_vapor"
+pressure0.ic.expression.constant.x_shock = -0.005
+pressure0.ic.expression.constant.delta = 2.0e-5
+pressure0.ic.expression.region0 = "p_shock + (p_vapor - p_shock)*0.5*(1.0 + tanh((x - x_shock)/delta))"
 
 pressure1.ic.type = expression
 pressure1.ic.expression.constant.p_vapor = 3.53948205141e4
@@ -182,4 +186,4 @@ omega_relax = 0.5
 # Pe_CH = U*epsilon^2/(M*sigma), M = M0*epsilon^2, M0 ~ U/sigma.
 # With sigma = 0.025 N/m, M0 = 1025.239/0.025 = 4.10095716768e4
 # Mob = 4.1e4
-Mob = 1000.0
+Mob = 2000.0

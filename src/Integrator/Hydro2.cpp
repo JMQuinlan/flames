@@ -446,6 +446,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         Util::ParallelMessage(INFO, "Van Leer   : 2");
         Util::Abort(INFO);
     }
+
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -461,6 +462,12 @@ void Hydro2::Initialize(int lev)
         step_counter.resize(lev + 1, 0);
     }
     step_counter[lev] = 0;
+
+    // Ensure flux register and face-flux vectors are large enough.
+    if ((int)flux_reg.size() <= lev)
+        flux_reg.resize(lev + 1);
+    if ((int)cc_fluxes.size() <= lev)
+        cc_fluxes.resize(lev + 1);
 
     // Initialize individual fluid variables
     // DIFFUSIVE BOUNDRY
@@ -521,6 +528,33 @@ void Hydro2::Initialize(int lev)
     UE_per_mas_mf[lev]  ->setVal(0.0);
     KE_per_vol_mf[lev]  ->setVal(0.0);
     KE_per_mas_mf[lev]  ->setVal(0.0);
+
+    // Use BoxArray/dmap from a registered MultiFab (density_mf) because
+    // grids[lev]/dmap[lev] may not yet be set when Initialize runs.
+    const amrex::BoxArray& ba_init = density_mf[lev]->boxArray();
+    const amrex::DistributionMapping& dm_init = density_mf[lev]->DistributionMap();
+
+    // Build FluxRegister for this level if it is a fine level.
+    if (lev > 0)
+    {
+        int ncomp_reflux = 1 + AMREX_SPACEDIM + 1; // mass + momentum + energy
+        flux_reg[lev] = std::make_unique<amrex::FluxRegister>(
+            ba_init, dm_init, refRatio(lev - 1), lev, ncomp_reflux);
+    }
+
+    // Cell-centered flux MultiFabs: cell (i,j) stores the hi-face Riemann flux.
+    // 1 ghost cell so FillBoundary can propagate fluxes across box boundaries
+    // for the cell-to-face conversion in Advance().
+    for (int d = 0; d < AMREX_SPACEDIM; d++)
+    {
+        cc_fluxes[lev].mass[d]   = std::make_unique<amrex::MultiFab>(ba_init, dm_init, 1, 1);
+        cc_fluxes[lev].mom[d]    = std::make_unique<amrex::MultiFab>(ba_init, dm_init, AMREX_SPACEDIM, 1);
+        cc_fluxes[lev].energy[d] = std::make_unique<amrex::MultiFab>(ba_init, dm_init, 1, 1);
+
+        cc_fluxes[lev].mass[d]->setVal(0.0);
+        cc_fluxes[lev].mom[d]->setVal(0.0);
+        cc_fluxes[lev].energy[d]->setVal(0.0);
+    }
 
     Util::ParallelMessage(INFO, "Finished initialization, begginning time iteration");
 }
@@ -1007,6 +1041,22 @@ Hydro2::RHS(int lev,
         Set::Patch<Set::Scalar> M_flux = M_flux_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> E_flux = E_flux_mf.Patch(lev, mfi);
 
+        // Cell-centered flux arrays for reflux at coarse-fine boundaries.
+        // cc_fluxes use density_mf's BA/dmap, so mfi access is compatible.
+        bool have_cc_fluxes = (lev < (int)cc_fluxes.size() && cc_fluxes[lev].mass[0]);
+        amrex::Array4<Set::Scalar> ff_mass_x, ff_mass_y;
+        amrex::Array4<Set::Scalar> ff_mom_x,  ff_mom_y;
+        amrex::Array4<Set::Scalar> ff_ene_x,  ff_ene_y;
+        if (have_cc_fluxes)
+        {
+            ff_mass_x = cc_fluxes[lev].mass[0]->array(mfi);
+            ff_mass_y = cc_fluxes[lev].mass[1]->array(mfi);
+            ff_mom_x  = cc_fluxes[lev].mom[0]->array(mfi);
+            ff_mom_y  = cc_fluxes[lev].mom[1]->array(mfi);
+            ff_ene_x  = cc_fluxes[lev].energy[0]->array(mfi);
+            ff_ene_y  = cc_fluxes[lev].energy[1]->array(mfi);
+        }
+
         Set::Patch<const Set::Scalar> v = velocity_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> press = pressure_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> a = a_mf.Patch(lev, mfi);
@@ -1453,6 +1503,27 @@ Hydro2::RHS(int lev,
             Set::Scalar eta_face_ylo = (flux_ylo.u_interface > 0.0) ? eta(i, j - 1, k) : eta(i, j, k);
             Set::Scalar eta_face_yhi = (flux_yhi.u_interface > 0.0) ? eta(i, j, k) : eta(i, j + 1, k);
 
+            // -----------------------------------------------------------
+            // Store hi-face Riemann fluxes at cell centers for reflux.
+            // Cell (i,j) stores the flux at face (i+1/2,j) for d=0
+            // and at face (i,j+1/2) for d=1.  Converted to face-centered
+            // MultiFabs in Advance() for CrseInit/FineAdd.
+            // -----------------------------------------------------------
+            if (have_cc_fluxes)
+            {
+                // x-direction hi-face: normal = x, tangent = y
+                ff_mass_x(i, j, k)    = flux_xhi.mass;
+                ff_mom_x(i, j, k, 0)  = flux_xhi.momentum_normal;   // x-mom
+                ff_mom_x(i, j, k, 1)  = flux_xhi.momentum_tangent;  // y-mom
+                ff_ene_x(i, j, k)     = flux_xhi.energy;
+
+                // y-direction hi-face: normal = y, tangent = x (swap to fixed x,y)
+                ff_mass_y(i, j, k)    = flux_yhi.mass;
+                ff_mom_y(i, j, k, 0)  = flux_yhi.momentum_tangent;  // x-mom
+                ff_mom_y(i, j, k, 1)  = flux_yhi.momentum_normal;   // y-mom
+                ff_ene_y(i, j, k)     = flux_yhi.energy;
+            }
+
             // ------------------------------------------------------------
             // Non-conservative volume-fraction advection (Saurel & Abgrall 1999, Eq. 41)
             //   D(eta)/Dt = deta/dt + u*grad(eta) = 0
@@ -1652,7 +1723,100 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     });
 
 
+    // Zero face-flux MultiFabs so reflux accumulation starts clean each step.
+    if (lev < (int)cc_fluxes.size() && cc_fluxes[lev].mass[0])
+    {
+        for (int d = 0; d < AMREX_SPACEDIM; d++)
+        {
+            cc_fluxes[lev].mass[d]->setVal(0.0);
+            cc_fluxes[lev].mom[d]->setVal(0.0);
+            cc_fluxes[lev].energy[d]->setVal(0.0);
+        }
+    }
+
     timeintegrator.advance(solution_old, solution_new, time, dt);
+
+    // ------------------------------------------------------------------
+    // Feed FluxRegister for reflux at coarse-fine boundaries.
+    // Convert cell-centered hi-face fluxes to face-centered MultiFabs
+    // required by CrseInit/FineAdd, then accumulate.
+    // ------------------------------------------------------------------
+    bool need_crse = (lev < finest_level
+                      && lev + 1 < (int)flux_reg.size() && flux_reg[lev + 1]
+                      && lev < (int)cc_fluxes.size() && cc_fluxes[lev].mass[0]);
+    bool need_fine = (lev > 0
+                      && lev < (int)flux_reg.size() && flux_reg[lev]
+                      && lev < (int)cc_fluxes.size() && cc_fluxes[lev].mass[0]);
+
+    if (need_crse || need_fine)
+    {
+        if (need_crse)
+            flux_reg[lev + 1]->setVal(0.0);
+
+        for (int d = 0; d < AMREX_SPACEDIM; d++)
+        {
+            // FillBoundary so ghost cells have neighbor's hi-face flux
+            // (needed for the lo-face of each box in the conversion below).
+            cc_fluxes[lev].mass[d]->FillBoundary(geom[lev].periodicity());
+            cc_fluxes[lev].mom[d]->FillBoundary(geom[lev].periodicity());
+            cc_fluxes[lev].energy[d]->FillBoundary(geom[lev].periodicity());
+
+            // Build temporary face-centered MultiFabs for FluxRegister.
+            // Use cc_fluxes' own BA/dmap to stay consistent.
+            amrex::BoxArray face_ba = cc_fluxes[lev].mass[d]->boxArray();
+            face_ba.surroundingNodes(d);
+            const amrex::DistributionMapping& dm_cc = cc_fluxes[lev].mass[d]->DistributionMap();
+            amrex::MultiFab face_mass(face_ba, dm_cc, 1, 0);
+            amrex::MultiFab face_mom(face_ba, dm_cc, AMREX_SPACEDIM, 0);
+            amrex::MultiFab face_ene(face_ba, dm_cc, 1, 0);
+
+            // Convert: face(f,j,k) = cc(f-1,j,k) for d=0, etc.
+            // The hi-face flux of cell (f-1) IS the flux at face f.
+            int nlocal = (int)cc_fluxes[lev].mass[d]->local_size();
+            for (int li = 0; li < nlocal; li++)
+            {
+                auto cc_m = cc_fluxes[lev].mass[d]->atLocalIdx(li).array();
+                auto cc_p = cc_fluxes[lev].mom[d]->atLocalIdx(li).array();
+                auto cc_e = cc_fluxes[lev].energy[d]->atLocalIdx(li).array();
+
+                auto f_m = face_mass.atLocalIdx(li).array();
+                auto f_p = face_mom.atLocalIdx(li).array();
+                auto f_e = face_ene.atLocalIdx(li).array();
+
+                const amrex::Box& fbx = face_mass.atLocalIdx(li).box();
+
+                int dd = d;
+                amrex::ParallelFor(fbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    int ii = (dd == 0) ? i - 1 : i;
+                    int jj = (dd == 1) ? j - 1 : j;
+                    f_m(i, j, k) = cc_m(ii, jj, k);
+                    for (int n = 0; n < AMREX_SPACEDIM; n++)
+                        f_p(i, j, k, n) = cc_p(ii, jj, k, n);
+                    f_e(i, j, k) = cc_e(ii, jj, k);
+                });
+            }
+
+            // Face area MultiFab for correct area-weighted flux accumulation.
+            // For Cartesian grids: x-face area = dy, y-face area = dx.
+            const amrex::Real* dx_lev = geom[lev].CellSize();
+            amrex::Real face_area = (d == 0) ? dx_lev[1] : dx_lev[0];
+            amrex::MultiFab area_mf(face_ba, dm_cc, 1, 0);
+            area_mf.setVal(face_area);
+
+            if (need_crse)
+            {
+                flux_reg[lev + 1]->CrseInit(face_mass, area_mf, d, 0, 0, 1, -dt);
+                flux_reg[lev + 1]->CrseInit(face_mom, area_mf, d, 0, 1, AMREX_SPACEDIM, -dt);
+                flux_reg[lev + 1]->CrseInit(face_ene, area_mf, d, 0, 1 + AMREX_SPACEDIM, 1, -dt);
+            }
+            if (need_fine)
+            {
+                flux_reg[lev]->FineAdd(face_mass, area_mf, d, 0, 0, 1, dt);
+                flux_reg[lev]->FineAdd(face_mom, area_mf, d, 0, 1, AMREX_SPACEDIM, dt);
+                flux_reg[lev]->FineAdd(face_ene, area_mf, d, 0, 1 + AMREX_SPACEDIM, 1, dt);
+            }
+        }
+    }
 
     // ENFORCE POSITIVITY after time advance
     for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
@@ -1903,6 +2067,36 @@ void Hydro2::Regrid(int lev, Set::Scalar regrid_time)
     // Zero fill fields
     ZeroDerivedScratchFields(lev);
 
+    // Ensure vectors are large enough for this level.
+    if ((int)flux_reg.size() <= lev)
+        flux_reg.resize(lev + 1);
+    if ((int)cc_fluxes.size() <= lev)
+        cc_fluxes.resize(lev + 1);
+
+    // Use BA/dmap from a registered MultiFab (same reason as Initialize).
+    const amrex::BoxArray& ba_reg = density_mf[lev]->boxArray();
+    const amrex::DistributionMapping& dm_reg = density_mf[lev]->DistributionMap();
+
+    // Rebuild FluxRegister on regridded level.
+    if (lev > 0)
+    {
+        int ncomp_reflux = 1 + AMREX_SPACEDIM + 1;
+        flux_reg[lev] = std::make_unique<amrex::FluxRegister>(
+            ba_reg, dm_reg, refRatio(lev - 1), lev, ncomp_reflux);
+    }
+
+    // Rebuild cell-centered flux storage (1 ghost for FillBoundary in Advance).
+    for (int d = 0; d < AMREX_SPACEDIM; d++)
+    {
+        cc_fluxes[lev].mass[d]   = std::make_unique<amrex::MultiFab>(ba_reg, dm_reg, 1, 1);
+        cc_fluxes[lev].mom[d]    = std::make_unique<amrex::MultiFab>(ba_reg, dm_reg, AMREX_SPACEDIM, 1);
+        cc_fluxes[lev].energy[d] = std::make_unique<amrex::MultiFab>(ba_reg, dm_reg, 1, 1);
+
+        cc_fluxes[lev].mass[d]->setVal(0.0);
+        cc_fluxes[lev].mom[d]->setVal(0.0);
+        cc_fluxes[lev].energy[d]->setVal(0.0);
+    }
+
     // Apply BC
     FillGhost4BC(lev, regrid_time);
 
@@ -1916,6 +2110,7 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
 
     const Set::Scalar* DX = geom[lev].CellSize();
     Set::Scalar dr = sqrt(AMREX_D_TERM(DX[0] * DX[0], +DX[1] * DX[1], +DX[2] * DX[2]));
+    amrex::Box domain = geom[lev].Domain();
 
     // Eta criterion for refinement
     for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi) {
@@ -1936,7 +2131,7 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
         amrex::Array4<const Set::Scalar> const& omega = (*vorticity_mf[lev]).array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            auto sten = Numeric::GetStencil(i, j, k, bx);
+            auto sten = Numeric::GetStencil(i, j, k, domain);
             Set::Vector grad_omega = Numeric::Gradient(omega, i, j, k, 0, DX, sten);
             if (grad_omega.lpNorm<2>() * dr * 2 > omega_refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
         });
@@ -1949,7 +2144,7 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
         amrex::Array4<const Set::Scalar> const& v = (*velocity_mf[lev]).array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            auto sten = Numeric::GetStencil(i, j, k, bx);
+            auto sten = Numeric::GetStencil(i, j, k, domain);
             Set::Matrix grad_u = Numeric::Gradient(v, i, j, k, DX, sten);
             if (grad_u.lpNorm<2>() * dr * 2 > gradu_refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
         });
@@ -1962,7 +2157,7 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
         amrex::Array4<const Set::Scalar> const& press = (*pressure_mf[lev]).array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            auto sten = Numeric::GetStencil(i, j, k, bx);
+            auto sten = Numeric::GetStencil(i, j, k, domain);
             Set::Vector grad_p = Numeric::Gradient(press, i, j, k, 0, DX, sten);
             if (grad_p.lpNorm<2>() * dr * 2 > p_refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
         });
@@ -1975,7 +2170,7 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
         amrex::Array4<const Set::Scalar> const& rho = (*density_mf[lev]).array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            auto sten = Numeric::GetStencil(i, j, k, bx);
+            auto sten = Numeric::GetStencil(i, j, k, domain);
             Set::Vector grad_rho = Numeric::Gradient(rho, i, j, k, 0, DX, sten);
             if (grad_rho.lpNorm<2>() * dr * 2 > rho_refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
         });
@@ -3513,6 +3708,63 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
 } // end FillGhost4BC()
 
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////// POST-SUBCYCLE REFLUX /////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+void Hydro2::PostSubcycleReflux(int lev, Set::Scalar /*time*/, Set::Scalar /*dt_coarse*/)
+{
+    BL_PROFILE("Integrator::Hydro2::PostSubcycleReflux");
+
+    if (lev >= finest_level) return;
+
+    int fine_lev = lev + 1;
+    if (fine_lev >= (int)flux_reg.size() || !flux_reg[fine_lev]) return;
+
+    // Apply the reflux correction to coarse-level conserved variables.
+    // The FluxRegister accumulated:
+    //   fine_flux * dt_fine  (positive, from FineAdd across all sub-steps)
+    //   coarse_flux * dt_coarse (negative, from CrseInit)
+    // Reflux() applies:  U_coarse += scale * (1/vol) * sum_faces(register)
+
+    // Reflux into total density
+    flux_reg[fine_lev]->Reflux(*density_mf[lev],
+                               1.0,        // scale
+                               0,          // src component in register (mass)
+                               0,          // dst component
+                               1,          // ncomp
+                               geom[lev]);
+
+    // Reflux momentum
+    flux_reg[fine_lev]->Reflux(*momentum_mf[lev],
+                               1.0,
+                               1,          // src component in register
+                               0,          // dst component
+                               AMREX_SPACEDIM,
+                               geom[lev]);
+
+    // Reflux energy
+    flux_reg[fine_lev]->Reflux(*energy_per_vol_mf[lev],
+                               1.0,
+                               1 + AMREX_SPACEDIM,  // src component in register
+                               0,                    // dst component
+                               1,
+                               geom[lev]);
+
+    // After refluxing total density, re-partition into rho_eta0 / rho_eta1.
+    for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
+        auto rho  = density_mf[lev]->array(mfi);
+        auto eta  = eta_mf[lev]->array(mfi);
+        auto rho0 = rho_eta0_mf[lev]->array(mfi);
+        auto rho1 = rho_eta1_mf[lev]->array(mfi);
+
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            rho0(i, j, k) = rho(i, j, k) * eta(i, j, k);
+            rho1(i, j, k) = rho(i, j, k) * (1.0 - eta(i, j, k));
+        });
+    }
+}
 
 
 } // end of Integrator namespace

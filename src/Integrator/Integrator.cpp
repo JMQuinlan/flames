@@ -1241,6 +1241,8 @@ Integrator::TimeStep(int lev, amrex::Real time, int /*iteration*/)
         for (int i = 1; i <= nsubsteps[lev + 1]; ++i)
             TimeStep(lev + 1, time + (i - 1) * dt[lev + 1], i);
 
+        PostSubcycleReflux(lev, time, dt[lev]);
+
         for (int n = 0; n < cell.number_of_fabs; n++)
         {
             amrex::average_down(*(*cell.fab_array[n])[lev + 1], *(*cell.fab_array[n])[lev],
