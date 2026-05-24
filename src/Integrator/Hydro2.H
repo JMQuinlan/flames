@@ -163,6 +163,11 @@ private:
     // Zero every derived/scratch MultiFabs
     void ZeroDerivedScratchFields(int lev);
 
+    // Curvature pipeline
+    void ComputeGradEta(int lev);
+    void ComputeSmoothNormals(int lev);
+    void ComputeKappas(int lev);
+
 protected:
     // FLUID 0
     Set::Field<Set::Scalar> density0_mf;
@@ -239,6 +244,12 @@ protected:
     Set::Field<Set::Scalar> grad_eta_mf;
     Set::Field<Set::Scalar> kappas_mf;
     Set::Field<Set::Scalar> grad_mag_grad_eta_mf;
+    Set::Field<Set::Scalar> eta_x_mf;
+    Set::Field<Set::Scalar> eta_y_mf;
+    Set::Field<Set::Scalar> gradmag_mf;
+    Set::Field<Set::Scalar> nx_smoothed_mf;
+    Set::Field<Set::Scalar> ny_smoothed_mf;
+    Set::Field<Set::Scalar> kappa_SF_mf;
 
     Set::Field<Set::Scalar> rho_flux_mf;
     Set::Field<Set::Scalar> M_flux_mf;
@@ -376,7 +387,8 @@ protected:
     int apply_vaporization = 0;
     int Spec_Vol = 1;
 
-    int kappa_method = 2;
+    int kappa_method = 1;
+    int smooth_kernel_size = 3;
 
     // Adaptive Timestep
     bool adaptive_timestep = false;

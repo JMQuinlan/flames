@@ -127,7 +127,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         }
 
         // CURVATURE
-        pp_query_default("kappa_method", value.kappa_method, 2); // Method to solve for curvature
+        pp_query_default("kappa_method", value.kappa_method, 1); // 1: Smooth Normals (default)  2: legacy Hessian-based
+        pp_query_default("smooth_kernel_size", value.smooth_kernel_size, 3); // Gaussian normal-smoothing kernel: 3 (3x3) or 5 (5x5)
 
         // ===========================================================
         // 7-EQUATION (Baer-Nunziato) SCAFFOLDING SWITCHES
@@ -326,10 +327,18 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.Bm_mf,           &value.bc_nothing,  1, nghost, "Spadling_Number", true, false);    // Spalding Number
         value.RegisterNewFab(value.Y_mf,            &value.bc_nothing,  1, nghost, "Mass_Fraction", true, false);       // Mass Fraction
 
+        // Curvature pipeline fields
+        value.RegisterNewFab(value.eta_x_mf,            &value.bc_nothing,  1, nghost, "eta_x", false, false);
+        value.RegisterNewFab(value.eta_y_mf,            &value.bc_nothing,  1, nghost, "eta_y", false, false);
+        value.RegisterNewFab(value.gradmag_mf,          &value.bc_nothing,  1, nghost, "gradmag", false, false);
+        value.RegisterNewFab(value.nx_smoothed_mf,      &value.bc_nothing,  1, nghost, "nx_smoothed", false, false);
+        value.RegisterNewFab(value.ny_smoothed_mf,      &value.bc_nothing,  1, nghost, "ny_smoothed", false, false);
+        value.RegisterNewFab(value.kappa_SF_mf,         &value.bc_nothing,  1, nghost, "kappa_SF", true, false);
+
         // EXTRAS & DEBUGGING
-        value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, 0, "grad_eta", true, false, { "x", "y" });
-        value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, 0, "kappa", true, false, { "Avg", "1", "2" }); // To Surface curvature
-        value.RegisterNewFab(value.grad_mag_grad_eta_mf, &value.bc_nothing, 2, 0, "grad_mag_grad_eta", false, false, { "x", "y" }); // grad( | grad(eta) | )
+        value.RegisterNewFab(value.grad_eta_mf,     &value.bc_nothing,  2, nghost, "grad_eta", true, false, { "x", "y" });
+        value.RegisterNewFab(value.kappas_mf,       &value.bc_nothing,  3, nghost, "kappa", true, false, { "Active", "SN", "Legacy" });
+        value.RegisterNewFab(value.grad_mag_grad_eta_mf, &value.bc_nothing, 2, nghost, "grad_mag_grad_eta", false, false, { "x", "y" }); // grad( | grad(eta) | )
         value.RegisterNewFab(value.rho_flux_mf,     &value.bc_nothing,  1, 0, "rho_flux", true, false);                    // Density Flux
         value.RegisterNewFab(value.M_flux_mf,       &value.bc_nothing,  2, 0, "M_flux", true, false, { "x", "y" });        // Momentum Flux
         value.RegisterNewFab(value.E_flux_mf,       &value.bc_nothing,  1, 0, "E_flux", true, false);                      // Energy Flux
@@ -844,6 +853,10 @@ Hydro2::RHS(int lev,
     // Primitive Fields (with BC)
     FillGhost4BC(lev, time);
 
+    // Curvature pipeline (smooth-normals method fills kappas_mf before the RHS loop)
+    if (kappa_method == 1)
+        ComputeKappas(lev);
+
     // Pre-Source Terms
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
     {
@@ -905,62 +918,21 @@ Hydro2::RHS(int lev,
             // Spalding Number  (F-1 / F-10: single canonical helper, denominator (1 - Y))
             Bm(i, j, k) = SpaldingBM(Y(i, j, k), Y_infinity, small);
 
-            // Curvature
-            Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
-            if (false)//(grad_eta_mag < 1e-4)
+            // Curvature (legacy Hessian-based method — stored in component 2 for diagnostics)
+            if (kappa_method != 1)
             {
-                n_hat(0) = 0.0;
-                n_hat(1) = 0.0;
-            }
-            else
-            {
-                n_hat(0) = n_hat(0);
-                n_hat(1) = n_hat(1);
+                Set::Vector n_hat = grad_eta / (grad_eta_mag + small);
+                Set::Vector t1;
+                if (abs(n_hat(0)) > abs(n_hat(1)))
+                    t1 = Set::Vector(-n_hat(1), n_hat(0)) / sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
+                else
+                    t1 = Set::Vector(n_hat(1), -n_hat(0)) / sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
 
-                Set::Vector grad_mag_grad_eta = Set::Vector(1 / (grad_eta_mag + small) * (grad_eta(0) * hess_eta(0, 0) + grad_eta(1) * hess_eta(0, 1)),
-                                                            1 / (grad_eta_mag + small) * (grad_eta(1) * hess_eta(1, 1) + grad_eta(0) * hess_eta(1, 0)));
-
-                Set::Scalar kappa, kappa1, kappa2 = 0.0;
-                if (kappa_method == 1)
-                {
-                    kappa = -((lap_eta / (grad_eta_mag + small)) - (grad_eta.dot(grad_mag_grad_eta) / (grad_eta_mag * grad_eta_mag + small)));
-
-                    kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
-                    kappas(i, j, k, 1) = kappa1; // First principal curvature
-                    kappas(i, j, k, 2) = kappa2; // Second principal curvature
-                }
-                else if (kappa_method == 2)
-                {
-                    // Orthogonal Basis
-                    Set::Vector t1, t2;
-
-                    if (abs(n_hat(0)) > abs(n_hat(1)))
-                    {
-                        t1 = Set::Vector(-n_hat(1), n_hat(0)) / sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
-                    }
-                    else
-                    {
-                        t1 = Set::Vector(n_hat(1), -n_hat(0)) / sqrt(n_hat(0) * n_hat(0) + n_hat(1) * n_hat(1) + small);
-                    }
-
-                    kappa1 = n_hat.dot(hess_eta * n_hat); // Normal Curvature
-                    kappa2 = t1.dot(hess_eta * t1);       // Tangential Curvature
-
-                    kappa1 = -kappa1;
-                    kappa2 = -kappa2 * 2.0 * epsilon;
-
-                    // Regularization
-                    Set::Scalar K23 = kappa2 * kappa2;     // K23 Regularization
-                    Set::Scalar K_Gauss = kappa1 * kappa2; // Gauss Regularization
-                    // Mean
-                    Set::Scalar K_mean = (kappa1 + kappa2) / 2.0; // Mean Curvature
-                    // Assign the curvature you want to use
-                    kappa = kappa2; // Or use another curvature measure as needed
-                    // Store curvature values
-                    kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
-                    kappas(i, j, k, 1) = kappa1; // First principal curvature
-                    kappas(i, j, k, 2) = kappa2; // Second principal curvature
-                } 
+                Set::Scalar kappa1 = -n_hat.dot(hess_eta * n_hat);
+                Set::Scalar kappa2 = -t1.dot(hess_eta * t1) * 2.0 * epsilon;
+                kappas(i, j, k, 0) = kappa2;
+                kappas(i, j, k, 1) = kappa1;
+                kappas(i, j, k, 2) = kappa2;
             }
 
             // ------------------------------------------------------------
@@ -2943,6 +2915,12 @@ void Hydro2::ZeroDerivedScratchFields(int lev)
         grad_eta_mf[lev].get(),             // grad(eta)
         kappas_mf[lev].get(),               // curvature
         grad_mag_grad_eta_mf[lev].get(),    // |grad(eta)| gradient
+        eta_x_mf[lev].get(),               // eta gradient x
+        eta_y_mf[lev].get(),               // eta gradient y
+        gradmag_mf[lev].get(),             // |grad(eta)|
+        nx_smoothed_mf[lev].get(),         // smoothed normal x
+        ny_smoothed_mf[lev].get(),         // smoothed normal y
+        kappa_SF_mf[lev].get(),            // smooth-normal curvature
         n_hat_mf[lev].get(),                // interface normal
         hess_eta_mf[lev].get(),             // Hessian of eta
         mu_chem_mf[lev].get(),              // chemical potential
@@ -3787,6 +3765,165 @@ void Hydro2::PostSubcycleReflux(int lev, Set::Scalar /*time*/, Set::Scalar /*dt_
             vel(i, j, k, 1) = mom(i, j, k, 1) / rho(i, j, k);
         });
     }
+}
+
+
+///////////////////////////////////////////////////////////////////////////
+///////////////////////// CURVATURE PIPELINE ////////////////////////////
+///////////////////////////////////////////////////////////////////////////
+
+void Hydro2::ComputeGradEta(int lev)
+{
+    BL_PROFILE("Hydro2::ComputeGradEta");
+
+    const amrex::Geometry& geom = this->geom[lev];
+    const amrex::Real* dx = geom.CellSize();
+    const amrex::Box& domain = geom.Domain();
+
+    for (amrex::MFIter mfi(*eta_mf[lev], amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& tb = mfi.tilebox();
+
+        auto eta_arr  = eta_mf[lev]->const_array(mfi);
+        auto etax_arr = eta_x_mf[lev]->array(mfi);
+        auto etay_arr = eta_y_mf[lev]->array(mfi);
+        auto gmag_arr = gradmag_mf[lev]->array(mfi);
+        auto ge_arr   = grad_eta_mf[lev]->array(mfi);
+
+        amrex::ParallelFor(tb, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        {
+            Set::Vector G = Numeric::Gradient(eta_arr, i, j, k, 0, dx);
+            amrex::Real gx = G(0);
+            amrex::Real gy = G(1);
+
+            etax_arr(i,j,k,0) = gx;
+            etay_arr(i,j,k,0) = gy;
+            gmag_arr(i,j,k,0) = std::sqrt(gx*gx + gy*gy);
+            ge_arr(i,j,k,0)   = gx;
+            ge_arr(i,j,k,1)   = gy;
+        });
+    }
+
+    eta_x_mf[lev]->FillBoundary(geom.periodicity());
+    eta_y_mf[lev]->FillBoundary(geom.periodicity());
+    gradmag_mf[lev]->FillBoundary(geom.periodicity());
+    grad_eta_mf[lev]->FillBoundary(geom.periodicity());
+}
+
+void Hydro2::ComputeSmoothNormals(int lev)
+{
+    BL_PROFILE("Hydro2::ComputeSmoothNormals");
+
+    const amrex::Geometry& geom = this->geom[lev];
+    const amrex::Real* dx = geom.CellSize();
+    const amrex::Box& domain = geom.Domain();
+
+    const int krad = (smooth_kernel_size >= 5) ? 2 : 1;
+
+    amrex::GpuArray<amrex::Real, 3> gw;
+    gw[0] = 1.0;
+    gw[1] = std::exp(-0.5);
+    gw[2] = std::exp(-2.0);
+
+    for (amrex::MFIter mfi(*nx_smoothed_mf[lev], amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& tb = mfi.tilebox();
+
+        auto eta_x   = eta_x_mf[lev]->const_array(mfi);
+        auto eta_y   = eta_y_mf[lev]->const_array(mfi);
+        auto gradmag = gradmag_mf[lev]->const_array(mfi);
+        auto nx_s    = nx_smoothed_mf[lev]->array(mfi);
+        auto ny_s    = ny_smoothed_mf[lev]->array(mfi);
+
+        amrex::ParallelFor(tb, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        {
+            amrex::Real accx = 0.0, accy = 0.0, wsum = 0.0;
+            const amrex::Box tb_g = amrex::grow(tb, krad);
+
+            for (int di = -krad; di <= krad; ++di)
+            for (int dj = -krad; dj <= krad; ++dj)
+            {
+                int ii = i + di, jj = j + dj;
+                if (!tb_g.contains(amrex::IntVect(AMREX_D_DECL(ii, jj, 0)))) continue;
+
+                amrex::Real w    = gw[std::abs(di)] * gw[std::abs(dj)];
+                amrex::Real gmN  = gradmag(ii, jj, k) + 1e-14;
+                accx += w * eta_x(ii, jj, k) / gmN;
+                accy += w * eta_y(ii, jj, k) / gmN;
+                wsum += w;
+            }
+
+            amrex::Real nx = accx / (wsum + 1e-14);
+            amrex::Real ny = accy / (wsum + 1e-14);
+            amrex::Real m  = std::sqrt(nx*nx + ny*ny) + 1e-14;
+            nx_s(i, j, k) = nx / m;
+            ny_s(i, j, k) = ny / m;
+        });
+    }
+
+    nx_smoothed_mf[lev]->FillBoundary(geom.periodicity());
+    ny_smoothed_mf[lev]->FillBoundary(geom.periodicity());
+}
+
+void Hydro2::ComputeKappas(int lev)
+{
+    BL_PROFILE("Hydro2::ComputeKappas");
+
+    ComputeGradEta(lev);
+    ComputeSmoothNormals(lev);
+
+    const amrex::Geometry& geom = this->geom[lev];
+    const amrex::Real* dx = geom.CellSize();
+    const amrex::Box& domain = geom.Domain();
+
+    const amrex::Real dx_eff = std::max({dx[0], dx[1], epsilon});
+    const amrex::Real Cg = 0.1 / dx_eff;
+    const amrex::Real small = 1e-14;
+
+    for (amrex::MFIter mfi(*kappas_mf[lev], amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& tb = mfi.tilebox();
+
+        auto gradmag_arr = gradmag_mf[lev]->const_array(mfi);
+        auto nx_s     = nx_smoothed_mf[lev]->const_array(mfi);
+        auto ny_s     = ny_smoothed_mf[lev]->const_array(mfi);
+        auto kappas   = kappas_mf[lev]->array(mfi);
+        auto kappa_sf = kappa_SF_mf[lev]->array(mfi);
+
+        amrex::ParallelFor(tb, [=] AMREX_GPU_DEVICE (int i, int j, int k)
+        {
+            amrex::Real gm = gradmag_arr(i,j,k);
+
+            if (gm < Cg)
+            {
+                kappas(i,j,k,0) = 0.0;
+                kappas(i,j,k,1) = 0.0;
+                kappas(i,j,k,2) = 0.0;
+                kappa_sf(i,j,k) = 0.0;
+                return;
+            }
+
+            int il = amrex::max(i-1, domain.smallEnd(0));
+            int ir = amrex::min(i+1, domain.bigEnd(0));
+            int jl = amrex::max(j-1, domain.smallEnd(1));
+            int jr = amrex::min(j+1, domain.bigEnd(1));
+
+            amrex::Real nx_x = 0.5 * (nx_s(ir,j,k) - nx_s(il,j,k)) / dx[0];
+            amrex::Real ny_y = 0.5 * (ny_s(i,jr,k) - ny_s(i,jl,k)) / dx[1];
+
+            amrex::Real kSN = -(nx_x + ny_y);
+
+            const amrex::Real kappa_max = 2.0 / amrex::min(dx[0], dx[1]);
+            kSN = amrex::max(-kappa_max, amrex::min(kappa_max, kSN));
+
+            kappas(i,j,k,0) = kSN;
+            kappas(i,j,k,1) = kSN;
+            kappas(i,j,k,2) = 0.0;
+            kappa_sf(i,j,k) = kSN;
+        });
+    }
+
+    kappas_mf[lev]->FillBoundary(geom.periodicity());
 }
 
 
