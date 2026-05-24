@@ -13,7 +13,7 @@ plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_reflux
 amr.plot_dt = 0.25e-6
 # amr.plot_int = 1
 amr.max_grid_size = 500000
-amr.blocking_factor = 2
+amr.blocking_factor = 16
 amr.regrid_int = 4
 amr.grid_eff = 0.8
 amr.n_error_buf = 4
@@ -186,4 +186,4 @@ omega_relax = 0.5
 # Pe_CH = U*epsilon^2/(M*sigma), M = M0*epsilon^2, M0 ~ U/sigma.
 # With sigma = 0.025 N/m, M0 = 1025.239/0.025 = 4.10095716768e4
 # Mob = 4.1e4
-Mob = 2000.0
+Mob = 10000.0

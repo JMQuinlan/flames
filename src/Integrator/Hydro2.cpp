@@ -1086,6 +1086,7 @@ Hydro2::RHS(int lev,
         Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
 
+        const auto bx_lo = amrex::lbound(bx);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
@@ -1522,6 +1523,23 @@ Hydro2::RHS(int lev,
                 ff_mom_y(i, j, k, 0)  = flux_yhi.momentum_tangent;  // x-mom
                 ff_mom_y(i, j, k, 1)  = flux_yhi.momentum_normal;   // y-mom
                 ff_ene_y(i, j, k)     = flux_yhi.energy;
+
+                // Write lo-face fluxes into ghost cells at box boundaries.
+                // At coarse-fine interfaces FillBoundary has no neighbor to
+                // copy from, so the ghost would stay zero without this.
+                // At interior box boundaries FillBoundary overwrites later.
+                if (i == bx_lo.x) {
+                    ff_mass_x(i - 1, j, k)    = flux_xlo.mass;
+                    ff_mom_x(i - 1, j, k, 0)  = flux_xlo.momentum_normal;
+                    ff_mom_x(i - 1, j, k, 1)  = flux_xlo.momentum_tangent;
+                    ff_ene_x(i - 1, j, k)     = flux_xlo.energy;
+                }
+                if (j == bx_lo.y) {
+                    ff_mass_y(i, j - 1, k)    = flux_ylo.mass;
+                    ff_mom_y(i, j - 1, k, 0)  = flux_ylo.momentum_tangent;
+                    ff_mom_y(i, j - 1, k, 1)  = flux_ylo.momentum_normal;
+                    ff_ene_y(i, j - 1, k)     = flux_ylo.energy;
+                }
             }
 
             // ------------------------------------------------------------
