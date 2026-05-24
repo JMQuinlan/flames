@@ -7,7 +7,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = /mmfs1/home/spatel6/flames/bin/tests/output/Dodecane_Case_M6.5_Vap
-plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_M6_5
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_M6_5_fix
 
 ### MESHING ###
 amr.plot_dt = 0.25e-6
@@ -26,7 +26,7 @@ timestep = 1e-13
 ## Adaptive
 dynamictimestep.on = 1
 dynamictimestep.verbose = 1
-dynamictimestep.max = 2.5e-8
+dynamictimestep.max = 2.5e-7
 dynamictimestep.min = 1e-15
 cfl = 0.3
 

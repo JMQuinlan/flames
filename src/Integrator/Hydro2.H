@@ -58,7 +58,7 @@ public:
         delete density_bc;
         delete momentum_bc;
         delete energy_bc;
-        //delete eta_bc;
+        delete eta_bc;
         delete temperature_bc;
 
         /// Inital Conditions
@@ -297,7 +297,7 @@ protected:
     BC::BC<Set::Scalar>* density_bc = nullptr;
     BC::BC<Set::Scalar>* momentum_bc = nullptr;
     BC::BC<Set::Scalar>* energy_bc = nullptr;
-    //BC::BC<Set::Scalar>* eta_bc = nullptr;
+    BC::BC<Set::Scalar>* eta_bc = nullptr;
     BC::BC<Set::Scalar>* temperature_bc = nullptr;
 
     IC::IC<Set::Scalar>* velocity0_ic = nullptr;
