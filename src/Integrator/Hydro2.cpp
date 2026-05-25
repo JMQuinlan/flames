@@ -293,8 +293,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.pressure_mf,     value.energy_bc, 1, nghost, "pressure", true, false);
         value.RegisterNewFab(value.velocity_mf,     &value.bc_nothing,  2, nghost, "velocity", true, false, { "x", "y" });
         value.RegisterNewFab(value.vorticity_mf,    &value.bc_nothing,  1, 0, "vorticity", true, false);
-        value.RegisterNewFab(value.density_mf,      value.density_bc,   1, nghost, "density", true, true);
-        value.RegisterNewFab(value.density_old_mf,  value.density_bc,   1, nghost, "density_old", false, true);
+        value.RegisterNewFab(value.density_mf,      value.density_bc,   1, nghost, "density", true, false);
+        value.RegisterNewFab(value.density_old_mf,  value.density_bc,   1, nghost, "density_old", false, false);
         value.RegisterNewFab(value.energy_per_vol_mf,       value.energy_bc,    1, nghost, "energy_per_vol", true, true);
         value.RegisterNewFab(value.energy_per_mas_mf,       value.energy_bc,    1, nghost, "energy_per_mass", true, true);
         value.RegisterNewFab(value.energy_per_vol_old_mf,   value.energy_bc,    1, nghost, "energy_vol_old", false, true);
@@ -546,7 +546,7 @@ void Hydro2::Initialize(int lev)
     // Build FluxRegister for this level if it is a fine level.
     if (lev > 0)
     {
-        int ncomp_reflux = 1 + AMREX_SPACEDIM + 1; // mass + momentum + energy
+        int ncomp_reflux = 2 + AMREX_SPACEDIM + 1; // rho0 + rho1 + momentum + energy
         flux_reg[lev] = std::make_unique<amrex::FluxRegister>(
             ba_init, dm_init, refRatio(lev - 1), lev, ncomp_reflux);
     }
@@ -556,7 +556,7 @@ void Hydro2::Initialize(int lev)
     // for the cell-to-face conversion in Advance().
     for (int d = 0; d < AMREX_SPACEDIM; d++)
     {
-        cc_fluxes[lev].mass[d]   = std::make_unique<amrex::MultiFab>(ba_init, dm_init, 1, 1);
+        cc_fluxes[lev].mass[d]   = std::make_unique<amrex::MultiFab>(ba_init, dm_init, 2, 1);
         cc_fluxes[lev].mom[d]    = std::make_unique<amrex::MultiFab>(ba_init, dm_init, AMREX_SPACEDIM, 1);
         cc_fluxes[lev].energy[d] = std::make_unique<amrex::MultiFab>(ba_init, dm_init, 1, 1);
 
@@ -1484,14 +1484,16 @@ Hydro2::RHS(int lev,
             // -----------------------------------------------------------
             if (have_cc_fluxes)
             {
-                // x-direction hi-face: normal = x, tangent = y
-                ff_mass_x(i, j, k)    = flux_xhi.mass;
+                // x-direction hi-face: per-phase mass fluxes
+                ff_mass_x(i, j, k, 0) = eta_face_xhi * flux_xhi.mass;           // rho_eta0
+                ff_mass_x(i, j, k, 1) = (1.0 - eta_face_xhi) * flux_xhi.mass;  // rho_eta1
                 ff_mom_x(i, j, k, 0)  = flux_xhi.momentum_normal;   // x-mom
                 ff_mom_x(i, j, k, 1)  = flux_xhi.momentum_tangent;  // y-mom
                 ff_ene_x(i, j, k)     = flux_xhi.energy;
 
-                // y-direction hi-face: normal = y, tangent = x (swap to fixed x,y)
-                ff_mass_y(i, j, k)    = flux_yhi.mass;
+                // y-direction hi-face: per-phase mass fluxes (swap mom to fixed x,y)
+                ff_mass_y(i, j, k, 0) = eta_face_yhi * flux_yhi.mass;           // rho_eta0
+                ff_mass_y(i, j, k, 1) = (1.0 - eta_face_yhi) * flux_yhi.mass;  // rho_eta1
                 ff_mom_y(i, j, k, 0)  = flux_yhi.momentum_tangent;  // x-mom
                 ff_mom_y(i, j, k, 1)  = flux_yhi.momentum_normal;   // y-mom
                 ff_ene_y(i, j, k)     = flux_yhi.energy;
@@ -1501,13 +1503,15 @@ Hydro2::RHS(int lev,
                 // copy from, so the ghost would stay zero without this.
                 // At interior box boundaries FillBoundary overwrites later.
                 if (i == bx_lo.x) {
-                    ff_mass_x(i - 1, j, k)    = flux_xlo.mass;
+                    ff_mass_x(i - 1, j, k, 0) = eta_face_xlo * flux_xlo.mass;
+                    ff_mass_x(i - 1, j, k, 1) = (1.0 - eta_face_xlo) * flux_xlo.mass;
                     ff_mom_x(i - 1, j, k, 0)  = flux_xlo.momentum_normal;
                     ff_mom_x(i - 1, j, k, 1)  = flux_xlo.momentum_tangent;
                     ff_ene_x(i - 1, j, k)     = flux_xlo.energy;
                 }
                 if (j == bx_lo.y) {
-                    ff_mass_y(i, j - 1, k)    = flux_ylo.mass;
+                    ff_mass_y(i, j - 1, k, 0) = eta_face_ylo * flux_ylo.mass;
+                    ff_mass_y(i, j - 1, k, 1) = (1.0 - eta_face_ylo) * flux_ylo.mass;
                     ff_mom_y(i, j - 1, k, 0)  = flux_ylo.momentum_tangent;
                     ff_mom_y(i, j - 1, k, 1)  = flux_ylo.momentum_normal;
                     ff_ene_y(i, j - 1, k)     = flux_ylo.energy;
@@ -1756,7 +1760,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             amrex::BoxArray face_ba = cc_fluxes[lev].mass[d]->boxArray();
             face_ba.surroundingNodes(d);
             const amrex::DistributionMapping& dm_cc = cc_fluxes[lev].mass[d]->DistributionMap();
-            amrex::MultiFab face_mass(face_ba, dm_cc, 1, 0);
+            amrex::MultiFab face_mass(face_ba, dm_cc, 2, 0);
             amrex::MultiFab face_mom(face_ba, dm_cc, AMREX_SPACEDIM, 0);
             amrex::MultiFab face_ene(face_ba, dm_cc, 1, 0);
 
@@ -1779,7 +1783,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 amrex::ParallelFor(fbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                     int ii = (dd == 0) ? i - 1 : i;
                     int jj = (dd == 1) ? j - 1 : j;
-                    f_m(i, j, k) = cc_m(ii, jj, k);
+                    f_m(i, j, k, 0) = cc_m(ii, jj, k, 0);
+                    f_m(i, j, k, 1) = cc_m(ii, jj, k, 1);
                     for (int n = 0; n < AMREX_SPACEDIM; n++)
                         f_p(i, j, k, n) = cc_p(ii, jj, k, n);
                     f_e(i, j, k) = cc_e(ii, jj, k);
@@ -1795,15 +1800,15 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             if (need_crse)
             {
-                flux_reg[lev + 1]->CrseInit(face_mass, area_mf, d, 0, 0, 1, -dt);
-                flux_reg[lev + 1]->CrseInit(face_mom, area_mf, d, 0, 1, AMREX_SPACEDIM, -dt);
-                flux_reg[lev + 1]->CrseInit(face_ene, area_mf, d, 0, 1 + AMREX_SPACEDIM, 1, -dt);
+                flux_reg[lev + 1]->CrseInit(face_mass, area_mf, d, 0, 0, 2, -dt);
+                flux_reg[lev + 1]->CrseInit(face_mom, area_mf, d, 0, 2, AMREX_SPACEDIM, -dt);
+                flux_reg[lev + 1]->CrseInit(face_ene, area_mf, d, 0, 2 + AMREX_SPACEDIM, 1, -dt);
             }
             if (need_fine)
             {
-                flux_reg[lev]->FineAdd(face_mass, area_mf, d, 0, 0, 1, dt);
-                flux_reg[lev]->FineAdd(face_mom, area_mf, d, 0, 1, AMREX_SPACEDIM, dt);
-                flux_reg[lev]->FineAdd(face_ene, area_mf, d, 0, 1 + AMREX_SPACEDIM, 1, dt);
+                flux_reg[lev]->FineAdd(face_mass, area_mf, d, 0, 0, 2, dt);
+                flux_reg[lev]->FineAdd(face_mom, area_mf, d, 0, 2, AMREX_SPACEDIM, dt);
+                flux_reg[lev]->FineAdd(face_ene, area_mf, d, 0, 2 + AMREX_SPACEDIM, 1, dt);
             }
         }
     }
@@ -2070,7 +2075,7 @@ void Hydro2::Regrid(int lev, Set::Scalar regrid_time)
     // Rebuild FluxRegister on regridded level.
     if (lev > 0)
     {
-        int ncomp_reflux = 1 + AMREX_SPACEDIM + 1;
+        int ncomp_reflux = 2 + AMREX_SPACEDIM + 1;
         flux_reg[lev] = std::make_unique<amrex::FluxRegister>(
             ba_reg, dm_reg, refRatio(lev - 1), lev, ncomp_reflux);
     }
@@ -2078,7 +2083,7 @@ void Hydro2::Regrid(int lev, Set::Scalar regrid_time)
     // Rebuild cell-centered flux storage (1 ghost for FillBoundary in Advance).
     for (int d = 0; d < AMREX_SPACEDIM; d++)
     {
-        cc_fluxes[lev].mass[d]   = std::make_unique<amrex::MultiFab>(ba_reg, dm_reg, 1, 1);
+        cc_fluxes[lev].mass[d]   = std::make_unique<amrex::MultiFab>(ba_reg, dm_reg, 2, 1);
         cc_fluxes[lev].mom[d]    = std::make_unique<amrex::MultiFab>(ba_reg, dm_reg, AMREX_SPACEDIM, 1);
         cc_fluxes[lev].energy[d] = std::make_unique<amrex::MultiFab>(ba_reg, dm_reg, 1, 1);
 
@@ -3721,19 +3726,27 @@ void Hydro2::PostSubcycleReflux(int lev, Set::Scalar /*time*/, Set::Scalar /*dt_
     //   fine_flux * dt_fine  (positive, from FineAdd across all sub-steps)
     //   coarse_flux * dt_coarse (negative, from CrseInit)
     // Reflux() applies:  U_coarse += scale * (1/vol) * sum_faces(register)
+    // Register layout: [rho_eta0, rho_eta1, mom_x, mom_y, energy]
 
-    // Reflux into total density
-    flux_reg[fine_lev]->Reflux(*density_mf[lev],
+    // Reflux per-phase densities directly
+    flux_reg[fine_lev]->Reflux(*rho_eta0_mf[lev],
                                1.0,        // scale
-                               0,          // src component in register (mass)
+                               0,          // src component in register
                                0,          // dst component
                                1,          // ncomp
+                               geom[lev]);
+
+    flux_reg[fine_lev]->Reflux(*rho_eta1_mf[lev],
+                               1.0,
+                               1,          // src component in register
+                               0,          // dst component
+                               1,
                                geom[lev]);
 
     // Reflux momentum
     flux_reg[fine_lev]->Reflux(*momentum_mf[lev],
                                1.0,
-                               1,          // src component in register
+                               2,          // src component in register
                                0,          // dst component
                                AMREX_SPACEDIM,
                                geom[lev]);
@@ -3741,26 +3754,23 @@ void Hydro2::PostSubcycleReflux(int lev, Set::Scalar /*time*/, Set::Scalar /*dt_
     // Reflux energy
     flux_reg[fine_lev]->Reflux(*energy_per_vol_mf[lev],
                                1.0,
-                               1 + AMREX_SPACEDIM,  // src component in register
+                               2 + AMREX_SPACEDIM,  // src component in register
                                0,                    // dst component
                                1,
                                geom[lev]);
 
-    // After refluxing, re-partition rho_eta0/rho_eta1 and recompute velocity
-    // from the corrected conserved variables so output is consistent.
+    // Recompute derived fields from the refluxed conserved variables.
     for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
         auto rho  = density_mf[lev]->array(mfi);
-        auto eta  = eta_mf[lev]->array(mfi);
         auto rho0 = rho_eta0_mf[lev]->array(mfi);
         auto rho1 = rho_eta1_mf[lev]->array(mfi);
         auto mom  = momentum_mf[lev]->array(mfi);
         auto vel  = velocity_mf[lev]->array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            rho0(i, j, k) = rho(i, j, k) * eta(i, j, k);
-            rho1(i, j, k) = rho(i, j, k) * (1.0 - eta(i, j, k));
+            rho(i, j, k) = rho0(i, j, k) + rho1(i, j, k);
             vel(i, j, k, 0) = mom(i, j, k, 0) / rho(i, j, k);
             vel(i, j, k, 1) = mom(i, j, k, 1) / rho(i, j, k);
         });
