@@ -7,7 +7,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = /mmfs1/home/spatel6/flames/bin/tests/output/Dodecane_Case_M6.5_Vap
-plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_reflux
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane
 
 ### MESHING ###
 amr.plot_dt = 0.25e-6
@@ -172,7 +172,10 @@ Spec_Vol = 1
 grav = 9.81
 
 ### DEBUGGING ###
-Riemann_Solver.type = hllc
+# Riemann_Solver.type = hllc
+# Riemann_Solver.type = hll
+Riemann_Solver.type = hllc_lm
+Riemann_Solver.ma_limit = 2.5 # transverse Ma limit below which HLLC_LM damps more
 kappa_method = 1
 smooth_kernel_size = 3
 

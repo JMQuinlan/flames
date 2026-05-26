@@ -22,6 +22,7 @@
 #include "Solver/Local/FluidRiemann/HLLC_Oomar_Jaiman.H"
 #include "Solver/Local/FluidRiemann/HLLC_All_Mach.H"
 #include "Solver/Local/FluidRiemann/HLLC_All_Mach_Furfaro.H"
+#include "Solver/Local/FluidRiemann/HLLC_LM.H"
 //#include "Solver/Local/FluidRiemann/HLLC_WENO5.H"
 //#include "Solver/Local/FluidRiemann/HLLE_WENO5.H"
 #include "Solver/Local/FluidRiemann/HLLCE.H"
@@ -426,7 +427,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                       //Solver::Local::FluidRiemann::PartiallyParabolic, // WIP - very outdated - never verified
                       Solver::Local::FluidRiemann::HLLC_Oomar_Jaiman, // Can't remember if this has been verified
                       Solver::Local::FluidRiemann::HLLC_All_Mach,
-                      Solver::Local::FluidRiemann::HLLC_All_Mach_Furfaro
+                      Solver::Local::FluidRiemann::HLLC_All_Mach_Furfaro,
+                      Solver::Local::FluidRiemann::HLLC_LM
                       //Solver::Local::FluidRiemann::Upwind,
                       //Solver::Local::FluidRiemann::Lax_Friedrich
     >("Riemann_Solver", value.riemannsolver);
