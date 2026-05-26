@@ -176,6 +176,8 @@ grav = 9.81
 Riemann_Solver.type = hll
 # Riemann_Solver.type = hllc_lm
 # Riemann_Solver.ma_limit = 0.1 # transverse Ma limit below which HLLC_LM damps more
+# Riemann_Solver.type = hllc_adc
+# Riemann_Solver.alpha = 25.0
 kappa_method = 1
 smooth_kernel_size = 3
 

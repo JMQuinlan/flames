@@ -23,6 +23,7 @@
 #include "Solver/Local/FluidRiemann/HLLC_All_Mach.H"
 #include "Solver/Local/FluidRiemann/HLLC_All_Mach_Furfaro.H"
 #include "Solver/Local/FluidRiemann/HLLC_LM.H"
+#include "Solver/Local/FluidRiemann/HLLC_ADC.H"
 //#include "Solver/Local/FluidRiemann/HLLC_WENO5.H"
 //#include "Solver/Local/FluidRiemann/HLLE_WENO5.H"
 #include "Solver/Local/FluidRiemann/HLLCE.H"
@@ -428,7 +429,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                       Solver::Local::FluidRiemann::HLLC_Oomar_Jaiman, // Can't remember if this has been verified
                       Solver::Local::FluidRiemann::HLLC_All_Mach,
                       Solver::Local::FluidRiemann::HLLC_All_Mach_Furfaro,
-                      Solver::Local::FluidRiemann::HLLC_LM
+                      Solver::Local::FluidRiemann::HLLC_LM,
+                      Solver::Local::FluidRiemann::HLLC_ADC
                       //Solver::Local::FluidRiemann::Upwind,
                       //Solver::Local::FluidRiemann::Lax_Friedrich
     >("Riemann_Solver", value.riemannsolver);
@@ -1428,6 +1430,39 @@ Hydro2::RHS(int lev,
                 // limiter_vanleer->reconstructCharacteristicStates(x_states, x_leftStates, x_rightStates, pref, small);
                 // limiter_vanleer->reconstructCharacteristicStates(y_states, y_leftStates, y_rightStates, pref, small);
             }
+
+            // Populate the perpendicular-neighbor pressures on each face state.
+            // Consumed by shock-aware solvers (HLLC-ADC) for the multidim sensor;
+            // ignored by all other solvers. For an x-face the perpendiculars are
+            // y-neighbors; for a y-face they are x-neighbors.
+            // x-face at i-1/2: L is cell (i-1,j), R is cell (i,j)
+            x_leftStates[1].p_cell    = press(i - 1, j, k);
+            x_leftStates[1].p_perp_lo = press(i - 1, j - 1, k);
+            x_leftStates[1].p_perp_hi = press(i - 1, j + 1, k);
+            x_rightStates[1].p_cell    = press(i, j, k);
+            x_rightStates[1].p_perp_lo = press(i, j - 1, k);
+            x_rightStates[1].p_perp_hi = press(i, j + 1, k);
+            // x-face at i+1/2: L is cell (i,j), R is cell (i+1,j)
+            x_leftStates[2].p_cell    = press(i, j, k);
+            x_leftStates[2].p_perp_lo = press(i, j - 1, k);
+            x_leftStates[2].p_perp_hi = press(i, j + 1, k);
+            x_rightStates[2].p_cell    = press(i + 1, j, k);
+            x_rightStates[2].p_perp_lo = press(i + 1, j - 1, k);
+            x_rightStates[2].p_perp_hi = press(i + 1, j + 1, k);
+            // y-face at j-1/2: L is cell (i,j-1), R is cell (i,j)
+            y_leftStates[1].p_cell    = press(i, j - 1, k);
+            y_leftStates[1].p_perp_lo = press(i - 1, j - 1, k);
+            y_leftStates[1].p_perp_hi = press(i + 1, j - 1, k);
+            y_rightStates[1].p_cell    = press(i, j, k);
+            y_rightStates[1].p_perp_lo = press(i - 1, j, k);
+            y_rightStates[1].p_perp_hi = press(i + 1, j, k);
+            // y-face at j+1/2: L is cell (i,j), R is cell (i,j+1)
+            y_leftStates[2].p_cell    = press(i, j, k);
+            y_leftStates[2].p_perp_lo = press(i - 1, j, k);
+            y_leftStates[2].p_perp_hi = press(i + 1, j, k);
+            y_rightStates[2].p_cell    = press(i, j + 1, k);
+            y_rightStates[2].p_perp_lo = press(i - 1, j + 1, k);
+            y_rightStates[2].p_perp_hi = press(i + 1, j + 1, k);
 
             // Calculate fluxes using the mixed fluid approach
             Solver::Local::FluidRiemann::Flux flux_xlo, flux_ylo, flux_xhi, flux_yhi;

@@ -20,6 +20,15 @@ struct State
     Set::Scalar gam = NAN;
     Set::Scalar p0 = NAN;
     Set::Scalar T = NAN;
+    // Optional per-state cell-centered pressure and pressures at the two
+    // perpendicular-direction neighbors of this state's cell. Only consumed by
+    // shock-aware solvers (e.g. HLLC-ADC) that need a multidimensional pressure-
+    // ratio sensor. Values <= 0 indicate "not set" and the solver should fall
+    // back to a single-face sensor. NOT included in the arithmetic operators
+    // since they are sensor metadata, not advected primitives.
+    Set::Scalar p_cell    = 0.0; // pressure at this state's cell center
+    Set::Scalar p_perp_lo = 0.0; // pressure at cell (i,j-1) for x-face, (i-1,j) for y-face
+    Set::Scalar p_perp_hi = 0.0; // pressure at cell (i,j+1) for x-face, (i+1,j) for y-face
 
     // Default constructor
     State()
