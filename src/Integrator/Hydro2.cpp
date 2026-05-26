@@ -16,6 +16,7 @@
 #include "IC/PNG.H"
 // Solvers
 #include "Solver/Local/FluidRiemann/Roe.H"
+#include "Solver/Local/FluidRiemann/HLL.H"
 #include "Solver/Local/FluidRiemann/HLLE.H"
 #include "Solver/Local/FluidRiemann/HLLC.H"
 #include "Solver/Local/FluidRiemann/HLLC_Oomar_Jaiman.H"
@@ -417,6 +418,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.query("Riemann_Solver.type", solver_name);
     Util::Message(INFO, "Input file has Riemann_Solver.type = ", solver_name);
     pp.select_default<Solver::Local::FluidRiemann::Roe,
+                      Solver::Local::FluidRiemann::HLL,
                       Solver::Local::FluidRiemann::HLLE,
                       Solver::Local::FluidRiemann::HLLC,
                       Solver::Local::FluidRiemann::HLLCE,
