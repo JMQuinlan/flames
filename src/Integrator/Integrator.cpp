@@ -394,7 +394,8 @@ void  // CUSTOM METHOD - CHANGEABLE
 Integrator::FillPatch(int lev, amrex::Real time,
     amrex::Vector<std::unique_ptr<amrex::MultiFab>>& source_mf,
     amrex::MultiFab& destination_mf,
-    BC::BC<Set::Scalar>& physbc, int icomp)
+    BC::BC<Set::Scalar>& physbc, int icomp,
+    amrex::Interpolater* mapper_override)
 {
     BL_PROFILE("Integrator::FillPatch");
     if (lev == 0)
@@ -410,7 +411,7 @@ Integrator::FillPatch(int lev, amrex::Real time,
             time,                         // time
             smf,                // Vector<MultiFab*> &smf (CONST)
             stime,          // Vector<Real> &stime    (CONST)
-            0,              // scomp - Source component 
+            0,              // scomp - Source component
             icomp,          // dcomp - Destination component
             destination_mf.nComp(), // ncomp - Number of components
             geom[lev],          // Geometry (CONST)
@@ -428,12 +429,14 @@ Integrator::FillPatch(int lev, amrex::Real time,
 
         physbc.define(geom[lev]);
 
-        amrex::Interpolater* mapper;
-
-        if (destination_mf.boxArray().ixType() == amrex::IndexType::TheNodeType())
-            mapper = &amrex::node_bilinear_interp;
-        else
-            mapper = &amrex::cell_cons_interp;
+        amrex::Interpolater* mapper = mapper_override;
+        if (mapper == nullptr)
+        {
+            if (destination_mf.boxArray().ixType() == amrex::IndexType::TheNodeType())
+                mapper = &amrex::node_bilinear_interp;
+            else
+                mapper = &amrex::cell_cons_interp;
+        }
 
         amrex::Vector<amrex::BCRec> bcs(destination_mf.nComp(), physbc.GetBCRec()); // todo
         amrex::FillPatchTwoLevels(destination_mf, time, cmf, ctime, fmf, ftime,
@@ -1240,6 +1243,12 @@ Integrator::TimeStep(int lev, amrex::Real time, int /*iteration*/)
     {
         for (int i = 1; i <= nsubsteps[lev + 1]; ++i)
             TimeStep(lev + 1, time + (i - 1) * dt[lev + 1], i);
+
+        // Conservative flux correction at the coarse-fine boundary.
+        // Derived integrators that wire amrex::FluxRegister fix up the
+        // coarse cells adjacent to the fine grids here, BEFORE average_down
+        // overwrites the coarse interior with fine averages.
+        Reflux(lev);
 
         for (int n = 0; n < cell.number_of_fabs; n++)
         {
