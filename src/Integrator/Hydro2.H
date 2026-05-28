@@ -89,6 +89,7 @@ public:
 
         delete riemannsolver;
         delete riemannsolver7;
+        delete hll_solver;
         delete nscbc7_bc;
     }
 
@@ -103,6 +104,7 @@ protected:
     void PostSubcycleReflux(int lev, Set::Scalar time, Set::Scalar dt_coarse) override;
     void RHS(int lev,
         Set::Scalar time,
+        Set::Scalar dt,
         amrex::MultiFab &rho_eta0_rhs_mf,
         amrex::MultiFab &rho_eta1_rhs_mf,
         amrex::MultiFab &M_rhs_mf,
@@ -400,6 +402,14 @@ protected:
     // Set via Riemann_Solver.alpha (same key consumed by the HLLC_ADC solver).
     Set::Scalar omega_adc_alpha = 3.0;
 
+    // Positivity-preserving flux limiter (Hu-Adams-Shu 2013, building on
+    // Perthame-Shu 1996 / Zhang-Shu 2010). Blends the selected Riemann flux
+    // toward the HLL flux per face so the Forward-Euler update keeps every cell
+    // in the admissible set { rho > eps_rho, p + p0 >= eps_p }.
+    int pp_flux_limiter = 1;
+    Set::Scalar eps_p = NAN;    // pressure floor (on p + p0_eff)
+    Set::Scalar eps_rho = NAN;  // density floor
+
     // Adaptive Timestep
     bool adaptive_timestep = false;
     Set::Scalar dt_min = NAN, dt_max = NAN, dt_growth = NAN;
@@ -412,6 +422,8 @@ protected:
     // Solvers
     Solver::Local::FluidRiemann::FluidRiemann  *riemannsolver  = nullptr; // 5-eqn
     Solver::Local::FluidRiemann::FluidRiemann7 *riemannsolver7 = nullptr; // 7-eqn (Phase C)
+    // Low-order, positivity-preserving flux for the PP flux limiter (always HLL).
+    Solver::Local::FluidRiemann::FluidRiemann  *hll_solver     = nullptr;
 
     // IntegrationScheme
     enum IntegrationScheme
@@ -460,6 +472,24 @@ protected:
         amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> energy;
     };
     amrex::Vector<CellFluxes> cc_fluxes;  // indexed by level
+
+    // ------------------------------------------------------------------
+    // Scratch storage for the positivity-preserving flux limiter.
+    // All cell-centered, storing the hi-face value (cell i holds face i+1/2
+    // for direction d), 1 ghost so FillBoundary supplies each cell's lo-face.
+    //   Fhi[d]: high-order (selected solver) flux, 5 comp = mass, x-mom,
+    //           y-mom (fixed frame), energy, u_interface.
+    //   Flo[d]: low-order HLL flux, 4 comp = mass, x-mom, y-mom, energy.
+    //   Bbase : source-inclusive low-order baseline, 4 comp = rho, Mx, My, E.
+    //   theta : per-face blend factor, AMREX_SPACEDIM comp (theta at i+1/2, j+1/2).
+    // ------------------------------------------------------------------
+    struct LimiterScratch {
+        amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> Fhi;
+        amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> Flo;
+        std::unique_ptr<amrex::MultiFab> Bbase;
+        std::unique_ptr<amrex::MultiFab> theta;
+    };
+    amrex::Vector<LimiterScratch> pp_scratch;  // indexed by level
 
     // ========================================================================
     // 7-EQUATION SWITCHES (Phase A scaffolding)

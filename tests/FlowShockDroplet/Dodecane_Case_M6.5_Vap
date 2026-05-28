@@ -7,7 +7,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = /mmfs1/home/spatel6/flames/bin/tests/output/Dodecane_Case_M6.5_Vap
-plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_initP
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_limiter
 
 ### MESHING ###
 amr.plot_dt = 0.25e-6
@@ -162,6 +162,14 @@ gradu_refinement_criterion = 5e+2
 cutoff = 1e-16
 small = 1e-6;
 
+### POSITIVITY-PRESERVING FLUX LIMITER (Hu-Adams-Shu) ###
+# Blends the selected (HLLC-ADC) flux toward HLL per face so the Forward-Euler
+# update keeps rho > eps_rho and p + p0 >= eps_p. Set pp_flux_limiter = 0 to
+# disable and recover the unlimited high-order flux.
+pp_flux_limiter = 1
+eps_p = 1.0
+eps_rho = 1e-10
+
 ### SOURCE TERMS ###
 m0.ic.constant.value = 0.0
 u0.ic.constant.value = 0.0 0.0
@@ -177,10 +185,10 @@ grav = 9.81
 
 ### DEBUGGING ###
 # Riemann_Solver.type = hllc
-Riemann_Solver.type = hll
+# Riemann_Solver.type = hll
 # Riemann_Solver.type = hllc_lm
 # Riemann_Solver.ma_limit = 0.1 # transverse Ma limit below which HLLC_LM damps more
-# Riemann_Solver.type = hllc_adc
+Riemann_Solver.type = hllc_adc
 Riemann_Solver.alpha = 5
 kappa_method = 1
 smooth_kernel_size = 3
@@ -197,4 +205,4 @@ omega_relax = 0.5
 # With sigma = 0.025 N/m, M0 = 1025.239/0.025 = 4.10095716768e4
 # Mob = 4.1e4
 # Mob = 4000.0
-Mob = 100.0
+Mob = 500.0
