@@ -100,15 +100,6 @@ protected:
     void Advance(int lev, Set::Scalar time, Set::Scalar dt) override;
     void TagCellsForRefinement(int lev, amrex::TagBoxArray& tags, amrex::Real /*time*/, int /*ngrow*/) override;
     void Regrid(int lev, Set::Scalar time) override;
-    void Reflux(int lev) override;
-
-    // Compute face-centered Riemann fluxes for the 5 conserved variables
-    // (alpha_rho_0, alpha_rho_1, M_x, M_y, E_total) from the current state
-    // at level lev, store them in the face-centered MultiFabs face_flux_x_mf
-    // / face_flux_y_mf, and accumulate them into the FluxRegister(s) with
-    // the supplied weight (which is the level dt for a Forward-Euler-style
-    // reflux correction).
-    void ComputeAndAccumulateFaceFluxes(int lev, Set::Scalar weight);
     // RHS signature carries the 6-equation primaries:
     //   eta              = alpha_1
     //   rho_eta{0,1}     = (alpha_k rho_k)  (canonical phase mass, NOT rho*eta)
@@ -421,34 +412,6 @@ protected:
 
     // NGHOST
     int nghost = 2;
-
-    // ------------------------------------------------------------------
-    // AMR conservative flux reflux machinery
-    // ------------------------------------------------------------------
-    // Bundle the 5 conserved variables (alpha_rho_0, alpha_rho_1, M_x,
-    // M_y, E_total) into a single FluxRegister per fine level. Component
-    // ordering is fixed across face_flux_x_mf / face_flux_y_mf and the
-    // FluxRegister so Reflux can correct all of them in one pass.
-    static constexpr int n_conserved = 5;
-    enum ConservedIdx
-    {
-        IDX_RHO_ETA0 = 0,
-        IDX_RHO_ETA1 = 1,
-        IDX_M_X      = 2,
-        IDX_M_Y      = 3,
-        IDX_E        = 4
-    };
-
-    // flux_reg[lev] holds the flux mismatch on the boundary between the
-    // coarse level (lev-1) and the fine level (lev). It is allocated lazily
-    // in Regrid(lev) whenever lev > 0 and finest_level is at least lev.
-    amrex::Vector<std::unique_ptr<amrex::FluxRegister>> flux_reg;
-
-    // Face-centered Riemann flux scratch storage for the 5 conserved
-    // variables. Recomputed every coarse step from the post-step state
-    // for the FluxRegister CrseInit/FineAdd accumulation.
-    amrex::Vector<amrex::MultiFab> face_flux_x_mf;
-    amrex::Vector<amrex::MultiFab> face_flux_y_mf;
 
     // Newton diagnostic for RelaxAndReinit.
     //   relax_diag = 0  : off (default; no diagnostic overhead)

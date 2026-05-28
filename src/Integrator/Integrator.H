@@ -189,14 +189,6 @@ protected:
     virtual void Regrid(int /* amrlev */, Set::Scalar /* time */)
     {}
 
-    /// Optional reflux hook. Called from TimeStep after the fine-level
-    /// subcycling at level lev+1 has completed and the average_down has
-    /// synced level lev with level lev+1. Derived integrators that use
-    /// amrex::FluxRegister should override this to apply the accumulated
-    /// flux correction to the conserved variables on level lev.
-    virtual void Reflux(int /* lev */)
-    {}
-
 
     inline void StopClock()
     {
@@ -381,8 +373,7 @@ protected:
         amrex::Vector<std::unique_ptr<amrex::MultiFab>>& source_mf,
         amrex::MultiFab& destination_multifab,
         BC::BC<Set::Scalar>& physbc,
-        int icomp,
-        amrex::Interpolater* mapper_override = nullptr);
+        int icomp);
 
 private:
     /// Simple utility to count cells

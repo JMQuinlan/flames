@@ -8,9 +8,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = ./tests/FlowShockDroplet/output_Shock1mmDroplet
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_amr
-#plot_file = /mmfs1/home/spatel6/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet
+plot_file = ./tests/FlowShockDroplet/output_Shock1mmDroplet_amr
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_amr
 
 ### MESHING ###
 amr.plot_dt = 0.5e-6
@@ -32,6 +31,7 @@ dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-4
 dynamictimestep.min = 1e-10
 cfl = 0.3
+nghost = 4
 
 ### DIMENSIONS ###
 geometry.prob_lo = -0.005 -0.005 0.0  # 1/4 tube left of droplet
