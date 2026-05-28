@@ -74,15 +74,16 @@ static Set::Scalar SpaldingBM(Set::Scalar Y_local, Set::Scalar Y_inf, Set::Scala
 // Per-cell scaling factor for the Hu-Adams-Shu positivity-preserving flux
 // limiter. Returns the largest theta in [0,1] such that the trial conserved
 // state  U(theta) = B + theta * (s * dF)  stays in the admissible set
-//   G = { rho >= eps_rho,  p + p0_eff >= eps_p }.
+//   G = { rho >= eps_rho,  p >= eps_p }   (eps_p = floor on absolute pressure).
 // B = (rho, Mx, My, E) is the source-inclusive low-order baseline for the cell,
 // dF = (mass, Mx, My, E) is the high-minus-low face flux correction, and s folds
 // in the convexity-split factor and signed lambda = ± (2*DIM) * dt/dx_dir.
 //
 // Density is a linear constraint; internal energy UE = E - |M|^2/(2 rho) is
 // concave along the line in theta, so with h(0) >= 0 (baseline in G) a single
-// bisection brackets the largest safe theta. p + p0 >= eps_p is equivalent to
-// UE >= ue_floor = p0_eff + (eps_p - pref)/(gamma_eff - 1) for frozen mixture
+// bisection brackets the largest safe theta. The absolute-pressure floor
+// p >= eps_p is equivalent to UE >= ue_floor =
+// (eps_p + gamma_eff*p0_eff - pref)/(gamma_eff - 1) for frozen mixture
 // gamma_eff, p0_eff.  (Perthame-Shu 1996; Zhang-Shu 2010; Hu-Adams-Shu 2013.)
 // ----------------------------------------------------------------------------
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
@@ -97,7 +98,7 @@ static Set::Scalar PPThetaCell(const Set::Scalar B[4], Set::Scalar s, const Set:
     const Set::Scalar V3 = s * dF[3]; // E
 
     const Set::Scalar r0 = B[0];
-    const Set::Scalar ue_floor = p0_eff + (eps_p - pref) / (gamma_eff - 1.0);
+    const Set::Scalar ue_floor = (eps_p + gamma_eff * p0_eff - pref) / (gamma_eff - 1.0);
 
     // Internal energy along the line; valid only where density stays positive.
     auto UE = [&](Set::Scalar t) -> Set::Scalar {
@@ -160,7 +161,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // Positivity-preserving flux limiter (Hu-Adams-Shu)
         pp_query_default("pp_flux_limiter", value.pp_flux_limiter, 1); // 1: on, 0: off
-        pp_query_default("eps_p", value.eps_p, 1.0);          // pressure floor on (p + p0_eff)
+        pp_query_default("eps_p", value.eps_p, 1.0);          // floor on absolute pressure p
         pp_query_default("eps_rho", value.eps_rho, 1.0E-10);  // density floor
         pp_query_default("lagrange", value.lagrange, 0.0);  // lagrange no-penetration factor
         pp_query_default("grav", value.g, 9.81);            // Gravitational Acceletation
@@ -2385,13 +2386,15 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             UE_vol(i,j,k) = E_vol(i,j,k) - KE_vol(i,j,k);
 
             // EOS-aware positivity backstop (final safety net behind the PP flux
-            // limiter). Enforce p + p0_eff >= eps_p, i.e.
-            //   UE_vol >= p0_eff + (eps_p - pref)/(gamma_eff - 1).
-            // For the stiffened-gas liquid this floor is ~gamma*p0/(gamma-1),
-            // not 0, so the old UE_vol<0 clip was EOS-inconsistent there.
+            // limiter). Enforce absolute p >= eps_p, i.e.
+            //   UE_vol >= (eps_p + gamma_eff*p0_eff - pref)/(gamma_eff - 1).
+            // Flooring the physical pressure (not p + p0_eff) gives both phases a
+            // sensible floor: gas p >= eps_p, and the stiffened liquid p >= eps_p
+            // instead of eps_p - p0_eff (~ -400 MPa), which let the reflected shock
+            // drive huge unphysical tension before the floor fired.
             p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
             {
-                Set::Scalar ue_floor = p0_eff(i, j, k) + (eps_p - pref) / (gammaf(i, j, k) - 1.0);
+                Set::Scalar ue_floor = (eps_p + gammaf(i, j, k) * p0_eff(i, j, k) - pref) / (gammaf(i, j, k) - 1.0);
                 UE_vol(i, j, k) = std::max(UE_vol(i, j, k), ue_floor);
             }
             E_mas(i,j,k) = E_vol(i,j,k) / (rho(i,j,k) + small);

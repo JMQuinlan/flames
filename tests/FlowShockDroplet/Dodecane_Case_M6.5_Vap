@@ -16,7 +16,7 @@ amr.max_grid_size = 500000
 amr.blocking_factor = 16
 amr.regrid_int = 4
 amr.grid_eff = 0.8
-amr.n_error_buf = 8
+amr.n_error_buf = 4
 amr.max_level = 3
 amr.n_cell = 1024 256
 
@@ -164,7 +164,9 @@ small = 1e-6;
 
 ### POSITIVITY-PRESERVING FLUX LIMITER (Hu-Adams-Shu) ###
 # Blends the selected (HLLC-ADC) flux toward HLL per face so the Forward-Euler
-# update keeps rho > eps_rho and p + p0 >= eps_p. Set pp_flux_limiter = 0 to
+# update keeps rho > eps_rho and absolute pressure p >= eps_p. eps_p floors the
+# physical pressure (not p + p0_eff), so the stiffened liquid is held at p >= eps_p
+# rather than eps_p - p0_eff (~ -400 MPa). Set pp_flux_limiter = 0 to
 # disable and recover the unlimited high-order flux.
 pp_flux_limiter = 1
 eps_p = 1.0
@@ -189,7 +191,7 @@ grav = 9.81
 # Riemann_Solver.type = hllc_lm
 # Riemann_Solver.ma_limit = 0.1 # transverse Ma limit below which HLLC_LM damps more
 Riemann_Solver.type = hllc_adc
-Riemann_Solver.alpha = 5
+Riemann_Solver.alpha = 12
 kappa_method = 1
 smooth_kernel_size = 3
 
@@ -205,4 +207,4 @@ omega_relax = 0.5
 # With sigma = 0.025 N/m, M0 = 1025.239/0.025 = 4.10095716768e4
 # Mob = 4.1e4
 # Mob = 4000.0
-Mob = 500.0
+Mob = 1000.0
