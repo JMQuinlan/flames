@@ -410,6 +410,15 @@ protected:
     Set::Scalar eps_p = NAN;    // pressure floor (on p + p0_eff)
     Set::Scalar eps_rho = NAN;  // density floor
 
+    // HLLC-ADC carbuncle cure driven by a Ducros-weighted div(u) compression
+    // shock tag (carbuncles are pressure-quiet, so the internal pressure-ratio
+    // sensor misses them). A cell is tagged when the sensor exceeds
+    // adc_shock_threshold, then the tag is grown by adc_grow cells so the HLL
+    // dissipation covers the post-shock band. adc_grow < 0 disables the tag and
+    // falls back to the solver's pressure-ratio omega.
+    Set::Scalar adc_shock_threshold = 0.05;
+    int adc_grow = 1;
+
     // Adaptive Timestep
     bool adaptive_timestep = false;
     Set::Scalar dt_min = NAN, dt_max = NAN, dt_growth = NAN;

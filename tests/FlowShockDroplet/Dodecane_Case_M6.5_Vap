@@ -192,6 +192,22 @@ grav = 9.81
 # Riemann_Solver.ma_limit = 0.1 # transverse Ma limit below which HLLC_LM damps more
 Riemann_Solver.type = hllc_adc
 Riemann_Solver.alpha = 12
+# 2 = Simon & Mandal paper-faithful cure (blend mass + normal momentum only).
+# 4 = also blend tangential momentum + energy toward HLL at shocks. 4 is a near
+# no-op for a clean shock (HLLC ~ HLL there) and just smears shear/contacts, so
+# keep 2; the carbuncle cure comes from the div(u) shock tag + grow cells below.
+Riemann_Solver.adc_components = 2
+
+# Carbuncle cure: locate the shock with a Ducros-weighted div(u) compression
+# sensor (not the pressure jump, which is carbuncle-quiet), tag cells above
+# adc_shock_threshold, then grow the tag by adc_grow cells so the full-HLL
+# dissipation covers the post-shock band. Tagged faces use omega = 0 (HLL on
+# mass + normal momentum), untagged faces use omega = 1 (full HLLC). Set
+# adc_grow = -1 to disable and fall back to the pressure-ratio sensor.
+adc_shock_threshold = 0.025
+adc_grow = 64
+
+# Surface tension nhat calc adjustments
 kappa_method = 1
 smooth_kernel_size = 3
 

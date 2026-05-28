@@ -17,6 +17,14 @@
 //          F^ADC_momtan   = F_HLLC_momtan        (unmodified)
 //          F^ADC_energy   = F_HLLC_energy        (unmodified)
 //
+//      For strong shocks (high Mach, stiffened two-phase) the partial cure can
+//      leave enough antidiffusion in the energy and tangential-momentum fluxes
+//      to keep feeding a carbuncle even though omega -> 0. Setting
+//      adc_components = 4 extends the same omega blend to those two components,
+//      so omega -> 0 yields a genuine HLL flux on all four; omega -> 1 still
+//      recovers full HLLC away from shocks. adc_components = 2 (default) is the
+//      paper-faithful cure.
+//
 //      Pressure-ratio sensor (Simon & Mandal Eqs. 49-50):
 //          omega = ( min_k f_k )^alpha,   f_k = min(p_R^k, p_L^k) / max(p_R^k, p_L^k)
 //      with alpha = 3 recommended by the paper for stability over a wide Mach
@@ -82,9 +90,21 @@ public:
     // minimum to render the scheme strictly stable.
     Set::Scalar alpha = 3.0;
 
+    // Number of flux components the omega switch is applied to at a shock.
+    //   2 = Simon & Mandal's paper-faithful cure: blend only mass and normal
+    //       momentum toward HLL; tangential momentum and energy stay full HLLC.
+    //   4 = full-HLL cure: also blend tangential momentum and energy, so
+    //       omega -> 0 yields a genuine HLL flux on all components. This adds
+    //       the extra dissipation needed for strong (high-Mach, stiffened
+    //       two-phase) shocks where the partial cure leaves enough
+    //       antidiffusion in the energy/tangential fluxes to feed a carbuncle.
+    // Away from shocks omega -> 1, so both settings recover full HLLC there.
+    int adc_components = 2;
+
     static void Parse(HLLC_ADC &value, IO::ParmParse &pp)
     {
         pp.query_default("alpha", value.alpha, 3.0);
+        pp.query_default("adc_components", value.adc_components, 2);
     }
 
     virtual Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1) override
@@ -220,30 +240,43 @@ public:
             // otherwise fall back to the single-face (current-face) ratio.
             // omega ~ 1 in smooth flow, omega ~ 0 across strong shocks.
             // ============================================================
-            auto face_ratio = [&](Set::Scalar pa, Set::Scalar pb) -> Set::Scalar
+            Set::Scalar omega;
+            if (lo.omega_ext >= 0.0 || hi.omega_ext >= 0.0)
             {
-                Set::Scalar pmin = std::min(pa, pb);
-                Set::Scalar pmax = std::max(pa, pb);
-                return pmin / (pmax + small);
-            };
-
-            // k=1: ratio across the current face (always available)
-            Set::Scalar f_min = face_ratio(p_L, p_R);
-
-            // k=2..5: ratios across the four perpendicular faces of the L and
-            // R cells, available only if the caller populated p_cell + perps.
-            if (lo.p_cell > 0.0 && lo.p_perp_lo > 0.0 && lo.p_perp_hi > 0.0)
-            {
-                f_min = std::min(f_min, face_ratio(lo.p_perp_lo, lo.p_cell));
-                f_min = std::min(f_min, face_ratio(lo.p_cell,    lo.p_perp_hi));
+                // Caller drives the blend from an external shock tag (e.g. a
+                // div(u) compression sensor). Both sides carry the same per-face
+                // value; take the smaller (more dissipative) of any provided.
+                Set::Scalar o_lo = (lo.omega_ext >= 0.0) ? lo.omega_ext : 1.0;
+                Set::Scalar o_hi = (hi.omega_ext >= 0.0) ? hi.omega_ext : 1.0;
+                omega = std::min(o_lo, o_hi);
             }
-            if (hi.p_cell > 0.0 && hi.p_perp_lo > 0.0 && hi.p_perp_hi > 0.0)
+            else
             {
-                f_min = std::min(f_min, face_ratio(hi.p_perp_lo, hi.p_cell));
-                f_min = std::min(f_min, face_ratio(hi.p_cell,    hi.p_perp_hi));
-            }
+                auto face_ratio = [&](Set::Scalar pa, Set::Scalar pb) -> Set::Scalar
+                {
+                    Set::Scalar pmin = std::min(pa, pb);
+                    Set::Scalar pmax = std::max(pa, pb);
+                    return pmin / (pmax + small);
+                };
 
-            Set::Scalar omega = std::pow(f_min, alpha);
+                // k=1: ratio across the current face (always available)
+                Set::Scalar f_min = face_ratio(p_L, p_R);
+
+                // k=2..5: ratios across the four perpendicular faces of the L and
+                // R cells, available only if the caller populated p_cell + perps.
+                if (lo.p_cell > 0.0 && lo.p_perp_lo > 0.0 && lo.p_perp_hi > 0.0)
+                {
+                    f_min = std::min(f_min, face_ratio(lo.p_perp_lo, lo.p_cell));
+                    f_min = std::min(f_min, face_ratio(lo.p_cell,    lo.p_perp_hi));
+                }
+                if (hi.p_cell > 0.0 && hi.p_perp_lo > 0.0 && hi.p_perp_hi > 0.0)
+                {
+                    f_min = std::min(f_min, face_ratio(hi.p_perp_lo, hi.p_cell));
+                    f_min = std::min(f_min, face_ratio(hi.p_cell,    hi.p_perp_hi));
+                }
+
+                omega = std::pow(f_min, alpha);
+            }
 
             // Classical HLLC flux (mass and normal momentum components only -
             // the tangent and energy components use full HLLC directly below)
@@ -261,27 +294,43 @@ public:
                 f_HLLC_Mn   = f_R.momentum_normal  + S_R * (rho_star_R * S_star - Mn_R);
             }
 
-            // HLL flux on the two critical components only:
             //   F_HLL = ( S_R F_L - S_L F_R + S_L S_R (U_R - U_L) ) / (S_R - S_L)
             Set::Scalar inv_dS = 1.0 / (S_R - S_L + small);
             Set::Scalar f_HLL_mass = (S_R * f_L.mass            - S_L * f_R.mass            + S_L * S_R * (rho_R - rho_L)) * inv_dS;
             Set::Scalar f_HLL_Mn   = (S_R * f_L.momentum_normal - S_L * f_R.momentum_normal + S_L * S_R * (Mn_R  - Mn_L )) * inv_dS;
 
-            // ADC blend on critical components; full HLLC on the rest.
+            // ADC blend on mass and normal momentum (always cured).
             fl.mass            = (1.0 - omega) * f_HLL_mass + omega * f_HLLC_mass;
             fl.momentum_normal = (1.0 - omega) * f_HLL_Mn   + omega * f_HLLC_Mn;
 
-            // Tangential momentum and energy: full HLLC (paper's prescription
-            // - antidiffusion control is *not* applied to these components).
+            // Classical HLLC tangential momentum and energy.
+            Set::Scalar f_HLLC_Mt, f_HLLC_E;
             if (S_star >= 0.0)
             {
-                fl.momentum_tangent = f_L.momentum_tangent + S_L * (rho_star_L * v_L - Mt_L);
-                fl.energy           = f_L.energy           + S_L * (E_star_L         - E_L );
+                f_HLLC_Mt = f_L.momentum_tangent + S_L * (rho_star_L * v_L - Mt_L);
+                f_HLLC_E  = f_L.energy           + S_L * (E_star_L         - E_L );
             }
             else
             {
-                fl.momentum_tangent = f_R.momentum_tangent + S_R * (rho_star_R * v_R - Mt_R);
-                fl.energy           = f_R.energy           + S_R * (E_star_R         - E_R );
+                f_HLLC_Mt = f_R.momentum_tangent + S_R * (rho_star_R * v_R - Mt_R);
+                f_HLLC_E  = f_R.energy           + S_R * (E_star_R         - E_R );
+            }
+
+            if (adc_components >= 4)
+            {
+                // Full-HLL cure: also blend tangential momentum and energy, so
+                // omega -> 0 gives a genuine HLL flux on all components.
+                Set::Scalar f_HLL_Mt = (S_R * f_L.momentum_tangent - S_L * f_R.momentum_tangent + S_L * S_R * (Mt_R - Mt_L)) * inv_dS;
+                Set::Scalar f_HLL_E  = (S_R * f_L.energy           - S_L * f_R.energy           + S_L * S_R * (E_R  - E_L )) * inv_dS;
+                fl.momentum_tangent = (1.0 - omega) * f_HLL_Mt + omega * f_HLLC_Mt;
+                fl.energy           = (1.0 - omega) * f_HLL_E  + omega * f_HLLC_E;
+            }
+            else
+            {
+                // Paper-faithful cure: tangential momentum and energy stay full
+                // HLLC (antidiffusion control is not applied to these).
+                fl.momentum_tangent = f_HLLC_Mt;
+                fl.energy           = f_HLLC_E;
             }
             fl.u_interface = S_star;
         }

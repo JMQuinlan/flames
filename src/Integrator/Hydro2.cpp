@@ -163,6 +163,15 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("pp_flux_limiter", value.pp_flux_limiter, 1); // 1: on, 0: off
         pp_query_default("eps_p", value.eps_p, 1.0);          // floor on absolute pressure p
         pp_query_default("eps_rho", value.eps_rho, 1.0E-10);  // density floor
+
+        // HLLC-ADC carbuncle cure: drive the omega blend from a Ducros-weighted
+        // div(u) compression shock tag instead of the internal pressure-ratio
+        // sensor (carbuncles are pressure-quiet). A cell is tagged when the
+        // sensor exceeds adc_shock_threshold; the tag is then grown by adc_grow
+        // cells so HLL dissipation covers the post-shock band, not just the
+        // pressure jump. adc_grow < 0 disables the tag (use the pressure sensor).
+        pp_query_default("adc_shock_threshold", value.adc_shock_threshold, 0.05);
+        pp_query_default("adc_grow", value.adc_grow, 1);
         pp_query_default("lagrange", value.lagrange, 0.0);  // lagrange no-penetration factor
         pp_query_default("grav", value.g, 9.81);            // Gravitational Acceletation
         pp_forbid("roefix", "--> solver.roe.entropy_fix");  // Roe solver entropy fix
@@ -1084,6 +1093,83 @@ Hydro2::RHS(int lev,
     // and corrupt eta across the entire domain via the CH term.
     FillBoundariesWithBC(lev, time, eta_bc, { mu_chem_mf[lev].get() });
 
+    // ------------------------------------------------------------
+    // HLLC-ADC carbuncle shock tag: a Ducros-weighted div(u) compression
+    // sensor, thresholded per cell then grown by adc_grow cells. Below it
+    // drives a per-face omega (0 = full HLL on the ADC-controlled components,
+    // 1 = full HLLC) into the Riemann states, replacing the solver's
+    // pressure-ratio sensor. Carbuncles are pressure-quiet, so a div(u) tag
+    // plus dilation lands the HLL dissipation on the post-shock band where the
+    // ripple lives, not just on the thin pressure jump. adc_grow < 0 disables
+    // the tag and lets the solver use its internal pressure sensor.
+    // ------------------------------------------------------------
+    const bool use_shock_tag = (adc_grow >= 0);
+    const int  tag_grow      = std::max(adc_grow, 0);
+    amrex::MultiFab shock_tag_local(velocity_mf[lev]->boxArray(),
+                                    velocity_mf[lev]->DistributionMap(), 1, 1);
+    shock_tag_local.setVal(0.0);
+    if (use_shock_tag)
+    {
+        amrex::MultiFab shock_raw(velocity_mf[lev]->boxArray(),
+                                  velocity_mf[lev]->DistributionMap(), 1, tag_grow + 1);
+        shock_raw.setVal(0.0);
+
+        const Set::Scalar dr      = std::sqrt(AMREX_D_TERM(DX[0] * DX[0], +DX[1] * DX[1], +DX[2] * DX[2]));
+        const Set::Scalar thresh  = adc_shock_threshold;
+        const Set::Scalar small_l = small;
+
+        // Raw shock indicator per valid cell.
+        for (amrex::MFIter mfi(shock_raw, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box& sbx = mfi.validbox();
+            auto raw = shock_raw.array(mfi);
+            auto vv  = velocity_mf[lev]->array(mfi);
+            auto aa  = a_mf[lev]->array(mfi);
+            amrex::ParallelFor(sbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                auto sten = Numeric::GetStencil(i, j, k, domain);
+                Set::Matrix grad_u = Numeric::Gradient(vv, i, j, k, DX, sten);
+                Set::Scalar div_u = grad_u.trace();
+                Set::Scalar comp = std::max(-div_u, 0.0);
+#if AMREX_SPACEDIM == 2
+                Set::Scalar wz = grad_u(1, 0) - grad_u(0, 1);
+                Set::Scalar curl_mag2 = wz * wz;
+#else
+                Set::Scalar wx = grad_u(2, 1) - grad_u(1, 2);
+                Set::Scalar wy = grad_u(0, 2) - grad_u(2, 0);
+                Set::Scalar wz = grad_u(1, 0) - grad_u(0, 1);
+                Set::Scalar curl_mag2 = wx * wx + wy * wy + wz * wz;
+#endif
+                Set::Scalar ducros = comp / std::sqrt(div_u * div_u + curl_mag2 + small_l * small_l);
+                Set::Scalar c = std::max(aa(i, j, k), small_l);
+                Set::Scalar sensor = ducros * comp * dr / c;
+                raw(i, j, k) = (sensor > thresh) ? 1.0 : 0.0;
+            });
+        }
+        shock_raw.FillBoundary(geom[lev].periodicity());
+
+        // Morphological dilation: tag a cell if any raw cell within tag_grow is set.
+        for (amrex::MFIter mfi(shock_tag_local, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box& sbx = mfi.validbox();
+            auto tag = shock_tag_local.array(mfi);
+            auto raw = shock_raw.array(mfi);
+            const int g = tag_grow;
+            amrex::ParallelFor(sbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Scalar m = 0.0;
+                for (int dj = -g; dj <= g; dj++)
+                    for (int di = -g; di <= g; di++)
+#if AMREX_SPACEDIM == 3
+                        for (int dk = -g; dk <= g; dk++)
+                            m = std::max(m, raw(i + di, j + dj, k + dk));
+#else
+                        m = std::max(m, raw(i + di, j + dj, k));
+#endif
+                tag(i, j, k) = m;
+            });
+        }
+        shock_tag_local.FillBoundary(geom[lev].periodicity());
+    }
+
     // Main time integration loop
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
     {
@@ -1175,6 +1261,7 @@ Hydro2::RHS(int lev,
         Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> omega_adc = omega_adc_mf.Patch(lev, mfi);
         const Set::Scalar omega_alpha_local = omega_adc_alpha;
+        amrex::Array4<const Set::Scalar> stag = shock_tag_local.const_array(mfi);
 
         const auto bx_lo = amrex::lbound(bx);
 
@@ -1576,6 +1663,29 @@ Hydro2::RHS(int lev,
             y_rightStates[2].p_perp_lo = press(i - 1, j + 1, k);
             y_rightStates[2].p_perp_hi = press(i + 1, j + 1, k);
 
+            // Drive the HLLC-ADC blend from the div(u) shock tag: a face inside
+            // the (dilated) tagged region gets omega = 0 (full HLL on the
+            // controlled components), otherwise omega = 1 (full HLLC). Both
+            // sides of a face carry the same value. When the tag is disabled
+            // (adc_grow < 0) omega_ext stays -1 and the solver uses its
+            // internal pressure-ratio sensor.
+            if (use_shock_tag)
+            {
+                Set::Scalar tc  = stag(i, j, k);
+                Set::Scalar txm = stag(i - 1, j, k);
+                Set::Scalar txp = stag(i + 1, j, k);
+                Set::Scalar tym = stag(i, j - 1, k);
+                Set::Scalar typ = stag(i, j + 1, k);
+                Set::Scalar om_xlo = (txm > 0.5 || tc > 0.5) ? 0.0 : 1.0;
+                Set::Scalar om_xhi = (tc > 0.5 || txp > 0.5) ? 0.0 : 1.0;
+                Set::Scalar om_ylo = (tym > 0.5 || tc > 0.5) ? 0.0 : 1.0;
+                Set::Scalar om_yhi = (tc > 0.5 || typ > 0.5) ? 0.0 : 1.0;
+                x_leftStates[1].omega_ext = x_rightStates[1].omega_ext = om_xlo;
+                x_leftStates[2].omega_ext = x_rightStates[2].omega_ext = om_xhi;
+                y_leftStates[1].omega_ext = y_rightStates[1].omega_ext = om_ylo;
+                y_leftStates[2].omega_ext = y_rightStates[2].omega_ext = om_yhi;
+            }
+
             // ------------------------------------------------------------
             // HLLC-ADC shock locator diagnostic.
             // Compute omega at the cell's two hi-faces (i+1/2, j) and
@@ -1609,8 +1719,17 @@ Hydro2::RHS(int lev,
                     }
                     return std::pow(fm, omega_alpha_local);
                 };
-                omega_adc(i, j, k, 0) = omega_at_face(x_leftStates[2], x_rightStates[2]); // x-hi face
-                omega_adc(i, j, k, 1) = omega_at_face(y_leftStates[2], y_rightStates[2]); // y-hi face
+                if (use_shock_tag)
+                {
+                    // Report the tag-based omega actually fed to the solver.
+                    omega_adc(i, j, k, 0) = (stag(i, j, k) > 0.5 || stag(i + 1, j, k) > 0.5) ? 0.0 : 1.0;
+                    omega_adc(i, j, k, 1) = (stag(i, j, k) > 0.5 || stag(i, j + 1, k) > 0.5) ? 0.0 : 1.0;
+                }
+                else
+                {
+                    omega_adc(i, j, k, 0) = omega_at_face(x_leftStates[2], x_rightStates[2]); // x-hi face
+                    omega_adc(i, j, k, 1) = omega_at_face(y_leftStates[2], y_rightStates[2]); // y-hi face
+                }
             }
 
             // Calculate fluxes using the mixed fluid approach

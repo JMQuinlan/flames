@@ -30,6 +30,13 @@ struct State
     Set::Scalar p_perp_lo = 0.0; // pressure at cell (i,j-1) for x-face, (i-1,j) for y-face
     Set::Scalar p_perp_hi = 0.0; // pressure at cell (i,j+1) for x-face, (i+1,j) for y-face
 
+    // Optional externally-supplied ADC blend factor for this face. When >= 0 it
+    // overrides the solver's internal pressure-ratio omega: HLLC-ADC uses this
+    // value directly (0 = full HLL on the controlled components, 1 = full HLLC).
+    // Lets the caller drive the carbuncle cure from a div(u) shock tag instead
+    // of the pressure jump. Negative (default) = use the internal sensor.
+    Set::Scalar omega_ext = -1.0;
+
     // Default constructor
     State()
     {
