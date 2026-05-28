@@ -431,6 +431,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                                                                                                     }); // hess_u Flux
         value.RegisterNewFab(value.Vap_dot_mf, &value.bc_nothing, 5, 0, "Vap_dot", true, false, { "_eta", "_rho", "_Mx", "_My", "_E" }); // Momentum Flux
         value.RegisterNewFab(value.omega_adc_mf, &value.bc_nothing, 2, 0, "omega_adc", true, false, { "_xhi", "_yhi" }); // HLLC-ADC shock locator (per hi-face omega)
+        value.RegisterNewFab(value.flux_dev_mf, &value.bc_nothing, 2, 0, "flux_dev", true, false, { "_xhi", "_yhi" }); // |F_used - F_HLL| rel. dev. per hi-face
 
         // ====================================================================
         // 7-EQUATION (Baer-Nunziato) PER-PHASE CONSERVATIVES
@@ -522,7 +523,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     // Mirror HLLC-ADC's exponent so the omega_adc_mf diagnostic uses the same
     // sensor sharpness as the active solver. Defaults to 3.0 if not set.
     {
-        IO::ParmParse pp_rs("Riemann_Solver");
+        // HLLC-ADC reads its parameters under the fully-qualified prefix
+        // "Riemann_Solver.hllc_adc" (select_default appends ".<type>"); mirror
+        // that here so the omega_adc diagnostic uses the solver's actual alpha.
+        IO::ParmParse pp_rs("Riemann_Solver.hllc_adc");
         pp_rs.query_default("alpha", value.omega_adc_alpha, 3.0);
     }
 
@@ -1260,6 +1264,7 @@ Hydro2::RHS(int lev,
         Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> omega_adc = omega_adc_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> flux_dev = flux_dev_mf.Patch(lev, mfi);
         const Set::Scalar omega_alpha_local = omega_adc_alpha;
         amrex::Array4<const Set::Scalar> stag = shock_tag_local.const_array(mfi);
 
@@ -1837,6 +1842,28 @@ Hydro2::RHS(int lev,
                     Flo_y(i, j - 1, k, 2) = hll_ylo.momentum_normal;
                     Flo_y(i, j - 1, k, 3) = hll_ylo.energy;
                 }
+
+                // Diagnostic: relative deviation of the used flux from pure HLL
+                // at the two hi-faces, max over conserved components. ~0 at a
+                // tagged face confirms it actually produced an HLL flux.
+                auto rel_dev = [&](const Solver::Local::FluidRiemann::Flux& fh,
+                                   const Solver::Local::FluidRiemann::Flux& fl_) -> Set::Scalar
+                {
+                    Set::Scalar num = std::max(std::max(std::abs(fh.mass            - fl_.mass),
+                                                        std::abs(fh.momentum_normal - fl_.momentum_normal)),
+                                               std::max(std::abs(fh.momentum_tangent- fl_.momentum_tangent),
+                                                        std::abs(fh.energy          - fl_.energy)));
+                    Set::Scalar den = std::max(std::max(std::abs(fl_.mass),            std::abs(fl_.momentum_normal)),
+                                               std::max(std::abs(fl_.momentum_tangent),std::abs(fl_.energy)));
+                    return num / (den + small);
+                };
+                flux_dev(i, j, k, 0) = rel_dev(flux_xhi, hll_xhi);
+                flux_dev(i, j, k, 1) = rel_dev(flux_yhi, hll_yhi);
+            }
+            else
+            {
+                flux_dev(i, j, k, 0) = 0.0;
+                flux_dev(i, j, k, 1) = 0.0;
             }
 
             // Upwind volume fractions (face-centered alpha, advected by HLLC contact wave speed u*)

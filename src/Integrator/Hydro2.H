@@ -266,7 +266,13 @@ protected:
     // regardless of which Riemann solver is active so the shock locator can
     // be inspected as a diagnostic.
     Set::Field<Set::Scalar> omega_adc_mf;
-    
+    // Diagnostic: per hi-face relative deviation of the *used* Riemann flux from
+    // the pure-HLL flux, max over the 4 conserved components. ~0 means the face
+    // produced a genuine HLL flux (confirms a tagged/omega=0 cell took the HLL
+    // path with all components blended); >0 means HLLC antidiffusion is still
+    // present (untagged face, or adc_components<4 leaking energy/tangent).
+    Set::Field<Set::Scalar> flux_dev_mf;
+
 
     Set::Field<Set::Scalar> m0_mf;
     Set::Field<Set::Scalar> u0_mf;

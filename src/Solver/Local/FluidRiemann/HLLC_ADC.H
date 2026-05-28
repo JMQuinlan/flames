@@ -105,6 +105,8 @@ public:
     {
         pp.query_default("alpha", value.alpha, 3.0);
         pp.query_default("adc_components", value.adc_components, 2);
+        Util::Message(INFO, "HLLC_ADC parsed: alpha=", value.alpha,
+                      " adc_components=", value.adc_components);
     }
 
     virtual Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1) override
@@ -332,7 +334,16 @@ public:
                 fl.momentum_tangent = f_HLLC_Mt;
                 fl.energy           = f_HLLC_E;
             }
-            fl.u_interface = S_star;
+
+            // Blend the interface velocity too. At omega -> 0 this returns the
+            // HLL-averaged velocity (so the flux matches the standalone HLL
+            // solver byte-for-byte, including the velocity that drives the
+            // volume-fraction transport); at omega -> 1 it returns the HLLC
+            // contact speed S_star. Leaving u_interface = S_star at omega = 0
+            // is a carbuncle leak: the conserved fluxes are HLL but eta is still
+            // transported at the contact speed, perturbing the per-phase split.
+            Set::Scalar u_HLL = (S_R * u_L - S_L * u_R) * inv_dS;
+            fl.u_interface = (1.0 - omega) * u_HLL + omega * S_star;
         }
 
         // ERROR CHECKING

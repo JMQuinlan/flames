@@ -191,12 +191,19 @@ grav = 9.81
 # Riemann_Solver.type = hllc_lm
 # Riemann_Solver.ma_limit = 0.1 # transverse Ma limit below which HLLC_LM damps more
 Riemann_Solver.type = hllc_adc
-Riemann_Solver.alpha = 12
+# NOTE: parameters for the selected solver live under Riemann_Solver.<type>.
+# select_default constructs the solver with prefix "Riemann_Solver.hllc_adc",
+# so a bare "Riemann_Solver.alpha" is NOT read by HLLC_ADC::Parse (it silently
+# falls back to the code default). Use the fully-qualified prefix below.
+Riemann_Solver.hllc_adc.alpha = 12
 # 2 = Simon & Mandal paper-faithful cure (blend mass + normal momentum only).
-# 4 = also blend tangential momentum + energy toward HLL at shocks. 4 is a near
-# no-op for a clean shock (HLLC ~ HLL there) and just smears shear/contacts, so
-# keep 2; the carbuncle cure comes from the div(u) shock tag + grow cells below.
-Riemann_Solver.adc_components = 2
+# 4 = also blend tangential momentum + energy toward HLL at shocks.
+# With omega=0 (tagged region below), adc=2 leaves the energy + tangential
+# fluxes at full antidiffusive HLLC -- the exact components that differ from a
+# pure-HLL run, which is why adc=2 fails to cure the carbuncle. adc=4 makes a
+# tagged face a genuine all-component HLL flux, identical to the pure-HLL run
+# that is confirmed carbuncle-free.
+Riemann_Solver.hllc_adc.adc_components = 4
 
 # Carbuncle cure: locate the shock with a Ducros-weighted div(u) compression
 # sensor (not the pressure jump, which is carbuncle-quiet), tag cells above
@@ -204,8 +211,8 @@ Riemann_Solver.adc_components = 2
 # dissipation covers the post-shock band. Tagged faces use omega = 0 (HLL on
 # mass + normal momentum), untagged faces use omega = 1 (full HLLC). Set
 # adc_grow = -1 to disable and fall back to the pressure-ratio sensor.
-adc_shock_threshold = 0.025
-adc_grow = 64
+adc_shock_threshold = 0.05
+adc_grow = 4
 
 # Surface tension nhat calc adjustments
 kappa_method = 1
@@ -223,4 +230,4 @@ omega_relax = 0.5
 # With sigma = 0.025 N/m, M0 = 1025.239/0.025 = 4.10095716768e4
 # Mob = 4.1e4
 # Mob = 4000.0
-Mob = 1000.0
+Mob = 1.0
