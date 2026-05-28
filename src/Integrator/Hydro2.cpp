@@ -183,6 +183,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("Dv", value.Dv, 0.0);          // Vapor Diffusivity
         pp_query_required("epsilon", value.epsilon);    // diffuse interface thickness Y_infinity
         pp_query_default("Y_infinity", value.Y_infinity, 0.0); // Far Field Vapor Mass Fraction
+        pp_query_default("Mob", value.Mob_user, 0.0);   // CH mobility scale M0: M = M0 * epsilon^2
+        if (value.epsilon <= 0.0)
+        {
+            Util::Abort(INFO, "epsilon must be positive for Hydro2 Cahn-Hilliard mobility; got ", value.epsilon);
+        }
 
         // CURVATURE
         pp_query_default("kappa_method", value.kappa_method, 2); // Method to solve for curvature
@@ -260,14 +265,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
             Util::Message(INFO, "nscbc_bc Pointer=", value.nscbc_bc);
             Util::Message(INFO, "nscbc4_bc Pointer=", value.nscbc4_bc);
-    
-            // Use BC::Nothing (does nothing when called)
-            value.density_bc = &value.bc_nothing;
-            value.energy_bc = &value.bc_nothing;
-            value.momentum_bc = &value.bc_nothing;
-    
-            Util::Message(INFO, "nscbc_bc Pointer=", value.nscbc_bc);
-            Util::Message(INFO, "nscbc4_bc Pointer=", value.nscbc4_bc);
         }
         else
         {
@@ -281,6 +278,18 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             Util::Message(INFO, "Parsing Reg");
             Util::Message(INFO, "nscbc_bc Pointer=", value.nscbc_bc);
         }
+
+        // Eta BC: parse from "eta.bc" if user provides it, otherwise zero neumann.
+        // Eta is a volume fraction transported by advection + Cahn-Hilliard;
+        // zero-neumann (ghost = interior) is the physically correct default.
+        if (pp.contains("eta.bc.type.xlo") || pp.contains("eta.bc.type.ylo"))
+        {
+            value.eta_bc = new BC::Expression(1, pp, "eta.bc");
+        }
+        else
+        {
+            value.eta_bc = new BC::Constant(BC::Constant::ZeroNeumann(1));
+        }
     }
 
     // Register FabFields:
@@ -289,8 +298,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         int nghost = value.nghost;
 
         // DIFFUSE PARAMETERS
-        value.RegisterNewFab(value.eta_mf,           value.energy_bc, 1, nghost, "eta", true, true);
-        value.RegisterNewFab(value.eta_old_mf,       value.energy_bc, 1, nghost, "eta_old", false, true);
+        value.RegisterNewFab(value.eta_mf,           value.eta_bc, 1, nghost, "eta", true, true);
+        value.RegisterNewFab(value.eta_old_mf,       value.eta_bc, 1, nghost, "eta_old", false, true);
         value.RegisterNewFab(value.rho_eta0_mf,      value.density_bc, 1, nghost, "rho_eta0", true, true);
         value.RegisterNewFab(value.rho_eta1_mf,      value.density_bc, 1, nghost, "rho_eta1", true, true);
         value.RegisterNewFab(value.rho_eta0_old_mf,  value.density_bc, 1, nghost, "rho_eta0_old", false, true);
@@ -1050,7 +1059,12 @@ Hydro2::RHS(int lev,
         }); // end parallelfor
     } // end Primative field
 
-    
+    // Fill mu_chem ghost cells with physical BCs before the main loop
+    // computes lap(mu_chem) via central differences. Without this,
+    // boundary cells read stale (zero) ghost values, creating a spurious
+    // CH source that causes eta to drift along domain boundaries.
+    FillBoundariesWithBC(lev, time, energy_bc, { mu_chem_mf[lev].get() });
+
     // Main time integration loop
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
     {
@@ -1298,18 +1312,26 @@ Hydro2::RHS(int lev,
             // ------------------------------------------------------------
             // Cahn-Hilliard
             // ------------------------------------------------------------
-            // d(eta)/dt = -u*grad(eta) + div( M*grad(mu) )
+            // Dr. Q mobility scaling:
+            //   Pe_CH = (U / epsilon) / (M * sigma / epsilon^3)
+            //         = U * epsilon^2 / (M * sigma).
+            // Setting Pe_CH = O(1) gives M = M0 * epsilon^2 with
+            // M0 = O(U / sigma).  The chemical potential stored here is
+            // mu = f'(eta) - epsilon^2 lap(eta), so the dimensional
+            // coefficient multiplying lap(mu) is M * sigma / epsilon.
             Set::Scalar lap_mu_chem = Numeric::Laplacian(mu_chem_, i, j, k, 0, DX);
-            // Set::Scalar Mob = a(i, j, k) * 0.7 * DX[0]; // Mob = u_max * epsilon
-            Set::Scalar Mob = a(i, j, k) * epsilon;// *epsilon / DX[0]; // Mob = u_max * epsilon
-            //Set::Scalar advection = -u.dot(grad_eta);
-            Set::Scalar eta_dot_CH = Mob * lap_mu_chem * 0.2;
+            Set::Scalar M0_CH = Mob_user;
+            Set::Scalar M_CH = M0_CH * epsilon * epsilon;
+            Set::Scalar Mob = M_CH * sigma / epsilon;
+            Set::Scalar eta_dot_CH = Mob * lap_mu_chem;
 
             // ERROR CHECKING
             check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Cahn-Hillard solving", {
                 { "mu_chem",  mu_chem_(i, j, k) },
                 { "lap_mu_chem",  lap_mu_chem },
                 { "a",  a(i, j, k) },
+                { "M0_CH",  M0_CH },
+                { "M_CH",  M_CH },
                 { "Mob",  Mob },
                 { "eta_dot_CH",  eta_dot_CH }
             }); // end check4nans
@@ -2767,8 +2789,22 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
     // ============================================================================
     Util::ParallelMessage(INFO, "Filling Shrp Interface: Density Correction, COMPELTE");
 
-    FillBoundariesWithBC(lev, 0.0, density_bc, { rho_eta0_mf[lev].get(), rho_eta1_mf[lev].get(), eta_mf[lev].get() });
-    FillBoundariesWithBC(lev, 0.0, energy_bc, { eta_mf[lev].get() });
+    // Eta: use eta_bc (not energy_bc or density_bc, which have wrong dirichlet values)
+    FillBoundariesWithBC(lev, 0.0, eta_bc, { eta_mf[lev].get() });
+    // Density: fill total density, then partition by eta (see FillGhost4BC fix)
+    FillBoundariesWithBC(lev, 0.0, density_bc, { density_mf[lev].get() });
+    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &ghostbox = mfi.growntilebox(nghost);
+        auto rho  = density_mf[lev]->array(mfi);
+        auto eta  = eta_mf[lev]->array(mfi);
+        auto rho0 = rho_eta0_mf[lev]->array(mfi);
+        auto rho1 = rho_eta1_mf[lev]->array(mfi);
+        amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            rho0(i, j, k) = rho(i, j, k) * eta(i, j, k);
+            rho1(i, j, k) = rho(i, j, k) * (1.0 - eta(i, j, k));
+        });
+    }
 
     Util::Message(INFO, "=== INTERFACE SHARPENING COMPLETE ===");
 }
@@ -3064,6 +3100,12 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
 
+    // Ensure eta_bc has a valid geometry for FillBoundary calls.
+    // The base Integrator calls define(geom) on registered BCs after
+    // Initialize(), but eta_bc may not yet be defined on this level
+    // if this is the first call. define() is idempotent.
+    eta_bc->define(geom[lev]);
+
     // ------------------------------------------------------------
     // STEP 1: Determine BC strategy based on nghost and NSCBC flag
     // ------------------------------------------------------------
@@ -3113,7 +3155,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         FillPatch(lev, time, rho_eta1_mf,        *rho_eta1_mf[lev],       *density_bc,  0);
         FillPatch(lev, time, momentum_mf,        *momentum_mf[lev],       *momentum_bc, 0);
         FillPatch(lev, time, energy_per_vol_mf,  *energy_per_vol_mf[lev], *energy_bc,   0);
-        FillPatch(lev, time, eta_mf,             *eta_mf[lev],            *energy_bc,   0);
+        FillPatch(lev, time, eta_mf,             *eta_mf[lev],            *eta_bc,      0);
         FillPatch(lev, time, energy0_mf,         *energy0_mf[lev],        *energy_bc,   0);
         FillPatch(lev, time, energy1_mf,         *energy1_mf[lev],        *energy_bc,   0);
     }
@@ -3139,7 +3181,13 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     // ------------------------------------------------------------
     // STEP 3: Fill Eta ghost cells
     // ------------------------------------------------------------
-    FillBoundariesWithBC(lev, time, energy_bc, {
+    // Eta must use its own BC (eta_bc), NOT energy_bc.
+    // energy_bc has dirichlet values meant for the total energy field
+    // (e.g. 1685653 at xlo), which would overwrite eta ghost cells with
+    // nonsensical values (clamped to 1.0 or 0.0). eta_bc defaults to
+    // zero-neumann: the flow carries eta into the domain via advection;
+    // ghost cells should mirror the interior gradient.
+    FillBoundariesWithBC(lev, time, eta_bc, {
             eta_mf[lev].get()
      });
 
@@ -3458,11 +3506,31 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     }
     else
     {
-        // Phase masses (canonical).
+        // Density: apply density_bc to the TOTAL density (density_mf),
+        // then partition into rho_eta0/rho_eta1 using eta.
+        // The user-specified dirichlet value (e.g. 39.0 at xlo) is the
+        // total mixture density. Applying it directly to both rho_eta0
+        // AND rho_eta1 would double the total density in ghost cells.
+        // Inter-fab exchange for phase densities still needed:
+        rho_eta0_mf[lev]->FillBoundary(geom[lev].periodicity());
+        rho_eta1_mf[lev]->FillBoundary(geom[lev].periodicity());
         FillBoundariesWithBC(lev, time, density_bc, {
-            rho_eta0_mf[lev].get(),
-            rho_eta1_mf[lev].get()
+            density_mf[lev].get()
         });
+        // Partition total density by eta in ghost cells (mirrors NSCBC path)
+        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &ghostbox = mfi.growntilebox(nghost);
+            auto rho  = density_mf[lev]->array(mfi);
+            auto eta  = eta_mf[lev]->array(mfi);
+            auto rho0 = rho_eta0_mf[lev]->array(mfi);
+            auto rho1 = rho_eta1_mf[lev]->array(mfi);
+
+            amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                rho0(i, j, k) = rho(i, j, k) * eta(i, j, k);
+                rho1(i, j, k) = rho(i, j, k) * (1.0 - eta(i, j, k));
+            });
+        }
         // Mixture momentum.
         FillBoundariesWithBC(lev, time, momentum_bc, {
             momentum_mf[lev].get()

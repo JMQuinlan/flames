@@ -60,7 +60,7 @@ public:
         delete density_bc;
         delete momentum_bc;
         delete energy_bc;
-        //delete eta_bc;
+        delete eta_bc;
         delete temperature_bc;
 
         /// Inital Conditions
@@ -262,7 +262,7 @@ protected:
     BC::BC<Set::Scalar>* density_bc = nullptr;
     BC::BC<Set::Scalar>* momentum_bc = nullptr;
     BC::BC<Set::Scalar>* energy_bc = nullptr;
-    //BC::BC<Set::Scalar>* eta_bc = nullptr;
+    BC::BC<Set::Scalar>* eta_bc = nullptr;
     BC::BC<Set::Scalar>* temperature_bc = nullptr;
 
     IC::IC<Set::Scalar>* velocity0_ic = nullptr;
@@ -326,6 +326,8 @@ protected:
 
     // CFD Properties
     Set::Scalar cfl = NAN, cfl_v = NAN, pref = NAN;
+    // Cahn-Hilliard mobility scale M0 in M = M0 * epsilon^2.
+    Set::Scalar Mob_user = NAN;
     Set::Scalar small=NAN;
     Set::Scalar cutoff=NAN;
     Set::Scalar lagrange=NAN;
