@@ -259,6 +259,11 @@ protected:
     Set::Field<Set::Scalar> div_tau_mf;
     Set::Field<Set::Scalar> hess_u_mf;
     Set::Field<Set::Scalar> Vap_dot_mf;
+    // HLLC-ADC pressure-ratio shock locator output. Two components: omega at
+    // the cell's hi-face in x (i+1/2,j) and y (i,j+1/2). Written every RHS
+    // regardless of which Riemann solver is active so the shock locator can
+    // be inspected as a diagnostic.
+    Set::Field<Set::Scalar> omega_adc_mf;
     
 
     Set::Field<Set::Scalar> m0_mf;
@@ -351,7 +356,7 @@ protected:
     Set::Scalar F_max = 0.0;
     Set::Scalar rho_min = 1e10;
 
-    Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion=NAN;
+    Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, divu_refinement_criterion=NAN, rho_refinement_criterion=NAN;
     // FLUID 0
     Set::Scalar gamma0 = NAN, p0_0 = NAN, mu0 = NAN, mu0_b = NAN, MW0 = NAN;
     Set::Scalar b0 = NAN, q0EOS = NAN;
@@ -389,6 +394,11 @@ protected:
 
     int kappa_method = 1;
     int smooth_kernel_size = 3;
+
+    // Exponent on the HLLC-ADC pressure-ratio shock locator. Reflected in the
+    // omega_adc_mf diagnostic regardless of which Riemann solver is active.
+    // Set via Riemann_Solver.alpha (same key consumed by the HLLC_ADC solver).
+    Set::Scalar omega_adc_alpha = 3.0;
 
     // Adaptive Timestep
     bool adaptive_timestep = false;

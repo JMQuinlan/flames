@@ -86,7 +86,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp.query_default("eta_refinement_criterion", value.eta_refinement_criterion, 0.001);   // eta-based refinement
         pp.query_default("omega_refinement_criterion", value.omega_refinement_criterion, 0.01); // vorticity-based refinement
         pp.query_default("gradu_refinement_criterion", value.gradu_refinement_criterion, 0.01); // velocity gradient-based refinement
-        pp.query_default("p_refinement_criterion", value.p_refinement_criterion, 1e-3);         // pressure-based refinement
+        pp.query_default("divu_refinement_criterion", value.divu_refinement_criterion, 0.05);   // Ducros-weighted compression (shock) refinement
         pp.query_default("rho_refinement_criterion", value.rho_refinement_criterion, 1e-6);    // density-based refinement
 
         // SOLVER AND REFRENCE CONDITIONS
@@ -353,6 +353,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                                                                                                      "110","111",
                                                                                                     }); // hess_u Flux
         value.RegisterNewFab(value.Vap_dot_mf, &value.bc_nothing, 5, 0, "Vap_dot", true, false, { "_eta", "_rho", "_Mx", "_My", "_E" }); // Momentum Flux
+        value.RegisterNewFab(value.omega_adc_mf, &value.bc_nothing, 2, 0, "omega_adc", true, false, { "_xhi", "_yhi" }); // HLLC-ADC shock locator (per hi-face omega)
 
         // ====================================================================
         // 7-EQUATION (Baer-Nunziato) PER-PHASE CONSERVATIVES
@@ -435,6 +436,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                       //Solver::Local::FluidRiemann::Lax_Friedrich
     >("Riemann_Solver", value.riemannsolver);
     Util::Message(INFO, "Selected Riemann solver: ", typeid(*value.riemannsolver).name());
+
+    // Mirror HLLC-ADC's exponent so the omega_adc_mf diagnostic uses the same
+    // sensor sharpness as the active solver. Defaults to 3.0 if not set.
+    {
+        IO::ParmParse pp_rs("Riemann_Solver");
+        pp_rs.query_default("alpha", value.omega_adc_alpha, 3.0);
+    }
 
 
     // LIMITERS
@@ -1063,6 +1071,8 @@ Hydro2::RHS(int lev,
         Set::Patch<const Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> omega_adc = omega_adc_mf.Patch(lev, mfi);
+        const Set::Scalar omega_alpha_local = omega_adc_alpha;
 
         const auto bx_lo = amrex::lbound(bx);
 
@@ -1463,6 +1473,43 @@ Hydro2::RHS(int lev,
             y_rightStates[2].p_cell    = press(i, j + 1, k);
             y_rightStates[2].p_perp_lo = press(i - 1, j + 1, k);
             y_rightStates[2].p_perp_hi = press(i + 1, j + 1, k);
+
+            // ------------------------------------------------------------
+            // HLLC-ADC shock locator diagnostic.
+            // Compute omega at the cell's two hi-faces (i+1/2, j) and
+            // (i, j+1/2) using the same 5-face pressure-ratio min that
+            // HLLC_ADC consumes. Written every step so the locator can be
+            // inspected regardless of which Riemann solver is selected.
+            //   omega = ( min_k f_k )^alpha,
+            //   f_k   = min(p_a^k, p_b^k) / max(p_a^k, p_b^k).
+            // ------------------------------------------------------------
+            {
+                const Set::Scalar omega_small = 1e-30;
+                auto omega_face_ratio = [&](Set::Scalar pa, Set::Scalar pb) -> Set::Scalar
+                {
+                    Set::Scalar pmin = std::min(pa, pb);
+                    Set::Scalar pmax = std::max(pa, pb);
+                    return pmin / (pmax + omega_small);
+                };
+                auto omega_at_face = [&](const Solver::Local::FluidRiemann::State& L,
+                                         const Solver::Local::FluidRiemann::State& R) -> Set::Scalar
+                {
+                    Set::Scalar fm = omega_face_ratio(L.p_cell, R.p_cell);
+                    if (L.p_cell > 0.0 && L.p_perp_lo > 0.0 && L.p_perp_hi > 0.0)
+                    {
+                        fm = std::min(fm, omega_face_ratio(L.p_perp_lo, L.p_cell));
+                        fm = std::min(fm, omega_face_ratio(L.p_cell,    L.p_perp_hi));
+                    }
+                    if (R.p_cell > 0.0 && R.p_perp_lo > 0.0 && R.p_perp_hi > 0.0)
+                    {
+                        fm = std::min(fm, omega_face_ratio(R.p_perp_lo, R.p_cell));
+                        fm = std::min(fm, omega_face_ratio(R.p_cell,    R.p_perp_hi));
+                    }
+                    return std::pow(fm, omega_alpha_local);
+                };
+                omega_adc(i, j, k, 0) = omega_at_face(x_leftStates[2], x_rightStates[2]); // x-hi face
+                omega_adc(i, j, k, 1) = omega_at_face(y_leftStates[2], y_rightStates[2]); // y-hi face
+            }
 
             // Calculate fluxes using the mixed fluid approach
             Solver::Local::FluidRiemann::Flux flux_xlo, flux_ylo, flux_xhi, flux_yhi;
@@ -2184,16 +2231,46 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
         });
     }
 
-    // Pressure criterion for refinement
-    for (amrex::MFIter mfi(*pressure_mf[lev], true); mfi.isValid(); ++mfi) {
+    // Divergence (shock) criterion for refinement.
+    // Shocks are strongly compressive (div(u) << 0); clean material interfaces
+    // and contacts keep u continuous so div(u) stays small there. A Ducros
+    // switch additionally suppresses tagging in shear/vorticity-dominated
+    // regions, so the gas-liquid interface no longer triggers refinement the
+    // way the old pressure-gradient sensor did.
+    for (amrex::MFIter mfi(*velocity_mf[lev], true); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.tilebox();
         amrex::Array4<char> const& tags = a_tags.array(mfi);
-        amrex::Array4<const Set::Scalar> const& press = (*pressure_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar> const& v = (*velocity_mf[lev]).array(mfi);
+        amrex::Array4<const Set::Scalar> const& a = (*a_mf[lev]).array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
-            Set::Vector grad_p = Numeric::Gradient(press, i, j, k, 0, DX, sten);
-            if (grad_p.lpNorm<2>() * dr * 2 > p_refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
+            Set::Matrix grad_u = Numeric::Gradient(v, i, j, k, DX, sten);
+
+            // div(u) = trace; compressive part only.
+            Set::Scalar div_u = grad_u.trace();
+            Set::Scalar comp = std::max(-div_u, 0.0);
+
+            // |curl(u)|^2 from the off-diagonal velocity gradients.
+#if AMREX_SPACEDIM == 2
+            Set::Scalar wz = grad_u(1, 0) - grad_u(0, 1);
+            Set::Scalar curl_mag2 = wz * wz;
+#else
+            Set::Scalar wx = grad_u(2, 1) - grad_u(1, 2);
+            Set::Scalar wy = grad_u(0, 2) - grad_u(2, 0);
+            Set::Scalar wz = grad_u(1, 0) - grad_u(0, 1);
+            Set::Scalar curl_mag2 = wx * wx + wy * wy + wz * wz;
+#endif
+
+            // Ducros switch in [0,1]: ~1 in a clean shock, ~0 in shear.
+            Set::Scalar ducros = comp / std::sqrt(div_u * div_u + curl_mag2 + small * small);
+
+            // Dimensionless shock strength: compression across a cell relative
+            // to the local sound speed, gated by the Ducros switch.
+            Set::Scalar c = std::max(a(i, j, k), small);
+            Set::Scalar sensor = ducros * comp * dr / c;
+
+            if (sensor > divu_refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
         });
     }
 

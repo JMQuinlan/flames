@@ -7,7 +7,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = /mmfs1/home/spatel6/flames/bin/tests/output/Dodecane_Case_M6.5_Vap
-plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_initP
 
 ### MESHING ###
 amr.plot_dt = 0.25e-6
@@ -41,7 +41,7 @@ geometry.is_periodic = 0 0 0
 ### TIME STEP ###
 stop_time = 2.0e-4
 # stop_time = 1.0e-5
-
+# stop_time = 5.0e-7
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
@@ -105,7 +105,11 @@ pressure0.ic.expression.region0 = "p_shock + (p_vapor - p_shock)*0.5*(1.0 + tanh
 
 pressure1.ic.type = expression
 pressure1.ic.expression.constant.p_vapor = 3.53948205141e4
-pressure1.ic.expression.region0 = "p_vapor"
+# Laplace pressure for a 2D droplet: dP = sigma/R = 0.025 / 4.4e-3 = 5.681818... Pa
+# Adding this to the droplet interior puts it in mechanical equilibrium with
+# the surrounding vapor at t=0, suppressing a spurious expansion wave.
+pressure1.ic.expression.constant.p_laplace = 5.6818181818
+pressure1.ic.expression.region0 = "p_vapor + p_laplace"
 
 # Thermodynamic properties from paper 
 eos0.cv = "1.95e3"
@@ -150,7 +154,7 @@ momentum.bc.type.xhi = neumann neumann
 ### REFINEMENT CRITERIA ###
 eta_refinement_criterion = 1e-3
 omega_refinement_criterion = 1e+10
-p_refinement_criterion = 1.7e+6
+divu_refinement_criterion = 0.05
 rho_refinement_criterion = 5e+1
 gradu_refinement_criterion = 5e+2
 
@@ -177,7 +181,7 @@ Riemann_Solver.type = hll
 # Riemann_Solver.type = hllc_lm
 # Riemann_Solver.ma_limit = 0.1 # transverse Ma limit below which HLLC_LM damps more
 # Riemann_Solver.type = hllc_adc
-# Riemann_Solver.alpha = 25.0
+Riemann_Solver.alpha = 5
 kappa_method = 1
 smooth_kernel_size = 3
 
@@ -192,4 +196,5 @@ omega_relax = 0.5
 # Pe_CH = U*epsilon^2/(M*sigma), M = M0*epsilon^2, M0 ~ U/sigma.
 # With sigma = 0.025 N/m, M0 = 1025.239/0.025 = 4.10095716768e4
 # Mob = 4.1e4
-Mob = 4000.0
+# Mob = 4000.0
+Mob = 100.0
