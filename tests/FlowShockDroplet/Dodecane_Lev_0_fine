@@ -6,10 +6,13 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-# plot_file = /mmfs1/home/spatel6/flames/bin/tests/output/Dodecane_Case_M6.5_Vap
-plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_limiter
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_lev0
 
 ### MESHING ###
+# Refined twin of Dodecane_Lev_0 (dx halved) to confirm h^2 scaling of the
+# mu_chem truncation dipole. dx = 4.0e-4/320 = 1.25e-6 = epsilon/16
+# (~16 cells per epsilon). Predicted peak |mu_chem| ~ 0.0426*(dx/epsilon)^2
+# = 1.66e-4, i.e. ~1/4 of the 6.6e-4 seen at dx = epsilon/8.
 amr.plot_dt = 0.25e-6
 amr.plot_int = 1
 amr.max_grid_size = 500000
@@ -17,8 +20,8 @@ amr.blocking_factor = 16
 amr.regrid_int = 1
 amr.grid_eff = 0.8
 amr.n_error_buf = 4
-amr.max_level = 4
-amr.n_cell = 1024 256
+amr.max_level = 0
+amr.n_cell = 320 32
 
 ### TIME STEPPING ###
 ## Static:
@@ -32,29 +35,25 @@ dynamictimestep.min = 1.0e-15
 cfl = 0.3
 
 ### DIMENSIONS ###
-#geometry.prob_lo = 0.000 0.000 0.0
-#geometry.prob_hi = 0.160 0.080 0.0
-geometry.prob_lo = -0.020 -0.0175 0.0
-geometry.prob_hi =  0.120  0.0175 0.0
+# Small window centered on the interface at x = 0 (~14 interface widths each side).
+geometry.prob_lo = -2.0e-4 -2.0e-5 0.0
+geometry.prob_hi =  2.0e-4  2.0e-5 0.0
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
-# stop_time = 2.0e-4
-# stop_time = 1.0e-5
-stop_time = 5.0e-7
+# Only need t ~ 0 (first plot) for the mu_chem diagnostic.
+stop_time = 1.0e-8
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 4.0e-5
-eta.ic.expression.constant.R0 = 4.4e-3
-eta.ic.expression.constant.x_center = 0.0
-eta.ic.expression.constant.y_center = 0.0
+eta.ic.expression.constant.epsilon = 2.0e-5
+eta.ic.expression.constant.x_interface = 0.0
 
 # convention for this expression: eta ~ 0 inside liquid, eta ~ 1 in gas.
-# Interface width = sqrt(2)*epsilon is the exact equilibrium of the code's
-# chemical potential mu = -epsilon^2 lap(eta) + 4 eta (eta-0.5)(eta-1).
-# (Was 2*sqrt(2)*epsilon -- a profile 2x too wide, leaving a residual mu dipole.)
-eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x-x_center)**2 + (y-y_center)**2) - R0)/(sqrt(2)*epsilon)))"
+# Flat vertical interface at x = x_interface: gas (eta~1) on the left, liquid (eta~0) on the right.
+# Width = sqrt(2)*epsilon is the EXACT 1D equilibrium of the code's chemical
+# potential mu = -epsilon^2 lap(eta) + 4 eta (eta-0.5)(eta-1): eta = 0.5(1 + tanh(x/(sqrt(2)*epsilon))).
+eta.ic.expression.region0 = "0.5*(1 + tanh((x_interface - x)/(sqrt(2)*epsilon)))"
 
 epsilon = eta.ic.expression.constant.epsilon
 
@@ -72,55 +71,42 @@ eos1.p0 = 4.01e8
 mu1 = 1.35e-3
 mu1_b = 0.0
 
-# Densities
+# Densities: uniform in each fluid (no shock).
 density0.ic.type = expression
 density0.ic.expression.constant.rho_vapor = 1.35598311723
-density0.ic.expression.constant.rho_shock = 39.0
-density0.ic.expression.constant.x_shock = -0.005
-density0.ic.expression.constant.delta = 4.0e-5
-density0.ic.expression.region0 = "rho_shock + (rho_vapor - rho_shock)*0.5*(1.0 + tanh((x - x_shock)/delta))"
+density0.ic.expression.region0 = "rho_vapor"
 
 density1.ic.type = expression
 density1.ic.expression.constant.rho_nDodecane = 749.5
 density1.ic.expression.region0 = "rho_nDodecane"
 
-# Velocities: post-shock gas velocity from normal-shock jump for Ms=6.5.
+# Velocities: quiescent (no shock).
 velocity0.ic.type = expression
-velocity0.ic.expression.constant.u_shock = 1025.23929192
-velocity0.ic.expression.constant.x_shock = -0.005
-velocity0.ic.expression.constant.delta = 4.0e-5
-velocity0.ic.expression.region0 = "u_shock*0.5*(1.0 - tanh((x - x_shock)/delta))"
+velocity0.ic.expression.region0 = "0.0"
 velocity0.ic.expression.region1 = "0.0"
 
 velocity1.ic.type = expression
-velocity1.ic.expression.constant.u_shock = 0.0
-velocity1.ic.expression.constant.x_shock = -0.005
-velocity1.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
+velocity1.ic.expression.region0 = "0.0"
 velocity1.ic.expression.region1 = "0.0"
 
-# Pressures: pre/post shock vapor pressure consistent with the density states.
+# Pressures: uniform p_vapor everywhere -> mechanical equilibrium across the
+# flat interface. A flat interface has zero curvature, so there is no Laplace
+# jump and both fluids share the same pressure.
 pressure0.ic.type = expression
 pressure0.ic.expression.constant.p_vapor = 3.53948205141e4
-pressure0.ic.expression.constant.p_shock = 1.51203069018e6
-pressure0.ic.expression.constant.x_shock = -0.005
-pressure0.ic.expression.constant.delta = 4.0e-5
-pressure0.ic.expression.region0 = "p_shock + (p_vapor - p_shock)*0.5*(1.0 + tanh((x - x_shock)/delta))"
+pressure0.ic.expression.region0 = "p_vapor"
 
 pressure1.ic.type = expression
 pressure1.ic.expression.constant.p_vapor = 3.53948205141e4
-# Laplace pressure for a 2D droplet: dP = sigma/R = 0.025 / 4.4e-3 = 5.681818... Pa
-# Adding this to the droplet interior puts it in mechanical equilibrium with
-# the surrounding vapor at t=0, suppressing a spurious expansion wave.
-pressure1.ic.expression.constant.p_laplace = 5.6818181818
-pressure1.ic.expression.region0 = "p_vapor + p_laplace"
+pressure1.ic.expression.region0 = "p_vapor"
 
-# Thermodynamic properties from paper 
+# Thermodynamic properties from paper
 eos0.cv = "1.95e3"
 eos0.cp = "1994.85"
 eos1.cv = "1.08e3"
 eos1.cp = "2546.64"
 
-# Surface tension from paper 
+# Surface tension from paper
 sigma = 0.025
 
 Dv = "1.0e-5"
@@ -130,10 +116,6 @@ Y_infinity = 0.0
 pref = 0.0
 
 ### BOUNDARY CONDITIONS ###
-# density.bc.type = expression
-# momentum.bc.type = expression
-# energy.bc.type = expression
-
 density.bc.type.ylo = neumann
 density.bc.type.yhi = neumann
 energy.bc.type.ylo = neumann
@@ -141,14 +123,10 @@ energy.bc.type.yhi = neumann
 momentum.bc.type.ylo = neumann neumann
 momentum.bc.type.yhi = neumann neumann
 
-density.bc.type.xlo = dirichlet
-density.bc.val.xlo  = "39.0"
-energy.bc.type.xlo = dirichlet
-energy.bc.val.xlo  = "86227652.0"
-# momentum.bc.type.xlo = neumann neumann
-momentum.bc.type.xlo = dirichlet neumann
-momentum.bc.val.xlo  = "39975.0" "0.0"
-
+# No inflow: quiescent equilibrium, so xlo is zero-gradient like xhi.
+density.bc.type.xlo = neumann
+energy.bc.type.xlo = neumann
+momentum.bc.type.xlo = neumann neumann
 
 density.bc.type.xhi = neumann
 energy.bc.type.xhi = neumann
@@ -232,5 +210,5 @@ omega_relax = 0.5
 # Pe_CH = U*epsilon^2/(M*sigma), M = M0*epsilon^2, M0 ~ U/sigma.
 # With sigma = 0.025 N/m, M0 = 1025.239/0.025 = 4.10095716768e4
 # Mob = 4.1e4
-Mob = 5.0
-# Mob = 1e-20
+# Mob = 4000.0
+Mob = 1e-20

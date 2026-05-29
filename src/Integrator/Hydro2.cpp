@@ -432,6 +432,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.Vap_dot_mf, &value.bc_nothing, 5, 0, "Vap_dot", true, false, { "_eta", "_rho", "_Mx", "_My", "_E" }); // Momentum Flux
         value.RegisterNewFab(value.omega_adc_mf, &value.bc_nothing, 2, 0, "omega_adc", true, false, { "_xhi", "_yhi" }); // HLLC-ADC shock locator (per hi-face omega)
         value.RegisterNewFab(value.flux_dev_mf, &value.bc_nothing, 2, 0, "flux_dev", true, false, { "_xhi", "_yhi" }); // |F_used - F_HLL| rel. dev. per hi-face
+        value.RegisterNewFab(value.shock_sensor_mf, &value.bc_nothing, 1, 0, "shock_sensor", true, false); // raw Ducros-weighted compression sensor (compared to adc_shock_threshold)
 
         // ====================================================================
         // 7-EQUATION (Baer-Nunziato) PER-PHASE CONSERVATIVES
@@ -1112,6 +1113,7 @@ Hydro2::RHS(int lev,
     amrex::MultiFab shock_tag_local(velocity_mf[lev]->boxArray(),
                                     velocity_mf[lev]->DistributionMap(), 1, 1);
     shock_tag_local.setVal(0.0);
+    shock_sensor_mf[lev]->setVal(0.0);
     if (use_shock_tag)
     {
         amrex::MultiFab shock_raw(velocity_mf[lev]->boxArray(),
@@ -1129,6 +1131,7 @@ Hydro2::RHS(int lev,
             auto raw = shock_raw.array(mfi);
             auto vv  = velocity_mf[lev]->array(mfi);
             auto aa  = a_mf[lev]->array(mfi);
+            auto sensor_out = shock_sensor_mf[lev]->array(mfi);
             amrex::ParallelFor(sbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 auto sten = Numeric::GetStencil(i, j, k, domain);
                 Set::Matrix grad_u = Numeric::Gradient(vv, i, j, k, DX, sten);
@@ -1146,6 +1149,7 @@ Hydro2::RHS(int lev,
                 Set::Scalar ducros = comp / std::sqrt(div_u * div_u + curl_mag2 + small_l * small_l);
                 Set::Scalar c = std::max(aa(i, j, k), small_l);
                 Set::Scalar sensor = ducros * comp * dr / c;
+                sensor_out(i, j, k) = sensor;
                 raw(i, j, k) = (sensor > thresh) ? 1.0 : 0.0;
             });
         }

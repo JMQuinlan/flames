@@ -272,6 +272,10 @@ protected:
     // path with all components blended); >0 means HLLC antidiffusion is still
     // present (untagged face, or adc_components<4 leaking energy/tangent).
     Set::Field<Set::Scalar> flux_dev_mf;
+    // Diagnostic: the raw Ducros-weighted compression shock sensor per cell
+    // (the continuous value compared against adc_shock_threshold), written so the
+    // threshold can be tuned by inspecting the field directly.
+    Set::Field<Set::Scalar> shock_sensor_mf;
 
 
     Set::Field<Set::Scalar> m0_mf;
