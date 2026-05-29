@@ -676,7 +676,7 @@ void Hydro2::Initialize(int lev)
     for (int d = 0; d < AMREX_SPACEDIM; d++)
     {
         pp_scratch[lev].Fhi[d] = std::make_unique<amrex::MultiFab>(ba_init, dm_init, 5, 1);
-        pp_scratch[lev].Flo[d] = std::make_unique<amrex::MultiFab>(ba_init, dm_init, 4, 1);
+        pp_scratch[lev].Flo[d] = std::make_unique<amrex::MultiFab>(ba_init, dm_init, 5, 1);
         pp_scratch[lev].Fhi[d]->setVal(0.0);
         pp_scratch[lev].Flo[d]->setVal(0.0);
     }
@@ -1818,6 +1818,7 @@ Hydro2::RHS(int lev,
                 Flo_x(i, j, k, 1) = hll_xhi.momentum_normal;
                 Flo_x(i, j, k, 2) = hll_xhi.momentum_tangent;
                 Flo_x(i, j, k, 3) = hll_xhi.energy;
+                Flo_x(i, j, k, 4) = hll_xhi.u_interface;
 
                 // y hi-face (j+1/2): normal=y, tangent=x
                 Fhi_y(i, j, k, 0) = flux_yhi.mass;
@@ -1829,6 +1830,7 @@ Hydro2::RHS(int lev,
                 Flo_y(i, j, k, 1) = hll_yhi.momentum_tangent;
                 Flo_y(i, j, k, 2) = hll_yhi.momentum_normal;
                 Flo_y(i, j, k, 3) = hll_yhi.energy;
+                Flo_y(i, j, k, 4) = hll_yhi.u_interface;
 
                 if (i == bx_lo.x) {
                     Fhi_x(i - 1, j, k, 0) = flux_xlo.mass;
@@ -1840,6 +1842,7 @@ Hydro2::RHS(int lev,
                     Flo_x(i - 1, j, k, 1) = hll_xlo.momentum_normal;
                     Flo_x(i - 1, j, k, 2) = hll_xlo.momentum_tangent;
                     Flo_x(i - 1, j, k, 3) = hll_xlo.energy;
+                    Flo_x(i - 1, j, k, 4) = hll_xlo.u_interface;
                 }
                 if (j == bx_lo.y) {
                     Fhi_y(i, j - 1, k, 0) = flux_ylo.mass;
@@ -1851,6 +1854,7 @@ Hydro2::RHS(int lev,
                     Flo_y(i, j - 1, k, 1) = hll_ylo.momentum_tangent;
                     Flo_y(i, j - 1, k, 2) = hll_ylo.momentum_normal;
                     Flo_y(i, j - 1, k, 3) = hll_ylo.energy;
+                    Flo_y(i, j - 1, k, 4) = hll_ylo.u_interface;
                 }
 
                 // Diagnostic: relative deviation of the used flux from pure HLL
@@ -1937,8 +1941,16 @@ Hydro2::RHS(int lev,
                                       - flux_ylo.u_interface * eta_face_ylo) / DX[1];
                 Set::Scalar div_u_x  = (flux_xhi.u_interface - flux_xlo.u_interface) / DX[0];
                 Set::Scalar div_u_y  = (flux_yhi.u_interface - flux_ylo.u_interface) / DX[1];
-                eta_rhs(i, j, k) = -(div_uA_x + div_uA_y)
-                                   + eta(i, j, k) * (div_u_x + div_u_y)
+                Set::Scalar eta_adv  = -(div_uA_x + div_uA_y)
+                                       + eta(i, j, k) * (div_u_x + div_u_y);
+                // When the PP limiter is active the conserved fluxes are blended
+                // toward HLL per face; the volume fraction must advect with the
+                // SAME blended interface velocity, or eta stays razor-sharp while
+                // rho diffuses and the stiffened-liquid EOS amplifies the
+                // mismatch into a spurious pressure wave. Defer the advective
+                // term to Pass D (recomputed with the blended u); keep only the
+                // non-advective sources here. With the limiter off, advect now.
+                eta_rhs(i, j, k) = (pp_on ? 0.0 : eta_adv)
                                    + eta_dot_Vap
                                    + eta_dot_CH; // CHAN HILLARD (CH)
             }
@@ -2045,8 +2057,9 @@ Hydro2::RHS(int lev,
     // Pass A above stored the selected (Fhi) and HLL (Flo) hi-face fluxes.
     // Here we (B) build the source-inclusive low-order baseline, (C) compute
     // the per-face blend factor theta, and (D) recompute the conservative RHS
-    // (and reflux fluxes) from the blended flux. The eta equation is
-    // non-conservative and intentionally left as computed in Pass A.
+    // (and reflux fluxes) from the blended flux. Pass D also re-adds the
+    // non-conservative eta advection using the SAME blended interface velocity
+    // (Pass A left only the eta sources in eta_rhs when the limiter is on).
     // ====================================================================
     const bool pp_on_lev = (pp_flux_limiter != 0 && lev < (int)pp_scratch.size()
                             && pp_scratch[lev].Fhi[0]);
@@ -2190,6 +2203,7 @@ Hydro2::RHS(int lev,
             auto re1rhs = rho_eta1_rhs_mf.array(mfi);
             auto Mrhs   = M_rhs_mf.array(mfi);
             auto Erhs   = E_rhs_mf.array(mfi);
+            auto etarhs = eta_rhs_mf.array(mfi);
             auto rho_flux = rho_flux_mf[lev]->array(mfi);
             auto M_flux   = M_flux_mf[lev]->array(mfi);
             auto E_flux   = E_flux_mf[lev]->array(mfi);
@@ -2246,6 +2260,30 @@ Hydro2::RHS(int lev,
                                     + (ef_ylo * Fylo[0] - ef_yhi * Fyhi[0]) / DX[1];
                 Set::Scalar re1_div = ((1.0 - ef_xlo) * Fxlo[0] - (1.0 - ef_xhi) * Fxhi[0]) / DX[0]
                                     + ((1.0 - ef_ylo) * Fylo[0] - (1.0 - ef_yhi) * Fyhi[0]) / DX[1];
+
+                // Volume-fraction advection with the SAME per-face blend factor as
+                // the conserved fluxes: u_blend = u_HLL + theta*(u_HLLC - u_HLL).
+                // Pass A deferred this term (leaving only sources in eta_rhs) when
+                // the limiter is on, so eta now tracks the blended mass transport
+                // instead of advecting at the unblended HLLC contact speed -- the
+                // desync that floored the pressure in the stiff liquid. theta=1
+                // faces recover full HLLC advection identically to the limiter-off
+                // path.
+                Set::Scalar ub_xhi = Flx(i, j, k, 4)     + th_xhi * (Fhx(i, j, k, 4)     - Flx(i, j, k, 4));
+                Set::Scalar ub_xlo = Flx(i - 1, j, k, 4) + th_xlo * (Fhx(i - 1, j, k, 4) - Flx(i - 1, j, k, 4));
+                Set::Scalar ub_yhi = Fly(i, j, k, 4)     + th_yhi * (Fhy(i, j, k, 4)     - Fly(i, j, k, 4));
+                Set::Scalar ub_ylo = Fly(i, j - 1, k, 4) + th_ylo * (Fhy(i, j - 1, k, 4) - Fly(i, j - 1, k, 4));
+
+                Set::Scalar ebf_xhi = (ub_xhi > 0.0) ? eta(i, j, k)     : eta(i + 1, j, k);
+                Set::Scalar ebf_xlo = (ub_xlo > 0.0) ? eta(i - 1, j, k) : eta(i, j, k);
+                Set::Scalar ebf_yhi = (ub_yhi > 0.0) ? eta(i, j, k)     : eta(i, j + 1, k);
+                Set::Scalar ebf_ylo = (ub_ylo > 0.0) ? eta(i, j - 1, k) : eta(i, j, k);
+
+                Set::Scalar div_uA_b = (ub_xhi * ebf_xhi - ub_xlo * ebf_xlo) / DX[0]
+                                     + (ub_yhi * ebf_yhi - ub_ylo * ebf_ylo) / DX[1];
+                Set::Scalar div_u_b  = (ub_xhi - ub_xlo) / DX[0]
+                                     + (ub_yhi - ub_ylo) / DX[1];
+                etarhs(i, j, k) += -div_uA_b + eta(i, j, k) * div_u_b;
 
                 Set::Scalar mdv = Vap(i, j, k, 1); // m_dot_Vap stored in Pass A
 
@@ -2771,7 +2809,7 @@ void Hydro2::Regrid(int lev, Set::Scalar regrid_time)
     for (int d = 0; d < AMREX_SPACEDIM; d++)
     {
         pp_scratch[lev].Fhi[d] = std::make_unique<amrex::MultiFab>(ba_reg, dm_reg, 5, 1);
-        pp_scratch[lev].Flo[d] = std::make_unique<amrex::MultiFab>(ba_reg, dm_reg, 4, 1);
+        pp_scratch[lev].Flo[d] = std::make_unique<amrex::MultiFab>(ba_reg, dm_reg, 5, 1);
         pp_scratch[lev].Fhi[d]->setVal(0.0);
         pp_scratch[lev].Flo[d]->setVal(0.0);
     }

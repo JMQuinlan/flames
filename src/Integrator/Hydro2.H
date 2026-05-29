@@ -516,7 +516,8 @@ protected:
     // for direction d), 1 ghost so FillBoundary supplies each cell's lo-face.
     //   Fhi[d]: high-order (selected solver) flux, 5 comp = mass, x-mom,
     //           y-mom (fixed frame), energy, u_interface.
-    //   Flo[d]: low-order HLL flux, 4 comp = mass, x-mom, y-mom, energy.
+    //   Flo[d]: low-order HLL flux, 5 comp = mass, x-mom, y-mom, energy,
+    //           u_interface (HLL contact speed, for blended eta advection).
     //   Bbase : source-inclusive low-order baseline, 4 comp = rho, Mx, My, E.
     //   theta : per-face blend factor, AMREX_SPACEDIM comp (theta at i+1/2, j+1/2).
     // ------------------------------------------------------------------
