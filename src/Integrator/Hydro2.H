@@ -276,6 +276,19 @@ protected:
     // (the continuous value compared against adc_shock_threshold), written so the
     // threshold can be tuned by inspecting the field directly.
     Set::Field<Set::Scalar> shock_sensor_mf;
+    // PP-limiter diagnostics (only meaningful when pp_flux_limiter != 0).
+    // pp_theta: per hi-face blend factor theta in [0,1] (1 = full high-order
+    //   HLLC, 0 = full HLL). Shows where the limiter is dissipating.
+    // pp_dmass: the antidiffusive mass flux removed at the cell's hi-faces,
+    //   (1-theta)*|F_HLLC - F_HLL| (max over x/y). This is the mass-transport
+    //   change the conserved (rho,M,E) update sees but the unblended eta
+    //   advection does not -- the interface desync source.
+    // pp_efloor: internal energy per volume injected by the EOS positivity
+    //   backstop, max(ue_floor - UE_raw, 0). Nonzero = the absolute-pressure
+    //   floor (eps_p) fired in that cell (the liquid "pressure flooring").
+    Set::Field<Set::Scalar> pp_theta_mf;
+    Set::Field<Set::Scalar> pp_dmass_mf;
+    Set::Field<Set::Scalar> pp_efloor_mf;
 
 
     Set::Field<Set::Scalar> m0_mf;
@@ -417,6 +430,11 @@ protected:
     // toward the HLL flux per face so the Forward-Euler update keeps every cell
     // in the admissible set { rho > eps_rho, p + p0 >= eps_p }.
     int pp_flux_limiter = 1;
+    // When set, fold dt*Source into the positivity baseline B so theta also
+    // guards against the source driving a cell out of the admissible set.
+    // Clear (pp_source_limit = 0) to limit the flux only and add the source
+    // unlimited, recovering the pure Hu-Adams-Shu flux limiter.
+    int pp_source_limit = 1;
     Set::Scalar eps_p = NAN;    // pressure floor (on p + p0_eff)
     Set::Scalar eps_rho = NAN;  // density floor
 
