@@ -2583,7 +2583,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> rho = density_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> E_vol = energy_per_vol_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> E_vol = energy_per_vol_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> E_mas = energy_per_mas_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> M = momentum_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> a = a_mf.Patch(lev, mfi);
@@ -2644,6 +2644,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 // Diagnostic: energy injected by the floor (0 if not floored).
                 pp_efloor_(i, j, k) = std::max(ue_floor - UE_vol(i, j, k), 0.0);
                 UE_vol(i, j, k) = std::max(UE_vol(i, j, k), ue_floor);
+                // Heal the CONSERVED energy too, not just the derived UE/pressure.
+                // Without this E_vol keeps its sub-floor (negative-internal-energy)
+                // value: only the displayed pressure is clamped while the bad
+                // conserved energy persists and propagates. Writing it back makes
+                // the backstop a true (non-conservative) energy floor so the
+                // conserved state stays consistent with the floored pressure.
+                E_vol(i, j, k) = UE_vol(i, j, k) + KE_vol(i, j, k);
             }
             E_mas(i,j,k) = E_vol(i,j,k) / (rho(i,j,k) + small);
             UE_mas(i,j,k) = E_mas(i,j,k) - KE_mas(i,j,k);
@@ -3861,13 +3868,20 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             // Kinetic energy
             KE(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
 
-            // Internal energy
-            UE(i, j, k) = E(i, j, k) - KE(i, j, k);
-            UE(i, j, k) = (UE(i, j, k) < 0.0) ? small : UE(i, j, k);
-
             // Mixed EOS properties
             gamma(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
             p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
+
+            // Internal energy, floored to the SAME eps_p-equivalent ue_floor the
+            // post-update backstop uses. The old clamp to `small` only caught
+            // UE < 0; but for the stiffened liquid p = (gamma-1)UE - gamma*p0 is
+            // already hugely negative for any UE below ue_floor (~7e8), so the
+            // weak clamp let negative pressure into the Riemann reconstruction
+            // even while the plotted (post-update) pressure read eps_p. This is
+            // the pressure the solver actually consumes, so it must carry the
+            // same floor or the backstop never reaches the flux computation.
+            Set::Scalar ue_floor = (eps_p + gamma(i, j, k) * p0_eff(i, j, k) - pref) / (gamma(i, j, k) - 1.0);
+            UE(i, j, k) = std::max(E(i, j, k) - KE(i, j, k), ue_floor);
 
             // Pressure from Tammann EOS
             press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small);

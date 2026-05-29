@@ -171,7 +171,7 @@ small = 1e-6
 # physical pressure (not p + p0_eff), so the stiffened liquid is held at p >= eps_p
 # rather than eps_p - p0_eff (~ -400 MPa). Set pp_flux_limiter = 0 to
 # disable and recover the unlimited high-order flux.
-pp_flux_limiter = 1
+pp_flux_limiter = 0
 # pp_source_limit folds dt*Source into the positivity baseline so the blend
 # factor also guards against the source pushing a cell out of bounds. Set to 0
 # to limit the flux only and add the source unlimited (pure Hu-Adams-Shu).
@@ -186,9 +186,9 @@ u0.ic.constant.value = 0.0 0.0
 q.ic.constant.value = 0.0 0.0
 
 ### ADDITIONAL SOURCES ###
-apply_surface_tension = 1
+apply_surface_tension = 0
 apply_weight = 0
-apply_vaporization = 1
+apply_vaporization = 0
 
 Spec_Vol = 1
 grav = 9.81
