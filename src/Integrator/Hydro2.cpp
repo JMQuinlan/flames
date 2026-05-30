@@ -313,8 +313,12 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.density0_mf,     value.density_bc,   1, nghost, "density0",     false, false );
         value.RegisterNewFab(value.density0_old_mf, value.density_bc,   1, nghost, "density0_old", false, false);
 
-        value.RegisterNewFab(value.energy0_mf,      value.energy_bc,    1, nghost, "energy0", false, false);
-        value.RegisterNewFab(value.energy0_old_mf,  value.energy_bc,    1, nghost, "energy0_old" , false, false);
+        // E_0 / E_1 are 6-eq conserved primaries (per-phase internal energies).
+        // Mark evolving=true so base Integrator auto-FillPatch/average_down/reflux
+        // treats them like rho_eta0/rho_eta1.  Also writeout=true for
+        // diagnostic visibility of per-phase energies in plotfiles.
+        value.RegisterNewFab(value.energy0_mf,      value.energy_bc,    1, nghost, "energy0", true, true);
+        value.RegisterNewFab(value.energy0_old_mf,  value.energy_bc,    1, nghost, "energy0_old" , false, true);
 
         value.RegisterNewFab(value.momentum0_mf,    value.momentum_bc,  2, nghost, "momentum0", false, false, { "x", "y" });
         value.RegisterNewFab(value.momentum0_old_mf,value.momentum_bc,  2, nghost, "momentum0_old", false, false);
@@ -330,8 +334,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.density1_mf,     value.density_bc,   1, nghost, "density1", false, false);
         value.RegisterNewFab(value.density1_old_mf, value.density_bc,   1, nghost, "density1_old", false, false);
 
-        value.RegisterNewFab(value.energy1_mf,      value.energy_bc,    1, nghost, "energy1", false, false);
-        value.RegisterNewFab(value.energy1_old_mf,  value.energy_bc,    1, nghost, "energy1_old", false, false);
+        value.RegisterNewFab(value.energy1_mf,      value.energy_bc,    1, nghost, "energy1", true, true);
+        value.RegisterNewFab(value.energy1_old_mf,  value.energy_bc,    1, nghost, "energy1_old", false, true);
 
         value.RegisterNewFab(value.momentum1_mf,    value.momentum_bc,  2, nghost, "momentum1", false, false, { "x", "y" });
         value.RegisterNewFab(value.momentum1_old_mf,value.momentum_bc,  2, nghost, "momentum1_old", false, false);
@@ -347,8 +351,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.pressure_mf,     value.energy_bc, 1, nghost, "pressure", true, false);
         value.RegisterNewFab(value.velocity_mf,     &value.bc_nothing,  2, nghost, "velocity", true, false, { "x", "y" });
         value.RegisterNewFab(value.vorticity_mf,    &value.bc_nothing,  1, 0, "vorticity", true, false);
-        value.RegisterNewFab(value.density_mf,      value.density_bc,   1, nghost, "density", true, true);
-        value.RegisterNewFab(value.density_old_mf,  value.density_bc,   1, nghost, "density_old", false, true);
+        // density_mf is a DERIVED field (rho = rho_eta0 + rho_eta1), recomputed
+        // every primitive-update pass. Marking it non-evolving prevents the base
+        // Integrator from average_down/FillPatch on it -- averaging a derived
+        // nonlinear combination of conserved primaries gives wrong coarse
+        // values, which then poison FillPatch at the next regrid.
+        value.RegisterNewFab(value.density_mf,      value.density_bc,   1, nghost, "density", true, false);
+        value.RegisterNewFab(value.density_old_mf,  value.density_bc,   1, nghost, "density_old", false, false);
         value.RegisterNewFab(value.energy_per_vol_mf,       value.energy_bc,    1, nghost, "energy_per_vol", true, true);
         value.RegisterNewFab(value.energy_per_mas_mf,       value.energy_bc,    1, nghost, "energy_per_mass", true, true);
         value.RegisterNewFab(value.energy_per_vol_old_mf,   value.energy_bc,    1, nghost, "energy_vol_old", false, true);
@@ -485,6 +494,15 @@ void Hydro2::Initialize(int lev)
     etadot_mf[lev]  ->setVal(0.0);
     hess_eta_mf[lev]->setVal(0.0);
 
+    // Source-term MFs are populated by the RHS. Zero them here so an
+    // IC-time regrid (which FillCoarsePatches every registered fab) can't
+    // propagate uninitialized garbage / NaN into freshly-created fine
+    // cells -- symptom is "Fw / Fsv / Vap_dot contains nan" at the first
+    // WritePlotFile, before any step has actually run.
+    Fw_mf[lev]      ->setVal(0.0);
+    Fsv_mf[lev]     ->setVal(0.0);
+    Vap_dot_mf[lev] ->setVal(0.0);
+
     // FLUID 0
     velocity0_ic    ->Initialize(lev, velocity0_mf, 0.0);
     pressure0_ic    ->Initialize(lev, pressure0_mf, 0.0);
@@ -537,6 +555,11 @@ void Hydro2::Initialize(int lev)
     UE_per_mas_mf[lev]  ->setVal(0.0);
     KE_per_vol_mf[lev]  ->setVal(0.0);
     KE_per_mas_mf[lev]  ->setVal(0.0);
+
+    // Reflux scratch: FluxRegister (lev>0) + per-direction cc_fluxes.
+    // Initialize covers lev=0 (Regrid is never called on level 0); Regrid
+    // covers lev>0 via MakeNewLevelFromCoarse / RemakeLevel.
+    AllocateRefluxScratch(lev);
 
     Util::ParallelMessage(INFO, "Finished initialization, begginning time iteration");
 }
@@ -1132,6 +1155,31 @@ Hydro2::RHS(int lev,
         Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
 
+        // ---------------- Cell-centered hi-face flux storage for reflux ---
+        // cc_fluxes use density_mf's BA/dmap (same as this MFIter source),
+        // so mfi access is compatible.  Each cell stores the Riemann flux
+        // at its HI face (i+1/2 for d=0, j+1/2 for d=1); at box-lo
+        // boundaries we also write into ghost cell (i-1) / (j-1) so
+        // coarse-fine boundary fluxes survive FillBoundary (Matt Q
+        // commit 8a1633977 "Fix missing lo-face fluxes...").
+        bool have_cc_fluxes = (lev < (int)cc_fluxes.size() && cc_fluxes[lev].mass[0]);
+        amrex::Array4<Set::Scalar> ff_mass_x, ff_mass_y;
+        amrex::Array4<Set::Scalar> ff_mom_x,  ff_mom_y;
+        amrex::Array4<Set::Scalar> ff_ene_x,  ff_ene_y;
+        amrex::Array4<Set::Scalar> ff_ene_k_x, ff_ene_k_y;
+        if (have_cc_fluxes)
+        {
+            ff_mass_x  = cc_fluxes[lev].mass  [0]->array(mfi);
+            ff_mass_y  = cc_fluxes[lev].mass  [1]->array(mfi);
+            ff_mom_x   = cc_fluxes[lev].mom   [0]->array(mfi);
+            ff_mom_y   = cc_fluxes[lev].mom   [1]->array(mfi);
+            ff_ene_x   = cc_fluxes[lev].energy[0]->array(mfi);
+            ff_ene_y   = cc_fluxes[lev].energy[1]->array(mfi);
+            ff_ene_k_x = cc_fluxes[lev].ene_k [0]->array(mfi);
+            ff_ene_k_y = cc_fluxes[lev].ene_k [1]->array(mfi);
+        }
+        const auto bx_lo = amrex::lbound(bx);
+
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
@@ -1581,6 +1629,60 @@ Hydro2::RHS(int lev,
             a_face_ylo = std::min(std::max(a_face_ylo, 0.0), 1.0);
             a_face_yhi = std::min(std::max(a_face_yhi, 0.0), 1.0);
 
+            // -----------------------------------------------------------
+            // Store hi-face Riemann fluxes at cell centers for reflux.
+            // Cell (i,j) -> face (i+1/2,j) flux for d=0, (i,j+1/2) for d=1.
+            // HEAD's Riemann solver already returns per-phase mass and
+            // per-phase energy components, so we feed the FluxRegister
+            // directly without an extra eta-weighted split (Matt Q's
+            // a5783ab32 split is built into our flux struct).
+            //
+            // At box-lo boundaries also write the lo-face flux into the
+            // (i-1) / (j-1) ghost cell -- FillBoundary in Advance() will
+            // overwrite this from a neighbor where one exists, but at
+            // coarse-fine boundaries no neighbor exists and these ghost
+            // values are what FineAdd picks up (Matt Q 8a1633977 fix).
+            // -----------------------------------------------------------
+            if (have_cc_fluxes)
+            {
+                // x-direction hi-face
+                ff_mass_x  (i, j, k, 0) = flux_xhi.mass0;
+                ff_mass_x  (i, j, k, 1) = flux_xhi.mass1;
+                ff_mom_x   (i, j, k, 0) = flux_xhi.momentum_normal;   // x-mom
+                ff_mom_x   (i, j, k, 1) = flux_xhi.momentum_tangent;  // y-mom
+                ff_ene_x   (i, j, k)    = flux_xhi.energy_total;
+                ff_ene_k_x (i, j, k, 0) = flux_xhi.energy0;
+                ff_ene_k_x (i, j, k, 1) = flux_xhi.energy1;
+
+                // y-direction hi-face (swap normal/tangent -> fixed x,y axes)
+                ff_mass_y  (i, j, k, 0) = flux_yhi.mass0;
+                ff_mass_y  (i, j, k, 1) = flux_yhi.mass1;
+                ff_mom_y   (i, j, k, 0) = flux_yhi.momentum_tangent;  // x-mom
+                ff_mom_y   (i, j, k, 1) = flux_yhi.momentum_normal;   // y-mom
+                ff_ene_y   (i, j, k)    = flux_yhi.energy_total;
+                ff_ene_k_y (i, j, k, 0) = flux_yhi.energy0;
+                ff_ene_k_y (i, j, k, 1) = flux_yhi.energy1;
+
+                if (i == bx_lo.x) {
+                    ff_mass_x  (i - 1, j, k, 0) = flux_xlo.mass0;
+                    ff_mass_x  (i - 1, j, k, 1) = flux_xlo.mass1;
+                    ff_mom_x   (i - 1, j, k, 0) = flux_xlo.momentum_normal;
+                    ff_mom_x   (i - 1, j, k, 1) = flux_xlo.momentum_tangent;
+                    ff_ene_x   (i - 1, j, k)    = flux_xlo.energy_total;
+                    ff_ene_k_x (i - 1, j, k, 0) = flux_xlo.energy0;
+                    ff_ene_k_x (i - 1, j, k, 1) = flux_xlo.energy1;
+                }
+                if (j == bx_lo.y) {
+                    ff_mass_y  (i, j - 1, k, 0) = flux_ylo.mass0;
+                    ff_mass_y  (i, j - 1, k, 1) = flux_ylo.mass1;
+                    ff_mom_y   (i, j - 1, k, 0) = flux_ylo.momentum_tangent;
+                    ff_mom_y   (i, j - 1, k, 1) = flux_ylo.momentum_normal;
+                    ff_ene_y   (i, j - 1, k)    = flux_ylo.energy_total;
+                    ff_ene_k_y (i, j - 1, k, 0) = flux_ylo.energy0;
+                    ff_ene_k_y (i, j - 1, k, 1) = flux_ylo.energy1;
+                }
+            }
+
             // div(alpha u) and div(u) (from S_M = flux.u_interface).
             const Set::Scalar div_uA_x = (flux_xhi.u_interface * a_face_xhi
                                         - flux_xlo.u_interface * a_face_xlo) / DX[0];
@@ -1820,11 +1922,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     std::swap(momentum_old_mf[lev],        momentum_mf[lev]);
     std::swap(energy_per_vol_old_mf[lev],  energy_per_vol_mf[lev]);
     std::swap(energy_per_mas_old_mf[lev],  energy_per_mas_mf[lev]);
-    std::swap(eta_old_mf,                  eta_mf);
-    std::swap(rho_eta0_old_mf,             rho_eta0_mf);
-    std::swap(rho_eta1_old_mf,             rho_eta1_mf);
-    std::swap(energy0_old_mf,              energy0_mf);
-    std::swap(energy1_old_mf,              energy1_mf);
+    std::swap(eta_old_mf[lev],             eta_mf[lev]);
+    std::swap(rho_eta0_old_mf[lev],        rho_eta0_mf[lev]);
+    std::swap(rho_eta1_old_mf[lev],        rho_eta1_mf[lev]);
+    std::swap(energy0_old_mf[lev],         energy0_mf[lev]);
+    std::swap(energy1_old_mf[lev],         energy1_mf[lev]);
 
     // ------------------------------------------------------------
     // Time Integration
@@ -1916,7 +2018,128 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     });
 
 
+    // Zero face-flux scratch so reflux accumulation starts clean each step.
+    if (lev < (int)cc_fluxes.size() && cc_fluxes[lev].mass[0])
+    {
+        for (int d = 0; d < AMREX_SPACEDIM; d++)
+        {
+            cc_fluxes[lev].mass[d]  ->setVal(0.0);
+            cc_fluxes[lev].mom[d]   ->setVal(0.0);
+            cc_fluxes[lev].energy[d]->setVal(0.0);
+            cc_fluxes[lev].ene_k[d] ->setVal(0.0);
+        }
+    }
+
     timeintegrator.advance(solution_old, solution_new, time, dt);
+
+    // ------------------------------------------------------------------
+    // Feed FluxRegister for reflux at coarse-fine boundaries.
+    // Convert cell-centered hi-face fluxes (written by RHS) to face-centered
+    // MultiFabs, then accumulate into the appropriate register.
+    //
+    // Register layout matches PostSubcycleReflux:
+    //   [0]               rho_eta0
+    //   [1]               rho_eta1
+    //   [2..2+SD-1]       momentum_k
+    //   [2+SD]            rho*E
+    //   [3+SD..4+SD]      E_0, E_1
+    // ------------------------------------------------------------------
+    {
+        const bool need_crse = (lev < finest_level
+                                && lev + 1 < (int)flux_reg.size() && flux_reg[lev + 1]
+                                && lev < (int)cc_fluxes.size() && cc_fluxes[lev].mass[0]);
+        const bool need_fine = (lev > 0
+                                && lev < (int)flux_reg.size() && flux_reg[lev]
+                                && lev < (int)cc_fluxes.size() && cc_fluxes[lev].mass[0]);
+
+        if (need_crse || need_fine)
+        {
+            if (need_crse) flux_reg[lev + 1]->setVal(0.0);
+
+            constexpr int IDX_RHO_ETA0 = 0;
+            constexpr int IDX_RHO_ETA1 = 1;
+            constexpr int IDX_M        = 2;
+            constexpr int IDX_E_VOL    = 2 + AMREX_SPACEDIM;
+            constexpr int IDX_E0       = 3 + AMREX_SPACEDIM;
+            constexpr int IDX_E1       = 4 + AMREX_SPACEDIM;
+
+            for (int d = 0; d < AMREX_SPACEDIM; d++)
+            {
+                // FillBoundary so ghost cells inherit a neighbor's hi-face
+                // flux for the cc->face conversion below.  At c/f boundaries
+                // FillBoundary has nothing to copy from -- the lo-face values
+                // written by RHS (commit 8a1633977 fix) persist there.
+                cc_fluxes[lev].mass[d]  ->FillBoundary(geom[lev].periodicity());
+                cc_fluxes[lev].mom[d]   ->FillBoundary(geom[lev].periodicity());
+                cc_fluxes[lev].energy[d]->FillBoundary(geom[lev].periodicity());
+                cc_fluxes[lev].ene_k[d] ->FillBoundary(geom[lev].periodicity());
+
+                // Build face-centered MFs on cc_fluxes' BA/dmap (surroundingNodes).
+                amrex::BoxArray face_ba = cc_fluxes[lev].mass[d]->boxArray();
+                face_ba.surroundingNodes(d);
+                const amrex::DistributionMapping& dm_cc = cc_fluxes[lev].mass[d]->DistributionMap();
+                amrex::MultiFab face_mass (face_ba, dm_cc, 2,              0);
+                amrex::MultiFab face_mom  (face_ba, dm_cc, AMREX_SPACEDIM, 0);
+                amrex::MultiFab face_ene  (face_ba, dm_cc, 1,              0);
+                amrex::MultiFab face_ene_k(face_ba, dm_cc, 2,              0);
+
+                // Convert cell-centered hi-face flux to face-centered:
+                //   face(f, j) = cc(f - 1, j)   for d=0
+                // i.e., the hi-face flux of cell f-1 IS the flux at face f.
+                int nlocal = (int)cc_fluxes[lev].mass[d]->local_size();
+                for (int li = 0; li < nlocal; li++)
+                {
+                    auto cc_m  = cc_fluxes[lev].mass  [d]->atLocalIdx(li).array();
+                    auto cc_p  = cc_fluxes[lev].mom   [d]->atLocalIdx(li).array();
+                    auto cc_e  = cc_fluxes[lev].energy[d]->atLocalIdx(li).array();
+                    auto cc_ek = cc_fluxes[lev].ene_k [d]->atLocalIdx(li).array();
+
+                    auto f_m  = face_mass  .atLocalIdx(li).array();
+                    auto f_p  = face_mom   .atLocalIdx(li).array();
+                    auto f_e  = face_ene   .atLocalIdx(li).array();
+                    auto f_ek = face_ene_k .atLocalIdx(li).array();
+
+                    const amrex::Box& fbx = face_mass.atLocalIdx(li).box();
+                    const int dd = d;
+                    amrex::ParallelFor(fbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                        const int ii = (dd == 0) ? i - 1 : i;
+                        const int jj = (dd == 1) ? j - 1 : j;
+                        f_m (i, j, k, 0) = cc_m (ii, jj, k, 0);
+                        f_m (i, j, k, 1) = cc_m (ii, jj, k, 1);
+                        for (int n = 0; n < AMREX_SPACEDIM; n++)
+                            f_p(i, j, k, n) = cc_p(ii, jj, k, n);
+                        f_e (i, j, k)    = cc_e (ii, jj, k);
+                        f_ek(i, j, k, 0) = cc_ek(ii, jj, k, 0);
+                        f_ek(i, j, k, 1) = cc_ek(ii, jj, k, 1);
+                    });
+                }
+
+                // Face area for area-weighted accumulation:
+                //   x-face area = dy, y-face area = dx (2D Cartesian).
+                const amrex::Real* dx_lev = geom[lev].CellSize();
+                const amrex::Real face_area = (d == 0) ? dx_lev[1] : dx_lev[0];
+                amrex::MultiFab area_mf(face_ba, dm_cc, 1, 0);
+                area_mf.setVal(face_area);
+
+                // Sign convention: CrseInit gets -dt (subtracts coarse flux),
+                // FineAdd gets +dt (adds fine flux). Reflux = (fine - coarse).
+                if (need_crse)
+                {
+                    flux_reg[lev + 1]->CrseInit(face_mass,  area_mf, d, 0, IDX_RHO_ETA0, 2,              -dt, amrex::FluxRegister::ADD);
+                    flux_reg[lev + 1]->CrseInit(face_mom,   area_mf, d, 0, IDX_M,        AMREX_SPACEDIM, -dt, amrex::FluxRegister::ADD);
+                    flux_reg[lev + 1]->CrseInit(face_ene,   area_mf, d, 0, IDX_E_VOL,    1,              -dt, amrex::FluxRegister::ADD);
+                    flux_reg[lev + 1]->CrseInit(face_ene_k, area_mf, d, 0, IDX_E0,       2,              -dt, amrex::FluxRegister::ADD);
+                }
+                if (need_fine)
+                {
+                    flux_reg[lev]->FineAdd(face_mass,  area_mf, d, 0, IDX_RHO_ETA0, 2,              dt);
+                    flux_reg[lev]->FineAdd(face_mom,   area_mf, d, 0, IDX_M,        AMREX_SPACEDIM, dt);
+                    flux_reg[lev]->FineAdd(face_ene,   area_mf, d, 0, IDX_E_VOL,    1,              dt);
+                    flux_reg[lev]->FineAdd(face_ene_k, area_mf, d, 0, IDX_E0,       2,              dt);
+                }
+            }
+        }
+    }
 
     // ENFORCE POSITIVITY after time advance
     for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
@@ -2212,6 +2435,10 @@ void Hydro2::Regrid(int lev, Set::Scalar regrid_time)
 
     // Zero fill fields
     ZeroDerivedScratchFields(lev);
+
+    // Re-allocate reflux scratch on the freshly-regridded level (new BA/dmap).
+    // Any previously-accumulated fluxes are discarded.
+    AllocateRefluxScratch(lev);
 
     // Apply BC
     FillGhost4BC(lev, regrid_time);
@@ -4414,6 +4641,219 @@ void Hydro2::RelaxAndReinit(int lev)
 } // end RelaxAndReinit()
 
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////// REFLUX SCRATCH ALLOC ////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// Conserved primaries refluxed at coarse-fine boundaries:
+//   rho_eta0, rho_eta1, M_x, M_y, rho*E, E_0, E_1   (7 components total)
+//
+// We split mass per-phase (eta*F, (1-eta)*F at the face) rather than refluxing
+// total mass + repartitioning, because rho_eta_k are the actual evolved fields
+// (not density_mf, which is derived).  See Matt Q's commit a5783ab32.
+//
+// E_0, E_1 are 6-eq additions not present in the 5-eq line; refluxed alongside
+// the mixture energy so per-phase internal energies stay consistent across c/f.
+//
+// Uses density_mf[lev]'s BoxArray / DistributionMap because grids[lev]/dmap[lev]
+// is not guaranteed populated when this runs (see memory note
+// feedback_amr_perlevel_alloc_must_cover_level0.md -- prior reflux attempt
+// segfaulted by reading empty grids[lev] inside MakeNewLevelFromScratch).
+// density_mf[lev] is guaranteed allocated by RegisterNewFab before Initialize.
+//
+void Hydro2::AllocateRefluxScratch(int lev)
+{
+    BL_PROFILE("Integrator::Hydro2::AllocateRefluxScratch");
+
+    if ((int)flux_reg.size() <= lev)  flux_reg.resize(lev + 1);
+    if ((int)cc_fluxes.size() <= lev) cc_fluxes.resize(lev + 1);
+
+    const amrex::BoxArray& ba           = density_mf[lev]->boxArray();
+    const amrex::DistributionMapping& dm = density_mf[lev]->DistributionMap();
+
+    // FluxRegister sits between lev-1 (coarse) and lev (fine).
+    if (lev > 0)
+    {
+        const int ncomp_reflux = 2 + AMREX_SPACEDIM + 1 + 2; // rho0, rho1, M_x, M_y, rhoE, E_0, E_1
+        flux_reg[lev] = std::make_unique<amrex::FluxRegister>(
+            ba, dm, refRatio(lev - 1), lev, ncomp_reflux);
+        flux_reg[lev]->setVal(0.0);
+    }
+
+    // Cell-centered hi-face flux scratch.  1 ghost so FillBoundary can
+    // propagate the hi-face flux of one box to the lo-face of its neighbor
+    // when converting to face-centered MultiFabs in Advance().
+    for (int d = 0; d < AMREX_SPACEDIM; d++)
+    {
+        cc_fluxes[lev].mass[d]   = std::make_unique<amrex::MultiFab>(ba, dm, 2,                1);
+        cc_fluxes[lev].mom[d]    = std::make_unique<amrex::MultiFab>(ba, dm, AMREX_SPACEDIM,   1);
+        cc_fluxes[lev].energy[d] = std::make_unique<amrex::MultiFab>(ba, dm, 1,                1);
+        cc_fluxes[lev].ene_k[d]  = std::make_unique<amrex::MultiFab>(ba, dm, 2,                1);
+
+        cc_fluxes[lev].mass[d]  ->setVal(0.0);
+        cc_fluxes[lev].mom[d]   ->setVal(0.0);
+        cc_fluxes[lev].energy[d]->setVal(0.0);
+        cc_fluxes[lev].ene_k[d] ->setVal(0.0);
+    }
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////// POST-SUBCYCLE REFLUX /////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// Called from base Integrator::TimeStep AFTER all fine subcycles complete
+// and BEFORE average_down.  Applies the FluxRegister correction to the
+// coarse-level conserved primaries, then re-derives density/velocity from
+// the corrected conserved state.
+//
+// Register layout (must match component offsets in Advance/RHS):
+//   [0]               rho_eta0       (per-phase mass 0)
+//   [1]               rho_eta1       (per-phase mass 1)
+//   [2 .. 2+SD-1]     momentum_k     (k = x, y, ...)
+//   [2+SD]            energy_per_vol (total rho*E)
+//   [3+SD .. 4+SD]    E_0, E_1       (per-phase internal energies; 6-eq)
+//
+void Hydro2::PostSubcycleReflux(int lev, Set::Scalar /*time*/, Set::Scalar /*dt_coarse*/)
+{
+    BL_PROFILE("Integrator::Hydro2::PostSubcycleReflux");
+
+    if (lev >= finest_level) return;
+    const int fine_lev = lev + 1;
+    if (fine_lev >= (int)flux_reg.size() || !flux_reg[fine_lev]) return;
+
+    constexpr int IDX_RHO_ETA0 = 0;
+    constexpr int IDX_RHO_ETA1 = 1;
+    constexpr int IDX_M        = 2;
+    constexpr int IDX_E_VOL    = 2 + AMREX_SPACEDIM;
+    constexpr int IDX_E0       = 3 + AMREX_SPACEDIM;
+    constexpr int IDX_E1       = 4 + AMREX_SPACEDIM;
+
+    flux_reg[fine_lev]->Reflux(*rho_eta0_mf[lev],       1.0, IDX_RHO_ETA0, 0, 1,              geom[lev]);
+    flux_reg[fine_lev]->Reflux(*rho_eta1_mf[lev],       1.0, IDX_RHO_ETA1, 0, 1,              geom[lev]);
+    flux_reg[fine_lev]->Reflux(*momentum_mf[lev],       1.0, IDX_M,        0, AMREX_SPACEDIM, geom[lev]);
+    flux_reg[fine_lev]->Reflux(*energy_per_vol_mf[lev], 1.0, IDX_E_VOL,    0, 1,              geom[lev]);
+    flux_reg[fine_lev]->Reflux(*energy0_mf[lev],        1.0, IDX_E0,       0, 1,              geom[lev]);
+    flux_reg[fine_lev]->Reflux(*energy1_mf[lev],        1.0, IDX_E1,       0, 1,              geom[lev]);
+
+    // Recompute derived fields from the refluxed conserved state.
+    // density and velocity are not refluxed directly -- they're derived.
+    for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& bx = mfi.validbox();
+        auto rho  = density_mf[lev]->array(mfi);
+        auto rho0 = rho_eta0_mf[lev]->array(mfi);
+        auto rho1 = rho_eta1_mf[lev]->array(mfi);
+        auto M    = momentum_mf[lev]->array(mfi);
+        auto v    = velocity_mf[lev]->array(mfi);
+        const Set::Scalar small_local = small;
+
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            rho(i, j, k) = rho0(i, j, k) + rho1(i, j, k);
+            const Set::Scalar rho_safe = std::max(rho(i, j, k), small_local);
+            v(i, j, k, 0) = M(i, j, k, 0) / rho_safe;
+            v(i, j, k, 1) = M(i, j, k, 1) / rho_safe;
+        });
+    }
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////// POST-AVERAGE-DOWN //////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// AMReX average_down independently averages every conserved primary into
+// each coarse-under-fine cell.  For the 6-eq state that includes E_0 and E_1
+// (per-phase internal energies), which are nonlinear functions of (rho*E,
+// rho_eta_k, alpha) via the EOS.  Independent averaging breaks the EOS
+// relation: the averaged (E_0, E_1) don't satisfy mech equilibrium with the
+// averaged (alpha, rho_eta_k, rho*E).  Symptom: |p_relaxed - p_reinit|
+// growing on coarse levels until RelaxAndReinit can't reconcile and a cell
+// goes NaN.
+//
+// Fix: after average_down, recompute (E_0, E_1) on the coarse level from
+// the averaged mixture state via Saurel III.5 mech-equilibrium:
+//   e_int = sum_k alpha_k * (p_mix + gamma_k * pi_k) / (gamma_k - 1)
+//   solve for p_mix, then E_k = alpha_k * (p_mix + gamma_k * pi_k) / (gamma_k - 1).
+//
+// Also re-derives density and velocity for the same consistency reason.
+//
+void Hydro2::PostAverageDown(int coarse_lev)
+{
+    BL_PROFILE("Integrator::Hydro2::PostAverageDown");
+
+    // Only coarse-under-fine cells got touched by average_down -- those are
+    // the cells whose EOS consistency we need to restore.  Other coarse
+    // cells are already at mech equilibrium from the prior RelaxAndReinit;
+    // overwriting them introduces a small per-step bias that compounds in
+    // low-Mach tests (~11 um interface drift over 3 us in pure advection).
+    //
+    // makeFineMask builds an iMultiFab on the coarse grid: 1 where covered
+    // by the fine BoxArray (coarsened to coarse resolution), 0 elsewhere.
+    if (coarse_lev + 1 > finest_level) return;
+
+    amrex::iMultiFab fine_cover_mask = amrex::makeFineMask(
+        eta_mf[coarse_lev]->boxArray(),
+        eta_mf[coarse_lev]->DistributionMap(),
+        eta_mf[coarse_lev + 1]->boxArray(),
+        refRatio(coarse_lev),
+        /*crse_value=*/ 0,
+        /*fine_value=*/ 1);
+
+    const Set::Scalar gam0 = eos0.Gamma();
+    const Set::Scalar pi0_ = eos0.P0();
+    const Set::Scalar gam1 = eos1.Gamma();
+    const Set::Scalar pi1_ = eos1.P0();
+    const Set::Scalar small_local = small;
+
+    for (amrex::MFIter mfi(*eta_mf[coarse_lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& bx = mfi.validbox();
+        auto eta   = eta_mf[coarse_lev]        ->array(mfi);
+        auto rho0  = rho_eta0_mf[coarse_lev]   ->array(mfi);
+        auto rho1  = rho_eta1_mf[coarse_lev]   ->array(mfi);
+        auto M     = momentum_mf[coarse_lev]   ->array(mfi);
+        auto E_vol = energy_per_vol_mf[coarse_lev]->array(mfi);
+        auto E0    = energy0_mf[coarse_lev]    ->array(mfi);
+        auto E1    = energy1_mf[coarse_lev]    ->array(mfi);
+        auto rho   = density_mf[coarse_lev]    ->array(mfi);
+        auto v     = velocity_mf[coarse_lev]   ->array(mfi);
+        auto mask  = fine_cover_mask.const_array(mfi);
+
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+        {
+            // Skip cells that average_down didn't touch.
+            if (mask(i, j, k) == 0) return;
+            // Re-derive density and velocity from refluxed/averaged conserved.
+            rho(i, j, k) = rho0(i, j, k) + rho1(i, j, k);
+            const Set::Scalar rho_safe = std::max(rho(i, j, k), small_local);
+            v(i, j, k, 0) = M(i, j, k, 0) / rho_safe;
+            v(i, j, k, 1) = M(i, j, k, 1) / rho_safe;
+
+            // Volume fractions (clamped).
+            const Set::Scalar a0 = std::min(std::max(eta(i, j, k), 0.0), 1.0);
+            const Set::Scalar a1 = 1.0 - a0;
+
+            // Mixture internal energy per volume:  e_int = rho*E - KE
+            const Set::Scalar KE = 0.5 * rho_safe * (v(i, j, k, 0) * v(i, j, k, 0)
+                                                   + v(i, j, k, 1) * v(i, j, k, 1));
+            const Set::Scalar e_int = E_vol(i, j, k) - KE;
+
+            // Sau09 III.5:  e_int = sum_k alpha_k * (p + gamma_k * pi_k) / (gamma_k - 1)
+            //   p_mix * [a0/(g0-1) + a1/(g1-1)] = e_int - [a0*g0*pi0/(g0-1) + a1*g1*pi1/(g1-1)]
+            const Set::Scalar denom = a0 / std::max(gam0 - 1.0, small_local)
+                                    + a1 / std::max(gam1 - 1.0, small_local);
+            const Set::Scalar stiff_offset = a0 * gam0 * pi0_ / std::max(gam0 - 1.0, small_local)
+                                           + a1 * gam1 * pi1_ / std::max(gam1 - 1.0, small_local);
+            const Set::Scalar p_mix = (e_int - stiff_offset) / std::max(denom, small_local);
+
+            // Recompute E_k consistent with p_mix.  This overwrites whatever
+            // independent average_down produced.
+            E0(i, j, k) = a0 * (p_mix + gam0 * pi0_) / std::max(gam0 - 1.0, small_local);
+            E1(i, j, k) = a1 * (p_mix + gam1 * pi1_) / std::max(gam1 - 1.0, small_local);
+        });
+    }
+}
 
 
 } // end of Integrator namespace

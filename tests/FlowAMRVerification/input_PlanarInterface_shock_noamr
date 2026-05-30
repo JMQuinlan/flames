@@ -1,0 +1,154 @@
+#@ [planar_interface_shock_noamr]
+#@ exe=hydro2
+#@ dim=2
+
+# =============================================================================
+# AMR VERIFICATION: Ma=1.5 shock impinging on planar gas/liquid interface,
+# AMR OFF
+# =============================================================================
+# Pair of input_PlanarInterface_shock_amr.  Same physical setup, same
+# finest resolution (256 x 64 uniform), zero AMR.  Reference run.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/FlowAMRVerification/output_PlanarInterface_shock_noamr
+
+### MESHING ###
+amr.plot_int      = -1
+amr.plot_dt       = 2.5e-7
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.regrid_int    = 20
+amr.grid_eff      = 0.8
+
+amr.max_level     = 0              # NO AMR
+amr.n_cell        = 256 64         # uniform at AMR-finest resolution
+
+nghost = 4
+
+### TIME STEPPING ###
+timestep                = 1.0e-9
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-8
+dynamictimestep.min     = 1.0e-13
+cfl                     = 0.3
+cfl_v                   = 0.3
+
+### DIMENSIONS ###
+geometry.prob_lo     = -0.0025 -0.0005 0.0
+geometry.prob_hi     =  0.0025  0.0005 0.0
+geometry.is_periodic = 0 0 0
+
+stop_time            = 3.0e-6
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.x_iface = 0.0
+eta.ic.expression.constant.eps     = 6.0e-5
+eta.ic.expression.region0 = "0.5*(1.0 - tanh((x - x_iface)/eps))"
+epsilon = 6.0e-5
+
+### EQUATION OF STATE ###
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cv    = 717.86
+eos0.cp    = 1005.0
+
+eos1.gamma = 7.15
+eos1.p0    = 3.0e8
+eos1.cv    = 584.5
+eos1.cp    = 4179.0
+
+### HYDRO INITIAL CONDITIONS ###
+density0.ic.type = expression
+density0.ic.expression.constant.rho_post = 2.281
+density0.ic.expression.constant.rho_pre  = 1.225
+density0.ic.expression.constant.x_shock  = -0.001
+density0.ic.expression.region0 = "(x < x_shock)*rho_post + (x >= x_shock)*rho_pre"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.constant.u_post  = 236.2
+velocity0.ic.expression.constant.x_shock = -0.001
+velocity0.ic.expression.region0 = "(x < x_shock)*u_post"
+velocity0.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_post  = 2.491e5
+pressure0.ic.expression.constant.p_atm   = 1.01325e5
+pressure0.ic.expression.constant.x_shock = -0.001
+pressure0.ic.expression.region0 = "(x < x_shock)*p_post + (x >= x_shock)*p_atm"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1000.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "1.01325e5"
+
+### VISCOSITY OFF ###
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION + CAHN-HILLIARD OFF ###
+sigma = 0.0
+Mob   = 0.0
+pref  = 1.01325e5
+
+### BOUNDARY CONDITIONS ###
+density.bc.type.xhi  = neumann
+density.bc.type.xlo  = neumann
+density.bc.type.ylo  = neumann
+density.bc.type.yhi  = neumann
+energy.bc.type.xhi   = neumann
+energy.bc.type.xlo   = neumann
+energy.bc.type.ylo   = neumann
+energy.bc.type.yhi   = neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA (unused at max_level=0; keep for parity) ###
+eta_refinement_criterion   = 1.0e-2
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 5.0e+3
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCE TERMS OFF ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS ###
+apply_surface_tension = 0
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+Spec_Vol              = 1
+grav                  = 0.0
+
+### NUMERICS ###
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+integration.type    = RungeKutta
+integration.rk.type = 3
+kappa_method        = 1
+
+apply_sharpening     = 0
+sharpening_frequency = 50
+reinit_max_iter      = 100
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+relax_diag           = 0
+
+small = 1.0e-8

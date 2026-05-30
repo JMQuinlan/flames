@@ -100,6 +100,13 @@ protected:
     void Advance(int lev, Set::Scalar time, Set::Scalar dt) override;
     void TagCellsForRefinement(int lev, amrex::TagBoxArray& tags, amrex::Real /*time*/, int /*ngrow*/) override;
     void Regrid(int lev, Set::Scalar time) override;
+    void PostSubcycleReflux(int lev, Set::Scalar time, Set::Scalar dt_coarse) override;
+    void PostAverageDown(int coarse_lev) override;
+    // Allocate flux_reg[lev] (only for lev > 0) and cc_fluxes[lev].
+    // Called from BOTH Initialize() and Regrid() so level 0 and refined
+    // levels both get their reflux scratch (level 0 only goes through
+    // Initialize via MakeNewLevelFromScratch -- Regrid never fires for it).
+    void AllocateRefluxScratch(int lev);
     // RHS signature carries the 6-equation primaries:
     //   eta              = alpha_1
     //   rho_eta{0,1}     = (alpha_k rho_k)  (canonical phase mass, NOT rho*eta)
@@ -414,6 +421,29 @@ protected:
 
     // NGHOST
     int nghost = 2;
+
+    // ------------------------------------------------------------------
+    // Flux registers for conservative reflux at coarse-fine boundaries.
+    // flux_reg[lev] sits between level lev-1 (coarse) and lev (fine).
+    // Element [0] is unused; valid indices are [1 .. max_level].
+    // ------------------------------------------------------------------
+    amrex::Vector<std::unique_ptr<amrex::FluxRegister>> flux_reg;
+
+    // Cell-centered flux MultiFabs storing hi-face Riemann fluxes.
+    // cc_fluxes[lev].mass[d]: cell (i,j) stores per-phase mass flux at face
+    //   (i+1/2,j) for d=0, or (i,j+1/2) for d=1.  2 components: rho_eta0, rho_eta1.
+    // cc_fluxes[lev].mom[d]:  AMREX_SPACEDIM components (x-mom, y-mom).
+    // cc_fluxes[lev].energy[d]: 1 component for total rho*E.
+    // cc_fluxes[lev].ene_k[d]: 2 components for per-phase E_0, E_1 (6-eq specific).
+    // 1 ghost cell so FillBoundary can propagate fluxes across box boundaries
+    // for the cell-to-face conversion in Advance().
+    struct CellFluxes {
+        amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> mass;
+        amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> mom;
+        amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> energy;
+        amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> ene_k;
+    };
+    amrex::Vector<CellFluxes> cc_fluxes;  // indexed by level
 
     // Newton diagnostic for RelaxAndReinit.
     //   relax_diag = 0  : off (default; no diagnostic overhead)

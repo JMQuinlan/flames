@@ -189,6 +189,21 @@ protected:
     virtual void Regrid(int /* amrlev */, Set::Scalar /* time */)
     {}
 
+    /// Called after all fine sub-steps complete and before average_down.
+    /// Override in derived classes to apply FluxRegister reflux corrections.
+    virtual void PostSubcycleReflux(int /*coarse_lev*/, Set::Scalar /*time*/, Set::Scalar /*dt_coarse*/)
+    {}
+
+    /// Called after the unconditional average_down loop on coarse_lev.
+    /// Override in derived classes that have DERIVED conserved fields
+    /// (i.e. fields that are nonlinear functions of other conserved
+    /// primaries -- e.g. per-phase E_k from mixture (rho*E, alpha)).
+    /// Plain average_down on such derived fields produces thermodynamically
+    /// inconsistent coarse-under-fine states; this hook lets the derived
+    /// class recompute them from the averaged primaries.
+    virtual void PostAverageDown(int /*coarse_lev*/)
+    {}
+
 
     inline void StopClock()
     {

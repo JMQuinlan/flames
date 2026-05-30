@@ -1,0 +1,177 @@
+#@ [planar_interface_advect_amr]
+#@ exe=hydro2
+#@ dim=2
+
+# =============================================================================
+# AMR VERIFICATION: planar gas/water interface, pure x-advection, AMR ON
+# =============================================================================
+# Pairs with input_PlanarInterface_advect_noamr (same finest resolution,
+# uniform grid).  Diagnostic: x_interface(t) from y-averaged eta=0.5
+# crossing.  Reference: x_analytical(t) = x_0 + U*t.
+#
+# DESIGN NOTES (this version):
+#   - Phase 1 = water (Tammann, gamma=7.15, p0=3e8).  The EOS mismatch
+#     between air and water is REQUIRED to trigger the AMR multiphase
+#     interpolation inconsistency we're hunting.  A two-ideal-gas test
+#     overlays AMR/noAMR perfectly (no per-phase pressure to relax) and
+#     fails to expose the bug regardless of run length.
+#   - 2 AMR levels (refRatio 2 each) -> finest is 4x coarse.  More c/f
+#     cascade = more chances for cell_cons_interp to produce
+#     thermodynamically inconsistent (alpha, rho_k, E_k) tuples that
+#     RelaxAndReinit can't reconcile.
+#   - Small domain (0.5 mm x 0.25 mm) keeps wall time tractable for
+#     long physical-time runs (water acoustic CFL forces dt ~ 1e-9 s).
+#   - U = 10 m/s (slow) so the interface stays in the domain for the
+#     full 50 us of physical time (interface moves 0.5 mm total).
+#
+# Expected behavior:
+#   - Cleanly passing AMR run: x_interface(t) overlays no-AMR run to
+#     within O(dx_finest).
+#   - Bug-affected AMR run: |p_relaxed - p_reinit| grows step by step
+#     on level 2; eventually p_mix goes NaN somewhere and the run
+#     aborts.  The python script will load whatever plotfiles exist,
+#     showing AMR diverging from noAMR before the crash.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/FlowAMRVerification/output_PlanarInterface_advect_amr
+
+### MESHING ###
+amr.plot_int      = -1
+amr.plot_dt       = 2.5e-7         # 12 frames over 3 us
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.regrid_int    = 20
+amr.grid_eff      = 0.8
+
+amr.max_level     = 2              # 2 AMR levels (refRatio 2 each)
+amr.n_cell        = 32 16          # coarse base; effective finest = 128 x 64
+
+nghost = 4
+
+### TIME STEPPING ###
+timestep                = 1.0e-9
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 2.0e-8
+dynamictimestep.min     = 1.0e-13
+cfl                     = 0.3
+cfl_v                   = 0.3
+
+### DIMENSIONS ###
+geometry.prob_lo     = -0.00025 -0.000125 0.0
+geometry.prob_hi     =  0.00025  0.000125 0.0
+geometry.is_periodic = 0 0 0
+
+# 50 us at U = 10 m/s -> interface moves 0.5 mm.  We start it at -0.20 mm
+# so it crosses the domain center near t = 20 us and exits the
+# right boundary near t = 45 us.
+stop_time            = 3.0e-6
+
+### ETA INITIAL CONDITIONS ###
+# eps = 1.5e-5 ~ 4*dx_finest on this mesh.
+eta.ic.type = expression
+eta.ic.expression.constant.x_iface = -0.0002
+eta.ic.expression.constant.eps     = 1.5e-5
+eta.ic.expression.region0 = "0.5*(1.0 - tanh((x - x_iface)/eps))"
+epsilon = 1.5e-5
+
+### EQUATION OF STATE ###
+eos0.gamma = 1.4               # Air (ideal gas)
+eos0.p0    = 0.0
+eos0.cv    = 717.86
+eos0.cp    = 1005.0
+
+eos1.gamma = 7.15              # Water (Tammann)
+eos1.p0    = 3.0e8
+eos1.cv    = 584.5
+eos1.cp    = 4179.0
+
+### HYDRO INITIAL CONDITIONS ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.225"        # Air
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1000.0"       # Water
+
+# Uniform 10 m/s in +x on BOTH phases (kinematic equilibrium).
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "10.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "10.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Uniform 1 atm on BOTH phases (mechanical equilibrium).
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "1.01325e5"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "1.01325e5"
+
+### VISCOSITY OFF ###
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION + CAHN-HILLIARD OFF ###
+sigma = 0.0
+Mob   = 0.0
+pref  = 1.01325e5
+
+### BOUNDARY CONDITIONS ###
+density.bc.type.xhi  = neumann
+density.bc.type.xlo  = neumann
+density.bc.type.ylo  = neumann
+density.bc.type.yhi  = neumann
+energy.bc.type.xhi   = neumann
+energy.bc.type.xlo   = neumann
+energy.bc.type.ylo   = neumann
+energy.bc.type.yhi   = neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion   = 1.0e-2
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCE TERMS OFF ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS ###
+apply_surface_tension = 0
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+Spec_Vol              = 1
+grav                  = 0.0
+
+### NUMERICS ###
+Riemann_Solver.type = hllc
+# Minmod (TVD) at c/f boundaries -- WENO5 overshoots cell_cons_interp noise
+# and drives p_mix negative in air phase -> NaN sound speed.
+Limiter.type        = minmod
+integration.type    = RungeKutta
+integration.rk.type = 3
+kappa_method        = 1
+
+apply_sharpening     = 0
+sharpening_frequency = 50
+reinit_max_iter      = 100
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+relax_diag           = 0
+
+small = 1.0e-8
