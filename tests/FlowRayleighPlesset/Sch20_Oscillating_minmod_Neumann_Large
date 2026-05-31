@@ -41,8 +41,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large
-# plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large
+# plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large
 
 
 ### MESHING ###
@@ -54,6 +54,17 @@ amr.regrid_int     = 10
 amr.grid_eff       = 0.8
 amr.max_level      = 4              # 4 AMR levels (refRatio 2 each)
 amr.n_cell         = 640 640        # base; effective finest = 10240 x 10240
+
+# n_error_buf adds buffer cells around tagged cells before AMReX makes
+# patches.  Critical for this test: keeps the coarse-fine boundary AWAY
+# from the eta interface band, sitting it in pure-water region instead.
+# The Q-Fix density-partition bug (rho_eta_k = density*eta) writes WRONG
+# values at c/f mixed-eta ghost cells but is EXACT at pure-phase boundaries.
+# With n_error_buf = 8, fine patches extend ~8 dx_finest = 6.2e-3 m past
+# the interface band on each side, far enough into pure water that the
+# partition gives the correct result there.
+# See memory note: feedback_density_partition_breaks_cf_ghosts.md
+amr.n_error_buf    = 8
 
 nghost = 4
 

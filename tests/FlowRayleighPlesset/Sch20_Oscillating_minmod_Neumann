@@ -45,7 +45,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Oscillating_minmod
+plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Oscillating_minmod_NO_p0
 
 ### MESHING ###
 amr.plot_int       = -1
@@ -83,7 +83,7 @@ epsilon = eta.ic.expression.constant.epsilon
 
 ### EQUATION OF STATE -- Sch20 water (Tammann) + air (ideal gas) ###
 eos0.gamma = 2.35
-eos0.p0    = 1.0e9
+eos0.p0    = 0.0 # 1.0e9
 eos0.cv    = 1781.0
 eos0.cp    = 4186.0
 
