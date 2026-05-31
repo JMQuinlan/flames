@@ -1,63 +1,59 @@
-#@ [sch20_oscillating_minmod]
+#@ [sch20_oscillating_minmod_neumann_large]
 #@ exe=hydro2
 #@ dim=2
 
 # =============================================================================
 # Schmidmayer-Bryngelson-Colonius (JCP 402, 2020) -- SPHERICAL BUBBLE
 # Case 1: LOW-PRESSURE-RATIO  (p_inf / p_b = 10)  -- "OSCILLATING" bubble
+# LARGE-DOMAIN AMR VARIANT for Chen-2D benchmark validation
 # =============================================================================
-# Air bubble in water; the bubble collapses then rebounds and oscillates with
-# acoustic-radiation damping. This is Sch20 Table 1 Case 1.
+# Companion to Sch20_Oscillating_minmod_Neumann; same physics + ICs, but:
+#   - Domain expanded from 0.4 m to 8 m so the pressure wave radiated at first
+#     collapse (t ~ tau_c = 1.83 ms) doesn't return to the bubble during the
+#     first oscillation cycle.
+#   - 4 levels of AMR centered on the eta interface, keeping the bubble at
+#     the same Sch20-nominal NR0 = R0/dx_finest = 25.6 while letting the
+#     surrounding water be ~16x coarser.
 #
-#   Reference: Schmidmayer, Bryngelson, Colonius, "An assessment of multiregion
-#   methods for two-phase flow simulations", J. Comput. Phys. 402 (2020)
-#   109080. Section 4 (problem setup), Table 1 (ICs), Eq. (27) (pressure
-#   initialization), Eq. (28) (interface smearing), Eq. (30) (collapse time).
-#
-# Sch20 nominal ICs (Table 1, Case 1):
-#   Water (liquid)  : gamma_l = 2.35,  pi_l = 1.0e9 Pa,  rho_l = 1000 kg/m^3
-#   Air   (gas)     : gamma_g = 1.4,   pi_g = 0,         rho_g = 1.0  kg/m^3
-#   p_inf  = 1.0e5 Pa     (far-field liquid pressure)
-#   p_b    = 1.0e4 Pa     (uniform initial bubble pressure)
-#   ratio  = p_inf / p_b = 10
-#
-# Initial-interface-equilibrium pressure field (Sch20 Eq. 27):
-#   p(r) = p_inf + (R0/r)(p_b - p_inf)        for r >= R0   (exterior liquid)
-#   p(r) = p_b                                for r <  R0   (bubble interior)
-#   This is the steady Rayleigh-Plesset exterior field, so R'(0) = 0 (the
-#   bubble starts at rest, "initial interface equilibrium").
-#
-# Derived quantities:
+# Domain reasoning:
 #   c_l = sqrt(gamma_l (p_inf + pi_l)/rho_l) = sqrt(2.35*(1e5+1e9)/1e3) ~ 1533 m/s
-#   tau_c = 0.915 R0 sqrt(rho_l / p_inf)
-#         = 0.915 * 0.02 * sqrt(1000/1e5) = 1.83e-3 s   (Sch20 Eq. 30)
+#   tau_c = 0.915 R0 sqrt(rho_l / p_inf) ~ 1.83e-3 s
+#   First full oscillation period ~ 2*tau_c = 3.66 ms.
+#   Wave generated at first collapse (t=tau_c) reaches L_half at
+#       t_arrive = tau_c + L_half/c_l
+#   For t_arrive > 2*tau_c we need L_half > c_l*tau_c = 2.8 m.
+#   L_half = 4 m gives t_arrive ~ 4.43 ms (~0.8 ms past first cycle end).
 #
-# Deviations from Sch20 (documented):
-#   - Sch20 uses an octant with symmetry BCs and L = 320 R0 to avoid
-#     reflections. We instead use a 2D Cartesian quadrant-free domain of
-#     +/- 0.2 m (10 R0 half-domain) with NSCBC4 non-reflecting outflow.
-#   - 2D Cartesian (cylindrical) rather than 3D spherical: the simulated
-#     bubble-wall dynamics should be compared against the Chen-2D cylindrical
-#     RPE; the 3D KM / 3D RPE curves are shown as geometric-context bounds.
-#     (See the companion analysis script analyze_Sch20_Oscillating.py.)
+# AMR resolution:
+#   base 640x640 over 8 m -> dx_coarse = 0.0125 m
+#   max_level = 4 (refRatio 2 each) -> dx_finest = 7.8e-4 m
+#   R0 / dx_finest = 25.6  -- matches Sch20 nominal NR0.
+#
+# Stop time: 5e-3 s ~ 2.7 tau_c, covers first full oscillation + reflection.
+#
+# Refinement criteria deliberately conservative: ETA-ONLY at the interface
+# band.  Multi-criterion refinement (p, rho, gradu) created over-refinement
+# and EOS-consistency issues at c/f boundaries in earlier _Large versions.
+# See memory note feedback_density_partition_breaks_cf_ghosts.md for the
+# current state of the c/f density-partition bug.
 # =============================================================================
 
 alamo.program = hydro2
 
 ### OUTPUT ###
-#plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Oscillating_minmod
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating
+plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large
+# plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large
 
 
 ### MESHING ###
-#amr.plot_int       = -1
-amr.plot_dt        = 1.0e-4        # ~ tau_c/18 -> ~100 frames over the run
+amr.plot_int       = -1
+amr.plot_dt        = 1.0e-4         # ~50 frames over 5 ms
 amr.max_grid_size  = 500000
 amr.blocking_factor = 2
-amr.regrid_int     = 20
+amr.regrid_int     = 10
 amr.grid_eff       = 0.8
-amr.max_level      = 4
-amr.n_cell         = 160 160
+amr.max_level      = 4              # 4 AMR levels (refRatio 2 each)
+amr.n_cell         = 640 640        # base; effective finest = 10240 x 10240
 
 nghost = 4
 
@@ -70,15 +66,15 @@ dynamictimestep.min     = 1.0e-13
 cfl                     = 0.5
 
 ### DIMENSIONS ###
-geometry.prob_lo     = -1.00 -1.00 0.0
-geometry.prob_hi     =  1.00  1.00 0.0
+geometry.prob_lo     = -4.00 -4.00 0.0
+geometry.prob_hi     =  4.00  4.00 0.0
 geometry.is_periodic = 0 0 0
-stop_time            = 1.0e-2      # ~ 5.5 tau_c -- several oscillation cycles
+stop_time            = 1e-2
 
-### ETA INITIAL CONDITIONS ###
+### ETA INITIAL CONDITIONS (identical to non-_Large) ###
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.0016     # ~ 2 cells across the band
+eta.ic.expression.constant.epsilon = 0.0016     # ~ 2 cells across the band at finest
 eta.ic.expression.constant.R0      = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
@@ -94,7 +90,7 @@ eos1.p0    = 0.0
 eos1.cv    = 714.286
 eos1.cp    = 1000.0
 
-### HYDRO INITIAL CONDITIONS ###
+### HYDRO INITIAL CONDITIONS (identical to non-_Large) ###
 density0.ic.type = expression
 density0.ic.expression.region0 = "1000.0"
 
@@ -109,33 +105,16 @@ velocity1.ic.type = expression
 velocity1.ic.expression.region0 = "0.0"
 velocity1.ic.expression.region1 = "0.0"
 
-# Liquid (exterior): 2D-CYLINDRICAL rest field (NOT Sch20 Eq. 27).
-#
-# Sch20 Eq. 27, p = p_inf + (R0/r)(p_b - p_inf), is the 3D SPHERICAL
-# incompressible exterior field (1/r decay) -- correct for Sch20's 3D
-# spherical sims. This is a 2D Cartesian (= 2D cylindrical) simulation,
-# whose "bubble at rest" exterior field is LOGARITHMIC:
-#
-#   p(r) = p_b + (p_inf - p_b) * ln(r/R0) / ln(r_inf/R0)
-#
-# Derivation: 2D incompressible continuity gives u = R Rdot / r; radial
-# momentum at Rdot = 0 integrates to a ln(r) pressure profile -- the same
-# logarithm that appears in the Chen-2D RPE inertia factor ln(r_inf/R).
-# Using the 3D 1/r field in a 2D sim leaves the bubble NOT at rest in 2D,
-# corrupting the early transient and shifting the phase vs Chen-2D.
-#
-# Clamps: max(r,R0) -> p_b for the gas interior (continuous at r=R0 since
-# ln(1)=0); min(.,r_inf) caps the field at p_inf in the square-domain
-# corners (r up to 0.2*sqrt(2) > r_inf) so it never overshoots p_inf.
+# Liquid exterior: uniform p_inf (same as non-_Large which uses uniform
+# rather than the 1/r or log(r) Rayleigh field).
 pressure0.ic.type = expression
 pressure0.ic.expression.constant.p_inf = 1.0e5
 pressure0.ic.expression.constant.p_b   = 1.0e4
 pressure0.ic.expression.constant.R0    = 0.02
-pressure0.ic.expression.constant.r_inf = 0.20
-#pressure0.ic.expression.region0 = "p_b + (p_inf - p_b)*log(min(max(sqrt(x*x + y*y), R0), r_inf)/R0)/log(r_inf/R0)"
+pressure0.ic.expression.constant.r_inf = 4.00
 pressure0.ic.expression.region0 = "p_inf"
 
-# Gas (interior): uniform bubble pressure p_b.
+# Gas interior: uniform bubble pressure p_b.
 pressure1.ic.type = expression
 pressure1.ic.expression.constant.p_b = 1.0e4
 pressure1.ic.expression.region0 = "p_b"
@@ -147,10 +126,10 @@ mu1   = 0.0
 mu1_b = 0.0
 
 ### SURFACE TENSION (none in Sch20 nominal collapse cases) ###
-sigma = 72.8e-3 #0.0
+sigma = 72.8e-3
 pref  = 0.0
 
-### BOUNDARY CONDITIONS - Neumann on all 4 sides ###
+### BOUNDARY CONDITIONS - Neumann on all 4 sides (Sch20 non-NSCBC variant) ###
 density.bc.type.xhi = neumann
 density.bc.type.xlo = neumann
 density.bc.type.ylo = neumann
@@ -166,21 +145,24 @@ momentum.bc.type.xlo = neumann neumann
 momentum.bc.type.ylo = neumann neumann
 momentum.bc.type.yhi = neumann neumann
 
-### REFINEMENT (off for the nominal validation run) ###
-eta_refinement_criterion = 1e-1
-omega_refinement_criterion = 10.55
-p_refinement_criterion = 1e+7
-rho_refinement_criterion = 1e+6
-gradu_refinement_criterion = 1e+6
-cutoff = 1e-16
-small = 1e-6;
+### REFINEMENT -- eta-only, conservative threshold ###
+# At the interface, grad_eta_mag ~ 1/epsilon = 625 m^-1.  The integrator's
+# refinement test is (grad_eta_mag * 2 * dr) > criterion where dr = sqrt(dx^2+dy^2).
+# Coarse-level dr ~ 1.77e-2, so a criterion of 0.1 fires at any cell where
+# grad_eta_mag exceeds ~5.7 m^-1 -- the full interface band, nothing else.
+eta_refinement_criterion   = 1.0e-1
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
 
 ### SOURCE TERMS ###
 m0.ic.constant.value = 0.0
 u0.ic.constant.value = 0.0 0.0
 q.ic.constant.value  = 0.0 0.0
 
-### PHYSICS FLAGS ###
+### PHYSICS FLAGS (identical to non-_Large) ###
 apply_surface_tension = 0
 apply_buoyancy        = 0
 apply_weight          = 0
@@ -188,9 +170,8 @@ apply_vaporization    = 0
 Spec_Vol              = 1
 grav                  = 0.0
 
-### NUMERICS -- Sch20 uses WENO5 + SSPRK3 for these cases ###
+### NUMERICS -- match non-_Large for clean validation comparison ###
 Riemann_Solver.type = hllc
-#Limiter.type        = weno5   # (our WENO5 has a startup-oscillation bug)
 Limiter.type        = minmod
 integration.type    = RungeKutta
 integration.rk.type = 3
