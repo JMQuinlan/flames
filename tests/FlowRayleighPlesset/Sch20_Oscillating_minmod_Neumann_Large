@@ -52,8 +52,8 @@ amr.max_grid_size  = 500000
 amr.blocking_factor = 2
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
-amr.max_level      = 4              # 4 AMR levels (refRatio 2 each)
-amr.n_cell         = 640 640        # base; effective finest = 10240 x 10240
+amr.max_level      = 5
+amr.n_cell         = 320 320        # base; effective finest = 10240 x 10240
 
 # n_error_buf adds buffer cells around tagged cells before AMReX makes
 # patches.  Critical for this test: keeps the coarse-fine boundary AWAY
@@ -64,7 +64,7 @@ amr.n_cell         = 640 640        # base; effective finest = 10240 x 10240
 # the interface band on each side, far enough into pure water that the
 # partition gives the correct result there.
 # See memory note: feedback_density_partition_breaks_cf_ghosts.md
-amr.n_error_buf    = 8
+amr.n_error_buf    = 16
 
 nghost = 4
 
