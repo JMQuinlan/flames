@@ -1,0 +1,162 @@
+#@ [toro1a_periodic_conservation]
+#@ exe=hydro2
+#@ dim=2
+
+# =============================================================================
+# CONSERVATION CHECK -- Toro Sod shock tube, all-periodic, single-phase gas
+# =============================================================================
+# Companion to input_GarrickPeriodic.  Tests the SAME conservation principle
+# (integrated mass / momentum / energy must stay constant under periodic BCs)
+# but on a different physical setup:
+#   - Single-phase ideal gas (gamma=1.4, p0=0) -- NO Tammann liquid.
+#   - 10x pressure ratio (Sod's classic) instead of Garrick's 9000x.
+#   - eta = 0 everywhere -> only phase 2 (eos1) is active; pressure
+#     relaxation between phases is effectively a no-op because alpha_1 = 0.
+#
+# Diagnostic logic:
+#   If Garrick-periodic drifts but THIS doesn't -> the bug is specific to
+#     Tammann EOS (stiff liquid) OR to multi-phase pressure-relaxation at
+#     extreme pressure ratios.
+#   If both drift similarly -> bug is in the conservative-flux machinery
+#     itself, independent of EOS / number of active phases.
+#   If THIS drifts much LESS than Garrick -> bug scales with pressure
+#     ratio or stiffness, pointing at relaxation/reinit math.
+#
+# Same Python script (conservation_check.py) integrates the same fields;
+# pass "Toro1aPeriodic" as a CLI arg to switch output directories.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/FlowConservativeCheck/output_Toro1aPeriodic
+
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+### MESHING ###
+amr.plot_dt        = 0.02           # ~25 frames over 0.5 sec
+amr.max_grid_size  = 500000
+amr.blocking_factor = 2
+amr.grid_eff       = 0.8
+amr.max_level      = 0
+amr.n_cell         = 800 16
+
+### DIMENSIONS ###
+geometry.prob_lo = -1.0  -0.02   0.0
+geometry.prob_hi =  1.0   0.02   0.0
+geometry.is_periodic = 1 1 0        # ALL periodic -- closed system
+
+### TIME STEP ###
+timestep                = 1.0e-4
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-3
+dynamictimestep.min     = 1.0e-10
+stop_time               = 0.5
+cfl                     = 0.4
+
+### ETA IC -- single-phase: eta = 0 everywhere -> only phase 2 active ###
+eta.ic.type = constant
+eta.ic.constant.value = 0.0
+epsilon = 1.0e-3                    # unused since eta is uniform, but parsed
+
+### EOS -- BOTH phases identical ideal gas (no Tammann anywhere) ###
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cv    = 717.5
+eos0.cp    = 1004.5
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 717.5
+eos1.cp    = 1004.5
+
+### HYDRO ICs -- Sod classic on phase 2 (the ACTIVE one given eta=0) ###
+# Phase 1 (eos0) is INACTIVE (alpha_1 = eta = 0 everywhere).  Set its
+# density to a benign uniform value just so the Initialize math doesn't
+# divide by something degenerate.
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "0.5"
+
+# Phase 2 (eos1) -- carries the Sod IC.
+density1.ic.type = expression
+density1.ic.expression.constant.rho_L = 1.0
+density1.ic.expression.constant.rho_R = 0.125
+density1.ic.expression.region0 = "rho_L*(x<0) + rho_R*(x>=0)"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_L = 1.0
+pressure1.ic.expression.constant.p_R = 0.1
+pressure1.ic.expression.region0 = "p_L*(x<0) + p_R*(x>=0)"
+
+### VISCOSITY (off) ###
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION (off) ###
+sigma = 0.0
+pref  = 0.0
+
+### BCs - ALL periodic ###
+density.bc.type.xhi = periodic
+density.bc.type.xlo = periodic
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+
+energy.bc.type.xhi = periodic
+energy.bc.type.xlo = periodic
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+
+momentum.bc.type.xhi = periodic periodic
+momentum.bc.type.xlo = periodic periodic
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+### REFINEMENT (off; no AMR) ###
+eta_refinement_criterion   = 1.0e+10
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCES (off for clean conservation check) ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS -- DISABLE EVERYTHING that touches conserved quantities ###
+apply_surface_tension = 0
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+apply_sharpening      = 0
+apply_ahe             = 0
+Spec_Vol              = 1
+grav                  = 0.0
+
+### NUMERICS ###
+kappa_method        = 1
+sharpening_frequency = 100
+reinit_max_iter      = 50
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+relax_diag           = 0

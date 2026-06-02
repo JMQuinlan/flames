@@ -1,0 +1,190 @@
+#@ [toro1a_periodic_centered_conservation]
+#@ exe=hydro2
+#@ dim=2
+
+# =============================================================================
+# CONSERVATION CHECK -- Centered Sod-like blast, diffuse interfaces, periodic
+# =============================================================================
+# Goal: rule out periodic-wrap contamination as the source of the 7.7%
+# energy_phase_sum drift observed in input_Toro1aPeriodic.
+#
+# Setup vs. input_Toro1aPeriodic:
+#   - Same Toro1a ratios (high/low: rho 1.0/0.125, p 1.0/0.1, both ideal
+#     gas gamma=1.4) and same EOS / numerics / no source terms.
+#   - LAYOUT changed:
+#       * input_Toro1aPeriodic: high state on x<0, low state on x>0 (Sod).
+#         The periodic wrap connects two STATES that differ -- a hidden
+#         sharp jump sitting on top of the periodic boundary itself.
+#       * THIS test: high state in the CENTER (|x| < 0.5), low state OUTSIDE
+#         (|x| > 0.5).  The periodic wrap is in UNIFORM LOW state -- no
+#         hidden discontinuity at x = +/- 1.
+#   - Transitions at x = +/- 0.5 are tanh-smoothed over eps = 0.05 (~20
+#     cells wide at dx = 0.0025) to keep limiters happy.
+#   - Single phase (eta = 0 uniform) so the multiphase pressure-relaxation
+#     stays out of the comparison.
+#
+# Expected wave structure: at t = 0+, the two density/pressure transitions
+# at x = +/- 0.5 launch shock waves OUTWARD and rarefaction waves INWARD.
+# The OUTGOING shocks eventually wrap and interact in the low-pressure
+# region; the INGOING rarefactions meet at x = 0.  All of this is real
+# wave activity that stresses the integrator, but never crosses a
+# discontinuous initial condition at the periodic boundary.
+#
+# Diagnostic logic:
+#   If THIS test conserves energy_phase_sum to ~machine precision but
+#     Toro1aPeriodic did not -> the wrap-IC discontinuity was indeed
+#     responsible for the per-phase energy drift.  Fix path: smooth ICs
+#     near periodic boundaries in future tests.
+#   If THIS test drifts similarly to Toro1aPeriodic -> the drift is
+#     from the integrator's per-phase-energy reconciliation (reinit
+#     step), independent of wrap structure.  Fix path: enforce
+#     E_0 + E_1 = rho*E - KE in RelaxAndReinit.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/FlowConservativeCheck/output_Toro1aPeriodicCentered
+
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+### MESHING ###
+amr.plot_dt        = 0.02
+amr.max_grid_size  = 500000
+amr.blocking_factor = 2
+amr.grid_eff       = 0.8
+amr.max_level      = 0
+amr.n_cell         = 800 16
+
+### DIMENSIONS ###
+geometry.prob_lo = -1.0  -0.02   0.0
+geometry.prob_hi =  1.0   0.02   0.0
+geometry.is_periodic = 1 1 0
+
+### TIME STEP ###
+timestep                = 1.0e-4
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-3
+dynamictimestep.min     = 1.0e-10
+stop_time               = 0.5
+cfl                     = 0.4
+
+### ETA IC -- single-phase: eta = 0 -> only phase 2 active ###
+eta.ic.type = constant
+eta.ic.constant.value = 0.0
+epsilon = 1.0e-3
+
+### EOS -- BOTH phases identical ideal gas (Toro1a EOS) ###
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cv    = 717.5
+eos0.cp    = 1004.5
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 717.5
+eos1.cp    = 1004.5
+
+### HYDRO ICs -- centered "blast" profile, smooth tanh transitions ###
+# High state in middle (|x| < 0.5), low state outside.  Both transitions
+# at x = +/- 0.5 are smoothed over eps_p = 0.05 (~20 fine-mesh cells).
+# Formula:
+#   f(x) = f_low + (f_high - f_low) * 0.5 * ( tanh((x + L1)/eps)
+#                                            - tanh((x - L1)/eps) )
+# evaluates to f_high for |x| << L1, f_low for |x| >> L1, smooth between.
+#
+# Phase 1 is the active phase (eta = 0 -> alpha_2 = 1).  Phase 0 ICs are
+# uniform benign placeholders since alpha_1 = 0 everywhere.
+
+# Phase 1 (active) density: 1.0 in center, 0.125 outside.
+density1.ic.type = expression
+density1.ic.expression.constant.rho_H = 1.0
+density1.ic.expression.constant.rho_L = 0.125
+density1.ic.expression.constant.L1    = 0.5
+density1.ic.expression.constant.eps_p = 0.05
+density1.ic.expression.region0 = "rho_L + (rho_H - rho_L) * 0.5 * (tanh((x + L1)/eps_p) - tanh((x - L1)/eps_p))"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Phase 1 pressure: 1.0 in center, 0.1 outside, smooth tanh transitions.
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_H  = 1.0
+pressure1.ic.expression.constant.p_L  = 0.1
+pressure1.ic.expression.constant.L1   = 0.5
+pressure1.ic.expression.constant.eps_p = 0.05
+pressure1.ic.expression.region0 = "p_L + (p_H - p_L) * 0.5 * (tanh((x + L1)/eps_p) - tanh((x - L1)/eps_p))"
+
+# Phase 0 (inactive) -- uniform benign values.
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "0.5"
+
+### VISCOSITY (off) ###
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION (off) ###
+sigma = 0.0
+pref  = 0.0
+
+### BCs - ALL periodic ###
+density.bc.type.xhi = periodic
+density.bc.type.xlo = periodic
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+
+energy.bc.type.xhi = periodic
+energy.bc.type.xlo = periodic
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+
+momentum.bc.type.xhi = periodic periodic
+momentum.bc.type.xlo = periodic periodic
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+### REFINEMENT (off; no AMR) ###
+eta_refinement_criterion   = 1.0e+10
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCES (off) ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS -- everything off (bare conservation check) ###
+apply_surface_tension = 0
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+apply_sharpening      = 0
+apply_ahe             = 0
+Spec_Vol              = 1
+grav                  = 0.0
+
+### NUMERICS ###
+kappa_method        = 1
+sharpening_frequency = 100
+reinit_max_iter      = 50
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+relax_diag           = 0

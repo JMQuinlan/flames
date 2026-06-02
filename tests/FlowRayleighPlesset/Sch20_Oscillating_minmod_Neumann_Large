@@ -183,7 +183,7 @@ grav                  = 0.0
 
 ### NUMERICS -- match non-_Large for clean validation comparison ###
 Riemann_Solver.type = hllc
-Limiter.type        = minmod
+Limiter.type        = weno3
 integration.type    = RungeKutta
 integration.rk.type = 3
 kappa_method        = 1

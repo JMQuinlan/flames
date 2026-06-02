@@ -1,0 +1,165 @@
+#@ [garrick_periodic_conservation]
+#@ exe=hydro2
+#@ dim=2
+
+# =============================================================================
+# CONSERVATION CHECK -- Garrick gas/liquid Riemann with all-periodic BCs
+# =============================================================================
+# Goal: integrated mass / momentum / energy must stay constant to machine
+# precision because periodic BCs let no flux escape the domain.  Any drift
+# is a bug in the integrator -- the integral over a closed system can't
+# change unless we're computing fluxes wrong.
+#
+# Setup mirrors tests/FlowRiemannUnitTests/input_Garrick (Garrick et al.
+# 2017 Sec. 4.1, Eq. 68) with two changes:
+#   1. ALL boundaries periodic (Garrick uses Neumann in x, periodic in y).
+#      This creates a second wave system at the wrap x = +/- 1.0 from the
+#      same eta discontinuity that Garrick puts at x = 0.  Extra wave
+#      activity is FINE for a conservation check -- the more dynamics, the
+#      more chances to expose conservation bugs.
+#   2. stop_time extended from 0.2 -> 1.0 (5x).  Lets waves traverse the
+#      domain ~10 times for ample integration / averaging windows.
+#
+# Companion python script:
+#   tests/FlowConservativeCheck/reference/conservation_check.py
+# integrates rho_eta0, rho_eta1, momentum, energy at each plotfile time
+# and plots drift vs initial value.
+#
+# Disable all source terms (sharpening, vaporization, AHE) so we're testing
+# the bare conservative integrator, not its corrections.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/FlowConservativeCheck/output_GarrickPeriodic
+
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+### MESHING ###
+# amr.plot_int       = -1
+amr.plot_dt        = 0.02           # 50 frames over 1.0 sec
+amr.max_grid_size  = 500000
+amr.blocking_factor = 2
+amr.grid_eff       = 0.8
+amr.max_level      = 0              # NO AMR -- bare conservation check first
+amr.n_cell         = 800 16
+
+### DIMENSIONS ###
+geometry.prob_lo = -1.0  -0.02   0.0
+geometry.prob_hi =  1.0   0.02   0.0
+geometry.is_periodic = 1 1 0        # ALL periodic -- closed system
+
+### TIME STEP ###
+timestep                = 1.0e-4
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-3
+dynamictimestep.min     = 1.0e-10
+stop_time               = 1.0
+cfl                     = 0.4
+
+### ETA IC (Garrick: 0 on left, 1 on right; sharp tanh at x=0) ###
+# Periodic wrap creates a second jump at x = +/-1; that's intentional here.
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 1.25e-3
+eta.ic.expression.region0 = "0.5 * (1.0 + tanh(x / epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### EOS (Garrick) ###
+eos0.gamma = 5.5
+eos0.p0    = 1.505
+eos0.cv    = 717.5
+eos0.cp    = 1004.5
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 717.5
+eos1.cp    = 1004.5
+
+### HYDRO ICs (Garrick Eq. 68) ###
+# Left side (x < 0) - heavier phase 0
+density0.ic.type = constant
+density0.ic.constant.value = 0.991
+
+velocity0.ic.type = constant
+velocity0.ic.constant.value = 0.0 0.0
+
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 3.059e-4
+
+# Right side (x > 0) - lighter phase 1
+density1.ic.type = constant
+density1.ic.constant.value = 1.241
+
+velocity1.ic.type = constant
+velocity1.ic.constant.value = 0.0 0.0
+
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 2.753
+
+### VISCOSITY (off) ###
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION (off) ###
+sigma = 0.0
+pref  = 0.0
+
+### BCs - ALL periodic ###
+density.bc.type.xhi = periodic
+density.bc.type.xlo = periodic
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+
+energy.bc.type.xhi = periodic
+energy.bc.type.xlo = periodic
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+
+momentum.bc.type.xhi = periodic periodic
+momentum.bc.type.xlo = periodic periodic
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+### REFINEMENT (off; no AMR) ###
+eta_refinement_criterion   = 1.0e+10
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCES (off for clean conservation check) ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS -- DISABLE EVERYTHING that touches conserved quantities ###
+# Sharpening reshuffles mass between phases -- breaks per-phase conservation.
+# Vaporization is a mass source.
+# AHE redistributes energy between phases (zero-sum but worth testing without).
+# Surface tension / weight add force without changing conservation but turn
+# off for cleanliness.
+apply_surface_tension = 0
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+apply_sharpening      = 0
+apply_ahe             = 0
+Spec_Vol              = 1
+grav                  = 0.0
+
+### NUMERICS ###
+kappa_method        = 1
+sharpening_frequency = 100
+reinit_max_iter      = 50
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+relax_diag           = 0

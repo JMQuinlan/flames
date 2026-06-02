@@ -105,10 +105,10 @@ T_END = 1.0e-2
 # and edited for a different machine / scratch location.
 OUTPUT_DIR = os.path.normpath(os.path.join(
     _HERE, "..", "..", "..", "bin", "tests",
-    "FlowRayleighPlesset", "output_Sch20_Oscillating_minmod",
+    "FlowRayleighPlesset", "output_Sch20_Oscillating_minmod_NO_p0",
 ))
 # OVERRIDE (uncomment + edit for your machine):
-OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large")
+#OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large")
 
 # ===== PLOT STYLING (publication knobs) =====
 FONT_SIZE_TITLE  = 16

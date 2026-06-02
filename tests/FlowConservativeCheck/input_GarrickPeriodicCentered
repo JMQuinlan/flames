@@ -1,0 +1,184 @@
+#@ [garrick_periodic_centered_conservation]
+#@ exe=hydro2
+#@ dim=2
+
+# =============================================================================
+# CONSERVATION CHECK -- Centered Garrick gas/liquid Riemann, diffuse, periodic
+# =============================================================================
+# Goal: distinguish "real conservation bug from extreme pressure ratio /
+# Tammann stiffness / pressure relaxation" from "test-setup artifact from
+# the wrap-IC discontinuity".
+#
+# Setup vs. input_GarrickPeriodic:
+#   - Same Garrick EOSs and ICs (Tammann liquid eos0, ideal gas eos1;
+#     liquid p = 3.059e-4, gas p = 2.753 -- 9000x ratio; rho_liq = 0.991,
+#     rho_gas = 1.241).
+#   - LAYOUT changed:
+#       * input_GarrickPeriodic: liquid on x<0, gas on x>0 (the Garrick
+#         original Riemann problem at x=0). Periodic wrap connects gas at
+#         x=+1 to liquid at x=-1 -- a HIDDEN second Riemann problem with
+#         the same 9000x pressure jump sitting on top of the periodic
+#         boundary itself.
+#       * THIS test: liquid in the CENTER (|x| < 0.5), gas OUTSIDE
+#         (|x| > 0.5). Periodic wrap is in UNIFORM GAS -- no hidden
+#         discontinuity at x = +/- 1.
+#   - Diffuse eta transitions at x = +/- 0.5 (tanh smoothed over eps=0.05,
+#     ~20 cells wide at dx=0.0025) so the gas/liquid interfaces are
+#     ALSO diffuse -- avoids upwind-flux noise from a sharp eta jump.
+#
+# Two symmetric inward-moving shock waves are launched at t=0+ from the
+# pressure jump at each diffuse interface, converge at x=0 around
+# t ~ 0.5 / c_gas ~ 0.28 s, then reflect and wrap.  Plenty of wave
+# activity to expose conservation bugs, but every IC discontinuity is
+# either diffuse or far from the periodic boundary.
+#
+# Diagnostic logic:
+#   If THIS conserves rho*E to ~machine precision but GarrickPeriodic did
+#     not -> wrap-IC discontinuity was the conservation breaker.  Same
+#     class of test-setup artifact we ruled out for Toro1a.
+#   If THIS still drifts massively -> conservation bug is from the
+#     multi-phase Tammann pressure relaxation at extreme pressure ratios,
+#     independent of where the discontinuity sits.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/FlowConservativeCheck/output_GarrickPeriodicCentered
+
+Riemann_Solver.type = hllc
+#Limiter.type        = minmod
+Limiter.type        = weno5
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+### MESHING ###
+amr.plot_dt        = 0.02           # ~25 frames over 0.5 sec
+amr.max_grid_size  = 500000
+amr.blocking_factor = 2
+amr.grid_eff       = 0.8
+amr.max_level      = 0              # NO AMR -- bare conservation check first
+amr.n_cell         = 800 16
+
+### DIMENSIONS ###
+geometry.prob_lo = -1.0  -0.02   0.0
+geometry.prob_hi =  1.0   0.02   0.0
+geometry.is_periodic = 1 1 0        # ALL periodic -- closed system
+
+### TIME STEP ###
+timestep                = 1.0e-4
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-3
+dynamictimestep.min     = 1.0e-10
+stop_time               = 0.5
+cfl                     = 0.4
+
+### ETA IC -- liquid blob in center, gas outside, smooth tanh transitions ###
+# eta = alpha_1 = volume fraction of phase 1 (= GAS in this setup).
+# Want eta = 0 in middle (pure liquid), eta = 1 outside (pure gas):
+#   eta(x) = 1 - 0.5*( tanh((x + L1)/eps) - tanh((x - L1)/eps) )
+# At x = 0       : 1 - 0.5*(1 - (-1)) = 0     (liquid)
+# At x = +/- L1  : 1 - 0.5*(1 - 0)    = 0.5   (interface)
+# At x = +/- 1   : 1 - 0.5*(1 - 1)    = 1     (gas, smooth wrap)
+eta.ic.type = expression
+eta.ic.expression.constant.L1     = 0.5
+eta.ic.expression.constant.eps_e  = 0.05
+eta.ic.expression.region0 = "1.0 - 0.5*(tanh((x + L1)/eps_e) - tanh((x - L1)/eps_e))"
+epsilon = eta.ic.expression.constant.eps_e
+
+### EOS (Garrick) ###
+# phase 0 = liquid (Tammann)
+eos0.gamma = 5.5
+eos0.p0    = 1.505
+eos0.cv    = 717.5
+eos0.cp    = 1004.5
+
+# phase 1 = gas (ideal)
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 717.5
+eos1.cp    = 1004.5
+
+### HYDRO ICs (Garrick states, both phases at rest) ###
+# Per-phase IC pressures are CONSTANT across the domain -- in pure-phase
+# cells the Initialize step uses them directly; in diffuse-interface cells
+# Initialize builds p_mix = alpha_0 * p0 + alpha_1 * p1 (mech-equilibrium IC
+# per Schmidmayer 2020 sec 3.3).  At eta=0 (interior): p = 3.059e-4 (liquid
+# pressure). At eta=1 (exterior): p = 2.753 (gas pressure).  In the eta
+# transition: linear blend.
+density0.ic.type = constant
+density0.ic.constant.value = 0.991
+
+velocity0.ic.type = constant
+velocity0.ic.constant.value = 0.0 0.0
+
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 3.059e-4
+
+density1.ic.type = constant
+density1.ic.constant.value = 1.241
+
+velocity1.ic.type = constant
+velocity1.ic.constant.value = 0.0 0.0
+
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 2.753
+
+### VISCOSITY (off) ###
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION (off) ###
+sigma = 0.0
+pref  = 0.0
+
+### BCs - ALL periodic ###
+density.bc.type.xhi = periodic
+density.bc.type.xlo = periodic
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+
+energy.bc.type.xhi = periodic
+energy.bc.type.xlo = periodic
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+
+momentum.bc.type.xhi = periodic periodic
+momentum.bc.type.xlo = periodic periodic
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+### REFINEMENT (off; no AMR) ###
+eta_refinement_criterion   = 1.0e+10
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCES (off) ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS -- everything off (bare conservation check) ###
+apply_surface_tension = 0
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+apply_sharpening      = 0
+apply_ahe             = 0
+Spec_Vol              = 1
+grav                  = 0.0
+
+### NUMERICS ###
+kappa_method        = 1
+sharpening_frequency = 100
+reinit_max_iter      = 50
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+relax_diag           = 0
