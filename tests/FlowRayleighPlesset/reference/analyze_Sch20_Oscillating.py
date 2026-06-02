@@ -448,6 +448,38 @@ def main():
     print(f"  wrote {out_eps}")
     plt.close(fig)
 
+    # ---- CSV export: sim vs Chen2D, interpolated onto sim time grid --------
+    # Columns:
+    #   time_s          -- simulation plotfile time
+    #   time_ms         -- same in ms (convenience)
+    #   R_hydro2_m      -- extracted bubble radius from simulation
+    #   R_chen2d_m      -- Chen-2D RPE solution interpolated to sim time
+    #   diff_m          -- R_hydro2 - R_chen2d (signed; +ve = bigger than analytic)
+    #   diff_rel_pct    -- 100 * diff / R_chen2d
+    # Rows skipped where either column is NaN or chen2d outside its time span.
+    if sim_loaded:
+        chen = next((c for c in curves if c['key'] == 'chen2d'), None)
+        if chen is not None and len(chen['t']) > 1:
+            # np.interp clamps outside-range to endpoint values; mask those.
+            R_chen_at_sim = np.interp(t_sim, chen['t'], chen['R'],
+                                      left=np.nan, right=np.nan)
+            diff_m   = R_sim - R_chen_at_sim
+            with np.errstate(divide='ignore', invalid='ignore'):
+                diff_pct = 100.0 * diff_m / R_chen_at_sim
+
+            out_csv = os.path.join(IMG_DIR, f"{SAVE_NAME}.csv")
+            with open(out_csv, 'w') as f:
+                f.write("time_s,time_ms,R_hydro2_m,R_chen2d_m,diff_m,diff_rel_pct\n")
+                for ts, rh, rc, dm, dp in zip(t_sim, R_sim,
+                                              R_chen_at_sim, diff_m, diff_pct):
+                    f.write(f"{ts:.9e},{ts*1e3:.6f},{rh:.9e},"
+                            f"{rc:.9e},{dm:.9e},{dp:.6f}\n")
+            print(f"  wrote {out_csv}")
+        else:
+            print("  [info] no Chen2D curve -- CSV export skipped.")
+    else:
+        print("  [info] no simulation data loaded -- CSV export skipped.")
+
 
 if __name__ == "__main__":
     main()
