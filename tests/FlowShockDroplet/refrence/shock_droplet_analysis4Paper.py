@@ -1,37 +1,31 @@
 """
 ===============================================================================
-SHOCK-DROPLET INTERACTION COMPREHENSIVE ANALYSIS SCRIPT v2.0
+SHOCK-DROPLET INTERACTION ANALYSIS -- PAPER-QUALITY VARIANT (4Paper)
 ===============================================================================
 
-PURPOSE:
-    Perform full diagnostic of shock-droplet interaction simulations with
-    organized subfolder output, timestamped frames, and automated GIF generation.
+Derived from shock_droplet_analysis2.py.  Same toggleable/parameter-driven
+structure, but tuned for journal-paper output.
 
-FEATURES:
-    - Organized subfolder structure for different plot types
-    - Sequential frame numbering with timestamps
-    - Unified GIF generation from subfolders
-    - TIME_STEP parameter for flexible sampling
-    - Individual timestep plots for all field visualizations
-    - Smart vorticity filtering (2sigma method)
-    - Streamline overlays on velocity fields
-    - 1x6 horizontal grid for publication-ready figures
-    - NO SPECIAL CHARACTERS (all plain ASCII)
-
-INPUTS:
-    - AMReX plot files from shock-droplet simulation
-    - Physical parameters configured in CONFIGURATION section
-
-OUTPUTS:
-    - Organized subfolders: Schlieren-Pressure/, Velocity-Streamline/, Vorticity/
-    - Timestamped individual frames (0001_*.png, 0002_*.png, ...)
-    - Automated GIF animations
-    - Quantitative analysis plots
+WHAT'S DIFFERENT FROM v2:
+    - Monotonic time-sequencing (re-sort by ds.current_time after load).
+    - Khare/Saurel-style per-phase numerical schlieren (separate normalization
+      for gas-side and liquid-side gradients) -- adjustable contrast / exponent
+      / floor.  Removes the "everything is grey" problem.
+    - Eta = {0.01, 0.5, 0.99} fine-weighted contour overlays on every field
+      plot (interface envelope, the standard paper convention).
+    - Deformation metrics emitted BOTH as the 2x3 grid (overview) AND as
+      separate publication-ready figures.
+    - NEW: shape-evolution composite (eta=0.5 outline overlaid at multiple
+      times, color-coded -- Khare 2022 Fig 6 style).
+    - NEW: Schlieren-Mach split plot (top = schlieren, bottom = Mach contour),
+      mirroring the existing Schlieren-Pressure split structure.
+    - NEW: mass-conservation diagnostic (integrated rho_eta0, rho_eta1, total
+      vs time + drift %).
+    - Publication-quality matplotlib defaults (serif fonts, tight layouts,
+      vector EPS alongside PNG, consistent label sizes).
 
 USAGE:
-    1. Set TIME_STEP for sampling frequency
-    2. Enable/disable plots using PLOT_* flags
-    3. Run: python ShockDroplet_Analysis_v2.py
+    python shock_droplet_analysis4Paper.py
 
 ===============================================================================
 """
@@ -99,6 +93,13 @@ PLOT_REGIME_MAP = 1                    # We-Oh diagram
 PLOT_PRESSURE_CONTOURS = 1             # Pressure contours at key times
 PLOT_DENSITY_CONTOURS = 1              # Density contours at key times
 
+# ---- 4Paper additions ------------------------------------------------------
+PLOT_SHAPE_EVOLUTION = 1               # Composite eta=0.5 outlines (Khare Fig 6 style)
+PLOT_SCHLIEREN_MACH_SPLIT = 1          # Individual frames in Schlieren-Mach/
+PLOT_SCHLIEREN_MACH_GIF   = 1          # GIF from Schlieren-Mach/
+PLOT_MASS_CONSERVATION    = 1          # rho_eta0, rho_eta1, total mass vs time
+SEPARATE_DEFORMATION_FIGS = 1          # In addition to 2x3 grid, save each metric standalone
+
 # ============================================================================
 # CONFIGURATION PARAMETERS
 # ============================================================================
@@ -146,14 +147,48 @@ USE_ALL_TIMESTEPS = 1
 KEY_TIMES = [0, 40e-6, 60e-6, 100e-6, 150e-6, 200e-6]
 NUM_GRID_TIMES = 6
 
-# Interface tracking
-ETA_CONTOURS = [0.1, 0.5, 0.9]
+# Interface tracking (v2 defaults; overridden below to ETA_CONTOURS_PAPER).
+ETA_CONTOURS = [0.01, 0.5, 0.99]
 ETA_THRESHOLD = 0.5
 
-# Schlieren parameters
+# Schlieren parameters (legacy v2 globals -- kept for back-compat plot calls)
 SCHLIEREN_BETA = 10.0
 SCHLIEREN_LOG_SCALE = 1
 SCHLIEREN_USE_MIXTURE = 1
+
+# 4Paper schlieren -- Khare 2022 / Saurel 2009 / Sch20-style per-phase
+# normalization.  Each phase gets its own dynamic range so that gas-side
+# shocks (small absolute |grad rho|) and liquid-side waves (large absolute
+# |grad rho|) BOTH render with crisp contrast.  k_air / k_liq are the
+# Quirk 1996 contrast constants; alpha_exp is the gradient exponent
+# (1.0 = linear, < 1.0 = boost weak features, > 1.0 = suppress weak features).
+# grad_floor sets a relative threshold below which a region renders as
+# pure white -- prevents low-amplitude numerical noise from filling the
+# field with grey.
+SCHLIEREN_PER_PHASE       = 1
+SCHLIEREN_K_AIR           = 60.0
+SCHLIEREN_K_LIQ           = 60.0
+SCHLIEREN_ALPHA_EXP       = 0.8
+SCHLIEREN_GRAD_FLOOR_AIR  = 1.0e-2     # relative to per-phase max
+SCHLIEREN_GRAD_FLOOR_LIQ  = 1.0e-2
+
+# Eta contour overlays on field plots (interface envelope).
+ETA_CONTOURS_PAPER = [0.01, 0.5, 0.99]
+ETA_CONTOUR_LW_THIN = 0.5              # weight for the 0.01 / 0.99 envelope
+ETA_CONTOUR_LW_MID  = 1.0              # weight for the 0.5 centerline
+ETA_CONTOUR_COLOR   = 'black'
+
+# Shape-evolution composite (Khare Fig 6 style).
+SHAPE_EVOLUTION_N_FRAMES = 8
+SHAPE_EVOLUTION_CMAP     = 'viridis'
+SHAPE_EVOLUTION_LW       = 1.5
+
+# ----------------------------------------------------------------------------
+# Override v2-era contour defaults with paper-quality values.  ETA_CONTOURS
+# and CONTOUR_LINE_WIDTH are referenced by ~14 plot-function call sites
+# inherited from v2; reassigning them globally here propagates to all of
+# them without per-site edits.  Comment these lines to revert to v2 defaults.
+# ----------------------------------------------------------------------------
 
 # Deformation calculation
 DEFORMATION_METHOD = 'bbox'
@@ -192,7 +227,7 @@ FONT_SIZE_TIMESTAMP = 12
 LINE_WIDTH_THICK = 2.5
 LINE_WIDTH_NORMAL = 2.0
 LINE_WIDTH_THIN = 1.5
-CONTOUR_LINE_WIDTH = 2.0
+CONTOUR_LINE_WIDTH = 0.5            # paper: fine-weighted contours (was 2.0 in v2)
 PLOT_ZOOM_FACTOR = 2.0
 ASPECT_RATIO = 'equal'
 
@@ -202,6 +237,22 @@ GIF_LOOP = 0
 GIF_OPTIMIZE = True
 SAVE_FORMAT_RASTER = 'png'
 SAVE_FORMAT_VECTOR = 'eps'
+
+# ----------------------------------------------------------------------------
+# Publication-quality matplotlib defaults.  Applied globally so every plot
+# produced by this script inherits paper-friendly typography and bbox.
+# ----------------------------------------------------------------------------
+plt.rcParams.update({
+    'font.family':       'serif',
+    'font.serif':        ['DejaVu Serif', 'Times', 'Times New Roman'],
+    'mathtext.fontset':  'dejavuserif',
+    'pdf.fonttype':      42,            # TrueType - editors can recolor text in vector
+    'ps.fonttype':       42,
+    'axes.linewidth':    1.0,
+    'savefig.dpi':       DPI,
+    'savefig.bbox':      'tight',
+    'figure.dpi':        110,
+})
 
 # Create output directories
 if not os.path.exists(output_folder):
@@ -214,14 +265,19 @@ subfolder_schlieren_velocity = os.path.join(output_folder, 'Schlieren-Velocity')
 subfolder_schlieren_vapdotrho = os.path.join(output_folder, 'Schlieren-VapDotRho')
 subfolder_velocity_vorticity = os.path.join(output_folder, 'Velocity-Vorticity')
 subfolder_schlieren_temperature = os.path.join(output_folder, 'Schlieren-Temperature')
+# 4Paper additions
+subfolder_schlieren_mach        = os.path.join(output_folder, 'Schlieren-Mach')
+subfolder_deformation_separate  = os.path.join(output_folder, 'Deformation-Separate')
 
-for folder in [subfolder_schlieren, 
-               subfolder_velocity, 
-               subfolder_vorticity, 
-               subfolder_schlieren_velocity, 
-               subfolder_schlieren_vapdotrho, 
-               subfolder_velocity_vorticity, 
-               subfolder_schlieren_temperature]:
+for folder in [subfolder_schlieren,
+               subfolder_velocity,
+               subfolder_vorticity,
+               subfolder_schlieren_velocity,
+               subfolder_schlieren_vapdotrho,
+               subfolder_velocity_vorticity,
+               subfolder_schlieren_temperature,
+               subfolder_schlieren_mach,
+               subfolder_deformation_separate]:
     if not os.path.exists(folder):
         os.makedirs(folder)
 
@@ -314,11 +370,11 @@ def create_gif_from_folder(subfolder_name, output_gif_name):
 # ============================================================================
 
 def compute_schlieren(rho, dx, dy, beta=5.0, log_scale=False):
-    """Calculate numerical schlieren field from density"""
+    """Calculate numerical schlieren field from density (legacy v2 form)."""
     drho_dx = np.gradient(rho, dx, axis=0)
     drho_dy = np.gradient(rho, dy, axis=1)
     grad_rho_mag = np.sqrt(drho_dx**2 + drho_dy**2)
-    
+
     if log_scale:
         schlieren = np.log10(1 + 100*grad_rho_mag)
     else:
@@ -327,8 +383,80 @@ def compute_schlieren(rho, dx, dy, beta=5.0, log_scale=False):
             schlieren = np.exp(-beta * grad_rho_mag / grad_max)
         else:
             schlieren = np.ones_like(grad_rho_mag)
-    
+
     return schlieren
+
+
+def compute_schlieren_per_phase(rho, eta, dx, dy,
+                                k_air=60.0, k_liq=60.0,
+                                alpha_exp=0.8,
+                                floor_air=1e-2, floor_liq=1e-2):
+    """Khare 2022 / Saurel 2009 / Sch20-style numerical schlieren.
+
+    Computes |grad rho| separately within the gas region (eta > 0.5) and the
+    liquid region (eta < 0.5), normalizes each by its OWN max, then blends
+    via eta.  Each phase gets its own contrast (k) and floor (so smooth
+    regions render pure white).
+
+    schlieren(x,y) = exp( -k * (|grad rho| / max_phase_grad)^alpha_exp )
+                     in each phase, with a floor that maps small gradients
+                     to pure white (schlieren = 1).
+
+    Output is in [0, 1]; rendered with cmap='gray' or 'gray_r'.  Smooth
+    regions appear WHITE; shocks/contacts appear BLACK.
+    """
+    drho_dx = np.gradient(rho, dx, axis=0)
+    drho_dy = np.gradient(rho, dy, axis=1)
+    g       = np.sqrt(drho_dx * drho_dx + drho_dy * drho_dy)
+
+    gas_mask = (eta > 0.5)
+    liq_mask = ~gas_mask
+
+    g_max_air = float(g[gas_mask].max()) if gas_mask.any() else 1.0
+    g_max_liq = float(g[liq_mask].max()) if liq_mask.any() else 1.0
+
+    # Normalize per phase, apply exponent, then exp transform.
+    g_norm_air = np.zeros_like(g)
+    g_norm_liq = np.zeros_like(g)
+    if g_max_air > 0:
+        g_norm_air[gas_mask] = (g[gas_mask] / g_max_air) ** alpha_exp
+    if g_max_liq > 0:
+        g_norm_liq[liq_mask] = (g[liq_mask] / g_max_liq) ** alpha_exp
+
+    # Floor: below the threshold, no schlieren signal (pure white).
+    g_norm_air[g_norm_air < floor_air] = 0.0
+    g_norm_liq[g_norm_liq < floor_liq] = 0.0
+
+    sch = np.ones_like(g)
+    sch[gas_mask] = np.exp(-k_air * g_norm_air[gas_mask])
+    sch[liq_mask] = np.exp(-k_liq * g_norm_liq[liq_mask])
+
+    return sch
+
+
+def overlay_eta_contours(ax, eta, x_grid, y_grid,
+                         levels=ETA_CONTOURS_PAPER,
+                         lw_thin=ETA_CONTOUR_LW_THIN,
+                         lw_mid=ETA_CONTOUR_LW_MID,
+                         color=ETA_CONTOUR_COLOR):
+    """Draw eta = {0.01, 0.5, 0.99} (or user levels) on `ax`.
+
+    Center level (closest to 0.5) gets weight `lw_mid`; envelope levels
+    get the thinner `lw_thin`.  Used to add an interface band to schlieren,
+    pressure, density, Mach, vorticity, velocity plots in paper figures.
+    """
+    levels_sorted = sorted(levels)
+    # Identify which level is the center (closest to 0.5).
+    center_lvl = min(levels_sorted, key=lambda v: abs(v - 0.5))
+    for lvl in levels_sorted:
+        lw = lw_mid if lvl == center_lvl else lw_thin
+        try:
+            ax.contour(x_grid, y_grid, eta, levels=[lvl],
+                       colors=color, linewidths=lw,
+                       linestyles='solid', alpha=0.85)
+        except Exception:
+            # Silently skip if a particular level produces no contour.
+            pass
 
 def extract_interface_contour(eta, x_grid, y_grid, threshold=0.5):
     """Extract interface contour coordinates from eta field"""
@@ -589,8 +717,19 @@ for i, idx in enumerate(analysis_indices):
     
     dx = x_1d[1] - x_1d[0]
     dy = y_1d[1] - y_1d[0]
-    schlieren = compute_schlieren(rho, dx, dy, SCHLIEREN_BETA, SCHLIEREN_LOG_SCALE)
-    
+    # 4Paper: per-phase schlieren (Khare/Saurel-style).  Falls back to the
+    # legacy mixture schlieren if SCHLIEREN_PER_PHASE = 0.
+    if SCHLIEREN_PER_PHASE:
+        schlieren = compute_schlieren_per_phase(
+            rho, eta_field, dx, dy,
+            k_air=SCHLIEREN_K_AIR, k_liq=SCHLIEREN_K_LIQ,
+            alpha_exp=SCHLIEREN_ALPHA_EXP,
+            floor_air=SCHLIEREN_GRAD_FLOOR_AIR,
+            floor_liq=SCHLIEREN_GRAD_FLOOR_LIQ,
+        )
+    else:
+        schlieren = compute_schlieren(rho, dx, dy, SCHLIEREN_BETA, SCHLIEREN_LOG_SCALE)
+
     schlieren_fields.append(schlieren)
     pressure_fields.append(pressure)
     density_fields.append(rho)
@@ -1410,8 +1549,306 @@ def plot_deformation_metrics():
     plt.savefig(os.path.join(output_folder, f'03_Deformation_Metrics.{SAVE_FORMAT_VECTOR}'))
     plt.close()
 
-# [Copy remaining plot functions from your existing script with NO SPECIAL CHARACTERS]
-# For brevity, I've shown the key ones - apply same pattern to all others
+    # ----------------------------------------------------------------------
+    # 4Paper: also save each metric as its own standalone publication figure.
+    # Folder: Deformation-Separate/.  Each panel gets BOTH raster and vector.
+    # ----------------------------------------------------------------------
+    if SEPARATE_DEFORMATION_FIGS:
+        V0 = np.pi * (D_DROPLET_INITIAL / 2) ** 2
+        # (name, y, ylabel, color, title, optional hline_value, hline_label)
+        standalones = [
+            ("D",        D_vals,                              "Deformation $D$",      "tab:blue",   "Deformation Parameter",   None,        None),
+            ("AR",       AR_vals,                             "Aspect Ratio $L/W$",   "tab:red",    "Aspect Ratio",            None,        None),
+            ("CentroidX", np.array(centroid_x) * 1e3,         "Centroid $x$ [mm]",    "tab:green",  "Centroid X Position",     None,        None),
+            ("CentroidY", np.array(centroid_y) * 1e3,         "Centroid $y$ [mm]",    "tab:purple", "Centroid Y Position",     None,        None),
+            ("Perimeter", np.array(area_vals) * 1e3,          "Surface $A$ [mm]",      "tab:cyan",   "Interface Perimeter",
+                np.pi * D_DROPLET_INITIAL * 1e3, "initial"),
+            ("Volume",    np.array(volume_vals) / V0,         r"$V / V_0$",            "tab:olive",  "Normalized Volume",
+                1.0, "initial"),
+        ]
+        for tag, y, ylabel, color, title, hval, hlabel in standalones:
+            fig_s, ax_s = plt.subplots(figsize=(6.5, 4.5))
+            ax_s.plot(t_analysis * 1e6, y, color=color, linewidth=LINE_WIDTH_NORMAL)
+            if hval is not None:
+                ax_s.axhline(y=hval, color='k', linestyle='--', linewidth=1.0, label=hlabel)
+                ax_s.legend(fontsize=FONT_SIZE_LEGEND, loc='best')
+            ax_s.set_xlabel(r"Time [$\mu$s]", fontsize=FONT_SIZE_LABEL)
+            ax_s.set_ylabel(ylabel, fontsize=FONT_SIZE_LABEL)
+            ax_s.set_title(title, fontsize=FONT_SIZE_TITLE)
+            ax_s.grid(True, alpha=0.3)
+            ax_s.tick_params(labelsize=FONT_SIZE_TICK)
+            fig_s.tight_layout()
+            base = os.path.join(subfolder_deformation_separate, f"Deformation_{tag}")
+            fig_s.savefig(f"{base}.{SAVE_FORMAT_RASTER}", dpi=DPI)
+            fig_s.savefig(f"{base}.{SAVE_FORMAT_VECTOR}")
+            plt.close(fig_s)
+
+# ============================================================================
+# 4PAPER PLOT FUNCTIONS
+# ============================================================================
+
+def plot_shape_evolution_composite():
+    """Single figure with eta = 0.5 outline overlaid at multiple times.
+
+    Khare 2022 Fig 6 / Sembian et al. style.  Color-codes each contour by
+    time using SHAPE_EVOLUTION_CMAP.  Useful as a one-glance summary of the
+    droplet's deformation history.
+    """
+    if len(analysis_indices) < 2:
+        print("  [skip] shape evolution: need at least 2 frames.")
+        return
+
+    n_frames = min(SHAPE_EVOLUTION_N_FRAMES, len(analysis_indices))
+    sel = np.linspace(0, len(analysis_indices) - 1, n_frames, dtype=int)
+    times_sel = times[[analysis_indices[s] for s in sel]]
+    cmap = plt.get_cmap(SHAPE_EVOLUTION_CMAP)
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+
+    # Compute bounding box across all overlaid contours so the zoom is tight.
+    x_all = []
+    y_all = []
+
+    for j, s in enumerate(sel):
+        t = times_sel[j]
+        eta = eta_fields[s]
+        x_grid = x_grids[s]
+        y_grid = y_grids[s]
+        color = cmap(j / max(n_frames - 1, 1))
+
+        cs = ax.contour(x_grid, y_grid, eta, levels=[0.5],
+                        colors=[color], linewidths=SHAPE_EVOLUTION_LW)
+        for seg_list in cs.allsegs:
+            for seg in seg_list:
+                if len(seg) > 0:
+                    x_all.append(seg[:, 0])
+                    y_all.append(seg[:, 1])
+
+    if x_all:
+        x_all_flat = np.concatenate(x_all)
+        y_all_flat = np.concatenate(y_all)
+        pad_x = 0.1 * (x_all_flat.max() - x_all_flat.min() + 1e-12)
+        pad_y = 0.1 * (y_all_flat.max() - y_all_flat.min() + 1e-12)
+        ax.set_xlim(x_all_flat.min() - pad_x, x_all_flat.max() + pad_x)
+        ax.set_ylim(y_all_flat.min() - pad_y, y_all_flat.max() + pad_y)
+
+    ax.set_aspect('equal', adjustable='box')
+    ax.set_xlabel(r"$x$ [m]", fontsize=FONT_SIZE_LABEL)
+    ax.set_ylabel(r"$y$ [m]", fontsize=FONT_SIZE_LABEL)
+    ax.set_title(r"Droplet shape evolution ($\eta = 0.5$ contour)",
+                 fontsize=FONT_SIZE_TITLE)
+    ax.grid(True, alpha=0.3)
+    ax.tick_params(labelsize=FONT_SIZE_TICK)
+
+    # Colorbar mapped to time.
+    sm = plt.cm.ScalarMappable(
+        cmap=cmap,
+        norm=plt.Normalize(vmin=times_sel.min() * 1e6, vmax=times_sel.max() * 1e6))
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, fraction=0.040, pad=0.04)
+    cbar.set_label(r"Time [$\mu$s]", fontsize=FONT_SIZE_LABEL)
+    cbar.ax.tick_params(labelsize=FONT_SIZE_TICK)
+
+    fig.tight_layout()
+    base = os.path.join(output_folder, "04Paper_ShapeEvolution")
+    fig.savefig(f"{base}.{SAVE_FORMAT_RASTER}", dpi=DPI)
+    fig.savefig(f"{base}.{SAVE_FORMAT_VECTOR}")
+    plt.close(fig)
+
+
+def _mach_field(pressure, rho, vx, vy, eta):
+    """Compute Mach number on the resampled FRB grid.
+
+    Uses an eta-weighted mixture sound speed (Tammann gas + Tammann liquid):
+        c_eff = sqrt( gamma_eff * (p + gamma_eff * pi_eff) / rho )
+    with gamma_eff = eta * GAMMA_AIR + (1-eta) * GAMMA_WATER and similar
+    for pi.  Approximation -- frozen mixture c is a more proper choice but
+    requires per-phase masses; this is good enough for the visualization.
+    """
+    eta_c = np.clip(eta, 0.0, 1.0)
+    gamma_eff = eta_c * GAMMA_AIR + (1.0 - eta_c) * GAMMA_WATER
+    pi_eff    = eta_c * P0_AIR    + (1.0 - eta_c) * P0_WATER
+    rho_safe  = np.maximum(rho, 1.0e-12)
+    c_sq      = gamma_eff * (np.maximum(pressure + gamma_eff * pi_eff, 0.0)) / rho_safe
+    c_eff     = np.sqrt(np.maximum(c_sq, 1.0e-12))
+    speed     = np.sqrt(vx * vx + vy * vy)
+    return speed / c_eff
+
+
+def plot_schlieren_mach_split_single(idx, frame_num, save_folder):
+    """Schlieren (top) + Mach contour (bottom) split.
+
+    Mirrors the structure of plot_schlieren_pressure_split_single -- same
+    domain split at y = 0, same zoom logic, same overlay convention.  Mach
+    colormap is 'hot' to emphasize supersonic regions.
+    """
+    fig = plt.figure(figsize=FIGURE_SIZE_SINGLE)
+    gs = GridSpec(2, 1, figure=fig, hspace=0.0, height_ratios=[1, 1])
+    ax_top = fig.add_subplot(gs[0])
+    ax_bot = fig.add_subplot(gs[1], sharex=ax_top)
+
+    t        = times[analysis_indices[idx]]
+    schlieren = schlieren_fields[idx]
+    pressure  = pressure_fields[idx]
+    rho       = density_fields[idx]
+    vx, vy    = velocity_fields[idx]
+    eta       = eta_fields[idx]
+    x_grid    = x_grids[idx]
+    y_grid    = y_grids[idx]
+
+    mach = _mach_field(pressure, rho, vx, vy, eta)
+
+    y_vals = y_grid[:, 0]
+    x_vals = x_grid[0, :]
+    zero_idx = np.argmin(np.abs(y_vals))
+
+    schlieren_top = schlieren[zero_idx:, :]
+    mach_bottom   = mach[:zero_idx + 1, :]
+    eta_top       = eta[zero_idx:, :]
+    eta_bottom    = eta[:zero_idx + 1, :]
+    y_top         = y_vals[zero_idx:]
+    y_bottom      = y_vals[:zero_idx + 1]
+
+    extent_top = [x_vals.min(), x_vals.max(), y_top.min(),    y_top.max()]
+    extent_bot = [x_vals.min(), x_vals.max(), y_bottom.min(), y_bottom.max()]
+
+    centroid    = deformation_data[idx]['centroid']
+    zoom_width  = (X_MAX - X_MIN) / PLOT_ZOOM_FACTOR
+    zoom_height = (Y_MAX - Y_MIN) / PLOT_ZOOM_FACTOR
+    x_min_zoom  = centroid[0] - zoom_width / 2
+    x_max_zoom  = centroid[0] + zoom_width / 2
+    y_min_zoom  = centroid[1] - zoom_height / 2
+    y_max_zoom  = centroid[1] + zoom_height / 2
+
+    # TOP: schlieren (white background, dark shocks)
+    im1 = ax_top.imshow(schlieren_top, origin='lower', extent=extent_top,
+                        cmap='gray', vmin=0.0, vmax=1.0,
+                        interpolation='bilinear', aspect='auto')
+    for eta_val in ETA_CONTOURS:
+        ax_top.contour(x_vals, y_top, eta_top, levels=[eta_val],
+                       colors=ETA_CONTOUR_COLOR,
+                       linewidths=(ETA_CONTOUR_LW_MID if eta_val == 0.5 else ETA_CONTOUR_LW_THIN))
+    ax_top.set_xlim(x_min_zoom, x_max_zoom)
+    ax_top.set_ylim(0, y_max_zoom)
+    ax_top.set_aspect('equal', adjustable='box')
+    ax_top.set_ylabel('Y [m]', fontsize=FONT_SIZE_LABEL)
+    ax_top.set_title(f't = {t*1e6:.2f} us', fontsize=FONT_SIZE_TITLE, fontweight='bold')
+    ax_top.tick_params(labelbottom=False)
+    ax_top.spines['bottom'].set_visible(False)
+    cax1 = inset_axes(ax_top, width="3%", height="80%", loc='right')
+    cbar1 = fig.colorbar(im1, cax=cax1)
+    cbar1.set_label('Numerical Schlieren', fontsize=FONT_SIZE_LABEL)
+
+    # BOTTOM: Mach number
+    mach_max = max(float(np.nanmax(mach)), 1.0)
+    im2 = ax_bot.imshow(mach_bottom, origin='lower', extent=extent_bot,
+                        cmap='hot', vmin=0.0, vmax=mach_max,
+                        interpolation='bilinear', aspect='auto')
+    for eta_val in ETA_CONTOURS:
+        ax_bot.contour(x_vals, y_bottom, eta_bottom, levels=[eta_val],
+                       colors='white',
+                       linewidths=(ETA_CONTOUR_LW_MID if eta_val == 0.5 else ETA_CONTOUR_LW_THIN))
+    ax_bot.set_xlim(x_min_zoom, x_max_zoom)
+    ax_bot.set_ylim(y_min_zoom, 0)
+    ax_bot.set_aspect('equal', adjustable='box')
+    ax_bot.set_xlabel('X [m]', fontsize=FONT_SIZE_LABEL)
+    ax_bot.set_ylabel('Y [m]', fontsize=FONT_SIZE_LABEL)
+    ax_bot.spines['top'].set_visible(False)
+    ax_bot.text(0.02, 0.02, f't = {t*1e6:.2f} us', transform=ax_bot.transAxes,
+                fontsize=FONT_SIZE_TIMESTAMP, color='white', fontweight='bold',
+                bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
+    cax2 = inset_axes(ax_bot, width="3%", height="80%", loc='right')
+    cbar2 = fig.colorbar(im2, cax=cax2)
+    cbar2.set_label('Mach Number', fontsize=FONT_SIZE_LABEL)
+
+    plt.subplots_adjust(left=0.08, right=0.92, top=0.95, bottom=0.08, hspace=0.0)
+    ax_top.set_position([ax_top.get_position().x0, ax_bot.get_position().y1,
+                         ax_top.get_position().width, ax_top.get_position().height])
+
+    save_path = os.path.join(save_folder, f'{frame_num:04d}_Schlieren_Mach.{SAVE_FORMAT_RASTER}')
+    plt.savefig(save_path, dpi=DPI)
+    plt.close()
+
+
+def plot_mass_conservation():
+    """Integrated mass diagnostic vs time.
+
+    Computes int(rho_eta_k) dV at each plotfile time, prints final/initial
+    drift % and saves a 2-panel figure (per-phase and total).  Direct
+    quality-control diagnostic for paper supplementary materials.
+    """
+    mass0_arr = []
+    mass1_arr = []
+    mass_tot  = []
+
+    for s, ds in enumerate(all_data):
+        try:
+            # Use a covering grid at finest level for accurate integration.
+            cg = ds.covering_grid(
+                level=ds.index.max_level,
+                left_edge=ds.domain_left_edge,
+                dims=ds.domain_dimensions * (ds.refine_by ** ds.index.max_level),
+            )
+            dx = float((ds.domain_right_edge[0] - ds.domain_left_edge[0]) / cg.shape[0])
+            dy = float((ds.domain_right_edge[1] - ds.domain_left_edge[1]) / cg.shape[1])
+            dV = dx * dy
+            m0 = float(np.asarray(cg["rho_eta0"]).sum()) * dV
+            m1 = float(np.asarray(cg["rho_eta1"]).sum()) * dV
+        except Exception as e:
+            print(f"  [mass-conservation] skip frame {s}: {e}")
+            mass0_arr.append(np.nan)
+            mass1_arr.append(np.nan)
+            mass_tot.append(np.nan)
+            continue
+        mass0_arr.append(m0)
+        mass1_arr.append(m1)
+        mass_tot.append(m0 + m1)
+
+    mass0_arr = np.array(mass0_arr)
+    mass1_arr = np.array(mass1_arr)
+    mass_tot  = np.array(mass_tot)
+
+    # Console summary
+    print("\n  Mass conservation summary:")
+    for name, q in [("rho_eta0", mass0_arr), ("rho_eta1", mass1_arr), ("total", mass_tot)]:
+        q0 = q[0] if np.isfinite(q[0]) else float("nan")
+        qN = q[-1] if np.isfinite(q[-1]) else float("nan")
+        if np.isfinite(q0) and abs(q0) > 1e-30:
+            drift = (qN - q0) / abs(q0) * 100
+            print(f"    {name:<10s}: {q0:14.6e} -> {qN:14.6e}  drift = {drift:+.4e}%")
+
+    # Figure: 2 panels (relative drift + absolute values)
+    fig, axes = plt.subplots(2, 1, figsize=(8, 8), sharex=True)
+    t_us = times * 1e6
+
+    def _drift(q):
+        return 100.0 * (q - q[0]) / max(abs(q[0]), 1e-30)
+
+    axes[0].plot(t_us, _drift(mass0_arr), 'tab:blue',    lw=LINE_WIDTH_NORMAL, label=r"$\int \rho_{\eta 0}\,\mathrm{d}V$ (phase 0)")
+    axes[0].plot(t_us, _drift(mass1_arr), 'tab:red',     lw=LINE_WIDTH_NORMAL, label=r"$\int \rho_{\eta 1}\,\mathrm{d}V$ (phase 1)")
+    axes[0].plot(t_us, _drift(mass_tot),  'k--',         lw=LINE_WIDTH_THICK,  label=r"total")
+    axes[0].set_ylabel(r"Mass drift [%]", fontsize=FONT_SIZE_LABEL)
+    axes[0].set_title("Mass conservation diagnostic",
+                      fontsize=FONT_SIZE_TITLE)
+    axes[0].legend(loc='best', fontsize=FONT_SIZE_LEGEND)
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].plot(t_us, mass0_arr, 'tab:blue', lw=LINE_WIDTH_NORMAL, label="phase 0")
+    axes[1].plot(t_us, mass1_arr, 'tab:red',  lw=LINE_WIDTH_NORMAL, label="phase 1")
+    axes[1].plot(t_us, mass_tot,  'k--',      lw=LINE_WIDTH_THICK,  label="total")
+    axes[1].set_xlabel(r"Time [$\mu$s]", fontsize=FONT_SIZE_LABEL)
+    axes[1].set_ylabel("Integrated mass [kg/m]", fontsize=FONT_SIZE_LABEL)
+    axes[1].legend(loc='best', fontsize=FONT_SIZE_LEGEND)
+    axes[1].grid(True, alpha=0.3)
+
+    for ax in axes:
+        ax.tick_params(labelsize=FONT_SIZE_TICK)
+    fig.tight_layout()
+    base = os.path.join(output_folder, "05Paper_MassConservation")
+    fig.savefig(f"{base}.{SAVE_FORMAT_RASTER}", dpi=DPI)
+    fig.savefig(f"{base}.{SAVE_FORMAT_VECTOR}")
+    plt.close(fig)
+
 
 # ============================================================================
 # EXECUTE PLOTS
@@ -1530,6 +1967,31 @@ if PLOT_SCHLIEREN_TEMPERATURE_GIF:
     print("\nCreating Schlieren/Temperature GIF...")
     create_gif_from_folder('Schlieren-Temperature', 'ANIM_Schlieren_Temperature.gif')
 
+# ---- 4Paper additions ----------------------------------------------------
+if PLOT_SHAPE_EVOLUTION:
+    print("\nGenerating shape-evolution composite (eta=0.5 overlay)...")
+    plot_shape_evolution_composite()
+    print("  Saved: 04Paper_ShapeEvolution")
+    plot_count += 1
+
+if PLOT_SCHLIEREN_MACH_SPLIT:
+    print("\nGenerating Schlieren/Mach split (individual frames)...")
+    for i, idx in enumerate(analysis_indices):
+        plot_schlieren_mach_split_single(i, i+1, subfolder_schlieren_mach)
+        if (i + 1) % 10 == 0:
+            print(f"  Saved {i + 1}/{len(analysis_indices)} frames")
+    plot_count += 1
+
+if PLOT_SCHLIEREN_MACH_GIF:
+    print("\nCreating Schlieren/Mach GIF...")
+    create_gif_from_folder('Schlieren-Mach', 'ANIM_Schlieren_Mach.gif')
+
+if PLOT_MASS_CONSERVATION:
+    print("\nGenerating mass-conservation diagnostic...")
+    plot_mass_conservation()
+    print("  Saved: 05Paper_MassConservation")
+    plot_count += 1
+
 
 # ============================================================================
 # SUMMARY
@@ -1549,4 +2011,6 @@ print(f"  - Velocity-Streamline/: {len(os.listdir(subfolder_velocity))} files")
 print(f"  - Velocity-Vorticity/: {len(os.listdir(subfolder_velocity_vorticity))} files")
 print(f"  - Vorticity/: {len(os.listdir(subfolder_vorticity))} files")
 print(f"  - Schlieren-Temperature/: {len(os.listdir(subfolder_schlieren_temperature))} files")
+print(f"  - Schlieren-Mach/: {len(os.listdir(subfolder_schlieren_mach))} files")
+print(f"  - Deformation-Separate/: {len(os.listdir(subfolder_deformation_separate))} files")
 print("\n" + "=" * 70)
