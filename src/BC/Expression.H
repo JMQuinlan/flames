@@ -176,7 +176,13 @@ public:
         {
             std::string querystr = std::string("val.") + std::string(facestr[face]);
             if (pp.contains(querystr.c_str())) pp_queryarr(querystr.c_str(),val);
-            else val.resize(value.m_ncomp,"0.0");
+            // NOTE: use assign (not resize) so a face without an explicit
+            // val.<face> defaults to "0.0" for ALL components.  resize only
+            // fills NEW slots, so it would leave a previously-parsed face's
+            // values in place -> e.g. a dirichlet val.xlo silently leaks into
+            // the neumann gradient on xhi/ylo/yhi, injecting a spurious
+            // boundary gradient (= val*DX).  See FlowVortex corner blow-up.
+            else val.assign(value.m_ncomp,"0.0");
             if (val.size() != value.m_ncomp) Util::Abort(INFO,"Incorrect number of expressions specified for ",querystr,": expected 1 or ",value.m_ncomp," but received ",val.size());
 
             value.m_bc_func_parser[face].clear();

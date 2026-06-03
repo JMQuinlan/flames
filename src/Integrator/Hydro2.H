@@ -67,6 +67,14 @@ public:
         // ETA
         delete eta_ic;
         delete etadot_ic;
+        // EMBEDDED SOLID
+        delete phi_ic;
+        delete phi_bc;
+        delete solid.density0_ic;
+        delete solid.density1_ic;
+        delete solid.momentum_ic;
+        delete solid.energy0_ic;
+        delete solid.energy1_ic;
         // FLUID 0
         delete density0_ic;
         delete velocity0_ic;
@@ -255,6 +263,18 @@ protected:
     Set::Field<Set::Scalar> eta_old_mf;
     Set::Field<Set::Scalar> hess_eta_mf;
     Set::Field<Set::Scalar> n_hat_mf;
+
+    // ------------------------------------------------------------------
+    // EMBEDDED SOLID BOUNDARY (diffuse-interface immersed boundary)
+    // ------------------------------------------------------------------
+    // phi is the SOLID indicator: phi = 1 -> fluid, phi = 0 -> solid.
+    // It is DISTINCT from eta, which in Hydro2 is the fluid-fluid volume
+    // fraction alpha_1.  (In the single-phase Hydro solver the field named
+    // eta plays the role that phi plays here.)  Static in this first
+    // implementation: phi is set from its IC and never evolved.
+    Set::Field<Set::Scalar> phi_mf;
+    Set::Field<Set::Scalar> phi_old_mf;
+    Set::Field<Set::Scalar> grad_phi_mf;
 protected:
 
     int n_step = 0;
@@ -288,6 +308,24 @@ protected:
     IC::IC<Set::Scalar>* eta_ic = nullptr;
     IC::IC<Set::Scalar>* etadot_ic = nullptr;
 
+    // EMBEDDED SOLID: indicator IC/BC + prescribed per-phase target state.
+    // The solid target is the quiescent state held inside solid cells and
+    // used to build a reflecting fluid state at the diffuse boundary.
+    IC::IC<Set::Scalar>* phi_ic = nullptr;
+    BC::BC<Set::Scalar>* phi_bc = nullptr;
+    struct {
+        Set::Field<Set::Scalar> density0_mf;   // prescribed (alpha_1 rho_1) inside solid
+        Set::Field<Set::Scalar> density1_mf;   // prescribed (alpha_2 rho_2) inside solid
+        Set::Field<Set::Scalar> momentum_mf;   // prescribed mixture momentum inside solid (=0 for a static wall)
+        Set::Field<Set::Scalar> energy0_mf;    // prescribed (alpha_1 rho_1 e_1) inside solid
+        Set::Field<Set::Scalar> energy1_mf;    // prescribed (alpha_2 rho_2 e_2) inside solid
+        IC::IC<Set::Scalar>* density0_ic = nullptr;
+        IC::IC<Set::Scalar>* density1_ic = nullptr;
+        IC::IC<Set::Scalar>* momentum_ic = nullptr;
+        IC::IC<Set::Scalar>* energy0_ic  = nullptr;
+        IC::IC<Set::Scalar>* energy1_ic  = nullptr;
+    } solid;
+
     BC::Nothing bc_nothing;
 
     BC::Constant neumann_bc_1 = BC::Constant::ZeroNeumann(1);
@@ -304,6 +342,7 @@ protected:
     Set::Scalar rho_min = 1e10;
 
     Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion=NAN;
+    Set::Scalar phi_refinement_criterion=NAN; // grad(phi) solid-boundary refinement
     // FLUID 0
     Set::Scalar gamma0 = NAN, p0_0 = NAN, mu0 = NAN, mu0_b = NAN, MW0 = NAN;
     Set::Scalar b0 = NAN, q0EOS = NAN;
@@ -338,6 +377,26 @@ protected:
     int static_eta = 0;
     int apply_vaporization = 0;
     int Spec_Vol = 1;
+
+    // EMBEDDED SOLID BOUNDARY controls.
+    //   apply_embedded_solid = 0 -> no immersed solid (default; behavior unchanged)
+    //   apply_embedded_solid = 1 -> mask fluxes by phi + penalize toward solid state
+    int apply_embedded_solid = 0;
+    // Below this phi value a cell is frozen to the prescribed solid target.
+    Set::Scalar solid_cutoff = 1.0e-6;
+    // Large solid viscosity blended in by (1-phi) to enforce no-SLIP at the
+    // diffuse wall via the viscous stress (the Brinkman penalty already gives
+    // no-penetration + a velocity sink; high mu sharpens the tangential
+    // boundary layer, as required in the single-phase Hydro solver).
+    // NOTE: this enters the viscous CFL, so a large value shrinks dt.
+    Set::Scalar solid_mu   = 100.0;
+    Set::Scalar solid_mu_b = 0.0;
+    // Optional phi-interface NORMAL no-penetration penalty coefficient (the
+    // solid analog of the fluid `lagrange`).  Default 0 (off).  Tangential
+    // no-slip is enforced by the always-on viscous interface traction
+    // (0.5*Mpqrs*(u-u_solid)*hess_phi, using solid_mu); this adds an extra
+    // normal penalty  -lagrange_solid*(u-u_solid).grad_phi * grad_phi.
+    Set::Scalar lagrange_solid = 0.0;
 
     // ------------------------------------------------------------------
     // Artificial heat exchange (AHE) - Schmidmayer 2020 eq. 13 r-source

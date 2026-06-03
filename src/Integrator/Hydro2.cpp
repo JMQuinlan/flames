@@ -90,6 +90,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp.query_default("gradu_refinement_criterion", value.gradu_refinement_criterion, 0.01); // velocity gradient-based refinement
         pp.query_default("p_refinement_criterion", value.p_refinement_criterion, 1e-3);         // pressure-based refinement
         pp.query_default("rho_refinement_criterion", value.rho_refinement_criterion, 1e-6);    // density-based refinement
+        pp.query_default("phi_refinement_criterion", value.phi_refinement_criterion, 0.001);   // grad(phi) solid-boundary refinement
 
         // SOLVER AND REFRENCE CONDITIONS
         pp_query_required("cfl", value.cfl);                // cfl condition
@@ -107,6 +108,17 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("apply_weight", value.apply_weight, false);                  // Apply weight when solving, default: false --> "No Weight"
         pp_query_default("apply_vaporization", value.apply_vaporization, false);       // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
+
+        // EMBEDDED SOLID BOUNDARY (immersed boundary via the phi indicator).
+        //   apply_embedded_solid = 0 -> off (default; existing behavior unchanged)
+        //   apply_embedded_solid = 1 -> static solid: mask fluxes by phi and
+        //                               penalize the fluid toward the solid state.
+        // The prescribed per-phase solid target is supplied via solid.*.ic below.
+        pp_query_default("apply_embedded_solid", value.apply_embedded_solid, 0);
+        pp_query_default("solid.cutoff", value.solid_cutoff, 1.0e-6); // phi below which a cell is frozen to the solid target
+        pp_query_default("solid.mu", value.solid_mu, 100.0);          // solid viscosity for no-slip (blended by 1-phi)
+        pp_query_default("solid.mu_b", value.solid_mu_b, 0.0);        // solid bulk viscosity
+        pp_query_default("lagrange_solid", value.lagrange_solid, 0.0); // optional phi-interface normal no-penetration penalty (default off)
 
         // Artificial heat exchange (AHE) on per-phase internal energy rows.
         // See bin/AHE.md for derivation: Schmidmayer 2020 eq. 13 r-source
@@ -290,6 +302,18 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         {
             value.eta_bc = new BC::Constant(BC::Constant::ZeroNeumann(1));
         }
+
+        // Phi (solid indicator) BC.  The solid geometry is static, so the
+        // indicator should not vary at the domain edge: zero-neumann
+        // (ghost = interior) is the correct default.  An explicit
+        // "solid.phi.bc" expression may override it.
+        if (value.apply_embedded_solid)
+        {
+            if (pp.contains("solid.phi.bc.type.xlo") || pp.contains("solid.phi.bc.type.ylo"))
+                value.phi_bc = new BC::Expression(1, pp, "solid.phi.bc");
+            else
+                value.phi_bc = new BC::Constant(BC::Constant::ZeroNeumann(1));
+        }
     }
 
     // Register FabFields:
@@ -308,6 +332,24 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing, 1, 0, "etadot", true, false);
         value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing, 4, 0, "hess_eta", false, false, { "00", "01", "10", "11" });
         value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing, 2, 0, "n_hat", false, false, { "x", "y" });
+
+        // EMBEDDED SOLID BOUNDARY fields (only registered when enabled, so
+        // existing inputs and plotfiles are completely unchanged when off).
+        // phi is registered as non-evolving (it is static and excluded from
+        // the RK solution vector); it is refilled from its IC on regrid.
+        if (value.apply_embedded_solid)
+        {
+            value.RegisterNewFab(value.phi_mf,      value.phi_bc, 1, nghost, "phi", true, false);
+            value.RegisterNewFab(value.phi_old_mf,  value.phi_bc, 1, nghost, "phi_old", false, false);
+            value.RegisterNewFab(value.grad_phi_mf, &value.bc_nothing, 2, 0, "grad_phi", true, false, { "x", "y" });
+
+            // Prescribed per-phase solid target state (quiescent solid).
+            value.RegisterNewFab(value.solid.density0_mf, value.density_bc,  1, nghost, "solid_rho_eta0", false, false);
+            value.RegisterNewFab(value.solid.density1_mf, value.density_bc,  1, nghost, "solid_rho_eta1", false, false);
+            value.RegisterNewFab(value.solid.momentum_mf, value.momentum_bc, 2, nghost, "solid_momentum", false, false, { "x", "y" });
+            value.RegisterNewFab(value.solid.energy0_mf,  value.energy_bc,   1, nghost, "solid_energy0",  false, false);
+            value.RegisterNewFab(value.solid.energy1_mf,  value.energy_bc,   1, nghost, "solid_energy1",  false, false);
+        }
 
         // FLUID 0
         value.RegisterNewFab(value.density0_mf,     value.density_bc,   1, nghost, "density0",     false, false );
@@ -423,9 +465,25 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<IC::Constant,IC::Expression>("m0.ic",value.ic_m0,value.geom);
     // diffuse boundary prescribed velocity
     pp.select_default<IC::Constant,IC::Expression>("u0.ic",value.ic_u0,value.geom);
-    // diffuse boundary prescribed heat flux 
+    // diffuse boundary prescribed heat flux
     pp.select_default<IC::Constant,IC::Expression>("q.ic",value.ic_q,value.geom);
-    
+
+    // EMBEDDED SOLID BOUNDARY initial conditions.
+    //   solid.phi.ic       -> indicator field (1 fluid, 0 solid), e.g. a tanh
+    //                         circle/airfoil expression (see tests/FlowCylinder).
+    //   solid.density{0,1} -> prescribed phase masses (alpha_k rho_k) in solid.
+    //   solid.momentum     -> prescribed mixture momentum in solid (0 = static wall).
+    //   solid.energy{0,1}  -> prescribed per-phase internal energies in solid.
+    if (value.apply_embedded_solid)
+    {
+        pp.select_default<IC::Constant,IC::Expression,IC::BMP,IC::PNG>("solid.phi.ic",       value.phi_ic,            value.geom);
+        pp.select_default<IC::Constant,IC::Expression>("solid.density0.ic",                 value.solid.density0_ic, value.geom);
+        pp.select_default<IC::Constant,IC::Expression>("solid.density1.ic",                 value.solid.density1_ic, value.geom);
+        pp.select_default<IC::Constant,IC::Expression>("solid.momentum.ic",                 value.solid.momentum_ic, value.geom);
+        pp.select_default<IC::Constant,IC::Expression>("solid.energy0.ic",                  value.solid.energy0_ic,  value.geom);
+        pp.select_default<IC::Constant,IC::Expression>("solid.energy1.ic",                  value.solid.energy1_ic,  value.geom);
+    }
+
 
     // SOLVERS
     // Riemann solver
@@ -507,6 +565,34 @@ void Hydro2::Initialize(int lev)
     ic_m0           ->Initialize(lev, m0_mf, 0.0);
     ic_u0           ->Initialize(lev, u0_mf, 0.0);
     ic_q            ->Initialize(lev, q_mf, 0.0);
+
+    // EMBEDDED SOLID BOUNDARY: indicator + prescribed solid target state.
+    if (apply_embedded_solid)
+    {
+        phi_ic              ->Initialize(lev, phi_mf, 0.0);
+        phi_ic              ->Initialize(lev, phi_old_mf, 0.0);
+        grad_phi_mf[lev]    ->setVal(0.0);
+        solid.density0_ic   ->Initialize(lev, solid.density0_mf, 0.0);
+        solid.density1_ic   ->Initialize(lev, solid.density1_mf, 0.0);
+        solid.momentum_ic   ->Initialize(lev, solid.momentum_mf, 0.0);
+        solid.energy0_ic    ->Initialize(lev, solid.energy0_mf, 0.0);
+        solid.energy1_ic    ->Initialize(lev, solid.energy1_mf, 0.0);
+
+        // grad(phi) diagnostic (static; for the boundary-refinement plot).
+        const Set::Scalar *DXp = geom[lev].CellSize();
+        phi_mf[lev]->FillBoundary(geom[lev].periodicity());
+        for (amrex::MFIter mfi(*phi_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto phi      = phi_mf[lev]->array(mfi);
+            auto grad_phi = grad_phi_mf[lev]->array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Vector g = Numeric::Gradient(phi, i, j, k, 0, DXp);
+                grad_phi(i, j, k, 0) = g(0);
+                grad_phi(i, j, k, 1) = g(1);
+            });
+        }
+    }
 
     // FILLING GHOST CELLS
     rho_eta0_mf[lev]->setVal(0.0);
@@ -1132,6 +1218,15 @@ Hydro2::RHS(int lev,
         Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
 
+        // EMBEDDED SOLID BOUNDARY patches (empty Array4 when the feature is
+        // off; never dereferenced unless apply_embedded_solid is set).
+        Set::Patch<const Set::Scalar> phisol = phi_mf.Patch(lev, mfi);          // solid indicator (1 fluid, 0 solid)
+        Set::Patch<const Set::Scalar> s_re0  = solid.density0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> s_re1  = solid.density1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> s_M    = solid.momentum_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> s_E0   = solid.energy0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> s_E1   = solid.energy1_mf.Patch(lev, mfi);
+
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
@@ -1194,6 +1289,33 @@ Hydro2::RHS(int lev,
             Set::Vector grad_mu = (mu0 - mu1) * grad_eta;
             Set::Vector grad_lambda = (mu0_b - mu1_b) * grad_eta;
 
+            // EMBEDDED SOLID: phi-interface quantities.  Defaults (phi_c=1,
+            // everything else zero) make every solid term below vanish when the
+            // feature is OFF, so behavior is unchanged in that case.
+            Set::Scalar phi_c      = 1.0;
+            Set::Vector grad_phi   = Set::Vector::Zero();
+            Set::Matrix hess_phi   = Set::Matrix::Zero();
+            Set::Vector u_solid    = Set::Vector::Zero();
+            Set::Vector Ldot_solid = Set::Vector::Zero();
+            if (apply_embedded_solid)
+            {
+                phi_c    = std::min(std::max(phisol(i, j, k), 0.0), 1.0);
+                grad_phi = Numeric::Gradient(phisol, i, j, k, 0, DX);
+                hess_phi = Numeric::Hessian(phisol, i, j, k, 0, DX, sten);
+                const Set::Scalar rho_s = std::max(s_re0(i, j, k) + s_re1(i, j, k), small);
+                u_solid  = Set::Vector(s_M(i, j, k, 0) / rho_s, s_M(i, j, k, 1) / rho_s);
+
+                // Blend a large solid viscosity in by the solid fraction (1-phi)
+                // so the diffuse wall enforces no-SLIP through the viscous stress
+                // (single-phase Hydro uses ~100 here).  mu_eff = phi*mu_f +
+                // (1-phi)*mu_solid; the gradient picks up grad(phi)*(mu_f-mu_s),
+                // computed BEFORE overwriting mu_eff (which still holds mu_fluid).
+                grad_mu     = grad_phi * (mu_eff     - solid_mu)   + phi_c * grad_mu;
+                grad_lambda = grad_phi * (lambda_eff - solid_mu_b) + phi_c * grad_lambda;
+                mu_eff      = phi_c * mu_eff     + (1.0 - phi_c) * solid_mu;
+                lambda_eff  = phi_c * lambda_eff + (1.0 - phi_c) * solid_mu_b;
+            }
+
             // Solving
             for (int p = 0; p < 2; p++)             // i
                 for (int q = 0; q < 2; q++)         // j
@@ -1220,6 +1342,13 @@ Hydro2::RHS(int lev,
 
                             div_tau(p) += Mpqrs * hess_u(r, s, q);
                             Ldot(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
+
+                            // EMBEDDED SOLID viscous interface traction: drags the
+                            // (tangential + normal) velocity to u_solid AT the phi
+                            // interface (hess_phi is nonzero only in the diffuse
+                            // band).  Direct analog of single-phase Hydro's Ldot0
+                            // no-slip term.  Zero when the feature is off.
+                            Ldot_solid(p) += 0.5 * Mpqrs * (u(r) - u_solid(r)) * hess_phi(q, s);
 
                             // Grad visc terms
                             div_tau(p) += dMpqrs * gradu(r, s);
@@ -1433,6 +1562,27 @@ Hydro2::RHS(int lev,
             Source(i, j, k, 2) = Source(i, j, k, 2) - lagrange * u.dot(grad_eta) * grad_eta(1);
 
             // ------------------------------------------------------------
+            // EMBEDDED SOLID no-slip / no-penetration at the phi interface
+            // (single-phase Hydro analog).  Added to the momentum source at
+            // FULL strength (NOT masked by phi below), so it pins the velocity
+            // to u_solid right at the phi=0.5 surface:
+            //   (a) viscous interface traction  -Ldot_solid  (tangential no-slip)
+            //   (b) optional normal penalty  -lagrange_solid (u-u_s).grad_phi grad_phi
+            // Both vanish when apply_embedded_solid is off (hess_phi/grad_phi = 0).
+            // ------------------------------------------------------------
+            if (apply_embedded_solid)
+            {
+                Source(i, j, k, 1) -= Ldot_solid(0);
+                Source(i, j, k, 2) -= Ldot_solid(1);
+                Source(i, j, k, 3) -= u.dot(Ldot_solid);
+
+                const Set::Scalar pen = lagrange_solid * (u - u_solid).dot(grad_phi);
+                Source(i, j, k, 1) -= pen * grad_phi(0);
+                Source(i, j, k, 2) -= pen * grad_phi(1);
+                Source(i, j, k, 3) -= pen * (u(0) * grad_phi(0) + u(1) * grad_phi(1));
+            }
+
+            // ------------------------------------------------------------
             // Error Checking
             // ------------------------------------------------------------
             check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Source solving", { 
@@ -1598,7 +1748,7 @@ Hydro2::RHS(int lev,
             // stiff relaxation source (handled in the post-stage hook).
             // ------------------------------------------------------------
             const Set::Scalar eta_advect = -(div_uA_x + div_uA_y) + eta(i, j, k) * div_u;
-            eta_rhs(i, j, k) = eta_advect + eta_dot_Vap;
+            eta_rhs(i, j, k) = phi_c * eta_advect + eta_dot_Vap;   // phi_c masks convective transport only (=1 if no solid)
 
             // ------------------------------------------------------------
             // Phase-mass rows (pure conservation, no source from h):
@@ -1609,8 +1759,8 @@ Hydro2::RHS(int lev,
             const Set::Scalar rho_eta1_flux = (flux_xlo.mass1 - flux_xhi.mass1) / DX[0]
                                             + (flux_ylo.mass1 - flux_yhi.mass1) / DX[1];
 
-            rho_eta0_rhs(i, j, k) = rho_eta0_flux + Source(i, j, k, 0) * (eta(i, j, k))         + m_dot_Vap;
-            rho_eta1_rhs(i, j, k) = rho_eta1_flux + Source(i, j, k, 0) * (1.0 - eta(i, j, k))   - m_dot_Vap;
+            rho_eta0_rhs(i, j, k) = phi_c * rho_eta0_flux + Source(i, j, k, 0) * (eta(i, j, k))         + m_dot_Vap;
+            rho_eta1_rhs(i, j, k) = phi_c * rho_eta1_flux + Source(i, j, k, 0) * (1.0 - eta(i, j, k))   - m_dot_Vap;
 
             // Diagnostic mass flux (kept for plotfile compatibility):
             rho_flux(i, j, k) = rho_eta0_flux + rho_eta1_flux;
@@ -1626,8 +1776,8 @@ Hydro2::RHS(int lev,
             M_flux(i, j, k, 1) = (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / DX[0]
                                + (flux_ylo.momentum_normal  - flux_yhi.momentum_normal ) / DX[1];
 
-            M_rhs(i, j, k, 0) = M_flux(i, j, k, 0) + Source(i, j, k, 1);
-            M_rhs(i, j, k, 1) = M_flux(i, j, k, 1) + Source(i, j, k, 2);
+            M_rhs(i, j, k, 0) = phi_c * M_flux(i, j, k, 0) + Source(i, j, k, 1);
+            M_rhs(i, j, k, 1) = phi_c * M_flux(i, j, k, 1) + Source(i, j, k, 2);
 
             // ------------------------------------------------------------
             // Redundant mixture total energy (pure conservation):
@@ -1635,7 +1785,7 @@ Hydro2::RHS(int lev,
             // ------------------------------------------------------------
             E_flux(i, j, k) = (flux_xlo.energy_total - flux_xhi.energy_total) / DX[0]
                             + (flux_ylo.energy_total - flux_yhi.energy_total) / DX[1];
-            E_rhs(i, j, k)  = E_flux(i, j, k) + Source(i, j, k, 3);
+            E_rhs(i, j, k)  = phi_c * E_flux(i, j, k) + Source(i, j, k, 3);
 
             // ------------------------------------------------------------
             // Per-phase internal energies (Sch20 eq. 13 last two rows /
@@ -1650,8 +1800,8 @@ Hydro2::RHS(int lev,
             const Set::Scalar E1_flux_div = (flux_xlo.energy1 - flux_xhi.energy1) / DX[0]
                                           + (flux_ylo.energy1 - flux_yhi.energy1) / DX[1];
 
-            E0_rhs(i, j, k) = E0_flux_div - a1_C * p0_C * div_u;
-            E1_rhs(i, j, k) = E1_flux_div - a2_C * p1_C * div_u;
+            E0_rhs(i, j, k) = phi_c * (E0_flux_div - a1_C * p0_C * div_u);
+            E1_rhs(i, j, k) = phi_c * (E1_flux_div - a2_C * p1_C * div_u);
 
             // ------------------------------------------------------------
             // Artificial heat exchange (AHE) -- Schmidmayer 2020 eq. 13
@@ -1767,6 +1917,40 @@ Hydro2::RHS(int lev,
 
                     E0_rhs(i, j, k) += -q_src;
                     E1_rhs(i, j, k) += -q_src;
+                }
+            }
+
+            // ============================================================
+            // EMBEDDED SOLID BOUNDARY -- volume (Brinkman) penalization.
+            // ------------------------------------------------------------
+            // The convective flux divergences above were already masked by
+            // phi_c (transport stops at the solid); the no-slip viscous
+            // interface traction (-Ldot_solid) and optional normal penalty
+            // were added to the momentum Source at FULL strength.  This adds
+            // the bulk penalty driving the conserved state in the solid
+            // fraction chi = 1 - phi toward the prescribed quiescent target,
+            // with strength `lagrange` (Angot et al. 1999; Liu & Vasilyev
+            // 2007).  Static solid (phidot = 0) -> no etadot relaxation term.
+            // ============================================================
+            if (apply_embedded_solid && lagrange > 0.0)
+            {
+                const Set::Scalar chi = 1.0 - phi_c;
+                if (chi > 0.0)
+                {
+                    const Set::Scalar lam = lagrange * chi;
+                    // Solid total energy target (rho E)_s = E0_s + E1_s + KE_s.
+                    const Set::Scalar rho_s = std::max(s_re0(i, j, k) + s_re1(i, j, k), small);
+                    const Set::Scalar KE_s  = 0.5 * (s_M(i, j, k, 0) * s_M(i, j, k, 0)
+                                                   + s_M(i, j, k, 1) * s_M(i, j, k, 1)) / rho_s;
+                    const Set::Scalar E_s   = s_E0(i, j, k) + s_E1(i, j, k) + KE_s;
+
+                    rho_eta0_rhs(i, j, k) += -lam * (rho_eta0(i, j, k) - s_re0(i, j, k));
+                    rho_eta1_rhs(i, j, k) += -lam * (rho_eta1(i, j, k) - s_re1(i, j, k));
+                    M_rhs(i, j, k, 0)     += -lam * (M(i, j, k, 0)      - s_M(i, j, k, 0));
+                    M_rhs(i, j, k, 1)     += -lam * (M(i, j, k, 1)      - s_M(i, j, k, 1));
+                    E_rhs(i, j, k)        += -lam * (E(i, j, k)         - E_s);
+                    E0_rhs(i, j, k)       += -lam * (E0_arr(i, j, k)    - s_E0(i, j, k));
+                    E1_rhs(i, j, k)       += -lam * (E1_arr(i, j, k)    - s_E1(i, j, k));
                 }
             }
 
@@ -2033,6 +2217,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> E0_p = energy0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> E1_p = energy1_mf.Patch(lev, mfi);
 
+        // EMBEDDED SOLID indicator (empty Array4 when feature is off).
+        Set::Patch<const Set::Scalar> phisol = phi_mf.Patch(lev, mfi);
+
         // Local EOS Copy
         const Solver::EOS::Tammann eos0_local = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
@@ -2142,15 +2329,20 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 {"n_hat_[1]", n_hat_(i,j,k,1)}
             });
         
-            // Track CFL quantities (NOW WORKS - captured by reference!)
-            c_max_local = std::max(c_max_local, a(i,j,k));
-            vx_max_local = std::max(vx_max_local, std::abs(v(i,j,k,0)));
-            vy_max_local = std::max(vy_max_local, std::abs(v(i,j,k,1)));
-        
-            Set::Scalar F_mag = sqrt(Source(i,j,k,1) * Source(i,j,k,1) + 
-                                    Source(i,j,k,2) * Source(i,j,k,2));
-            F_max_local = std::max(F_max_local, F_mag);
-            rho_min_local = std::min(rho_min_local, rho(i,j,k));
+            // Track CFL quantities.  Skip solid cells (their frozen state must
+            // not drive the global timestep).
+            const bool is_fluid = (!apply_embedded_solid) || (phisol(i, j, k) > solid_cutoff);
+            if (is_fluid)
+            {
+                c_max_local = std::max(c_max_local, a(i,j,k));
+                vx_max_local = std::max(vx_max_local, std::abs(v(i,j,k,0)));
+                vy_max_local = std::max(vy_max_local, std::abs(v(i,j,k,1)));
+
+                Set::Scalar F_mag = sqrt(Source(i,j,k,1) * Source(i,j,k,1) +
+                                        Source(i,j,k,2) * Source(i,j,k,2));
+                F_max_local = std::max(F_max_local, F_mag);
+                rho_min_local = std::min(rho_min_local, rho(i,j,k));
+            }
         });
     } // end Mixed Fields loop
 
@@ -2174,6 +2366,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     Set::Scalar dt_acoustic = cfl * dx_min / (wave_speed + small);
 
     Set::Scalar mu_max = std::max(mu0, mu1);
+    // The blended solid viscosity acts in the interface band, so it must be
+    // respected by the explicit viscous CFL or those cells go unstable.
+    if (apply_embedded_solid) mu_max = std::max(mu_max, std::max(solid_mu, solid_mu_b));
     Set::Scalar dt_viscous = cfl_v * rho_min * dx_min * dx_min / (mu_max + small);
 
     Set::Scalar a_max = F_max / (rho_min + small);
@@ -2213,6 +2408,36 @@ void Hydro2::Regrid(int lev, Set::Scalar regrid_time)
     // Zero fill fields
     ZeroDerivedScratchFields(lev);
 
+    // EMBEDDED SOLID: phi (and the prescribed solid target) is a STATIC,
+    // analytic field.  Re-evaluate it from its IC on the new grid rather
+    // than relying on coarse-fine interpolation, which would smear the
+    // sharp solid boundary and create spurious partial-solid cells.
+    if (apply_embedded_solid)
+    {
+        phi_ic            ->Initialize(lev, phi_mf,            regrid_time);
+        phi_ic            ->Initialize(lev, phi_old_mf,        regrid_time);
+        solid.density0_ic ->Initialize(lev, solid.density0_mf, regrid_time);
+        solid.density1_ic ->Initialize(lev, solid.density1_mf, regrid_time);
+        solid.momentum_ic ->Initialize(lev, solid.momentum_mf, regrid_time);
+        solid.energy0_ic  ->Initialize(lev, solid.energy0_mf,  regrid_time);
+        solid.energy1_ic  ->Initialize(lev, solid.energy1_mf,  regrid_time);
+
+        // grad(phi) diagnostic (static; recomputed for the new grid).
+        const Set::Scalar *DX = geom[lev].CellSize();
+        phi_mf[lev]->FillBoundary(geom[lev].periodicity());
+        for (amrex::MFIter mfi(*phi_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto phi      = phi_mf[lev]->array(mfi);
+            auto grad_phi = grad_phi_mf[lev]->array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Vector g = Numeric::Gradient(phi, i, j, k, 0, DX);
+                grad_phi(i, j, k, 0) = g(0);
+                grad_phi(i, j, k, 1) = g(1);
+            });
+        }
+    }
+
     // Apply BC
     FillGhost4BC(lev, regrid_time);
 
@@ -2237,6 +2462,22 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
             if (grad_eta.lpNorm<2>() * dr * 2 > eta_refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
         });
+    }
+
+    // EMBEDDED SOLID: refine the diffuse solid boundary (grad(phi) is large
+    // only across the immersed wall, so this tags exactly that layer).
+    if (apply_embedded_solid)
+    {
+        for (amrex::MFIter mfi(*phi_mf[lev], true); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.tilebox();
+            amrex::Array4<char> const& tags = a_tags.array(mfi);
+            amrex::Array4<const Set::Scalar> const& phi = (*phi_mf[lev]).array(mfi);
+
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Vector grad_phi = Numeric::Gradient(phi, i, j, k, 0, DX);
+                if (grad_phi.lpNorm<2>() * dr * 2 > phi_refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
+            });
+        }
     }
 
     // Vorticity criterion for refinement
@@ -2463,8 +2704,11 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
             Set::Patch<Set::Scalar> rho_eta1 = rho_eta1_work.array(mfi);
             Set::Patch<const Set::Scalar> rho_eta0_original = rho_eta0_mf[lev]->array(mfi);
             Set::Patch<const Set::Scalar> rho_eta1_original = rho_eta1_mf[lev]->array(mfi);
+            Set::Patch<const Set::Scalar> phisol = phi_mf.Patch(lev, mfi);
 
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                // Embedded solid: never sharpen the frozen solid interior.
+                if (apply_embedded_solid && phisol(i, j, k) < solid_cutoff) return;
                 auto sten = Numeric::GetStencil(i, j, k, domain);
 
                 // ============================================================
@@ -2774,8 +3018,11 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
         Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf[lev]->array(mfi);
         Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf[lev]->array(mfi);
         Set::Patch<Set::Scalar> eta = eta_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> phisol = phi_mf.Patch(lev, mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            // Embedded solid: preserve the prescribed alpha inside the solid.
+            if (apply_embedded_solid && phisol(i, j, k) < solid_cutoff) return;
             Set::Scalar rho_total = rho_eta0(i, j, k) + rho_eta1(i, j, k);
             eta(i, j, k) = rho_eta0(i, j, k) / (rho_total + small);
 
@@ -3176,6 +3423,57 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             rho(i, j, k) = std::max(rho_eta0(i, j, k) + rho_eta1(i, j, k), small);
             eta(i, j, k) = std::max(0.0, std::min(1.0, eta(i, j, k)));
         });
+    }
+
+    // ------------------------------------------------------------
+    // STEP 2b: EMBEDDED SOLID BOUNDARY freeze + ghost fill.
+    // ------------------------------------------------------------
+    // Fill the static indicator's ghosts, then hard-reset every deep-solid
+    // cell (phi < solid_cutoff) to the prescribed quiescent solid target.
+    // This runs BEFORE the STEP 4 primitive recovery so the EOS sees a
+    // sensible (finite p, c) state inside the solid instead of frozen
+    // garbage, and it is IDEMPOTENT (sets to a constant target) -- safe to
+    // call from RHS, the post-stage hook, and the post-integration refresh.
+    if (apply_embedded_solid)
+    {
+        phi_bc->define(geom[lev]);
+        FillBoundariesWithBC(lev, time, phi_bc, { phi_mf[lev].get() });
+
+        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox(); // DOMAIN ONLY
+            auto phi      = phi_mf[lev]->array(mfi);
+            auto rho_eta0 = rho_eta0_mf[lev]->array(mfi);
+            auto rho_eta1 = rho_eta1_mf[lev]->array(mfi);
+            auto M        = momentum_mf[lev]->array(mfi);
+            auto E        = energy_per_vol_mf[lev]->array(mfi);
+            auto E0_arr   = energy0_mf[lev]->array(mfi);
+            auto E1_arr   = energy1_mf[lev]->array(mfi);
+            auto rho      = density_mf[lev]->array(mfi);
+            auto s_re0    = solid.density0_mf[lev]->array(mfi);
+            auto s_re1    = solid.density1_mf[lev]->array(mfi);
+            auto s_M      = solid.momentum_mf[lev]->array(mfi);
+            auto s_E0     = solid.energy0_mf[lev]->array(mfi);
+            auto s_E1     = solid.energy1_mf[lev]->array(mfi);
+
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                if (phi(i, j, k) < solid_cutoff)
+                {
+                    rho_eta0(i, j, k) = s_re0(i, j, k);
+                    rho_eta1(i, j, k) = s_re1(i, j, k);
+                    M(i, j, k, 0)     = s_M(i, j, k, 0);
+                    M(i, j, k, 1)     = s_M(i, j, k, 1);
+                    E0_arr(i, j, k)   = s_E0(i, j, k);
+                    E1_arr(i, j, k)   = s_E1(i, j, k);
+                    rho(i, j, k)      = std::max(s_re0(i, j, k) + s_re1(i, j, k), small);
+                    const Set::Scalar KE = 0.5 * (M(i, j, k, 0) * M(i, j, k, 0)
+                                                + M(i, j, k, 1) * M(i, j, k, 1)) / rho(i, j, k);
+                    E(i, j, k)        = s_E0(i, j, k) + s_E1(i, j, k) + KE;
+                    // eta (= alpha_1) is left clamped-as-is; the solid target
+                    // energies are built consistent with that alpha in the IC.
+                }
+            });
+        }
     }
 
     // ------------------------------------------------------------
@@ -4133,12 +4431,19 @@ void Hydro2::RelaxAndReinit(int lev)
         auto E0_   = energy0_mf[lev]->array(mfi);
         auto E1_   = energy1_mf[lev]->array(mfi);
 
+        // EMBEDDED SOLID indicator (empty Array4 when feature is off).
+        Set::Patch<const Set::Scalar> phisol = phi_mf.Patch(lev, mfi);
+
         // Diagnostic array (only used if diag_on).
         amrex::Array4<Set::Scalar> diag_arr = diag_on
             ? (*diag_mf)[mfi].array()
             : amrex::Array4<Set::Scalar>{};
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            // Skip solid cells: pressure relaxation must not touch the
+            // frozen solid state (its per-phase energies are prescribed,
+            // not in thermodynamic equilibrium with the alpha there).
+            if (apply_embedded_solid && phisol(i, j, k) < solid_cutoff) return;
             // -----------------------------------------------------------
             // Pre-relax state.  ALL divides use DIV_FLOOR (1e-30), NEVER
             // `small`.  Same lesson as the Limiter Garrick post-mortem:
