@@ -116,14 +116,31 @@ velocity1.ic.type = expression
 velocity1.ic.expression.region0 = "0.0"
 velocity1.ic.expression.region1 = "0.0"
 
-# Liquid exterior: uniform p_inf (same as non-_Large which uses uniform
-# rather than the 1/r or log(r) Rayleigh field).
+# Sch20 eq. (27) "initial interface equilibrium":
+#   p(R) = p_inf + (R0/R) * (p_b - p_inf)   for R >= R0   (exterior liquid)
+#   p(R) = p_b                              for R <  R0   (bubble interior, via clamp)
+# This is the 3D-spherical Rayleigh equilibrium exterior pressure field; Sch20
+# uses it for nominal Case 1 (line 505 of _Schmidmayer_2020.txt) so the bubble
+# starts at rest (R'(0) = 0), giving the standard R_min vs Keller-Miksis match.
+#
+# Algebraic rearrangement of eq. (27):
+#   p(R) = p_inf - (p_inf - p_b) * R0 / R
+# The max(R, R0) clamp makes the formula continuous and equal to p_b inside
+# the bubble (R < R0), matching the bubble-interior pressure that
+# pressure1 carries.
+#
+# NB: this is the 3D spherical equilibrium field.  The 2D-cylindrical
+# equivalent has a log(R) dependence rather than 1/R and is NOT covered by
+# Sch20.  Using the 3D form here as a documented first test of the
+# "sharp-IC vs gradual-IC hypothesis" for the 20% R_min discrepancy vs
+# Chen-2D.  If this closes the gap, refine to the cylindrical form
+# (requires a Chen-2D RPE paper to source from).
 pressure0.ic.type = expression
 pressure0.ic.expression.constant.p_inf = 1.0e5
 pressure0.ic.expression.constant.p_b   = 1.0e4
 pressure0.ic.expression.constant.R0    = 0.02
 pressure0.ic.expression.constant.r_inf = 4.00
-pressure0.ic.expression.region0 = "p_inf"
+pressure0.ic.expression.region0 = "p_inf - (p_inf - p_b)*R0/max(sqrt(x*x + y*y), R0)"
 
 # Gas interior: uniform bubble pressure p_b.
 pressure1.ic.type = expression
