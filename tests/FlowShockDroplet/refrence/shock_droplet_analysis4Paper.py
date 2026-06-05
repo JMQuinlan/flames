@@ -107,10 +107,6 @@ PLOT_AREA_VS_VAP          = 1          # Surface area (left) vs integrated Vap_d
 # ============================================================================
 
 # Time sampling
-# N_TIMESTEPS_EVENLY > 0 selects exactly that many evenly spaced timesteps from
-# the first to the last plot file and OVERRIDES both TIME_STEP and KEY_TIMES.
-# Set to 0 to fall back to the legacy TIME_STEP / KEY_TIMES behavior.
-N_TIMESTEPS_EVENLY = 20
 TIME_STEP = 4  # Sample every Nth timestep (1=all, 2=every other, 5=every 5th, etc.)
 
 # File paths
@@ -193,7 +189,10 @@ ETA_CONTOUR_LW_MID  = 1.0              # weight for the 0.5 centerline
 ETA_CONTOUR_COLOR   = 'black'
 
 # Shape-evolution composite (Khare Fig 6 style).
-SHAPE_EVOLUTION_N_FRAMES = 8
+# SHAPE_EVOLUTION_N_FRAMES = number of evenly spaced outlines drawn, picked
+# from the FULL plot_files range (start -> end of simulation).  Loads eta
+# independently of the main TIME_STEP / KEY_TIMES pipeline.
+SHAPE_EVOLUTION_N_FRAMES = 20
 SHAPE_EVOLUTION_CMAP     = 'viridis'
 SHAPE_EVOLUTION_LW       = 1.5
 
@@ -698,14 +697,7 @@ print("\n" + "=" * 70)
 print(f"APPLYING TIME_STEP SAMPLING (TIME_STEP = {TIME_STEP})")
 print("=" * 70)
 
-if N_TIMESTEPS_EVENLY and N_TIMESTEPS_EVENLY > 0:
-    n_pick = min(N_TIMESTEPS_EVENLY, len(plot_files))
-    analysis_indices = list(np.linspace(0, len(plot_files) - 1, n_pick, dtype=int))
-    seen = set()
-    analysis_indices = [i for i in analysis_indices if not (i in seen or seen.add(i))]
-    print(f"Using {len(analysis_indices)} evenly spaced timesteps "
-          f"(N_TIMESTEPS_EVENLY = {N_TIMESTEPS_EVENLY})")
-elif USE_ALL_TIMESTEPS:
+if USE_ALL_TIMESTEPS:
     analysis_indices = list(range(0, len(plot_files), TIME_STEP))
     print(f"Using every {TIME_STEP} timestep(s): {len(analysis_indices)} total")
 else:
@@ -1738,14 +1730,22 @@ def plot_shape_evolution_composite():
     time using SHAPE_EVOLUTION_CMAP.  Useful as a one-glance summary of the
     droplet's deformation history.
     """
-    if len(analysis_indices) < 2:
+    if len(plot_files) < 2:
         print("  [skip] shape evolution: need at least 2 frames.")
         return
 
-    n_frames = min(SHAPE_EVOLUTION_N_FRAMES, len(analysis_indices))
-    sel = np.linspace(0, len(analysis_indices) - 1, n_frames, dtype=int)
-    times_sel = times[[analysis_indices[s] for s in sel]]
+    # Pick SHAPE_EVOLUTION_N_FRAMES evenly spaced indices spanning the FULL
+    # plot_files range (start -> end of simulation), independent of the
+    # TIME_STEP / KEY_TIMES sampling used elsewhere.
+    n_frames = min(SHAPE_EVOLUTION_N_FRAMES, len(plot_files))
+    sel      = list(np.linspace(0, len(plot_files) - 1, n_frames, dtype=int))
+    seen = set()
+    sel  = [i for i in sel if not (i in seen or seen.add(i))]
+    n_frames = len(sel)
+    times_sel = times[sel]
     cmap = plt.get_cmap(SHAPE_EVOLUTION_CMAP)
+
+    print(f"  loading eta for {n_frames} frames (independent of main pipeline)")
 
     fig, ax = plt.subplots(figsize=(9, 6))
 
@@ -1753,11 +1753,19 @@ def plot_shape_evolution_composite():
     x_all = []
     y_all = []
 
-    for j, s in enumerate(sel):
-        t = times_sel[j]
-        eta = eta_fields[s]
-        x_grid = x_grids[s]
-        y_grid = y_grids[s]
+    for j, file_idx in enumerate(sel):
+        ds  = all_data[file_idx]
+        slc = ds.slice('z', 0.0)
+        domain_width  = X_MAX - X_MIN
+        domain_height = Y_MAX - Y_MIN
+        resolution    = 512
+        frb = slc.to_frb((domain_width, 'code_length'), resolution,
+                         center=[0.5*(X_MIN+X_MAX), 0.5*(Y_MIN+Y_MAX), 0.0],
+                         height=(domain_height, 'code_length'))
+        eta = np.array(frb['eta'])
+        x_1d = np.linspace(X_MIN, X_MAX, resolution)
+        y_1d = np.linspace(Y_MIN, Y_MAX, resolution)
+        x_grid, y_grid = np.meshgrid(x_1d, y_1d)
         color = cmap(j / max(n_frames - 1, 1))
 
         cs = ax.contour(x_grid, y_grid, eta, levels=[0.5],
