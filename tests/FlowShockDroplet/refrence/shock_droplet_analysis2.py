@@ -76,7 +76,16 @@ PLOT_SCHLIEREN_TEMPERATURE_SPLIT = 1    # Individual frames in Schlieren-Tempera
 PLOT_SCHLIEREN_TEMPERATURE_GIF = 1      # GIF from Schlieren-Temperature/
 
 # Quantitative analysis plots
-PLOT_DEFORMATION_METRICS = 1           # D(t), AR(t), centroid, area, volume
+PLOT_DEFORMATION_METRICS = 1           # D(t), AR(t), centroid, area, volume (2x3 grid)
+SEPARATE_DEFORMATION_FIGS = 1          # also save each metric as its own standalone figure (like 4Paper)
+PLOT_AR_VS_VAP = 1                     # AR (left) vs integrated Vap_dot_rho (right) twin-axis
+PLOT_AREA_VS_VAP = 1                   # Surface area (left) vs integrated Vap_dot_rho (right) twin-axis
+PLOT_SHAPE_EVOLUTION = 1               # Composite eta=0.5 outlines (Khare Fig 6 style)
+
+# Shape-evolution composite knobs (mirrors 4Paper).
+SHAPE_EVOLUTION_N_FRAMES = 8
+SHAPE_EVOLUTION_CMAP     = 'viridis'
+SHAPE_EVOLUTION_LW       = 1.5
 PLOT_ENERGY_EVOLUTION = 1              # Max pressure, KE, surface energy vs time
 PLOT_SHOCK_TRACKING = 1                # x-t diagram
 
@@ -104,6 +113,10 @@ PLOT_DENSITY_CONTOURS = 1              # Density contours at key times
 # ============================================================================
 
 # Time sampling
+# N_TIMESTEPS_EVENLY > 0 selects exactly that many evenly spaced timesteps from
+# the first to the last plot file and OVERRIDES both TIME_STEP and KEY_TIMES.
+# Set to 0 to fall back to the legacy TIME_STEP / KEY_TIMES behavior.
+N_TIMESTEPS_EVENLY = 20
 TIME_STEP = 4  # Sample every Nth timestep (1=all, 2=every other, 5=every 5th, etc.)
 
 # File paths
@@ -261,14 +274,16 @@ subfolder_schlieren_velocity = os.path.join(output_folder, 'Schlieren-Velocity')
 subfolder_schlieren_vapdotrho = os.path.join(output_folder, 'Schlieren-VapDotRho')
 subfolder_velocity_vorticity = os.path.join(output_folder, 'Velocity-Vorticity')
 subfolder_schlieren_temperature = os.path.join(output_folder, 'Schlieren-Temperature')
+subfolder_deformation_separate  = os.path.join(output_folder, 'Deformation-Separate')
 
-for folder in [subfolder_schlieren, 
-               subfolder_velocity, 
-               subfolder_vorticity, 
-               subfolder_schlieren_velocity, 
-               subfolder_schlieren_vapdotrho, 
-               subfolder_velocity_vorticity, 
-               subfolder_schlieren_temperature]:
+for folder in [subfolder_schlieren,
+               subfolder_velocity,
+               subfolder_vorticity,
+               subfolder_schlieren_velocity,
+               subfolder_schlieren_vapdotrho,
+               subfolder_velocity_vorticity,
+               subfolder_schlieren_temperature,
+               subfolder_deformation_separate]:
     if not os.path.exists(folder):
         os.makedirs(folder)
 
@@ -552,7 +567,16 @@ print("\n" + "=" * 70)
 print(f"APPLYING TIME_STEP SAMPLING (TIME_STEP = {TIME_STEP})")
 print("=" * 70)
 
-if USE_ALL_TIMESTEPS:
+if N_TIMESTEPS_EVENLY and N_TIMESTEPS_EVENLY > 0:
+    n_pick = min(N_TIMESTEPS_EVENLY, len(plot_files))
+    analysis_indices = list(np.linspace(0, len(plot_files) - 1, n_pick, dtype=int))
+    # Drop any duplicates while keeping order (linspace can repeat at endpoints
+    # when n_pick >= len(plot_files)).
+    seen = set()
+    analysis_indices = [i for i in analysis_indices if not (i in seen or seen.add(i))]
+    print(f"Using {len(analysis_indices)} evenly spaced timesteps "
+          f"(N_TIMESTEPS_EVENLY = {N_TIMESTEPS_EVENLY})")
+elif USE_ALL_TIMESTEPS:
     analysis_indices = list(range(0, len(plot_files), TIME_STEP))
     print(f"Using every {TIME_STEP} timestep(s): {len(analysis_indices)} total")
 else:
@@ -1457,8 +1481,174 @@ def plot_deformation_metrics():
     plt.savefig(os.path.join(output_folder, f'03_Deformation_Metrics.{SAVE_FORMAT_VECTOR}'))
     plt.close()
 
-# [Copy remaining plot functions from your existing script with NO SPECIAL CHARACTERS]
-# For brevity, I've shown the key ones - apply same pattern to all others
+    # ----------------------------------------------------------------------
+    # Also save each metric as its own standalone publication figure.
+    # Folder: Deformation-Separate/.  Each panel gets BOTH raster and vector.
+    # Toggle via SEPARATE_DEFORMATION_FIGS.
+    # ----------------------------------------------------------------------
+    if SEPARATE_DEFORMATION_FIGS:
+        V0 = np.pi * (D_DROPLET_INITIAL / 2) ** 2
+        standalones = [
+            ("D",         D_vals,                              "Deformation D",        "tab:blue",   "Deformation Parameter",   None,        None),
+            ("AR",        AR_vals,                             "Aspect Ratio L/W",     "tab:red",    "Aspect Ratio",            None,        None),
+            ("CentroidX", np.array(centroid_x) * 1e3,          "Centroid x [mm]",      "tab:green",  "Centroid X Position",     None,        None),
+            ("CentroidY", np.array(centroid_y) * 1e3,          "Centroid y [mm]",      "tab:purple", "Centroid Y Position",     None,        None),
+            ("Perimeter", np.array(area_vals) * 1e3,           "Surface A [mm]",       "tab:cyan",   "Interface Perimeter",
+                np.pi * D_DROPLET_INITIAL * 1e3, "initial"),
+            ("Volume",    np.array(volume_vals) / V0,          "V / V0",               "tab:olive",  "Normalized Volume",
+                1.0, "initial"),
+        ]
+        for tag, y, ylabel, color, title, hval, hlabel in standalones:
+            fig_s, ax_s = plt.subplots(figsize=(6.5, 4.5))
+            ax_s.plot(t_analysis * 1e6, y, color=color, linewidth=LINE_WIDTH_NORMAL)
+            if hval is not None:
+                ax_s.axhline(y=hval, color='k', linestyle='--', linewidth=1.0, label=hlabel)
+                ax_s.legend(fontsize=FONT_SIZE_LEGEND, loc='best')
+            ax_s.set_xlabel('Time (us)', fontsize=FONT_SIZE_LABEL)
+            ax_s.set_ylabel(ylabel, fontsize=FONT_SIZE_LABEL)
+            ax_s.set_title(title, fontsize=FONT_SIZE_TITLE)
+            ax_s.grid(True, alpha=0.3)
+            ax_s.tick_params(labelsize=FONT_SIZE_TICK)
+            fig_s.tight_layout()
+            base = os.path.join(subfolder_deformation_separate, f"Deformation_{tag}")
+            fig_s.savefig(f"{base}.{SAVE_FORMAT_RASTER}", dpi=DPI)
+            fig_s.savefig(f"{base}.{SAVE_FORMAT_VECTOR}")
+            plt.close(fig_s)
+
+
+# ============================================================================
+# AR / SURFACE-AREA vs INTEGRATED VAPORIZATION (twin-axis charts)
+# ============================================================================
+
+def _integrate_vap_dot_rho():
+    """Return array (len = len(analysis_indices)) of int(Vap_dot_rho) dV.
+
+    Uses the resampled Vap_dot_rho field stored in vap_dot_rho_fields, with
+    cell area derived from domain extent / field shape.
+    """
+    vap_int = np.zeros(len(analysis_indices))
+    for i in range(len(analysis_indices)):
+        vd = np.asarray(vap_dot_rho_fields[i])
+        if vd.ndim != 2 or vd.size == 0:
+            vap_int[i] = np.nan
+            continue
+        dx = (X_MAX - X_MIN) / vd.shape[1]
+        dy = (Y_MAX - Y_MIN) / vd.shape[0]
+        vap_int[i] = float(np.nansum(vd)) * dx * dy
+    return vap_int
+
+
+def _twin_axis_chart(t_us, left_y, right_y, left_label, right_label,
+                     left_color, right_color, title, save_basename):
+    """Generic twin-axis plot helper: left_y vs right_y vs time."""
+    fig, ax1 = plt.subplots(figsize=(8.5, 5))
+    ax1.plot(t_us, left_y, color=left_color, linewidth=LINE_WIDTH_NORMAL,
+             label=left_label)
+    ax1.set_xlabel('Time (us)', fontsize=FONT_SIZE_LABEL)
+    ax1.set_ylabel(left_label, color=left_color, fontsize=FONT_SIZE_LABEL)
+    ax1.tick_params(axis='y', labelcolor=left_color, labelsize=FONT_SIZE_TICK)
+    ax1.tick_params(axis='x', labelsize=FONT_SIZE_TICK)
+    ax1.grid(True, alpha=0.3)
+
+    ax2 = ax1.twinx()
+    ax2.plot(t_us, right_y, color=right_color, linewidth=LINE_WIDTH_NORMAL,
+             linestyle='--', label=right_label)
+    ax2.set_ylabel(right_label, color=right_color, fontsize=FONT_SIZE_LABEL)
+    ax2.tick_params(axis='y', labelcolor=right_color, labelsize=FONT_SIZE_TICK)
+
+    ax1.set_title(title, fontsize=FONT_SIZE_TITLE)
+    fig.tight_layout()
+    fig.savefig(f"{save_basename}.{SAVE_FORMAT_RASTER}", dpi=DPI)
+    fig.savefig(f"{save_basename}.{SAVE_FORMAT_VECTOR}")
+    plt.close(fig)
+
+
+def plot_AR_vs_vap_dot_rho():
+    t_us = times[analysis_indices] * 1e6
+    AR_vals  = np.array([d['AR'] for d in deformation_data])
+    vap_int  = _integrate_vap_dot_rho()
+    _twin_axis_chart(t_us, AR_vals, vap_int,
+                     left_label='Aspect Ratio L/W',
+                     right_label='Integral Vap_dot_rho [kg/s]',
+                     left_color='tab:blue', right_color='tab:red',
+                     title='Aspect Ratio vs Integrated Vaporization',
+                     save_basename=os.path.join(output_folder, '06_AR_vs_VapDotRho'))
+
+
+def plot_area_vs_vap_dot_rho():
+    t_us = times[analysis_indices] * 1e6
+    area_vals = np.array([d['area'] for d in deformation_data]) * 1e3  # mm
+    vap_int   = _integrate_vap_dot_rho()
+    _twin_axis_chart(t_us, area_vals, vap_int,
+                     left_label='Surface Area [mm]',
+                     right_label='Integral Vap_dot_rho [kg/s]',
+                     left_color='tab:cyan', right_color='tab:red',
+                     title='Surface Area vs Integrated Vaporization',
+                     save_basename=os.path.join(output_folder, '07_Area_vs_VapDotRho'))
+
+
+# ============================================================================
+# SHAPE EVOLUTION COMPOSITE (Khare 2022 Fig 6 / Sembian et al. style)
+# ============================================================================
+# Single figure with eta = 0.5 outlines from multiple times overlaid and
+# color-coded by time.  Ports the 4Paper version into v2 for parity.
+def plot_shape_evolution_composite():
+    if len(analysis_indices) < 2:
+        print("  [skip] shape evolution: need at least 2 frames.")
+        return
+
+    n_frames  = min(SHAPE_EVOLUTION_N_FRAMES, len(analysis_indices))
+    sel       = np.linspace(0, len(analysis_indices) - 1, n_frames, dtype=int)
+    times_sel = times[[analysis_indices[s] for s in sel]]
+    cmap      = plt.get_cmap(SHAPE_EVOLUTION_CMAP)
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+
+    x_all = []
+    y_all = []
+    for j, s in enumerate(sel):
+        eta    = eta_fields[s]
+        x_grid = x_grids[s]
+        y_grid = y_grids[s]
+        color  = cmap(j / max(n_frames - 1, 1))
+
+        cs = ax.contour(x_grid, y_grid, eta, levels=[0.5],
+                        colors=[color], linewidths=SHAPE_EVOLUTION_LW)
+        for seg_list in cs.allsegs:
+            for seg in seg_list:
+                if len(seg) > 0:
+                    x_all.append(seg[:, 0])
+                    y_all.append(seg[:, 1])
+
+    if x_all:
+        x_all_flat = np.concatenate(x_all)
+        y_all_flat = np.concatenate(y_all)
+        pad_x = 0.1 * (x_all_flat.max() - x_all_flat.min() + 1e-12)
+        pad_y = 0.1 * (y_all_flat.max() - y_all_flat.min() + 1e-12)
+        ax.set_xlim(x_all_flat.min() - pad_x, x_all_flat.max() + pad_x)
+        ax.set_ylim(y_all_flat.min() - pad_y, y_all_flat.max() + pad_y)
+
+    ax.set_aspect('equal', adjustable='box')
+    ax.set_xlabel('x [m]', fontsize=FONT_SIZE_LABEL)
+    ax.set_ylabel('y [m]', fontsize=FONT_SIZE_LABEL)
+    ax.set_title('Droplet shape evolution (eta = 0.5 contour)',
+                 fontsize=FONT_SIZE_TITLE)
+    ax.grid(True, alpha=0.3)
+    ax.tick_params(labelsize=FONT_SIZE_TICK)
+
+    sm = plt.cm.ScalarMappable(
+        cmap=cmap,
+        norm=plt.Normalize(vmin=times_sel.min() * 1e6, vmax=times_sel.max() * 1e6))
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, fraction=0.040, pad=0.04)
+    cbar.set_label('Time (us)', fontsize=FONT_SIZE_LABEL)
+    cbar.ax.tick_params(labelsize=FONT_SIZE_TICK)
+
+    fig.tight_layout()
+    base = os.path.join(output_folder, '08_ShapeEvolution')
+    fig.savefig(f"{base}.{SAVE_FORMAT_RASTER}", dpi=DPI)
+    fig.savefig(f"{base}.{SAVE_FORMAT_VECTOR}")
+    plt.close(fig)
 
 # ============================================================================
 # EXECUTE PLOTS
@@ -1504,6 +1694,24 @@ if PLOT_DEFORMATION_METRICS:
     print("\nGenerating Deformation Metrics...")
     plot_deformation_metrics()
     print("  Saved: 03_Deformation_Metrics")
+    plot_count += 1
+
+if PLOT_AR_VS_VAP:
+    print("\nGenerating AR vs integrated Vap_dot_rho...")
+    plot_AR_vs_vap_dot_rho()
+    print("  Saved: 06_AR_vs_VapDotRho")
+    plot_count += 1
+
+if PLOT_AREA_VS_VAP:
+    print("\nGenerating Surface Area vs integrated Vap_dot_rho...")
+    plot_area_vs_vap_dot_rho()
+    print("  Saved: 07_Area_vs_VapDotRho")
+    plot_count += 1
+
+if PLOT_SHAPE_EVOLUTION:
+    print("\nGenerating Shape Evolution Composite...")
+    plot_shape_evolution_composite()
+    print("  Saved: 08_ShapeEvolution")
     plot_count += 1
 
 if PLOT_SCHLIEREN_VELOCITY_SPLIT:

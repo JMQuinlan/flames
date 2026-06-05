@@ -99,12 +99,18 @@ PLOT_SCHLIEREN_MACH_SPLIT = 1          # Individual frames in Schlieren-Mach/
 PLOT_SCHLIEREN_MACH_GIF   = 1          # GIF from Schlieren-Mach/
 PLOT_MASS_CONSERVATION    = 1          # rho_eta0, rho_eta1, total mass vs time
 SEPARATE_DEFORMATION_FIGS = 1          # In addition to 2x3 grid, save each metric standalone
+PLOT_AR_VS_VAP            = 1          # AR (left) vs integrated Vap_dot_rho (right) twin-axis
+PLOT_AREA_VS_VAP          = 1          # Surface area (left) vs integrated Vap_dot_rho (right) twin-axis
 
 # ============================================================================
 # CONFIGURATION PARAMETERS
 # ============================================================================
 
 # Time sampling
+# N_TIMESTEPS_EVENLY > 0 selects exactly that many evenly spaced timesteps from
+# the first to the last plot file and OVERRIDES both TIME_STEP and KEY_TIMES.
+# Set to 0 to fall back to the legacy TIME_STEP / KEY_TIMES behavior.
+N_TIMESTEPS_EVENLY = 20
 TIME_STEP = 4  # Sample every Nth timestep (1=all, 2=every other, 5=every 5th, etc.)
 
 # File paths
@@ -167,11 +173,18 @@ SCHLIEREN_USE_MIXTURE = 1
 # pure white -- prevents low-amplitude numerical noise from filling the
 # field with grey.
 SCHLIEREN_PER_PHASE       = 1
-SCHLIEREN_K_AIR           = 60.0
-SCHLIEREN_K_LIQ           = 60.0
+# K controls Quirk 1996 contrast: schlieren = exp(-K * |grad rho|/max).
+# Lower K -> wider tonal range, weak fronts still visible (less "saturated /
+# smeared" look).  Was 60 -- saturated quickly and washed out into a single
+# blob.  20 keeps the strong shock dark while the surrounding compression
+# fan stays mid-grey.
+SCHLIEREN_K_AIR           = 20.0
+SCHLIEREN_K_LIQ           = 20.0
 SCHLIEREN_ALPHA_EXP       = 0.8
-SCHLIEREN_GRAD_FLOOR_AIR  = 1.0e-2     # relative to per-phase max
-SCHLIEREN_GRAD_FLOOR_LIQ  = 1.0e-2
+# Floor below which the field renders as pure background.  Lowered from 1e-2
+# to 1e-3 so weak (but real) compression waves don't get wiped out.
+SCHLIEREN_GRAD_FLOOR_AIR  = 1.0e-3     # relative to per-phase max
+SCHLIEREN_GRAD_FLOOR_LIQ  = 1.0e-3
 
 # Eta contour overlays on field plots (interface envelope).
 ETA_CONTOURS_PAPER = [0.01, 0.5, 0.99]
@@ -685,7 +698,14 @@ print("\n" + "=" * 70)
 print(f"APPLYING TIME_STEP SAMPLING (TIME_STEP = {TIME_STEP})")
 print("=" * 70)
 
-if USE_ALL_TIMESTEPS:
+if N_TIMESTEPS_EVENLY and N_TIMESTEPS_EVENLY > 0:
+    n_pick = min(N_TIMESTEPS_EVENLY, len(plot_files))
+    analysis_indices = list(np.linspace(0, len(plot_files) - 1, n_pick, dtype=int))
+    seen = set()
+    analysis_indices = [i for i in analysis_indices if not (i in seen or seen.add(i))]
+    print(f"Using {len(analysis_indices)} evenly spaced timesteps "
+          f"(N_TIMESTEPS_EVENLY = {N_TIMESTEPS_EVENLY})")
+elif USE_ALL_TIMESTEPS:
     analysis_indices = list(range(0, len(plot_files), TIME_STEP))
     print(f"Using every {TIME_STEP} timestep(s): {len(analysis_indices)} total")
 else:
@@ -1635,6 +1655,78 @@ def plot_deformation_metrics():
             fig_s.savefig(f"{base}.{SAVE_FORMAT_VECTOR}")
             plt.close(fig_s)
 
+
+# ============================================================================
+# AR / SURFACE-AREA vs INTEGRATED VAPORIZATION (twin-axis charts)
+# ============================================================================
+
+def _integrate_vap_dot_rho():
+    """Return array (len = len(analysis_indices)) of int(Vap_dot_rho) dV.
+
+    Uses the resampled Vap_dot_rho field stored in vap_dot_rho_fields, with
+    cell area derived from domain extent / field shape.
+    """
+    vap_int = np.zeros(len(analysis_indices))
+    for i in range(len(analysis_indices)):
+        vd = np.asarray(vap_dot_rho_fields[i])
+        if vd.ndim != 2 or vd.size == 0:
+            vap_int[i] = np.nan
+            continue
+        dx = (X_MAX - X_MIN) / vd.shape[1]
+        dy = (Y_MAX - Y_MIN) / vd.shape[0]
+        vap_int[i] = float(np.nansum(vd)) * dx * dy
+    return vap_int
+
+
+def _twin_axis_chart(t_us, left_y, right_y, left_label, right_label,
+                     left_color, right_color, title, save_basename):
+    """Generic twin-axis plot helper: left_y vs right_y vs time."""
+    fig, ax1 = plt.subplots(figsize=(8.5, 5))
+    ax1.plot(t_us, left_y, color=left_color, linewidth=LINE_WIDTH_NORMAL,
+             label=left_label)
+    ax1.set_xlabel(r"Time [$\mu$s]", fontsize=FONT_SIZE_LABEL)
+    ax1.set_ylabel(left_label, color=left_color, fontsize=FONT_SIZE_LABEL)
+    ax1.tick_params(axis='y', labelcolor=left_color, labelsize=FONT_SIZE_TICK)
+    ax1.tick_params(axis='x', labelsize=FONT_SIZE_TICK)
+    ax1.grid(True, alpha=0.3)
+
+    ax2 = ax1.twinx()
+    ax2.plot(t_us, right_y, color=right_color, linewidth=LINE_WIDTH_NORMAL,
+             linestyle='--', label=right_label)
+    ax2.set_ylabel(right_label, color=right_color, fontsize=FONT_SIZE_LABEL)
+    ax2.tick_params(axis='y', labelcolor=right_color, labelsize=FONT_SIZE_TICK)
+
+    ax1.set_title(title, fontsize=FONT_SIZE_TITLE)
+    fig.tight_layout()
+    fig.savefig(f"{save_basename}.{SAVE_FORMAT_RASTER}", dpi=DPI)
+    fig.savefig(f"{save_basename}.{SAVE_FORMAT_VECTOR}")
+    plt.close(fig)
+
+
+def plot_AR_vs_vap_dot_rho():
+    t_us = times[analysis_indices] * 1e6
+    AR_vals = np.array([d['AR'] for d in deformation_data])
+    vap_int = _integrate_vap_dot_rho()
+    _twin_axis_chart(t_us, AR_vals, vap_int,
+                     left_label='Aspect Ratio L/W',
+                     right_label=r'$\int \dot{m}_{vap}\,dV$ [kg/s]',
+                     left_color='tab:blue', right_color='tab:red',
+                     title='Aspect Ratio vs Integrated Vaporization',
+                     save_basename=os.path.join(output_folder, '06_AR_vs_VapDotRho'))
+
+
+def plot_area_vs_vap_dot_rho():
+    t_us = times[analysis_indices] * 1e6
+    area_vals = np.array([d['area'] for d in deformation_data]) * 1e3  # mm
+    vap_int = _integrate_vap_dot_rho()
+    _twin_axis_chart(t_us, area_vals, vap_int,
+                     left_label='Surface Area [mm]',
+                     right_label=r'$\int \dot{m}_{vap}\,dV$ [kg/s]',
+                     left_color='tab:cyan', right_color='tab:red',
+                     title='Surface Area vs Integrated Vaporization',
+                     save_basename=os.path.join(output_folder, '07_Area_vs_VapDotRho'))
+
+
 # ============================================================================
 # 4PAPER PLOT FUNCTIONS
 # ============================================================================
@@ -1772,9 +1864,11 @@ def plot_schlieren_mach_split_single(idx, frame_num, save_folder):
     y_min_zoom  = centroid[1] - zoom_height / 2
     y_max_zoom  = centroid[1] + zoom_height / 2
 
-    # TOP: schlieren (white background, dark shocks)
+    # TOP: schlieren -- match v2 convention (white shocks on dark background).
+    # NOTE: gray_r maps high schlieren -> white, so shock fronts read as bright
+    # streaks against the bulk-fluid dark.
     im1 = ax_top.imshow(schlieren_top, origin='lower', extent=extent_top,
-                        cmap='gray', vmin=0.0, vmax=1.0,
+                        cmap='gray_r', vmin=0.0, vmax=1.0,
                         interpolation='bilinear', aspect='auto')
     for eta_val in ETA_CONTOURS:
         ax_top.contour(x_vals, y_top, eta_top, levels=[eta_val],
@@ -1946,6 +2040,18 @@ if PLOT_DEFORMATION_METRICS:
     print("\nGenerating Deformation Metrics...")
     plot_deformation_metrics()
     print("  Saved: 03_Deformation_Metrics")
+    plot_count += 1
+
+if PLOT_AR_VS_VAP:
+    print("\nGenerating AR vs integrated Vap_dot_rho...")
+    plot_AR_vs_vap_dot_rho()
+    print("  Saved: 06_AR_vs_VapDotRho")
+    plot_count += 1
+
+if PLOT_AREA_VS_VAP:
+    print("\nGenerating Surface Area vs integrated Vap_dot_rho...")
+    plot_area_vs_vap_dot_rho()
+    print("  Saved: 07_Area_vs_VapDotRho")
     plot_count += 1
 
 if PLOT_SCHLIEREN_VELOCITY_SPLIT:
