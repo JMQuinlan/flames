@@ -95,6 +95,11 @@ static Set::Scalar SpaldingBM(Set::Scalar Y_local, Set::Scalar Y_inf, Set::Scala
 // comps 4,5). The pressure (UE) constraint depends only on the mixture, so the
 // bisection below is unchanged -- it just runs on the tightened [0,t_rho].
 // ----------------------------------------------------------------------------
+// Phase-dependent pressure floor lives in Solver::EOS::EOS::PressureFloor (so
+// the EOS-facing MixedPressure/diagnostics share one definition). Gas
+// (eta -> 1) is held at p >= eps_p; the stiffened liquid (eta -> 0) may tension
+// down to -p_cav, with a hyperbolicity guard (p -> -p0_eff makes c -> 0).
+// ----------------------------------------------------------------------------
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 static Set::Scalar PPThetaCell(const Set::Scalar B[4], Set::Scalar s, const Set::Scalar dF[4],
                                Set::Scalar gamma_eff, Set::Scalar p0_eff,
@@ -190,8 +195,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("pp_source_limiter", value.pp_source_limiter, 0); // 1: scale source for positivity + per-phase flux guard (needs pp_flux_limiter); 0: off
         if (value.pp_source_limiter != 0 && value.pp_flux_limiter == 0)
             Util::Abort(INFO, "pp_source_limiter requires pp_flux_limiter=1 (it lives in the PP-limiter Pass B/C/D); got pp_flux_limiter=0");
-        pp_query_default("eps_p", value.eps_p, 1.0);          // floor on absolute pressure p
+        pp_query_default("eps_p", value.eps_p, 1.0);          // floor on absolute pressure p (gas side, eta -> 1)
         pp_query_default("eps_rho", value.eps_rho, 1.0E-10);  // density floor
+        pp_query_default("p_cav", value.p_cav, 0.0);          // liquid cavitation floor: hold the liquid (eta -> 0) at p >= -p_cav (gas stays p >= eps_p). 0 = vacuum floor, no tension.
+        if (value.p_cav < 0.0)
+            Util::Abort(INFO, "p_cav is the magnitude of the liquid tensile/cavitation floor (liquid held at p >= -p_cav); it must be >= 0");
 
         // HLLC-ADC carbuncle cure: drive the omega blend from a Ducros-weighted
         // div(u) compression shock tag instead of the internal pressure-ratio
@@ -227,6 +235,15 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // INTERACTIONS
         pp_query_default("sigma", value.sigma, 0.0);    // Surface tension condition
         pp_query_default("Dv", value.Dv, 0.0);          // Vapor Diffusivity
+        // HRM bulk cavitation (liquid -> vapor when p < p_sat). Off by default.
+        pp_query_default("apply_cavitation", value.apply_cavitation, 0);
+        pp_query_default("tau_cav", value.tau_cav, 1.0e-4);            // cavitation relaxation time [s]
+        pp_query_default("antoine_A", value.antoine_A, 4.10549);      // log10(p_sat[bar]) = A - B/(T[K]+C)
+        pp_query_default("antoine_B", value.antoine_B, 1625.928);
+        pp_query_default("antoine_C", value.antoine_C, -92.839);
+        pp_query_default("L_vap", value.L_vap, 256.0e3);              // latent heat [J/kg] (Phase B energy coupling, unused in Phase A)
+        if (value.apply_cavitation != 0 && value.tau_cav <= 0.0)
+            Util::Abort(INFO, "tau_cav must be > 0 when apply_cavitation=1 (it is the cavitation relaxation time)");
         pp_query_required("epsilon", value.epsilon);    // diffuse interface thickness Y_infinity
         pp_query_default("Y_infinity", value.Y_infinity, 0.0); // Far Field Vapor Mass Fraction
         pp_query_default("Mob", value.Mob_user, 0.0);   // CH mobility scale M0: M = M0 * epsilon^2
@@ -845,7 +862,7 @@ void Hydro2::Mix(int lev)
 
             // Pressure
             p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
-            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE_vol(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small);
+            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE_vol(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small, eps_p, p_cav);
 
             // Chemical Potential
             // Set::Scalar f_prime = 4.0 * eta(i, j, k) * (eta(i, j, k) - 0.5) * (eta(i, j, k) - 1.0); // Double-well potential derivative: f'(eta) = 4*eta*(eta-0.5)*(eta-1)
@@ -1581,6 +1598,32 @@ Hydro2::RHS(int lev,
                 // identical to the previous u.dot(u * m_dot_Vap * |grad_eta|) * |grad_eta|.
                 E_dot_Vap = m_dot_Vap * (u(0)*u(0) + u(1)*u(1)) * grad_eta_mag * grad_eta_mag;
             }
+
+            // ------------------------------------------------------------
+            // HRM bulk cavitation (Phase A: mass + void; latent heat deferred)
+            // ------------------------------------------------------------
+            // When the local pressure falls below saturation, convert liquid ->
+            // vapor at a finite rate (Bilicki / Downar-Zapolski HRM): the gas phase
+            // here IS n-dodecane vapor, so cavitation is just pressure-triggered
+            // vaporization. Folds into the same m_dot_Vap/eta_dot_Vap, so the
+            // partial-density update preserves action-reaction (gas +m, liquid -m).
+            // Evaporation only (drive clamped >= 0; no condensation of the ambient
+            // vapor) and it vanishes in pure gas since the rate scales with the
+            // liquid partial density. The tension is relieved through the
+            // eta-blended EOS (p0_eff drops as vapor forms); no latent-heat term is
+            // applied yet (mixture energy held fixed -- Phase B, pending theory).
+            if (apply_cavitation == 1)
+            {
+                Set::Scalar p_sat = std::pow(10.0, antoine_A - antoine_B / (T(i, j, k) + antoine_C)) * 1.0e5; // Antoine (bar) -> Pa
+                Set::Scalar drive = (p_sat - press(i, j, k)) / (p_sat + small);
+                drive = (drive < 0.0) ? 0.0 : ((drive > 1.0) ? 1.0 : drive);
+                Set::Scalar m_dot_cav = (rho_eta1(i, j, k) / tau_cav) * drive; // liquid -> vapor [kg/m^3/s]
+                Set::Scalar inv_rho_g = 1.0 / std::max(rho_eta0(i, j, k), small);
+                Set::Scalar inv_rho_l = 1.0 / std::max(rho_eta1(i, j, k), small);
+                m_dot_Vap   += m_dot_cav;
+                eta_dot_Vap += m_dot_cav * (inv_rho_l - inv_rho_g);
+            }
+
             // Vaporization Trackers (Vap_dot[2..3] used to hold M_dot_Vap which
             // has been removed per F-5; left as zero so the plotfile field
             // shape is preserved without changing the registration).
@@ -2095,6 +2138,7 @@ Hydro2::RHS(int lev,
     {
         const Set::Scalar eps_rho_l = eps_rho;
         const Set::Scalar eps_p_l   = eps_p;
+        const Set::Scalar p_cav_l   = p_cav;
         const Set::Scalar pref_l    = pref;
         const Set::Scalar small_l   = small;
         const Set::Scalar pp_factor = 2.0 * AMREX_SPACEDIM;
@@ -2228,9 +2272,11 @@ Hydro2::RHS(int lev,
                     Set::Scalar BR[4] = { Bb(i + 1, j, k, 0), Bb(i + 1, j, k, 1), Bb(i + 1, j, k, 2), Bb(i + 1, j, k, 3) };
                     Set::Scalar lam = dt / DX[0];
                     Set::Scalar ef  = (Fhx(i, j, k, 4) > 0.0) ? eta(i, j, k) : eta(i + 1, j, k);
-                    Set::Scalar tL = PPThetaCell(BL, -pp_factor * lam, dF, gam(i, j, k),     p0(i, j, k),     eps_rho_l, eps_p_l, pref_l,
+                    Set::Scalar pfL = Solver::EOS::EOS::PressureFloor(eta(i, j, k),     p0(i, j, k),     eps_p_l, p_cav_l);
+                    Set::Scalar pfR = Solver::EOS::EOS::PressureFloor(eta(i + 1, j, k), p0(i + 1, j, k), eps_p_l, p_cav_l);
+                    Set::Scalar tL = PPThetaCell(BL, -pp_factor * lam, dF, gam(i, j, k),     p0(i, j, k),     eps_rho_l, pfL, pref_l,
                                                  src_limit_on, Bb(i, j, k, 4),     Bb(i, j, k, 5),     ef, small_l);
-                    Set::Scalar tR = PPThetaCell(BR, +pp_factor * lam, dF, gam(i + 1, j, k), p0(i + 1, j, k), eps_rho_l, eps_p_l, pref_l,
+                    Set::Scalar tR = PPThetaCell(BR, +pp_factor * lam, dF, gam(i + 1, j, k), p0(i + 1, j, k), eps_rho_l, pfR, pref_l,
                                                  src_limit_on, Bb(i + 1, j, k, 4), Bb(i + 1, j, k, 5), ef, small_l);
                     Set::Scalar th = std::min(tL, tR);
                     Th(i, j, k, 0) = (th < 0.0) ? 0.0 : ((th > 1.0) ? 1.0 : th);
@@ -2243,9 +2289,11 @@ Hydro2::RHS(int lev,
                     Set::Scalar BR[4] = { Bb(i, j + 1, k, 0), Bb(i, j + 1, k, 1), Bb(i, j + 1, k, 2), Bb(i, j + 1, k, 3) };
                     Set::Scalar lam = dt / DX[1];
                     Set::Scalar ef  = (Fhy(i, j, k, 4) > 0.0) ? eta(i, j, k) : eta(i, j + 1, k);
-                    Set::Scalar tL = PPThetaCell(BL, -pp_factor * lam, dF, gam(i, j, k),     p0(i, j, k),     eps_rho_l, eps_p_l, pref_l,
+                    Set::Scalar pfL = Solver::EOS::EOS::PressureFloor(eta(i, j, k),     p0(i, j, k),     eps_p_l, p_cav_l);
+                    Set::Scalar pfR = Solver::EOS::EOS::PressureFloor(eta(i, j + 1, k), p0(i, j + 1, k), eps_p_l, p_cav_l);
+                    Set::Scalar tL = PPThetaCell(BL, -pp_factor * lam, dF, gam(i, j, k),     p0(i, j, k),     eps_rho_l, pfL, pref_l,
                                                  src_limit_on, Bb(i, j, k, 4),     Bb(i, j, k, 5),     ef, small_l);
-                    Set::Scalar tR = PPThetaCell(BR, +pp_factor * lam, dF, gam(i, j + 1, k), p0(i, j + 1, k), eps_rho_l, eps_p_l, pref_l,
+                    Set::Scalar tR = PPThetaCell(BR, +pp_factor * lam, dF, gam(i, j + 1, k), p0(i, j + 1, k), eps_rho_l, pfR, pref_l,
                                                  src_limit_on, Bb(i, j + 1, k, 4), Bb(i, j + 1, k, 5), ef, small_l);
                     Set::Scalar th = std::min(tL, tR);
                     Th(i, j, k, 1) = (th < 0.0) ? 0.0 : ((th > 1.0) ? 1.0 : th);
@@ -2376,7 +2424,8 @@ Hydro2::RHS(int lev,
                                           Mom(i, j, k, 1) + dt * my_div, Ene(i, j, k) + dt * E_div };
                     Set::Scalar Sv[4] = { Src(i, j, k, 0), Src(i, j, k, 1), Src(i, j, k, 2), Src(i, j, k, 3) };
                     // Mixture (rho, p): reuse PPThetaCell with scale dt, source as dF.
-                    Set::Scalar s = PPThetaCell(Bf, dt, Sv, gam(i, j, k), p0(i, j, k), eps_rho_l, eps_p_l, pref_l);
+                    Set::Scalar pf = Solver::EOS::EOS::PressureFloor(eta(i, j, k), p0(i, j, k), eps_p_l, p_cav_l);
+                    Set::Scalar s = PPThetaCell(Bf, dt, Sv, gam(i, j, k), p0(i, j, k), eps_rho_l, pf, pref_l);
                     // Per-phase partial densities (linear in s).
                     Set::Scalar re0f = re0(i, j, k) + dt * re0_div;
                     Set::Scalar re1f = re1(i, j, k) + dt * re1_div;
@@ -2738,15 +2787,16 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             UE_vol(i,j,k) = E_vol(i,j,k) - KE_vol(i,j,k);
 
             // EOS-aware positivity backstop (final safety net behind the PP flux
-            // limiter). Enforce absolute p >= eps_p, i.e.
-            //   UE_vol >= (eps_p + gamma_eff*p0_eff - pref)/(gamma_eff - 1).
-            // Flooring the physical pressure (not p + p0_eff) gives both phases a
-            // sensible floor: gas p >= eps_p, and the stiffened liquid p >= eps_p
-            // instead of eps_p - p0_eff (~ -400 MPa), which let the reflected shock
-            // drive huge unphysical tension before the floor fired.
+            // limiter). Enforce a PHASE-DEPENDENT physical pressure floor: the gas
+            // (eta -> 1) cannot tension, p >= eps_p; the stiffened liquid (eta -> 0)
+            // may be pulled into tension down to a cavitation limit, p >= -p_cav
+            // (PressureFloor blends the two). This replaces the old uniform p >= eps_p
+            // (which clamped legitimate lee-side liquid tension to 1 Pa and injected
+            // energy every step). UE_vol >= (p_floor + gamma_eff*p0_eff - pref)/(gamma_eff-1).
             p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
             {
-                Set::Scalar ue_floor = (eps_p + gammaf(i, j, k) * p0_eff(i, j, k) - pref) / (gammaf(i, j, k) - 1.0);
+                Set::Scalar p_floor  = Solver::EOS::EOS::PressureFloor(eta(i, j, k), p0_eff(i, j, k), eps_p, p_cav);
+                Set::Scalar ue_floor = (p_floor + gammaf(i, j, k) * p0_eff(i, j, k) - pref) / (gammaf(i, j, k) - 1.0);
                 // Diagnostic: energy injected by the floor (0 if not floored).
                 pp_efloor_(i, j, k) = std::max(ue_floor - UE_vol(i, j, k), 0.0);
                 floor_energy_local += pp_efloor_(i, j, k);
@@ -2762,7 +2812,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             E_mas(i,j,k) = E_vol(i,j,k) / (rho(i,j,k) + small);
             UE_mas(i,j,k) = E_mas(i,j,k) - KE_mas(i,j,k);
 
-            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE_vol(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small);
+            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE_vol(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small, eps_p, p_cav);
         
             Set::Scalar f_prime = 4.0 * eta_new(i,j,k) * (eta_new(i,j,k) - 0.5) * (eta_new(i,j,k) - 1.0);
             Set::Scalar mu_chem = -epsilon * epsilon * lap_eta + f_prime;
@@ -3999,11 +4049,12 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             // even while the plotted (post-update) pressure read eps_p. This is
             // the pressure the solver actually consumes, so it must carry the
             // same floor or the backstop never reaches the flux computation.
-            Set::Scalar ue_floor = (eps_p + gamma(i, j, k) * p0_eff(i, j, k) - pref) / (gamma(i, j, k) - 1.0);
+            Set::Scalar p_floor = Solver::EOS::EOS::PressureFloor(eta(i, j, k), p0_eff(i, j, k), eps_p, p_cav);
+            Set::Scalar ue_floor = (p_floor + gamma(i, j, k) * p0_eff(i, j, k) - pref) / (gamma(i, j, k) - 1.0);
             UE(i, j, k) = std::max(E(i, j, k) - KE(i, j, k), ue_floor);
 
             // Pressure from Tammann EOS
-            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small);
+            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small, eps_p, p_cav);
 
             // Temperature
             T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
@@ -4243,7 +4294,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             //{
                 gamma(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
                 p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
-                press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small);
+                press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small, eps_p, p_cav);
             //}
             T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
             a(i, j, k) = Solver::EOS::EOS::TammannSoundSpeed(rho(i, j, k), press(i, j, k), gamma(i, j, k), p0_eff(i, j, k), small);

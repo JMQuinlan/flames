@@ -415,6 +415,12 @@ protected:
     int apply_weight = 0;
     int static_eta = 0;
     int apply_vaporization = 0;
+    int apply_cavitation = 0;          // HRM bulk cavitation: liquid -> vapor at finite rate when p < p_sat(T). 0 = off.
+    Set::Scalar tau_cav = 1.0e-4;      // cavitation relaxation time [s]
+    Set::Scalar antoine_A = 4.10549;   // Antoine: log10(p_sat[bar]) = A - B/(T[K] + C)  (n-dodecane, 399-490 K)
+    Set::Scalar antoine_B = 1625.928;
+    Set::Scalar antoine_C = -92.839;
+    Set::Scalar L_vap = 256.0e3;       // latent heat of vaporization [J/kg]; for the phase-change energy coupling (Phase B, pending theory) -- unused in Phase A.
     int Spec_Vol = 1;
 
     int kappa_method = 1;
@@ -445,8 +451,9 @@ protected:
     // and energy non-conservatively) with the minimal source throttle needed to
     // stay positive. Default 0 (off) -> legacy pp_source_limit behavior.
     int pp_source_limiter = 0;
-    Set::Scalar eps_p = NAN;    // pressure floor (on p + p0_eff)
+    Set::Scalar eps_p = NAN;    // pressure floor on p (gas side, eta -> 1)
     Set::Scalar eps_rho = NAN;  // density floor
+    Set::Scalar p_cav = 0.0;    // liquid cavitation/tensile floor: hold the liquid (eta -> 0) at p >= -p_cav while the gas (eta -> 1) stays p >= eps_p. 0 = vacuum floor (no tension).
 
     // HLLC-ADC carbuncle cure driven by a Ducros-weighted div(u) compression
     // shock tag (carbuncles are pressure-quiet, so the internal pressure-ratio

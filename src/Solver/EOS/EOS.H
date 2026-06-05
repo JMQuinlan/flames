@@ -137,6 +137,23 @@ public:
     // These compute state variables for the MIXTURE using effective properties
     // ========================================================================
 
+    /// Phase-dependent pressure floor.  Gas (eta -> 1, p0_eff -> 0) cannot
+    /// sustain tension: p >= eps_p.  The stiffened liquid (eta -> 0) may be
+    /// pulled into tension down to a cavitation limit -p_cav.  Blend linearly in
+    /// eta.  A hyperbolicity guard caps the tension at 0.75*p0_eff so
+    /// p + p0_eff >= 0.25*p0_eff (c >= 0.5 c_ref); p -> -p0_eff makes
+    /// c^2 = gamma*(p+p0_eff)/rho -> 0, which is why an unguarded -p0_eff floor
+    /// breaks the solver.  Defaults (eps_p=p_cav=0) give a vacuum floor.
+    AMREX_GPU_HOST_DEVICE
+    static Set::Scalar PressureFloor(Set::Scalar eta, Set::Scalar p0_eff,
+                                     Set::Scalar eps_p = 0.0, Set::Scalar p_cav = 0.0)
+    {
+        const Set::Scalar e   = (eta < 0.0) ? 0.0 : ((eta > 1.0) ? 1.0 : eta);
+        const Set::Scalar pf  = e * eps_p - (1.0 - e) * p_cav; // gas:+eps_p, liquid:-p_cav
+        const Set::Scalar hyp = -0.75 * p0_eff;                // hyperbolicity guard
+        return (pf > hyp) ? pf : hyp;
+    }
+
     /// Compute mixture pressure from (rho, UE_vol, eta)
     /// Uses: p = (gamma_eff - 1)*UE_vol - gamma_eff*p0_eff + pref
     AMREX_GPU_HOST_DEVICE
@@ -146,15 +163,18 @@ public:
                                      const EOS &eos0,
                                      const EOS &eos1,
                                      Set::Scalar pref = 0.0,
-                                     Set::Scalar small = 1e-16)
+                                     Set::Scalar small = 1e-16,
+                                     Set::Scalar eps_p = 0.0,
+                                     Set::Scalar p_cav = 0.0)
     {
         Set::Scalar gamma_eff = MixedGamma(eta, eos0, eos1);
         Set::Scalar p0_eff = MixedP0(eta, eos0, eos1);
 
         Set::Scalar press = (gamma_eff - 1.0) * UE_vol - gamma_eff * p0_eff + pref;
-        return std::max(press, small); // Doesn't look right
-        //return std::max(press, -p0_eff + small); // Breaks
-        //return std::max(press, -p0_eff * gamma_eff + small);// Breaks
+        // Phase-dependent floor: gas p >= eps_p, liquid p >= -p_cav (hyperbolicity
+        // guarded). The old uniform max(press, small) clipped legitimate liquid
+        // tension to ~0; this lets the bounded tension through to plots/NSCBC.
+        return std::max(press, PressureFloor(eta, p0_eff, eps_p, p_cav));
     }
 
     // Compute Tammann Pressure assuming correct mixing

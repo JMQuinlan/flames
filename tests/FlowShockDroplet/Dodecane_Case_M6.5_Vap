@@ -7,7 +7,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = /mmfs1/home/spatel6/flames/bin/tests/output/Dodecane_Case_M6.5_Vap
-plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_limiter
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_cavitation
 
 ### MESHING ###
 amr.plot_dt = 0.25e-6
@@ -29,7 +29,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1.0e-7
 dynamictimestep.min = 1.0e-15
-cfl = 0.2
+cfl = 0.1
 
 ### DIMENSIONS ###
 #geometry.prob_lo = 0.000 0.000 0.0
@@ -176,10 +176,14 @@ pp_flux_limiter = 1
 # factor also guards against the source pushing a cell out of bounds. Set to 0
 # to limit the flux only and add the source unlimited (pure Hu-Adams-Shu).
 # Only active when pp_flux_limiter != 0.
-pp_source_limit = 1
+pp_source_limiter=1
 # Small values
 eps_p = 1.0
 eps_rho = 1e-10
+
+# Liquid cavitation/tensile floor: hold the liquid (eta->0) at p >= -p_cav
+# while gas (eta->1) stays p >= eps_p. 0 = vacuum floor (no tension).
+p_cav = 1.0e5
 
 ### SOURCE TERMS ###
 m0.ic.constant.value = 0.0
@@ -190,6 +194,14 @@ q.ic.constant.value = 0.0 0.0
 apply_surface_tension = 1
 apply_weight = 0
 apply_vaporization = 1
+
+# HRM bulk cavitation: liquid -> vapor at finite rate when p < p_sat(T).
+apply_cavitation = 1
+tau_cav   = 1.0e-4
+antoine_A = 4.10549
+antoine_B = 1625.928
+antoine_C = -92.839
+L_vap     = 256.0e3
 
 Spec_Vol = 1
 grav = 9.81
@@ -238,5 +250,6 @@ omega_relax = 0.5
 # Pe_CH = U*epsilon^2/(M*sigma), M = M0*epsilon^2, M0 ~ U/sigma.
 # With sigma = 0.025 N/m, M0 = 1025.239/0.025 = 4.10095716768e4
 # Mob = 4.1e4
-Mob = 50.0
-# Mob = 1e-20
+# Mob = 50.0 # too low: interface collapses at separation point
+# Mob = 1000. # too high: interface gumbled
+Mob = 200
