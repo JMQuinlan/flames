@@ -2939,7 +2939,7 @@ void Hydro2::Regrid(int lev, Set::Scalar regrid_time)
         pp_scratch[lev].Fhi[d]->setVal(0.0);
         pp_scratch[lev].Flo[d]->setVal(0.0);
     }
-    pp_scratch[lev].Bbase = std::make_unique<amrex::MultiFab>(ba_reg, dm_reg, 4, 1);
+    pp_scratch[lev].Bbase = std::make_unique<amrex::MultiFab>(ba_reg, dm_reg, 6, 1); // 6 comp: rho, Mx, My, E, rho*eta0, rho*eta1 (must match Initialize)
     pp_scratch[lev].theta = std::make_unique<amrex::MultiFab>(ba_reg, dm_reg, AMREX_SPACEDIM, 1);
     pp_scratch[lev].Bbase->setVal(0.0);
     pp_scratch[lev].theta->setVal(0.0);
