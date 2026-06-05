@@ -39,7 +39,7 @@ geometry.prob_hi =  0.015  0.005 0.0  # 3/4 tube right of droplet (0.02m × 0.01m
 geometry.is_periodic = 0 0 0
  
 ### TIME STEP ###
-stop_time = 0.0002  # Shorter time for shock interaction
+stop_time = 9.5e-5
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression

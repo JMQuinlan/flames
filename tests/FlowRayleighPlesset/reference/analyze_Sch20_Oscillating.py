@@ -74,9 +74,13 @@ from rayleigh_plesset_solver import (                                  # noqa: E
 # ============================================================================
 
 # ===== MODEL TOGGLES =====
-SHOW_KM_3D   = True      # 3D Keller-Miksis
-SHOW_RPE_3D  = True      # 3D Rayleigh-Plesset
-SHOW_CHEN_2D = True      # 2D Chen cylindrical
+# Default: 2D Chen on (the only geometric match for the 2D Cartesian sim).
+# Flip KM_3D / RPE_3D to True to overlay the 3D-spherical references for
+# context -- they have different periods/amplitudes because the geometry
+# differs, so they won't overlay the sim, but are useful as bounds.
+SHOW_KM_3D   = False     # 3D Keller-Miksis
+SHOW_RPE_3D  = False     # 3D Rayleigh-Plesset
+SHOW_CHEN_2D = True      # 2D Chen cylindrical (matches the 2D Cartesian sim geometry)
 SHOW_SIM     = True      # flames2 simulation R(t)
 
 # ===== PHYSICAL PARAMETERS =====
@@ -140,9 +144,14 @@ LABEL_KM    = "Keller--Miksis (3D)"
 LABEL_RPE   = "Rayleigh--Plesset (3D)"
 LABEL_CHEN  = "Chen (2D cylindrical)"
 LABEL_SIM   = "flames2 (2D)"
-NONDIM_TIME   = True     # plot t / tau_c instead of t [s]
 NONDIM_RADIUS = True     # plot R / R0  instead of R [m]
 SAVE_NAME     = "Sch20_Oscillating"
+
+# Time-axis units.  Options:
+#   'ms'     -- milliseconds (recommended default; most readable for tau_c ~ 1-10 ms)
+#   'us'     -- microseconds (use for tau_c < 1 ms)
+#   'nondim' -- t / tau_c (Rayleigh non-dimensional, the v2 default)
+TIME_UNIT = 'ms'
 
 # ============================================================================
 # ==========================  END CONFIGURATION  =============================
@@ -289,7 +298,16 @@ def extract_radius_history_robust(amrex_output_dir, eta_threshold=0.5, axis="x")
 
 def main():
     tau_c = rayleigh_collapse_time(P)
-    t_scale = tau_c if (NONDIM_TIME and np.isfinite(tau_c) and tau_c > 0) else 1.0
+    # Time-axis: convert simulation time (seconds) -> plot units.
+    if TIME_UNIT == 'ms':
+        t_factor   = 1.0e3
+        t_label    = r"$t$ [ms]"
+    elif TIME_UNIT == 'us':
+        t_factor   = 1.0e6
+        t_label    = r"$t$ [$\mu$s]"
+    else:  # 'nondim'
+        t_factor   = 1.0 / tau_c if (np.isfinite(tau_c) and tau_c > 0) else 1.0
+        t_label    = XLABEL_STR  # r"$t / \tau_c$"
     r_scale = P.R0  if NONDIM_RADIUS else 1.0
 
     print("=" * 70)
@@ -419,19 +437,18 @@ def main():
 
     for c in curves:
         Tlbl = f", T={c['T']*1e3:.3f} ms" if np.isfinite(c['T']) else ""
-        ax.plot(c['t'] / t_scale, c['R'] / r_scale,
+        ax.plot(c['t'] * t_factor, c['R'] / r_scale,
                 c['ls'], color=c['color'], lw=c['lw'],
                 label=f"{c['label']}{Tlbl}")
 
     if sim_loaded:
-        ax.plot(t_sim / t_scale, R_sim / r_scale, 'o', color=COLOR_SIM,
+        ax.plot(t_sim * t_factor, R_sim / r_scale, 'o', color=COLOR_SIM,
                 ms=MARKER_SIZE_SIM, lw=LINE_WIDTH_SIM, alpha=0.7,
                 label=f"{LABEL_SIM} (n={len(t_sim)})")
 
-    ax.axhline(1.0 if NONDIM_RADIUS else P.R0, color='k', lw=0.5, ls=':',
-               alpha=0.4, label='equilibrium $R_0$')
-    ax.set_xlabel(XLABEL_STR if NONDIM_TIME else r"$t$ [s]",
-                  fontsize=FONT_SIZE_LABEL)
+    # (Equilibrium R0 reference line removed at user request -- will revisit
+    # once the IC / model trajectory is sorted out.)
+    ax.set_xlabel(t_label, fontsize=FONT_SIZE_LABEL)
     ax.set_ylabel(YLABEL_STR if NONDIM_RADIUS else r"$R$ [m]",
                   fontsize=FONT_SIZE_LABEL)
     ax.set_title(TITLE_STR, fontsize=FONT_SIZE_TITLE, fontweight='bold')
