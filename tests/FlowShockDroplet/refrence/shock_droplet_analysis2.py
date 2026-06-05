@@ -208,6 +208,52 @@ SAVE_FORMAT_VECTOR = 'eps'
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
 
+# ----------------------------------------------------------------------------
+# Write run-metadata: source plotfile dir, run date/time, git commit + branch.
+# Saved at output_folder/RUN_METADATA.txt before any plotting work so that
+# even a crashed run leaves a traceable record of what was analyzed.
+# ----------------------------------------------------------------------------
+def _write_run_metadata(script_name):
+    import datetime as _dt
+    import subprocess as _sp
+    import sys as _sys
+
+    def _git(args, cwd=None):
+        try:
+            return _sp.check_output(
+                ['git'] + args, cwd=cwd, stderr=_sp.DEVNULL
+            ).decode().strip()
+        except Exception:
+            return 'unavailable'
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    commit  = _git(['rev-parse', 'HEAD'],            cwd=script_dir)
+    commit_s = _git(['rev-parse', '--short', 'HEAD'], cwd=script_dir)
+    branch  = _git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd=script_dir)
+    dirty   = _git(['status', '--porcelain'],         cwd=script_dir)
+    dirty_flag = 'YES' if dirty and dirty != 'unavailable' else 'no'
+
+    meta_path = os.path.join(output_folder, 'RUN_METADATA.txt')
+    with open(meta_path, 'w') as f:
+        f.write("# Shock-droplet analysis run metadata\n")
+        f.write(f"script              : {script_name}\n")
+        f.write(f"run_started         : {_dt.datetime.now().isoformat(timespec='seconds')}\n")
+        f.write(f"amrex_output_dir    : {amrex_output_dir}\n")
+        f.write(f"output_folder       : {output_folder}\n")
+        f.write(f"git_commit          : {commit}\n")
+        f.write(f"git_commit_short    : {commit_s}\n")
+        f.write(f"git_branch          : {branch}\n")
+        f.write(f"git_uncommitted     : {dirty_flag}\n")
+        f.write(f"python_version      : {_sys.version.split()[0]}\n")
+        f.write(f"python_executable   : {_sys.executable}\n")
+        f.write(f"working_directory   : {os.getcwd()}\n")
+        # Selected analysis knobs (back-trace plot-config without diffing scripts).
+        f.write(f"TIME_STEP           : {TIME_STEP}\n")
+        f.write(f"USE_ALL_TIMESTEPS   : {USE_ALL_TIMESTEPS}\n")
+    print(f"  wrote {meta_path}")
+
+_write_run_metadata('shock_droplet_analysis2.py')
+
 subfolder_schlieren = os.path.join(output_folder, 'Schlieren-Pressure')
 subfolder_velocity = os.path.join(output_folder, 'Velocity-Streamline')
 subfolder_vorticity = os.path.join(output_folder, 'Vorticity')
