@@ -98,6 +98,7 @@ protected:
     void Mix(int lev);
     void TimeStepBegin(Set::Scalar a_time, int a_iter) override;
     void TimeStepComplete(Set::Scalar time, int lev) override;
+    void WriteIntegrals(Set::Scalar time);  // append volume-integrated conserved quantities to integrals.dat
     void Advance(int lev, Set::Scalar time, Set::Scalar dt) override;
     void TagCellsForRefinement(int lev, amrex::TagBoxArray& tags, amrex::Real /*time*/, int /*ngrow*/) override;
     void Regrid(int lev, Set::Scalar time) override;
@@ -426,6 +427,8 @@ protected:
     int kappa_method = 1;
     int smooth_kernel_size = 3;
     Set::Scalar kappa_grad_frac = 0.02;
+
+    int write_integrals = 1;  // 1: append volume-integrated conserved quantities to <plot_file>/integrals.dat each step
 
     // Exponent on the HLLC-ADC pressure-ratio shock locator. Reflected in the
     // omega_adc_mf diagnostic regardless of which Riemann solver is active.

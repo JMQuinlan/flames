@@ -42,6 +42,10 @@
 #include "Solver/EOS/Tammann.H"
 #include "Solver/EOS/CPG.H"
 
+#include <fstream>
+#include <iomanip>
+#include "AMReX_MultiFabUtil.H"   // makeFineMask (WriteIntegrals)
+
 
 #include <AMReX_Math.H>
 #include "AMReX_TimeIntegrator.H"
@@ -256,6 +260,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("kappa_method", value.kappa_method, 1); // 1: Smooth Normals (default)  2: legacy Hessian-based
         pp_query_default("smooth_kernel_size", value.smooth_kernel_size, 3); // Gaussian normal-smoothing kernel: 3 (3x3) or 5 (5x5)
         pp_query_default("kappa_grad_frac", value.kappa_grad_frac, 0.02); // |grad eta| floor for curvature, as a fraction of the equilibrium peak 1/(2 sqrt2 eps); below this kappa is forced to 0. Lower keeps stretched/thinned interface (necks); ~0.28 was the old 0.1/dx_eff default.
+
+        pp_query_default("write_integrals", value.write_integrals, 1); // 1: write volume-integrated conserved quantities to <plot_file>/integrals.dat each step
 
         // ===========================================================
         // 7-EQUATION (Baer-Nunziato) SCAFFOLDING SWITCHES
@@ -961,6 +967,111 @@ void Hydro2::TimeStepComplete(Set::Scalar time, int lev)
     if (dynamictimestep.on)
     {
         Integrator::DynamicTimestep_Update();
+    }
+
+    if (write_integrals) WriteIntegrals(time);
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////// WriteIntegrals ///////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+// Volume-integrated conserved quantities, appended to <plot_file>/integrals.dat once per coarse
+// timestep (called from TimeStepComplete). This is a 5-equation model: the conserved state is two
+// partial densities (rho_eta0 = phase 0 / gas, rho_eta1 = phase 1 / liquid; total rho = rho_eta0 +
+// rho_eta1) plus a single mixture momentum and a single mixture total energy. Momentum and energy are
+// therefore reported as totals only -- they are not separately conserved per phase here -- while mass
+// is split into both phases (mass transfer mdot_0 + mdot_1 = 0 should keep M_total flat as the phase
+// masses trade off). Adapted from the two-full-states branch, which split every quantity per phase.
+void Hydro2::WriteIntegrals(Set::Scalar time)
+{
+    BL_PROFILE("Hydro2::WriteIntegrals");
+
+    Set::Scalar M_total = 0.0, M_phase0 = 0.0, M_phase1 = 0.0;
+    Set::Scalar Px_total = 0.0, Py_total = 0.0;
+    Set::Scalar E_total = 0.0, KE_total = 0.0;
+
+    for (int lev = 0; lev <= finest_level; ++lev)
+    {
+        const amrex::Geometry& geom = this->geom[lev];
+        const amrex::Real* DX = geom.CellSize();
+        const amrex::Real  dV = DX[0] * DX[1];
+
+        // Mask out cells covered by a finer level so they are not double-counted.
+        amrex::iMultiFab fine_mask;
+        if (lev < finest_level)
+        {
+            fine_mask = amrex::makeFineMask(
+                eta_mf[lev]->boxArray(),
+                eta_mf[lev]->DistributionMap(),
+                eta_mf[lev + 1]->boxArray(),
+                ref_ratio[lev],
+                1, 0);   // 1 = uncovered (count), 0 = covered (skip)
+        }
+
+        for (amrex::MFIter mfi(*eta_mf[lev], amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box& bx = mfi.validbox();
+
+            auto re0_arr = rho_eta0_mf[lev]->const_array(mfi);
+            auto re1_arr = rho_eta1_mf[lev]->const_array(mfi);
+            auto M_arr   = momentum_mf[lev]->const_array(mfi);
+            auto E_arr   = energy_per_vol_mf[lev]->const_array(mfi);
+
+            const auto mask_arr = (lev < finest_level)
+                ? fine_mask.const_array(mfi) : amrex::Array4<const int>{};
+
+            amrex::LoopOnCpu(bx, [&](int i, int j, int k)
+            {
+                if (lev < finest_level && mask_arr(i, j, k) == 0) return;
+
+                Set::Scalar re0 = re0_arr(i, j, k);
+                Set::Scalar re1 = re1_arr(i, j, k);
+                Set::Scalar rho = re0 + re1;
+
+                Set::Scalar Mx = M_arr(i, j, k, 0);
+                Set::Scalar My = M_arr(i, j, k, 1);
+
+                Set::Scalar KE = (rho > Set::Scalar(0.0))
+                    ? Set::Scalar(0.5) * (Mx*Mx + My*My) / rho : Set::Scalar(0.0);
+
+                M_total  += rho * dV;
+                M_phase0 += re0 * dV;
+                M_phase1 += re1 * dV;
+                Px_total += Mx  * dV;
+                Py_total += My  * dV;
+                E_total  += E_arr(i, j, k) * dV;
+                KE_total += KE  * dV;
+            });
+        }
+    }
+
+    amrex::ParallelDescriptor::ReduceRealSum(M_total);
+    amrex::ParallelDescriptor::ReduceRealSum(M_phase0);
+    amrex::ParallelDescriptor::ReduceRealSum(M_phase1);
+    amrex::ParallelDescriptor::ReduceRealSum(Px_total);
+    amrex::ParallelDescriptor::ReduceRealSum(Py_total);
+    amrex::ParallelDescriptor::ReduceRealSum(E_total);
+    amrex::ParallelDescriptor::ReduceRealSum(KE_total);
+
+    if (amrex::ParallelDescriptor::IOProcessor())
+    {
+        std::string fname = plot_file + "/integrals.dat";
+        std::ifstream test(fname);
+        bool write_header = (test.peek() == std::ifstream::traits_type::eof() || !test.good());
+        test.close();
+
+        std::ofstream outfile(fname, std::ios_base::app);
+        if (write_header)
+            outfile << "# 1:Time 2:M_total 3:M_phase0_gas 4:M_phase1_liq"
+                    << " 5:Px_total 6:Py_total 7:E_total 8:KE_total\n";
+
+        outfile << std::setprecision(12) << time;
+        outfile << std::setprecision(8)
+                << "\t" << M_total  << "\t" << M_phase0 << "\t" << M_phase1
+                << "\t" << Px_total << "\t" << Py_total
+                << "\t" << E_total  << "\t" << KE_total
+                << "\n";
+        outfile.close();
     }
 }
 
