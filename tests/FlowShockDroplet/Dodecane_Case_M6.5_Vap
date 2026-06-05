@@ -7,7 +7,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = /mmfs1/home/spatel6/flames/bin/tests/output/Dodecane_Case_M6.5_Vap
-plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_cavitation
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_tension_fine
 
 ### MESHING ###
 amr.plot_dt = 0.25e-6
@@ -17,8 +17,9 @@ amr.blocking_factor = 16
 amr.regrid_int = 1
 amr.grid_eff = 0.8
 amr.n_error_buf = 4
-amr.max_level = 4
-amr.n_cell = 1024 256
+amr.max_level = 3
+# amr.n_cell = 1024 256
+amr.n_cell = 2048 512
 
 ### TIME STEPPING ###
 ## Static:
@@ -29,7 +30,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1.0e-7
 dynamictimestep.min = 1.0e-15
-cfl = 0.1
+cfl = 0.2
 
 ### DIMENSIONS ###
 #geometry.prob_lo = 0.000 0.000 0.0
@@ -183,7 +184,9 @@ eps_rho = 1e-10
 
 # Liquid cavitation/tensile floor: hold the liquid (eta->0) at p >= -p_cav
 # while gas (eta->1) stays p >= eps_p. 0 = vacuum floor (no tension).
-p_cav = 1.0e5
+# p_cav = 1.0e5 # Still some flooring inside the bubble due to reflected shock and focusing
+p_cav = 1.0e6 # Almost unchanged in the back
+# p_cav = 1.0e7 # Didn't really help either
 
 ### SOURCE TERMS ###
 m0.ic.constant.value = 0.0
@@ -196,7 +199,7 @@ apply_weight = 0
 apply_vaporization = 1
 
 # HRM bulk cavitation: liquid -> vapor at finite rate when p < p_sat(T).
-apply_cavitation = 1
+apply_cavitation = 0
 tau_cav   = 1.0e-4
 antoine_A = 4.10549
 antoine_B = 1625.928
@@ -237,7 +240,8 @@ adc_grow = 4
 
 # Surface tension nhat calc adjustments
 kappa_method = 1
-smooth_kernel_size = 3
+smooth_kernel_size = 5  # Gaussian normal smoothing kernel: 3 (3x3, default) or 5 (5x5)
+nghost = 4             # Ghost cell depth (= N_int for HF band). Requires amr.blocking_factor >= nghost.
 
 ## Interface Sharpening ##
 apply_sharpening = 0
@@ -252,4 +256,5 @@ omega_relax = 0.5
 # Mob = 4.1e4
 # Mob = 50.0 # too low: interface collapses at separation point
 # Mob = 1000. # too high: interface gumbled
-Mob = 200
+# Mob = 200 # Good for the course base mesh (1024 256), but too high for (2048 512)
+Mob = 130

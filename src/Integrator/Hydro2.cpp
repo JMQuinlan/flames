@@ -289,6 +289,20 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // Boundry Conditions
         pp_query_default("nghost", value.nghost, 2); // Number of Ghost Cells
 
+        // The curvature pipeline fills the derived fields (eta_x, smoothed
+        // normals) into the ghost layer so kappa is coarse-fine/physical-
+        // boundary correct. That needs nghost >= krad+2 (3 for a 3x3 smoothing
+        // kernel, 4 for 5x5). Below that, patch-edge curvature ghosts fall back
+        // to same-level FillBoundary (today's behavior) and can be stale.
+        {
+            const int krad_req = (value.smooth_kernel_size >= 5) ? 2 : 1;
+            if (value.nghost < krad_req + 2)
+                Util::Message(INFO, "WARNING: nghost=", value.nghost,
+                              " < krad+2=", krad_req + 2,
+                              " for smooth_kernel_size=", value.smooth_kernel_size,
+                              "; curvature at coarse-fine/physical boundaries falls back to FillBoundary (same-level only).");
+        }
+
         bool uses_nscbc = false;
         std::vector<std::string> bc_faces = { "xlo", "xhi", "ylo", "yhi" };
 #if AMREX_SPACEDIM == 3
@@ -4730,9 +4744,19 @@ void Hydro2::ComputeGradEta(int lev)
     const amrex::Real* dx = geom.CellSize();
     const amrex::Box& domain = geom.Domain();
 
-    for (amrex::MFIter mfi(*eta_mf[lev], amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    // Compute eta gradients into the ghost layer (not just valid cells) so the
+    // smoothing/curvature stages downstream are coarse-fine- and physical-
+    // boundary-correct: eta is FillPatch'd to nghost in FillGhost4BC, but the
+    // derived fields only get same-level FillBoundary, which leaves patch-edge
+    // ghosts stale. gE is the ghost depth we fill; reading eta at +/-1 needs eta
+    // valid to gE+1 (<= nghost). Targets normals 1-deep -> eta_x krad+1 deep.
+    // Non-tiled MFIter avoids the grown-tile write race.
+    const int krad = (smooth_kernel_size >= 5) ? 2 : 1;
+    const int gE = std::max(0, std::min(krad + 1, nghost - 1));
+
+    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
-        const amrex::Box& tb = mfi.tilebox();
+        const amrex::Box& tb = mfi.growntilebox(gE);
 
         auto eta_arr  = eta_mf[lev]->const_array(mfi);
         auto etax_arr = eta_x_mf[lev]->array(mfi);
@@ -4770,14 +4794,20 @@ void Hydro2::ComputeSmoothNormals(int lev)
 
     const int krad = (smooth_kernel_size >= 5) ? 2 : 1;
 
+    // Smooth normals one ghost cell deep so ComputeKappas' divergence (reads n
+    // at +/-1) is coarse-fine/physical-boundary correct. Needs eta_x valid to
+    // gN+krad, which ComputeGradEta fills (gE = krad+1 when nghost >= krad+2).
+    // Falls back to 0 (valid-only, same as before) when the halo is too small.
+    const int gN = std::max(0, std::min(1, (nghost - 1) - krad));
+
     amrex::GpuArray<amrex::Real, 3> gw;
     gw[0] = 1.0;
     gw[1] = std::exp(-0.5);
     gw[2] = std::exp(-2.0);
 
-    for (amrex::MFIter mfi(*nx_smoothed_mf[lev], amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    for (amrex::MFIter mfi(*nx_smoothed_mf[lev], false); mfi.isValid(); ++mfi)
     {
-        const amrex::Box& tb = mfi.tilebox();
+        const amrex::Box& tb = mfi.growntilebox(gN);
 
         auto eta_x   = eta_x_mf[lev]->const_array(mfi);
         auto eta_y   = eta_y_mf[lev]->const_array(mfi);
