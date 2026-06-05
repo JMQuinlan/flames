@@ -85,17 +85,33 @@ static Set::Scalar SpaldingBM(Set::Scalar Y_local, Set::Scalar Y_inf, Set::Scala
 // p >= eps_p is equivalent to UE >= ue_floor =
 // (eps_p + gamma_eff*p0_eff - pref)/(gamma_eff - 1) for frozen mixture
 // gamma_eff, p0_eff.  (Perthame-Shu 1996; Zhang-Shu 2010; Hu-Adams-Shu 2013.)
+//
+// Optional per-phase guard (guard_phase): the mixture mass change s*dF[0] splits
+// across phases by the upwind face fraction ef, so the partial densities change
+// by s*ef*dF[0] and s*(1-ef)*dF[0] per unit theta. Both are linear, so we just
+// add two more upper-bound clamps on t to keep rho*eta0, rho*eta1 >= phase_floor
+// (= the same `small` the post-update partial-density floor would otherwise
+// inject mass to enforce). re0_base/re1_base are the partial baselines (Bbase
+// comps 4,5). The pressure (UE) constraint depends only on the mixture, so the
+// bisection below is unchanged -- it just runs on the tightened [0,t_rho].
 // ----------------------------------------------------------------------------
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 static Set::Scalar PPThetaCell(const Set::Scalar B[4], Set::Scalar s, const Set::Scalar dF[4],
                                Set::Scalar gamma_eff, Set::Scalar p0_eff,
-                               Set::Scalar eps_rho, Set::Scalar eps_p, Set::Scalar pref)
+                               Set::Scalar eps_rho, Set::Scalar eps_p, Set::Scalar pref,
+                               bool guard_phase = false,
+                               Set::Scalar re0_base = 0.0, Set::Scalar re1_base = 0.0,
+                               Set::Scalar ef = 0.0, Set::Scalar phase_floor = 0.0)
 {
     // Per-unit-theta change vector.
     const Set::Scalar V0 = s * dF[0]; // rho
     const Set::Scalar V1 = s * dF[1]; // Mx
     const Set::Scalar V2 = s * dF[2]; // My
     const Set::Scalar V3 = s * dF[3]; // E
+
+    // Per-phase per-unit-theta change (partial mass = upwind ef * mixture mass).
+    const Set::Scalar V_re0 = s * ef * dF[0];
+    const Set::Scalar V_re1 = s * (1.0 - ef) * dF[0];
 
     const Set::Scalar r0 = B[0];
     const Set::Scalar ue_floor = (eps_p + gamma_eff * p0_eff - pref) / (gamma_eff - 1.0);
@@ -112,12 +128,21 @@ static Set::Scalar PPThetaCell(const Set::Scalar B[4], Set::Scalar s, const Set:
     // Baseline must already be admissible; otherwise the limiter cannot help
     // (flux blending only adds the correction) and we fall back to pure HLL.
     if (r0 <= eps_rho || UE(0.0) < ue_floor) return 0.0;
+    if (guard_phase && (re0_base < phase_floor || re1_base < phase_floor)) return 0.0;
 
     // Density: largest t keeping rho >= eps_rho.
     Set::Scalar t_rho = 1.0;
     if (V0 < 0.0) t_rho = (r0 - eps_rho) / (-V0);
     if (t_rho > 1.0) t_rho = 1.0;
     if (t_rho < 0.0) t_rho = 0.0;
+
+    // Per-phase densities: tighten t so each partial stays >= phase_floor.
+    if (guard_phase)
+    {
+        if (V_re0 < 0.0) { Set::Scalar t0 = (re0_base - phase_floor) / (-V_re0); if (t0 < t_rho) t_rho = t0; }
+        if (V_re1 < 0.0) { Set::Scalar t1 = (re1_base - phase_floor) / (-V_re1); if (t1 < t_rho) t_rho = t1; }
+        if (t_rho < 0.0) t_rho = 0.0;
+    }
 
     // Internal energy: concave in t, h(0) >= 0. If the whole [0,t_rho] is safe
     // take t_rho, else bisect for the crossing.
@@ -162,6 +187,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // Positivity-preserving flux limiter (Hu-Adams-Shu)
         pp_query_default("pp_flux_limiter", value.pp_flux_limiter, 1); // 1: on, 0: off
         pp_query_default("pp_source_limit", value.pp_source_limit, 1); // 1: fold source into PP baseline, 0: limit flux only
+        pp_query_default("pp_source_limiter", value.pp_source_limiter, 0); // 1: scale source for positivity + per-phase flux guard (needs pp_flux_limiter); 0: off
+        if (value.pp_source_limiter != 0 && value.pp_flux_limiter == 0)
+            Util::Abort(INFO, "pp_source_limiter requires pp_flux_limiter=1 (it lives in the PP-limiter Pass B/C/D); got pp_flux_limiter=0");
         pp_query_default("eps_p", value.eps_p, 1.0);          // floor on absolute pressure p
         pp_query_default("eps_rho", value.eps_rho, 1.0E-10);  // density floor
 
@@ -680,7 +708,7 @@ void Hydro2::Initialize(int lev)
         pp_scratch[lev].Fhi[d]->setVal(0.0);
         pp_scratch[lev].Flo[d]->setVal(0.0);
     }
-    pp_scratch[lev].Bbase = std::make_unique<amrex::MultiFab>(ba_init, dm_init, 4, 1);
+    pp_scratch[lev].Bbase = std::make_unique<amrex::MultiFab>(ba_init, dm_init, 6, 1);
     pp_scratch[lev].theta = std::make_unique<amrex::MultiFab>(ba_init, dm_init, AMREX_SPACEDIM, 1);
     pp_scratch[lev].Bbase->setVal(0.0);
     pp_scratch[lev].theta->setVal(0.0);
@@ -2068,7 +2096,13 @@ Hydro2::RHS(int lev,
         const Set::Scalar eps_rho_l = eps_rho;
         const Set::Scalar eps_p_l   = eps_p;
         const Set::Scalar pref_l    = pref;
+        const Set::Scalar small_l   = small;
         const Set::Scalar pp_factor = 2.0 * AMREX_SPACEDIM;
+        // Source limiter on -> guard the per-phase partial densities in theta and
+        // scale the source for positivity in Pass D. Its positivity baseline must
+        // be source-free (the source is governed by s, not by theta), so override
+        // the legacy source-into-baseline folding.
+        const bool src_limit_on = (pp_source_limiter != 0);
 
         // Make each cell's lo-face flux available from its neighbor's hi-face.
         for (int d = 0; d < AMREX_SPACEDIM; d++)
@@ -2081,7 +2115,7 @@ Hydro2::RHS(int lev,
         // With pp_source_limit set, the source is folded into the positivity
         // baseline so theta also guards against the source; cleared, theta
         // limits the flux only and the source is added unlimited in Pass D.
-        const Set::Scalar src_fac = (pp_source_limit != 0) ? 1.0 : 0.0;
+        const Set::Scalar src_fac = src_limit_on ? 0.0 : ((pp_source_limit != 0) ? 1.0 : 0.0);
         // Seed the baseline over valid cells AND one ghost layer from the
         // already ghost-filled conserved state. FillGhost4BC (run at the top of
         // RHS) FillPatches rho_eta0/rho_eta1/M/E across coarse-fine boundaries
@@ -2101,12 +2135,16 @@ Hydro2::RHS(int lev,
             auto rho = density_mf[lev]->array(mfi);
             auto Mom = momentum_mf[lev]->array(mfi);
             auto Ene = energy_per_vol_mf[lev]->array(mfi);
+            auto re0 = rho_eta0_mf[lev]->array(mfi);
+            auto re1 = rho_eta1_mf[lev]->array(mfi);
             auto Bb  = pp_scratch[lev].Bbase->array(mfi);
             amrex::ParallelFor(gbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 Bb(i, j, k, 0) = rho(i, j, k);
                 Bb(i, j, k, 1) = Mom(i, j, k, 0);
                 Bb(i, j, k, 2) = Mom(i, j, k, 1);
                 Bb(i, j, k, 3) = Ene(i, j, k);
+                Bb(i, j, k, 4) = re0(i, j, k);
+                Bb(i, j, k, 5) = re1(i, j, k);
             });
         }
         for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
@@ -2115,9 +2153,15 @@ Hydro2::RHS(int lev,
             auto rho = density_mf[lev]->array(mfi);
             auto Mom = momentum_mf[lev]->array(mfi);
             auto Ene = energy_per_vol_mf[lev]->array(mfi);
+            auto re0 = rho_eta0_mf[lev]->array(mfi);
+            auto re1 = rho_eta1_mf[lev]->array(mfi);
+            auto eta = eta_mf[lev]->array(mfi);
             auto Src = Source_mf[lev]->array(mfi);
+            auto Vap = Vap_dot_mf[lev]->array(mfi);
             auto Flx = pp_scratch[lev].Flo[0]->array(mfi);
             auto Fly = pp_scratch[lev].Flo[1]->array(mfi);
+            auto Fhx = pp_scratch[lev].Fhi[0]->array(mfi);
+            auto Fhy = pp_scratch[lev].Fhi[1]->array(mfi);
             auto Bb  = pp_scratch[lev].Bbase->array(mfi);
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 Set::Scalar fdiv_rho = (Flx(i - 1, j, k, 0) - Flx(i, j, k, 0)) / DX[0] + (Fly(i, j - 1, k, 0) - Fly(i, j, k, 0)) / DX[1];
@@ -2128,6 +2172,23 @@ Hydro2::RHS(int lev,
                 Bb(i, j, k, 1) = Mom(i, j, k, 0) + dt * fdiv_mx + src_fac * dt * Src(i, j, k, 1);
                 Bb(i, j, k, 2) = Mom(i, j, k, 1) + dt * fdiv_my + src_fac * dt * Src(i, j, k, 2);
                 Bb(i, j, k, 3) = Ene(i, j, k) + dt * fdiv_E + src_fac * dt * Src(i, j, k, 3);
+
+                // Per-phase low-order baselines. The partial mass flux is the
+                // upwind face fraction (by the high-order u_interface, matching
+                // Pass D's re*_div split) times the low-order mixture mass flux,
+                // so Bb[4]+Bb[5] == Bb[0] at theta=0. The source is folded in only
+                // when the source limiter is off (src_fac); otherwise s guards it.
+                Set::Scalar ef_xlo = (Fhx(i - 1, j, k, 4) > 0.0) ? eta(i - 1, j, k) : eta(i, j, k);
+                Set::Scalar ef_xhi = (Fhx(i, j, k, 4)     > 0.0) ? eta(i, j, k)     : eta(i + 1, j, k);
+                Set::Scalar ef_ylo = (Fhy(i, j - 1, k, 4) > 0.0) ? eta(i, j - 1, k) : eta(i, j, k);
+                Set::Scalar ef_yhi = (Fhy(i, j, k, 4)     > 0.0) ? eta(i, j, k)     : eta(i, j + 1, k);
+                Set::Scalar fdiv_re0 = (ef_xlo * Flx(i - 1, j, k, 0) - ef_xhi * Flx(i, j, k, 0)) / DX[0]
+                                     + (ef_ylo * Fly(i, j - 1, k, 0) - ef_yhi * Fly(i, j, k, 0)) / DX[1];
+                Set::Scalar fdiv_re1 = ((1.0 - ef_xlo) * Flx(i - 1, j, k, 0) - (1.0 - ef_xhi) * Flx(i, j, k, 0)) / DX[0]
+                                     + ((1.0 - ef_ylo) * Fly(i, j - 1, k, 0) - (1.0 - ef_yhi) * Fly(i, j, k, 0)) / DX[1];
+                Set::Scalar mdv = Vap(i, j, k, 1);
+                Bb(i, j, k, 4) = re0(i, j, k) + dt * fdiv_re0 + src_fac * dt * (Src(i, j, k, 0) * eta(i, j, k)         + mdv);
+                Bb(i, j, k, 5) = re1(i, j, k) + dt * fdiv_re1 + src_fac * dt * (Src(i, j, k, 0) * (1.0 - eta(i, j, k)) - mdv);
             });
         }
         pp_scratch[lev].Bbase->FillBoundary(geom[lev].periodicity());
@@ -2155,17 +2216,22 @@ Hydro2::RHS(int lev,
             auto Bb  = pp_scratch[lev].Bbase->array(mfi);
             auto gam = gamma_mf[lev]->array(mfi);
             auto p0  = p0_mf[lev]->array(mfi);
+            auto eta = eta_mf[lev]->array(mfi);
             auto Th  = pp_scratch[lev].theta->array(mfi);
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                // x hi-face: L = (i,j), R = (i+1,j), lambda = dt/dx
+                // x hi-face: L = (i,j), R = (i+1,j), lambda = dt/dx. ef = upwind
+                // face fraction (by high-order u_interface) shared by both cells.
                 {
                     Set::Scalar dF[4] = { Fhx(i, j, k, 0) - Flx(i, j, k, 0), Fhx(i, j, k, 1) - Flx(i, j, k, 1),
                                           Fhx(i, j, k, 2) - Flx(i, j, k, 2), Fhx(i, j, k, 3) - Flx(i, j, k, 3) };
                     Set::Scalar BL[4] = { Bb(i, j, k, 0), Bb(i, j, k, 1), Bb(i, j, k, 2), Bb(i, j, k, 3) };
                     Set::Scalar BR[4] = { Bb(i + 1, j, k, 0), Bb(i + 1, j, k, 1), Bb(i + 1, j, k, 2), Bb(i + 1, j, k, 3) };
                     Set::Scalar lam = dt / DX[0];
-                    Set::Scalar tL = PPThetaCell(BL, -pp_factor * lam, dF, gam(i, j, k),     p0(i, j, k),     eps_rho_l, eps_p_l, pref_l);
-                    Set::Scalar tR = PPThetaCell(BR, +pp_factor * lam, dF, gam(i + 1, j, k), p0(i + 1, j, k), eps_rho_l, eps_p_l, pref_l);
+                    Set::Scalar ef  = (Fhx(i, j, k, 4) > 0.0) ? eta(i, j, k) : eta(i + 1, j, k);
+                    Set::Scalar tL = PPThetaCell(BL, -pp_factor * lam, dF, gam(i, j, k),     p0(i, j, k),     eps_rho_l, eps_p_l, pref_l,
+                                                 src_limit_on, Bb(i, j, k, 4),     Bb(i, j, k, 5),     ef, small_l);
+                    Set::Scalar tR = PPThetaCell(BR, +pp_factor * lam, dF, gam(i + 1, j, k), p0(i + 1, j, k), eps_rho_l, eps_p_l, pref_l,
+                                                 src_limit_on, Bb(i + 1, j, k, 4), Bb(i + 1, j, k, 5), ef, small_l);
                     Set::Scalar th = std::min(tL, tR);
                     Th(i, j, k, 0) = (th < 0.0) ? 0.0 : ((th > 1.0) ? 1.0 : th);
                 }
@@ -2176,8 +2242,11 @@ Hydro2::RHS(int lev,
                     Set::Scalar BL[4] = { Bb(i, j, k, 0), Bb(i, j, k, 1), Bb(i, j, k, 2), Bb(i, j, k, 3) };
                     Set::Scalar BR[4] = { Bb(i, j + 1, k, 0), Bb(i, j + 1, k, 1), Bb(i, j + 1, k, 2), Bb(i, j + 1, k, 3) };
                     Set::Scalar lam = dt / DX[1];
-                    Set::Scalar tL = PPThetaCell(BL, -pp_factor * lam, dF, gam(i, j, k),     p0(i, j, k),     eps_rho_l, eps_p_l, pref_l);
-                    Set::Scalar tR = PPThetaCell(BR, +pp_factor * lam, dF, gam(i, j + 1, k), p0(i, j + 1, k), eps_rho_l, eps_p_l, pref_l);
+                    Set::Scalar ef  = (Fhy(i, j, k, 4) > 0.0) ? eta(i, j, k) : eta(i, j + 1, k);
+                    Set::Scalar tL = PPThetaCell(BL, -pp_factor * lam, dF, gam(i, j, k),     p0(i, j, k),     eps_rho_l, eps_p_l, pref_l,
+                                                 src_limit_on, Bb(i, j, k, 4),     Bb(i, j, k, 5),     ef, small_l);
+                    Set::Scalar tR = PPThetaCell(BR, +pp_factor * lam, dF, gam(i, j + 1, k), p0(i, j + 1, k), eps_rho_l, eps_p_l, pref_l,
+                                                 src_limit_on, Bb(i, j + 1, k, 4), Bb(i, j + 1, k, 5), ef, small_l);
                     Set::Scalar th = std::min(tL, tR);
                     Th(i, j, k, 1) = (th < 0.0) ? 0.0 : ((th > 1.0) ? 1.0 : th);
                 }
@@ -2194,6 +2263,13 @@ Hydro2::RHS(int lev,
             auto eta = eta_mf[lev]->array(mfi);
             auto Src = Source_mf[lev]->array(mfi);
             auto Vap = Vap_dot_mf[lev]->array(mfi);
+            auto rho = density_mf[lev]->array(mfi);
+            auto Mom = momentum_mf[lev]->array(mfi);
+            auto Ene = energy_per_vol_mf[lev]->array(mfi);
+            auto re0 = rho_eta0_mf[lev]->array(mfi);
+            auto re1 = rho_eta1_mf[lev]->array(mfi);
+            auto gam = gamma_mf[lev]->array(mfi);
+            auto p0  = p0_mf[lev]->array(mfi);
             auto Fhx = pp_scratch[lev].Fhi[0]->array(mfi);
             auto Fhy = pp_scratch[lev].Fhi[1]->array(mfi);
             auto Flx = pp_scratch[lev].Flo[0]->array(mfi);
@@ -2287,11 +2363,35 @@ Hydro2::RHS(int lev,
 
                 Set::Scalar mdv = Vap(i, j, k, 1); // m_dot_Vap stored in Pass A
 
-                re0rhs(i, j, k) = re0_div + Src(i, j, k, 0) * eta(i, j, k)         + mdv;
-                re1rhs(i, j, k) = re1_div + Src(i, j, k, 0) * (1.0 - eta(i, j, k)) - mdv;
-                Mrhs(i, j, k, 0) = mx_div + Src(i, j, k, 1);
-                Mrhs(i, j, k, 1) = my_div + Src(i, j, k, 2);
-                Erhs(i, j, k)    = E_div  + Src(i, j, k, 3);
+                // Positivity-preserving SOURCE limiter. The flux-blended update is
+                // already admissible (the per-phase theta guaranteed it); find the
+                // largest single scale s in [0,1] so that adding dt*s*Source keeps
+                // the cell admissible (mixture rho,p AND both partial densities).
+                // One scalar s for every component preserves the action-reaction
+                // split (mdv cancels in the mixture; total mass source = s*Src0).
+                Set::Scalar s_src = 1.0;
+                if (src_limit_on)
+                {
+                    Set::Scalar Bf[4] = { rho(i, j, k) + dt * rho_div, Mom(i, j, k, 0) + dt * mx_div,
+                                          Mom(i, j, k, 1) + dt * my_div, Ene(i, j, k) + dt * E_div };
+                    Set::Scalar Sv[4] = { Src(i, j, k, 0), Src(i, j, k, 1), Src(i, j, k, 2), Src(i, j, k, 3) };
+                    // Mixture (rho, p): reuse PPThetaCell with scale dt, source as dF.
+                    Set::Scalar s = PPThetaCell(Bf, dt, Sv, gam(i, j, k), p0(i, j, k), eps_rho_l, eps_p_l, pref_l);
+                    // Per-phase partial densities (linear in s).
+                    Set::Scalar re0f = re0(i, j, k) + dt * re0_div;
+                    Set::Scalar re1f = re1(i, j, k) + dt * re1_div;
+                    Set::Scalar src_re0 = Src(i, j, k, 0) * eta(i, j, k)         + mdv;
+                    Set::Scalar src_re1 = Src(i, j, k, 0) * (1.0 - eta(i, j, k)) - mdv;
+                    if (src_re0 < 0.0) { Set::Scalar s0 = (re0f - small_l) / (-dt * src_re0); if (s0 < s) s = s0; }
+                    if (src_re1 < 0.0) { Set::Scalar s1 = (re1f - small_l) / (-dt * src_re1); if (s1 < s) s = s1; }
+                    s_src = (s < 0.0) ? 0.0 : ((s > 1.0) ? 1.0 : s);
+                }
+
+                re0rhs(i, j, k) = re0_div + s_src * (Src(i, j, k, 0) * eta(i, j, k)         + mdv);
+                re1rhs(i, j, k) = re1_div + s_src * (Src(i, j, k, 0) * (1.0 - eta(i, j, k)) - mdv);
+                Mrhs(i, j, k, 0) = mx_div + s_src * Src(i, j, k, 1);
+                Mrhs(i, j, k, 1) = my_div + s_src * Src(i, j, k, 2);
+                Erhs(i, j, k)    = E_div  + s_src * Src(i, j, k, 3);
 
                 rho_flux(i, j, k) = rho_div;
                 M_flux(i, j, k, 0) = mx_div;
@@ -2510,7 +2610,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         }
     }
 
-    // ENFORCE POSITIVITY after time advance
+    // ENFORCE POSITIVITY after time advance. The deficit healed here is mass
+    // created from nothing (non-conservative) -- accumulate it as a diagnostic
+    // so the source/flux limiter's effect on conservation is measurable.
+    Set::Scalar floor_mass_local = 0.0;
     for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
@@ -2518,12 +2621,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         auto rho_eta1 = rho_eta1_mf[lev]->array(mfi);
         Set::Scalar small_local = small;
 
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+        amrex::ParallelFor(bx, [=, &floor_mass_local] AMREX_GPU_DEVICE(int i, int j, int k) {
+            floor_mass_local += std::max(small_local - rho_eta0(i, j, k), 0.0)
+                              + std::max(small_local - rho_eta1(i, j, k), 0.0);
             rho_eta0(i, j, k) = std::max(rho_eta0(i, j, k), small_local);
             rho_eta1(i, j, k) = std::max(rho_eta1(i, j, k), small_local);
         });
     }
-    
+
 
 
     // ------------------------------------------------------------
@@ -2569,6 +2674,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     Set::Scalar vy_max_local = 0.0;
     Set::Scalar F_max_local = 0.0;
     Set::Scalar rho_min_local = 1e10;
+    Set::Scalar floor_energy_local = 0.0; // internal energy injected by the eps_p backstop
 
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
@@ -2605,7 +2711,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         const Solver::EOS::Tammann eos0_local = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
     
-        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &F_max_local, &rho_min_local] AMREX_GPU_DEVICE(int i, int j, int k) 
+        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &F_max_local, &rho_min_local, &floor_energy_local] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
         
@@ -2643,6 +2749,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Set::Scalar ue_floor = (eps_p + gammaf(i, j, k) * p0_eff(i, j, k) - pref) / (gammaf(i, j, k) - 1.0);
                 // Diagnostic: energy injected by the floor (0 if not floored).
                 pp_efloor_(i, j, k) = std::max(ue_floor - UE_vol(i, j, k), 0.0);
+                floor_energy_local += pp_efloor_(i, j, k);
                 UE_vol(i, j, k) = std::max(UE_vol(i, j, k), ue_floor);
                 // Heal the CONSERVED energy too, not just the derived UE/pressure.
                 // Without this E_vol keeps its sub-floor (negative-internal-energy)
@@ -2733,6 +2840,18 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     vy_max = vy_max_local;
     F_max = F_max_local;
     rho_min = rho_min_local;
+
+    // Conservation diagnostic: total mass and internal energy this level created
+    // out of nothing by the post-update positivity floors this step (cell-volume
+    // weighted). Both should trend to ~0 as the source/flux limiter does its job;
+    // a persistently large mass figure is the droplet-mass leak.
+    amrex::ParallelDescriptor::ReduceRealSum(floor_mass_local);
+    amrex::ParallelDescriptor::ReduceRealSum(floor_energy_local);
+    const Set::Scalar cell_vol = DX[0] * DX[1];
+    if ((floor_mass_local > 0.0 || floor_energy_local > 0.0) && amrex::ParallelDescriptor::IOProcessor())
+        Util::ParallelMessage(INFO, "[pp-floor] lev=", lev,
+                              " mass_injected=", floor_mass_local * cell_vol,
+                              " energy_injected=", floor_energy_local * cell_vol);
 
     // Computing dt for next time step on all levels
     Set::Scalar dx_min = std::min(DX[0], DX[1]);

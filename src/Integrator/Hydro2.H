@@ -435,6 +435,16 @@ protected:
     // Clear (pp_source_limit = 0) to limit the flux only and add the source
     // unlimited, recovering the pure Hu-Adams-Shu flux limiter.
     int pp_source_limit = 1;
+    // Optional positivity-preserving SOURCE limiter (requires pp_flux_limiter).
+    // When set: (1) the flux baseline is taken source-free so theta limits the
+    // flux only, (2) the per-face theta additionally keeps the per-phase partial
+    // densities rho*eta0, rho*eta1 >= small (not just the mixture rho), and
+    // (3) the cell source is scaled by the largest s in [0,1] that keeps the
+    // flux-updated state admissible (mixture rho,p AND both partial densities).
+    // This replaces hard pressure/partial-density flooring (which injects mass
+    // and energy non-conservatively) with the minimal source throttle needed to
+    // stay positive. Default 0 (off) -> legacy pp_source_limit behavior.
+    int pp_source_limiter = 0;
     Set::Scalar eps_p = NAN;    // pressure floor (on p + p0_eff)
     Set::Scalar eps_rho = NAN;  // density floor
 
@@ -518,7 +528,9 @@ protected:
     //           y-mom (fixed frame), energy, u_interface.
     //   Flo[d]: low-order HLL flux, 5 comp = mass, x-mom, y-mom, energy,
     //           u_interface (HLL contact speed, for blended eta advection).
-    //   Bbase : source-inclusive low-order baseline, 4 comp = rho, Mx, My, E.
+    //   Bbase : low-order positivity baseline, 6 comp = rho, Mx, My, E,
+    //           rho*eta0, rho*eta1 (last two only used by the source limiter's
+    //           per-phase guard; source folded in unless pp_source_limiter).
     //   theta : per-face blend factor, AMREX_SPACEDIM comp (theta at i+1/2, j+1/2).
     // ------------------------------------------------------------------
     struct LimiterScratch {

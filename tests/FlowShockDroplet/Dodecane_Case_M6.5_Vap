@@ -11,7 +11,7 @@ plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_limiter
 
 ### MESHING ###
 amr.plot_dt = 0.25e-6
-amr.plot_int = 1
+# amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 16
 amr.regrid_int = 1
@@ -29,7 +29,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1.0e-7
 dynamictimestep.min = 1.0e-15
-cfl = 0.3
+cfl = 0.2
 
 ### DIMENSIONS ###
 #geometry.prob_lo = 0.000 0.000 0.0
@@ -39,9 +39,9 @@ geometry.prob_hi =  0.120  0.0175 0.0
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
-# stop_time = 2.0e-4
+stop_time = 2.0e-4
 # stop_time = 1.0e-5
-stop_time = 5.0e-7
+# stop_time = 5.0e-7
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
@@ -171,12 +171,13 @@ small = 1e-6
 # physical pressure (not p + p0_eff), so the stiffened liquid is held at p >= eps_p
 # rather than eps_p - p0_eff (~ -400 MPa). Set pp_flux_limiter = 0 to
 # disable and recover the unlimited high-order flux.
-pp_flux_limiter = 0
+pp_flux_limiter = 1
 # pp_source_limit folds dt*Source into the positivity baseline so the blend
 # factor also guards against the source pushing a cell out of bounds. Set to 0
 # to limit the flux only and add the source unlimited (pure Hu-Adams-Shu).
 # Only active when pp_flux_limiter != 0.
-pp_source_limit = 0
+pp_source_limit = 1
+# Small values
 eps_p = 1.0
 eps_rho = 1e-10
 
@@ -186,9 +187,9 @@ u0.ic.constant.value = 0.0 0.0
 q.ic.constant.value = 0.0 0.0
 
 ### ADDITIONAL SOURCES ###
-apply_surface_tension = 0
+apply_surface_tension = 1
 apply_weight = 0
-apply_vaporization = 0
+apply_vaporization = 1
 
 Spec_Vol = 1
 grav = 9.81
@@ -237,5 +238,5 @@ omega_relax = 0.5
 # Pe_CH = U*epsilon^2/(M*sigma), M = M0*epsilon^2, M0 ~ U/sigma.
 # With sigma = 0.025 N/m, M0 = 1025.239/0.025 = 4.10095716768e4
 # Mob = 4.1e4
-# Mob = 50.0
-Mob = 1e-20
+Mob = 50.0
+# Mob = 1e-20
