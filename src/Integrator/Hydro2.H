@@ -425,6 +425,7 @@ protected:
 
     int kappa_method = 1;
     int smooth_kernel_size = 3;
+    Set::Scalar kappa_grad_frac = 0.02;
 
     // Exponent on the HLLC-ADC pressure-ratio shock locator. Reflected in the
     // omega_adc_mf diagnostic regardless of which Riemann solver is active.

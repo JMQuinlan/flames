@@ -255,6 +255,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // CURVATURE
         pp_query_default("kappa_method", value.kappa_method, 1); // 1: Smooth Normals (default)  2: legacy Hessian-based
         pp_query_default("smooth_kernel_size", value.smooth_kernel_size, 3); // Gaussian normal-smoothing kernel: 3 (3x3) or 5 (5x5)
+        pp_query_default("kappa_grad_frac", value.kappa_grad_frac, 0.02); // |grad eta| floor for curvature, as a fraction of the equilibrium peak 1/(2 sqrt2 eps); below this kappa is forced to 0. Lower keeps stretched/thinned interface (necks); ~0.28 was the old 0.1/dx_eff default.
 
         // ===========================================================
         // 7-EQUATION (Baer-Nunziato) SCAFFOLDING SWITCHES
@@ -4856,8 +4857,15 @@ void Hydro2::ComputeKappas(int lev)
     const amrex::Real* dx = geom.CellSize();
     const amrex::Box& domain = geom.Domain();
 
-    const amrex::Real dx_eff = std::max({dx[0], dx[1], epsilon});
-    const amrex::Real Cg = 0.1 / dx_eff;
+    // |grad eta| floor below which the normal is too weak to define a curvature.
+    // Expressed as a fraction (kappa_grad_frac) of the equilibrium peak gradient
+    // |grad eta|_eq = 1/(2 sqrt2 eps), so it tracks the interface width, not the
+    // mesh: low enough (~2-3%) to keep a stretched/thinned interface (e.g. a neck
+    // where |grad eta| has collapsed and the SQR sources should still act), high
+    // enough to reject the flat bulk. The max(.,1.0) is an absolute 0/0 guard so a
+    // genuinely gradient-free cell can never define a normal even if frac -> 0.
+    // (Old floor was 0.1/dx_eff ~ 0.28 * peak, which cut anything below ~28%.)
+    const amrex::Real Cg = std::max(kappa_grad_frac / (2.0 * std::sqrt(2.0) * epsilon), 1.0);
     const amrex::Real small = 1e-14;
 
     for (amrex::MFIter mfi(*kappas_mf[lev], amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)

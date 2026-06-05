@@ -242,6 +242,12 @@ adc_grow = 4
 kappa_method = 1
 smooth_kernel_size = 5  # Gaussian normal smoothing kernel: 3 (3x3, default) or 5 (5x5)
 nghost = 4             # Ghost cell depth (= N_int for HF band). Requires amr.blocking_factor >= nghost.
+# |grad eta| floor for curvature, as a fraction of the equilibrium peak
+# |grad eta| = 1/(2 sqrt2 eps). Below this kappa is forced to 0. The old hard-coded
+# floor (0.1/dx_eff) was ~0.28*peak, which zeroed curvature on stretched/thinned
+# interface (e.g. the windward neck where |grad eta| collapses to ~500). 0.02 keeps
+# it (0.02*peak ~ 175 1/m) while the flat bulk (|grad eta| ~ 0) is still rejected.
+kappa_grad_frac = 0.02
 
 ## Interface Sharpening ##
 apply_sharpening = 0
