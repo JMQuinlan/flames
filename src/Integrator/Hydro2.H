@@ -416,6 +416,8 @@ protected:
     int apply_weight = 0;
     int static_eta = 0;
     int apply_vaporization = 0;
+    int apply_vap_const = 0;           // Verification: prescribed constant-rate phase change (bypasses Spalding closure). 0 = off.
+    Set::Scalar vap_const_mdot = 0.0;  // imposed interfacial mass flux [kg/m^2/s]; m_dot_Vap = vap_const_mdot * |grad eta| (liquid->vapor if > 0)
     int apply_cavitation = 0;          // HRM bulk cavitation: liquid -> vapor at finite rate when p < p_sat(T). 0 = off.
     Set::Scalar tau_cav = 1.0e-4;      // cavitation relaxation time [s]
     Set::Scalar antoine_A = 4.10549;   // Antoine: log10(p_sat[bar]) = A - B/(T[K] + C)  (n-dodecane, 399-490 K)

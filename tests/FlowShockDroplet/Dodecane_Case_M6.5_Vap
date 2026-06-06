@@ -7,7 +7,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = /mmfs1/home/spatel6/flames/bin/tests/output/Dodecane_Case_M6.5_Vap
-plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_tension_fine
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_dodecane_no_vap
 
 ### MESHING ###
 amr.plot_dt = 0.25e-6
@@ -124,7 +124,7 @@ eos1.cp = "2546.64"
 # Surface tension from paper 
 sigma = 0.025
 
-Dv = "1.0e-5"
+Dv = "1.0e-5" # I think that this could be a factor of 10 higher, need to check
 Y_infinity = 0.0
 
 # Reference pressure
@@ -156,11 +156,11 @@ energy.bc.type.xhi = neumann
 momentum.bc.type.xhi = neumann neumann
 
 ### REFINEMENT CRITERIA ###
-eta_refinement_criterion = 1e-3
-omega_refinement_criterion = 1e+10
-divu_refinement_criterion = 0.05
-rho_refinement_criterion = 5e+1
-gradu_refinement_criterion = 5e+2
+eta_refinement_criterion = 2e-2 # Interface location
+omega_refinement_criterion = 1e+20
+divu_refinement_criterion = 100 # Shock location
+rho_refinement_criterion = 1e+2
+gradu_refinement_criterion = 5e+4
 
 
 cutoff = 1e-16
@@ -196,7 +196,7 @@ q.ic.constant.value = 0.0 0.0
 ### ADDITIONAL SOURCES ###
 apply_surface_tension = 1
 apply_weight = 0
-apply_vaporization = 1
+apply_vaporization = 0
 
 # HRM bulk cavitation: liquid -> vapor at finite rate when p < p_sat(T).
 apply_cavitation = 0

@@ -239,6 +239,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // INTERACTIONS
         pp_query_default("sigma", value.sigma, 0.0);    // Surface tension condition
         pp_query_default("Dv", value.Dv, 0.0);          // Vapor Diffusivity
+        // Verification: prescribed constant-rate phase change (bypasses Spalding). Off by default.
+        pp_query_default("apply_vap_const", value.apply_vap_const, 0);
+        pp_query_default("vap_const_mdot", value.vap_const_mdot, 0.0); // interfacial mass flux [kg/m^2/s]; m_dot = vap_const_mdot*|grad eta|
         // HRM bulk cavitation (liquid -> vapor when p < p_sat). Off by default.
         pp_query_default("apply_cavitation", value.apply_cavitation, 0);
         pp_query_default("tau_cav", value.tau_cav, 1.0e-4);            // cavitation relaxation time [s]
@@ -1704,18 +1707,17 @@ Hydro2::RHS(int lev,
                 // and omit the Sherwood/length-scale prefactor for now -- see F-3.)
                 m_dot_Vap = rho_g * Dv * (B_M / (1.0 + B_M + small)) * grad_eta_mag;
 
-                // Volume-fraction source from phase change (F-4 fix).
-                // Canonical 5-eq Allaire form (Saurel-Petitpas-Abgrall JFM 2008
-                // Eq. 44; Le Metayer-Massoni-Saurel IJMF 2013 Eq. 28; Schmidmayer
-                // JCP 2020 Eq. 8):
-                //     D(alpha_gas)/Dt |_phase = m_dot_vol * (1/rho_l - 1/rho_g)
-                // For evaporation (m_dot_Vap > 0) with rho_l > rho_g, this is
-                // positive, so the gas volume fraction grows. Phase 0 = gas
-                // (per the comment above); phase 1 = liquid in this code's
-                // convention.
-                Set::Scalar inv_rho_g = 1.0 / std::max(rho_eta0(i, j, k), small);
-                Set::Scalar inv_rho_l = 1.0 / std::max(rho_eta1(i, j, k), small);
-                eta_dot_Vap = m_dot_Vap * (inv_rho_l - inv_rho_g);
+                // Phase-change source for eta. IMPORTANT: this branch does NOT
+                // carry independent intrinsic phase densities -- rho is the single
+                // mixture density and rho_eta0 = eta*rho, rho_eta1 = (1-eta)*rho
+                // (see L847-852), so eta is effectively the gas mass fraction
+                // (Y = rho_eta0/rho = eta). The canonical 5-eq form
+                // m_dot*(1/rho_g - 1/rho_l) assumes true partial densities and does
+                // NOT apply here. To keep eta consistent with rho_eta0/rho under the
+                // mass source (d(rho_eta0)=+m_dot, d(rho)=0 by action-reaction):
+                //     eta_dot = d(rho_eta0/rho)/dt = m_dot / rho   (>0: eta -> gas)
+                // Bounded (no 1/eta or 1/(1-eta)), so it is stable near pure phases.
+                eta_dot_Vap = m_dot_Vap / std::max(rho(i, j, k), small);
 
                 // Energy "flux" diagnostic -- NOT applied to Source[3] (commented
                 // out at line 1259-ish below). Kept inactive per F-6 ignore;
@@ -1723,6 +1725,26 @@ Hydro2::RHS(int lev,
                 // M_dot_Vap (F-5) so it stays compileable. Mathematically
                 // identical to the previous u.dot(u * m_dot_Vap * |grad_eta|) * |grad_eta|.
                 E_dot_Vap = m_dot_Vap * (u(0)*u(0) + u(1)*u(1)) * grad_eta_mag * grad_eta_mag;
+            }
+
+            // ------------------------------------------------------------
+            // Prescribed constant-rate phase change (VERIFICATION ONLY)
+            // ------------------------------------------------------------
+            // Bypasses the Spalding closure to impose a KNOWN interfacial mass
+            // flux, so the integrated transfer is exactly
+            //     dM_liq/dt = -vap_const_mdot * (interface area),
+            // (and +the same into the gas), because the localizer |grad eta|
+            // integrates to the interface area:  ∫|grad eta| dV = ∫ dA.  This
+            // isolates the mass-transfer plumbing (action-reaction + per-phase
+            // sink/source) from the questionable Spalding driving force. Liquid
+            // -> vapor for vap_const_mdot > 0. Same eta-source form as Spalding.
+            if (apply_vap_const == 1)
+            {
+                Set::Scalar m_dot_const = vap_const_mdot * grad_eta_mag;
+                // eta source = m_dot/rho keeps eta = rho_eta0/rho consistent under
+                // the mass source (see Spalding block above for the derivation).
+                m_dot_Vap   += m_dot_const;
+                eta_dot_Vap += m_dot_const / std::max(rho(i, j, k), small);
             }
 
             // ------------------------------------------------------------
@@ -1744,10 +1766,10 @@ Hydro2::RHS(int lev,
                 Set::Scalar drive = (p_sat - press(i, j, k)) / (p_sat + small);
                 drive = (drive < 0.0) ? 0.0 : ((drive > 1.0) ? 1.0 : drive);
                 Set::Scalar m_dot_cav = (rho_eta1(i, j, k) / tau_cav) * drive; // liquid -> vapor [kg/m^3/s]
-                Set::Scalar inv_rho_g = 1.0 / std::max(rho_eta0(i, j, k), small);
-                Set::Scalar inv_rho_l = 1.0 / std::max(rho_eta1(i, j, k), small);
+                // eta source = m_dot/rho keeps eta = rho_eta0/rho consistent under
+                // the mass source (see Spalding block above for the derivation).
                 m_dot_Vap   += m_dot_cav;
-                eta_dot_Vap += m_dot_cav * (inv_rho_l - inv_rho_g);
+                eta_dot_Vap += m_dot_cav / std::max(rho(i, j, k), small);
             }
 
             // Vaporization Trackers (Vap_dot[2..3] used to hold M_dot_Vap which

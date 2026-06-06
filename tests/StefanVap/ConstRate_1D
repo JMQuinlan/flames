@@ -1,0 +1,188 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# =============================================================================
+# STAGE 1 VERIFICATION: prescribed constant-rate phase change (mass plumbing)
+# =============================================================================
+# Quiescent, no-shock, no-AMR, quasi-1D box. Liquid slab (eta~0) on the left,
+# vapor (eta~1) on the right, single planar interface at x = x_int. A KNOWN
+# interfacial mass flux is imposed (apply_vap_const + vap_const_mdot), bypassing
+# the Spalding closure, so the integrated transfer is exactly predictable:
+#
+#   m_dot_Vap = vap_const_mdot * |grad eta|         [kg/m^3/s]
+#   d(M_liq)/dt = -vap_const_mdot * INT|grad eta|dV = -vap_const_mdot * Ly
+#   d(M_gas)/dt = +vap_const_mdot * Ly
+#   M_total     = const  (action-reaction)
+#
+# because INT|grad eta|dV = (eta jump)*Ly = 1*Ly for a planar interface.
+#
+# With the numbers below (vap_const_mdot=1000, Ly=1.6e-4):
+#   d(M_liq)/dt = -0.16 kg/s ;  over stop_time=1e-4 s -> Delta M_liq = -1.6e-5 kg
+#   M_liq(0)    = rho_l * x_int * Ly = 749.5*2e-3*1.6e-4 = 2.3984e-4 kg (~6.7% lost)
+#   interface recession v = vap_const_mdot/(rho_l - rho_g) ~ 1.33 m/s
+#
+# CHECK against the auto-logged integrals.dat (cols: t, M_total, M_gas, M_liq):
+#   * M_total flat to machine precision  -> action-reaction OK
+#   * slope(M_liq) = -0.16 kg/s          -> liquid sink OK
+#   * d(M_gas) = -d(M_liq)               -> gas source OK
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = /mmfs1/home/jquinlan/runs/stefan/output_const_rate
+amr.plot_dt = 2.0e-6
+# amr.plot_int = 1
+# amr.max_step = 10
+# max_step = 10 
+
+### MESHING (no AMR -- isolate the source term) ###
+amr.max_grid_size = 500000
+amr.blocking_factor = 4
+amr.regrid_int = 1
+amr.max_level = 0
+amr.n_cell = 200 8
+
+### DIMENSIONS ###
+# dx = dy = 2e-5 ; Lx = 4e-3, Ly = 1.6e-4
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 4.0e-3 1.6e-4 0.0
+# Neumann (zero-gradient) in y, matching the proven droplet setup. A y-uniform
+# planar interface stays uniform under zero-gradient y-BCs. (Periodic-y here
+# corrupted the boundary rows on step 1 -- the y-ghost fill produced garbage
+# fluxes at the ylo/yhi faces.)
+geometry.is_periodic = 0 0 0
+
+### TIME STEPPING ###
+timestep = 1e-11
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1.0e-8
+dynamictimestep.min = 1.0e-15
+cfl = 0.2
+stop_time = 1.0e-4
+
+### ETA INITIAL CONDITIONS ###
+# eta ~ 0 inside liquid (left), eta ~ 1 in gas (right). Interface at x_int.
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 4.0e-5
+eta.ic.expression.constant.x_int = 2.0e-3
+eta.ic.expression.region0 = "0.5*(1 + tanh((x - x_int)/(sqrt(2)*epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+# fluid 0 = vapor (gas, eta~1) ; fluid 1 = liquid (eta~0)
+eos0.gamma = 1.023
+eos0.p0 = 0.0
+eos0.cv = "1.95e3"
+eos0.cp = "1994.85"
+mu0 = 0.0
+mu0_b = 0.0
+
+eos1.gamma = 2.358
+eos1.p0 = 4.01e8
+eos1.cv = "1.08e3"
+eos1.cp = "2546.64"
+mu1 = 0.0
+mu1_b = 0.0
+
+# Intrinsic phase densities (uniform).
+density0.ic.type = expression
+density0.ic.expression.constant.rho_vapor = 1.35598311723
+density0.ic.expression.region0 = "rho_vapor"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_nDodecane = 749.5
+density1.ic.expression.region0 = "rho_nDodecane"
+
+# Quiescent: zero velocity everywhere.
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Uniform pressure -> mechanical equilibrium (planar interface, no Laplace jump).
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p0 = 1.0e5
+pressure0.ic.expression.region0 = "p0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p0 = 1.0e5
+pressure1.ic.expression.region0 = "p0"
+
+pref = 0.0
+
+### PRESCRIBED CONSTANT-RATE PHASE CHANGE (the thing under test) ###
+apply_vap_const = 1
+vap_const_mdot  = 1000.0     # interfacial mass flux [kg/m^2/s], liquid -> vapor
+
+# Spalding + cavitation OFF so only the prescribed rate acts.
+apply_vaporization = 0
+apply_cavitation   = 0
+Dv = 0.0
+Y_infinity = 0.0
+
+### SURFACE TENSION / CH OFF-ish (planar interface; keep test minimal) ###
+apply_surface_tension = 0
+sigma = 0.0
+Mob = 50.0
+kappa_method = 1
+smooth_kernel_size = 5
+nghost = 4
+kappa_grad_frac = 0.02
+apply_sharpening = 0
+
+### BOUNDARY CONDITIONS (neumann all sides) ###
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA (unused at max_level=0, set benign) ###
+eta_refinement_criterion = 2e-2
+omega_refinement_criterion = 1e+20
+divu_refinement_criterion = 1e+20
+rho_refinement_criterion = 1e+20
+gradu_refinement_criterion = 1e+20
+
+cutoff = 1e-16
+small = 1e-6
+
+### POSITIVITY-PRESERVING FLUX LIMITER ###
+# Flux limiter on (production path); SOURCE limiter OFF so the imposed transfer
+# is added unscaled and the predicted slope is exact (quiescent flow keeps the
+# flux blend inactive anyway).
+pp_flux_limiter = 1
+pp_source_limiter = 0
+eps_p = 1.0
+eps_rho = 1e-10
+p_cav = 1.0e6
+
+### SOURCE TERM IC FIELDS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+apply_weight = 0
+Spec_Vol = 1
+grav = 9.81
+
+### RIEMANN SOLVER (matches production; quiescent so behavior is irrelevant) ###
+Riemann_Solver.type = hllc_adc
+Riemann_Solver.hllc_adc.alpha = 12
+Riemann_Solver.hllc_adc.adc_components = 4
+adc_shock_threshold = 0.75
+adc_grow = 4

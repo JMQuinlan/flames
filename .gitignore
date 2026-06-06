@@ -69,3 +69,6 @@ alamo.py
 logs/
 .claude/
 *.md
+cspell.json
+*.dat
+
