@@ -411,6 +411,8 @@ protected:
     // Set::Scalar R = 8.314; // [J]/[mol]-[K]
     Set::Scalar R = 8314.; // [J]/[kmol]-[K] - Probably more common to use
     Set::Scalar Dv = 0.0; // Vapor Diffusivity
+    Set::Scalar k0_thermal = 0.0; // gas-phase thermal conductivity [W/m/K] (Fourier conduction; 0 = off)
+    Set::Scalar k1_thermal = 0.0; // liquid-phase thermal conductivity [W/m/K] (Fourier conduction; 0 = off)
     Set::Scalar Y_infinity = 0.0; // Far Feild Vapor Mass Fraction
 
 
@@ -434,7 +436,8 @@ protected:
     Set::Scalar antoine_A = 4.10549;   // Antoine: log10(p_sat[bar]) = A - B/(T[K] + C)  (n-dodecane, 399-490 K)
     Set::Scalar antoine_B = 1625.928;
     Set::Scalar antoine_C = -92.839;
-    Set::Scalar L_vap = 256.0e3;       // latent heat of vaporization [J/kg]; for the phase-change energy coupling (Phase B, pending theory) -- unused in Phase A.
+    Set::Scalar L_vap = 256.0e3;       // latent heat of vaporization [J/kg]; phase-change energy coupling (Stage 3c). Applied only when apply_latent_heat=1.
+    int apply_latent_heat = 0;         // Stage 3c: subtract L_vap*m_dot_Vap from the mixture energy (evaporative cooling). 0 = off (Phase-A mass-only behavior).
 
     // Stage 3: inert-carrier (air) gas + transported dodecane-vapor species.
     int species_transport = 0;         // 0 = off (gas = eos0 directly). 1 = gas is carrier(eos0)+vapor, track rho_vap.

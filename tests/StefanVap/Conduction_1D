@@ -1,0 +1,189 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# =============================================================================
+# STAGE 3b -- checkpoint 2 (3b-2): FOURIER THERMAL CONDUCTION
+# =============================================================================
+# Isolated check of the new conduction operator added to the energy RHS:
+#       d(E)/dt += div( k grad T ) ,   k = eta*k0_thermal + (1-eta)*k1_thermal
+# (conservative central Laplacian, arithmetic-mean face k, clamped neighbors =>
+# adiabatic/no-flux at the neumann walls).
+#
+# Setup: a SINGLE-PHASE gas box (eta = 1 everywhere -> pure air, k = k0_thermal),
+# quiescent, at UNIFORM pressure but with a smooth temperature step imposed via a
+# density profile (T = p/(R rho) for the ideal carrier): rho_hot -> T~600 K on the
+# left, rho_cold -> T~300 K on the right. With p uniform there is no initial
+# pressure gradient, so nothing moves except by conduction; the conducted heat
+# then drives a (physical, small) thermal expansion. No phase change, no species
+# -- this isolates conduction.
+#
+# k0_thermal = 2.6 W/m/K is EXAGGERATED (~100x real air ~0.026) so the thermal
+# diffusion is visible in the short pre-transit window while keeping the parabolic
+# limit dt_conduction = cfl_v*rho*cv*dx^2/k above the acoustic dt (run stays
+# acoustic-limited). k1_thermal = 0 (no liquid present; keeps k_max = k0 so dt is
+# not over-restricted).
+#
+# CHECK against integrals.dat (1:Time 2:M_total ... 7:E_total 8:KE_total), over the
+# EARLY (pre acoustic-transit) window -- after the expansion wave reaches the walls
+# the neumann BC leaks a little, exactly as in the other Stefan tests:
+#   * E_total ~ constant   -> conduction is conservative (divergence form, adiabatic
+#                             walls); it only redistributes internal energy
+#   * M_total ~ constant   -> quiescent, no phase change
+#   * run stays stable (no NaN / pressure floor)
+#   * the T profile relaxes/broadens (visual, in the plotfiles). CONTROL: rerun with
+#     k0_thermal = 0 -- the T step then persists (only weak acoustic smoothing),
+#     confirming the spreading is the conduction operator.
+#   -> python check_conduction.py <plot_file>/integrals.dat
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = /mmfs1/home/jquinlan/runs/stefan/output_conduction
+amr.plot_dt = 1.0e-6
+
+### MESHING (no AMR) ###
+amr.max_grid_size = 500000
+amr.blocking_factor = 4
+amr.regrid_int = 1
+amr.max_level = 0
+amr.n_cell = 200 8
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 4.0e-3 1.6e-4 0.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEPPING ###
+timestep = 1e-11
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1.0e-8
+dynamictimestep.min = 1.0e-15
+cfl = 0.2
+stop_time = 1.0e-4
+
+### ETA INITIAL CONDITIONS (all gas) ###
+eta.ic.type = expression
+eta.ic.expression.region0 = "1.0"
+
+### HYDRO INITIAL CONDITIONS ###
+# eos0 = AIR carrier (ideal gas): gamma=1.4, cv=717.5, cp=1004.5 (cp=gamma*cv), p0=0.
+eos0.gamma = 1.4
+eos0.p0 = 0.0
+eos0.cv = "717.5"
+eos0.cp = "1004.5"
+mu0 = 0.0
+mu0_b = 0.0
+
+# eos1 = liquid dodecane (Tammann) -- not present (eta=1) but must be parsed.
+eos1.gamma = 2.358
+eos1.p0 = 4.01e8
+eos1.cv = "1.08e3"
+eos1.cp = "2546.64"
+mu1 = 0.0
+mu1_b = 0.0
+
+# Smooth density step at uniform p=1e5 Pa -> smooth T step (T = p/(R rho), R=287):
+#   rho_hot  = 0.58072 -> T ~ 600 K (left)
+#   rho_cold = 1.16144 -> T ~ 300 K (right)
+density0.ic.type = expression
+density0.ic.expression.constant.rho_hot  = 0.58072
+density0.ic.expression.constant.rho_cold = 1.16144
+density0.ic.expression.constant.x_c = 2.0e-3
+density0.ic.expression.constant.w   = 2.0e-4
+density0.ic.expression.region0 = "rho_hot + 0.5*(rho_cold - rho_hot)*(1 + tanh((x - x_c)/w))"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_nDodecane = 749.5
+density1.ic.expression.region0 = "rho_nDodecane"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p0 = 1.0e5
+pressure0.ic.expression.region0 = "p0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p0 = 1.0e5
+pressure1.ic.expression.region0 = "p0"
+
+pref = 0.0
+
+### THERMAL CONDUCTION (Stage 3b-2) ###
+k0_thermal = 2.6            # gas thermal conductivity [W/m/K] -- EXAGGERATED (~100x real air) for visibility
+k1_thermal = 0.0           # liquid not present (eta=1); keep k_max = k0 so dt is not over-restricted
+
+### NO SPECIES / NO PHASE CHANGE ###
+species_transport = 0
+Dv = 0.0
+apply_vap_const = 0
+apply_vaporization = 0
+apply_cavitation   = 0
+Y_infinity = 0.0
+epsilon = 4.0e-5
+
+### SURFACE TENSION / CH OFF ###
+apply_surface_tension = 0
+sigma = 0.0
+Mob = 50.0
+kappa_method = 1
+smooth_kernel_size = 5
+nghost = 4
+kappa_grad_frac = 0.02
+apply_sharpening = 0
+
+### BOUNDARY CONDITIONS (neumann all sides = adiabatic, reflecting-ish) ###
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA (unused at max_level=0) ###
+eta_refinement_criterion = 2e-2
+omega_refinement_criterion = 1e+20
+divu_refinement_criterion = 1e+20
+rho_refinement_criterion = 1e+20
+gradu_refinement_criterion = 1e+20
+
+cutoff = 1e-16
+small = 1e-6
+
+### POSITIVITY-PRESERVING FLUX LIMITER ###
+pp_flux_limiter = 0
+pp_source_limiter = 0
+eps_p = 1.0
+eps_rho = 1e-10
+p_cav = 1.0e6
+
+### SOURCE TERM IC FIELDS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+apply_weight = 0
+Spec_Vol = 1
+grav = 9.81
+
+### RIEMANN SOLVER ###
+Riemann_Solver.type = hllc_adc
+Riemann_Solver.hllc_adc.alpha = 12
+Riemann_Solver.hllc_adc.adc_components = 4
+adc_shock_threshold = 0.75
+adc_grow = 4

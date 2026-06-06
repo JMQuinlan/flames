@@ -260,6 +260,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // INTERACTIONS
         pp_query_default("sigma", value.sigma, 0.0);    // Surface tension condition
         pp_query_default("Dv", value.Dv, 0.0);          // Vapor Diffusivity
+        pp_query_default("k0_thermal", value.k0_thermal, 0.0); // gas thermal conductivity [W/m/K] (Fourier conduction; 0 = off)
+        pp_query_default("k1_thermal", value.k1_thermal, 0.0); // liquid thermal conductivity [W/m/K] (Fourier conduction; 0 = off)
         // Verification: prescribed constant-rate phase change (bypasses Spalding). Off by default.
         pp_query_default("apply_vap_const", value.apply_vap_const, 0);
         pp_query_default("vap_const_mdot", value.vap_const_mdot, 0.0); // interfacial mass flux [kg/m^2/s]; m_dot = vap_const_mdot*|grad eta|
@@ -269,7 +271,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("antoine_A", value.antoine_A, 4.10549);      // log10(p_sat[bar]) = A - B/(T[K]+C)
         pp_query_default("antoine_B", value.antoine_B, 1625.928);
         pp_query_default("antoine_C", value.antoine_C, -92.839);
-        pp_query_default("L_vap", value.L_vap, 256.0e3);              // latent heat [J/kg] (Phase B energy coupling, unused in Phase A)
+        pp_query_default("L_vap", value.L_vap, 256.0e3);              // latent heat of vaporization [J/kg] (Stage 3c energy coupling)
+        pp_query_default("apply_latent_heat", value.apply_latent_heat, 0); // 1 = subtract L_vap*m_dot_Vap from mixture energy (evaporative cooling); 0 = off
         // Stage 3: inert-carrier gas + transported dodecane-vapor species.
         pp_query_default("species_transport", value.species_transport, 0); // 1 = gas is carrier(eos0)+vapor, track rho_vap
         pp_query_default("Yv_init", value.Yv_init, 0.0);              // initial vapor mass fraction in the gas region
@@ -1843,6 +1846,23 @@ Hydro2::RHS(int lev,
                 eta_dot_Vap += m_dot_cav / std::max(rho(i, j, k), small);
             }
 
+            // ------------------------------------------------------------
+            // Latent heat of vaporization (Stage 3c)
+            // ------------------------------------------------------------
+            // The Tammann/CPG EOS here carries no formation/reference energy, so
+            // the phase-change enthalpy is NOT encoded in the internal energy and
+            // must be added explicitly. Evaporation breaks liquid bonds, drawing
+            // that energy from the mixture's sensible energy pool -> the energy
+            // equation gets a sink (evaporative cooling):
+            //     E_rhs += -L_vap * m_dot_Vap      [J/m^3/s]
+            // with m_dot_Vap > 0 for liquid -> vapor (so E drops, T drops). It is a
+            // single source on the shared mixture energy, applied to the total
+            // m_dot_Vap (Spalding + const-rate + cavitation), so it is consistent
+            // with the same m_dot_Vap that drives the mass transfer. Gated on
+            // apply_latent_heat so the Phase-A mass-only verification runs (which
+            // were checked with the energy held fixed) are bit-for-bit unchanged.
+            Set::Scalar E_latent = (apply_latent_heat == 1) ? (-L_vap * m_dot_Vap) : 0.0;
+
             // Vaporization Trackers (Vap_dot[2..3] used to hold M_dot_Vap which
             // has been removed per F-5; left as zero so the plotfile field
             // shape is preserved without changing the registration).
@@ -1864,7 +1884,7 @@ Hydro2::RHS(int lev,
             // Eq. 3). M_dot_Vap was removed per F-5.
             Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0);
             Source(i, j, k, 2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1);
-            Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force);// + E_dot_Vap;
+            Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force) + E_latent;// + E_dot_Vap;
 
             // Lagrange terms to enforce no-penetration
             Source(i, j, k, 1) = Source(i, j, k, 1) - lagrange * u.dot(grad_eta) * grad_eta(0);
@@ -2342,7 +2362,36 @@ Hydro2::RHS(int lev,
             M_rhs(i, j, k, 1) = M_flux(i, j, k, 1) + Source(i, j, k, 2); //(mu * (lap_uy * eta(i, j, k))) +
 
             // Energy
-            E_rhs(i, j, k) = E_flux(i, j, k) + Source(i, j, k, 3);
+            // Fourier thermal conduction (Stage 3b-2): d(E)/dt += div( k grad T ),
+            // k = eta*k0_thermal + (1-eta)*k1_thermal (eta-blended like the viscosity
+            // mu_eff above). Conservative central Laplacian with arithmetic-mean face
+            // k; the clamped neighbor indices give a zero-gradient (adiabatic / no-flux)
+            // wall at the domain edges -- correct for the neumann energy BC and the 1D
+            // Stefan setup. T is refreshed every RHS by FillGhost4BC. Gated on k>0 so
+            // all conduction-off (k0=k1=0) runs are bit-for-bit unchanged. Single-grid
+            // / FE path only (same valid-neighbor access as the species diffusion above).
+            Set::Scalar E_cond = 0.0;
+            if (k0_thermal > 0.0 || k1_thermal > 0.0)
+            {
+                const int dlo0 = domain.smallEnd(0), dhi0 = domain.bigEnd(0);
+                const int dlo1 = domain.smallEnd(1), dhi1 = domain.bigEnd(1);
+                const int im = (i > dlo0) ? i - 1 : i;
+                const int ip = (i < dhi0) ? i + 1 : i;
+                const int jm = (j > dlo1) ? j - 1 : j;
+                const int jp = (j < dhi1) ? j + 1 : j;
+                const Set::Scalar k_c  = eta(i, j, k)  * k0_thermal + (1.0 - eta(i, j, k))  * k1_thermal;
+                const Set::Scalar k_im = eta(im, j, k) * k0_thermal + (1.0 - eta(im, j, k)) * k1_thermal;
+                const Set::Scalar k_ip = eta(ip, j, k) * k0_thermal + (1.0 - eta(ip, j, k)) * k1_thermal;
+                const Set::Scalar k_jm = eta(i, jm, k) * k0_thermal + (1.0 - eta(i, jm, k)) * k1_thermal;
+                const Set::Scalar k_jp = eta(i, jp, k) * k0_thermal + (1.0 - eta(i, jp, k)) * k1_thermal;
+                const Set::Scalar k_xlo = 0.5 * (k_im + k_c);
+                const Set::Scalar k_xhi = 0.5 * (k_c + k_ip);
+                const Set::Scalar k_ylo = 0.5 * (k_jm + k_c);
+                const Set::Scalar k_yhi = 0.5 * (k_c + k_jp);
+                E_cond = ( k_xhi * (T(ip, j, k) - T(i, j, k)) - k_xlo * (T(i, j, k) - T(im, j, k)) ) / (DX[0] * DX[0])
+                       + ( k_yhi * (T(i, jp, k) - T(i, j, k)) - k_ylo * (T(i, j, k) - T(i, jm, k)) ) / (DX[1] * DX[1]);
+            }
+            E_rhs(i, j, k) = E_flux(i, j, k) + Source(i, j, k, 3) + E_cond;
 
            // ------------------------------------------------------------
            // Error Checking
@@ -3219,13 +3268,24 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                                  ? cfl_v * dx_min * dx_min / (Dv + small)
                                  : dt_acoustic;
 
+    // Parabolic limit for Fourier thermal conduction (Stage 3b-2). The thermal
+    // diffusivity is alpha = k/(rho*cv), so the explicit bound scales as
+    // dx^2/alpha = rho*cv*dx^2/k. Use rho_min and the smaller phase cv against the
+    // larger phase conductivity (a conservative lower bound on the true dt). Falls
+    // back to the acoustic dt when conduction is off so it never tightens the min.
+    Set::Scalar k_max  = std::max(k0_thermal, k1_thermal);
+    Set::Scalar cv_min = std::min(eos0.Cv(), eos1.Cv());
+    Set::Scalar dt_conduction = (k_max > 0.0)
+                                    ? cfl_v * rho_min * cv_min * dx_min * dx_min / (k_max + small)
+                                    : dt_acoustic;
+
     Set::Scalar a_max = F_max / (rho_min + small);
     Set::Scalar dt_force = cfl_v * sqrt(dx_min / (a_max + small));
 
     Set::Scalar Mob = 0.01 * dx_min * dx_min;
     Set::Scalar dt_allen_cahn = 0.5 * dx_min * dx_min / (Mob + small);
 
-    Set::Scalar dt_max = std::min({ dt_acoustic, dt_viscous, dt_force, dt_allen_cahn, dt_species });
+    Set::Scalar dt_max = std::min({ dt_acoustic, dt_viscous, dt_force, dt_allen_cahn, dt_species, dt_conduction });
     dt_max = dt_max * 0.9;
 
     // Debugging to report cfl constants used. Change bool to show

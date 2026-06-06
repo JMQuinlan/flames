@@ -1,0 +1,188 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# =============================================================================
+# STAGE 3c: LATENT HEAT OF VAPORIZATION (energy coupling)
+# =============================================================================
+# The Tammann/CPG EOS carries no formation/reference energy, so the phase-change
+# enthalpy is not in the internal energy and must be added explicitly. Evaporation
+# draws the latent heat from the mixture's sensible energy pool (evaporative
+# cooling), so the energy equation gets a sink:
+#       E_rhs += -L_vap * m_dot_Vap      [J/m^3/s] ,   m_dot_Vap > 0: liquid->vapor
+# Turned on with apply_latent_heat = 1 (default 0 = the Phase-A mass-only behavior,
+# so every earlier verification run is unchanged).
+#
+# Setup: quiescent liquid (eta~0, left) | planar interface | gas (eta~1, right) at
+# uniform pressure, with a PRESCRIBED constant evaporation rate (apply_vap_const)
+# so the volumetric phase-change rate is known. species OFF -> latent heat is
+# isolated (no composition/diffusion). The gas EOS (eos0 = air) is incidental; the
+# latent-heat sink magnitude does not depend on it.
+#
+# WHY THE CONST RATE: it makes the energy coupling QUANTITATIVE. Over the early
+# (pre acoustic-transit) window, before any wave reaches the walls,
+#       d(E_total)/dt = -L_vap * INT(m_dot_Vap) dV = -L_vap * vap_const_mdot * Ly
+#       d(M_liq)/dt   =        - INT(m_dot_Vap) dV = -        vap_const_mdot * Ly
+# so the RATIO is exact and independent of the discrete |grad eta| quadrature
+# (which gave Stage 1 its ~10% slope offset -- it cancels here):
+#       d(E_total) / d(M_liq) = L_vap   (= 256000 J/kg)
+#
+# CHECK against integrals.dat (1:Time 2:M_total 3:M_gas 4:M_liq ... 7:E_total):
+#   * E_total decreases (evaporative cooling; sign)               -> latent sink active
+#   * d(E_total)/d(M_liq) ~ L_vap over the early window           -> right magnitude
+#   * CONTROL: rerun with apply_latent_heat = 0 -> E_total ~ flat (early window)
+#   -> python check_latent.py <plot_file>/integrals.dat [L_vap]
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = /mmfs1/home/jquinlan/runs/stefan/output_latent
+amr.plot_dt = 5.0e-7
+
+### MESHING (no AMR) ###
+amr.max_grid_size = 500000
+amr.blocking_factor = 4
+amr.regrid_int = 1
+amr.max_level = 0
+amr.n_cell = 200 8
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 4.0e-3 1.6e-4 0.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEPPING ###
+timestep = 1e-11
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1.0e-8
+dynamictimestep.min = 1.0e-15
+cfl = 0.2
+stop_time = 1.0e-4
+
+### ETA INITIAL CONDITIONS (liquid left, gas right) ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 4.0e-5
+eta.ic.expression.constant.x_int = 2.0e-3
+eta.ic.expression.region0 = "0.5*(1 + tanh((x - x_int)/(sqrt(2)*epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+# eos0 = gas (air ideal gas): gamma=1.4, cv=717.5, cp=1004.5, p0=0. (Incidental to
+# the latent-heat magnitude check; species transport is off.)
+eos0.gamma = 1.4
+eos0.p0 = 0.0
+eos0.cv = "717.5"
+eos0.cp = "1004.5"
+mu0 = 0.0
+mu0_b = 0.0
+
+# eos1 = liquid dodecane (Tammann).
+eos1.gamma = 2.358
+eos1.p0 = 4.01e8
+eos1.cv = "1.08e3"
+eos1.cp = "2546.64"
+mu1 = 0.0
+mu1_b = 0.0
+
+density0.ic.type = expression
+density0.ic.expression.constant.rho_air = 1.16144
+density0.ic.expression.region0 = "rho_air"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_nDodecane = 749.5
+density1.ic.expression.region0 = "rho_nDodecane"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p0 = 1.0e5
+pressure0.ic.expression.region0 = "p0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p0 = 1.0e5
+pressure1.ic.expression.region0 = "p0"
+
+pref = 0.0
+
+### LATENT HEAT (Stage 3c) ###
+apply_latent_heat = 1        # subtract L_vap*m_dot_Vap from the mixture energy
+L_vap             = 256.0e3  # latent heat of vaporization [J/kg] (n-dodecane ~256 kJ/kg)
+
+### PRESCRIBED CONSTANT-RATE PHASE CHANGE (known m_dot for the ratio check) ###
+apply_vap_const = 1
+vap_const_mdot  = 1000.0     # interfacial mass flux [kg/m^2/s], liquid -> vapor
+apply_vaporization = 0
+apply_cavitation   = 0
+
+### NO SPECIES (isolate latent heat) ###
+species_transport = 0
+Dv = 0.0
+k0_thermal = 0.0
+k1_thermal = 0.0
+Y_infinity = 0.0
+
+### SURFACE TENSION / CH OFF ###
+apply_surface_tension = 0
+sigma = 0.0
+Mob = 50.0
+kappa_method = 1
+smooth_kernel_size = 5
+nghost = 4
+kappa_grad_frac = 0.02
+apply_sharpening = 0
+
+### BOUNDARY CONDITIONS (neumann all sides) ###
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA (unused at max_level=0) ###
+eta_refinement_criterion = 2e-2
+omega_refinement_criterion = 1e+20
+divu_refinement_criterion = 1e+20
+rho_refinement_criterion = 1e+20
+gradu_refinement_criterion = 1e+20
+
+cutoff = 1e-16
+small = 1e-6
+
+### POSITIVITY-PRESERVING FLUX LIMITER ###
+pp_flux_limiter = 0
+pp_source_limiter = 0
+eps_p = 1.0
+eps_rho = 1e-10
+p_cav = 1.0e6
+
+### SOURCE TERM IC FIELDS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+apply_weight = 0
+Spec_Vol = 1
+grav = 9.81
+
+### RIEMANN SOLVER ###
+Riemann_Solver.type = hllc_adc
+Riemann_Solver.hllc_adc.alpha = 12
+Riemann_Solver.hllc_adc.adc_components = 4
+adc_shock_threshold = 0.75
+adc_grow = 4
