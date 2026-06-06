@@ -2303,7 +2303,34 @@ Hydro2::RHS(int lev,
                     : rho_vap(i, jp, k) / std::max(rho(i, jp, k), small);
                 Set::Scalar rho_vap_flux = (fvap_xlo * flux_xlo.mass - fvap_xhi * flux_xhi.mass) / DX[0]
                                          + (fvap_ylo * flux_ylo.mass - fvap_yhi * flux_yhi.mass) / DX[1];
-                rho_vap_rhs(i, j, k) = rho_vap_flux + m_dot_Vap;
+
+                // Fickian vapor diffusion through the inert carrier (Stage 3b-1):
+                //   d(rho_vap)/dt += div( rho_eta0 * Dv * grad(Y_v) ),  Y_v = rho_vap/rho_eta0.
+                // rho_eta0 (= rho*eta) is the gas mass per total volume, so this is the
+                // vapor mass flux per total area -- binary diffusion of vapor through the
+                // carrier. Conservative central Laplacian with arithmetic-mean face
+                // rho_eta0; the clamped neighbor indices (im/ip/jm/jp) give a zero-gradient
+                // (no-flux) diffusive boundary at the domain edges (neumann), correct for
+                // the 1D Stefan tests. It only redistributes vapor within the fixed
+                // rho_eta0 field, so the carrier (= rho_eta0 - rho_vap) counter-diffuses
+                // and INT(rho_vap) is unchanged for no-flux walls. Single-grid / FE path
+                // only (same rho_vap ghost-fill limitation as the advection above).
+                Set::Scalar rho_vap_diff = 0.0;
+                if (Dv > 0.0)
+                {
+                    const Set::Scalar Yv_c  = rho_vap(i, j, k)  / std::max(rho_eta0(i, j, k), small);
+                    const Set::Scalar Yv_im = rho_vap(im, j, k) / std::max(rho_eta0(im, j, k), small);
+                    const Set::Scalar Yv_ip = rho_vap(ip, j, k) / std::max(rho_eta0(ip, j, k), small);
+                    const Set::Scalar Yv_jm = rho_vap(i, jm, k) / std::max(rho_eta0(i, jm, k), small);
+                    const Set::Scalar Yv_jp = rho_vap(i, jp, k) / std::max(rho_eta0(i, jp, k), small);
+                    const Set::Scalar re0_xlo = 0.5 * (rho_eta0(im, j, k) + rho_eta0(i, j, k));
+                    const Set::Scalar re0_xhi = 0.5 * (rho_eta0(i, j, k) + rho_eta0(ip, j, k));
+                    const Set::Scalar re0_ylo = 0.5 * (rho_eta0(i, jm, k) + rho_eta0(i, j, k));
+                    const Set::Scalar re0_yhi = 0.5 * (rho_eta0(i, j, k) + rho_eta0(i, jp, k));
+                    rho_vap_diff = Dv * ( (re0_xhi * (Yv_ip - Yv_c) - re0_xlo * (Yv_c - Yv_im)) / (DX[0] * DX[0])
+                                        + (re0_yhi * (Yv_jp - Yv_c) - re0_ylo * (Yv_c - Yv_jm)) / (DX[1] * DX[1]) );
+                }
+                rho_vap_rhs(i, j, k) = rho_vap_flux + m_dot_Vap + rho_vap_diff;
             }
             else
             {
@@ -3184,13 +3211,21 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     Set::Scalar mu_max = std::max(mu0, mu1);
     Set::Scalar dt_viscous = cfl_v * rho_min * dx_min * dx_min / (mu_max + small);
 
+    // Parabolic limit for vapor-species diffusion (Stage 3b-1). Effective
+    // diffusivity of Y_v is Dv (d(rho_eta0 Y)/dt = div(rho_eta0 Dv grad Y)),
+    // so the explicit stability bound scales as dx^2/Dv. Falls back to the
+    // acoustic dt when species diffusion is off so it never tightens the min.
+    Set::Scalar dt_species = (species_transport && Dv > 0.0)
+                                 ? cfl_v * dx_min * dx_min / (Dv + small)
+                                 : dt_acoustic;
+
     Set::Scalar a_max = F_max / (rho_min + small);
     Set::Scalar dt_force = cfl_v * sqrt(dx_min / (a_max + small));
 
     Set::Scalar Mob = 0.01 * dx_min * dx_min;
     Set::Scalar dt_allen_cahn = 0.5 * dx_min * dx_min / (Mob + small);
 
-    Set::Scalar dt_max = std::min({ dt_acoustic, dt_viscous, dt_force, dt_allen_cahn });
+    Set::Scalar dt_max = std::min({ dt_acoustic, dt_viscous, dt_force, dt_allen_cahn, dt_species });
     dt_max = dt_max * 0.9;
 
     // Debugging to report cfl constants used. Change bool to show
