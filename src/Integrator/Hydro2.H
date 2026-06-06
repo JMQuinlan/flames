@@ -304,6 +304,14 @@ protected:
     Set::Field<Set::Scalar> rho_eta0_old_mf;
     Set::Field<Set::Scalar> rho_eta1_old_mf;
 
+    // Stage 3 (inert carrier + Spalding): dodecane-vapor partial density within the
+    // gas phase. gas (eta=1) = inert carrier (eos0) + dodecane vapor. rho_vap is
+    // conserved (advects with the mixture mass flux + gains the evaporation source);
+    // Y_v = rho_vap/rho_eta0 is the vapor mass fraction of the gas; carrier mass =
+    // rho_eta0 - rho_vap. Active only when species_transport != 0.
+    Set::Field<Set::Scalar> rho_vap_mf;
+    Set::Field<Set::Scalar> rho_vap_old_mf;
+
     // ========================================================================
     // 7-EQUATION (Baer-Nunziato) CONSERVATIVE STATE
     //
@@ -424,6 +432,12 @@ protected:
     Set::Scalar antoine_B = 1625.928;
     Set::Scalar antoine_C = -92.839;
     Set::Scalar L_vap = 256.0e3;       // latent heat of vaporization [J/kg]; for the phase-change energy coupling (Phase B, pending theory) -- unused in Phase A.
+
+    // Stage 3: inert-carrier (air) gas + transported dodecane-vapor species.
+    int species_transport = 0;         // 0 = off (gas = eos0 directly). 1 = gas is carrier(eos0)+vapor, track rho_vap.
+    Set::Scalar Yv_init = 0.0;         // initial vapor mass fraction in the gas (eta=1) region
+    Set::Scalar cp_vap = 1994.85;      // dodecane-vapor cp [J/kg/K] (carrier props come from eos0)
+    Set::Scalar cv_vap = 1950.0;       // dodecane-vapor cv [J/kg/K]
     int Spec_Vol = 1;
 
     int kappa_method = 1;

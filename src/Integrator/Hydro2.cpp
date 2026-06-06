@@ -249,6 +249,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("antoine_B", value.antoine_B, 1625.928);
         pp_query_default("antoine_C", value.antoine_C, -92.839);
         pp_query_default("L_vap", value.L_vap, 256.0e3);              // latent heat [J/kg] (Phase B energy coupling, unused in Phase A)
+        // Stage 3: inert-carrier gas + transported dodecane-vapor species.
+        pp_query_default("species_transport", value.species_transport, 0); // 1 = gas is carrier(eos0)+vapor, track rho_vap
+        pp_query_default("Yv_init", value.Yv_init, 0.0);              // initial vapor mass fraction in the gas region
+        pp_query_default("cp_vap", value.cp_vap, 1994.85);           // dodecane-vapor cp [J/kg/K]
+        pp_query_default("cv_vap", value.cv_vap, 1950.0);            // dodecane-vapor cv [J/kg/K]
         if (value.apply_cavitation != 0 && value.tau_cav <= 0.0)
             Util::Abort(INFO, "tau_cav must be > 0 when apply_cavitation=1 (it is the cavitation relaxation time)");
         pp_query_required("epsilon", value.epsilon);    // diffuse interface thickness Y_infinity
@@ -400,6 +405,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.rho_eta1_mf,      value.density_bc, 1, nghost, "rho_eta1", true, true);
         value.RegisterNewFab(value.rho_eta0_old_mf,  value.density_bc, 1, nghost, "rho_eta0_old", false, true);
         value.RegisterNewFab(value.rho_eta1_old_mf,  value.density_bc, 1, nghost, "rho_eta1_old", false, true);
+        // Stage 3: dodecane-vapor partial density within the gas (carrier+vapor).
+        value.RegisterNewFab(value.rho_vap_mf,       value.density_bc, 1, nghost, "rho_vap", true, true);
+        value.RegisterNewFab(value.rho_vap_old_mf,   value.density_bc, 1, nghost, "rho_vap_old", false, true);
 
         value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing, 1, 0, "etadot", true, false);
         value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing, 4, 0, "hess_eta", false, false, { "00", "01", "10", "11" });
@@ -689,6 +697,8 @@ void Hydro2::Initialize(int lev)
     rho_eta1_mf[lev]->setVal(0.0);
     rho_eta0_old_mf[lev]->setVal(0.0);
     rho_eta1_old_mf[lev]->setVal(0.0);
+    rho_vap_mf[lev]->setVal(0.0);
+    rho_vap_old_mf[lev]->setVal(0.0);
 
     energy_per_vol_mf[lev]->setVal(0.0);
     energy_per_mas_mf[lev]->setVal(0.0);
@@ -776,6 +786,8 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar> rho_eta1 = rho_eta1_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> rho_eta0_old = rho_eta0_old_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> rho_eta1_old = rho_eta1_old_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> rho_vap = rho_vap_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> rho_vap_old = rho_vap_old_mf.Patch(lev, mfi);
 
         // FLUID 0
         Set::Patch<const Set::Scalar>   v0          = velocity0_mf.Patch(lev, mfi);
@@ -849,6 +861,10 @@ void Hydro2::Mix(int lev)
             rho_old(i, j, k) = rho(i, j, k);  
 
             rho_eta0(i, j, k) = rho(i, j, k) * eta(i, j, k);
+            // Stage 3: vapor mass = Y_v * gas mass. Yv_init applies in the gas
+            // (eta=1); rho_eta0=0 in the liquid so rho_vap=0 there automatically.
+            rho_vap(i, j, k) = Yv_init * rho_eta0(i, j, k);
+            rho_vap_old(i, j, k) = rho_vap(i, j, k);
             rho_eta1(i, j, k) = rho(i, j, k) * (1.0 - eta(i, j, k));
 
             rho_eta0_old(i, j, k) = rho_eta0(i, j, k);
@@ -990,6 +1006,7 @@ void Hydro2::WriteIntegrals(Set::Scalar time)
     BL_PROFILE("Hydro2::WriteIntegrals");
 
     Set::Scalar M_total = 0.0, M_phase0 = 0.0, M_phase1 = 0.0;
+    Set::Scalar M_vapor = 0.0;   // dodecane vapor mass in the gas (Stage 3); carrier = M_phase0 - M_vapor
     Set::Scalar Px_total = 0.0, Py_total = 0.0;
     Set::Scalar E_total = 0.0, KE_total = 0.0;
 
@@ -1017,6 +1034,7 @@ void Hydro2::WriteIntegrals(Set::Scalar time)
 
             auto re0_arr = rho_eta0_mf[lev]->const_array(mfi);
             auto re1_arr = rho_eta1_mf[lev]->const_array(mfi);
+            auto rvap_arr = rho_vap_mf[lev]->const_array(mfi);
             auto M_arr   = momentum_mf[lev]->const_array(mfi);
             auto E_arr   = energy_per_vol_mf[lev]->const_array(mfi);
 
@@ -1040,6 +1058,7 @@ void Hydro2::WriteIntegrals(Set::Scalar time)
                 M_total  += rho * dV;
                 M_phase0 += re0 * dV;
                 M_phase1 += re1 * dV;
+                M_vapor  += rvap_arr(i, j, k) * dV;
                 Px_total += Mx  * dV;
                 Py_total += My  * dV;
                 E_total  += E_arr(i, j, k) * dV;
@@ -1050,6 +1069,7 @@ void Hydro2::WriteIntegrals(Set::Scalar time)
 
     amrex::ParallelDescriptor::ReduceRealSum(M_total);
     amrex::ParallelDescriptor::ReduceRealSum(M_phase0);
+    amrex::ParallelDescriptor::ReduceRealSum(M_vapor);
     amrex::ParallelDescriptor::ReduceRealSum(M_phase1);
     amrex::ParallelDescriptor::ReduceRealSum(Px_total);
     amrex::ParallelDescriptor::ReduceRealSum(Py_total);
@@ -1066,13 +1086,15 @@ void Hydro2::WriteIntegrals(Set::Scalar time)
         std::ofstream outfile(fname, std::ios_base::app);
         if (write_header)
             outfile << "# 1:Time 2:M_total 3:M_phase0_gas 4:M_phase1_liq"
-                    << " 5:Px_total 6:Py_total 7:E_total 8:KE_total\n";
+                    << " 5:Px_total 6:Py_total 7:E_total 8:KE_total"
+                    << " 9:M_vapor 10:M_carrier\n";
 
         outfile << std::setprecision(12) << time;
         outfile << std::setprecision(8)
                 << "\t" << M_total  << "\t" << M_phase0 << "\t" << M_phase1
                 << "\t" << Px_total << "\t" << Py_total
                 << "\t" << E_total  << "\t" << KE_total
+                << "\t" << M_vapor  << "\t" << (M_phase0 - M_vapor)
                 << "\n";
         outfile.close();
     }
