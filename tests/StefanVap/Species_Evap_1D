@@ -4,29 +4,33 @@
 #@
 
 # =============================================================================
-# STAGE 3a -- checkpoint 1: vapor-species field SCAFFOLDING test
+# STAGE 3a -- checkpoint 2: vapor-species EVOLUTION + carrier-mass conservation
 # =============================================================================
-# Quiescent, no-source, no-AMR 1D box. Verifies ONLY that the new conserved
-# vapor field (rho_vap) is allocated, initialized, and logged correctly -- the
-# field is NOT evolved yet (advection + evaporation source come in checkpoint 2),
-# so everything is static. EOS is also NOT composition-dependent yet (eos0 is
-# used directly); this test is EOS-agnostic since nothing moves.
+# Quiescent, no-AMR 1D box, liquid (eta~0, left) | planar interface | gas
+# (eta~1, right). The gas starts as pure carrier (Yv_init=0). A prescribed
+# constant-rate phase change (apply_vap_const) evaporates liquid into vapor:
+#   rho_eta1 -= m_dot   (liquid loses)
+#   rho_eta0 += m_dot   (gas gains)
+#   rho_vap  += m_dot   (the evaporated mass is dodecane vapor)
+# so the inert carrier (= rho_eta0 - rho_vap) must be CONSERVED.
 #
-# species_transport = 1, Yv_init = 0.5  -> rho_vap = 0.5 * rho_eta0 at IC.
-# apply_vap_const = 0 (no source) and zero velocity -> nothing moves.
+# NOTE: species_transport=1 currently requires pp_flux_limiter=0 (FE path);
+# Pass-B species flux is not yet wired (parse guard enforces this).
 #
-# CHECK against integrals.dat (cols ... 3:M_phase0_gas ... 9:M_vapor 10:M_carrier):
-#   * a "rho_vap" field appears in the plotfiles (= 0.5*rho_eta0 in the gas)
-#   * M_vapor  ~= 0.5 * M_phase0_gas at t=0, and CONSTANT over the run
-#   * M_carrier = M_phase0_gas - M_vapor, also constant
-#   * M_total / M_phase0 / M_phase1 all flat (quiescent, no source)
+# CHECK against integrals.dat (... 3:M_phase0_gas 4:M_phase1_liq ... 9:M_vapor
+# 10:M_carrier), over the EARLY (pre acoustic-transit) window -- after that the
+# phase-change expansion reaches the walls and advects mass out (see Stage 1):
+#   * M_carrier ~ constant            -> carrier conserved (species plumbing OK)
+#   * d(M_vapor) = -d(M_phase1_liq)   -> evaporated liquid becomes vapor
+#   * M_vapor grows from 0 (Yv_init=0)
+#   * M_total flat (early window)
 # =============================================================================
 
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = /mmfs1/home/jquinlan/runs/stefan/output_species_scaffold
-amr.plot_dt = 5.0e-7
+plot_file = /mmfs1/home/jquinlan/runs/stefan/output_species_evap
+amr.plot_dt = 2.0e-6
 
 ### MESHING (no AMR) ###
 amr.max_grid_size = 500000
@@ -40,17 +44,16 @@ geometry.prob_lo = 0.0 0.0 0.0
 geometry.prob_hi = 4.0e-3 1.6e-4 0.0
 geometry.is_periodic = 0 0 0
 
-### TIME STEPPING (short -- just need a few logged rows) ###
+### TIME STEPPING ###
 timestep = 1e-11
 dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1.0e-8
 dynamictimestep.min = 1.0e-15
 cfl = 0.2
-stop_time = 2.0e-6
+stop_time = 1.0e-4
 
 ### ETA INITIAL CONDITIONS ###
-# eta ~ 0 inside liquid (left), eta ~ 1 in gas (right). Interface at x_int.
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = 4.0e-5
 eta.ic.expression.constant.x_int = 2.0e-3
@@ -58,8 +61,6 @@ eta.ic.expression.region0 = "0.5*(1 + tanh((x - x_int)/(sqrt(2)*epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
 
 ### HYDRO INITIAL CONDITIONS ###
-# fluid 0 = gas (eta~1) ; fluid 1 = liquid (eta~0). EOS compositing is Stage 3a-2;
-# for this static scaffolding test eos0 is used directly (values irrelevant here).
 eos0.gamma = 1.023
 eos0.p0 = 0.0
 eos0.cv = "1.95e3"
@@ -74,7 +75,6 @@ eos1.cp = "2546.64"
 mu1 = 0.0
 mu1_b = 0.0
 
-# Intrinsic phase densities (uniform).
 density0.ic.type = expression
 density0.ic.expression.constant.rho_vapor = 1.35598311723
 density0.ic.expression.region0 = "rho_vapor"
@@ -83,7 +83,6 @@ density1.ic.type = expression
 density1.ic.expression.constant.rho_nDodecane = 749.5
 density1.ic.expression.region0 = "rho_nDodecane"
 
-# Quiescent: zero velocity everywhere.
 velocity0.ic.type = expression
 velocity0.ic.expression.region0 = "0.0"
 velocity0.ic.expression.region1 = "0.0"
@@ -92,7 +91,6 @@ velocity1.ic.type = expression
 velocity1.ic.expression.region0 = "0.0"
 velocity1.ic.expression.region1 = "0.0"
 
-# Uniform pressure.
 pressure0.ic.type = expression
 pressure0.ic.expression.constant.p0 = 1.0e5
 pressure0.ic.expression.region0 = "p0"
@@ -103,13 +101,13 @@ pressure1.ic.expression.region0 = "p0"
 
 pref = 0.0
 
-### VAPOR SPECIES (the thing under test) ###
-species_transport = 1        # allocate + initialize + log rho_vap
-Yv_init           = 0.5      # initial vapor mass fraction in the gas -> rho_vap = 0.5*rho_eta0
+### VAPOR SPECIES ###
+species_transport = 1        # evolve rho_vap (advection + evaporation source)
+Yv_init           = 0.0      # gas starts as pure carrier; vapor appears via evaporation
 
-### PHASE CHANGE OFF (static field check) ###
-apply_vap_const    = 0
-vap_const_mdot     = 0.0
+### PRESCRIBED CONSTANT-RATE PHASE CHANGE (drives evaporation) ###
+apply_vap_const = 1
+vap_const_mdot  = 1000.0     # interfacial mass flux [kg/m^2/s], liquid -> vapor
 apply_vaporization = 0
 apply_cavitation   = 0
 Dv = 0.0
@@ -150,8 +148,7 @@ cutoff = 1e-16
 small = 1e-6
 
 ### POSITIVITY-PRESERVING FLUX LIMITER ###
-# species_transport=1 currently requires pp_flux_limiter=0 (FE path; Pass-B
-# species flux not yet implemented -- parse guard enforces this).
+# species_transport=1 currently requires pp_flux_limiter=0 (FE path).
 pp_flux_limiter = 0
 pp_source_limiter = 0
 eps_p = 1.0

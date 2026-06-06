@@ -254,6 +254,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("Yv_init", value.Yv_init, 0.0);              // initial vapor mass fraction in the gas region
         pp_query_default("cp_vap", value.cp_vap, 1994.85);           // dodecane-vapor cp [J/kg/K]
         pp_query_default("cv_vap", value.cv_vap, 1950.0);            // dodecane-vapor cv [J/kg/K]
+        // Stage 3a checkpoint 2 wires rho_vap advection only in the FE (no-limiter)
+        // path; the Pass-B (positivity-limiter) blended flux is not yet applied to
+        // rho_vap, so the two would be inconsistent. Forbid the combination for now.
+        if (value.species_transport != 0 && value.pp_flux_limiter != 0)
+            Util::Abort(INFO, "species_transport=1 currently requires pp_flux_limiter=0 (Pass-B species flux not yet implemented)");
         if (value.apply_cavitation != 0 && value.tau_cav <= 0.0)
             Util::Abort(INFO, "tau_cav must be > 0 when apply_cavitation=1 (it is the cavitation relaxation time)");
         pp_query_required("epsilon", value.epsilon);    // diffuse interface thickness Y_infinity
@@ -484,6 +489,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.KE_per_mas_mf,   value.energy_bc,  1, nghost, "KE_per_mass", true, false);        // Kinetic Energy (per unit mass)
         value.RegisterNewFab(value.Bm_mf,           &value.bc_nothing,  1, nghost, "Spadling_Number", true, false);    // Spalding Number
         value.RegisterNewFab(value.Y_mf,            &value.bc_nothing,  1, nghost, "Mass_Fraction", true, false);       // Mass Fraction
+        value.RegisterNewFab(value.mass_frac_v_mf,  &value.bc_nothing,  1, nghost, "Mass_Fraction_Vapor", true, false); // vapor mass fraction of the gas (rho_vap/rho_eta0)
 
         // Curvature pipeline fields
         value.RegisterNewFab(value.eta_x_mf,            &value.bc_nothing,  1, nghost, "eta_x", false, false);
@@ -836,6 +842,7 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar>         mu_chem_    = mu_chem_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         Bm          = Bm_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         Y           = Y_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar>         mass_frac_v = mass_frac_v_mf.Patch(lev, mfi);
 
         // EXTRAS & DEBUGGING
         Set::Patch<Set::Scalar>         a           = a_mf.Patch(lev, mfi);
@@ -912,6 +919,9 @@ void Hydro2::Mix(int lev)
 
             // Mass Fraction
             Y(i, j, k) = rho_eta0(i, j, k) / (rho(i, j, k));
+            // Vapor mass fraction of the gas (Stage 3): rho_vap / rho_eta0. ~0 in
+            // the liquid (both ~0); = Y_v in the gas.
+            mass_frac_v(i, j, k) = rho_vap(i, j, k) / std::max(rho_eta0(i, j, k), small);
 
             // Spalding Number  (F-1 / F-10: single canonical helper, denominator (1 - Y))
             Bm(i, j, k) = SpaldingBM(Y(i, j, k), Y_infinity, small);
@@ -1133,11 +1143,13 @@ Hydro2::RHS(int lev,
     amrex::MultiFab &M_rhs_mf,
     amrex::MultiFab &E_rhs_mf,
     amrex::MultiFab &eta_rhs_mf,
+    amrex::MultiFab &rho_vap_rhs_mf,
     const amrex::MultiFab &rho_eta0_mf_in,
     const amrex::MultiFab &rho_eta1_mf_in,
     const amrex::MultiFab &M_mf_in,
     const amrex::MultiFab &E_mf_in,
-    const amrex::MultiFab &eta_mf_in)
+    const amrex::MultiFab &eta_mf_in,
+    const amrex::MultiFab &rho_vap_mf_in)
 {
     BL_PROFILE("Integrator::Hydro2::RHS");
 
@@ -1147,6 +1159,7 @@ Hydro2::RHS(int lev,
     // Converting Array to mf
     amrex::MultiFab::Copy(*rho_eta0_mf[lev], rho_eta0_mf_in, 0, 0, 1, 0);
     amrex::MultiFab::Copy(*rho_eta1_mf[lev], rho_eta1_mf_in, 0, 0, 1, 0);
+    amrex::MultiFab::Copy(*rho_vap_mf[lev], rho_vap_mf_in, 0, 0, 1, 0);
     amrex::MultiFab::Copy(*momentum_mf[lev], M_mf_in, 0, 0, AMREX_SPACEDIM, 0);
     amrex::MultiFab::Copy(*energy_per_vol_mf[lev], E_mf_in, 0, 0, 1, 0);
     amrex::MultiFab::Copy(*eta_mf[lev], eta_mf_in, 0, 0, 1, 0);
@@ -1183,6 +1196,7 @@ Hydro2::RHS(int lev,
         Set::Patch<const Set::Scalar> eta = eta_mf.Patch(lev, mfi);
         auto const rho_eta0 = rho_eta0_mf[lev]->array(mfi);
         auto const rho_eta1 = rho_eta1_mf[lev]->array(mfi);
+        auto const rho_vap  = rho_vap_mf[lev]->array(mfi);
         Set::Patch<const Set::Scalar> rho = density_mf.Patch(lev, mfi);
         auto const M = momentum_mf[lev]->array(mfi);
         auto const E = energy_per_vol_mf[lev]->array(mfi);
@@ -1208,6 +1222,7 @@ Hydro2::RHS(int lev,
         Set::Patch<Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Y = Y_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> mass_frac_v = mass_frac_v_mf.Patch(lev, mfi);
 
         // Local EOS Copy
         const Solver::EOS::Tammann eos0_local = eos0;
@@ -1231,6 +1246,9 @@ Hydro2::RHS(int lev,
 
             // Mass Fraction
             Y(i, j, k) = rho_eta0(i, j, k) / (rho(i, j, k));
+            // Vapor mass fraction of the gas (Stage 3): rho_vap / rho_eta0. ~0 in
+            // the liquid (both ~0); = Y_v in the gas.
+            mass_frac_v(i, j, k) = rho_vap(i, j, k) / std::max(rho_eta0(i, j, k), small);
 
             // Spalding Number  (F-1 / F-10: single canonical helper, denominator (1 - Y))
             Bm(i, j, k) = SpaldingBM(Y(i, j, k), Y_infinity, small);
@@ -1395,6 +1413,7 @@ Hydro2::RHS(int lev,
         Set::Patch<const Set::Scalar> eta = eta_mf.Patch(lev, mfi);
         auto const rho_eta0 = rho_eta0_mf[lev]->array(mfi);
         auto const rho_eta1 = rho_eta1_mf[lev]->array(mfi);
+        auto const rho_vap  = rho_vap_mf[lev]->array(mfi);
         Set::Patch<const Set::Scalar> rho = density_mf.Patch(lev, mfi);
         auto const M = momentum_mf[lev]->array(mfi);
         auto const E = energy_per_vol_mf[lev]->array(mfi);
@@ -1402,6 +1421,7 @@ Hydro2::RHS(int lev,
         // OUTPUTS
         Set::Patch<Set::Scalar> rho_eta0_rhs = rho_eta0_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> rho_eta1_rhs = rho_eta1_rhs_mf.array(mfi);
+        Set::Patch<Set::Scalar> rho_vap_rhs  = rho_vap_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> M_rhs       = M_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> E_rhs       = E_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> eta_rhs     = eta_rhs_mf.array(mfi);
@@ -2223,7 +2243,44 @@ Hydro2::RHS(int lev,
             // Mass
             rho_eta0_rhs(i, j, k) = rho_eta0_flux + Source(i, j, k, 0) * (eta(i, j, k)) + m_dot_Vap;
             rho_eta1_rhs(i, j, k) = rho_eta1_flux + Source(i, j, k, 0) * (1.0 - eta(i, j, k)) - m_dot_Vap;
-            
+
+            // Vapor species (Stage 3a, checkpoint 2): rho_vap advects with the
+            // mixture mass flux, weighted by the upwind vapor-fraction-of-total
+            // (rho_vap/rho) with the SAME upwind direction as eta_face. The
+            // neighbor index is clamped to the valid domain (= neumann for
+            // rho_vap), so no rho_vap ghost fill is required. Evaporation creates
+            // vapor (+m_dot_Vap), matching the +m_dot_Vap added to rho_eta0, so
+            // carrier (= rho_eta0 - rho_vap) is conserved. FE/no-limiter path only;
+            // a parse guard forbids pp_flux_limiter with species_transport for now.
+            if (species_transport)
+            {
+                const int dlo0 = domain.smallEnd(0), dhi0 = domain.bigEnd(0);
+                const int dlo1 = domain.smallEnd(1), dhi1 = domain.bigEnd(1);
+                const int im = (i > dlo0) ? i - 1 : i;
+                const int ip = (i < dhi0) ? i + 1 : i;
+                const int jm = (j > dlo1) ? j - 1 : j;
+                const int jp = (j < dhi1) ? j + 1 : j;
+                Set::Scalar fvap_xlo = (flux_xlo.u_interface > 0.0)
+                    ? rho_vap(im, j, k) / std::max(rho(im, j, k), small)
+                    : rho_vap(i, j, k)  / std::max(rho(i, j, k), small);
+                Set::Scalar fvap_xhi = (flux_xhi.u_interface > 0.0)
+                    ? rho_vap(i, j, k)  / std::max(rho(i, j, k), small)
+                    : rho_vap(ip, j, k) / std::max(rho(ip, j, k), small);
+                Set::Scalar fvap_ylo = (flux_ylo.u_interface > 0.0)
+                    ? rho_vap(i, jm, k) / std::max(rho(i, jm, k), small)
+                    : rho_vap(i, j, k)  / std::max(rho(i, j, k), small);
+                Set::Scalar fvap_yhi = (flux_yhi.u_interface > 0.0)
+                    ? rho_vap(i, j, k)  / std::max(rho(i, j, k), small)
+                    : rho_vap(i, jp, k) / std::max(rho(i, jp, k), small);
+                Set::Scalar rho_vap_flux = (fvap_xlo * flux_xlo.mass - fvap_xhi * flux_xhi.mass) / DX[0]
+                                         + (fvap_ylo * flux_ylo.mass - fvap_yhi * flux_yhi.mass) / DX[1];
+                rho_vap_rhs(i, j, k) = rho_vap_flux + m_dot_Vap;
+            }
+            else
+            {
+                rho_vap_rhs(i, j, k) = 0.0;
+            }
+
             // Momentum
             M_rhs(i, j, k, 0) = M_flux(i, j, k, 0) + Source(i, j, k, 1); //(mu * (lap_ux * eta(i, j, k))) +
             M_rhs(i, j, k, 1) = M_flux(i, j, k, 1) + Source(i, j, k, 2); //(mu * (lap_uy * eta(i, j, k))) +
@@ -2670,6 +2727,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     std::swap(eta_old_mf[lev], eta_mf[lev]);
     std::swap(rho_eta0_old_mf[lev], rho_eta0_mf[lev]);
     std::swap(rho_eta1_old_mf[lev], rho_eta1_mf[lev]);
+    std::swap(rho_vap_old_mf[lev], rho_vap_mf[lev]);
 
     // ------------------------------------------------------------
     // Time Integration
@@ -2681,6 +2739,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     solution_new.emplace_back(*momentum_mf[lev].get(),       amrex::MakeType::make_alias, 0, 2);
     solution_new.emplace_back(*energy_per_vol_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
     solution_new.emplace_back(*eta_mf[lev].get(),            amrex::MakeType::make_alias, 0, 1);
+    solution_new.emplace_back(*rho_vap_mf[lev].get(),        amrex::MakeType::make_alias, 0, 1);
 
     amrex::Vector<amrex::MultiFab> solution_old;
     solution_old.emplace_back(*rho_eta0_old_mf[lev].get(),       amrex::MakeType::make_alias, 0, 1);
@@ -2688,6 +2747,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     solution_old.emplace_back(*momentum_old_mf[lev].get(),       amrex::MakeType::make_alias, 0, 2);
     solution_old.emplace_back(*energy_per_vol_old_mf[lev].get(), amrex::MakeType::make_alias, 0, 1);
     solution_old.emplace_back(*eta_old_mf[lev].get(),            amrex::MakeType::make_alias, 0, 1);
+    solution_old.emplace_back(*rho_vap_old_mf[lev].get(),        amrex::MakeType::make_alias, 0, 1);
 
     amrex::TimeIntegrator timeintegrator(solution_new, time);
 
@@ -2695,11 +2755,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                                amrex::Vector<amrex::MultiFab> &rhs_mf,
                                amrex::Vector<amrex::MultiFab> &solution_mf,
                                const Set::Scalar time) {
-        // rhs_mf:      [0]=rho_eta0_rhs, [1]=rho_eta1_rhs, [2]=M_rhs, [3]=E_rhs, [4]=eta_rhs
-        // solution_mf: [0]=rho_eta0,     [1]=rho_eta1,     [2]=M,     [3]=E,     [4]=eta
+        // rhs_mf:      [0]=rho_eta0_rhs, [1]=rho_eta1_rhs, [2]=M_rhs, [3]=E_rhs, [4]=eta_rhs, [5]=rho_vap_rhs
+        // solution_mf: [0]=rho_eta0,     [1]=rho_eta1,     [2]=M,     [3]=E,     [4]=eta,     [5]=rho_vap
         RHS(lev, time, dt,
-            rhs_mf[0], rhs_mf[1], rhs_mf[2], rhs_mf[3], rhs_mf[4],
-            solution_mf[0], solution_mf[1], solution_mf[2], solution_mf[3], solution_mf[4]);
+            rhs_mf[0], rhs_mf[1], rhs_mf[2], rhs_mf[3], rhs_mf[4], rhs_mf[5],
+            solution_mf[0], solution_mf[1], solution_mf[2], solution_mf[3], solution_mf[4], solution_mf[5]);
     });
 
     timeintegrator.set_post_stage_action([&](amrex::Vector<amrex::MultiFab> &stage_mf, Set::Scalar time) {
@@ -2709,6 +2769,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         amrex::MultiFab::Copy(*momentum_mf[lev],       stage_mf[2], 0, 0, AMREX_SPACEDIM, nghost);
         amrex::MultiFab::Copy(*energy_per_vol_mf[lev], stage_mf[3], 0, 0, 1,              nghost);
         amrex::MultiFab::Copy(*eta_mf[lev],            stage_mf[4], 0, 0, 1,              nghost);
+        amrex::MultiFab::Copy(*rho_vap_mf[lev],        stage_mf[5], 0, 0, 1,              nghost);
 
         // Clamp eta in domain prior to ghost fill (state can drift slightly outside [0,1])
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
@@ -2729,6 +2790,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         amrex::MultiFab::Copy(stage_mf[2], *momentum_mf[lev],       0, 0, AMREX_SPACEDIM, nghost);
         amrex::MultiFab::Copy(stage_mf[3], *energy_per_vol_mf[lev], 0, 0, 1,              nghost);
         amrex::MultiFab::Copy(stage_mf[4], *eta_mf[lev],            0, 0, 1,              nghost);
+        amrex::MultiFab::Copy(stage_mf[5], *rho_vap_mf[lev],        0, 0, 1,              nghost);
 
     });
 
@@ -2838,6 +2900,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         const amrex::Box &bx = mfi.validbox();
         auto rho_eta0 = rho_eta0_mf[lev]->array(mfi);
         auto rho_eta1 = rho_eta1_mf[lev]->array(mfi);
+        auto rho_vap  = rho_vap_mf[lev]->array(mfi);
         Set::Scalar small_local = small;
 
         amrex::ParallelFor(bx, [=, &floor_mass_local] AMREX_GPU_DEVICE(int i, int j, int k) {
@@ -2845,6 +2908,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                               + std::max(small_local - rho_eta1(i, j, k), 0.0);
             rho_eta0(i, j, k) = std::max(rho_eta0(i, j, k), small_local);
             rho_eta1(i, j, k) = std::max(rho_eta1(i, j, k), small_local);
+            // Vapor: floor at 0 (vapor is legitimately 0 in the liquid; do not
+            // create mass with a small_local floor). Clamp <= rho_eta0 (Y_v<=1)
+            // is deferred to the EOS-compositing step.
+            rho_vap(i, j, k) = std::max(rho_vap(i, j, k), 0.0);
         });
     }
 

@@ -111,11 +111,13 @@ protected:
         amrex::MultiFab &M_rhs_mf,
         amrex::MultiFab &E_rhs_mf,
         amrex::MultiFab &eta_rhs_mf,
+        amrex::MultiFab &rho_vap_rhs_mf,
         const amrex::MultiFab &rho_eta0_mf_in,
         const amrex::MultiFab &rho_eta1_mf_in,
         const amrex::MultiFab &M_mf,
         const amrex::MultiFab &E_mf,
-        const amrex::MultiFab &eta_mf_in);
+        const amrex::MultiFab &eta_mf_in,
+        const amrex::MultiFab &rho_vap_mf_in);
 
     // ========================================================================
     // 7-EQUATION (Baer-Nunziato) entry points.
@@ -242,7 +244,8 @@ protected:
     Set::Field<Set::Scalar> Fsv_mf;         // Surface Tension
     Set::Field<Set::Scalar> Fw_mf;          // Weight Force
     Set::Field<Set::Scalar> Bm_mf;          // Spalding Number
-    Set::Field<Set::Scalar> Y_mf;           // Mass Fraction
+    Set::Field<Set::Scalar> Y_mf;           // Mass Fraction (gas mass fraction of total = rho_eta0/rho)
+    Set::Field<Set::Scalar> mass_frac_v_mf; // vapor mass fraction OF THE GAS = rho_vap/rho_eta0 (Stage 3 diagnostic + Spalding/EOS input)
     Set::Field<Set::Scalar> Ldot_mf;        // Ldot
     Set::Field<Set::Scalar> grad_eta_mf;
     Set::Field<Set::Scalar> kappas_mf;
