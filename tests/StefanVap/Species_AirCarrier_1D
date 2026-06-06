@@ -1,0 +1,186 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# =============================================================================
+# STAGE 3a -- checkpoint 3 (3a-2): COMPOSITION-DEPENDENT gas EOS
+# =============================================================================
+# Same quiescent 1D liquid|gas box as Species_Evap_1D, but the gas is now a true
+# inert carrier (AIR) instead of pure dodecane vapor. The gas EOS is built
+# per-cell as a frozen ideal-gas blend of carrier (eos0 = air) and dodecane
+# vapor at the local vapor mass fraction Yv = mass_frac_v = rho_vap/rho_eta0:
+#       cv_g = Yv*cv_vap + (1-Yv)*cv_air
+#       cp_g = Yv*cp_vap + (1-Yv)*cp_air ,   gamma_g = cp_g/cv_g ,   p0_g = 0
+# so as evaporation injects dodecane vapor near the interface, the local gas
+# gamma drops from 1.4 (air) toward ~1.023 (dodecane vapor).
+#
+# Contrast with Species_Evap_1D, where eos0's cv/cp already equal the vapor's:
+# there the blend is a no-op (carrier == vapor) and results are unchanged -- that
+# test is the 3a-2 regression; THIS test exercises the new composition coupling.
+#
+# NOTE: species_transport=1 currently requires pp_flux_limiter=0 (FE path).
+# The energy source for the injected vapor mass (latent heat) is Stage 3c and is
+# NOT yet added, so absolute gas temperature is not meant to be physical here;
+# what 3a-2 verifies is that the gas EOS now depends on composition and the run
+# stays stable + carrier-conserving.
+#
+# CHECK against integrals.dat (... 3:M_phase0_gas 4:M_phase1_liq ... 9:M_vapor
+# 10:M_carrier), over the EARLY (pre acoustic-transit) window:
+#   * M_carrier (= air) ~ constant     -> inert carrier conserved
+#   * d(M_vapor) = -d(M_phase1_liq)    -> evaporated liquid becomes vapor
+#   * M_vapor grows from 0 (Yv_init=0)
+#   * run stays stable (no pressure floor / NaN); gamma & T fields near the
+#     interface shift with mass_frac_v (visual, in the plotfiles)
+#   -> reuse: python check_species.py <plot_file>/integrals.dat
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = /mmfs1/home/jquinlan/runs/stefan/output_species_air
+amr.plot_dt = 2.0e-6
+
+### MESHING (no AMR) ###
+amr.max_grid_size = 500000
+amr.blocking_factor = 4
+amr.regrid_int = 1
+amr.max_level = 0
+amr.n_cell = 200 8
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 4.0e-3 1.6e-4 0.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEPPING ###
+timestep = 1e-11
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1.0e-8
+dynamictimestep.min = 1.0e-15
+cfl = 0.2
+stop_time = 1.0e-4
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 4.0e-5
+eta.ic.expression.constant.x_int = 2.0e-3
+eta.ic.expression.region0 = "0.5*(1 + tanh((x - x_int)/(sqrt(2)*epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+# eos0 = AIR carrier (ideal gas): gamma=1.4, cv=717.5, cp=1004.5 (cp=gamma*cv), p0=0.
+eos0.gamma = 1.4
+eos0.p0 = 0.0
+eos0.cv = "717.5"
+eos0.cp = "1004.5"
+mu0 = 0.0
+mu0_b = 0.0
+
+# eos1 = liquid dodecane (Tammann).
+eos1.gamma = 2.358
+eos1.p0 = 4.01e8
+eos1.cv = "1.08e3"
+eos1.cp = "2546.64"
+mu1 = 0.0
+mu1_b = 0.0
+
+# Gas intrinsic density = air at p=1e5 Pa, T=300 K: rho = p/(R T), R = cp-cv = 287.
+density0.ic.type = expression
+density0.ic.expression.constant.rho_air = 1.16144
+density0.ic.expression.region0 = "rho_air"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_nDodecane = 749.5
+density1.ic.expression.region0 = "rho_nDodecane"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p0 = 1.0e5
+pressure0.ic.expression.region0 = "p0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p0 = 1.0e5
+pressure1.ic.expression.region0 = "p0"
+
+pref = 0.0
+
+### VAPOR SPECIES (composition-dependent gas EOS) ###
+species_transport = 1        # evolve rho_vap AND make the gas EOS depend on Yv
+Yv_init           = 0.0      # gas starts as pure air; dodecane vapor appears via evaporation
+cv_vap            = 1950.0   # dodecane-vapor cv [J/kg/K]
+cp_vap            = 1994.85  # dodecane-vapor cp [J/kg/K]  (gamma_vap ~ 1.023)
+
+### PRESCRIBED CONSTANT-RATE PHASE CHANGE (drives evaporation) ###
+apply_vap_const = 1
+vap_const_mdot  = 1000.0     # interfacial mass flux [kg/m^2/s], liquid -> vapor
+apply_vaporization = 0
+apply_cavitation   = 0
+Dv = 0.0
+Y_infinity = 0.0
+
+### SURFACE TENSION / CH OFF ###
+apply_surface_tension = 0
+sigma = 0.0
+Mob = 50.0
+kappa_method = 1
+smooth_kernel_size = 5
+nghost = 4
+kappa_grad_frac = 0.02
+apply_sharpening = 0
+
+### BOUNDARY CONDITIONS (neumann all sides) ###
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA (unused at max_level=0) ###
+eta_refinement_criterion = 2e-2
+omega_refinement_criterion = 1e+20
+divu_refinement_criterion = 1e+20
+rho_refinement_criterion = 1e+20
+gradu_refinement_criterion = 1e+20
+
+cutoff = 1e-16
+small = 1e-6
+
+### POSITIVITY-PRESERVING FLUX LIMITER ###
+# species_transport=1 currently requires pp_flux_limiter=0 (FE path).
+pp_flux_limiter = 0
+pp_source_limiter = 0
+eps_p = 1.0
+eps_rho = 1e-10
+p_cav = 1.0e6
+
+### SOURCE TERM IC FIELDS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+apply_weight = 0
+Spec_Vol = 1
+grav = 9.81
+
+### RIEMANN SOLVER ###
+Riemann_Solver.type = hllc_adc
+Riemann_Solver.hllc_adc.alpha = 12
+Riemann_Solver.hllc_adc.adc_components = 4
+adc_shock_threshold = 0.75
+adc_grow = 4

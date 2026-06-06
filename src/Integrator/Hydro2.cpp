@@ -74,6 +74,27 @@ static Set::Scalar SpaldingBM(Set::Scalar Y_local, Set::Scalar Y_inf, Set::Scala
     return (Y_local - Y_inf) / (1.0 - Y_local + small);
 }
 
+// Stage 3 (3a-2): per-cell effective GAS equation of state for a binary
+// ideal-gas mixture of an inert carrier (the eos0 phase, e.g. air) and dodecane
+// vapor at vapor mass fraction Yv = mass_frac_v = rho_vap / rho_eta0. Frozen
+// caloric mixing: cv and cp are mass-weighted and gamma = cp/cv; both components
+// are ideal gases so the stiffened reference pressure p0 = 0. Reduces EXACTLY to
+// the carrier at Yv = 0 (and, if the carrier's cv/cp equal the vapor's, to the
+// carrier for all Yv -- so a "carrier == vapor" input is a no-op regression).
+// The result is passed in place of eos0 to the Mixed* EOS calls so the gas
+// thermodynamics track composition; the liquid (eos1) and the eta-blending are
+// unchanged.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+static Solver::EOS::Tammann GasEOS_eff(Set::Scalar Yv,
+                                       const Solver::EOS::Tammann &carrier,
+                                       Set::Scalar cv_vap, Set::Scalar cp_vap)
+{
+    Yv = (Yv < 0.0) ? 0.0 : ((Yv > 1.0) ? 1.0 : Yv);
+    const Set::Scalar cv_g = Yv * cv_vap + (1.0 - Yv) * carrier.Cv();
+    const Set::Scalar cp_g = Yv * cp_vap + (1.0 - Yv) * carrier.Cp();
+    return Solver::EOS::Tammann(cp_g / cv_g, 0.0, cv_g, cp_g);
+}
+
 // ----------------------------------------------------------------------------
 // Per-cell scaling factor for the Hu-Adams-Shu positivity-preserving flux
 // limiter. Returns the largest theta in [0,1] such that the trial conserved
@@ -852,8 +873,9 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar>         KE_vol      = KE_per_vol_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         KE_mas      = KE_per_mas_mf.Patch(lev, mfi);
 
-        // Local EOS Copy
-        const Solver::EOS::Tammann eos0_local = eos0;
+        // Local EOS Copy (eos0_base = inert carrier; eos0_local is built per-cell
+        // below as carrier + dodecane vapor when species_transport is on).
+        const Solver::EOS::Tammann eos0_base = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
@@ -876,6 +898,13 @@ void Hydro2::Mix(int lev)
 
             rho_eta0_old(i, j, k) = rho_eta0(i, j, k);
             rho_eta1_old(i, j, k) = rho_eta1(i, j, k);
+
+            // Stage 3 (3a-2): composition-dependent gas EOS -- blend the carrier
+            // (eos0_base) with dodecane vapor at the local vapor mass fraction
+            // Yv = rho_vap/rho_eta0. Off (== carrier) when species_transport=0.
+            const Solver::EOS::Tammann eos0_local = species_transport
+                ? GasEOS_eff(rho_vap(i, j, k) / std::max(rho_eta0(i, j, k), small), eos0_base, cv_vap, cp_vap)
+                : eos0_base;
 
             M(i, j, k, 0) = (rho0(i, j, k) * v0(i, j, k, 0)) * eta(i, j, k) + (rho1(i, j, k) * v1(i, j, k, 0)) * (1.0 - eta(i, j, k));
             M(i, j, k, 1) = (rho0(i, j, k) * v0(i, j, k, 1)) * eta(i, j, k) + (rho1(i, j, k) * v1(i, j, k, 1)) * (1.0 - eta(i, j, k));
@@ -2974,6 +3003,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     
         Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> rho_vap  = rho_vap_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> rho = density_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> E_vol = energy_per_vol_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> E_mas = energy_per_mas_mf.Patch(lev, mfi);
@@ -2993,8 +3023,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
 
-        // Local EOS Copy
-        const Solver::EOS::Tammann eos0_local = eos0;
+        // Local EOS Copy (eos0_base = carrier; per-cell eos0_local built below)
+        const Solver::EOS::Tammann eos0_base = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
     
         amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &F_max_local, &rho_min_local, &floor_energy_local] AMREX_GPU_DEVICE(int i, int j, int k)
@@ -3006,8 +3036,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Matrix hess_eta = Numeric::Hessian(eta_new, i, j, k, 0, DX, sten);
             Set::Scalar lap_eta = Numeric::Laplacian(eta_new, i, j, k, 0, DX);
 
+            // Stage 3 (3a-2): composition-dependent gas EOS (carrier + vapor).
+            const Solver::EOS::Tammann eos0_local = species_transport
+                ? GasEOS_eff(rho_vap(i, j, k) / std::max(rho_eta0(i, j, k), small), eos0_base, cv_vap, cp_vap)
+                : eos0_base;
+
             gammaf(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
-        
+
             etadot(i,j,k) = (eta_new(i,j,k) - eta(i,j,k)) / dt;
         
             v(i,j,k,0) = M(i,j,k,0) / (rho(i,j,k));
@@ -4256,13 +4291,21 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         auto UE = UE_per_vol_mf[lev]->array(mfi);
         auto KE = KE_per_vol_mf[lev]->array(mfi);
 
-        const Solver::EOS::Tammann eos0_local = eos0;
+        auto rho_eta0 = rho_eta0_mf[lev]->array(mfi);
+        auto rho_vap  = rho_vap_mf[lev]->array(mfi);
+
+        const Solver::EOS::Tammann eos0_base = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             // Velocity
             v(i, j, k, 0) = M(i, j, k, 0) / rho(i, j, k);
             v(i, j, k, 1) = M(i, j, k, 1) / rho(i, j, k);
+
+            // Stage 3 (3a-2): composition-dependent gas EOS (carrier + vapor).
+            const Solver::EOS::Tammann eos0_local = species_transport
+                ? GasEOS_eff(rho_vap(i, j, k) / std::max(rho_eta0(i, j, k), small), eos0_base, cv_vap, cp_vap)
+                : eos0_base;
 
             // Limiting Velocity
             /*
