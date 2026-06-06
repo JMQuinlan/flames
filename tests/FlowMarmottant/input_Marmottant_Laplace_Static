@@ -1,0 +1,200 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+# =============================================================================
+# MARMOTTANT (2005) LAPLACE-EQUILIBRIUM / CURVATURE-RECONSTRUCTION TEST
+# 2D cylindrical bubble, scaled units, NSCBC4.  (See bin/Marmottant.md.)
+# =============================================================================
+# Static counterpart of Bubble_UNIT_TEST2_Laplase, but with apply_marmottant=1.
+# The bubble sits on the Marmottant ELASTIC ramp at rest, so sigma_eff(R0)=sigma_0
+# and the gas pressure is Laplace-balanced against that *reconstructed* tension:
+#
+#   sigma(R) = chi (R_eff^2/R_buck^2 - 1),   R_eff = geom_factor/|kappa|  (=R in 2D)
+#
+# Canonical parameters (kept identical in the analysis scripts):
+#   R0          = 0.02
+#   chi         = 14.56
+#   sigma_break = 7.28        (clean-liquid rupture tension, scaled units)
+#   R_buckling  = 0.018
+#   geom_factor = 1.0         (2D-planar/cylinder: kappa = 1/R)
+# Derived:
+#   sigma_0 = chi*((R0/R_buck)^2 - 1) = 14.56*((0.02/0.018)^2 - 1) = 3.4153
+#   R_rupt  = R_buck*sqrt(1 + sigma_break/chi) = 0.018*sqrt(1.5) = 0.022045
+#   2D Laplace jump = sigma_0/R0 = 3.4153/0.02 = 170.77
+#   p_gas = p_liquid + jump = 500 + 170.77 = 670.77
+#
+# R0 = 0.02 lies between R_buck (0.018) and R_rupt (0.022045) -> ELASTIC regime.
+#
+# WHAT TO CHECK (analyze_Marmottant_Laplace.py):
+#   1. Bubble holds at R = R0 (no drift)         -> Laplace balance with sigma(R).
+#   2. sigma_eff field on interface ~ sigma_0    -> sigma(R_eff) reconstruction OK.
+#   3. R_eff = geom_factor/|kappa| ~ R0          -> curvature->radius inversion OK.
+# Drift / oscillation / wrong sigma_eff => reconstruction or scaling bug.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/FlowMarmottant/output_Marmottant_Laplace_Static
+
+### MESHING ###
+amr.plot_dt = 5e-4
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.regrid_int = 10
+amr.grid_eff = 0.8
+amr.max_level = 0
+amr.n_cell = 256 256
+
+nghost = 4
+
+### TIME STEPING ###
+timestep  = 1e-6
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1e-0
+dynamictimestep.min = 1e-12
+cfl = 0.3
+
+### DIMENSIONS ###
+geometry.prob_lo = -0.10 -0.10 0.0
+geometry.prob_hi =  0.10  0.10 0.0
+geometry.is_periodic = 0 0 0
+
+stop_time = 10e-3
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.002
+eta.ic.expression.constant.R0 = 0.02
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+# EOS (Tammann liquid + ideal gas) -- same scaled fluids as the Laplace test
+eos0.gamma = 7.15
+eos1.gamma = 1.4
+
+density0.ic.type = expression
+density0.ic.expression.region0 = "10.0"
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Marmottant-Laplace-balanced pressures: p_gas - p_liquid = sigma_0/R0 = 170.77
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "500.0"          # liquid (outside, eta=1)
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "670.77"         # gas    (inside,  eta=0): 500 + sigma_0/R0
+
+eos0.cp = "1000.0"
+eos1.cp = "1000.0"
+eos0.cv = "1000.0/1.4"
+eos1.cv = "1000.0/1.4"
+
+eos0.p0 = 5000.0
+eos1.p0 = 0.0
+
+# Inviscid -- pure Laplace test, no damping
+mu0 = 0.0
+mu0_b = 0.0
+mu1 = 0.0
+mu1_b = 0.0
+
+# Numeric/baseline surface tension (used only by the CH interface regularization;
+# the physical capillary force is taken over by Marmottant below).
+sigma = 7.28
+pref = 0.0
+
+### MARMOTTANT (2005) COATED-BUBBLE SURFACE TENSION ###
+apply_marmottant   = 1
+marm.chi           = 14.56
+marm.R_buckling    = 0.018
+marm.sigma_break   = 7.28
+marm.geom_factor   = 1.0
+
+### BOUNDARY CONDITIONS - NSCBC4 outflow ###
+density.bc.type.xhi  = nscbc_outflow
+density.bc.type.xlo  = nscbc_outflow
+density.bc.type.ylo  = nscbc_outflow
+density.bc.type.yhi  = nscbc_outflow
+energy.bc.type.xhi   = nscbc_outflow
+energy.bc.type.xlo   = nscbc_outflow
+energy.bc.type.ylo   = nscbc_outflow
+energy.bc.type.yhi   = nscbc_outflow
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow
+momentum.bc.type.xlo = nscbc_outflow nscbc_outflow
+momentum.bc.type.ylo = nscbc_outflow nscbc_outflow
+momentum.bc.type.yhi = nscbc_outflow nscbc_outflow
+
+nscbc.xlo.type = outflow
+nscbc.xlo.target_p = 500.0
+nscbc.xlo.sigma = 0.15
+nscbc.xlo.beta  = 0.5
+nscbc.xlo.L_ref = 0.20
+nscbc.xlo.target_u = 0.0
+nscbc.xlo.target_v = 0.0
+
+nscbc.xhi.type = outflow
+nscbc.xhi.target_p = 500.0
+nscbc.xhi.sigma = 0.15
+nscbc.xhi.beta  = 0.5
+nscbc.xhi.L_ref = 0.20
+nscbc.xhi.target_u = 0.0
+nscbc.xhi.target_v = 0.0
+
+nscbc.ylo.type = outflow
+nscbc.ylo.target_p = 500.0
+nscbc.ylo.sigma = 0.15
+nscbc.ylo.beta  = 0.5
+nscbc.ylo.L_ref = 0.20
+nscbc.ylo.target_u = 0.0
+nscbc.ylo.target_v = 0.0
+
+nscbc.yhi.type = outflow
+nscbc.yhi.target_p = 500.0
+nscbc.yhi.sigma = 0.15
+nscbc.yhi.beta  = 0.5
+nscbc.yhi.L_ref = 0.20
+nscbc.yhi.target_u = 0.0
+nscbc.yhi.target_v = 0.0
+
+nscbc.small = 1.0e-10
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion = 1e-1
+omega_refinement_criterion = 10.55
+p_refinement_criterion = 1e+7
+rho_refinement_criterion = 1e+6
+gradu_refinement_criterion = 1e+6
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 1
+apply_buoyancy = 0
+apply_weight = 0
+Spec_Vol = 1
+grav = 0.0
+
+### DEBUGGING ###
+Riemann_Solver.type = hllc
+kappa_method = 1                # REQUIRED for Marmottant (clean mean curvature)
+
+### INTERFACE COMPRESSION ###
+apply_sharpening = 0
+sharpening_frequency = 50
+reinit_max_iter = 100
+reinit_tolerance = 1e-6
+omega_relax = 0.5

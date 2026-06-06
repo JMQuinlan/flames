@@ -1,0 +1,205 @@
+#@ [marmottant_oscillating]
+#@ exe=hydro2
+#@ dim=2
+#@
+# =============================================================================
+# MARMOTTANT (2005) OSCILLATING COATED BUBBLE -- 2D cylindrical, scaled units
+# =============================================================================
+# Same canonical Marmottant parameters as input_Marmottant_Laplace_Static, but
+# the gas is initialized BELOW the Marmottant-balanced pressure so the net
+# surface-tension force compresses the bubble.  As R drops the bubble sweeps the
+# elastic ramp toward R_buck = 0.018 (sigma -> 0, "buckled"), then the now-
+# compressed gas rebounds.  The asymmetric stiffness (soft in compression as it
+# buckles, stiffer in expansion as sigma climbs toward the rupture cap) is the
+# Marmottant "compression-only" signature.
+#
+#   R0          = 0.02
+#   chi         = 14.56,  R_buckling = 0.018,  sigma_break = 7.28,  geom = 1.0
+#   sigma_0     = 3.4153  (elastic rest tension at R0)
+#   R_rupt      = 0.022045
+#   Balanced p_gas would be 670.77; we DRIVE with p_gas = 400 (under by ~271)
+#     -> deficit vs tension support => bubble collapses, rebounds, oscillates.
+#
+# Drive sizing (coated Chen-2D RPE, reference/marmottant_model.py): p_gas=400
+# gives min R/R0 ~ 0.82, i.e. the bubble compresses well past R_buck/R0 = 0.90
+# INTO the buckled regime (sigma -> 0), while the upper turning point stays at
+# R0 -- a textbook "compression-only" oscillation. (An OVER-pressure drive
+# p_gas > 670.77 would instead push R above R_rupt into the ruptured branch.)
+#
+# This is a free (un-forced) large-amplitude oscillation, intended to exercise
+# the sigma(R) machinery across regimes -- NOT a quantitative UCA match. Tune
+# the drive via pressure1 (gas IC) and stop_time. Compare against the constant-
+# sigma case and the coated Chen-2D RPE reference in
+# reference/analyze_Marmottant_Oscillating.py.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/FlowMarmottant/output_Marmottant_Oscillating
+
+### MESHING ###
+amr.plot_int        = -1
+amr.plot_dt         = 2.0e-4
+amr.max_grid_size   = 500000
+amr.blocking_factor = 2
+amr.regrid_int      = 10
+amr.grid_eff        = 0.8
+amr.max_level       = 0
+amr.n_cell          = 512 512        # dx = 7.8e-4 -> R0/dx ~ 25.6
+
+nghost = 4
+
+### TIME STEPPING ###
+timestep                = 1.0e-7
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-5
+dynamictimestep.min     = 1.0e-13
+cfl                     = 0.4
+
+### DIMENSIONS ###
+geometry.prob_lo     = -0.20 -0.20 0.0
+geometry.prob_hi     =  0.20  0.20 0.0
+geometry.is_periodic = 0 0 0
+stop_time            = 20.0e-3       # several oscillation cycles
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.0016     # ~ 2 cells across the band
+eta.ic.expression.constant.R0      = 0.02
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y) - R0)/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### EQUATION OF STATE -- scaled Tammann liquid + ideal gas ###
+eos0.gamma = 7.15
+eos0.p0    = 5000.0
+eos0.cp    = 1000.0
+eos0.cv    = 714.286
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp    = 1000.0
+eos1.cv    = 714.286
+
+### HYDRO INITIAL CONDITIONS ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "10.0"
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Liquid (exterior): uniform far-field 500 (small bubble in large domain).
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "500.0"
+
+# Gas (interior): driven BELOW the 670.77 Marmottant balance to force collapse
+# into the buckled regime (min R/R0 ~ 0.82 per the coated Chen-2D RPE).
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "400.0"
+
+### VISCOSITY (light -- a little damping keeps the rebound bounded) ###
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+# Numeric/baseline surface tension (CH regularization only; physical force is Marmottant)
+sigma = 7.28
+pref  = 0.0
+
+### MARMOTTANT (2005) COATED-BUBBLE SURFACE TENSION ###
+apply_marmottant   = 1
+marm.chi           = 14.56
+marm.R_buckling    = 0.018
+marm.sigma_break   = 7.28
+marm.geom_factor   = 1.0
+
+### BOUNDARY CONDITIONS - NSCBC4 non-reflecting outflow, target = 500 ###
+density.bc.type.xhi  = nscbc_outflow
+density.bc.type.xlo  = nscbc_outflow
+density.bc.type.ylo  = nscbc_outflow
+density.bc.type.yhi  = nscbc_outflow
+energy.bc.type.xhi   = nscbc_outflow
+energy.bc.type.xlo   = nscbc_outflow
+energy.bc.type.ylo   = nscbc_outflow
+energy.bc.type.yhi   = nscbc_outflow
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow
+momentum.bc.type.xlo = nscbc_outflow nscbc_outflow
+momentum.bc.type.ylo = nscbc_outflow nscbc_outflow
+momentum.bc.type.yhi = nscbc_outflow nscbc_outflow
+
+nscbc.xlo.type = outflow
+nscbc.xlo.target_p = 500.0
+nscbc.xlo.sigma = 0.15
+nscbc.xlo.beta  = 0.5
+nscbc.xlo.L_ref = 0.40
+nscbc.xlo.target_u = 0.0
+nscbc.xlo.target_v = 0.0
+
+nscbc.xhi.type = outflow
+nscbc.xhi.target_p = 500.0
+nscbc.xhi.sigma = 0.15
+nscbc.xhi.beta  = 0.5
+nscbc.xhi.L_ref = 0.40
+nscbc.xhi.target_u = 0.0
+nscbc.xhi.target_v = 0.0
+
+nscbc.ylo.type = outflow
+nscbc.ylo.target_p = 500.0
+nscbc.ylo.sigma = 0.15
+nscbc.ylo.beta  = 0.5
+nscbc.ylo.L_ref = 0.40
+nscbc.ylo.target_u = 0.0
+nscbc.ylo.target_v = 0.0
+
+nscbc.yhi.type = outflow
+nscbc.yhi.target_p = 500.0
+nscbc.yhi.sigma = 0.15
+nscbc.yhi.beta  = 0.5
+nscbc.yhi.L_ref = 0.40
+nscbc.yhi.target_u = 0.0
+nscbc.yhi.target_v = 0.0
+
+nscbc.small = 1.0e-10
+
+### REFINEMENT (off for the nominal run) ###
+eta_refinement_criterion   = 1.0e+10
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS ###
+apply_surface_tension = 1
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+Spec_Vol              = 1
+grav                  = 0.0
+
+### NUMERICS ###
+Riemann_Solver.type = hllc
+Limiter.type        = godunov
+integration.type    = RungeKutta
+integration.rk.type = 3
+kappa_method        = 1                # REQUIRED for Marmottant
+
+apply_sharpening     = 0
+sharpening_frequency = 50
+reinit_max_iter      = 100
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+relax_diag           = 1

@@ -72,6 +72,37 @@ static Set::Scalar SpaldingBM(Set::Scalar Y_local, Set::Scalar Y_inf, Set::Scala
     return (Y_local - Y_inf) / (1.0 - Y_local + small);
 }
 
+// Marmottant (2005) coated-bubble surface tension, evaluated as a state
+// function of an *effective radius reconstructed from the local interface
+// curvature*.  In the sharp-interface limit a clean mean curvature satisfies
+// kappa -> c_d / R (c_d = 1 planar/cylinder, 2 sphere/axisymmetric), so
+// R_eff = geom_factor / |kappa| recovers the bubble radius as epsilon -> 0.
+// This is exact for a spherical bubble (every interface point sees the same
+// kappa); under shape deformation it is a local generalization of the
+// area-based lipid model -- see bin/Marmottant.md (theory) for the caveat.
+//
+// Three regimes (Marmottant et al., JASA 117(6), 2005):
+//   (i)   buckled  R_eff <= R_buck         : sigma = 0
+//   (ii)  elastic  R_buck < R_eff < R_rupt : sigma = chi (R_eff^2/R_buck^2 - 1)
+//   (iii) ruptured R_eff >= R_rupt         : sigma = sigma_break (bare liquid)
+// with R_rupt = R_buck sqrt(1 + sigma_break/chi).  The branch structure is
+// self-regularizing: flat interface (kappa->0) saturates at sigma_break, tight
+// curvature drops to the buckling floor 0, so the 1/kappa in R_eff never blows
+// the force up -- sigma is bounded in [0, sigma_break] by construction.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+static Set::Scalar MarmottantSigma(Set::Scalar kappa,
+                                   Set::Scalar chi, Set::Scalar R_buck,
+                                   Set::Scalar sigma_break, Set::Scalar geom_factor,
+                                   Set::Scalar small)
+{
+    const Set::Scalar R_eff  = geom_factor / (std::abs(kappa) + small);
+    const Set::Scalar R_rupt = R_buck * std::sqrt(1.0 + sigma_break / (chi + small));
+
+    if (R_eff <= R_buck)  return 0.0;          // (i)   buckled
+    if (R_eff >= R_rupt)  return sigma_break;  // (iii) ruptured
+    return chi * ((R_eff * R_eff) / (R_buck * R_buck) - 1.0); // (ii) elastic
+}
+
 Hydro2::Hydro2(IO::ParmParse& pp) : Hydro2()
 {
     pp.queryclass(*this);
@@ -191,6 +222,28 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // CURVATURE
         pp_query_default("kappa_method", value.kappa_method, 2); // Method to solve for curvature
+
+        // MARMOTTANT (2005) coated-bubble surface tension.
+        // Reconstructs an effective radius from the local mean curvature and
+        // feeds it through the three-regime sigma(R).  Gated off by default so
+        // the constant-sigma path (and every existing test) is unchanged.
+        // See bin/Marmottant.md for the theory / sharp-interface-limit notes.
+        pp_query_default("apply_marmottant", value.apply_marmottant, false);     // master switch
+        pp_query_default("marm.chi",         value.marm_chi,         0.0);       // shell elastic modulus chi [N/m]
+        pp_query_default("marm.R_buckling",  value.marm_R_buck,      0.0);       // buckling radius (sigma=0) [m]
+        pp_query_default("marm.sigma_break", value.marm_sigma_break, 0.072);     // rupture tension (water) [N/m]
+        pp_query_default("marm.geom_factor", value.marm_geom_factor, 1.0);       // c_d: 2D-planar/cyl=1, sphere/axisym=2
+        if (value.apply_marmottant)
+        {
+            if (!value.apply_surface_tension)
+                Util::Abort(INFO, "apply_marmottant requires apply_surface_tension = 1");
+            if (value.kappa_method != 1)
+                Util::Abort(INFO, "apply_marmottant needs kappa_method = 1: method 2 stores an "
+                                  "epsilon-scaled tangential curvature in kappas[0] that is not "
+                                  "1/length and would corrupt the reconstructed R_eff");
+            if (value.marm_chi <= 0.0 || value.marm_R_buck <= 0.0)
+                Util::Abort(INFO, "apply_marmottant requires marm.chi > 0 and marm.R_buckling > 0");
+        }
 
         // INTERFACE COMPRESSION
         pp_query_default("apply_sharpening", value.apply_sharpening, false);
@@ -371,6 +424,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.q_mf,            &value.bc_nothing, 2, 0, "q0", false, false, { "x", "y" });
         value.RegisterNewFab(value.Source_mf,       &value.bc_nothing,  4, 0, "Source", true, false, { "_rho", "_Mx", "_My","_E" });
         value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, 0, "Fsv", true, false, { "x", "y" });  // Surface Tension
+        value.RegisterNewFab(value.sigma_eff_mf,    &value.bc_nothing,  1, 0, "sigma_eff", true, false);  // Marmottant effective surface tension
         value.RegisterNewFab(value.Fw_mf,           &value.bc_nothing,  2, 0, "Fw", true, false, { "x", "y" });   // Weight
         value.RegisterNewFab(value.Ldot_mf,         &value.bc_nothing,  2, 0, "Ldot", true, false, { "x", "y" });  // Ldot
         value.RegisterNewFab(value.T_mf,            value.energy_bc,  1, nghost, "T", true, false);                  // Temperature
@@ -501,6 +555,7 @@ void Hydro2::Initialize(int lev)
     // WritePlotFile, before any step has actually run.
     Fw_mf[lev]      ->setVal(0.0);
     Fsv_mf[lev]     ->setVal(0.0);
+    sigma_eff_mf[lev]->setVal(0.0);
     Vap_dot_mf[lev] ->setVal(0.0);
 
     // FLUID 0
@@ -1142,6 +1197,7 @@ Hydro2::RHS(int lev,
 
         Set::Patch<Set::Scalar> Source = Source_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fsv = Fsv_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> sigma_eff_p = sigma_eff_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fw = Fw_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Ldot_ = Ldot_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Vap_dot = Vap_dot_mf.Patch(lev, mfi);
@@ -1292,13 +1348,19 @@ Hydro2::RHS(int lev,
             // ------------------------------------------------------------
             // Fsv =  simga * kappa * grad_eta
             Set::Vector Fsv_vector = Set::Vector(0.0, 0.0);
+            Set::Scalar sigma_eff = 0.0;   // diagnostic-visible; physical value set on-interface below
             if (apply_surface_tension)
             {
                 // Optimization, only calc surface tension if on interface
                 if (grad_eta_mag > 0.0)
                 {
                     Set::Scalar kappa = kappas(i, j, k, 0);
-                    Set::Scalar sigma_eff = sigma;
+                    // Marmottant (2005): sigma(R_eff) reconstructed from local curvature.
+                    // Constant-sigma path is preserved when apply_marmottant is off.
+                    sigma_eff = apply_marmottant
+                              ? MarmottantSigma(kappa, marm_chi, marm_R_buck,
+                                                marm_sigma_break, marm_geom_factor, small)
+                              : sigma;
                     Set::Scalar alpha = 6 * sqrt(2);
                     //Set::Scalar UFFDA = epsilon * alpha * grad_eta_mag * grad_eta_mag;                // What I oringially had, did not reach max amplitude
                     //Set::Scalar UFFDA = grad_eta_mag * grad_eta_mag / (epsilon * sqrt(2.0));          // Forces an interface thickness
@@ -1314,6 +1376,7 @@ Hydro2::RHS(int lev,
             }
             Fsv(i, j, k, 0) = Fsv_vector(0);
             Fsv(i, j, k, 1) = Fsv_vector(1);
+            sigma_eff_p(i, j, k, 0) = sigma_eff;
 
             // ERROR CHECKING
             check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Surface Tension solving", {

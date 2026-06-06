@@ -227,6 +227,7 @@ protected:
     Set::Field<Set::Scalar> Source_mf;      // Sumation of Source Terms
     Set::Field<Set::Scalar> flux_mf;        // Riemann Solver Fluxes
     Set::Field<Set::Scalar> Fsv_mf;         // Surface Tension
+    Set::Field<Set::Scalar> sigma_eff_mf;   // Effective surface tension (Marmottant diagnostic)
     Set::Field<Set::Scalar> Fw_mf;          // Weight Force
     Set::Field<Set::Scalar> Bm_mf;          // Spalding Number
     Set::Field<Set::Scalar> Y_mf;           // Mass Fraction
@@ -329,6 +330,14 @@ protected:
     Set::Scalar R = 8314.; // [J]/[kmol]-[K] - Probably more common to use
     Set::Scalar Dv = 0.0; // Vapor Diffusivity
     Set::Scalar Y_infinity = 0.0; // Far Feild Vapor Mass Fraction
+
+    // Marmottant (2005) coated-bubble surface tension (sigma reconstructed
+    // from local curvature -> effective radius).  Gated by apply_marmottant.
+    int         apply_marmottant = 0;
+    Set::Scalar marm_chi         = NAN;   // shell elastic modulus chi [N/m]
+    Set::Scalar marm_R_buck      = NAN;   // buckling radius (sigma=0) [m]
+    Set::Scalar marm_sigma_break = 0.072; // rupture tension (water) [N/m]
+    Set::Scalar marm_geom_factor = 1.0;   // c_d: 2D-planar/cyl=1, sphere/axisym=2
 
 
     // CFD Properties
