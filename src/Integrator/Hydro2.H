@@ -429,6 +429,7 @@ protected:
     int apply_weight = 0;
     int static_eta = 0;
     int apply_vaporization = 0;
+    int spalding_saturation = 0;       // Stage 2: 1 = Spalding driving force = Antoine saturation Y_s at interface T; 0 = legacy local cell-Y. See SaturationYs.
     int apply_vap_const = 0;           // Verification: prescribed constant-rate phase change (bypasses Spalding closure). 0 = off.
     Set::Scalar vap_const_mdot = 0.0;  // imposed interfacial mass flux [kg/m^2/s]; m_dot_Vap = vap_const_mdot * |grad eta| (liquid->vapor if > 0)
     int apply_cavitation = 0;          // HRM bulk cavitation: liquid -> vapor at finite rate when p < p_sat(T). 0 = off.

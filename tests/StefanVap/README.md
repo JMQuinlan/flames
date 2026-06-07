@@ -209,8 +209,84 @@ This is what makes an absolute interface temperature physical; combined with
 conduction (3b-2) it sets up the quantitative Stefan / d²-law (3d) once the
 saturation closure (Stage 2) replaces the prescribed rate.
 
-## Stage 2 — fix the closure + full Stefan (TODO)
+## Stage 2 — physical Spalding driving force (`Saturation_1D`)
 
-Wire up the commented-out saturation block (Antoine + Clausius-Clapeyron →
-`Y_s`) so `B_M = (Y_s - Y_inf)/(1 - Y_s)` reflects a real driving force, then
-compare interface recession against the analytic Stefan solution.
+The legacy closure used the local cell mass fraction as the Spalding driving
+force, but in this branch `Y = rho_eta0/rho = eta`, so the old
+`B_M = (eta - Y_inf)/(1 - eta)` depends on the phase indicator `eta` **only** —
+it is thermodynamically meaningless and **temperature-independent**. That (not
+just the small magnitude) is why evaporation was a no-op. Stage 2 replaces it
+with the real driving force, the Antoine **saturation** mass fraction `Y_s` at
+the interface temperature:
+
+```
+p_sat(T) = 10^(A - B/(T+C)) bar        # same Antoine curve as HRM cavitation
+x_s      = p_sat / p                   # Raoult/Dalton mole fraction
+Y_s      = (x_s/R_v) / (x_s/R_v + (1-x_s)/R_g)   # mole->mass, R = cp - cv
+B_M      = (Y_s - Y_inf) / (1 - Y_s)
+```
+
+The mole→mass conversion uses the specific gas constants `R = cp - cv` (the
+universal constant cancels), so **no new molecular-weight inputs** are needed:
+`R_v = cp_vap - cv_vap`, `R_g` from the carrier `eos0`. Implemented as the
+`SaturationYs()` helper and turned on with `spalding_saturation = 1` (default 0
+= legacy local-`Y`, so all earlier runs are unchanged).
+
+Verification is the **temperature response**: a hotter interface gives a larger
+`Y_s` (Antoine) and so a faster rate, while the legacy closure is flat in `T`.
+
+**Critical regime gotcha (learned the hard way).** The driving force uses the
+**interface** temperature, `T = MixedTemperature(rho, p, eta)`. Across the diffuse
+band the mixed Tammann EOS makes `T` **overshoot well above both pure-phase
+temperatures** (the stiff `p0_eff` term dominates). The first attempt used pure-T
+450 K / 400 K, but the band ran 465–672 K / 413–597 K — both **above n-dodecane's
+boiling point (~489 K)** — so `x_s` clamped to 0.99 and `B_M` was **identical** in
+both runs. The observed ratio was then just the liquid-density prefactor (cold is
+denser): **0.902**, which a band model reproduces to 0.9016 — i.e. the *code is
+correct*, the *test regime* was wrong. So the test must stay **sub-boiling**, and
+because `B_M` varies across the (overshooting) band the prediction is the
+**band-integrated** rate, not a single-cell ratio.
+
+`Saturation_1D` is quiescent liquid|gas (carrier+vapor, `Dv` on, latent +
+conduction **off** so `T` stays put), with pure-phase temperatures chosen so the
+*whole band* stays below boiling:
+
+```
+HOT  pure-T = 300 K  ->  band ~310-448 K
+COLD pure-T = 250 K  ->  band ~258-373 K
+rate_hot/rate_cold ~ 9   (band-integrated; clamped/legacy gives ~0.9)
+```
+
+`Yv_init = 0` so `M_vapor` starts at 0 and `M_vapor(t_win) ~ rate*t_win` is the
+cleanest rate proxy. Run the cold and hot cases (swap the two density constants),
+then:
+
+```
+python3 tests/StefanVap/check_saturation.py <cold>/integrals.dat <hot>/integrals.dat 250 300
+```
+
+`check_saturation.py` re-implements the closure (mixed-EOS `T(eta)` + Antoine +
+Spalding) and integrates over the band to predict the ratio; it PASSES if the
+observed `M_vapor` ratio is `> 3` and within ~2x of that prediction, and it warns
+if any band cell clamps (`> 489 K`). CONTROL: `spalding_saturation = 0` gives the
+flat ~0.9 trend (legacy `B_M` tracks `eta`, not `T`).
+
+**Open physics concern (needs a decision).** At *production* densities the Tammann
+liquid temperature is very high (dodecane ~860 K at 749.5 kg/m³), and the band
+overshoots further, so the interface is superheated and the saturation closure
+**clamps** (always near-full driving force). Options: recalibrate the liquid EOS so
+its temperature is physical at its real density; drive saturation off a different
+temperature (liquid-side rather than the overshooting mixture `T`); or accept
+clamping in the shock regime.
+
+A design choice left for Stage 3d: `Y_inf` here is the constant far-field
+`Y_infinity` (textbook Spalding). The resolved-Stefan alternative is the local
+gas-side vapor mass fraction `mass_frac_v`, which self-limits as the local vapor
+approaches saturation — the natural coupling once diffusion + conduction + latent
+are all live.
+
+## Stage 3d — quantitative Stefan / d²-law (TODO)
+
+Turn saturation + latent heat + conduction on together and compare the interface
+recession against the analytic Stefan solution (interface ~ sqrt(t)); likely
+switch `Y_inf` to the local `mass_frac_v` for the self-consistent coupling.

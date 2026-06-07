@@ -62,16 +62,40 @@ namespace Integrator
 // (1 + Y_inf) denominator. (Spalding 1953; Sirignano 2010 Eq. 2.18;
 // Abramzon-Sirignano IJHMT 1989 Eq. 18.)
 //
-// `Y_local` here is whatever vapor mass-fraction the caller chose to use --
-// in the simplified Spalding closure used in this code, that is the cell
-// mass fraction Y(i,j,k). A more rigorous implementation would evaluate
-// the saturation mass fraction via Antoine + Clausius-Clapeyron at the
-// interface temperature; out of scope for this fix (see F-2 in
-// bin/Spalding_Rep.md).
+// `Y_local` here is whatever vapor mass-fraction the caller chose to use:
+// the legacy closure passes the local cell mass fraction Y(i,j,k) (which at a
+// liquid-dominated interface is ~rho_g/rho_l, nearly zeroing the rate -- the
+// "evaporation does nothing" bug); the Stage-2 closure passes the Antoine
+// SATURATION mass fraction Y_s from SaturationYs() below (gated on
+// spalding_saturation), the physically meaningful driving force.
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 static Set::Scalar SpaldingBM(Set::Scalar Y_local, Set::Scalar Y_inf, Set::Scalar small)
 {
     return (Y_local - Y_inf) / (1.0 - Y_local + small);
+}
+
+// Saturation vapor mass fraction at a liquid->vapor interface (Stage 2 Spalding
+// closure). The interface temperature T sets the vapor's saturation PARTIAL
+// pressure p_sat via the same Antoine curve (bar) used by the HRM cavitation
+// block, so the two share one saturation line; Raoult/Dalton give the saturation
+// MOLE fraction x_s = p_sat/p; the mole->mass conversion needs the
+// molecular-weight ratio, taken from the specific gas constants R = cp - cv
+// (W = R_univ/R, so the universal constant cancels):
+//     Y_s = (x_s/R_v) / ( x_s/R_v + (1-x_s)/R_g )
+// with R_v the vapor and R_g the inert-carrier specific gas constant. No new
+// molecular-weight inputs are needed -- R_v = cp_vap-cv_vap and R_g comes from the
+// carrier eos0. x_s is clamped to [0, 0.99] (sub-critical / numerically safe).
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+static Set::Scalar SaturationYs(Set::Scalar T, Set::Scalar p,
+                                Set::Scalar A, Set::Scalar B, Set::Scalar C,
+                                Set::Scalar R_v, Set::Scalar R_g, Set::Scalar small)
+{
+    const Set::Scalar p_sat = std::pow(10.0, A - B / (T + C)) * 1.0e5; // Antoine bar -> Pa
+    Set::Scalar x_s = p_sat / (p + small);
+    x_s = (x_s < 0.0) ? 0.0 : ((x_s > 0.99) ? 0.99 : x_s);            // saturation mole fraction
+    const Set::Scalar nv = x_s / (R_v + small);
+    const Set::Scalar ng = (1.0 - x_s) / (R_g + small);
+    return nv / (nv + ng + small);
 }
 
 // Stage 3 (3a-2): per-cell effective GAS equation of state for a binary
@@ -271,6 +295,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("antoine_A", value.antoine_A, 4.10549);      // log10(p_sat[bar]) = A - B/(T[K]+C)
         pp_query_default("antoine_B", value.antoine_B, 1625.928);
         pp_query_default("antoine_C", value.antoine_C, -92.839);
+        // Stage 2: physical Spalding driving force. 1 = build Bm from the Antoine
+        // SATURATION mass fraction Y_s at the interface T (carrier+vapor model);
+        // 0 = legacy local cell-Y driving force. See SaturationYs / SpaldingBM.
+        pp_query_default("spalding_saturation", value.spalding_saturation, 0);
         pp_query_default("L_vap", value.L_vap, 256.0e3);              // latent heat of vaporization [J/kg] (Stage 3c energy coupling)
         pp_query_default("apply_latent_heat", value.apply_latent_heat, 0); // 1 = subtract L_vap*m_dot_Vap from mixture energy (evaporative cooling); 0 = off
         // Stage 3: inert-carrier gas + transported dodecane-vapor species.
@@ -955,11 +983,18 @@ void Hydro2::Mix(int lev)
             // the liquid (both ~0); = Y_v in the gas.
             mass_frac_v(i, j, k) = rho_vap(i, j, k) / std::max(rho_eta0(i, j, k), small);
 
-            // Spalding Number  (F-1 / F-10: single canonical helper, denominator (1 - Y))
-            Bm(i, j, k) = SpaldingBM(Y(i, j, k), Y_infinity, small);
-
-            // Temperature
+            // Temperature (computed before Bm: the Stage-2 saturation driving force needs it)
             T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
+
+            // Spalding Number  (F-1 / F-10: single canonical helper, denominator (1 - Y)).
+            // Stage 2: spalding_saturation -> physical Antoine saturation mass fraction
+            // Y_s at the interface T as the driving force (carrier R from the base gas
+            // EOS, vapor R = cp_vap-cv_vap; see SaturationYs) instead of the local cell Y.
+            Set::Scalar Y_drive = Y(i, j, k);
+            if (spalding_saturation == 1)
+                Y_drive = SaturationYs(T(i, j, k), press(i, j, k), antoine_A, antoine_B, antoine_C,
+                                       cp_vap - cv_vap, eos0_base.Cp() - eos0_base.Cv(), small);
+            Bm(i, j, k) = SpaldingBM(Y_drive, Y_infinity, small);
 
             // Thermal Conductivity
             //k_thermal(i, j, k) = eta(i, j, k) * k0_thermal(i, j, k) + (1.0 - eta(i, j, k)) * k1_thermal(i, j, k);
@@ -1282,8 +1317,16 @@ Hydro2::RHS(int lev,
             // the liquid (both ~0); = Y_v in the gas.
             mass_frac_v(i, j, k) = rho_vap(i, j, k) / std::max(rho_eta0(i, j, k), small);
 
-            // Spalding Number  (F-1 / F-10: single canonical helper, denominator (1 - Y))
-            Bm(i, j, k) = SpaldingBM(Y(i, j, k), Y_infinity, small);
+            // Spalding Number  (F-1 / F-10: single canonical helper, denominator (1 - Y)).
+            // Stage 2: spalding_saturation -> physical Antoine saturation mass fraction
+            // Y_s at the interface T as the driving force (carrier R from eos0_local,
+            // vapor R = cp_vap-cv_vap; see SaturationYs) instead of the local cell Y.
+            // T/press here are the FillGhost4BC-refreshed primitives (valid neighbors).
+            Set::Scalar Y_drive = Y(i, j, k);
+            if (spalding_saturation == 1)
+                Y_drive = SaturationYs(T(i, j, k), press(i, j, k), antoine_A, antoine_B, antoine_C,
+                                       cp_vap - cv_vap, eos0_local.Cp() - eos0_local.Cv(), small);
+            Bm(i, j, k) = SpaldingBM(Y_drive, Y_infinity, small);
 
             // Curvature (legacy Hessian-based method — stored in component 2 for diagnostics)
             if (kappa_method != 1)
@@ -1745,30 +1788,11 @@ Hydro2::RHS(int lev,
                 //m_dot_Vap = (rho0(i, j, k) * Dv * (Bm(i, j, k) / (1.0 + Bm(i, j, k) + small)) * grad_eta_mag);
                 //eta_dot_Vap += (1.0 / (rho(i, j, k) * epsilon)) * m_dot_vap;
 
-                // Interface temperature - use gas side temperature
-                /*
-                Set::Scalar T_s = T(i, j, k);         // Interface temperature [K]
-                Set::Scalar T_celsius = T_s - 273.15; // Convert to Celsius for Antoine equation
-
-                // Saturation pressure from Antoine equation
-                // log10(p_sat[mmHg]) = A - B/(C + T[*C])
-                Set::Scalar log10_psat_mmHg = vap_Antoine_A - vap_Antoine_B / (vap_Antoine_C + T_celsius);
-                Set::Scalar p_sat = std::pow(10.0, log10_psat_mmHg) * 133.322; // Convert mmHg to Pa
-
-                // Mole fraction of vapor at interface (saturation)
-                Set::Scalar x_vs = p_sat / (press(i, j, k) + small);
-                x_vs = std::min(x_vs, 0.99); // Clamp to avoid numerical issues
-
-                // Mass fraction of vapor at surface (Equation 5 of document):
-                // Y_v,s = W_v * x_v,s / (W_v * x_v,s + W_g * (1 - x_v,s))
-                Set::Scalar numerator_Y = vap_W_v * x_vs;
-                Set::Scalar Y_vs = numerator_Y / (numerator_Y + vap_W_g * (1.0 - x_vs) + small);
-                */
-
-                // Mass fraction of vapor at surface
-                Set::Scalar Y_vs = Y(i, j, k); // rho_eta0(i, j, k) / (rho0(i, j, k) + rho1(i, j, k));
-
-                // Spalding mass transfer number
+                // Spalding mass transfer number. The driving force is folded into Bm
+                // upstream in the primitives loop: Bm = (Y_drive - Y_inf)/(1 - Y_drive),
+                // where Y_drive is the Antoine SATURATION mass fraction Y_s at the
+                // interface T when spalding_saturation = 1 (Stage 2; see SaturationYs),
+                // else the legacy local cell Y. The rate below just consumes Bm.
                 Set::Scalar B_M = Bm(i, j, k);
                 //B_M = std::max(B_M, 0.0); // Only evaporation, no condensation in this formulation
 

@@ -1,0 +1,220 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# =============================================================================
+# STAGE 2: PHYSICAL SPALDING DRIVING FORCE (Antoine saturation Y_s)
+# =============================================================================
+# The legacy Spalding closure used the LOCAL cell mass fraction as the driving
+# force. In this branch Y = rho_eta0/rho = eta (the phase indicator), so the old
+# B_M = (eta - Y_inf)/(1 - eta) is a function of eta ONLY -- thermodynamically
+# meaningless and TEMPERATURE-INDEPENDENT. Stage 2 (spalding_saturation = 1)
+# replaces it with the real driving force: the Antoine SATURATION mass fraction
+# Y_s at the interface temperature,
+#       p_sat(T) = 10^(A - B/(T+C)) bar        (same curve as HRM cavitation)
+#       x_s      = p_sat / p                    (Raoult/Dalton, mole fraction)
+#       Y_s      = (x_s/R_v) / (x_s/R_v + (1-x_s)/R_g)   (mole->mass; R = cp-cv)
+#       B_M      = (Y_s - Y_inf) / (1 - Y_s)
+# so evaporation now RESPONDS to temperature (Arrhenius-like via Antoine).
+#
+# *** CRITICAL REGIME NOTE (learned the hard way) ***
+# The closure uses the INTERFACE temperature, T = MixedTemperature(rho,p,eta).
+# Across the diffuse band the mixed (Tammann) EOS makes T OVERSHOOT well above
+# both pure-phase temperatures -- the stiff p0_eff term dominates. So the band T
+# is much hotter than the densities-imply pure-phase T. If any band cell exceeds
+# n-dodecane's boiling point (~489 K at 1 atm), x_s clamps (-> 0.99) and B_M
+# saturates identically in every run, killing the temperature response (you then
+# measure only the prefactor rho_g, ratio ~0.9). So this test MUST stay SUB-
+# BOILING. The temperatures below are chosen so the *band* (not just the pure
+# phases) stays under ~450 K:
+#       HOT  pure-T = 300 K  ->  band ~310-448 K   (Y_s up to ~0.6, no clamp)
+#       COLD pure-T = 250 K  ->  band ~258-373 K   (Y_s ~0.02-0.1)
+#
+# VERIFICATION -- temperature response. Run BOTH cases. The prefactor
+# (rho_g * Dv * |grad eta|) is nearly common, but because the band T overshoots
+# and varies, B_M varies across the band and the predicted ratio is the
+# BAND-INTEGRATED rate, which check_saturation.py models with the same mixed-EOS
+# T(eta) and Antoine:
+#       rate_hot/rate_cold ~ 9  (decisively > 1; legacy/control gives ~0.9)
+# M_vapor starts at 0 (Yv_init=0), so M_vapor(t_win) ~ rate*t_win is the cleanest
+# rate proxy. The CONTROL (spalding_saturation = 0) is flat-to-decreasing in T
+# (B_M depends on eta, not T) -- the opposite trend, the decisive sign the
+# saturation closure is live.
+#   * runs: (cold,sat=1) (hot,sat=1) [(hot,sat=0) control]
+#   -> python check_saturation.py <cold>/integrals.dat <hot>/integrals.dat 250 300
+#
+# Latent heat is OFF here on purpose: evaporative cooling would drift T mid-run
+# and muddy the T-response. species ON + Dv ON so vapor diffuses into the carrier
+# (the Spalding picture). Quiescent, uniform p -> the only dynamics is evaporation.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+# plot_file = /mmfs1/home/jquinlan/runs/stefan/output_saturation_hot
+plot_file = /mmfs1/home/jquinlan/runs/stefan/output_saturation_cold
+amr.plot_dt = 5.0e-7
+
+### MESHING (no AMR) ###
+amr.max_grid_size = 500000
+amr.blocking_factor = 4
+amr.regrid_int = 1
+amr.max_level = 0
+amr.n_cell = 200 8
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 4.0e-3 1.6e-4 0.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEPPING ###
+timestep = 1e-11
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1.0e-8
+dynamictimestep.min = 1.0e-15
+cfl = 0.2
+stop_time = 1.0e-4
+
+### ETA INITIAL CONDITIONS (liquid left, gas right) ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 4.0e-5
+eta.ic.expression.constant.x_int = 2.0e-3
+eta.ic.expression.region0 = "0.5*(1 + tanh((x - x_int)/(sqrt(2)*epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+# eos0 = gas: inert carrier (air) ideal gas. gamma=1.4, cv=717.5, cp=1004.5, p0=0.
+eos0.gamma = 1.4
+eos0.p0 = 0.0
+eos0.cv = "717.5"
+eos0.cp = "1004.5"
+mu0 = 0.0
+mu0_b = 0.0
+
+# eos1 = liquid n-dodecane (Tammann).
+eos1.gamma = 2.358
+eos1.p0 = 4.01e8
+eos1.cv = "1.08e3"
+eos1.cp = "2546.64"
+mu1 = 0.0
+mu1_b = 0.0
+
+# Densities chosen so the pure phases sit at a chosen temperature at p=1e5:
+#   gas:    T = p/((g-1) cv rho)        liquid: T = (p+g p0)/((g-1) cv rho)
+# (NB: the diffuse-band interface T runs HOTTER than these -- see the regime note
+#  above; these pure-T values are picked to keep the whole band sub-boiling.)
+#   HOT  (pure-T=300 K): rho_air=1.16144   rho_dodecane=2149.26   <-- this run
+#   COLD (pure-T=250 K): rho_air=1.39373   rho_dodecane=2579.11   <-- swap in for the cold run
+density0.ic.type = expression
+# density0.ic.expression.constant.rho_air = 1.16144 # hot
+density0.ic.expression.constant.rho_air = 1.39373 # cold
+density0.ic.expression.region0 = "rho_air"
+
+density1.ic.type = expression
+# density1.ic.expression.constant.rho_nDodecane = 2149.26 # hot
+density1.ic.expression.constant.rho_nDodecane = 2579.11 # cold
+density1.ic.expression.region0 = "rho_nDodecane"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p0 = 1.0e5
+pressure0.ic.expression.region0 = "p0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p0 = 1.0e5
+pressure1.ic.expression.region0 = "p0"
+
+pref = 0.0
+
+### SPALDING VAPORIZATION + STAGE-2 SATURATION DRIVING FORCE ###
+apply_vaporization  = 1      # Spalding mass transfer on
+spalding_saturation = 1      # Stage 2: B_M from Antoine saturation Y_s(T,p) (set 0 for the legacy/control run)
+Y_infinity          = 0.0    # far-field (ambient) vapor mass fraction
+# Antoine for p_sat (n-dodecane, bar): log10(p_sat) = A - B/(T+C). Shared with cavitation.
+antoine_A = 4.10549
+antoine_B = 1625.928
+antoine_C = -92.839
+
+### SPECIES (carrier + vapor) + DIFFUSION ###
+species_transport = 1        # gas = carrier(eos0=air) + transported dodecane vapor
+Yv_init           = 0.0      # gas starts as pure carrier -> M_vapor starts at 0
+cp_vap            = 1994.85  # dodecane-vapor cp [J/kg/K]  (R_v = cp_vap - cv_vap)
+cv_vap            = 1950.0   # dodecane-vapor cv [J/kg/K]
+Dv                = 2.0e-2   # vapor diffusivity [m^2/s] (exaggerated for a measurable, acoustic-limited rate)
+
+### NO LATENT HEAT / NO CONDUCTION (isolate the closure; keep T ~ constant) ###
+apply_latent_heat = 0
+L_vap             = 256.0e3
+k0_thermal        = 0.0
+k1_thermal        = 0.0
+
+### NO PRESCRIBED-RATE / NO CAVITATION ###
+apply_vap_const = 0
+vap_const_mdot  = 0.0
+apply_cavitation = 0
+
+### SURFACE TENSION / CH OFF ###
+apply_surface_tension = 0
+sigma = 0.0
+Mob = 50.0
+kappa_method = 1
+smooth_kernel_size = 5
+nghost = 4
+kappa_grad_frac = 0.02
+apply_sharpening = 0
+
+### BOUNDARY CONDITIONS (neumann all sides) ###
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA (unused at max_level=0) ###
+eta_refinement_criterion = 2e-2
+omega_refinement_criterion = 1e+20
+divu_refinement_criterion = 1e+20
+rho_refinement_criterion = 1e+20
+gradu_refinement_criterion = 1e+20
+
+cutoff = 1e-16
+small = 1e-6
+
+### POSITIVITY-PRESERVING FLUX LIMITER (off: species requires FE path) ###
+pp_flux_limiter = 0
+pp_source_limiter = 0
+eps_p = 1.0
+eps_rho = 1e-10
+p_cav = 1.0e6
+
+### SOURCE TERM IC FIELDS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+apply_weight = 0
+Spec_Vol = 1
+grav = 9.81
+
+### RIEMANN SOLVER ###
+Riemann_Solver.type = hllc_adc
+Riemann_Solver.hllc_adc.alpha = 12
+Riemann_Solver.hllc_adc.adc_components = 4
+adc_shock_threshold = 0.75
+adc_grow = 4
