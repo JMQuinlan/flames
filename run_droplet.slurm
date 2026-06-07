@@ -51,7 +51,8 @@ pwd
 date
 cat run_droplet.slurm
 # cat ./tests/FlowVortexShedLarge/input
-cat ./tests/FlowShockDroplet/Dodecane_Case_M6.5_Vap
+# cat ./tests/FlowShockDroplet/Dodecane_Case_M6.5_Vap
+cat ./tests/FlowShockDroplet/Air-Dodecane-Ma6_5
 
 # Set thread count (default value is 1)...
 
@@ -59,6 +60,7 @@ export OMP_NUM_THREADS=1
 
 # Launch MPI code...
 
-mpirun ./bin/hydro2-2d-g++ ./tests/FlowShockDroplet/Dodecane_Case_M6.5_Vap
+# mpirun ./bin/hydro2-2d-g++ ./tests/FlowShockDroplet/Dodecane_Case_M6.5_Vap
+mpirun ./bin/hydro2-2d-g++ ./tests/FlowShockDroplet/Air-Dodecane-Ma6_5
 
 # ---------------------------------------------------

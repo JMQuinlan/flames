@@ -306,11 +306,20 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("Yv_init", value.Yv_init, 0.0);              // initial vapor mass fraction in the gas region
         pp_query_default("cp_vap", value.cp_vap, 1994.85);           // dodecane-vapor cp [J/kg/K]
         pp_query_default("cv_vap", value.cv_vap, 1950.0);            // dodecane-vapor cv [J/kg/K]
-        // Stage 3a checkpoint 2 wires rho_vap advection only in the FE (no-limiter)
-        // path; the Pass-B (positivity-limiter) blended flux is not yet applied to
-        // rho_vap, so the two would be inconsistent. Forbid the combination for now.
+        // rho_vap is advected in BOTH the FE (no-limiter) path and the PP-limiter
+        // Pass D, in each case riding the SAME mixture mass flux as rho_eta0 so the
+        // carrier (= rho_eta0 - rho_vap) is conserved face-by-face. Under the limiter
+        // rho_vap carries no positivity theta of its own (it inherits the per-face
+        // blend chosen for the mixture) and, as in the FE path, its ghosts are not
+        // FillPatch'd across coarse-fine boundaries (neumann/clamped there). So vapor
+        // advection is APPROXIMATE where the limiter fires -- acceptable for the
+        // shock-droplet production target; a fully PP-limited + multigrid species
+        // flux is future work.
         if (value.species_transport != 0 && value.pp_flux_limiter != 0)
-            Util::Abort(INFO, "species_transport=1 currently requires pp_flux_limiter=0 (Pass-B species flux not yet implemented)");
+            Util::Message(INFO, "WARNING: species_transport=1 with pp_flux_limiter=1: "
+                          "vapor advection is approximate where the limiter fires "
+                          "(rho_vap rides the blended mixture mass flux with no separate "
+                          "positivity theta; coarse-fine rho_vap ghosts are clamped).");
         if (value.apply_cavitation != 0 && value.tau_cav <= 0.0)
             Util::Abort(INFO, "tau_cav must be > 0 when apply_cavitation=1 (it is the cavitation relaxation time)");
         pp_query_required("epsilon", value.epsilon);    // diffuse interface thickness Y_infinity
@@ -2323,8 +2332,9 @@ Hydro2::RHS(int lev,
             // neighbor index is clamped to the valid domain (= neumann for
             // rho_vap), so no rho_vap ghost fill is required. Evaporation creates
             // vapor (+m_dot_Vap), matching the +m_dot_Vap added to rho_eta0, so
-            // carrier (= rho_eta0 - rho_vap) is conserved. FE/no-limiter path only;
-            // a parse guard forbids pp_flux_limiter with species_transport for now.
+            // carrier (= rho_eta0 - rho_vap) is conserved. This is the FE/no-limiter
+            // value; when the PP limiter is on, Pass D OVERWRITES rho_vap_rhs with the
+            // blended-mass-flux version (consistent with rho_eta0) -- see there.
             if (species_transport)
             {
                 const int dlo0 = domain.smallEnd(0), dhi0 = domain.bigEnd(0);
@@ -2392,8 +2402,10 @@ Hydro2::RHS(int lev,
             // k; the clamped neighbor indices give a zero-gradient (adiabatic / no-flux)
             // wall at the domain edges -- correct for the neumann energy BC and the 1D
             // Stefan setup. T is refreshed every RHS by FillGhost4BC. Gated on k>0 so
-            // all conduction-off (k0=k1=0) runs are bit-for-bit unchanged. Single-grid
-            // / FE path only (same valid-neighbor access as the species diffusion above).
+            // all conduction-off (k0=k1=0) runs are bit-for-bit unchanged. Folded into
+            // Source[3] below so it flows through the source limiter (Pass D), exactly
+            // like latent heat -- instead of being dropped when the limiter overwrites
+            // E_rhs (same valid-neighbor/clamped access as the species diffusion above).
             Set::Scalar E_cond = 0.0;
             if (k0_thermal > 0.0 || k1_thermal > 0.0)
             {
@@ -2415,7 +2427,17 @@ Hydro2::RHS(int lev,
                 E_cond = ( k_xhi * (T(ip, j, k) - T(i, j, k)) - k_xlo * (T(i, j, k) - T(im, j, k)) ) / (DX[0] * DX[0])
                        + ( k_yhi * (T(i, jp, k) - T(i, j, k)) - k_ylo * (T(i, j, k) - T(i, jm, k)) ) / (DX[1] * DX[1]);
             }
-            E_rhs(i, j, k) = E_flux(i, j, k) + Source(i, j, k, 3) + E_cond;
+            // Fold conduction into the energy source so it takes the SAME path as latent
+            // heat: the FE update below adds Source[3], and when the PP limiter is on Pass
+            // D adds s_src*Source[3] -- so conduction is now governed by the source limiter
+            // rather than dropped. Source[3] is reassigned fresh every RHS (Source loop),
+            // so this does not accumulate across RK stages. At k=0, E_cond=0 -> unchanged.
+            // NB: the source limiter scales the whole energy source by one per-cell s_src,
+            // so when s_src<1 (positivity active) the conservative div(k gradT) is scaled
+            // and conduction is no longer strictly energy-conserving in those cells -- the
+            // intended positivity-over-conservation trade-off of the source limiter.
+            Source(i, j, k, 3) += E_cond;
+            E_rhs(i, j, k) = E_flux(i, j, k) + Source(i, j, k, 3);
 
            // ------------------------------------------------------------
            // Error Checking
@@ -2503,6 +2525,10 @@ Hydro2::RHS(int lev,
         // be source-free (the source is governed by s, not by theta), so override
         // the legacy source-into-baseline folding.
         const bool src_limit_on = (pp_source_limiter != 0);
+        // Local copies (member access is not GPU-safe inside the device lambdas below)
+        // for the Pass-D vapor-species (rho_vap) recompute.
+        const bool species_on = (species_transport != 0);
+        const Set::Scalar Dv_l = Dv;
 
         // Make each cell's lo-face flux available from its neighbor's hi-face.
         for (int d = 0; d < AMREX_SPACEDIM; d++)
@@ -2672,6 +2698,8 @@ Hydro2::RHS(int lev,
             auto Ene = energy_per_vol_mf[lev]->array(mfi);
             auto re0 = rho_eta0_mf[lev]->array(mfi);
             auto re1 = rho_eta1_mf[lev]->array(mfi);
+            auto rho_vap = rho_vap_mf[lev]->array(mfi);
+            auto rvaprhs = rho_vap_rhs_mf.array(mfi);
             auto gam = gamma_mf[lev]->array(mfi);
             auto p0  = p0_mf[lev]->array(mfi);
             auto Fhx = pp_scratch[lev].Fhi[0]->array(mfi);
@@ -2797,6 +2825,54 @@ Hydro2::RHS(int lev,
                 Mrhs(i, j, k, 0) = mx_div + s_src * Src(i, j, k, 1);
                 Mrhs(i, j, k, 1) = my_div + s_src * Src(i, j, k, 2);
                 Erhs(i, j, k)    = E_div  + s_src * Src(i, j, k, 3);
+
+                // Vapor species under the PP limiter (Stage 3a): advect rho_vap with
+                // the SAME blended mixture mass flux as rho_eta0 (Fx*[0]/Fy*[0]),
+                // weighted by the upwind vapor-fraction-of-total rho_vap/rho (upwind
+                // direction by the high-order u_interface uxhi.., matching the ef_*
+                // split used for rho_eta0). The evaporation source +mdv is scaled by
+                // the SAME s_src as rho_eta0's +mdv, so the carrier (rho_eta0 - rho_vap)
+                // source cancels exactly and action-reaction holds at the discrete
+                // level. Diffusion is the same FE Fickian operator (clamped-neighbor
+                // neumann at domain edges). This OVERWRITES the unblended rho_vap_rhs
+                // the FE block wrote above (same pattern as the other conserved RHS).
+                // Approximate where the limiter fires: no separate positivity theta for
+                // rho_vap; coarse-fine rho_vap ghosts are clamped (parse-time WARNING).
+                if (species_on)
+                {
+                    const int dlo0 = domain.smallEnd(0), dhi0 = domain.bigEnd(0);
+                    const int dlo1 = domain.smallEnd(1), dhi1 = domain.bigEnd(1);
+                    const int im = (i > dlo0) ? i - 1 : i;
+                    const int ip = (i < dhi0) ? i + 1 : i;
+                    const int jm = (j > dlo1) ? j - 1 : j;
+                    const int jp = (j < dhi1) ? j + 1 : j;
+                    Set::Scalar fvap_xlo = (uxlo > 0.0) ? rho_vap(im, j, k) / std::max(rho(im, j, k), small_l)
+                                                        : rho_vap(i,  j, k) / std::max(rho(i,  j, k), small_l);
+                    Set::Scalar fvap_xhi = (uxhi > 0.0) ? rho_vap(i,  j, k) / std::max(rho(i,  j, k), small_l)
+                                                        : rho_vap(ip, j, k) / std::max(rho(ip, j, k), small_l);
+                    Set::Scalar fvap_ylo = (uylo > 0.0) ? rho_vap(i, jm, k) / std::max(rho(i, jm, k), small_l)
+                                                        : rho_vap(i, j,  k) / std::max(rho(i, j,  k), small_l);
+                    Set::Scalar fvap_yhi = (uyhi > 0.0) ? rho_vap(i, j,  k) / std::max(rho(i, j,  k), small_l)
+                                                        : rho_vap(i, jp, k) / std::max(rho(i, jp, k), small_l);
+                    Set::Scalar rho_vap_div = (fvap_xlo * Fxlo[0] - fvap_xhi * Fxhi[0]) / DX[0]
+                                            + (fvap_ylo * Fylo[0] - fvap_yhi * Fyhi[0]) / DX[1];
+                    Set::Scalar rho_vap_diff = 0.0;
+                    if (Dv_l > 0.0)
+                    {
+                        const Set::Scalar Yv_c  = rho_vap(i, j, k)  / std::max(re0(i, j, k), small_l);
+                        const Set::Scalar Yv_im = rho_vap(im, j, k) / std::max(re0(im, j, k), small_l);
+                        const Set::Scalar Yv_ip = rho_vap(ip, j, k) / std::max(re0(ip, j, k), small_l);
+                        const Set::Scalar Yv_jm = rho_vap(i, jm, k) / std::max(re0(i, jm, k), small_l);
+                        const Set::Scalar Yv_jp = rho_vap(i, jp, k) / std::max(re0(i, jp, k), small_l);
+                        const Set::Scalar re0_xlo = 0.5 * (re0(im, j, k) + re0(i, j, k));
+                        const Set::Scalar re0_xhi = 0.5 * (re0(i, j, k) + re0(ip, j, k));
+                        const Set::Scalar re0_ylo = 0.5 * (re0(i, jm, k) + re0(i, j, k));
+                        const Set::Scalar re0_yhi = 0.5 * (re0(i, j, k) + re0(i, jp, k));
+                        rho_vap_diff = Dv_l * ( (re0_xhi * (Yv_ip - Yv_c) - re0_xlo * (Yv_c - Yv_im)) / (DX[0] * DX[0])
+                                              + (re0_yhi * (Yv_jp - Yv_c) - re0_ylo * (Yv_c - Yv_jm)) / (DX[1] * DX[1]) );
+                    }
+                    rvaprhs(i, j, k) = rho_vap_div + s_src * mdv + rho_vap_diff;
+                }
 
                 rho_flux(i, j, k) = rho_div;
                 M_flux(i, j, k, 0) = mx_div;
