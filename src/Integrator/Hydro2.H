@@ -542,7 +542,9 @@ protected:
 
     // Cell-centered flux MultiFabs storing hi-face Riemann fluxes.
     // cc_fluxes[lev].mass[d]: cell (i,j) stores per-phase mass flux at face
-    //   (i+1/2,j) for d=0, or (i,j+1/2) for d=1.  2 components: rho_eta0, rho_eta1.
+    //   (i+1/2,j) for d=0, or (i,j+1/2) for d=1.  3 components: rho_eta0,
+    //   rho_eta1, rho_vap (vapor advective flux; comp 2 written only when
+    //   species_transport != 0, otherwise it stays 0 and refluxes as a no-op).
     // cc_fluxes[lev].mom[d]:  AMREX_SPACEDIM components (x-mom, y-mom).
     // cc_fluxes[lev].energy[d]: 1 component.  1 ghost cell for FillBoundary.
     // Converted to temporary face-centered MultiFabs in Advance() for

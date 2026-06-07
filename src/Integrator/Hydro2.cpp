@@ -308,18 +308,19 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("cv_vap", value.cv_vap, 1950.0);            // dodecane-vapor cv [J/kg/K]
         // rho_vap is advected in BOTH the FE (no-limiter) path and the PP-limiter
         // Pass D, in each case riding the SAME mixture mass flux as rho_eta0 so the
-        // carrier (= rho_eta0 - rho_vap) is conserved face-by-face. Under the limiter
-        // rho_vap carries no positivity theta of its own (it inherits the per-face
-        // blend chosen for the mixture) and, as in the FE path, its ghosts are not
-        // FillPatch'd across coarse-fine boundaries (neumann/clamped there). So vapor
-        // advection is APPROXIMATE where the limiter fires -- acceptable for the
-        // shock-droplet production target; a fully PP-limited + multigrid species
-        // flux is future work.
+        // carrier (= rho_eta0 - rho_vap) is conserved face-by-face. Its coarse-fine
+        // ghosts are now FillPatch'd from the coarse level (FillGhost4BC) and its
+        // advective face flux is refluxed at coarse-fine boundaries (cc_fluxes mass
+        // comp 2 -> FluxRegister), so the multigrid handling matches rho_eta0. The
+        // remaining approximation under the limiter is that rho_vap carries no
+        // positivity theta of its own (it inherits the per-face blend chosen for
+        // the mixture); the diffusive (Dv) flux is also not refluxed, matching the
+        // conduction treatment.
         if (value.species_transport != 0 && value.pp_flux_limiter != 0)
             Util::Message(INFO, "WARNING: species_transport=1 with pp_flux_limiter=1: "
-                          "vapor advection is approximate where the limiter fires "
-                          "(rho_vap rides the blended mixture mass flux with no separate "
-                          "positivity theta; coarse-fine rho_vap ghosts are clamped).");
+                          "vapor advection inherits the mixture per-face positivity "
+                          "blend (no separate rho_vap theta); CF ghosts are FillPatch'd "
+                          "and the advective flux is refluxed.");
         if (value.apply_cavitation != 0 && value.tau_cav <= 0.0)
             Util::Abort(INFO, "tau_cav must be > 0 when apply_cavitation=1 (it is the cavitation relaxation time)");
         pp_query_required("epsilon", value.epsilon);    // diffuse interface thickness Y_infinity
@@ -472,8 +473,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.rho_eta0_old_mf,  value.density_bc, 1, nghost, "rho_eta0_old", false, true);
         value.RegisterNewFab(value.rho_eta1_old_mf,  value.density_bc, 1, nghost, "rho_eta1_old", false, true);
         // Stage 3: dodecane-vapor partial density within the gas (carrier+vapor).
-        value.RegisterNewFab(value.rho_vap_mf,       value.density_bc, 1, nghost, "rho_vap", true, true);
-        value.RegisterNewFab(value.rho_vap_old_mf,   value.density_bc, 1, nghost, "rho_vap_old", false, true);
+        // Zero-gradient (neumann) BC, NOT density_bc: the gas inflow is pure
+        // carrier (no vapor), so the total-density dirichlet value density_bc
+        // carries would be wrong as a rho_vap ghost. Zero-gradient also matches
+        // the species advection/diffusion stencil, which clamps to the domain
+        // edge (= no-flux) at physical boundaries.
+        value.RegisterNewFab(value.rho_vap_mf,       &value.neumann_bc_1, 1, nghost, "rho_vap", true, true);
+        value.RegisterNewFab(value.rho_vap_old_mf,   &value.neumann_bc_1, 1, nghost, "rho_vap_old", false, true);
 
         value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing, 1, 0, "etadot", true, false);
         value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing, 4, 0, "hess_eta", false, false, { "00", "01", "10", "11" });
@@ -799,7 +805,7 @@ void Hydro2::Initialize(int lev)
     // Build FluxRegister for this level if it is a fine level.
     if (lev > 0)
     {
-        int ncomp_reflux = 2 + AMREX_SPACEDIM + 1; // rho0 + rho1 + momentum + energy
+        int ncomp_reflux = 2 + AMREX_SPACEDIM + 1 + 1; // rho0 + rho1 + momentum + energy + rho_vap
         flux_reg[lev] = std::make_unique<amrex::FluxRegister>(
             ba_init, dm_init, refRatio(lev - 1), lev, ncomp_reflux);
     }
@@ -809,7 +815,7 @@ void Hydro2::Initialize(int lev)
     // for the cell-to-face conversion in Advance().
     for (int d = 0; d < AMREX_SPACEDIM; d++)
     {
-        cc_fluxes[lev].mass[d]   = std::make_unique<amrex::MultiFab>(ba_init, dm_init, 2, 1);
+        cc_fluxes[lev].mass[d]   = std::make_unique<amrex::MultiFab>(ba_init, dm_init, 3, 1); // rho_eta0, rho_eta1, rho_vap
         cc_fluxes[lev].mom[d]    = std::make_unique<amrex::MultiFab>(ba_init, dm_init, AMREX_SPACEDIM, 1);
         cc_fluxes[lev].energy[d] = std::make_unique<amrex::MultiFab>(ba_init, dm_init, 1, 1);
 
@@ -2329,8 +2335,10 @@ Hydro2::RHS(int lev,
             // Vapor species (Stage 3a, checkpoint 2): rho_vap advects with the
             // mixture mass flux, weighted by the upwind vapor-fraction-of-total
             // (rho_vap/rho) with the SAME upwind direction as eta_face. The
-            // neighbor index is clamped to the valid domain (= neumann for
-            // rho_vap), so no rho_vap ghost fill is required. Evaporation creates
+            // neighbor index is clamped only at PHYSICAL domain edges (= neumann
+            // for rho_vap); at box / coarse-fine interfaces it reads rho_vap
+            // ghosts, which FillGhost4BC now FillBoundary's (same level) and
+            // FillPatch'es (coarse-fine). Evaporation creates
             // vapor (+m_dot_Vap), matching the +m_dot_Vap added to rho_eta0, so
             // carrier (= rho_eta0 - rho_vap) is conserved. This is the FE/no-limiter
             // value; when the PP limiter is on, Pass D OVERWRITES rho_vap_rhs with the
@@ -2357,6 +2365,20 @@ Hydro2::RHS(int lev,
                     : rho_vap(i, jp, k) / std::max(rho(i, jp, k), small);
                 Set::Scalar rho_vap_flux = (fvap_xlo * flux_xlo.mass - fvap_xhi * flux_xhi.mass) / DX[0]
                                          + (fvap_ylo * flux_ylo.mass - fvap_yhi * flux_yhi.mass) / DX[1];
+
+                // Store the hi-face rho_vap ADVECTIVE flux for reflux (mass comp 2),
+                // mirroring the rho_eta0/rho_eta1 storage above. Diffusion (rho_vap_diff)
+                // is deliberately NOT refluxed -- same approximation as conduction, which
+                // is a source rather than a cc_flux. fvap_face <= eta_face (rho_vap<=rho_eta0)
+                // per face, so the rho_vap reflux correction stays bounded by rho_eta0's,
+                // keeping the carrier (rho_eta0 - rho_vap) consistent at coarse-fine edges.
+                if (have_cc_fluxes)
+                {
+                    ff_mass_x(i, j, k, 2) = fvap_xhi * flux_xhi.mass;
+                    ff_mass_y(i, j, k, 2) = fvap_yhi * flux_yhi.mass;
+                    if (i == bx_lo.x) ff_mass_x(i - 1, j, k, 2) = fvap_xlo * flux_xlo.mass;
+                    if (j == bx_lo.y) ff_mass_y(i, j - 1, k, 2) = fvap_ylo * flux_ylo.mass;
+                }
 
                 // Fickian vapor diffusion through the inert carrier (Stage 3b-1):
                 //   d(rho_vap)/dt += div( rho_eta0 * Dv * grad(Y_v) ),  Y_v = rho_vap/rho_eta0.
@@ -2836,8 +2858,10 @@ Hydro2::RHS(int lev,
                 // level. Diffusion is the same FE Fickian operator (clamped-neighbor
                 // neumann at domain edges). This OVERWRITES the unblended rho_vap_rhs
                 // the FE block wrote above (same pattern as the other conserved RHS).
-                // Approximate where the limiter fires: no separate positivity theta for
-                // rho_vap; coarse-fine rho_vap ghosts are clamped (parse-time WARNING).
+                // Coarse-fine rho_vap ghosts are FillPatch'd and the advective flux is
+                // refluxed (cc_fluxes mass comp 2); the only remaining approximation
+                // where the limiter fires is that rho_vap carries no separate positivity
+                // theta (it inherits the mixture per-face blend) -- see parse WARNING.
                 if (species_on)
                 {
                     const int dlo0 = domain.smallEnd(0), dhi0 = domain.bigEnd(0);
@@ -2856,6 +2880,19 @@ Hydro2::RHS(int lev,
                                                         : rho_vap(i, jp, k) / std::max(rho(i, jp, k), small_l);
                     Set::Scalar rho_vap_div = (fvap_xlo * Fxlo[0] - fvap_xhi * Fxhi[0]) / DX[0]
                                             + (fvap_ylo * Fylo[0] - fvap_yhi * Fyhi[0]) / DX[1];
+
+                    // Store the hi-face rho_vap advective flux for reflux (mass comp 2),
+                    // using the SAME blended mass flux Fx*[0]/Fy*[0] as rho_eta0 below.
+                    // (Stored here, inside the species block, where fvap_* are in scope;
+                    // the rho_eta0/rho_eta1 comps are stored in the have_cc block below.)
+                    if (have_cc)
+                    {
+                        ff_mass_x(i, j, k, 2) = fvap_xhi * Fxhi[0];
+                        ff_mass_y(i, j, k, 2) = fvap_yhi * Fyhi[0];
+                        if (i == bxlo.x) ff_mass_x(i - 1, j, k, 2) = fvap_xlo * Fxlo[0];
+                        if (j == bxlo.y) ff_mass_y(i, j - 1, k, 2) = fvap_ylo * Fylo[0];
+                    }
+
                     Set::Scalar rho_vap_diff = 0.0;
                     if (Dv_l > 0.0)
                     {
@@ -3043,7 +3080,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             amrex::BoxArray face_ba = cc_fluxes[lev].mass[d]->boxArray();
             face_ba.surroundingNodes(d);
             const amrex::DistributionMapping& dm_cc = cc_fluxes[lev].mass[d]->DistributionMap();
-            amrex::MultiFab face_mass(face_ba, dm_cc, 2, 0);
+            amrex::MultiFab face_mass(face_ba, dm_cc, 3, 0); // rho_eta0, rho_eta1, rho_vap
             amrex::MultiFab face_mom(face_ba, dm_cc, AMREX_SPACEDIM, 0);
             amrex::MultiFab face_ene(face_ba, dm_cc, 1, 0);
 
@@ -3068,6 +3105,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     int jj = (dd == 1) ? j - 1 : j;
                     f_m(i, j, k, 0) = cc_m(ii, jj, k, 0);
                     f_m(i, j, k, 1) = cc_m(ii, jj, k, 1);
+                    f_m(i, j, k, 2) = cc_m(ii, jj, k, 2); // rho_vap (0 when species off)
                     for (int n = 0; n < AMREX_SPACEDIM; n++)
                         f_p(i, j, k, n) = cc_p(ii, jj, k, n);
                     f_e(i, j, k) = cc_e(ii, jj, k);
@@ -3086,12 +3124,17 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 flux_reg[lev + 1]->CrseInit(face_mass, area_mf, d, 0, 0, 2, -dt);
                 flux_reg[lev + 1]->CrseInit(face_mom, area_mf, d, 0, 2, AMREX_SPACEDIM, -dt);
                 flux_reg[lev + 1]->CrseInit(face_ene, area_mf, d, 0, 2 + AMREX_SPACEDIM, 1, -dt);
+                // rho_vap: face_mass comp 2 -> register comp 2+SPACEDIM+1 (last).
+                if (species_transport)
+                    flux_reg[lev + 1]->CrseInit(face_mass, area_mf, d, 2, 2 + AMREX_SPACEDIM + 1, 1, -dt);
             }
             if (need_fine)
             {
                 flux_reg[lev]->FineAdd(face_mass, area_mf, d, 0, 0, 2, dt);
                 flux_reg[lev]->FineAdd(face_mom, area_mf, d, 0, 2, AMREX_SPACEDIM, dt);
                 flux_reg[lev]->FineAdd(face_ene, area_mf, d, 0, 2 + AMREX_SPACEDIM, 1, dt);
+                if (species_transport)
+                    flux_reg[lev]->FineAdd(face_mass, area_mf, d, 2, 2 + AMREX_SPACEDIM + 1, 1, dt);
             }
         }
     }
@@ -3431,7 +3474,7 @@ void Hydro2::Regrid(int lev, Set::Scalar regrid_time)
     // Rebuild FluxRegister on regridded level.
     if (lev > 0)
     {
-        int ncomp_reflux = 2 + AMREX_SPACEDIM + 1;
+        int ncomp_reflux = 2 + AMREX_SPACEDIM + 1 + 1; // rho0 + rho1 + momentum + energy + rho_vap
         flux_reg[lev] = std::make_unique<amrex::FluxRegister>(
             ba_reg, dm_reg, refRatio(lev - 1), lev, ncomp_reflux);
     }
@@ -3439,7 +3482,7 @@ void Hydro2::Regrid(int lev, Set::Scalar regrid_time)
     // Rebuild cell-centered flux storage (1 ghost for FillBoundary in Advance).
     for (int d = 0; d < AMREX_SPACEDIM; d++)
     {
-        cc_fluxes[lev].mass[d]   = std::make_unique<amrex::MultiFab>(ba_reg, dm_reg, 2, 1);
+        cc_fluxes[lev].mass[d]   = std::make_unique<amrex::MultiFab>(ba_reg, dm_reg, 3, 1); // rho_eta0, rho_eta1, rho_vap
         cc_fluxes[lev].mom[d]    = std::make_unique<amrex::MultiFab>(ba_reg, dm_reg, AMREX_SPACEDIM, 1);
         cc_fluxes[lev].energy[d] = std::make_unique<amrex::MultiFab>(ba_reg, dm_reg, 1, 1);
 
@@ -4432,7 +4475,23 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         FillPatch(lev, time, momentum_mf,        *momentum_mf[lev],       *momentum_bc,  0);
         FillPatch(lev, time, energy_per_vol_mf,  *energy_per_vol_mf[lev], *energy_bc,    0);
         FillPatch(lev, time, eta_mf,             *eta_mf[lev],            *eta_bc,       0);
+        // Vapor species: interpolate rho_vap across coarse-fine boundaries from
+        // the coarse level (two-time-level FillPatch, zero-gradient physical BC).
+        // The species advection/diffusion stencils read rho_vap at +/-1 across
+        // coarse-fine interfaces (interior, NOT clamped), so without this the CF
+        // ghosts are stale and the vapor transport is wrong at refinement edges.
+        if (species_transport)
+            FillPatch(lev, time, rho_vap_mf,     *rho_vap_mf[lev],        neumann_bc_1,  0);
     }
+
+    // Same-level FillBoundary for rho_vap (ALL levels, both the NSCBC and
+    // non-NSCBC paths below). The CF FillPatch above only runs for lev>0; this
+    // fills box-to-box ghosts so multi-box grids (even at max_level=0) don't
+    // read stale rho_vap ghosts. rho_vap is not touched elsewhere in this
+    // routine, so these ghosts persist to the RHS. Physical-domain edges are
+    // left to the stencil clamp (= no-flux), consistent with neumann_bc_1.
+    if (species_transport)
+        rho_vap_mf[lev]->FillBoundary(geom[lev].periodicity());
 
     // ------------------------------------------------------------
     // STEP 2: Compute total density in DOMAIN; clamp eta.
@@ -5141,7 +5200,7 @@ void Hydro2::PostSubcycleReflux(int lev, Set::Scalar /*time*/, Set::Scalar /*dt_
     //   fine_flux * dt_fine  (positive, from FineAdd across all sub-steps)
     //   coarse_flux * dt_coarse (negative, from CrseInit)
     // Reflux() applies:  U_coarse += scale * (1/vol) * sum_faces(register)
-    // Register layout: [rho_eta0, rho_eta1, mom_x, mom_y, energy]
+    // Register layout: [rho_eta0, rho_eta1, mom_x, mom_y, energy, rho_vap]
 
     // Reflux per-phase densities directly
     flux_reg[fine_lev]->Reflux(*rho_eta0_mf[lev],
@@ -5174,7 +5233,19 @@ void Hydro2::PostSubcycleReflux(int lev, Set::Scalar /*time*/, Set::Scalar /*dt_
                                1,
                                geom[lev]);
 
+    // Reflux vapor species (register comp 2 + AMREX_SPACEDIM + 1, the last one).
+    // Conservative correction of rho_vap at coarse-fine boundaries with the same
+    // advective flux that updated rho_eta0, so the carrier stays consistent.
+    if (species_transport)
+        flux_reg[fine_lev]->Reflux(*rho_vap_mf[lev],
+                                   1.0,
+                                   2 + AMREX_SPACEDIM + 1,  // src component in register
+                                   0,                        // dst component
+                                   1,
+                                   geom[lev]);
+
     // Recompute derived fields from the refluxed conserved variables.
+    const bool spec = (species_transport != 0);
     for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
@@ -5183,11 +5254,17 @@ void Hydro2::PostSubcycleReflux(int lev, Set::Scalar /*time*/, Set::Scalar /*dt_
         auto rho1 = rho_eta1_mf[lev]->array(mfi);
         auto mom  = momentum_mf[lev]->array(mfi);
         auto vel  = velocity_mf[lev]->array(mfi);
+        auto rvap = rho_vap_mf[lev]->array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             rho(i, j, k) = rho0(i, j, k) + rho1(i, j, k);
             vel(i, j, k, 0) = mom(i, j, k, 0) / rho(i, j, k);
             vel(i, j, k, 1) = mom(i, j, k, 1) / rho(i, j, k);
+            // Keep the refluxed vapor in [0, rho_eta0] so Yv = rho_vap/rho_eta0
+            // stays physical (the flux correction is bounded by rho_eta0's, but
+            // guard against round-off pushing it slightly out of range).
+            if (spec)
+                rvap(i, j, k) = std::max(0.0, std::min(rvap(i, j, k), rho0(i, j, k)));
         });
     }
 }
