@@ -1029,7 +1029,9 @@ void Hydro2::Mix(int lev)
             Y(i, j, k) = rho_eta0(i, j, k) / (rho(i, j, k));
             // Vapor mass fraction of the gas (Stage 3): rho_vap / rho_eta0. ~0 in
             // the liquid (both ~0); = Y_v in the gas.
-            mass_frac_v(i, j, k) = rho_vap(i, j, k) / std::max(rho_eta0(i, j, k), small);
+            // Cap Yv <= 0.99: rho_vap can transiently overshoot rho_eta0 at isolated
+            // points (advection/diffusion transients), giving an unphysical Yv > 1.
+            mass_frac_v(i, j, k) = std::min(rho_vap(i, j, k) / std::max(rho_eta0(i, j, k), small), 0.99);
 
             // Temperature (computed before Bm: the Stage-2 saturation driving force needs it)
             T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
@@ -1363,7 +1365,9 @@ Hydro2::RHS(int lev,
             Y(i, j, k) = rho_eta0(i, j, k) / (rho(i, j, k));
             // Vapor mass fraction of the gas (Stage 3): rho_vap / rho_eta0. ~0 in
             // the liquid (both ~0); = Y_v in the gas.
-            mass_frac_v(i, j, k) = rho_vap(i, j, k) / std::max(rho_eta0(i, j, k), small);
+            // Cap Yv <= 0.99: rho_vap can transiently overshoot rho_eta0 at isolated
+            // points (advection/diffusion transients), giving an unphysical Yv > 1.
+            mass_frac_v(i, j, k) = std::min(rho_vap(i, j, k) / std::max(rho_eta0(i, j, k), small), 0.99);
 
             // Spalding Number  (F-1 / F-10: single canonical helper, denominator (1 - Y)).
             // Stage 2: spalding_saturation -> physical Antoine saturation mass fraction
