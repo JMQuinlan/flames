@@ -284,6 +284,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // INTERACTIONS
         pp_query_default("sigma", value.sigma, 0.0);    // Surface tension condition
         pp_query_default("Dv", value.Dv, 0.0);          // Vapor Diffusivity
+        // Spalding film thickness L [m]. The Spalding areal flux is m'' = (rho_g*Dv/L)*B'
+        // -- L is the diffusion boundary-layer thickness, a PHYSICAL length distinct from
+        // the band localizer |grad eta|. Prescribing a fixed L is the QUASI-STEADY
+        // stagnant-film model (valid when delta^2/Dv << t_change): with L and B_M fixed
+        // the rate is CONSTANT (linear mass loss), NOT the transient Stefan sqrt(t)
+        // (which needs L -> delta(t) ~ sqrt(Dv*t)). Default 1.0 reproduces the legacy
+        // (under-dimensioned) magnitude; set to a real film thickness for a correct rate.
+        pp_query_default("L_film", value.L_film, 1.0);   // Spalding film/boundary-layer thickness [m]
         pp_query_default("k0_thermal", value.k0_thermal, 0.0); // gas thermal conductivity [W/m/K] (Fourier conduction; 0 = off)
         pp_query_default("k1_thermal", value.k1_thermal, 0.0); // liquid thermal conductivity [W/m/K] (Fourier conduction; 0 = off)
         // Verification: prescribed constant-rate phase change (bypasses Spalding). Off by default.
@@ -299,6 +307,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // SATURATION mass fraction Y_s at the interface T (carrier+vapor model);
         // 0 = legacy local cell-Y driving force. See SaturationYs / SpaldingBM.
         pp_query_default("spalding_saturation", value.spalding_saturation, 0);
+        // Stage 3d: Spalding sink (Y_inf) closure. 0 = constant far-field Y_infinity
+        // (fixed driving -> constant, non-Stefan rate). 1 = sample the sink at a film
+        // distance ell = film_eps_mult*epsilon into the gas along +n_hat, so the
+        // driving falls as vapor accumulates near the interface (transport-limited,
+        // sqrt(t) recession). Sampling the gas EDGE of the band (not the adjacent
+        // cell) avoids the self-quench from the source's own vapor.
+        pp_query_default("spalding_film_sink", value.spalding_film_sink, 0);
+        pp_query_default("film_eps_mult", value.film_eps_mult, 3.0);
         pp_query_default("L_vap", value.L_vap, 256.0e3);              // latent heat of vaporization [J/kg] (Stage 3c energy coupling)
         pp_query_default("apply_latent_heat", value.apply_latent_heat, 0); // 1 = subtract L_vap*m_dot_Vap from mixture energy (evaporative cooling); 0 = off
         // Stage 3: inert-carrier gas + transported dodecane-vapor species.
@@ -306,6 +322,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("Yv_init", value.Yv_init, 0.0);              // initial vapor mass fraction in the gas region
         pp_query_default("cp_vap", value.cp_vap, 1994.85);           // dodecane-vapor cp [J/kg/K]
         pp_query_default("cv_vap", value.cv_vap, 1950.0);            // dodecane-vapor cv [J/kg/K]
+        if (value.spalding_film_sink != 0 && value.species_transport == 0)
+            Util::Abort(INFO, "spalding_film_sink=1 requires species_transport=1 (the sink samples rho_vap/rho_eta0)");
         // rho_vap is advected in BOTH the FE (no-limiter) path and the PP-limiter
         // Pass D, in each case riding the SAME mixture mass flux as rho_eta0 so the
         // carrier (= rho_eta0 - rho_vap) is conserved face-by-face. Its coarse-fine
@@ -847,7 +865,22 @@ void Hydro2::Mix(int lev)
 {
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
-    
+
+    // Stage 3d film-sink resolution check: the Spalding sink is sampled
+    // film_eps_mult*epsilon into the gas, clamped to the ghost depth nghost. If
+    // ell/dx > nghost the sample is clamped back inside the diffuse band and the
+    // closure reverts to the self-quenching local-cell behavior. Warn once.
+    if (spalding_film_sink == 1)
+    {
+        const Set::Scalar ncells = film_eps_mult * epsilon / std::min(DX[0], DX[1]);
+        if (ncells > (Set::Scalar)nghost + 1.0e-6)
+            Util::Message(INFO, "WARNING: spalding_film_sink film distance is ",
+                          ncells, " cells but nghost = ", nghost,
+                          "; the sink sample is clamped inside the band -> rate will"
+                          " self-quench. Increase nghost or dx (need dx >= "
+                          "film_eps_mult*epsilon/nghost).");
+    }
+
     // Function is for the diffusive mixing terms. I.E: rho = eta*rho0 + (1-eta)*rho1
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
@@ -1341,7 +1374,33 @@ Hydro2::RHS(int lev,
             if (spalding_saturation == 1)
                 Y_drive = SaturationYs(T(i, j, k), press(i, j, k), antoine_A, antoine_B, antoine_C,
                                        cp_vap - cv_vap, eos0_local.Cp() - eos0_local.Cv(), small);
-            Bm(i, j, k) = SpaldingBM(Y_drive, Y_infinity, small);
+            // Stage 3d: sink mass fraction Y_inf for the Spalding driving force B_M =
+            // (Y_s - Y_inf)/(1 - Y_s). Default = constant far-field Y_infinity (fixed
+            // driving -> constant, non-Stefan rate). With spalding_film_sink=1 the sink
+            // is sampled at a FILM distance ell = film_eps_mult*epsilon along +n_hat
+            // (grad eta points into the gas), i.e. at the gas EDGE of the diffuse band.
+            // This is deliberately NOT the adjacent cell (which fills with the vapor the
+            // source just produced and would self-quench the rate -- the local-cell
+            // closure pathology) and NOT a fixed far field (which never self-limits): as
+            // vapor accumulates and diffuses, the sampled sink rises and the driving
+            // falls, giving a transport-limited (sqrt(t)) recession. Only meaningful in
+            // the band (the source ~ |grad eta|); elsewhere fall back to Y_infinity. The
+            // cell offset is clamped to the ghost depth (needs dx >= ell/nghost so the
+            // sample clears the band -- warned once in Mix()).
+            Set::Scalar Y_sink = Y_infinity;
+            if (spalding_film_sink == 1 && species_transport && grad_eta_mag > small)
+            {
+                const Set::Scalar inv_g = 1.0 / grad_eta_mag;
+                const Set::Scalar ell   = film_eps_mult * epsilon;
+                const Set::Scalar fx = ell * grad_eta(0) * inv_g / DX[0];
+                const Set::Scalar fy = ell * grad_eta(1) * inv_g / DX[1];
+                int di = (int)(fx + (fx >= 0.0 ? 0.5 : -0.5));
+                int dj = (int)(fy + (fy >= 0.0 ? 0.5 : -0.5));
+                di = (di < -nghost) ? -nghost : ((di > nghost) ? nghost : di);
+                dj = (dj < -nghost) ? -nghost : ((dj > nghost) ? nghost : dj);
+                Y_sink = rho_vap(i + di, j + dj, k) / std::max(rho_eta0(i + di, j + dj, k), small);
+            }
+            Bm(i, j, k) = SpaldingBM(Y_drive, Y_sink, small);
 
             // Curvature (legacy Hessian-based method — stored in component 2 for diagnostics)
             if (kappa_method != 1)
@@ -1815,10 +1874,17 @@ Hydro2::RHS(int lev,
                 Set::Scalar rho_g = rho_eta0(i, j, k);
 
                 // Mass-transfer rate (volumetric) -- simplified Spalding form.
-                // m_dot_Vap = rho_g * D_v * (B_M / (1+B_M)) * |grad(eta)|     [kg/m^3/s]
-                // (We keep the simplified (B_M/(1+B_M)) factor instead of ln(1+B_M)
-                // and omit the Sherwood/length-scale prefactor for now -- see F-3.)
-                m_dot_Vap = rho_g * Dv * (B_M / (1.0 + B_M + small)) * grad_eta_mag;
+                //   areal flux   m'' = (rho_g * Dv / L_film) * (B_M/(1+B_M))   [kg/m^2/s]
+                //   volumetric   m_dot_Vap = m'' * |grad eta|                  [kg/m^3/s]
+                // L_film is the diffusion boundary-layer thickness (a PHYSICAL length);
+                // |grad eta| is the band localizer (INT|grad eta|dV = interface area), NOT
+                // the diffusion length. Including 1/L_film makes m'' a true areal flux
+                // (matching the const-rate path, where vap_const_mdot is already [kg/m^2/s])
+                // and m_dot_Vap dimensionally consistent with rho_vap_flux/rho_vap_diff
+                // [kg/m^3/s]. Fixed L_film = QUASI-STEADY (constant rate); transient
+                // sqrt(t) Stefan needs L -> delta(t) ~ sqrt(Dv*t). (We keep the simplified
+                // (B_M/(1+B_M)) factor instead of ln(1+B_M) for now -- see F-3.)
+                m_dot_Vap = rho_g * Dv * (B_M / (1.0 + B_M + small)) * grad_eta_mag / L_film;
 
                 // Phase-change source for eta. IMPORTANT: this branch does NOT
                 // carry independent intrinsic phase densities -- rho is the single

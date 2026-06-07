@@ -317,8 +317,103 @@ gas-side vapor mass fraction `mass_frac_v`, which self-limits as the local vapor
 approaches saturation — the natural coupling once diffusion + conduction + latent
 are all live.
 
-## Stage 3d — quantitative Stefan / d²-law (TODO)
+## Stage 3d — Spalding rate magnitude (`1/L_film`) and the path to √t
 
-Turn saturation + latent heat + conduction on together and compare the interface
-recession against the analytic Stefan solution (interface ~ sqrt(t)); likely
-switch `Y_inf` to the local `mass_frac_v` for the self-consistent coupling.
+> **Status (revised).** The original plan was "film sink ⇒ √t". Diagnosing the coupled
+> run showed that is wrong with the current rate form: the bare `|grad eta|` rate is
+> **constant-by-construction** (and was dimensionally short a `1/length`). The film sink
+> is a real *driving* refinement but is **not sufficient** for √t on its own. This
+> section records what was actually found and fixed.
+
+### The rate, and the missing film thickness (units fix — `L_film`)
+
+The Spalding rate is
+
+```
+m_dot_Vap = rho_g · Dv · [B_M/(1+B_M)] · |grad eta| / L_film ,   B_M = (Y_s − Y_inf)/(1 − Y_s)
+```
+
+Two distinct lengths were being conflated:
+
+- **`|grad eta|` is the band localizer** — it smears a surface flux over the diffuse
+  interface (`INT|grad eta| dV = interface area`). It is *not* a diffusion length.
+- **`L_film` is the diffusion boundary-layer thickness** — a physical length. The
+  Spalding areal flux is `m'' = (rho_g·Dv/L_film)·B'  [kg/m²/s]`; the volumetric source
+  is `m'' · |grad eta|  [kg/m³/s]`.
+
+Before this fix the rate omitted `1/L_film`, so `m_dot_Vap = rho_g·Dv·B'·|grad eta|`
+evaluated to `[kg/m²/s]` but was summed into `rho_vap_rhs` / `rho_eta0/1_rhs`, which are
+`[kg/m³/s]` — short one factor of `1/length` (the `1/epsilon` the old commented-out
+`eta_dot` line used to carry, dropped in the mixture refactor). The rate therefore ran
+**~`1/epsilon` too small** — a major reason "evaporation does nothing". Adding `1/L_film`
+restores units (and makes `eta_dot_Vap = m_dot_Vap/rho` come out `[1/s]`) and matches the
+const-rate path, where `vap_const_mdot` is already an areal flux. **Default `L_film = 1.0`
+reproduces the legacy magnitude bit-for-bit**, so existing runs are unchanged until set.
+
+### Quasi-steady (fixed `L_film`) vs transient (√t)
+
+Prescribing a **fixed** `L_film` is the **quasi-steady stagnant-film** model (valid when
+`delta²/Dv ≪ t_change`). With `L_film` and `B_M` fixed the rate is **constant** →
+`dM_liq ~ t` (linear, p=1) at the *correct magnitude*. The transient 1-D Stefan √t comes
+only from **not** fixing the length: the diffusion layer grows `delta(t) ~ √(Dv·t)`, so
+`m_dot ~ 1/√t` → `s(t) ~ √t` (p≈0.5). Getting p≈0.5 therefore requires `L_film → delta(t)`
+(or reading the resolved concentration gradient — a Fickian flux), **not yet implemented**.
+
+### The `Y_inf` / film-sink driving refinement
+
+Independently of the length scale, the sink `Y_inf` sets the driving `B_M`:
+
+- **Constant `Y_inf`** (`spalding_film_sink = 0`, the default and the `Saturation_1D`
+  setting): fixed driving.
+- **Local adjacent-cell `Y_inf = mass_frac_v`**: the cell next to the interface fills
+  with the vapor the source just made, so `Y_local → Y_s` within a cell residence time
+  and the driving **self-quenches** (grid-dependent). `spalding_closure_demo.py`
+  tabulates this: at 400 K (`Y_s=0.307`) the driving is already cut to 0.59 at half-`Y_s`.
+- **Film sink** (`spalding_film_sink = 1`): sample `Y_inf` at `ell = film_eps_mult·epsilon`
+  along `+n_hat` (the gas edge of the band, past the source), so the driving responds to
+  the *diffused* field. Offset clamped to ghost depth, so resolution must satisfy
+  `film_eps_mult·epsilon/dx <= nghost` (Mix() warns).
+
+  **Necessary, not sufficient for √t.** The film sink only bends the rate if the sampled
+  vapor reaches a real fraction of `Y_s`. At `Dv = 1e-3` the layer is so diffuse (~16
+  cells by t=1e-4) that `Y_film` stays `~1e-4 ≪ Y_s = 0.307`, so `B_M` barely moves and
+  the rate stays ~constant. Combined with the fixed-`|grad eta|` length above, this is why
+  the coupled run produced a **linear** `M_vapor`, not √t.
+
+### What the coupled run actually showed (diagnostic)
+
+Running `Stefan_Coupled_1D` (before the `L_film` fix):
+
+- Vapor **is** produced (`M_vapor`: 5e-17 → 5e-10 kg) and grows **linearly** (constant
+  rate) — consistent with the analysis above.
+- `M_liq` **grew** (+9e-9) instead of shrinking, and `M_total` drifted **+4.6e-8**. Mass
+  accounting pins all of it to **boundary leak** through the zero-gradient (`neumann`)
+  walls: the impulsive 440 K/400 K start drives conduction → expansion → nonzero
+  wall-normal velocity → mass crosses the open walls. The real (tiny) evaporation is
+  ~90× smaller than the leak, so it is buried.
+- The phase-change **source is conservative** — gas `+m_dot_Vap`, liquid `−m_dot_Vap`,
+  vapor `+m_dot_Vap` (verified by the mass budget). The leak is a BC artifact, **not** a
+  source bug.
+
+Fixes implied: (1) `L_film` for magnitude (done); (2) **wall** BC on the liquid `xlo`
+end + **outflow** at the gas `xhi` end to stop the leak (a Stefan tube is open at the gas
+end); (3) for genuine √t, the transient diffusion-length reformulation above.
+
+### The cases & verify
+
+- **`Stefan_Diffusion_1D`** — isothermal diffusional tube (latent + conduction OFF, both
+  phases 400 K). With a **prescribed `L_film`** and **`spalding_film_sink = 0`** this is a
+  clean **quasi-steady magnitude/linearity** check: predict `dM/dt = rho_g·Dv·B'·Ly/L_film`
+  and expect **p ≈ 1** (linear) with the slope matching to a few %.
+- **`Stefan_Coupled_1D`** — everything on (conduction + latent + saturation + species,
+  and on AMR the `rho_vap` CF FillPatch + reflux). Needs the wall/outflow BCs above before
+  the evaporation signal is measurable above the leak.
+
+```
+python3 tests/StefanVap/check_stefan.py <run>/integrals.dat              # fit p
+python3 tests/StefanVap/check_stefan.py <film>/integrals.dat <ctrl>/integrals.dat
+```
+
+`check_stefan.py` fits `dM_liq(t) = M_liq(0) − M_liq(t) ~ t^p` (and `M_vapor ~ t^p`).
+**Current expectation is p ≈ 1** (quasi-steady, fixed `L_film`); **p ≈ 0.5 is the future
+target**, pending the transient diffusion-length (or Fickian-gradient) reformulation.

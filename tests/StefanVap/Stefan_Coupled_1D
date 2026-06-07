@@ -1,0 +1,205 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# =============================================================================
+# STAGE 3d (b): FULLY-COUPLED STEFAN -- conduction + latent + saturation + film sink
+# =============================================================================
+# Everything on. A SUPERHEATED carrier gas (right, 440 K) conducts heat to the
+# liquid interface (left column at 400 K); the liquid evaporates (Spalding with the
+# Antoine saturation Y_s and the FILM-SINK closure), latent heat cools the interface
+# (evaporative cooling), and the vapor diffuses away into the carrier. The thermal
+# boundary layer in the gas grows ~ sqrt(alpha t), so the conductive heat flux to the
+# interface falls ~1/sqrt(t); in the heat-supply-limited regime the interface T (hence
+# Y_s, hence the rate) self-adjusts and the evaporated mass grows as
+#       dM_liq(t) = M_liq(0) - M_liq(t) ~ sqrt(t)   (exponent p = 1/2).
+#
+# This is the "full 1-D Stefan" capstone: it exercises species transport + diffusion
+# (3a/3b-1), conduction (3b-2), latent heat (3c), the saturation closure (Stage 2),
+# the film sink (Stage 3d), and -- on AMR -- the rho_vap CF FillPatch + reflux. The
+# film sink is what makes it a genuine sqrt(t) problem (constant Y_inf would pin a
+# fixed driving and give a constant rate); see Stefan_Diffusion_1D for the isolated,
+# isothermal version and spalding_closure_demo.py for the closure rationale.
+#
+# RESOLUTION CONSTRAINT (film sink): film_eps_mult*epsilon/dx <= nghost. Here
+# epsilon = dx = 2e-5, film_eps_mult = 3 -> 3 cells <= nghost = 4 (Mix() warns if not).
+#
+# TUNING NOTE: this case has the most coupled knobs. Starting point below: gas
+# superheat 40 K, k0_thermal/k1_thermal exaggerated (~100x) for an acoustic-safe but
+# visible conduction rate, Dv = 1e-3. If the rate is source- rather than heat-limited
+# (slope > 0.5, toward constant) raise k or lower Dv/superheat; if it stalls, raise
+# the superheat. The thermal layer sqrt(alpha t) must stay inside the gas region over
+# the window (it does here: alpha ~ 3e-3, layer ~6e-4 m << 6e-3 m gas at t=1e-4 s).
+#
+# VERIFY:
+#   python3 tests/StefanVap/check_stefan.py <coupled>/integrals.dat        # slope p ~ 0.5
+#   CONTROL (spalding_film_sink = 0): the same physics with a fixed driving ->
+#   python3 tests/StefanVap/check_stefan.py <coupled>/integrals.dat <ctrl>/integrals.dat
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = /mmfs1/home/jquinlan/runs/stefan/output_stefan_coupled
+# plot_file = /mmfs1/home/jquinlan/runs/stefan/output_stefan_coupled_ctrl  # spalding_film_sink=0 control
+amr.plot_dt = 1.0e-5
+
+### MESHING (no AMR) ###
+amr.max_grid_size = 500000
+amr.blocking_factor = 4
+amr.regrid_int = 1
+amr.max_level = 0
+amr.n_cell = 400 8
+
+### DIMENSIONS ###  dx = dy = 2e-5
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 8.0e-3 1.6e-4 0.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEPPING ###
+timestep = 1e-11
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1.0e-8
+dynamictimestep.min = 1.0e-15
+cfl = 0.2
+stop_time = 1.0e-4
+
+### ETA INITIAL CONDITIONS (liquid left, gas right) ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 2.0e-5
+eta.ic.expression.constant.x_int = 2.0e-3
+eta.ic.expression.region0 = "0.5*(1 + tanh((x - x_int)/(sqrt(2)*epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+# eos0 = gas: inert carrier (air) ideal gas.
+eos0.gamma = 1.4
+eos0.p0 = 0.0
+eos0.cv = "717.5"
+eos0.cp = "1004.5"
+mu0 = 0.0
+mu0_b = 0.0
+
+# eos1 = liquid n-dodecane (Tammann), textbook stiffened gas.
+eos1.gamma = 2.358
+eos1.p0 = 4.01e8
+eos1.cv = "1.08e3"
+eos1.cp = "2546.64"
+mu1 = 0.0
+mu1_b = 0.0
+
+# Superheated gas vs cooler liquid (drives conduction), p = 1e5:
+#   gas    T = 440 K  ->  rho_air      = 0.79160   (= 1e5/(287*440))
+#   liquid T = 400 K  ->  rho_dodecane = 683.706   (textbook SG)
+density0.ic.type = expression
+density0.ic.expression.constant.rho_air = 0.79160
+density0.ic.expression.region0 = "rho_air"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_nDodecane = 683.706
+density1.ic.expression.region0 = "rho_nDodecane"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p0 = 1.0e5
+pressure0.ic.expression.region0 = "p0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p0 = 1.0e5
+pressure1.ic.expression.region0 = "p0"
+
+pref = 0.0
+
+### SPALDING VAPORIZATION + SATURATION + FILM SINK ###
+apply_vaporization  = 1
+spalding_saturation = 1
+spalding_film_sink  = 1      # Stage 3d film sink (set 0 for the constant-Y_inf control)
+film_eps_mult       = 3.0
+Y_infinity          = 0.0
+antoine_A = 4.10549
+antoine_B = 1625.928
+antoine_C = -92.839
+
+### SPECIES (carrier + vapor) + DIFFUSION ###
+species_transport = 1
+Yv_init           = 0.0
+cp_vap            = 1994.85
+cv_vap            = 1950.0
+Dv                = 1.0e-3
+
+### LATENT HEAT + CONDUCTION ON (the heat that drives the Stefan recession) ###
+apply_latent_heat = 1
+L_vap             = 256.0e3
+k0_thermal        = 2.6      # gas conductivity [W/m/K] (exaggerated ~100x for an acoustic-safe rate)
+k1_thermal        = 10.0     # liquid conductivity (keeps the liquid column near-uniform T)
+
+### NO PRESCRIBED-RATE / NO CAVITATION ###
+apply_vap_const = 0
+vap_const_mdot  = 0.0
+apply_cavitation = 0
+
+### SURFACE TENSION / CH OFF ###
+apply_surface_tension = 0
+sigma = 0.0
+Mob = 50.0
+kappa_method = 1
+smooth_kernel_size = 5
+nghost = 4
+kappa_grad_frac = 0.02
+apply_sharpening = 0
+
+### BOUNDARY CONDITIONS (neumann all sides) ###
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA (unused at max_level=0) ###
+eta_refinement_criterion = 2e-2
+omega_refinement_criterion = 1e+20
+divu_refinement_criterion = 1e+20
+rho_refinement_criterion = 1e+20
+gradu_refinement_criterion = 1e+20
+
+cutoff = 1e-16
+small = 1e-6
+
+### POSITIVITY-PRESERVING FLUX LIMITER (off: FE species path) ###
+pp_flux_limiter = 0
+pp_source_limiter = 0
+eps_p = 1.0
+eps_rho = 1e-10
+p_cav = 1.0e6
+
+### SOURCE TERM IC FIELDS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+apply_weight = 0
+Spec_Vol = 1
+grav = 9.81
+
+### RIEMANN SOLVER ###
+Riemann_Solver.type = hllc_adc
+Riemann_Solver.hllc_adc.alpha = 12
+Riemann_Solver.hllc_adc.adc_components = 4
+adc_shock_threshold = 0.75
+adc_grow = 4

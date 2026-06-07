@@ -1,0 +1,212 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# =============================================================================
+# STAGE 3d (a): DIFFUSIONAL STEFAN TUBE -- isothermal, transport-limited sqrt(t)
+# =============================================================================
+# Isolates the Spalding FILM-SINK closure (spalding_film_sink=1). A liquid column
+# (left, against the quiet xlo wall) evaporates into an inert carrier + vapor gas
+# (right). Vapor diffuses away through the carrier; the interface recedes. With a
+# transport-responsive sink the evaporated mass grows as the Stefan/d^2-law
+#       dM_liq(t) = M_liq(0) - M_liq(t) ~ sqrt(t)   (exponent p = 1/2)
+#
+# WHY THE FILM SINK (the Stage-3d Y_inf fork):
+#   B_M = (Y_s - Y_inf)/(1 - Y_s),   m_dot = rho_g*Dv*[B_M/(1+B_M)]*|grad eta|
+#   * constant Y_inf (spalding_film_sink=0): every factor is ~const -> CONSTANT
+#     rate -> dM_liq ~ t (linear, p=1). NOT a Stefan problem (this is what the
+#     Saturation_1D rate-proxy test does on purpose).
+#   * local ADJACENT-cell Y_inf: the cell next to the interface fills with the
+#     vapor the source just made (before it diffuses away) -> Y_local -> Y_s ->
+#     rate self-quenches to ~Dv/dx (GRID DEPENDENT). (See spalding_closure_demo.py.)
+#   * FILM sink (this case): sample the sink at ell = film_eps_mult*epsilon along
+#     +n_hat (grad eta points into the gas), i.e. at the gas EDGE of the diffuse
+#     band -- past the source region, in gas that reflects the DIFFUSED field. As
+#     vapor accumulates the sampled sink rises and the driving falls -> the rate
+#     declines as the diffusion layer grows -> sqrt(t). Grid-convergent.
+#
+# RESOLUTION CONSTRAINT: the sink sample is clamped to the ghost depth nghost, so
+# the film distance must clear the band:  ell/dx = film_eps_mult*epsilon/dx <= nghost.
+# Here epsilon = dx = 2e-5, film_eps_mult = 3  -> ell = 3 cells <= nghost = 4. The
+# band (~5.6*epsilon ~ 5-6 cells) is resolved and the sample lands just past its gas
+# edge. Mix() warns if this is violated.
+#
+# Isothermal: latent heat + conduction OFF, both phases start at the SAME pure-T
+# (400 K) so (with the thermal-equilibrium mixing rule) the band is isothermal and
+# Y_s is fixed -- the only dynamics is diffusion-limited evaporation.
+#
+# VERIFY (the exponent is the decisive check):
+#   python3 tests/StefanVap/check_stefan.py <film>/integrals.dat
+#       -> slope p ~ 0.5
+#   CONTROL (rerun with spalding_film_sink = 0):
+#   python3 tests/StefanVap/check_stefan.py <film>/integrals.dat <ctrl>/integrals.dat
+#       -> film p ~ 0.5  vs  control p ~ 1.0  (the closure flips constant->sqrt(t))
+# M_liq sits against the quiet xlo wall, so it is robust to the gas-side outflow.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = /mmfs1/home/jquinlan/runs/stefan/output_stefan_diff
+# plot_file = /mmfs1/home/jquinlan/runs/stefan/output_stefan_diff_ctrl   # spalding_film_sink=0 control
+amr.plot_dt = 1.0e-5
+
+### MESHING (no AMR) ###
+amr.max_grid_size = 500000
+amr.blocking_factor = 4
+amr.regrid_int = 1
+amr.max_level = 0
+amr.n_cell = 400 8
+
+### DIMENSIONS ###  dx = dy = 2e-5
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 8.0e-3 1.6e-4 0.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEPPING ###
+timestep = 1e-11
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1.0e-8
+dynamictimestep.min = 1.0e-15
+cfl = 0.2
+stop_time = 1.0e-4
+
+### ETA INITIAL CONDITIONS (liquid left, gas right) ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 2.0e-5
+eta.ic.expression.constant.x_int = 2.0e-3
+eta.ic.expression.region0 = "0.5*(1 + tanh((x - x_int)/(sqrt(2)*epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+# eos0 = gas: inert carrier (air) ideal gas.
+eos0.gamma = 1.4
+eos0.p0 = 0.0
+eos0.cv = "717.5"
+eos0.cp = "1004.5"
+mu0 = 0.0
+mu0_b = 0.0
+
+# eos1 = liquid n-dodecane (Tammann), textbook stiffened gas.
+eos1.gamma = 2.358
+eos1.p0 = 4.01e8
+eos1.cv = "1.08e3"
+eos1.cp = "2546.64"
+mu1 = 0.0
+mu1_b = 0.0
+
+# Both phases at pure-T = 400 K, p = 1e5 (band isothermal):
+#   gas:    rho_air      = 0.87108
+#   liquid: rho_dodecane = 683.706
+density0.ic.type = expression
+density0.ic.expression.constant.rho_air = 0.87108
+density0.ic.expression.region0 = "rho_air"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_nDodecane = 683.706
+density1.ic.expression.region0 = "rho_nDodecane"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p0 = 1.0e5
+pressure0.ic.expression.region0 = "p0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p0 = 1.0e5
+pressure1.ic.expression.region0 = "p0"
+
+pref = 0.0
+
+### SPALDING VAPORIZATION + SATURATION + FILM SINK ###
+apply_vaporization  = 1
+spalding_saturation = 1      # B_M from Antoine saturation Y_s(T,p)
+spalding_film_sink  = 1      # Stage 3d: sample Y_inf at the film edge (set 0 for the constant-Y_inf control)
+film_eps_mult       = 3.0    # film distance ell = 3*epsilon (3 cells <= nghost=4)
+Y_infinity          = 0.0    # fallback sink outside the band (where the source ~ 0)
+antoine_A = 4.10549
+antoine_B = 1625.928
+antoine_C = -92.839
+
+### SPECIES (carrier + vapor) + DIFFUSION ###
+species_transport = 1
+Yv_init           = 0.0      # gas starts pure carrier
+cp_vap            = 1994.85
+cv_vap            = 1950.0
+Dv                = 1.0e-3   # vapor diffusivity [m^2/s]; sets the (acoustic-safe) diffusion rate
+
+### ISOTHERMAL: no latent heat, no conduction ###
+apply_latent_heat = 0
+L_vap             = 256.0e3
+k0_thermal        = 0.0
+k1_thermal        = 0.0
+
+### NO PRESCRIBED-RATE / NO CAVITATION ###
+apply_vap_const = 0
+vap_const_mdot  = 0.0
+apply_cavitation = 0
+
+### SURFACE TENSION / CH OFF ###
+apply_surface_tension = 0
+sigma = 0.0
+Mob = 50.0
+kappa_method = 1
+smooth_kernel_size = 5
+nghost = 4
+kappa_grad_frac = 0.02
+apply_sharpening = 0
+
+### BOUNDARY CONDITIONS (neumann all sides) ###
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA (unused at max_level=0) ###
+eta_refinement_criterion = 2e-2
+omega_refinement_criterion = 1e+20
+divu_refinement_criterion = 1e+20
+rho_refinement_criterion = 1e+20
+gradu_refinement_criterion = 1e+20
+
+cutoff = 1e-16
+small = 1e-6
+
+### POSITIVITY-PRESERVING FLUX LIMITER (off: FE species path) ###
+pp_flux_limiter = 0
+pp_source_limiter = 0
+eps_p = 1.0
+eps_rho = 1e-10
+p_cav = 1.0e6
+
+### SOURCE TERM IC FIELDS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+apply_weight = 0
+Spec_Vol = 1
+grav = 9.81
+
+### RIEMANN SOLVER ###
+Riemann_Solver.type = hllc_adc
+Riemann_Solver.hllc_adc.alpha = 12
+Riemann_Solver.hllc_adc.adc_components = 4
+adc_shock_threshold = 0.75
+adc_grow = 4

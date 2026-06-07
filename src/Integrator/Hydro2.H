@@ -411,6 +411,7 @@ protected:
     // Set::Scalar R = 8.314; // [J]/[mol]-[K]
     Set::Scalar R = 8314.; // [J]/[kmol]-[K] - Probably more common to use
     Set::Scalar Dv = 0.0; // Vapor Diffusivity
+    Set::Scalar L_film = 1.0; // Spalding film/boundary-layer thickness [m] in m'' = (rho_g*Dv/L_film)*B'. PHYSICAL diffusion length, distinct from the band localizer |grad eta|. Fixed L_film = quasi-steady (constant rate); transient sqrt(t) Stefan needs L -> delta(t)~sqrt(Dv*t). Default 1.0 reproduces the legacy under-dimensioned magnitude.
     Set::Scalar k0_thermal = 0.0; // gas-phase thermal conductivity [W/m/K] (Fourier conduction; 0 = off)
     Set::Scalar k1_thermal = 0.0; // liquid-phase thermal conductivity [W/m/K] (Fourier conduction; 0 = off)
     Set::Scalar Y_infinity = 0.0; // Far Feild Vapor Mass Fraction
@@ -430,6 +431,8 @@ protected:
     int static_eta = 0;
     int apply_vaporization = 0;
     int spalding_saturation = 0;       // Stage 2: 1 = Spalding driving force = Antoine saturation Y_s at interface T; 0 = legacy local cell-Y. See SaturationYs.
+    int spalding_film_sink = 0;        // Stage 3d: 0 = constant far-field Y_infinity as the Spalding sink (fixed driving -> constant rate). 1 = sample the sink at a FILM distance into the gas (transport-responsive -> sqrt(t) Stefan recession). Requires species_transport.
+    Set::Scalar film_eps_mult = 3.0;   // film sink distance ell = film_eps_mult * epsilon, sampled along +n_hat (into the gas). Needs dx >= ell/nghost so the sample clears the diffuse band.
     int apply_vap_const = 0;           // Verification: prescribed constant-rate phase change (bypasses Spalding closure). 0 = off.
     Set::Scalar vap_const_mdot = 0.0;  // imposed interfacial mass flux [kg/m^2/s]; m_dot_Vap = vap_const_mdot * |grad eta| (liquid->vapor if > 0)
     int apply_cavitation = 0;          // HRM bulk cavitation: liquid -> vapor at finite rate when p < p_sat(T). 0 = off.
