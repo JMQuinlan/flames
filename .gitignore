@@ -12,7 +12,7 @@ doc
 *~
 output*
 *.txt
-plot*
+plot*/
 bl_prof*
 build
 *.orig
