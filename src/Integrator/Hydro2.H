@@ -418,6 +418,15 @@ protected:
     Set::Scalar density_tol = 1e-8;
     Set::Scalar omega_relax = 0.5;
 
+    // IC pressure equalization (Mix() formula switch).
+    //   0 = legacy linear alpha-weighted average:  p_mix = a0*p_0 + a1*p_1
+    //   1 = energy-conserving gamma-weighted form (matches ReinitMixturePressure):
+    //         p_mix = (a0*p_0/(g0-1) + a1*p_1/(g1-1)) / (a0/(g0-1) + a1/(g1-1))
+    // The second form makes the IC state already equal to what the first
+    // RelaxAndReinit step would compute, eliminating the per-step IC kick
+    // that seeds a small acoustic transient at diffuse interfaces.
+    int equalize_ic_pressure = 0;
+
 
     // NGHOST
     int nghost = 2;

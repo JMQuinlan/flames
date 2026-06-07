@@ -192,6 +192,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // CURVATURE
         pp_query_default("kappa_method", value.kappa_method, 2); // Method to solve for curvature
 
+        // IC pressure equalization (Mix() formula).  See Hydro2.H for what
+        // 0 / 1 mean.  Default 0 preserves legacy behavior; opt in per test.
+        pp_query_default("equalize_ic_pressure", value.equalize_ic_pressure, 0);
+
         // INTERFACE COMPRESSION
         pp_query_default("apply_sharpening", value.apply_sharpening, false);
         pp_query_default("sharpening_frequency", value.sharpening_frequency, 10);
@@ -727,8 +731,31 @@ void Hydro2::Mix(int lev)
             // unchanged.  In diffuse-interface cells it produces the
             // correct mechanical-equilibrium IC that the 5-eq reference
             // uses.
+            //
+            // FORMULA SWITCH (equalize_ic_pressure):
+            //   0 (legacy)  : p_mix = a1*p0 + a2*p1                 (linear average)
+            //   1 (matches  : p_mix = (a1*p0/(g0-1) + a2*p1/(g1-1)) /
+            //     RelaxAnd                (a1/(g0-1) + a2/(g1-1))
+            //     Reinit)     gamma-weighted form -- this is exactly the
+            //                 pressure that the energy-conserving relaxation
+            //                 (Sch20 eq. 26 / Sau09 eq. III.5) would yield
+            //                 from these per-phase IC pressures, so step-1
+            //                 RelaxAndReinit produces no IC pressure kick.
             // ===========================================================
-            const Set::Scalar p_mix_IC = a1 * p0(i, j, k) + a2 * p1(i, j, k);
+            const Set::Scalar p0_ij = p0(i, j, k);
+            const Set::Scalar p1_ij = p1(i, j, k);
+            Set::Scalar p_mix_IC;
+            if (equalize_ic_pressure == 0)
+            {
+                p_mix_IC = a1 * p0_ij + a2 * p1_ij;
+            }
+            else
+            {
+                const Set::Scalar denom_a = a1 / (gam0 - 1.0) + a2 / (gam1 - 1.0);
+                const Set::Scalar numer_a = a1 * p0_ij / (gam0 - 1.0)
+                                          + a2 * p1_ij / (gam1 - 1.0);
+                p_mix_IC = numer_a / std::max(denom_a, small);
+            }
 
             E0_arr(i, j, k)     = Solver::EOS::EOS::PhasicEnergyFromPressure(p_mix_IC, a1, gam0, pi0_, small);
             E1_arr(i, j, k)     = Solver::EOS::EOS::PhasicEnergyFromPressure(p_mix_IC, a2, gam1, pi1_, small);

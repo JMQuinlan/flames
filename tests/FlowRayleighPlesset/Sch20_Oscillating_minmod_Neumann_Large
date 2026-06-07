@@ -211,3 +211,14 @@ reinit_max_iter      = 100
 reinit_tolerance     = 1e-6
 omega_relax          = 0.5
 relax_diag           = 1
+
+# IC pressure equalization: switch Mix() from the legacy linear
+#   p_mix = a0*p0 + a1*p1
+# to the gamma-weighted form
+#   p_mix = (a0*p0/(g0-1) + a1*p1/(g1-1)) / (a0/(g0-1) + a1/(g1-1))
+# which is the exact result the energy-conserving RelaxAndReinit step would
+# give from these per-phase IC pressures.  Eliminates the step-1 pressure
+# kick that seeds the small interface wobble at IC.  Verified 2026-06-07
+# against the IC-pressure diagnostic: predicted p* at R0+eps drops from
+# 15867 -> 14566 Pa, matching RelaxAndReinit.
+equalize_ic_pressure = 1
