@@ -138,8 +138,8 @@ velocity1.ic.expression.region1 = "0.0"
 pressure0.ic.type = expression
 pressure0.ic.expression.constant.p_inf = 1.0e5
 pressure0.ic.expression.constant.p_b   = 1.0e4
-pressure0.ic.expression.constant.R0    = 0.02
-pressure0.ic.expression.constant.r_inf = 8.00 # OG: 4.00
+pressure0.ic.expression.constant.R0    = 0.019 # OG: 0.02
+pressure0.ic.expression.constant.r_inf = 8.00  # OG: 4.00
 pressure0.ic.expression.region0 = "p_inf - (p_inf - p_b)*R0/max(sqrt(x*x + y*y), R0)"
 
 # Gas interior: uniform bubble pressure p_b.
