@@ -18,31 +18,31 @@
 #       B_M      = (Y_s - Y_inf) / (1 - Y_s)
 # so evaporation now RESPONDS to temperature (Arrhenius-like via Antoine).
 #
-# *** CRITICAL REGIME NOTE (learned the hard way) ***
-# The closure uses the INTERFACE temperature, T = MixedTemperature(rho,p,eta).
-# Across the diffuse band the mixed (Tammann) EOS makes T OVERSHOOT well above
-# both pure-phase temperatures -- the stiff p0_eff term dominates. So the band T
-# is much hotter than the densities-imply pure-phase T. If any band cell exceeds
-# n-dodecane's boiling point (~489 K at 1 atm), x_s clamps (-> 0.99) and B_M
-# saturates identically in every run, killing the temperature response (you then
-# measure only the prefactor rho_g, ratio ~0.9). So this test MUST stay SUB-
-# BOILING. The temperatures below are chosen so the *band* (not just the pure
-# phases) stays under ~450 K:
-#       HOT  pure-T = 300 K  ->  band ~310-448 K   (Y_s up to ~0.6, no clamp)
-#       COLD pure-T = 250 K  ->  band ~258-373 K   (Y_s ~0.02-0.1)
+# *** REGIME NOTE (the band overshoot is now FIXED) ***
+# The closure uses the INTERFACE temperature, T = MixedTemperature(rho,p,eta), now
+# the THERMAL-EQUILIBRIUM mixing rule
+#   T = [ eta*(p+pi0)/((g0-1)cv0) + (1-eta)*(p+pi1)/((g1-1)cv1) ] / rho
+# (EOS.H). It uses per-phase gamma/cv/pi and stays BOUNDED between the two pure-phase
+# temperatures across the band. The OLD single-effective-fluid form
+# (p+p0_eff)/((g_eff-1) rho cv_eff) divided by the collapsing band density and made
+# the interface T overshoot to many hundreds of K, which clamped this closure and
+# forced earlier versions of this test to use unphysically cold pure-T. With the fix,
+# when both phases start at the SAME pure-T the band is ISOTHERMAL at that T, so the
+# test runs at PHYSICAL temperatures with no clamping:
+#       HOT  pure-T = 400 K  ->  band ~400 K   (no clamp; boiling ~489 K)
+#       COLD pure-T = 300 K  ->  band ~300 K   (no clamp)
 #
-# VERIFICATION -- temperature response. Run BOTH cases. The prefactor
-# (rho_g * Dv * |grad eta|) is nearly common, but because the band T overshoots
-# and varies, B_M varies across the band and the predicted ratio is the
-# BAND-INTEGRATED rate, which check_saturation.py models with the same mixed-EOS
-# T(eta) and Antoine:
-#       rate_hot/rate_cold ~ 9  (decisively > 1; legacy/control gives ~0.9)
+# VERIFICATION -- temperature response. Run BOTH cases. The B_M/(1+B_M) group is now
+# uniform across the band (band isothermal), so the predicted ratio is just that
+# group's T-response times the (differing) rho_g prefactor integral; check_saturation.py
+# models it with the same T(eta) + Antoine:
+#       rate_hot/rate_cold ~ 200  (decisively > 1; legacy/control gives ~0.9)
 # M_vapor starts at 0 (Yv_init=0), so M_vapor(t_win) ~ rate*t_win is the cleanest
 # rate proxy. The CONTROL (spalding_saturation = 0) is flat-to-decreasing in T
 # (B_M depends on eta, not T) -- the opposite trend, the decisive sign the
 # saturation closure is live.
 #   * runs: (cold,sat=1) (hot,sat=1) [(hot,sat=0) control]
-#   -> python check_saturation.py <cold>/integrals.dat <hot>/integrals.dat 250 300
+#   -> python check_saturation.py <cold>/integrals.dat <hot>/integrals.dat 300 400
 #
 # Latent heat is OFF here on purpose: evaporative cooling would drift T mid-run
 # and muddy the T-response. species ON + Dv ON so vapor diffuses into the carrier
@@ -101,20 +101,21 @@ eos1.cp = "2546.64"
 mu1 = 0.0
 mu1_b = 0.0
 
-# Densities chosen so the pure phases sit at a chosen temperature at p=1e5:
-#   gas:    T = p/((g-1) cv rho)        liquid: T = (p+g p0)/((g-1) cv rho)
-# (NB: the diffuse-band interface T runs HOTTER than these -- see the regime note
-#  above; these pure-T values are picked to keep the whole band sub-boiling.)
-#   HOT  (pure-T=300 K): rho_air=1.16144   rho_dodecane=2149.26   <-- this run
-#   COLD (pure-T=250 K): rho_air=1.39373   rho_dodecane=2579.11   <-- swap in for the cold run
+# Densities chosen so the pure phases sit at a chosen temperature at p=1e5 under
+# the pure-phase stiffened-gas T:
+#   gas:    T = p/((g-1) cv rho)        liquid: T = (p+p0)/((g-1) cv rho)
+# (With the thermal-equilibrium mixing rule the band T no longer overshoots -- when
+#  both phases share a pure-T the band is isothermal at it -- so these are PHYSICAL.)
+#   HOT  (pure-T=400 K): rho_air=0.87108   rho_dodecane=683.706   <-- this run
+#   COLD (pure-T=300 K): rho_air=1.16144   rho_dodecane=911.607   <-- swap in for the cold run
 density0.ic.type = expression
-# density0.ic.expression.constant.rho_air = 1.16144 # hot
-density0.ic.expression.constant.rho_air = 1.39373 # cold
+# density0.ic.expression.constant.rho_air = 0.87108 # hot
+density0.ic.expression.constant.rho_air = 1.16144 # cold
 density0.ic.expression.region0 = "rho_air"
 
 density1.ic.type = expression
-# density1.ic.expression.constant.rho_nDodecane = 2149.26 # hot
-density1.ic.expression.constant.rho_nDodecane = 2579.11 # cold
+# density1.ic.expression.constant.rho_nDodecane = 683.706 # hot
+density1.ic.expression.constant.rho_nDodecane = 911.607 # cold
 density1.ic.expression.region0 = "rho_nDodecane"
 
 velocity0.ic.type = expression

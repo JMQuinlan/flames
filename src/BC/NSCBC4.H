@@ -127,9 +127,8 @@ public:
         // =========================================================================
         // CAPTURE EOS PARAMETERS FOR GPU
         // =========================================================================
-        // (gamma/p0 captures removed - all EOS calls go through Solver::EOS::EOS::*)
-        Set::Scalar cv0_ = eos0.Cv();
-        Set::Scalar cv1_ = eos1.Cv();
+        // (gamma/p0/cv captures removed - all EOS calls go through Solver::EOS::EOS::*,
+        //  e.g. MixedTemperature/MixedPressure take eos0/eos1 directly.)
         Set::Scalar pref_local = pref;
         Set::Scalar small_local = small;
 
@@ -925,8 +924,11 @@ public:
 
                             // Temperature (for entropy relaxation)
                             Set::Scalar eta_bnd = eta_arr(i_bnd, j, k);
-                            Set::Scalar cv_mix = eta_bnd * cv0_ + (1.0 - eta_bnd) * cv1_;
-                            Set::Scalar T_bnd = (p_bnd + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
+                            // Thermal-equilibrium mixture T (matches the integrator's EOS.H
+                            // MixedTemperature): per-phase gamma/cv/pi, bounded across the band.
+                            // The old (p+pi_bnd)/(rho_bnd*cv_mix*(gm_bnd-1)) effective-fluid form
+                            // divided by the collapsing band density and superheated the interface.
+                            Set::Scalar T_bnd = Solver::EOS::EOS::MixedTemperature(rho_bnd, p_bnd, eta_bnd, eos0, eos1);
 
                             L4 = K_acoustic * (un_bnd - params_xlo_local.target_u) - T4;
                             L2 = K_entropy * (T_bnd - params_xlo_local.target_T) - T2;
@@ -1122,8 +1124,11 @@ public:
 
                             // Temperature (for entropy relaxation)
                             Set::Scalar eta_bnd = eta_arr(i_bnd, j, k);
-                            Set::Scalar cv_mix = eta_bnd * cv0_ + (1.0 - eta_bnd) * cv1_;
-                            Set::Scalar T_bnd = (p_bnd + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
+                            // Thermal-equilibrium mixture T (matches the integrator's EOS.H
+                            // MixedTemperature): per-phase gamma/cv/pi, bounded across the band.
+                            // The old (p+pi_bnd)/(rho_bnd*cv_mix*(gm_bnd-1)) effective-fluid form
+                            // divided by the collapsing band density and superheated the interface.
+                            Set::Scalar T_bnd = Solver::EOS::EOS::MixedTemperature(rho_bnd, p_bnd, eta_bnd, eos0, eos1);
 
                             L1 = -K_acoustic * (un_bnd - params_xhi_local.target_u) - T1;
                             L2 = K_entropy * (T_bnd - params_xhi_local.target_T) - T2;
@@ -1324,8 +1329,11 @@ public:
 
                             // Temperature
                             Set::Scalar eta_bnd = eta_arr(i, j_bnd, k);
-                            Set::Scalar cv_mix = eta_bnd * cv0_ + (1.0 - eta_bnd) * cv1_;
-                            Set::Scalar T_bnd = (p_bnd + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
+                            // Thermal-equilibrium mixture T (matches the integrator's EOS.H
+                            // MixedTemperature): per-phase gamma/cv/pi, bounded across the band.
+                            // The old (p+pi_bnd)/(rho_bnd*cv_mix*(gm_bnd-1)) effective-fluid form
+                            // divided by the collapsing band density and superheated the interface.
+                            Set::Scalar T_bnd = Solver::EOS::EOS::MixedTemperature(rho_bnd, p_bnd, eta_bnd, eos0, eos1);
 
                             L4 = K_acoustic * (un_bnd - params_ylo_local.target_v) - T4;
                             L2 = K_entropy * (T_bnd - params_ylo_local.target_T) - T2;
@@ -1514,8 +1522,11 @@ public:
 
                             // Temperature
                             Set::Scalar eta_bnd = eta_arr(i, j_bnd, k);
-                            Set::Scalar cv_mix = eta_bnd * cv0_ + (1.0 - eta_bnd) * cv1_;
-                            Set::Scalar T_bnd = (p_bnd + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
+                            // Thermal-equilibrium mixture T (matches the integrator's EOS.H
+                            // MixedTemperature): per-phase gamma/cv/pi, bounded across the band.
+                            // The old (p+pi_bnd)/(rho_bnd*cv_mix*(gm_bnd-1)) effective-fluid form
+                            // divided by the collapsing band density and superheated the interface.
+                            Set::Scalar T_bnd = Solver::EOS::EOS::MixedTemperature(rho_bnd, p_bnd, eta_bnd, eos0, eos1);
 
                             L1 = -K_acoustic * (un_bnd - params_yhi_local.target_v) - T1;
                             L2 = K_entropy * (T_bnd - params_yhi_local.target_T) - T2;

@@ -15,30 +15,36 @@
 # tests/StefanVap/README.md and Saturation_1D for the verified closure.
 #
 # SHOCK STATES recomputed for AIR (gamma=1.4, R=cp-cv=287) at Ms=6.5.
-#   ambient (pre-shock) air:  p1 = 101325 Pa (1 atm), T1 = 300 K
-#     -> rho1 = p1/(R T1)            = 1.17682927 kg/m^3
-#        a1   = sqrt(gamma R T1)     = 347.18872 m/s
-#        W    = Ms a1                = 2256.7267 m/s   (shock speed, lab frame)
+#   ambient (pre-shock) air:  p1 = 101325 Pa (1 atm), T1 = 364 K
+#     (T1 = 364 K matches the droplet bulk T under the textbook-SG EOS, so gas and
+#      liquid are thermally paired at t=0 -- no spurious initial conduction.)
+#     -> rho1 = p1/(R T1)            = 0.9699142 kg/m^3
+#        a1   = sqrt(gamma R T1)     = 382.4333 m/s
+#        W    = Ms a1                = 2485.816 m/s   (shock speed, lab frame)
 #   normal-shock jump (Ms=6.5, gamma=1.4):
-#        rho2/rho1 = (g+1)M^2/((g-1)M^2+2) = 5.3650794 -> rho2 = 6.31374585
+#        rho2/rho1 = (g+1)M^2/((g-1)M^2+2) = 5.3650794 -> rho2 = 5.203667
 #        p2/p1     = 1 + 2g/(g+1)(M^2-1)   = 49.125     -> p2  = 4977590.625 Pa
-#        T2        = T1 (p2/p1)/(rho2/rho1) = 2746.91 K   (CPG; hot but correct)
-#        u_p (induced) = W(1 - rho1/rho2)   = 1836.0923 m/s  (post-shock velocity)
+#        T2        = T1 (p2/p1)/(rho2/rho1) = 3332.94 K   (CPG; hot but correct)
+#        u_p (induced) = W(1 - rho1/rho2)   = 2022.484 m/s  (post-shock velocity)
 #   inflow conserved state (xlo Dirichlet, pure air Yv=0):
-#        rho = 6.31374585,  rho*u = 11592.62,
-#        E   = p2/(g-1) + 0.5 rho2 u_p^2 = 23086538.0 J/m^3
-#   (Verification: the same relations reproduce the original dodecane-vapor case
-#    exactly -- rho2=39.0, p2=1.51203e6, u_p=1025.27 -- so the jump is correct.)
+#        rho = 5.203667,  rho*u = 10524.33,
+#        E   = p2/(g-1) + 0.5 rho2 u_p^2 = 23086624.0 J/m^3
+#   (p2 and the flow Mach behind the shock, u_p/a2 ~ 1.75, are unchanged from the
+#    300 K case -- they depend only on Ms; only rho1, a1, W, u_p, rho2 shift.)
 #
-# AMBIENT CHOICE: standard lab air (1 atm, 300 K). Change p1/T1 (and rederive the
-# states above) to match a specific experiment.
+# AMBIENT CHOICE: lab air at 1 atm, T1 = 364 K (paired with the droplet). Change
+# p1/T1 (and rederive the states above) to match a specific experiment.
 #
-# *** OPEN CONCERN (deferred, see project_vaporization_verification memory): at
-#     production liquid density (749.5 kg/m^3) the Tammann dodecane T is very high
-#     and the diffuse-band mixed-EOS interface T overshoots, so the saturation
-#     closure may CLAMP (x_s -> 0.99) across the band -> ~full driving force,
-#     little T-sensitivity. Resolving (EOS recalibration / liquid-side driving T)
-#     is the Stage-3d task, not addressed here. ***
+# EOS NOTE: this case relies on TWO temperature fixes in Solver/EOS:
+#   1) textbook stiffened-gas pure-phase T = (p + p0)/((gamma-1) rho cv)
+#      (Tammann.H) -- puts physical-density liquid (rho=750) at a physical BULK
+#      T ~ 364.6 K (was ~860 K with the old (p+gamma*p0) form).
+#   2) thermal-equilibrium MIXTURE T (EOS.H MixedTemperature):
+#      T = [eta*(p+pi0)/((g0-1)cv0) + (1-eta)*(p+pi1)/((g1-1)cv1)] / rho,
+#      which stays BOUNDED between the pure-phase T's across the diffuse band
+#      (the old single-effective-fluid form superheated the band to ~900 K and
+#      clamped the saturation closure). Together these resolve the production-
+#      density saturation clamping at both the droplet interior and the interface.
 # =============================================================================
 
 alamo.program = hydro2
@@ -113,19 +119,22 @@ mu1_b = 0.0
 
 # Densities (air shock; see header for the jump calc)
 density0.ic.type = expression
-density0.ic.expression.constant.rho_amb   = 1.17682927   # pre-shock air (1 atm, 300 K)
-density0.ic.expression.constant.rho_shock = 6.31374585   # post-shock air
+density0.ic.expression.constant.rho_amb   = 0.9699142    # pre-shock air (1 atm, 364 K)
+density0.ic.expression.constant.rho_shock = 5.203667     # post-shock air
 density0.ic.expression.constant.x_shock = -0.005
 density0.ic.expression.constant.delta = 4.0e-5
 density0.ic.expression.region0 = "rho_shock + (rho_amb - rho_shock)*0.5*(1.0 + tanh((x - x_shock)/delta))"
 
 density1.ic.type = expression
-density1.ic.expression.constant.rho_nDodecane = 749.5
+# Physical liquid n-dodecane density. With the textbook-SG temperature fix and the
+# original Le Metayer values (cv=1080), this gives T ~ 364.6 K (see eos1 block);
+# no density inflation needed.
+density1.ic.expression.constant.rho_nDodecane = 750.0
 density1.ic.expression.region0 = "rho_nDodecane"
 
 # Velocities: post-shock gas velocity from the moving-shock induced velocity for Ms=6.5 in air.
 velocity0.ic.type = expression
-velocity0.ic.expression.constant.u_shock = 1836.0923
+velocity0.ic.expression.constant.u_shock = 2022.484
 velocity0.ic.expression.constant.x_shock = -0.005
 velocity0.ic.expression.constant.delta = 4.0e-5
 velocity0.ic.expression.region0 = "u_shock*0.5*(1.0 - tanh((x - x_shock)/delta))"
@@ -155,7 +164,11 @@ pressure1.ic.expression.region0 = "p_amb + p_laplace"
 # eos0 = AIR carrier:
 eos0.cv = "717.5"
 eos0.cp = "1004.5"
-# eos1 = liquid n-dodecane:
+# eos1 = liquid n-dodecane (original Le Metayer SG values):
+# With the textbook SG temperature T = (p + p0)/((gamma-1)*rho*cv) (the EOS fix),
+# the pure liquid at rho = 750, p ~ 1 atm sits at
+#   T = (101330.68 + 4.01e8)/(1.358*750*1080) = 364.6 K,
+# so no parameter retune is needed -- the literature values give a physical T.
 eos1.cv = "1.08e3"
 eos1.cp = "2546.64"
 
@@ -197,11 +210,11 @@ momentum.bc.type.yhi = neumann neumann
 
 # xlo inflow = post-shock AIR state (pure carrier, Yv=0)
 density.bc.type.xlo = dirichlet
-density.bc.val.xlo  = "6.31374585"
+density.bc.val.xlo  = "5.203667"
 energy.bc.type.xlo = dirichlet
-energy.bc.val.xlo  = "23086538.0"
+energy.bc.val.xlo  = "23086624.0"
 momentum.bc.type.xlo = dirichlet neumann
-momentum.bc.val.xlo  = "11592.62" "0.0"
+momentum.bc.val.xlo  = "10524.33" "0.0"
 
 density.bc.type.xhi = neumann
 energy.bc.type.xhi = neumann
@@ -210,7 +223,7 @@ momentum.bc.type.xhi = neumann neumann
 ### REFINEMENT CRITERIA ###
 eta_refinement_criterion = 2e-2 # Interface location
 omega_refinement_criterion = 1e+20
-divu_refinement_criterion = 0.3 # Shock location (actually Ducros gating)
+divu_refinement_criterion = 0.3 # Shock location (actually Ducros gating, so 0 to 1)
 rho_refinement_criterion = 1e+2
 gradu_refinement_criterion = 5e+4
 

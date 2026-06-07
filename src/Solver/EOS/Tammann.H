@@ -9,18 +9,22 @@ namespace Solver
 namespace EOS
 {
 
-/// Tammann (Stiffened Gas) Equation of State
+/// Tammann (Stiffened Gas) Equation of State (textbook / Le Metayer form, q=0)
 /// Thermodynamic relations:
 ///   p = (gamma - 1)*rho*e - gamma*p0
-///   T = (p + gamma*p0) / ((gamma-1)*rho*cv)
+///   T = (p + p0) / ((gamma-1)*rho*cv)
 ///   a = sqrt(gamma*(p + p0)/rho)
+/// NB: the caloric relation implied by the (p) and (T) forms is
+///   e = cv*T + p0/rho   (NOT e = cv*T); both are consistent since
+///   p + p0 = (gamma-1)*rho*cv*T. For the gas (p0=0) this reduces to the
+///   ideal-gas T = p/((gamma-1)*rho*cv) = e/cv, unchanged.
 class Tammann : public EOS
 {
 private:
     Set::Scalar m_gamma; // Ratio of specific heats (dimensionless)
     Set::Scalar m_p0;    // Stiffened gas reference pressure [Pa]
-    Set::Scalar m_cv;    // Specific heat at constant volume [J/(kg·K)]
-    Set::Scalar m_cp;    // Specific heat at constant pressure [J/(kg·K)]
+    Set::Scalar m_cv;    // Specific heat at constant volume [J/(kgï¿½K)]
+    Set::Scalar m_cp;    // Specific heat at constant pressure [J/(kgï¿½K)]
 
 public:
     /// Default constructor (water parameters as example)
@@ -35,8 +39,8 @@ public:
     /// Constructor with parameters
     /// @param gamma  Ratio of specific heats
     /// @param p0     Stiffened gas reference pressure [Pa]
-    /// @param cv     Specific heat at constant volume [J/(kg·K)]
-    /// @param cp     Specific heat at constant pressure [J/(kg·K)]
+    /// @param cv     Specific heat at constant volume [J/(kgï¿½K)]
+    /// @param cp     Specific heat at constant pressure [J/(kgï¿½K)]
     Tammann(Set::Scalar gamma, Set::Scalar p0, Set::Scalar cv, Set::Scalar cp)
         : m_gamma(gamma),
           m_p0(p0),
@@ -91,12 +95,12 @@ public:
     }
 
     /// Compute temperature from (rho, e)
-    /// Formula: T = (p + gamma*p0) / ((gamma-1)*rho*cv)
+    /// Formula: T = (p + p0) / ((gamma-1)*rho*cv)   (textbook SG, q=0)
     AMREX_GPU_HOST_DEVICE
     Set::Scalar Temperature(Set::Scalar rho, Set::Scalar e) const override
     {
         Set::Scalar p = Pressure(rho, e);
-        return (p + m_gamma * m_p0) / ((m_gamma - 1.0) * rho * m_cv);
+        return (p + m_p0) / ((m_gamma - 1.0) * rho * m_cv);
     }
 
     /// Compute sound speed from (rho, p)

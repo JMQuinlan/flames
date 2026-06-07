@@ -235,26 +235,32 @@ universal constant cancels), so **no new molecular-weight inputs** are needed:
 Verification is the **temperature response**: a hotter interface gives a larger
 `Y_s` (Antoine) and so a faster rate, while the legacy closure is flat in `T`.
 
-**Critical regime gotcha (learned the hard way).** The driving force uses the
-**interface** temperature, `T = MixedTemperature(rho, p, eta)`. Across the diffuse
-band the mixed Tammann EOS makes `T` **overshoot well above both pure-phase
-temperatures** (the stiff `p0_eff` term dominates). The first attempt used pure-T
-450 K / 400 K, but the band ran 465–672 K / 413–597 K — both **above n-dodecane's
-boiling point (~489 K)** — so `x_s` clamped to 0.99 and `B_M` was **identical** in
-both runs. The observed ratio was then just the liquid-density prefactor (cold is
-denser): **0.902**, which a band model reproduces to 0.9016 — i.e. the *code is
-correct*, the *test regime* was wrong. So the test must stay **sub-boiling**, and
-because `B_M` varies across the (overshooting) band the prediction is the
-**band-integrated** rate, not a single-cell ratio.
-
-`Saturation_1D` is quiescent liquid|gas (carrier+vapor, `Dv` on, latent +
-conduction **off** so `T` stays put), with pure-phase temperatures chosen so the
-*whole band* stays below boiling:
+**Interface temperature (band overshoot fixed by the mixing rule).** The driving
+force uses the **interface** temperature `T = MixedTemperature(rho, p, eta)`, now the
+**thermal-equilibrium** mixing rule
 
 ```
-HOT  pure-T = 300 K  ->  band ~310-448 K
-COLD pure-T = 250 K  ->  band ~258-373 K
-rate_hot/rate_cold ~ 9   (band-integrated; clamped/legacy gives ~0.9)
+T = [ eta*(p+pi0)/((g0-1) cv0) + (1-eta)*(p+pi1)/((g1-1) cv1) ] / rho
+```
+
+(EOS.H). Each phase is a pure fluid at the shared `p` and a common `T` (intrinsic
+`rho_k = (p+pi_k)/((g_k-1) cv_k T)`); inverting the volume-fraction density blend
+`rho = eta*rho_0 + (1-eta)*rho_1` gives the form above. It uses **per-phase**
+gamma/cv/pi, so `T` stays **bounded between the two pure-phase temperatures** across
+the band — no overshoot. The old single-effective-fluid form
+`(p+p0_eff)/((g_eff-1) rho cv_eff)` divided by the *collapsing* band density (which
+falls toward the gas value while `p0_eff` lingers) and superheated the interface by
+hundreds of K, clamping this closure. This is the single-density analog of the full
+two-state model's per-phase thermal-T blend.
+
+`Saturation_1D` is quiescent liquid|gas (carrier+vapor, `Dv` on, latent +
+conduction **off** so `T` stays put). When both phases share a pure-T the band is
+**isothermal** at it, so the test runs at **physical** temperatures, no clamping:
+
+```
+HOT  pure-T = 400 K  ->  band ~400 K   (rho_air=0.87108, rho_dod=683.706)
+COLD pure-T = 300 K  ->  band ~300 K   (rho_air=1.16144, rho_dod=911.607)
+rate_hot/rate_cold ~ 200  (band-integrated; clamped/legacy gives ~0.9)
 ```
 
 `Yv_init = 0` so `M_vapor` starts at 0 and `M_vapor(t_win) ~ rate*t_win` is the
@@ -262,22 +268,21 @@ cleanest rate proxy. Run the cold and hot cases (swap the two density constants)
 then:
 
 ```
-python3 tests/StefanVap/check_saturation.py <cold>/integrals.dat <hot>/integrals.dat 250 300
+python3 tests/StefanVap/check_saturation.py <cold>/integrals.dat <hot>/integrals.dat 300 400
 ```
 
 `check_saturation.py` re-implements the closure (mixed-EOS `T(eta)` + Antoine +
 Spalding) and integrates over the band to predict the ratio; it PASSES if the
 observed `M_vapor` ratio is `> 3` and within ~2x of that prediction, and it warns
-if any band cell clamps (`> 489 K`). CONTROL: `spalding_saturation = 0` gives the
+if any band cell exceeds 489 K. CONTROL: `spalding_saturation = 0` gives the
 flat ~0.9 trend (legacy `B_M` tracks `eta`, not `T`).
 
-**Open physics concern (needs a decision).** At *production* densities the Tammann
-liquid temperature is very high (dodecane ~860 K at 749.5 kg/m³), and the band
-overshoots further, so the interface is superheated and the saturation closure
-**clamps** (always near-full driving force). Options: recalibrate the liquid EOS so
-its temperature is physical at its real density; drive saturation off a different
-temperature (liquid-side rather than the overshooting mixture `T`); or accept
-clamping in the shock regime.
+**Production-density clamping — RESOLVED.** Two fixes together: the textbook-SG EOS
+fix put the *bulk* liquid at a physical ~365 K (was ~860 K at 750 kg/m³), and the
+thermal-equilibrium mixing rule removed the *diffuse-band* `T` overshoot (the
+interface no longer superheats hundreds of K above the bulk). So the saturation
+closure no longer clamps at production conditions. (Remaining design fork, Stage 3d:
+`Y_inf` constant far-field vs local gas-side `mass_frac_v`.)
 
 A design choice left for Stage 3d: `Y_inf` here is the constant far-field
 `Y_infinity` (textbook Spalding). The resolved-Stefan alternative is the local

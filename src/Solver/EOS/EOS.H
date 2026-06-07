@@ -49,7 +49,7 @@ public:
     virtual Set::Scalar Pressure(Set::Scalar rho, Set::Scalar e) const = 0;
 
     /// Compute temperature from (rho, e)
-    /// For Tammann: T = (p + gamma*p0) / ((gamma-1)*rho*cv)
+    /// For Tammann: T = (p + p0) / ((gamma-1)*rho*cv)   (textbook SG, q=0; e = cv*T + p0/rho)
     /// For CPG:     T = e / cv
     AMREX_GPU_HOST_DEVICE
     virtual Set::Scalar Temperature(Set::Scalar rho, Set::Scalar e) const = 0;
@@ -219,9 +219,23 @@ public:
         // return ue_vol;
     }
 
-    /// Compute mixture temperature from (rho, p, eta)
-    /// Uses: T = (p + p0_eff) / (rho * cv_eff * (gamma_eff - 1))
-    /// This is your current formulation from RHS() function
+    /// Compute mixture temperature from (rho, p, eta) -- THERMAL-EQUILIBRIUM form.
+    ///
+    /// T = [ eta*(p+pi_0)/((g0-1) cv0) + (1-eta)*(p+pi_1)/((g1-1) cv1) ] / rho
+    ///
+    /// Derivation: this model builds the mixture density by the volume-fraction
+    /// (arithmetic) blend  rho = eta*rho_0 + (1-eta)*rho_1  (see Hydro2 Mix()).
+    /// Treat each phase as a pure fluid at the shared pressure p and a COMMON
+    /// temperature T, so its intrinsic density is rho_k = (p+pi_k)/((g_k-1) cv_k T)
+    /// (textbook stiffened gas). Substituting and solving for T gives the formula
+    /// above. It uses the PER-PHASE (pure) gamma/cv/pi, NOT the mixed-effective
+    /// values, so across the diffuse band T stays BOUNDED between the two pure-phase
+    /// temperatures -- no overshoot. The old single-effective-fluid form
+    /// (p + p0_eff)/((g_eff-1) rho cv_eff) divides by the band density, which
+    /// collapses toward the gas value while p0_eff lingers, superheating the
+    /// interface (hundreds of K) and clamping the saturation closure. This is the
+    /// single-density analog of the full two-state model's per-phase thermal-T blend.
+    /// Pure limits: gas (pi0=0) -> p/((g0-1) cv0 rho); liquid -> (p+pi1)/((g1-1) cv1 rho).
     AMREX_GPU_HOST_DEVICE
     static Set::Scalar MixedTemperature(Set::Scalar rho,
                                         Set::Scalar p,
@@ -230,11 +244,13 @@ public:
                                         const EOS &eos1,
                                         Set::Scalar pref = 0.0)
     {
-        Set::Scalar gamma_eff = MixedGamma(eta, eos0, eos1);
-        Set::Scalar p0_eff = MixedP0(eta, eos0, eos1);
-        Set::Scalar cv_eff = MixedCv(eta, eos0, eos1);
-
-        return (p + gamma_eff * p0_eff) / (rho * cv_eff * (gamma_eff - 1.0));
+        (void)pref;  // p already carries pref (MixedPressure adds it)
+        const Set::Scalar small = 1.0e-16;
+        const Set::Scalar g0 = eos0.Gamma(), pi0 = eos0.P0(), cv0 = eos0.Cv();
+        const Set::Scalar g1 = eos1.Gamma(), pi1 = eos1.P0(), cv1 = eos1.Cv();
+        const Set::Scalar t0 = eta         * std::max(p + pi0, 0.0) / ((g0 - 1.0) * cv0);
+        const Set::Scalar t1 = (1.0 - eta) * std::max(p + pi1, 0.0) / ((g1 - 1.0) * cv1);
+        return (t0 + t1) / std::max(rho, small);
     }
 
     /// Compute mixture sound speed from (rho, p, eta) -- ORIGINAL FROZEN FORM.

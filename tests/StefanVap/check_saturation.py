@@ -10,16 +10,21 @@ Antoine saturation closure predicts. Columns (1-indexed):
 WHY A BAND-INTEGRATED PREDICTION (not a simple cell ratio). The volumetric rate
 is m_dot_Vap = rho_g * Dv * (B_M/(1+B_M)) * |grad eta|, B_M = (Y_s-Y_inf)/(1-Y_s),
 Y_s = Y_s(T,p) from Antoine. The driving force uses the INTERFACE temperature
-T = MixedTemperature(rho,p,eta), and across the diffuse band the mixed Tammann EOS
-makes T OVERSHOOT above both pure-phase temperatures (stiff p0_eff). So B_M varies
-strongly across the band and the prefactor does NOT cleanly cancel. This script
-therefore predicts the ratio by integrating the rate over the band with the SAME
-mixed-EOS T(eta) and Antoine the code uses -- an independent re-implementation of
-the closure, so a mismatch flags a coding error in the C++.
+T = MixedTemperature(rho,p,eta), now the THERMAL-EQUILIBRIUM mixing rule
+T = [eta*(p+pi0)/((g0-1)cv0) + (1-eta)*(p+pi1)/((g1-1)cv1)] / rho (EOS.H). This uses
+per-phase gamma/cv/pi (not mixed-effective values) and stays BOUNDED between the
+two pure-phase temperatures across the band -- the old single-effective-fluid form
+(p+p0_eff)/((g_eff-1) rho cv_eff) divided by the collapsing band density and
+SUPERHEATED the interface (hundreds of K) which clamped this closure. With the fix,
+when both phases start at the same pure-T the band is ISOTHERMAL at that T, so the
+test runs at PHYSICAL temperatures with no clamping. The rate ratio is still
+predicted by a band integral (the rho*eta prefactor varies across the band) using
+the SAME T(eta) + Antoine the code uses -- an independent re-implementation, so a
+mismatch flags a C++ coding error.
 
-  *** If any band cell is above n-dodecane boiling (~489 K) x_s clamps (->0.99)
-      and B_M saturates identically in every run -- the T-response dies and you
-      measure only the prefactor (ratio ~0.9). Keep the runs SUB-BOILING. ***
+  *** Boiling clamp (x_s -> 0.99 above ~489 K) is no longer a practical worry now
+      that the band no longer overshoots, but the check still warns if any band
+      cell exceeds 489 K. Default pair is cold=300 / hot=400 K. ***
 
 M_vapor starts at 0 (Yv_init=0), so over the early window M_vapor(t_win) ~ rate is
 the cleanest rate proxy -> observed ratio = M_vapor_hot/M_vapor_cold.
@@ -51,29 +56,15 @@ EPS, X_INT, DOMAIN, NX = 4.0e-5, 2.0e-3, 4.0e-3, 200
 T_BOIL = 489.0  # n-dodecane normal boiling point [K] (clamp warning threshold)
 
 
-def _mixA(eta):
-    return eta / (G0 - 1.0) + (1.0 - eta) / (G1 - 1.0)
-
-
-def mix_gamma(eta):
-    return 1.0 + 1.0 / _mixA(eta)
-
-
-def mix_p0(eta):
-    A = _mixA(eta)
-    B = eta * G0 * P00 / (G0 - 1.0) + (1.0 - eta) * G1 * P01 / (G1 - 1.0)
-    return B / (A * mix_gamma(eta))
-
-
-def mix_cv(eta):
-    A = _mixA(eta)
-    B = eta / (CV0 * (G0 - 1.0)) + (1.0 - eta) / (CV1 * (G1 - 1.0))
-    return A / B
-
-
 def T_interface(eta, rho):
-    ge, p0e, cve = mix_gamma(eta), mix_p0(eta), mix_cv(eta)
-    return (P_REF + ge * p0e) / (rho * cve * (ge - 1.0))
+    """Thermal-equilibrium mixture T (matches EOS.H MixedTemperature):
+       T = [ eta*(p+pi0)/((g0-1)cv0) + (1-eta)*(p+pi1)/((g1-1)cv1) ] / rho.
+    Per-phase (pure) gamma/cv/pi, volume(eta)-weighted, divided by rho. Stays
+    BOUNDED between the pure-phase T's across the band -- no overshoot. When both
+    phases start at the same pure-T, the band is isothermal at that T."""
+    t0 = eta * (P_REF + P00) / ((G0 - 1.0) * CV0)
+    t1 = (1.0 - eta) * (P_REF + P01) / ((G1 - 1.0) * CV1)
+    return (t0 + t1) / rho
 
 
 def bm_group(T):
@@ -93,7 +84,7 @@ def band_model(T_pure):
     rho_g = rho*eta, rho = eta*rho_air + (1-eta)*rho_dod, T from the mixed EOS.
     """
     rho_air = P_REF / ((G0 - 1.0) * CV0 * T_pure)
-    rho_dod = (P_REF + G1 * P01) / ((G1 - 1.0) * CV1 * T_pure)
+    rho_dod = (P_REF + P01) / ((G1 - 1.0) * CV1 * T_pure)   # textbook SG (p+p0)
     dx = DOMAIN / NX
     x = np.arange(0, DOMAIN, dx) + dx / 2.0
     eta = 0.5 * (1.0 + np.tanh((x - X_INT) / (np.sqrt(2.0) * EPS)))
@@ -121,7 +112,7 @@ def load(path):
 
 
 def transit(T_pure):
-    rho_l = (P_REF + G1 * P01) / ((G1 - 1.0) * CV1 * T_pure)
+    rho_l = (P_REF + P01) / ((G1 - 1.0) * CV1 * T_pure)   # textbook SG (p+p0)
     return 2.0e-3 / np.sqrt(G1 * (P_REF + P01) / rho_l)
 
 
@@ -141,8 +132,8 @@ def main():
         sys.exit("usage: check_saturation.py <cold>/integrals.dat <hot>/integrals.dat "
                  "[T_cold] [T_hot] [t_win_s]")
     cold_path, hot_path = sys.argv[1], sys.argv[2]
-    T_cold = float(sys.argv[3]) if len(sys.argv) > 3 else 250.0
-    T_hot = float(sys.argv[4]) if len(sys.argv) > 4 else 300.0
+    T_cold = float(sys.argv[3]) if len(sys.argv) > 3 else 300.0
+    T_hot = float(sys.argv[4]) if len(sys.argv) > 4 else 400.0
 
     dc, dh = load(cold_path), load(hot_path)
     t_win = float(sys.argv[5]) if len(sys.argv) > 5 else 0.8 * min(transit(T_cold), transit(T_hot))
