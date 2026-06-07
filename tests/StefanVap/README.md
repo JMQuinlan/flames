@@ -277,6 +277,33 @@ observed `M_vapor` ratio is `> 3` and within ~2x of that prediction, and it warn
 if any band cell exceeds 489 K. CONTROL: `spalding_saturation = 0` gives the
 flat ~0.9 trend (legacy `B_M` tracks `eta`, not `T`).
 
+**Result — PASSES (cold = 300 K, hot = 400 K).**
+
+```
+python3 tests/StefanVap/check_saturation.py \
+    .../output_saturation_cold/integrals.dat \
+    .../output_saturation_hot/integrals.dat
+early window = 1.36e-06 s  (cold 386 rows, hot 446 rows)
+
+[cold] pure-T=300K  interface band T=300-300K
+        M_vapor: 5.5363e-18 -> 7.5138e-13  (dM_vapor=+7.514e-13)
+        dM_liq=+9.000e-11   dM_carrier=+9.720e-11 (rel 2.2e-05)
+[hot]  pure-T=400K  interface band T=400-400K
+        M_vapor: 1.1054e-15 -> 1.5003e-10  (dM_vapor=+1.500e-10)
+        dM_liq=-8.000e-11   dM_carrier=+1.463e-10 (rel 4.3e-05)
+
+(1) both evaporate (M_vapor up) + carrier conserved:        CHECK
+(2) temperature response  rate_hot/rate_cold:
+    observed (M_vapor ratio)   = 199.672
+    band-integrated prediction = 199.654   (obs/pred = 1.00)
+    -> PASS   (legacy spalding_saturation=0 would give ~0.9)
+```
+
+The band is isothermal at the pure-T in each case (300/300 K and 400/400 K — the
+mixing-rule fix, no overshoot), and the observed hot/cold `M_vapor` ratio (199.67)
+matches the band-integrated Antoine prediction (199.65) to within 0.01%. This is
+the decisive evidence the saturation driving force is live and temperature-driven.
+
 **Production-density clamping — RESOLVED.** Two fixes together: the textbook-SG EOS
 fix put the *bulk* liquid at a physical ~365 K (was ~860 K at 750 kg/m³), and the
 thermal-equilibrium mixing rule removed the *diffuse-band* `T` overshoot (the

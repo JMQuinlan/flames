@@ -52,8 +52,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-# plot_file = /mmfs1/home/jquinlan/runs/stefan/output_saturation_hot
-plot_file = /mmfs1/home/jquinlan/runs/stefan/output_saturation_cold
+plot_file = /mmfs1/home/jquinlan/runs/stefan/output_saturation_hot
+# plot_file = /mmfs1/home/jquinlan/runs/stefan/output_saturation_cold
 amr.plot_dt = 5.0e-7
 
 ### MESHING (no AMR) ###
@@ -109,13 +109,13 @@ mu1_b = 0.0
 #   HOT  (pure-T=400 K): rho_air=0.87108   rho_dodecane=683.706   <-- this run
 #   COLD (pure-T=300 K): rho_air=1.16144   rho_dodecane=911.607   <-- swap in for the cold run
 density0.ic.type = expression
-# density0.ic.expression.constant.rho_air = 0.87108 # hot
-density0.ic.expression.constant.rho_air = 1.16144 # cold
+density0.ic.expression.constant.rho_air = 0.87108 # hot
+# density0.ic.expression.constant.rho_air = 1.16144 # cold
 density0.ic.expression.region0 = "rho_air"
 
 density1.ic.type = expression
-# density1.ic.expression.constant.rho_nDodecane = 683.706 # hot
-density1.ic.expression.constant.rho_nDodecane = 911.607 # cold
+density1.ic.expression.constant.rho_nDodecane = 683.706 # hot
+# density1.ic.expression.constant.rho_nDodecane = 911.607 # cold
 density1.ic.expression.region0 = "rho_nDodecane"
 
 velocity0.ic.type = expression
