@@ -153,6 +153,25 @@ SAVE_NAME     = "Sch20_Oscillating"
 #   'nondim' -- t / tau_c (Rayleigh non-dimensional, the v2 default)
 TIME_UNIT = 'ms'
 
+# ===== IC-DIAGNOSTIC OPTIONS =====
+# Plot p_mix(R) along the x-axis ray for the first DIAG_N_FRAMES plotfiles to
+# inspect the initial pressure profile and the diffuse-interface "relaxation
+# ledge" that would explain a small initial wobble in R(t).  See the analysis
+# in the chat: the eq-(27) liquid IC + uniform gas IC are NOT in mechanical
+# equilibrium inside the diffuse eta band; the first pressure-relaxation
+# Newton step pulls the gas-side pressure up toward the liquid-side IC (the
+# Tammann liquid is ~1e5x stiffer in B = sum a_k gamma_k pi_k/(g-1)).  The
+# predicted ledge is computed analytically from the input-file IC constants.
+DIAG_IC_PRESSURE   = True
+DIAG_N_FRAMES      = 5
+DIAG_R_MAX_FACTOR  = 3.0      # max radius (in units of R0) to show on x-axis
+DIAG_EPSILON       = 0.0016   # eta IC tanh width (must match input file)
+DIAG_GAMMA_LIQ     = 2.35     # eos0 (Tammann liquid)
+DIAG_PI_LIQ        = 1.0e9
+DIAG_GAMMA_GAS     = 1.4      # eos1 (ideal gas)
+DIAG_PI_GAS        = 0.0
+DIAG_SAVE_NAME     = "Sch20_IC_PressureDiagnostic"
+
 # ============================================================================
 # ==========================  END CONFIGURATION  =============================
 # ============================================================================
@@ -293,6 +312,160 @@ def extract_radius_history_robust(amrex_output_dir, eta_threshold=0.5, axis="x")
 
 
 # ============================================================================
+# IC PRESSURE DIAGNOSTIC
+# ============================================================================
+#
+# Plots p_mix(R) along the +x ray for the first DIAG_N_FRAMES plotfiles, with
+# the predicted post-relaxation "ledge" overlaid as a reference marker.
+#
+# At a diffuse-interface cell of volume-fraction alpha_liq=eta, alpha_gas=1-eta
+# with per-phase ICs p_liq_IC(R), p_gas_IC = p_b, the energy-conserving
+# pressure relaxation drives both phases to a common p* given by:
+#
+#     A = sum_k alpha_k / (gamma_k - 1)
+#     B = sum_k alpha_k * gamma_k * pi_k / (gamma_k - 1)
+#     E_int = sum_k alpha_k * (p_k_IC + gamma_k * pi_k) / (gamma_k - 1)
+#     p*    = (E_int - B) / A
+#
+# For Sch20 Case 1 at R0+epsilon (eta ~= 0.88, p_liq_IC ~= 16667 Pa,
+# p_gas_IC = 1e4 Pa, gamma_liq=2.35, pi_liq=1e9, gamma_gas=1.4) this gives
+# p* ~= 14.5 kPa -- a ~4.5 kPa jump above p_b that the gas-side cells get
+# yanked up to on the very first step.  If you SEE that ledge in the
+# first-frame profile, that's the IC mismatch hypothesis confirmed.
+# ============================================================================
+
+def _predicted_relaxed_pressure(R, R0, p_inf, p_b, epsilon):
+    """Predicted post-relaxation p* at radius R for the Sch20 IC.
+
+    Uses the eq-(27) gradual liquid IC clamped to p_b for R<=R0, eta-tanh
+    smearing with width `epsilon`, and the energy-conserving relaxation
+    formula above.  Returns p* in Pa.
+    """
+    p_liq_IC = p_inf - (p_inf - p_b) * R0 / np.maximum(R, R0)
+    p_gas_IC = p_b
+    eta_liq  = 0.5 * (1.0 + np.tanh((R - R0) / epsilon))   # alpha_liq
+    eta_gas  = 1.0 - eta_liq                                # alpha_gas
+
+    g_l, pi_l = DIAG_GAMMA_LIQ, DIAG_PI_LIQ
+    g_g, pi_g = DIAG_GAMMA_GAS, DIAG_PI_GAS
+
+    A = eta_liq / (g_l - 1.0) + eta_gas / (g_g - 1.0)
+    B = eta_liq * g_l * pi_l / (g_l - 1.0) + eta_gas * g_g * pi_g / (g_g - 1.0)
+    E = (eta_liq * (p_liq_IC + g_l * pi_l) / (g_l - 1.0)
+         + eta_gas * (p_gas_IC + g_g * pi_g) / (g_g - 1.0))
+    return (E - B) / A
+
+
+def plot_ic_pressure_diagnostic(amrex_output_dir, axis="x"):
+    """Overlay p_mix(R) along the +x ray for the first DIAG_N_FRAMES plotfiles.
+
+    Adds:
+      - The raw IC liquid-pressure profile (no relaxation): dashed grey.
+      - The analytically-predicted post-relaxation profile: solid black.
+      - Reference lines at R = R0, R = R0+epsilon, and at p_b, p_inf.
+
+    Saves Images/{DIAG_SAVE_NAME}.png and .eps.  Skips quietly with a
+    message if the output dir is missing or yt fails to load.
+    """
+    if not DIAG_IC_PRESSURE:
+        return
+    if not os.path.isdir(amrex_output_dir):
+        print(f"  [diag] skip IC-pressure diagnostic: {amrex_output_dir} missing")
+        return
+
+    import yt
+    yt.funcs.mylog.setLevel(40)
+
+    plot_files = sorted(
+        os.path.join(amrex_output_dir, d)
+        for d in os.listdir(amrex_output_dir)
+        if os.path.isdir(os.path.join(amrex_output_dir, d)) and d.endswith("cell")
+    )
+    if len(plot_files) < 1:
+        print(f"  [diag] no plotfiles in {amrex_output_dir}")
+        return
+    plot_files = plot_files[:DIAG_N_FRAMES]
+
+    R0     = P.R0
+    p_inf  = P.p_inf
+    p_b    = P.p_g0
+    R_max  = DIAG_R_MAX_FACTOR * R0
+    R_curve = np.linspace(0.5 * R0, R_max, 400)
+    p_pred  = _predicted_relaxed_pressure(R_curve, R0, p_inf, p_b, DIAG_EPSILON)
+    p_ic    = p_inf - (p_inf - p_b) * R0 / np.maximum(R_curve, R0)
+
+    fig, ax = plt.subplots(figsize=(FIG_WIDTH, FIG_HEIGHT))
+    cmap = plt.get_cmap('viridis')
+
+    loaded = 0
+    for j, pf in enumerate(plot_files):
+        try:
+            ds = yt.load(pf)
+            L  = float(ds.domain_right_edge[0])
+            if axis == "x":
+                ray = ds.ray(ds.arr([0.0, 0.0, 0.0], "code_length"),
+                             ds.arr([L,   0.0, 0.0], "code_length"))
+                r   = np.array(ray["x"])
+            else:
+                ray = ds.ray(ds.arr([0.0, 0.0, 0.0], "code_length"),
+                             ds.arr([0.0, L,   0.0], "code_length"))
+                r   = np.array(ray["y"])
+            p   = np.array(ray["pressure"])
+            order = np.argsort(r)
+            r, p  = r[order], p[order]
+            mask  = r <= R_max
+            color = cmap(j / max(DIAG_N_FRAMES - 1, 1))
+            ax.plot(r[mask] / R0, p[mask],
+                    'o-', color=color, ms=3, lw=1.2, alpha=0.8,
+                    label=f"sim t = {float(ds.current_time)*1e6:.2f} us")
+            loaded += 1
+        except Exception as exc:
+            print(f"  [diag] skipped {os.path.basename(pf)}: {exc}")
+            continue
+
+    if loaded == 0:
+        plt.close(fig)
+        print("  [diag] no usable plotfiles -- IC-pressure diagnostic skipped")
+        return
+
+    # Reference overlays.
+    ax.plot(R_curve / R0, p_ic,   '--', color='0.55', lw=1.5,
+            label='IC: eq.(27) p_liq (no relax)')
+    ax.plot(R_curve / R0, p_pred, '-',  color='black', lw=2.0,
+            label='Predicted post-relax p* (theory)')
+    ax.axhline(p_b,   color='tab:red',   ls=':', lw=1.0,
+               label=f"p_b   = {p_b:.0f} Pa")
+    ax.axhline(p_inf, color='tab:blue',  ls=':', lw=1.0,
+               label=f"p_inf = {p_inf:.0f} Pa")
+    ax.axvline(1.0,                       color='0.3', ls=':', lw=0.8)
+    ax.axvline(1.0 + DIAG_EPSILON / R0,   color='0.3', ls=':', lw=0.8)
+
+    ax.set_xlabel(r"$R / R_0$",       fontsize=FONT_SIZE_LABEL)
+    ax.set_ylabel(r"$p_\mathrm{mix}$ [Pa]", fontsize=FONT_SIZE_LABEL)
+    ax.set_title("Sch20 IC-pressure diagnostic (first {} frames)".format(loaded),
+                 fontsize=FONT_SIZE_TITLE, fontweight='bold')
+    ax.set_xlim(0.5, DIAG_R_MAX_FACTOR)
+    ax.grid(True, alpha=0.3)
+    ax.tick_params(labelsize=FONT_SIZE_TICK)
+    ax.legend(fontsize=FONT_SIZE_LEGEND, loc='best')
+    plt.tight_layout()
+
+    out_png = os.path.join(IMG_DIR, f"{DIAG_SAVE_NAME}.png")
+    out_eps = os.path.join(IMG_DIR, f"{DIAG_SAVE_NAME}.eps")
+    fig.savefig(out_png, dpi=DPI, bbox_inches='tight')
+    fig.savefig(out_eps, dpi=DPI, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  [diag] wrote {out_png}")
+    print(f"  [diag] wrote {out_eps}")
+
+    # Console summary: predicted p* at R0+epsilon vs p_b.
+    p_star = float(_predicted_relaxed_pressure(
+        np.array([R0 + DIAG_EPSILON]), R0, p_inf, p_b, DIAG_EPSILON))
+    print(f"  [diag] predicted p* at R0+epsilon = {p_star:.1f} Pa "
+          f"(p_b = {p_b:.0f} Pa, ledge = {p_star - p_b:+.1f} Pa)")
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
@@ -423,6 +596,11 @@ def main():
             print(f"    decay (sim vs KM): alpha_sim/alpha_KM = "
                   f"{alpha_sim/km['alpha']:.3f}  "
                   f"(1.0 perfect; >1 numerical dissipation; <1 under-damped)")
+
+    # ---- IC pressure diagnostic (first ~5 frames, p_mix(R) vs theory) ----
+    if DIAG_IC_PRESSURE:
+        print("\n  Running IC-pressure diagnostic...")
+        plot_ic_pressure_diagnostic(OUTPUT_DIR, axis="x")
 
     # ---- Plot --------------------------------------------------------------
     plt.rcParams.update({
