@@ -42,7 +42,8 @@ yt.funcs.mylog.setLevel(50)
 # =============================================================================
 
 # ---- paths -----------------------------------------------------------------
-AMREX_OUTPUT_DIR = sys.argv[1] if len(sys.argv) > 1 else "../output_currents"  # dir of NNNNNcell plotfiles
+AMREX_OUTPUT_DIR = r'../../../bin/tests/FlowCurrents/output_currents'
+
 IMAGE_DIR        = "./Images"          # standalone frames go here
 GIF_PATH         = "./Images/Currents.gif"
 
@@ -96,7 +97,7 @@ SHOW_STREAMLINES = True
 # lines that just deform with the flow (the album look).  'grid' seeds a fixed
 # lattice; 'auto' = matplotlib's default (bobbles).
 STREAM_SEED_MODE = "inlet"            # 'inlet' | 'grid' | 'auto'
-STREAM_N_SEEDS   = 92                 # for 'inlet': number of lines (evenly spaced in y)
+STREAM_N_SEEDS   = 54                 # for 'inlet': number of lines (evenly spaced in y)
 STREAM_SEED_INSET = 0.02              # seed this fraction of the width in from the left edge
 STREAM_GRID_NX   = 26                 # for 'grid'
 STREAM_GRID_NY   = 18

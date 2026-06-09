@@ -33,7 +33,7 @@ amr.blocking_factor  = 4
 amr.regrid_int       = 10
 amr.grid_eff         = 0.8
 amr.max_level        = 0              # finest dx = 0.125/4 = 0.03125 (~32 cells / D)
-amr.n_cell           = 800 384       # dx = 25/200 = 12/96 = 0.125
+amr.n_cell           = 400 192       # dx = 25/200 = 12/96 = 0.125
 
 ### DIMENSIONS ###
 # Long downstream tail so the street has room to develop; wide enough that the
@@ -49,7 +49,6 @@ dynamictimestep.verbose = 0
 dynamictimestep.max = 5e-2
 dynamictimestep.min = 1e-9
 cfl                 = 0.3
-cfl_v               = 0.3
 stop_time           = 2500.0          # 10x -- long run so the asymmetric instability fully grows
 
 # ----------------------------------------------------------------------------
