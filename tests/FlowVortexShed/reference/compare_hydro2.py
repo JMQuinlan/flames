@@ -117,7 +117,7 @@ BG_CMAP          = "gray"    # black = solid (0), white = fluid (1)
 BG_VMIN, BG_VMAX = 0.0, 1.0
 CONTOUR_LW       = 2.2       # vx=0 contour line width
 CONTOUR_LEVEL    = 0.0       # velocity_x level to contour
-DRAW_CYL_OUTLINE = True      # draw the analytic cylinder circle
+DRAW_CYL_OUTLINE = False     # draw the analytic cylinder circle (green eta=0.5 line)
 CYL_OUTLINE_COLOR = "#39ff14"
 CYL_OUTLINE_LW   = 1.0
 
