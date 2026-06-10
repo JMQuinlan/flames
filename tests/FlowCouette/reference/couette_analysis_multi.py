@@ -1,19 +1,22 @@
 """
-Single-phase planar Couette analysis (no-slip plates, steady-state).
+Two-fluid planar Couette analysis (steady-state, classical 2-layer).
 
-Reference for input_hydro2_single:
-  bottom wall (y = 0) : stationary, u = U_bot
-  top    wall (y = H) : moving,     u = U_top
-  pure single fluid (eta forced to 0, only phase 1 active).
+Reference for input_hydro2_multi: two fluid layers stacked vertically with
+no-slip plates at y=0 (u=0) and y=H (u=U_top).  Phase 1 (lower fluid B,
+viscosity mu_B) occupies y in [0, y_int]; phase 0 (upper fluid A, viscosity
+mu_A) occupies y in [y_int, H].
 
-Steady-state momentum balance + no-slip BCs => linear profile:
-    u(y) = U_bot + (U_top - U_bot) * y / H
-    du/dy = (U_top - U_bot) / H              (uniform)
-    shear stress tau = mu * du/dy            (uniform)
+Steady-state momentum balance gives piecewise-linear u(y) with shear stress
+tau = mu * du/dy continuous across the interface:
+
+    A1 = U_top / [ y_int + (mu_B / mu_A) * (H - y_int) ]    # du/dy in lower layer
+    A2 = (mu_B / mu_A) * A1                                 # du/dy in upper layer
+    u(y) = A1 * y                                  for y <= y_int
+    u(y) = A1 * y_int + A2 * (y - y_int)           for y >  y_int
 
 This script extracts u(y) from the last plotfile, computes the analytical
-linear profile, and reports L2 / Linf error plus a uniform-shear-rate
-diagnostic.
+profile, and reports the L2 / Linf error plus a shear-stress continuity
+diagnostic at the interface.
 """
 
 import yt
@@ -28,24 +31,28 @@ yt.funcs.mylog.setLevel(40)
 # USER CONFIGURATION
 # ============================================================================
 
-case_name        = 'Couette_Single'
-amrex_output_dir = r'../../../bin/tests/FlowCouette/output_single'
+case_name        = 'Couette_Multi'
+amrex_output_dir = r'../../../bin/tests/FlowCouette/output_multi'
 
-# Geometry (must match input_hydro2_single)
+# Geometry (must match input_hydro2_multi)
 y_min  = 0.0
 y_max  = 3.0
 x_min  = 0.0
 x_max  = 0.1875
+y_int  = 1.5       # interface height
 H      = y_max - y_min
 
-# Physical parameters (must match input_hydro2_single)
-mu    = 10.0      # dynamic viscosity (phase 1 since eta = 0 everywhere)
-rho   = 100.0
-nu    = mu / rho  # kinematic viscosity = 0.1 m^2/s
+# Physical parameters (must match input_hydro2_multi)
+# Phase 0 (upper, fluid A)
+mu_A   = 2.0
+rho_A  = 100.0
+# Phase 1 (lower, fluid B)
+mu_B   = 1.0
+rho_B  = 50.0
 
-# Plate velocities (must match Dirichlet momentum BCs in input file)
-U_bot = 0.0
-U_top = 0.1
+# Boundary conditions
+U_bot  = 0.0
+U_top  = 0.1
 
 # Slice location for 1D profile extraction
 x_slice = 0.5 * (x_min + x_max)
@@ -59,14 +66,22 @@ os.makedirs(images_dir, exist_ok=True)
 # ANALYTICAL HELPERS
 # ============================================================================
 
-def couette_single(y, U_top, U_bot, H):
-    """Steady-state single-phase Couette profile."""
-    return U_bot + (U_top - U_bot) * y / H
+def couette_2layer(y, U_top, U_bot, mu_A, mu_B, y_int, H):
+    """Classical 2-layer Couette closed-form.
 
-
-def shear_rate(U_top, U_bot, H):
-    """Steady-state uniform shear rate du/dy."""
-    return (U_top - U_bot) / H
+    Stress continuity:  mu_B * A1 = mu_A * A2
+    Velocity continuity at y_int.
+    Boundary conditions: u(0) = U_bot, u(H) = U_top.
+    """
+    delta_U = U_top - U_bot
+    A1 = delta_U / (y_int + (mu_B / mu_A) * (H - y_int))
+    A2 = (mu_B / mu_A) * A1
+    u  = np.where(
+        y <= y_int,
+        U_bot + A1 * y,
+        U_bot + A1 * y_int + A2 * (y - y_int),
+    )
+    return u, A1, A2
 
 
 # ============================================================================
@@ -74,14 +89,25 @@ def shear_rate(U_top, U_bot, H):
 # ============================================================================
 
 print("=" * 70)
-print("SINGLE-PHASE COUETTE ANALYSIS  (input_hydro2_single)")
+print("TWO-FLUID PLANAR COUETTE ANALYSIS  (input_hydro2_multi)")
 print("=" * 70)
 print(f"\nProblem setup:")
 print(f"  Domain     : y = [{y_min}, {y_max}] m,  x = [{x_min}, {x_max}] m")
-print(f"  Fluid      : rho = {rho}, mu = {mu},  nu = {nu}")
-print(f"  No-slip    : u(0) = {U_bot},  u(H) = {U_top}")
-print(f"  Steady SS  : du/dy = {shear_rate(U_top, U_bot, H):.6f} 1/s (uniform)")
-print(f"  tau_diff   : H^2 / (pi^2 * nu) = {H * H / (np.pi ** 2 * nu):.2f} s")
+print(f"  Interface  : y_int = {y_int} m")
+print(f"  Lower (B)  : rho = {rho_B}, mu = {mu_B}, nu = {mu_B/rho_B}")
+print(f"  Upper (A)  : rho = {rho_A}, mu = {mu_A}, nu = {mu_A/rho_A}")
+print(f"  Plates     : u(0) = {U_bot},  u(H) = {U_top}")
+
+# Steady-state expectations
+_, A1_exp, A2_exp = couette_2layer(np.array([y_int]), U_top, U_bot,
+                                   mu_A, mu_B, y_int, H)
+print(f"  Expected shear rates:")
+print(f"    A1 (lower) = du/dy = {A1_exp:.6f} 1/s")
+print(f"    A2 (upper) = du/dy = {A2_exp:.6f} 1/s")
+print(f"  Stress check: mu_B * A1 = {mu_B * A1_exp:.6e}")
+print(f"                mu_A * A2 = {mu_A * A2_exp:.6e}  (should match)")
+print(f"  tau_diff lower : H^2 / nu_B = {H * H / (mu_B / rho_B):.2f} s")
+print(f"  tau_diff upper : H^2 / nu_A = {H * H / (mu_A / rho_A):.2f} s")
 
 print(f"\nLoading {amrex_output_dir}...")
 plot_files = sorted(
@@ -121,19 +147,14 @@ print(f"\n  extracted {len(y_num)} points along x = {x_slice} m")
 print(f"  u range: [{np.min(u_num):.6f}, {np.max(u_num):.6f}] m/s")
 print(f"  |v|max : {np.max(np.abs(v_num)):.3e} m/s (should be ~0)")
 
-# No-slip enforcement check
-print(f"\n  No-slip BC enforcement (at the first/last cells of the ray):")
-print(f"    u(y ~= 0)  = {u_num[0]:.6e}   (target {U_bot})")
-print(f"    u(y ~= H)  = {u_num[-1]:.6e}   (target {U_top})")
-
 
 # ============================================================================
 # ANALYTICAL PROFILE + ERROR
 # ============================================================================
 
 y_fine        = np.linspace(y_min, y_max, 500)
-u_ana_fine    = couette_single(y_fine, U_top, U_bot, H)
-u_ana_at_num  = couette_single(y_num,  U_top, U_bot, H)
+u_ana_fine, A1, A2 = couette_2layer(y_fine, U_top, U_bot, mu_A, mu_B, y_int, H)
+u_ana_at_num, _, _ = couette_2layer(y_num,  U_top, U_bot, mu_A, mu_B, y_int, H)
 
 err  = u_num - u_ana_at_num
 L2   = np.sqrt(np.mean(err ** 2))
@@ -142,11 +163,18 @@ print(f"\n  L2 error  = {L2:.6e}")
 print(f"  Linf err  = {Linf:.6e}")
 print(f"  mean |err|= {np.mean(np.abs(err)):.6e}")
 
-# Numerical shear rate diagnostic.
+# Numerical shear rate diagnostic (one-sided at interface from below / above).
 dudy_num = np.gradient(u_num, y_num)
-print(f"\n  Numerical du/dy stats:")
-print(f"    mean   : {np.mean(dudy_num):.6f}  (analytical {shear_rate(U_top, U_bot, H):.6f})")
-print(f"    stddev : {np.std(dudy_num):.6e}    (should be ~0 -> uniform shear)")
+mask_lower = y_num < y_int
+mask_upper = y_num > y_int
+A1_num = float(np.mean(dudy_num[mask_lower])) if mask_lower.any() else np.nan
+A2_num = float(np.mean(dudy_num[mask_upper])) if mask_upper.any() else np.nan
+print(f"\n  Numerical mean du/dy:")
+print(f"    lower layer : {A1_num:.6f}  (analytical {A1:.6f})")
+print(f"    upper layer : {A2_num:.6f}  (analytical {A2:.6f})")
+print(f"  Numerical stress continuity:")
+print(f"    mu_B * A1_num = {mu_B * A1_num:.6e}")
+print(f"    mu_A * A2_num = {mu_A * A2_num:.6e}  (should match)")
 
 
 # ============================================================================
@@ -154,21 +182,19 @@ print(f"    stddev : {np.std(dudy_num):.6e}    (should be ~0 -> uniform shear)")
 # ============================================================================
 
 # Percent error normalized by the plate-velocity scale (U_top - U_bot).
-# Using percent-of-velocity-difference (rather than dividing by u_ana which
-# vanishes at y=0) keeps the metric finite and physically meaningful.
+# Keeps the metric finite at y=0 where u_ana = 0.
 U_scale  = max(abs(U_top - U_bot), 1e-30)
 pct_err  = 100.0 * err / U_scale
 L2_pct   = np.sqrt(np.mean(pct_err ** 2))
 Linf_pct = np.max(np.abs(pct_err))
 
-# Velocity profile (final time)
+# Velocity profile
 fig, ax = plt.subplots(figsize=(8, 7))
-ax.plot(u_ana_fine, y_fine, 'b-', lw=2.0, label=f'Analytical (linear)')
+ax.plot(u_ana_fine, y_fine, 'b-', lw=2.0, label='Analytical (2-layer Couette)')
 ax.plot(u_num,      y_num,  'r--', lw=1.4, label='Numerical', alpha=0.85)
 ax.set_xlabel('u (m/s)', fontsize=12)
 ax.set_ylabel('Height (m)', fontsize=12)
-ax.set_title('Single-phase Couette velocity profile',
-             fontsize=13, fontweight='bold')
+ax.set_title('Two-fluid Couette velocity profile', fontsize=13, fontweight='bold')
 ax.set_ylim([y_min, y_max])
 ax.legend(fontsize=10, loc='best')
 ax.grid(alpha=0.3)
@@ -181,8 +207,8 @@ print(f"\n  wrote {out}.png / .eps")
 
 # Shear rate
 fig, ax = plt.subplots(figsize=(8, 7))
-dudy_ana = np.full_like(y_fine, shear_rate(U_top, U_bot, H))
-ax.plot(dudy_ana, y_fine, 'b-', lw=2.0, label='Analytical (uniform)')
+dudy_ana = np.where(y_fine <= y_int, A1, A2)
+ax.plot(dudy_ana, y_fine, 'b-', lw=2.0, label='Analytical')
 ax.plot(dudy_num, y_num,  'r--', lw=1.4, label='Numerical (centered diff)', alpha=0.85)
 ax.set_xlabel('du/dy (1/s)', fontsize=12)
 ax.set_ylabel('Height (m)', fontsize=12)
@@ -192,6 +218,26 @@ ax.legend(fontsize=10, loc='upper center')
 ax.grid(alpha=0.3)
 plt.tight_layout()
 out = os.path.join(images_dir, f'{case_name}_shear_rate')
+fig.savefig(out + '.png', dpi=300, bbox_inches='tight')
+fig.savefig(out + '.eps',           bbox_inches='tight')
+plt.close(fig)
+print(f"  wrote {out}.png / .eps")
+
+# Stress continuity check (mu * du/dy should be flat across the domain)
+fig, ax = plt.subplots(figsize=(8, 7))
+mu_profile = np.where(y_num <= y_int, mu_B, mu_A)
+tau_num    = mu_profile * dudy_num
+tau_ana    = np.full_like(y_fine, mu_B * A1)
+ax.plot(tau_ana, y_fine, 'b-', lw=2.0, label=f'Analytical')
+ax.plot(tau_num, y_num,  'r--', lw=1.4, label='Numerical mu * du/dy', alpha=0.85)
+ax.set_xlabel('shear stress tau (Pa)', fontsize=12)
+ax.set_ylabel('Height (m)', fontsize=12)
+ax.set_title('Shear stress continuity', fontsize=13, fontweight='bold')
+ax.set_ylim([y_min, y_max])
+ax.legend(fontsize=10, loc='best')
+ax.grid(alpha=0.3)
+plt.tight_layout()
+out = os.path.join(images_dir, f'{case_name}_stress_continuity')
 fig.savefig(out + '.png', dpi=300, bbox_inches='tight')
 fig.savefig(out + '.eps',           bbox_inches='tight')
 plt.close(fig)
@@ -216,7 +262,7 @@ print(f"  wrote {out}.png / .eps")
 if has_eta:
     fig, ax = plt.subplots(figsize=(8, 7))
     ax.plot(eta_num, y_num, 'g-', lw=1.6)
-    ax.set_xlabel('eta', fontsize=12)
+    ax.set_xlabel('eta (alpha of phase 0 / upper fluid A)', fontsize=12)
     ax.set_ylabel('Height (m)', fontsize=12)
     ax.set_xlim([-0.05, 1.05])
     ax.set_ylim([y_min, y_max])
@@ -251,7 +297,6 @@ for pf in plot_files:
     except Exception as exc:
         print(f"    [skip] {os.path.basename(pf)}: {exc}")
 
-# Sort by physical time (filenames are usually monotonic, but be safe).
 frame_data.sort(key=lambda d: d[0])
 
 x_lo = min(U_bot, U_top) - 0.02 * U_scale
@@ -267,7 +312,7 @@ ax_g.set_xlim([x_lo, x_hi])
 ax_g.set_ylim([y_min, y_max])
 ax_g.set_xlabel('u (m/s)', fontsize=12)
 ax_g.set_ylabel('Height (m)', fontsize=12)
-ax_g.set_title('Single-phase Couette transient', fontsize=13, fontweight='bold')
+ax_g.set_title('Two-fluid Couette transient', fontsize=13, fontweight='bold')
 ax_g.legend(fontsize=10, loc='lower right')
 ax_g.grid(alpha=0.3)
 

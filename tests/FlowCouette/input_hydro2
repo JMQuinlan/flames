@@ -27,8 +27,19 @@ stop_time = 30.0
 
 ### HYDRO PARAM ###
 
-gamma0 = 1.4
-gamma1 = 1.4
+### EQUATION OF STATE -- pure ideal gas (both phases gamma=1.4, p0=0) ###
+# Couette test: shearing between plates, only the viscosity ratio matters.
+# Normalized units (cv=1.0, cp=gamma=1.4).
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cv    = 1.0
+eos0.cp    = 1.4
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 1.0
+eos1.cp    = 1.4
+
 cfl   = 0.4
 mu0   = 1.0
 mu1   = 10.0
@@ -71,12 +82,6 @@ velocity1.ic.expression.region1 = "0.0"
 
 pressure1.ic.type = expression
 pressure1.ic.expression.region0 = "100.0"
-
-cp0 = "1.4"
-cv0 = "1.0"
-
-cp1 = "1.4"
-cv1 = "1.0"
 
 ### HYDRO BC ###
 pf.eta.bc.type.xlo = neumann
@@ -121,4 +126,8 @@ p_refinement_criterion     = 100000.0
 static_eta = 1
 Spec_Vol = 1
 
+### NUMERICS -- standardized: HLLC + WENO3 + RK3 ###
 Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3

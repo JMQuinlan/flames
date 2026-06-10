@@ -1,0 +1,175 @@
+#@ exe=hydro2
+#@ dim=2
+# alamo.program = hydro2
+
+# =============================================================================
+# RAYLEIGH FLOW / STOKES' FIRST PROBLEM -- hydro2 single-phase variant
+# =============================================================================
+# Hydro2 6-eq port of inputx.  Single-phase by degeneracy: eos0 == eos1,
+# mu0 == mu1, density0 == density1, eta = 1 everywhere (only phase 0
+# physically active).
+#
+# Setup:
+#   Channel y = [0, 1] m, x cells nearly ignored (effectively 1D in y).
+#   Bottom plate (ylo): impulsively moved at U = 1 m/s   (Dirichlet momentum)
+#   Top    plate (yhi): stationary                       (Dirichlet momentum)
+#   x sides            : Neumann (free, no driving)
+#
+#   Bottom-wall momentum = rho * U = 100 * 1.0 = 100.
+#
+# Analytical (Stokes' first):
+#   u_x(y, t) = U * erfc( y / sqrt(4 * nu * t) )
+#   nu = mu / rho = 2.5 / 100 = 0.025 m^2/s
+#   Diffusive penetration depth at t: delta(t) ~ sqrt(nu * t) ~ 0.25 m at t = 2.5 s.
+#
+# Validation:
+#   reference/rayleigh_single_x.py reads from
+#     ./tests/FlowRayleigh/FlowRayleigh   (no x-suffix in the script!)
+#   The ORIGINAL inputx wrote to FlowRayleighx, which mismatches the script.
+#   I kept the original path so this conversion is faithful; if you want the
+#   existing script to pick it up directly, change `plot_file` below to
+#   `./tests/FlowRayleigh/FlowRayleigh`  OR  update line 55 of the script.
+# =============================================================================
+
+### OUTPUT ###
+plot_file = ./tests/FlowRayleigh/FlowRayleighx
+
+### MESHING ###
+amr.plot_dt        = 0.1
+amr.max_grid_size  = 5000000
+amr.blocking_factor = 4
+amr.regrid_int     = 50
+amr.grid_eff       = 0.8
+amr.max_level      = 0
+amr.n_cell         = 8 128         # 8 in x (essentially ignored), 128 in y
+
+### DIMENSIONS ###
+geometry.prob_lo     = -0.5 0.0 0.0       # [ m ]
+geometry.prob_hi     =  0.5 1.0 0.0       # [ m ]
+geometry.is_periodic = 0 0 0
+
+### TIME STEP ###
+timestep  = 5.0e-6
+stop_time = 2.5
+
+### HYDRO PARAM ###
+
+### EQUATION OF STATE -- single fluid (both phases identical, ideal gas) ###
+# gamma = 1.4 matches the original input.  cv = 1.0, cp = gamma = 1.4
+# in normalized units (the test only exercises viscous momentum diffusion).
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cv    = 1.0
+eos0.cp    = 1.4
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 1.0
+eos1.cp    = 1.4
+
+cfl    = 0.2
+mu0    = 2.5
+mu0_b  = 1.67
+mu1    = 2.5
+mu1_b  = 1.67
+
+### ETA IC ###
+# Pure phase 0 throughout (eta = 1).  No interface dynamics; epsilon is
+# a parser-required placeholder and doesn't enter the test.
+eta.ic.type = expression
+eta.ic.expression.region0 = "1.0"
+epsilon = 0.01
+
+### SOURCE-TERM ICs (off) ###
+m0.ic.type = constant
+m0.ic.constant.value = "0.0"
+
+u0.ic.type = expression
+u0.ic.expression.region0 = "0.0"
+u0.ic.expression.region1 = "0.0"
+
+q.ic.type = expression
+q.ic.expression.region0 = "0.0"
+q.ic.expression.region1 = "0.0"
+
+### PER-PHASE PRIMARIES ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "100.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"            # u_x = 0 at rest
+velocity0.ic.expression.region1 = "0.0"            # u_y
+
+# Sound speed stays large (p ~ 1e5) so the viscous diffusion is the rate-
+# limiting timescale, not acoustics.
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "100000.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "100.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "100000.0"
+
+### HYDRO BC ###
+# eta: neumann everywhere (zero-gradient).
+pf.eta.bc.type.xlo = neumann
+pf.eta.bc.type.xhi = neumann
+pf.eta.bc.type.ylo = neumann
+pf.eta.bc.type.yhi = neumann
+
+# Density: zero-gradient on all four sides.
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+density.bc.val.xhi = 0.0
+density.bc.val.xlo = 0.0
+density.bc.val.ylo = 0.0
+density.bc.val.yhi = 0.0
+
+# Energy: Neumann everywhere (no heat flux through walls or x-faces).
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+energy.bc.val.xlo = 0.0
+energy.bc.val.xhi = 0.0
+energy.bc.val.ylo = 0.0
+energy.bc.val.yhi = 0.0
+
+# Momentum: free at x-sides, no-slip Dirichlet at y-walls.
+# Bottom plate (ylo) moves impulsively at u = 1 m/s; rho = 100 -> M_x = 100.
+# Top plate (yhi) stationary; M = 0.
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = dirichlet dirichlet
+momentum.bc.type.yhi = dirichlet dirichlet
+momentum.bc.val.xlo = 0.0 0.0
+momentum.bc.val.xhi = 0.0 0.0
+momentum.bc.val.ylo = 100.0 0.0            # bottom plate u = 1.0, M_x = rho*U = 100
+momentum.bc.val.yhi = 0.0 0.0
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion   = 0.1
+omega_refinement_criterion = 0.5
+gradu_refinement_criterion = 0.75
+rho_refinement_criterion   = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+cutoff = 0.01
+
+amr.abort_on_nan = 0
+small = 1E-8
+
+static_eta = 1
+Spec_Vol   = 1
+
+### NUMERICS -- standardized: HLLC + WENO3 + RK3 ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3
