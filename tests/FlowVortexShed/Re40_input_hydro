@@ -5,38 +5,51 @@
 
 # ============================================================================
 # FlowVortex -- SINGLE-PHASE (Integrator::Hydro) flow past an embedded cylinder
-# at Re = 40.  Reference case for the two-phase input_hydro2 (same geometry and
-# Reynolds number).  Here eta is the SOLID indicator (eta = 1 fluid, eta = 0
-# solid).
+# at Re = 40.  REFERENCE case for the two-phase Re40_input_hydro2: the geometry,
+# mesh, AMR, time stepping, Reynolds number, Mach number and boundary
+# conditions are matched EXACTLY (the format differs only because Hydro is
+# single-phase and uses eta as the SOLID indicator, eta=1 fluid, eta=0 solid).
 #
-#   Re = rho * U * D / mu = 100 * 1 * 1.0 / 2.5 = 40
-#   D  = 2*R0 = 1.0,  R0 = 0.5
+#   Re = rho*U*D/mu = 100*1*1.0/2.5 = 40,    D = 2*R0 = 1.0
+#   Ma = U/c = 1/5 = 0.2   (c = sqrt(gamma*(p+pref)/rho) = sqrt(1.4*1785.71/100) = 5)
+#
+# Matched to Re40_input_hydro2:
+#   domain [-3,12]x[-3,3], n_cell 144x48 (dx=0.125), max_level 2, regrid 10,
+#   grid_eff 0.8, n_error_buf 16, plot_dt 0.25, stop_time 60, cfl 0.4, dt<=5e-3,
+#   rho=100, U=1, p_abs=1785.71 (Ma 0.2), cylinder R0=0.5 eps=0.06 at origin,
+#   inflow xlo / outflow xhi / free-stream (neumann) top+bottom.
+# Solver-specific (NOT matched, inherent to each scheme): Hydro enforces no-slip
+# via fluid-state reconstruction + lagrange penalty + cutoff; Hydro2 via the
+# cutoff freeze + blended solid viscosity.
 # ============================================================================
-
-# alamo.program = hydro   # only for the unified 'alamo' exe; the standalone
-#                          # hydro exe (this test, #@ exe=hydro) aborts on it
-#                          # as an unused input.
 
 ### OUTPUT ###
 plot_file = ./tests/FlowVortexShed/output_hydro
 
 ### MESHING ###
-amr.plot_dt          = 2.0
-amr.max_grid_size    = 5000000
+amr.plot_dt          = 0.25
+amr.max_grid_size    = 500000
 amr.blocking_factor  = 4
 amr.regrid_int       = 10
 amr.grid_eff         = 0.8
 amr.max_level        = 2
-timestep             = 1.0e-6
-amr.n_cell           = 72 48        # dx = 9/72 = 6/48 = 0.125
+amr.n_cell           = 144 48        # matches Hydro2: dx = 15/144 = 0.104, dy = 6/48 = 0.125
+amr.n_error_buf      = 16
+timestep             = 1.0e-5
 
 ### DIMENSIONS ###
 geometry.prob_lo     = -3.0 -3.0 0.0
-geometry.prob_hi     =  6.0  3.0 0.0
+geometry.prob_hi     =  12.0  3.0 0.0
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
-stop_time = 500.0
+stop_time = 60.0
+cfl       = 0.4
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.cfl     = 0.4
+dynamictimestep.max     = 5.0e-3
+dynamictimestep.min     = 1.0e-9
 
 ### DIFFUSE-BOUNDARY SOURCES ###
 m0.ic.type = constant
@@ -49,8 +62,9 @@ q.ic.expression.region0 = "0.0"
 q.ic.expression.region1 = "0.0"
 
 ### ETA (SOLID INDICATOR) IC -- cylinder of radius R0 at the origin ###
+# Matched to Hydro2's solid.phi interface width eps = 0.06.
 eta.ic.type = expression
-eta.ic.expression.constant.eps = 0.024
+eta.ic.expression.constant.eps = 0.06
 eta.ic.expression.constant.x0  = 0.0
 eta.ic.expression.constant.y0  = 0.0
 eta.ic.expression.constant.R0  = 0.5
@@ -58,10 +72,9 @@ eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x-x0)**2 + (y-y0)**2) - R0)/ep
 
 ### HYDRO PARAM ###
 gamma = 1.4
-cfl   = 0.0024
 mu    = 2.5
 mu_b  = 0.0
-pref  = 1000.0
+pref  = 0.0          # match Hydro2 (pref=0); absolute pressure = pressure + pref
 
 density.ic.type = expression
 density.ic.expression.region0 = "100.0"
@@ -70,17 +83,19 @@ velocity.ic.type = expression
 velocity.ic.expression.region0 = "1.0"
 velocity.ic.expression.region1 = "0.0"
 
+# p_abs = 1785.71 -> c = sqrt(1.4*1785.71/100) = 5, Ma = 0.2 (matches Hydro2).
 pressure.ic.type = expression
-pressure.ic.expression.region0 = "101.325"
+pressure.ic.expression.region0 = "1785.71"
 
 ### SOLID (prescribed quiescent target) ###
+# Quiescent solid at ambient pressure: u=0, E_solid = p_abs/(gamma-1) = 4464.275.
 solid.density.ic.type = expression
 solid.density.ic.expression.region0 = "100.0"
 solid.momentum.ic.type = expression
 solid.momentum.ic.expression.region0 = "0.0"
 solid.momentum.ic.expression.region1 = "0.0"
 solid.energy.ic.type = expression
-solid.energy.ic.expression.region0 = "0.0"
+solid.energy.ic.expression.region0 = "4464.275"
 
 ### ETA BC ###
 pf.eta.bc.constant.type.xlo = neumann
@@ -96,49 +111,52 @@ pf.eta.bc.constant.val.yhi = 0.0
 pf.eta.bc.constant.val.zlo = 0.0
 pf.eta.bc.constant.val.zhi = 0.0
 
-### HYDRO BC ###
-density.bc.constant.type.xhi = neumann
+### HYDRO BC -- inflow xlo (Dirichlet), outflow xhi, free-stream (neumann) top/bottom ###
+# Matched to Hydro2: density Dirichlet inflow only; momentum Dirichlet-normal
+# inflow with neumann tangential; everything else neumann (free-stream).
 density.bc.constant.type.xlo = dirichlet
+density.bc.constant.type.xhi = neumann
 density.bc.constant.type.ylo = neumann
 density.bc.constant.type.yhi = neumann
-density.bc.constant.val.xhi = 0.0
 density.bc.constant.val.xlo = 100.0
+density.bc.constant.val.xhi = 0.0
 density.bc.constant.val.ylo = 0.0
 density.bc.constant.val.yhi = 0.0
 
-energy.bc.constant.type.xhi = neumann
 energy.bc.constant.type.xlo = neumann
+energy.bc.constant.type.xhi = neumann
 energy.bc.constant.type.ylo = neumann
 energy.bc.constant.type.yhi = neumann
-energy.bc.constant.val.xhi = 0.0
 energy.bc.constant.val.xlo = 0.0
+energy.bc.constant.val.xhi = 0.0
 energy.bc.constant.val.ylo = 0.0
 energy.bc.constant.val.yhi = 0.0
 
+momentum.bc.constant.type.xlo = dirichlet neumann
 momentum.bc.constant.type.xhi = neumann neumann
-momentum.bc.constant.type.xlo = dirichlet dirichlet
-momentum.bc.constant.type.ylo = dirichlet dirichlet
-momentum.bc.constant.type.yhi = dirichlet dirichlet
-momentum.bc.constant.val.xhi = 0.0 0.0
+momentum.bc.constant.type.ylo = neumann neumann
+momentum.bc.constant.type.yhi = neumann neumann
 momentum.bc.constant.val.xlo = 100.0 0.0
-momentum.bc.constant.val.ylo = 100.0 0.0
-momentum.bc.constant.val.yhi = 100.0 0.0
+momentum.bc.constant.val.xhi = 0.0 0.0
+momentum.bc.constant.val.ylo = 0.0 0.0
+momentum.bc.constant.val.yhi = 0.0 0.0
 
 ### REFINEMENT CRITERIA ###
+# Match Hydro2: refine the solid boundary (eta here == phi there) at 0.1 and the
+# wake on vorticity (omega) at 0.5; velocity-gradient criterion OFF.
 eta_refinement_criterion   = 0.1
 omega_refinement_criterion = 0.5
-gradu_refinement_criterion = 0.1
+gradu_refinement_criterion = 1.0e8
 
 amr.abort_on_nan = 0
 
-dynamictimestep.on  = 1
-dynamictimestep.verbose = 1
-dynamictimestep.cfl = 0.8
-dynamictimestep.max = 1.0
-dynamictimestep.min = 0.0
-
 small    = 1E-8
-cutoff   = 0.01
-lagrange = 2000.0
+# No-slip strategy matched to Hydro2 "State A": the cutoff freeze is the primary
+# wall (cells with eta < cutoff are frozen to the quiescent solid target every
+# stage -- unconditionally stable), so the explicit lagrange penalty is OFF.
+# (The original lagrange=2000 was stable only at a tiny dt; cutoff=0.5 lets the
+# acoustic dt=5e-3 match Hydro2.)
+cutoff   = 0.5
+lagrange = 0.0
 
 solver.type = hllc
