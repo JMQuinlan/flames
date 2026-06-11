@@ -52,16 +52,16 @@ amr.max_level = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 2
 amr.grid_eff = 0.8
-amr.n_cell = 16 64 0
+amr.n_cell = 4 64 0
 
 ### DIMENSIONS ###
 geometry.prob_lo = 0.0 0.0 0.0       # [ m ]
-geometry.prob_hi = 0.75 3.0 0.0    # [ m ]
+geometry.prob_hi = 0.1874 3.0 0.0    # [ m ]
 geometry.is_periodic = 1 0 0
 
 ### TIME STEP ###
 timestep  = 1.0e-3
-stop_time = 30.0
+stop_time = 120.0
 
 ### HYDRO PARAM ###
 

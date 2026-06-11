@@ -1264,8 +1264,10 @@ Hydro2::RHS(int lev,
             Set::Vector div_tau = Set::Vector::Zero();
 
             // Effective Viscosities
-            Set::Scalar mu_eff = eta(i, j, k) * mu0 + (1.0 - eta(i, j, k)) * mu1;
-            Set::Scalar lambda_eff = eta(i, j, k) * mu0_b + (1.0 - eta(i, j, k)) * mu1_b;
+            //Set::Scalar mu_eff = eta(i, j, k) * mu0 + (1.0 - eta(i, j, k)) * mu1;
+            //Set::Scalar lambda_eff = eta(i, j, k) * mu0_b + (1.0 - eta(i, j, k)) * mu1_b;
+            Set::Scalar mu_eff = 1.0 / (eta(i, j, k) / std::max(mu0, small) + (1.0 - eta(i, j, k)) / std::max(mu1, small));
+            Set::Scalar lambda_eff = 1.0 / (eta(i, j, k) / std::max(mu0_b, small) + (1.0 - eta(i, j, k)) / std::max(mu1_b, small));
             Set::Vector grad_mu = (mu0 - mu1) * grad_eta;
             Set::Vector grad_lambda = (mu0_b - mu1_b) * grad_eta;
 
@@ -1294,7 +1296,7 @@ Hydro2::RHS(int lev,
                             }
 
                             div_tau(p) += Mpqrs * hess_u(r, s, q);
-                            Ldot(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
+                            Ldot(p) += 0.0; // 0.5 * Mpqrs *(u(r) - u0(r)) * hess_eta(q, s);
 
                             // Grad visc terms
                             div_tau(p) += dMpqrs * gradu(r, s);
@@ -1326,14 +1328,6 @@ Hydro2::RHS(int lev,
                 {
                     Set::Scalar kappa = kappas(i, j, k, 0);
                     Set::Scalar sigma_eff = sigma;
-                    Set::Scalar alpha = 6 * sqrt(2);
-                    //Set::Scalar UFFDA = epsilon * alpha * grad_eta_mag * grad_eta_mag;                // What I oringially had, did not reach max amplitude
-                    //Set::Scalar UFFDA = grad_eta_mag * grad_eta_mag / (epsilon * sqrt(2.0));          // Forces an interface thickness
-                    //Set::Scalar UFFDA = grad_eta_mag * grad_eta_mag;                                  // More natural
-                    Set::Scalar UFFDA = epsilon * grad_eta_mag / 0.02;           // Working the best
-                    //Set::Scalar UFFDA = grad_eta_mag;           // More natural
-                    //Fsv_vector(0) = sigma_eff * kappa * n_hat(0) * UFFDA;    // / (grad_eta_mag + small)); // / (DX[0] + small);
-                    //Fsv_vector(1) = sigma_eff * kappa * n_hat(1) * UFFDA; // / (grad_eta_mag + small)); // / (DX[1] + small);
                     
                     Fsv_vector(0) = sigma_eff * kappa * grad_eta(0); // * epsilon; // / (grad_eta_mag + small)); // / (DX[1] + small);
                     Fsv_vector(1) = sigma_eff * kappa * grad_eta(1); // * epsilon; // / (grad_eta_mag + small)); // / (DX[1] + small);
