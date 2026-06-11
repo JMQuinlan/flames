@@ -133,6 +133,8 @@ def main():
         col_name = ref_names[col]
         ax.set_xlabel(LATEX_LABELS.get(ref_names[0], ref_names[0]))
         ax.set_ylabel(LATEX_LABELS.get(col_name, col_name))
+        # Force the time axis into scientific notation (shared 10^n offset).
+        ax.ticklabel_format(axis="x", style="sci", scilimits=(0, 0))
         ax.legend()
         ax.grid(True, alpha=0.3)
         fig.tight_layout()

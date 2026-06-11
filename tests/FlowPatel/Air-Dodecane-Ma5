@@ -51,12 +51,12 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 
-plot_file = /mmfs1//home/spatel6/flames/bin/dodecane_8um/air_dodecane_Ma5_Vap
-# plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_air_dodecane_Ma5_no_vap
+# plot_file = /mmfs1//home/spatel6/flames/bin/dodecane_8um/air_dodecane_Ma5_Vap
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_air_dodecane_Ma5_Vap
 
 ### MESHING ###
 amr.plot_dt = 0.25e-6
-# amr.plot_int = 1
+amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 16
 amr.regrid_int = 1

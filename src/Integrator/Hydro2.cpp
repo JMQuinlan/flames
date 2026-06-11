@@ -3278,6 +3278,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     Set::Scalar vy_max_local = 0.0;
     Set::Scalar F_max_local = 0.0;
     Set::Scalar rho_min_local = 1e10;
+    Set::Scalar nu_max_local = 0.0;       // max per-cell kinematic viscosity mu_eff/rho (viscous dt)
+    Set::Scalar alpha_max_local = 0.0;    // max per-cell thermal diffusivity k/(rho cv) (conduction dt)
     Set::Scalar floor_energy_local = 0.0; // internal energy injected by the eps_p backstop
 
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
@@ -3316,7 +3318,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         const Solver::EOS::Tammann eos0_base = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
     
-        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &F_max_local, &rho_min_local, &floor_energy_local] AMREX_GPU_DEVICE(int i, int j, int k)
+        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &F_max_local, &rho_min_local, &nu_max_local, &alpha_max_local, &floor_energy_local] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
         
@@ -3436,6 +3438,22 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                                     Source(i,j,k,2) * Source(i,j,k,2));
             F_max_local = std::max(F_max_local, F_mag);
             rho_min_local = std::min(rho_min_local, rho(i,j,k));
+
+            // Per-cell parabolic diffusivities for the dt limits. Use the SAME
+            // eta-blended mu_eff and k as the viscous/conduction fluxes (mu_eff at
+            // ~1709, k at ~2510) over the local rho (and rho*cv), so the stability
+            // estimate tracks the true worst-case kinematic viscosity / thermal
+            // diffusivity instead of pairing min-rho with max-mu (a cell that
+            // exists nowhere and over-restricts dt by ~70x at small scales).
+            {
+                Set::Scalar eta_c  = eta_new(i, j, k);
+                Set::Scalar mu_eff = eta_c * mu0 + (1.0 - eta_c) * mu1;
+                nu_max_local = std::max(nu_max_local, mu_eff / (rho(i, j, k) + small));
+
+                Set::Scalar k_eff  = eta_c * k0_thermal + (1.0 - eta_c) * k1_thermal;
+                Set::Scalar cv_eff = eta_c * eos0_local.Cv() + (1.0 - eta_c) * eos1_local.Cv();
+                alpha_max_local = std::max(alpha_max_local, k_eff / (rho(i, j, k) * cv_eff + small));
+            }
         });
     } // end Mixed Fields loop
 
@@ -3445,6 +3463,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     amrex::ParallelDescriptor::ReduceRealMax(vy_max_local);
     amrex::ParallelDescriptor::ReduceRealMax(F_max_local);
     amrex::ParallelDescriptor::ReduceRealMin(rho_min_local);
+    amrex::ParallelDescriptor::ReduceRealMax(nu_max_local);
+    amrex::ParallelDescriptor::ReduceRealMax(alpha_max_local);
 
     c_max = c_max_local;
     vx_max = vx_max_local;
@@ -3470,8 +3490,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     Set::Scalar wave_speed = c_max + sqrt(vx_max * vx_max + vy_max * vy_max);
     Set::Scalar dt_acoustic = cfl * dx_min / (wave_speed + small);
 
-    Set::Scalar mu_max = std::max(mu0, mu1);
-    Set::Scalar dt_viscous = cfl_v * rho_min * dx_min * dx_min / (mu_max + small);
+    // Parabolic momentum-diffusion limit: dt <= cfl_v * dx^2 / nu, nu = mu/rho.
+    // nu_max_local is the max per-cell kinematic viscosity (mu_eff/rho) tracked in
+    // the loop above. This replaces the old rho_min/mu_max pairing, which combined
+    // the global-min density (gas) with the global-max viscosity (liquid) -- a
+    // "cell" that exists nowhere -- and over-restricted dt by ~70x at small scales.
+    Set::Scalar dt_viscous = (nu_max_local > 0.0)
+                                 ? cfl_v * dx_min * dx_min / (nu_max_local + small)
+                                 : dt_acoustic;
 
     // Parabolic limit for vapor-species diffusion (Stage 3b-1). Effective
     // diffusivity of Y_v is Dv (d(rho_eta0 Y)/dt = div(rho_eta0 Dv grad Y)),
@@ -3481,15 +3507,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                                  ? cfl_v * dx_min * dx_min / (Dv + small)
                                  : dt_acoustic;
 
-    // Parabolic limit for Fourier thermal conduction (Stage 3b-2). The thermal
-    // diffusivity is alpha = k/(rho*cv), so the explicit bound scales as
-    // dx^2/alpha = rho*cv*dx^2/k. Use rho_min and the smaller phase cv against the
-    // larger phase conductivity (a conservative lower bound on the true dt). Falls
-    // back to the acoustic dt when conduction is off so it never tightens the min.
-    Set::Scalar k_max  = std::max(k0_thermal, k1_thermal);
-    Set::Scalar cv_min = std::min(eos0.Cv(), eos1.Cv());
-    Set::Scalar dt_conduction = (k_max > 0.0)
-                                    ? cfl_v * rho_min * cv_min * dx_min * dx_min / (k_max + small)
+    // Parabolic Fourier-conduction limit: dt <= cfl_v * dx^2 / alpha,
+    // alpha = k/(rho*cv). alpha_max_local is the max per-cell thermal diffusivity
+    // tracked in the loop above (same eta-blended k and per-cell rho*cv the
+    // conduction flux uses), replacing the old rho_min*cv_min/k_max worst-case
+    // pairing. Falls back to the acoustic dt when conduction is off.
+    Set::Scalar dt_conduction = (alpha_max_local > 0.0)
+                                    ? cfl_v * dx_min * dx_min / (alpha_max_local + small)
                                     : dt_acoustic;
 
     Set::Scalar a_max = F_max / (rho_min + small);
@@ -3501,14 +3525,22 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     Set::Scalar dt_max = std::min({ dt_acoustic, dt_viscous, dt_force, dt_allen_cahn, dt_species, dt_conduction });
     dt_max = dt_max * 0.9;
 
-    // Debugging to report cfl constants used. Change bool to show
-    if ((step_counter[lev] % 10 == 0) && false)
+    // Debugging to report cfl constants used. Change bool to show. Prints each
+    // dt candidate separately so the binding constraint is obvious at a glance.
+    if ((step_counter[lev] % 10 == 0) && true)
     {
         Util::Message(INFO, "=== CFL DIAGNOSTICS Level ", lev, " ===");
         Util::Message(INFO, "  c_max = ", c_max, " m/s");
         Util::Message(INFO, "  vx_max = ", vx_max, " m/s");
         Util::Message(INFO, "  vy_max = ", vy_max, " m/s");
-        Util::Message(INFO, "  dt_max = ", dt_max, " s");
+        Util::Message(INFO, "  nu_max = ", nu_max_local, " m^2/s , alpha_max = ", alpha_max_local, " m^2/s");
+        Util::Message(INFO, "  dt_acoustic   = ", dt_acoustic, " s");
+        Util::Message(INFO, "  dt_viscous    = ", dt_viscous, " s");
+        Util::Message(INFO, "  dt_conduction = ", dt_conduction, " s");
+        Util::Message(INFO, "  dt_species    = ", dt_species, " s");
+        Util::Message(INFO, "  dt_force      = ", dt_force, " s");
+        Util::Message(INFO, "  dt_allen_cahn = ", dt_allen_cahn, " s");
+        Util::Message(INFO, "  dt_max (x0.9) = ", dt_max, " s");
     }
 
     if (dynamictimestep.on)
