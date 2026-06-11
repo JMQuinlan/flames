@@ -98,6 +98,19 @@ static Set::Scalar SaturationYs(Set::Scalar T, Set::Scalar p,
     return nv / (nv + ng + small);
 }
 
+// NaN-safe clamp of a vapor mass fraction to [0, hi]. A plain ternary clamp
+// (x<lo?lo:(x>hi?hi:x)) LEAKS NaN: a NaN fails both comparisons and passes
+// straight through, so one corrupted rho_vap silently poisons every EOS call
+// that reads Yv (gamma -> p0_eff -> press -> sound speed all go NaN, and the
+// crash then mis-points at gamma instead of the real culprit rho_vap). Mapping
+// NaN -- and any sub-zero input -- to 0, the physically safe "no vapor" value,
+// localizes such corruption. Reordered so the default (else) branch is 0.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+static Set::Scalar ClampYv(Set::Scalar Yv, Set::Scalar hi = 1.0)
+{
+    return (Yv > 0.0) ? ((Yv < hi) ? Yv : hi) : 0.0;
+}
+
 // Stage 3 (3a-2): per-cell effective GAS equation of state for a binary
 // ideal-gas mixture of an inert carrier (the eos0 phase, e.g. air) and dodecane
 // vapor at vapor mass fraction Yv = mass_frac_v = rho_vap / rho_eta0. Frozen
@@ -113,7 +126,7 @@ static Solver::EOS::Tammann GasEOS_eff(Set::Scalar Yv,
                                        const Solver::EOS::Tammann &carrier,
                                        Set::Scalar cv_vap, Set::Scalar cp_vap)
 {
-    Yv = (Yv < 0.0) ? 0.0 : ((Yv > 1.0) ? 1.0 : Yv);
+    Yv = ClampYv(Yv); // NaN-safe clamp to [0,1] (a raw ternary clamp leaks NaN)
     const Set::Scalar cv_g = Yv * cv_vap + (1.0 - Yv) * carrier.Cv();
     const Set::Scalar cp_g = Yv * cp_vap + (1.0 - Yv) * carrier.Cp();
     return Solver::EOS::Tammann(cp_g / cv_g, 0.0, cv_g, cp_g);
@@ -1039,7 +1052,7 @@ void Hydro2::Mix(int lev)
             // the liquid (both ~0); = Y_v in the gas.
             // Cap Yv <= 0.99: rho_vap can transiently overshoot rho_eta0 at isolated
             // points (advection/diffusion transients), giving an unphysical Yv > 1.
-            mass_frac_v(i, j, k) = std::min(rho_vap(i, j, k) / std::max(rho_eta0(i, j, k), small), 0.99);
+            mass_frac_v(i, j, k) = ClampYv(rho_vap(i, j, k) / std::max(rho_eta0(i, j, k), small), 0.99);
 
             // Temperature (computed before Bm: the Stage-2 saturation driving force needs it)
             T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
@@ -1375,7 +1388,7 @@ Hydro2::RHS(int lev,
             // the liquid (both ~0); = Y_v in the gas.
             // Cap Yv <= 0.99: rho_vap can transiently overshoot rho_eta0 at isolated
             // points (advection/diffusion transients), giving an unphysical Yv > 1.
-            mass_frac_v(i, j, k) = std::min(rho_vap(i, j, k) / std::max(rho_eta0(i, j, k), small), 0.99);
+            mass_frac_v(i, j, k) = ClampYv(rho_vap(i, j, k) / std::max(rho_eta0(i, j, k), small), 0.99);
 
             // Spalding Number  (F-1 / F-10: single canonical helper, denominator (1 - Y)).
             // Stage 2: spalding_saturation -> physical Antoine saturation mass fraction
@@ -2486,11 +2499,20 @@ Hydro2::RHS(int lev,
                 Set::Scalar rho_vap_diff = 0.0;
                 if (Dv > 0.0)
                 {
-                    const Set::Scalar Yv_c  = rho_vap(i, j, k)  / std::max(rho_eta0(i, j, k), small);
-                    const Set::Scalar Yv_im = rho_vap(im, j, k) / std::max(rho_eta0(im, j, k), small);
-                    const Set::Scalar Yv_ip = rho_vap(ip, j, k) / std::max(rho_eta0(ip, j, k), small);
-                    const Set::Scalar Yv_jm = rho_vap(i, jm, k) / std::max(rho_eta0(i, jm, k), small);
-                    const Set::Scalar Yv_jp = rho_vap(i, jp, k) / std::max(rho_eta0(i, jp, k), small);
+                    // Clamp Y_v to [0,1] (NaN-safe) BEFORE differencing. The raw
+                    // ratio rho_vap/rho_eta0 blows up where the gas partial density
+                    // collapses (lee/liquid side of the interface): rho_eta0 -> floor
+                    // makes Y_v ~ O(1e15), the explicit diffusion overflows to inf and
+                    // then inf-inf -> NaN -- and dt_species = cfl*dx^2/Dv never sees it
+                    // (that bound assumes a clean Dv-Laplacian). Clamping caps the
+                    // operator at the nominal Dv scale dt_species already respects; the
+                    // re0 face-weighting below still vanishes where there is no carrier
+                    // gas, so deep-liquid contributions stay ~0.
+                    const Set::Scalar Yv_c  = ClampYv(rho_vap(i, j, k)  / std::max(rho_eta0(i, j, k), small));
+                    const Set::Scalar Yv_im = ClampYv(rho_vap(im, j, k) / std::max(rho_eta0(im, j, k), small));
+                    const Set::Scalar Yv_ip = ClampYv(rho_vap(ip, j, k) / std::max(rho_eta0(ip, j, k), small));
+                    const Set::Scalar Yv_jm = ClampYv(rho_vap(i, jm, k) / std::max(rho_eta0(i, jm, k), small));
+                    const Set::Scalar Yv_jp = ClampYv(rho_vap(i, jp, k) / std::max(rho_eta0(i, jp, k), small));
                     const Set::Scalar re0_xlo = 0.5 * (rho_eta0(im, j, k) + rho_eta0(i, j, k));
                     const Set::Scalar re0_xhi = 0.5 * (rho_eta0(i, j, k) + rho_eta0(ip, j, k));
                     const Set::Scalar re0_ylo = 0.5 * (rho_eta0(i, jm, k) + rho_eta0(i, j, k));
@@ -2560,7 +2582,8 @@ Hydro2::RHS(int lev,
                 or (M_rhs(i, j, k, 1) != M_rhs(i, j, k, 1))
                 or (E_rhs(i, j, k) != E_rhs(i, j, k))
                 or (rho_eta0_rhs(i, j, k) != rho_eta0_rhs(i, j, k))
-                or (rho_eta1_rhs(i, j, k) != rho_eta1_rhs(i, j, k)))
+                or (rho_eta1_rhs(i, j, k) != rho_eta1_rhs(i, j, k))
+                or (rho_vap_rhs(i, j, k) != rho_vap_rhs(i, j, k)))
             {
                 Util::ParallelMessage(INFO, "-------------------------------");
                 Util::ParallelMessage(INFO, "ERROR IN HYDRO2");
@@ -2581,6 +2604,7 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "gamma_eff=", gammaf(i, j, k));
                 Util::ParallelMessage(INFO, "drhoeta0/dt=", rho_eta0_rhs(i, j, k));
                 Util::ParallelMessage(INFO, "drhoeta1/dt=", rho_eta1_rhs(i, j, k));
+                Util::ParallelMessage(INFO, "drhovap/dt=", rho_vap_rhs(i, j, k));
                 Util::ParallelMessage(INFO, "dM/dt=", M_rhs(i, j, k, 0), ", ", M_rhs(i, j, k, 1));
                 Util::ParallelMessage(INFO, "dE/dt=", E_rhs(i, j, k));
                 Util::Abort(INFO);
@@ -2988,11 +3012,14 @@ Hydro2::RHS(int lev,
                     Set::Scalar rho_vap_diff = 0.0;
                     if (Dv_l > 0.0)
                     {
-                        const Set::Scalar Yv_c  = rho_vap(i, j, k)  / std::max(re0(i, j, k), small_l);
-                        const Set::Scalar Yv_im = rho_vap(im, j, k) / std::max(re0(im, j, k), small_l);
-                        const Set::Scalar Yv_ip = rho_vap(ip, j, k) / std::max(re0(ip, j, k), small_l);
-                        const Set::Scalar Yv_jm = rho_vap(i, jm, k) / std::max(re0(i, jm, k), small_l);
-                        const Set::Scalar Yv_jp = rho_vap(i, jp, k) / std::max(re0(i, jp, k), small_l);
+                        // Clamp Y_v to [0,1] (NaN-safe) before differencing -- see the
+                        // FE-path note above; same rho_eta0-collapse stiffness/NaN guard
+                        // for the PP-limiter (Pass D) species update.
+                        const Set::Scalar Yv_c  = ClampYv(rho_vap(i, j, k)  / std::max(re0(i, j, k), small_l));
+                        const Set::Scalar Yv_im = ClampYv(rho_vap(im, j, k) / std::max(re0(im, j, k), small_l));
+                        const Set::Scalar Yv_ip = ClampYv(rho_vap(ip, j, k) / std::max(re0(ip, j, k), small_l));
+                        const Set::Scalar Yv_jm = ClampYv(rho_vap(i, jm, k) / std::max(re0(i, jm, k), small_l));
+                        const Set::Scalar Yv_jp = ClampYv(rho_vap(i, jp, k) / std::max(re0(i, jp, k), small_l));
                         const Set::Scalar re0_xlo = 0.5 * (re0(im, j, k) + re0(i, j, k));
                         const Set::Scalar re0_xhi = 0.5 * (re0(i, j, k) + re0(ip, j, k));
                         const Set::Scalar re0_ylo = 0.5 * (re0(i, jm, k) + re0(i, j, k));
@@ -3001,6 +3028,21 @@ Hydro2::RHS(int lev,
                                               + (re0_yhi * (Yv_jp - Yv_c) - re0_ylo * (Yv_c - Yv_jm)) / (DX[1] * DX[1]) );
                     }
                     rvaprhs(i, j, k) = rho_vap_div + s_src * mdv + rho_vap_diff;
+
+                    // Catch a vapor-species RHS NaN at its source (the Pass-D limiter
+                    // path) instead of letting it slip through to the EOS compositing,
+                    // where it first surfaces as a misleading gamma=NaN. Reports the
+                    // individual terms so the offending one (advection/source/diffusion)
+                    // is immediately visible.
+                    check4nans(time, lev, i, j, k, "ERROR IN Advance(): Pass-D vapor species RHS", {
+                        {"rvaprhs", rvaprhs(i, j, k)},
+                        {"rho_vap_div", rho_vap_div},
+                        {"rho_vap_diff", rho_vap_diff},
+                        {"mdv", mdv},
+                        {"s_src", s_src},
+                        {"rho_vap", rho_vap(i, j, k)},
+                        {"re0", re0(i, j, k)}
+                    });
                 }
 
                 rho_flux(i, j, k) = rho_div;
@@ -3276,6 +3318,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> rho = density_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> rho_vap = rho_vap_mf.Patch(lev, mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
@@ -3283,11 +3326,15 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             rho(i, j, k) = std::max(rho_eta0(i, j, k) + rho_eta1(i, j, k), small);
             eta_new(i, j, k) = std::max(0.0, std::min(1.0, eta_new(i, j, k)));
 
+            // rho_vap is included here so a corrupted vapor field is caught on the
+            // conserved state (both FE and PP-limiter paths) rather than downstream
+            // in EOS compositing as a misleading gamma=NaN. (0 when species off.)
             check4nans(time, lev, i, j, k, "ERROR IN Advance(): Conservative Variable Check", {
                 { "eta_new", eta_new(i, j, k) },
                 { "rho_eta0", rho_eta0(i, j, k) },
                 { "rho_eta1", rho_eta1(i, j, k) },
-                { "rho", rho(i, j, k) }
+                { "rho", rho(i, j, k) },
+                { "rho_vap", rho_vap(i, j, k) }
             });
         });
     } // end rho, eta solver loop
