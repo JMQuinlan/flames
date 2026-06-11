@@ -298,4 +298,4 @@ omega_relax = 0.5
 
 # Cahn-Hilliard mobility scale from interface Peclet estimate:
 # Pe_CH = U*epsilon^2/(M*sigma), M = M0*epsilon^2, M0 ~ U/sigma.
-Mob = 0.1
+Mob = 130
