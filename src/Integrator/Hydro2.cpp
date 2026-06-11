@@ -225,7 +225,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     BL_PROFILE("Integrator::Hydro2::Hydro2()");
     {
         // REFINEMENT CRITERION
-        pp.query_default("eta_refinement_criterion", value.eta_refinement_criterion, 0.001);   // eta-based refinement
+        pp.query_default("eta_refinement_criterion", value.eta_refinement_criterion, 0.001);   // eta-based refinement (|grad eta|)
+        pp.query_default("eta_band_refinement", value.eta_band_refinement, 1e-3);              // value-based band tag: refine where min(eta,1-eta) > this (covers the low-|grad eta| band tails the gradient tag misses)
         pp.query_default("omega_refinement_criterion", value.omega_refinement_criterion, 0.01); // vorticity-based refinement
         pp.query_default("gradu_refinement_criterion", value.gradu_refinement_criterion, 0.01); // velocity gradient-based refinement
         pp.query_default("divu_refinement_criterion", value.divu_refinement_criterion, 0.05);   // Ducros-weighted compression (shock) refinement
@@ -258,6 +259,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // pressure jump. adc_grow < 0 disables the tag (use the pressure sensor).
         pp_query_default("adc_shock_threshold", value.adc_shock_threshold, 0.05);
         pp_query_default("adc_grow", value.adc_grow, 1);
+        // Force full HLL (omega = 0 on every face) for the first hll_first_steps
+        // step(s), then fall back to the normal shock-tag blend. The interface/
+        // contact carbuncle is seeded only by the step-1 startup transient (the
+        // surface-tension ring), which the div(u) shock locator cannot tag; running
+        // HLL there skips the seed without globally over-diffusing the run. 0 = off.
+        // (omega=0 is genuine all-component HLL only when adc_components covers all 4.)
+        pp_query_default("hll_first_steps", value.hll_first_steps, 0);
         pp_query_default("lagrange", value.lagrange, 0.0);  // lagrange no-penetration factor
         pp_query_default("grav", value.g, 9.81);            // Gravitational Acceletation
         pp_forbid("roefix", "--> solver.roe.entropy_fix");  // Roe solver entropy fix
@@ -1481,6 +1489,10 @@ Hydro2::RHS(int lev,
     // ------------------------------------------------------------
     const bool use_shock_tag = (adc_grow >= 0);
     const int  tag_grow      = std::max(adc_grow, 0);
+    // Force full HLL on every face for the first hll_first_steps step(s) (step_counter
+    // is incremented at the top of Advance, so the first step's RHS sees == 1). This
+    // overrides the shock tag below to skip the step-1 interface-carbuncle seed.
+    const bool force_hll = (hll_first_steps > 0 && step_counter[lev] <= hll_first_steps);
     amrex::MultiFab shock_tag_local(velocity_mf[lev]->boxArray(),
                                     velocity_mf[lev]->DistributionMap(), 1, 1);
     shock_tag_local.setVal(0.0);
@@ -2103,7 +2115,17 @@ Hydro2::RHS(int lev,
             // sides of a face carry the same value. When the tag is disabled
             // (adc_grow < 0) omega_ext stays -1 and the solver uses its
             // internal pressure-ratio sensor.
-            if (use_shock_tag)
+            if (force_hll)
+            {
+                // hll_first_steps active: omega = 0 on every face -> full HLL on the
+                // ADC-controlled components (genuine pure HLL when adc_components=4).
+                // Takes precedence over the shock tag so the step-1 carbuncle never seeds.
+                x_leftStates[1].omega_ext = x_rightStates[1].omega_ext = 0.0;
+                x_leftStates[2].omega_ext = x_rightStates[2].omega_ext = 0.0;
+                y_leftStates[1].omega_ext = y_rightStates[1].omega_ext = 0.0;
+                y_leftStates[2].omega_ext = y_rightStates[2].omega_ext = 0.0;
+            }
+            else if (use_shock_tag)
             {
                 Set::Scalar tc  = stag(i, j, k);
                 Set::Scalar txm = stag(i - 1, j, k);
@@ -3630,6 +3652,13 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
             if (grad_eta.lpNorm<2>() * dr * 2 > eta_refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
+            // Also refine the low-|grad eta| band TAILS: the gradient tag misses
+            // eta->0/1 (the tanh flattens), leaving a coarse-fine edge INSIDE the
+            // diffuse band where the stiffened offset (1-eta)*g1*p0_1/(g1-1) ~ 7e8
+            // is interpolated and HLL amplifies the jump into a patch-aligned halo.
+            // Tag by value so the C-F edge only lands where the minority phase is
+            // < eta_band_refinement (set >= 0.5 to disable -> gradient-only tagging).
+            if (std::min(eta(i, j, k), 1.0 - eta(i, j, k)) > eta_band_refinement) tags(i, j, k) = amrex::TagBox::SET;
         });
     }
 

@@ -394,6 +394,7 @@ protected:
     Set::Scalar rho_min = 1e10;
 
     Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, divu_refinement_criterion=NAN, rho_refinement_criterion=NAN;
+    Set::Scalar eta_band_refinement=NAN; // value-based band tag: refine where min(eta,1-eta) > this
     // FLUID 0
     Set::Scalar gamma0 = NAN, p0_0 = NAN, mu0 = NAN, mu0_b = NAN, MW0 = NAN;
     Set::Scalar b0 = NAN, q0EOS = NAN;
@@ -493,6 +494,7 @@ protected:
     // falls back to the solver's pressure-ratio omega.
     Set::Scalar adc_shock_threshold = 0.05;
     int adc_grow = 1;
+    int hll_first_steps = 0; // force full HLL (omega=0) for the first N steps, then resume the shock-tag blend (skips the step-1 carbuncle seed)
 
     // Adaptive Timestep
     bool adaptive_timestep = false;
