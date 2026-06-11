@@ -4805,6 +4805,30 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         // Inter-fab exchange for phase densities still needed:
         rho_eta0_mf[lev]->FillBoundary(geom[lev].periodicity());
         rho_eta1_mf[lev]->FillBoundary(geom[lev].periodicity());
+
+        // Recompute the TOTAL density over the full ghost ring from the phase
+        // masses (C-F FillPatch'd above + same-level FillBoundary'd) BEFORE the
+        // eta-partition below. density_mf is NOT in the C-F FillPatch list, so
+        // without this it is stale at coarse-fine ghosts -- and the partition
+        // then overwrites the good FillPatch'd phase masses with (stale rho)*eta,
+        // leaving (rho, M, E) mutually inconsistent at patch edges. The Riemann
+        // reconstruction then sees UE = E - |M|^2/2rho with the wrong rho, dips
+        // sub-floor, and the EOS floors pressure -> the low-energy staircase
+        // along refinement boundaries (step-1 artifact). The NSCBC path already
+        // does this via its rho_total grown-box recompute; mirror it here. This
+        // runs before the physical-BC fill below so domain-edge Dirichlet ghosts
+        // (the total inflow density) are preserved.
+        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &ghostbox = mfi.growntilebox(nghost);
+            auto rho  = density_mf[lev]->array(mfi);
+            auto rho0 = rho_eta0_mf[lev]->array(mfi);
+            auto rho1 = rho_eta1_mf[lev]->array(mfi);
+            amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                rho(i, j, k) = std::max(rho0(i, j, k) + rho1(i, j, k), small);
+            });
+        }
+
         FillBoundariesWithBC(lev, time, density_bc, {
             density_mf[lev].get()
         });
