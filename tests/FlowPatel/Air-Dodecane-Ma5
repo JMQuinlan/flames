@@ -55,7 +55,7 @@ alamo.program = hydro2
 plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_air_dodecane_Ma5_Vap
 
 ### MESHING ###
-amr.plot_dt = 0.25e-6
+amr.plot_dt = 1e-9
 amr.plot_int = 1
 amr.max_grid_size = 500000
 amr.blocking_factor = 16
@@ -68,7 +68,7 @@ amr.n_cell = 2048 512
 
 ### TIME STEPPING ###
 ## Static:
-timestep = 1e-11
+timestep = 1e-12
 max_step = 10
 
 ## Adaptive
@@ -124,7 +124,7 @@ mu1_b = 0.0
 density0.ic.type = expression
 density0.ic.expression.constant.rho_amb   = 0.9699142    # pre-shock air (1 atm, 364 K)
 density0.ic.expression.constant.rho_shock = 4.8495712    # post-shock air
-density0.ic.expression.constant.x_shock = -6.0e-6
+density0.ic.expression.constant.x_shock = -5.0e-6
 density0.ic.expression.constant.delta = 1.0e-7
 density0.ic.expression.region0 = "rho_shock + (rho_amb - rho_shock)*0.5*(1.0 + tanh((x - x_shock)/delta))"
 
@@ -138,7 +138,7 @@ density1.ic.expression.region0 = "rho_nDodecane"
 # Velocities: post-shock gas velocity from the moving-shock induced velocity for Ms=5.0 in air.
 velocity0.ic.type = expression
 velocity0.ic.expression.constant.u_shock = 1529.7330
-velocity0.ic.expression.constant.x_shock = -6.0e-6
+velocity0.ic.expression.constant.x_shock = -5.0e-6
 velocity0.ic.expression.constant.delta = 1.0e-7
 velocity0.ic.expression.region0 = "u_shock*0.5*(1.0 - tanh((x - x_shock)/delta))"
 velocity0.ic.expression.region1 = "0.0"
@@ -151,7 +151,7 @@ velocity1.ic.expression.region1 = "0.0"
 pressure0.ic.type = expression
 pressure0.ic.expression.constant.p_amb   = 101325.0      # pre-shock air (1 atm)
 pressure0.ic.expression.constant.p_shock = 2938425.0     # post-shock air
-pressure0.ic.expression.constant.x_shock = -6.0e-6
+pressure0.ic.expression.constant.x_shock = -5.0e-6
 pressure0.ic.expression.constant.delta = 1.0e-7
 pressure0.ic.expression.region0 = "p_shock + (p_amb - p_shock)*0.5*(1.0 + tanh((x - x_shock)/delta))"
 
