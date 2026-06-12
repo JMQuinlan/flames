@@ -148,14 +148,18 @@ static Solver::EOS::Tammann GasEOS_eff(Set::Scalar Yv,
 // (eps_p + gamma_eff*p0_eff - pref)/(gamma_eff - 1) for frozen mixture
 // gamma_eff, p0_eff.  (Perthame-Shu 1996; Zhang-Shu 2010; Hu-Adams-Shu 2013.)
 //
-// Optional per-phase guard (guard_phase): the mixture mass change s*dF[0] splits
-// across phases by the upwind face fraction ef, so the partial densities change
-// by s*ef*dF[0] and s*(1-ef)*dF[0] per unit theta. Both are linear, so we just
-// add two more upper-bound clamps on t to keep alpharho0, alpharho1 >= phase_floor
-// (= the same `small` the post-update partial-density floor would otherwise
-// inject mass to enforce). re0_base/re1_base are the partial baselines (Bbase
-// comps 4,5). The pressure (UE) constraint depends only on the mixture, so the
-// bisection below is unchanged -- it just runs on the tightened [0,t_rho].
+// Optional per-phase guard (guard_phase): the per-phase flux corrections are
+// NOT proportional to the mixture correction dF[0] -- each component flux is
+// split by its OWN donor-side (Larrouturou) upwind mass fraction, so the caller
+// passes dF_re0 = Y0h*Fh[0] - Y0l*Fl[0], the gas-partial per-unit-theta change
+// at this face (the liquid one is dF[0] - dF_re0 since Y0+Y1=1 per flux). Both
+// are linear in theta, so we just add two more upper-bound clamps on t to keep
+// alpharho0, alpharho1 >= phase_floor (= 0, matching the post-update
+// floor-at-0; partials are legitimately exactly 0 in pure phases, so any
+// positive threshold here would force theta=0 across the whole single-phase
+// field). re0_base/re1_base are the partial baselines (Bbase comps 4,5). The
+// pressure (UE) constraint depends only on the mixture, so the bisection below
+// is unchanged -- it just runs on the tightened [0,t_rho].
 // ----------------------------------------------------------------------------
 // Phase-dependent pressure floor lives in Solver::EOS::EOS::PressureFloor (so
 // the EOS-facing MixedPressure/diagnostics share one definition). Gas
@@ -168,7 +172,7 @@ static Set::Scalar PPThetaCell(const Set::Scalar B[4], Set::Scalar s, const Set:
                                Set::Scalar eps_rho, Set::Scalar eps_p, Set::Scalar pref,
                                bool guard_phase = false,
                                Set::Scalar re0_base = 0.0, Set::Scalar re1_base = 0.0,
-                               Set::Scalar ef = 0.0, Set::Scalar phase_floor = 0.0)
+                               Set::Scalar dF_re0 = 0.0, Set::Scalar phase_floor = 0.0)
 {
     // Per-unit-theta change vector.
     const Set::Scalar V0 = s * dF[0]; // rho
@@ -176,9 +180,10 @@ static Set::Scalar PPThetaCell(const Set::Scalar B[4], Set::Scalar s, const Set:
     const Set::Scalar V2 = s * dF[2]; // My
     const Set::Scalar V3 = s * dF[3]; // E
 
-    // Per-phase per-unit-theta change (partial mass = upwind ef * mixture mass).
-    const Set::Scalar V_re0 = s * ef * dF[0];
-    const Set::Scalar V_re1 = s * (1.0 - ef) * dF[0];
+    // Per-phase per-unit-theta change (donor-split partial correction; the
+    // liquid one is the mixture remainder, exact by Y0+Y1=1 per flux).
+    const Set::Scalar V_re0 = s * dF_re0;
+    const Set::Scalar V_re1 = s * (dF[0] - dF_re0);
 
     const Set::Scalar r0 = B[0];
     const Set::Scalar ue_floor = (eps_p + gamma_eff * p0_eff - pref) / (gamma_eff - 1.0);
@@ -2413,17 +2418,23 @@ Hydro2::RHS(int lev,
             // Upwind GAS MASS FRACTION Y_0 = alpharho0/rho (the true mass fraction, NOT eta).
             // The partial density alpharho0 = alpha_0*rho_0 advects with the mixture mass flux
             // weighted by Y_0, so ff_0 = Y0_face*F_mass and ff_1 = (1-Y0_face)*F_mass telescope
-            // to F_mass (=> total mass conserved). Same upwind stencil (raw neighbor + filled
-            // ghosts) as eta_face above; rho here is the reconstructed mixture density
+            // to F_mass (=> total mass conserved). rho here is the reconstructed mixture density
             // (= alpharho0+alpharho1). This is the conservation-critical change vs the retired
             // rho_eta convention, which split by eta and so did not transport the true masses.
+            // DONOR RULE (Larrouturou 1991): Y_0 is upwinded by the sign of the MASS FLUX it
+            // multiplies, NOT by u_interface. For pure HLLC the two agree (F_mass = rho* S*),
+            // but at ADC-tagged / HLL faces the diffusive S_L*S_R*(rho_R - rho_L) term can flip
+            // the mass-flux sign at a gas-liquid face; an u_interface donor then drains a
+            // partial density from a cell holding none of that phase (alpharho < 0 -> floored
+            // -> mass created -- the shock-droplet floor leak). Flux-sign upwinding keeps the
+            // partial update positivity-preserving whenever the mixture update is.
             auto Y0_up = [&](int ii, int jj) {
                 return alpharho0(ii, jj, k) / std::max(rho(ii, jj, k), small);
             };
-            Set::Scalar Y0_face_xlo = (flux_xlo.u_interface > 0.0) ? Y0_up(i - 1, j) : Y0_up(i, j);
-            Set::Scalar Y0_face_xhi = (flux_xhi.u_interface > 0.0) ? Y0_up(i, j)     : Y0_up(i + 1, j);
-            Set::Scalar Y0_face_ylo = (flux_ylo.u_interface > 0.0) ? Y0_up(i, j - 1) : Y0_up(i, j);
-            Set::Scalar Y0_face_yhi = (flux_yhi.u_interface > 0.0) ? Y0_up(i, j)     : Y0_up(i, j + 1);
+            Set::Scalar Y0_face_xlo = (flux_xlo.mass > 0.0) ? Y0_up(i - 1, j) : Y0_up(i, j);
+            Set::Scalar Y0_face_xhi = (flux_xhi.mass > 0.0) ? Y0_up(i, j)     : Y0_up(i + 1, j);
+            Set::Scalar Y0_face_ylo = (flux_ylo.mass > 0.0) ? Y0_up(i, j - 1) : Y0_up(i, j);
+            Set::Scalar Y0_face_yhi = (flux_yhi.mass > 0.0) ? Y0_up(i, j)     : Y0_up(i, j + 1);
 
             // -----------------------------------------------------------
             // Store hi-face Riemann fluxes at cell centers for reflux.
@@ -2543,16 +2554,18 @@ Hydro2::RHS(int lev,
                 const int ip = (i < dhi0) ? i + 1 : i;
                 const int jm = (j > dlo1) ? j - 1 : j;
                 const int jp = (j < dhi1) ? j + 1 : j;
-                Set::Scalar fvap_xlo = (flux_xlo.u_interface > 0.0)
+                // Same Larrouturou donor rule as Y0_face above: upwind by the
+                // sign of the mass flux this fraction multiplies, not u_interface.
+                Set::Scalar fvap_xlo = (flux_xlo.mass > 0.0)
                     ? rho_vap(im, j, k) / std::max(rho(im, j, k), small)
                     : rho_vap(i, j, k)  / std::max(rho(i, j, k), small);
-                Set::Scalar fvap_xhi = (flux_xhi.u_interface > 0.0)
+                Set::Scalar fvap_xhi = (flux_xhi.mass > 0.0)
                     ? rho_vap(i, j, k)  / std::max(rho(i, j, k), small)
                     : rho_vap(ip, j, k) / std::max(rho(ip, j, k), small);
-                Set::Scalar fvap_ylo = (flux_ylo.u_interface > 0.0)
+                Set::Scalar fvap_ylo = (flux_ylo.mass > 0.0)
                     ? rho_vap(i, jm, k) / std::max(rho(i, jm, k), small)
                     : rho_vap(i, j, k)  / std::max(rho(i, j, k), small);
-                Set::Scalar fvap_yhi = (flux_yhi.u_interface > 0.0)
+                Set::Scalar fvap_yhi = (flux_yhi.mass > 0.0)
                     ? rho_vap(i, j, k)  / std::max(rho(i, j, k), small)
                     : rho_vap(i, jp, k) / std::max(rho(i, jp, k), small);
                 Set::Scalar rho_vap_flux = (fvap_xlo * flux_xlo.mass - fvap_xhi * flux_xhi.mass) / DX[0]
@@ -2811,8 +2824,6 @@ Hydro2::RHS(int lev,
             auto Vap = Vap_dot_mf[lev]->array(mfi);
             auto Flx = pp_scratch[lev].Flo[0]->array(mfi);
             auto Fly = pp_scratch[lev].Flo[1]->array(mfi);
-            auto Fhx = pp_scratch[lev].Fhi[0]->array(mfi);
-            auto Fhy = pp_scratch[lev].Fhi[1]->array(mfi);
             auto Bb  = pp_scratch[lev].Bbase->array(mfi);
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 Set::Scalar fdiv_rho = (Flx(i - 1, j, k, 0) - Flx(i, j, k, 0)) / DX[0] + (Fly(i, j - 1, k, 0) - Fly(i, j, k, 0)) / DX[1];
@@ -2825,15 +2836,20 @@ Hydro2::RHS(int lev,
                 Bb(i, j, k, 3) = Ene(i, j, k) + dt * fdiv_E + src_fac * dt * Src(i, j, k, 3);
 
                 // Per-phase low-order baselines. The partial mass flux is the
-                // upwind TRUE MASS FRACTION Y_0 = alpharho0/rho (by the high-order
-                // u_interface, matching Pass D's re*_div split) times the low-order
-                // mixture mass flux, so Bb[4]+Bb[5] == Bb[0] at theta=0. The source is
-                // folded in only when the source limiter is off (src_fac); otherwise s
-                // guards it. (Y_0, not eta: alpharho_k are the true partial densities.)
-                Set::Scalar Yf_xlo = (Fhx(i - 1, j, k, 4) > 0.0) ? re0(i - 1, j, k) / std::max(rho(i - 1, j, k), small_l) : re0(i, j, k) / std::max(rho(i, j, k), small_l);
-                Set::Scalar Yf_xhi = (Fhx(i, j, k, 4)     > 0.0) ? re0(i, j, k)     / std::max(rho(i, j, k), small_l)     : re0(i + 1, j, k) / std::max(rho(i + 1, j, k), small_l);
-                Set::Scalar Yf_ylo = (Fhy(i, j - 1, k, 4) > 0.0) ? re0(i, j - 1, k) / std::max(rho(i, j - 1, k), small_l) : re0(i, j, k) / std::max(rho(i, j, k), small_l);
-                Set::Scalar Yf_yhi = (Fhy(i, j, k, 4)     > 0.0) ? re0(i, j, k)     / std::max(rho(i, j, k), small_l)     : re0(i, j + 1, k) / std::max(rho(i, j + 1, k), small_l);
+                // upwind TRUE MASS FRACTION Y_0 = alpharho0/rho times the low-order
+                // mixture mass flux, so Bb[4]+Bb[5] == Bb[0] at theta=0. DONOR RULE
+                // (Larrouturou): Y_0 upwinds by the sign of the LOW-ORDER mass flux
+                // it multiplies -- the subsonic HLL flux's diffusive S_L*S_R*drho
+                // term can oppose u_interface at a gas-liquid face, and an
+                // u_interface donor then makes the theta=0 baseline itself drain a
+                // partial from a pure-other-phase cell (negative -> floored -> mass
+                // leak the theta limiter cannot catch). The source is folded in only
+                // when the source limiter is off (src_fac); otherwise s guards it.
+                // (Y_0, not eta: alpharho_k are the true partial densities.)
+                Set::Scalar Yf_xlo = (Flx(i - 1, j, k, 0) > 0.0) ? re0(i - 1, j, k) / std::max(rho(i - 1, j, k), small_l) : re0(i, j, k) / std::max(rho(i, j, k), small_l);
+                Set::Scalar Yf_xhi = (Flx(i, j, k, 0)     > 0.0) ? re0(i, j, k)     / std::max(rho(i, j, k), small_l)     : re0(i + 1, j, k) / std::max(rho(i + 1, j, k), small_l);
+                Set::Scalar Yf_ylo = (Fly(i, j - 1, k, 0) > 0.0) ? re0(i, j - 1, k) / std::max(rho(i, j - 1, k), small_l) : re0(i, j, k) / std::max(rho(i, j, k), small_l);
+                Set::Scalar Yf_yhi = (Fly(i, j, k, 0)     > 0.0) ? re0(i, j, k)     / std::max(rho(i, j, k), small_l)     : re0(i, j + 1, k) / std::max(rho(i, j + 1, k), small_l);
                 Set::Scalar fdiv_re0 = (Yf_xlo * Flx(i - 1, j, k, 0) - Yf_xhi * Flx(i, j, k, 0)) / DX[0]
                                      + (Yf_ylo * Fly(i, j - 1, k, 0) - Yf_yhi * Fly(i, j, k, 0)) / DX[1];
                 Set::Scalar fdiv_re1 = ((1.0 - Yf_xlo) * Flx(i - 1, j, k, 0) - (1.0 - Yf_xhi) * Flx(i, j, k, 0)) / DX[0]
@@ -2873,22 +2889,28 @@ Hydro2::RHS(int lev,
             auto rhoc = density_mf[lev]->array(mfi);
             auto Th  = pp_scratch[lev].theta->array(mfi);
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                // x hi-face: L = (i,j), R = (i+1,j), lambda = dt/dx. ef = upwind GAS
-                // MASS FRACTION Y_0 (by high-order u_interface) shared by both cells --
-                // the same per-face apportionment of the mixture mass flux Pass D uses.
+                // x hi-face: L = (i,j), R = (i+1,j), lambda = dt/dx. The per-phase
+                // guard takes dF_re0 = Y0h*Fh[0] - Y0l*Fl[0], the gas-partial flux
+                // correction per unit theta, with each Y_0 donor chosen by ITS OWN
+                // flux's mass sign (Larrouturou) -- the same per-face split Pass D
+                // applies, shared by both cells.
                 {
                     Set::Scalar dF[4] = { Fhx(i, j, k, 0) - Flx(i, j, k, 0), Fhx(i, j, k, 1) - Flx(i, j, k, 1),
                                           Fhx(i, j, k, 2) - Flx(i, j, k, 2), Fhx(i, j, k, 3) - Flx(i, j, k, 3) };
                     Set::Scalar BL[4] = { Bb(i, j, k, 0), Bb(i, j, k, 1), Bb(i, j, k, 2), Bb(i, j, k, 3) };
                     Set::Scalar BR[4] = { Bb(i + 1, j, k, 0), Bb(i + 1, j, k, 1), Bb(i + 1, j, k, 2), Bb(i + 1, j, k, 3) };
                     Set::Scalar lam = dt / DX[0];
-                    Set::Scalar ef  = (Fhx(i, j, k, 4) > 0.0) ? re0(i, j, k) / std::max(rhoc(i, j, k), small_l) : re0(i + 1, j, k) / std::max(rhoc(i + 1, j, k), small_l);
+                    Set::Scalar YL = re0(i, j, k)     / std::max(rhoc(i, j, k),     small_l);
+                    Set::Scalar YR = re0(i + 1, j, k) / std::max(rhoc(i + 1, j, k), small_l);
+                    Set::Scalar Yh = (Fhx(i, j, k, 0) > 0.0) ? YL : YR;
+                    Set::Scalar Yl = (Flx(i, j, k, 0) > 0.0) ? YL : YR;
+                    Set::Scalar dF_re0 = Yh * Fhx(i, j, k, 0) - Yl * Flx(i, j, k, 0);
                     Set::Scalar pfL = Solver::EOS::EOS::PressureFloor(eta(i, j, k),     p0(i, j, k),     eps_p_l, p_cav_l);
                     Set::Scalar pfR = Solver::EOS::EOS::PressureFloor(eta(i + 1, j, k), p0(i + 1, j, k), eps_p_l, p_cav_l);
                     Set::Scalar tL = PPThetaCell(BL, -pp_factor * lam, dF, gam(i, j, k),     p0(i, j, k),     eps_rho_l, pfL, pref_l,
-                                                 src_limit_on, Bb(i, j, k, 4),     Bb(i, j, k, 5),     ef, small_l);
+                                                 src_limit_on, Bb(i, j, k, 4),     Bb(i, j, k, 5),     dF_re0, 0.0);
                     Set::Scalar tR = PPThetaCell(BR, +pp_factor * lam, dF, gam(i + 1, j, k), p0(i + 1, j, k), eps_rho_l, pfR, pref_l,
-                                                 src_limit_on, Bb(i + 1, j, k, 4), Bb(i + 1, j, k, 5), ef, small_l);
+                                                 src_limit_on, Bb(i + 1, j, k, 4), Bb(i + 1, j, k, 5), dF_re0, 0.0);
                     Set::Scalar th = std::min(tL, tR);
                     Th(i, j, k, 0) = (th < 0.0) ? 0.0 : ((th > 1.0) ? 1.0 : th);
                 }
@@ -2899,13 +2921,17 @@ Hydro2::RHS(int lev,
                     Set::Scalar BL[4] = { Bb(i, j, k, 0), Bb(i, j, k, 1), Bb(i, j, k, 2), Bb(i, j, k, 3) };
                     Set::Scalar BR[4] = { Bb(i, j + 1, k, 0), Bb(i, j + 1, k, 1), Bb(i, j + 1, k, 2), Bb(i, j + 1, k, 3) };
                     Set::Scalar lam = dt / DX[1];
-                    Set::Scalar ef  = (Fhy(i, j, k, 4) > 0.0) ? re0(i, j, k) / std::max(rhoc(i, j, k), small_l) : re0(i, j + 1, k) / std::max(rhoc(i, j + 1, k), small_l);
+                    Set::Scalar YL = re0(i, j, k)     / std::max(rhoc(i, j, k),     small_l);
+                    Set::Scalar YR = re0(i, j + 1, k) / std::max(rhoc(i, j + 1, k), small_l);
+                    Set::Scalar Yh = (Fhy(i, j, k, 0) > 0.0) ? YL : YR;
+                    Set::Scalar Yl = (Fly(i, j, k, 0) > 0.0) ? YL : YR;
+                    Set::Scalar dF_re0 = Yh * Fhy(i, j, k, 0) - Yl * Fly(i, j, k, 0);
                     Set::Scalar pfL = Solver::EOS::EOS::PressureFloor(eta(i, j, k),     p0(i, j, k),     eps_p_l, p_cav_l);
                     Set::Scalar pfR = Solver::EOS::EOS::PressureFloor(eta(i, j + 1, k), p0(i, j + 1, k), eps_p_l, p_cav_l);
                     Set::Scalar tL = PPThetaCell(BL, -pp_factor * lam, dF, gam(i, j, k),     p0(i, j, k),     eps_rho_l, pfL, pref_l,
-                                                 src_limit_on, Bb(i, j, k, 4),     Bb(i, j, k, 5),     ef, small_l);
+                                                 src_limit_on, Bb(i, j, k, 4),     Bb(i, j, k, 5),     dF_re0, 0.0);
                     Set::Scalar tR = PPThetaCell(BR, +pp_factor * lam, dF, gam(i, j + 1, k), p0(i, j + 1, k), eps_rho_l, pfR, pref_l,
-                                                 src_limit_on, Bb(i, j + 1, k, 4), Bb(i, j + 1, k, 5), ef, small_l);
+                                                 src_limit_on, Bb(i, j + 1, k, 4), Bb(i, j + 1, k, 5), dF_re0, 0.0);
                     Set::Scalar th = std::min(tL, tR);
                     Th(i, j, k, 1) = (th < 0.0) ? 0.0 : ((th > 1.0) ? 1.0 : th);
                 }
@@ -2980,25 +3006,44 @@ Hydro2::RHS(int lev,
                     Fylo[c] = Fly(i, j - 1, k, c) + th_ylo * (Fhy(i, j - 1, k, c) - Fly(i, j - 1, k, c));
                 }
 
-                // Upwinded face GAS MASS FRACTIONS Y_0 = alpharho0/rho from the high-order
-                // u_interface (NOT eta) -- splits the blended mixture mass flux into the
-                // true partial densities so alpharho0 transports as alpha_0*rho_0.
-                Set::Scalar uxhi = Fhx(i, j, k, 4),     uxlo = Fhx(i - 1, j, k, 4);
-                Set::Scalar uyhi = Fhy(i, j, k, 4),     uylo = Fhy(i, j - 1, k, 4);
-                Set::Scalar Yf_xhi = (uxhi > 0.0) ? re0(i, j, k)     / std::max(rho(i, j, k), small_l)     : re0(i + 1, j, k) / std::max(rho(i + 1, j, k), small_l);
-                Set::Scalar Yf_xlo = (uxlo > 0.0) ? re0(i - 1, j, k) / std::max(rho(i - 1, j, k), small_l) : re0(i, j, k)     / std::max(rho(i, j, k), small_l);
-                Set::Scalar Yf_yhi = (uyhi > 0.0) ? re0(i, j, k)     / std::max(rho(i, j, k), small_l)     : re0(i, j + 1, k) / std::max(rho(i, j + 1, k), small_l);
-                Set::Scalar Yf_ylo = (uylo > 0.0) ? re0(i, j - 1, k) / std::max(rho(i, j - 1, k), small_l) : re0(i, j, k)     / std::max(rho(i, j, k), small_l);
+                // Donor-split (Larrouturou) partial-mass face fluxes: each component
+                // flux upwinds Y_0 = alpharho0/rho by ITS OWN mass-flux sign, then
+                // blends with the SAME theta as the mixture:
+                //   F_re0 = Y0l*Fl[0] + theta*(Y0h*Fh[0] - Y0l*Fl[0]).
+                // Per face F_re0 + F_re1 telescopes to the blended mixture flux
+                // (Y0+Y1 = 1 for each flux), and at theta=0 it reduces to the
+                // positivity-preserving low-order donor flux -- the admissible
+                // baseline Pass B built and PPThetaCell's per-phase guard assumes.
+                // (Upwinding by the high-order u_interface instead drained partials
+                // from pure-other-phase cells wherever the HLL mass flux opposed
+                // u_interface -- the shock-droplet floor leak.)
+                auto Y0c = [&](int ii, int jj) { return re0(ii, jj, k) / std::max(rho(ii, jj, k), small_l); };
+                // x hi-face (donors i | i+1)
+                Set::Scalar Yh_xhi = (Fhx(i, j, k, 0) > 0.0) ? Y0c(i, j) : Y0c(i + 1, j);
+                Set::Scalar Yl_xhi = (Flx(i, j, k, 0) > 0.0) ? Y0c(i, j) : Y0c(i + 1, j);
+                Set::Scalar Fre0_xhi = Yl_xhi * Flx(i, j, k, 0) + th_xhi * (Yh_xhi * Fhx(i, j, k, 0) - Yl_xhi * Flx(i, j, k, 0));
+                // x lo-face (donors i-1 | i)
+                Set::Scalar Yh_xlo = (Fhx(i - 1, j, k, 0) > 0.0) ? Y0c(i - 1, j) : Y0c(i, j);
+                Set::Scalar Yl_xlo = (Flx(i - 1, j, k, 0) > 0.0) ? Y0c(i - 1, j) : Y0c(i, j);
+                Set::Scalar Fre0_xlo = Yl_xlo * Flx(i - 1, j, k, 0) + th_xlo * (Yh_xlo * Fhx(i - 1, j, k, 0) - Yl_xlo * Flx(i - 1, j, k, 0));
+                // y hi-face (donors j | j+1)
+                Set::Scalar Yh_yhi = (Fhy(i, j, k, 0) > 0.0) ? Y0c(i, j) : Y0c(i, j + 1);
+                Set::Scalar Yl_yhi = (Fly(i, j, k, 0) > 0.0) ? Y0c(i, j) : Y0c(i, j + 1);
+                Set::Scalar Fre0_yhi = Yl_yhi * Fly(i, j, k, 0) + th_yhi * (Yh_yhi * Fhy(i, j, k, 0) - Yl_yhi * Fly(i, j, k, 0));
+                // y lo-face (donors j-1 | j)
+                Set::Scalar Yh_ylo = (Fhy(i, j - 1, k, 0) > 0.0) ? Y0c(i, j - 1) : Y0c(i, j);
+                Set::Scalar Yl_ylo = (Fly(i, j - 1, k, 0) > 0.0) ? Y0c(i, j - 1) : Y0c(i, j);
+                Set::Scalar Fre0_ylo = Yl_ylo * Fly(i, j - 1, k, 0) + th_ylo * (Yh_ylo * Fhy(i, j - 1, k, 0) - Yl_ylo * Fly(i, j - 1, k, 0));
 
                 Set::Scalar rho_div = (Fxlo[0] - Fxhi[0]) / DX[0] + (Fylo[0] - Fyhi[0]) / DX[1];
                 Set::Scalar mx_div  = (Fxlo[1] - Fxhi[1]) / DX[0] + (Fylo[1] - Fyhi[1]) / DX[1];
                 Set::Scalar my_div  = (Fxlo[2] - Fxhi[2]) / DX[0] + (Fylo[2] - Fyhi[2]) / DX[1];
                 Set::Scalar E_div   = (Fxlo[3] - Fxhi[3]) / DX[0] + (Fylo[3] - Fyhi[3]) / DX[1];
 
-                Set::Scalar re0_div = (Yf_xlo * Fxlo[0] - Yf_xhi * Fxhi[0]) / DX[0]
-                                    + (Yf_ylo * Fylo[0] - Yf_yhi * Fyhi[0]) / DX[1];
-                Set::Scalar re1_div = ((1.0 - Yf_xlo) * Fxlo[0] - (1.0 - Yf_xhi) * Fxhi[0]) / DX[0]
-                                    + ((1.0 - Yf_ylo) * Fylo[0] - (1.0 - Yf_yhi) * Fyhi[0]) / DX[1];
+                Set::Scalar re0_div = (Fre0_xlo - Fre0_xhi) / DX[0] + (Fre0_ylo - Fre0_yhi) / DX[1];
+                // Exact mixture remainder: the per-face partial fluxes telescope, so
+                // re0_div + re1_div == rho_div to machine precision by construction.
+                Set::Scalar re1_div = rho_div - re0_div;
 
                 // Volume-fraction advection with the SAME per-face blend factor as
                 // the conserved fluxes: u_blend = u_HLL + theta*(u_HLLC - u_HLL).
@@ -3044,10 +3089,13 @@ Hydro2::RHS(int lev,
                     // Per-phase partial densities (linear in s).
                     Set::Scalar re0f = re0(i, j, k) + dt * re0_div;
                     Set::Scalar re1f = re1(i, j, k) + dt * re1_div;
+                    // Clamp target is 0, matching the post-update floor-at-0 (partials
+                    // are legitimately exactly 0 in pure phases; a `small` target here
+                    // would zero the sources across the whole single-phase field).
                     Set::Scalar src_re0 = Src(i, j, k, 0) * eta(i, j, k)         + mdv;
                     Set::Scalar src_re1 = Src(i, j, k, 0) * (1.0 - eta(i, j, k)) - mdv;
-                    if (src_re0 < 0.0) { Set::Scalar s0 = (re0f - small_l) / (-dt * src_re0); if (s0 < s) s = s0; }
-                    if (src_re1 < 0.0) { Set::Scalar s1 = (re1f - small_l) / (-dt * src_re1); if (s1 < s) s = s1; }
+                    if (src_re0 < 0.0) { Set::Scalar s0 = re0f / (-dt * src_re0); if (s0 < s) s = s0; }
+                    if (src_re1 < 0.0) { Set::Scalar s1 = re1f / (-dt * src_re1); if (s1 < s) s = s1; }
                     s_src = (s < 0.0) ? 0.0 : ((s > 1.0) ? 1.0 : s);
                 }
 
@@ -3058,10 +3106,10 @@ Hydro2::RHS(int lev,
                 Erhs(i, j, k)    = E_div  + s_src * Src(i, j, k, 3);
 
                 // Vapor species under the PP limiter (Stage 3a): advect rho_vap with
-                // the SAME blended mixture mass flux as alpharho0 (Fx*[0]/Fy*[0]),
-                // weighted by the upwind vapor-fraction-of-total rho_vap/rho (upwind
-                // direction by the high-order u_interface uxhi.., matching the ef_*
-                // split used for alpharho0). The evaporation source +mdv is scaled by
+                // the same composite donor-split face flux as alpharho0 (Fre0_*),
+                // weighted by the upwind vapor-fraction-of-total rho_vap/rho with the
+                // donor of each component flux chosen by its own mass-flux sign
+                // (Larrouturou, matching the Y0 split). The evaporation source +mdv is scaled by
                 // the SAME s_src as alpharho0's +mdv, so the carrier (alpharho0 - rho_vap)
                 // source cancels exactly and action-reaction holds at the discrete
                 // level. Diffusion is the same FE Fickian operator (clamped-neighbor
@@ -3079,27 +3127,35 @@ Hydro2::RHS(int lev,
                     const int ip = (i < dhi0) ? i + 1 : i;
                     const int jm = (j > dlo1) ? j - 1 : j;
                     const int jp = (j < dhi1) ? j + 1 : j;
-                    Set::Scalar fvap_xlo = (uxlo > 0.0) ? rho_vap(im, j, k) / std::max(rho(im, j, k), small_l)
-                                                        : rho_vap(i,  j, k) / std::max(rho(i,  j, k), small_l);
-                    Set::Scalar fvap_xhi = (uxhi > 0.0) ? rho_vap(i,  j, k) / std::max(rho(i,  j, k), small_l)
-                                                        : rho_vap(ip, j, k) / std::max(rho(ip, j, k), small_l);
-                    Set::Scalar fvap_ylo = (uylo > 0.0) ? rho_vap(i, jm, k) / std::max(rho(i, jm, k), small_l)
-                                                        : rho_vap(i, j,  k) / std::max(rho(i, j,  k), small_l);
-                    Set::Scalar fvap_yhi = (uyhi > 0.0) ? rho_vap(i, j,  k) / std::max(rho(i, j,  k), small_l)
-                                                        : rho_vap(i, jp, k) / std::max(rho(i, jp, k), small_l);
-                    Set::Scalar rho_vap_div = (fvap_xlo * Fxlo[0] - fvap_xhi * Fxhi[0]) / DX[0]
-                                            + (fvap_ylo * Fylo[0] - fvap_yhi * Fyhi[0]) / DX[1];
+                    // Same donor-split composite as Fre0_* above: the vapor fraction
+                    // rho_vap/rho upwinds by each flux's own mass sign, blended with
+                    // the same per-face theta. fv = vapor-fraction-of-total.
+                    auto fvc = [&](int ii, int jj) { return rho_vap(ii, jj, k) / std::max(rho(ii, jj, k), small_l); };
+                    Set::Scalar fvh_xhi = (Fhx(i, j, k, 0) > 0.0) ? fvc(i, j) : fvc(ip, j);
+                    Set::Scalar fvl_xhi = (Flx(i, j, k, 0) > 0.0) ? fvc(i, j) : fvc(ip, j);
+                    Set::Scalar Frv_xhi = fvl_xhi * Flx(i, j, k, 0) + th_xhi * (fvh_xhi * Fhx(i, j, k, 0) - fvl_xhi * Flx(i, j, k, 0));
+                    Set::Scalar fvh_xlo = (Fhx(i - 1, j, k, 0) > 0.0) ? fvc(im, j) : fvc(i, j);
+                    Set::Scalar fvl_xlo = (Flx(i - 1, j, k, 0) > 0.0) ? fvc(im, j) : fvc(i, j);
+                    Set::Scalar Frv_xlo = fvl_xlo * Flx(i - 1, j, k, 0) + th_xlo * (fvh_xlo * Fhx(i - 1, j, k, 0) - fvl_xlo * Flx(i - 1, j, k, 0));
+                    Set::Scalar fvh_yhi = (Fhy(i, j, k, 0) > 0.0) ? fvc(i, j) : fvc(i, jp);
+                    Set::Scalar fvl_yhi = (Fly(i, j, k, 0) > 0.0) ? fvc(i, j) : fvc(i, jp);
+                    Set::Scalar Frv_yhi = fvl_yhi * Fly(i, j, k, 0) + th_yhi * (fvh_yhi * Fhy(i, j, k, 0) - fvl_yhi * Fly(i, j, k, 0));
+                    Set::Scalar fvh_ylo = (Fhy(i, j - 1, k, 0) > 0.0) ? fvc(i, jm) : fvc(i, j);
+                    Set::Scalar fvl_ylo = (Fly(i, j - 1, k, 0) > 0.0) ? fvc(i, jm) : fvc(i, j);
+                    Set::Scalar Frv_ylo = fvl_ylo * Fly(i, j - 1, k, 0) + th_ylo * (fvh_ylo * Fhy(i, j - 1, k, 0) - fvl_ylo * Fly(i, j - 1, k, 0));
+                    Set::Scalar rho_vap_div = (Frv_xlo - Frv_xhi) / DX[0]
+                                            + (Frv_ylo - Frv_yhi) / DX[1];
 
                     // Store the hi-face rho_vap advective flux for reflux (mass comp 2),
-                    // using the SAME blended mass flux Fx*[0]/Fy*[0] as alpharho0 below.
-                    // (Stored here, inside the species block, where fvap_* are in scope;
+                    // the SAME composite donor-split flux as the divergence above.
+                    // (Stored here, inside the species block, where Frv_* are in scope;
                     // the alpharho0/alpharho1 comps are stored in the have_cc block below.)
                     if (have_cc)
                     {
-                        ff_mass_x(i, j, k, 2) = fvap_xhi * Fxhi[0];
-                        ff_mass_y(i, j, k, 2) = fvap_yhi * Fyhi[0];
-                        if (i == bxlo.x) ff_mass_x(i - 1, j, k, 2) = fvap_xlo * Fxlo[0];
-                        if (j == bxlo.y) ff_mass_y(i, j - 1, k, 2) = fvap_ylo * Fylo[0];
+                        ff_mass_x(i, j, k, 2) = Frv_xhi;
+                        ff_mass_y(i, j, k, 2) = Frv_yhi;
+                        if (i == bxlo.x) ff_mass_x(i - 1, j, k, 2) = Frv_xlo;
+                        if (j == bxlo.y) ff_mass_y(i, j - 1, k, 2) = Frv_ylo;
                     }
 
                     Set::Scalar rho_vap_diff = 0.0;
@@ -3145,31 +3201,32 @@ Hydro2::RHS(int lev,
 
                 if (have_cc)
                 {
-                    // Per-phase reflux mass fluxes split by the same true mass fraction Y0
-                    // (Yf_*) used for re0_div/re1_div above, so reflux stays consistent with
-                    // the conserved partial-density update.
-                    ff_mass_x(i, j, k, 0) = Yf_xhi * Fxhi[0];
-                    ff_mass_x(i, j, k, 1) = (1.0 - Yf_xhi) * Fxhi[0];
+                    // Per-phase reflux mass fluxes = the same composite donor-split face
+                    // fluxes (Fre0_*) used for re0_div/re1_div above, so reflux stays
+                    // consistent with the conserved partial-density update; the liquid
+                    // comp is the mixture remainder (telescopes exactly).
+                    ff_mass_x(i, j, k, 0) = Fre0_xhi;
+                    ff_mass_x(i, j, k, 1) = Fxhi[0] - Fre0_xhi;
                     ff_mom_x(i, j, k, 0) = Fxhi[1];
                     ff_mom_x(i, j, k, 1) = Fxhi[2];
                     ff_ene_x(i, j, k) = Fxhi[3];
 
-                    ff_mass_y(i, j, k, 0) = Yf_yhi * Fyhi[0];
-                    ff_mass_y(i, j, k, 1) = (1.0 - Yf_yhi) * Fyhi[0];
+                    ff_mass_y(i, j, k, 0) = Fre0_yhi;
+                    ff_mass_y(i, j, k, 1) = Fyhi[0] - Fre0_yhi;
                     ff_mom_y(i, j, k, 0) = Fyhi[1];
                     ff_mom_y(i, j, k, 1) = Fyhi[2];
                     ff_ene_y(i, j, k) = Fyhi[3];
 
                     if (i == bxlo.x) {
-                        ff_mass_x(i - 1, j, k, 0) = Yf_xlo * Fxlo[0];
-                        ff_mass_x(i - 1, j, k, 1) = (1.0 - Yf_xlo) * Fxlo[0];
+                        ff_mass_x(i - 1, j, k, 0) = Fre0_xlo;
+                        ff_mass_x(i - 1, j, k, 1) = Fxlo[0] - Fre0_xlo;
                         ff_mom_x(i - 1, j, k, 0) = Fxlo[1];
                         ff_mom_x(i - 1, j, k, 1) = Fxlo[2];
                         ff_ene_x(i - 1, j, k) = Fxlo[3];
                     }
                     if (j == bxlo.y) {
-                        ff_mass_y(i, j - 1, k, 0) = Yf_ylo * Fylo[0];
-                        ff_mass_y(i, j - 1, k, 1) = (1.0 - Yf_ylo) * Fylo[0];
+                        ff_mass_y(i, j - 1, k, 0) = Fre0_ylo;
+                        ff_mass_y(i, j - 1, k, 1) = Fylo[0] - Fre0_ylo;
                         ff_mom_y(i, j - 1, k, 0) = Fylo[1];
                         ff_mom_y(i, j - 1, k, 1) = Fylo[2];
                         ff_ene_y(i, j - 1, k) = Fylo[3];
