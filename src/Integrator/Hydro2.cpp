@@ -5077,11 +5077,47 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         // FillPatch'd. Re-projecting rho*eta here (the retired convention) overwrote the
         // conservatively-transported masses with the INDEPENDENT volume fraction every step
         // -- the sealed-box mass leak. The density-BC ncomp matches (1 per partial density).
-        // [A Dirichlet inflow prescribing a TOTAL density would need a per-phase composition
-        //  to split; the sealed/REFLECT and periodic regression tests do not exercise that.]
         FillBoundariesWithBC(lev, time, density_bc, {
             alpharho0_mf[lev].get(), alpharho1_mf[lev].get()
         });
+        // Dirichlet-total repair. density_bc prescribes the TOTAL mixture density,
+        // but it was just applied to EACH partial, so a dirichlet ghost holds
+        // alpharho0 = alpharho1 = rho_BC: composition Y0 = 1/2 regardless of what
+        // is flowing in, and the rebuilt ghost mixture density DOUBLES. A
+        // supersonic inflow then feeds half its mass into the wrong phase (the
+        // shock-droplet liquid-mass growth, ~rho*u*H/2) and a rho-doubled
+        // momentum/energy state (u and p far off the intended post-shock values).
+        // Detect those ghosts by applying the same BC to a scratch TOTAL-density
+        // fab: neumann/reflect ghosts reproduce the per-partial sum exactly (the
+        // BC copies/mirrors the interior), so only dirichlet-total ghosts
+        // disagree. The BC carries no composition, so split rho_BC by the eta
+        // ghost (own BC, zero-neumann default) -- exact for a pure-phase inflow
+        // (eta = Y0 there), an approximation only if a dirichlet boundary cuts
+        // the interface (the same eta fallback the NSCBC branch uses).
+        {
+            amrex::MultiFab rho_bc_total(density_mf[lev]->boxArray(),
+                                         density_mf[lev]->DistributionMap(), 1, nghost);
+            amrex::MultiFab::Copy(rho_bc_total, *density_mf[lev], 0, 0, 1, nghost);
+            FillBoundariesWithBC(lev, time, density_bc, { &rho_bc_total });
+            const Set::Scalar small_l = small;
+            for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &ghostbox = mfi.growntilebox(nghost);
+                auto rbc  = rho_bc_total.array(mfi);
+                auto rho0 = alpharho0_mf[lev]->array(mfi);
+                auto rho1 = alpharho1_mf[lev]->array(mfi);
+                auto eta  = eta_mf[lev]->array(mfi);
+                amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    if (domain.contains(amrex::IntVect(AMREX_D_DECL(i, j, k)))) return; // physical ghosts only
+                    const Set::Scalar sum = rho0(i, j, k) + rho1(i, j, k);
+                    if (std::abs(sum - rbc(i, j, k)) > 1.0e-10 * std::max(std::abs(rbc(i, j, k)), small_l))
+                    {
+                        rho0(i, j, k) = rbc(i, j, k) * eta(i, j, k);
+                        rho1(i, j, k) = rbc(i, j, k) * (1.0 - eta(i, j, k));
+                    }
+                });
+            }
+        }
         // Total density ghosts = sum of the filled partial densities, so (rho, M, E) stay
         // mutually consistent at domain edges and coarse-fine boundaries (the Riemann
         // reconstruction reads UE = E - |M|^2/2rho with this rho).
