@@ -43,7 +43,7 @@ import oblique_shock_theory as ost
 # ---- CASE -----------------------------------------------------------------
 MACH          = 2.0                       # freestream Mach (overridable via argv[1])
 GAMMA         = 1.4
-OUTPUT_TMPL   = "../output_Ma{ma}"        # plotfile dir, {ma} -> str(MACH)
+OUTPUT_TMPL   = "../../../bin/tests/FlowWedge/output_Ma{ma}"        # plotfile dir, {ma} -> str(MACH)
 FRAME         = "last"                    # 'last' or an integer plotfile index
 
 # ---- WEDGE GEOMETRY (must match the input file) ---------------------------

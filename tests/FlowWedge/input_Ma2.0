@@ -93,6 +93,12 @@ solid.energy1.ic.constant.value = 0.892857
 ### ETA (alpha_1) IC -- uniform 0.5 (two identical fluids => single ideal gas) ###
 eta.ic.type = constant
 eta.ic.constant.value = 0.5
+# Pin alpha_1 = 0.5 at the supersonic inflow (all characteristics enter).
+eta.bc.type.xlo = dirichlet
+eta.bc.val.xlo  = 0.5
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = neumann
+eta.bc.type.yhi = neumann
 
 ### EOS (ideal gas, gamma = 1.4, p0 = 0) ###
 eos0.gamma = 1.4
@@ -137,6 +143,8 @@ grav    = 0.0
 ### BOUNDARY CONDITIONS ###
 # SUPERSONIC inflow xlo: ALL characteristics enter -> Dirichlet on rho, M, E.
 # Supersonic outflow xhi + far-field top/bottom: Neumann (zero-gradient extrap).
+# density.bc sets the MIXTURE inflow density (the per-phase partials follow as
+# rho_eta_k = alpha_k * rho via the eta=0.5 split + recompute rho=rho_eta0+rho_eta1).
 density.bc.type.xlo  = dirichlet
 density.bc.val.xlo   = 1.0
 density.bc.type.xhi  = neumann
@@ -149,8 +157,12 @@ momentum.bc.type.xhi = neumann neumann
 momentum.bc.type.ylo = neumann neumann
 momentum.bc.type.yhi = neumann neumann
 
+# energy.bc is SHARED by energy0 AND energy1 (the per-phase INTERNAL energies),
+# which drive the phasic pressure.  Dirichlet value = per-phase internal energy
+# E0 = E1 = alpha_k*p/(gamma-1) = 0.5*1.785714 = 0.892857  (NOT the mixture total
+# energy 3.785714, which over-energized the inflow -> p~3 -> Mach decay).
 energy.bc.type.xlo   = dirichlet
-energy.bc.val.xlo    = 3.785714
+energy.bc.val.xlo    = 0.892857
 energy.bc.type.xhi   = neumann
 energy.bc.type.ylo   = neumann
 energy.bc.type.yhi   = neumann

@@ -93,6 +93,12 @@ solid.energy1.ic.constant.value = 0.892857
 ### ETA (alpha_1) IC -- uniform 0.5 (two identical fluids => single ideal gas) ###
 eta.ic.type = constant
 eta.ic.constant.value = 0.5
+# Pin alpha_1 = 0.5 at the supersonic inflow (all characteristics enter).
+eta.bc.type.xlo = dirichlet
+eta.bc.val.xlo  = 0.5
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = neumann
+eta.bc.type.yhi = neumann
 
 ### EOS (ideal gas, gamma = 1.4, p0 = 0) ###
 eos0.gamma = 1.4
@@ -150,7 +156,7 @@ momentum.bc.type.ylo = neumann neumann
 momentum.bc.type.yhi = neumann neumann
 
 energy.bc.type.xlo   = dirichlet
-energy.bc.val.xlo    = 6.285714
+energy.bc.val.xlo    = 0.892857   # per-phase E0=E1=alpha_1*p/(gamma-1); NOT the mixture total E
 energy.bc.type.xhi   = neumann
 energy.bc.type.ylo   = neumann
 energy.bc.type.yhi   = neumann

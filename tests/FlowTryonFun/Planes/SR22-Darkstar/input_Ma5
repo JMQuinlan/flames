@@ -1,0 +1,177 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# ============================================================================
+# FlowTryonFun / Planes / SR22-Darkstar
+# ----------------------------------------------------------------------------
+# Just-for-fun TC: Ma = 5 air over a "Darkstar"-style hypersonic aircraft, with
+# the aircraft SILHOUETTE supplied as an embedded-solid phi geometry read from a
+# greyscale BMP (solid = black = phi 0, air = white = phi 1).
+#
+#   Reference air state: rho=1, p=1/gamma=0.714286 -> c=1  =>  U = Ma = 5.0.
+#   Single-gas limit: eta=alpha_1=0.5 with two identical phases.  INVISCID Euler;
+#   no-penetration at the airframe via the cutoff freeze (slip wall).
+#
+# NOTE: Ma 5 over the airframe is far tamer than Ma 10 but still supersonic -- a very strong, very
+# thin bow shock with a tiny standoff.  Expect to need heavy AMR at the nose
+# (raise amr.max_level) and a small cfl.  This is a cool-factor test, not a
+# converged validation; treat instabilities as "needs more resolution".
+# ============================================================================
+
+### OUTPUT ###
+plot_file = ./tests/FlowTryonFun/Planes/SR22-Darkstar/output_Ma5
+
+### MESHING ###
+amr.plot_dt          = 0.25
+amr.max_grid_size    = 500000
+amr.blocking_factor  = 8
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level        = 2              # refine the airframe + bow shock (raise to 3-4 for a crisp nose shock)
+amr.n_cell           = 480 240        # dx = 12/480 = 0.025 = dy = 6/240
+amr.n_error_buf      = 8
+
+### DIMENSIONS ###
+geometry.prob_lo     = -3.0 -3.0 0.0
+geometry.prob_hi     =  9.0  3.0 0.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEPPING ###
+timestep            = 1e-6
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 5e-3
+dynamictimestep.min = 1e-10
+cfl                 = 0.3             # supersonic
+cfl_v               = 0.3
+stop_time           = 11.0             # ~5 flow-through times (L/U = 12/5 = 2.4)
+
+# ----------------------------------------------------------------------------
+# EMBEDDED SOLID -- the aircraft, from a greyscale BMP.
+#   black (0)   -> phi 0 (solid/airframe);  white (255) -> phi 1 (air)
+#   (val-min)/(max-min) maps the pixel value to phi.
+# Regenerate the BMP with reference/make_darkstar_bmp.py (keep coord.lo/hi in
+# sync with the values printed there).
+# ----------------------------------------------------------------------------
+apply_embedded_solid = 1
+solid.cutoff         = 0.5
+lagrange             = 0.0
+solid.mu             = 0.0            # inviscid slip wall
+solid.mu_b           = 0.0
+lagrange_solid       = 0.0
+phi_refinement_criterion = 0.05       # refine the airframe boundary (image edges)
+
+solid.phi.ic.type          = bmp
+solid.phi.ic.bmp.filename  = ./tests/FlowTryonFun/Planes/SR22-Darkstar/darkstar.bmp
+solid.phi.ic.bmp.channel   = g        # greyscale (R=G=B)
+solid.phi.ic.bmp.min       = 0        # pixel 0   -> phi 0 (solid)
+solid.phi.ic.bmp.max       = 255      # pixel 255 -> phi 1 (fluid)
+solid.phi.ic.bmp.fit       = coord    # map image onto a domain box (else stretch)
+solid.phi.ic.bmp.coord.lo  = -3.0 -3.0
+solid.phi.ic.bmp.coord.hi  =  9.0  3.0
+
+# Prescribed quiescent solid target, eta-consistent (alpha_1 = 0.5):
+#   rho_eta0=rho_eta1=0.5 ; M=0 ; E0=E1=0.5*p/(gamma-1)=0.892857  (u=0, p=p_inf)
+solid.density0.ic.type = constant
+solid.density0.ic.constant.value = 0.5
+solid.density1.ic.type = constant
+solid.density1.ic.constant.value = 0.5
+solid.momentum.ic.type = constant
+solid.momentum.ic.constant.value = 0.0 0.0
+solid.energy0.ic.type = constant
+solid.energy0.ic.constant.value = 0.892857
+solid.energy1.ic.type = constant
+solid.energy1.ic.constant.value = 0.892857
+
+### ETA (alpha_1) IC -- uniform 0.5 (two identical fluids => single ideal gas) ###
+eta.ic.type = constant
+eta.ic.constant.value = 0.5
+eta.bc.type.xlo = dirichlet
+eta.bc.val.xlo  = 0.5
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = neumann
+eta.bc.type.yhi = neumann
+
+### EOS (ideal gas, gamma = 1.4) ###
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cp    = 1005.0
+eos0.cv    = 717.86
+mu0   = 0.0
+mu0_b = 0.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp    = 1005.0
+eos1.cv    = 717.86
+mu1   = 0.0
+mu1_b = 0.0
+
+### FLUID IC (hypersonic freestream in +x, Ma 10) ###
+density0.ic.type = constant
+density0.ic.constant.value = 1.0
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "5.0"
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 0.714286
+density1.ic.type = constant
+density1.ic.constant.value = 1.0
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "5.0"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 0.714286
+
+### INTERACTIONS ###
+epsilon = 0.1
+sigma   = 0.0
+Dv      = 0.0
+pref    = 0.0
+small   = 1e-6
+grav    = 0.0
+
+### BOUNDARY CONDITIONS -- supersonic (Dirichlet inflow, Neumann elsewhere) ###
+# density.bc sets the MIXTURE inflow density; energy.bc sets the PER-PHASE
+# internal energy E0=E1=alpha_1*p/(gamma-1)=0.892857 (NOT the mixture total).
+density.bc.type.xlo  = dirichlet
+density.bc.val.xlo   = 1.0
+density.bc.type.xhi  = neumann
+density.bc.type.ylo  = neumann
+density.bc.type.yhi  = neumann
+
+momentum.bc.type.xlo = dirichlet dirichlet
+momentum.bc.val.xlo  = 5.0 0.0
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+energy.bc.type.xlo   = dirichlet
+energy.bc.val.xlo    = 0.892857
+energy.bc.type.xhi   = neumann
+energy.bc.type.ylo   = neumann
+energy.bc.type.yhi   = neumann
+
+### REFINEMENT CRITERIA -- shock (rho/p gradients) + airframe (phi) ###
+eta_refinement_criterion   = 1e10
+omega_refinement_criterion = 1e10
+gradu_refinement_criterion = 1e10
+p_refinement_criterion     = 0.5
+rho_refinement_criterion   = 0.2
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+Spec_Vol = 1
+
+### SOLVER ###
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+kappa_method        = 1
+apply_sharpening    = 0
