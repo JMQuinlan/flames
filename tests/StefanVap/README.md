@@ -417,3 +417,123 @@ python3 tests/StefanVap/check_stefan.py <film>/integrals.dat <ctrl>/integrals.da
 `check_stefan.py` fits `dM_liq(t) = M_liq(0) − M_liq(t) ~ t^p` (and `M_vapor ~ t^p`).
 **Current expectation is p ≈ 1** (quasi-steady, fixed `L_film`); **p ≈ 0.5 is the future
 target**, pending the transient diffusion-length (or Fickian-gradient) reformulation.
+
+---
+
+## Toy fluid pair (Stage 3b-2b + Stage 4)
+
+The two closing validation cases below share a **synthetic ~10:1 density-ratio** fluid
+pair instead of real dodecane/air. A real Antoine curve needs sub-critical pressure, so
+a genuinely *low* density ratio (the project's stiffness-reduction target) means a toy
+pair, engineered for comparable sound speeds (non-stiff) and a large, measurable
+saturation vapor fraction:
+
+| quantity | gas carrier (`eos0`, CPG) | liquid (`eos1`, Tammann) |
+|---|---|---|
+| `gamma` | 1.2 | 2.0 |
+| `cv` | 300 | 80 |
+| `cp` | 360  (R_g = 60) | 160 |
+| `p0` / `pi` | 0 | 1.0e6 |
+
+At p = 1e5 Pa: `rho_gas(400 K) = 4.167`, `rho_liq(300 K) = 45.83` (ratio 11:1), with
+`c_gas ≈ 170`, `c_liq ≈ 219 m/s`. Vapor species `R_v = 50` (`cv_vap=500`, `cp_vap=550`),
+`L_vap = 1e5`. Antoine (Clausius–Clapeyron-consistent, `B = L_vap/(R_v ln10) = 868.6`,
+`A = 1.959`, `C = 0`): `p_sat(300)=0.116`, `p_sat(350)=0.30`, `p_sat(400)=0.613` bar,
+boiling ≈ 443 K, so 300–400 K is sub-boiling with `Y_s ≈ 0.34` at 350 K.
+
+Both new checkers read the Alamo `<NNNNN>cell` plotfiles with **yt** (4.3.1) for the
+spatial quantities `integrals.dat` does not carry (T(x), interface position, vapor
+partial pressure).
+
+## Stage 3b-2b — two-phase analytical conduction (`Conduction_2Phase_1D`)
+
+The original `Conduction_1D` was **single-phase** (`eta=1`) and only checked
+conservation + stability — it never validated `div(k grad T)` against a known solution
+or exercised the `eta`-blended `k` across a real liquid|gas interface. This case is the
+classic **two-semi-infinite-slab contact problem**: a cold liquid slab (`eta=0`, 300 K)
+in perfect thermal contact with a hot gas slab (`eta=1`, 400 K), pure Fourier
+conduction, **no** phase change. The two phases at uniform per-phase densities and a
+common `p` produce the temperature step automatically (`T = MixedTemperature`).
+
+Closed form (constant properties, perfect contact, step IC):
+
+```
+effusivity   b_k    = sqrt(k_k rho_k c_k)
+contact T    T_s    = (b_L T_L + b_R T_R)/(b_L + b_R)            (constant in time)
+profile      T(x,t) = T_s + (T_bulk - T_s) erf(|x-x_int|/(2 sqrt(alpha_k t)))
+diffusivity  alpha_k= k_k/(rho_k c_k)
+```
+
+The solver conducts on total energy with a fast acoustic field, so the process is
+**isobaric** and `c_k = cp_k` is expected; the checker also reports the isochoric (`cv`)
+prediction so the run reveals which it follows. Conductivities are tuned for a clear
+effusivity contrast: `k0_thermal=0.5` (gas), `k1_thermal=5.0` (liquid) →
+`b_gas=27.4`, `b_liq=191.5`, **`T_s = 312.5 K`** (clearly between, weighted to the
+high-effusivity liquid); `alpha_gas=3.33e-4`, `alpha_liq=6.82e-4` are comparable, so
+both erf fronts resolve at the same time. At the comparison time ~1.6e-4 s,
+`sqrt(alpha t) ≈ 11–16` cells (well-resolved) and ≫5× from the walls (semi-infinite
+still holds). The run is acoustic-limited (`dt ≈ 1.8e-8` s), so the conduction dt does
+not over-restrict.
+
+```
+python3 tests/StefanVap/check_conduction_2phase.py <output_dir> [target_time]
+```
+
+`check_conduction_2phase.py` loads the plotfile nearest `target_time`, masks the
+±3·`epsilon` diffuse band (the sharp-contact solution does not model it), and reports
+the masked L2/Linf error of `T(x)` vs the analytic profile and the measured vs predicted
+contact temperature. PASS: L2/ΔT within a few % and `T(eta=0.5) ≈ 312.5 K`. CONTROL:
+rerun with `k0_thermal = k1_thermal = 0` → the T step persists (only weak acoustic
+smoothing), confirming the spreading is the conduction operator.
+
+## Stage 4 — sealed adiabatic saturation equilibrium (`Saturation_Box_1D`)
+
+Every earlier saturation case is an **open** tube with `neumann` walls, which leak under
+flow — fine for an early-window rate response, useless for an **equilibrium** statement.
+This case is a **closed, adiabatic box**: a cold liquid slab (`eta=0`, 300 K) | hot gas
+slab (`eta=1`, 400 K), run to equilibrium. Four thermodynamic relations must hold:
+
+```
+(1) M_total = const                            sealed box: zero wall mass flux
+(2) p_vapor -> p_sat(T)  in the gas bulk       gas saturates; evaporation rate -> 0
+(3) E_total(t) = E_total(0) - L_vap*M_vapor    adiabatic: energy only moves to latent
+(4) interface (eta=0.5) position ~ M_vapor     mass converted liquid -> vapor
+```
+
+`(1)` and `(3)` are **relational** and hold every step (no early-window restriction —
+`REFLECT` walls do not leak); `(2)` and the rate→0 are the **asymptotic** equilibrium;
+`(4)` is mass↔volume bookkeeping.
+
+Two ingredients make the equilibrium reachable and well-posed:
+
+- **Sealed, adiabatic walls** — `density`/`energy` `REFLECT_EVEN` + wall-normal
+  `momentum` `REFLECT_ODD` give zero advective wall flux (mass **and** energy
+  conserved). `neumann` cannot once the phase-change expansion drives a wall-normal
+  velocity. The conduction stencil's clamped neighbors are already adiabatic (no-flux),
+  consistent with `REFLECT_EVEN` energy. (`BC::Expression` honors these uppercase
+  mathematical-type strings; lowercase `reflect_odd` is the *LinOp* enum and is **not**
+  recognized as reflecting.)
+- **Self-quenching driving** — `spalding_film_sink = 1` samples `Y_inf` from the local
+  gas-side vapor fraction, so as the sealed gas fills toward `Y_s` the driving `B_M → 0`
+  and evaporation stops with the vapor partial pressure pinned at `p_sat`. With the
+  default constant `Y_infinity = 0` the liquid would evaporate without bound — no
+  equilibrium exists. (`film_eps_mult = 1.5` keeps the sample offset `1.5·epsilon = 3`
+  cells < `nghost = 4`.)
+
+`L_film` sets only the *rate* (the equilibrium state is `L_film`-independent); the
+default 1.0 is far too slow for a tractable run, so this case uses `L_film = 2e-4` with
+an exaggerated `Dv = 1e-2` to homogenize the gas. Conduction is ON (`k0=0.5`, `k1=5.0`),
+so the gas-hot/liquid-cold start, conductive exchange, and latent cooling make the
+equilibrium `(T_eq, p_v = p_sat(T_eq))` genuinely coupled.
+
+```
+python3 tests/StefanVap/check_saturation_box.py <output_dir>
+```
+
+`check_saturation_box.py` reads `integrals.dat` for `(1)` `M_total` flat to machine
+precision and `(3)` the whole-run slope `d(E_total)/d(M_vapor) = -L_vap` (linear fit,
+R²); and the plotfiles (yt) for `(2)` `p_v = rho_vap·R_v·T ≈ p_sat(T)` in the gas bulk
+(plus a rate-decay diagnostic) and `(4)` the `eta=0.5` position linear in `M_vapor`.
+CONTROLS: `apply_latent_heat = 0` → `d(E_total)/d(M_vapor) ≈ 0`; `spalding_saturation = 0`
+→ no saturation pinning. If `(2)` reads `p_v/p_sat < 0.8`, the run simply needs more time
+to equilibrate (raise `stop_time`).

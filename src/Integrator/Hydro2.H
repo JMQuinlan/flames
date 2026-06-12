@@ -456,6 +456,15 @@ protected:
     Set::Scalar kappa_grad_frac = 0.02;
 
     int write_integrals = 1;  // 1: append volume-integrated conserved quantities to <plot_file>/integrals.dat each step
+    // Cumulative liquid->vapor mass transformed by the phase-change source (INT INT m_dot_Vap dV dt),
+    // accumulated trapezoidally in WriteIntegrals from the volume-integrated rate. IOProcessor copy only.
+    Set::Scalar m_vap_transformed = 0.0;  // running total [kg] (integrals.dat column 11)
+    Set::Scalar wi_mdot_prev = 0.0;       // previous volume-integrated m_dot_Vap [kg/s] (trapezoidal state)
+    Set::Scalar wi_time_prev = -1.0;      // previous WriteIntegrals time [s] (-1 = uninitialized)
+    // Cumulative positivity-floor mass injection [kg], split by phase partition, to measure the
+    // density-ratio asymmetry of the rho_eta floor leak (integrals.dat columns 12/13).
+    Set::Scalar m_floor_gas = 0.0;        // rho_eta0 (gas partition) floor injection
+    Set::Scalar m_floor_liq = 0.0;        // rho_eta1 (liquid partition) floor injection
 
     // Exponent on the HLLC-ADC pressure-ratio shock locator. Reflected in the
     // omega_adc_mf diagnostic regardless of which Riemann solver is active.

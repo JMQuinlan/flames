@@ -1,0 +1,197 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# =============================================================================
+# STAGE 3b -- checkpoint 2b (3b-2b): TWO-PHASE FOURIER CONDUCTION vs ANALYTIC
+# =============================================================================
+# The original Conduction_1D was a SINGLE-PHASE gas box (eta=1) and only checked
+# conservation + stability -- it never validated the conduction operator against a
+# known solution, nor exercised the eta-blended k across a real liquid|gas interface.
+# This case is the classic TWO-SEMI-INFINITE-SLAB CONTACT problem: a cold liquid slab
+# (eta=0, left) in perfect thermal contact with a hot gas slab (eta=1, right), pure
+# Fourier conduction, no phase change. It has a closed-form solution to compare to.
+#
+# Operator under test (Hydro2.cpp ~2535):
+#       d(E)/dt += div( k grad T ) ,   k = eta*k0_thermal + (1-eta)*k1_thermal
+# with T = MixedTemperature(rho,p,eta) the per-phase thermal-equilibrium mixing rule.
+#
+# ANALYTIC (two semi-infinite bodies, constant props, perfect contact, step IC):
+#   thermal effusivity   b_k   = sqrt(k_k * rho_k * cp_k)
+#   contact temperature  T_s   = (b_L*T_L + b_R*T_R)/(b_L + b_R)   (CONSTANT in time)
+#   profile each slab    T(x,t)= T_s + (T_bulk - T_s)*erf(|x-x_int|/(2 sqrt(alpha_k t)))
+#   diffusivity          alpha_k = k_k/(rho_k cp_k)   (isobaric: acoustics equilibrate p)
+#
+# TOY FLUID PAIR (shared with Saturation_Box_1D): ~10:1 density ratio, comparable
+# sound speeds (non-stiff). Gas: gamma=1.2, cv=300, cp=360 (R=60). Liquid (Tammann):
+# gamma=2.0, pi=1e6, cv=80, cp=160. At p=1e5: rho_gas(400K)=4.167, rho_liq(300K)=45.83.
+#
+# CONDUCTIVITIES tuned for a clear effusivity contrast (T_s clearly between 300/400):
+#   k0_thermal=0.5 (gas), k1_thermal=5.0 (liquid)
+#   alpha_gas = 0.5/(4.167*360) = 3.33e-4 ,  alpha_liq = 5.0/(45.83*160) = 6.82e-4
+#   b_gas = sqrt(0.5*4.167*360)=27.4 ,  b_liq = sqrt(5.0*45.83*160)=191.5
+#   ==> T_s = (191.5*300 + 27.4*400)/(191.5+27.4) = 312.5 K   (weighted to the liquid)
+# Both alpha are O(few e-4) so the two erf fronts resolve at the SAME time. At the
+# comparison time ~1.6e-4 s: sqrt(alpha t) ~ 11-16 cells (well-resolved) and ~6x from
+# the walls (semi-infinite still holds). Run is acoustic-limited (~1.8e-8 s) so the
+# conduction dt (~5.9e-8) never over-restricts.
+#
+# CHECK -> python check_conduction_2phase.py <output_dir> [target_time]
+#   reads T(x) from the plotfile nearest target_time, masks the +/-3*epsilon diffuse
+#   band, and fits the two-slab erf solution: PASS if L2(T) within a few % and the
+#   measured interface T matches T_s=312.5 K. CONTROL: rerun with k0=k1=0 -> the T step
+#   persists (the conduction operator is what relaxes it).
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = /mmfs1/home/jquinlan/runs/stefan/output_conduction2phase
+amr.plot_dt = 1.0e-5
+
+### MESHING (no AMR) ###
+amr.max_grid_size = 500000
+amr.blocking_factor = 4
+amr.regrid_int = 1
+amr.max_level = 0
+amr.n_cell = 200 8
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 4.0e-3 1.6e-4 0.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEPPING ###
+timestep = 1e-11
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1.0e-8
+dynamictimestep.min = 1.0e-15
+cfl = 0.2
+stop_time = 2.5e-4
+
+### ETA INITIAL CONDITIONS (liquid left eta=0, gas right eta=1) ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 4.0e-5
+eta.ic.expression.constant.x_int = 2.0e-3
+eta.ic.expression.region0 = "0.5*(1 + tanh((x - x_int)/(sqrt(2)*epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS (TOY ~10:1 pair) ###
+# eos0 = gas carrier (CPG): gamma=1.2, cv=300, cp=360 (R=60), p0=0.
+eos0.gamma = 1.2
+eos0.p0 = 0.0
+eos0.cv = "300.0"
+eos0.cp = "360.0"
+mu0 = 0.0
+mu0_b = 0.0
+
+# eos1 = liquid (Tammann): gamma=2.0, pi=1e6, cv=80, cp=160.
+eos1.gamma = 2.0
+eos1.p0 = 1.0e6
+eos1.cv = "80.0"
+eos1.cp = "160.0"
+mu1 = 0.0
+mu1_b = 0.0
+
+# Uniform per-phase densities -> the T step is automatic (both at p=1e5):
+#   gas:    T = p/(R rho)        = 1e5/(60*4.167)        = 400 K  (HOT, right)
+#   liquid: T = (p+pi)/((g-1)cv rho) = 1.1e6/(80*45.83)  = 300 K  (COLD, left)
+density0.ic.type = expression
+density0.ic.expression.constant.rho_gas = 4.167
+density0.ic.expression.region0 = "rho_gas"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_liq = 45.83
+density1.ic.expression.region0 = "rho_liq"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p0 = 1.0e5
+pressure0.ic.expression.region0 = "p0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p0 = 1.0e5
+pressure1.ic.expression.region0 = "p0"
+
+pref = 0.0
+
+### THERMAL CONDUCTION (both phases on; effusivity contrast) ###
+k0_thermal = 0.5           # gas thermal conductivity  [W/m/K]
+k1_thermal = 5.0           # liquid thermal conductivity [W/m/K]
+
+### NO SPECIES / NO PHASE CHANGE / NO LATENT (isolate conduction) ###
+species_transport = 0
+Dv = 0.0
+apply_vap_const = 0
+apply_vaporization = 0
+apply_cavitation   = 0
+apply_latent_heat  = 0
+spalding_saturation = 0
+Y_infinity = 0.0
+
+### SURFACE TENSION / CH (interface stays put: flat tanh at equilibrium) ###
+apply_surface_tension = 0
+sigma = 0.0
+Mob = 50.0
+kappa_method = 1
+smooth_kernel_size = 5
+nghost = 4
+kappa_grad_frac = 0.02
+apply_sharpening = 0
+
+### BOUNDARY CONDITIONS (sealed reflecting walls = no leak, adiabatic) ###
+# density/energy REFLECT_EVEN; momentum REFLECT_ODD on the wall-normal component.
+density.bc.type.xlo = REFLECT_EVEN
+density.bc.type.xhi = REFLECT_EVEN
+density.bc.type.ylo = REFLECT_EVEN
+density.bc.type.yhi = REFLECT_EVEN
+energy.bc.type.xlo = REFLECT_EVEN
+energy.bc.type.xhi = REFLECT_EVEN
+energy.bc.type.ylo = REFLECT_EVEN
+energy.bc.type.yhi = REFLECT_EVEN
+momentum.bc.type.xlo = REFLECT_ODD  REFLECT_EVEN
+momentum.bc.type.xhi = REFLECT_ODD  REFLECT_EVEN
+momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD
+momentum.bc.type.yhi = REFLECT_EVEN REFLECT_ODD
+
+### REFINEMENT CRITERIA (unused at max_level=0) ###
+eta_refinement_criterion = 2e-2
+omega_refinement_criterion = 1e+20
+divu_refinement_criterion = 1e+20
+rho_refinement_criterion = 1e+20
+gradu_refinement_criterion = 1e+20
+
+cutoff = 1e-16
+small = 1e-6
+
+### POSITIVITY-PRESERVING FLUX LIMITER ###
+pp_flux_limiter = 0
+pp_source_limiter = 0
+eps_p = 1.0
+eps_rho = 1e-10
+p_cav = 1.0e6
+
+### SOURCE TERM IC FIELDS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+apply_weight = 0
+Spec_Vol = 1
+grav = 9.81
+
+### RIEMANN SOLVER ###
+Riemann_Solver.type = hllc_adc
+Riemann_Solver.hllc_adc.alpha = 12
+Riemann_Solver.hllc_adc.adc_components = 4
+adc_shock_threshold = 0.75
+adc_grow = 4

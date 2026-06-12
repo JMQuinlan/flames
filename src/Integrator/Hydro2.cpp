@@ -984,7 +984,30 @@ void Hydro2::Mix(int lev)
             // Derivative Function Calls
             Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
 
-            // Calculate State Variables 
+            // =====================================================================
+            // BRANCH CONVENTION (Hydro2_Redo_BASE / Hydro2_Redo_BASE-Q_fix):
+            //   rho      = mixture density = eta*rho0 + (1-eta)*rho1   (built here, at init)
+            //   rho_eta0 = rho * eta         (GAS    partition of the mixture density)
+            //   rho_eta1 = rho * (1 - eta)   (LIQUID partition)
+            //   => rho_eta0 + rho_eta1 = rho ,  and  Y_gas = rho_eta0/rho = eta
+            // rho_eta0/1 are the TIME-EVOLVED conserved mass DOF (solution_mf[0],[1]); rho is
+            // reconstructed as their SUM in Advance (rho = rho_eta0 + rho_eta1). They are NOT
+            // raw per-phase densities and NOT true volume-fraction partial densities
+            // (alpha_k*rho_k) -- they equal rho*eta / rho*(1-eta), which match alpha_k*rho_k
+            // only in pure cells, not across the band. (This is why the textbook 5-eq
+            // evaporation source m_dot*(1/rho_g - 1/rho_l) does NOT apply here.)
+            // density0_mf/density1_mf (rho0/rho1) are IC SCAFFOLDING: used ONCE on this line to
+            // build the initial mixture density from density0.ic/density1.ic, then effectively
+            // unused in the RHS. BEWARE: the local name `rho0` is overloaded -- it aliases
+            // density0_mf in Mix/RHS but rho_eta0_mf in InterfaceSharpening/FillGhost4BC.
+            //
+            // TODO(convention): RETIRE the rho_eta partition. Store (rho, eta) as the primary
+            // fields and derive partial densities where needed. The rho_eta0/1 split is
+            // redundant with the separately-evolved eta (solution_mf[4]) and is the root cause
+            // of the sealed-box mass drift -- rho_eta1 -> 0 in the gas makes the evaporation
+            // sink hit the positivity floor (see the conservation guard in RHS).
+            // =====================================================================
+            // Calculate State Variables
             rho(i, j, k) = eta(i, j, k) * rho0(i, j, k) + (1.0 - eta(i, j, k)) * rho1(i, j, k);
             //rho(i, j, k) = 1.0 / (eta(i, j, k) / (rho0(i, j, k)) + (1.0 - eta(i, j, k)) / (rho1(i, j, k)));
             rho_old(i, j, k) = rho(i, j, k);  
@@ -1157,6 +1180,7 @@ void Hydro2::WriteIntegrals(Set::Scalar time)
     Set::Scalar M_vapor = 0.0;   // dodecane vapor mass in the gas (Stage 3); carrier = M_phase0 - M_vapor
     Set::Scalar Px_total = 0.0, Py_total = 0.0;
     Set::Scalar E_total = 0.0, KE_total = 0.0;
+    Set::Scalar Mdot_total = 0.0; // volume-integrated liquid->vapor rate INT m_dot_Vap dV [kg/s] (Vap_dot[1])
 
     for (int lev = 0; lev <= finest_level; ++lev)
     {
@@ -1185,6 +1209,7 @@ void Hydro2::WriteIntegrals(Set::Scalar time)
             auto rvap_arr = rho_vap_mf[lev]->const_array(mfi);
             auto M_arr   = momentum_mf[lev]->const_array(mfi);
             auto E_arr   = energy_per_vol_mf[lev]->const_array(mfi);
+            auto vap_arr = Vap_dot_mf[lev]->const_array(mfi);   // [1] = m_dot_Vap [kg/m^3/s]
 
             const auto mask_arr = (lev < finest_level)
                 ? fine_mask.const_array(mfi) : amrex::Array4<const int>{};
@@ -1211,6 +1236,7 @@ void Hydro2::WriteIntegrals(Set::Scalar time)
                 Py_total += My  * dV;
                 E_total  += E_arr(i, j, k) * dV;
                 KE_total += KE  * dV;
+                Mdot_total += vap_arr(i, j, k, 1) * dV;   // INT m_dot_Vap dV [kg/s]
             });
         }
     }
@@ -1223,9 +1249,21 @@ void Hydro2::WriteIntegrals(Set::Scalar time)
     amrex::ParallelDescriptor::ReduceRealSum(Py_total);
     amrex::ParallelDescriptor::ReduceRealSum(E_total);
     amrex::ParallelDescriptor::ReduceRealSum(KE_total);
+    amrex::ParallelDescriptor::ReduceRealSum(Mdot_total);
 
     if (amrex::ParallelDescriptor::IOProcessor())
     {
+        // Cumulative liquid->vapor mass transformed by the phase-change source,
+        // INT INT m_dot_Vap dV dt, trapezoidally integrated from the volume-integrated
+        // rate Mdot_total. With the action-reaction guard this tracks -dM_phase1 (and
+        // dM_vapor when Yv_init=0) up to transport. Assumes WriteIntegrals fires once per
+        // level-0 step; only the IOProcessor copy is maintained (the only consumer).
+        if (!std::isfinite(Mdot_total)) Mdot_total = 0.0;  // Vap_dot may be unfilled at t=0
+        if (wi_time_prev >= 0.0 && time > wi_time_prev)
+            m_vap_transformed += 0.5 * (Mdot_total + wi_mdot_prev) * (time - wi_time_prev);
+        wi_mdot_prev = Mdot_total;
+        wi_time_prev = time;
+
         std::string fname = plot_file + "/integrals.dat";
         std::ifstream test(fname);
         bool write_header = (test.peek() == std::ifstream::traits_type::eof() || !test.good());
@@ -1235,7 +1273,8 @@ void Hydro2::WriteIntegrals(Set::Scalar time)
         if (write_header)
             outfile << "# 1:Time 2:M_total 3:M_phase0_gas 4:M_phase1_liq"
                     << " 5:Px_total 6:Py_total 7:E_total 8:KE_total"
-                    << " 9:M_vapor 10:M_carrier\n";
+                    << " 9:M_vapor 10:M_carrier 11:M_vap_transformed"
+                    << " 12:M_floor_gas 13:M_floor_liq\n";
 
         outfile << std::setprecision(12) << time;
         outfile << std::setprecision(8)
@@ -1243,6 +1282,8 @@ void Hydro2::WriteIntegrals(Set::Scalar time)
                 << "\t" << Px_total << "\t" << Py_total
                 << "\t" << E_total  << "\t" << KE_total
                 << "\t" << M_vapor  << "\t" << (M_phase0 - M_vapor)
+                << "\t" << m_vap_transformed
+                << "\t" << m_floor_gas << "\t" << m_floor_liq
                 << "\n";
         outfile.close();
     }
@@ -1979,6 +2020,31 @@ Hydro2::RHS(int lev,
                 m_dot_Vap   += m_dot_cav;
                 eta_dot_Vap += m_dot_cav / std::max(rho(i, j, k), small);
             }
+
+            // ------------------------------------------------------------
+            // Conservation / positivity guard on the evaporation sink
+            // ------------------------------------------------------------
+            // The sink removes from rho_eta1 = rho*(1-eta), the LIQUID partition (see the
+            // convention block in Mix()). rho_eta1 -> 0 across the gas region and the gas-side
+            // half of the diffuse band, yet the source is still nonzero there (m_dot_Vap ~
+            // |grad eta|, symmetric about eta=0.5). The FE step rho_eta1 += dt*(-m_dot_Vap)
+            // then pushes rho_eta1 below the `small` floor, and the post-update floor (Advance)
+            // clamps it and INJECTS mass -- while the matching +m_dot_Vap on rho_eta0 is not
+            // clipped. That breaks action-reaction (gas gains ~2x the liquid loss; ~0.5*m_vapor
+            // of spurious mass in the sealed-box test). Cap m_dot_Vap at the rate that just
+            // empties the available liquid to the floor; the SAME capped value feeds gas(+),
+            // liquid(-), vapor(+), eta_dot, and latent, so the floor never bites and
+            // m_dot_0 + m_dot_1 = 0 holds at the discrete level. (Only activates in the gas-side
+            // band tail; the band-center bulk evaporation where rho_eta1 is large is untouched.)
+            // Physically: you cannot evaporate liquid that is not present in the cell.
+            if (m_dot_Vap > 0.0 && dt > 0.0)
+            {
+                const Set::Scalar mdot_avail = std::max(rho_eta1(i, j, k) - small, 0.0) / dt;
+                m_dot_Vap = std::min(m_dot_Vap, mdot_avail);
+            }
+            // Re-derive eta_dot from the (possibly capped) m_dot so eta = rho_eta0/rho stays
+            // consistent (eta_dot_Vap above is exactly m_dot_Vap/rho before the cap).
+            eta_dot_Vap = m_dot_Vap / std::max(rho(i, j, k), small);
 
             // ------------------------------------------------------------
             // Latent heat of vaporization (Stage 3c)
@@ -3276,22 +3342,37 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // ENFORCE POSITIVITY after time advance. The deficit healed here is mass
     // created from nothing (non-conservative) -- accumulate it as a diagnostic
     // so the source/flux limiter's effect on conservation is measurable.
-    Set::Scalar floor_mass_local = 0.0;
+    // Split the floor injection by phase: rho_eta0 (gas partition, ~0 in the dense liquid)
+    // vs rho_eta1 (liquid partition, ~0 in the light gas). The injection scales with the
+    // local bulk density of the region where the partition vanishes, so for rho_liq/rho_gas
+    // = R the gas-side injection should exceed the liquid-side by ~R -- a direct measure of
+    // the convention's density-ratio asymmetry. (See integrals.dat cols 12/13.)
+    Set::Scalar floor_mass_gas_local = 0.0;  // rho_eta0 floor injection this step
+    Set::Scalar floor_mass_liq_local = 0.0;  // rho_eta1 floor injection this step
     for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
         auto rho_eta0 = rho_eta0_mf[lev]->array(mfi);
         auto rho_eta1 = rho_eta1_mf[lev]->array(mfi);
         auto rho_vap  = rho_vap_mf[lev]->array(mfi);
-        Set::Scalar small_local = small;
 
-        amrex::ParallelFor(bx, [=, &floor_mass_local] AMREX_GPU_DEVICE(int i, int j, int k) {
-            floor_mass_local += std::max(small_local - rho_eta0(i, j, k), 0.0)
-                              + std::max(small_local - rho_eta1(i, j, k), 0.0);
-            rho_eta0(i, j, k) = std::max(rho_eta0(i, j, k), small_local);
-            rho_eta1(i, j, k) = std::max(rho_eta1(i, j, k), small_local);
+        amrex::ParallelFor(bx, [=, &floor_mass_gas_local, &floor_mass_liq_local] AMREX_GPU_DEVICE(int i, int j, int k) {
+            // Floor the partitions at 0, NOT `small`. rho_eta0/rho_eta1 = rho*eta /
+            // rho*(1-eta) are PARTITIONS of the mixture density (see the convention block in
+            // Mix()); they are legitimately 0 in pure phases (rho_eta1=0 in the gas, rho_eta0=0
+            // in the liquid). A `small` floor there CREATES mass every step -> the sealed-box
+            // M_total drift, present even with NO phase change (Conduction_2Phase_1D: +0.07%,
+            // growing). 0 is safe: every division by rho_eta0 is std::max(.,small)-guarded and
+            // rho = max(rho_eta0+rho_eta1, small) is guarded at its reconstruction; rho_eta1 is
+            // never a denominator. Mirrors the rho_vap floor-at-0 just below. (The evaporation
+            // m_dot cap in RHS additionally stops the sink from driving rho_eta1 negative, so
+            // even the negative-overshoot injection here goes to ~0.)
+            floor_mass_gas_local += std::max(0.0 - rho_eta0(i, j, k), 0.0);
+            floor_mass_liq_local += std::max(0.0 - rho_eta1(i, j, k), 0.0);
+            rho_eta0(i, j, k) = std::max(rho_eta0(i, j, k), 0.0);
+            rho_eta1(i, j, k) = std::max(rho_eta1(i, j, k), 0.0);
             // Vapor: floor at 0 (vapor is legitimately 0 in the liquid; do not
-            // create mass with a small_local floor). Clamp <= rho_eta0 (Y_v<=1)
+            // create mass with a `small` floor). Clamp <= rho_eta0 (Y_v<=1)
             // is deferred to the EOS-compositing step.
             rho_vap(i, j, k) = std::max(rho_vap(i, j, k), 0.0);
         });
@@ -3545,13 +3626,21 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // out of nothing by the post-update positivity floors this step (cell-volume
     // weighted). Both should trend to ~0 as the source/flux limiter does its job;
     // a persistently large mass figure is the droplet-mass leak.
-    amrex::ParallelDescriptor::ReduceRealSum(floor_mass_local);
+    amrex::ParallelDescriptor::ReduceRealSum(floor_mass_gas_local);
+    amrex::ParallelDescriptor::ReduceRealSum(floor_mass_liq_local);
     amrex::ParallelDescriptor::ReduceRealSum(floor_energy_local);
     const Set::Scalar cell_vol = DX[0] * DX[1];
-    if ((floor_mass_local > 0.0 || floor_energy_local > 0.0) && amrex::ParallelDescriptor::IOProcessor())
-        Util::ParallelMessage(INFO, "[pp-floor] lev=", lev,
-                              " mass_injected=", floor_mass_local * cell_vol,
-                              " energy_injected=", floor_energy_local * cell_vol);
+    if (amrex::ParallelDescriptor::IOProcessor())
+    {
+        // Cumulative per-phase floor injection [kg] -> integrals.dat cols 12/13 (IOProcessor copy).
+        m_floor_gas += floor_mass_gas_local * cell_vol;
+        m_floor_liq += floor_mass_liq_local * cell_vol;
+        if (floor_mass_gas_local > 0.0 || floor_mass_liq_local > 0.0 || floor_energy_local > 0.0)
+            Util::ParallelMessage(INFO, "[pp-floor] lev=", lev,
+                                  " mass_gas=", floor_mass_gas_local * cell_vol,
+                                  " mass_liq=", floor_mass_liq_local * cell_vol,
+                                  " energy_injected=", floor_energy_local * cell_vol);
+    }
 
     // Computing dt for next time step on all levels
     Set::Scalar dx_min = std::min(DX[0], DX[1]);

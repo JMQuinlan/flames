@@ -1,0 +1,220 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# =============================================================================
+# STAGE 4: SEALED, ADIABATIC SATURATION EQUILIBRIUM (closed-box Stefan)
+# =============================================================================
+# Every earlier saturation case (Saturation_1D, Stefan_*_1D) is an OPEN tube with
+# neumann walls, which leak under flow (README) -- fine for an early-window rate
+# response, useless for an EQUILIBRIUM statement. This case is a CLOSED, ADIABATIC
+# box: fixed total mass, fixed total energy. Liquid slab (eta=0, cold 300 K) | gas
+# slab (eta=1, hot 400 K). Run to equilibrium; FOUR thermodynamic relations must hold:
+#
+#   (1) M_total = const                          (sealed box: zero wall mass flux)
+#   (2) p_vapor -> p_sat(T_interface)            (gas saturates; evaporation quenches)
+#   (3) E_total(t) = E_total(0) - L_vap*M_vapor  (adiabatic: energy only moves to latent)
+#   (4) interface displacement ~ M_vapor         (mass converted liquid -> vapor)
+#
+# (1) and (3) are RELATIONAL and hold every step; (2) and the rate->0 are the
+# ASYMPTOTIC equilibrium; (4) is mass<->volume bookkeeping.
+#
+# SEALED ADIABATIC WALLS are the key difference from the open tubes: density/energy
+# REFLECT_EVEN + wall-normal momentum REFLECT_ODD give zero advective wall flux (mass
+# AND energy conserved). neumann CANNOT do this once the phase-change expansion drives
+# a wall-normal velocity. The conduction stencil's clamped neighbors are already
+# adiabatic (no-flux), consistent with REFLECT_EVEN energy.
+#
+# SELF-QUENCHING DRIVING is REQUIRED for a *saturation* equilibrium: spalding_film_sink
+# = 1 samples Y_inf from the local gas-side vapor fraction, so as the sealed gas fills
+# toward Y_s the driving B_M -> 0 and evaporation stops with the vapor partial pressure
+# pinned at p_sat. With the default constant Y_infinity=0 the liquid would evaporate
+# without bound -- no equilibrium exists. (film_eps_mult=2 keeps the sample offset
+# 2*epsilon = 4 cells <= nghost.)
+#
+# TOY FLUID PAIR (shared with Conduction_2Phase_1D): ~10:1 density ratio, comparable
+# sound speeds (non-stiff), and a saturation curve giving Y_s ~ 0.34 at 350 K (a large,
+# measurable vapor fraction). Gas: gamma=1.2, cv=300, cp=360 (R=60). Liquid (Tammann):
+# gamma=2.0, pi=1e6, cv=80, cp=160. Vapor: R_v=50 (cv_vap=500, cp_vap=550). L_vap=1e5.
+# Antoine (Clausius-Clapeyron-consistent: B=L_vap/(R_v ln10)=868.6): p_sat(300)=0.116 bar,
+# p_sat(350)=0.30 bar, p_sat(400)=0.613 bar, boiling ~443 K -> 300-400 K is sub-boiling.
+#
+# Conduction is ON (k0=0.5, k1=5.0) per the project note -- the gas-hot/liquid-cold
+# start drives heat exchange, and latent cooling draws on the same energy, so the
+# equilibrium (T_eq, p_v=p_sat(T_eq)) is genuinely coupled.
+#
+# CHECK -> python check_saturation_box.py <output_dir>
+#   integrals.dat: (1) M_total flat, (3) slope d(E_total)/d(M_vapor) ~ -L_vap.
+#   late plotfile (yt): (2) p_v = rho_vap*R_v*T ~ p_sat(T) in the gas bulk + rate
+#   decayed, (4) eta=0.5 position linear in M_vapor.
+#   CONTROLS: apply_latent_heat=0 -> E_total flat; spalding_saturation=0 -> no pinning.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = /mmfs1/home/jquinlan/runs/stefan/output_saturation_box
+amr.plot_dt = 2.0e-5
+
+### MESHING (no AMR) ###
+amr.max_grid_size = 500000
+amr.blocking_factor = 4
+amr.regrid_int = 1
+amr.max_level = 0
+amr.n_cell = 200 8
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 4.0e-3 1.6e-4 0.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEPPING ###
+timestep = 1e-11
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1.0e-8
+dynamictimestep.min = 1.0e-15
+cfl = 0.2
+stop_time = 2.0e-3
+
+### ETA INITIAL CONDITIONS (liquid left eta=0, gas right eta=1) ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 4.0e-5
+eta.ic.expression.constant.x_int = 2.0e-3
+eta.ic.expression.region0 = "0.5*(1 + tanh((x - x_int)/(sqrt(2)*epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS (TOY ~10:1 pair) ###
+# eos0 = gas carrier (CPG): gamma=1.2, cv=300, cp=360 (R=60), p0=0.
+eos0.gamma = 1.2
+eos0.p0 = 0.0
+eos0.cv = "300.0"
+eos0.cp = "360.0"
+mu0 = 0.0
+mu0_b = 0.0
+
+# eos1 = liquid (Tammann): gamma=2.0, pi=1e6, cv=80, cp=160.
+eos1.gamma = 2.0
+eos1.p0 = 1.0e6
+eos1.cv = "80.0"
+eos1.cp = "160.0"
+mu1 = 0.0
+mu1_b = 0.0
+
+# Uniform per-phase densities at p=1e5 -> pure-phase temperatures:
+#   gas:    T = p/(R rho)            = 1e5/(60*4.167)        = 400 K  (HOT, right)
+#   liquid: T = (p+pi)/((g-1)cv rho) = 1.1e6/(80*45.83)      = 300 K  (COLD, left)
+density0.ic.type = expression
+density0.ic.expression.constant.rho_gas = 4.167
+density0.ic.expression.region0 = "rho_gas"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_liq = 45.83
+density1.ic.expression.region0 = "rho_liq"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p0 = 1.0e5
+pressure0.ic.expression.region0 = "p0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p0 = 1.0e5
+pressure1.ic.expression.region0 = "p0"
+
+pref = 0.0
+
+### SPALDING VAPORIZATION + SATURATION DRIVING + SELF-QUENCHING FILM SINK ###
+apply_vaporization  = 1      # Spalding mass transfer on
+spalding_saturation = 1      # Antoine saturation Y_s(T,p) driving force
+spalding_film_sink  = 1      # Y_inf = local gas-side vapor fraction -> self-quenches at p_sat
+film_eps_mult       = 1.5    # sample at 1.5*epsilon (3 cells) < nghost (4): no clamp/warning
+L_film              = 2.0e-4 # film/BL thickness [m]; sets the rate magnitude (equilibrium STATE is L_film-independent)
+Y_infinity          = 0.0    # (unused when film_sink=1, except as the fallback far-field)
+# Antoine for p_sat (toy, bar): log10(p_sat) = A - B/(T+C). B = L_vap/(R_v ln10).
+antoine_A = 1.959
+antoine_B = 868.6
+antoine_C = 0.0
+
+### SPECIES (carrier + vapor) + DIFFUSION ###
+species_transport = 1        # gas = carrier(eos0) + transported vapor
+Yv_init           = 0.0      # gas starts pure carrier -> M_vapor starts at 0
+cp_vap            = 550.0    # vapor cp [J/kg/K]  (R_v = cp_vap - cv_vap = 50)
+cv_vap            = 500.0    # vapor cv [J/kg/K]
+Dv                = 1.0e-2   # vapor diffusivity [m^2/s] (exaggerated: homogenize the gas, acoustic/species-limited dt)
+
+### LATENT HEAT + CONDUCTION (both ON: coupled equilibrium) ###
+apply_latent_heat = 1
+L_vap             = 1.0e5    # latent heat [J/kg]  (Antoine B consistent with this + R_v)
+k0_thermal        = 0.5      # gas thermal conductivity [W/m/K]
+k1_thermal        = 5.0      # liquid thermal conductivity [W/m/K]
+
+### NO PRESCRIBED-RATE / NO CAVITATION ###
+apply_vap_const = 0
+vap_const_mdot  = 0.0
+apply_cavitation = 0
+
+### SURFACE TENSION / CH OFF (flat tanh interface; CH just maintains it) ###
+apply_surface_tension = 0
+sigma = 0.0
+Mob = 50.0
+kappa_method = 1
+smooth_kernel_size = 5
+nghost = 4
+kappa_grad_frac = 0.02
+apply_sharpening = 0
+
+### BOUNDARY CONDITIONS (SEALED reflecting walls = fixed mass + adiabatic) ###
+# density/energy REFLECT_EVEN; momentum REFLECT_ODD on the wall-normal component.
+density.bc.type.xlo = REFLECT_EVEN
+density.bc.type.xhi = REFLECT_EVEN
+density.bc.type.ylo = REFLECT_EVEN
+density.bc.type.yhi = REFLECT_EVEN
+energy.bc.type.xlo = REFLECT_EVEN
+energy.bc.type.xhi = REFLECT_EVEN
+energy.bc.type.ylo = REFLECT_EVEN
+energy.bc.type.yhi = REFLECT_EVEN
+momentum.bc.type.xlo = REFLECT_ODD  REFLECT_EVEN
+momentum.bc.type.xhi = REFLECT_ODD  REFLECT_EVEN
+momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD
+momentum.bc.type.yhi = REFLECT_EVEN REFLECT_ODD
+
+### REFINEMENT CRITERIA (unused at max_level=0) ###
+eta_refinement_criterion = 2e-2
+omega_refinement_criterion = 1e+20
+divu_refinement_criterion = 1e+20
+rho_refinement_criterion = 1e+20
+gradu_refinement_criterion = 1e+20
+
+cutoff = 1e-16
+small = 1e-6
+
+### POSITIVITY-PRESERVING FLUX LIMITER (off: species requires the FE path) ###
+pp_flux_limiter = 0
+pp_source_limiter = 0
+eps_p = 1.0
+eps_rho = 1e-10
+p_cav = 1.0e6
+
+### SOURCE TERM IC FIELDS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+apply_weight = 0
+Spec_Vol = 1
+grav = 9.81
+
+### RIEMANN SOLVER ###
+Riemann_Solver.type = hllc_adc
+Riemann_Solver.hllc_adc.alpha = 12
+Riemann_Solver.hllc_adc.adc_components = 4
+adc_shock_threshold = 0.75
+adc_grow = 4
