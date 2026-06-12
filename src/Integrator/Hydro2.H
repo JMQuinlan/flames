@@ -106,14 +106,14 @@ protected:
     void RHS(int lev,
         Set::Scalar time,
         Set::Scalar dt,
-        amrex::MultiFab &rho_eta0_rhs_mf,
-        amrex::MultiFab &rho_eta1_rhs_mf,
+        amrex::MultiFab &alpharho0_rhs_mf,
+        amrex::MultiFab &alpharho1_rhs_mf,
         amrex::MultiFab &M_rhs_mf,
         amrex::MultiFab &E_rhs_mf,
         amrex::MultiFab &eta_rhs_mf,
         amrex::MultiFab &rho_vap_rhs_mf,
-        const amrex::MultiFab &rho_eta0_mf_in,
-        const amrex::MultiFab &rho_eta1_mf_in,
+        const amrex::MultiFab &alpharho0_mf_in,
+        const amrex::MultiFab &alpharho1_mf_in,
         const amrex::MultiFab &M_mf,
         const amrex::MultiFab &E_mf,
         const amrex::MultiFab &eta_mf_in,
@@ -244,8 +244,8 @@ protected:
     Set::Field<Set::Scalar> Fsv_mf;         // Surface Tension
     Set::Field<Set::Scalar> Fw_mf;          // Weight Force
     Set::Field<Set::Scalar> Bm_mf;          // Spalding Number
-    Set::Field<Set::Scalar> Y_mf;           // Mass Fraction (gas mass fraction of total = rho_eta0/rho)
-    Set::Field<Set::Scalar> mass_frac_v_mf; // vapor mass fraction OF THE GAS = rho_vap/rho_eta0 (Stage 3 diagnostic + Spalding/EOS input)
+    Set::Field<Set::Scalar> Y_mf;           // Mass Fraction (gas mass fraction of total = alpharho0/rho)
+    Set::Field<Set::Scalar> mass_frac_v_mf; // vapor mass fraction OF THE GAS = rho_vap/alpharho0 (Stage 3 diagnostic + Spalding/EOS input)
     Set::Field<Set::Scalar> Ldot_mf;        // Ldot
     Set::Field<Set::Scalar> grad_eta_mf;
     Set::Field<Set::Scalar> kappas_mf;
@@ -302,16 +302,16 @@ protected:
 protected:
     Set::Field<Set::Scalar> eta_mf;
 
-    Set::Field<Set::Scalar> rho_eta0_mf;
-    Set::Field<Set::Scalar> rho_eta1_mf;
-    Set::Field<Set::Scalar> rho_eta0_old_mf;
-    Set::Field<Set::Scalar> rho_eta1_old_mf;
+    Set::Field<Set::Scalar> alpharho0_mf;
+    Set::Field<Set::Scalar> alpharho1_mf;
+    Set::Field<Set::Scalar> alpharho0_old_mf;
+    Set::Field<Set::Scalar> alpharho1_old_mf;
 
     // Stage 3 (inert carrier + Spalding): dodecane-vapor partial density within the
     // gas phase. gas (eta=1) = inert carrier (eos0) + dodecane vapor. rho_vap is
     // conserved (advects with the mixture mass flux + gains the evaporation source);
-    // Y_v = rho_vap/rho_eta0 is the vapor mass fraction of the gas; carrier mass =
-    // rho_eta0 - rho_vap. Active only when species_transport != 0.
+    // Y_v = rho_vap/alpharho0 is the vapor mass fraction of the gas; carrier mass =
+    // alpharho0 - rho_vap. Active only when species_transport != 0.
     Set::Field<Set::Scalar> rho_vap_mf;
     Set::Field<Set::Scalar> rho_vap_old_mf;
 
@@ -463,8 +463,8 @@ protected:
     Set::Scalar wi_time_prev = -1.0;      // previous WriteIntegrals time [s] (-1 = uninitialized)
     // Cumulative positivity-floor mass injection [kg], split by phase partition, to measure the
     // density-ratio asymmetry of the rho_eta floor leak (integrals.dat columns 12/13).
-    Set::Scalar m_floor_gas = 0.0;        // rho_eta0 (gas partition) floor injection
-    Set::Scalar m_floor_liq = 0.0;        // rho_eta1 (liquid partition) floor injection
+    Set::Scalar m_floor_gas = 0.0;        // alpharho0 (gas partition) floor injection
+    Set::Scalar m_floor_liq = 0.0;        // alpharho1 (liquid partition) floor injection
 
     // Exponent on the HLLC-ADC pressure-ratio shock locator. Reflected in the
     // omega_adc_mf diagnostic regardless of which Riemann solver is active.
@@ -484,7 +484,7 @@ protected:
     // Optional positivity-preserving SOURCE limiter (requires pp_flux_limiter).
     // When set: (1) the flux baseline is taken source-free so theta limits the
     // flux only, (2) the per-face theta additionally keeps the per-phase partial
-    // densities rho*eta0, rho*eta1 >= small (not just the mixture rho), and
+    // densities alpharho0, alpharho1 >= small (not just the mixture rho), and
     // (3) the cell source is scaled by the largest s in [0,1] that keeps the
     // flux-updated state admissible (mixture rho,p AND both partial densities).
     // This replaces hard pressure/partial-density flooring (which injects mass
@@ -556,8 +556,8 @@ protected:
 
     // Cell-centered flux MultiFabs storing hi-face Riemann fluxes.
     // cc_fluxes[lev].mass[d]: cell (i,j) stores per-phase mass flux at face
-    //   (i+1/2,j) for d=0, or (i,j+1/2) for d=1.  3 components: rho_eta0,
-    //   rho_eta1, rho_vap (vapor advective flux; comp 2 written only when
+    //   (i+1/2,j) for d=0, or (i,j+1/2) for d=1.  3 components: alpharho0,
+    //   alpharho1, rho_vap (vapor advective flux; comp 2 written only when
     //   species_transport != 0, otherwise it stays 0 and refluxes as a no-op).
     // cc_fluxes[lev].mom[d]:  AMREX_SPACEDIM components (x-mom, y-mom).
     // cc_fluxes[lev].energy[d]: 1 component.  1 ghost cell for FillBoundary.
@@ -579,7 +579,7 @@ protected:
     //   Flo[d]: low-order HLL flux, 5 comp = mass, x-mom, y-mom, energy,
     //           u_interface (HLL contact speed, for blended eta advection).
     //   Bbase : low-order positivity baseline, 6 comp = rho, Mx, My, E,
-    //           rho*eta0, rho*eta1 (last two only used by the source limiter's
+    //           alpharho0, alpharho1 (last two only used by the source limiter's
     //           per-phase guard; source folded in unless pp_source_limiter).
     //   theta : per-face blend factor, AMREX_SPACEDIM comp (theta at i+1/2, j+1/2).
     // ------------------------------------------------------------------
