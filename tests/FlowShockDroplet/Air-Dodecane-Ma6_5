@@ -194,7 +194,7 @@ Yv_init           = 0.0        # gas starts as pure air -> vapor grows by evapor
 cp_vap            = 1994.85    # dodecane-vapor cp [J/kg/K]  (R_v = cp_vap - cv_vap = 44.85)
 cv_vap            = 1950.0     # dodecane-vapor cv [J/kg/K]  (old eos0 dodecane-vapor props)
 Dv = "1.0e-5"                  # vapor diffusivity [m^2/s] (physical-ish; could be higher, but really should add T and P dependence)
-L_film = 2.0e-7                 # Spalding film thickness [m]: m'' = (rho_g*Dv/L_film)*B'. Dv/L_film = 50 m/s mass-transfer velocity (quasi-steady stagnant-film). Restores the rate magnitude (the bare |grad eta| form was missing 1/L -> ran ~1/epsilon too small).
+L_film = 3.19e-8                 # Spalding film thickness [m]: m'' = (rho_g*Dv/L_film)*B'. Dv/L_film = 50 m/s mass-transfer velocity (quasi-steady stagnant-film). Restores the rate magnitude (the bare |grad eta| form was missing 1/L -> ran ~1/epsilon too small).
 
 ### LATENT HEAT (on) / CONDUCTION (off: never validated 2-phase) ###
 apply_latent_heat = 1
