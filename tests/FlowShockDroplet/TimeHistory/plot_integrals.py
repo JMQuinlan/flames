@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """Plot conserved-quantity time histories for the dodecane shock-droplet runs.
 
-Reads two `integrals.dat`-style files (vaporizing vs. non-vaporizing) and, for
-each data column, writes plots containing both runs' time histories overlaid.
-Column 1 (Time) is the x-axis for the remaining columns.
+Reads `integrals.dat`-style files and, for each data column, writes a plot of
+that column's time history. Column 1 (Time) is the x-axis for the remaining
+columns.
 
 Usage:
-    plot_integrals.py [VAP_FILE] [NO_VAP_FILE]
+    plot_integrals.py                     # default vap vs. no-vap overlay
+    plot_integrals.py FILE                # single run, one line, no legend
+    plot_integrals.py VAP_FILE NO_VAP_FILE # two runs overlaid with a legend
 
-If no arguments are supplied, the two default run outputs are used.
+With a single file path, exactly one line is drawn per column and no legend is
+shown. With two paths (or no arguments, which uses the two default outputs) the
+runs are overlaid and a legend distinguishes them.
 """
 
 import os
@@ -60,6 +64,9 @@ LATEX_LABELS = {
     "KE_total": r"$\mathrm{KE}_\mathrm{total}\ [\mathrm{J/m}]$",
     "M_vapor": r"$M_\mathrm{vapor}\ [\mathrm{kg/m}]$",
     "M_carrier": r"$M_\mathrm{carrier}\ [\mathrm{kg/m}]$",
+    "M_vap_transformed": r"$M_\mathrm{vap,transformed}\ [\mathrm{kg/m}]$",
+    "M_floor_gas": r"$M_\mathrm{floor,gas}\ [\mathrm{kg/m}]$",
+    "M_floor_liq": r"$M_\mathrm{floor,liq}\ [\mathrm{kg/m}]$",
 }
 
 
@@ -92,42 +99,63 @@ def load(path):
 def main():
     args = sys.argv[1:]
     if len(args) == 0:
-        vap_path, no_vap_path = DEFAULT_FILES
-    elif len(args) == 2:
-        vap_path, no_vap_path = args
+        paths = list(DEFAULT_FILES)
+    elif len(args) in (1, 2):
+        paths = list(args)
     else:
         sys.exit(
-            "usage: plot_integrals.py [VAP_FILE] [NO_VAP_FILE]\n"
-            "       (supply both paths or neither)"
+            "usage: plot_integrals.py [FILE [FILE]]\n"
+            "       0 args: default vap vs. no-vap overlay\n"
+            "       1 arg : single run, one line, no legend\n"
+            "       2 args: VAP_FILE NO_VAP_FILE overlaid with a legend"
         )
 
-    FILES = {"vap": vap_path, "no_vap": no_vap_path}
-    loaded = {key: load(path) for key, path in FILES.items()}
+    single = len(paths) == 1
 
-    # Use the vaporizing run's column names as the canonical schema; verify the
+    # Build the list of series to draw. For a single file we draw one
+    # unadorned line; for two we overlay the vaporizing/non-vaporizing runs.
+    if single:
+        series = [
+            {"path": paths[0], "label": None, "linestyle": "-", "color": "C0"},
+        ]
+    else:
+        # paths == [vap, no_vap]; draw no_vap first per PLOT_ORDER.
+        by_key = {"vap": paths[0], "no_vap": paths[1]}
+        series = [
+            {
+                "path": by_key[key],
+                "label": LABELS[key],
+                "linestyle": LINESTYLES[key],
+                "color": COLORS[key],
+            }
+            for key in PLOT_ORDER
+        ]
+
+    for s in series:
+        s["data"], s["names"] = load(s["path"])
+
+    # Use the first series' column names as the canonical schema; verify any
     # other file matches in column count so we are comparing like with like.
-    ref_names = loaded["vap"][1]
-    ncols = loaded["vap"][0].shape[1]
-    for key, (data, names) in loaded.items():
-        if data.shape[1] != ncols:
+    ref_names = series[0]["names"]
+    ncols = series[0]["data"].shape[1]
+    for s in series:
+        if s["data"].shape[1] != ncols:
             raise ValueError(
-                f"{FILES[key]} has {data.shape[1]} columns, expected {ncols}"
+                f"{s['path']} has {s['data'].shape[1]} columns, expected {ncols}"
             )
 
     # Column 0 is Time; plot every other column against it.
     for col in range(1, ncols):
         fig, ax = plt.subplots(figsize=(6, 4))
-        for key in PLOT_ORDER:
-            data, names = loaded[key]
-            t = data[:, 0]
-            y = data[:, col]
+        for s in series:
+            data = s["data"]
             ax.plot(
-                t,
-                y,
-                label=LABELS[key],
+                data[:, 0],
+                data[:, col],
+                label=s["label"],
                 linewidth=2.0,
-                linestyle=LINESTYLES[key],
-                color=COLORS[key],
+                linestyle=s["linestyle"],
+                color=s["color"],
             )
 
         col_name = ref_names[col]
@@ -135,7 +163,8 @@ def main():
         ax.set_ylabel(LATEX_LABELS.get(col_name, col_name))
         # Force the time axis into scientific notation (shared 10^n offset).
         ax.ticklabel_format(axis="x", style="sci", scilimits=(0, 0))
-        ax.legend()
+        if not single:
+            ax.legend()
         ax.grid(True, alpha=0.3)
         fig.tight_layout()
 

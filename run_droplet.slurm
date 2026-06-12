@@ -41,7 +41,7 @@
 #SBATCH -e ./logs/jmq_droplet.e%j    # Name of stderr error file
 #SBATCH -p compute-long         # Queue (partition) name
 #SBATCH --ntasks-per-node=128
-#SBATCH -N 4               # Total # of nodes
+#SBATCH -N 3               # Total # of nodes
 #SBATCH -t 48:00:00        # Run time (hh:mm:ss)
 
 # Other commands must follow all #SBATCH directives...
