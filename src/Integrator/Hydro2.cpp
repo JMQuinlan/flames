@@ -3145,28 +3145,31 @@ Hydro2::RHS(int lev,
 
                 if (have_cc)
                 {
-                    ff_mass_x(i, j, k, 0) = ef_xhi * Fxhi[0];
-                    ff_mass_x(i, j, k, 1) = (1.0 - ef_xhi) * Fxhi[0];
+                    // Per-phase reflux mass fluxes split by the same true mass fraction Y0
+                    // (Yf_*) used for re0_div/re1_div above, so reflux stays consistent with
+                    // the conserved partial-density update.
+                    ff_mass_x(i, j, k, 0) = Yf_xhi * Fxhi[0];
+                    ff_mass_x(i, j, k, 1) = (1.0 - Yf_xhi) * Fxhi[0];
                     ff_mom_x(i, j, k, 0) = Fxhi[1];
                     ff_mom_x(i, j, k, 1) = Fxhi[2];
                     ff_ene_x(i, j, k) = Fxhi[3];
 
-                    ff_mass_y(i, j, k, 0) = ef_yhi * Fyhi[0];
-                    ff_mass_y(i, j, k, 1) = (1.0 - ef_yhi) * Fyhi[0];
+                    ff_mass_y(i, j, k, 0) = Yf_yhi * Fyhi[0];
+                    ff_mass_y(i, j, k, 1) = (1.0 - Yf_yhi) * Fyhi[0];
                     ff_mom_y(i, j, k, 0) = Fyhi[1];
                     ff_mom_y(i, j, k, 1) = Fyhi[2];
                     ff_ene_y(i, j, k) = Fyhi[3];
 
                     if (i == bxlo.x) {
-                        ff_mass_x(i - 1, j, k, 0) = ef_xlo * Fxlo[0];
-                        ff_mass_x(i - 1, j, k, 1) = (1.0 - ef_xlo) * Fxlo[0];
+                        ff_mass_x(i - 1, j, k, 0) = Yf_xlo * Fxlo[0];
+                        ff_mass_x(i - 1, j, k, 1) = (1.0 - Yf_xlo) * Fxlo[0];
                         ff_mom_x(i - 1, j, k, 0) = Fxlo[1];
                         ff_mom_x(i - 1, j, k, 1) = Fxlo[2];
                         ff_ene_x(i - 1, j, k) = Fxlo[3];
                     }
                     if (j == bxlo.y) {
-                        ff_mass_y(i, j - 1, k, 0) = ef_ylo * Fylo[0];
-                        ff_mass_y(i, j - 1, k, 1) = (1.0 - ef_ylo) * Fylo[0];
+                        ff_mass_y(i, j - 1, k, 0) = Yf_ylo * Fylo[0];
+                        ff_mass_y(i, j - 1, k, 1) = (1.0 - Yf_ylo) * Fylo[0];
                         ff_mom_y(i, j - 1, k, 0) = Fylo[1];
                         ff_mom_y(i, j - 1, k, 1) = Fylo[2];
                         ff_ene_y(i, j - 1, k) = Fylo[3];
