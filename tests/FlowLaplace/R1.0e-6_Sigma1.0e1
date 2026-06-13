@@ -1,13 +1,13 @@
-#@ [r1e-06_sigma1.0]
+#@ [r1.0e-6_sigma1.0e1]
 #@ exe=hydro2
 #@ dim=2
 
 # =============================================================================
-# Laplace pressure test  --  R = 1e-06,  sigma = 1
+# Laplace pressure test  --  R = 1e-06,  sigma = 10
 # =============================================================================
 # 2D cylindrical bubble at rest, gas pressure Laplace-balanced against the
 # liquid:
-#     p_gas - p_liquid = sigma / R = 1000000     (Young-Laplace, single curvature)
+#     p_gas - p_liquid = sigma / R = 10000000     (Young-Laplace, single curvature)
 # A correct Brackbill CSF holds the bubble motionless at R0 = 1e-06.  Drift,
 # oscillation, or collapse indicates either a surface-tension scaling bug or
 # that this (R, sigma) is too stiff for the resolution (the sweep's purpose).
@@ -15,14 +15,14 @@
 # Fluid: Garrick (2017) Tammann liquid + ideal gas (cheap but stiffened).
 #   liquid (phase 0, eta=1, outside):  rho=0.991, gamma=5.5, p0=1.505
 #   gas    (phase 1, eta=0, inside):   rho=1.241, gamma=1.4, p0=0
-#   p_liquid = 1,  p_gas = p_liquid + sigma/R = 1000001
+#   p_liquid = 1,  p_gas = p_liquid + sigma/R = 10000001
 #
 # Mesh: 64x64 base + 1 AMR level (eta-only) over a 4e-06 box.
 #   dx_finest = 3.125e-08 = R/32;  R resolved by 32 finest cells.
 #   epsilon   = 12*dx_finest = 3.75e-07 = 0.375 R  (interface band).
 #
-# Timescale: capillary tau=sqrt(rho R^3/sigma) = 9.954898292e-10;
-#   stop_time = 15 tau = 1.493234744e-08 (50 frames).
+# Timescale: capillary tau=sqrt(rho R^3/sigma) = 3.148015248e-10;
+#   stop_time = 15 tau = 4.722022872e-09 (50 frames).
 #
 # This is a unit test -- keep it fast: low resolution, eta-only AMR, Neumann
 # walls (bubble is far from the boundary in the 4e-06 box).
@@ -31,11 +31,11 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowLaplace/output_R1e-06_Sigma1.0
+plot_file = ./tests/FlowLaplace/output_R1.0e-6_Sigma1.0e1
 
 ### MESHING ###
 amr.plot_int        = -1
-amr.plot_dt         = 2.986469488e-10
+amr.plot_dt         = 9.444045743e-11
 amr.max_grid_size   = 500000
 amr.blocking_factor = 2
 amr.regrid_int      = 10
@@ -46,18 +46,18 @@ amr.n_cell          = 64 64
 nghost = 4
 
 ### TIME STEPPING ###
-timestep                = 1.493234744e-11
+timestep                = 4.722022872e-12
 dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
-dynamictimestep.max     = 7.466173719e-11
-dynamictimestep.min     = 1.493234744e-16
+dynamictimestep.max     = 2.361011436e-11
+dynamictimestep.min     = 4.722022872e-17
 cfl                     = 0.4
 
 ### DIMENSIONS ###
 geometry.prob_lo     = -2e-06 -2e-06 0.0
 geometry.prob_hi     =  2e-06  2e-06 0.0
 geometry.is_periodic = 0 0 0
-stop_time            = 1.493234744e-08
+stop_time            = 4.722022872e-09
 
 ### ETA INITIAL CONDITIONS ###
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
@@ -93,12 +93,12 @@ velocity1.ic.type = expression
 velocity1.ic.expression.region0 = "0.0"
 velocity1.ic.expression.region1 = "0.0"
 
-# Laplace-balanced pressures: p_gas - p_liquid = sigma/R = 1000000
+# Laplace-balanced pressures: p_gas - p_liquid = sigma/R = 10000000
 pressure0.ic.type = expression
 pressure0.ic.expression.region0 = "1"      # liquid (outside, eta=1)
 
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "1000001"      # gas (inside, eta=0)
+pressure1.ic.expression.region0 = "10000001"      # gas (inside, eta=0)
 
 ### VISCOSITY (zero -- pure Laplace test, no damping) ###
 mu0   = 0.0
@@ -107,7 +107,7 @@ mu1   = 0.0
 mu1_b = 0.0
 
 ### SURFACE TENSION ###
-sigma = 1
+sigma = 10
 pref  = 0.0
 
 ### BOUNDARY CONDITIONS - Neumann walls (bubble far from boundary) ###

@@ -27,6 +27,7 @@ Re-run from the repo root or anywhere:
     python tests/FlowLaplace/reference/gen_inputs.py
 """
 
+import math
 import os
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -58,8 +59,22 @@ N_FRAMES    = 50
 
 
 def fmt(v):
-    """Compact, round-trippable number formatting for input files."""
+    """Compact, round-trippable number formatting for input file bodies."""
     return f"{v:.10g}"
+
+
+def name_sci(v):
+    """Decimal-mantissa scientific notation for file names, e.g.
+    1.0 -> '1.0e0', 0.001 -> '1.0e-3', 1e-06 -> '1.0e-6', 0.0 -> '0.0'.
+    Round-trips through float() so the analysis scripts can parse it back."""
+    if v == 0:
+        return "0.0"
+    exp = math.floor(math.log10(abs(v)))
+    mant = v / 10.0 ** exp
+    if abs(mant) >= 9.99995:                 # floor undershot a decade boundary
+        mant /= 10.0
+        exp += 1
+    return f"{mant:.1f}e{exp}"
 
 
 def make_input(R, sigma):
@@ -81,7 +96,7 @@ def make_input(R, sigma):
     dt_min    = stop_time / 1.0e8
 
     apply_st = 1 if sigma > 0.0 else 0
-    name = f"R{R}_Sigma{sigma}"
+    name = f"R{name_sci(R)}_Sigma{name_sci(sigma)}"
 
     return name, f"""#@ [{name.lower()}]
 #@ exe=hydro2

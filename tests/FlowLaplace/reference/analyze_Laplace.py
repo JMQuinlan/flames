@@ -16,7 +16,7 @@ near round-off.  Drift / oscillation / collapse flags a surface-tension scaling
 bug, or that this (R, sigma) is too stiff for the resolution.
 
 USAGE:
-    python tests/FlowLaplace/reference/analyze_Laplace.py R1.0_Sigma1.0
+    python tests/FlowLaplace/reference/analyze_Laplace.py R1.0e0_Sigma1.0e0
     python tests/FlowLaplace/reference/analyze_Laplace.py            # -> DEFAULT_TEST
 
 OUTPUTS (in reference/Images/):
@@ -41,7 +41,7 @@ from matplotlib import animation
 # ============================================================================
 
 # Which test to analyze when none is given on the command line.
-DEFAULT_TEST = "R1.0_Sigma1.0"
+DEFAULT_TEST = "R1.0e0_Sigma1.0e0"
 
 # Fluid constants (must match gen_inputs.py / the input files).
 RHO_LIQ      = 0.991
@@ -85,6 +85,21 @@ SAVE_EPS  = True
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.normpath(os.path.join(_HERE, "..", "..", ".."))
 IMG_DIR = os.path.join(_HERE, "Images")
+
+
+def sci_latex(v, sig=3):
+    """Format a number as LaTeX scientific notation, e.g. 1e-06 -> '10^{-6}',
+    10.0 -> '10^{1}', 1.0 -> '10^{0}', 0 -> '0'.  Returned string is meant to
+    sit inside a math-mode ($...$) context."""
+    if v == 0:
+        return "0"
+    exp = int(np.floor(np.log10(abs(v))))
+    mant = v / 10.0 ** exp
+    mant_str = f"{mant:.{sig}g}"
+    if mant_str in ("1", "-1"):
+        sign = "-" if mant_str == "-1" else ""
+        return rf"{sign}10^{{{exp}}}"
+    return rf"{mant_str}\times10^{{{exp}}}"
 
 
 def parse_test_name(name):
@@ -207,8 +222,8 @@ def plot_radius(name, R0, sigma, t, Rx, Ry):
     ax1.plot(tn, Ry / R0,   color=COLOR_Y,   ls="--", lw=1.3, label=r"$R_y/R_0$  ($x=0$)")
     ax1.plot(tn, Ravg / R0, color=COLOR_AVG, ls="-",  lw=1.2, alpha=0.5, label=r"$\langle R\rangle/R_0$")
     ax1.set_ylabel(r"$R/R_0$")
-    ax1.set_title(rf"Laplace test  $R_0={R0:g}$,  $\sigma={sigma:g}$  "
-                  rf"($\Delta p=\sigma/R_0={sigma / R0 if R0 else 0:g}$)")
+    ax1.set_title(rf"Laplace test  $R_0={sci_latex(R0)}$,  $\sigma={sci_latex(sigma)}$  "
+                  rf"($\Delta p=\sigma/R_0={sci_latex(sigma / R0 if R0 else 0)}$)")
     ax1.grid(True, alpha=0.3)
     ax1.legend(loc="best", framealpha=0.9)
 
@@ -257,7 +272,7 @@ def make_gif(name, R0, sigma, times, imgs, extent):
         cs[0].remove()                      # matplotlib >=3.10: ContourSet is one artist
         cs[0] = ax.contour(xs, ys, imgs[k].T, levels=[ETA_THRESHOLD],
                            colors="k", linewidths=1.5)
-        title.set_text(rf"$R_0={R0:g}$, $\sigma={sigma:g}$   "
+        title.set_text(rf"$R_0={sci_latex(R0)}$, $\sigma={sci_latex(sigma)}$   "
                        rf"$t/\tau={times[k] / tau:.2f}$")
         return [im]
 

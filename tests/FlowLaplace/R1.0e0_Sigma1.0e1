@@ -1,4 +1,4 @@
-#@ [r1.0_sigma10.0]
+#@ [r1.0e0_sigma1.0e1]
 #@ exe=hydro2
 #@ dim=2
 
@@ -31,7 +31,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowLaplace/output_R1.0_Sigma10.0
+plot_file = ./tests/FlowLaplace/output_R1.0e0_Sigma1.0e1
 
 ### MESHING ###
 amr.plot_int        = -1

@@ -36,7 +36,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 from analyze_Laplace import (                                    # noqa: E402
     parse_test_name, char_timescale, extract_radius_history,
-    _cell_dirs, IMG_DIR, _REPO,
+    sci_latex, _cell_dirs, IMG_DIR, _REPO,
 )
 
 # ============================================================================
@@ -109,7 +109,7 @@ def main():
         for r in SEARCH_ROOTS:
             print(f"          {r}")
         print("  Run the sims first, e.g.:")
-        print("          ./bin/hydro2-2d-g++ tests/FlowLaplace/R1.0_Sigma1.0")
+        print("          ./bin/hydro2-2d-g++ tests/FlowLaplace/R1.0e0_Sigma1.0e0")
         return 2
     print(f"  found {len(tests)} test(s): {', '.join(tests)}")
 
@@ -129,7 +129,7 @@ def main():
         rn = R / R0
         err = np.abs(rn - 1.0)
         color, ls = style_for(R0, sigma)
-        label = rf"$R_0={R0:g}$, $\sigma={sigma:g}$"
+        label = rf"$R_0={sci_latex(R0)}$, $\sigma={sci_latex(sigma)}$"
         ax1.plot(tn, rn, color=color, ls=ls, label=label)
         ax2.semilogy(tn, np.maximum(err, 1e-16), color=color, ls=ls, label=label)
         summary.append((name, np.nanmax(err), rn[-1]))
