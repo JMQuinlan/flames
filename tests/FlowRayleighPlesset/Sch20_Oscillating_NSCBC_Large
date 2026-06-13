@@ -1,61 +1,56 @@
-#@ [sch20_oscillating]
+#@ [sch20_oscillating_nscbc_large]
 #@ exe=hydro2
 #@ dim=2
 
 # =============================================================================
 # Schmidmayer-Bryngelson-Colonius (JCP 402, 2020) -- SPHERICAL BUBBLE
 # Case 1: LOW-PRESSURE-RATIO  (p_inf / p_b = 10)  -- "OSCILLATING" bubble
+# LARGE-DOMAIN NSCBC VARIANT
 # =============================================================================
-# Air bubble in water; the bubble collapses then rebounds and oscillates with
-# acoustic-radiation damping. This is Sch20 Table 1 Case 1.
+# Large-domain twin of Sch20_Oscillating_NSCBC: same NSCBC4 non-reflecting
+# outflow BCs, but expanded to the +/- 4 m domain + 5-level eta-only AMR of
+# Sch20_Oscillating_Neumann_Large.  This is the NSCBC counterpart to the
+# Neumann _Large run -- it lets us separate physical acoustic-radiation damping
+# from boundary artefacts by comparing two different far-field treatments
+# (characteristic NSCBC outflow here vs. plain Neumann walls) on the SAME large
+# domain.
 #
-#   Reference: Schmidmayer, Bryngelson, Colonius, "An assessment of multiregion
-#   methods for two-phase flow simulations", J. Comput. Phys. 402 (2020)
-#   109080. Section 4 (problem setup), Table 1 (ICs), Eq. (27) (pressure
-#   initialization), Eq. (28) (interface smearing), Eq. (30) (collapse time).
+# Pressure IC is the Sch20_Oscillating_Neumann_Large field (the variant giving
+# the closest match to the Chen-2D RPE reference); see that file's header for
+# the full derivation.
 #
-# Sch20 nominal ICs (Table 1, Case 1):
-#   Water (liquid)  : gamma_l = 2.35,  pi_l = 1.0e9 Pa,  rho_l = 1000 kg/m^3
-#   Air   (gas)     : gamma_g = 1.4,   pi_g = 0,         rho_g = 1.0  kg/m^3
-#   p_inf  = 1.0e5 Pa     (far-field liquid pressure)
-#   p_b    = 1.0e4 Pa     (uniform initial bubble pressure)
-#   ratio  = p_inf / p_b = 10
-#
-# Initial-interface-equilibrium pressure field (Sch20 Eq. 27):
-#   p(r) = p_inf + (R0/r)(p_b - p_inf)        for r >= R0   (exterior liquid)
-#   p(r) = p_b                                for r <  R0   (bubble interior)
-#   This is the steady Rayleigh-Plesset exterior field, so R'(0) = 0 (the
-#   bubble starts at rest, "initial interface equilibrium").
-#
-# Derived quantities:
+# Domain reasoning (from _Large):
 #   c_l = sqrt(gamma_l (p_inf + pi_l)/rho_l) = sqrt(2.35*(1e5+1e9)/1e3) ~ 1533 m/s
-#   tau_c = 0.915 R0 sqrt(rho_l / p_inf)
-#         = 0.915 * 0.02 * sqrt(1000/1e5) = 1.83e-3 s   (Sch20 Eq. 30)
+#   tau_c = 0.915 R0 sqrt(rho_l / p_inf) ~ 1.83e-3 s
+#   L_half = 4 m -> first-collapse wave reaches the boundary at
+#       t_arrive ~ tau_c + L_half/c_l ~ 4.43 ms (~0.8 ms past first cycle end);
+#   NSCBC outflow then absorbs it rather than reflecting.
 #
-# Deviations from Sch20 (documented):
-#   - Sch20 uses an octant with symmetry BCs and L = 320 R0 to avoid
-#     reflections. We instead use a 2D Cartesian quadrant-free domain of
-#     +/- 0.2 m (10 R0 half-domain) with NSCBC4 non-reflecting outflow.
-#   - 2D Cartesian (cylindrical) rather than 3D spherical: the simulated
-#     bubble-wall dynamics should be compared against the Chen-2D cylindrical
-#     RPE; the 3D KM / 3D RPE curves are shown as geometric-context bounds.
-#     (See the companion analysis script analyze_Sch20_Oscillating.py.)
+# AMR resolution (matched to _Large finest dx):
+#   base 320x320 over 8 m -> dx_coarse = 0.025 m
+#   max_level = 5 (refRatio 2 each) -> dx_finest = 7.8e-4 m
+#   R0 / dx_finest = 25.6  -- matches Sch20 nominal NR0.
 # =============================================================================
 
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Oscillating
+plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Oscillating_NSCBC_Large
 
 ### MESHING ###
 amr.plot_int       = -1
-amr.plot_dt        = 1.0e-4        # ~ tau_c/18 -> ~100 frames over the run
+amr.plot_dt        = 1.0e-4         # ~50 frames over 5 ms
 amr.max_grid_size  = 500000
 amr.blocking_factor = 2
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
-amr.max_level      = 0
-amr.n_cell         = 512 512       # dx = 7.8e-4 m -> R0/dx ~ 25.6 (Sch20 NR0~25)
+amr.max_level      = 5
+amr.n_cell         = 320 320        # base; effective finest = 10240 x 10240
+
+# n_error_buf keeps the coarse-fine boundary out of the mixed-eta interface band
+# (Q-Fix density-partition is exact only at pure-phase c/f boundaries).
+# See memory note: feedback_density_partition_breaks_cf_ghosts.md
+amr.n_error_buf    = 16
 
 nghost = 4
 
@@ -68,15 +63,15 @@ dynamictimestep.min     = 1.0e-13
 cfl                     = 0.5
 
 ### DIMENSIONS ###
-geometry.prob_lo     = -0.20 -0.20 0.0
-geometry.prob_hi     =  0.20  0.20 0.0
+geometry.prob_lo     = -4.00 -4.00 0.0
+geometry.prob_hi     =  4.00  4.00 0.0
 geometry.is_periodic = 0 0 0
-stop_time            = 1.0e-2      # ~ 5.5 tau_c -- several oscillation cycles
+stop_time            = 1e-2
 
-### ETA INITIAL CONDITIONS ###
+### ETA INITIAL CONDITIONS (identical to _Large) ###
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.0016     # ~ 2 cells across the band
+eta.ic.expression.constant.epsilon = 0.0016     # ~ 2 cells across the band at finest
 eta.ic.expression.constant.R0      = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
@@ -92,7 +87,7 @@ eos1.p0    = 0.0
 eos1.cv    = 714.286
 eos1.cp    = 1000.0
 
-### HYDRO INITIAL CONDITIONS ###
+### HYDRO INITIAL CONDITIONS (identical to _Large) ###
 density0.ic.type = expression
 density0.ic.expression.region0 = "1000.0"
 
@@ -107,32 +102,17 @@ velocity1.ic.type = expression
 velocity1.ic.expression.region0 = "0.0"
 velocity1.ic.expression.region1 = "0.0"
 
-# Liquid (exterior): 2D-CYLINDRICAL rest field (NOT Sch20 Eq. 27).
-#
-# Sch20 Eq. 27, p = p_inf + (R0/r)(p_b - p_inf), is the 3D SPHERICAL
-# incompressible exterior field (1/r decay) -- correct for Sch20's 3D
-# spherical sims. This is a 2D Cartesian (= 2D cylindrical) simulation,
-# whose "bubble at rest" exterior field is LOGARITHMIC:
-#
-#   p(r) = p_b + (p_inf - p_b) * ln(r/R0) / ln(r_inf/R0)
-#
-# Derivation: 2D incompressible continuity gives u = R Rdot / r; radial
-# momentum at Rdot = 0 integrates to a ln(r) pressure profile -- the same
-# logarithm that appears in the Chen-2D RPE inertia factor ln(r_inf/R).
-# Using the 3D 1/r field in a 2D sim leaves the bubble NOT at rest in 2D,
-# corrupting the early transient and shifting the phase vs Chen-2D.
-#
-# Clamps: max(r,R0) -> p_b for the gas interior (continuous at r=R0 since
-# ln(1)=0); min(.,r_inf) caps the field at p_inf in the square-domain
-# corners (r up to 0.2*sqrt(2) > r_inf) so it never overshoots p_inf.
+# Pressure field IDENTICAL to Sch20_Oscillating_Neumann_Large (closest match to
+# the Chen-2D RPE reference).  See the _Large file header for the derivation.
 pressure0.ic.type = expression
 pressure0.ic.expression.constant.p_inf = 1.0e5
 pressure0.ic.expression.constant.p_b   = 1.0e4
 pressure0.ic.expression.constant.R0    = 0.02
-pressure0.ic.expression.constant.r_inf = 0.20
-pressure0.ic.expression.region0 = "p_b + (p_inf - p_b)*log(min(max(sqrt(x*x + y*y), R0), r_inf)/R0)/log(r_inf/R0)"
+pressure0.ic.expression.constant.r_inf = 4.00
+pressure0.ic.expression.region0 = "p_inf - (p_inf - p_b)*R0/max(sqrt(x*x + y*y), R0)"
+#pressure0.ic.expression.region0 = "p_inf - (p_inf - p_b)*log(r_inf/max(sqrt(x*x + y*y), R0))/log(r_inf/R0)"
 
-# Gas (interior): uniform bubble pressure p_b.
+# Gas interior: uniform bubble pressure p_b.
 pressure1.ic.type = expression
 pressure1.ic.expression.constant.p_b = 1.0e4
 pressure1.ic.expression.region0 = "p_b"
@@ -144,7 +124,7 @@ mu1   = 0.0
 mu1_b = 0.0
 
 ### SURFACE TENSION (none in Sch20 nominal collapse cases) ###
-sigma = 0.0
+sigma = 72.8e-3
 pref  = 0.0
 
 ### BOUNDARY CONDITIONS - NSCBC4 non-reflecting outflow, target = p_inf ###
@@ -161,11 +141,12 @@ momentum.bc.type.xlo = nscbc_outflow nscbc_outflow
 momentum.bc.type.ylo = nscbc_outflow nscbc_outflow
 momentum.bc.type.yhi = nscbc_outflow nscbc_outflow
 
+# L_ref scaled to the 8 m domain (was 0.40 for the 0.4 m small-domain NSCBC).
 nscbc.xlo.type = outflow
 nscbc.xlo.target_p = 1.0e5
 nscbc.xlo.sigma = 0.15
 nscbc.xlo.beta  = 0.5
-nscbc.xlo.L_ref = 0.40
+nscbc.xlo.L_ref = 8.00
 nscbc.xlo.target_u = 0.0
 nscbc.xlo.target_v = 0.0
 
@@ -173,7 +154,7 @@ nscbc.xhi.type = outflow
 nscbc.xhi.target_p = 1.0e5
 nscbc.xhi.sigma = 0.15
 nscbc.xhi.beta  = 0.5
-nscbc.xhi.L_ref = 0.40
+nscbc.xhi.L_ref = 8.00
 nscbc.xhi.target_u = 0.0
 nscbc.xhi.target_v = 0.0
 
@@ -181,7 +162,7 @@ nscbc.ylo.type = outflow
 nscbc.ylo.target_p = 1.0e5
 nscbc.ylo.sigma = 0.15
 nscbc.ylo.beta  = 0.5
-nscbc.ylo.L_ref = 0.40
+nscbc.ylo.L_ref = 8.00
 nscbc.ylo.target_u = 0.0
 nscbc.ylo.target_v = 0.0
 
@@ -189,14 +170,14 @@ nscbc.yhi.type = outflow
 nscbc.yhi.target_p = 1.0e5
 nscbc.yhi.sigma = 0.15
 nscbc.yhi.beta  = 0.5
-nscbc.yhi.L_ref = 0.40
+nscbc.yhi.L_ref = 8.00
 nscbc.yhi.target_u = 0.0
 nscbc.yhi.target_v = 0.0
 
 nscbc.small = 1.0e-10
 
-### REFINEMENT (off for the nominal validation run) ###
-eta_refinement_criterion   = 1.0e+10
+### REFINEMENT -- eta-only, conservative threshold (identical to _Large) ###
+eta_refinement_criterion   = 1.0e-1
 omega_refinement_criterion = 1.0e+10
 p_refinement_criterion     = 1.0e+10
 rho_refinement_criterion   = 1.0e+10
@@ -208,7 +189,7 @@ m0.ic.constant.value = 0.0
 u0.ic.constant.value = 0.0 0.0
 q.ic.constant.value  = 0.0 0.0
 
-### PHYSICS FLAGS ###
+### PHYSICS FLAGS (identical to _Large) ###
 apply_surface_tension = 0
 apply_buoyancy        = 0
 apply_weight          = 0
@@ -216,7 +197,7 @@ apply_vaporization    = 0
 Spec_Vol              = 1
 grav                  = 0.0
 
-### NUMERICS -- Sch20 nominal: WENO3 + SSPRK3 (project-standard for Sch20 tests) ###
+### NUMERICS -- WENO3 + SSPRK3 (project-standard for Sch20 tests) ###
 Riemann_Solver.type = hllc
 Limiter.type        = weno3
 integration.type    = RungeKutta
@@ -229,3 +210,7 @@ reinit_max_iter      = 100
 reinit_tolerance     = 1e-6
 omega_relax          = 0.5
 relax_diag           = 1
+
+# IC pressure equalization (see _Large header): gamma-weighted Mix() kills the
+# step-1 pressure kick at the interface.
+equalize_ic_pressure = 1
