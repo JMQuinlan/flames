@@ -36,7 +36,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 from analyze_Laplace import (                                    # noqa: E402
     parse_test_name, char_timescale, extract_radius_history,
-    sci_latex, _cell_dirs, IMG_DIR, _REPO,
+    sci_latex, is_ignored, _cell_dirs, IMG_DIR, _REPO,
 )
 
 # ============================================================================
@@ -85,6 +85,8 @@ def discover_tests():
         if not os.path.isdir(root):
             continue
         for d in os.listdir(root):
+            if is_ignored(d):                       # skip *.old.* backup dirs
+                continue
             m = re.match(r"output_(R[^_]+_Sigma.+)", d)
             full = os.path.join(root, d)
             if m and os.path.isdir(full) and _cell_dirs(full):

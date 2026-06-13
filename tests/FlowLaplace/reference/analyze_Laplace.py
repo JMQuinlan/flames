@@ -28,6 +28,7 @@ OUTPUTS (in reference/Images/):
 import os
 import re
 import sys
+import fnmatch
 import numpy as np
 import matplotlib
 
@@ -49,6 +50,9 @@ P_LIQUID     = 1.0
 EOS0_GAMMA   = 5.5
 EOS0_P0      = 1.505
 C_LIQ        = (EOS0_GAMMA * (P_LIQUID + EOS0_P0) / RHO_LIQ) ** 0.5
+
+# Backup plotfiles/dirs matching this glob are ignored when reading output.
+IGNORE_GLOB = "*.old.*"
 
 # Analysis knobs.
 ETA_THRESHOLD = 0.5          # interface iso-level
@@ -131,10 +135,16 @@ def find_output_dir(name):
     return None
 
 
+def is_ignored(name):
+    """True for backup artifacts (e.g. *.old.*) that should never be read."""
+    return fnmatch.fnmatch(os.path.basename(name), IGNORE_GLOB)
+
+
 def _cell_dirs(d):
     return sorted(
         os.path.join(d, x) for x in os.listdir(d)
         if os.path.isdir(os.path.join(d, x)) and x.endswith("cell")
+        and not is_ignored(x)
     )
 
 
