@@ -398,6 +398,17 @@ protected:
     // normal penalty  -lagrange_solid*(u-u_solid).grad_phi * grad_phi.
     Set::Scalar lagrange_solid = 0.0;
 
+    // RIEMANN-REFLECTING WALL coefficient.  0 = off (the masked-flux + cutoff
+    // freeze legacy behaviour).  >0 enforces the embedded no-penetration wall by
+    // replacing the SOLID-side reconstructed Riemann state at the diffuse
+    // interface with a MIRROR of the fluid-side state (normal momentum reversed),
+    // weighted by min(coeff * (phi_lo - phi_hi), 1) across each face.  The HLLC
+    // then returns u_n = 0 (exact no-penetration) and the reflected wall
+    // pressure, supplying the consistent NORMAL traction the diffuse wall was
+    // missing.  When >0 the momentum flux is also left UN-masked by phi_c so the
+    // wall flux is delivered at full strength.  Recommended value ~2.
+    Set::Scalar solid_reflect = 0.0;
+
     // ------------------------------------------------------------------
     // Artificial heat exchange (AHE) - Schmidmayer 2020 eq. 13 r-source
     //     E0_rhs += -mu p_I (p_0 - p_1)

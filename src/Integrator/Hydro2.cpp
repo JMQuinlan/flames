@@ -119,6 +119,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("solid.mu", value.solid_mu, 100.0);          // solid viscosity for no-slip (blended by 1-phi)
         pp_query_default("solid.mu_b", value.solid_mu_b, 0.0);        // solid bulk viscosity
         pp_query_default("lagrange_solid", value.lagrange_solid, 0.0); // optional phi-interface normal no-penetration penalty (default off)
+        pp_query_default("solid.reflect", value.solid_reflect, 0.0); // Riemann-reflecting wall coeff (0=off, ~2 recommended)
 
         // Artificial heat exchange (AHE) on per-phase internal energy rows.
         // See bin/AHE.md for derivation: Schmidmayer 2020 eq. 13 r-source
@@ -1679,6 +1680,50 @@ Hydro2::RHS(int lev,
                 Solver::Local::Limiter::Primitive pR = limiter->Reconstruct(stencil_R);
                 Solver::Local::FluidRiemann::State sL_face = Solver::Local::Limiter::ToState(pL, small);
                 Solver::Local::FluidRiemann::State sR_face = Solver::Local::Limiter::ToState(pR, small);
+
+                // ----------------------------------------------------------
+                // STAGE 1.5: RIEMANN-REFLECTING WALL.
+                // ----------------------------------------------------------
+                // At the diffuse solid interface, replace the SOLID-side state
+                // with a MIRROR of the FLUID-side state (normal momentum
+                // reversed), weighted by the phi jump across the face.  The
+                // HLLC then returns u_n = 0 (exact no-penetration) and the
+                // reflected wall pressure -- not self-limiting (it uses the
+                // incoming cell-edge state, not a local already-turned one).
+                if (apply_embedded_solid && solid_reflect > 0.0)
+                {
+                    const Set::Scalar plo = std::min(std::max(phisol(lo_i, lo_j, k), 0.0), 1.0);
+                    const Set::Scalar phr = std::min(std::max(phisol(hi_i, hi_j, k), 0.0), 1.0);
+                    const Set::Scalar dj  = plo - phr;
+                    auto blend = [](const Solver::Local::FluidRiemann::State &a,
+                                    const Solver::Local::FluidRiemann::State &b, Set::Scalar w)
+                    {
+                        Solver::Local::FluidRiemann::State s = a;
+                        s.alpha       = (1.0 - w) * a.alpha       + w * b.alpha;
+                        s.alpha_rho_0 = (1.0 - w) * a.alpha_rho_0 + w * b.alpha_rho_0;
+                        s.alpha_rho_1 = (1.0 - w) * a.alpha_rho_1 + w * b.alpha_rho_1;
+                        s.M_normal    = (1.0 - w) * a.M_normal    + w * b.M_normal;
+                        s.M_tangent   = (1.0 - w) * a.M_tangent   + w * b.M_tangent;
+                        s.E0          = (1.0 - w) * a.E0          + w * b.E0;
+                        s.E1          = (1.0 - w) * a.E1          + w * b.E1;
+                        s.E_total     = (1.0 - w) * a.E_total     + w * b.E_total;
+                        return s;
+                    };
+                    if (dj > 0.0)   // fluid(lo) -> solid(hi): mirror L into the R (solid) side
+                    {
+                        const Set::Scalar w = std::min(solid_reflect * dj, 1.0);
+                        Solver::Local::FluidRiemann::State mir = sL_face;
+                        mir.M_normal = -mir.M_normal;
+                        sR_face = blend(sR_face, mir, w);
+                    }
+                    else if (dj < 0.0)   // solid(lo) -> fluid(hi): mirror R into the L (solid) side
+                    {
+                        const Set::Scalar w = std::min(solid_reflect * (-dj), 1.0);
+                        Solver::Local::FluidRiemann::State mir = sR_face;
+                        mir.M_normal = -mir.M_normal;
+                        sL_face = blend(sL_face, mir, w);
+                    }
+                }
                 return riemannsolver->Solve(sL_face, sR_face, pref, small, Spec_Vol);
             };
 
@@ -1776,8 +1821,12 @@ Hydro2::RHS(int lev,
             M_flux(i, j, k, 1) = (flux_xlo.momentum_tangent - flux_xhi.momentum_tangent) / DX[0]
                                + (flux_ylo.momentum_normal  - flux_yhi.momentum_normal ) / DX[1];
 
-            M_rhs(i, j, k, 0) = phi_c * M_flux(i, j, k, 0) + Source(i, j, k, 1);
-            M_rhs(i, j, k, 1) = phi_c * M_flux(i, j, k, 1) + Source(i, j, k, 2);
+            // STAGE 1.5: with the Riemann-reflecting wall, the momentum face flux
+            // already carries the wall traction, so do NOT attenuate it by phi_c
+            // (that would halve the wall pressure at the interface).
+            const Set::Scalar mfac = (apply_embedded_solid && solid_reflect > 0.0) ? 1.0 : phi_c;
+            M_rhs(i, j, k, 0) = mfac * M_flux(i, j, k, 0) + Source(i, j, k, 1);
+            M_rhs(i, j, k, 1) = mfac * M_flux(i, j, k, 1) + Source(i, j, k, 2);
 
             // ------------------------------------------------------------
             // Redundant mixture total energy (pure conservation):
