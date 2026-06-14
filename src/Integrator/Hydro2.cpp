@@ -2079,8 +2079,28 @@ Hydro2::RHS(int lev,
             // Physically: you cannot evaporate liquid that is not present in the cell.
             if (m_dot_Vap > 0.0 && dt > 0.0)
             {
-                const Set::Scalar mdot_avail = std::max(alpharho1(i, j, k) - small, 0.0) / dt;
-                m_dot_Vap = std::min(m_dot_Vap, mdot_avail);
+                // (1) Mass-available cap: cannot evaporate liquid not present.
+                Set::Scalar mdot_cap = std::max(alpharho1(i, j, k) - small, 0.0) / dt;
+                // (2) Energy-available cap (the mass cap's missing twin). The latent
+                // sink E_rhs += -L_vap*m_dot_Vap cannot pull the cell's internal energy
+                // below the EOS pressure floor; if it does, the Advance backstop clamps
+                // UE_vol up and INJECTS energy (non-conservative -- this is the
+                // "mass=0, energy!=0" floor signature). The internal-energy margin above
+                // the floor is UE_vol - ue_floor = (p - p_floor)/(gamma-1), so the
+                // latent-safe rate is m_dot <= margin/(L_vap*dt). The 0.9 factor leaves
+                // headroom for the other energy sinks in this cell (conduction/viscous).
+                // Uses the SAME p_floor expression as the Advance backstop (PressureFloor
+                // -> ue_floor). Gated on apply_latent_heat so the mass-only verification
+                // runs stay bit-for-bit. The single capped m_dot feeds gas(+)/liquid(-)/
+                // eta_dot/latent below, preserving discrete action-reaction.
+                if (apply_latent_heat == 1 && L_vap > 0.0)
+                {
+                    const Set::Scalar p_floor   = Solver::EOS::EOS::PressureFloor(eta(i, j, k), p0_eff(i, j, k), eps_p, p_cav);
+                    const Set::Scalar ue_margin = std::max(press(i, j, k) - p_floor, 0.0) / std::max(gammaf(i, j, k) - 1.0, small);
+                    const Set::Scalar edot_avail = 0.9 * ue_margin / dt;   // J/m^3/s available to the latent sink
+                    mdot_cap = std::min(mdot_cap, edot_avail / (L_vap + small));
+                }
+                m_dot_Vap = std::min(m_dot_Vap, mdot_cap);
             }
             // Re-derive eta_dot from the (possibly capped) m_dot so eta = alpharho0/rho stays
             // consistent (eta_dot_Vap above is exactly m_dot_Vap/rho before the cap).
