@@ -68,6 +68,10 @@ LATEX_LABELS = {
     "M_floor_gas": r"$M_\mathrm{floor,gas}\ [\mathrm{kg/m}]$",
     "M_floor_liq": r"$M_\mathrm{floor,liq}\ [\mathrm{kg/m}]$",
     "E_floor": r"$E_\mathrm{floor}\ [\mathrm{J/m}]$",
+    "E_floor_gas": r"$E_\mathrm{floor,gas}\ [\mathrm{J/m}]$",
+    "E_floor_liq": r"$E_\mathrm{floor,liq}\ [\mathrm{J/m}]$",
+    "p_preflr_min_gas": r"$p_\mathrm{pre,min}^\mathrm{gas}\ [\mathrm{Pa}]$",
+    "p_preflr_min_liq": r"$p_\mathrm{pre,min}^\mathrm{liq}\ [\mathrm{Pa}]$",
 }
 
 

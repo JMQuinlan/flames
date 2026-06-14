@@ -1305,7 +1305,9 @@ void Hydro2::WriteIntegrals(Set::Scalar time)
             outfile << "# 1:Time 2:M_total 3:M_phase0_gas 4:M_phase1_liq"
                     << " 5:Px_total 6:Py_total 7:E_total 8:KE_total"
                     << " 9:M_vapor 10:M_carrier 11:M_vap_transformed"
-                    << " 12:M_floor_gas 13:M_floor_liq 14:E_floor\n";
+                    << " 12:M_floor_gas 13:M_floor_liq 14:E_floor"
+                    << " 15:E_floor_gas 16:E_floor_liq"
+                    << " 17:p_preflr_min_gas 18:p_preflr_min_liq\n";
 
         outfile << std::setprecision(12) << time;
         outfile << std::setprecision(8)
@@ -1316,6 +1318,8 @@ void Hydro2::WriteIntegrals(Set::Scalar time)
                 << "\t" << m_vap_transformed
                 << "\t" << m_floor_gas << "\t" << m_floor_liq
                 << "\t" << e_floor
+                << "\t" << e_floor_gas << "\t" << e_floor_liq
+                << "\t" << p_preflr_min_gas << "\t" << p_preflr_min_liq
                 << "\n";
         outfile.close();
     }
@@ -3616,6 +3620,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     Set::Scalar alpha_max_local = 0.0;    // max per-cell thermal diffusivity k/(rho cv) (conduction dt)
     Set::Scalar Deff_max_local = 0.0;     // max per-cell vapor diffusivity rho*D(T)/rho_0 (species dt, CE model)
     Set::Scalar floor_energy_local = 0.0; // internal energy injected by the eps_p backstop
+    Set::Scalar floor_energy_gas_local = 0.0; // ... split by phase: gas-dominated cells (eta>=0.5)
+    Set::Scalar floor_energy_liq_local = 0.0; // ... liquid-dominated cells (eta<0.5)
+    Set::Scalar p_preflr_min_gas_local = 1e30; // min pre-floor pressure among floored gas cells
+    Set::Scalar p_preflr_min_liq_local = 1e30; // min pre-floor pressure among floored liquid cells
 
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
@@ -3654,7 +3662,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         const Solver::EOS::Tammann eos0_base = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
     
-        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &F_max_local, &rho_min_local, &nu_max_local, &alpha_max_local, &Deff_max_local, &floor_energy_local] AMREX_GPU_DEVICE(int i, int j, int k)
+        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &F_max_local, &rho_min_local, &nu_max_local, &alpha_max_local, &Deff_max_local, &floor_energy_local, &floor_energy_gas_local, &floor_energy_liq_local, &p_preflr_min_gas_local, &p_preflr_min_liq_local] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
         
@@ -3699,6 +3707,26 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 // Diagnostic: energy injected by the floor (0 if not floored).
                 pp_efloor_(i, j, k) = std::max(ue_floor - UE_vol(i, j, k), 0.0);
                 floor_energy_local += pp_efloor_(i, j, k);
+                // Attribute the injection (and record the unclamped pre-floor
+                // pressure) to gas- vs liquid-dominated cells. UE_vol is still the
+                // raw value here, so press_pre is the pressure the cell WOULD have
+                // had with no floor -- negative on the liquid side = tension being
+                // clipped; very negative = an upstream overshoot, not tension.
+                if (pp_efloor_(i, j, k) > 0.0)
+                {
+                    const Set::Scalar press_pre = (gammaf(i, j, k) - 1.0) * UE_vol(i, j, k)
+                                                - gammaf(i, j, k) * p0_eff(i, j, k) + pref;
+                    if (eta(i, j, k) >= 0.5)
+                    {
+                        floor_energy_gas_local += pp_efloor_(i, j, k);
+                        p_preflr_min_gas_local = std::min(p_preflr_min_gas_local, press_pre);
+                    }
+                    else
+                    {
+                        floor_energy_liq_local += pp_efloor_(i, j, k);
+                        p_preflr_min_liq_local = std::min(p_preflr_min_liq_local, press_pre);
+                    }
+                }
                 UE_vol(i, j, k) = std::max(UE_vol(i, j, k), ue_floor);
                 // Heal the CONSERVED energy too, not just the derived UE/pressure.
                 // Without this E_vol keeps its sub-floor (negative-internal-energy)
@@ -3827,6 +3855,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     amrex::ParallelDescriptor::ReduceRealSum(floor_mass_gas_local);
     amrex::ParallelDescriptor::ReduceRealSum(floor_mass_liq_local);
     amrex::ParallelDescriptor::ReduceRealSum(floor_energy_local);
+    amrex::ParallelDescriptor::ReduceRealSum(floor_energy_gas_local);
+    amrex::ParallelDescriptor::ReduceRealSum(floor_energy_liq_local);
+    amrex::ParallelDescriptor::ReduceRealMin(p_preflr_min_gas_local);
+    amrex::ParallelDescriptor::ReduceRealMin(p_preflr_min_liq_local);
     const Set::Scalar cell_vol = DX[0] * DX[1];
     if (amrex::ParallelDescriptor::IOProcessor())
     {
@@ -3835,6 +3867,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         m_floor_liq += floor_mass_liq_local * cell_vol;
         // Cumulative internal energy injected [J] by the eps_p pressure backstop -> col 14.
         e_floor += floor_energy_local * cell_vol;
+        // Phase-split injection (cols 15/16) + all-time min pre-floor pressure (cols 17/18).
+        e_floor_gas += floor_energy_gas_local * cell_vol;
+        e_floor_liq += floor_energy_liq_local * cell_vol;
+        p_preflr_min_gas = std::min(p_preflr_min_gas, p_preflr_min_gas_local);
+        p_preflr_min_liq = std::min(p_preflr_min_liq, p_preflr_min_liq_local);
         if (floor_mass_gas_local > 0.0 || floor_mass_liq_local > 0.0 || floor_energy_local > 0.0)
             Util::ParallelMessage(INFO, "[pp-floor] lev=", lev,
                                   " mass_gas=", floor_mass_gas_local * cell_vol,

@@ -476,6 +476,17 @@ protected:
     Set::Scalar m_floor_liq = 0.0;        // alpharho1 (liquid partition) floor injection
     Set::Scalar e_floor = 0.0;            // cumulative internal energy injected [J] by the eps_p
                                           // pressure backstop (integrals.dat column 14)
+    // Phase-split of the backstop injection (eta>=0.5 gas-dominated, else liquid),
+    // to tell whether the energy leak fires in expanding air or in tensioned
+    // liquid, and how negative the pre-floor pressure gets in each. The two
+    // p_preflr_min_* are all-time running minima of the pre-floor (unclamped)
+    // pressure among cells the floor actually touched: a modest negative value on
+    // the liquid side means physical tension is being clipped (raise p_cav); a
+    // huge negative value (or near-zero/negative UE) means an upstream overshoot.
+    Set::Scalar e_floor_gas = 0.0;        // cumulative injection [J] in gas-dominated cells (col 15)
+    Set::Scalar e_floor_liq = 0.0;        // cumulative injection [J] in liquid-dominated cells (col 16)
+    Set::Scalar p_preflr_min_gas = 1e30;  // all-time min pre-floor pressure [Pa], floored gas cells (col 17)
+    Set::Scalar p_preflr_min_liq = 1e30;  // all-time min pre-floor pressure [Pa], floored liquid cells (col 18)
 
     // Exponent on the HLLC-ADC pressure-ratio shock locator. Reflected in the
     // omega_adc_mf diagnostic regardless of which Riemann solver is active.
