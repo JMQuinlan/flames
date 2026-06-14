@@ -474,6 +474,8 @@ protected:
     // density-ratio asymmetry of the rho_eta floor leak (integrals.dat columns 12/13).
     Set::Scalar m_floor_gas = 0.0;        // alpharho0 (gas partition) floor injection
     Set::Scalar m_floor_liq = 0.0;        // alpharho1 (liquid partition) floor injection
+    Set::Scalar e_floor = 0.0;            // cumulative internal energy injected [J] by the eps_p
+                                          // pressure backstop (integrals.dat column 14)
 
     // Exponent on the HLLC-ADC pressure-ratio shock locator. Reflected in the
     // omega_adc_mf diagnostic regardless of which Riemann solver is active.

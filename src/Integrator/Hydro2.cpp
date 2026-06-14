@@ -1305,7 +1305,7 @@ void Hydro2::WriteIntegrals(Set::Scalar time)
             outfile << "# 1:Time 2:M_total 3:M_phase0_gas 4:M_phase1_liq"
                     << " 5:Px_total 6:Py_total 7:E_total 8:KE_total"
                     << " 9:M_vapor 10:M_carrier 11:M_vap_transformed"
-                    << " 12:M_floor_gas 13:M_floor_liq\n";
+                    << " 12:M_floor_gas 13:M_floor_liq 14:E_floor\n";
 
         outfile << std::setprecision(12) << time;
         outfile << std::setprecision(8)
@@ -1315,6 +1315,7 @@ void Hydro2::WriteIntegrals(Set::Scalar time)
                 << "\t" << M_vapor  << "\t" << (M_phase0 - M_vapor)
                 << "\t" << m_vap_transformed
                 << "\t" << m_floor_gas << "\t" << m_floor_liq
+                << "\t" << e_floor
                 << "\n";
         outfile.close();
     }
@@ -3832,6 +3833,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         // Cumulative per-phase floor injection [kg] -> integrals.dat cols 12/13 (IOProcessor copy).
         m_floor_gas += floor_mass_gas_local * cell_vol;
         m_floor_liq += floor_mass_liq_local * cell_vol;
+        // Cumulative internal energy injected [J] by the eps_p pressure backstop -> col 14.
+        e_floor += floor_energy_local * cell_vol;
         if (floor_mass_gas_local > 0.0 || floor_mass_liq_local > 0.0 || floor_energy_local > 0.0)
             Util::ParallelMessage(INFO, "[pp-floor] lev=", lev,
                                   " mass_gas=", floor_mass_gas_local * cell_vol,

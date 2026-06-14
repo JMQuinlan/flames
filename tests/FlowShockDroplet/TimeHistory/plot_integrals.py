@@ -67,6 +67,7 @@ LATEX_LABELS = {
     "M_vap_transformed": r"$M_\mathrm{vap,transformed}\ [\mathrm{kg/m}]$",
     "M_floor_gas": r"$M_\mathrm{floor,gas}\ [\mathrm{kg/m}]$",
     "M_floor_liq": r"$M_\mathrm{floor,liq}\ [\mathrm{kg/m}]$",
+    "E_floor": r"$E_\mathrm{floor}\ [\mathrm{J/m}]$",
 }
 
 
@@ -134,32 +135,40 @@ def main():
     for s in series:
         s["data"], s["names"] = load(s["path"])
 
-    # Use the first series' column names as the canonical schema; verify any
-    # other file matches in column count so we are comparing like with like.
-    ref_names = series[0]["names"]
-    ncols = series[0]["data"].shape[1]
+    # Files may differ in column count (e.g. an older run predates a newly added
+    # column like E_floor). Plot by column NAME rather than index so each series
+    # contributes only the columns it actually has; the widest schema sets the
+    # full list of plots, and a series missing a column is simply skipped there.
     for s in series:
-        if s["data"].shape[1] != ncols:
-            raise ValueError(
-                f"{s['path']} has {s['data'].shape[1]} columns, expected {ncols}"
-            )
+        s["index"] = {name: i for i, name in enumerate(s["names"])}
 
-    # Column 0 is Time; plot every other column against it.
-    for col in range(1, ncols):
+    # Canonical column order: the schema of the series with the most columns.
+    ref_names = max(series, key=lambda s: s["data"].shape[1])["names"]
+    time_name = ref_names[0]
+
+    # Plot every non-Time column against Time.
+    for col_name in ref_names[1:]:
         fig, ax = plt.subplots(figsize=(6, 4))
+        drew = False
         for s in series:
+            if col_name not in s["index"] or time_name not in s["index"]:
+                continue  # this run predates the column; skip it on this plot
             data = s["data"]
             ax.plot(
-                data[:, 0],
-                data[:, col],
+                data[:, s["index"][time_name]],
+                data[:, s["index"][col_name]],
                 label=s["label"],
                 linewidth=2.0,
                 linestyle=s["linestyle"],
                 color=s["color"],
             )
+            drew = True
 
-        col_name = ref_names[col]
-        ax.set_xlabel(LATEX_LABELS.get(ref_names[0], ref_names[0]))
+        if not drew:
+            plt.close(fig)
+            continue
+
+        ax.set_xlabel(LATEX_LABELS.get(time_name, time_name))
         ax.set_ylabel(LATEX_LABELS.get(col_name, col_name))
         # Force the time axis into scientific notation (shared 10^n offset).
         ax.ticklabel_format(axis="x", style="sci", scilimits=(0, 0))
