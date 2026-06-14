@@ -254,7 +254,8 @@ eps_rho = 1e-10
 
 # Liquid cavitation/tensile floor: hold the liquid (eta->0) at p >= -p_cav
 # while gas (eta->1) stays p >= eps_p. 0 = vacuum floor (no tension).
-p_cav = 1.0e6
+# p_cav = 1.0e6 # Too small for the high tension caused during the shock-droplet interaction
+p_cav = 5.0e7 # We above the -35 MPa observed liquid tension
 
 ### SOURCE TERMS ###
 m0.ic.constant.value = 0.0

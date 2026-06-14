@@ -50,7 +50,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_air_dodecane_Ma6_5_AMR_6
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_air_dodecane_Ma6_5_AMR_5
 # plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_air_dodecane_Ma6_5_no_vap
 
 ### MESHING ###
@@ -61,7 +61,7 @@ amr.blocking_factor = 16
 amr.regrid_int = 1
 amr.grid_eff = 0.8
 amr.n_error_buf = 4
-amr.max_level = 6
+amr.max_level = 5
 # amr.n_cell = 1024 256
 # amr.n_cell = 2048 512
 amr.n_cell = 512 128
@@ -196,7 +196,11 @@ species_transport = 1          # gas = carrier(eos0=air) + transported dodecane 
 Yv_init           = 0.0        # gas starts as pure air -> vapor grows by evaporation
 cp_vap            = 1994.85    # dodecane-vapor cp [J/kg/K]  (R_v = cp_vap - cv_vap = 44.85)
 cv_vap            = 1950.0     # dodecane-vapor cv [J/kg/K]  (old eos0 dodecane-vapor props)
+#   cp_vap = 1004.5 # Test with matching properties for debugging
+#   cv_vap = 717.5 # Test with matching properties for debugging
 # Dv = "1.0e-5"                  # vapor diffusivity [m^2/s] (physical-ish; could be higher, but really should add T and P dependence)
+Dv = 0 # For debugging
+# rhoD_ref = 0 # For debugging
 rhoD_ref  = 1.177e-5   # kg/m/s; this replaces tuning Dv
   rhoD_Tref = 300.0
   rhoD_exp  = 0.5  # 0.5 = C-E scaling
@@ -207,6 +211,8 @@ apply_latent_heat = 1
 L_vap             = 256.0e3
 k0_thermal        = 0.047
 k1_thermal        = 0.1175
+# k0_thermal        = 0.0 # For debugging
+# k1_thermal        = 0.0 # For debugging
 
 ### BOUNDARY CONDITIONS ###
 density.bc.type.ylo = neumann
@@ -254,7 +260,8 @@ eps_rho = 1e-10
 
 # Liquid cavitation/tensile floor: hold the liquid (eta->0) at p >= -p_cav
 # while gas (eta->1) stays p >= eps_p. 0 = vacuum floor (no tension).
-p_cav = 1.0e6
+# p_cav = 1.0e6 # Too small for the high tension caused during the shock-droplet interaction
+p_cav = 5.0e7 # We above the -35 MPa observed liquid tension
 
 ### SOURCE TERMS ###
 m0.ic.constant.value = 0.0
