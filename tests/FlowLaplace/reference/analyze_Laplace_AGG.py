@@ -52,8 +52,8 @@ SEARCH_ROOTS = [
 ]
 
 # Color per radius, line style per sigma (extend if the matrix grows).
-R_COLORS = {1.0: "#1f77b4", 0.001: "#ff7f0e", 1e-06: "#2ca02c"}
-S_STYLES = {0.0: ":", 1.0: "-", 10.0: "--"}
+R_COLORS = {1.0e-3: "#1f77b4", 1.0e-4: "#ff7f0e", 1.0e-5: "#2ca02c"}
+S_STYLES = {0.0: ":", 0.036: "-", 0.073: "--"}
 DEFAULT_COLOR = "#7f7f7f"
 DEFAULT_STYLE = "-."
 
@@ -111,7 +111,7 @@ def main():
         for r in SEARCH_ROOTS:
             print(f"          {r}")
         print("  Run the sims first, e.g.:")
-        print("          ./bin/hydro2-2d-g++ tests/FlowLaplace/R1.0e0_Sigma1.0e0")
+        print("          ./bin/hydro2-2d-g++ tests/FlowLaplace/R1.0e-4_Sigma7.3e-2")
         return 2
     print(f"  found {len(tests)} test(s): {', '.join(tests)}")
 

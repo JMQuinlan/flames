@@ -42,14 +42,14 @@ from matplotlib import animation
 # ============================================================================
 
 # Which test to analyze when none is given on the command line.
-DEFAULT_TEST = "R1.0e0_Sigma1.0e0"
+DEFAULT_TEST = "R1.0e-4_Sigma7.3e-2"
 
-# Fluid constants (must match gen_inputs.py / the input files).
-RHO_LIQ      = 0.991
-P_LIQUID     = 1.0
-EOS0_GAMMA   = 5.5
-EOS0_P0      = 1.505
-C_LIQ        = (EOS0_GAMMA * (P_LIQUID + EOS0_P0) / RHO_LIQ) ** 0.5
+# Fluid constants (air/water -- must match gen_inputs.py / the input files).
+RHO_LIQ      = 1000.0
+P_LIQUID     = 101325.0
+EOS0_GAMMA   = 2.35
+EOS0_P0      = 1.0e9
+C_LIQ        = (EOS0_GAMMA * (P_LIQUID + EOS0_P0) / RHO_LIQ) ** 0.5   # ~1533 m/s
 
 # Backup plotfiles/dirs matching this glob are ignored when reading output.
 IGNORE_GLOB = "*.old.*"
@@ -115,9 +115,11 @@ def parse_test_name(name):
 
 
 def char_timescale(R0, sigma):
-    """Capillary time if sigma > 0, else acoustic time R0/c_l."""
-    if sigma > 0.0:
-        return (RHO_LIQ * R0 ** 3 / sigma) ** 0.5
+    """Acoustic transit time R0/c_l, used to normalize the time axis.
+
+    stop_time in every input is 500*R0/c_l, so normalizing by R0/c_l makes all
+    cases span the same t/tau window regardless of R or sigma -- which is what
+    lets the AGG overlay line up. (sigma kept in the signature for callers.)"""
     return R0 / C_LIQ
 
 

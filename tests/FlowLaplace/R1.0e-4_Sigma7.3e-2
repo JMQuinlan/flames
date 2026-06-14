@@ -1,41 +1,42 @@
-#@ [r1.0e0_sigma1.0e1]
+#@ [r1.0e-4_sigma7.3e-2]
 #@ exe=hydro2
 #@ dim=2
 
 # =============================================================================
-# Laplace pressure test  --  R = 1,  sigma = 10
+# Laplace pressure test (air/water)  --  R = 0.0001 m,  sigma = 0.073 N/m
 # =============================================================================
 # 2D cylindrical bubble at rest, gas pressure Laplace-balanced against the
 # liquid:
-#     p_gas - p_liquid = sigma / R = 10     (Young-Laplace, single curvature)
-# A correct Brackbill CSF holds the bubble motionless at R0 = 1.  Drift,
-# oscillation, or collapse indicates either a surface-tension scaling bug or
-# that this (R, sigma) is too stiff for the resolution (the sweep's purpose).
+#     p_gas - p_liquid = sigma / R = 730 Pa     (Young-Laplace, single curvature)
+# A correct Brackbill CSF holds the bubble motionless at R0 = 0.0001 m.  Drift,
+# oscillation, or collapse indicates a surface-tension scaling bug.
 #
-# Fluid: Garrick (2017) Tammann liquid + ideal gas (cheap but stiffened).
-#   liquid (phase 0, eta=1, outside):  rho=0.991, gamma=5.5, p0=1.505
-#   gas    (phase 1, eta=0, inside):   rho=1.241, gamma=1.4, p0=0
-#   p_liquid = 1,  p_gas = p_liquid + sigma/R = 11
+# Fluid: air / water (validated Sch20 Tammann-water + ideal-gas-air pair).
+#   water (phase 0, eta=1, outside):  rho=1000, gamma=2.35, p0=1000000000
+#   air   (phase 1, eta=0, inside):   rho=1, gamma=1.4, p0=0
+#   p_liquid = 101325 Pa (1 atm),  p_gas = p_liquid + sigma/R = 102055 Pa
+#   dp/p_liquid = 0.007204539847  (small -> well-conditioned pressure field)
 #
-# Mesh: 64x64 base + 1 AMR level (eta-only) over a 4 box.
-#   dx_finest = 0.03125 = R/32;  R resolved by 32 finest cells.
-#   epsilon   = 2*dx_finest = 0.0625 = 0.0625 R  (interface band).
+# Mesh: 64x64 base + 1 AMR level (eta-only) over a 0.0004 m box.
+#   dx_finest = 3.125e-06 = R/32;  R resolved by 32 finest cells.
+#   epsilon   = 2*dx_finest = 6.25e-06 = 0.0625 R  (interface band).
 #
-# Timescale: capillary tau=sqrt(rho R^3/sigma) = 0.3148015248;
-#   stop_time = 15 tau = 4.722022872 (50 frames).
+# Time: acoustic transit R/c_l = 6.52295027e-08 s (c_l = 1533.048634 m/s);
+#   capillary tau = sqrt(rho R^3/sigma) = 0.0001170411472 s;
+#   stop_time = 500 * R/c_l = 3.261475135e-05 s (50 frames).
 #
 # This is a unit test -- keep it fast: low resolution, eta-only AMR, Neumann
-# walls (bubble is far from the boundary in the 4 box).
+# walls (bubble is far from the boundary in the 0.0004 m box).
 # =============================================================================
 
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowLaplace/output_R1.0e0_Sigma1.0e1
+plot_file = ./tests/FlowLaplace/output_R1.0e-4_Sigma7.3e-2
 
 ### MESHING ###
 amr.plot_int        = -1
-amr.plot_dt         = 0.09444045743
+amr.plot_dt         = 6.52295027e-07
 amr.max_grid_size   = 500000
 amr.blocking_factor = 2
 amr.regrid_int      = 10
@@ -46,44 +47,44 @@ amr.n_cell          = 64 64
 nghost = 4
 
 ### TIME STEPPING ###
-timestep                = 0.004722022872
+timestep                = 1e-12
 dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
-dynamictimestep.max     = 0.02361011436
-dynamictimestep.min     = 4.722022872e-08
-cfl                     = 0.4
+dynamictimestep.max     = 1.630737567e-07
+dynamictimestep.min     = 1e-14
+cfl                     = 0.3
 
 ### DIMENSIONS ###
-geometry.prob_lo     = -2 -2 0.0
-geometry.prob_hi     =  2  2 0.0
+geometry.prob_lo     = -0.0002 -0.0002 0.0
+geometry.prob_hi     =  0.0002  0.0002 0.0
 geometry.is_periodic = 0 0 0
-stop_time            = 4.722022872
+stop_time            = 3.261475135e-05
 
 ### ETA INITIAL CONDITIONS ###
-# eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
+# eta = 0 inside bubble (air, phase 1), eta = 1 outside (water, phase 0).
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.0625
-eta.ic.expression.constant.R0      = 1
+eta.ic.expression.constant.epsilon = 6.25e-06
+eta.ic.expression.constant.R0      = 0.0001
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
 
-### EQUATION OF STATE -- Garrick Tammann liquid + ideal gas ###
-eos0.gamma = 5.5
-eos0.p0    = 1.505
-eos0.cp    = 1004.5
-eos0.cv    = 717.5
+### EQUATION OF STATE -- Sch20 Tammann water + ideal-gas air ###
+eos0.gamma = 2.35
+eos0.p0    = 1000000000
+eos0.cp    = 4186
+eos0.cv    = 1781
 
 eos1.gamma = 1.4
 eos1.p0    = 0
-eos1.cp    = 1004.5
-eos1.cv    = 717.5
+eos1.cp    = 1000
+eos1.cv    = 714.286
 
 ### HYDRO INITIAL CONDITIONS ###
 density0.ic.type = expression
-density0.ic.expression.region0 = "0.991"
+density0.ic.expression.region0 = "1000"
 
 density1.ic.type = expression
-density1.ic.expression.region0 = "1.241"
+density1.ic.expression.region0 = "1"
 
 velocity0.ic.type = expression
 velocity0.ic.expression.region0 = "0.0"
@@ -93,12 +94,12 @@ velocity1.ic.type = expression
 velocity1.ic.expression.region0 = "0.0"
 velocity1.ic.expression.region1 = "0.0"
 
-# Laplace-balanced pressures: p_gas - p_liquid = sigma/R = 10
+# Laplace-balanced pressures: p_gas - p_liquid = sigma/R = 730 Pa
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "1"      # liquid (outside, eta=1)
+pressure0.ic.expression.region0 = "101325"      # water (outside, eta=1)
 
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "11"      # gas (inside, eta=0)
+pressure1.ic.expression.region0 = "102055"      # air (inside, eta=0)
 
 ### VISCOSITY (zero -- pure Laplace test, no damping) ###
 mu0   = 0.0
@@ -107,7 +108,7 @@ mu1   = 0.0
 mu1_b = 0.0
 
 ### SURFACE TENSION ###
-sigma = 10
+sigma = 0.073
 pref  = 0.0
 
 ### BOUNDARY CONDITIONS - Neumann walls (bubble far from boundary) ###

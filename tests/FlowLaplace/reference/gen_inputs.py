@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Generator for the FlowLaplace surface-tension test matrix.
+Generator for the FlowLaplace surface-tension test matrix (realistic air/water).
 
 Emits one Hydro2 input file per (R, sigma) combination into ../  (the
 FlowLaplace test directory), named  R<R>_Sigma<sigma>.
@@ -9,19 +9,23 @@ FlowLaplace test directory), named  R<R>_Sigma<sigma>.
 Laplace test (2D cylindrical bubble, single curvature 1/R):
     p_gas - p_liquid = sigma / R          (Young-Laplace, 2D)
 A correctly-implemented Brackbill CSF holds the bubble motionless at R = R0.
-Drift / oscillation / collapse flags a surface-tension scaling bug, or shows
-that a given (R, sigma) is too stiff for the chosen resolution (the point of
-the sensitivity sweep).
+Drift / oscillation / collapse flags a surface-tension scaling bug.
 
-Fluid = Garrick (2017) gas-liquid pair (Tammann liquid + ideal gas) -- chosen
-because it carries a Tammann stiffness yet runs cheaply.  All quantities are in
-Garrick's consistent (non-dimensional) unit system; R is treated as a length in
-those same units.
+Fluid = air / water (the validated Sch20 Tammann-water + ideal-gas-air pair).
+Background pressure is 1 atm, so the Laplace jump sigma/R (tens to thousands of
+Pa) is small relative to the ~101 kPa background -- a well-conditioned pressure
+field, unlike the earlier non-dimensional setup where sigma/R dwarfed the
+background and drove the solver into the sound-speed clamps.
 
 Mesh: 64x64 base + 1 AMR level (eta-only refinement) -> 128 finest cells across
 the 4R box, dx_finest = R/32, bubble radius resolved by 32 finest cells.
 Interface band epsilon = 2 * dx_finest = 0.0625 R  (~2 cells, matching the
 actual Sch20 RPE interface thickness).
+
+Time: water's sound speed (~1533 m/s) makes the capillary period >> the acoustic
+transit time, so simulating many capillary periods would be millions of steps.
+For an equilibrium check we instead run a fixed number of acoustic transits
+(N_ACOUSTIC * R/c_l), which keeps every case at ~40k steps regardless of R.
 
 Re-run from the repo root or anywhere:
     python tests/FlowLaplace/reference/gen_inputs.py
@@ -34,19 +38,24 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 TEST_DIR = os.path.normpath(os.path.join(_HERE, ".."))
 
 # ============================  TEST MATRIX  =================================
-R_VALUES     = [1.0, 0.001, 0.000001]      # metres (Garrick units)
-SIGMA_VALUES = [0.0, 1.0, 10.0]            # surface-tension coefficient
+R_VALUES     = [1.0e-3, 1.0e-4, 1.0e-5]    # bubble radii [m]: 1 mm, 100 um, 10 um
+SIGMA_VALUES = [0.0, 0.036, 0.073]         # surface tension [N/m]: none,
+#                                            surfactant-laden, clean air/water (~0.0728)
 
-# ============================  FLUID (Garrick)  ============================
-# Liquid = phase 0 (eta = 1, outside bubble); Gas = phase 1 (eta = 0, inside).
-RHO_LIQ = 0.991                            # liquid density
-RHO_GAS = 1.241                            # gas density
-P_LIQUID = 1.0                             # uniform far-field liquid pressure
-EOS0_GAMMA, EOS0_P0 = 5.5, 1.505           # Tammann liquid
-EOS1_GAMMA, EOS1_P0 = 1.4, 0.0            # ideal gas
-CP, CV = 1004.5, 717.5                      # shared cp / cv (Garrick)
+# ============================  FLUID (air / water)  =========================
+# Liquid = water = phase 0 (eta = 1, outside bubble);
+# Gas    = air   = phase 1 (eta = 0, inside bubble).
+# EOS values are the validated Sch20 air/water pair used by the RPE tests.
+RHO_LIQ = 1000.0                           # water density [kg/m^3]
+RHO_GAS = 1.0                              # air   density [kg/m^3]
+P_LIQUID = 101325.0                        # far-field liquid pressure [Pa] (1 atm)
+EOS0_GAMMA, EOS0_P0 = 2.35, 1.0e9          # water (Tammann / stiffened gas)
+EOS1_GAMMA, EOS1_P0 = 1.4, 0.0            # air (ideal gas)
+CP0, CV0 = 4186.0, 1781.0                  # water cp / cv [J/kg/K]
+CP1, CV1 = 1000.0, 714.286                 # air   cp / cv [J/kg/K]
 
-# liquid sound speed for the sigma = 0 (no capillary timescale) cases
+# Liquid (water) sound speed; sets the acoustic transit time R/c_l used for
+# stop_time.  c_l = sqrt(gamma (p + p0)/rho) ~ 1533 m/s.
 C_LIQ = (EOS0_GAMMA * (P_LIQUID + EOS0_P0) / RHO_LIQ) ** 0.5
 
 # ============================  MESH / NUMERICS  ============================
@@ -54,7 +63,7 @@ N_CELL_BASE = 64
 MAX_LEVEL   = 1                            # 64 base + 1 level -> 128 finest
 REF_RATIO   = 2
 EPS_CELLS   = 2                            # interface band thickness, finest cells (~Sch20 RPE)
-N_PERIODS   = 15                           # capillary/acoustic times to simulate
+N_ACOUSTIC  = 500                          # acoustic transits R/c_l to simulate (~40k steps/case)
 N_FRAMES    = 50
 
 
@@ -65,7 +74,7 @@ def fmt(v):
 
 def name_sci(v):
     """Decimal-mantissa scientific notation for file names, e.g.
-    1.0 -> '1.0e0', 0.001 -> '1.0e-3', 1e-06 -> '1.0e-6', 0.0 -> '0.0'.
+    1e-3 -> '1.0e-3', 0.073 -> '7.3e-2', 0.0 -> '0.0'.
     Round-trips through float() so the analysis scripts can parse it back."""
     if v == 0:
         return "0.0"
@@ -80,52 +89,54 @@ def name_sci(v):
 def make_input(R, sigma):
     half = 2.0 * R                                  # domain half-width = 2R
     dx_finest = (2.0 * half) / (N_CELL_BASE * REF_RATIO ** MAX_LEVEL)
-    epsilon = EPS_CELLS * dx_finest                 # = 0.375 R
+    epsilon = EPS_CELLS * dx_finest                 # = 0.0625 R (2 cells)
     dp = sigma / R                                  # Young-Laplace jump (2D)
     p_gas = P_LIQUID + dp
 
-    # characteristic timescale: capillary if sigma > 0, else acoustic
-    if sigma > 0.0:
-        tau = (RHO_LIQ * R ** 3 / sigma) ** 0.5
-    else:
-        tau = R / C_LIQ
-    stop_time = N_PERIODS * tau
+    # Acoustic-transit-based stop time (see module docstring): stiff water makes
+    # the capillary period >> R/c_l, so we run a fixed number of acoustic
+    # transits to keep the step count ~constant.  Capillary time is reported.
+    tau_ac  = R / C_LIQ
+    tau_cap = (RHO_LIQ * R ** 3 / sigma) ** 0.5 if sigma > 0.0 else float("inf")
+    stop_time = N_ACOUSTIC * tau_ac
     plot_dt   = stop_time / N_FRAMES
-    dt_init   = stop_time / 1000.0
+    dt_init   = 1.0e-12                              # tiny fixed start; CFL ramps up
     dt_max    = stop_time / 200.0
-    dt_min    = stop_time / 1.0e8
+    dt_min    = 1.0e-14                              # floor, kept below dt_init
 
     apply_st = 1 if sigma > 0.0 else 0
     name = f"R{name_sci(R)}_Sigma{name_sci(sigma)}"
+    tau_cap_str = "inf (sigma=0)" if sigma == 0.0 else fmt(tau_cap)
 
     return name, f"""#@ [{name.lower()}]
 #@ exe=hydro2
 #@ dim=2
 
 # =============================================================================
-# Laplace pressure test  --  R = {fmt(R)},  sigma = {fmt(sigma)}
+# Laplace pressure test (air/water)  --  R = {fmt(R)} m,  sigma = {fmt(sigma)} N/m
 # =============================================================================
 # 2D cylindrical bubble at rest, gas pressure Laplace-balanced against the
 # liquid:
-#     p_gas - p_liquid = sigma / R = {fmt(dp)}     (Young-Laplace, single curvature)
-# A correct Brackbill CSF holds the bubble motionless at R0 = {fmt(R)}.  Drift,
-# oscillation, or collapse indicates either a surface-tension scaling bug or
-# that this (R, sigma) is too stiff for the resolution (the sweep's purpose).
+#     p_gas - p_liquid = sigma / R = {fmt(dp)} Pa     (Young-Laplace, single curvature)
+# A correct Brackbill CSF holds the bubble motionless at R0 = {fmt(R)} m.  Drift,
+# oscillation, or collapse indicates a surface-tension scaling bug.
 #
-# Fluid: Garrick (2017) Tammann liquid + ideal gas (cheap but stiffened).
-#   liquid (phase 0, eta=1, outside):  rho={fmt(RHO_LIQ)}, gamma={fmt(EOS0_GAMMA)}, p0={fmt(EOS0_P0)}
-#   gas    (phase 1, eta=0, inside):   rho={fmt(RHO_GAS)}, gamma={fmt(EOS1_GAMMA)}, p0={fmt(EOS1_P0)}
-#   p_liquid = {fmt(P_LIQUID)},  p_gas = p_liquid + sigma/R = {fmt(p_gas)}
+# Fluid: air / water (validated Sch20 Tammann-water + ideal-gas-air pair).
+#   water (phase 0, eta=1, outside):  rho={fmt(RHO_LIQ)}, gamma={fmt(EOS0_GAMMA)}, p0={fmt(EOS0_P0)}
+#   air   (phase 1, eta=0, inside):   rho={fmt(RHO_GAS)}, gamma={fmt(EOS1_GAMMA)}, p0={fmt(EOS1_P0)}
+#   p_liquid = {fmt(P_LIQUID)} Pa (1 atm),  p_gas = p_liquid + sigma/R = {fmt(p_gas)} Pa
+#   dp/p_liquid = {fmt(dp / P_LIQUID)}  (small -> well-conditioned pressure field)
 #
-# Mesh: {N_CELL_BASE}x{N_CELL_BASE} base + {MAX_LEVEL} AMR level (eta-only) over a {fmt(4*R)} box.
+# Mesh: {N_CELL_BASE}x{N_CELL_BASE} base + {MAX_LEVEL} AMR level (eta-only) over a {fmt(4*R)} m box.
 #   dx_finest = {fmt(dx_finest)} = R/{N_CELL_BASE*REF_RATIO**MAX_LEVEL//4};  R resolved by {N_CELL_BASE*REF_RATIO**MAX_LEVEL//4} finest cells.
 #   epsilon   = {EPS_CELLS}*dx_finest = {fmt(epsilon)} = {fmt(epsilon/R)} R  (interface band).
 #
-# Timescale: {'capillary tau=sqrt(rho R^3/sigma)' if sigma>0 else 'acoustic tau=R/c_l'} = {fmt(tau)};
-#   stop_time = {N_PERIODS} tau = {fmt(stop_time)} ({N_FRAMES} frames).
+# Time: acoustic transit R/c_l = {fmt(tau_ac)} s (c_l = {fmt(C_LIQ)} m/s);
+#   capillary tau = sqrt(rho R^3/sigma) = {tau_cap_str} s;
+#   stop_time = {N_ACOUSTIC} * R/c_l = {fmt(stop_time)} s ({N_FRAMES} frames).
 #
 # This is a unit test -- keep it fast: low resolution, eta-only AMR, Neumann
-# walls (bubble is far from the boundary in the {fmt(4*R)} box).
+# walls (bubble is far from the boundary in the {fmt(4*R)} m box).
 # =============================================================================
 
 alamo.program = hydro2
@@ -151,7 +162,7 @@ dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
 dynamictimestep.max     = {fmt(dt_max)}
 dynamictimestep.min     = {fmt(dt_min)}
-cfl                     = 0.4
+cfl                     = 0.3
 
 ### DIMENSIONS ###
 geometry.prob_lo     = {fmt(-half)} {fmt(-half)} 0.0
@@ -160,23 +171,23 @@ geometry.is_periodic = 0 0 0
 stop_time            = {fmt(stop_time)}
 
 ### ETA INITIAL CONDITIONS ###
-# eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
+# eta = 0 inside bubble (air, phase 1), eta = 1 outside (water, phase 0).
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = {fmt(epsilon)}
 eta.ic.expression.constant.R0      = {fmt(R)}
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
 
-### EQUATION OF STATE -- Garrick Tammann liquid + ideal gas ###
+### EQUATION OF STATE -- Sch20 Tammann water + ideal-gas air ###
 eos0.gamma = {fmt(EOS0_GAMMA)}
 eos0.p0    = {fmt(EOS0_P0)}
-eos0.cp    = {fmt(CP)}
-eos0.cv    = {fmt(CV)}
+eos0.cp    = {fmt(CP0)}
+eos0.cv    = {fmt(CV0)}
 
 eos1.gamma = {fmt(EOS1_GAMMA)}
 eos1.p0    = {fmt(EOS1_P0)}
-eos1.cp    = {fmt(CP)}
-eos1.cv    = {fmt(CV)}
+eos1.cp    = {fmt(CP1)}
+eos1.cv    = {fmt(CV1)}
 
 ### HYDRO INITIAL CONDITIONS ###
 density0.ic.type = expression
@@ -193,12 +204,12 @@ velocity1.ic.type = expression
 velocity1.ic.expression.region0 = "0.0"
 velocity1.ic.expression.region1 = "0.0"
 
-# Laplace-balanced pressures: p_gas - p_liquid = sigma/R = {fmt(dp)}
+# Laplace-balanced pressures: p_gas - p_liquid = sigma/R = {fmt(dp)} Pa
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "{fmt(P_LIQUID)}"      # liquid (outside, eta=1)
+pressure0.ic.expression.region0 = "{fmt(P_LIQUID)}"      # water (outside, eta=1)
 
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "{fmt(p_gas)}"      # gas (inside, eta=0)
+pressure1.ic.expression.region0 = "{fmt(p_gas)}"      # air (inside, eta=0)
 
 ### VISCOSITY (zero -- pure Laplace test, no damping) ###
 mu0   = 0.0

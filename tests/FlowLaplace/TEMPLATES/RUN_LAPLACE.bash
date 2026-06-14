@@ -23,24 +23,24 @@ set -e
 # INPUTS  (edit / comment to subset the matrix)
 # -----------------------------
 R_VALUES=(
-  1.0
-  0.001
-  0.000001
+  1.0e-3
+  1.0e-4
+  1.0e-5
 )
 SIGMA_VALUES=(
   0.0
-  1.0
-  10.0
+  0.036
+  0.073
 )
 
 NP=${NP:-6}
 EXEC=${EXEC:-./hydro2-2d-g++}
 
-# Fluid constants -- MUST match gen_inputs.py / input_Laplace.
-RHO_LIQ=0.991
-P_LIQUID=1.0
-EOS0_GAMMA=5.5
-EOS0_P0=1.505
+# Fluid constants (air/water) -- MUST match gen_inputs.py / input_Laplace.
+RHO_LIQ=1000.0
+P_LIQUID=101325.0
+EOS0_GAMMA=2.35
+EOS0_P0=1.0e9
 
 # -----------------------------
 # PATHS
@@ -70,7 +70,7 @@ for R in "${R_VALUES[@]}"; do
 
     # Compute every derived quantity for this (R, sigma) in one awk pass.
     # Mirrors gen_inputs.py:  domain half-width 2R, 64+1 AMR levels -> dx=R/32,
-    # epsilon = 2*dx, capillary (or acoustic) tau, stop_time = 15 tau, etc.
+    # epsilon = 2*dx, acoustic transit tau=R/c_l, stop_time = 500 tau, etc.
     read RNAME SNAME EPSILON HALF NEG PGAS STOP PLOTDT DTI DTMAX DTMIN APPLYST DP TAU DXFINE BOX < <(
       awk -v R="$R" -v S="$SIGMA" \
           -v rho="$RHO_LIQ" -v pliq="$P_LIQUID" -v g0="$EOS0_GAMMA" -v p0="$EOS0_P0" '
@@ -88,9 +88,9 @@ for R in "${R_VALUES[@]}"; do
           half   = 2*R; neg = -half; box = 4*R
           dxfine = 4*R/128; eps = 2*dxfine
           dp     = S/R; pgas = pliq + dp
-          if (S > 0) tau = sqrt(rho*R*R*R/S); else tau = R/cliq
-          stop   = 15*tau; plotdt = stop/50
-          dti    = stop/1000; dtmax = stop/200; dtmin = stop/1e8
+          tau    = R/cliq                 # acoustic transit (see gen_inputs.py)
+          stop   = 500*tau; plotdt = stop/50
+          dti    = 1e-12; dtmax = stop/200; dtmin = 1e-14
           applyst = (S > 0) ? 1 : 0
           printf "%s %s %s %s %s %s %s %s %s %s %s %d %s %s %s %s\n", \
             namesci(R), namesci(S), eps, half, neg, pgas, stop, plotdt, \
