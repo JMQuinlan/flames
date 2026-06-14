@@ -50,7 +50,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_air_dodecane_Ma6_5_test
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_air_dodecane_Ma6_5_AMR_6
 # plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_air_dodecane_Ma6_5_no_vap
 
 ### MESHING ###
@@ -61,9 +61,10 @@ amr.blocking_factor = 16
 amr.regrid_int = 1
 amr.grid_eff = 0.8
 amr.n_error_buf = 4
-amr.max_level = 3
+amr.max_level = 6
 # amr.n_cell = 1024 256
-amr.n_cell = 2048 512
+# amr.n_cell = 2048 512
+amr.n_cell = 512 128
 
 ### TIME STEPPING ###
 ## Static:
@@ -79,12 +80,14 @@ cfl = 0.2
 ### DIMENSIONS ###
 #geometry.prob_lo = 0.000 0.000 0.0
 #geometry.prob_hi = 0.160 0.080 0.0
-geometry.prob_lo = -0.020 -0.0175 0.0
-geometry.prob_hi =  0.120  0.0175 0.0
+# geometry.prob_lo = -0.020 -0.0175 0.0
+# geometry.prob_hi =  0.120  0.0175 0.0
+geometry.prob_lo = -0.020 -0.035 0.0
+geometry.prob_hi =  0.260  0.035 0.0
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
-stop_time = 2.0e-4
+stop_time = 4.0e-4
 # stop_time = 1.0e-5
 # stop_time = 5.0e-7
 
@@ -193,7 +196,10 @@ species_transport = 1          # gas = carrier(eos0=air) + transported dodecane 
 Yv_init           = 0.0        # gas starts as pure air -> vapor grows by evaporation
 cp_vap            = 1994.85    # dodecane-vapor cp [J/kg/K]  (R_v = cp_vap - cv_vap = 44.85)
 cv_vap            = 1950.0     # dodecane-vapor cv [J/kg/K]  (old eos0 dodecane-vapor props)
-Dv = "1.0e-5"                  # vapor diffusivity [m^2/s] (physical-ish; could be higher, but really should add T and P dependence)
+# Dv = "1.0e-5"                  # vapor diffusivity [m^2/s] (physical-ish; could be higher, but really should add T and P dependence)
+rhoD_ref  = 1.177e-5   # kg/m/s; this replaces tuning Dv
+  rhoD_Tref = 300.0
+  rhoD_exp  = 0.5  # 0.5 = C-E scaling
 L_film = 3.19e-8                 # Spalding film thickness [m]: m'' = (rho_g*Dv/L_film)*B'. Dv/L_film = 50 m/s mass-transfer velocity (quasi-steady stagnant-film). Restores the rate magnitude (the bare |grad eta| form was missing 1/L -> ran ~1/epsilon too small).
 
 ### LATENT HEAT (on) / CONDUCTION (off: never validated 2-phase) ###
