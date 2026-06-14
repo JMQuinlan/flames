@@ -409,6 +409,37 @@ protected:
     // wall flux is delivered at full strength.  Recommended value ~2.
     Set::Scalar solid_reflect = 0.0;
 
+    // YANG (2023) DIFFUSE-DOMAIN no-penetration via MOMENTUM-ONLY Brinkman
+    // penalization.  0 = off.  >0 adds -coeff*(1-phi)*(M - M_solid) to the
+    // momentum RHS only (mass/energy left to evolve), so the arrested normal
+    // kinetic energy converts to internal energy (stagnation heating) and the
+    // wall pressure builds self-consistently from the EOS -> the flow reflects
+    // WITHOUT a ghost-fluid mirror.  This is the genuine diffuse-interface
+    // no-penetration of Yang et al. 2023 (term phi0/kappa (u_S - u); orig.
+    // Angot 1999 / Liu & Vasilyev 2007), the true-diffuse-interface alternative
+    // to `solid.reflect`.  Distinct from the full-state `lagrange` penalty,
+    // which also pins density+energy and therefore clamps the wall pressure.
+    Set::Scalar solid_brinkman = 0.0;
+
+    // Gate threshold for the momentum-only Brinkman penalty: the penalty is
+    // applied ONLY where phi < solid_brinkman_gate (default 1.0 = whole diffuse
+    // band, the original (1-phi)-weighted behaviour).  Set to 0.5 to CONFINE
+    // the wall to the geometric solid (phi<0.5) and leave the forward part of
+    // the diffuse band fluid -- this prevents a strong penalty from turning the
+    // band that protrudes upstream of the phi=0.5 tip into effective wall
+    // (which blunts the tip and pushes the shock into an upstream standoff).
+    Set::Scalar solid_brinkman_gate = 1.0;
+
+    // CLEAN YANG (2023) diffuse-domain mode.  When 1, run the embedded solid as
+    // a PURE porous-penalty wall exactly as Yang et al. 2023: FULL Euler flux
+    // everywhere (NO phi_c flux masking) and NO cutoff freeze, with the solid
+    // created solely by the (1-phi)/kappa momentum Brinkman penalty
+    // (solid.brinkman).  Strips the cutoff-method masking/freeze and the GFM
+    // reflect / viscous-Hessian wall closures so the wall matches the paper.
+    // Parse forces solid_cutoff tiny so the freeze + all cutoff-gated solid
+    // skips become inert; requires solid.brinkman > 0 to do anything.
+    int solid_clean_yang = 0;
+
     // ------------------------------------------------------------------
     // Artificial heat exchange (AHE) - Schmidmayer 2020 eq. 13 r-source
     //     E0_rhs += -mu p_I (p_0 - p_1)

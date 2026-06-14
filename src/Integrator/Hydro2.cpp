@@ -120,6 +120,17 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("solid.mu_b", value.solid_mu_b, 0.0);        // solid bulk viscosity
         pp_query_default("lagrange_solid", value.lagrange_solid, 0.0); // optional phi-interface normal no-penetration penalty (default off)
         pp_query_default("solid.reflect", value.solid_reflect, 0.0); // Riemann-reflecting wall coeff (0=off, ~2 recommended)
+        pp_query_default("solid.brinkman", value.solid_brinkman, 0.0); // Yang(2023) momentum-only Brinkman no-penetration (0=off)
+        pp_query_default("solid.brinkman_gate", value.solid_brinkman_gate, 1.0); // apply penalty only where phi<gate (1.0=whole band, 0.5=solid only)
+        pp_query_default("solid.clean_yang", value.solid_clean_yang, 0); // pure full-flux Yang porous-penalty wall (no flux masking, no freeze)
+        if (value.solid_clean_yang)
+        {
+            // Disable the cutoff freeze AND every cutoff-gated solid skip
+            // (RelaxAndReinit/sharpening/CFL) so the (1-phi)/kappa penalty is the
+            // SOLE wall, exactly as Yang.  Flux un-masking is handled in the RHS.
+            value.solid_cutoff = 1.0e-12;
+            Util::Message(INFO, "solid.clean_yang=1: full-flux Yang porous wall (freeze+masking OFF); needs solid.brinkman>0");
+        }
 
         // Artificial heat exchange (AHE) on per-phase internal energy rows.
         // See bin/AHE.md for derivation: Schmidmayer 2020 eq. 13 r-source
@@ -1792,8 +1803,13 @@ Hydro2::RHS(int lev,
             // The 6-eq model REPLACES the 5-eq Kapila K-source with the
             // stiff relaxation source (handled in the post-stage hook).
             // ------------------------------------------------------------
+            // fmask masks the convective flux divergence by cell phi (the cutoff
+            // method).  In clean-Yang mode the flux is FULL strength everywhere
+            // (fmask=1) and the (1-phi)/kappa penalty alone makes the solid.
+            const Set::Scalar fmask = (apply_embedded_solid && solid_clean_yang) ? 1.0 : phi_c;
+
             const Set::Scalar eta_advect = -(div_uA_x + div_uA_y) + eta(i, j, k) * div_u;
-            eta_rhs(i, j, k) = phi_c * eta_advect + eta_dot_Vap;   // phi_c masks convective transport only (=1 if no solid)
+            eta_rhs(i, j, k) = fmask * eta_advect + eta_dot_Vap;   // fmask masks convective transport only (=1 if no solid / clean-yang)
 
             // ------------------------------------------------------------
             // Phase-mass rows (pure conservation, no source from h):
@@ -1804,8 +1820,8 @@ Hydro2::RHS(int lev,
             const Set::Scalar rho_eta1_flux = (flux_xlo.mass1 - flux_xhi.mass1) / DX[0]
                                             + (flux_ylo.mass1 - flux_yhi.mass1) / DX[1];
 
-            rho_eta0_rhs(i, j, k) = phi_c * rho_eta0_flux + Source(i, j, k, 0) * (eta(i, j, k))         + m_dot_Vap;
-            rho_eta1_rhs(i, j, k) = phi_c * rho_eta1_flux + Source(i, j, k, 0) * (1.0 - eta(i, j, k))   - m_dot_Vap;
+            rho_eta0_rhs(i, j, k) = fmask * rho_eta0_flux + Source(i, j, k, 0) * (eta(i, j, k))         + m_dot_Vap;
+            rho_eta1_rhs(i, j, k) = fmask * rho_eta1_flux + Source(i, j, k, 0) * (1.0 - eta(i, j, k))   - m_dot_Vap;
 
             // Diagnostic mass flux (kept for plotfile compatibility):
             rho_flux(i, j, k) = rho_eta0_flux + rho_eta1_flux;
@@ -1823,8 +1839,12 @@ Hydro2::RHS(int lev,
 
             // STAGE 1.5: with the Riemann-reflecting wall, the momentum face flux
             // already carries the wall traction, so do NOT attenuate it by phi_c
-            // (that would halve the wall pressure at the interface).
-            const Set::Scalar mfac = (apply_embedded_solid && solid_reflect > 0.0) ? 1.0 : phi_c;
+            // (that would halve the wall pressure at the interface).  The Yang
+            // momentum-only Brinkman wall (`solid.brinkman`) likewise needs the
+            // pressure-gradient part of the momentum flux delivered un-masked into
+            // the diffuse band so the stagnation pressure can push the flow back.
+            const Set::Scalar mfac = (apply_embedded_solid
+                                      && (solid_reflect > 0.0 || solid_brinkman > 0.0 || solid_clean_yang)) ? 1.0 : phi_c;
             M_rhs(i, j, k, 0) = mfac * M_flux(i, j, k, 0) + Source(i, j, k, 1);
             M_rhs(i, j, k, 1) = mfac * M_flux(i, j, k, 1) + Source(i, j, k, 2);
 
@@ -1834,7 +1854,7 @@ Hydro2::RHS(int lev,
             // ------------------------------------------------------------
             E_flux(i, j, k) = (flux_xlo.energy_total - flux_xhi.energy_total) / DX[0]
                             + (flux_ylo.energy_total - flux_yhi.energy_total) / DX[1];
-            E_rhs(i, j, k)  = phi_c * E_flux(i, j, k) + Source(i, j, k, 3);
+            E_rhs(i, j, k)  = fmask * E_flux(i, j, k) + Source(i, j, k, 3);
 
             // ------------------------------------------------------------
             // Per-phase internal energies (Sch20 eq. 13 last two rows /
@@ -1849,8 +1869,8 @@ Hydro2::RHS(int lev,
             const Set::Scalar E1_flux_div = (flux_xlo.energy1 - flux_xhi.energy1) / DX[0]
                                           + (flux_ylo.energy1 - flux_yhi.energy1) / DX[1];
 
-            E0_rhs(i, j, k) = phi_c * (E0_flux_div - a1_C * p0_C * div_u);
-            E1_rhs(i, j, k) = phi_c * (E1_flux_div - a2_C * p1_C * div_u);
+            E0_rhs(i, j, k) = fmask * (E0_flux_div - a1_C * p0_C * div_u);
+            E1_rhs(i, j, k) = fmask * (E1_flux_div - a2_C * p1_C * div_u);
 
             // ------------------------------------------------------------
             // Artificial heat exchange (AHE) -- Schmidmayer 2020 eq. 13
@@ -2000,6 +2020,40 @@ Hydro2::RHS(int lev,
                     E_rhs(i, j, k)        += -lam * (E(i, j, k)         - E_s);
                     E0_rhs(i, j, k)       += -lam * (E0_arr(i, j, k)    - s_E0(i, j, k));
                     E1_rhs(i, j, k)       += -lam * (E1_arr(i, j, k)    - s_E1(i, j, k));
+                }
+            }
+
+            // ============================================================
+            // EMBEDDED SOLID BOUNDARY -- Yang(2023) diffuse-domain
+            // no-penetration via MOMENTUM-ONLY Brinkman penalization.
+            // ------------------------------------------------------------
+            // Genuine diffuse-interface no-penetration (Yang et al. 2023,
+            // term phi0/kappa (u_S - u); orig. Angot 1999 / Liu & Vasilyev
+            // 2007): drive the MOMENTUM toward the quiescent solid value in
+            // the solid fraction chi = 1 - phi, but DO NOT penalize mass or
+            // total energy.  Because E is conserved while the normal
+            // kinetic energy is removed, the arrested KE converts to
+            // INTERNAL energy (stagnation heating) and the wall pressure
+            // builds self-consistently from the EOS -> the flow reflects.
+            // Contrast the full-state `lagrange` penalty above (which also
+            // pins rho and E to the solid target and so clamps the wall
+            // pressure to ambient -> under-turning) and the ghost-fluid
+            // `solid.reflect` mirror (VoF-flavoured).  Static solid
+            // (M_solid = 0) -> the penalty does no work on the solid.
+            // ============================================================
+            if (apply_embedded_solid && solid_brinkman > 0.0)
+            {
+                // Gate: only penalize where phi < solid_brinkman_gate so a strong
+                // wall stays confined to the geometric solid and does not blunt
+                // the forward diffuse band (which causes the shock standoff).
+                const Set::Scalar chi = (phi_c < solid_brinkman_gate) ? (1.0 - phi_c) : 0.0;
+                if (chi > 0.0)
+                {
+                    const Set::Scalar lam = solid_brinkman * chi;
+                    M_rhs(i, j, k, 0) += -lam * (M(i, j, k, 0) - s_M(i, j, k, 0));
+                    M_rhs(i, j, k, 1) += -lam * (M(i, j, k, 1) - s_M(i, j, k, 1));
+                    // momentum-only: no mass/energy penalty (pressure builds,
+                    // arrested KE -> internal energy; energy-conserving).
                 }
             }
 
