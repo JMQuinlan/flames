@@ -413,6 +413,15 @@ protected:
     Set::Scalar R = 8314.; // [J]/[kmol]-[K] - Probably more common to use
     Set::Scalar Dv = 0.0; // Vapor Diffusivity
     Set::Scalar L_film = 1.0; // Spalding film/boundary-layer thickness [m] in m'' = (rho_g*Dv/L_film)*B'. PHYSICAL diffusion length, distinct from the band localizer |grad eta|. Fixed L_film = quasi-steady (constant rate); transient sqrt(t) Stefan needs L -> delta(t)~sqrt(Dv*t). Default 1.0 reproduces the legacy under-dimensioned magnitude.
+    // Chapman-Enskog variable gas diffusivity. When rhoD_ref > 0 the vapor
+    // transport coefficient is the gas product rho*D(T) = rhoD_ref*(T/rhoD_Tref)^rhoD_exp
+    // [kg/m/s] (CE binary: D~T^1.5/p, rho~p/T => rho*D~T^0.5, pressure-independent),
+    // shared by BOTH the bulk Fickian vapor diffusion (face coeff eta*rho*D) and the
+    // Spalding film source (rho*D at the interface T). rhoD_ref <= 0 keeps the legacy
+    // constant-Dv path (bulk: alpharho0*Dv; source: rho_g*Dv).
+    Set::Scalar rhoD_ref = 0.0;    // reference gas rho*D [kg/m/s] (0 = legacy Dv path)
+    Set::Scalar rhoD_Tref = 300.0; // reference temperature [K] for rho*D(T)
+    Set::Scalar rhoD_exp = 0.5;    // T exponent of rho*D; Chapman-Enskog = 0.5
     Set::Scalar k0_thermal = 0.0; // gas-phase thermal conductivity [W/m/K] (Fourier conduction; 0 = off)
     Set::Scalar k1_thermal = 0.0; // liquid-phase thermal conductivity [W/m/K] (Fourier conduction; 0 = off)
     Set::Scalar Y_infinity = 0.0; // Far Feild Vapor Mass Fraction

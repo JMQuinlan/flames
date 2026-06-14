@@ -132,6 +132,22 @@ static Solver::EOS::Tammann GasEOS_eff(Set::Scalar Yv,
     return Solver::EOS::Tammann(cp_g / cv_g, 0.0, cv_g, cp_g);
 }
 
+// Chapman-Enskog gas transport product rho*D(T) [kg/m/s]. CE binary diffusion
+// gives D ~ T^1.5/p while rho ~ p/T, so the PRODUCT rho*D ~ T^0.5 and is
+// pressure-independent (robust across shocks). Parameterized as
+//   rho*D(T) = rhoD_ref * (T/T_ref)^q,   q = 0.5 (CE) by default.
+// The single coefficient is shared by the bulk vapor diffusion (face value
+// eta*rho*D, eta = gas volume fraction) and the Spalding film source (rho*D at
+// the interface T), so the resolved transport and the sub-grid closure stay
+// thermodynamically consistent. T is clamped non-negative for pow() safety.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+static Set::Scalar RhoD_CE(Set::Scalar T, Set::Scalar rhoD_ref,
+                           Set::Scalar T_ref, Set::Scalar q, Set::Scalar small)
+{
+    const Set::Scalar Tr = T / (T_ref + small);
+    return rhoD_ref * std::pow(Tr > 0.0 ? Tr : 0.0, q);
+}
+
 // ----------------------------------------------------------------------------
 // Per-cell scaling factor for the Hu-Adams-Shu positivity-preserving flux
 // limiter. Returns the largest theta in [0,1] such that the trial conserved
@@ -318,6 +334,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // (which needs L -> delta(t) ~ sqrt(Dv*t)). Default 1.0 reproduces the legacy
         // (under-dimensioned) magnitude; set to a real film thickness for a correct rate.
         pp_query_default("L_film", value.L_film, 1.0);   // Spalding film/boundary-layer thickness [m]
+        // Chapman-Enskog variable gas diffusivity. rhoD_ref > 0 enables the gas
+        // transport product rho*D(T) = rhoD_ref*(T/rhoD_Tref)^rhoD_exp [kg/m/s] for
+        // BOTH the bulk vapor diffusion and the Spalding source (p-independent, ~T^0.5);
+        // rhoD_ref <= 0 keeps the legacy constant-Dv behavior.
+        pp_query_default("rhoD_ref", value.rhoD_ref, 0.0);     // gas rho*D [kg/m/s]; >0 enables CE variable diffusivity
+        pp_query_default("rhoD_Tref", value.rhoD_Tref, 300.0); // reference T [K] for rho*D(T)
+        pp_query_default("rhoD_exp", value.rhoD_exp, 0.5);     // T exponent of rho*D (Chapman-Enskog: D~T^1.5/p, rho~p/T => rho*D~T^0.5)
         pp_query_default("k0_thermal", value.k0_thermal, 0.0); // gas thermal conductivity [W/m/K] (Fourier conduction; 0 = off)
         pp_query_default("k1_thermal", value.k1_thermal, 0.0); // liquid thermal conductivity [W/m/K] (Fourier conduction; 0 = off)
         // Verification: prescribed constant-rate phase change (bypasses Spalding). Off by default.
@@ -1962,7 +1985,16 @@ Hydro2::RHS(int lev,
                 // [kg/m^3/s]. Fixed L_film = QUASI-STEADY (constant rate); transient
                 // sqrt(t) Stefan needs L -> delta(t) ~ sqrt(Dv*t). (We keep the simplified
                 // (B_M/(1+B_M)) factor instead of ln(1+B_M) for now -- see F-3.)
-                m_dot_Vap = rho_g * Dv * (B_M / (1.0 + B_M + small)) * grad_eta_mag / L_film;
+                // CE path (rhoD_ref>0): the areal flux uses the gas transport
+                // product rho*D(T) evaluated at the interface T (p-independent,
+                // ~T^0.5) instead of the legacy rho_g*Dv, which inherited the
+                // spurious density/pressure scaling of the partial density rho_g.
+                // |grad eta| stays the band localizer; L_film the (quasi-steady)
+                // film length. Legacy (rhoD_ref<=0): rho_g*Dv with rho_g=alpharho0.
+                const Set::Scalar rhoD_film = (rhoD_ref > 0.0)
+                    ? RhoD_CE(T(i, j, k), rhoD_ref, rhoD_Tref, rhoD_exp, small)
+                    : rho_g * Dv;
+                m_dot_Vap = rhoD_film * (B_M / (1.0 + B_M + small)) * grad_eta_mag / L_film;
 
                 // Phase-change source for eta. IMPORTANT: this branch does NOT
                 // carry independent intrinsic phase densities -- rho is the single
@@ -2597,7 +2629,7 @@ Hydro2::RHS(int lev,
                 // and INT(rho_vap) is unchanged for no-flux walls. Single-grid / FE path
                 // only (same rho_vap ghost-fill limitation as the advection above).
                 Set::Scalar rho_vap_diff = 0.0;
-                if (Dv > 0.0)
+                if (Dv > 0.0 || rhoD_ref > 0.0)
                 {
                     // Clamp Y_v to [0,1] (NaN-safe) BEFORE differencing. The raw
                     // ratio rho_vap/alpharho0 blows up where the gas partial density
@@ -2606,19 +2638,35 @@ Hydro2::RHS(int lev,
                     // then inf-inf -> NaN -- and dt_species = cfl*dx^2/Dv never sees it
                     // (that bound assumes a clean Dv-Laplacian). Clamping caps the
                     // operator at the nominal Dv scale dt_species already respects; the
-                    // re0 face-weighting below still vanishes where there is no carrier
-                    // gas, so deep-liquid contributions stay ~0.
+                    // face coefficient below still vanishes where there is no carrier
+                    // gas (eta or alpharho0 -> 0), so deep-liquid contributions stay ~0.
                     const Set::Scalar Yv_c  = ClampYv(rho_vap(i, j, k)  / std::max(alpharho0(i, j, k), small));
                     const Set::Scalar Yv_im = ClampYv(rho_vap(im, j, k) / std::max(alpharho0(im, j, k), small));
                     const Set::Scalar Yv_ip = ClampYv(rho_vap(ip, j, k) / std::max(alpharho0(ip, j, k), small));
                     const Set::Scalar Yv_jm = ClampYv(rho_vap(i, jm, k) / std::max(alpharho0(i, jm, k), small));
                     const Set::Scalar Yv_jp = ClampYv(rho_vap(i, jp, k) / std::max(alpharho0(i, jp, k), small));
-                    const Set::Scalar re0_xlo = 0.5 * (alpharho0(im, j, k) + alpharho0(i, j, k));
-                    const Set::Scalar re0_xhi = 0.5 * (alpharho0(i, j, k) + alpharho0(ip, j, k));
-                    const Set::Scalar re0_ylo = 0.5 * (alpharho0(i, jm, k) + alpharho0(i, j, k));
-                    const Set::Scalar re0_yhi = 0.5 * (alpharho0(i, j, k) + alpharho0(i, jp, k));
-                    rho_vap_diff = Dv * ( (re0_xhi * (Yv_ip - Yv_c) - re0_xlo * (Yv_c - Yv_im)) / (DX[0] * DX[0])
-                                        + (re0_yhi * (Yv_jp - Yv_c) - re0_ylo * (Yv_c - Yv_jm)) / (DX[1] * DX[1]) );
+                    // Face transport coefficient for the vapor-mass flux per total area.
+                    // Legacy: alpharho0_face * Dv  (= alpha0*rho_0*Dv, rho_0 varying with
+                    // the wrong sign). CE: alpha0_face * rho*D(T_face), with alpha0 = eta
+                    // the gas volume-fraction localizer and rho*D the p-independent CE
+                    // product evaluated at the arithmetic-mean face temperature.
+                    Set::Scalar c_xlo, c_xhi, c_ylo, c_yhi;
+                    if (rhoD_ref > 0.0)
+                    {
+                        c_xlo = 0.5 * (eta(im, j, k) + eta(i, j, k)) * RhoD_CE(0.5 * (T(im, j, k) + T(i, j, k)), rhoD_ref, rhoD_Tref, rhoD_exp, small);
+                        c_xhi = 0.5 * (eta(i, j, k) + eta(ip, j, k)) * RhoD_CE(0.5 * (T(i, j, k) + T(ip, j, k)), rhoD_ref, rhoD_Tref, rhoD_exp, small);
+                        c_ylo = 0.5 * (eta(i, jm, k) + eta(i, j, k)) * RhoD_CE(0.5 * (T(i, jm, k) + T(i, j, k)), rhoD_ref, rhoD_Tref, rhoD_exp, small);
+                        c_yhi = 0.5 * (eta(i, j, k) + eta(i, jp, k)) * RhoD_CE(0.5 * (T(i, j, k) + T(i, jp, k)), rhoD_ref, rhoD_Tref, rhoD_exp, small);
+                    }
+                    else
+                    {
+                        c_xlo = 0.5 * (alpharho0(im, j, k) + alpharho0(i, j, k)) * Dv;
+                        c_xhi = 0.5 * (alpharho0(i, j, k) + alpharho0(ip, j, k)) * Dv;
+                        c_ylo = 0.5 * (alpharho0(i, jm, k) + alpharho0(i, j, k)) * Dv;
+                        c_yhi = 0.5 * (alpharho0(i, j, k) + alpharho0(i, jp, k)) * Dv;
+                    }
+                    rho_vap_diff = ( (c_xhi * (Yv_ip - Yv_c) - c_xlo * (Yv_c - Yv_im)) / (DX[0] * DX[0])
+                                   + (c_yhi * (Yv_jp - Yv_c) - c_ylo * (Yv_c - Yv_jm)) / (DX[1] * DX[1]) );
                 }
                 rho_vap_rhs(i, j, k) = rho_vap_flux + m_dot_Vap + rho_vap_diff;
             }
@@ -2767,6 +2815,11 @@ Hydro2::RHS(int lev,
         // for the Pass-D vapor-species (rho_vap) recompute.
         const bool species_on = (species_transport != 0);
         const Set::Scalar Dv_l = Dv;
+        // CE variable-diffusivity model params (member access is not GPU-safe in
+        // the device lambdas below; mirror the Dv_l local-copy pattern).
+        const Set::Scalar rhoD_ref_l  = rhoD_ref;
+        const Set::Scalar rhoD_Tref_l = rhoD_Tref;
+        const Set::Scalar rhoD_exp_l  = rhoD_exp;
 
         // Make each cell's lo-face flux available from its neighbor's hi-face.
         for (int d = 0; d < AMREX_SPACEDIM; d++)
@@ -2954,6 +3007,7 @@ Hydro2::RHS(int lev,
             auto re0 = alpharho0_mf[lev]->array(mfi);
             auto re1 = alpharho1_mf[lev]->array(mfi);
             auto rho_vap = rho_vap_mf[lev]->array(mfi);
+            auto T   = T_mf[lev]->array(mfi);   // interface/face temperature for the CE rho*D(T) coefficient
             auto rvaprhs = rho_vap_rhs_mf.array(mfi);
             auto gam = gamma_mf[lev]->array(mfi);
             auto p0  = p0_mf[lev]->array(mfi);
@@ -3159,7 +3213,7 @@ Hydro2::RHS(int lev,
                     }
 
                     Set::Scalar rho_vap_diff = 0.0;
-                    if (Dv_l > 0.0)
+                    if (Dv_l > 0.0 || rhoD_ref_l > 0.0)
                     {
                         // Clamp Y_v to [0,1] (NaN-safe) before differencing -- see the
                         // FE-path note above; same alpharho0-collapse stiffness/NaN guard
@@ -3169,12 +3223,25 @@ Hydro2::RHS(int lev,
                         const Set::Scalar Yv_ip = ClampYv(rho_vap(ip, j, k) / std::max(re0(ip, j, k), small_l));
                         const Set::Scalar Yv_jm = ClampYv(rho_vap(i, jm, k) / std::max(re0(i, jm, k), small_l));
                         const Set::Scalar Yv_jp = ClampYv(rho_vap(i, jp, k) / std::max(re0(i, jp, k), small_l));
-                        const Set::Scalar re0_xlo = 0.5 * (re0(im, j, k) + re0(i, j, k));
-                        const Set::Scalar re0_xhi = 0.5 * (re0(i, j, k) + re0(ip, j, k));
-                        const Set::Scalar re0_ylo = 0.5 * (re0(i, jm, k) + re0(i, j, k));
-                        const Set::Scalar re0_yhi = 0.5 * (re0(i, j, k) + re0(i, jp, k));
-                        rho_vap_diff = Dv_l * ( (re0_xhi * (Yv_ip - Yv_c) - re0_xlo * (Yv_c - Yv_im)) / (DX[0] * DX[0])
-                                              + (re0_yhi * (Yv_jp - Yv_c) - re0_ylo * (Yv_c - Yv_jm)) / (DX[1] * DX[1]) );
+                        // Face transport coefficient (mirrors the FE path): CE uses
+                        // eta_face * rho*D(T_face); legacy uses alpharho0_face * Dv.
+                        Set::Scalar c_xlo, c_xhi, c_ylo, c_yhi;
+                        if (rhoD_ref_l > 0.0)
+                        {
+                            c_xlo = 0.5 * (eta(im, j, k) + eta(i, j, k)) * RhoD_CE(0.5 * (T(im, j, k) + T(i, j, k)), rhoD_ref_l, rhoD_Tref_l, rhoD_exp_l, small_l);
+                            c_xhi = 0.5 * (eta(i, j, k) + eta(ip, j, k)) * RhoD_CE(0.5 * (T(i, j, k) + T(ip, j, k)), rhoD_ref_l, rhoD_Tref_l, rhoD_exp_l, small_l);
+                            c_ylo = 0.5 * (eta(i, jm, k) + eta(i, j, k)) * RhoD_CE(0.5 * (T(i, jm, k) + T(i, j, k)), rhoD_ref_l, rhoD_Tref_l, rhoD_exp_l, small_l);
+                            c_yhi = 0.5 * (eta(i, j, k) + eta(i, jp, k)) * RhoD_CE(0.5 * (T(i, j, k) + T(i, jp, k)), rhoD_ref_l, rhoD_Tref_l, rhoD_exp_l, small_l);
+                        }
+                        else
+                        {
+                            c_xlo = 0.5 * (re0(im, j, k) + re0(i, j, k)) * Dv_l;
+                            c_xhi = 0.5 * (re0(i, j, k) + re0(ip, j, k)) * Dv_l;
+                            c_ylo = 0.5 * (re0(i, jm, k) + re0(i, j, k)) * Dv_l;
+                            c_yhi = 0.5 * (re0(i, j, k) + re0(i, jp, k)) * Dv_l;
+                        }
+                        rho_vap_diff = ( (c_xhi * (Yv_ip - Yv_c) - c_xlo * (Yv_c - Yv_im)) / (DX[0] * DX[0])
+                                       + (c_yhi * (Yv_jp - Yv_c) - c_ylo * (Yv_c - Yv_jm)) / (DX[1] * DX[1]) );
                     }
                     rvaprhs(i, j, k) = rho_vap_div + s_src * mdv + rho_vap_diff;
 
@@ -3526,6 +3593,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     Set::Scalar rho_min_local = 1e10;
     Set::Scalar nu_max_local = 0.0;       // max per-cell kinematic viscosity mu_eff/rho (viscous dt)
     Set::Scalar alpha_max_local = 0.0;    // max per-cell thermal diffusivity k/(rho cv) (conduction dt)
+    Set::Scalar Deff_max_local = 0.0;     // max per-cell vapor diffusivity rho*D(T)/rho_0 (species dt, CE model)
     Set::Scalar floor_energy_local = 0.0; // internal energy injected by the eps_p backstop
 
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
@@ -3541,6 +3609,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> alpharho0 = alpharho0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> alpharho1 = alpharho1_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> rho_vap  = rho_vap_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> T = T_mf.Patch(lev, mfi);   // for the CE species-diffusion dt bound
         Set::Patch<const Set::Scalar> rho = density_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> E_vol = energy_per_vol_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> E_mas = energy_per_mas_mf.Patch(lev, mfi);
@@ -3564,7 +3633,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         const Solver::EOS::Tammann eos0_base = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
     
-        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &F_max_local, &rho_min_local, &nu_max_local, &alpha_max_local, &floor_energy_local] AMREX_GPU_DEVICE(int i, int j, int k)
+        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &F_max_local, &rho_min_local, &nu_max_local, &alpha_max_local, &Deff_max_local, &floor_energy_local] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
         
@@ -3699,6 +3768,17 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Set::Scalar k_eff  = eta_c * k0_thermal + (1.0 - eta_c) * k1_thermal;
                 Set::Scalar cv_eff = eta_c * eos0_local.Cv() + (1.0 - eta_c) * eos1_local.Cv();
                 alpha_max_local = std::max(alpha_max_local, k_eff / (rho(i, j, k) * cv_eff + small));
+
+                // CE species diffusion dt: the scalar diffusivity acting on Y_v is
+                // D_eff = rho*D(T)/rho_0 (rho_0 = alpharho0/eta the intrinsic gas
+                // density). Restrict to the gas (eta_c > 1e-3) so the deep-liquid
+                // alpharho0->0 limit can't spuriously inflate the bound.
+                if (species_transport && rhoD_ref > 0.0 && eta_c > 1.0e-3)
+                {
+                    Set::Scalar rho0_est = alpharho0(i, j, k) / eta_c;   // intrinsic gas density
+                    Set::Scalar Deff = RhoD_CE(T(i, j, k), rhoD_ref, rhoD_Tref, rhoD_exp, small) / (rho0_est + small);
+                    Deff_max_local = std::max(Deff_max_local, Deff);
+                }
             }
         });
     } // end Mixed Fields loop
@@ -3711,6 +3791,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     amrex::ParallelDescriptor::ReduceRealMin(rho_min_local);
     amrex::ParallelDescriptor::ReduceRealMax(nu_max_local);
     amrex::ParallelDescriptor::ReduceRealMax(alpha_max_local);
+    amrex::ParallelDescriptor::ReduceRealMax(Deff_max_local);
 
     c_max = c_max_local;
     vx_max = vx_max_local;
@@ -3753,13 +3834,22 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                                  ? cfl_v * dx_min * dx_min / (nu_max_local + small)
                                  : dt_acoustic;
 
-    // Parabolic limit for vapor-species diffusion (Stage 3b-1). Effective
-    // diffusivity of Y_v is Dv (d(alpharho0 Y)/dt = div(alpharho0 Dv grad Y)),
-    // so the explicit stability bound scales as dx^2/Dv. Falls back to the
-    // acoustic dt when species diffusion is off so it never tightens the min.
-    Set::Scalar dt_species = (species_transport && Dv > 0.0)
-                                 ? cfl_v * dx_min * dx_min / (Dv + small)
-                                 : dt_acoustic;
+    // Parabolic limit for vapor-species diffusion (Stage 3b-1). The scalar
+    // diffusivity acting on Y_v is the coefficient/alpharho0:
+    //   legacy (alpharho0*Dv): D_eff = Dv (constant), bound = dx^2/Dv;
+    //   CE (eta*rho*D(T)):     D_eff = rho*D(T)/rho_0 (varies), bound = dx^2/Deff_max,
+    //   with Deff_max the domain-max tracked in the loop above (hot/rarefied gas).
+    // Falls back to the acoustic dt when species diffusion is off so it never
+    // tightens the min.
+    Set::Scalar dt_species;
+    if (species_transport && rhoD_ref > 0.0)
+        dt_species = (Deff_max_local > 0.0)
+                         ? cfl_v * dx_min * dx_min / (Deff_max_local + small)
+                         : dt_acoustic;
+    else if (species_transport && Dv > 0.0)
+        dt_species = cfl_v * dx_min * dx_min / (Dv + small);
+    else
+        dt_species = dt_acoustic;
 
     // Parabolic Fourier-conduction limit: dt <= cfl_v * dx^2 / alpha,
     // alpha = k/(rho*cv). alpha_max_local is the max per-cell thermal diffusivity
