@@ -16,7 +16,7 @@
 #   p_liquid = 1.0,  p_gas = p_liquid + sigma/R = @PGAS@
 #
 # Mesh: 64x64 base + 1 eta-only AMR level over a @BOX@ box.
-#   dx_finest = @DXFINE@ = R/32;  epsilon = @EPSILON@ (~12 finest cells).
+#   dx_finest = @DXFINE@ = R/32;  epsilon = @EPSILON@ (~2 finest cells).
 # Timescale tau = @TAU@;  stop_time = 15 tau = @STOP_TIME@ (50 frames).
 #
 # NOTE: this is a TEMPLATE.  RUN_LAPLACE.bash fills the @...@ placeholders per

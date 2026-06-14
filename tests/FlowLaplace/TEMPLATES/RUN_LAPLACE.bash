@@ -70,7 +70,7 @@ for R in "${R_VALUES[@]}"; do
 
     # Compute every derived quantity for this (R, sigma) in one awk pass.
     # Mirrors gen_inputs.py:  domain half-width 2R, 64+1 AMR levels -> dx=R/32,
-    # epsilon = 12*dx, capillary (or acoustic) tau, stop_time = 15 tau, etc.
+    # epsilon = 2*dx, capillary (or acoustic) tau, stop_time = 15 tau, etc.
     read RNAME SNAME EPSILON HALF NEG PGAS STOP PLOTDT DTI DTMAX DTMIN APPLYST DP TAU DXFINE BOX < <(
       awk -v R="$R" -v S="$SIGMA" \
           -v rho="$RHO_LIQ" -v pliq="$P_LIQUID" -v g0="$EOS0_GAMMA" -v p0="$EOS0_P0" '
@@ -86,7 +86,7 @@ for R in "${R_VALUES[@]}"; do
           CONVFMT="%.10g"; OFMT="%.10g"
           cliq   = sqrt(g0*(pliq+p0)/rho)
           half   = 2*R; neg = -half; box = 4*R
-          dxfine = 4*R/128; eps = 12*dxfine
+          dxfine = 4*R/128; eps = 2*dxfine
           dp     = S/R; pgas = pliq + dp
           if (S > 0) tau = sqrt(rho*R*R*R/S); else tau = R/cliq
           stop   = 15*tau; plotdt = stop/50

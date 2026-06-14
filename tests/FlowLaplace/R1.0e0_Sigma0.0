@@ -19,7 +19,7 @@
 #
 # Mesh: 64x64 base + 1 AMR level (eta-only) over a 4 box.
 #   dx_finest = 0.03125 = R/32;  R resolved by 32 finest cells.
-#   epsilon   = 12*dx_finest = 0.375 = 0.375 R  (interface band).
+#   epsilon   = 2*dx_finest = 0.0625 = 0.0625 R  (interface band).
 #
 # Timescale: acoustic tau=R/c_l = 0.2681955807;
 #   stop_time = 15 tau = 4.022933711 (50 frames).
@@ -62,7 +62,7 @@ stop_time            = 4.022933711
 ### ETA INITIAL CONDITIONS ###
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.375
+eta.ic.expression.constant.epsilon = 0.0625
 eta.ic.expression.constant.R0      = 1
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon

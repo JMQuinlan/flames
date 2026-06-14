@@ -19,7 +19,7 @@
 #
 # Mesh: 64x64 base + 1 AMR level (eta-only) over a 0.004 box.
 #   dx_finest = 3.125e-05 = R/32;  R resolved by 32 finest cells.
-#   epsilon   = 12*dx_finest = 0.000375 = 0.375 R  (interface band).
+#   epsilon   = 2*dx_finest = 6.25e-05 = 0.0625 R  (interface band).
 #
 # Timescale: capillary tau=sqrt(rho R^3/sigma) = 9.954898292e-06;
 #   stop_time = 15 tau = 0.0001493234744 (50 frames).
@@ -62,7 +62,7 @@ stop_time            = 0.0001493234744
 ### ETA INITIAL CONDITIONS ###
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.000375
+eta.ic.expression.constant.epsilon = 6.25e-05
 eta.ic.expression.constant.R0      = 0.001
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon

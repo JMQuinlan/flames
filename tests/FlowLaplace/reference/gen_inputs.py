@@ -20,8 +20,8 @@ those same units.
 
 Mesh: 64x64 base + 1 AMR level (eta-only refinement) -> 128 finest cells across
 the 4R box, dx_finest = R/32, bubble radius resolved by 32 finest cells.
-Interface band epsilon = 12 * dx_finest = 0.375 R  (~12 cells, inside the
-10-20-cell target carried over from the RPE work).
+Interface band epsilon = 2 * dx_finest = 0.0625 R  (~2 cells, matching the
+actual Sch20 RPE interface thickness).
 
 Re-run from the repo root or anywhere:
     python tests/FlowLaplace/reference/gen_inputs.py
@@ -53,7 +53,7 @@ C_LIQ = (EOS0_GAMMA * (P_LIQUID + EOS0_P0) / RHO_LIQ) ** 0.5
 N_CELL_BASE = 64
 MAX_LEVEL   = 1                            # 64 base + 1 level -> 128 finest
 REF_RATIO   = 2
-EPS_CELLS   = 12                           # interface band thickness, finest cells
+EPS_CELLS   = 2                            # interface band thickness, finest cells (~Sch20 RPE)
 N_PERIODS   = 15                           # capillary/acoustic times to simulate
 N_FRAMES    = 50
 
