@@ -238,6 +238,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // updated mixture state and the extrapolated alpha (linearly
         // degenerate; see post-NSCBC block in FillGhost4BC).
 
+        // Primitive (density, momentum, pressure, eta) vs conservative
+        // (density, momentum, energy) BC path. Default 0 keeps the existing
+        // conservative behavior bit-identical. See bin/PrimitiveBC.md.
+        pp_query_default("bc.primitive", value.bc_primitive, 0);
+
         // Initialize boundary conditions based on whether NSCBC is used
         if (uses_nscbc)
         {
@@ -275,6 +280,12 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             value.energy_bc = new BC::Expression(1, pp, "energy.bc");
             value.momentum_bc = new BC::Expression(2, pp, "momentum.bc");
 
+            // Primitive path: prescribe pressure at the boundary and reconstruct
+            // per-phase energies from the EOS in FillGhost4BC. Left nullptr in
+            // the conservative path (delete nullptr is safe).
+            if (value.bc_primitive)
+                value.pressure_bc = new BC::Expression(1, pp, "pressure.bc");
+
             Util::Message(INFO, "Parsing Reg");
             Util::Message(INFO, "nscbc_bc Pointer=", value.nscbc_bc);
         }
@@ -296,6 +307,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     // Toggle the last boolean to true/false to track the variable or not.
     {
         int nghost = value.nghost;
+
+        // BC carried by the (derived) pressure fields for AMR coarse-fine
+        // FillPatch. In the primitive path this is the user pressure BC; else
+        // fall back to energy_bc (pressure fields are non-evolving, so this is
+        // mostly cosmetic -- the physical-boundary fill happens in FillGhost4BC).
+        BC::BC<Set::Scalar>* pbc =
+            (value.bc_primitive && value.pressure_bc) ? value.pressure_bc : value.energy_bc;
 
         // DIFFUSE PARAMETERS
         value.RegisterNewFab(value.eta_mf,           value.eta_bc, 1, nghost, "eta", true, true);
@@ -327,7 +345,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //value.RegisterNewFab(value.k0_thermal_mf,   &value.bc_nothing, 1, nghost, "k0_thermal", false, false);
         //value.RegisterNewFab(value.h0_thermal_mf,   &value.bc_nothing, 1, nghost, "h0_thermal", false, false);
 
-        value.RegisterNewFab(value.pressure0_mf,    value.energy_bc,  1, nghost, "pressure0", false, false);
+        value.RegisterNewFab(value.pressure0_mf,    pbc,  1, nghost, "pressure0", false, false);
         value.RegisterNewFab(value.velocity0_mf,    &value.bc_nothing,  2, nghost, "velocity0", false, false, { "x", "y" });
 
         // FLUID 1
@@ -344,11 +362,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //value.RegisterNewFab(value.k1_thermal_mf,   &value.bc_nothing, 1, nghost, "k1_thermal", false, false);
         //value.RegisterNewFab(value.h1_thermal_mf,   &value.bc_nothing, 1, nghost, "h1_thermal", false, false);
 
-        value.RegisterNewFab(value.pressure1_mf,    value.energy_bc,  1, nghost, "pressure1", false, true);
+        value.RegisterNewFab(value.pressure1_mf,    pbc,  1, nghost, "pressure1", false, true);
         value.RegisterNewFab(value.velocity1_mf,    &value.bc_nothing,  2, nghost, "velocity1", false, true, { "x", "y" });
 
         // MIXTURE
-        value.RegisterNewFab(value.pressure_mf,     value.energy_bc, 1, nghost, "pressure", true, false);
+        value.RegisterNewFab(value.pressure_mf,     pbc, 1, nghost, "pressure", true, false);
         value.RegisterNewFab(value.velocity_mf,     &value.bc_nothing,  2, nghost, "velocity", true, false, { "x", "y" });
         value.RegisterNewFab(value.vorticity_mf,    &value.bc_nothing,  1, 0, "vorticity", true, false);
         // density_mf is a DERIVED field (rho = rho_eta0 + rho_eta1), recomputed
@@ -3762,13 +3780,47 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         FillBoundariesWithBC(lev, time, momentum_bc, {
             momentum_mf[lev].get()
         });
-        // Redundant total energy AND per-phase internal energies (6-eq primaries
-        // -- Schmidmayer 2020 eq. 13 last two rows + eq. 16).
-        FillBoundariesWithBC(lev, time, energy_bc, {
-            energy_per_vol_mf[lev].get(),
-            energy0_mf[lev].get(),
-            energy1_mf[lev].get()
-        });
+        if (!bc_primitive)
+        {
+            // CONSERVATIVE PATH: redundant total energy AND per-phase internal
+            // energies (6-eq primaries -- Sch20 eq. 13 last two rows + eq. 16).
+            FillBoundariesWithBC(lev, time, energy_bc, {
+                energy_per_vol_mf[lev].get(),
+                energy0_mf[lev].get(),
+                energy1_mf[lev].get()
+            });
+        }
+        else
+        {
+            // PRIMITIVE PATH: prescribe pressure at the boundary, then
+            // reconstruct per-phase internal energies from (alpha, p) via the
+            // EOS -- identical formula to the NSCBC4 branch above. eta ghosts
+            // are already filled (STEP 3); rho/momentum ghosts from above.
+            // rho E (energy_per_vol) is rebuilt in STEP 7 as E0+E1+KE.
+            // See bin/PrimitiveBC.md.
+            FillBoundariesWithBC(lev, time, pressure_bc, {
+                pressure_mf[lev].get()
+            });
+
+            const Set::Scalar g0p = eos0.Gamma(), pi0p = eos0.P0();
+            const Set::Scalar g1p = eos1.Gamma(), pi1p = eos1.P0();
+            const Set::Scalar smp = small;
+            for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &ghostbox = mfi.growntilebox(nghost);
+                auto eta   = eta_mf[lev]->array(mfi);
+                auto press = pressure_mf[lev]->array(mfi);
+                auto E0    = energy0_mf[lev]->array(mfi);
+                auto E1    = energy1_mf[lev]->array(mfi);
+                amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    const Set::Scalar a1  = std::min(std::max(eta(i, j, k), 0.0), 1.0);
+                    const Set::Scalar a2  = 1.0 - a1;
+                    const Set::Scalar p_g = std::max(press(i, j, k), smp);
+                    E0(i, j, k) = a1 * (p_g + g0p * pi0p) / std::max(g0p - 1.0, smp);
+                    E1(i, j, k) = a2 * (p_g + g1p * pi1p) / std::max(g1p - 1.0, smp);
+                });
+            }
+        }
 
         // Zero Gradient Fill
         if (nghost > effective_nghost)
