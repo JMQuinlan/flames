@@ -2,6 +2,7 @@
 #define INTEGRATOR_HYDRO2_H
 
 #include "Integrator/Integrator.H"
+#include "Integrator/EmbeddedSolid.H"
 #include "IO/ParmParse.H"
 
 // Boundry Conditions
@@ -67,14 +68,7 @@ public:
         // ETA
         delete eta_ic;
         delete etadot_ic;
-        // EMBEDDED SOLID
-        delete phi_ic;
-        delete phi_bc;
-        delete solid.density0_ic;
-        delete solid.density1_ic;
-        delete solid.momentum_ic;
-        delete solid.energy0_ic;
-        delete solid.energy1_ic;
+        // EMBEDDED SOLID: ICs/BCs owned by the EmbeddedSolid destructor.
         // FLUID 0
         delete density0_ic;
         delete velocity0_ic;
@@ -272,9 +266,8 @@ protected:
     // fraction alpha_1.  (In the single-phase Hydro solver the field named
     // eta plays the role that phi plays here.)  Static in this first
     // implementation: phi is set from its IC and never evolved.
-    Set::Field<Set::Scalar> phi_mf;
-    Set::Field<Set::Scalar> phi_old_mf;
-    Set::Field<Set::Scalar> grad_phi_mf;
+    // All embedded-solid state + per-cell wall physics is consolidated here.
+    EmbeddedSolid embedded;
 protected:
 
     int n_step = 0;
@@ -308,23 +301,8 @@ protected:
     IC::IC<Set::Scalar>* eta_ic = nullptr;
     IC::IC<Set::Scalar>* etadot_ic = nullptr;
 
-    // EMBEDDED SOLID: indicator IC/BC + prescribed per-phase target state.
-    // The solid target is the quiescent state held inside solid cells and
-    // used to build a reflecting fluid state at the diffuse boundary.
-    IC::IC<Set::Scalar>* phi_ic = nullptr;
-    BC::BC<Set::Scalar>* phi_bc = nullptr;
-    struct {
-        Set::Field<Set::Scalar> density0_mf;   // prescribed (alpha_1 rho_1) inside solid
-        Set::Field<Set::Scalar> density1_mf;   // prescribed (alpha_2 rho_2) inside solid
-        Set::Field<Set::Scalar> momentum_mf;   // prescribed mixture momentum inside solid (=0 for a static wall)
-        Set::Field<Set::Scalar> energy0_mf;    // prescribed (alpha_1 rho_1 e_1) inside solid
-        Set::Field<Set::Scalar> energy1_mf;    // prescribed (alpha_2 rho_2 e_2) inside solid
-        IC::IC<Set::Scalar>* density0_ic = nullptr;
-        IC::IC<Set::Scalar>* density1_ic = nullptr;
-        IC::IC<Set::Scalar>* momentum_ic = nullptr;
-        IC::IC<Set::Scalar>* energy0_ic  = nullptr;
-        IC::IC<Set::Scalar>* energy1_ic  = nullptr;
-    } solid;
+    // EMBEDDED SOLID: indicator IC/BC + prescribed per-phase target state are
+    // now held by the `embedded` member (Integrator::EmbeddedSolid).
 
     BC::Nothing bc_nothing;
 
@@ -342,7 +320,7 @@ protected:
     Set::Scalar rho_min = 1e10;
 
     Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion=NAN;
-    Set::Scalar phi_refinement_criterion=NAN; // grad(phi) solid-boundary refinement
+    // grad(phi) solid-boundary refinement is now embedded.refinement_criterion
     // FLUID 0
     Set::Scalar gamma0 = NAN, p0_0 = NAN, mu0 = NAN, mu0_b = NAN, MW0 = NAN;
     Set::Scalar b0 = NAN, q0EOS = NAN;
@@ -378,10 +356,9 @@ protected:
     int apply_vaporization = 0;
     int Spec_Vol = 1;
 
-    // EMBEDDED SOLID BOUNDARY controls.
-    //   apply_embedded_solid = 0 -> no immersed solid (default; behavior unchanged)
-    //   apply_embedded_solid = 1 -> mask fluxes by phi + penalize toward solid state
-    int apply_embedded_solid = 0;
+    // EMBEDDED SOLID BOUNDARY controls now live on the `embedded` member:
+    //   embedded.apply = 0 -> no immersed solid (default; behavior unchanged)
+    //   embedded.apply = 1 -> mask fluxes by phi + penalize toward solid state
 
     // YANG (2023) DIFFUSE-DOMAIN no-penetration via MOMENTUM-ONLY Brinkman
     // penalization.  0 = off.  >0 adds -coeff*(1-phi)*(M - M_solid) to the
@@ -393,14 +370,14 @@ protected:
     // Angot 1999 / Liu & Vasilyev 2007), the true-diffuse-interface alternative
     // to `solid.reflect`.  Distinct from the full-state `lagrange` penalty,
     // which also pins density+energy and therefore clamps the wall pressure.
-    Set::Scalar solid_brinkman = 0.0;
+    // (now embedded.brinkman)
 
     // Phi threshold below which the SOLID is skipped by pressure relaxation,
     // interface sharpening and the CFL reduction.  The stiff pressure-relaxation
     // Newton DIVERGES on the penalized full-flux solid state (especially
     // low-Mach), so relaxation must skip the solid -- this threshold
     // (0.5 = the geometric solid side) keeps that skip on.  Fixed at 0.5.
-    Set::Scalar solid_relax_skip = 0.0;
+    // (now embedded.relax_skip)
 
     // ------------------------------------------------------------------
     // Artificial heat exchange (AHE) - Schmidmayer 2020 eq. 13 r-source
