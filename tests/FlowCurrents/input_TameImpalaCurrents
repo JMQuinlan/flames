@@ -55,11 +55,7 @@ stop_time           = 2500.0          # 10x -- long run so the asymmetric instab
 # EMBEDDED SOLID BOUNDARY -- the "sphere" (2D cylinder), centered at the origin
 # ----------------------------------------------------------------------------
 apply_embedded_solid = 1
-solid.clean_yang     = 1              # YANG full-flux porous wall (the default embedded-solid method)
 solid.brinkman       = 70             # YANG penalty ~4*U/eps (U=1, eps=0.06): gives BOTH no-penetration AND no-slip (drives u->0 in the solid)
-solid.mu             = 0.0            # NO solid-mu blend: under Yang's UN-masked flux a large solid.mu x the steep band gradient (u:1->0) destabilizes the low-Mach wall (dt collapse). The penalty does the no-slip; fluid mu0/mu1 does the boundary layer.
-solid.mu_b           = 0.0
-lagrange_solid       = 0.0
 phi_refinement_criterion = 0.1
 
 # Cylinder of radius R0 at the origin: r>R0 -> phi=1 (fluid), r<R0 -> phi=0 (solid)

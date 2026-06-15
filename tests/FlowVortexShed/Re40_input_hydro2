@@ -13,12 +13,12 @@
 #   Re = rho * U * D / mu = 100 * 1 * 1.0 / 2.5 = 40,   D = 2*R0 = 1.0
 #   Ma = U / c = 1 / 5 = 0.2   (c = sqrt(gamma p / rho) = sqrt(1.4*1785.71/100))
 #
-# No-slip / no-penetration at the cylinder is enforced by (a) the Brinkman
-# penalty (lagrange) and (b) the large blended solid viscosity solid.mu = 100.
-# NOTE: solid.mu enters the viscous CFL, so dt is viscously limited; with
-# rho = 100 the solid kinematic viscosity is nu_solid = solid.mu/rho = 1,
-# which keeps dt tractable.  Lower solid.mu (the penalty alone already gives
-# full no-slip) if you want a larger timestep.
+# No-slip AND no-penetration at the cylinder are enforced entirely by the YANG
+# (1-phi)/kappa momentum Brinkman penalty (solid.brinkman): it drives the full
+# velocity vector to zero in the solid, so it provides no-slip by itself.  The
+# fluid viscosity (mu0/mu1) gives the boundary layer.  Do NOT add a solid
+# viscosity blend -- under the full-flux Yang wall it destabilizes the low-Mach
+# case (dt collapse ~t=0.15).
 # ============================================================================
 
 # alamo.program = hydro2   # only for the unified 'alamo' exe; the standalone
@@ -55,11 +55,7 @@ stop_time           = 60.0
 # EMBEDDED SOLID BOUNDARY
 # ----------------------------------------------------------------------------
 apply_embedded_solid = 1
-solid.clean_yang     = 1              # YANG full-flux porous wall (the default embedded-solid method)
 solid.brinkman       = 70             # YANG penalty ~4*U/eps (U=1, eps=0.06): gives BOTH no-penetration AND no-slip (drives u->0 in the solid)
-solid.mu             = 0.0            # NO solid-mu blend: under Yang's UN-masked flux a large solid.mu x the steep band gradient (u:1->0) destabilizes the low-Mach wall (dt collapse ~t=0.15). The penalty does the no-slip; fluid mu0/mu1 does the boundary layer.
-solid.mu_b           = 0.0
-lagrange_solid       = 0.0        # optional EXTRA phi-interface normal no-penetration penalty (default 0)
 phi_refinement_criterion = 0.1
 
 # Cylinder of radius R0 at the origin: r>R0 -> phi=1 (fluid), r<R0 -> phi=0 (solid)

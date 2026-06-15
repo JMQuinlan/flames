@@ -61,10 +61,7 @@ stop_time           = 30.0            # L/U = 6/1.2 = 5
 # so the shock sits ~eps off the phi=0.5 surface and converges as eps -> 0.
 # Explicit-penalty stability: solid.brinkman * dt < 2 (see dynamictimestep.max).
 apply_embedded_solid = 1
-solid.clean_yang     = 1             # Yang full-flux porous wall (now the default; explicit for clarity)
 solid.brinkman       = 500           # ~4*U/eps, U=1.2, eps=0.01  (kappa = 1/500)
-solid.mu             = 0.0           # INVISCID wall -- oblique shock is an Euler phenomenon
-solid.mu_b           = 0.0
 phi_refinement_criterion = 0.1        # refine the wedge boundary
 
 # Wedge as the intersection of three half-planes (upper ramp, lower ramp, base),

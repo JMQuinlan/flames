@@ -4,7 +4,7 @@
 #@
 
 # ============================================================================
-# FlowTryonFun / Planes / SR22-Darkstar
+# FlowTryonFun / Planes / SR72-Darkstar
 # ----------------------------------------------------------------------------
 # Just-for-fun TC: Ma = 3 air over a "Darkstar"-style hypersonic aircraft, with
 # the aircraft SILHOUETTE supplied as an embedded-solid phi geometry read from a
@@ -21,7 +21,7 @@
 # ============================================================================
 
 ### OUTPUT ###
-plot_file = ./tests/FlowTryonFun/Planes/SR22-Darkstar/output_Ma3
+plot_file = ./tests/FlowTryonFun/Planes/SR72-Darkstar/output_Ma3
 
 ### MESHING ###
 amr.plot_dt          = 0.25
@@ -57,15 +57,10 @@ stop_time           = 18.0             # ~5 flow-through times (L/U = 12/3 = 4.0
 # ----------------------------------------------------------------------------
 apply_embedded_solid = 1
 solid.brinkman       = 300            # YANG porous wall (now the default): ~4*U/eps, U=3, eps~0.04 (BMP)
-solid.cutoff         = 0.5
-lagrange             = 0.0
-solid.mu             = 0.0            # inviscid slip wall
-solid.mu_b           = 0.0
-lagrange_solid       = 0.0
 phi_refinement_criterion = 0.05       # refine the airframe boundary (image edges)
 
 solid.phi.ic.type          = bmp
-solid.phi.ic.bmp.filename  = ./tests/FlowTryonFun/Planes/SR22-Darkstar/darkstar.bmp
+solid.phi.ic.bmp.filename  = ./tests/FlowTryonFun/Planes/SR72-Darkstar/darkstar.bmp
 solid.phi.ic.bmp.channel   = g        # greyscale (R=G=B)
 solid.phi.ic.bmp.min       = 0        # pixel 0   -> phi 0 (solid)
 solid.phi.ic.bmp.max       = 255      # pixel 255 -> phi 1 (fluid)

@@ -382,32 +382,6 @@ protected:
     //   apply_embedded_solid = 0 -> no immersed solid (default; behavior unchanged)
     //   apply_embedded_solid = 1 -> mask fluxes by phi + penalize toward solid state
     int apply_embedded_solid = 0;
-    // Below this phi value a cell is frozen to the prescribed solid target.
-    Set::Scalar solid_cutoff = 1.0e-6;
-    // Large solid viscosity blended in by (1-phi) to enforce no-SLIP at the
-    // diffuse wall via the viscous stress (the Brinkman penalty already gives
-    // no-penetration + a velocity sink; high mu sharpens the tangential
-    // boundary layer, as required in the single-phase Hydro solver).
-    // NOTE: this enters the viscous CFL, so a large value shrinks dt.
-    Set::Scalar solid_mu   = 100.0;
-    Set::Scalar solid_mu_b = 0.0;
-    // Optional phi-interface NORMAL no-penetration penalty coefficient (the
-    // solid analog of the fluid `lagrange`).  Default 0 (off).  Tangential
-    // no-slip is enforced by the always-on viscous interface traction
-    // (0.5*Mpqrs*(u-u_solid)*hess_phi, using solid_mu); this adds an extra
-    // normal penalty  -lagrange_solid*(u-u_solid).grad_phi * grad_phi.
-    Set::Scalar lagrange_solid = 0.0;
-
-    // RIEMANN-REFLECTING WALL coefficient.  0 = off (the masked-flux + cutoff
-    // freeze legacy behaviour).  >0 enforces the embedded no-penetration wall by
-    // replacing the SOLID-side reconstructed Riemann state at the diffuse
-    // interface with a MIRROR of the fluid-side state (normal momentum reversed),
-    // weighted by min(coeff * (phi_lo - phi_hi), 1) across each face.  The HLLC
-    // then returns u_n = 0 (exact no-penetration) and the reflected wall
-    // pressure, supplying the consistent NORMAL traction the diffuse wall was
-    // missing.  When >0 the momentum flux is also left UN-masked by phi_c so the
-    // wall flux is delivered at full strength.  Recommended value ~2.
-    Set::Scalar solid_reflect = 0.0;
 
     // YANG (2023) DIFFUSE-DOMAIN no-penetration via MOMENTUM-ONLY Brinkman
     // penalization.  0 = off.  >0 adds -coeff*(1-phi)*(M - M_solid) to the
@@ -421,32 +395,11 @@ protected:
     // which also pins density+energy and therefore clamps the wall pressure.
     Set::Scalar solid_brinkman = 0.0;
 
-    // Gate threshold for the momentum-only Brinkman penalty: the penalty is
-    // applied ONLY where phi < solid_brinkman_gate (default 1.0 = whole diffuse
-    // band, the original (1-phi)-weighted behaviour).  Set to 0.5 to CONFINE
-    // the wall to the geometric solid (phi<0.5) and leave the forward part of
-    // the diffuse band fluid -- this prevents a strong penalty from turning the
-    // band that protrudes upstream of the phi=0.5 tip into effective wall
-    // (which blunts the tip and pushes the shock into an upstream standoff).
-    Set::Scalar solid_brinkman_gate = 1.0;
-
-    // CLEAN YANG (2023) diffuse-domain mode.  When 1, run the embedded solid as
-    // a PURE porous-penalty wall exactly as Yang et al. 2023: FULL Euler flux
-    // everywhere (NO phi_c flux masking) and NO cutoff freeze, with the solid
-    // created solely by the (1-phi)/kappa momentum Brinkman penalty
-    // (solid.brinkman).  Strips the cutoff-method masking/freeze and the GFM
-    // reflect / viscous-Hessian wall closures so the wall matches the paper.
-    // Parse forces solid_cutoff tiny so the freeze + all cutoff-gated solid
-    // skips become inert; requires solid.brinkman > 0 to do anything.
-    int solid_clean_yang = 0;
-
     // Phi threshold below which the SOLID is skipped by pressure relaxation,
-    // interface sharpening and the CFL reduction.  Legacy: = solid_cutoff (skip
-    // the frozen cells).  Under clean_yang the freeze cutoff is forced tiny, but
-    // the stiff pressure-relaxation Newton still DIVERGES on the penalized
-    // full-flux solid state (especially low-Mach), so relaxation must still skip
-    // the solid -- this separate threshold (0.5 = the geometric solid side) keeps
-    // that skip on while the freeze stays off.
+    // interface sharpening and the CFL reduction.  The stiff pressure-relaxation
+    // Newton DIVERGES on the penalized full-flux solid state (especially
+    // low-Mach), so relaxation must skip the solid -- this threshold
+    // (0.5 = the geometric solid side) keeps that skip on.  Fixed at 0.5.
     Set::Scalar solid_relax_skip = 0.0;
 
     // ------------------------------------------------------------------
