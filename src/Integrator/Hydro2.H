@@ -226,7 +226,8 @@ protected:
 
     Set::Field<Set::Scalar> Source_mf;      // Sumation of Source Terms
     Set::Field<Set::Scalar> flux_mf;        // Riemann Solver Fluxes
-    Set::Field<Set::Scalar> Fsv_mf;         // Surface Tension
+    Set::Field<Set::Scalar> Fsv_mf;         // Surface Tension (now stores div(Omega) -- diagnostic only; see Omega_mf)
+    Set::Field<Set::Scalar> Omega_mf;       // Sch17 capillary stress tensor Omega_ij = -sigma*|grad_eta|*(I - n n^T), 3 comps (xx, xy, yy), 1 ghost
     Set::Field<Set::Scalar> Fw_mf;          // Weight Force
     Set::Field<Set::Scalar> Bm_mf;          // Spalding Number
     Set::Field<Set::Scalar> Y_mf;           // Mass Fraction
