@@ -60,6 +60,7 @@ public:
         delete density_bc;
         delete momentum_bc;
         delete energy_bc;
+        delete pressure_bc;
         delete eta_bc;
         delete temperature_bc;
 
@@ -269,8 +270,13 @@ protected:
     BC::BC<Set::Scalar>* density_bc = nullptr;
     BC::BC<Set::Scalar>* momentum_bc = nullptr;
     BC::BC<Set::Scalar>* energy_bc = nullptr;
+    BC::BC<Set::Scalar>* pressure_bc = nullptr;   // primitive pressure BC (bc.primitive=1)
     BC::BC<Set::Scalar>* eta_bc = nullptr;
     BC::BC<Set::Scalar>* temperature_bc = nullptr;
+
+    // 0 = conservative BC path (density, momentum, energy); 1 = primitive path
+    // (density, momentum, pressure, eta) with EOS reconstruction of E_k.
+    int bc_primitive = 0;
 
     IC::IC<Set::Scalar>* velocity0_ic = nullptr;
     IC::IC<Set::Scalar>* pressure0_ic = nullptr;
