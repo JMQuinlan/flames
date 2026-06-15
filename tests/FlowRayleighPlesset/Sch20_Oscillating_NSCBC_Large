@@ -35,7 +35,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Oscillating_NSCBC_Large
+# plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Oscillating
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating
 
 ### MESHING ###
 amr.plot_int       = -1
