@@ -46,7 +46,7 @@ amr.blocking_factor = 2
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
 amr.max_level      = 6
-amr.n_cell         = 640 640        # base; effective finest = 10240 x 10240
+amr.n_cell         = 320 320        # base; effective finest = 10240 x 10240
 
 # n_error_buf keeps the coarse-fine boundary out of the mixed-eta interface band
 # (Q-Fix density-partition is exact only at pure-phase c/f boundaries).
@@ -64,8 +64,8 @@ dynamictimestep.min     = 1.0e-13
 cfl                     = 0.5
 
 ### DIMENSIONS ###
-geometry.prob_lo     = -4.00 -4.00 0.0
-geometry.prob_hi     =  4.00  4.00 0.0
+geometry.prob_lo     = -8.00 -8.00 0.0
+geometry.prob_hi     =  8.00  8.00 0.0
 geometry.is_periodic = 0 0 0
 stop_time            = 1e-2
 
