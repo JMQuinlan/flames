@@ -55,9 +55,9 @@ stop_time           = 60.0
 # EMBEDDED SOLID BOUNDARY
 # ----------------------------------------------------------------------------
 apply_embedded_solid = 1
-solid.cutoff         = 0.5        # phi<cutoff frozen to the solid target (near-sharp wall at phi=0.5)
-lagrange             = 0.0        # Brinkman penalty (off; the cutoff freeze + viscous traction enforce the wall)
-solid.mu             = 100.0      # large solid viscosity for tangential no-slip
+solid.clean_yang     = 1              # YANG full-flux porous wall (the default embedded-solid method)
+solid.brinkman       = 70             # YANG penalty ~4*U/eps (U=1, eps=0.06): gives BOTH no-penetration AND no-slip (drives u->0 in the solid)
+solid.mu             = 0.0            # NO solid-mu blend: under Yang's UN-masked flux a large solid.mu x the steep band gradient (u:1->0) destabilizes the low-Mach wall (dt collapse ~t=0.15). The penalty does the no-slip; fluid mu0/mu1 does the boundary layer.
 solid.mu_b           = 0.0
 lagrange_solid       = 0.0        # optional EXTRA phi-interface normal no-penetration penalty (default 0)
 phi_refinement_criterion = 0.1

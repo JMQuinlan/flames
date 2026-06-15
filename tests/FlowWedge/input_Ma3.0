@@ -45,7 +45,7 @@ geometry.is_periodic = 0 0 0
 timestep            = 1e-6
 dynamictimestep.on  = 1
 dynamictimestep.verbose = 0
-dynamictimestep.max = 5e-3
+dynamictimestep.max = 1e-3
 dynamictimestep.min = 1e-9
 cfl                 = 0.3
 cfl_v               = 0.3
@@ -54,12 +54,17 @@ stop_time           = 12.0            # L/U = 6/3 = 2
 # ----------------------------------------------------------------------------
 # EMBEDDED SOLID -- the 15deg wedge.  phi = 1 fluid, phi = 0 solid.
 # ----------------------------------------------------------------------------
+# YANG (2023) diffuse-domain method (the ONLY embedded-solid mode): full Euler
+# flux everywhere + a (1-phi)/kappa momentum Brinkman penalty as the wall.  No
+# cutoff freeze / flux masking / Riemann reflect.  solid.brinkman ~ 4*U/eps sets
+# the wall stiffness (kappa = 1/brinkman); the diffuse wall is accurate to O(eps)
+# so the shock sits ~eps off the phi=0.5 surface and converges as eps -> 0.
+# Explicit-penalty stability: solid.brinkman * dt < 2 (see dynamictimestep.max).
 apply_embedded_solid = 1
-solid.cutoff         = 0.5            # freeze phi<0.5 cells to the quiescent target
-lagrange             = 0.0            # no Brinkman penalty (freeze gives no-penetration)
-solid.mu             = 0.0            # INVISCID wall (slip) -- oblique shock is an Euler phenomenon
+solid.clean_yang     = 1             # Yang full-flux porous wall (now the default; explicit for clarity)
+solid.brinkman       = 1200          # ~4*U/eps, U=3.0, eps=0.01  (kappa = 1/1200)
+solid.mu             = 0.0           # INVISCID wall -- oblique shock is an Euler phenomenon
 solid.mu_b           = 0.0
-lagrange_solid       = 0.0
 phi_refinement_criterion = 0.1        # refine the wedge boundary
 
 # Wedge as the intersection of three half-planes (upper ramp, lower ramp, base),
@@ -73,7 +78,7 @@ solid.phi.ic.expression.constant.cth = 0.9659258
 solid.phi.ic.expression.constant.sth = 0.2588190
 solid.phi.ic.expression.constant.x0  = -0.5
 solid.phi.ic.expression.constant.xb  = 1.5
-solid.phi.ic.expression.constant.eps = 0.02
+solid.phi.ic.expression.constant.eps = 0.01
 solid.phi.ic.expression.region0 = "0.5*(1.0 + tanh( max(max( y*cth - (x-x0)*sth, -y*cth - (x-x0)*sth ), x - xb ) / eps ))"
 
 # Prescribed quiescent solid target, eta-consistent (alpha_1 = 0.5):

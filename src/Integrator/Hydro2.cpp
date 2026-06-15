@@ -122,15 +122,34 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("solid.reflect", value.solid_reflect, 0.0); // Riemann-reflecting wall coeff (0=off, ~2 recommended)
         pp_query_default("solid.brinkman", value.solid_brinkman, 0.0); // Yang(2023) momentum-only Brinkman no-penetration (0=off)
         pp_query_default("solid.brinkman_gate", value.solid_brinkman_gate, 1.0); // apply penalty only where phi<gate (1.0=whole band, 0.5=solid only)
-        pp_query_default("solid.clean_yang", value.solid_clean_yang, 0); // pure full-flux Yang porous-penalty wall (no flux masking, no freeze)
-        if (value.solid_clean_yang)
+        // DEFAULT-ON: the embedded solid uses ONLY the Yang (2023) diffuse-domain
+        // method -- full Euler flux everywhere + the (1-phi)/kappa momentum
+        // Brinkman penalty (solid.brinkman) as the SOLE wall.  Set
+        // solid.clean_yang=0 to fall back to the legacy cutoff/freeze/reflect
+        // hybrid (kept only for comparison).
+        pp_query_default("solid.clean_yang", value.solid_clean_yang, 1);
+        if (value.apply_embedded_solid && value.solid_clean_yang)
         {
-            // Disable the cutoff freeze AND every cutoff-gated solid skip
-            // (RelaxAndReinit/sharpening/CFL) so the (1-phi)/kappa penalty is the
-            // SOLE wall, exactly as Yang.  Flux un-masking is handled in the RHS.
-            value.solid_cutoff = 1.0e-12;
-            Util::Message(INFO, "solid.clean_yang=1: full-flux Yang porous wall (freeze+masking OFF); needs solid.brinkman>0");
+            // Force every competing/legacy mechanism OFF so nothing but the Yang
+            // porous penalty can act on the embedded solid:
+            value.solid_cutoff        = 1.0e-12; // freeze OFF (the penalty is the wall)
+            value.solid_reflect       = 0.0;     // GFM Riemann-mirror wall off
+            value.solid_brinkman_gate = 1.0;     // penalty over the whole (1-phi) band
+            value.lagrange            = 0.0;     // full-state Brinkman off (it pins pressure -> under-turns)
+            value.lagrange_solid      = 0.0;     // normal phi-interface penalty off
+            // (Flux un-masking is handled by `fmask` in the RHS; viscous mu-blend
+            //  + Ldot_solid remain for viscous walls -- inert when solid.mu=0.)
+            if (value.solid_brinkman <= 0.0)
+                Util::Warning(INFO, "apply_embedded_solid + Yang method but solid.brinkman<=0: NO wall will form. Set solid.brinkman>0 (~4*U/eps).");
+            else
+                Util::Message(INFO, "embedded solid: Yang full-flux porous wall, solid.brinkman=", value.solid_brinkman);
         }
+        // Relaxation/sharpening/CFL solid-skip threshold, DECOUPLED from the freeze
+        // cutoff: legacy skips the frozen cells (phi<solid_cutoff); under clean_yang
+        // the freeze is off (cutoff tiny) but the stiff pressure relaxation still
+        // DIVERGES on the penalized solid state, so we keep skipping the solid side
+        // (phi<0.5).  (No-op for the trivial single-pressure inviscid wedge solid.)
+        value.solid_relax_skip = value.solid_clean_yang ? 0.5 : value.solid_cutoff;
 
         // Artificial heat exchange (AHE) on per-phase internal energy rows.
         // See bin/AHE.md for derivation: Schmidmayer 2020 eq. 13 r-source
@@ -589,6 +608,40 @@ void Hydro2::Initialize(int lev)
         solid.momentum_ic   ->Initialize(lev, solid.momentum_mf, 0.0);
         solid.energy0_ic    ->Initialize(lev, solid.energy0_mf, 0.0);
         solid.energy1_ic    ->Initialize(lev, solid.energy1_mf, 0.0);
+
+        // ----------------------------------------------------------------
+        // Initialize the embedded solid AT REST (Mix-style velocity blend).
+        // ----------------------------------------------------------------
+        // The fluid IC sets the velocity over the WHOLE domain, including
+        // inside the solid.  Blend it toward the solid velocity u_solid by phi
+        //   velocity <- phi*velocity + (1-phi)*u_solid
+        // so the solid region starts quiescent.  Without this, the Yang
+        // full-flux porous wall (no cutoff freeze) starts the dense solid
+        // interior moving at the freestream and shocks itself apart at startup
+        // (the low-Mach viscous Riemann abort).  u_solid = solid_M/rho_solid
+        // (= 0 for a static solid).  Mix() below then builds the conserved
+        // state from the blended primitives.
+        for (amrex::MFIter mfi(*phi_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto phi   = phi_mf[lev]->array(mfi);
+            auto vel0  = velocity0_mf[lev]->array(mfi);
+            auto vel1  = velocity1_mf[lev]->array(mfi);
+            auto s_re0 = solid.density0_mf[lev]->array(mfi);
+            auto s_re1 = solid.density1_mf[lev]->array(mfi);
+            auto s_M   = solid.momentum_mf[lev]->array(mfi);
+            const Set::Scalar small_loc = small;
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                const Set::Scalar w     = std::min(std::max(phi(i, j, k), 0.0), 1.0);
+                const Set::Scalar rho_s = std::max(s_re0(i, j, k) + s_re1(i, j, k), small_loc);
+                const Set::Scalar us_x  = s_M(i, j, k, 0) / rho_s;
+                const Set::Scalar us_y  = s_M(i, j, k, 1) / rho_s;
+                vel0(i, j, k, 0) = w * vel0(i, j, k, 0) + (1.0 - w) * us_x;
+                vel0(i, j, k, 1) = w * vel0(i, j, k, 1) + (1.0 - w) * us_y;
+                vel1(i, j, k, 0) = w * vel1(i, j, k, 0) + (1.0 - w) * us_x;
+                vel1(i, j, k, 1) = w * vel1(i, j, k, 1) + (1.0 - w) * us_y;
+            });
+        }
 
         // grad(phi) diagnostic (static; for the boundary-refinement plot).
         const Set::Scalar *DXp = geom[lev].CellSize();
@@ -2811,7 +2864,7 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
 
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 // Embedded solid: never sharpen the frozen solid interior.
-                if (apply_embedded_solid && phisol(i, j, k) < solid_cutoff) return;
+                if (apply_embedded_solid && phisol(i, j, k) < solid_relax_skip) return;
                 auto sten = Numeric::GetStencil(i, j, k, domain);
 
                 // ============================================================
@@ -3125,7 +3178,7 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             // Embedded solid: preserve the prescribed alpha inside the solid.
-            if (apply_embedded_solid && phisol(i, j, k) < solid_cutoff) return;
+            if (apply_embedded_solid && phisol(i, j, k) < solid_relax_skip) return;
             Set::Scalar rho_total = rho_eta0(i, j, k) + rho_eta1(i, j, k);
             eta(i, j, k) = rho_eta0(i, j, k) / (rho_total + small);
 
@@ -4546,7 +4599,7 @@ void Hydro2::RelaxAndReinit(int lev)
             // Skip solid cells: pressure relaxation must not touch the
             // frozen solid state (its per-phase energies are prescribed,
             // not in thermodynamic equilibrium with the alpha there).
-            if (apply_embedded_solid && phisol(i, j, k) < solid_cutoff) return;
+            if (apply_embedded_solid && phisol(i, j, k) < solid_relax_skip) return;
             // -----------------------------------------------------------
             // Pre-relax state.  ALL divides use DIV_FLOOR (1e-30), NEVER
             // `small`.  Same lesson as the Limiter Garrick post-mortem:

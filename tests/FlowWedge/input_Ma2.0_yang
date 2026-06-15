@@ -73,7 +73,7 @@ solid.phi.ic.expression.constant.cth = 0.9659258
 solid.phi.ic.expression.constant.sth = 0.2588190
 solid.phi.ic.expression.constant.x0  = -0.5
 solid.phi.ic.expression.constant.xb  = 1.5
-solid.phi.ic.expression.constant.eps = 0.02
+solid.phi.ic.expression.constant.eps = 0.01
 solid.phi.ic.expression.region0 = "0.5*(1.0 + tanh( max(max( y*cth - (x-x0)*sth, -y*cth - (x-x0)*sth ), x - xb ) / eps ))"
 
 # Prescribed quiescent solid target, eta-consistent (alpha_1 = 0.5):

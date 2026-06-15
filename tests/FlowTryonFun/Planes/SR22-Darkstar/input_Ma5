@@ -42,7 +42,7 @@ geometry.is_periodic = 0 0 0
 timestep            = 1e-6
 dynamictimestep.on  = 1
 dynamictimestep.verbose = 0
-dynamictimestep.max = 5e-3
+dynamictimestep.max = 3e-3
 dynamictimestep.min = 1e-10
 cfl                 = 0.3             # supersonic
 cfl_v               = 0.3
@@ -56,6 +56,7 @@ stop_time           = 11.0             # ~5 flow-through times (L/U = 12/5 = 2.4
 # sync with the values printed there).
 # ----------------------------------------------------------------------------
 apply_embedded_solid = 1
+solid.brinkman       = 500            # YANG porous wall (now the default): ~4*U/eps, U=5, eps~0.04 (BMP)
 solid.cutoff         = 0.5
 lagrange             = 0.0
 solid.mu             = 0.0            # inviscid slip wall

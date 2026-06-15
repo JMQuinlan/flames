@@ -440,6 +440,15 @@ protected:
     // skips become inert; requires solid.brinkman > 0 to do anything.
     int solid_clean_yang = 0;
 
+    // Phi threshold below which the SOLID is skipped by pressure relaxation,
+    // interface sharpening and the CFL reduction.  Legacy: = solid_cutoff (skip
+    // the frozen cells).  Under clean_yang the freeze cutoff is forced tiny, but
+    // the stiff pressure-relaxation Newton still DIVERGES on the penalized
+    // full-flux solid state (especially low-Mach), so relaxation must still skip
+    // the solid -- this separate threshold (0.5 = the geometric solid side) keeps
+    // that skip on while the freeze stays off.
+    Set::Scalar solid_relax_skip = 0.0;
+
     // ------------------------------------------------------------------
     // Artificial heat exchange (AHE) - Schmidmayer 2020 eq. 13 r-source
     //     E0_rhs += -mu p_I (p_0 - p_1)

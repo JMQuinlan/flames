@@ -56,6 +56,7 @@ stop_time           = 18.0             # ~5 flow-through times (L/U = 12/3 = 4.0
 # sync with the values printed there).
 # ----------------------------------------------------------------------------
 apply_embedded_solid = 1
+solid.brinkman       = 300            # YANG porous wall (now the default): ~4*U/eps, U=3, eps~0.04 (BMP)
 solid.cutoff         = 0.5
 lagrange             = 0.0
 solid.mu             = 0.0            # inviscid slip wall

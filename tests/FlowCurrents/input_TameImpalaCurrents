@@ -46,7 +46,7 @@ geometry.is_periodic = 0 0 0
 timestep            = 1e-5
 dynamictimestep.on  = 1
 dynamictimestep.verbose = 0
-dynamictimestep.max = 5e-2
+dynamictimestep.max = 2e-2
 dynamictimestep.min = 1e-9
 cfl                 = 0.3
 stop_time           = 2500.0          # 10x -- long run so the asymmetric instability fully grows
@@ -55,11 +55,9 @@ stop_time           = 2500.0          # 10x -- long run so the asymmetric instab
 # EMBEDDED SOLID BOUNDARY -- the "sphere" (2D cylinder), centered at the origin
 # ----------------------------------------------------------------------------
 apply_embedded_solid = 1
-solid.cutoff         = 0.5            # phi<cutoff frozen to the solid target (near-sharp wall)
-lagrange             = 0.0            # Brinkman penalty off (freeze + traction enforce the wall)
-solid.mu             = 20.0           # solid viscosity for tangential no-slip (kept moderate so the
-                                      # viscous CFL doesn't dominate dt over a long shedding run;
-                                      # raise toward ~100 for a stiffer wall if you see surface slip)
+solid.clean_yang     = 1              # YANG full-flux porous wall (the default embedded-solid method)
+solid.brinkman       = 70             # YANG penalty ~4*U/eps (U=1, eps=0.06): gives BOTH no-penetration AND no-slip (drives u->0 in the solid)
+solid.mu             = 0.0            # NO solid-mu blend: under Yang's UN-masked flux a large solid.mu x the steep band gradient (u:1->0) destabilizes the low-Mach wall (dt collapse). The penalty does the no-slip; fluid mu0/mu1 does the boundary layer.
 solid.mu_b           = 0.0
 lagrange_solid       = 0.0
 phi_refinement_criterion = 0.1
