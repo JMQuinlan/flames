@@ -2,6 +2,7 @@
 #define INTEGRATOR_HYDRO2_H
 
 #include "Integrator/Integrator.H"
+#include "Integrator/EmbeddedSolid.H"
 #include "IO/ParmParse.H"
 
 // Boundry Conditions
@@ -68,6 +69,7 @@ public:
         // ETA
         delete eta_ic;
         delete etadot_ic;
+        // EMBEDDED SOLID: ICs/BCs owned by the EmbeddedSolid destructor.
         // FLUID 0
         delete density0_ic;
         delete velocity0_ic;
@@ -263,6 +265,17 @@ protected:
     Set::Field<Set::Scalar> eta_old_mf;
     Set::Field<Set::Scalar> hess_eta_mf;
     Set::Field<Set::Scalar> n_hat_mf;
+
+    // ------------------------------------------------------------------
+    // EMBEDDED SOLID BOUNDARY (diffuse-interface immersed boundary)
+    // ------------------------------------------------------------------
+    // phi is the SOLID indicator: phi = 1 -> fluid, phi = 0 -> solid.
+    // It is DISTINCT from eta, which in Hydro2 is the fluid-fluid volume
+    // fraction alpha_1.  (In the single-phase Hydro solver the field named
+    // eta plays the role that phi plays here.)  Static in this first
+    // implementation: phi is set from its IC and never evolved.
+    // All embedded-solid state + per-cell wall physics is consolidated here.
+    EmbeddedSolid embedded;
 protected:
 
     int n_step = 0;
@@ -301,6 +314,9 @@ protected:
     IC::IC<Set::Scalar>* eta_ic = nullptr;
     IC::IC<Set::Scalar>* etadot_ic = nullptr;
 
+    // EMBEDDED SOLID: indicator IC/BC + prescribed per-phase target state are
+    // now held by the `embedded` member (Integrator::EmbeddedSolid).
+
     BC::Nothing bc_nothing;
 
     BC::Constant neumann_bc_1 = BC::Constant::ZeroNeumann(1);
@@ -317,6 +333,7 @@ protected:
     Set::Scalar rho_min = 1e10;
 
     Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion=NAN;
+    // grad(phi) solid-boundary refinement is now embedded.refinement_criterion
     // FLUID 0
     Set::Scalar gamma0 = NAN, p0_0 = NAN, mu0 = NAN, mu0_b = NAN, MW0 = NAN;
     Set::Scalar b0 = NAN, q0EOS = NAN;
@@ -351,6 +368,29 @@ protected:
     int static_eta = 0;
     int apply_vaporization = 0;
     int Spec_Vol = 1;
+
+    // EMBEDDED SOLID BOUNDARY controls now live on the `embedded` member:
+    //   embedded.apply = 0 -> no immersed solid (default; behavior unchanged)
+    //   embedded.apply = 1 -> mask fluxes by phi + penalize toward solid state
+
+    // YANG (2023) DIFFUSE-DOMAIN no-penetration via MOMENTUM-ONLY Brinkman
+    // penalization.  0 = off.  >0 adds -coeff*(1-phi)*(M - M_solid) to the
+    // momentum RHS only (mass/energy left to evolve), so the arrested normal
+    // kinetic energy converts to internal energy (stagnation heating) and the
+    // wall pressure builds self-consistently from the EOS -> the flow reflects
+    // WITHOUT a ghost-fluid mirror.  This is the genuine diffuse-interface
+    // no-penetration of Yang et al. 2023 (term phi0/kappa (u_S - u); orig.
+    // Angot 1999 / Liu & Vasilyev 2007), the true-diffuse-interface alternative
+    // to `solid.reflect`.  Distinct from the full-state `lagrange` penalty,
+    // which also pins density+energy and therefore clamps the wall pressure.
+    // (now embedded.brinkman)
+
+    // Phi threshold below which the SOLID is skipped by pressure relaxation,
+    // interface sharpening and the CFL reduction.  The stiff pressure-relaxation
+    // Newton DIVERGES on the penalized full-flux solid state (especially
+    // low-Mach), so relaxation must skip the solid -- this threshold
+    // (0.5 = the geometric solid side) keeps that skip on.  Fixed at 0.5.
+    // (now embedded.relax_skip)
 
     // ------------------------------------------------------------------
     // Artificial heat exchange (AHE) - Schmidmayer 2020 eq. 13 r-source

@@ -90,6 +90,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp.query_default("gradu_refinement_criterion", value.gradu_refinement_criterion, 0.01); // velocity gradient-based refinement
         pp.query_default("p_refinement_criterion", value.p_refinement_criterion, 1e-3);         // pressure-based refinement
         pp.query_default("rho_refinement_criterion", value.rho_refinement_criterion, 1e-6);    // density-based refinement
+        pp.query_default("phi_refinement_criterion", value.embedded.refinement_criterion, 0.001);   // grad(phi) solid-boundary refinement
 
         // SOLVER AND REFRENCE CONDITIONS
         pp_query_required("cfl", value.cfl);                // cfl condition
@@ -107,6 +108,29 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("apply_weight", value.apply_weight, false);                  // Apply weight when solving, default: false --> "No Weight"
         pp_query_default("apply_vaporization", value.apply_vaporization, false);       // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
         pp_query_default("static_eta", value.static_eta, false);                      // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
+
+        // EMBEDDED SOLID BOUNDARY (immersed boundary via the phi indicator).
+        //   apply_embedded_solid = 0 -> off (default; existing behavior unchanged)
+        //   apply_embedded_solid = 1 -> static solid: mask fluxes by phi and
+        //                               penalize the fluid toward the solid state.
+        // The prescribed per-phase solid target is supplied via solid.*.ic below.
+        pp_query_default("apply_embedded_solid", value.embedded.apply, 0);
+        pp_query_default("solid.brinkman", value.embedded.brinkman, 0.0); // Yang(2023) momentum-only Brinkman no-penetration (0=off)
+        // The embedded solid uses ONLY the Yang (2023) diffuse-domain method --
+        // full Euler flux everywhere + the (1-phi)/kappa momentum Brinkman
+        // penalty (solid.brinkman) as the SOLE wall.  When solid.brinkman is not
+        // provided, the FillGhost4BC auto wall (a dt-independent momentum-only
+        // projection) supplies the no-penetration instead.
+        if (value.embedded.apply)
+        {
+            if (value.embedded.brinkman <= 0.0)
+                Util::Message(INFO, "embedded solid: Yang full-flux wall, auto momentum projection (solid.brinkman not set)");
+            else
+                Util::Message(INFO, "embedded solid: Yang full-flux porous wall, solid.brinkman=", value.embedded.brinkman);
+            // Pressure relaxation still DIVERGES on the penalized full-flux solid
+            // state, so it must skip the solid side (phi<0.5).  Fixed threshold.
+            value.embedded.relax_skip = 0.5;
+        }
 
         // Artificial heat exchange (AHE) on per-phase internal energy rows.
         // See bin/AHE.md for derivation: Schmidmayer 2020 eq. 13 r-source
@@ -305,6 +329,18 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         {
             value.eta_bc = new BC::Constant(BC::Constant::ZeroNeumann(1));
         }
+
+        // Phi (solid indicator) BC.  The solid geometry is static, so the
+        // indicator should not vary at the domain edge: zero-neumann
+        // (ghost = interior) is the correct default.  An explicit
+        // "solid.phi.bc" expression may override it.
+        if (value.embedded.apply)
+        {
+            if (pp.contains("solid.phi.bc.type.xlo") || pp.contains("solid.phi.bc.type.ylo"))
+                value.embedded.phi_bc = new BC::Expression(1, pp, "solid.phi.bc");
+            else
+                value.embedded.phi_bc = new BC::Constant(BC::Constant::ZeroNeumann(1));
+        }
     }
 
     // Register FabFields:
@@ -330,6 +366,24 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing, 1, 0, "etadot", true, false);
         value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing, 4, 0, "hess_eta", false, false, { "00", "01", "10", "11" });
         value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing, 2, 0, "n_hat", false, false, { "x", "y" });
+
+        // EMBEDDED SOLID BOUNDARY fields (only registered when enabled, so
+        // existing inputs and plotfiles are completely unchanged when off).
+        // phi is registered as non-evolving (it is static and excluded from
+        // the RK solution vector); it is refilled from its IC on regrid.
+        if (value.embedded.apply)
+        {
+            value.RegisterNewFab(value.embedded.phi_mf,      value.embedded.phi_bc, 1, nghost, "phi", true, false);
+            value.RegisterNewFab(value.embedded.phi_old_mf,  value.embedded.phi_bc, 1, nghost, "phi_old", false, false);
+            value.RegisterNewFab(value.embedded.grad_phi_mf, &value.bc_nothing, 2, 0, "grad_phi", true, false, { "x", "y" });
+
+            // Prescribed per-phase solid target state (quiescent solid).
+            value.RegisterNewFab(value.embedded.density0_mf, value.density_bc,  1, nghost, "solid_rho_eta0", false, false);
+            value.RegisterNewFab(value.embedded.density1_mf, value.density_bc,  1, nghost, "solid_rho_eta1", false, false);
+            value.RegisterNewFab(value.embedded.momentum_mf, value.momentum_bc, 2, nghost, "solid_momentum", false, false, { "x", "y" });
+            value.RegisterNewFab(value.embedded.energy0_mf,  value.energy_bc,   1, nghost, "solid_energy0",  false, false);
+            value.RegisterNewFab(value.embedded.energy1_mf,  value.energy_bc,   1, nghost, "solid_energy1",  false, false);
+        }
 
         // FLUID 0
         value.RegisterNewFab(value.density0_mf,     value.density_bc,   1, nghost, "density0",     false, false );
@@ -454,9 +508,25 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     pp.select_default<IC::Constant,IC::Expression>("m0.ic",value.ic_m0,value.geom);
     // diffuse boundary prescribed velocity
     pp.select_default<IC::Constant,IC::Expression>("u0.ic",value.ic_u0,value.geom);
-    // diffuse boundary prescribed heat flux 
+    // diffuse boundary prescribed heat flux
     pp.select_default<IC::Constant,IC::Expression>("q.ic",value.ic_q,value.geom);
-    
+
+    // EMBEDDED SOLID BOUNDARY initial conditions.
+    //   solid.phi.ic       -> indicator field (1 fluid, 0 solid), e.g. a tanh
+    //                         circle/airfoil expression (see tests/FlowCylinder).
+    //   solid.density{0,1} -> prescribed phase masses (alpha_k rho_k) in solid.
+    //   solid.momentum     -> prescribed mixture momentum in solid (0 = static wall).
+    //   solid.energy{0,1}  -> prescribed per-phase internal energies in solid.
+    if (value.embedded.apply)
+    {
+        pp.select_default<IC::Constant,IC::Expression,IC::BMP,IC::PNG>("solid.phi.ic",       value.embedded.phi_ic,      value.geom);
+        pp.select_default<IC::Constant,IC::Expression>("solid.density0.ic",                 value.embedded.density0_ic, value.geom);
+        pp.select_default<IC::Constant,IC::Expression>("solid.density1.ic",                 value.embedded.density1_ic, value.geom);
+        pp.select_default<IC::Constant,IC::Expression>("solid.momentum.ic",                 value.embedded.momentum_ic, value.geom);
+        pp.select_default<IC::Constant,IC::Expression>("solid.energy0.ic",                  value.embedded.energy0_ic,  value.geom);
+        pp.select_default<IC::Constant,IC::Expression>("solid.energy1.ic",                  value.embedded.energy1_ic,  value.geom);
+    }
+
 
     // SOLVERS
     // Riemann solver
@@ -547,6 +617,68 @@ void Hydro2::Initialize(int lev)
     ic_m0           ->Initialize(lev, m0_mf, 0.0);
     ic_u0           ->Initialize(lev, u0_mf, 0.0);
     ic_q            ->Initialize(lev, q_mf, 0.0);
+
+    // EMBEDDED SOLID BOUNDARY: indicator + prescribed solid target state.
+    if (embedded.apply)
+    {
+        embedded.phi_ic     ->Initialize(lev, embedded.phi_mf, 0.0);
+        embedded.phi_ic     ->Initialize(lev, embedded.phi_old_mf, 0.0);
+        embedded.grad_phi_mf[lev]    ->setVal(0.0);
+        embedded.density0_ic   ->Initialize(lev, embedded.density0_mf, 0.0);
+        embedded.density1_ic   ->Initialize(lev, embedded.density1_mf, 0.0);
+        embedded.momentum_ic   ->Initialize(lev, embedded.momentum_mf, 0.0);
+        embedded.energy0_ic    ->Initialize(lev, embedded.energy0_mf, 0.0);
+        embedded.energy1_ic    ->Initialize(lev, embedded.energy1_mf, 0.0);
+
+        // ----------------------------------------------------------------
+        // Initialize the embedded solid AT REST (Mix-style velocity blend).
+        // ----------------------------------------------------------------
+        // The fluid IC sets the velocity over the WHOLE domain, including
+        // inside the solid.  Blend it toward the solid velocity u_solid by phi
+        //   velocity <- phi*velocity + (1-phi)*u_solid
+        // so the solid region starts quiescent.  Without this, the Yang
+        // full-flux porous wall (no cutoff freeze) starts the dense solid
+        // interior moving at the freestream and shocks itself apart at startup
+        // (the low-Mach viscous Riemann abort).  u_solid = solid_M/rho_solid
+        // (= 0 for a static solid).  Mix() below then builds the conserved
+        // state from the blended primitives.
+        for (amrex::MFIter mfi(*embedded.phi_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto phi   = embedded.phi_mf[lev]->array(mfi);
+            auto vel0  = velocity0_mf[lev]->array(mfi);
+            auto vel1  = velocity1_mf[lev]->array(mfi);
+            auto s_re0 = embedded.density0_mf[lev]->array(mfi);
+            auto s_re1 = embedded.density1_mf[lev]->array(mfi);
+            auto s_M   = embedded.momentum_mf[lev]->array(mfi);
+            const Set::Scalar small_loc = small;
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                const Set::Scalar w     = std::min(std::max(phi(i, j, k), 0.0), 1.0);
+                const Set::Scalar rho_s = std::max(s_re0(i, j, k) + s_re1(i, j, k), small_loc);
+                const Set::Scalar us_x  = s_M(i, j, k, 0) / rho_s;
+                const Set::Scalar us_y  = s_M(i, j, k, 1) / rho_s;
+                vel0(i, j, k, 0) = w * vel0(i, j, k, 0) + (1.0 - w) * us_x;
+                vel0(i, j, k, 1) = w * vel0(i, j, k, 1) + (1.0 - w) * us_y;
+                vel1(i, j, k, 0) = w * vel1(i, j, k, 0) + (1.0 - w) * us_x;
+                vel1(i, j, k, 1) = w * vel1(i, j, k, 1) + (1.0 - w) * us_y;
+            });
+        }
+
+        // grad(phi) diagnostic (static; for the boundary-refinement plot).
+        const Set::Scalar *DXp = geom[lev].CellSize();
+        embedded.phi_mf[lev]->FillBoundary(geom[lev].periodicity());
+        for (amrex::MFIter mfi(*embedded.phi_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto phi      = embedded.phi_mf[lev]->array(mfi);
+            auto grad_phi = embedded.grad_phi_mf[lev]->array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Vector g = Numeric::Gradient(phi, i, j, k, 0, DXp);
+                grad_phi(i, j, k, 0) = g(0);
+                grad_phi(i, j, k, 1) = g(1);
+            });
+        }
+    }
 
     // FILLING GHOST CELLS
     rho_eta0_mf[lev]->setVal(0.0);
@@ -1225,6 +1357,15 @@ Hydro2::RHS(int lev,
         }
         const auto bx_lo = amrex::lbound(bx);
 
+        // EMBEDDED SOLID BOUNDARY patches (empty Array4 when the feature is
+        // off; never dereferenced unless apply_embedded_solid is set).
+        Set::Patch<const Set::Scalar> phisol = embedded.phi_mf.Patch(lev, mfi);          // solid indicator (1 fluid, 0 solid)
+        Set::Patch<const Set::Scalar> s_re0  = embedded.density0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> s_re1  = embedded.density1_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> s_M    = embedded.momentum_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> s_E0   = embedded.energy0_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> s_E1   = embedded.energy1_mf.Patch(lev, mfi);
+
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
@@ -1288,6 +1429,16 @@ Hydro2::RHS(int lev,
             Set::Scalar lambda_eff = 1.0 / (eta(i, j, k) / std::max(mu0_b, small) + (1.0 - eta(i, j, k)) / std::max(mu1_b, small));
             Set::Vector grad_mu = (mu0 - mu1) * grad_eta;
             Set::Vector grad_lambda = (mu0_b - mu1_b) * grad_eta;
+
+            // EMBEDDED SOLID: clamped phi indicator (phi_c=1 in pure fluid, ->0
+            // in the solid).  Default 1 makes every solid term below vanish when
+            // the feature is OFF, so behavior is unchanged in that case.  phi_c
+            // weights the (1-phi)/kappa momentum Brinkman penalty in the RHS.
+            Set::Scalar phi_c = 1.0;
+            if (embedded.apply)
+            {
+                phi_c = embedded.clampPhi(phisol(i, j, k));
+            }
 
             // Solving
             for (int p = 0; p < 2; p++)             // i
@@ -1616,6 +1767,7 @@ Hydro2::RHS(int lev,
                 Solver::Local::Limiter::Primitive pR = limiter->Reconstruct(stencil_R);
                 Solver::Local::FluidRiemann::State sL_face = Solver::Local::Limiter::ToState(pL, small);
                 Solver::Local::FluidRiemann::State sR_face = Solver::Local::Limiter::ToState(pR, small);
+
                 return riemannsolver->Solve(sL_face, sR_face, pref, small, Spec_Vol);
             };
 
@@ -1791,8 +1943,8 @@ Hydro2::RHS(int lev,
             const Set::Scalar E1_flux_div = (flux_xlo.energy1 - flux_xhi.energy1) / DX[0]
                                           + (flux_ylo.energy1 - flux_yhi.energy1) / DX[1];
 
-            E0_rhs(i, j, k) = E0_flux_div - a1_C * p0_C * div_u;
-            E1_rhs(i, j, k) = E1_flux_div - a2_C * p1_C * div_u;
+            E0_rhs(i, j, k) = (E0_flux_div - a1_C * p0_C * div_u);
+            E1_rhs(i, j, k) = (E1_flux_div - a2_C * p1_C * div_u);
 
             // ------------------------------------------------------------
             // Artificial heat exchange (AHE) -- Schmidmayer 2020 eq. 13
@@ -1908,6 +2060,69 @@ Hydro2::RHS(int lev,
 
                     E0_rhs(i, j, k) += -q_src;
                     E1_rhs(i, j, k) += -q_src;
+                }
+            }
+
+            // ============================================================
+            // EMBEDDED SOLID BOUNDARY -- volume (Brinkman) penalization.
+            // ------------------------------------------------------------
+            // The convective flux is delivered at full strength everywhere
+            // (Yang diffuse-domain).  This adds the bulk penalty driving the
+            // conserved state in the solid fraction chi = 1 - phi toward the
+            // prescribed quiescent target, with strength `lagrange` (Angot et
+            // al. 1999; Liu & Vasilyev 2007).  Static solid (phidot = 0) -> no
+            // etadot relaxation term.
+            // ============================================================
+            if (embedded.apply && lagrange > 0.0)
+            {
+                const Set::Scalar chi = 1.0 - phi_c;
+                if (chi > 0.0)
+                {
+                    const Set::Scalar lam = lagrange * chi;
+                    // Solid total energy target (rho E)_s = E0_s + E1_s + KE_s.
+                    const Set::Scalar rho_s = std::max(s_re0(i, j, k) + s_re1(i, j, k), small);
+                    const Set::Scalar KE_s  = 0.5 * (s_M(i, j, k, 0) * s_M(i, j, k, 0)
+                                                   + s_M(i, j, k, 1) * s_M(i, j, k, 1)) / rho_s;
+                    const Set::Scalar E_s   = s_E0(i, j, k) + s_E1(i, j, k) + KE_s;
+
+                    rho_eta0_rhs(i, j, k) += -lam * (rho_eta0(i, j, k) - s_re0(i, j, k));
+                    rho_eta1_rhs(i, j, k) += -lam * (rho_eta1(i, j, k) - s_re1(i, j, k));
+                    M_rhs(i, j, k, 0)     += -lam * (M(i, j, k, 0)      - s_M(i, j, k, 0));
+                    M_rhs(i, j, k, 1)     += -lam * (M(i, j, k, 1)      - s_M(i, j, k, 1));
+                    E_rhs(i, j, k)        += -lam * (E(i, j, k)         - E_s);
+                    E0_rhs(i, j, k)       += -lam * (E0_arr(i, j, k)    - s_E0(i, j, k));
+                    E1_rhs(i, j, k)       += -lam * (E1_arr(i, j, k)    - s_E1(i, j, k));
+                }
+            }
+
+            // ============================================================
+            // EMBEDDED SOLID BOUNDARY -- Yang(2023) diffuse-domain
+            // no-penetration via MOMENTUM-ONLY Brinkman penalization.
+            // ------------------------------------------------------------
+            // Genuine diffuse-interface no-penetration (Yang et al. 2023,
+            // term phi0/kappa (u_S - u); orig. Angot 1999 / Liu & Vasilyev
+            // 2007): drive the MOMENTUM toward the quiescent solid value in
+            // the solid fraction chi = 1 - phi, but DO NOT penalize mass or
+            // total energy.  Because E is conserved while the normal
+            // kinetic energy is removed, the arrested KE converts to
+            // INTERNAL energy (stagnation heating) and the wall pressure
+            // builds self-consistently from the EOS -> the flow reflects.
+            // Contrast the full-state `lagrange` penalty above (which also
+            // pins rho and E to the solid target and so clamps the wall
+            // pressure to ambient -> under-turning) and the ghost-fluid
+            // `solid.reflect` mirror (VoF-flavoured).  Static solid
+            // (M_solid = 0) -> the penalty does no work on the solid.
+            // ============================================================
+            if (embedded.apply && embedded.brinkman > 0.0)
+            {
+                const Set::Scalar chi = 1.0 - phi_c;
+                if (chi > 0.0)
+                {
+                    const Set::Scalar lam = embedded.brinkman * chi;
+                    M_rhs(i, j, k, 0) += -lam * (M(i, j, k, 0) - s_M(i, j, k, 0));
+                    M_rhs(i, j, k, 1) += -lam * (M(i, j, k, 1) - s_M(i, j, k, 1));
+                    // momentum-only: no mass/energy penalty (pressure builds,
+                    // arrested KE -> internal energy; energy-conserving).
                 }
             }
 
@@ -2295,6 +2510,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> E0_p = energy0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> E1_p = energy1_mf.Patch(lev, mfi);
 
+        // EMBEDDED SOLID indicator (empty Array4 when feature is off).
+        Set::Patch<const Set::Scalar> phisol = embedded.phi_mf.Patch(lev, mfi);
+
         // Local EOS Copy
         const Solver::EOS::Tammann eos0_local = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
@@ -2404,15 +2622,20 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 {"n_hat_[1]", n_hat_(i,j,k,1)}
             });
         
-            // Track CFL quantities (NOW WORKS - captured by reference!)
-            c_max_local = std::max(c_max_local, a(i,j,k));
-            vx_max_local = std::max(vx_max_local, std::abs(v(i,j,k,0)));
-            vy_max_local = std::max(vy_max_local, std::abs(v(i,j,k,1)));
-        
-            Set::Scalar F_mag = sqrt(Source(i,j,k,1) * Source(i,j,k,1) + 
-                                    Source(i,j,k,2) * Source(i,j,k,2));
-            F_max_local = std::max(F_max_local, F_mag);
-            rho_min_local = std::min(rho_min_local, rho(i,j,k));
+            // Track CFL quantities.  Skip solid cells (their frozen state must
+            // not drive the global timestep).
+            const bool is_fluid = (!embedded.apply) || (phisol(i, j, k) > embedded.relax_skip);
+            if (is_fluid)
+            {
+                c_max_local = std::max(c_max_local, a(i,j,k));
+                vx_max_local = std::max(vx_max_local, std::abs(v(i,j,k,0)));
+                vy_max_local = std::max(vy_max_local, std::abs(v(i,j,k,1)));
+
+                Set::Scalar F_mag = sqrt(Source(i,j,k,1) * Source(i,j,k,1) +
+                                        Source(i,j,k,2) * Source(i,j,k,2));
+                F_max_local = std::max(F_max_local, F_mag);
+                rho_min_local = std::min(rho_min_local, rho(i,j,k));
+            }
         });
     } // end Mixed Fields loop
 
@@ -2479,6 +2702,36 @@ void Hydro2::Regrid(int lev, Set::Scalar regrid_time)
     // Any previously-accumulated fluxes are discarded.
     AllocateRefluxScratch(lev);
 
+    // EMBEDDED SOLID: phi (and the prescribed solid target) is a STATIC,
+    // analytic field.  Re-evaluate it from its IC on the new grid rather
+    // than relying on coarse-fine interpolation, which would smear the
+    // sharp solid boundary and create spurious partial-solid cells.
+    if (embedded.apply)
+    {
+        embedded.phi_ic   ->Initialize(lev, embedded.phi_mf,            regrid_time);
+        embedded.phi_ic   ->Initialize(lev, embedded.phi_old_mf,        regrid_time);
+        embedded.density0_ic ->Initialize(lev, embedded.density0_mf, regrid_time);
+        embedded.density1_ic ->Initialize(lev, embedded.density1_mf, regrid_time);
+        embedded.momentum_ic ->Initialize(lev, embedded.momentum_mf, regrid_time);
+        embedded.energy0_ic  ->Initialize(lev, embedded.energy0_mf,  regrid_time);
+        embedded.energy1_ic  ->Initialize(lev, embedded.energy1_mf,  regrid_time);
+
+        // grad(phi) diagnostic (static; recomputed for the new grid).
+        const Set::Scalar *DX = geom[lev].CellSize();
+        embedded.phi_mf[lev]->FillBoundary(geom[lev].periodicity());
+        for (amrex::MFIter mfi(*embedded.phi_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto phi      = embedded.phi_mf[lev]->array(mfi);
+            auto grad_phi = embedded.grad_phi_mf[lev]->array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Vector g = Numeric::Gradient(phi, i, j, k, 0, DX);
+                grad_phi(i, j, k, 0) = g(0);
+                grad_phi(i, j, k, 1) = g(1);
+            });
+        }
+    }
+
     // Apply BC
     FillGhost4BC(lev, regrid_time);
 
@@ -2503,6 +2756,22 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
             if (grad_eta.lpNorm<2>() * dr * 2 > eta_refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
         });
+    }
+
+    // EMBEDDED SOLID: refine the diffuse solid boundary (grad(phi) is large
+    // only across the immersed wall, so this tags exactly that layer).
+    if (embedded.apply)
+    {
+        for (amrex::MFIter mfi(*embedded.phi_mf[lev], true); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.tilebox();
+            amrex::Array4<char> const& tags = a_tags.array(mfi);
+            amrex::Array4<const Set::Scalar> const& phi = (*embedded.phi_mf[lev]).array(mfi);
+
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Vector grad_phi = Numeric::Gradient(phi, i, j, k, 0, DX);
+                if (grad_phi.lpNorm<2>() * dr * 2 > embedded.refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
+            });
+        }
     }
 
     // Vorticity criterion for refinement
@@ -2729,8 +2998,11 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
             Set::Patch<Set::Scalar> rho_eta1 = rho_eta1_work.array(mfi);
             Set::Patch<const Set::Scalar> rho_eta0_original = rho_eta0_mf[lev]->array(mfi);
             Set::Patch<const Set::Scalar> rho_eta1_original = rho_eta1_mf[lev]->array(mfi);
+            Set::Patch<const Set::Scalar> phisol = embedded.phi_mf.Patch(lev, mfi);
 
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                // Embedded solid: never sharpen the frozen solid interior.
+                if (embedded.apply && embedded.isSolid(phisol(i, j, k))) return;
                 auto sten = Numeric::GetStencil(i, j, k, domain);
 
                 // ============================================================
@@ -3040,8 +3312,11 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
         Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf[lev]->array(mfi);
         Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf[lev]->array(mfi);
         Set::Patch<Set::Scalar> eta = eta_mf.Patch(lev, mfi);
+        Set::Patch<const Set::Scalar> phisol = embedded.phi_mf.Patch(lev, mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            // Embedded solid: preserve the prescribed alpha inside the solid.
+            if (embedded.apply && embedded.isSolid(phisol(i, j, k))) return;
             Set::Scalar rho_total = rho_eta0(i, j, k) + rho_eta1(i, j, k);
             eta(i, j, k) = rho_eta0(i, j, k) / (rho_total + small);
 
@@ -3442,6 +3717,60 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             rho(i, j, k) = std::max(rho_eta0(i, j, k) + rho_eta1(i, j, k), small);
             eta(i, j, k) = std::max(0.0, std::min(1.0, eta(i, j, k)));
         });
+    }
+
+    // ------------------------------------------------------------
+    // STEP 2b: EMBEDDED SOLID BOUNDARY auto wall + ghost fill.
+    // ------------------------------------------------------------
+    // Fill the static indicator's ghosts, then (only when solid.brinkman was
+    // not provided) apply a dt-independent, unconditionally-stable momentum-
+    // only projection toward the solid velocity, graded by phi.  When
+    // solid.brinkman > 0 the explicit RHS penalty is the wall and this is
+    // skipped.  This runs BEFORE the STEP 4 primitive recovery so the EOS sees
+    // a sensible (finite p, c) state inside the solid, and it is IDEMPOTENT --
+    // safe to call from RHS, the post-stage hook, and the post-integration
+    // refresh.
+    if (embedded.apply)
+    {
+        embedded.phi_bc->define(geom[lev]);
+        FillBoundariesWithBC(lev, time, embedded.phi_bc, { embedded.phi_mf[lev].get() });
+
+        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox(); // DOMAIN ONLY
+            auto phi      = embedded.phi_mf[lev]->array(mfi);
+            auto M        = momentum_mf[lev]->array(mfi);
+            auto E        = energy_per_vol_mf[lev]->array(mfi);
+            auto E0_arr   = energy0_mf[lev]->array(mfi);
+            auto E1_arr   = energy1_mf[lev]->array(mfi);
+            auto rho      = density_mf[lev]->array(mfi);
+            auto s_M      = embedded.momentum_mf[lev]->array(mfi);
+
+            const Set::Scalar small_  = small;
+            const Set::Scalar brink_  = embedded.brinkman;
+
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                // Auto wall (used only when solid.brinkman not provided): a
+                // dt-independent, unconditionally-stable momentum-only
+                // projection toward the solid velocity, graded by phi:
+                //   M <- phi*M + (1-phi)*M_solid  (= the rest-init blend applied
+                // every step).  When solid.brinkman > 0 the explicit RHS penalty
+                // is the wall instead and this is skipped.  Mass/per-phase
+                // energy keep their evolved (full-flux) values; only the
+                // momentum is projected and the redundant total energy E is
+                // recomputed consistently (rho already = rho_eta0+rho_eta1 from
+                // STEP 2 above).
+                if (brink_ <= 0.0)
+                {
+                    const Set::Scalar w = std::min(std::max(phi(i, j, k), 0.0), 1.0);
+                    M(i, j, k, 0) = w * M(i, j, k, 0) + (1.0 - w) * s_M(i, j, k, 0);
+                    M(i, j, k, 1) = w * M(i, j, k, 1) + (1.0 - w) * s_M(i, j, k, 1);
+                    const Set::Scalar KE = 0.5 * (M(i, j, k, 0) * M(i, j, k, 0)
+                                                + M(i, j, k, 1) * M(i, j, k, 1)) / std::max(rho(i, j, k), small_);
+                    E(i, j, k) = E0_arr(i, j, k) + E1_arr(i, j, k) + KE;
+                }
+            });
+        }
     }
 
     // ------------------------------------------------------------
@@ -4433,12 +4762,19 @@ void Hydro2::RelaxAndReinit(int lev)
         auto E0_   = energy0_mf[lev]->array(mfi);
         auto E1_   = energy1_mf[lev]->array(mfi);
 
+        // EMBEDDED SOLID indicator (empty Array4 when feature is off).
+        Set::Patch<const Set::Scalar> phisol = embedded.phi_mf.Patch(lev, mfi);
+
         // Diagnostic array (only used if diag_on).
         amrex::Array4<Set::Scalar> diag_arr = diag_on
             ? (*diag_mf)[mfi].array()
             : amrex::Array4<Set::Scalar>{};
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            // Skip solid cells: pressure relaxation must not touch the
+            // frozen solid state (its per-phase energies are prescribed,
+            // not in thermodynamic equilibrium with the alpha there).
+            if (embedded.apply && embedded.isSolid(phisol(i, j, k))) return;
             // -----------------------------------------------------------
             // Pre-relax state.  ALL divides use DIV_FLOOR (1e-30), NEVER
             // `small`.  Same lesson as the Limiter Garrick post-mortem:
