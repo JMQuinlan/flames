@@ -30,6 +30,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.colors import ListedColormap
 
 import yt
 yt.funcs.mylog.setLevel(50)
@@ -64,10 +65,15 @@ FRB_RES_X     = 1200
 
 # ---- BACKGROUND FIELD -----------------------------------------------------
 BACKGROUND    = "schlieren"   # 'schlieren' | 'density' | 'pressure' | 'mach'
-SCHLIEREN_EXP = 12.0          # exp contrast for numerical schlieren
-CMAP_SCHLIEREN = "gray_r"
+SCHLIEREN_EXP = 12.0          # exp contrast for schlieren
+CMAP_SCHLIEREN = "gray"       # black shocks on white (flipped from gray_r)
 CMAP_FIELD     = "inferno"
 SHOW_COLORBAR  = True
+
+# ---- PHI (SOLID) OVERLAY --------------------------------------------------
+SHOW_PHI_OVERLAY  = True       # shade the solid (phi) in grayscale over the field
+CMAP_PHI          = "gray"     # phi=0 (solid) -> black, phi=1 (fluid) -> white
+PHI_OVERLAY_ALPHA = 0.6        # max opacity (in solid); fades to 0 in pure fluid
 
 # ---- SHOCK DETECTION ------------------------------------------------------
 DETECT_SHOCK   = True
@@ -85,7 +91,8 @@ SHOW_WEDGE_OUTLINE = True
 SHOW_MEASURED      = True
 SHOW_ANALYTICAL    = True
 SHOW_MACH_LINE     = False        # also draw the Mach-wave angle from the apex
-WEDGE_COLOR        = "#00e5ff"    # wedge phi=0.5 outline
+WEDGE_COLOR        = "#00e5ff"    # wedge phi-contour outline
+PHI_CONTOUR_LEVEL  = 0.5         # wedge outline contour level + shock-origin apex (was 0.5)
 MEASURED_COLOR     = "#ff2d2d"    # measured shock points / fit  (RED)
 ANALYTIC_COLOR     = "#39ff14"    # analytical shock line        (GREEN)
 MACHLINE_COLOR     = "#ffd400"
@@ -95,12 +102,13 @@ MEAS_MS    = 12                   # measured-point marker size (scatter)
 
 # ---- FIGURE / TYPOGRAPHY --------------------------------------------------
 FIGSIZE    = (11.0, 6.2)
+DEBUG_Info = 1                    # 1 -> show the data/annotation textbox; else hide it
 DPI        = 140
 FONT_TITLE = 15
 FONT_LABEL = 12.5
 FONT_TICK  = 10.5
 FONT_ANNOT = 12
-TITLE_TMPL = "FlowWedge  Ma {ma}:  oblique shock vs theta-beta-M theory"
+TITLE_TMPL = r"Oblique Shock $\theta$-$\beta$-M Theory Comparison (Ma {ma})"
 
 # ============================================================================
 # ============================  END CONFIG  ==================================
@@ -173,18 +181,18 @@ def background_field(s):
     dx = (xhi - xlo) / (s["nx"] - 1)
     dy = (yhi - ylo) / (s["ny"] - 1)
     if BACKGROUND == "density":
-        return s["rho"], CMAP_FIELD, "density"
+        return s["rho"], CMAP_FIELD, "Density"
     if BACKGROUND == "pressure":
-        return s["p"], CMAP_FIELD, "pressure"
+        return s["p"], CMAP_FIELD, "Pressure"
     if BACKGROUND == "mach":
         c = np.sqrt(GAMMA * np.maximum(s["p"], 1e-12) / np.maximum(s["rho"], 1e-12))
         mach = np.sqrt(s["vx"] ** 2 + s["vy"] ** 2) / np.maximum(c, 1e-12)
-        return mach, CMAP_FIELD, "Mach number"
-    # numerical schlieren (default)
+        return mach, CMAP_FIELD, "Mach Number"
+    # schlieren (default)
     gy, gx = np.gradient(s["rho"], dy, dx)
     mag = np.sqrt(gx * gx + gy * gy)
     schl = np.exp(-SCHLIEREN_EXP * mag / (mag.max() + 1e-30))
-    return schl, CMAP_SCHLIEREN, "numerical schlieren"
+    return schl, CMAP_SCHLIEREN, "Schlieren"
 
 
 def grad_rho_mag(s):
@@ -245,6 +253,13 @@ def render(s, meas, mach, out_png):
     xlo, xhi, ylo, yhi = s["extent"]
     img, cmap, label = background_field(s)
 
+    # Shock-origin apex from the phi=PHI_CONTOUR_LEVEL crossing on the symmetry
+    # axis (y=0).  The diffuse interface puts this slightly upstream of the
+    # geometric apex, which pushes the analytical shock origin forward.
+    j0 = int(np.argmin(np.abs(s["Y"])))
+    _cross = np.where(s["phi"][j0, :] <= PHI_CONTOUR_LEVEL)[0]
+    apex_x = float(s["X"][_cross[0]]) if _cross.size else WEDGE_X0
+
     # analytical shock angle
     beta_a = ost.beta_deg(WEDGE_THETA_DEG, mach, GAMMA, weak=True)
     attached = beta_a is not None
@@ -257,15 +272,27 @@ def render(s, meas, mach, out_png):
         cb = fig.colorbar(im, ax=ax, fraction=0.025, pad=0.01)
         cb.set_label(label, fontsize=FONT_LABEL)
 
-    # wedge outline (phi = 0.5)
+    # solid (phi) grayscale overlay with alpha BAKED INTO the colormap so the
+    # whiteness tracks transparency: phi=1 (fluid, white) -> fully transparent,
+    # phi=0 (solid, black) -> most opaque.  Lets the schlieren show through.
+    if SHOW_PHI_OVERLAY:
+        _t = np.linspace(0.0, 1.0, 256)
+        _lut = plt.get_cmap(CMAP_PHI)(_t)            # RGBA ramp from the base gray cmap
+        _lut[:, 3] = PHI_OVERLAY_ALPHA * (1.0 - _t)  # alpha: white(1)->0, black(0)->max
+        phi_cmap = ListedColormap(_lut)
+        ax.imshow(np.clip(s["phi"], 0.0, 1.0), origin="lower",
+                  extent=[xlo, xhi, ylo, yhi], cmap=phi_cmap, vmin=0.0, vmax=1.0,
+                  aspect="equal", interpolation="bilinear", zorder=1)
+
+    # wedge outline (phi = PHI_CONTOUR_LEVEL)
     if SHOW_WEDGE_OUTLINE:
-        ax.contour(s["XX"], s["YY"], s["phi"], levels=[0.5],
+        ax.contour(s["XX"], s["YY"], s["phi"], levels=[PHI_CONTOUR_LEVEL],
                    colors=[WEDGE_COLOR], linewidths=WEDGE_LW, zorder=4)
 
     # measured shock points + fit
     if SHOW_MEASURED and len(meas["pts_x"]):
         ax.scatter(meas["pts_x"], meas["pts_y"], s=MEAS_MS, c=MEASURED_COLOR,
-                   marker="o", zorder=6, label="measured shock")
+                   marker="o", zorder=6, label="Measured Shock")
         # mirror to lower half for visual symmetry
         ax.scatter(meas["pts_x"], -meas["pts_y"], s=MEAS_MS, c=MEASURED_COLOR,
                    marker="o", zorder=6)
@@ -279,9 +306,9 @@ def render(s, meas, mach, out_png):
     # analytical shock line from the apex
     if SHOW_ANALYTICAL and attached:
         yy = np.linspace(0.0, yhi, 50)
-        xx = WEDGE_X0 + yy / np.tan(np.radians(beta_a))
+        xx = apex_x + yy / np.tan(np.radians(beta_a))
         ax.plot(xx, yy, "-", color=ANALYTIC_COLOR, lw=SHOCK_LW, zorder=7,
-                label=f"analytical beta={beta_a:.2f}deg")
+                label=rf"Analytical Shock ($\beta$={beta_a:.2f}$^\circ$)")
         ax.plot(xx, -yy, "-", color=ANALYTIC_COLOR, lw=SHOCK_LW, zorder=7)
 
     if SHOW_MACH_LINE:
@@ -290,7 +317,7 @@ def render(s, meas, mach, out_png):
             yy = np.linspace(0.0, yhi, 50)
             xx = WEDGE_X0 + yy / np.tan(mu)
             ax.plot(xx, yy, ":", color=MACHLINE_COLOR, lw=1.3, zorder=5,
-                    label=f"Mach wave mu={np.degrees(mu):.1f}deg")
+                    label=rf"Mach Wave ($\mu$={np.degrees(mu):.1f}$^\circ$)")
 
     # annotation box
     lines = [f"Ma = {mach:.2f},  theta = {WEDGE_THETA_DEG:.1f}deg,  gamma = {GAMMA}",
@@ -306,18 +333,19 @@ def render(s, meas, mach, out_png):
     else:
         lines.append("ATTACHED SHOCK IMPOSSIBLE -> DETACHED BOW SHOCK")
         lines.append(f"(theta={WEDGE_THETA_DEG:.0f} > theta_max={tmax:.2f})")
-    ax.text(0.015, 0.985, "\n".join(lines), transform=ax.transAxes,
-            fontsize=FONT_ANNOT, va="top", ha="left", family="monospace",
-            bbox=dict(boxstyle="round", fc="white", ec="0.3", alpha=0.85), zorder=10)
+    if DEBUG_Info == 1:
+        ax.text(0.015, 0.015, "\n".join(lines), transform=ax.transAxes,
+                fontsize=FONT_ANNOT, va="bottom", ha="left", family="monospace",
+                bbox=dict(boxstyle="round", fc="white", ec="0.3", alpha=0.85), zorder=10)
 
     ax.set_xlim(xlo, xhi)
     ax.set_ylim(ylo, yhi)
-    ax.set_xlabel("x", fontsize=FONT_LABEL)
-    ax.set_ylabel("y", fontsize=FONT_LABEL)
+    ax.set_xlabel("x [m]", fontsize=FONT_LABEL)
+    ax.set_ylabel("y [m]", fontsize=FONT_LABEL)
     ax.tick_params(labelsize=FONT_TICK)
     ax.set_title(TITLE_TMPL.format(ma=f"{mach:g}") + f"    (t = {s['time']:.2f})",
                  fontsize=FONT_TITLE)
-    ax.legend(loc="lower right", fontsize=10, framealpha=0.85)
+    ax.legend(loc="upper left", fontsize=10, framealpha=0.85)
     fig.tight_layout()
     fig.savefig(out_png, dpi=DPI)
     plt.close(fig)
