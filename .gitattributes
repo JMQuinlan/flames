@@ -1,0 +1,42 @@
+# Enforce LF line endings everywhere so files authored on Windows don't break
+# Linux tooling (sbatch/bash, the Alamo input parser, etc.).
+#
+#   text=auto -> git auto-detects text vs binary (binaries are left untouched)
+#   eol=lf    -> text files are stored AND checked out with LF, on every
+#                platform; this overrides a local core.autocrlf=true, so a
+#                Windows checkout still produces LF and a push/pull stays LF.
+* text=auto eol=lf
+
+# Shell / SLURM / source / input decks are always text -> LF (explicit).
+*.sh    text eol=lf
+*.slurm text eol=lf
+*.py    text eol=lf
+*.cpp   text eol=lf
+*.H     text eol=lf
+*.h     text eol=lf
+*.cc    text eol=lf
+*.rst   text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+Makefile text eol=lf
+
+# Windows-only scripts must keep CRLF (none expected, but be safe).
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary file types: never touch the bytes.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.bmp  binary
+*.pdf  binary
+*.eps  binary
+*.ico  binary
+*.gz   binary
+*.tgz  binary
+*.tar  binary
+*.zip  binary
+*.npy  binary
+*.npz  binary
