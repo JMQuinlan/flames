@@ -374,8 +374,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.u0_mf,           &value.bc_nothing, 2, 0, "u0", false, false, { "x", "y" });
         value.RegisterNewFab(value.q_mf,            &value.bc_nothing, 2, 0, "q0", false, false, { "x", "y" });
         value.RegisterNewFab(value.Source_mf,       &value.bc_nothing,  4, 0, "Source", true, false, { "_rho", "_Mx", "_My","_E" });
-        value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, 0, "Fsv", true, false, { "x", "y" });  // Surface Tension (now stores div(Omega) -- diagnostic)
-        value.RegisterNewFab(value.Omega_mf,        &value.bc_nothing,  3, 1, "Omega", true, false, { "xx", "xy", "yy" });  // Sch17 capillary stress tensor (1 ghost for div stencil)
+        value.RegisterNewFab(value.Fsv_mf,          &value.bc_nothing,  2, 0, "Fsv", true, false, { "x", "y" });  // Surface Tension
         value.RegisterNewFab(value.Fw_mf,           &value.bc_nothing,  2, 0, "Fw", true, false, { "x", "y" });   // Weight
         value.RegisterNewFab(value.Ldot_mf,         &value.bc_nothing,  2, 0, "Ldot", true, false, { "x", "y" });  // Ldot
         value.RegisterNewFab(value.T_mf,            value.energy_bc,  1, nghost, "T", true, false);                  // Temperature
@@ -506,7 +505,6 @@ void Hydro2::Initialize(int lev)
     // WritePlotFile, before any step has actually run.
     Fw_mf[lev]      ->setVal(0.0);
     Fsv_mf[lev]     ->setVal(0.0);
-    Omega_mf[lev]   ->setVal(0.0);
     Vap_dot_mf[lev] ->setVal(0.0);
 
     // FLUID 0
@@ -984,7 +982,6 @@ Hydro2::RHS(int lev,
         Set::Patch<const Set::Scalar> gammaf = gamma_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> p0_eff = p0_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
-        Set::Patch<Set::Scalar> Omega_p = Omega_mf.Patch(lev, mfi);     // Sch17 capillary stress tensor (3 comps: xx, xy, yy)
         Set::Patch<Set::Scalar> mu_chem_ = mu_chem_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Bm = Bm_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Y = Y_mf.Patch(lev, mfi);
@@ -992,7 +989,6 @@ Hydro2::RHS(int lev,
         // Local EOS Copy
         const Solver::EOS::Tammann eos0_local = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
-        const Set::Scalar sigma_local = sigma;                          // capture sigma for the device kernel
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
@@ -1075,24 +1071,6 @@ Hydro2::RHS(int lev,
             }
 
             // ------------------------------------------------------------
-            // Sch17 capillary stress tensor  Omega_ij = -sigma * |grad eta|
-            // * (delta_ij - n_i n_j)  (Schmidmayer 2017, Eq. 4).  Computed
-            // at cell centers here; div(Omega) and div(Omega . u) are taken
-            // in the main loop below via central FD on the ghost-filled
-            // Omega_mf.  Conservative-flux form of the Brackbill CSF body
-            // force used previously, preserves total momentum / energy by
-            // construction.  Zero in pure-phase cells (grad_eta_mag = 0).
-            // ------------------------------------------------------------
-            {
-                const Set::Scalar nx = n_hat(0);
-                const Set::Scalar ny = n_hat(1);
-                const Set::Scalar coef = -sigma_local * grad_eta_mag;
-                Omega_p(i, j, k, 0) = coef * (1.0 - nx * nx);   // Omega_xx
-                Omega_p(i, j, k, 1) = coef * (    - nx * ny);   // Omega_xy  ( = Omega_yx )
-                Omega_p(i, j, k, 2) = coef * (1.0 - ny * ny);   // Omega_yy
-            }
-
-            // ------------------------------------------------------------
             // Error Checking
             // ------------------------------------------------------------
             check4nans(time, lev, i, j, k, "ERROR IN RHS(): Primative Field Calculation", {
@@ -1136,16 +1114,6 @@ Hydro2::RHS(int lev,
     // boundary cells read stale (zero) ghost values, creating a spurious
     // CH source that causes eta to drift along domain boundaries.
     FillBoundariesWithBC(lev, time, energy_bc, { mu_chem_mf[lev].get() });
-
-    // Omega ghost cells needed for the div(Omega) and div(Omega . u)
-    // central-difference stencils in the main loop.  Use the simple
-    // FillBoundaries (no physical-BC apply) because energy_bc is a
-    // single-component BC::Expression that aborts on a 3-component MF.
-    // Acceptable here because Omega = -sigma*|grad eta|*(I - n n^T) is
-    // identically zero in pure-phase cells (|grad eta| -> 0), so physical-
-    // wall ghosts left as initialized/extrapolated do not contaminate the
-    // divergence stencil for any bubble that isn't touching the wall.
-    FillBoundaries(lev, { Omega_mf[lev].get() });
 
     // Main time integration loop
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
@@ -1201,7 +1169,6 @@ Hydro2::RHS(int lev,
 
         Set::Patch<Set::Scalar> Source = Source_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Fsv = Fsv_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> Omega_in = Omega_mf.Patch(lev, mfi);   // Sch17 capillary stress tensor (read with 1-ghost stencil)
         Set::Patch<Set::Scalar> Fw = Fw_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Ldot_ = Ldot_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> Vap_dot = Vap_dot_mf.Patch(lev, mfi);
@@ -1350,61 +1317,29 @@ Hydro2::RHS(int lev,
             }); // end check4nans
             
             // ------------------------------------------------------------
-            // Surface Tension -- Sch17 conservative capillary stress tensor
+            // Surface Tension
             // ------------------------------------------------------------
-            // Schmidmayer 2017, Eq. (3) + (4):
-            //   Omega_ij = -sigma * |grad eta| * (delta_ij - n_i n_j)
-            //   d(rho u_i)/dt = ... + d(Omega_ij)/dx_j
-            //   d(E)/dt       = ... + d(Omega_ij u_j)/dx_i
-            // Omega is filled at cell centers in Loop 1, ghost-exchanged
-            // via FillBoundariesWithBC before Loop 2; here we take the
-            // divergences via central FD.  Algebraically equivalent to the
-            // Brackbill body force F_sv = sigma * kappa * grad_eta in the
-            // continuous limit, but discretely conservative (preserves
-            // total momentum / energy contributions to machine precision)
-            // and avoids the kappa-times-grad_eta cross-term whose
-            // discrete error scales as 1/epsilon at the diffuse interface.
-            Set::Vector div_Omega = Set::Vector::Zero();
-            Set::Scalar div_Omega_u = 0.0;
-
-            if (apply_surface_tension && sigma > 0.0)
+            // Fsv =  simga * kappa * grad_eta
+            Set::Vector Fsv_vector = Set::Vector(0.0, 0.0);
+            if (apply_surface_tension)
             {
-                const Set::Scalar dxinv = 1.0 / (2.0 * DX[0]);
-                const Set::Scalar dyinv = 1.0 / (2.0 * DX[1]);
+                // Optimization, only calc surface tension if on interface
+                if (grad_eta_mag > 0.0)
+                {
+                    Set::Scalar kappa = kappas(i, j, k, 0);
+                    Set::Scalar sigma_eff = sigma;
 
-                // div(Omega)_x = d(Omega_xx)/dx + d(Omega_xy)/dy
-                // div(Omega)_y = d(Omega_xy)/dx + d(Omega_yy)/dy
-                div_Omega(0) = (Omega_in(i + 1, j, k, 0) - Omega_in(i - 1, j, k, 0)) * dxinv
-                             + (Omega_in(i, j + 1, k, 1) - Omega_in(i, j - 1, k, 1)) * dyinv;
-                div_Omega(1) = (Omega_in(i + 1, j, k, 1) - Omega_in(i - 1, j, k, 1)) * dxinv
-                             + (Omega_in(i, j + 1, k, 2) - Omega_in(i, j - 1, k, 2)) * dyinv;
-
-                // div(Omega . u) = d(Omega_xx u + Omega_xy v)/dx
-                //                + d(Omega_yx u + Omega_yy v)/dy ;  Omega_yx = Omega_xy.
-                auto Ou_x = [&](int ii, int jj) {
-                    return Omega_in(ii, jj, k, 0) * v(ii, jj, k, 0)
-                         + Omega_in(ii, jj, k, 1) * v(ii, jj, k, 1);
-                };
-                auto Ou_y = [&](int ii, int jj) {
-                    return Omega_in(ii, jj, k, 1) * v(ii, jj, k, 0)
-                         + Omega_in(ii, jj, k, 2) * v(ii, jj, k, 1);
-                };
-
-                div_Omega_u = (Ou_x(i + 1, j) - Ou_x(i - 1, j)) * dxinv
-                            + (Ou_y(i, j + 1) - Ou_y(i, j - 1)) * dyinv;
+                    Fsv_vector(0) = sigma_eff * kappa * grad_eta(0); // * epsilon; // / (grad_eta_mag + small)); // / (DX[1] + small);
+                    Fsv_vector(1) = sigma_eff * kappa * grad_eta(1); // * epsilon; // / (grad_eta_mag + small)); // / (DX[1] + small);
+                }
             }
-
-            // Diagnostic: keep the Fsv slot populated with div(Omega) so
-            // existing plotfile / debug paths still resolve a "surface
-            // tension force" field.
-            Fsv(i, j, k, 0) = div_Omega(0);
-            Fsv(i, j, k, 1) = div_Omega(1);
+            Fsv(i, j, k, 0) = Fsv_vector(0);
+            Fsv(i, j, k, 1) = Fsv_vector(1);
 
             // ERROR CHECKING
             check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Surface Tension solving", {
-                { "div_Omega[0]", div_Omega(0) },
-                { "div_Omega[1]", div_Omega(1) },
-                { "div_Omega_u", div_Omega_u }
+                { "Fsv_vector[0]", Fsv_vector(0) },
+                { "Fsv_vector[1]", Fsv_vector(1) }
             }); // end check4nans
             
 
@@ -1549,15 +1484,9 @@ Hydro2::RHS(int lev,
             Vap_dot(i, j, k, 4) = E_dot_Vap;
 
 
-            // Total momentum force:
-            //   div(Omega)    -- Sch17 conservative capillary stress divergence
-            //   Fw_vector     -- weight (body force; gravity / buoyancy)
-            // Sch17 separates these because the energy contributions differ:
-            // body forces contribute u . F, the capillary tensor contributes
-            // div(Omega . u), and these are NOT equal at the discrete level
-            // (they differ by the work term Omega : grad(u)).
-            Set::Vector Total_Force = Set::Vector(div_Omega(0) + Fw_vector(0),
-                                                  div_Omega(1) + Fw_vector(1));
+            // Total:
+            Set::Vector Total_Force = Set::Vector(Fsv_vector(0) + Fw_vector(0),
+                                                  Fsv_vector(1) + Fw_vector(1));
 
             Source(i, j, k, 0) = mdot0;
 
@@ -1566,11 +1495,7 @@ Hydro2::RHS(int lev,
             // Eq. 3). M_dot_Vap was removed per F-5.
             Source(i, j, k, 1) = Pdot0(0) + Ldot(0) + div_tau(0) + Total_Force(0);
             Source(i, j, k, 2) = Pdot0(1) + Ldot(1) + div_tau(1) + Total_Force(1);
-            // Energy:  body forces enter as u . F_w ;  capillary enters as
-            // div(Omega . u) per Sch17 Eq. (3).  Old code used u.dot(Total_Force)
-            // for both, which is equivalent only in the continuous limit.
-            Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot)
-                               + u.dot(Fw_vector) + div_Omega_u;// + E_dot_Vap;
+            Source(i, j, k, 3) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force);// + E_dot_Vap;
 
             // Lagrange terms to enforce no-penetration
             Source(i, j, k, 1) = Source(i, j, k, 1) - lagrange * u.dot(grad_eta) * grad_eta(0);
@@ -3351,8 +3276,7 @@ void Hydro2::ZeroDerivedScratchFields(int lev)
     BL_PROFILE("Integrator::Hydro2::ZeroDerivedScratchFields");
     FillBoundariesWithZero(lev, {
         Source_mf[lev].get(),               // RHS source / forcing
-        Fsv_mf[lev].get(),                  // surface tension (div(Omega) diagnostic)
-        Omega_mf[lev].get(),                // Sch17 capillary stress tensor (3 comps: xx, xy, yy)
+        Fsv_mf[lev].get(),                  // surface tension
         Fw_mf[lev].get(),                   // weight / body force
         Ldot_mf[lev].get(),                 // Lagrange / IB term
         Vap_dot_mf[lev].get(),              // vaporization tracker
