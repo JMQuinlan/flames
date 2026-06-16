@@ -154,33 +154,11 @@ NUM_GRID_TIMES = 6
 ETA_CONTOURS = [0.01, 0.5, 0.99]
 ETA_THRESHOLD = 0.5
 
-# Schlieren parameters (legacy v2 globals -- kept for back-compat plot calls)
-SCHLIEREN_BETA = 10.0
-SCHLIEREN_LOG_SCALE = 1
-SCHLIEREN_USE_MIXTURE = 1
-
-# 4Paper schlieren -- Khare 2022 / Saurel 2009 / Sch20-style per-phase
-# normalization.  Each phase gets its own dynamic range so that gas-side
-# shocks (small absolute |grad rho|) and liquid-side waves (large absolute
-# |grad rho|) BOTH render with crisp contrast.  k_air / k_liq are the
-# Quirk 1996 contrast constants; alpha_exp is the gradient exponent
-# (1.0 = linear, < 1.0 = boost weak features, > 1.0 = suppress weak features).
-# grad_floor sets a relative threshold below which a region renders as
-# pure white -- prevents low-amplitude numerical noise from filling the
-# field with grey.
-SCHLIEREN_PER_PHASE       = 1
-# K controls Quirk 1996 contrast: schlieren = exp(-K * |grad rho|/max).
-# Lower K -> wider tonal range, weak fronts still visible (less "saturated /
-# smeared" look).  Was 60 -- saturated quickly and washed out into a single
-# blob.  20 keeps the strong shock dark while the surrounding compression
-# fan stays mid-grey.
-SCHLIEREN_K_AIR           = 20.0
-SCHLIEREN_K_LIQ           = 20.0
-SCHLIEREN_ALPHA_EXP       = 0.8
-# Floor below which the field renders as pure background.  Lowered from 1e-2
-# to 1e-3 so weak (but real) compression waves don't get wiped out.
-SCHLIEREN_GRAD_FLOOR_AIR  = 1.0e-3     # relative to per-phase max
-SCHLIEREN_GRAD_FLOOR_LIQ  = 1.0e-3
+# Numerical schlieren (mixture density), matching tests/FlowWedge:
+#   schlieren = exp(-SCHLIEREN_EXP * |grad rho| / max|grad rho|)
+# Higher EXP -> sharper / thinner fronts.  Rendered with cmap 'gray':
+# smooth background -> white, shocks/contacts -> black.
+SCHLIEREN_EXP = 12.0
 
 # Eta contour overlays on field plots (interface envelope).
 ETA_CONTOURS_PAPER = [0.01, 0.5, 0.99]
@@ -313,10 +291,7 @@ def _write_run_metadata(script_name):
         # Selected analysis knobs (back-trace plot-config without diffing scripts).
         f.write(f"TIME_STEP             : {TIME_STEP}\n")
         f.write(f"USE_ALL_TIMESTEPS     : {USE_ALL_TIMESTEPS}\n")
-        f.write(f"SCHLIEREN_PER_PHASE   : {SCHLIEREN_PER_PHASE}\n")
-        f.write(f"SCHLIEREN_K_AIR       : {SCHLIEREN_K_AIR}\n")
-        f.write(f"SCHLIEREN_K_LIQ       : {SCHLIEREN_K_LIQ}\n")
-        f.write(f"SCHLIEREN_ALPHA_EXP   : {SCHLIEREN_ALPHA_EXP}\n")
+        f.write(f"SCHLIEREN_EXP         : {SCHLIEREN_EXP}\n")
         f.write(f"ETA_CONTOURS_PAPER    : {ETA_CONTOURS_PAPER}\n")
     print(f"  wrote {meta_path}")
 
@@ -433,69 +408,17 @@ def create_gif_from_folder(subfolder_name, output_gif_name):
 # ANALYSIS FUNCTIONS
 # ============================================================================
 
-def compute_schlieren(rho, dx, dy, beta=5.0, log_scale=False):
-    """Calculate numerical schlieren field from density (legacy v2 form)."""
-    drho_dx = np.gradient(rho, dx, axis=0)
-    drho_dy = np.gradient(rho, dy, axis=1)
-    grad_rho_mag = np.sqrt(drho_dx**2 + drho_dy**2)
+def compute_schlieren(rho, dx, dy, exp=12.0):
+    """Numerical schlieren from mixture density (matches tests/FlowWedge):
 
-    if log_scale:
-        schlieren = np.log10(1 + 100*grad_rho_mag)
-    else:
-        grad_max = np.max(grad_rho_mag)
-        if grad_max > 0:
-            schlieren = np.exp(-beta * grad_rho_mag / grad_max)
-        else:
-            schlieren = np.ones_like(grad_rho_mag)
+        schlieren = exp(-exp * |grad rho| / max|grad rho|)
 
-    return schlieren
-
-
-def compute_schlieren_per_phase(rho, eta, dx, dy,
-                                k_air=60.0, k_liq=60.0,
-                                alpha_exp=0.8,
-                                floor_air=1e-2, floor_liq=1e-2):
-    """Khare 2022 / Saurel 2009 / Sch20-style numerical schlieren.
-
-    Computes |grad rho| separately within the gas region (eta > 0.5) and the
-    liquid region (eta < 0.5), normalizes each by its OWN max, then blends
-    via eta.  Each phase gets its own contrast (k) and floor (so smooth
-    regions render pure white).
-
-    schlieren(x,y) = exp( -k * (|grad rho| / max_phase_grad)^alpha_exp )
-                     in each phase, with a floor that maps small gradients
-                     to pure white (schlieren = 1).
-
-    Output is in [0, 1]; rendered with cmap='gray' or 'gray_r'.  Smooth
-    regions appear WHITE; shocks/contacts appear BLACK.
+    Output in (0, 1]: smooth background -> 1 (white with cmap 'gray'),
+    shocks/contacts -> ~0 (black).  `exp` sets the contrast / front thickness.
     """
-    drho_dx = np.gradient(rho, dx, axis=0)
-    drho_dy = np.gradient(rho, dy, axis=1)
-    g       = np.sqrt(drho_dx * drho_dx + drho_dy * drho_dy)
-
-    gas_mask = (eta > 0.5)
-    liq_mask = ~gas_mask
-
-    g_max_air = float(g[gas_mask].max()) if gas_mask.any() else 1.0
-    g_max_liq = float(g[liq_mask].max()) if liq_mask.any() else 1.0
-
-    # Normalize per phase, apply exponent, then exp transform.
-    g_norm_air = np.zeros_like(g)
-    g_norm_liq = np.zeros_like(g)
-    if g_max_air > 0:
-        g_norm_air[gas_mask] = (g[gas_mask] / g_max_air) ** alpha_exp
-    if g_max_liq > 0:
-        g_norm_liq[liq_mask] = (g[liq_mask] / g_max_liq) ** alpha_exp
-
-    # Floor: below the threshold, no schlieren signal (pure white).
-    g_norm_air[g_norm_air < floor_air] = 0.0
-    g_norm_liq[g_norm_liq < floor_liq] = 0.0
-
-    sch = np.ones_like(g)
-    sch[gas_mask] = np.exp(-k_air * g_norm_air[gas_mask])
-    sch[liq_mask] = np.exp(-k_liq * g_norm_liq[liq_mask])
-
-    return sch
+    gy, gx = np.gradient(rho, dy, dx)
+    mag = np.sqrt(gx * gx + gy * gy)
+    return np.exp(-exp * mag / (mag.max() + 1e-30))
 
 
 def overlay_eta_contours(ax, eta, x_grid, y_grid,
@@ -750,13 +673,7 @@ for i, idx in enumerate(analysis_indices):
                      center=[0.5*(X_MIN+X_MAX), 0.5*(Y_MIN+Y_MAX), 0.0],
                      height=(domain_height, 'code_length'))
     
-    if SCHLIEREN_USE_MIXTURE:
-        rho = np.array(frb['density'])
-    else:
-        eta = np.array(frb['eta'])
-        rho0 = np.array(frb['density0'])
-        rho1 = np.array(frb['density1'])
-        rho = eta * rho0 + (1 - eta) * rho1
+    rho = np.array(frb['density'])   # mixture density (schlieren source)
     
     pressure = np.array(frb['pressure'])
     eta_field = np.array(frb['eta'])
@@ -781,18 +698,8 @@ for i, idx in enumerate(analysis_indices):
     
     dx = x_1d[1] - x_1d[0]
     dy = y_1d[1] - y_1d[0]
-    # 4Paper: per-phase schlieren (Khare/Saurel-style).  Falls back to the
-    # legacy mixture schlieren if SCHLIEREN_PER_PHASE = 0.
-    if SCHLIEREN_PER_PHASE:
-        schlieren = compute_schlieren_per_phase(
-            rho, eta_field, dx, dy,
-            k_air=SCHLIEREN_K_AIR, k_liq=SCHLIEREN_K_LIQ,
-            alpha_exp=SCHLIEREN_ALPHA_EXP,
-            floor_air=SCHLIEREN_GRAD_FLOOR_AIR,
-            floor_liq=SCHLIEREN_GRAD_FLOOR_LIQ,
-        )
-    else:
-        schlieren = compute_schlieren(rho, dx, dy, SCHLIEREN_BETA, SCHLIEREN_LOG_SCALE)
+    # Numerical schlieren (mixture density, exp contrast) -- wedge algorithm.
+    schlieren = compute_schlieren(rho, dx, dy, SCHLIEREN_EXP)
 
     schlieren_fields.append(schlieren)
     pressure_fields.append(pressure)
@@ -925,7 +832,7 @@ def plot_schlieren_pressure_split_single(idx, frame_num, save_folder):
     
     # TOP - SCHLIEREN
     im1 = ax_top.imshow(schlieren_top, origin='lower', extent=extent_top,
-                        cmap=COLORMAP_SCHLIEREN + '_r', vmin=schlieren_min, vmax=schlieren_max,
+                        cmap=COLORMAP_SCHLIEREN, vmin=schlieren_min, vmax=schlieren_max,
                         interpolation='bilinear', aspect='auto')
     
     for eta_val in ETA_CONTOURS:
@@ -942,7 +849,7 @@ def plot_schlieren_pressure_split_single(idx, frame_num, save_folder):
     
     cax1 = inset_axes(ax_top, width="3%", height="80%", loc='right')
     cbar1 = fig.colorbar(im1, cax=cax1)
-    cbar1.set_label('Numerical Schlieren', fontsize=FONT_SIZE_LABEL)
+    cbar1.set_label('Schlieren', fontsize=FONT_SIZE_LABEL)
     
     # BOTTOM - PRESSURE
     im2 = ax_bot.imshow(pressure_bottom, origin='lower', extent=extent_bot,
@@ -1012,7 +919,7 @@ def plot_schlieren_pressure_grid_1x6():
         mask_top = y_grid >= 0
         schlieren_top = np.where(mask_top, schlieren, np.nan)
         im1 = ax_top.contourf(x_grid, y_grid, schlieren_top, levels=20,
-                             cmap=COLORMAP_SCHLIEREN + '_r', vmin=schlieren_min, vmax=schlieren_max)
+                             cmap=COLORMAP_SCHLIEREN, vmin=schlieren_min, vmax=schlieren_max)
         for eta_val in ETA_CONTOURS:
             ax_top.contour(x_grid, y_grid, eta, levels=[eta_val], colors='red', linewidths=1.0)
         
@@ -1202,7 +1109,7 @@ def plot_schlieren_velocity_split_single(idx, frame_num, save_folder):
     
     # TOP - SCHLIEREN
     im1 = ax_top.imshow(schlieren_top, origin='lower', extent=extent_top,
-                        cmap=COLORMAP_SCHLIEREN + '_r', vmin=schlieren_min, vmax=schlieren_max,
+                        cmap=COLORMAP_SCHLIEREN, vmin=schlieren_min, vmax=schlieren_max,
                         interpolation='bilinear', aspect='auto')
     
     for eta_val in ETA_CONTOURS:
@@ -1219,7 +1126,7 @@ def plot_schlieren_velocity_split_single(idx, frame_num, save_folder):
     
     cax1 = inset_axes(ax_top, width="3%", height="80%", loc='right')
     cbar1 = fig.colorbar(im1, cax=cax1)
-    cbar1.set_label('Numerical Schlieren', fontsize=FONT_SIZE_LABEL)
+    cbar1.set_label('Schlieren', fontsize=FONT_SIZE_LABEL)
     
     # BOTTOM - VELOCITY MAGNITUDE
     im2 = ax_bot.imshow(velocity_bottom, origin='lower', extent=extent_bot,
@@ -1305,7 +1212,7 @@ def plot_schlieren_vapdotrho_split_single(idx, frame_num, save_folder):
     
     # TOP - SCHLIEREN
     im1 = ax_top.imshow(schlieren_top, origin='lower', extent=extent_top,
-                        cmap=COLORMAP_SCHLIEREN + '_r', vmin=schlieren_min, vmax=schlieren_max,
+                        cmap=COLORMAP_SCHLIEREN, vmin=schlieren_min, vmax=schlieren_max,
                         interpolation='bilinear', aspect='auto')
     
     for eta_val in ETA_CONTOURS:
@@ -1322,7 +1229,7 @@ def plot_schlieren_vapdotrho_split_single(idx, frame_num, save_folder):
     
     cax1 = inset_axes(ax_top, width="3%", height="80%", loc='right')
     cbar1 = fig.colorbar(im1, cax=cax1)
-    cbar1.set_label('Numerical Schlieren', fontsize=FONT_SIZE_LABEL)
+    cbar1.set_label('Schlieren', fontsize=FONT_SIZE_LABEL)
     
     # BOTTOM - VAP_DOT_RHO (symmetric colorbar)
     im2 = ax_bot.imshow(vapdotrho_bottom, origin='lower', extent=extent_bot,
@@ -1502,7 +1409,7 @@ def plot_schlieren_temperature_split_single(idx, frame_num, save_folder):
     
     # TOP - SCHLIEREN
     im1 = ax_top.imshow(schlieren_top, origin='lower', extent=extent_top,
-                        cmap=COLORMAP_SCHLIEREN + '_r', vmin=schlieren_min, vmax=schlieren_max,
+                        cmap=COLORMAP_SCHLIEREN, vmin=schlieren_min, vmax=schlieren_max,
                         interpolation='bilinear', aspect='auto')
     
     for eta_val in ETA_CONTOURS:
@@ -1519,7 +1426,7 @@ def plot_schlieren_temperature_split_single(idx, frame_num, save_folder):
     
     cax1 = inset_axes(ax_top, width="3%", height="80%", loc='right')
     cbar1 = fig.colorbar(im1, cax=cax1)
-    cbar1.set_label('Numerical Schlieren', fontsize=FONT_SIZE_LABEL)
+    cbar1.set_label('Schlieren', fontsize=FONT_SIZE_LABEL)
     
     # BOTTOM - TEMPERATURE
     im2 = ax_bot.imshow(temperature_bottom, origin='lower', extent=extent_bot,
@@ -1872,11 +1779,10 @@ def plot_schlieren_mach_split_single(idx, frame_num, save_folder):
     y_min_zoom  = centroid[1] - zoom_height / 2
     y_max_zoom  = centroid[1] + zoom_height / 2
 
-    # TOP: schlieren -- match v2 convention (white shocks on dark background).
-    # NOTE: gray_r maps high schlieren -> white, so shock fronts read as bright
-    # streaks against the bulk-fluid dark.
+    # TOP: schlieren -- cmap 'gray' (smooth background -> white, shocks -> black),
+    # matching the wedge / other schlieren panels.
     im1 = ax_top.imshow(schlieren_top, origin='lower', extent=extent_top,
-                        cmap='gray_r', vmin=0.0, vmax=1.0,
+                        cmap=COLORMAP_SCHLIEREN, vmin=0.0, vmax=1.0,
                         interpolation='bilinear', aspect='auto')
     for eta_val in ETA_CONTOURS:
         ax_top.contour(x_vals, y_top, eta_top, levels=[eta_val],
@@ -1891,7 +1797,7 @@ def plot_schlieren_mach_split_single(idx, frame_num, save_folder):
     ax_top.spines['bottom'].set_visible(False)
     cax1 = inset_axes(ax_top, width="3%", height="80%", loc='right')
     cbar1 = fig.colorbar(im1, cax=cax1)
-    cbar1.set_label('Numerical Schlieren', fontsize=FONT_SIZE_LABEL)
+    cbar1.set_label('Schlieren', fontsize=FONT_SIZE_LABEL)
 
     # BOTTOM: Mach number
     mach_max = max(float(np.nanmax(mach)), 1.0)
