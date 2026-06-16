@@ -69,3 +69,4 @@ alamo.py
 logs/
 .claude/
 *.csv
+*.tar.gz
