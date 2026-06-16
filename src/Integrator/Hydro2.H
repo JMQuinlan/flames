@@ -21,7 +21,6 @@
 #include "Solver/Local/FluidRiemann/HLLC.H"
 #include "Solver/Local/FluidRiemann/HLLC_All_Mach.H"
 #include "Solver/Local/FluidRiemann/HLLC_All_Mach_Furfaro.H"
-#include "Solver/Local/FluidRiemann/HLLC_WENO5.H"
 #include "Solver/Local/FluidRiemann/HLLE.H"
 #include "Solver/Local/FluidRiemann/HLLCE.H"
 // #include "Solver/Local/FluidRiemann/PartiallyParabolic.H"
