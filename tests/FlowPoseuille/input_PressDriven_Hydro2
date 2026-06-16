@@ -70,9 +70,9 @@ mu0   = 0.1
 mu1   = 0.1
 
 ### ETA IC ###
-# Pure phase 0 throughout the channel (eta = 1).  No interface dynamics
-# (static_eta = 1 below), but the integrator requires an `epsilon` value
-# to be defined; pick a small placeholder since it doesn't affect this test.
+# Pure phase 0 throughout the channel (eta = 1).  No interface dynamics,
+# but the integrator requires an `epsilon` value to be defined; pick a small
+# placeholder since it doesn't affect this test.
 eta.ic.type = expression
 eta.ic.expression.region0 = "1.0"
 epsilon = 0.01
@@ -166,8 +166,6 @@ cutoff = 0.01
 amr.abort_on_nan = 0
 small = 1E-8
 
-static_eta = 1
-Spec_Vol   = 1
 
 ### NUMERICS -- standardized: HLLC + WENO3 + RK3 ###
 Riemann_Solver.type = hllc

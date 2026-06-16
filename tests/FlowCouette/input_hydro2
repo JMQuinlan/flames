@@ -123,8 +123,6 @@ gradu_refinement_criterion = 100000.0
 rho_refinement_criterion   = 100000.0
 p_refinement_criterion     = 100000.0
 
-static_eta = 1
-Spec_Vol = 1
 
 ### NUMERICS -- standardized: HLLC + WENO3 + RK3 ###
 Riemann_Solver.type = hllc

@@ -169,8 +169,6 @@ apply_surface_tension = 0       # DISABLED for shock tube
 apply_buoyancy = 0
 apply_weight = 0
 apply_vaporization = 0          # TEST 1: NO VAPORIZATION
-static_eta = 0
-Spec_Vol = 1
 grav = 9.81
 
 ### SOLVER SETTINGS ###

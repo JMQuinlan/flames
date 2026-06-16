@@ -46,7 +46,7 @@ public:
 
     static void Parse(HLLE & /*value*/, IO::ParmParse & /*pp*/) {}
 
-    virtual Flux Solve(State lo, State hi, Set::Scalar /*p_ref*/, Set::Scalar small, int /*Spec_Vol*/ = 1) override
+    virtual Flux Solve(State lo, State hi, Set::Scalar /*p_ref*/, Set::Scalar small) override
     {
         const Set::Scalar alpha_floor = 1.0e-12;
 

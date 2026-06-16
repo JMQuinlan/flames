@@ -129,10 +129,8 @@ q.ic.constant.value = 0.0 0.0
 apply_surface_tension = 0
 apply_buoyancy = 0
 apply_weight = 0
-Spec_Vol = 1
 grav = 0.0
 
-static_eta=1
 
 ### DEBUGGING ###
 Riemann_Solver.type = hllc

@@ -81,16 +81,12 @@ solid.phi.ic.expression.region0 = "0.5*(1.0 + tanh( max(max( y*cth - (x-x0)*sth,
 # Prescribed quiescent solid target, eta-consistent (alpha_1 = 0.5):
 #   rho_eta0 = rho_eta1 = 0.5*rho_solid = 0.5,  M = 0,
 #   E0 = E1 = 0.5*p_solid/(gamma-1) = 0.5*1.785714 = 0.892857  (u=0, p=p_inf)
-solid.density0.ic.type = constant
-solid.density0.ic.constant.value = 0.5
-solid.density1.ic.type = constant
-solid.density1.ic.constant.value = 0.5
+solid.density.ic.type = constant
+solid.density.ic.constant.value = 1.0
 solid.momentum.ic.type = constant
 solid.momentum.ic.constant.value = 0.0 0.0
-solid.energy0.ic.type = constant
-solid.energy0.ic.constant.value = 0.892857
-solid.energy1.ic.type = constant
-solid.energy1.ic.constant.value = 0.892857
+solid.pressure.ic.type = constant
+solid.pressure.ic.constant.value = 0.714286
 
 ### ETA (alpha_1) IC -- uniform 0.5 (two identical fluids => single ideal gas) ###
 eta.ic.type = constant
@@ -181,7 +177,6 @@ q.ic.constant.value  = 0.0 0.0
 apply_surface_tension = 0
 apply_weight          = 0
 apply_vaporization    = 0
-Spec_Vol = 1
 
 ### SOLVER ###
 Riemann_Solver.type = hllc

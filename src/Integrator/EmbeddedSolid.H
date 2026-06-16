@@ -22,13 +22,17 @@ public:
     Set::Field<Set::Scalar> grad_phi_mf;
     IC::IC<Set::Scalar>* phi_ic = nullptr;
     BC::BC<Set::Scalar>* phi_bc = nullptr;
-    // prescribed quiescent target state (was the anonymous `solid` struct)
+    // Prescribed quiescent solid target.  The 6-eqn conservative state is
+    // two-phase, so the target fills BOTH phase slots (density0/1, energy0/1) --
+    // but these are DERIVED, not input: InitEmbeddedSolidTarget() splits a
+    // SINGLE solid density + pressure by the local eta (stiffened-gas EOS for
+    // the per-phase energy).  The input is therefore single-phase.
     Set::Field<Set::Scalar> density0_mf, density1_mf, momentum_mf, energy0_mf, energy1_mf;
-    IC::IC<Set::Scalar> *density0_ic=nullptr, *density1_ic=nullptr, *momentum_ic=nullptr, *energy0_ic=nullptr, *energy1_ic=nullptr;
+    IC::IC<Set::Scalar> *density_ic=nullptr, *pressure_ic=nullptr, *momentum_ic=nullptr;
 
     ~EmbeddedSolid() {
         delete phi_ic; delete phi_bc;
-        delete density0_ic; delete density1_ic; delete momentum_ic; delete energy0_ic; delete energy1_ic;
+        delete density_ic; delete pressure_ic; delete momentum_ic;
     }
 
     // per-cell wall physics (inline; called inside Hydro2's loops)

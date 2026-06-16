@@ -50,7 +50,6 @@ stop_time = 0.7
 eta.ic.type = constant
 eta.ic.constant.value = 0.0
 epsilon = 0.005
-static_eta = 1
 
 ### DIFFUSE BOUNDARY SOURCES ###
 m0.ic.constant.value = 0.0
@@ -63,7 +62,6 @@ Riemann_Solver.type = hllc
 Limiter.type        = weno5
 integration.type    = RungeKutta
 integration.rk.type = 3
-Spec_Vol = 1
 
 ### EOS - IDEAL GAS (AIR) ###
 eos0.gamma = 1.4
@@ -148,7 +146,7 @@ energy.bc.val.xhi  = "0.0"
 energy.bc.type.ylo = periodic
 energy.bc.type.yhi = periodic
 
-# eta BC: omitted -> defaults to ZeroNeumann (eta stays 0, static_eta=1).
+# eta BC: omitted -> defaults to ZeroNeumann (eta stays 0).
 
 ### REFINEMENT CRITERIA (DISABLED) ###
 eta_refinement_criterion   = 1000.0

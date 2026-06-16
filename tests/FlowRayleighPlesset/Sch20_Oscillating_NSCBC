@@ -214,7 +214,6 @@ apply_surface_tension = 0
 apply_buoyancy        = 0
 apply_weight          = 0
 apply_vaporization    = 0
-Spec_Vol              = 1
 grav                  = 0.0
 
 ### NUMERICS -- Sch20 nominal: WENO3 + SSPRK3 (project-standard for Sch20 tests) ###

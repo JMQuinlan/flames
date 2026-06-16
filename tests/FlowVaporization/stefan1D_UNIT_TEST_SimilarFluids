@@ -112,7 +112,6 @@ rho_refinement_criterion   = 100.0  # Disable density refinement
 p_refinement_criterion     = 100.0  # Disable pressure refinement
 
 ### SOLVER OPTIONS ###
-Spec_Vol = 1          # Solve energy per specific volume
 kappa_method = 2      # Curvature calculation method
 nghost = 2            # Ghost cells
 

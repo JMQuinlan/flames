@@ -255,7 +255,6 @@ apply_surface_tension = {apply_st}
 apply_buoyancy        = 0
 apply_weight          = 0
 apply_vaporization    = 0
-Spec_Vol              = 1
 grav                  = 0.0
 
 ### NUMERICS -- WENO3 + SSPRK3 (project standard) ###

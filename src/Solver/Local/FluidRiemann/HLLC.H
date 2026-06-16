@@ -58,7 +58,7 @@ public:
 
     /// HLLC star-state algebra per Saurel 2009 §3.1.2.
     /// The face is conceptually between the L (low) and R (hi) state.
-    virtual Flux Solve(State lo, State hi, Set::Scalar /*p_ref*/, Set::Scalar small, int /*Spec_Vol*/ = 1) override
+    virtual Flux Solve(State lo, State hi, Set::Scalar /*p_ref*/, Set::Scalar small) override
     {
         // ====================================================================
         // 1. Primitive recovery on each side.

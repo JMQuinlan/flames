@@ -169,8 +169,6 @@ p_refinement_criterion     = 100000.0
 apply_surface_tension = 0  # Disable surface tension for gases
 apply_buoyancy = 0        # Not needed
 apply_weight = 0          # Disable gravity
-Spec_Vol = 1              # Using volume-specific energy
-static_eta = 0            # Allow interface to evolve
 
 ### NUMERICAL METHODS ###
 Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"

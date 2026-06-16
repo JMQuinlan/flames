@@ -142,7 +142,7 @@ struct Flux
 class FluidRiemann
 {
 public:
-    virtual Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol) = 0;
+    virtual Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small) = 0;
     virtual ~FluidRiemann() = default;
 };
 

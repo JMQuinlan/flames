@@ -153,8 +153,6 @@ apply_surface_tension = 0
 apply_buoyancy = 0
 apply_weight = 0
 apply_vaporization = 0
-static_eta = 1                 #FREEZE INTERFACE FOR TESTING
-Spec_Vol = 1
 grav = 9.81
 
 ### SOLVER SETTINGS ###

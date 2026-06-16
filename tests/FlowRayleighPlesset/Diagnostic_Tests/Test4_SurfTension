@@ -124,7 +124,6 @@ q.ic.constant.value = 0.0 0.0
 apply_surface_tension = 1  # ON - this is what we're testing
 apply_buoyancy = 0
 apply_weight = 0
-Spec_Vol = 1
 grav = 0.0
 
 ### DEBUGGING ###

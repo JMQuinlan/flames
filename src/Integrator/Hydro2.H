@@ -157,6 +157,9 @@ private:
     void FillGhost4BC(int lev, Set::Scalar time);
     // Zero every derived/scratch MultiFabs
     void ZeroDerivedScratchFields(int lev);
+    // Derive the per-phase embedded-solid target from the single solid
+    // density/pressure, split by local eta (option 3a).
+    void InitEmbeddedSolidTarget(int lev, Set::Scalar time);
 
 protected:
     // FLUID 0
@@ -362,9 +365,7 @@ protected:
     // Booleans
     int apply_surface_tension = 1;
     int apply_weight = 0;
-    int static_eta = 0;
     int apply_vaporization = 0;
-    int Spec_Vol = 1;
 
     // EMBEDDED SOLID BOUNDARY controls now live on the `embedded` member:
     //   embedded.apply = 0 -> no immersed solid (default; behavior unchanged)

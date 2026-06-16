@@ -157,7 +157,6 @@ u0.ic.constant.value = 0.0
 apply_surface_tension = 1
 apply_buoyancy = 0
 apply_weight = 0
-Spec_Vol = 1
 grav = 9.81
 
 ### DEBUGGING ### 

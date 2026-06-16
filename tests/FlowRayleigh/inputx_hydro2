@@ -165,8 +165,6 @@ cutoff = 0.01
 amr.abort_on_nan = 0
 small = 1E-8
 
-static_eta = 1
-Spec_Vol   = 1
 
 ### NUMERICS -- standardized: HLLC + WENO3 + RK3 ###
 Riemann_Solver.type = hllc

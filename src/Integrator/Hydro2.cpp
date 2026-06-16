@@ -85,13 +85,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("cutoff", value.cutoff, 1.0E-8);   // eta cutoff value
         pp_query_default("lagrange", value.lagrange, 0.0);  // lagrange no-penetration factor
         pp_query_default("grav", value.g, 9.81);            // Gravitational Acceletation
-        pp_query_default("Spec_Vol", value.Spec_Vol, 1);    // 0: Solve Energy via specific mass | 1: Solve Energy via specific volume
 
         // OPTIONAL SOURCE TERMS
         pp_query_default("apply_surface_tension", value.apply_surface_tension, false);  // Apply surface tension when solving, default: true --> "Apply Surface Tension"
         pp_query_default("apply_weight", value.apply_weight, false);                    // Apply weight when solving, default: false --> "No Weight"
         pp_query_default("apply_vaporization", value.apply_vaporization, false);        // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
-        pp_query_default("static_eta", value.static_eta, false);                        // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
         // EMBEDDED SOLID BOUNDARY (see FlowWedge for examples)
         pp_query_default("apply_embedded_solid", value.embedded.apply, 0);  // Apply Solid Boundry 1 --> "Domain has solid boundry"
@@ -460,11 +458,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     if (value.embedded.apply)
     {
         pp.select_default<IC::Constant,IC::Expression,IC::BMP,IC::PNG>("solid.phi.ic",       value.embedded.phi_ic,      value.geom);
-        pp.select_default<IC::Constant,IC::Expression>("solid.density0.ic",                 value.embedded.density0_ic, value.geom);
-        pp.select_default<IC::Constant,IC::Expression>("solid.density1.ic",                 value.embedded.density1_ic, value.geom);
+        // Single-phase solid input: total density + pressure (+ momentum).  The
+        // per-phase target slots are derived from these by InitEmbeddedSolidTarget.
+        pp.select_default<IC::Constant,IC::Expression>("solid.density.ic",                  value.embedded.density_ic,  value.geom);
+        pp.select_default<IC::Constant,IC::Expression>("solid.pressure.ic",                 value.embedded.pressure_ic, value.geom);
         pp.select_default<IC::Constant,IC::Expression>("solid.momentum.ic",                 value.embedded.momentum_ic, value.geom);
-        pp.select_default<IC::Constant,IC::Expression>("solid.energy0.ic",                  value.embedded.energy0_ic,  value.geom);
-        pp.select_default<IC::Constant,IC::Expression>("solid.energy1.ic",                  value.embedded.energy1_ic,  value.geom);
     }
 
 
@@ -559,11 +557,10 @@ void Hydro2::Initialize(int lev)
         embedded.phi_ic     ->Initialize(lev, embedded.phi_mf, 0.0);
         embedded.phi_ic     ->Initialize(lev, embedded.phi_old_mf, 0.0);
         embedded.grad_phi_mf[lev]    ->setVal(0.0);
-        embedded.density0_ic   ->Initialize(lev, embedded.density0_mf, 0.0);
-        embedded.density1_ic   ->Initialize(lev, embedded.density1_mf, 0.0);
-        embedded.momentum_ic   ->Initialize(lev, embedded.momentum_mf, 0.0);
-        embedded.energy0_ic    ->Initialize(lev, embedded.energy0_mf, 0.0);
-        embedded.energy1_ic    ->Initialize(lev, embedded.energy1_mf, 0.0);
+        // Derive the per-phase solid target (density0/1, energy0/1, momentum)
+        // from the single solid density + pressure, split by local eta.
+        // Must run BEFORE the velocity blend below (it reads density0/1, M).
+        InitEmbeddedSolidTarget(lev, 0.0);
 
         // ----------------------------------------------------------------
         // Initialize the embedded solid AT REST (Mix-style velocity blend).
@@ -1603,7 +1600,7 @@ Hydro2::RHS(int lev,
                 Solver::Local::FluidRiemann::State sL_face = Solver::Local::Limiter::ToState(pL, small);
                 Solver::Local::FluidRiemann::State sR_face = Solver::Local::Limiter::ToState(pR, small);
 
-                return riemannsolver->Solve(sL_face, sR_face, pref, small, Spec_Vol);
+                return riemannsolver->Solve(sL_face, sR_face, pref, small);
             };
 
             Solver::Local::FluidRiemann::Flux flux_xlo, flux_ylo, flux_xhi, flux_yhi;
@@ -2453,6 +2450,52 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////// EMBEDDED-SOLID TARGET DERIVE //////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+// Build the per-phase embedded-solid target (density0/1_mf, energy0/1_mf,
+// momentum_mf) from the SINGLE-phase solid input (density_ic, pressure_ic,
+// momentum_ic), splitting mass + energy by the LOCAL eta (option 3a) and using
+// the stiffened-gas EOS for the per-phase internal energies:
+//   rho_eta0 = eta*rho_s ,  rho_eta1 = (1-eta)*rho_s
+//   E_k      = alpha_k*(p_s + gamma_k*pi_k)/(gamma_k - 1)
+// Called at IC time and after every regrid.  Requires eta_mf populated first.
+void Hydro2::InitEmbeddedSolidTarget(int lev, Set::Scalar time)
+{
+    if (!embedded.apply) return;
+
+    // Single-phase solid inputs.  Stage the total density into the phase-0
+    // density slot and the pressure into the phase-0 energy slot as scratch,
+    // then split per-cell (read into locals before overwriting).
+    embedded.momentum_ic->Initialize(lev, embedded.momentum_mf, time);
+    embedded.density_ic ->Initialize(lev, embedded.density0_mf, time);   // scratch: rho_s
+    embedded.pressure_ic->Initialize(lev, embedded.energy0_mf, time);    // scratch: p_s
+
+    const Set::Scalar g0 = eos0.Gamma(), pi0 = eos0.P0();
+    const Set::Scalar g1 = eos1.Gamma(), pi1 = eos1.P0();
+    const Set::Scalar sm = small;
+    for (amrex::MFIter mfi(*embedded.density0_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.growntilebox(nghost);
+        auto eta = eta_mf[lev]->array(mfi);
+        auto d0  = embedded.density0_mf[lev]->array(mfi);
+        auto d1  = embedded.density1_mf[lev]->array(mfi);
+        auto e0  = embedded.energy0_mf[lev]->array(mfi);
+        auto e1  = embedded.energy1_mf[lev]->array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            const Set::Scalar rho_s = d0(i, j, k);   // scratch (total solid density)
+            const Set::Scalar p_s   = e0(i, j, k);   // scratch (solid pressure)
+            const Set::Scalar a1 = std::min(std::max(eta(i, j, k), 0.0), 1.0);
+            const Set::Scalar a2 = 1.0 - a1;
+            d0(i, j, k) = a1 * rho_s;
+            d1(i, j, k) = a2 * rho_s;
+            e0(i, j, k) = a1 * (p_s + g0 * pi0) / std::max(g0 - 1.0, sm);
+            e1(i, j, k) = a2 * (p_s + g1 * pi1) / std::max(g1 - 1.0, sm);
+        });
+    }
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////// REGRIDDING //////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 void Hydro2::Regrid(int lev, Set::Scalar regrid_time)
@@ -2472,11 +2515,9 @@ void Hydro2::Regrid(int lev, Set::Scalar regrid_time)
     {
         embedded.phi_ic   ->Initialize(lev, embedded.phi_mf,            regrid_time);
         embedded.phi_ic   ->Initialize(lev, embedded.phi_old_mf,        regrid_time);
-        embedded.density0_ic ->Initialize(lev, embedded.density0_mf, regrid_time);
-        embedded.density1_ic ->Initialize(lev, embedded.density1_mf, regrid_time);
-        embedded.momentum_ic ->Initialize(lev, embedded.momentum_mf, regrid_time);
-        embedded.energy0_ic  ->Initialize(lev, embedded.energy0_mf,  regrid_time);
-        embedded.energy1_ic  ->Initialize(lev, embedded.energy1_mf,  regrid_time);
+        // Re-derive the per-phase solid target from the single density+pressure
+        // (split by the regridded eta).
+        InitEmbeddedSolidTarget(lev, regrid_time);
 
         // grad(phi) diagnostic (static; recomputed for the new grid).
         const Set::Scalar *DX = geom[lev].CellSize();
