@@ -112,7 +112,7 @@ OUTPUT_DIR = os.path.normpath(os.path.join(
     "FlowRayleighPlesset", "output_Sch20_Oscillating_minmod_NO_p0",
 ))
 # OVERRIDE (uncomment + edit for your machine):
-OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large")
+OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating")
 
 # ===== PLOT STYLING (publication knobs) =====
 FONT_SIZE_TITLE  = 16
@@ -243,7 +243,8 @@ def alpha_KM_radiation(R_eq, omega0, c_l):
     return 0.5 * omega0 * omega0 * R_eq / c_l
 
 
-def extract_radius_history_robust(amrex_output_dir, eta_threshold=0.5, axis="x"):
+def extract_radius_history_robust(amrex_output_dir, eta_threshold=0.5,
+                                  axis="x", x_max=None):
     """Same as rayleigh_plesset_solver.extract_radius_history but tolerant
     of individual corrupt / partially-written plotfiles.
 
@@ -251,6 +252,15 @@ def extract_radius_history_robust(amrex_output_dir, eta_threshold=0.5, axis="x")
     each one with yt, and silently SKIPS any that raise an exception (typical
     cause: a run interrupted while a plotfile was still being written, leaving
     an incomplete Cell_H / Header behind).
+
+    Parameters
+    ----------
+    x_max : float or None
+        If provided, restrict the eta=0.5 search to the interval [0, x_max]
+        along the chosen axis.  Useful when the far-field has spurious
+        eta excursions (NSCBC ghosts, AMR coarse-fine wiggles, plotfile
+        averaging artifacts) that get mistaken for the bubble interface.
+        With x_max=1.5*R0 the search stays in the near-bubble region.
 
     Returns (times, radii, n_skipped) with times/radii sorted by time. Never
     raises -- if the whole directory is bad, returns empty arrays.
@@ -286,6 +296,21 @@ def extract_radius_history_robust(amrex_output_dir, eta_threshold=0.5, axis="x")
             eta = np.array(ray["eta"])
             order = np.argsort(x)
             x, eta = x[order], eta[order]
+
+            # Restrict the eta = 0.5 search window so spurious far-field
+            # eta excursions (NSCBC ghost rings, AMR c/f wiggles, BC
+            # extrapolation noise) can't get mis-picked as the bubble
+            # interface.  With x_max ~ 1.5*R0 the bubble cleanly fits and
+            # nothing past it is considered.
+            if x_max is not None:
+                mask = (x >= 0.0) & (x <= float(x_max))
+                x = x[mask]
+                eta = eta[mask]
+                if len(x) == 0:
+                    radii.append(np.nan)
+                    times.append(float(ds.current_time))
+                    continue
+
             idx = np.where(eta >= eta_threshold)[0]
             if len(idx) == 0:
                 radii.append(np.nan)
@@ -558,8 +583,13 @@ def main():
     R_sim = np.array([])
     if SHOW_SIM:
         if os.path.isdir(OUTPUT_DIR):
+            # Restrict the eta = 0.5 search to the near-bubble window x in
+            # [0, 1.5*R0] -- keeps NSCBC ghost rings and far-field AMR c/f
+            # wiggles from being mistaken for the interface in the _Large
+            # NSCBC variant.
             t_sim, R_sim, n_skipped = extract_radius_history_robust(
-                OUTPUT_DIR, eta_threshold=0.5, axis="x")
+                OUTPUT_DIR, eta_threshold=0.5, axis="x",
+                x_max=1.5 * P.R0)
             sim_loaded = (len(t_sim) > 1)
             if n_skipped > 0:
                 print(f"\n  [warn] skipped {n_skipped} corrupt / partial "

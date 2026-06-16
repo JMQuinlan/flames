@@ -1217,7 +1217,7 @@ Hydro2::RHS(int lev,
                     kappas(i, j, k, 0) = kappa;  // Mean or selected curvature
                     kappas(i, j, k, 1) = kappa1; // First principal curvature
                     kappas(i, j, k, 2) = kappa2; // Second principal curvature
-                } 
+                }
             }
 
             // ------------------------------------------------------------
@@ -1497,10 +1497,10 @@ Hydro2::RHS(int lev,
                 {
                     Set::Scalar kappa = kappas(i, j, k, 0);
                     Set::Scalar sigma_eff = sigma;
-                    
+
                     Fsv_vector(0) = sigma_eff * kappa * grad_eta(0); // * epsilon; // / (grad_eta_mag + small)); // / (DX[1] + small);
                     Fsv_vector(1) = sigma_eff * kappa * grad_eta(1); // * epsilon; // / (grad_eta_mag + small)); // / (DX[1] + small);
-                } 
+                }
             }
             Fsv(i, j, k, 0) = Fsv_vector(0);
             Fsv(i, j, k, 1) = Fsv_vector(1);
@@ -1656,7 +1656,7 @@ Hydro2::RHS(int lev,
             // Total:
             Set::Vector Total_Force = Set::Vector(Fsv_vector(0) + Fw_vector(0),
                                                   Fsv_vector(1) + Fw_vector(1));
-            
+
             Source(i, j, k, 0) = mdot0;
 
             // Momentum source from phase change is ZERO in 5-eq velocity-equilibrium
