@@ -243,8 +243,92 @@ def alpha_KM_radiation(R_eq, omega0, c_l):
     return 0.5 * omega0 * omega0 * R_eq / c_l
 
 
+def _crossing_in_1d(x, eta, eta_threshold):
+    """Helper: find the lowest-x cell where eta first crosses eta_threshold
+    from below.  Returns the interpolated x (radius), or NaN if no crossing.
+    Filters NaN/Inf eta cells before searching."""
+    finite = np.isfinite(eta) & np.isfinite(x)
+    x = x[finite]
+    eta = eta[finite]
+    if len(x) < 2:
+        return np.nan
+    # First index where eta crosses up through the threshold (eta[i-1] < t <= eta[i]).
+    # The old "eta >= threshold" test triggered on the first cell when bubble
+    # had drifted off the ray and the ray-origin cell was already in liquid
+    # (eta=1) at x = dx/2, producing a spuriously tiny radius.  Looking for
+    # an UPWARD crossing fixes that.
+    below = eta < eta_threshold
+    above = eta >= eta_threshold
+    cross = np.where(below[:-1] & above[1:])[0]
+    if len(cross) == 0:
+        return np.nan
+    i = cross[0] + 1            # the "above" side of the crossing
+    denom = eta[i] - eta[i - 1]
+    if abs(denom) < 1.0e-30:
+        return float(x[i - 1])
+    frac = (eta_threshold - eta[i - 1]) / denom
+    return float(x[i - 1] + frac * (x[i] - x[i - 1]))
+
+
+def _extract_via_covering_grid(ds, axis, x_max, eta_threshold,
+                               n_y_rows=5, y_half_cells=2):
+    """Fallback extraction using a thin 2D covering_grid strip at the
+    finest AMR level.  Robust against (a) the ray method missing a contour
+    that VisIt sees (yt's ds.ray cell-center sampling skips AMR transitions
+    that bilinear isocontouring picks up), and (b) small symmetry-breaking
+    drift of the bubble center off y=0 -- the strip samples 2*y_half_cells
+    on either side and picks the largest valid crossing across all rows.
+
+    Returns interpolated radius (float) or np.nan.
+    """
+    try:
+        finest = int(ds.index.max_level)
+        # finest-level cell size on the chosen axis
+        dx_finest = float(ds.domain_width[0]) / (
+            int(ds.domain_dimensions[0]) * (2 ** finest))
+        dy_finest = float(ds.domain_width[1]) / (
+            int(ds.domain_dimensions[1]) * (2 ** finest))
+        L = float(ds.domain_right_edge[0]) if axis == "x" \
+            else float(ds.domain_right_edge[1])
+        x_lim = float(x_max) if x_max is not None else L
+
+        n_x = max(int(np.ceil(x_lim / dx_finest)) + 2, 4)
+        half = int(y_half_cells)
+        n_y = 2 * half + 1
+
+        if axis == "x":
+            left_edge  = [0.0,       -half * dy_finest, 0.0]
+            dims       = [n_x, n_y, 1]
+            cg = ds.covering_grid(level=finest,
+                                   left_edge=left_edge, dims=dims)
+            eta = np.array(cg["eta"])[:, :, 0]   # shape (n_x, n_y)
+            x_axis = np.linspace(0.5 * dx_finest,
+                                 (n_x - 0.5) * dx_finest, n_x)
+        else:
+            left_edge  = [-half * dx_finest, 0.0, 0.0]
+            dims       = [n_y, n_x, 1]
+            cg = ds.covering_grid(level=finest,
+                                   left_edge=left_edge, dims=dims)
+            eta = np.array(cg["eta"])[:, :, 0].T  # rotate so axis-0 is along-axis
+            x_axis = np.linspace(0.5 * dy_finest,
+                                 (n_x - 0.5) * dy_finest, n_x)
+
+        # Scan every row, pick the LARGEST valid crossing across rows.
+        # Largest = furthest from origin = the +x edge of the bubble even
+        # if the bubble center has drifted slightly toward +x.  If no row
+        # has a crossing, return NaN.
+        best = np.nan
+        for j in range(n_y):
+            r = _crossing_in_1d(x_axis, eta[:, j], eta_threshold)
+            if np.isfinite(r) and (not np.isfinite(best) or r > best):
+                best = r
+        return float(best)
+    except Exception:
+        return np.nan
+
+
 def extract_radius_history_robust(amrex_output_dir, eta_threshold=0.5,
-                                  axis="x", x_max=None):
+                                  axis="x", x_max=None, verbose=False):
     """Same as rayleigh_plesset_solver.extract_radius_history but tolerant
     of individual corrupt / partially-written plotfiles.
 
@@ -253,17 +337,29 @@ def extract_radius_history_robust(amrex_output_dir, eta_threshold=0.5,
     cause: a run interrupted while a plotfile was still being written, leaving
     an incomplete Cell_H / Header behind).
 
+    Two-stage extraction at each plotfile:
+      1. Fast path -- ds.ray along the chosen axis, scan for first upward
+         crossing of eta_threshold (NaN-filtered, true crossing-detection
+         instead of the old eta >= t which mis-triggered on edge cells).
+      2. Fallback  -- if the ray returns NaN, retry with a thin 2D
+         covering_grid strip at the finest AMR level and pick the largest
+         valid crossing across rows in [-2*dy, +2*dy].  Catches the cases
+         where yt's ray cell-center sampling skips an AMR boundary or where
+         the bubble center has drifted slightly off-axis at deep collapse
+         (both have been observed reproducing as gaps in R(t) when VisIt's
+         isocontour clearly shows the bubble surface in the same frame).
+
     Parameters
     ----------
     x_max : float or None
-        If provided, restrict the eta=0.5 search to the interval [0, x_max]
-        along the chosen axis.  Useful when the far-field has spurious
-        eta excursions (NSCBC ghosts, AMR coarse-fine wiggles, plotfile
-        averaging artifacts) that get mistaken for the bubble interface.
-        With x_max=1.5*R0 the search stays in the near-bubble region.
+        If provided, restrict the eta_threshold search to the interval
+        [0, x_max] along the chosen axis.  With x_max ~ 1.5*R0 the search
+        stays in the near-bubble region and ignores far-field artifacts.
+    verbose : bool
+        If True, print a per-frame diagnostic when the fallback fires or
+        the radius could not be found, and a summary tally at the end.
 
-    Returns (times, radii, n_skipped) with times/radii sorted by time. Never
-    raises -- if the whole directory is bad, returns empty arrays.
+    Returns (times, radii, n_skipped) with times/radii sorted by time.
     """
     import yt
     yt.funcs.mylog.setLevel(40)
@@ -281,6 +377,10 @@ def extract_radius_history_robust(amrex_output_dir, eta_threshold=0.5,
 
     times, radii = [], []
     n_skipped = 0
+    n_ray_ok   = 0
+    n_fb_ok    = 0
+    n_failed   = 0
+    failed_list = []
     for pf in plot_files:
         try:
             ds = yt.load(pf)
@@ -297,35 +397,55 @@ def extract_radius_history_robust(amrex_output_dir, eta_threshold=0.5,
             order = np.argsort(x)
             x, eta = x[order], eta[order]
 
-            # Restrict the eta = 0.5 search window so spurious far-field
+            # Restrict the eta-threshold search window so spurious far-field
             # eta excursions (NSCBC ghost rings, AMR c/f wiggles, BC
-            # extrapolation noise) can't get mis-picked as the bubble
+            # extrapolation noise) can't be mis-picked as the bubble
             # interface.  With x_max ~ 1.5*R0 the bubble cleanly fits and
             # nothing past it is considered.
             if x_max is not None:
                 mask = (x >= 0.0) & (x <= float(x_max))
                 x = x[mask]
                 eta = eta[mask]
-                if len(x) == 0:
-                    radii.append(np.nan)
-                    times.append(float(ds.current_time))
-                    continue
 
-            idx = np.where(eta >= eta_threshold)[0]
-            if len(idx) == 0:
-                radii.append(np.nan)
-            else:
-                i = idx[0]
-                if i == 0:
-                    radii.append(x[0])
+            # Fast path: 1D crossing on the ray cells.
+            r = _crossing_in_1d(x, eta, eta_threshold) if len(x) >= 2 else np.nan
+
+            # Fallback: thin 2D covering_grid strip at finest level.
+            if not np.isfinite(r):
+                r = _extract_via_covering_grid(ds, axis, x_max,
+                                                eta_threshold)
+                if np.isfinite(r):
+                    n_fb_ok += 1
+                    if verbose:
+                        print(f"    [fallback] {os.path.basename(pf)}: "
+                              f"ray missed eta={eta_threshold:.2f}, "
+                              f"covering_grid recovered R={r:.4e}")
                 else:
-                    frac = (eta_threshold - eta[i - 1]) / (eta[i] - eta[i - 1])
-                    radii.append(x[i - 1] + frac * (x[i] - x[i - 1]))
+                    n_failed += 1
+                    failed_list.append(os.path.basename(pf))
+                    if verbose:
+                        print(f"    [no contour] {os.path.basename(pf)}: "
+                              f"both ray + covering_grid found no "
+                              f"eta={eta_threshold:.2f} crossing in window")
+            else:
+                n_ray_ok += 1
+
+            radii.append(r)
             times.append(float(ds.current_time))
         except Exception:
             # Bad / partial plotfile -- skip and keep going.
             n_skipped += 1
             continue
+
+    if verbose:
+        print(f"    extract_radius_history_robust eta={eta_threshold:.2f}: "
+              f"ray_ok={n_ray_ok}, fallback_ok={n_fb_ok}, "
+              f"no_contour={n_failed}, plotfile_skipped={n_skipped}")
+        if failed_list and len(failed_list) <= 12:
+            print(f"      failed frames: {', '.join(failed_list)}")
+        elif failed_list:
+            print(f"      failed frames: {', '.join(failed_list[:6])}, "
+                  f"... ({len(failed_list)} total)")
 
     if not times:
         return np.array([]), np.array([]), n_skipped
@@ -581,6 +701,10 @@ def main():
     n_skipped  = 0
     t_sim = np.array([])
     R_sim = np.array([])
+    # Diffuse-band envelope curves (eta = 0.1 inner, eta = 0.9 outer).
+    # Used by the second plot to shade the diffuse-band thickness.
+    R_sim_eta01 = np.array([])
+    R_sim_eta09 = np.array([])
     if SHOW_SIM:
         if os.path.isdir(OUTPUT_DIR):
             # Restrict the eta = 0.5 search to the near-bubble window x in
@@ -590,8 +714,19 @@ def main():
             t_sim, R_sim, n_skipped = extract_radius_history_robust(
                 OUTPUT_DIR, eta_threshold=0.5, axis="x",
                 #OUTPUT_DIR, eta_threshold=0.9, axis="x", # For Giggles tracks eta = 0.9 (MINIMUM MATCHES)
-                x_max=1.5 * P.R0)
+                x_max=1.5 * P.R0, verbose=True)
             sim_loaded = (len(t_sim) > 1)
+
+            # Also extract the diffuse-band envelope (eta = 0.1 inside edge,
+            # eta = 0.9 outside edge of the tanh transition).  Same plotfile
+            # walk + skip logic, so the time arrays match t_sim element-wise.
+            if sim_loaded:
+                _, R_sim_eta01, _ = extract_radius_history_robust(
+                    OUTPUT_DIR, eta_threshold=0.1, axis="x",
+                    x_max=1.5 * P.R0, verbose=True)
+                _, R_sim_eta09, _ = extract_radius_history_robust(
+                    OUTPUT_DIR, eta_threshold=0.9, axis="x",
+                    x_max=1.5 * P.R0, verbose=True)
             if n_skipped > 0:
                 print(f"\n  [warn] skipped {n_skipped} corrupt / partial "
                       f"plotfile(s) in")
@@ -673,6 +808,66 @@ def main():
     print(f"\n  wrote {out_png}")
     print(f"  wrote {out_eps}")
     plt.close(fig)
+
+    # ---- 2nd plot: same as above + shaded diffuse-band envelope -----------
+    # Background polygon spans the radii where eta crosses 0.1 (inside edge,
+    # gas-rich) and 0.9 (outside edge, liquid-rich), i.e. the FULL diffuse
+    # interface thickness as the bubble evolves.  Lets us see whether the
+    # eta = 0.5 collapse minimum (red dots) and the analytical R_min sit
+    # inside the band -- if so, the discrepancy is dominated by interface
+    # smearing, not by physics, and the cure is more AMR + smaller epsilon
+    # rather than chasing a model change.
+    if sim_loaded and len(R_sim_eta01) == len(t_sim) and len(R_sim_eta09) == len(t_sim):
+        fig2, ax2 = plt.subplots(figsize=(FIG_WIDTH, FIG_HEIGHT))
+
+        # Same analytical curves as the main plot.
+        for c in curves:
+            Tlbl = f", T={c['T']*1e3:.3f} ms" if np.isfinite(c['T']) else ""
+            ax2.plot(c['t'] * t_factor, c['R'] / r_scale,
+                     c['ls'], color=c['color'], lw=c['lw'],
+                     label=f"{c['label']}{Tlbl}")
+
+        # Shaded diffuse band envelope.  fill_between handles NaN gracefully:
+        # any frame where one of the eta = {0.1, 0.9} contours wasn't found
+        # (e.g. fully sub-grid bubble at deep collapse) simply leaves a hole
+        # in the polygon, which is itself diagnostic of resolution loss.
+        with np.errstate(invalid='ignore'):
+            ax2.fill_between(t_sim * t_factor,
+                             R_sim_eta01 / r_scale,
+                             R_sim_eta09 / r_scale,
+                             where=np.isfinite(R_sim_eta01) & np.isfinite(R_sim_eta09),
+                             color='tab:orange', alpha=0.22, linewidth=0,
+                             label=r'flames2 diffuse band $\eta \in [0.1, 0.9]$',
+                             zorder=1)
+
+        # eta=0.5 simulation marker on top.
+        ax2.plot(t_sim * t_factor, R_sim / r_scale, 'o', color=COLOR_SIM,
+                 ms=MARKER_SIZE_SIM, lw=LINE_WIDTH_SIM, alpha=0.7,
+                 label=f"{LABEL_SIM} ($\\eta = 0.5$) (n={len(t_sim)})",
+                 zorder=3)
+
+        ax2.set_xlabel(t_label, fontsize=FONT_SIZE_LABEL)
+        ax2.set_ylabel(YLABEL_STR if NONDIM_RADIUS else r"$R$ [m]",
+                       fontsize=FONT_SIZE_LABEL)
+        ax2.set_title(TITLE_STR + r"  $-$  with diffuse-band envelope",
+                      fontsize=FONT_SIZE_TITLE, fontweight='bold')
+        ax2.tick_params(labelsize=FONT_SIZE_TICK)
+        ax2.grid(True, alpha=0.3)
+        ax2.legend(fontsize=FONT_SIZE_LEGEND, loc=LEGEND_LOC)
+
+        plt.tight_layout()
+        out_png2 = os.path.join(IMG_DIR, f"{SAVE_NAME}_EtaBand.png")
+        out_eps2 = os.path.join(IMG_DIR, f"{SAVE_NAME}_EtaBand.eps")
+        fig2.savefig(out_png2, dpi=DPI, bbox_inches='tight')
+        fig2.savefig(out_eps2, dpi=DPI, bbox_inches='tight')
+        print(f"  wrote {out_png2}")
+        print(f"  wrote {out_eps2}")
+        plt.close(fig2)
+    elif sim_loaded:
+        print(f"  [warn] diffuse-band envelope skipped -- "
+              f"eta=0.1 ({len(R_sim_eta01)} pts) or eta=0.9 "
+              f"({len(R_sim_eta09)} pts) array length doesn't match "
+              f"R_sim ({len(t_sim)} pts).")
 
     # ---- CSV export: sim vs Chen2D, interpolated onto sim time grid --------
     # Columns:
