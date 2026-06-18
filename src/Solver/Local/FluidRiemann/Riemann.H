@@ -42,6 +42,7 @@ struct State
     // Mixture momentum
     Set::Scalar M_normal    = 0.0;
     Set::Scalar M_tangent   = 0.0;
+    Set::Scalar M_tangent2  = 0.0;    // second tangential momentum (3D; stays 0 in 2D)
 
     // Per-phase internal energies (canonical)
     Set::Scalar E0          = 0.0;    // (alpha_1 rho_1 e_1)
@@ -93,6 +94,7 @@ struct State
            << ", arh1=" << s.alpha_rho_1
            << ", Mn="   << s.M_normal
            << ", Mt="   << s.M_tangent
+           << ", Mt2="  << s.M_tangent2
            << ", E0="   << s.E0
            << ", E1="   << s.E1
            << ", E="    << s.E_total
@@ -117,6 +119,7 @@ struct Flux
     Set::Scalar mass1            = 0.0;  // (alpha_2 rho_2) u
     Set::Scalar momentum_normal  = 0.0;  // rho u_n^2 + p
     Set::Scalar momentum_tangent = 0.0;  // rho u_n u_t
+    Set::Scalar momentum_tangent2 = 0.0; // rho u_n u_t2 (3D; stays 0 in 2D)
     Set::Scalar energy_total     = 0.0;  // (rho E + p) u_n (for redundant rho E)
     Set::Scalar energy0          = 0.0;  // (alpha_1 rho_1 e_1) u_n
     Set::Scalar energy1          = 0.0;  // (alpha_2 rho_2 e_2) u_n
@@ -131,6 +134,7 @@ struct Flux
            << ", m1=" << f.mass1
            << ", Mn=" << f.momentum_normal
            << ", Mt=" << f.momentum_tangent
+           << ", Mt2=" << f.momentum_tangent2
            << ", E="  << f.energy_total
            << ", E0=" << f.energy0
            << ", E1=" << f.energy1

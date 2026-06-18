@@ -69,6 +69,7 @@ struct Primitive
     Set::Scalar alpha_rho_1 = 0.0;  // partial density 1  (= alpha_2 rho_2)
     Set::Scalar u           = 0.0;  // mixture velocity, normal component
     Set::Scalar v           = 0.0;  // mixture velocity, tangent component
+    Set::Scalar w           = 0.0;  // mixture velocity, 2nd tangent (3D; 0 in 2D)
     Set::Scalar p_mix       = 0.0;  // mixture pressure (Sch20 eq. 8)
     // Metadata (NOT reconstructed; carried for back-conversion):
     Set::Scalar gamma0      = 0.0;
@@ -86,6 +87,7 @@ inline Primitive operator-(const Primitive &a, const Primitive &b)
              a.alpha_rho_1 - b.alpha_rho_1,
              a.u           - b.u,
              a.v           - b.v,
+             a.w           - b.w,
              a.p_mix       - b.p_mix,
              a.gamma0, a.pi0, a.gamma1, a.pi1 };
 }
@@ -96,13 +98,14 @@ inline Primitive operator+(const Primitive &a, const Primitive &b)
              a.alpha_rho_1 + b.alpha_rho_1,
              a.u           + b.u,
              a.v           + b.v,
+             a.w           + b.w,
              a.p_mix       + b.p_mix,
              a.gamma0, a.pi0, a.gamma1, a.pi1 };
 }
 inline Primitive operator*(Set::Scalar s, const Primitive &p)
 {
     return { s*p.alpha, s*p.alpha_rho_0, s*p.alpha_rho_1,
-             s*p.u, s*p.v, s*p.p_mix,
+             s*p.u, s*p.v, s*p.w, s*p.p_mix,
              p.gamma0, p.pi0, p.gamma1, p.pi1 };
 }
 inline Primitive operator*(const Primitive &p, Set::Scalar s) { return s * p; }
@@ -128,8 +131,9 @@ ToPrimitive(const Solver::Local::FluidRiemann::State &s, Set::Scalar /*small*/)
     // Mixture velocity (one velocity for all phases in the equilibrium-
     // velocity 6-eq model; Sch20 eq. 13).
     Set::Scalar rho = s.alpha_rho_0 + s.alpha_rho_1;
-    p.u = s.M_normal  / std::max(rho, DIV_FLOOR);
-    p.v = s.M_tangent / std::max(rho, DIV_FLOOR);
+    p.u = s.M_normal   / std::max(rho, DIV_FLOOR);
+    p.v = s.M_tangent  / std::max(rho, DIV_FLOOR);
+    p.w = s.M_tangent2 / std::max(rho, DIV_FLOOR);  // 2nd tangent (3D; 0 in 2D)
     // Per-phase pressures (inlined, not via EOS::PhasicPressureFromEnergy
     // which uses `small` as divide-floor and would re-introduce the
     // 10000x discontinuity in pure-other-phase cells).
@@ -169,12 +173,13 @@ ToState(const Primitive &p, Set::Scalar /*small*/)
     Set::Scalar rho = s.alpha_rho_0 + s.alpha_rho_1;
     s.M_normal    = rho * p.u;
     s.M_tangent   = rho * p.v;
+    s.M_tangent2  = rho * p.w;   // 2nd tangent (3D; 0 in 2D)
     // E_k = alpha_k (p_mix + gamma_k pi_k) / (gamma_k - 1).
     Set::Scalar num0 = std::max(p.p_mix + p.gamma0 * p.pi0, DIV_FLOOR);
     Set::Scalar num1 = std::max(p.p_mix + p.gamma1 * p.pi1, DIV_FLOOR);
     s.E0          = a1 * num0 / (p.gamma0 - 1.0);
     s.E1          = a2 * num1 / (p.gamma1 - 1.0);
-    s.E_total     = s.E0 + s.E1 + 0.5 * rho * (p.u*p.u + p.v*p.v);
+    s.E_total     = s.E0 + s.E1 + 0.5 * rho * (p.u*p.u + p.v*p.v + p.w*p.w);
     s.gamma0 = p.gamma0;  s.pi0 = p.pi0;
     s.gamma1 = p.gamma1;  s.pi1 = p.pi1;
     return s;

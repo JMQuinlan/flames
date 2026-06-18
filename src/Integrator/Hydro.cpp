@@ -417,9 +417,12 @@ void Hydro::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 E_new(i, j, k, 0) = E_solid(i, j, k, 0);
             }
 
-            // Calculate u_new from updated momentum and density
-            Set::Vector u_new(M_new(i, j, k, 0) / (rho_new(i, j, k) + small),
-                              M_new(i, j, k, 1) / (rho_new(i, j, k) + small));
+            // Calculate u_new from updated momentum and density.
+            // (Hydro is a 2D-only solver -- it asserts AMREX_SPACEDIM==2 at runtime;
+            // the z placeholder only exists so the file compiles in a 3D build.)
+            Set::Vector u_new(AMREX_D_DECL(M_new(i, j, k, 0) / (rho_new(i, j, k) + small),
+                                           M_new(i, j, k, 1) / (rho_new(i, j, k) + small),
+                                           0.0));
 
             Set::Matrix gradu = Numeric::Gradient(u, i, j, k, DX);
             omega(i, j, k) = eta * (gradu(1, 0) - gradu(0, 1));

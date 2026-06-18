@@ -331,6 +331,18 @@ public:
             fl.u_interface = uR;
         }
 
+        // Second tangential momentum (3D): the tangential velocity is constant
+        // across the acoustic waves and is simply advected across the contact,
+        // exactly like momentum_tangent.  In every wave case the existing
+        // momentum_tangent equals (total mass flux) * v_t(upwind of contact), so
+        // the second tangent is that same mass flux times w_t2(upwind).  In 2D
+        // M_tangent2 == 0, so this is identically zero (no-op).
+        {
+            const Set::Scalar wL = lo.M_tangent2 / rhoL;
+            const Set::Scalar wR = hi.M_tangent2 / rhoR;
+            fl.momentum_tangent2 = (fl.mass0 + fl.mass1) * ((S_M >= 0.0) ? wL : wR);
+        }
+
         // ====================================================================
         // Error checking
         // ====================================================================
@@ -338,6 +350,7 @@ public:
           or (fl.mass1 != fl.mass1)
           or (fl.momentum_normal  != fl.momentum_normal)
           or (fl.momentum_tangent != fl.momentum_tangent)
+          or (fl.momentum_tangent2 != fl.momentum_tangent2)
           or (fl.energy_total     != fl.energy_total)
           or (fl.energy0          != fl.energy0)
           or (fl.energy1          != fl.energy1)
