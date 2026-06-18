@@ -137,8 +137,7 @@ def main():
         summary.append((name, np.nanmax(err), rn[-1]))
 
     ax1.set_ylabel(r"$R/R_0$")
-    ax1.set_title("FlowLaplace surface-tension sweep  "
-                  "(color = $R_0$, style = $\\sigma$)")
+    ax1.set_title("Radius and Surface-tension sweep")
     ax1.grid(True, alpha=0.3)
     ax1.legend(loc="best", ncol=2, framealpha=0.9)
 
