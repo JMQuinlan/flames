@@ -144,7 +144,7 @@ pressure0.ic.expression.constant.p_inf = 1.0e5
 pressure0.ic.expression.constant.p_b   = 1.0e4
 pressure0.ic.expression.constant.R0    = 0.02
 pressure0.ic.expression.constant.r_inf = 4.00
-pressure0.ic.expression.region0 = "p_inf - (p_inf - p_b)*R0/max(sqrt(x*x + y*y), R0)"
+pressure0.ic.expression.region0 = "p_inf" # "p_inf - (p_inf - p_b)*R0/max(sqrt(x*x + y*y), R0)"
 #pressure0.ic.expression.region0 = "p_inf - (p_inf - p_b)*log(r_inf/max(sqrt(x*x + y*y), R0))/log(r_inf/R0)"
 
 # Gas interior: uniform bubble pressure p_b.
