@@ -5,7 +5,7 @@
 #SBATCH -e /mmfs1/home/ttryon/FLAMES_out/err_flame_%j_stdout
 #SBATCH -N 1
 #SBATCH --ntasks-per-node=128
-#SBATCH --partitiion=bigmem-long
+#SBATCH --partition=bigmem-long
 #SBATCH -t 10:00:00
 
 module purge
