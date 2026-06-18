@@ -1,0 +1,213 @@
+#@ [sch20_oscillating_minmod_neumann_large]
+#@ exe=hydro2
+#@ dim=2
+
+# =============================================================================
+# Schmidmayer-Bryngelson-Colonius (JCP 402, 2020) -- SPHERICAL BUBBLE
+# Case 1: LOW-PRESSURE-RATIO  (p_inf / p_b = 10)  -- "OSCILLATING" bubble
+# LARGE-DOMAIN AMR VARIANT for Chen-2D benchmark validation
+# =============================================================================
+# Companion to Sch20_Oscillating_minmod_Neumann; same physics + ICs, but:
+#   - Domain expanded from 0.4 m to 8 m so the pressure wave radiated at first
+#     collapse (t ~ tau_c = 1.83 ms) doesn't return to the bubble during the
+#     first oscillation cycle.
+#   - 4 levels of AMR centered on the eta interface, keeping the bubble at
+#     the same Sch20-nominal NR0 = R0/dx_finest = 25.6 while letting the
+#     surrounding water be ~16x coarser.
+#
+# Domain reasoning:
+#   c_l = sqrt(gamma_l (p_inf + pi_l)/rho_l) = sqrt(2.35*(1e5+1e9)/1e3) ~ 1533 m/s
+#   tau_c = 0.915 R0 sqrt(rho_l / p_inf) ~ 1.83e-3 s
+#   First full oscillation period ~ 2*tau_c = 3.66 ms.
+#   Wave generated at first collapse (t=tau_c) reaches L_half at
+#       t_arrive = tau_c + L_half/c_l
+#   For t_arrive > 2*tau_c we need L_half > c_l*tau_c = 2.8 m.
+#   L_half = 4 m gives t_arrive ~ 4.43 ms (~0.8 ms past first cycle end).
+#
+# AMR resolution:
+#   base 640x640 over 8 m -> dx_coarse = 0.0125 m
+#   max_level = 4 (refRatio 2 each) -> dx_finest = 7.8e-4 m
+#   R0 / dx_finest = 25.6  -- matches Sch20 nominal NR0.
+#
+# Stop time: 5e-3 s ~ 2.7 tau_c, covers first full oscillation + reflection.
+#
+# Refinement criteria deliberately conservative: ETA-ONLY at the interface
+# band.  Multi-criterion refinement (p, rho, gradu) created over-refinement
+# and EOS-consistency issues at c/f boundaries in earlier _Large versions.
+# See memory note feedback_density_partition_breaks_cf_ghosts.md for the
+# current state of the c/f density-partition bug.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+# plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large
+
+
+### MESHING ###
+amr.plot_int       = -1
+amr.plot_dt        = 1.0e-4         # ~50 frames over 5 ms
+amr.max_grid_size  = 500000
+amr.blocking_factor = 2
+amr.regrid_int     = 10
+amr.grid_eff       = 0.8
+amr.max_level      = 5
+amr.n_cell         = 320 320        # base; effective finest = 10240 x 10240
+
+# n_error_buf adds buffer cells around tagged cells before AMReX makes
+# patches.  Critical for this test: keeps the coarse-fine boundary AWAY
+# from the eta interface band, sitting it in pure-water region instead.
+# The Q-Fix density-partition bug (rho_eta_k = density*eta) writes WRONG
+# values at c/f mixed-eta ghost cells but is EXACT at pure-phase boundaries.
+# With n_error_buf = 8, fine patches extend ~8 dx_finest = 6.2e-3 m past
+# the interface band on each side, far enough into pure water that the
+# partition gives the correct result there.
+# See memory note: feedback_density_partition_breaks_cf_ghosts.md
+amr.n_error_buf    = 16
+
+nghost = 4
+
+### TIME STEPPING ###
+timestep                = 1.0e-7
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-5
+dynamictimestep.min     = 1.0e-13
+cfl                     = 0.5
+
+### DIMENSIONS ###
+geometry.prob_lo     = -4.00 -4.00 0.0
+geometry.prob_hi     =  4.00  4.00 0.0
+geometry.is_periodic = 0 0 0
+stop_time            = 1e-2
+
+### ETA INITIAL CONDITIONS (identical to non-_Large) ###
+# eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.0016     # ~ 2 cells across the band at finest
+eta.ic.expression.constant.R0      = 0.02
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y) - R0)/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### EQUATION OF STATE -- Sch20 water (Tammann) + air (ideal gas) ###
+eos0.gamma = 2.35
+eos0.p0    = 1.0e9
+eos0.cv    = 1781.0
+eos0.cp    = 4186.0
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 714.286
+eos1.cp    = 1000.0
+
+### HYDRO INITIAL CONDITIONS (identical to non-_Large) ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1000.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Sch20 eq. (27) "initial interface equilibrium":
+#   p(R) = p_inf + (R0/R) * (p_b - p_inf)   for R >= R0   (exterior liquid)
+#   p(R) = p_b                              for R <  R0   (bubble interior, via clamp)
+# This is the 3D-spherical Rayleigh equilibrium exterior pressure field; Sch20
+# uses it for nominal Case 1 (line 505 of _Schmidmayer_2020.txt) so the bubble
+# starts at rest (R'(0) = 0), giving the standard R_min vs Keller-Miksis match.
+#
+# Algebraic rearrangement of eq. (27):
+#   p(R) = p_inf - (p_inf - p_b) * R0 / R
+# The max(R, R0) clamp makes the formula continuous and equal to p_b inside
+# the bubble (R < R0), matching the bubble-interior pressure that
+# pressure1 carries.
+#
+# NB: this is the 3D spherical equilibrium field.  The 2D-cylindrical
+# equivalent has a log(R) dependence rather than 1/R and is NOT covered by
+# Sch20.  Using the 3D form here as a documented first test of the
+# "sharp-IC vs gradual-IC hypothesis" for the 20% R_min discrepancy vs
+# Chen-2D.  If this closes the gap, refine to the cylindrical form
+# (requires a Chen-2D RPE paper to source from).
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_inf = 1.0e5
+pressure0.ic.expression.constant.p_b   = 1.0e4
+pressure0.ic.expression.constant.R0    = 0.019 # OG: 0.02
+pressure0.ic.expression.constant.r_inf = 8.00  # OG: 4.00
+pressure0.ic.expression.region0 = "p_inf" # "p_inf - (p_inf - p_b)*R0/max(sqrt(x*x + y*y), R0)"
+
+# Gas interior: uniform bubble pressure p_b.
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_b = 1.0e4
+pressure1.ic.expression.region0 = "p_b"
+
+### VISCOSITY (inviscid -- Sch20 nominal) ###
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION (none in Sch20 nominal collapse cases) ###
+sigma = 72.8e-3
+pref  = 0.0
+
+### BOUNDARY CONDITIONS - Neumann on all 4 sides (Sch20 non-NSCBC variant) ###
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT -- eta-only, conservative threshold ###
+# At the interface, grad_eta_mag ~ 1/epsilon = 625 m^-1.  The integrator's
+# refinement test is (grad_eta_mag * 2 * dr) > criterion where dr = sqrt(dx^2+dy^2).
+# Coarse-level dr ~ 1.77e-2, so a criterion of 0.1 fires at any cell where
+# grad_eta_mag exceeds ~5.7 m^-1 -- the full interface band, nothing else.
+eta_refinement_criterion   = 1.0e-1
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS (identical to non-_Large) ###
+apply_surface_tension = 0
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+Spec_Vol              = 1
+grav                  = 0.0
+
+### NUMERICS -- match non-_Large for clean validation comparison ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3
+kappa_method        = 1
+
+apply_sharpening     = 0
+sharpening_frequency = 50
+reinit_max_iter      = 100
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+relax_diag           = 1
