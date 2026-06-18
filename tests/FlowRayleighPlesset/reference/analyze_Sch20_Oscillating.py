@@ -588,8 +588,8 @@ def main():
             # wiggles from being mistaken for the interface in the _Large
             # NSCBC variant.
             t_sim, R_sim, n_skipped = extract_radius_history_robust(
-                #OUTPUT_DIR, eta_threshold=0.5, axis="x",
-                OUTPUT_DIR, eta_threshold=0.9, axis="x", # For Giggles pls delete after run
+                OUTPUT_DIR, eta_threshold=0.5, axis="x",
+                #OUTPUT_DIR, eta_threshold=0.9, axis="x", # For Giggles tracks eta = 0.9 (MINIMUM MATCHES)
                 x_max=1.5 * P.R0)
             sim_loaded = (len(t_sim) > 1)
             if n_skipped > 0:

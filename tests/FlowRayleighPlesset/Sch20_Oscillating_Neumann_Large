@@ -52,7 +52,7 @@ amr.max_grid_size  = 500000
 amr.blocking_factor = 2
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
-amr.max_level      = 5
+amr.max_level      = 6
 amr.n_cell         = 320 320        # base; effective finest = 10240 x 10240
 
 # n_error_buf adds buffer cells around tagged cells before AMReX makes
