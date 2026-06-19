@@ -15,6 +15,7 @@
 #include "IC/Expression.H"
 #include "IC/BMP.H"
 #include "IC/PNG.H"
+#include "IC/STL.H"   // 3D STL solid geometry (self-guarded: no-op unless USE_EB + 3D)
 // Solvers
 #include "Solver/Local/FluidRiemann/Roe.H"
 #include "Solver/Local/FluidRiemann/HLLE.H"
@@ -474,7 +475,12 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     //   solid.energy{0,1}  -> prescribed per-phase internal energies in solid.
     if (value.embedded.apply)
     {
+#if defined(AMREX_USE_EB) && (AMREX_SPACEDIM == 3)
+        // 3D + USE_EB build: also offer "stl" geometry (IC::STL wraps AMReX STLtools).
+        pp.select_default<IC::Constant,IC::Expression,IC::BMP,IC::PNG,IC::STL>("solid.phi.ic", value.embedded.phi_ic, value.geom);
+#else
         pp.select_default<IC::Constant,IC::Expression,IC::BMP,IC::PNG>("solid.phi.ic",       value.embedded.phi_ic,      value.geom);
+#endif
         // Single-phase solid input: total density + pressure (+ momentum).  The
         // per-phase target slots are derived from these by InitEmbeddedSolidTarget.
         pp.select_default<IC::Constant,IC::Expression>("solid.density.ic",                  value.embedded.density_ic,  value.geom);
