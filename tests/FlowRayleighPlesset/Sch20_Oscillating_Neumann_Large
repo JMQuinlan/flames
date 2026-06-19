@@ -52,7 +52,7 @@ amr.max_grid_size  = 500000
 amr.blocking_factor = 2
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
-amr.max_level      = 6
+amr.max_level      = 5
 amr.n_cell         = 320 320        # base; effective finest = 10240 x 10240
 
 # n_error_buf adds buffer cells around tagged cells before AMReX makes
@@ -86,7 +86,7 @@ stop_time            = 1e-2
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
 eta.ic.type = expression
 #eta.ic.expression.constant.epsilon = 0.0016     # ~ 2 cells across the band at finest
-eta.ic.expression.constant.epsilon = 0.00001     # ~ 1 cells across the band at finest
+#eta.ic.expression.constant.epsilon = 0.00001     # ~ 1 cells across the band at finest
 eta.ic.expression.constant.R0      = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon

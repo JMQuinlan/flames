@@ -234,7 +234,7 @@ def plot_snapshots(times, x, P, alpha, A0, have_fit):
             ax.legend(fontsize=8, loc="upper right")
     sub = (f"  (fitted alpha={alpha:.3g} /len, decay length 1/alpha={1/alpha:.3g})"
            if have_fit and alpha > 0 else "")
-    fig.suptitle("Acoustic primitive-BC: pressure vs analytic" + sub,
+    fig.suptitle("Acoustic Temporal-BC: Pressure Analyitical Comparison" + sub,
                  fontweight="bold")
     plt.tight_layout()
     out = os.path.join(IMG_DIR, f"{CASE}_snapshots.png")
