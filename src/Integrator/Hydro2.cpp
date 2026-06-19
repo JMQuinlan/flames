@@ -228,6 +228,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         {
             if (value.nghost == 2)
             {
+#if AMREX_SPACEDIM == 3
+                // The simple (nghost=2) NSCBC variant is 2D-only: single-tangential
+                // transverse LODI + a 2D corner closure that were never ported to
+                // 3D. Fail loudly at init rather than produce wrong boundary data.
+                // Use NSCBC4 (nghost=4) for 3D, which is validated (faces+edges+corners).
+                Util::Abort(INFO, "Simple NSCBC (nghost=2) is 2D-only; set nghost=4 to use NSCBC4 for 3D runs.");
+#endif
                 value.nscbc_bc = new BC::NSCBC(pp);
                 value.nscbc4_bc = nullptr;
                 Util::Message(INFO, "Parsing NSCBC (2-cell)");
