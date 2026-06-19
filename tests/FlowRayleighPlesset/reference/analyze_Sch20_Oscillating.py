@@ -97,7 +97,7 @@ P = Params(
     sigma     = 0.0,
     R0        = 0.02,
     Rdot0     = 0.0,
-    r_inf     = 20*0.02 #20 * R0 or so :p #0.20,        # Chen-2D log far-field cutoff = half-domain
+    r_inf     = 40*0.02 #20 * R0 or so :p #0.20,        # Chen-2D log far-field cutoff = half-domain
 )
 
 # ===== TIME / DOMAIN =====
