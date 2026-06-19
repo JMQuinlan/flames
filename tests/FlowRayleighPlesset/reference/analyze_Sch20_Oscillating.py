@@ -97,7 +97,7 @@ P = Params(
     sigma     = 0.0,
     R0        = 0.02,
     Rdot0     = 0.0,
-    r_inf     = 40*0.02 #20 * R0 or so :p #0.20,        # Chen-2D log far-field cutoff = half-domain
+    r_inf     = 30*0.02 #20 * R0 or so :p #0.20,        # Chen-2D log far-field cutoff = half-domain
 )
 
 # ===== TIME / DOMAIN =====
@@ -143,7 +143,7 @@ YLABEL_STR  = r"$R / R_0$"
 LABEL_KM    = "Keller--Miksis (3D)"
 LABEL_RPE   = "Rayleigh--Plesset (3D)"
 LABEL_CHEN  = "Chen (2D cylindrical)"
-LABEL_SIM   = "flames2 (2D)"
+LABEL_SIM   = "Sim"
 NONDIM_RADIUS = True     # plot R / R0  instead of R [m]
 SAVE_NAME     = "Sch20_Oscillating"
 
@@ -837,7 +837,7 @@ def main():
                              R_sim_eta09 / r_scale,
                              where=np.isfinite(R_sim_eta01) & np.isfinite(R_sim_eta09),
                              color='tab:orange', alpha=0.22, linewidth=0,
-                             label=r'flames2 diffuse band $\eta \in [0.1, 0.9]$',
+                             label=r'Diffuse Interface $\eta \in [0.1, 0.9]$',
                              zorder=1)
 
         # eta=0.5 simulation marker on top.
