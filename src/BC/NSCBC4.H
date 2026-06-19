@@ -992,6 +992,67 @@ public:
                         }
                 }
             }
+
+            // =====================================================================
+            // STEP 1c: 3D CORNERS (8 of them, triple-ghost cubes).
+            // =====================================================================
+            // The dimension-split flux reconstruction never reads the triple-ghost
+            // corner cells, so an elaborate 3x3-coupled LODI buys nothing; fill them
+            // by constant extrapolation from the corner boundary cell so they hold a
+            // physical, non-stale state (robustness + clean output). Runs after the
+            // edges; the triple-ghost region is disjoint from faces (1 ghost) and
+            // edges (2 ghost / 1 valid).
+            // =====================================================================
+            for (int cx = 0; cx < 2; ++cx)
+                for (int cy = 0; cy < 2; ++cy)
+                    for (int cz = 0; cz < 2; ++cz)
+                    {
+                        BoundaryParams pcx = (cx == 0) ? params_xlo_local : params_xhi_local;
+                        BoundaryParams pcy = (cy == 0) ? params_ylo_local : params_yhi_local;
+                        BoundaryParams pcz = (cz == 0) ? params_zlo_local : params_zhi_local;
+                        if (pcx.type == Type::None || pcy.type == Type::None || pcz.type == Type::None)
+                            continue;
+                        int ibx = (cx == 0) ? domain.smallEnd(0) : domain.bigEnd(0);
+                        int jby = (cy == 0) ? domain.smallEnd(1) : domain.bigEnd(1);
+                        int kbz = (cz == 0) ? domain.smallEnd(2) : domain.bigEnd(2);
+                        bool tcx = (cx == 0) ? (bx.smallEnd(0) == domain.smallEnd(0)) : (bx.bigEnd(0) == domain.bigEnd(0));
+                        bool tcy = (cy == 0) ? (bx.smallEnd(1) == domain.smallEnd(1)) : (bx.bigEnd(1) == domain.bigEnd(1));
+                        bool tcz = (cz == 0) ? (bx.smallEnd(2) == domain.smallEnd(2)) : (bx.bigEnd(2) == domain.bigEnd(2));
+                        if (!tcx || !tcy || !tcz)
+                            continue;
+
+                        int ng = 4;
+                        amrex::Box cbox;
+                        cbox.setSmall(0, (cx == 1) ? ibx + 1 : ibx - ng); cbox.setBig(0, (cx == 1) ? ibx + ng : ibx - 1);
+                        cbox.setSmall(1, (cy == 1) ? jby + 1 : jby - ng); cbox.setBig(1, (cy == 1) ? jby + ng : jby - 1);
+                        cbox.setSmall(2, (cz == 1) ? kbz + 1 : kbz - ng); cbox.setBig(2, (cz == 1) ? kbz + ng : kbz - 1);
+                        int ibxl = ibx, jbyl = jby, kbzl = kbz;
+
+                        amrex::ParallelFor(cbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                            Set::Scalar rho_b, u1, u2, p_b, a_b, gm_b, pi_b;
+                            compute_prim(eta_arr, rho_arr, M_arr, E_arr, ibxl, jbyl, kbzl, 0, rho_b, u1, u2, p_b, a_b, gm_b, pi_b);
+                            Set::Scalar inv = 1.0 / (rho_b + small_local);
+                            Set::Scalar vx_b = M_arr(ibxl, jbyl, kbzl, 0) * inv;
+                            Set::Scalar vy_b = M_arr(ibxl, jbyl, kbzl, 1) * inv;
+                            Set::Scalar vz_b = M_arr(ibxl, jbyl, kbzl, 2) * inv;
+                            Set::Scalar eta_g = eta_arr(i, j, k);
+                            Set::Scalar gm_g = Solver::EOS::EOS::MixedGamma(eta_g, eos0, eos1);
+                            Set::Scalar pi_g = Solver::EOS::EOS::MixedP0(eta_g, eos0, eos1);
+                            Set::Scalar p_g = amrex::max(p_b, 1.0e-6);
+                            Set::Scalar UE_g = Solver::EOS::EOS::MixedInternalEnergy(p_g, eta_g, eos0, eos1, pref_local, small_local);
+                            if (UE_g < 0.0) UE_g = 0.0;
+                            Set::Scalar rho_g = amrex::max(rho_b, pref_local);
+                            Set::Scalar KE_g = 0.5 * rho_g * (vx_b * vx_b + vy_b * vy_b + vz_b * vz_b);
+                            rho_arr(i, j, k) = rho_g;
+                            M_arr(i, j, k, 0) = rho_g * vx_b;
+                            M_arr(i, j, k, 1) = rho_g * vy_b;
+                            M_arr(i, j, k, 2) = rho_g * vz_b;
+                            E_arr(i, j, k) = UE_g + KE_g;
+                            gamma_arr(i, j, k) = gm_g;
+                            pi_arr(i, j, k) = pi_g;
+                            p_arr(i, j, k) = p_g;
+                        });
+                    }
 #endif
 
         // =====================================================================
