@@ -12,11 +12,19 @@ import os
 yt.funcs.mylog.setLevel(40)
 
 # Configuration
-case_name = 'Garrick'
+# case_name selects the exact case -> its {case_name}.hdf5 exact solution AND
+# its output_{case_name} plotfile dir.  The aggregator passes it as argv[1]
+# (e.g. Toro1a, Toro2, Garrick); default is Garrick for standalone use.
+import sys
+case_name = sys.argv[1] if len(sys.argv) > 1 else 'Garrick'
 Tammann = '.' # Change to "." for not Tammann and "TammannEOS" for Tamman
 #Tammann = '.' # Change to "." for not Tammann and "TammannEOS" for Tamman
 hdf5_file = fr'{Tammann}\{case_name}.hdf5'
-amrex_output_dir = fr'..\..\..\bin\tests\FlowRiemannUnitTests\output_{case_name}'
+# Output dir: argv[2] overrides; else the dual INCLINE/desktop UNIT_TEST default.
+# Toggle the default between INCLINE (/mmfs1, active) and DESKTOP (comment swap).
+_OUT_INCLINE = fr'/mmfs1/home/ttryon/flames/bin/tests/FlowRiemannUnitTests/UNIT_TEST_2D/output_{case_name}'
+_OUT_DESKTOP = fr'../../../bin/tests/FlowRiemannUnitTests/UNIT_TEST_2D/output_{case_name}'
+amrex_output_dir = sys.argv[2] if len(sys.argv) > 2 else _OUT_INCLINE  # -> _OUT_DESKTOP for desktop
 
 # Case name mapping
 case_to_group = {

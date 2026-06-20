@@ -29,7 +29,12 @@ yt.funcs.mylog.setLevel(40)
 # ============================================================================
 
 case_name        = 'Couette_Single'
-amrex_output_dir = r'../../../bin/tests/FlowCouette/output_single'
+# Output dir: the aggregator passes it as argv[1]; otherwise use a default.
+# Toggle the default between INCLINE (/mmfs1, active) and DESKTOP (comment swap).
+import sys
+_OUT_INCLINE = r'/mmfs1/home/ttryon/flames/bin/tests/FlowCouette/UNIT_TEST_2D/output_single'
+_OUT_DESKTOP = r'../../../bin/tests/FlowCouette/UNIT_TEST_2D/output_single'
+amrex_output_dir = sys.argv[1] if len(sys.argv) > 1 else _OUT_INCLINE  # -> _OUT_DESKTOP for desktop
 
 # Geometry (must match input_hydro2_single)
 y_min  = 0.0

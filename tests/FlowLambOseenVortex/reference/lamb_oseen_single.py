@@ -54,7 +54,12 @@ xc, yc = 5.0, 5.0                # Center of the vortex
 L = 10.0                         # Domain length (m)
 
 # File paths
-amrex_output_dir = r'..\..\..\bin\tests\FlowLambOseenVortex\FlowLambOseenVortex'
+# Output dir: the aggregator passes it as argv[1]; otherwise use a default.
+# Toggle the default between INCLINE (/mmfs1, active) and DESKTOP (comment swap).
+import sys
+_OUT_INCLINE = r'/mmfs1/home/ttryon/flames/bin/tests/FlowLambOseenVortex/UNIT_TEST_2D/FlowLambOseenVortex'
+_OUT_DESKTOP = r'../../../bin/tests/FlowLambOseenVortex/UNIT_TEST_2D/FlowLambOseenVortex'
+amrex_output_dir = sys.argv[1] if len(sys.argv) > 1 else _OUT_INCLINE  # -> _OUT_DESKTOP for desktop
 
 # Plotting customization
 FONT_SIZE_TITLE = 16

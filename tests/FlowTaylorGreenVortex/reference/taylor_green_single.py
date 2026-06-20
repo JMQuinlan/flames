@@ -51,7 +51,12 @@ nu = mu / density                # Kinematic viscosity (m^2/s)
 k = 1.0 #2.0 * np.pi / L              # Wavenumber (1/m)
 
 # File paths
-amrex_output_dir = r'..\..\..\bin\tests\FlowTaylorGreenVortex\TaylorGreenDecay'
+# Output dir: the aggregator passes it as argv[1]; otherwise use a default.
+# Toggle the default between INCLINE (/mmfs1, active) and DESKTOP (comment swap).
+import sys
+_OUT_INCLINE = r'/mmfs1/home/ttryon/flames/bin/tests/FlowTaylorGreenVortex/UNIT_TEST_2D/TaylorGreenDecay'
+_OUT_DESKTOP = r'../../../bin/tests/FlowTaylorGreenVortex/UNIT_TEST_2D/TaylorGreenDecay'
+amrex_output_dir = sys.argv[1] if len(sys.argv) > 1 else _OUT_INCLINE  # -> _OUT_DESKTOP for desktop
 
 # Plotting customization
 FONT_SIZE_TITLE = 16
