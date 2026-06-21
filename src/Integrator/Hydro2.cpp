@@ -807,7 +807,7 @@ void Hydro2::Mix(int lev)
                 v(i, j, k, d) = M(i, j, k, d) / std::max(rho(i, j, k), small);
 
             // Mixture kinetic energy (consistent with rho E):
-            KE_vol(i, j, k) = 0.5 * rho(i, j, k) * (AMREX_D_TERM(  v(i, j, k, 0) * v(i, j, k, 0),
+            KE_vol(i, j, k) = 0.5 * rho(i, j, k) * (AMREX_D_TERM( v(i, j, k, 0) * v(i, j, k, 0),
                                                                 + v(i, j, k, 1) * v(i, j, k, 1),
                                                                 + v(i, j, k, 2) * v(i, j, k, 2)));
             KE_mas(i, j, k) = (rho(i, j, k) > small) ? KE_vol(i, j, k) / rho(i, j, k) : 0.0;
@@ -1413,8 +1413,9 @@ Hydro2::RHS(int lev,
             // Debugging feild for div_tau and Ldot
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
                 div_tau_(i, j, k, d) = div_tau(d);
-            Ldot_(i, j, k, 0) = Ldot(0);   // Ldot diagnostic field stays 2-component (always zero here)
-            Ldot_(i, j, k, 1) = Ldot(1);
+
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                Ldot_(i, j, k, d) = Ldot(0);
 
             // ERROR CHECKING
             check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Viscosity solving", {
@@ -1423,6 +1424,12 @@ Hydro2::RHS(int lev,
                 { "div_tau[0]", div_tau(0) },
                 { "div_tau[1]", div_tau(1) }
             }); // end check4nans
+#if AMREX_SPACEDIM == 3
+            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Surface Tension solving", {
+                { "Ldot[2]", Ldot(2) },
+                { "div_tau[2]", div_tau(2) },
+            }); // end check4nans
+#endif  
             
             // ------------------------------------------------------------
             // Surface Tension
@@ -1449,8 +1456,12 @@ Hydro2::RHS(int lev,
             check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Surface Tension solving", {
                 { "Fsv_vector[0]", Fsv_vector(0) },
                 { "Fsv_vector[1]", Fsv_vector(1) }
+            });
+#if AMREX_SPACEDIM == 3
+            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Surface Tension solving", {
+                { "Fsv_vector[2]", Fsv_vector(2) }
             }); // end check4nans
-            
+#endif  
 
             // ------------------------------------------------------------
             // Weight
@@ -1469,7 +1480,12 @@ Hydro2::RHS(int lev,
             check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Weight solving", {
                 { "Fw_vector[0]", Fw_vector(0) },
                 { "Fw_vector[1]", Fw_vector(1) }
+            });
+#if AMREX_SPACEDIM == 3
+            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Surface Tension solving", {
+                { "Fw_vector[2]", Fw_vector(2) }
             }); // end check4nans
+#endif
 
             // ------------------------------------------------------------
             // Conservative Allen-Cahn
@@ -1580,7 +1596,7 @@ Hydro2::RHS(int lev,
             // ============================================================
             // 6-equation HLLC face fluxes (Saurel 2009 Sec 3.1.2 / Schmidmayer 2020 Sec 3).
             // ============================================================
-            const int X = 0, Y_dir = 1;
+            const int X_dir = 0, Y_dir = 1, Z_dir = 2;
 
             // Build per-face State (6-eq).  EOS constants are per-phase and identical L/R per cell (same eos0/eos1).
             auto make_state = [&](int ii, int jj, int kk, int dir)
@@ -1670,13 +1686,13 @@ Hydro2::RHS(int lev,
 #endif
             try
             {
-                flux_xlo = compute_face(i - 1, j,     k,     i,     j,     k,     X    );
-                flux_xhi = compute_face(i,     j,     k,     i + 1, j,     k,     X    );
+                flux_xlo = compute_face(i - 1, j,     k,     i,     j,     k,     X_dir);
+                flux_xhi = compute_face(i,     j,     k,     i + 1, j,     k,     X_dir);
                 flux_ylo = compute_face(i,     j - 1, k,     i,     j,     k,     Y_dir);
                 flux_yhi = compute_face(i,     j,     k,     i,     j + 1, k,     Y_dir);
 #if AMREX_SPACEDIM == 3
-                flux_zlo = compute_face(i,     j,     k - 1, i,     j,     k,     2    );
-                flux_zhi = compute_face(i,     j,     k,     i,     j,     k + 1, 2    );
+                flux_zlo = compute_face(i,     j,     k - 1, i,     j,     k,     Z_dir);
+                flux_zhi = compute_face(i,     j,     k,     i,     j,     k + 1, Z_dir);
 #endif
             }
             catch (...)
