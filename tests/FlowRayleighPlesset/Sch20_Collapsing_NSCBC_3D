@@ -1,0 +1,245 @@
+#@ [sch20_collapsing]
+#@ exe=hydro2
+#@ dim=3
+
+# =============================================================================
+# Schmidmayer-Bryngelson-Colonius (JCP 402, 2020) -- SPHERICAL BUBBLE
+# Case 2: HIGH-PRESSURE-RATIO  (p_inf / p_b = 1427)  -- "COLLAPSING" bubble
+# =============================================================================
+# Air bubble in water undergoing a violent, near-singular collapse. This is
+# Sch20 Table 1 Case 2 -- the challenging high-pressure-ratio test.
+#
+#   Reference: Schmidmayer, Bryngelson, Colonius, "An assessment of multiregion
+#   methods for two-phase flow simulations", J. Comput. Phys. 402 (2020)
+#   109080. Section 4 (problem setup), Table 1 (ICs), Eq. (27) (pressure
+#   initialization), Eq. (28) (interface smearing), Eq. (30) (collapse time).
+#
+# Sch20 nominal ICs (Table 1, Case 2):
+#   Water (liquid)  : gamma_l = 2.35,  pi_l = 1.0e9 Pa,  rho_l = 1000 kg/m^3
+#   Air   (gas)     : gamma_g = 1.4,   pi_g = 0,         rho_g = 1.0  kg/m^3
+#   p_inf  = 5.0e6 Pa     (far-field liquid pressure)
+#   p_b    = 3550  Pa     (uniform initial bubble pressure)
+#   ratio  = p_inf / p_b = 1427
+#
+# Initial-interface-equilibrium pressure field (Sch20 Eq. 27):
+#   p(r) = p_inf + (R0/r)(p_b - p_inf)        for r >= R0   (exterior liquid)
+#   p(r) = p_b                                for r <  R0   (bubble interior)
+#
+# Derived quantities:
+#   c_l = sqrt(gamma_l (p_inf + pi_l)/rho_l) = sqrt(2.35*(5e6+1e9)/1e3) ~ 1539 m/s
+#   tau_c = 0.915 R0 sqrt(rho_l / p_inf)
+#         = 0.915 * 0.02 * sqrt(1000/5e6) = 2.588e-4 s   (Sch20 Eq. 30)
+#
+# Deviations from Sch20 (documented):
+#   - Sch20 uses an octant with symmetry BCs and L = 320 R0. We use a 2D
+#     Cartesian +/- 0.2 m (10 R0 half-domain) with NSCBC4 outflow.
+#   - 2D Cartesian (cylindrical) rather than 3D spherical -- compare against
+#     the Chen-2D cylindrical RPE; the 3D KM/RPE curves are geometric bounds.
+#   - High-pressure-ratio collapse is stiff and near-singular; WENO5 + SSPRK3
+#     and a tight CFL are used. The minimum radius is mesh-limited -- refine
+#     amr.n_cell or enable AMR (eta_refinement_criterion) for convergence
+#     studies of R_min / tau_c.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+# plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Collapsing_NSCBC_3D                                  # DESKTOP
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Collapsing_NSCBC_3D   # INCLINE /mmfs1 (default)
+
+### MESHING ###
+amr.plot_int       = -1
+amr.plot_dt        = 4.0e-6        # ~ tau_c/65 -> fine sampling through collapse
+amr.max_grid_size  = 500000
+amr.blocking_factor = 2
+amr.regrid_int     = 10
+amr.grid_eff       = 0.8
+amr.max_level      = 3
+amr.n_cell         = 64 64 64       # base; eta-only AMR -> finest dx 7.8e-4 (R0/dx 25.6)
+amr.n_error_buf    = 16
+
+nghost = 4
+
+### TIME STEPPING ###
+timestep                = 1.0e-8
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-6
+dynamictimestep.min     = 1.0e-14
+cfl                     = 0.4
+
+### DIMENSIONS ###
+geometry.prob_lo     = -0.20 -0.20 -0.20
+geometry.prob_hi     =  0.20  0.20  0.20
+geometry.is_periodic = 0 0 0
+stop_time            = 4.0e-4      # ~ 1.55 tau_c -- collapse + first rebound
+
+### ETA INITIAL CONDITIONS ###
+# eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.0016     # ~ 2 cells across the band
+eta.ic.expression.constant.R0      = 0.02
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### EQUATION OF STATE -- Sch20 water (Tammann) + air (ideal gas) ###
+eos0.gamma = 2.35
+eos0.p0    = 1.0e9
+eos0.cv    = 1781.0
+eos0.cp    = 4186.0
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 714.286
+eos1.cp    = 1000.0
+
+### HYDRO INITIAL CONDITIONS ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1000.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Liquid (exterior): Sch20 Eq. 27 RPE steady field.
+# max(r, R0) regularizes the 1/r singularity; for r < R0 returns p_b
+# (continuous with the gas interior under the mechanical-equilibrium IC).
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_inf = 5.0e6
+pressure0.ic.expression.constant.p_b   = 3550.0
+pressure0.ic.expression.constant.R0    = 0.02
+pressure0.ic.expression.region0 = "p_inf + (R0/max(sqrt(x*x + y*y + z*z), R0))*(p_b - p_inf)"
+
+# Gas (interior): uniform bubble pressure p_b.
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_b = 3550.0
+pressure1.ic.expression.region0 = "p_b"
+
+### VISCOSITY (inviscid -- Sch20 nominal) ###
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION (none in Sch20 nominal collapse cases) ###
+sigma = 0.0
+pref  = 0.0
+
+### BOUNDARY CONDITIONS - NSCBC4 non-reflecting outflow on all 6 faces, target = p_inf ###
+density.bc.type.xlo = nscbc_outflow
+density.bc.type.xhi = nscbc_outflow
+density.bc.type.ylo = nscbc_outflow
+density.bc.type.yhi = nscbc_outflow
+density.bc.type.zlo = nscbc_outflow
+density.bc.type.zhi = nscbc_outflow
+
+energy.bc.type.xlo = nscbc_outflow
+energy.bc.type.xhi = nscbc_outflow
+energy.bc.type.ylo = nscbc_outflow
+energy.bc.type.yhi = nscbc_outflow
+energy.bc.type.zlo = nscbc_outflow
+energy.bc.type.zhi = nscbc_outflow
+
+momentum.bc.type.xlo = nscbc_outflow nscbc_outflow nscbc_outflow
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow nscbc_outflow
+momentum.bc.type.ylo = nscbc_outflow nscbc_outflow nscbc_outflow
+momentum.bc.type.yhi = nscbc_outflow nscbc_outflow nscbc_outflow
+momentum.bc.type.zlo = nscbc_outflow nscbc_outflow nscbc_outflow
+momentum.bc.type.zhi = nscbc_outflow nscbc_outflow nscbc_outflow
+
+nscbc.xlo.type = outflow
+nscbc.xlo.target_p = 5.0e6
+nscbc.xlo.sigma = 0.15
+nscbc.xlo.beta  = 0.5
+nscbc.xlo.L_ref = 0.40
+nscbc.xlo.target_u = 0.0
+nscbc.xlo.target_v = 0.0
+nscbc.xlo.target_w = 0.0
+
+nscbc.xhi.type = outflow
+nscbc.xhi.target_p = 5.0e6
+nscbc.xhi.sigma = 0.15
+nscbc.xhi.beta  = 0.5
+nscbc.xhi.L_ref = 0.40
+nscbc.xhi.target_u = 0.0
+nscbc.xhi.target_v = 0.0
+nscbc.xhi.target_w = 0.0
+
+nscbc.ylo.type = outflow
+nscbc.ylo.target_p = 5.0e6
+nscbc.ylo.sigma = 0.15
+nscbc.ylo.beta  = 0.5
+nscbc.ylo.L_ref = 0.40
+nscbc.ylo.target_u = 0.0
+nscbc.ylo.target_v = 0.0
+nscbc.ylo.target_w = 0.0
+
+nscbc.yhi.type = outflow
+nscbc.yhi.target_p = 5.0e6
+nscbc.yhi.sigma = 0.15
+nscbc.yhi.beta  = 0.5
+nscbc.yhi.L_ref = 0.40
+nscbc.yhi.target_u = 0.0
+nscbc.yhi.target_v = 0.0
+nscbc.yhi.target_w = 0.0
+
+nscbc.zlo.type = outflow
+nscbc.zlo.target_p = 5.0e6
+nscbc.zlo.sigma = 0.15
+nscbc.zlo.beta  = 0.5
+nscbc.zlo.L_ref = 0.40
+nscbc.zlo.target_u = 0.0
+nscbc.zlo.target_v = 0.0
+nscbc.zlo.target_w = 0.0
+
+nscbc.zhi.type = outflow
+nscbc.zhi.target_p = 5.0e6
+nscbc.zhi.sigma = 0.15
+nscbc.zhi.beta  = 0.5
+nscbc.zhi.L_ref = 0.40
+nscbc.zhi.target_u = 0.0
+nscbc.zhi.target_v = 0.0
+nscbc.zhi.target_w = 0.0
+
+nscbc.small = 1.0e-10
+
+### REFINEMENT (off for the nominal validation run) ###
+eta_refinement_criterion   = 1.0e-1
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS ###
+apply_surface_tension = 0
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+grav                  = 0.0
+
+### NUMERICS -- Sch20 nominal: WENO3 + SSPRK3 (project-standard for Sch20 tests) ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3
+kappa_method        = 1
+
+apply_sharpening     = 0
+sharpening_frequency = 50
+reinit_max_iter      = 100
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+relax_diag           = 1

@@ -346,15 +346,15 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // built from the 2-component per-phase velocity ICs; kept 2-component in 3D.
         // They use bc_nothing (component-agnostic): momentum_bc now has SPACEDIM
         // components and would assert on these 2-component fabs in 3D.
-        value.RegisterNewFab(value.momentum0_mf,    &value.bc_nothing,  2, nghost, "momentum0",     false,false, { "x", "y" });
-        value.RegisterNewFab(value.momentum0_old_mf,&value.bc_nothing,  2, nghost, "momentum0_old", false,false);
+        value.RegisterNewFab(value.momentum0_mf,    &value.bc_nothing,  AMREX_SPACEDIM, nghost, "momentum0",     false,false, { AMREX_D_DECL("x", "y", "z") });
+        value.RegisterNewFab(value.momentum0_old_mf,&value.bc_nothing,  AMREX_SPACEDIM, nghost, "momentum0_old", false,false);
  
         //value.RegisterNewFab(value.T0_mf,           value.temperature_bc, 1, nghost, "T0", false, false);
         //value.RegisterNewFab(value.k0_thermal_mf,   &value.bc_nothing, 1, nghost, "k0_thermal", false, false);
         //value.RegisterNewFab(value.h0_thermal_mf,   &value.bc_nothing, 1, nghost, "h0_thermal", false, false);
 
         value.RegisterNewFab(value.pressure0_mf,    pbc,                1, nghost, "pressure0",     false,false);
-        value.RegisterNewFab(value.velocity0_mf,    &value.bc_nothing,  2, nghost, "velocity0",     false,false, { "x", "y" });
+        value.RegisterNewFab(value.velocity0_mf,    &value.bc_nothing,  AMREX_SPACEDIM, nghost, "velocity0",     false,false, { AMREX_D_DECL("x", "y", "z") });
 
         // FLUID 1
         value.RegisterNewFab(value.density1_mf,     value.density_bc,   1, nghost, "density1",      false,false);
@@ -363,15 +363,15 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.energy1_mf,      value.energy_bc,    1, nghost, "energy1",       true, true);
         value.RegisterNewFab(value.energy1_old_mf,  value.energy_bc,    1, nghost, "energy1_old",   false,true);
 
-        value.RegisterNewFab(value.momentum1_mf,    &value.bc_nothing,  2, nghost, "momentum1",     false,false, { "x", "y" });
-        value.RegisterNewFab(value.momentum1_old_mf,&value.bc_nothing,  2, nghost, "momentum1_old", false,false);
+        value.RegisterNewFab(value.momentum1_mf,    &value.bc_nothing,  AMREX_SPACEDIM, nghost, "momentum1",     false,false, { AMREX_D_DECL("x", "y", "z") });
+        value.RegisterNewFab(value.momentum1_old_mf,&value.bc_nothing,  AMREX_SPACEDIM, nghost, "momentum1_old", false,false);
 
         //value.RegisterNewFab(value.T1_mf,           value.temperature_bc, 1, nghost, "T1", false, false);
         //value.RegisterNewFab(value.k1_thermal_mf,   &value.bc_nothing, 1, nghost, "k1_thermal", false, false);
         //value.RegisterNewFab(value.h1_thermal_mf,   &value.bc_nothing, 1, nghost, "h1_thermal", false, false);
 
         value.RegisterNewFab(value.pressure1_mf,    pbc,                1, nghost, "pressure1",     false,true);
-        value.RegisterNewFab(value.velocity1_mf,    &value.bc_nothing,  2, nghost, "velocity1",     false,true, { "x", "y" });
+        value.RegisterNewFab(value.velocity1_mf,    &value.bc_nothing,  AMREX_SPACEDIM, nghost, "velocity1",     false,true, { AMREX_D_DECL("x", "y", "z") });
 
         // MIXTURE
         value.RegisterNewFab(value.pressure_mf,    pbc,                 1,              nghost,  "pressure",    true, false);
@@ -399,7 +399,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.Source_mf,      &value.bc_nothing,   AMREX_SPACEDIM + 2, 0,  "Source",true, false, { "_rho", AMREX_D_DECL("_Mx", "_My", "_Mz"), "_E" });
         value.RegisterNewFab(value.Fsv_mf,         &value.bc_nothing,   AMREX_SPACEDIM, 0,      "Fsv",  true, false, { AMREX_D_DECL("x", "y", "z") }); // Surface Tension
         value.RegisterNewFab(value.Fw_mf,          &value.bc_nothing,   AMREX_SPACEDIM, 0,      "Fw",   true, false, { AMREX_D_DECL("x", "y", "z") }); // Weight
-        value.RegisterNewFab(value.Ldot_mf,        &value.bc_nothing,   2, 0,       "Ldot",             true, false, { "x", "y" }); // Ldot
+        value.RegisterNewFab(value.Ldot_mf,        &value.bc_nothing,   AMREX_SPACEDIM, 0, "Ldot",      true, false, { AMREX_D_DECL("x", "y", "z") }); // Ldot (3-comp: z-momentum source develops dynamically)
         value.RegisterNewFab(value.T_mf,            value.energy_bc,    1, nghost, "T",                 true, false);               // Temperature
         value.RegisterNewFab(value.cp_mf,          &value.bc_nothing,   1, nghost, "cp",                false,true);                // Constant Pressure Specific Heat
         value.RegisterNewFab(value.cv_mf,          &value.bc_nothing,   1, nghost, "cv",                false,true);                // Constant Volume Specific Heat
@@ -544,6 +544,16 @@ void Hydro2::Initialize(int lev)
     Fsv_mf[lev]     ->setVal(0.0);
     Vap_dot_mf[lev] ->setVal(0.0);
 
+    // Pre-zero per-phase velocity/momentum so inputs that specify only the in-plane
+    // components (region0/region1) leave the out-of-plane (z) component at 0.  The
+    // expression IC writes exactly as many components as regionN entries provided,
+    // so a 3-component field driven by a 2-region IC keeps vz = 0 here; supply
+    // velocity{0,1}.ic.expression.region2 to drive a genuine 3D velocity field.
+    velocity0_mf[lev]->setVal(0.0);
+    velocity1_mf[lev]->setVal(0.0);
+    momentum0_mf[lev]->setVal(0.0);
+    momentum1_mf[lev]->setVal(0.0);
+
     // FLUID 0
     velocity0_ic    ->Initialize(lev, velocity0_mf, 0.0);
     pressure0_ic    ->Initialize(lev, pressure0_mf, 0.0);
@@ -633,6 +643,13 @@ void Hydro2::Initialize(int lev)
     rho_eta1_mf[lev]->setVal(0.0);
     rho_eta0_old_mf[lev]->setVal(0.0);
     rho_eta1_old_mf[lev]->setVal(0.0);
+
+    // Pre-zero the mixture momentum/velocity (like the conserved fields above) so
+    // every cell of the grown box is finite before the time=0 Mix() runs over it
+    // (Mix() then overwrites valid+ghost from the per-phase fields).
+    momentum_mf[lev]->setVal(0.0);
+    momentum_old_mf[lev]->setVal(0.0);
+    velocity_mf[lev]->setVal(0.0);
 
     energy_per_vol_mf[lev]->setVal(0.0);
     energy_per_mas_mf[lev]->setVal(0.0);
@@ -793,12 +810,12 @@ void Hydro2::Mix(int lev)
 
             // Mixture momentum from per-phase mass-weighted velocities:
             //   M = (alpha_1 rho_1) u_0 + (alpha_2 rho_2) u_1
-            // PER-PHASE velocity ICs (v0/v1) are 2-component; the in-plane momenta
-            // are built from them and the out-of-plane (z) momentum starts at zero
-            // and develops dynamically through the flux/source spine.
+            // PER-PHASE velocity fields (v0/v1) are full AMREX_SPACEDIM vectors; the
+            // IC may drive every component (region0/region1/region2).  Build all
+            // momentum components from them -- in 3D the z-momentum is a genuine DOF.
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
                 M(i, j, k, d) = rho_eta0(i, j, k) * v0(i, j, k, d) + rho_eta1(i, j, k) * v1(i, j, k, d);
-      
+
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
                 M_old(i, j, k, d) = M(i, j, k, d);
 
@@ -1415,7 +1432,7 @@ Hydro2::RHS(int lev,
                 div_tau_(i, j, k, d) = div_tau(d);
 
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
-                Ldot_(i, j, k, d) = Ldot(0);
+                Ldot_(i, j, k, d) = Ldot(d);
 
             // ERROR CHECKING
             check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Viscosity solving", {
