@@ -110,9 +110,10 @@ PLOT_AREA_VS_VAP          = 1          # Surface area (left) vs integrated Vap_d
 TIME_STEP = 4  # Sample every Nth timestep (1=all, 2=every other, 5=every 5th, etc.)
 
 # File paths
-amrex_output_dir = r'../../../bin/tests/FlowShockDroplet/output_ShockDroplet'
+#amrex_output_dir = r'../../../bin/tests/FlowShockDroplet/output_ShockDroplet'
 #amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet'
 #amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_2mm_Droplet_1-0Ma'
+amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_2mm_Droplet_3-0Ma'
 #amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_H20'
 #amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_minmod_rk3'
 
