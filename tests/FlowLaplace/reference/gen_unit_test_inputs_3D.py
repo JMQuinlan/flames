@@ -39,7 +39,7 @@ N_CELL_BASE = 32
 MAX_LEVEL   = 1
 REF_RATIO   = 2
 EPS_CELLS   = 2
-N_ACOUSTIC  = 100      # acoustic transits R/c_l (2D used 500; reduced for 3D cost)
+N_ACOUSTIC  = 50       # acoustic transits R/c_l (2D matrix uses 500; trimmed for 3D cost)
 N_FRAMES    = 40
 
 

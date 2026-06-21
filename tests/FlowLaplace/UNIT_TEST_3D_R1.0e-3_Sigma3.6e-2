@@ -19,7 +19,7 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowLaplace/UNIT_TEST_3D/output_
 
 ### MESHING ###
 amr.plot_int        = -1
-amr.plot_dt         = 1.630737567e-06
+amr.plot_dt         = 8.153687837e-07
 amr.max_grid_size   = 32
 amr.blocking_factor = 2
 amr.regrid_int      = 10
@@ -33,7 +33,7 @@ nghost = 4
 timestep                = 1.0e-12
 dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
-dynamictimestep.max     = 3.261475135e-07
+dynamictimestep.max     = 1.630737567e-07
 dynamictimestep.min     = 1.0e-14
 cfl                     = 0.3
 
@@ -41,7 +41,7 @@ cfl                     = 0.3
 geometry.prob_lo     = -0.002 -0.002 -0.002
 geometry.prob_hi     =  0.002  0.002  0.002
 geometry.is_periodic = 0 0 0
-stop_time            = 6.52295027e-05
+stop_time            = 3.261475135e-05
 
 ### ETA IC -- sphere: eta=0 inside (air, phase 1), eta=1 outside (water, phase 0) ###
 eta.ic.type = expression

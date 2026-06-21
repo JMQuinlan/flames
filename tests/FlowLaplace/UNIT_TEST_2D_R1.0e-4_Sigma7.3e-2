@@ -23,7 +23,7 @@
 #
 # Time: acoustic transit R/c_l = 6.52295027e-08 s (c_l = 1533.048634 m/s);
 #   capillary tau = sqrt(rho R^3/sigma) = 0.0001170411472 s;
-#   stop_time = 500 * R/c_l = 3.261475135e-05 s (50 frames).
+#   stop_time = 100 * R/c_l = 6.52295027e-06 s (50 frames).
 #
 # This is a unit test -- keep it fast: low resolution, eta-only AMR, Neumann
 # walls (bubble is far from the boundary in the 0.0004 m box).
@@ -37,7 +37,7 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowLaplace/UNIT_TEST_2D/output_
 
 ### MESHING ###
 amr.plot_int        = -1
-amr.plot_dt         = 6.52295027e-07
+amr.plot_dt         = 1.304590054e-07
 amr.max_grid_size   = 500000
 amr.blocking_factor = 2
 amr.regrid_int      = 10
@@ -51,7 +51,7 @@ nghost = 4
 timestep                = 1e-12
 dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
-dynamictimestep.max     = 1.630737567e-07
+dynamictimestep.max     = 3.261475135e-08
 dynamictimestep.min     = 1e-14
 cfl                     = 0.3
 
@@ -59,7 +59,7 @@ cfl                     = 0.3
 geometry.prob_lo     = -0.0002 -0.0002 0.0
 geometry.prob_hi     =  0.0002  0.0002 0.0
 geometry.is_periodic = 0 0 0
-stop_time            = 3.261475135e-05
+stop_time            = 6.52295027e-06
 
 ### ETA INITIAL CONDITIONS ###
 # eta = 0 inside bubble (air, phase 1), eta = 1 outside (water, phase 0).

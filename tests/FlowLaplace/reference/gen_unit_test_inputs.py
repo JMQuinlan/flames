@@ -36,6 +36,10 @@ SIGMA_VALUES = [0.036, 0.073]             # surfactant-laden, clean air/water
 
 
 def main():
+    # Speed knob: shorten the run to fewer acoustic transits than the committed
+    # R*_Sigma* matrix (gen_inputs default = 500).  ~100 transits is plenty to
+    # detect any equilibrium drift in the bubble radius -- the unit-test metric.
+    gi.N_ACOUSTIC = 100
     written = []
     for R in R_VALUES:
         for sigma in SIGMA_VALUES:
