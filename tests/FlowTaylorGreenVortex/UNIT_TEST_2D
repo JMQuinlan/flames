@@ -101,7 +101,7 @@ velocity0.ic.expression.region1 = "-cos(x) * sin(y)"
 # Taylor-Green pressure field.
 #   p = p_0 + (rho / 4) * (cos(2x) + cos(2y))
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "1.1 + 0.25 * (cos(2.0*x) + cos(2.0*y))"
+pressure0.ic.expression.region0 = "100.0 + 0.25 * (cos(2.0*x) + cos(2.0*y))"
 
 # Phase 1 (degenerate copy -- same fields as phase 0 to keep the IC
 # self-consistent under the equalize_ic_pressure / linear Mix() weighting,
@@ -114,7 +114,7 @@ velocity1.ic.expression.region0 = "sin(x) * cos(y)"
 velocity1.ic.expression.region1 = "-cos(x) * sin(y)"
 
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "1.1 + 0.25 * (cos(2.0*x) + cos(2.0*y))"
+pressure1.ic.expression.region0 = "100.0 + 0.25 * (cos(2.0*x) + cos(2.0*y))"
 
 ### HYDRO BC -- ALL PERIODIC ###
 pf.eta.bc.type.xlo = periodic

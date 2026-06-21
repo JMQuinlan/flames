@@ -19,7 +19,7 @@ import sys
 case_name = sys.argv[1] if len(sys.argv) > 1 else 'Garrick'
 Tammann = '.' # Change to "." for not Tammann and "TammannEOS" for Tamman
 #Tammann = '.' # Change to "." for not Tammann and "TammannEOS" for Tamman
-hdf5_file = fr'{Tammann}\{case_name}.hdf5'
+hdf5_file = os.path.join(Tammann, f'{case_name}.hdf5')   # os.path.join: works on Linux (INCLINE) too, not just Windows '\'
 # Output dir: argv[2] overrides; else the dual INCLINE/desktop UNIT_TEST default.
 # Toggle the default between INCLINE (/mmfs1, active) and DESKTOP (comment swap).
 _OUT_INCLINE = fr'/mmfs1/home/ttryon/flames/bin/tests/FlowRiemannUnitTests/UNIT_TEST_2D/output_{case_name}'
@@ -193,6 +193,7 @@ axes[2].set_xlim([x_exact[0], x_exact[-1]])
 
 
 plt.tight_layout()
+os.makedirs('./Images', exist_ok=True)
 output_filename = f'./Images/{case_name}_comparison'
 plt.savefig(output_filename+'.png', format='png', dpi=300, bbox_inches='tight')
 plt.savefig(output_filename+'.eps', format='eps', bbox_inches='tight')

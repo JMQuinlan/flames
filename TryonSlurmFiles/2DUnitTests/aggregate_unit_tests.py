@@ -101,15 +101,25 @@ TESTS = [
          args=["{base}/FlowLaplace/UNIT_TEST_2D"]),
 ]
 
-# Error-line patterns (best effort; raw stdout is always kept in run.log).
+# Error parsing.  Priority 1: an explicit "UNIT_TEST_RESULT max_err=.. avg_err=.."
+# line (for analyses whose metric isn't labelled "error", e.g. noslip).  The
+# fallback patterns REQUIRE an explicit error label next to the number, so they
+# can't grab a coordinate ("phi=0.5") or a shear-rate ("mean : 0.033").  Raw
+# stdout is always kept in run.log.
 _NUM = r"([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)"
+RESULT_MAX = re.compile(rf"UNIT_TEST_RESULT\b.*?max_err\s*=\s*{_NUM}", re.I)
+RESULT_AVG = re.compile(rf"UNIT_TEST_RESULT\b.*?avg_err\s*=\s*{_NUM}", re.I)
 MAX_PATTERNS = [re.compile(p, re.I) for p in (
-    rf"(?:l[\s_]*inf|linf|l_?∞|max(?:imum)?(?:\s*(?:rel(?:ative)?)?)?\s*err\w*)\D*{_NUM}",
-    rf"max\D*{_NUM}",
+    rf"\bmax_err\s*=\s*{_NUM}",
+    rf"(?:l[\s_]*inf(?:inity)?|linf)\b\D*err\w*\D*{_NUM}",
+    rf"(?:l[\s_]*inf(?:inity)?|linf)\b\D*{_NUM}",
+    rf"max(?:imum)?\s*(?:rel\w*\s*)?err\w*\D*{_NUM}",
 )]
 AVG_PATTERNS = [re.compile(p, re.I) for p in (
-    rf"(?:l[\s_]*2|l_?2|avg|average|mean|rms)\D*err\w*\D*{_NUM}",
-    rf"(?:avg|average|mean|rms|l2)\D*{_NUM}",
+    rf"\bavg_err\s*=\s*{_NUM}",
+    rf"(?:l[\s_]*2)\b\D*err\w*\D*{_NUM}",
+    rf"(?:l[\s_]*2)\b\D*{_NUM}",
+    rf"(?:mean|average|avg|rms)\s*\|?\s*err\w*\|?\D*{_NUM}",
 )]
 PLOT_EXTS = (".png", ".eps", ".pdf", ".jpg", ".jpeg", ".gif")
 
@@ -128,15 +138,21 @@ def snapshot_plots(root):
     return snap
 
 
-def parse_metric(text, patterns):
-    """Last numeric match across the given patterns, or None."""
+def parse_metric(text, result_pat, patterns):
+    """UNIT_TEST_RESULT line if present, else last label-adjacent match, else None."""
+    m = result_pat.search(text)
+    if m:
+        try:
+            return float(m.group(1))
+        except (ValueError, IndexError):
+            pass
     val = None
     for line in text.splitlines():
         for pat in patterns:
-            m = pat.search(line)
-            if m:
+            mm = pat.search(line)
+            if mm:
                 try:
-                    val = float(m.group(1))
+                    val = float(mm.group(1))
                 except (ValueError, IndexError):
                     pass
     return val
@@ -200,8 +216,8 @@ def run_one(test, base, only):
         except OSError as ex:
             print(f"    [warn] could not copy {rel}: {ex}")
 
-    max_err = parse_metric(out, MAX_PATTERNS)
-    avg_err = parse_metric(out, AVG_PATTERNS)
+    max_err = parse_metric(out, RESULT_MAX, MAX_PATTERNS)
+    avg_err = parse_metric(out, RESULT_AVG, AVG_PATTERNS)
     print(f"    status={status}  time={dt:.0f}s  plots={len(new_plots)}  "
           f"max_err={max_err}  avg_err={avg_err}")
     return dict(name=name, status=status,
