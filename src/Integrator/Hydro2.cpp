@@ -27,27 +27,21 @@
 //#include "Solver/Local/FluidRiemann/PartiallyParabolic.H"
 #include "Solver/Local/FluidRiemann/Upwind.H"
 #include "Solver/Local/FluidRiemann/Lax_Friedrich.H"
-
-
-// Limiters / primitive-variable reconstruction (Sch20 §3.2)
+// Limiters / primitive-variable reconstruction
 #include "Solver/Local/Limiter/Limiter.H"
 #include "Solver/Local/Limiter/Godunov.H"
 #include "Solver/Local/Limiter/Minmod.H"
 #include "Solver/Local/Limiter/VanLeer.H"
 #include "Solver/Local/Limiter/WENO3.H"
 #include "Solver/Local/Limiter/WENO5.H"
-
 //EOS
 #include "Solver/EOS/EOS.H"
 #include "Solver/EOS/Tammann.H"
 #include "Solver/EOS/CPG.H"
-
-
+// Generic
 #include <AMReX_Math.H>
 #include "AMReX_TimeIntegrator.H"
 
-
-//#if AMREX_SPACEDIM == 2
 
 namespace Integrator
 {
@@ -231,8 +225,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             {
 #if AMREX_SPACEDIM == 3
                 // The simple (nghost=2) NSCBC variant is 2D-only: single-tangential
-                // transverse LODI + a 2D corner closure that were never ported to
-                // 3D. Fail loudly at init rather than produce wrong boundary data.
+                // transverse LODI + a 2D corner closure that were never ported to 3D/
                 // Use NSCBC4 (nghost=4) for 3D, which is validated (faces+edges+corners).
                 Util::Abort(INFO, "Simple NSCBC (nghost=2) is 2D-only; set nghost=4 to use NSCBC4 for 3D runs.");
 #endif
@@ -381,8 +374,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.velocity1_mf,    &value.bc_nothing,  2, nghost, "velocity1",     false,true, { "x", "y" });
 
         // MIXTURE
-        value.RegisterNewFab(value.pressure_mf,             pbc,                1, nghost,  "pressure",         true, false);
-        value.RegisterNewFab(value.velocity_mf,            &value.bc_nothing,   AMREX_SPACEDIM, nghost,  "velocity",         true, false, { AMREX_D_DECL("x", "y", "z") });
+        value.RegisterNewFab(value.pressure_mf,    pbc,                 1,              nghost,  "pressure",    true, false);
+        value.RegisterNewFab(value.velocity_mf,    &value.bc_nothing,   AMREX_SPACEDIM, nghost,  "velocity",    true, false, { AMREX_D_DECL("x", "y", "z") });
         // Vorticity is the curl of velocity: a scalar (omega_z) in 2D, a full
         // 3-vector (omega_x, omega_y, omega_z) in 3D.
 #if AMREX_SPACEDIM == 2
@@ -403,9 +396,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.m0_mf,          &value.bc_nothing,   1, 0,       "m0",               false,false);
         value.RegisterNewFab(value.u0_mf,          &value.bc_nothing,   2, 0,       "u0",               false,false, { "x", "y" });
         value.RegisterNewFab(value.q_mf,           &value.bc_nothing,   2, 0,       "q0",               false,false, { "x", "y" });
-        value.RegisterNewFab(value.Source_mf,      &value.bc_nothing,   AMREX_SPACEDIM + 2, 0,       "Source",           true, false, { "_rho", AMREX_D_DECL("_Mx", "_My", "_Mz"), "_E" });
-        value.RegisterNewFab(value.Fsv_mf,         &value.bc_nothing,   AMREX_SPACEDIM, 0,       "Fsv",              true, false, { AMREX_D_DECL("x", "y", "z") }); // Surface Tension
-        value.RegisterNewFab(value.Fw_mf,          &value.bc_nothing,   AMREX_SPACEDIM, 0,       "Fw",               true, false, { AMREX_D_DECL("x", "y", "z") }); // Weight
+        value.RegisterNewFab(value.Source_mf,      &value.bc_nothing,   AMREX_SPACEDIM + 2, 0,  "Source",true, false, { "_rho", AMREX_D_DECL("_Mx", "_My", "_Mz"), "_E" });
+        value.RegisterNewFab(value.Fsv_mf,         &value.bc_nothing,   AMREX_SPACEDIM, 0,      "Fsv",  true, false, { AMREX_D_DECL("x", "y", "z") }); // Surface Tension
+        value.RegisterNewFab(value.Fw_mf,          &value.bc_nothing,   AMREX_SPACEDIM, 0,      "Fw",   true, false, { AMREX_D_DECL("x", "y", "z") }); // Weight
         value.RegisterNewFab(value.Ldot_mf,        &value.bc_nothing,   2, 0,       "Ldot",             true, false, { "x", "y" }); // Ldot
         value.RegisterNewFab(value.T_mf,            value.energy_bc,    1, nghost, "T",                 true, false);               // Temperature
         value.RegisterNewFab(value.cp_mf,          &value.bc_nothing,   1, nghost, "cp",                false,true);                // Constant Pressure Specific Heat
@@ -425,17 +418,17 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.Y_mf,           &value.bc_nothing,   1, nghost, "Mass_Fraction",     true, false);               // Mass Fraction
 
         // EXTRAS & DEBUGGING
-        value.RegisterNewFab(value.grad_eta_mf,         &value.bc_nothing,  AMREX_SPACEDIM, 0, "grad_eta",           true, false, { AMREX_D_DECL("x", "y", "z") });
-        value.RegisterNewFab(value.kappas_mf,           &value.bc_nothing,  3, 0, "kappa",              true, false, { "Avg", "1", "2" });  // Surface curvature
-        value.RegisterNewFab(value.grad_mag_grad_eta_mf,&value.bc_nothing,  AMREX_SPACEDIM, 0, "grad_mag_grad_eta",  false,false, { AMREX_D_DECL("x", "y", "z") });         // grad( | grad(eta) | )
-        value.RegisterNewFab(value.rho_flux_mf,         &value.bc_nothing,  1, 0, "rho_flux",           true, false);                       // Density Flux
-        value.RegisterNewFab(value.M_flux_mf,           &value.bc_nothing,  AMREX_SPACEDIM, 0, "M_flux",             true, false, { AMREX_D_DECL("x", "y", "z") });         // Momentum Flux
-        value.RegisterNewFab(value.E_flux_mf,           &value.bc_nothing,  1, 0, "E_flux",             true, false);                       // Energy Flux
-        value.RegisterNewFab(value.div_tau_mf,          &value.bc_nothing,  AMREX_SPACEDIM, 0, "div_tau",            true, false, { AMREX_D_DECL("x", "y", "z") });         // Energy Flux
-        value.RegisterNewFab(value.hess_u_mf,           &value.bc_nothing,  8, 0, "hess_u",             false,false, {"000","001",
-                                                                                                                      "010","011",
-                                                                                                                      "100","101",
-                                                                                                                      "110","111"});      // hess_u Flux
+        value.RegisterNewFab(value.grad_eta_mf,         &value.bc_nothing,  AMREX_SPACEDIM, 0, "grad_eta",           true, false, { AMREX_D_DECL("x", "y", "z") }); // grad(eta)
+        value.RegisterNewFab(value.kappas_mf,           &value.bc_nothing,  3,              0, "kappa",              true, false, { "Avg", "1", "2" });             // Surface curvature
+        value.RegisterNewFab(value.grad_mag_grad_eta_mf,&value.bc_nothing,  AMREX_SPACEDIM, 0, "grad_mag_grad_eta",  false,false, { AMREX_D_DECL("x", "y", "z") }); // grad( | grad(eta) | )
+        value.RegisterNewFab(value.rho_flux_mf,         &value.bc_nothing,  1,              0, "rho_flux",           true, false);                                  // Density Flux
+        value.RegisterNewFab(value.M_flux_mf,           &value.bc_nothing,  AMREX_SPACEDIM, 0, "M_flux",             true, false, { AMREX_D_DECL("x", "y", "z") }); // Momentum Flux
+        value.RegisterNewFab(value.E_flux_mf,           &value.bc_nothing,  1,              0, "E_flux",             true, false);                                  // Energy Flux
+        value.RegisterNewFab(value.div_tau_mf,          &value.bc_nothing,  AMREX_SPACEDIM, 0, "div_tau",            true, false, { AMREX_D_DECL("x", "y", "z") }); // Energy Flux
+        value.RegisterNewFab(value.hess_u_mf,           &value.bc_nothing,  8,              0, "hess_u",             false,false, {"000","001",
+                                                                                                                                   "010","011",
+                                                                                                                                   "100","101",
+                                                                                                                                   "110","111"});                   // hess_u Flux
         value.RegisterNewFab(value.Vap_dot_mf, &value.bc_nothing, AMREX_SPACEDIM + 3, 0, "Vap_dot", true, false, { "_eta", "_rho", AMREX_D_DECL("_Mx", "_My", "_Mz"), "_E" });    // Momentum Flux
         
     }
@@ -803,11 +796,9 @@ void Hydro2::Mix(int lev)
             // PER-PHASE velocity ICs (v0/v1) are 2-component; the in-plane momenta
             // are built from them and the out-of-plane (z) momentum starts at zero
             // and develops dynamically through the flux/source spine.
-            M(i, j, k, 0) = rho_eta0(i, j, k) * v0(i, j, k, 0) + rho_eta1(i, j, k) * v1(i, j, k, 0);
-            M(i, j, k, 1) = rho_eta0(i, j, k) * v0(i, j, k, 1) + rho_eta1(i, j, k) * v1(i, j, k, 1);
-#if AMREX_SPACEDIM == 3
-            M(i, j, k, 2) = 0.0;
-#endif
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                M(i, j, k, d) = rho_eta0(i, j, k) * v0(i, j, k, d) + rho_eta1(i, j, k) * v1(i, j, k, d);
+      
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
                 M_old(i, j, k, d) = M(i, j, k, d);
 

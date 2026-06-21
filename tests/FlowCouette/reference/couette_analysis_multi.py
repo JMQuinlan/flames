@@ -134,9 +134,11 @@ print(f"  using {os.path.basename(last_plot)}, t_sim = {sim_time:.4f} s")
 # EXTRACT NUMERICAL PROFILE
 # ============================================================================
 
+# z midplane: 0.0 in 2D; central z-plane in a 3D z-extension run.
+zmid = lambda d: float(0.5 * (d.domain_left_edge[2] + d.domain_right_edge[2]))
 ray = ds.ray(
-    ds.arr([x_slice, y_min, 0.0], 'code_length'),
-    ds.arr([x_slice, y_max, 0.0], 'code_length'),
+    ds.arr([x_slice, y_min, zmid(ds)], 'code_length'),
+    ds.arr([x_slice, y_max, zmid(ds)], 'code_length'),
 )
 order = np.argsort(ray['y'])
 y_num = np.array(ray['y'][order])
@@ -291,8 +293,8 @@ for pf in plot_files:
     try:
         ds_f      = yt.load(pf)
         ray_f     = ds_f.ray(
-            ds_f.arr([x_slice, y_min, 0.0], 'code_length'),
-            ds_f.arr([x_slice, y_max, 0.0], 'code_length'),
+            ds_f.arr([x_slice, y_min, zmid(ds_f)], 'code_length'),
+            ds_f.arr([x_slice, y_max, zmid(ds_f)], 'code_length'),
         )
         order_f   = np.argsort(ray_f['y'])
         y_f       = np.array(ray_f['y'][order_f])

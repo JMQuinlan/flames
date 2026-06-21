@@ -1,0 +1,45 @@
+diff --git a/configure b/configure
+index f90486241..5a89fc96c 100755
+--- a/configure
++++ b/configure
+@@ -142,6 +142,7 @@ parser.add_argument('--link',default=None, nargs='+', help='Additional link path
+ parser.add_argument('--no-comp-cmds',dest='compile_commands',default=False,action='store_true', help='Suppress generation of compile_commands.json for language servers like clangd')
+ parser.add_argument('--verbose',default=False,action='store_true',help="Show full make commands - useful if encountering compile/link errors")
+ parser.add_argument('--fft',default=False,action='store_true',help="Compile with fftw3")
++parser.add_argument('--eb',default=False,action='store_true',help="Compile AMReX with embedded-boundary support (USE_EB) -- needed for 3D STL solid geometry import")
+ parser.add_argument('--github-mode',default="http",help="Github checkout mode to use (http or ssh)")
+ parser.add_argument("--save", action="store_true", help="Save current configuration to .alamo file")
+ parser.add_argument("--config", default=CONFIG_FILE, help="Configuration file to load or save [.alamo]")
+@@ -323,6 +324,7 @@ if args.buildamrex and not args.amrex:
+     if args.profile: amrex_configure += ' --enable-tiny-profile=yes'
+     
+     if args.fft: amrex_configure += " --enable-fft=yes"
++    if args.eb: amrex_configure += " --enable-eb=yes"
+ 
+     message("AMReX-Configure",amrex_configure,False)
+     subprocess.Popen(amrex_configure.split(),cwd=f"ext/{args.amrexfork}/amrex")
+diff --git a/src/Integrator/Hydro2.cpp b/src/Integrator/Hydro2.cpp
+index 1a78fb961..3efe11331 100644
+--- a/src/Integrator/Hydro2.cpp
++++ b/src/Integrator/Hydro2.cpp
+@@ -15,6 +15,7 @@
+ #include "IC/Expression.H"
+ #include "IC/BMP.H"
+ #include "IC/PNG.H"
++#include "IC/STL.H"   // 3D STL solid geometry (self-guarded: no-op unless USE_EB + 3D)
+ // Solvers
+ #include "Solver/Local/FluidRiemann/Roe.H"
+ #include "Solver/Local/FluidRiemann/HLLE.H"
+@@ -474,7 +475,12 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
+     //   solid.energy{0,1}  -> prescribed per-phase internal energies in solid.
+     if (value.embedded.apply)
+     {
++#if defined(AMREX_USE_EB) && (AMREX_SPACEDIM == 3)
++        // 3D + USE_EB build: also offer "stl" geometry (IC::STL wraps AMReX STLtools).
++        pp.select_default<IC::Constant,IC::Expression,IC::BMP,IC::PNG,IC::STL>("solid.phi.ic", value.embedded.phi_ic, value.geom);
++#else
+         pp.select_default<IC::Constant,IC::Expression,IC::BMP,IC::PNG>("solid.phi.ic",       value.embedded.phi_ic,      value.geom);
++#endif
+         // Single-phase solid input: total density + pressure (+ momentum).  The
+         // per-phase target slots are derived from these by InitEmbeddedSolidTarget.
+         pp.select_default<IC::Constant,IC::Expression>("solid.density.ic",                  value.embedded.density_ic,  value.geom);

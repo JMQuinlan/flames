@@ -178,8 +178,10 @@ for i, plot_file in enumerate(plot_files):
     y_min = float(ds.domain_left_edge[1])
     y_max = float(ds.domain_right_edge[1])
     
-    ray_start = ds.arr([x_sample, y_min, 0.0], 'code_length')
-    ray_end = ds.arr([x_sample, y_max, 0.0], 'code_length')
+    # z midplane: 0.0 in 2D; central z-plane in a 3D z-extension (z=0 is a face).
+    zmid = float(0.5 * (ds.domain_left_edge[2] + ds.domain_right_edge[2]))
+    ray_start = ds.arr([x_sample, y_min, zmid], 'code_length')
+    ray_end = ds.arr([x_sample, y_max, zmid], 'code_length')
     ray = ds.ray(ray_start, ray_end)
     
     sort_indices = np.argsort(ray['y'])

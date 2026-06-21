@@ -1,0 +1,189 @@
+#@ exe=hydro2
+#@ dim=3
+# alamo.program = hydro2
+
+# =============================================================================
+# PLANE POISEUILLE (PRESSURE-DRIVEN) -- hydro2 single-phase variant
+# =============================================================================
+# Hydro2 6-eq port of input_PressDrivenx.  Single-phase by degeneracy:
+# eos0 == eos1, mu0 == mu1, density0 == density1, and eta = 1 everywhere
+# (only phase 0 is physically active).
+#
+# Setup:
+#   Channel x = [-2.5, 2.5] m, y = [-0.5, 0.5] m  (H = 1 m)
+#   Top / bottom walls : no-slip (Dirichlet momentum = 0)
+#   xlo / xhi          : Dirichlet energy (sets pressure jump = 5 Pa)
+#                          dp/dx = -1 Pa/m  =>  p_left  = 100000, p_right = 99995
+#                          E = p/(gamma-1)   =>  E_left = 250000, E_right = 249987.5
+#
+# Analytical (steady):
+#   u_x(y) = -(dp/dx) / (2*mu) * (y - y_min) * (H - (y - y_min))
+#   u_max  = -(dp/dx) * H^2 / (8*mu) = 1.25 m/s at y = 0.
+#
+# Validation:
+#   reference/poiseuillex_single.py reads from
+#     ./tests/FlowPoiseuille/FlowPoiseuillex
+#   This input writes the SAME plot_file path so the existing analysis script
+#   works unmodified.  Make sure the script's mu, dpdx, density match those
+#   set below before running.
+# =============================================================================
+
+### OUTPUT ###
+# plot_file = ./tests/FlowPoseuille/UNIT_TEST_3D/FlowPoiseuillex                                  # DESKTOP (run from bin/)
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowPoseuille/UNIT_TEST_3D/FlowPoiseuillex   # INCLINE /mmfs1 (default)
+
+### MESHING ###
+amr.plot_dt        = 0.5
+amr.max_grid_size  = 5000000
+amr.blocking_factor = 4
+amr.regrid_int     = 50
+amr.grid_eff       = 0.8
+amr.max_level      = 1
+amr.n_cell         = 80 64 8
+
+### DIMENSIONS ###
+geometry.prob_lo     = -2.5 -0.5 0.0       # [ m ]
+geometry.prob_hi     =  2.5  0.5 0.5       # [ m ]
+geometry.is_periodic = 0 0 1
+
+### TIME STEP ###
+timestep  = 2.0e-5
+stop_time = 20.0
+
+### HYDRO PARAM ###
+
+### EQUATION OF STATE -- single fluid (both phases identical, ideal gas) ###
+# gamma = 1.4 matches the original hydro input.  cv = 1.0, cp = gamma = 1.4
+# in normalized units (the test does not exercise thermal physics, only the
+# pressure-driven momentum equation).
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cv    = 1.0
+eos0.cp    = 1.4
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 1.0
+eos1.cp    = 1.4
+
+cfl   = 0.2
+mu0   = 0.1
+mu1   = 0.1
+
+### ETA IC ###
+# Pure phase 0 throughout the channel (eta = 1).  No interface dynamics,
+# but the integrator requires an `epsilon` value to be defined; pick a small
+# placeholder since it doesn't affect this test.
+eta.ic.type = expression
+eta.ic.expression.region0 = "1.0"
+epsilon = 0.01
+
+### SOURCE-TERM ICs (off) ###
+m0.ic.type = constant
+m0.ic.constant.value = "0.0"
+
+u0.ic.type = expression
+u0.ic.expression.region0 = "0.0"
+u0.ic.expression.region1 = "0.0"
+
+q.ic.type = expression
+q.ic.expression.region0 = "0.0"
+q.ic.expression.region1 = "0.0"
+
+### PER-PHASE PRIMARIES ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"            # u_x
+velocity0.ic.expression.region1 = "0.0"            # u_y
+
+# Linear pressure ramp consistent with dp/dx = -1 Pa/m and the xlo/xhi
+# Dirichlet energy BCs below.
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "100000.0 - 1.0 * x"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "100000.0 - 1.0 * x"
+
+### HYDRO BC ###
+# eta: neumann everywhere (zero-gradient).
+pf.eta.bc.type.xlo = neumann
+pf.eta.bc.type.xhi = neumann
+pf.eta.bc.type.ylo = neumann
+pf.eta.bc.type.yhi = neumann
+pf.eta.bc.type.zlo = periodic
+pf.eta.bc.type.zhi = periodic
+
+# Density: zero-gradient on all four sides (no mass flux through walls,
+# x-direction inflow/outflow density is whatever the interior advects).
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+density.bc.type.zlo = periodic
+density.bc.type.zhi = periodic
+density.bc.val.xhi = 0.0
+density.bc.val.xlo = 0.0
+density.bc.val.ylo = 0.0
+density.bc.val.yhi = 0.0
+density.bc.val.zlo = 0.0
+density.bc.val.zhi = 0.0
+
+# Energy: Dirichlet on x-faces enforces the prescribed pressure jump that
+# drives the flow.  E = p / (gamma - 1):
+#   p_xlo = 100000 -> E = 250000.0
+#   p_xhi =  99995 -> E = 249987.5
+# Neumann (zero-gradient) on y-walls.
+energy.bc.type.xlo = dirichlet
+energy.bc.type.xhi = dirichlet
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+energy.bc.type.zlo = periodic
+energy.bc.type.zhi = periodic
+energy.bc.val.xlo = 250000.0
+energy.bc.val.xhi = 249987.5
+energy.bc.val.ylo = 0.0
+energy.bc.val.yhi = 0.0
+energy.bc.val.zlo = 0.0
+energy.bc.val.zhi = 0.0
+
+# Momentum: free at x-faces (advective inflow/outflow), no-slip Dirichlet at
+# the y-walls (top and bottom plates stationary).
+momentum.bc.type.xlo = neumann neumann neumann
+momentum.bc.type.xhi = neumann neumann neumann
+momentum.bc.type.ylo = dirichlet dirichlet dirichlet
+momentum.bc.type.yhi = dirichlet dirichlet dirichlet
+momentum.bc.type.zlo = periodic periodic periodic
+momentum.bc.type.zhi = periodic periodic periodic
+momentum.bc.val.xlo = 0.0 0.0 0.0
+momentum.bc.val.xhi = 0.0 0.0 0.0
+momentum.bc.val.ylo = 0.0 0.0 0.0
+momentum.bc.val.yhi = 0.0 0.0 0.0
+momentum.bc.val.zlo = 0.0 0.0 0.0
+momentum.bc.val.zhi = 0.0 0.0 0.0
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion   = 0.1
+omega_refinement_criterion = 0.5
+gradu_refinement_criterion = 0.75
+rho_refinement_criterion   = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+cutoff = 0.01
+
+amr.abort_on_nan = 0
+small = 1E-8
+
+
+### NUMERICS -- standardized: HLLC + WENO3 + RK3 ###
+Riemann_Solver.type = hllc
+#Limiter.type        = weno3
+#integration.type    = RungeKutta
+#integration.rk.type = 3

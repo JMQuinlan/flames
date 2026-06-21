@@ -86,20 +86,30 @@ print(f"\nAvailable fields:")
 for field in ds.field_list:
     print(f"  {field}")
 
-# Create a ray (1D line) through the domain at y=0
-print(f"\nExtracting 1D slice at y=0...")
-
-# Define the ray from x=-1 to x=1 at y=0, z=0
-ray_start = ds.arr([-1.0, 0.0, 0.0], 'code_length')
-ray_end = ds.arr([1.0, 0.0, 0.0], 'code_length')
+# Slice axis: argv[3] = 'x' (default, 2D x-normal) or 'z' (3D z-normal shock tube,
+# e.g. UNIT_TEST_3D_Toro*/Garrick).  The exact .hdf5 solution is 1D, so we compare
+# its 1D profile against the numerical normal-direction ray regardless of which
+# physical axis is the shock normal.  For 'z' we ray along z and use velocityz.
+axis = sys.argv[3] if len(sys.argv) > 3 else 'x'
+lo = float(ds.domain_left_edge[0 if axis == 'x' else 2])
+hi = float(ds.domain_right_edge[0 if axis == 'x' else 2])
+if axis == 'z':
+    ray_start = ds.arr([0.0, 0.0, lo], 'code_length')
+    ray_end   = ds.arr([0.0, 0.0, hi], 'code_length')
+    vel_field = 'velocityz'
+else:
+    ray_start = ds.arr([lo, 0.0, 0.0], 'code_length')
+    ray_end   = ds.arr([hi, 0.0, 0.0], 'code_length')
+    vel_field = 'velocityx'
+print(f"\nExtracting 1D slice along {axis} in [{lo}, {hi}]...")
 
 ray = ds.ray(ray_start, ray_end)
 
-# Sort by x coordinate
-sort_indices = np.argsort(ray['x'])
+# Sort by the normal coordinate
+sort_indices = np.argsort(ray[axis])
 
-x_numerical = np.array(ray['x'][sort_indices])
-velocity_numerical = np.array(ray['velocityx'][sort_indices])
+x_numerical = np.array(ray[axis][sort_indices])
+velocity_numerical = np.array(ray[vel_field][sort_indices])
 pressure_numerical = np.array(ray['pressure'][sort_indices])
 density_numerical = np.array(ray['density'][sort_indices])
 

@@ -191,8 +191,10 @@ y_min = float(ds.domain_left_edge[1])
 y_max = float(ds.domain_right_edge[1])
 
 # Define the ray from bottom to top at x=0, z=0
-ray_start = ds.arr([0.0, y_min, 0.0], 'code_length')
-ray_end = ds.arr([0.0, y_max, 0.0], 'code_length')
+# z midplane: 0.0 in 2D; central z-plane in a 3D z-extension run (z=0 is a face).
+zmid = float(0.5 * (ds.domain_left_edge[2] + ds.domain_right_edge[2]))
+ray_start = ds.arr([0.0, y_min, zmid], 'code_length')
+ray_end = ds.arr([0.0, y_max, zmid], 'code_length')
 ray = ds.ray(ray_start, ray_end)
 
 # Sort by y coordinate
@@ -347,8 +349,9 @@ if create_gif:
         time_temp = float(ds_temp.current_time)
         
         # Extract data
-        ray_start_temp = ds_temp.arr([0.0, y_min, 0.0], 'code_length')
-        ray_end_temp = ds_temp.arr([0.0, y_max, 0.0], 'code_length')
+        zmid_temp = float(0.5 * (ds_temp.domain_left_edge[2] + ds_temp.domain_right_edge[2]))
+        ray_start_temp = ds_temp.arr([0.0, y_min, zmid_temp], 'code_length')
+        ray_end_temp = ds_temp.arr([0.0, y_max, zmid_temp], 'code_length')
         ray_temp = ds_temp.ray(ray_start_temp, ray_end_temp)
         
         sort_indices_temp = np.argsort(ray_temp['y'])

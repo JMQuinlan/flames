@@ -7,7 +7,7 @@
 # plot_file = ./tests/FlowRiemannUnitTests/UNIT_TEST_2D/output_Toro1a                                  # DESKTOP (run from bin/)
 plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRiemannUnitTests/UNIT_TEST_2D/output_Toro1a   # INCLINE /mmfs1 (default)
 
-eos.backend = pelephysics
+# eos.backend = native   # (default; pelephysics needs PELE_ENABLED)
 
 ### MESHING ###
 #amr.plot_dt = 0.1
