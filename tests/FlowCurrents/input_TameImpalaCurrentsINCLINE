@@ -1,0 +1,185 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# ============================================================================
+# "CURRENTS" -- Tame Impala (Robert Beatty) album-cover homage.
+# ----------------------------------------------------------------------------
+# Uniform flow past an embedded-solid cylinder at a SHEDDING Reynolds number,
+# producing a von Karman vortex street: clean parallel streamlines upstream,
+# wrapping over the cylinder, rolling up into the alternating swirling wake
+# downstream.  Render streamlines / vorticity with an indigo->magenta->orange
+# colormap (e.g. matplotlib 'plasma' or 'magma') for the album palette.
+#
+#   Re = rho*U*D/mu = 100*1*1.0/0.6667 = 150   (D = 2*R0 = 1.0)
+#   Ma = U/c = 1/5 = 0.2     (c = sqrt(gamma p/rho) = sqrt(1.4*1785.71/100))
+#   Strouhal ~ 0.18  ->  shedding period T ~ D/(St*U) ~ 5.6 t-units
+#
+# The wake is absolutely unstable at Re=150, so a small one-time v_y kick
+# behind the cylinder (velocity0.ic.region1) breaks the up/down symmetry and
+# starts the shedding early; it then self-sustains.
+# ============================================================================
+
+alamo.program = hydro2   # only for the unified 'alamo' exe (this is #@ exe=hydro2)
+
+### OUTPUT ###
+#plot_file = ./tests/FlowCurrents/output_currents
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowCurrents/output_currents
+
+### MESHING ###
+amr.plot_dt          = 0.5            # ~11 frames per shedding cycle (nice for animation)
+amr.max_grid_size    = 500000
+amr.blocking_factor  = 4
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level        = 2
+amr.n_cell           = 400 192
+
+### DIMENSIONS ###
+# Long downstream tail so the street has room to develop; wide enough that the
+# lateral boundaries don't feel the wake.
+geometry.prob_lo     = -5.0 -6.0 0.0
+geometry.prob_hi     = 20.0  6.0 0.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEPPING ###
+timestep            = 1e-5
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 2e-2
+dynamictimestep.min = 1e-9
+cfl                 = 0.3
+stop_time           = 2500.0          # 10x -- long run so the asymmetric instability fully grows
+
+# ----------------------------------------------------------------------------
+# EMBEDDED SOLID BOUNDARY -- the "sphere" (2D cylinder), centered at the origin
+# ----------------------------------------------------------------------------
+apply_embedded_solid = 1
+solid.brinkman       = 70             # YANG penalty ~4*U/eps (U=1, eps=0.06): gives BOTH no-penetration AND no-slip (drives u->0 in the solid)
+phi_refinement_criterion = 0.001
+
+# Cylinder of radius R0 at the origin: r>R0 -> phi=1 (fluid), r<R0 -> phi=0 (solid)
+solid.phi.ic.type = expression
+solid.phi.ic.expression.constant.R0  = 0.5
+solid.phi.ic.expression.constant.eps = 0.01
+solid.phi.ic.expression.region0 = "0.5*(1.0 + tanh((sqrt(x*x + y*y) - R0)/eps))"
+
+# Prescribed quiescent solid target.  The thin dye band (hw=0.15) is NARROWER
+# than the ball (R0=0.5), so the cylinder straddles the eta interface: its core
+# (|y|<hw) has alpha_1=eta~1, its outer cap (hw<|y|<R0) has alpha_1=eta~0.  The
+# solid target is therefore made CONSISTENT with the local alpha_1 = eta band
+# (otherwise an eta~0 solid cell with rho_eta0=100 -> divide blow-up).  Both
+# fluids are identical, so the physical solid state is uniform (rho=100,
+# p=1785.71, u=0) regardless of the split:
+#   rho_eta0 = eta*100,     rho_eta1 = (1-eta)*100
+#   E0       = eta*4464.28, E1       = (1-eta)*4464.28,  E_tot = 4464.28
+solid.density.ic.type = constant
+solid.density.ic.constant.value = 100.0
+solid.momentum.ic.type = constant
+solid.momentum.ic.constant.value = 0.0 0.0
+solid.pressure.ic.type = constant
+solid.pressure.ic.constant.value = 1785.712
+
+### ETA (alpha_1) IC -- RED DYE BAND in front of the ball (Currents look) ###
+# eta=1 in a horizontal strip |y|<hw aligned with the flow (the "red fluid"),
+# eta=0 outside.  Identical fluids -> eta is a PASSIVE tracer: the strip stays
+# steady upstream (u.grad(eta)=0 for a flow-aligned band) and wraps / rolls up
+# around the ball into the wake.  The ball (R0=0.5) sits inside the band so the
+# solid target (alpha_1=1) stays consistent (no triple point).  Render eta in
+# red.  It WILL diffuse in the far wake -- that's the smoky dye look.
+eta.ic.type = expression
+eta.ic.expression.constant.hw  = 0.15
+eta.ic.expression.constant.eps = 0.08
+eta.ic.expression.region0 = "0.5*(tanh((y+hw)/eps) - tanh((y-hw)/eps))"
+# Inject the band at the inflow so it is continuously replenished.
+eta.bc.type.xlo = dirichlet
+eta.bc.val.xlo  = "0.5*(tanh((y+0.15)/0.08) - tanh((y-0.15)/0.08))"
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = neumann
+eta.bc.type.yhi = neumann
+
+### EOS ###
+# Re = 150  ->  mu = rho*U*D/Re = 100*1*1/150 = 0.666667
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cp    = 1005.0
+eos0.cv    = 717.86
+mu0   = 0.666667
+mu0_b = 0.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp    = 1005.0
+eos1.cv    = 717.86
+mu1   = 0.666667
+mu1_b = 0.0
+
+### FLUID 0 IC (uniform inflow in +x, with a small v_y kick to trigger shedding) ###
+density0.ic.type = constant
+density0.ic.constant.value = 100.0
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "1.0"
+# v_y bump (amp 0.1) centered just behind the cylinder -> breaks symmetry -> sheds
+velocity0.ic.expression.region1 = "0.1*exp(-(((x-1.0)*(x-1.0)) + (y*y))/0.5)"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 1785.71
+
+### FLUID 1 IC (inert; mirrors fluid 0) ###
+density1.ic.type = constant
+density1.ic.constant.value = 100.0
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "1.0"
+velocity1.ic.expression.region1 = "0.1*exp(-(((x-1.0)*(x-1.0)) + (y*y))/0.5)"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 1785.71
+
+### INTERACTIONS ###
+epsilon = 0.1
+sigma   = 0.0
+Dv      = 0.0
+pref    = 0.0
+small   = 1e-6
+grav    = 0.0
+
+### BOUNDARY CONDITIONS ###
+# Inflow at xlo (Dirichlet rho=100, Mx=100); outflow xhi + far-field top/bottom (Neumann).
+density.bc.type.xlo  = dirichlet
+density.bc.val.xlo   = 100.0
+density.bc.type.xhi  = neumann
+density.bc.type.ylo  = neumann
+density.bc.type.yhi  = neumann
+
+momentum.bc.type.xlo = dirichlet neumann
+momentum.bc.val.xlo  = 100.0 0.0
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+energy.bc.type.xlo   = neumann
+energy.bc.type.xhi   = neumann
+energy.bc.type.ylo   = neumann
+energy.bc.type.yhi   = neumann
+
+### REFINEMENT CRITERIA ###
+# Refine on vorticity (the wake) and the solid boundary; keep the rest off.
+eta_refinement_criterion   = 1e10
+omega_refinement_criterion = 0.2      # lower -> refine more of the vortex street
+gradu_refinement_criterion = 1e10
+p_refinement_criterion     = 1e10
+rho_refinement_criterion   = 1e10
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+
+### SOLVER ###
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+kappa_method        = 1
+apply_sharpening    = 0

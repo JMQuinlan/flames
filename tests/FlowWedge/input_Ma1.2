@@ -24,7 +24,8 @@
 # ============================================================================
 
 ### OUTPUT ###
-plot_file = ./tests/FlowWedge/output_Ma1.2
+#plot_file = ./tests/FlowWedge/output_Ma1.2
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowWedge/output_Ma1.2
 
 ### MESHING ###
 amr.plot_dt          = 0.5
@@ -32,7 +33,7 @@ amr.max_grid_size    = 500000
 amr.blocking_factor  = 4
 amr.regrid_int       = 10
 amr.grid_eff         = 0.8
-amr.max_level        = 2              # refine the shock + wedge boundary
+amr.max_level        = 4
 amr.n_cell           = 192 128        # dx = 6/192 = 0.03125 = dy = 4/128
 amr.n_error_buf      = 8
 
@@ -75,7 +76,7 @@ solid.phi.ic.expression.constant.cth = 0.9659258
 solid.phi.ic.expression.constant.sth = 0.2588190
 solid.phi.ic.expression.constant.x0  = -0.5
 solid.phi.ic.expression.constant.xb  = 1.5
-solid.phi.ic.expression.constant.eps = 0.01
+solid.phi.ic.expression.constant.eps = 0.001
 solid.phi.ic.expression.region0 = "0.5*(1.0 + tanh( max(max( y*cth - (x-x0)*sth, -y*cth - (x-x0)*sth ), x - xb ) / eps ))"
 
 # Prescribed quiescent solid target, eta-consistent (alpha_1 = 0.5):
