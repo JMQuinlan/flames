@@ -293,6 +293,12 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // pressure jump. adc_grow < 0 disables the tag (use the pressure sensor).
         pp_query_default("adc_shock_threshold", value.adc_shock_threshold, 0.05);
         pp_query_default("adc_grow", value.adc_grow, 1);
+        // Interface-compression tag: OR into the raw shock tag any diffuse-band cell
+        // (min(eta,1-eta) > adc_interface_band) that is also compressing (div_u < 0).
+        // Lands HLL dissipation on the shock-compressed interface band that the
+        // Ducros sensor shear-suppresses (cures the windward-contact energy overshoot
+        // that drives the liquid pressure/energy floor). 0 = off.
+        pp_query_default("adc_interface_band", value.adc_interface_band, 0.0);
         // Force full HLL (omega = 0 on every face) for the first hll_first_steps
         // step(s), then fall back to the normal shock-tag blend. The interface/
         // contact carbuncle is seeded only by the step-1 startup transient (the
@@ -1596,9 +1602,10 @@ Hydro2::RHS(int lev,
                                   velocity_mf[lev]->DistributionMap(), 1, tag_grow + 1);
         shock_raw.setVal(0.0);
 
-        const Set::Scalar dr      = std::sqrt(AMREX_D_TERM(DX[0] * DX[0], +DX[1] * DX[1], +DX[2] * DX[2]));
-        const Set::Scalar thresh  = adc_shock_threshold;
-        const Set::Scalar small_l = small;
+        const Set::Scalar dr         = std::sqrt(AMREX_D_TERM(DX[0] * DX[0], +DX[1] * DX[1], +DX[2] * DX[2]));
+        const Set::Scalar thresh     = adc_shock_threshold;
+        const Set::Scalar small_l    = small;
+        const Set::Scalar iface_band = adc_interface_band;
 
         // Raw shock indicator per valid cell.
         for (amrex::MFIter mfi(shock_raw, false); mfi.isValid(); ++mfi)
@@ -1607,6 +1614,7 @@ Hydro2::RHS(int lev,
             auto raw = shock_raw.array(mfi);
             auto vv  = velocity_mf[lev]->array(mfi);
             auto aa  = a_mf[lev]->array(mfi);
+            auto ee  = eta_mf[lev]->array(mfi);
             auto sensor_out = shock_sensor_mf[lev]->array(mfi);
             amrex::ParallelFor(sbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 auto sten = Numeric::GetStencil(i, j, k, domain);
@@ -1627,6 +1635,16 @@ Hydro2::RHS(int lev,
                 Set::Scalar sensor = ducros * comp * dr / c;
                 sensor_out(i, j, k) = sensor;
                 raw(i, j, k) = (sensor > thresh) ? 1.0 : 0.0;
+                // Interface-compression tag: the Ducros weight kills the sensor on the
+                // sheared diffuse interface, so a shock-compressed contact never trips
+                // the threshold above. Tag it directly when it is inside the band AND
+                // compressing, so HLL dissipation reaches the windward-contact overshoot
+                // that would otherwise feed the liquid pressure/energy floor.
+                if (iface_band > 0.0)
+                {
+                    const Set::Scalar eb = std::min(ee(i, j, k), 1.0 - ee(i, j, k));
+                    if (eb > iface_band && div_u < 0.0) raw(i, j, k) = 1.0;
+                }
             });
         }
         shock_raw.FillBoundary(geom[lev].periodicity());

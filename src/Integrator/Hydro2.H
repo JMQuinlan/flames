@@ -532,6 +532,14 @@ protected:
     Set::Scalar adc_shock_threshold = 0.05;
     int adc_grow = 1;
     int hll_first_steps = 0; // force full HLL (omega=0) for the first N steps, then resume the shock-tag blend (skips the step-1 carbuncle seed)
+    // Interface-compression tag: the Ducros weight shear-suppresses the sensor on
+    // the curved diffuse interface, so a shock-compressed contact (e.g. the
+    // windward droplet face) runs full HLLC and its energy flux carries an
+    // antidiffusive overshoot -> bad conserved energy -> the liquid pressure/energy
+    // floor. OR into the raw shock tag any diffuse-band cell (min(eta,1-eta) >
+    // adc_interface_band) that is also compressing (div_u < 0), so HLL dissipation
+    // reaches the compressed band the Ducros sensor misses. 0 = off (no extra tag).
+    Set::Scalar adc_interface_band = 0.0;
 
     // Adaptive Timestep
     bool adaptive_timestep = false;
