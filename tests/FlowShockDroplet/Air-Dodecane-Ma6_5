@@ -50,7 +50,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_air_dodecane_Ma6_5_AMR_5
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_air_dodecane_Ma6_5_eta_alpha
 # plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_air_dodecane_Ma6_5_no_vap
 
 ### MESHING ###
@@ -61,7 +61,7 @@ amr.blocking_factor = 16
 amr.regrid_int = 1
 amr.grid_eff = 0.8
 amr.n_error_buf = 4
-amr.max_level = 5
+amr.max_level = 6
 # amr.n_cell = 1024 256
 # amr.n_cell = 2048 512
 amr.n_cell = 512 128
@@ -93,7 +93,10 @@ stop_time = 4.0e-4
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 4.0e-5
+# eta.ic.expression.constant.epsilon = 4.0e-5 # (512 128 / 0.28 by 0.07 / amr.max_level=5 -> 13 cells across the interface)
+# eta.ic.expression.constant.epsilon = 2.0e-5 # (512 128 / 0.28 by 0.07 / amr.max_level=5 -> 7 cells across the interface)
+eta.ic.expression.constant.epsilon = 2.0e-5 # (512 128 / 0.28 by 0.07 / amr.max_level=6 -> 13 cells across the interface)
+# eta.ic.expression.constant.epsilon = 1.0e-5 # (512 128 / 0.28 by 0.07 / amr.max_level=7 -> 13 cells across the interface)
 eta.ic.expression.constant.R0 = 4.4e-3
 eta.ic.expression.constant.x_center = 0.0
 eta.ic.expression.constant.y_center = 0.0
@@ -261,7 +264,7 @@ eps_rho = 1e-10
 # Liquid cavitation/tensile floor: hold the liquid (eta->0) at p >= -p_cav
 # while gas (eta->1) stays p >= eps_p. 0 = vacuum floor (no tension).
 # p_cav = 1.0e6 # Too small for the high tension caused during the shock-droplet interaction
-p_cav = 5.0e7 # We above the -35 MPa observed liquid tension
+p_cav = 6.0e7 # We above the -35 MPa observed liquid tension
 
 ### SOURCE TERMS ###
 m0.ic.constant.value = 0.0

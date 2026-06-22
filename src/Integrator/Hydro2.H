@@ -439,6 +439,12 @@ protected:
     int apply_surface_tension = 1;
     int apply_weight = 0;
     int static_eta = 0;
+    // Cahn-Hilliard companion mass/momentum/energy fluxes: transport each phase's
+    // mass+energy along the SAME face CH flux J_CH that moves eta, so the conserved
+    // partial densities stay consistent with eta through the diffuse band tail (cures
+    // the rho1 = alpharho1/(1-eta) blow-up when CH pushes eta->1 without removing the
+    // stranded liquid mass). 1 = on (default), 0 = off (1D regression bit-identical).
+    int apply_ch_companion = 1;
     int apply_vaporization = 0;
     int spalding_saturation = 0;       // Stage 2: 1 = Spalding driving force = Antoine saturation Y_s at interface T; 0 = legacy local cell-Y. See SaturationYs.
     int spalding_film_sink = 0;        // Stage 3d: 0 = constant far-field Y_infinity as the Spalding sink (fixed driving -> constant rate). 1 = sample the sink at a FILM distance into the gas (transport-responsive -> sqrt(t) Stefan recession). Requires species_transport.

@@ -393,6 +393,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_required("epsilon", value.epsilon);    // diffuse interface thickness Y_infinity
         pp_query_default("Y_infinity", value.Y_infinity, 0.0); // Far Field Vapor Mass Fraction
         pp_query_default("Mob", value.Mob_user, 0.0);   // CH mobility scale M0: M = M0 * epsilon^2
+        pp_query_default("apply_ch_companion", value.apply_ch_companion, 1); // 1: CH companion mass/mom/energy fluxes on (keeps alpharho_k consistent with eta); 0: off
         if (value.epsilon <= 0.0)
         {
             Util::Abort(INFO, "epsilon must be positive for Hydro2 Cahn-Hilliard mobility; got ", value.epsilon);
@@ -3327,6 +3328,165 @@ Hydro2::RHS(int lev,
             });
         }
     } // end pp_on_lev
+
+    // ============================================================================
+    // Cahn-Hilliard COMPANION mass / momentum / energy fluxes
+    // ============================================================================
+    // The phase field eta (= gas volume fraction alpha_0) carries a CH diffusion
+    // term  eta_dot_CH = div(M grad mu) = Mob*lap(mu_chem)  (added to eta_rhs above).
+    // The conserved partial densities alpharho_k = alpha_k*rho_k are advected ONLY,
+    // so CH moves the VOLUME fraction without moving the PHASE MASS: it shrinks
+    // (1-eta) in a band cell without removing the stranded liquid mass alpharho1,
+    // and the recovered rho1 = alpharho1/(1-eta) -> diverges as eta -> 1. The fix
+    // (continuous): (1-eta)[d_t rho1 + div(rho1 u)] = rho1 * S_CH, singular as
+    // eta->1; cancel the RHS by transporting each phase's mass+energy along the SAME
+    // face CH flux J_CH whose divergence IS eta_dot_CH:
+    //   J_CH(i+1/2) = Mob*(mu(i+1)-mu(i))/dx ,  S_CH = (J_CH(hi)-J_CH(lo))/dx == eta_dot_CH.
+    // Because eta = alpha_0, J_CH moves GAS volume fraction:
+    //   d_t alpharho0 += + div(rho0_donor * J_CH)     (gas gains volume -> gains mass)
+    //   d_t alpharho1 += - div(rho1_donor * J_CH)     (liquid loses volume -> loses mass)
+    //   d_t E         += + div(E0_donor * J_CH) - div(E1_donor * J_CH)   E_k = rho_k e_k + 0.5 rho_k|u|^2
+    //   d_t (Mx,My)   += + div(u_face * F_rho_CH),    F_rho_CH = (rho0_donor - rho1_donor)*J_CH
+    // The mixture density rho = alpharho0+alpharho1 is RECOVERED downstream, so the
+    // mixture-mass companion div(F_rho_CH) is applied automatically (no separate rho
+    // equation); it is flux-form, so global mass is still conserved. F_rho_CH is
+    // nonzero (Lowengrub-Truskinovsky: volume-fraction diffusion at unequal
+    // intrinsic densities really moves mixture mass) and that is correct.
+    //
+    // Donor rule (mirrors the advective Larrouturou sign(F) switch): the gas flux is
+    // +rho0*J_CH (upwind rho0 by sign(J_CH)); the liquid flux is -rho1*J_CH (upwind
+    // rho1 by sign(-J_CH)). Per-phase energy donors use that phase's mass-donor side.
+    //
+    // Sourcing: ALL inputs come from the CURRENT-STAGE, ghost-valid conserved member
+    // fields (alpharho0/1, momentum, energy_per_vol, eta, mu_chem -- all filled by
+    // FillGhost4BC / the mu_chem ghost fill before the main loop), recovered locally
+    // and consistently, NOT from the frozen velocity_mf/pressure_mf primitives. At a
+    // PHYSICAL domain face the zero-neumann mu_chem ghost gives mu(ghost)=mu(edge) so
+    // J_CH=0 there automatically -- no special edge handling needed.
+    //
+    // Placement: a single unconditional parabolic post-pass with += into the conserved
+    // RHS, so it lands identically on the FE path (main loop) and the PP-limiter path
+    // (Pass D, which OVERWRITES the conserved RHS). eta_rhs already holds eta_dot_CH
+    // and is NOT touched here. DEFERRED (after criteria pass): coarse-fine reflux of
+    // the companion fluxes, and the thermodynamic div(mu_chem*J_CH) working term.
+    if (apply_ch_companion != 0 && Mob_user != 0.0)
+    {
+        const Set::Scalar Mob_l   = Mob_user * epsilon * epsilon * sigma / epsilon; // == Mob in the main loop (constant)
+        const Set::Scalar small_l = small;
+        const Set::Scalar pref_l  = pref;
+        const Set::Scalar eps_p_l = eps_p;
+        const Set::Scalar p_cav_l = p_cav;
+        // Below this volume fraction the donor intrinsic-density recovery is bounded
+        // (matches the diagnostic recovery guard in Advance): the donor rule normally
+        // reads the well-conditioned side, but guard defensively in case it does not.
+        const Set::Scalar alpha_floor = 1.0e-3;
+        const Solver::EOS::Tammann eos0_l = eos0;
+        const Solver::EOS::Tammann eos1_l = eos1;
+        const Set::Scalar g0 = eos0_l.Gamma(), pi0 = eos0_l.P0();
+        const Set::Scalar g1 = eos1_l.Gamma(), pi1 = eos1_l.P0();
+
+        // Per-cell recovered companion state: intrinsic densities, velocity, and
+        // per-phase INTERNAL energy per volume rho_k*e_k = (p + gamma_k*pi_k)/(gamma_k-1)
+        // (Tammann; independent of rho_k -- only the kinetic part 0.5 rho_k|u|^2 needs rho_k).
+        struct CompCell { Set::Scalar rho0, rho1, ux, uy, ein0, ein1; };
+
+        for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto mu_chem = mu_chem_mf[lev]->array(mfi);
+            auto alpharho0 = alpharho0_mf[lev]->array(mfi);
+            auto alpharho1 = alpharho1_mf[lev]->array(mfi);
+            auto M = momentum_mf[lev]->array(mfi);
+            auto E = energy_per_vol_mf[lev]->array(mfi);
+            auto eta = eta_mf[lev]->array(mfi);
+
+            auto re0rhs = alpharho0_rhs_mf.array(mfi);
+            auto re1rhs = alpharho1_rhs_mf.array(mfi);
+            auto Mrhs   = M_rhs_mf.array(mfi);
+            auto Erhs   = E_rhs_mf.array(mfi);
+
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                auto St = [=] AMREX_GPU_DEVICE (int ii, int jj) -> CompCell {
+                    CompCell c;
+                    const Set::Scalar a0 = std::max(alpharho0(ii, jj, k), 0.0);
+                    const Set::Scalar a1 = std::max(alpharho1(ii, jj, k), 0.0);
+                    const Set::Scalar rc = std::max(a0 + a1, small_l);
+                    Set::Scalar e_ = std::max(0.0, std::min(1.0, eta(ii, jj, k)));
+                    c.ux = M(ii, jj, k, 0) / rc;
+                    c.uy = M(ii, jj, k, 1) / rc;
+                    const Set::Scalar UE = E(ii, jj, k) - 0.5 * rc * (c.ux * c.ux + c.uy * c.uy);
+                    const Set::Scalar p = Solver::EOS::EOS::MixedPressure(rc, UE, e_, eos0_l, eos1_l, pref_l, small_l, eps_p_l, p_cav_l);
+                    c.rho0 = a0 / std::max(e_,        alpha_floor);
+                    c.rho1 = a1 / std::max(1.0 - e_,  alpha_floor);
+                    c.ein0 = (p + g0 * pi0) / (g0 - 1.0);
+                    c.ein1 = (p + g1 * pi1) / (g1 - 1.0);
+                    return c;
+                };
+
+                const CompCell C  = St(i, j);
+                const CompCell Xp = St(i + 1, j);
+                const CompCell Xm = St(i - 1, j);
+                const CompCell Yp = St(i, j + 1);
+                const CompCell Ym = St(i, j - 1);
+
+                // Face CH fluxes J_CH = Mob*(mu_nbr - mu_cell)/dx (hi-face between
+                // this cell and its +neighbor; lo-face between -neighbor and this cell).
+                const Set::Scalar Jxh = Mob_l * (mu_chem(i + 1, j, k) - mu_chem(i, j, k)) / DX[0];
+                const Set::Scalar Jxl = Mob_l * (mu_chem(i, j, k) - mu_chem(i - 1, j, k)) / DX[0];
+                const Set::Scalar Jyh = Mob_l * (mu_chem(i, j + 1, k) - mu_chem(i, j, k)) / DX[1];
+                const Set::Scalar Jyl = Mob_l * (mu_chem(i, j, k) - mu_chem(i, j - 1, k)) / DX[1];
+
+                // Per-face donor-weighted companion fluxes. Gas donor = sign(J) side;
+                // liquid donor = sign(-J) side. F_rho = gas_mass - liquid_mass; momentum
+                // carries F_rho at the face-averaged velocity.
+                auto faceFlux = [=] AMREX_GPU_DEVICE (const CompCell& A, const CompCell& B, Set::Scalar J,
+                                                      Set::Scalar& Fr0, Set::Scalar& Fr1,
+                                                      Set::Scalar& FE0, Set::Scalar& FE1,
+                                                      Set::Scalar& FMx, Set::Scalar& FMy) {
+                    // A = this cell's "lower-index" side, B = "upper-index" side of the face.
+                    const CompCell& gd = (J > 0.0) ? A : B;   // gas donor (flux +rho0*J)
+                    const CompCell& ld = (J > 0.0) ? B : A;   // liquid donor (flux -rho1*J)
+                    Fr0 = gd.rho0 * J;
+                    Fr1 = ld.rho1 * J;
+                    FE0 = (gd.ein0 + 0.5 * gd.rho0 * (gd.ux * gd.ux + gd.uy * gd.uy)) * J;
+                    FE1 = (ld.ein1 + 0.5 * ld.rho1 * (ld.ux * ld.ux + ld.uy * ld.uy)) * J;
+                    const Set::Scalar Frho = Fr0 - Fr1;       // F_rho_CH at this face
+                    const Set::Scalar uxf = 0.5 * (A.ux + B.ux);
+                    const Set::Scalar uyf = 0.5 * (A.uy + B.uy);
+                    FMx = uxf * Frho;
+                    FMy = uyf * Frho;
+                };
+
+                Set::Scalar Fr0_xh, Fr1_xh, FE0_xh, FE1_xh, FMx_xh, FMy_xh;
+                Set::Scalar Fr0_xl, Fr1_xl, FE0_xl, FE1_xl, FMx_xl, FMy_xl;
+                Set::Scalar Fr0_yh, Fr1_yh, FE0_yh, FE1_yh, FMx_yh, FMy_yh;
+                Set::Scalar Fr0_yl, Fr1_yl, FE0_yl, FE1_yl, FMx_yl, FMy_yl;
+                faceFlux(C,  Xp, Jxh, Fr0_xh, Fr1_xh, FE0_xh, FE1_xh, FMx_xh, FMy_xh);
+                faceFlux(Xm, C,  Jxl, Fr0_xl, Fr1_xl, FE0_xl, FE1_xl, FMx_xl, FMy_xl);
+                faceFlux(C,  Yp, Jyh, Fr0_yh, Fr1_yh, FE0_yh, FE1_yh, FMx_yh, FMy_yh);
+                faceFlux(Ym, C,  Jyl, Fr0_yl, Fr1_yl, FE0_yl, FE1_yl, FMx_yl, FMy_yl);
+
+                // Divergences (hi - lo)/dx, matching S_CH = (J_hi - J_lo)/dx.
+                const Set::Scalar dFr0 = (Fr0_xh - Fr0_xl) / DX[0] + (Fr0_yh - Fr0_yl) / DX[1];
+                const Set::Scalar dFr1 = (Fr1_xh - Fr1_xl) / DX[0] + (Fr1_yh - Fr1_yl) / DX[1];
+                const Set::Scalar dFE0 = (FE0_xh - FE0_xl) / DX[0] + (FE0_yh - FE0_yl) / DX[1];
+                const Set::Scalar dFE1 = (FE1_xh - FE1_xl) / DX[0] + (FE1_yh - FE1_yl) / DX[1];
+                const Set::Scalar dFMx = (FMx_xh - FMx_xl) / DX[0] + (FMx_yh - FMx_yl) / DX[1];
+                const Set::Scalar dFMy = (FMy_xh - FMy_xl) / DX[0] + (FMy_yh - FMy_yl) / DX[1];
+
+                re0rhs(i, j, k)  += dFr0;        // gas gains mass where it gains volume
+                re1rhs(i, j, k)  += -dFr1;       // liquid loses mass where it loses volume
+                Erhs(i, j, k)    += dFE0 - dFE1;
+                Mrhs(i, j, k, 0) += dFMx;
+                Mrhs(i, j, k, 1) += dFMy;
+
+                check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): CH companion flux", {
+                    {"dFr0", dFr0}, {"dFr1", dFr1}, {"dFE0", dFE0}, {"dFE1", dFE1},
+                    {"dFMx", dFMx}, {"dFMy", dFMy}, {"Jxh", Jxh}, {"Jyh", Jyh}
+                });
+            });
+        }
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -3538,6 +3698,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         auto eta      = eta_mf[lev]->array(mfi);
         auto density0 = density0_mf[lev]->array(mfi);   // rho_0 output (recovered below)
         auto density1 = density1_mf[lev]->array(mfi);   // rho_1 output
+        auto density0_old = density0_old_mf[lev]->array(mfi); // IC reference rho_0 (band-tail fallback)
+        auto density1_old = density1_old_mf[lev]->array(mfi); // IC reference rho_1 (band-tail fallback)
+
+        // Below this volume fraction the intrinsic-density recovery rho_k =
+        // alpharho_k / alpha_k is ill-conditioned (alpha_k -> 0); freeze the
+        // OUTPUT density to the IC reference instead of letting it blow up.
+        const Set::Scalar alpha_recover_floor = 1.0e-3;
 
         amrex::ParallelFor(bx, [=, &floor_mass_gas_local, &floor_mass_liq_local] AMREX_GPU_DEVICE(int i, int j, int k) {
             // Floor the TRUE partial densities alpharho_k = alpha_k*rho_k at 0, NOT `small`.
@@ -3558,11 +3725,25 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Recover the intrinsic per-phase densities rho_k = alpharho_k / alpha_k for
             // output (the live density0/density1 fields that replace the retired rho_eta
-            // partition as the per-phase mass representation). alpha_0 = eta, alpha_1 = 1-eta;
-            // guarded so pure phases (alpha_k -> 0) give a benign 0/small, never used by the
-            // mixture hydro (which reads only rho = alpharho0+alpharho1 and eta).
-            density0(i, j, k) = alpharho0(i, j, k) / std::max(eta(i, j, k),       small_l);
-            density1(i, j, k) = alpharho1(i, j, k) / std::max(1.0 - eta(i, j, k), small_l);
+            // partition as the per-phase mass representation). alpha_0 = eta, alpha_1 = 1-eta.
+            // These are DIAGNOSTIC-ONLY here: the mixture hydro/EOS reads only
+            // rho = alpharho0+alpharho1 and eta, never the recovered rho_k.
+            //
+            // Band-tail guard: in the diffuse band tail the uncompanioned CH term leaves
+            // alpharho_k unchanged while alpha_k -> 0, so the raw quotient diverges (rho1
+            // ~ 1e6 spikes on the windward rim). Below alpha_recover_floor, hold the IC
+            // reference density (density{0,1}_old, which retain the initial-condition
+            // values -- they are not swapped/updated during the run) so plots stay bounded.
+            // This is cosmetic: it does NOT remove the spurious alpharho1 rim that drives
+            // the mixture pressure cascade -- the CH companion mass flux does that.
+            const Set::Scalar alpha0 = eta(i, j, k);
+            const Set::Scalar alpha1 = 1.0 - eta(i, j, k);
+            density0(i, j, k) = (alpha0 > alpha_recover_floor)
+                                ? alpharho0(i, j, k) / alpha0
+                                : density0_old(i, j, k);
+            density1(i, j, k) = (alpha1 > alpha_recover_floor)
+                                ? alpharho1(i, j, k) / alpha1
+                                : density1_old(i, j, k);
         });
     }
 
