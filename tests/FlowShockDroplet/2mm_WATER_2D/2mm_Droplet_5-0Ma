@@ -9,7 +9,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 #plot_file = ./tests/FlowShockDroplet/output_Shock1mmDroplet
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_2mm_Droplet_1-5Ma
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_2mm_Droplet_5-0Ma
 
 ### MESHING ###
 amr.plot_dt = 0.5e-6
@@ -39,11 +39,11 @@ geometry.prob_hi =  0.015  0.005 0.0  # 3/4 tube right of droplet (0.02m × 0.01m
 geometry.is_periodic = 0 0 0
  
 ### TIME STEP ###
-stop_time = 17.7e-5
+stop_time = 6.6e-5
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.00002
+eta.ic.expression.constant.epsilon = 0.00001
 eta.ic.expression.constant.R0 = 0.001  # 5mm droplet radius
 eta.ic.expression.constant.x_center = 0.0  # Centered at origin
 eta.ic.expression.constant.y_center = 0.0  # Centered at origin
@@ -82,7 +82,7 @@ density1.ic.expression.region0 = "rho_water"
 
 # Velocities (initially at rest, except shock region)
 velocity0.ic.type = expression
-velocity0.ic.expression.constant.u_shock = 520.0  # Shock velocity [m/s]
+velocity0.ic.expression.constant.u_shock = 1720.0  # Shock velocity [m/s]
 velocity0.ic.expression.constant.x_shock = -0.004
 velocity0.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
 velocity0.ic.expression.region1 = "0.0"

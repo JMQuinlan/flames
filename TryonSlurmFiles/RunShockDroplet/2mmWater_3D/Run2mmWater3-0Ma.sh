@@ -11,4 +11,4 @@
 module purge
 module load gnu9 mpich
 
-srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-2d-g++ /home/ttryon/flames/tests/FlowShockDroplet/2mm_WATER/2mm_Droplet_3-0Ma
+srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowShockDroplet/2mm_WATER_3D/2mm_Droplet_3-0Ma
