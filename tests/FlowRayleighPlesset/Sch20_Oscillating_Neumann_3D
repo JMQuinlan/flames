@@ -31,9 +31,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-# plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Oscillating_Neumann_3D                                  # DESKTOP
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_Neumann_3D   # INCLINE /mmfs1 (default)
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating
+# plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Oscillating_Neumann_3D
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_3D
 
 ### MESHING ###
 amr.plot_int       = -1
