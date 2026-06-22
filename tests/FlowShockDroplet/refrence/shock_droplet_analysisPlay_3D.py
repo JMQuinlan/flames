@@ -118,6 +118,15 @@ PLOT_DENSITY_CONTOURS = 1              # Density contours at key times
 # Time sampling
 TIME_STEP = 4  # Sample every Nth timestep (1=all, 2=every other, 5=every 5th, etc.)
 
+# ============================================================================
+# 3D VARIANT -- field images are extracted on the z-MIDPLANE slice
+# (ds.domain_center[2]); schlieren / velocity / vorticity / deformation / eta are
+# correct in-plane.  CAVEAT: integrated metrics derived from that single slice
+# (surface perimeter, kinetic energy, integrated Vap_dot_rho) are MIDPLANE
+# CROSS-SECTION values, NOT full 3D volume integrals -- representative, not
+# absolute.  Point amrex_output_dir at your 3D plotfile output below.
+# ============================================================================
+
 # File paths
 amrex_output_dir = r'../../../bin/tests/FlowShockDroplet/output_ShockDroplet_3D'
 #amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet'
