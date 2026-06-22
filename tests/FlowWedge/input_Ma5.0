@@ -33,7 +33,7 @@ amr.max_grid_size    = 500000
 amr.blocking_factor  = 4
 amr.regrid_int       = 10
 amr.grid_eff         = 0.8
-amr.max_level        = 4
+amr.max_level        = 3
 amr.n_cell           = 192 128        # dx = 6/192 = 0.03125 = dy = 4/128
 amr.n_error_buf      = 8
 
