@@ -6,6 +6,9 @@
 ### OUTPUT ###
 plot_file = ./tests/FlowRiemannUnitTests/output_Toro5_HLLC_Sharp_Interface
 Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3
 
 eta.ic.type = constant
 eta.ic.expression.constant.epsilon  = 111111.0005

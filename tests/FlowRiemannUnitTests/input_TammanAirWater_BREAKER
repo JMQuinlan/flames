@@ -176,4 +176,7 @@ apply_buoyancy = 0        # Not needed, using gravity instead
 apply_weight = 1          # Enable gravity
 
 ### NUMERICAL METHODS ###
-Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3

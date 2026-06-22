@@ -4,7 +4,10 @@
 
 ### OUTPUT ###
 plot_file = ./tests/FlowRiemannUnitTests/output_Toro1r_HLLC_Oomar_Jaiman_epsilon_1e-3
-Riemann_Solver.type = hllc_oomar_jaiman
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3
 
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = "1e-3"

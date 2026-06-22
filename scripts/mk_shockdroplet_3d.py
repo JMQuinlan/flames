@@ -16,6 +16,8 @@ import re
 
 SRC = os.path.join(os.path.dirname(__file__), "..",
                    "tests", "FlowShockDroplet", "2mm_WATER_2D")
+DST = os.path.join(os.path.dirname(__file__), "..",
+                   "tests", "FlowShockDroplet", "2mm_WATER_3D")
 FILES = ["2mm_Droplet_1-5Ma", "2mm_Droplet_2-0Ma", "2mm_Droplet_3-0Ma",
          "2mm_Droplet_4-0Ma", "2mm_Droplet_5-0Ma"]
 
@@ -71,15 +73,17 @@ def convert(txt):
 
 def main():
     src = os.path.normpath(SRC)
+    dst = os.path.normpath(DST)
+    os.makedirs(dst, exist_ok=True)
     written = []
     for fn in FILES:
         with open(os.path.join(src, fn), "r") as f:
             txt = f.read()
-        out = os.path.join(src, fn + "_3D")
+        out = os.path.join(dst, fn + "_3D")
         with open(out, "w", newline="\n") as f:
             f.write(convert(txt))
         written.append(fn + "_3D")
-    print(f"wrote {len(written)} 3D inputs to {src}:")
+    print(f"wrote {len(written)} 3D inputs to {dst}:")
     for n in written:
         print("  " + n)
 
