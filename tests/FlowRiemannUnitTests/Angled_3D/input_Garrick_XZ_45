@@ -1,0 +1,133 @@
+#@ [garrick3d_xz_45]
+#@ exe=hydro2
+#@ dim=3
+
+# Garrick et al. (2017) gas-liquid Riemann problem, ROTATED in 3D.
+# Plane XZ, theta = 45 deg.  Propagation direction (unit):
+#     n = (0.707106781187, 0.000000000000, 0.707106781187)
+# Multi-D coupling check: the 1D profile projected onto n must be identical for
+# every orientation.  Overlay/error: reference/RiemannGarrickCompare_3D.py
+
+alamo.program = hydro2
+
+### OUTPUT ###
+# plot_file = ./tests/FlowRiemannUnitTests/Angled_3D/output_Garrick_Angled_3D_XZ_45                                  # DESKTOP (run from bin/)
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRiemannUnitTests/Angled_3D/output_Garrick_Angled_3D_XZ_45   # INCLINE /mmfs1 (default)
+
+### NUMERICS ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3
+nghost = 4
+
+### ROTATED INTERFACE: s = n . r = nx*x + ny*y + nz*z = 0 ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = "1.25e-3"
+eta.ic.expression.constant.nx = "0.707106781187"
+eta.ic.expression.constant.ny = "0.000000000000"
+eta.ic.expression.constant.nz = "0.707106781187"
+eta.ic.expression.region0 = "0.5 * (1.0 + tanh((nx*x + ny*y + nz*z) / epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### MESHING (uniform; max_grid_size set for ~125 grids -> good MPI spread) ###
+amr.plot_int        = 50
+amr.max_level       = 0
+amr.max_grid_size   = 40
+amr.blocking_factor = 8
+amr.grid_eff        = 0.8
+amr.n_cell          = 200 200 200
+
+### DIMENSIONS (unit cube) ###
+geometry.prob_lo     = -1.0 -1.0 -1.0 # [ m ]
+geometry.prob_hi     =  1.0  1.0  1.0 # [ m ]
+geometry.is_periodic = 0 0 0
+
+### TIME STEP (CFL-driven) ###
+timestep            = 1.0e-12
+dynamictimestep.on  = 1
+dynamictimestep.max = 1.0e-3
+dynamictimestep.min = 1.0e-9
+cfl                 = 0.4
+stop_time           = 0.2
+
+### FORCED SOURCE (off) ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0 0.0
+
+### EOS (stiffened-gas liquid + ideal gas) ###
+eos0.gamma = 5.5
+eos1.gamma = 1.4
+eos0.p0 = 1.505
+eos1.p0 = 0.0
+eos0.cp = 1004.5
+eos1.cp = 1004.5
+eos0.cv = 717.5
+eos1.cv = 717.5
+
+mu0   = 0.0
+mu1   = 0.0
+sigma = 0.0
+pref  = 0.0
+
+### IC State - Fluid 0 (s < 0 side) - LIQUID ###
+density0.ic.type = constant
+density0.ic.constant.value = 0.991
+velocity0.ic.type = constant
+velocity0.ic.constant.value = 0.0 0.0 0.0
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 3.059e-4
+cp0 = 1.4
+cv0 = 1.0
+
+### IC State - Fluid 1 (s > 0 side) - GAS ###
+density1.ic.type = constant
+density1.ic.constant.value = 1.241
+velocity1.ic.type = constant
+velocity1.ic.constant.value = 0.0 0.0 0.0
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 2.753
+cp1 = 1.4
+cv1 = 1.0
+
+### BC - neumann on all 6 faces ###
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+density.bc.type.zlo = neumann
+density.bc.type.zhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+energy.bc.type.zlo = neumann
+energy.bc.type.zhi = neumann
+momentum.bc.type.xlo = neumann neumann neumann
+momentum.bc.type.xhi = neumann neumann neumann
+momentum.bc.type.ylo = neumann neumann neumann
+momentum.bc.type.yhi = neumann neumann neumann
+momentum.bc.type.zlo = neumann neumann neumann
+momentum.bc.type.zhi = neumann neumann neumann
+
+### REFINEMENT (off -- uniform mesh) ###
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+kappa_method = 1
+Dv = 0
+g  = 0.0
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+
+apply_sharpening     = 0
+sharpening_frequency = 100
+reinit_max_iter      = 50
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5

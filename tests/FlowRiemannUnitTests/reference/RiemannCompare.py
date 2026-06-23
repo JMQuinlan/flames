@@ -22,6 +22,7 @@ Tammann = '.' # Change to "." for not Tammann and "TammannEOS" for Tamman
 hdf5_file = os.path.join(Tammann, f'{case_name}.hdf5')   # os.path.join: works on Linux (INCLINE) too, not just Windows '\'
 # Output dir: argv[2] overrides; else the dual INCLINE/desktop UNIT_TEST default.
 # Toggle the default between INCLINE (/mmfs1, active) and DESKTOP (comment swap).
+#_OUT_INCLINE = fr'../../../bin/tests/FlowRiemannUnitTests/output_{case_name}'
 _OUT_INCLINE = fr'/mmfs1/home/ttryon/flames/bin/tests/FlowRiemannUnitTests/UNIT_TEST_2D/output_{case_name}'
 _OUT_DESKTOP = fr'../../../bin/tests/FlowRiemannUnitTests/UNIT_TEST_2D/output_{case_name}'
 amrex_output_dir = sys.argv[2] if len(sys.argv) > 2 else _OUT_INCLINE  # -> _OUT_DESKTOP for desktop

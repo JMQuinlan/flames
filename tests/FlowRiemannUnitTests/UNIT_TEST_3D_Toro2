@@ -99,8 +99,9 @@ velocity0.ic.expression.region1 = "0.0"
 velocity1.ic.type = expression
 velocity1.ic.expression.constant.v_L = "-2.0"
 velocity1.ic.expression.constant.v_R = "2.0"
-velocity1.ic.expression.region0 = "v_L*(z<0) + v_R*(z>0)"
+velocity1.ic.expression.region0 = "0.0"
 velocity1.ic.expression.region1 = "0.0"
+velocity1.ic.expression.region2 = "v_L*(z<0) + v_R*(z>0)"
 
 pressure0.ic.type = expression
 pressure0.ic.expression.region0 = "0.0"
