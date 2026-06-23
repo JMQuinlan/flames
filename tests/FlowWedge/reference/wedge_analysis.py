@@ -103,7 +103,7 @@ MEAS_MS    = 12                   # measured-point marker size (scatter)
 
 # ---- FIGURE / TYPOGRAPHY --------------------------------------------------
 FIGSIZE    = (11.0, 6.2)
-DEBUG_Info = 1                    # 1 -> show the data/annotation textbox; else hide it
+DEBUG_Info = 0                    # 1 -> show the data/annotation textbox; else hide it
 DPI        = 140
 FONT_TITLE = 15
 FONT_LABEL = 12.5
