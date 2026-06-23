@@ -126,6 +126,22 @@ pf.eta.bc.type.yhi = neumann
 pf.eta.bc.type.zlo = periodic
 pf.eta.bc.type.zhi = periodic
 
+### PRIMITIVE PRESSURE BC (bc.primitive=1) -- drives the channel directly.
+### Validated: reproduces the analytical u_max = 1.25 m/s.  The conservative
+### energy.bc (dirichlet) below is SUPERSEDED / ignored when bc.primitive=1;
+### that path over-predicted u_max by ~2x (dirichlet-ghost gradient doubling).
+bc.primitive = 1
+pressure.bc.type.xlo = dirichlet
+pressure.bc.val.xlo  = "1000.0"
+pressure.bc.type.xhi = dirichlet
+pressure.bc.val.xhi  = "995.0"
+pressure.bc.type.ylo = neumann
+pressure.bc.val.ylo  = "0.0"
+pressure.bc.type.yhi = neumann
+pressure.bc.val.yhi  = "0.0"
+pressure.bc.type.zlo = periodic
+pressure.bc.type.zhi = periodic
+
 # Density: zero-gradient on all four sides (no mass flux through walls,
 # x-direction inflow/outflow density is whatever the interior advects).
 density.bc.type.xhi = neumann
