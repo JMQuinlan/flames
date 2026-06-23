@@ -337,6 +337,113 @@ def extract_radius_history_robust(amrex_output_dir, eta_threshold=0.5,
 
 
 # ============================================================================
+# DIFFUSE ETA-BAND DIAGNOSTIC
+# ============================================================================
+# eta rises 0 -> 1 from gas (bubble center) to liquid (outside), so along the
+# +x ray eta=0.1 is the INNER band edge, eta=0.9 the OUTER edge, eta=0.5 the
+# nominal R(t).  The shaded region between the outer thresholds is the diffuse
+# interface band; a band that fattens over time = numerical interface smearing
+# (worth watching through the collapse, where it can over/under-shoot R_min).
+BAND_THRESHOLDS = (0.1, 0.5, 0.9)
+
+
+def extract_eta_band_history(amrex_output_dir, thresholds=BAND_THRESHOLDS,
+                             axis="x", x_max=None):
+    """Per frame, the radius where eta crosses each threshold (linear-interp).
+    Returns (times, {thr: radii}); skips corrupt/partial plotfiles silently."""
+    import yt
+    yt.funcs.mylog.setLevel(40)
+    empty = {t: np.array([]) for t in thresholds}
+    if not os.path.isdir(amrex_output_dir):
+        return np.array([]), empty
+    pfs = sorted(os.path.join(amrex_output_dir, d) for d in os.listdir(amrex_output_dir)
+                 if os.path.isdir(os.path.join(amrex_output_dir, d)) and d.endswith("cell"))
+    times, bands = [], {t: [] for t in thresholds}
+    for pf in pfs:
+        try:
+            ds = yt.load(pf)
+            L = float(ds.domain_right_edge[0])
+            if axis == "x":
+                ray = ds.ray(ds.arr([0.0, 0.0, 0.0], "code_length"),
+                             ds.arr([L, 0.0, 0.0], "code_length"))
+                r = np.array(ray["x"])
+            else:
+                ray = ds.ray(ds.arr([0.0, 0.0, 0.0], "code_length"),
+                             ds.arr([0.0, L, 0.0], "code_length"))
+                r = np.array(ray["y"])
+            eta = np.array(ray["eta"])
+            o = np.argsort(r); r, eta = r[o], eta[o]
+            if x_max is not None:
+                m = (r >= 0.0) & (r <= float(x_max)); r, eta = r[m], eta[m]
+            for thr in thresholds:
+                if len(r) == 0:
+                    bands[thr].append(np.nan); continue
+                idx = np.where(eta >= thr)[0]
+                if len(idx) == 0:
+                    bands[thr].append(np.nan)
+                elif idx[0] == 0:
+                    bands[thr].append(r[0])
+                else:
+                    i = idx[0]
+                    frac = (thr - eta[i - 1]) / (eta[i] - eta[i - 1])
+                    bands[thr].append(r[i - 1] + frac * (r[i] - r[i - 1]))
+            times.append(float(ds.current_time))
+        except Exception:
+            continue
+    if not times:
+        return np.array([]), empty
+    times = np.array(times); o = np.argsort(times)
+    return times[o], {t: np.array(bands[t])[o] for t in thresholds}
+
+
+def plot_eta_band(times_s, bands):
+    """Shaded diffuse eta-band radius vs time -> Images/{SAVE_NAME}_eta_band.*"""
+    if len(times_s) < 2:
+        print("  [eta-band] <2 usable frames -- skipped")
+        return
+    thrs = sorted(bands)
+    tu = globals().get("TIME_UNIT", "us")
+    if tu == "ms":
+        tf, tl = 1.0e3, r"$t$ [ms]"
+    elif tu == "us":
+        tf, tl = 1.0e6, r"$t$ [$\mu$s]"
+    else:
+        tau = rayleigh_collapse_time(P)
+        tf = 1.0 / tau if (np.isfinite(tau) and tau > 0) else 1.0
+        tl = r"$t / \tau_c$"
+    R0 = P.R0
+    lo, hi = thrs[0], thrs[-1]
+    fw = globals().get("FIG_WIDTH", 11); fh = globals().get("FIG_HEIGHT", 6.5)
+    fsl = globals().get("FONT_SIZE_LABEL", 14); fst = globals().get("FONT_SIZE_TITLE", 16)
+    fsk = globals().get("FONT_SIZE_TICK", 11); fsg = globals().get("FONT_SIZE_LEGEND", 12)
+    dpi = globals().get("DPI", 180)
+    fig, ax = plt.subplots(figsize=(fw, fh))
+    ax.fill_between(times_s * tf, bands[lo] / R0, bands[hi] / R0,
+                    color="tab:red", alpha=0.20,
+                    label=rf"diffuse band $\eta\in[{lo:.2f},{hi:.2f}]$")
+    for thr in thrs:
+        ls, lw = ("-", 2.2) if abs(thr - 0.5) < 1e-9 else ("--", 1.3)
+        lab = rf"$\eta={thr:.2f}$" + ("  ($R/R_0$)" if abs(thr - 0.5) < 1e-9 else "")
+        ax.plot(times_s * tf, bands[thr] / R0, ls, lw=lw, label=lab)
+    ax.axhline(1.0, color="0.6", ls=":", lw=0.8)
+    ax.set_xlabel(tl, fontsize=fsl)
+    ax.set_ylabel(r"$R / R_0$", fontsize=fsl)
+    ax.set_title(f"{SAVE_NAME}: diffuse eta-band radius vs time",
+                 fontsize=fst, fontweight="bold")
+    ax.grid(True, alpha=0.3); ax.tick_params(labelsize=fsk)
+    ax.legend(fontsize=fsg, loc="best")
+    plt.tight_layout()
+    out = os.path.join(IMG_DIR, f"{SAVE_NAME}_eta_band")
+    fig.savefig(out + ".png", dpi=dpi, bbox_inches="tight")
+    fig.savefig(out + ".eps", dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    bw = (bands[hi] - bands[lo]) / R0
+    with np.errstate(invalid="ignore"):
+        print(f"  [eta-band] wrote {out}.png  (band width R/R0: "
+              f"start={bw[0]:.4f}, end={bw[-1]:.4f}, max={np.nanmax(bw):.4f})")
+
+
+# ============================================================================
 # IC PRESSURE DIAGNOSTIC
 # ============================================================================
 #
@@ -665,6 +772,12 @@ def main():
     ax.legend(fontsize=FONT_SIZE_LEGEND, loc=LEGEND_LOC)
 
     plt.tight_layout()
+    # ---- Diffuse eta-band (interface thickness) vs time ----------------------
+    if sim_loaded:
+        print("  Extracting diffuse eta-band (eta=0.1/0.5/0.9 radii)...")
+        _bt, _bands = extract_eta_band_history(OUTPUT_DIR, axis="x", x_max=1.5 * P.R0)
+        plot_eta_band(_bt, _bands)
+
     out_png = os.path.join(IMG_DIR, f"{SAVE_NAME}.png")
     out_eps = os.path.join(IMG_DIR, f"{SAVE_NAME}.eps")
     fig.savefig(out_png, dpi=DPI, bbox_inches='tight')
