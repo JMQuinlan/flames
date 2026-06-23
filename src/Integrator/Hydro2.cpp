@@ -347,6 +347,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("rhoD_ref", value.rhoD_ref, 0.0);     // gas rho*D [kg/m/s]; >0 enables CE variable diffusivity
         pp_query_default("rhoD_Tref", value.rhoD_Tref, 300.0); // reference T [K] for rho*D(T)
         pp_query_default("rhoD_exp", value.rhoD_exp, 0.5);     // T exponent of rho*D (Chapman-Enskog: D~T^1.5/p, rho~p/T => rho*D~T^0.5)
+        // Floor on rho0 = alpharho0/eta in the CE species-dt diagnostic only (caps Deff
+        // = rho*D(T)/rho0 so a collapsed-alpharho0 interface cell can't crush dt_species
+        // to ~1e-11; the vapor operator is already ClampYv-bounded). 0 = off (raw rho0).
+        pp_query_default("dt_species_rho0_floor", value.dt_species_rho0_floor, 0.0); // [kg/m^3]; ~1e-2 for air-dodecane
         pp_query_default("k0_thermal", value.k0_thermal, 0.0); // gas thermal conductivity [W/m/K] (Fourier conduction; 0 = off)
         pp_query_default("k1_thermal", value.k1_thermal, 0.0); // liquid thermal conductivity [W/m/K] (Fourier conduction; 0 = off)
         // Verification: prescribed constant-rate phase change (bypasses Spalding). Off by default.
@@ -4023,7 +4027,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 // alpharho0->0 limit can't spuriously inflate the bound.
                 if (species_transport && rhoD_ref > 0.0 && eta_c > 1.0e-3)
                 {
-                    Set::Scalar rho0_est = alpharho0(i, j, k) / eta_c;   // intrinsic gas density
+                    // Floor rho0 so a collapsed-alpharho0 interface cell cannot inflate
+                    // Deff (and crush dt_species) past the nominal CE scale the
+                    // ClampYv-bounded vapor operator actually respects. dt BOUND only.
+                    Set::Scalar rho0_est = std::max(alpharho0(i, j, k) / eta_c, dt_species_rho0_floor); // intrinsic gas density
                     Set::Scalar Deff = RhoD_CE(T(i, j, k), rhoD_ref, rhoD_Tref, rhoD_exp, small) / (rho0_est + small);
                     Deff_max_local = std::max(Deff_max_local, Deff);
                 }

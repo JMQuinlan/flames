@@ -87,9 +87,10 @@ geometry.prob_hi =  0.260  0.035 0.0
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
-stop_time = 4.0e-4
-# stop_time = 1.0e-5
+# stop_time = 4.0e-4
+stop_time = 1.0e-5
 # stop_time = 5.0e-7
+# stop_time = 6.0e-6
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
@@ -265,8 +266,9 @@ eps_rho = 1e-10
 # Liquid cavitation/tensile floor: hold the liquid (eta->0) at p >= -p_cav
 # while gas (eta->1) stays p >= eps_p. 0 = vacuum floor (no tension).
 # p_cav = 1.0e6 # Too small for the high tension caused during the shock-droplet interaction
-p_cav = 6.0e7 # We above the -35 MPa observed liquid tension
-# p_cav = 1.5e8 # We above the -63 MPa observed liquid tension ... failure just tracking cap.  Trying to fix with HLL on compressive face of droplet
+# p_cav = 6.0e7 # We above the -35 MPa observed liquid tension
+# p_cav = 1.0e8 # We above the -63 MPa observed liquid tension ... failure just tracking cap.  Trying to fix with HLL on compressive face of droplet
+p_cav = 1.0e9 # Way too extreme, but seeing what happens on a little longer run
 
 ### SOURCE TERMS ###
 m0.ic.constant.value = 0.0
@@ -297,7 +299,9 @@ Riemann_Solver.hllc_adc.adc_components = 4
 adc_shock_threshold = 0.75
 adc_grow = 4
 # Apply HLL to compressive (windward) side of droplet
-adc_interface_band = 0.1
+adc_interface_band = 0.05
+# dt species was crashing only on the finest mesh
+dt_species_rho0_floor = 1e-2   # kg/m^3
 
 # Surface tension nhat calc adjustments
 kappa_method = 1

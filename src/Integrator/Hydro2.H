@@ -422,6 +422,15 @@ protected:
     Set::Scalar rhoD_ref = 0.0;    // reference gas rho*D [kg/m/s] (0 = legacy Dv path)
     Set::Scalar rhoD_Tref = 300.0; // reference temperature [K] for rho*D(T)
     Set::Scalar rhoD_exp = 0.5;    // T exponent of rho*D; Chapman-Enskog = 0.5
+    // Floor on the intrinsic gas density rho0 = alpharho0/eta used ONLY in the
+    // CE species-dt diagnostic (dt_species = cfl*dx^2/Deff, Deff = rho*D(T)/rho0).
+    // At an interface cell where alpharho0 collapses toward 0 while eta stays above
+    // the 1e-3 guard, rho0 -> 0 inflates Deff by ~1e4 and crushes the global dt to
+    // ~1e-11 s, even though the vapor operator is ClampYv-bounded to the nominal Dv
+    // scale (so the restriction is spurious). Flooring rho0 here caps Deff at that
+    // nominal scale. It touches the dt BOUND only, never the transported state.
+    // 0 = off (raw rho0, bit-identical); ~1e-2 kg/m^3 restores dt for air-dodecane.
+    Set::Scalar dt_species_rho0_floor = 0.0;
     Set::Scalar k0_thermal = 0.0; // gas-phase thermal conductivity [W/m/K] (Fourier conduction; 0 = off)
     Set::Scalar k1_thermal = 0.0; // liquid-phase thermal conductivity [W/m/K] (Fourier conduction; 0 = off)
     Set::Scalar Y_infinity = 0.0; // Far Feild Vapor Mass Fraction
