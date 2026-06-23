@@ -1,0 +1,187 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# =============================================================================
+# DROPLET-ADVECTION  -- eta interface-width isolation case (uniform translation)
+# =============================================================================
+# Purpose: isolate the effect of ADVECTION on the diffuse interface width. The
+# whole field (gas + droplet) is initialised in mechanical+thermal equilibrium
+# and advected at a single CONSTANT velocity (u = 250 m/s, +x). There is NO
+# shock and NO velocity gradient, so the exact solution is "the t=0 droplet
+# translated by u*t" -- the eta profile should not change shape at all. Any
+# growth of the 2%-98% eta width is therefore PURELY numerical: the first-order
+# upwind eta-advection diffusion (and, with AMR on, the regrid interpolation as
+# the refined patch chases the droplet), partially opposed by the Cahn-Hilliard
+# sharpening (Mob).
+#
+# Compare against Droplet-stationary (same deck, u=0): that case has CH only and
+# no advection/regrid, so (advection width growth) - (stationary width growth)
+# is the advective/regrid numerical diffusion in isolation.
+#
+# To isolate advection from AMR regrid diffusion, set amr.max_level = 0 (uniform
+# coarse mesh) -- then only the upwind eta advection remains. To isolate from CH,
+# set Mob = 0. To remove the curvature coupling, set apply_surface_tension = 0
+# (and drop the droplet Laplace pressure below).
+#
+# All reactive physics (vaporization, species, latent heat, conduction,
+# cavitation) is OFF so only hydro + CH + (optional) surface tension act on eta.
+# Geometry/EOS/epsilon/Mob/Riemann/limiter settings match Air-Dodecane-Ma6_5.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_Droplet_advection
+amr.plot_dt = 0.5e-6
+
+### MESHING ###
+amr.max_grid_size = 500000
+amr.blocking_factor = 16
+amr.regrid_int = 1
+amr.grid_eff = 0.8
+amr.n_error_buf = 4
+amr.max_level = 4
+# Compact domain at the SAME finest resolution as Air-Dodecane-Ma6_5
+# (level-0 dx = 0.16/320 = 5.0e-4 m; finest at L4 = 3.125e-5 m -> ~14 cells
+#  across the analytic 2-98% band 3.89*sqrt(2)*epsilon = 4.40e-4 m).
+amr.n_cell = 320 80
+
+### TIME STEPPING ###
+timestep = 1e-11
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1.0e-7
+dynamictimestep.min = 1.0e-15
+cfl = 0.2
+
+### DIMENSIONS ###
+# Periodic in x and y: the uniform field + localized droplet are periodic-
+# compatible, so the droplet translates with no boundary artifact. At 250 m/s
+# over 2e-5 s it moves 5 mm (< the 160 mm box), so it never wraps.
+geometry.prob_lo = -0.020 -0.020 0.0
+geometry.prob_hi =  0.140  0.020 0.0
+geometry.is_periodic = 1 1 0
+
+### STOP ###
+stop_time = 2.0e-5
+
+### ETA INITIAL CONDITIONS ###
+# eta ~ 0 inside liquid, eta ~ 1 in gas. Width = sqrt(2)*epsilon is the exact
+# equilibrium of mu = -epsilon^2 lap(eta) + 4 eta (eta-0.5)(eta-1).
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 8.0e-5
+eta.ic.expression.constant.R0 = 4.4e-3
+eta.ic.expression.constant.x_center = 0.0
+eta.ic.expression.constant.y_center = 0.0
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x-x_center)**2 + (y-y_center)**2) - R0)/(sqrt(2)*epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+# eos0 = gas (air), eos1 = liquid (n-dodecane) -- same EOS as Air-Dodecane-Ma6_5.
+eos0.gamma = 1.4
+eos0.p0 = 0.0
+mu0 = 1.85e-5
+mu0_b = 0.0
+eos1.gamma = 2.358
+eos1.p0 = 4.01e8
+mu1 = 1.35e-3
+mu1_b = 0.0
+
+# Uniform ambient gas (1 atm, 364 K -> rho = 0.9699142). No shock state.
+density0.ic.type = expression
+density0.ic.expression.constant.rho_amb = 0.9699142
+density0.ic.expression.region0 = "rho_amb"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_nDodecane = 750.0
+density1.ic.expression.region0 = "rho_nDodecane"
+
+# Uniform advection velocity (+x) for BOTH phases (region0 = x-comp, region1 = y-comp).
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "250.0"
+velocity0.ic.expression.region1 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "250.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Uniform pressure (1 atm); droplet carries the Laplace jump for equilibrium with
+# surface tension on (dP = sigma/R = 0.025/4.4e-3 = 5.6818 Pa).
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_amb = 101325.0
+pressure0.ic.expression.region0 = "p_amb"
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_amb = 101325.0
+pressure1.ic.expression.constant.p_laplace = 5.6818181818
+pressure1.ic.expression.region0 = "p_amb + p_laplace"
+
+# Thermodynamic properties (paired so gas and liquid are both ~364 K at t=0).
+eos0.cv = "717.5"
+eos0.cp = "1004.5"
+eos1.cv = "1.08e3"
+eos1.cp = "2546.64"
+
+sigma = 0.025
+pref  = 0.0
+
+### REACTIVE PHYSICS -- ALL OFF (isolate hydro + CH on eta) ###
+apply_vaporization = 0
+species_transport  = 0
+apply_latent_heat  = 0
+apply_cavitation   = 0
+k0_thermal = 0.0
+k1_thermal = 0.0
+
+### BOUNDARY CONDITIONS ###
+# Periodic in x and y -> no physical BCs needed.
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion   = 2e-2    # refine the interface band
+omega_refinement_criterion = 1e+20   # (off)
+divu_refinement_criterion  = 1e+20   # (off -- no shock here)
+rho_refinement_criterion   = 1e+20   # (off)
+gradu_refinement_criterion = 1e+20   # (off)
+
+cutoff = 1e-16
+small  = 1e-6
+
+### POSITIVITY-PRESERVING FLUX LIMITER ###
+pp_flux_limiter   = 1
+pp_source_limiter = 1
+eps_p   = 1.0
+eps_rho = 1e-10
+# No tension expected (no shock); keep a modest liquid floor.
+p_cav = 1.0e6
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 1
+apply_weight = 0
+grav = 0.0
+Spec_Vol = 1
+
+### RIEMANN SOLVER ###
+Riemann_Solver.type = hllc_adc
+Riemann_Solver.hllc_adc.alpha = 12
+Riemann_Solver.hllc_adc.adc_components = 4
+adc_shock_threshold = 0.75
+adc_grow = 4
+adc_interface_band = 0.05
+
+### SURFACE-TENSION NORMAL CALC ###
+kappa_method = 1
+smooth_kernel_size = 5
+nghost = 4
+kappa_grad_frac = 0.02
+
+### INTERFACE SHARPENING (off) ###
+apply_sharpening = 0
+
+### CAHN-HILLIARD ###
+apply_ch_companion = 0   # neutral for the width (verified); off keeps it simple
+Mob = 130

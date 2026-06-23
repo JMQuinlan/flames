@@ -50,7 +50,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_air_dodecane_Ma6_5_eta_alpha
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_air_dodecane_Ma6_5_eta_alpha_no_companion
 # plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_air_dodecane_Ma6_5_no_vap
 
 ### MESHING ###
@@ -317,7 +317,7 @@ reinit_tolerance = 1e-6
 omega_relax = 0.5
 
 # CH companion
-apply_ch_companion = 1
+apply_ch_companion = 0
 
 # Cahn-Hilliard mobility scale from interface Peclet estimate:
 # Pe_CH = U*epsilon^2/(M*sigma), M = M0*epsilon^2, M0 ~ U/sigma.
