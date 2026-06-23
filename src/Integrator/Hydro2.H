@@ -454,6 +454,13 @@ protected:
     // the rho1 = alpharho1/(1-eta) blow-up when CH pushes eta->1 without removing the
     // stranded liquid mass). 1 = on (default), 0 = off (1D regression bit-identical).
     int apply_ch_companion = 1;
+    // Zalesak outflow limiter on the conservative CH companion fluxes. Without it the
+    // companion can drain a band-tail cell's vanishing alpharho_k below 0 (the gas-mass
+    // "CFL" J_CH*dt/(eta*dx) blows up as eta->0), and the post-advance floor-at-0 then
+    // INJECTS mass (the integrals.dat col-12 M_floor_gas drift). 1 = on (default; makes
+    // M_floor_gas structurally 0 with the companion on), 0 = unlimited companion (the old
+    // behavior, bit-identical, for A/B).
+    int ch_companion_pp_limit = 1;
     int apply_vaporization = 0;
     int spalding_saturation = 0;       // Stage 2: 1 = Spalding driving force = Antoine saturation Y_s at interface T; 0 = legacy local cell-Y. See SaturationYs.
     int spalding_film_sink = 0;        // Stage 3d: 0 = constant far-field Y_infinity as the Spalding sink (fixed driving -> constant rate). 1 = sample the sink at a FILM distance into the gas (transport-responsive -> sqrt(t) Stefan recession). Requires species_transport.

@@ -316,6 +316,10 @@ reinit_max_iter = 20
 reinit_tolerance = 1e-6
 omega_relax = 0.5
 
+# CH companion
+apply_ch_companion = 0
+
 # Cahn-Hilliard mobility scale from interface Peclet estimate:
 # Pe_CH = U*epsilon^2/(M*sigma), M = M0*epsilon^2, M0 ~ U/sigma.
 Mob = 130
+# Mob = 65

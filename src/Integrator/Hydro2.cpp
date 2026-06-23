@@ -404,6 +404,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("Y_infinity", value.Y_infinity, 0.0); // Far Field Vapor Mass Fraction
         pp_query_default("Mob", value.Mob_user, 0.0);   // CH mobility scale M0: M = M0 * epsilon^2
         pp_query_default("apply_ch_companion", value.apply_ch_companion, 1); // 1: CH companion mass/mom/energy fluxes on (keeps alpharho_k consistent with eta); 0: off
+        pp_query_default("ch_companion_pp_limit", value.ch_companion_pp_limit, 1); // 1: Zalesak outflow limiter on the companion (positivity -> M_floor_gas=0); 0: unlimited companion (old behavior, bit-identical)
         if (value.epsilon <= 0.0)
         {
             Util::Abort(INFO, "epsilon must be positive for Hydro2 Cahn-Hilliard mobility; got ", value.epsilon);
@@ -3412,6 +3413,94 @@ Hydro2::RHS(int lev,
         // (Tammann; independent of rho_k -- only the kinetic part 0.5 rho_k|u|^2 needs rho_k).
         struct CompCell { Set::Scalar rho0, rho1, ux, uy, ein0, ein1; };
 
+        // Zalesak outflow limiter (positivity for the conservative companion). The companion
+        // `+= dFr0` (Pass 2 below) can drain a band-tail cell's vanishing alpharho_k below 0
+        // (the gas-mass "CFL" = J_CH*dt/(eta*dx) blows up as eta->0), and the post-advance
+        // floor-at-0 then INJECTS mass -- the integrals.dat col-12 M_floor_gas drift. R0/R1 are
+        // per-cell scale factors in [0,1]: Pass 1 caps each cell's net OUTGOING phase mass at
+        // the post-advective budget A_k = max(alpharho_k + dt*re_k_rhs, 0) (>=0 by Pass C/D);
+        // Pass 2 scales each face flux by the DRAINING cell's R (same scaled flux on both sides
+        // -> the divergence still telescopes, so it stays conservative -- the floor injection is
+        // removed at the source rather than papered over). Default 1.0 leaves domain-edge ghosts
+        // (J_CH=0 there) and the limit-off (ch_companion_pp_limit=0) path bit-identical.
+        const bool limit_on = (ch_companion_pp_limit != 0);
+        amrex::MultiFab R0lim_mf(alpharho0_mf[lev]->boxArray(), alpharho0_mf[lev]->DistributionMap(), 1, 1);
+        amrex::MultiFab R1lim_mf(alpharho1_mf[lev]->boxArray(), alpharho1_mf[lev]->DistributionMap(), 1, 1);
+        R0lim_mf.setVal(1.0);
+        R1lim_mf.setVal(1.0);
+
+        if (limit_on)
+        {
+            for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &bx = mfi.validbox();
+                auto mu_chem = mu_chem_mf[lev]->array(mfi);
+                auto alpharho0 = alpharho0_mf[lev]->array(mfi);
+                auto alpharho1 = alpharho1_mf[lev]->array(mfi);
+                auto M = momentum_mf[lev]->array(mfi);
+                auto E = energy_per_vol_mf[lev]->array(mfi);
+                auto eta = eta_mf[lev]->array(mfi);
+                auto re0rhs = alpharho0_rhs_mf.array(mfi);   // advective+source (companion not yet added)
+                auto re1rhs = alpharho1_rhs_mf.array(mfi);
+                auto R0lim = R0lim_mf.array(mfi);
+                auto R1lim = R1lim_mf.array(mfi);
+
+                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    auto St = [=] AMREX_GPU_DEVICE (int ii, int jj) -> CompCell {
+                        CompCell c;
+                        const Set::Scalar a0 = std::max(alpharho0(ii, jj, k), 0.0);
+                        const Set::Scalar a1 = std::max(alpharho1(ii, jj, k), 0.0);
+                        const Set::Scalar rc = std::max(a0 + a1, small_l);
+                        Set::Scalar e_ = std::max(0.0, std::min(1.0, eta(ii, jj, k)));
+                        c.ux = M(ii, jj, k, 0) / rc;
+                        c.uy = M(ii, jj, k, 1) / rc;
+                        const Set::Scalar UE = E(ii, jj, k) - 0.5 * rc * (c.ux * c.ux + c.uy * c.uy);
+                        const Set::Scalar p = Solver::EOS::EOS::MixedPressure(rc, UE, e_, eos0_l, eos1_l, pref_l, small_l, eps_p_l, p_cav_l);
+                        c.rho0 = a0 / std::max(e_,        alpha_floor);
+                        c.rho1 = a1 / std::max(1.0 - e_,  alpha_floor);
+                        c.ein0 = (p + g0 * pi0) / (g0 - 1.0);
+                        c.ein1 = (p + g1 * pi1) / (g1 - 1.0);
+                        return c;
+                    };
+                    const CompCell C  = St(i, j);
+                    const CompCell Xp = St(i + 1, j);
+                    const CompCell Xm = St(i - 1, j);
+                    const CompCell Yp = St(i, j + 1);
+                    const CompCell Ym = St(i, j - 1);
+
+                    const Set::Scalar Jxh = Mob_l * (mu_chem(i + 1, j, k) - mu_chem(i, j, k)) / DX[0];
+                    const Set::Scalar Jxl = Mob_l * (mu_chem(i, j, k) - mu_chem(i - 1, j, k)) / DX[0];
+                    const Set::Scalar Jyh = Mob_l * (mu_chem(i, j + 1, k) - mu_chem(i, j, k)) / DX[1];
+                    const Set::Scalar Jyl = Mob_l * (mu_chem(i, j, k) - mu_chem(i, j - 1, k)) / DX[1];
+
+                    // Unscaled per-face phase-mass fluxes (gas = rho0(donor)*J, liquid = rho1(donor)*J).
+                    auto faceMass = [=] AMREX_GPU_DEVICE (const CompCell& A, const CompCell& B, Set::Scalar J,
+                                                          Set::Scalar& Fr0, Set::Scalar& Fr1) {
+                        const CompCell& gd = (J > 0.0) ? A : B;
+                        const CompCell& ld = (J > 0.0) ? B : A;
+                        Fr0 = gd.rho0 * J;
+                        Fr1 = ld.rho1 * J;
+                    };
+                    // Outgoing phase mass = negative part of each face's contribution to this cell.
+                    // gas:    +Fr0(hi)/dx, -Fr0(lo)/dx   (re0 += +dFr0)
+                    // liquid: -Fr1(hi)/dx, +Fr1(lo)/dx   (re1 += -dFr1)
+                    Set::Scalar f0, f1, out0 = 0.0, out1 = 0.0;
+                    faceMass(C,  Xp, Jxh, f0, f1); out0 += std::max(-f0, 0.0) / DX[0]; out1 += std::max( f1, 0.0) / DX[0];
+                    faceMass(Xm, C,  Jxl, f0, f1); out0 += std::max( f0, 0.0) / DX[0]; out1 += std::max(-f1, 0.0) / DX[0];
+                    faceMass(C,  Yp, Jyh, f0, f1); out0 += std::max(-f0, 0.0) / DX[1]; out1 += std::max( f1, 0.0) / DX[1];
+                    faceMass(Ym, C,  Jyl, f0, f1); out0 += std::max( f0, 0.0) / DX[1]; out1 += std::max(-f1, 0.0) / DX[1];
+
+                    const Set::Scalar A0 = std::max(alpharho0(i, j, k) + dt * re0rhs(i, j, k), 0.0);
+                    const Set::Scalar A1 = std::max(alpharho1(i, j, k) + dt * re1rhs(i, j, k), 0.0);
+                    R0lim(i, j, k) = (dt * out0 > 0.0) ? std::min(1.0, A0 / (dt * out0)) : 1.0;
+                    R1lim(i, j, k) = (dt * out1 > 0.0) ? std::min(1.0, A1 / (dt * out1)) : 1.0;
+                });
+            }
+            R0lim_mf.FillBoundary(geom[lev].periodicity());
+            R1lim_mf.FillBoundary(geom[lev].periodicity());
+        }
+
+        // ---- Pass 2: apply the (limited) companion divergence to the RHS ----
         for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box &bx = mfi.validbox();
@@ -3426,6 +3515,8 @@ Hydro2::RHS(int lev,
             auto re1rhs = alpharho1_rhs_mf.array(mfi);
             auto Mrhs   = M_rhs_mf.array(mfi);
             auto Erhs   = E_rhs_mf.array(mfi);
+            auto R0lim  = R0lim_mf.array(mfi);
+            auto R1lim  = R1lim_mf.array(mfi);
 
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 auto St = [=] AMREX_GPU_DEVICE (int ii, int jj) -> CompCell {
@@ -3460,33 +3551,52 @@ Hydro2::RHS(int lev,
 
                 // Per-face donor-weighted companion fluxes. Gas donor = sign(J) side;
                 // liquid donor = sign(-J) side. F_rho = gas_mass - liquid_mass; momentum
-                // carries F_rho at the face-averaged velocity.
+                // carries F_rho at the face-averaged velocity. r0f/r1f are the Zalesak
+                // factors of the DRAINING cell for each phase (1.0 when limiting is off);
+                // each phase's mass+energy+its momentum share scale together, so the per-face
+                // flux stays a single conservative quantity shared by both adjacent cells.
                 auto faceFlux = [=] AMREX_GPU_DEVICE (const CompCell& A, const CompCell& B, Set::Scalar J,
+                                                      Set::Scalar r0f, Set::Scalar r1f,
                                                       Set::Scalar& Fr0, Set::Scalar& Fr1,
                                                       Set::Scalar& FE0, Set::Scalar& FE1,
                                                       Set::Scalar& FMx, Set::Scalar& FMy) {
                     // A = this cell's "lower-index" side, B = "upper-index" side of the face.
                     const CompCell& gd = (J > 0.0) ? A : B;   // gas donor (flux +rho0*J)
                     const CompCell& ld = (J > 0.0) ? B : A;   // liquid donor (flux -rho1*J)
-                    Fr0 = gd.rho0 * J;
-                    Fr1 = ld.rho1 * J;
-                    FE0 = (gd.ein0 + 0.5 * gd.rho0 * (gd.ux * gd.ux + gd.uy * gd.uy)) * J;
-                    FE1 = (ld.ein1 + 0.5 * ld.rho1 * (ld.ux * ld.ux + ld.uy * ld.uy)) * J;
-                    const Set::Scalar Frho = Fr0 - Fr1;       // F_rho_CH at this face
+                    Fr0 = r0f * gd.rho0 * J;
+                    Fr1 = r1f * ld.rho1 * J;
+                    FE0 = r0f * (gd.ein0 + 0.5 * gd.rho0 * (gd.ux * gd.ux + gd.uy * gd.uy)) * J;
+                    FE1 = r1f * (ld.ein1 + 0.5 * ld.rho1 * (ld.ux * ld.ux + ld.uy * ld.uy)) * J;
+                    const Set::Scalar Frho = Fr0 - Fr1;       // F_rho_CH at this face (limited)
                     const Set::Scalar uxf = 0.5 * (A.ux + B.ux);
                     const Set::Scalar uyf = 0.5 * (A.uy + B.uy);
                     FMx = uxf * Frho;
                     FMy = uyf * Frho;
                 };
 
+                // Limiter factor of the DRAINING cell per face and phase. Since rho_k >= 0,
+                // sign(Fr0)=sign(Fr1)=sign(J): the gas flux drains the sign(J) side and the
+                // liquid flux drains the opposite side (mass swap), so for a face (L|U) the
+                // gas factor is R0(U) if J>0 else R0(L), and the liquid factor is R1(L) if
+                // J>0 else R1(U). 1.0 when limiting is off (faceFlux then reproduces the
+                // unlimited companion bit-for-bit).
+                const Set::Scalar r0_xh = limit_on ? ((Jxh > 0.0) ? R0lim(i + 1, j, k) : R0lim(i, j, k)) : 1.0;
+                const Set::Scalar r1_xh = limit_on ? ((Jxh > 0.0) ? R1lim(i, j, k) : R1lim(i + 1, j, k)) : 1.0;
+                const Set::Scalar r0_xl = limit_on ? ((Jxl > 0.0) ? R0lim(i, j, k) : R0lim(i - 1, j, k)) : 1.0;
+                const Set::Scalar r1_xl = limit_on ? ((Jxl > 0.0) ? R1lim(i - 1, j, k) : R1lim(i, j, k)) : 1.0;
+                const Set::Scalar r0_yh = limit_on ? ((Jyh > 0.0) ? R0lim(i, j + 1, k) : R0lim(i, j, k)) : 1.0;
+                const Set::Scalar r1_yh = limit_on ? ((Jyh > 0.0) ? R1lim(i, j, k) : R1lim(i, j + 1, k)) : 1.0;
+                const Set::Scalar r0_yl = limit_on ? ((Jyl > 0.0) ? R0lim(i, j, k) : R0lim(i, j - 1, k)) : 1.0;
+                const Set::Scalar r1_yl = limit_on ? ((Jyl > 0.0) ? R1lim(i, j - 1, k) : R1lim(i, j, k)) : 1.0;
+
                 Set::Scalar Fr0_xh, Fr1_xh, FE0_xh, FE1_xh, FMx_xh, FMy_xh;
                 Set::Scalar Fr0_xl, Fr1_xl, FE0_xl, FE1_xl, FMx_xl, FMy_xl;
                 Set::Scalar Fr0_yh, Fr1_yh, FE0_yh, FE1_yh, FMx_yh, FMy_yh;
                 Set::Scalar Fr0_yl, Fr1_yl, FE0_yl, FE1_yl, FMx_yl, FMy_yl;
-                faceFlux(C,  Xp, Jxh, Fr0_xh, Fr1_xh, FE0_xh, FE1_xh, FMx_xh, FMy_xh);
-                faceFlux(Xm, C,  Jxl, Fr0_xl, Fr1_xl, FE0_xl, FE1_xl, FMx_xl, FMy_xl);
-                faceFlux(C,  Yp, Jyh, Fr0_yh, Fr1_yh, FE0_yh, FE1_yh, FMx_yh, FMy_yh);
-                faceFlux(Ym, C,  Jyl, Fr0_yl, Fr1_yl, FE0_yl, FE1_yl, FMx_yl, FMy_yl);
+                faceFlux(C,  Xp, Jxh, r0_xh, r1_xh, Fr0_xh, Fr1_xh, FE0_xh, FE1_xh, FMx_xh, FMy_xh);
+                faceFlux(Xm, C,  Jxl, r0_xl, r1_xl, Fr0_xl, Fr1_xl, FE0_xl, FE1_xl, FMx_xl, FMy_xl);
+                faceFlux(C,  Yp, Jyh, r0_yh, r1_yh, Fr0_yh, Fr1_yh, FE0_yh, FE1_yh, FMx_yh, FMy_yh);
+                faceFlux(Ym, C,  Jyl, r0_yl, r1_yl, Fr0_yl, Fr1_yl, FE0_yl, FE1_yl, FMx_yl, FMy_yl);
 
                 // Divergences (hi - lo)/dx, matching S_CH = (J_hi - J_lo)/dx.
                 const Set::Scalar dFr0 = (Fr0_xh - Fr0_xl) / DX[0] + (Fr0_yh - Fr0_yl) / DX[1];
