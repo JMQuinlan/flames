@@ -369,6 +369,106 @@ def plot_eta_band(times_s, bands, curves=None):
 # MAIN
 # ============================================================================
 
+
+
+# ============================================================================
+# VOLUME-BASED RADIUS  (Sch20 eq. 29)
+# ============================================================================
+# R = (3 V_b / 4pi)^(1/3),  V_b = sum_cells alpha_g * V_cell,  alpha_g = 1 - eta.
+# This is Sch20's actual radius definition -- a robust volume integral over the
+# whole gas phase, NOT a single-ray eta=0.5 crossing.  It is immune to the
+# interface smearing / grid-anisotropy that makes the eta=0.5 ray under-read R
+# at the violent collapse (see the eta-band plot).  AMR-correct: yt returns only
+# leaf cells, so no double-counting of covered coarse cells.  Restricted to a
+# +/-BOX_HALF box about the origin (the far field is eta=1 -> alpha_g=0, no
+# contribution) so it stays fast on the 320^3 _Large grids.
+BOX_HALF = 0.2   # m; ~10 R0 -- the bubble (R<=R0=0.02) lives well inside this
+
+
+def extract_radius_volume_history(amrex_output_dir, box_half=BOX_HALF):
+    """Per frame, R from the gas-volume integral (Sch20 eq. 29).
+    Returns (times, radii); skips corrupt/partial plotfiles silently."""
+    import yt
+    yt.funcs.mylog.setLevel(40)
+    if not os.path.isdir(amrex_output_dir):
+        return np.array([]), np.array([])
+    pfs = sorted(os.path.join(amrex_output_dir, d) for d in os.listdir(amrex_output_dir)
+                 if os.path.isdir(os.path.join(amrex_output_dir, d)) and d.endswith("cell"))
+    times, radii = [], []
+    for pf in pfs:
+        try:
+            ds = yt.load(pf)
+            dh = float(ds.domain_right_edge[0])
+            bh = min(box_half, dh)
+            reg = ds.box(ds.arr([-bh, -bh, -bh], "code_length"),
+                         ds.arr([bh, bh, bh], "code_length"))
+            eta = np.array(reg["eta"])
+            try:
+                vol = np.array(reg["index", "cell_volume"])
+            except Exception:
+                vol = np.array(reg["cell_volume"])
+            alpha_g = np.clip(1.0 - eta, 0.0, 1.0)
+            V_b = float(np.sum(alpha_g * vol))
+            radii.append((3.0 * V_b / (4.0 * np.pi)) ** (1.0 / 3.0))
+            times.append(float(ds.current_time))
+        except Exception:
+            continue
+    if not times:
+        return np.array([]), np.array([])
+    t = np.array(times); r = np.array(radii); o = np.argsort(t)
+    return t[o], r[o]
+
+
+def plot_radius_volume(times_s, R_vol, curves, R_eta_t=None, R_eta=None):
+    """Volume-based R/R0 vs time, overlaid with KM/RP (and the eta=0.5 ray R for
+    contrast) -> Images/{SAVE_NAME}_R_volume.*"""
+    if len(times_s) < 2:
+        print("  [R-volume] <2 usable frames -- skipped")
+        return
+    tu = globals().get("TIME_UNIT", "us")
+    if tu == "ms":
+        tf, tl = 1.0e3, r"$t$ [ms]"
+    elif tu == "us":
+        tf, tl = 1.0e6, r"$t$ [$\mu$s]"
+    else:
+        tau = rayleigh_collapse_time(P)
+        tf = 1.0 / tau if (np.isfinite(tau) and tau > 0) else 1.0
+        tl = r"$t / \tau_c$"
+    R0 = P.R0
+    fw = globals().get("FIG_WIDTH", 11); fh = globals().get("FIG_HEIGHT", 6.5)
+    fsl = globals().get("FONT_SIZE_LABEL", 14); fst = globals().get("FONT_SIZE_TITLE", 16)
+    fsk = globals().get("FONT_SIZE_TICK", 11); fsg = globals().get("FONT_SIZE_LEGEND", 12)
+    dpi = globals().get("DPI", 180)
+    fig, ax = plt.subplots(figsize=(fw, fh))
+    # analytical references
+    for c in (curves or []):
+        if c.get("key") in ("rp", "km"):
+            ax.plot(np.asarray(c["t"]) * tf, np.asarray(c["R"]) / R0, c.get("ls", "-"),
+                    color=c.get("color", "k"), lw=c.get("lw", 1.6), alpha=0.9,
+                    label=c.get("label", c["key"]))
+    # eta=0.5 ray radius for contrast (the old measure), if available
+    if R_eta is not None and R_eta_t is not None and len(R_eta) > 1:
+        ax.plot(np.asarray(R_eta_t) * tf, np.asarray(R_eta) / R0, ":", color="tab:gray",
+                lw=1.3, alpha=0.7, label=r"hydro2 $\eta{=}0.5$ ray")
+    # the new volume-based radius
+    ax.plot(times_s * tf, R_vol / R0, "-o", color="tab:purple", lw=2.0, ms=3,
+            label=r"hydro2 $R=(3V_b/4\pi)^{1/3}$ (gas volume)")
+    ax.set_xlabel(tl, fontsize=fsl)
+    ax.set_ylabel(r"$R / R_0$", fontsize=fsl)
+    ax.set_title(f"{SAVE_NAME}: bubble radius from GAS VOLUME (Sch20 eq. 29)",
+                 fontsize=fst, fontweight="bold")
+    ax.grid(True, alpha=0.3); ax.tick_params(labelsize=fsk)
+    ax.legend(fontsize=fsg, loc="best")
+    plt.tight_layout()
+    out = os.path.join(IMG_DIR, f"{SAVE_NAME}_R_volume")
+    fig.savefig(out + ".png", dpi=dpi, bbox_inches="tight")
+    fig.savefig(out + ".eps", dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    imin = int(np.argmin(R_vol))
+    print(f"  [R-volume] wrote {out}.png  (R_min/R0={R_vol[imin] / R0:.4f} at "
+          f"t={times_s[imin] * tf:.4f}; sanity R(0)/R0={R_vol[0] / R0:.4f} -- expect ~1.0)")
+
+
 def main():
     tau_c = rayleigh_collapse_time(P)
     t_scale = tau_c if (NONDIM_TIME and np.isfinite(tau_c) and tau_c > 0) else 1.0
@@ -517,6 +617,9 @@ def main():
         print("  Extracting diffuse eta-band (eta=0.1/0.5/0.9 radii)...")
         _bt, _bands = extract_eta_band_history(OUTPUT_DIR, axis="x", x_max=1.5 * P.R0)
         plot_eta_band(_bt, _bands, curves)
+        print("  Extracting volume-based radius (Sch20 eq.29: R=(3 V_gas/4pi)^1/3)...")
+        _vt, _vr = extract_radius_volume_history(OUTPUT_DIR)
+        plot_radius_volume(_vt, _vr, curves, t_sim, R_sim)
 
     out_png = os.path.join(IMG_DIR, f"{SAVE_NAME}.png")
     out_eps = os.path.join(IMG_DIR, f"{SAVE_NAME}.eps")
