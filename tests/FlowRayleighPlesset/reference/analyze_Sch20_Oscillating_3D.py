@@ -396,7 +396,7 @@ def extract_eta_band_history(amrex_output_dir, thresholds=BAND_THRESHOLDS,
     return times[o], {t: np.array(bands[t])[o] for t in thresholds}
 
 
-def plot_eta_band(times_s, bands):
+def plot_eta_band(times_s, bands, curves=None):
     """Shaded diffuse eta-band radius vs time -> Images/{SAVE_NAME}_eta_band.*"""
     if len(times_s) < 2:
         print("  [eta-band] <2 usable frames -- skipped")
@@ -426,6 +426,12 @@ def plot_eta_band(times_s, bands):
         lab = rf"$\eta={thr:.2f}$" + ("  ($R/R_0$)" if abs(thr - 0.5) < 1e-9 else "")
         ax.plot(times_s * tf, bands[thr] / R0, ls, lw=lw, label=lab)
     ax.axhline(1.0, color="0.6", ls=":", lw=0.8)
+    # overlay analytical bubble-dynamics references (RPE / KM) for comparison
+    for c in (curves or []):
+        if c.get("key") in ("rp", "km"):
+            ax.plot(np.asarray(c["t"]) * tf, np.asarray(c["R"]) / R0,
+                    c.get("ls", "-"), color=c.get("color", "k"),
+                    lw=c.get("lw", 1.6), alpha=0.9, label=c.get("label", c["key"]))
     ax.set_xlabel(tl, fontsize=fsl)
     ax.set_ylabel(r"$R / R_0$", fontsize=fsl)
     ax.set_title(f"{SAVE_NAME}: diffuse eta-band radius vs time",
@@ -776,7 +782,7 @@ def main():
     if sim_loaded:
         print("  Extracting diffuse eta-band (eta=0.1/0.5/0.9 radii)...")
         _bt, _bands = extract_eta_band_history(OUTPUT_DIR, axis="x", x_max=1.5 * P.R0)
-        plot_eta_band(_bt, _bands)
+        plot_eta_band(_bt, _bands, curves)
 
     out_png = os.path.join(IMG_DIR, f"{SAVE_NAME}.png")
     out_eps = os.path.join(IMG_DIR, f"{SAVE_NAME}.eps")
