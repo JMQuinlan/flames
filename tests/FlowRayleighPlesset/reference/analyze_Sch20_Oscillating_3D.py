@@ -113,7 +113,9 @@ OUTPUT_DIR = os.path.normpath(os.path.join(
 ))
 # OVERRIDE (uncomment + edit for your machine):
 OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_3D")
-OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large_3D")
+#OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large_3D")
+OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_3D_WENO3_SHARP")
+#OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_3D_WENO5")
 
 # ===== PLOT STYLING (publication knobs) =====
 FONT_SIZE_TITLE  = 16
