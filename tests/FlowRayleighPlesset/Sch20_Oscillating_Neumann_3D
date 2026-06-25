@@ -32,7 +32,8 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Oscillating_Neumann_3D
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_3D
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_3D
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_3D_WENO3_SHARP
 
 ### MESHING ###
 amr.plot_int       = -1
@@ -68,7 +69,8 @@ stop_time            = 1e-2
 ### ETA INITIAL CONDITIONS (identical to _Large) ###
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.0016     # ~ 2 cells across the band at finest
+# eta.ic.expression.constant.epsilon = 0.0016     # ~ 2 cells across the band at finest
+eta.ic.expression.constant.epsilon = 0.00001     # ~ 0 cells across the band at finest
 eta.ic.expression.constant.R0      = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
