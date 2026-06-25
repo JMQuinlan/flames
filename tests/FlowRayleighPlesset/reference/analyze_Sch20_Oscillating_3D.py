@@ -637,17 +637,29 @@ def extract_radius_volume_history(amrex_output_dir, box_half=BOX_HALF):
     for pf in pfs:
         try:
             ds = yt.load(pf)
-            dh = float(ds.domain_right_edge[0])
-            bh = min(box_half, dh)
-            reg = ds.box(ds.arr([-bh, -bh, -bh], "code_length"),
-                         ds.arr([bh, bh, bh], "code_length"))
+            dle = ds.domain_left_edge
+            dre = ds.domain_right_edge
+            # Octant/symmetry detection: a lo edge sitting at the origin (the
+            # bubble center) means that axis is a symmetry plane, so only half the
+            # bubble lies along it.  full domain: all lo<0 -> factor 1; octant:
+            # all lo=0 -> factor 8.  Scale V_gas by 2^(#symmetry axes).
+            sym_factor = 1
+            for _d in range(3):
+                if float(dle[_d]) > -1e-6:
+                    sym_factor *= 2
+            if not times:
+                print("  [R-volume] geometry: %s -> V_gas x%d"
+                      % ("OCTANT" if sym_factor > 1 else "FULL domain", sym_factor))
+            lo = [max(-box_half, float(dle[_d])) for _d in range(3)]
+            hi = [min( box_half, float(dre[_d])) for _d in range(3)]
+            reg = ds.box(ds.arr(lo, "code_length"), ds.arr(hi, "code_length"))
             eta = np.array(reg["eta"])
             try:
                 vol = np.array(reg["index", "cell_volume"])
             except Exception:
                 vol = np.array(reg["cell_volume"])
             alpha_g = np.clip(1.0 - eta, 0.0, 1.0)
-            V_b = float(np.sum(alpha_g * vol))
+            V_b = float(np.sum(alpha_g * vol)) * sym_factor
             radii.append((3.0 * V_b / (4.0 * np.pi)) ** (1.0 / 3.0))
             times.append(float(ds.current_time))
         except Exception:

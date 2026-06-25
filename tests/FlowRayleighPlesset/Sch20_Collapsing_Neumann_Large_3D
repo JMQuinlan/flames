@@ -1,10 +1,12 @@
 #@ [sch20_collapsing]
-# >>> LARGE-DOMAIN 3D VARIANT (auto-derived from the non-Large twin) <<<
-# domain +/-2.0 (100 R0), base 320^3, max_level 4 -> effective finest 5120^3,
-# dx_finest = 7.81e-4 (R0/dx = 25.6, UNCHANGED).  Enlarged domain pushes the
-# reflecting boundary to ~100 R0 (far-field IC err ~0.9%, wave round-trip ~2.7 ms)
-# per Sch20 (L >> R0) to suppress boundary/reflection contamination of R_min.
-# max_grid_size lowered 500000 -> 64 so the 320^3 base tiles into ~125 grids for MPI.
+# >>> LARGE-DOMAIN OCTANT 3D VARIANT <<<
+# +x+y+z octant [0,2.0]^3 (100 R0) with SYMMETRY (reflect) BCs on the inner
+# faces (xlo/ylo/zlo -- the planes through the bubble center at the origin) and
+# neumann far-field on the outer faces.  base 160^3, max_level 4 -> dx_finest =
+# 7.81e-4 (R0/dx = 25.6).  This is 1/8 the cells of the +/-2.0 full domain
+# (160^3 vs 320^3) for identical physics -- the octant reproduces the full
+# bubble to round-off (verified, _OctVerify pair).  The RPE analysis auto-detects
+# the octant (prob_lo=0) and scales the gas volume by 8.
 #@ exe=hydro2
 #@ dim=3
 
@@ -56,12 +58,12 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20
 ### MESHING ###
 amr.plot_int       = -1
 amr.plot_dt        = 4.0e-6        # ~ tau_c/65 -> fine sampling through collapse
-amr.max_grid_size  = 64
+amr.max_grid_size  = 32
 amr.blocking_factor = 2
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
 amr.max_level      = 4
-amr.n_cell         = 320 320 320       # base; eta-only AMR -> finest dx 7.8e-4 (R0/dx 25.6)
+amr.n_cell         = 160 160 160       # base; eta-only AMR -> finest dx 7.8e-4 (R0/dx 25.6)
 amr.n_error_buf    = 16
 
 nghost = 4
@@ -75,7 +77,7 @@ dynamictimestep.min     = 1.0e-14
 cfl                     = 0.4
 
 ### DIMENSIONS ###
-geometry.prob_lo     = -2.0 -2.0 -2.0
+geometry.prob_lo     =  0.0  0.0  0.0
 geometry.prob_hi     =  2.0  2.0  2.0
 geometry.is_periodic = 0 0 0
 stop_time            = 4.0e-4      # ~ 1.55 tau_c -- collapse + first rebound
@@ -139,25 +141,33 @@ sigma = 0.0
 pref  = 0.0
 
 ### BOUNDARY CONDITIONS - Neumann on all 6 faces (Sch20 non-NSCBC variant) ###
-density.bc.type.xlo = neumann
+# eta: symmetry (reflect_even) on inner faces, neumann far-field
+eta.bc.type.xlo = REFLECT_EVEN
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = REFLECT_EVEN
+eta.bc.type.yhi = neumann
+eta.bc.type.zlo = REFLECT_EVEN
+eta.bc.type.zhi = neumann
+
+density.bc.type.xlo = REFLECT_EVEN
 density.bc.type.xhi = neumann
-density.bc.type.ylo = neumann
+density.bc.type.ylo = REFLECT_EVEN
 density.bc.type.yhi = neumann
-density.bc.type.zlo = neumann
+density.bc.type.zlo = REFLECT_EVEN
 density.bc.type.zhi = neumann
 
-energy.bc.type.xlo = neumann
+energy.bc.type.xlo = REFLECT_EVEN
 energy.bc.type.xhi = neumann
-energy.bc.type.ylo = neumann
+energy.bc.type.ylo = REFLECT_EVEN
 energy.bc.type.yhi = neumann
-energy.bc.type.zlo = neumann
+energy.bc.type.zlo = REFLECT_EVEN
 energy.bc.type.zhi = neumann
 
-momentum.bc.type.xlo = neumann neumann neumann
+momentum.bc.type.xlo = REFLECT_ODD  REFLECT_EVEN REFLECT_EVEN
 momentum.bc.type.xhi = neumann neumann neumann
-momentum.bc.type.ylo = neumann neumann neumann
+momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD  REFLECT_EVEN
 momentum.bc.type.yhi = neumann neumann neumann
-momentum.bc.type.zlo = neumann neumann neumann
+momentum.bc.type.zlo = REFLECT_EVEN REFLECT_EVEN REFLECT_ODD
 momentum.bc.type.zhi = neumann neumann neumann
 
 ### REFINEMENT (off for the nominal validation run) ###
