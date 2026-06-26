@@ -184,6 +184,29 @@ def find_local_maxima(t, R):
     return t[idx], R[idx]
 
 
+def _offset_ray_radial(ds, axis="x"):
+    """Ray PARALLEL to `axis` but offset by half a finest cell off the other two
+    axes, so it passes through cell CENTERS instead of the on-axis cell EDGES.
+    The exact y=z=0 axis lies on 3D cell edges, where yt's ray sampling is
+    ambiguous -> spurious eta=0.5 crossings (the ~0.64 R0 stray dots at collapse).
+    Returns (radius, eta) sorted by radius, with radius = sqrt(s^2 + 2*off^2)
+    (the true distance from the origin along the offset ray)."""
+    L = float(ds.domain_right_edge[0])
+    dx_base = float(ds.domain_width[0]) / int(ds.domain_dimensions[0])
+    off = 0.5 * dx_base / (2 ** int(ds.max_level))     # half a finest cell
+    if axis == "x":
+        a, b, key = [0.0, off, off], [L, off, off], "x"
+    elif axis == "y":
+        a, b, key = [off, 0.0, off], [off, L, off], "y"
+    else:
+        a, b, key = [off, off, 0.0], [off, off, L], "z"
+    ray = ds.ray(ds.arr(a, "code_length"), ds.arr(b, "code_length"))
+    s = np.array(ray[key]); eta = np.array(ray["eta"])
+    rad = np.sqrt(s * s + 2.0 * off * off)
+    o = np.argsort(rad)
+    return rad[o], eta[o]
+
+
 def extract_radius_history_robust(amrex_output_dir, eta_threshold=0.5, axis="x"):
     """Same as rayleigh_plesset_solver.extract_radius_history but tolerant
     of individual corrupt / partially-written plotfiles.
@@ -215,18 +238,7 @@ def extract_radius_history_robust(amrex_output_dir, eta_threshold=0.5, axis="x")
     for pf in plot_files:
         try:
             ds = yt.load(pf)
-            L = float(ds.domain_right_edge[0])
-            if axis == "x":
-                ray = ds.ray(ds.arr([0.0, 0.0, 0.0], "code_length"),
-                             ds.arr([L,   0.0, 0.0], "code_length"))
-                x = np.array(ray["x"])
-            else:
-                ray = ds.ray(ds.arr([0.0, 0.0, 0.0], "code_length"),
-                             ds.arr([0.0, L,   0.0], "code_length"))
-                x = np.array(ray["y"])
-            eta = np.array(ray["eta"])
-            order = np.argsort(x)
-            x, eta = x[order], eta[order]
+            x, eta = _offset_ray_radial(ds, axis)   # off-axis ray -> radial coord (Option a)
             idx = np.where(eta >= eta_threshold)[0]
             if len(idx) == 0:
                 radii.append(np.nan)
@@ -278,17 +290,7 @@ def extract_eta_band_history(amrex_output_dir, thresholds=BAND_THRESHOLDS,
     for pf in pfs:
         try:
             ds = yt.load(pf)
-            L = float(ds.domain_right_edge[0])
-            if axis == "x":
-                ray = ds.ray(ds.arr([0.0, 0.0, 0.0], "code_length"),
-                             ds.arr([L, 0.0, 0.0], "code_length"))
-                r = np.array(ray["x"])
-            else:
-                ray = ds.ray(ds.arr([0.0, 0.0, 0.0], "code_length"),
-                             ds.arr([0.0, L, 0.0], "code_length"))
-                r = np.array(ray["y"])
-            eta = np.array(ray["eta"])
-            o = np.argsort(r); r, eta = r[o], eta[o]
+            r, eta = _offset_ray_radial(ds, axis)   # off-axis ray -> radial coord (Option a)
             if x_max is not None:
                 m = (r >= 0.0) & (r <= float(x_max)); r, eta = r[m], eta[m]
             for thr in thresholds:
