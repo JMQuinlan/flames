@@ -3,7 +3,7 @@
 #SBATCH --job-name=RPE-KM
 #SBATCH -o /mmfs1/home/ttryon/FLAMES_out/flame_%j_stdout
 #SBATCH -e /mmfs1/home/ttryon/FLAMES_out/err_flame_%j_stdout
-#SBATCH -N 1
+#SBATCH -N 4
 #SBATCH --ntasks-per-node=128
 #SBATCH --partition=compute-long
 #SBATCH -t 100:00:00
