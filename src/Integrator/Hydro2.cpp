@@ -3236,8 +3236,11 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
                 // Update with relaxation (pseudo-time stepping)
                 // ============================================================
 
-                rho_eta0(i, j, k) = rho_eta0(i, j, k) - omega_relax * dt_compression * R_l;
-                rho_eta1(i, j, k) = rho_eta1(i, j, k) - omega_relax * dt_compression * R_g;
+                // [SIGN EXPERIMENT 2026-06] Tiwari Eq 30a/30b put R-hat on the RHS as a
+                // SOURCE (d(rho alpha)/dt = +R-hat), so a forward update ADDS it.  The
+                // original code subtracted -> anti-sharpening.  Flipped to += to test.
+                rho_eta0(i, j, k) = rho_eta0(i, j, k) + omega_relax * dt_compression * R_l;
+                rho_eta1(i, j, k) = rho_eta1(i, j, k) + omega_relax * dt_compression * R_g;
 
                 // Ensure positivity
                 rho_eta0(i, j, k) = std::max(small, rho_eta0(i, j, k));
