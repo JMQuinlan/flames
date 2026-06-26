@@ -41,6 +41,7 @@ alamo.program = hydro2
 ### OUTPUT ###
 # plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Oscillating_Neumann_3D
 plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large_3D
+#plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large_3D_Sharp
 
 ### MESHING ###
 amr.plot_int       = -1
@@ -192,7 +193,7 @@ integration.rk.type = 3
 kappa_method        = 1
 
 apply_sharpening     = 0
-sharpening_frequency = 50
+sharpening_frequency = 20
 reinit_max_iter      = 100
 reinit_tolerance     = 1e-6
 omega_relax          = 0.5
