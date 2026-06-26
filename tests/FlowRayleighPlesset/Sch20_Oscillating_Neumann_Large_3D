@@ -183,9 +183,9 @@ apply_weight          = 0
 apply_vaporization    = 0
 grav                  = 0.0
 
-### NUMERICS -- WENO3 + SSPRK3 (project-standard for Sch20 tests) ###
+### NUMERICS -- WENO5 + SSPRK3 ###
 Riemann_Solver.type = hllc
-Limiter.type        = weno3
+Limiter.type        = weno5
 integration.type    = RungeKutta
 integration.rk.type = 3
 kappa_method        = 1
