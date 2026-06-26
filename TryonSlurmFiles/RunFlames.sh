@@ -5,8 +5,8 @@
 #SBATCH -e /mmfs1/home/ttryon/FLAMES_out/err_flame_%j_stdout
 #SBATCH -N 1
 #SBATCH --ntasks-per-node=128
-#SBATCH --partition=compute
-#SBATCH -t 23:00:00
+#SBATCH --partition=compute-long
+#SBATCH -t 100:00:00
 
 module purge
 module load gnu9 mpich
@@ -24,9 +24,9 @@ module load gnu9 mpich
 
 
 ## 3D Varients ##
-srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Sch20_Oscillating_Neumann_3D
+#srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Sch20_Oscillating_Neumann_3D
 #srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Sch20_Oscillating_NSCBC_3D
-#srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Sch20_Oscillating_Neumann_Large_3D
+srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Sch20_Oscillating_Neumann_Large_3D
 #srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Sch20_Oscillating_NSCBC_Large_3D
 
 #srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Sch20_Collapsing_Neumann_3D
