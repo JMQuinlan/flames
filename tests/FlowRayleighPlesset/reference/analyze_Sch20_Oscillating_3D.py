@@ -113,8 +113,8 @@ OUTPUT_DIR = os.path.normpath(os.path.join(
 ))
 # OVERRIDE (uncomment + edit for your machine):
 OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_3D")
-#OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large_3D")
-OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_3D_WENO3_SHARP")
+OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large_3D")
+#OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_3D_WENO3_SHARP")
 #OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_3D_WENO5")
 
 # ===== PLOT STYLING (publication knobs) =====
@@ -938,14 +938,24 @@ def main():
             with np.errstate(divide='ignore', invalid='ignore'):
                 diff_pct = 100.0 * diff_m / R_ref_at
 
+            # Volume-based radius (Sch20 eq.29) interpolated to the sim time grid,
+            # and its diff vs the SAME baseline (KM if present, else RP).
+            R_vol_at = (np.interp(t_sim, _vt, _vr, left=np.nan, right=np.nan)
+                        if len(_vt) > 1 else np.full_like(t_sim, np.nan))
+            diff_vol_m = R_vol_at - R_ref_at
+            with np.errstate(divide='ignore', invalid='ignore'):
+                diff_vol_pct = 100.0 * diff_vol_m / R_ref_at
+
             out_csv = os.path.join(IMG_DIR, f"{SAVE_NAME}.csv")
             with open(out_csv, 'w') as f:
-                f.write("time_s,time_ms,R_hydro2_m,R_rp_m,R_km_m,"
-                        "diff_km_m,diff_km_rel_pct\n")
-                for ts, rh, rr, rk, dm, dp in zip(t_sim, R_sim,
-                                                  R_rp_at, R_km_at, diff_m, diff_pct):
-                    f.write(f"{ts:.9e},{ts*1e3:.6f},{rh:.9e},"
-                            f"{rr:.9e},{rk:.9e},{dm:.9e},{dp:.6f}\n")
+                f.write("time_s,time_ms,R_hydro2_m,R_vol_m,R_rp_m,R_km_m,"
+                        "diff_km_m,diff_km_rel_pct,diff_vol_km_m,diff_vol_km_rel_pct\n")
+                for ts, rh, rv, rr, rk, dm, dp, dvm, dvp in zip(
+                        t_sim, R_sim, R_vol_at, R_rp_at, R_km_at,
+                        diff_m, diff_pct, diff_vol_m, diff_vol_pct):
+                    f.write(f"{ts:.9e},{ts*1e3:.6f},{rh:.9e},{rv:.9e},"
+                            f"{rr:.9e},{rk:.9e},{dm:.9e},{dp:.6f},"
+                            f"{dvm:.9e},{dvp:.6f}\n")
             print(f"  wrote {out_csv}")
         else:
             print("  [info] no RP/KM curve -- CSV export skipped.")
