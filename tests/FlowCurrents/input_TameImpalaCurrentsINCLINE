@@ -50,7 +50,7 @@ dynamictimestep.verbose = 0
 dynamictimestep.max = 2e-2
 dynamictimestep.min = 1e-9
 cfl                 = 0.3
-stop_time           = 2500.0          # 10x -- long run so the asymmetric instability fully grows
+stop_time           = 250.0
 
 # ----------------------------------------------------------------------------
 # EMBEDDED SOLID BOUNDARY -- the "sphere" (2D cylinder), centered at the origin
@@ -183,3 +183,5 @@ Riemann_Solver.type = hllc
 Limiter.type        = minmod
 kappa_method        = 1
 apply_sharpening    = 0
+
+equalize_ic_pressure = 1
