@@ -170,6 +170,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("marmottant.R_buckling", value.marmottant_R_buckling, 0.0);   // buckling radius [m]
         pp_query_default("marmottant.chi",        value.marmottant_chi, 0.0);          // shell elastic modulus [N/m]
         pp_query_default("marmottant.sigma_break",value.marmottant_sigma_break, 1.0e30); // rupture tension (default huge = never rupture)
+        pp_query_default("marmottant.eta_smooth_iters", value.marmottant_eta_smooth_iters, 8); // eta box-average passes (curvature de-noising)
         if (value.marmottant)
             Util::Message(INFO, "Marmottant ON: R_buckling=", value.marmottant_R_buckling,
                           " chi=", value.marmottant_chi, " sigma_break=", value.marmottant_sigma_break,
@@ -1227,49 +1228,129 @@ Hydro2::RHS(int lev,
     // ------------------------------------------------------------
     // MARMOTTANT (2005) coated-bubble surface tension  [add-on to the CSF term]
     // ------------------------------------------------------------
-    // Extract the bubble radius from the INTERFACE-AVERAGED curvature,
-    //   R = (d-1)/|<kappa>|,   <kappa> = sum(kappa*w)/sum(w),  w = eta(1-eta),
-    // then evaluate the piecewise sigma(R) (Marmottant Eq.4) ONCE for this level.
-    // The averaged (global) curvature -- not the noisy pointwise value -- keeps
-    // sigma uniform over the shell (physically correct: the coating tension is set
-    // by the bubble radius) AND immune to the curvature-noise rectification that
-    // destabilises a pointwise sigma(R=1/kappa).  See tests/FlowMarmottant.
-    Set::Scalar sigma_marmottant = sigma;
+    // LOCAL sigma(R(x)): the shell tension varies point-to-point so non-spherical and
+    // multi-bubble shells are captured.  A raw pointwise R=1/kappa is unstable -- the
+    // diffuse curvature is noisy and the piecewise sigma(R) RECTIFIES that noise into
+    // a spurious force (drift to R/R0~1.2).  We de-noise by a LOCAL interface-weighted
+    // average of the curvature over a small window (N box passes):
+    //     kappa_s(x) = sum_win w*kappa / sum_win w ,   w = eta(1-eta)
+    // Because the curvature noise is ~ZERO-MEAN (per-cell swings about the true value),
+    // averaging kappa is UNBIASED -- unlike smoothing eta first (Brackbill), which
+    // shifts a convex contour and biases the radius (drift grows with #passes).  Then
+    //     R(x) = (d-1)/|kappa_s(x)| ,  sigma_eff(x) = sigma(R(x))   [Marmottant Eq.4].
+    // kappa_s -> kappas(.,1), sigma_eff -> kappas(.,2) (both plottable); the CSF force
+    // below uses BOTH (smooth) so sigma_eff*kappa is uniform across the band (no
+    // parasitic currents) yet varies per bubble/region.  See tests/FlowMarmottant.
     if (marmottant)
     {
-        Set::Scalar sum_kw = 0.0, sum_w = 0.0;
+        const amrex::BoxArray &ba = eta_mf[lev]->boxArray();
+        const amrex::DistributionMapping &dm = eta_mf[lev]->DistributionMap();
+        const int ng = 1; // one box-average pass reach (FillBoundary refills each pass)
+        amrex::MultiFab kap_s(ba, dm, 1, ng);
+        kap_s.setVal(0.0); // init incl. ghosts (kappas has 0 ghosts -> uninit ghosts would be NaN)
+        amrex::MultiFab::Copy(kap_s, *kappas_mf[lev], 0, 0, 1, 0); // pointwise kappa = kappas(.,0)
+        kap_s.FillBoundary(geom[lev].periodicity());
+
+        // N interface-weighted box-average passes -> de-noised, UNBIASED curvature.
+        for (int pass = 0; pass < marmottant_eta_smooth_iters; ++pass)
+        {
+            amrex::MultiFab tmp(ba, dm, 1, ng);
+            for (amrex::MFIter mfi(kap_s, false); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &bx = mfi.validbox();
+                amrex::Array4<const Set::Scalar> const &ks = kap_s.const_array(mfi);
+                amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
+                amrex::Array4<Set::Scalar> const &t = tmp.array(mfi);
+                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    Set::Scalar sw = 0.0, swk = 0.0;
+                    for (int dj = -1; dj <= 1; ++dj)
+                        for (int di = -1; di <= 1; ++di)
+                        {
+#if AMREX_SPACEDIM == 3
+                            for (int dk = -1; dk <= 1; ++dk) {
+                                Set::Scalar e = et(i+di,j+dj,k+dk); Set::Scalar w = e*(1.0-e);
+                                sw += w; swk += w*ks(i+di,j+dj,k+dk);
+                            }
+#else
+                            Set::Scalar e = et(i+di,j+dj,k); Set::Scalar w = e*(1.0-e);
+                            sw += w; swk += w*ks(i+di,j+dj,k);
+#endif
+                        }
+                    t(i, j, k) = (sw > 1.0e-12) ? swk / sw : ks(i, j, k); // weighted; bulk -> unchanged
+                });
+            }
+            amrex::MultiFab::Copy(kap_s, tmp, 0, 0, 1, 0);
+            kap_s.FillBoundary(geom[lev].periodicity());
+        }
+
+        // Local Marmottant sigma(R) from the de-noised curvature.
+        const Set::Scalar Rb = marmottant_R_buckling, chi = marmottant_chi;
+        const Set::Scalar sbrk = marmottant_sigma_break, sigw = sigma, small_ = small;
+        const Set::Scalar dm1 = (Set::Scalar)(AMREX_SPACEDIM - 1);
+        for (amrex::MFIter mfi(kap_s, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            amrex::Array4<const Set::Scalar> const &ks = kap_s.const_array(mfi);
+            amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
+            amrex::Array4<Set::Scalar> const &kap = kappas_mf[lev]->array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Scalar e = et(i, j, k), w = e * (1.0 - e);
+                Set::Scalar kt = ks(i, j, k), se = 0.0;
+                if (w > 1.0e-6) // interface band
+                {
+                    Set::Scalar R = dm1 / (std::abs(kt) + small_);
+                    if (R > Rb) { Set::Scalar el = chi * (R * R / (Rb * Rb) - 1.0); se = (el >= sbrk) ? sigw : el; }
+                }
+                kap(i, j, k, 1) = kt; // kappa_s  (de-noised curvature; plottable)
+                kap(i, j, k, 2) = se; // sigma_eff(x)  (used by the CSF force below)
+            });
+        }
+    }
+
+    // ------------------------------------------------------------
+    // CAPILLARY STRESS TENSOR  (Schmidmayer et al. 2017, Eq.3-4) -- the conservative
+    // "continuum surface stress" form of surface tension.  The momentum force is
+    //   F = div(Omega),   Omega_ij = sigma_eff (|grad eta| delta_ij - d_i eta d_j eta/|grad eta|).
+    // div(Omega) reduces to sigma*kappa*grad(eta) for CONSTANT sigma, but for a VARYING
+    // sigma it also carries the Marangoni (grad sigma) term automatically -- i.e. the
+    // physically complete surface stress.  sigma_eff is the local Marmottant tension
+    // kappas(.,2) (marmottant) or the constant sigma.  [The capillary energy
+    // eps_sigma = sigma|grad eta| in the energy flux is the next step toward full
+    // discrete conservation; it does not change the static momentum/Laplace balance.]
+    // Symmetric-tensor storage:  2D [xx,yy,xy] ; 3D [xx,yy,zz,xy,xz,yz].
+    amrex::MultiFab Omega;
+    if (apply_surface_tension)
+    {
+        const amrex::BoxArray &baO = eta_mf[lev]->boxArray();
+        const amrex::DistributionMapping &dmO = eta_mf[lev]->DistributionMap();
+        const int nO = (AMREX_SPACEDIM == 2) ? 3 : 6;
+        Omega.define(baO, dmO, nO, 1);
+        Omega.setVal(0.0);
+        const Set::Scalar sig0 = sigma; const int marm = marmottant;
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box &bx = mfi.validbox();
-            amrex::Array4<const Set::Scalar> const &eta = eta_mf[lev]->const_array(mfi);
-            amrex::Array4<const Set::Scalar> const &kap = kappas_mf[lev]->const_array(mfi);
-            const auto lo = amrex::lbound(bx), hi = amrex::ubound(bx);
-            for (int k = lo.z; k <= hi.z; ++k)
-                for (int j = lo.y; j <= hi.y; ++j)
-                    for (int i = lo.x; i <= hi.x; ++i)
-                    {
-                        Set::Scalar w = eta(i, j, k) * (1.0 - eta(i, j, k)); // interface weight
-                        sum_kw += kap(i, j, k, 0) * w;
-                        sum_w  += w;
-                    }
+            amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
+            amrex::Array4<const Set::Scalar> const &kp = kappas_mf[lev]->const_array(mfi);
+            amrex::Array4<Set::Scalar> const &om = Omega.array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
+                Set::Scalar gem = ge.lpNorm<2>();
+                if (gem < 1.0e-10) return; // Omega = 0 off the interface
+                Set::Scalar se = marm ? kp(i, j, k, 2) : sig0;
+                om(i, j, k, 0) = se * (gem - ge(0) * ge(0) / gem); // xx
+                om(i, j, k, 1) = se * (gem - ge(1) * ge(1) / gem); // yy
+#if AMREX_SPACEDIM == 2
+                om(i, j, k, 2) = se * (-ge(0) * ge(1) / gem);      // xy
+#else
+                om(i, j, k, 2) = se * (gem - ge(2) * ge(2) / gem); // zz
+                om(i, j, k, 3) = se * (-ge(0) * ge(1) / gem);      // xy
+                om(i, j, k, 4) = se * (-ge(0) * ge(2) / gem);      // xz
+                om(i, j, k, 5) = se * (-ge(1) * ge(2) / gem);      // yz
+#endif
+            });
         }
-        amrex::ParallelDescriptor::ReduceRealSum(sum_kw);
-        amrex::ParallelDescriptor::ReduceRealSum(sum_w);
-        Set::Scalar kappa_avg = sum_kw / (sum_w + small);
-        Set::Scalar R = (Set::Scalar)(AMREX_SPACEDIM - 1) / (std::abs(kappa_avg) + small);
-        marmottant_R = R; // diagnostic
-
-        // Marmottant Eq.(4): buckled (sigma=0) -> elastic -> ruptured (sigma_water).
-        const Set::Scalar Rb = marmottant_R_buckling;
-        if (R <= Rb)
-            sigma_marmottant = 0.0;
-        else
-        {
-            Set::Scalar s_elastic = marmottant_chi * (R * R / (Rb * Rb) - 1.0);
-            sigma_marmottant = (s_elastic >= marmottant_sigma_break) ? sigma : s_elastic;
-        }
-        Util::Message(INFO, "Marmottant lev=", lev, " R=", R, " Rb=", Rb,
-                      " sigma_eff=", sigma_marmottant);
+        Omega.FillBoundary(geom[lev].periodicity());
     }
 
     // Main time integration loop
@@ -1336,6 +1417,8 @@ Hydro2::RHS(int lev,
 
         // DEBUGGING PLOTS
         Set::Patch<const Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
+        amrex::Array4<const Set::Scalar> om_cap; // capillary stress tensor (if surface tension on)
+        if (apply_surface_tension) om_cap = Omega.const_array(mfi);
         Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
 
@@ -1512,18 +1595,29 @@ Hydro2::RHS(int lev,
             Set::Vector Fsv_vector = Set::Vector::Zero();
             if (apply_surface_tension)
             {
-                // Optimization, only calc surface tension if on interface
-                if (grad_eta_mag > 0.0)
-                {
-                    Set::Scalar kappa = kappas(i, j, k, 0);
-                    // Marmottant: uniform shell tension sigma(R) (computed once above);
-                    // else the constant input sigma.
-                    Set::Scalar sigma_eff = marmottant ? sigma_marmottant : sigma;
-
-                    // Fsv = sigma * kappa * grad(eta), component-wise in every direction.
-                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
-                        Fsv_vector(d) = sigma_eff * kappa * grad_eta(d);
-                }
+                // Conservative continuum-surface-stress force  F = div(Omega)
+                // (Schmidmayer 2017).  Centered divergence of the capillary stress
+                // tensor stored in om_cap.  Reduces to sigma*kappa*grad(eta) for
+                // constant sigma, and adds Marangoni automatically for varying sigma.
+                // Storage: 2D [xx,yy,xy] ; 3D [xx,yy,zz,xy,xz,yz].
+                const Set::Scalar idx = 0.5 / DX[0], idy = 0.5 / DX[1];
+#if AMREX_SPACEDIM == 2
+                Fsv_vector(0) = (om_cap(i+1,j,k,0) - om_cap(i-1,j,k,0)) * idx
+                              + (om_cap(i,j+1,k,2) - om_cap(i,j-1,k,2)) * idy;
+                Fsv_vector(1) = (om_cap(i+1,j,k,2) - om_cap(i-1,j,k,2)) * idx
+                              + (om_cap(i,j+1,k,1) - om_cap(i,j-1,k,1)) * idy;
+#else
+                const Set::Scalar idz = 0.5 / DX[2];
+                Fsv_vector(0) = (om_cap(i+1,j,k,0) - om_cap(i-1,j,k,0)) * idx
+                              + (om_cap(i,j+1,k,3) - om_cap(i,j-1,k,3)) * idy
+                              + (om_cap(i,j,k+1,4) - om_cap(i,j,k-1,4)) * idz;
+                Fsv_vector(1) = (om_cap(i+1,j,k,3) - om_cap(i-1,j,k,3)) * idx
+                              + (om_cap(i,j+1,k,1) - om_cap(i,j-1,k,1)) * idy
+                              + (om_cap(i,j,k+1,5) - om_cap(i,j,k-1,5)) * idz;
+                Fsv_vector(2) = (om_cap(i+1,j,k,4) - om_cap(i-1,j,k,4)) * idx
+                              + (om_cap(i,j+1,k,5) - om_cap(i,j-1,k,5)) * idy
+                              + (om_cap(i,j,k+1,2) - om_cap(i,j,k-1,2)) * idz;
+#endif
             }
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
                 Fsv(i, j, k, d) = Fsv_vector(d);

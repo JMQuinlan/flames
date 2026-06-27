@@ -101,6 +101,7 @@ marmottant            = 1
 marmottant.R_buckling = 0.1      # R_buckling
 marmottant.chi        = 0.1      # shell elastic modulus
 marmottant.sigma_break= 100.0    # huge -> never ruptures in this test
+marmottant.eta_smooth_iters = 12 # eta box-average passes (curvature de-noising)
 
 ### BCs -- neumann all faces (bubble far from boundary) ###
 eta.bc.type.xlo = neumann

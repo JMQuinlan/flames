@@ -359,15 +359,16 @@ protected:
 
     // --- Marmottant (2005) coated-bubble surface tension (toggle: marmottant=1) ---
     // An ADD-ON to the existing CSF surface tension: when on, the constant sigma is
-    // replaced by the Marmottant piecewise sigma(R) using a bubble radius extracted
-    // from the interface-averaged curvature.  `sigma` (above) is reused as
-    // sigma_water (the post-rupture / bare gas-water tension).
-    // Ref: Marmottant et al., JASA 118 (2005) 3499, Eq.(4).
-    int marmottant = 0;                       // 0 = constant sigma; 1 = Marmottant sigma(R)
+    // replaced by the LOCAL Marmottant piecewise sigma(R(x)), with the radius taken
+    // per-cell from the SMOOTHED-eta curvature (Brackbill de-noising) so non-spherical
+    // and multi-bubble shells are captured.  `sigma` (above) is reused as sigma_water
+    // (the post-rupture / bare gas-water tension).
+    // Ref: Marmottant et al., JASA 118 (2005) 3499, Eq.(4); Brackbill et al. JCP 100 (1992) 335.
+    int marmottant = 0;                       // 0 = constant sigma; 1 = Marmottant sigma(R(x))
     Set::Scalar marmottant_R_buckling = NAN;  // R_buckling: below this, sigma=0 (buckled)
     Set::Scalar marmottant_chi = NAN;         // chi: shell elastic modulus [N/m]
     Set::Scalar marmottant_sigma_break = NAN; // sigma_break-up: rupture tension (>= sigma_water)
-    Set::Scalar marmottant_R = NAN;           // diagnostic: last curvature-derived bubble radius
+    int marmottant_eta_smooth_iters = 4;      // # box-average passes that de-noise eta before d/dx
     Set::Scalar g = 9.81; // m/s^2
     // Set::Scalar R = 8.314; // [J]/[mol]-[K]
     Set::Scalar R = 8314.; // [J]/[kmol]-[K] - Probably more common to use
