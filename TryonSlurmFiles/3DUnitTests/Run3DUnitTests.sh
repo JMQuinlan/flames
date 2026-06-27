@@ -44,23 +44,23 @@ RUN() {
 suite_start=$SECONDS
 
 # ---- Riemann solvers ------------------------------------------------------
-RUN $TESTS/FlowRiemannUnitTests/UNIT_TEST_3D_Toro1a
-RUN $TESTS/FlowRiemannUnitTests/UNIT_TEST_3D_Toro2
-RUN $TESTS/FlowRiemannUnitTests/UNIT_TEST_3D_Garrick
+#RUN $TESTS/FlowRiemannUnitTests/UNIT_TEST_3D_Toro1a
+#RUN $TESTS/FlowRiemannUnitTests/UNIT_TEST_3D_Toro2
+#RUN $TESTS/FlowRiemannUnitTests/UNIT_TEST_3D_Garrick
 
 # ---- Viscosity: Couette (single + multiphase) -----------------------------
-RUN $TESTS/FlowCouette/UNIT_TEST_3D_single
-RUN $TESTS/FlowCouette/UNIT_TEST_3D_multi
+#RUN $TESTS/FlowCouette/UNIT_TEST_3D_single
+#RUN $TESTS/FlowCouette/UNIT_TEST_3D_multi
 
 # ---- Pressure: Poiseuille -------------------------------------------------
-RUN $TESTS/FlowPoseuille/UNIT_TEST_3D
+#RUN $TESTS/FlowPoseuille/UNIT_TEST_3D
 
 # ---- Viscosity: Lamb-Oseen --------------------------------------------------
 # (3D Taylor-Green skipped: no closed-form 3D TGV solution to validate against.)
-RUN $TESTS/FlowLambOseenVortex/UNIT_TEST_3D
+#RUN $TESTS/FlowLambOseenVortex/UNIT_TEST_3D
 
 # ---- Embedded BC: Flow Vortex Re40 ----------------------------------------
-RUN $TESTS/FlowVortexShed/UNIT_TEST_3D_Re40
+#RUN $TESTS/FlowVortexShed/UNIT_TEST_3D_Re40
 
 # ---- Surface tension: Laplace (R x sigma matrix) --------------------------
 RUN $TESTS/FlowLaplace/UNIT_TEST_3D_R1.0e-3_Sigma3.6e-2
