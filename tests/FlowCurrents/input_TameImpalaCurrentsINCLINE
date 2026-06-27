@@ -30,7 +30,7 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowCurrents/output_currents
 ### MESHING ###
 amr.plot_dt          = 0.5            # ~11 frames per shedding cycle (nice for animation)
 amr.max_grid_size    = 500000
-amr.blocking_factor  = 4
+amr.blocking_factor  = 16
 amr.regrid_int       = 10
 amr.grid_eff         = 0.8
 amr.max_level        = 2
