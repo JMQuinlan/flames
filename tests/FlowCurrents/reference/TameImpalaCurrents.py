@@ -43,6 +43,7 @@ yt.funcs.mylog.setLevel(50)
 
 # ---- paths -----------------------------------------------------------------
 AMREX_OUTPUT_DIR = r'../../../bin/tests/FlowCurrents/output_currents'
+AMREX_OUTPUT_DIR = r'/mmfs1/home/ttryon/flames/bin/tests/FlowCurrents/output_currents' # INCLINE
 
 IMAGE_DIR        = "./Images"          # standalone frames go here
 GIF_PATH         = "./Images/Currents.gif"
