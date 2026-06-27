@@ -164,7 +164,16 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         Solver::EOS::SetBackend(eos_backend_str);
 
         // INTERACTIONS
-        pp_query_default("sigma", value.sigma, 0.0);            // Surface tension condition
+        pp_query_default("sigma", value.sigma, 0.0);            // Surface tension condition (= sigma_water when marmottant=1)
+        // Marmottant (2005) coated-bubble surface tension -- add-on to the CSF term.
+        pp_query_default("marmottant", value.marmottant, 0);                       // 0=const sigma, 1=Marmottant sigma(R)
+        pp_query_default("marmottant.R_buckling", value.marmottant_R_buckling, 0.0);   // buckling radius [m]
+        pp_query_default("marmottant.chi",        value.marmottant_chi, 0.0);          // shell elastic modulus [N/m]
+        pp_query_default("marmottant.sigma_break",value.marmottant_sigma_break, 1.0e30); // rupture tension (default huge = never rupture)
+        if (value.marmottant)
+            Util::Message(INFO, "Marmottant ON: R_buckling=", value.marmottant_R_buckling,
+                          " chi=", value.marmottant_chi, " sigma_break=", value.marmottant_sigma_break,
+                          " sigma_water=", value.sigma);
         pp_query_default("Dv", value.Dv, 0.0);                  // Vapor Diffusivity
         pp_query_required("epsilon", value.epsilon);            // diffuse interface thickness Y_infinity
         pp_query_default("Y_infinity", value.Y_infinity, 0.0);  // Far Field Vapor Mass Fraction
@@ -1215,6 +1224,54 @@ Hydro2::RHS(int lev,
     // Fill Boundries
     FillBoundariesWithBC(lev, time, energy_bc, { mu_chem_mf[lev].get() });
 
+    // ------------------------------------------------------------
+    // MARMOTTANT (2005) coated-bubble surface tension  [add-on to the CSF term]
+    // ------------------------------------------------------------
+    // Extract the bubble radius from the INTERFACE-AVERAGED curvature,
+    //   R = (d-1)/|<kappa>|,   <kappa> = sum(kappa*w)/sum(w),  w = eta(1-eta),
+    // then evaluate the piecewise sigma(R) (Marmottant Eq.4) ONCE for this level.
+    // The averaged (global) curvature -- not the noisy pointwise value -- keeps
+    // sigma uniform over the shell (physically correct: the coating tension is set
+    // by the bubble radius) AND immune to the curvature-noise rectification that
+    // destabilises a pointwise sigma(R=1/kappa).  See tests/FlowMarmottant.
+    Set::Scalar sigma_marmottant = sigma;
+    if (marmottant)
+    {
+        Set::Scalar sum_kw = 0.0, sum_w = 0.0;
+        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            amrex::Array4<const Set::Scalar> const &eta = eta_mf[lev]->const_array(mfi);
+            amrex::Array4<const Set::Scalar> const &kap = kappas_mf[lev]->const_array(mfi);
+            const auto lo = amrex::lbound(bx), hi = amrex::ubound(bx);
+            for (int k = lo.z; k <= hi.z; ++k)
+                for (int j = lo.y; j <= hi.y; ++j)
+                    for (int i = lo.x; i <= hi.x; ++i)
+                    {
+                        Set::Scalar w = eta(i, j, k) * (1.0 - eta(i, j, k)); // interface weight
+                        sum_kw += kap(i, j, k, 0) * w;
+                        sum_w  += w;
+                    }
+        }
+        amrex::ParallelDescriptor::ReduceRealSum(sum_kw);
+        amrex::ParallelDescriptor::ReduceRealSum(sum_w);
+        Set::Scalar kappa_avg = sum_kw / (sum_w + small);
+        Set::Scalar R = (Set::Scalar)(AMREX_SPACEDIM - 1) / (std::abs(kappa_avg) + small);
+        marmottant_R = R; // diagnostic
+
+        // Marmottant Eq.(4): buckled (sigma=0) -> elastic -> ruptured (sigma_water).
+        const Set::Scalar Rb = marmottant_R_buckling;
+        if (R <= Rb)
+            sigma_marmottant = 0.0;
+        else
+        {
+            Set::Scalar s_elastic = marmottant_chi * (R * R / (Rb * Rb) - 1.0);
+            sigma_marmottant = (s_elastic >= marmottant_sigma_break) ? sigma : s_elastic;
+        }
+        Util::Message(INFO, "Marmottant lev=", lev, " R=", R, " Rb=", Rb,
+                      " sigma_eff=", sigma_marmottant);
+    }
+
     // Main time integration loop
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
     {
@@ -1459,7 +1516,9 @@ Hydro2::RHS(int lev,
                 if (grad_eta_mag > 0.0)
                 {
                     Set::Scalar kappa = kappas(i, j, k, 0);
-                    Set::Scalar sigma_eff = sigma;
+                    // Marmottant: uniform shell tension sigma(R) (computed once above);
+                    // else the constant input sigma.
+                    Set::Scalar sigma_eff = marmottant ? sigma_marmottant : sigma;
 
                     // Fsv = sigma * kappa * grad(eta), component-wise in every direction.
                     for (int d = 0; d < AMREX_SPACEDIM; ++d)
