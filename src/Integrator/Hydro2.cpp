@@ -468,8 +468,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     //   solid.energy{0,1}  -> prescribed per-phase internal energies in solid.
     if (value.embedded.apply)
     {
-#if defined(AMREX_USE_EB) && (AMREX_SPACEDIM == 3)
-        // 3D + USE_EB build: also offer "stl" geometry (IC::STL wraps AMReX STLtools).
+#if (AMREX_SPACEDIM == 3)
+        // 3D build: also offer "stl" geometry (IC::STL -> self-contained Util::STL, no EB).
         pp.select_default<IC::Constant,IC::Expression,IC::BMP,IC::PNG,IC::STL>("solid.phi.ic", value.embedded.phi_ic, value.geom);
 #else
         pp.select_default<IC::Constant,IC::Expression,IC::BMP,IC::PNG>("solid.phi.ic",       value.embedded.phi_ic,      value.geom);

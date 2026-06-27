@@ -1,38 +1,35 @@
 //
 // Initialize a field (e.g. the embedded-solid indicator phi) from a 3D STL
-// triangle mesh.  Wraps AMReX's STLtools, which reads the STL (ASCII or binary),
-// builds a BVH, and returns the SIGNED DISTANCE to the surface:
+// triangle mesh, using the SELF-CONTAINED Util::STL (Route B) -- no AMReX
+// embedded-boundary module (USE_EB) required.  Util::STL reads the STL (binary
+// or ASCII), builds a BVH, and returns the signed distance:
 //
-//     d  >  0   OUTSIDE the mesh  (fluid)
-//     d  <  0   INSIDE  the mesh  (solid)
+//     d > 0   OUTSIDE the mesh  (fluid)
+//     d < 0   INSIDE  the mesh  (solid)
 //
-// which is mapped to a diffuse indicator
+// mapped to a diffuse indicator
 //
 //     phi = 0.5 * (1 + tanh(d / eps))        (1 = fluid, 0 = solid; band ~ eps)
 //
-// REQUIREMENTS: a 3D build (AMREX_SPACEDIM == 3) compiled with USE_EB=TRUE
-// (STLtools lives in AMReX's embedded-boundary module).  This file is a no-op
-// in any other build, so it is always safe to include.  Note that ONLY the
-// STL reader + distance query are borrowed from EB -- the solver never builds
-// an EB index space, so the eb2.* input language is never used; the mesh is
-// configured purely through this IC's own keys (e.g. solid.phi.ic.stl.*).
+// 3D only (guarded on AMREX_SPACEDIM == 3; a no-op in 2D builds).  The mesh is
+// configured purely through this IC's own keys (solid.phi.ic.stl.*).
 //
 
 #ifndef IC_STL_H
 #define IC_STL_H
 
-#include <AMReX_Config.H>   // AMREX_SPACEDIM, AMREX_USE_EB
+#include <AMReX_Config.H>   // AMREX_SPACEDIM
 
-#if defined(AMREX_USE_EB) && (AMREX_SPACEDIM == 3)
+#if (AMREX_SPACEDIM == 3)
 
 #include <cmath>
 #include <array>
-#include <AMReX_EB_STL_utils.H>
 
 #include "IC/IC.H"
 #include "IO/ParmParse.H"
 #include "Set/Set.H"
 #include "Util/Util.H"
+#include "Util/STL.H"
 
 namespace IC
 {
@@ -50,19 +47,22 @@ public:
 
     void Add(const int &lev, Set::Field<Set::Scalar> &a_field, Set::Scalar) override
     {
-        // (1) Fill the field MultiFab (valid + ghost cells) with the signed
-        //     distance to the STL surface.  d > 0 fluid, d < 0 solid.
-        stl.fillSignedDistance(*a_field[lev], a_field[lev]->nGrowVect(), geom[lev]);
-
-        // (2) Map the signed distance to the diffuse indicator in place.
+        const Util::STL *stlp = &stl;            // captured by value (pointer) into the lambda
         const Set::Scalar eps_loc = eps;
+        const Set::Scalar *DX = geom[lev].CellSize();
+        Set::Vector domlo(geom[lev].ProbLo()[0], geom[lev].ProbLo()[1], geom[lev].ProbLo()[2]);
+
         for (amrex::MFIter mfi(*a_field[lev], amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
         {
             amrex::Box bx = mfi.growntilebox();
             amrex::Array4<Set::Scalar> const &field = a_field[lev]->array(mfi);
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
             {
-                field(i, j, k, 0) = 0.5 * (1.0 + std::tanh(field(i, j, k, 0) / eps_loc));
+                Set::Scalar x = domlo(0) + (i + 0.5) * DX[0];
+                Set::Scalar y = domlo(1) + (j + 0.5) * DX[1];
+                Set::Scalar z = domlo(2) + (k + 0.5) * DX[2];
+                Set::Scalar d = stlp->SignedDistance(x, y, z);   // <0 solid, >0 fluid
+                field(i, j, k, 0) = 0.5 * (1.0 + std::tanh(d / eps_loc));
                 if (field.nComp() > 1) field(i, j, k, 1) = 1.0 - field(i, j, k, 0);
             });
         }
@@ -70,8 +70,8 @@ public:
     }
 
 private:
-    amrex::STLtools stl;
-    Set::Scalar eps = 0.02;   // diffuse-interface half-width (in domain units)
+    Util::STL  stl;
+    Set::Scalar eps = 0.02;   // diffuse-interface half-width (domain units)
 
 public:
     static void Parse(STL &value, IO::ParmParse &pp)
@@ -83,19 +83,17 @@ public:
         pp_query_default("scale", scale, 1.0);                  // uniform scale applied to the mesh
 
         Set::Vector center = Set::Vector::Zero();
-        pp_queryarr("center", center);                         // mesh placement offset (see AMReX read_stl_file)
+        pp_queryarr("center", center);                         // placement offset: vertex -> vertex*scale + center
 
         int reverse_normal = 0;
         pp_query_default("reverse_normal", reverse_normal, 0); // flip inside/outside if the solid comes out inverted
 
         pp_query_default("eps", value.eps, 0.02);              // diffuse-interface half-width (~ a few dx_finest)
 
-        // STLtools reads, scales, places, and builds its own BVH up front.
-        value.stl.read_stl_file(filename, scale,
-                                {center(0), center(1), center(2)}, reverse_normal);
+        value.stl.Read(filename, scale, {center(0), center(1), center(2)}, reverse_normal);
     }
 };
 }
 
-#endif // AMREX_USE_EB && AMREX_SPACEDIM == 3
+#endif // AMREX_SPACEDIM == 3
 #endif // IC_STL_H
