@@ -1,6 +1,7 @@
 // Base
 #include "Hydro2.H"
 #include <memory>
+#include <cstdio>   // [TEMP DIAG] std::printf for RELAX-FAIL cell dumps
 // Parsing and Input Handeling
 #include "AMReX_MultiFab.H"
 #include "IO/ParmParse.H"
@@ -4895,6 +4896,12 @@ void Hydro2::RelaxAndReinit(int lev)
         diag_mf->setVal(0.0);
     }
 
+    // [TEMP DIAG 2026-06] dump the full state of the first few GROSS relaxation
+    // failures (|f|>0.5) so we can see exactly what degenerate cell forms at
+    // collapse.  CPU-only diagnostic; remove once root cause is found.
+    static int relax_dump_n = 0;
+    const int step_now = step_counter[lev];
+
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
@@ -5068,6 +5075,19 @@ void Hydro2::RelaxAndReinit(int lev)
             }
 
             Set::Scalar p_relaxed = p;
+
+            // [TEMP DIAG] dump full state of gross relaxation failures.
+            if (std::abs(f_final) > 0.5 && relax_dump_n < 40)
+            {
+                std::printf("RELAX-FAIL step=%d lev=%d cell=(%d,%d,%d) "
+                            "a1=%.4e a2=%.4e arh0=%.6e arh1=%.6e rho0_pre=%.6e rho1_pre=%.6e "
+                            "E0=%.6e E1=%.6e p0_pre=%.6e p1_pre=%.6e "
+                            "p_init=%.6e p_lo=%.6e p_hi=%.6e p=%.6e f=%.6e iters=%d\n",
+                            step_now, lev, i, j, k, a1, a2, arh0_loc, arh1_loc,
+                            rho0_pre, rho1_pre, E0_(i, j, k), E1_(i, j, k),
+                            p0_pre, p1_pre, p_init, p_lo, p_hi, p_relaxed, f_final, iters_used);
+                ++relax_dump_n;
+            }
 
             // Write diagnostic: (iter count, |f| at final p).
             if (diag_on)
