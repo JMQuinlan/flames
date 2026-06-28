@@ -413,9 +413,11 @@ def extract_radius_volume_history(amrex_output_dir, box_half=BOX_HALF):
             if not times:
                 print("  [R-volume] geometry: %s -> V_gas x%d"
                       % ("OCTANT" if sym_factor > 1 else "FULL domain", sym_factor))
-            lo = [max(-box_half, float(dle[_d])) for _d in range(3)]
-            hi = [min( box_half, float(dre[_d])) for _d in range(3)]
-            reg = ds.box(ds.arr(lo, "code_length"), ds.arr(hi, "code_length"))
+            # R-FILTER REMOVED (2026-06): integrate alpha_g over the WHOLE domain
+            # (no +/-box_half restriction) -- Sch20 Eq.(29) sums over ALL cells; the
+            # far field is eta=1 -> alpha_g=0, so the box only risked clipping the
+            # diffuse halo / an expanded bubble.
+            reg = ds.all_data()
             eta = np.array(reg["eta"])
             try:
                 vol = np.array(reg["index", "cell_volume"])
