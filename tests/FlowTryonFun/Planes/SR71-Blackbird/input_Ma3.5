@@ -49,13 +49,13 @@ amr.blocking_factor  = 16
 amr.regrid_int       = 10
 amr.grid_eff         = 0.8
 amr.max_level        = 4
-amr.n_cell           = 192 80 48     # dx_coarse = 96/192 = 40/80 = 24/48 = 0.5 m (cubic)
+amr.n_cell           = 192 32 48     # dx=0.5 cubic; y=0..16 half-body; all div by blocking_factor 16
 amr.n_error_buf      = 8
 nghost = 4
 
 ### DIMENSIONS (meters) -- flow in +X (from -X to +X) ###
-geometry.prob_lo     = -32.0 -20.0 -12.0     # ~15 m upstream of nose
-geometry.prob_hi     =  64.0  20.0  12.0     # ~48 m wake
+geometry.prob_lo     = -32.0   0.0 -12.0     # ~15 m upstream of nose
+geometry.prob_hi     =  64.0  16.0  12.0     # ~48 m wake
 geometry.is_periodic = 0 0 0
 
 ### TIME STEPPING ###
@@ -98,7 +98,7 @@ eta.ic.constant.value = 0.5
 eta.bc.type.xlo = dirichlet            # supersonic inflow (all characteristics enter)
 eta.bc.val.xlo  = 0.5
 eta.bc.type.xhi = neumann
-eta.bc.type.ylo = neumann
+eta.bc.type.ylo = Symmetry        # y=0 symmetry plane (half-body)
 eta.bc.type.yhi = neumann
 eta.bc.type.zlo = neumann
 eta.bc.type.zhi = neumann
@@ -152,7 +152,7 @@ grav    = 0.0
 density.bc.type.xlo  = dirichlet
 density.bc.val.xlo   = 0.03418
 density.bc.type.xhi  = neumann
-density.bc.type.ylo  = neumann
+density.bc.type.ylo  = Symmetry
 density.bc.type.yhi  = neumann
 density.bc.type.zlo  = neumann
 density.bc.type.zhi  = neumann
@@ -161,7 +161,7 @@ density.bc.type.zhi  = neumann
 momentum.bc.type.xlo = dirichlet dirichlet dirichlet
 momentum.bc.val.xlo  = 35.779 0.0 0.0
 momentum.bc.type.xhi = neumann neumann neumann
-momentum.bc.type.ylo = neumann neumann neumann
+momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD REFLECT_EVEN  # Mx even, My(normal) odd, Mz even
 momentum.bc.type.yhi = neumann neumann neumann
 momentum.bc.type.zlo = neumann neumann neumann
 momentum.bc.type.zhi = neumann neumann neumann
@@ -169,7 +169,7 @@ momentum.bc.type.zhi = neumann neumann neumann
 energy.bc.type.xlo   = dirichlet
 energy.bc.val.xlo    = 2729.61
 energy.bc.type.xhi   = neumann
-energy.bc.type.ylo   = neumann
+energy.bc.type.ylo   = Symmetry
 energy.bc.type.yhi   = neumann
 energy.bc.type.zlo   = neumann
 energy.bc.type.zhi   = neumann
