@@ -5081,10 +5081,10 @@ void Hydro2::RelaxAndReinit(int lev)
             {
                 std::printf("RELAX-FAIL step=%d lev=%d cell=(%d,%d,%d) "
                             "a1=%.4e a2=%.4e arh0=%.6e arh1=%.6e rho0_pre=%.6e rho1_pre=%.6e "
-                            "E0=%.6e E1=%.6e p0_pre=%.6e p1_pre=%.6e "
+                            "E0=%.6e E1=%.6e Emix=%.6e p0_pre=%.6e p1_pre=%.6e "
                             "p_init=%.6e p_lo=%.6e p_hi=%.6e p=%.6e f=%.6e iters=%d\n",
                             step_now, lev, i, j, k, a1, a2, arh0_loc, arh1_loc,
-                            rho0_pre, rho1_pre, E0_(i, j, k), E1_(i, j, k),
+                            rho0_pre, rho1_pre, E0_(i, j, k), E1_(i, j, k), E_(i, j, k),
                             p0_pre, p1_pre, p_init, p_lo, p_hi, p_relaxed, f_final, iters_used);
                 ++relax_dump_n;
             }
@@ -5098,12 +5098,30 @@ void Hydro2::RelaxAndReinit(int lev)
 
             // Post-relax volume fractions (using self-consistent v_k(p)).
             // DIV_FLOOR matches the pre-relax / Newton-loop convention.
-            Set::Scalar v0_r = Solver::EOS::EOS::RelaxationVolume_SG_SC(p_relaxed, p0_pre, rho0_pre, gam0, pi0_, DIV_FLOOR);
-            Set::Scalar v1_r = Solver::EOS::EOS::RelaxationVolume_SG_SC(p_relaxed, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
-            Set::Scalar a1_new = arh0_loc * v0_r;
-            Set::Scalar a2_new = arh1_loc * v1_r;
-            Set::Scalar asum   = a1_new + a2_new;
-            if (asum > DIV_FLOOR) { a1_new /= asum; a2_new /= asum; }
+            // ROBUST FALLBACK: if the volume-constraint solve did NOT converge
+            // (unphysical per-phase input -- e.g. a coarse cell whose per-phase
+            // ENERGY split came out with the wrong sign, while the conserved
+            // MIXTURE energy E is still correct), do NOT trust the failed solve's
+            // alpha.  Keep the prior alpha and let the energy-consistent reinit
+            // (Sch20 eq.26, below) rebuild a valid per-phase state from E.  Without
+            // this the masked-garbage alpha poisons the interface (rho_eta0/1) and
+            // the per-phase energies at the bubble center on coarse grids.
+            const bool relax_failed = std::abs(f_final) > unconv_threshold;
+            Set::Scalar a1_new, a2_new;
+            if (relax_failed)
+            {
+                a1_new = a1;   // prior (clamped) volume fraction -- trust the conserved E instead
+                a2_new = a2;
+            }
+            else
+            {
+                Set::Scalar v0_r = Solver::EOS::EOS::RelaxationVolume_SG_SC(p_relaxed, p0_pre, rho0_pre, gam0, pi0_, DIV_FLOOR);
+                Set::Scalar v1_r = Solver::EOS::EOS::RelaxationVolume_SG_SC(p_relaxed, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
+                a1_new = arh0_loc * v0_r;
+                a2_new = arh1_loc * v1_r;
+                Set::Scalar asum = a1_new + a2_new;
+                if (asum > DIV_FLOOR) { a1_new /= asum; a2_new /= asum; }
+            }
             a1_new = std::min(std::max(a1_new, alpha_floor), 1.0 - alpha_floor);
             a2_new = 1.0 - a1_new;
 
