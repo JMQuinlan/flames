@@ -773,6 +773,166 @@ def plot_radius_volume(times_s, R_vol, curves, R_eta_t=None, R_eta=None,
               f"  (KM R_min/R0={kmin:.4f}; the robust radius to compare to the benchmark)")
 
 
+# ===========================================================================
+# Bubble SPHERICITY / deformation vs time
+# ---------------------------------------------------------------------------
+# On a Cartesian octant the bubble cannot deform in an ellipsoidal (l=2) mode
+# (the x<->y<->z symmetry forces the inertia tensor isotropic), so an inertia
+# tensor reads "perfectly spherical" no matter what.  The real grid-induced mode
+# is l=4 (cubic): does the interface bulge toward the AXES, the EDGE diagonals,
+# or the CORNER (body) diagonal?  We cast eta=0.5 rays along each family and
+# compare their radii.  A diffuse band offsets all rays equally, so the SPREAD
+# is a clean relative deformation measure (immune to the band that biases R_vol).
+# ===========================================================================
+def _sphericity_directions(octant):
+    a = 1.0 / np.sqrt(2.0); b = 1.0 / np.sqrt(3.0)
+    base = {"axis":   [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)],
+            "edge":   [(a, a, 0.0), (a, 0.0, a), (0.0, a, a)],
+            "corner": [(b, b, b)]}
+    if octant:
+        return base
+    # full domain: include sign flips so we sample the whole sphere
+    def flips(v):
+        out = set()
+        for sx in (1.0, -1.0):
+            for sy in (1.0, -1.0):
+                for sz in (1.0, -1.0):
+                    out.add((sx * v[0], sy * v[1], sz * v[2]))
+        return list(out)
+    return {k: [w for v in vs for w in flips(v)] for k, vs in base.items()}
+
+
+def _ray_eta_radius(ds, center, direction, Lmax):
+    """Distance from `center` along `direction` (unit) to the eta=0.5 crossing."""
+    end = (center[0] + direction[0] * Lmax,
+           center[1] + direction[1] * Lmax,
+           center[2] + direction[2] * Lmax)
+    try:
+        ray = ds.ray(center, end)
+        t = np.array(ray["t"], dtype=float)          # parametric 0..1 along ray
+        eta = np.array(ray["eta"], dtype=float)
+    except Exception:
+        return np.nan
+    if len(t) < 2:
+        return np.nan
+    o = np.argsort(t); t = t[o]; eta = eta[o]
+    d = t * Lmax                                      # |end-center| = Lmax (unit dir)
+    for i in range(len(d) - 1):                        # first 0.5 crossing outward
+        if (eta[i] - 0.5) * (eta[i + 1] - 0.5) < 0:
+            return d[i] + (0.5 - eta[i]) * (d[i + 1] - d[i]) / (eta[i + 1] - eta[i])
+    return np.nan
+
+
+def extract_sphericity_history(amrex_output_dir, Lmax=None):
+    """Per frame, two complementary deformation measures:
+
+      K  -- the INTERFACE-weighted cubic invariant  <g>_band - 3/5, with
+            g = (x^4+y^4+z^4)/r^4  (g=1 along an axis, 1/2 edge, 1/3 corner;
+            sphere average = 3/5).  Volume-integrated (NO ray-sampling bias) and
+            band-focused (weight alpha_g(1-alpha_g)) -> reads ~0 for a sphere
+            (IC sphere baseline ~2e-5) and is the trustworthy deformation scalar.
+            K>0 => interface bulges toward the AXES (faces push out);
+            K<0 => bulges toward the CORNERS (diamond/octahedral).
+      R_axis/R_edge/R_corner -- mean eta=0.5 RAY radius along each direction
+            family.  Interpretable "which way" picture, BUT carries a grid-sampling
+            floor ~dx/2R (~4% at R0/dx~13, larger as the bubble shrinks), so read
+            their SPREAD only relative to the t=0 baseline; trust K for magnitude.
+
+    Returns (times, R_axis, R_edge, R_corner, K)."""
+    import yt
+    yt.funcs.mylog.setLevel(40)
+    if not os.path.isdir(amrex_output_dir):
+        return (np.array([]),) * 5
+    pfs = sorted(os.path.join(amrex_output_dir, d) for d in os.listdir(amrex_output_dir)
+                 if os.path.isdir(os.path.join(amrex_output_dir, d)) and d.endswith("cell"))
+    times, Ra, Re, Rc, Kk = [], [], [], [], []
+    for pf in pfs:
+        try:
+            ds = yt.load(pf)
+            dle = ds.domain_left_edge; dre = ds.domain_right_edge
+            octant = all(float(dle[d]) > -1e-6 for d in range(3))
+            center = [0.0, 0.0, 0.0] if octant else \
+                     [0.5 * float(dle[d] + dre[d]) for d in range(3)]
+            lmax = Lmax if Lmax else 5.0 * P.R0
+            # --- interface-weighted cubic invariant K (the robust scalar) -------
+            ad = ds.all_data()
+            x = np.array(ad["x"]) - center[0]
+            y = np.array(ad["y"]) - center[1]
+            z = np.array(ad["z"]) - center[2]
+            eta = np.array(ad["eta"])
+            try:
+                vol = np.array(ad["index", "cell_volume"])
+            except Exception:
+                vol = np.array(ad["cell_volume"])
+            ag = np.clip(1.0 - eta, 0.0, 1.0)
+            r4 = (x * x + y * y + z * z) ** 2
+            m = r4 > 0
+            g = (x[m] ** 4 + y[m] ** 4 + z[m] ** 4) / r4[m]
+            w = ag[m] * (1.0 - ag[m]) * vol[m]             # interface band weight
+            K = float(np.sum(w * g) / np.sum(w) - 0.6) if np.sum(w) > 0 else np.nan
+            # --- ray radii along axis / edge / corner families (interpretable) --
+            dirs = _sphericity_directions(octant)
+            grp = {}
+            for name, vs in dirs.items():
+                rr = [_ray_eta_radius(ds, center, v, lmax) for v in vs]
+                rr = [q for q in rr if np.isfinite(q)]
+                grp[name] = float(np.mean(rr)) if rr else np.nan
+            times.append(float(ds.current_time))
+            Ra.append(grp["axis"]); Re.append(grp["edge"]); Rc.append(grp["corner"]); Kk.append(K)
+        except Exception:
+            continue
+    if not times:
+        return (np.array([]),) * 5
+    t = np.array(times); o = np.argsort(t)
+    return (t[o], np.array(Ra)[o], np.array(Re)[o], np.array(Rc)[o], np.array(Kk)[o])
+
+
+def plot_sphericity(times_s, R_axis, R_edge, R_corner, K):
+    """Top: axis/edge/corner eta=0.5 radii (interpretable shape).  Bottom: the
+    interface cubic invariant K (robust deformation, 0=sphere) -> _sphericity.*"""
+    if len(times_s) < 2:
+        print("  [sphericity] <2 usable frames -- skipped")
+        return
+    tu = globals().get("TIME_UNIT", "us")
+    tf, tl = (1.0e3, r"$t$ [ms]") if tu == "ms" else \
+             ((1.0e6, r"$t$ [$\mu$s]") if tu == "us" else (1.0, r"$t$"))
+    R0 = P.R0
+    fw = globals().get("FIG_WIDTH", 11); fh = globals().get("FIG_HEIGHT", 6.5)
+    fsl = globals().get("FONT_SIZE_LABEL", 14); fst = globals().get("FONT_SIZE_TITLE", 16)
+    fsk = globals().get("FONT_SIZE_TICK", 11); fsg = globals().get("FONT_SIZE_LEGEND", 12)
+    dpi = globals().get("DPI", 180)
+    K = np.asarray(K, dtype=float)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(fw, fh), sharex=True,
+                                   gridspec_kw={"height_ratios": [2, 1]})
+    ax1.plot(times_s * tf, R_axis / R0, "-o", color="tab:blue",  ms=3, lw=1.8, label="axis  (100)")
+    ax1.plot(times_s * tf, R_edge / R0, "-s", color="tab:orange", ms=3, lw=1.8, label="edge  (110)")
+    ax1.plot(times_s * tf, R_corner / R0, "-^", color="tab:green", ms=3, lw=1.8, label="corner (111)")
+    ax1.set_ylabel(r"$R_{\eta=0.5} / R_0$", fontsize=fsl)
+    ax1.set_title(f"{SAVE_NAME}: bubble sphericity (rays = shape; K = robust deformation)",
+                  fontsize=fst, fontweight="bold")
+    ax1.grid(True, alpha=0.3); ax1.tick_params(labelsize=fsk)
+    ax1.legend(fontsize=fsg, loc="best",
+               title="$\\eta{=}0.5$ ray  (spread incl. ~dx/2R grid floor)")
+    # cubic invariant K: 0 = sphere; sign = bulge direction
+    ax2.axhline(0.0, color="0.6", lw=1.0)
+    ax2.plot(times_s * tf, K, "-", color="tab:red", lw=2.0)
+    ax2.fill_between(times_s * tf, 0, K, where=(K >= 0), color="tab:blue",  alpha=0.18)
+    ax2.fill_between(times_s * tf, 0, K, where=(K < 0),  color="tab:green", alpha=0.18)
+    ax2.set_ylabel("cubic invariant $K$\n(+axis / −corner)", fontsize=fsl - 3)
+    ax2.set_xlabel(tl, fontsize=fsl)
+    ax2.grid(True, alpha=0.3); ax2.tick_params(labelsize=fsk)
+    plt.tight_layout()
+    out = os.path.join(IMG_DIR, f"{SAVE_NAME}_sphericity")
+    fig.savefig(out + ".png", dpi=dpi, bbox_inches="tight")
+    fig.savefig(out + ".eps", dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    if np.any(np.isfinite(K)):
+        j = int(np.nanargmax(np.abs(K)))
+        print(f"  [sphericity] wrote {out}.png  (peak |K|={abs(K[j]):.4f} at "
+              f"t={times_s[j] * tf:.4f} -> {'axis' if K[j] >= 0 else 'corner'}-bulge; "
+              f"sphere baseline |K|~2e-5)")
+
+
 def main():
     tau_c = rayleigh_collapse_time(P)
     # Time-axis: convert simulation time (seconds) -> plot units.
@@ -952,6 +1112,9 @@ def main():
         print("  Extracting volume + radial-avg eta=0.5 radii (one yt pass)...")
         _vt, _vr, _vre = extract_radius_volume_history(OUTPUT_DIR)
         plot_radius_volume(_vt, _vr, curves, t_sim, R_sim, _vt, _vre)
+        print("  Extracting bubble sphericity (cubic invariant K + axis/edge/corner rays)...")
+        _st, _sa, _se, _sc, _sk = extract_sphericity_history(OUTPUT_DIR)
+        plot_sphericity(_st, _sa, _se, _sc, _sk)
 
     out_png = os.path.join(IMG_DIR, f"{SAVE_NAME}.png")
     out_eps = os.path.join(IMG_DIR, f"{SAVE_NAME}.eps")
