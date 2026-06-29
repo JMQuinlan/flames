@@ -1,7 +1,6 @@
 // Base
 #include "Hydro2.H"
 #include <memory>
-#include <cstdio>   // [TEMP DIAG] std::printf for RELAX-FAIL cell dumps
 // Parsing and Input Handeling
 #include "AMReX_MultiFab.H"
 #include "IO/ParmParse.H"
@@ -3498,18 +3497,22 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
 
     // Eta: use eta_bc (not energy_bc or density_bc, which have wrong dirichlet values)
     FillBoundariesWithBC(lev, 0.0, eta_bc, { eta_mf[lev].get() });
-    // Density: fill total density, then partition by eta (see FillGhost4BC fix)
-    FillBoundariesWithBC(lev, 0.0, density_bc, { density_mf[lev].get() });
+    // Per-phase density ghosts via their own BC.  Do NOT re-partition the mixture by
+    // eta (rho_eta_k = rho_mix*(eta|1-eta) injects alpha_g*alpha_l*(rho_l-rho_g) of
+    // liquid mass into the gas at mixed cells, and growntilebox clobbers the VALID
+    // conserved cells -- the same gas-mass-injection bug fixed in FillGhost4BC).
+    FillBoundariesWithBC(lev, 0.0, density_bc, {
+        rho_eta0_mf[lev].get(), rho_eta1_mf[lev].get()
+    });
+    // Mixture density is the consistent sum of the partial densities.
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &ghostbox = mfi.growntilebox(nghost);
         auto rho  = density_mf[lev]->array(mfi);
-        auto eta  = eta_mf[lev]->array(mfi);
         auto rho0 = rho_eta0_mf[lev]->array(mfi);
         auto rho1 = rho_eta1_mf[lev]->array(mfi);
         amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            rho0(i, j, k) = rho(i, j, k) * eta(i, j, k);
-            rho1(i, j, k) = rho(i, j, k) * (1.0 - eta(i, j, k));
+            rho(i, j, k) = rho0(i, j, k) + rho1(i, j, k);
         });
     }
 
@@ -4251,8 +4254,16 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
                 const Set::Scalar rho_g = std::max(rho(i, j, k), small_ns);
                 const Set::Scalar p_g   = std::max(press(i, j, k), small_ns);
 
-                rho0(i, j, k) = a1 * rho_g;
-                rho1(i, j, k) = a2 * rho_g;
+                // Per-phase densities: preserve the (BC-filled) per-phase RATIO and
+                // rescale to the LODI-updated mixture rho_g, instead of re-splitting
+                // rho_g by eta -- the latter mis-assigns liquid mass to the gas at a
+                // mixed ghost (alpha_g*alpha_l*(rho_l-rho_g)); pure-phase ghosts are
+                // identical either way.  Energies stay the equilibrium re-derivation.
+                const Set::Scalar r0   = std::max(rho0(i, j, k), 0.0);
+                const Set::Scalar r1   = std::max(rho1(i, j, k), 0.0);
+                const Set::Scalar scale = rho_g / std::max(r0 + r1, small_ns);
+                rho0(i, j, k) = r0 * scale;
+                rho1(i, j, k) = r1 * scale;
                 E0(i, j, k)   = a1 * (p_g + g0_ns * pi0_ns) / std::max(g0_ns - 1.0, small_ns);
                 E1(i, j, k)   = a2 * (p_g + g1_ns * pi1_ns) / std::max(g1_ns - 1.0, small_ns);
             });
@@ -4271,21 +4282,26 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         // Inter-fab exchange for phase densities still needed:
         rho_eta0_mf[lev]->FillBoundary(geom[lev].periodicity());
         rho_eta1_mf[lev]->FillBoundary(geom[lev].periodicity());
+        // Per-phase density GHOSTS via their own BC.  Do NOT re-partition the mixture
+        // density by eta: rho_eta_k = rho_mix*(eta | 1-eta) is exact only at PURE-phase
+        // cells.  At a mixed-eta INTERFACE cell it injects alpha_g*alpha_l*(rho_l-rho_g)
+        // (~250 for water/air at 50/50) of LIQUID mass into the GAS partial density --
+        // and growntilebox(nghost) clobbered the VALID, flux-conserved cells too, so it
+        // was a per-step gas-mass SOURCE at the interface that destroyed bubble collapse
+        // (gas mass blew up ~119x; see tests/FlowRayleighPlesset mass-conservation check).
+        // rho_eta0/1 are conserved -- fill only their ghosts, directly, per phase.
         FillBoundariesWithBC(lev, time, density_bc, {
-            density_mf[lev].get()
+            rho_eta0_mf[lev].get(), rho_eta1_mf[lev].get()
         });
-        // Partition total density by eta in ghost cells (mirrors NSCBC path)
+        // Mixture density is the consistent sum of the partial densities.
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box &ghostbox = mfi.growntilebox(nghost);
             auto rho  = density_mf[lev]->array(mfi);
-            auto eta  = eta_mf[lev]->array(mfi);
             auto rho0 = rho_eta0_mf[lev]->array(mfi);
             auto rho1 = rho_eta1_mf[lev]->array(mfi);
-
             amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                rho0(i, j, k) = rho(i, j, k) * eta(i, j, k);
-                rho1(i, j, k) = rho(i, j, k) * (1.0 - eta(i, j, k));
+                rho(i, j, k) = rho0(i, j, k) + rho1(i, j, k);
             });
         }
         // Mixture momentum.
@@ -4896,12 +4912,6 @@ void Hydro2::RelaxAndReinit(int lev)
         diag_mf->setVal(0.0);
     }
 
-    // [TEMP DIAG 2026-06] dump the full state of the first few GROSS relaxation
-    // failures (|f|>0.5) so we can see exactly what degenerate cell forms at
-    // collapse.  CPU-only diagnostic; remove once root cause is found.
-    static int relax_dump_n = 0;
-    const int step_now = step_counter[lev];
-
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
@@ -5075,19 +5085,6 @@ void Hydro2::RelaxAndReinit(int lev)
             }
 
             Set::Scalar p_relaxed = p;
-
-            // [TEMP DIAG] dump full state of gross relaxation failures.
-            if (std::abs(f_final) > 0.5 && relax_dump_n < 40)
-            {
-                std::printf("RELAX-FAIL step=%d lev=%d cell=(%d,%d,%d) "
-                            "a1=%.4e a2=%.4e arh0=%.6e arh1=%.6e rho0_pre=%.6e rho1_pre=%.6e "
-                            "E0=%.6e E1=%.6e Emix=%.6e p0_pre=%.6e p1_pre=%.6e "
-                            "p_init=%.6e p_lo=%.6e p_hi=%.6e p=%.6e f=%.6e iters=%d\n",
-                            step_now, lev, i, j, k, a1, a2, arh0_loc, arh1_loc,
-                            rho0_pre, rho1_pre, E0_(i, j, k), E1_(i, j, k), E_(i, j, k),
-                            p0_pre, p1_pre, p_init, p_lo, p_hi, p_relaxed, f_final, iters_used);
-                ++relax_dump_n;
-            }
 
             // Write diagnostic: (iter count, |f| at final p).
             if (diag_on)
