@@ -16,6 +16,10 @@ import glob, os, sys
 import numpy as np
 import yt
 yt.funcs.mylog.setLevel(40)
+try:
+    from diag_config import resolve_dir
+except Exception:
+    def resolve_dir(a): return a[1] if len(a) > 1 else "."
 
 def cells(d):
     return sorted(p for p in glob.glob(os.path.join(d, "*cell")) if os.path.isdir(p))
@@ -35,7 +39,7 @@ def masses(pf):
     return float(ds.current_time), mg, ml, sym
 
 def main():
-    d = sys.argv[1]
+    d = resolve_dir(sys.argv)
     cs = cells(d)
     if not cs:
         print("NO OUTPUT in", d); sys.exit(1)

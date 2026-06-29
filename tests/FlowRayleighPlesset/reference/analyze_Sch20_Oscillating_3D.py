@@ -802,6 +802,22 @@ def _sphericity_directions(octant):
     return {k: [w for v in vs for w in flips(v)] for k, vs in base.items()}
 
 
+def _fibonacci_dirs(n, octant):
+    """n roughly-uniform unit directions (golden-angle spiral; deterministic).
+    For an octant, fold into the +++ octant (the bubble is reflection-symmetric)."""
+    ga = np.pi * (3.0 - np.sqrt(5.0))
+    out = []
+    for i in range(n):
+        z = 1.0 - 2.0 * (i + 0.5) / n
+        rad = np.sqrt(max(0.0, 1.0 - z * z))
+        th = ga * i
+        v = (np.cos(th) * rad, np.sin(th) * rad, z)
+        if octant:
+            v = (abs(v[0]), abs(v[1]), abs(v[2]))
+        out.append(v)
+    return out
+
+
 def _ray_eta_radius(ds, center, direction, Lmax):
     """Distance from `center` along `direction` (unit) to the eta=0.5 crossing."""
     end = (center[0] + direction[0] * Lmax,
@@ -838,14 +854,19 @@ def extract_sphericity_history(amrex_output_dir, Lmax=None):
             floor ~dx/2R (~4% at R0/dx~13, larger as the bubble shrinks), so read
             their SPREAD only relative to the t=0 baseline; trust K for magnitude.
 
-    Returns (times, R_axis, R_edge, R_corner, K)."""
+      R_min/R_max -- deepest/shallowest eta=0.5 radius over a 32-direction sweep.
+            R_min is the JET DEPTH (a localized inward liquid spike drops the deepest
+            interface well below the mean); the R_min..R_max band is the asymmetry
+            envelope, complementary to the (direction-averaging) family radii.
+
+    Returns (times, R_axis, R_edge, R_corner, K, R_min, R_max)."""
     import yt
     yt.funcs.mylog.setLevel(40)
     if not os.path.isdir(amrex_output_dir):
-        return (np.array([]),) * 5
+        return (np.array([]),) * 7
     pfs = sorted(os.path.join(amrex_output_dir, d) for d in os.listdir(amrex_output_dir)
                  if os.path.isdir(os.path.join(amrex_output_dir, d)) and d.endswith("cell"))
-    times, Ra, Re, Rc, Kk = [], [], [], [], []
+    times, Ra, Re, Rc, Kk, Rmn, Rmx = [], [], [], [], [], [], []
     for pf in pfs:
         try:
             ds = yt.load(pf)
@@ -877,19 +898,27 @@ def extract_sphericity_history(amrex_output_dir, Lmax=None):
                 rr = [_ray_eta_radius(ds, center, v, lmax) for v in vs]
                 rr = [q for q in rr if np.isfinite(q)]
                 grp[name] = float(np.mean(rr)) if rr else np.nan
+            # --- dense sweep for the jet-depth envelope (min = jet tip) ----------
+            rd = [_ray_eta_radius(ds, center, v, lmax) for v in _fibonacci_dirs(32, octant)]
+            rd = [q for q in rd if np.isfinite(q)]
+            rmin = float(np.min(rd)) if rd else np.nan
+            rmax = float(np.max(rd)) if rd else np.nan
             times.append(float(ds.current_time))
-            Ra.append(grp["axis"]); Re.append(grp["edge"]); Rc.append(grp["corner"]); Kk.append(K)
+            Ra.append(grp["axis"]); Re.append(grp["edge"]); Rc.append(grp["corner"])
+            Kk.append(K); Rmn.append(rmin); Rmx.append(rmax)
         except Exception:
             continue
     if not times:
-        return (np.array([]),) * 5
+        return (np.array([]),) * 7
     t = np.array(times); o = np.argsort(t)
-    return (t[o], np.array(Ra)[o], np.array(Re)[o], np.array(Rc)[o], np.array(Kk)[o])
+    return (t[o], np.array(Ra)[o], np.array(Re)[o], np.array(Rc)[o],
+            np.array(Kk)[o], np.array(Rmn)[o], np.array(Rmx)[o])
 
 
-def plot_sphericity(times_s, R_axis, R_edge, R_corner, K):
-    """Top: axis/edge/corner eta=0.5 radii (interpretable shape).  Bottom: the
-    interface cubic invariant K (robust deformation, 0=sphere) -> _sphericity.*"""
+def plot_sphericity(times_s, R_axis, R_edge, R_corner, K, R_min=None, R_max=None):
+    """Top: axis/edge/corner eta=0.5 radii + the min..max jet-depth envelope
+    (interpretable shape).  Bottom: the interface cubic invariant K (robust
+    deformation, 0=sphere) -> _sphericity.*"""
     if len(times_s) < 2:
         print("  [sphericity] <2 usable frames -- skipped")
         return
@@ -904,6 +933,12 @@ def plot_sphericity(times_s, R_axis, R_edge, R_corner, K):
     K = np.asarray(K, dtype=float)
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(fw, fh), sharex=True,
                                    gridspec_kw={"height_ratios": [2, 1]})
+    # jet-depth envelope: min..max eta=0.5 radius over a 32-direction sweep
+    if R_min is not None and R_max is not None and np.sum(np.isfinite(R_min)) > 1:
+        ax1.fill_between(times_s * tf, np.asarray(R_min) / R0, np.asarray(R_max) / R0,
+                         color="0.7", alpha=0.30, label="min..max envelope")
+        ax1.plot(times_s * tf, np.asarray(R_min) / R0, "-", color="tab:red", lw=1.4,
+                 alpha=0.9, label="min (jet depth)")
     ax1.plot(times_s * tf, R_axis / R0, "-o", color="tab:blue",  ms=3, lw=1.8, label="axis  (100)")
     ax1.plot(times_s * tf, R_edge / R0, "-s", color="tab:orange", ms=3, lw=1.8, label="edge  (110)")
     ax1.plot(times_s * tf, R_corner / R0, "-^", color="tab:green", ms=3, lw=1.8, label="corner (111)")
@@ -934,6 +969,10 @@ def plot_sphericity(times_s, R_axis, R_edge, R_corner, K):
 
 
 def main():
+    global OUTPUT_DIR
+    if len(sys.argv) > 1:                       # wrapper / CLI override of the dir
+        OUTPUT_DIR = os.path.normpath(sys.argv[1])
+        print(f"  [OUTPUT_DIR override] {OUTPUT_DIR}")
     tau_c = rayleigh_collapse_time(P)
     # Time-axis: convert simulation time (seconds) -> plot units.
     if TIME_UNIT == 'ms':
@@ -1113,8 +1152,8 @@ def main():
         _vt, _vr, _vre = extract_radius_volume_history(OUTPUT_DIR)
         plot_radius_volume(_vt, _vr, curves, t_sim, R_sim, _vt, _vre)
         print("  Extracting bubble sphericity (cubic invariant K + axis/edge/corner rays)...")
-        _st, _sa, _se, _sc, _sk = extract_sphericity_history(OUTPUT_DIR)
-        plot_sphericity(_st, _sa, _se, _sc, _sk)
+        _st, _sa, _se, _sc, _sk, _smn, _smx = extract_sphericity_history(OUTPUT_DIR)
+        plot_sphericity(_st, _sa, _se, _sc, _sk, _smn, _smx)
 
     out_png = os.path.join(IMG_DIR, f"{SAVE_NAME}.png")
     out_eps = os.path.join(IMG_DIR, f"{SAVE_NAME}.eps")
