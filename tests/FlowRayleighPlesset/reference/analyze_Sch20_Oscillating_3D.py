@@ -628,21 +628,31 @@ def plot_ic_pressure_diagnostic(amrex_output_dir, axis="x"):
 BOX_HALF = 0.2   # m; ~10 R0 -- the bubble (R<=R0=0.02) lives well inside this
 
 
-def extract_radius_volume_history(amrex_output_dir, box_half=BOX_HALF):
-    """Per frame, R from the gas-volume integral (Sch20 eq. 29).
-    Returns (times, radii); skips corrupt/partial plotfiles silently."""
+def extract_radius_volume_history(amrex_output_dir, box_half=BOX_HALF, nbins=400):
+    """Per frame, TWO radii from one yt pass:
+        R_vol     -- gas-volume integral (Sch20 eq.29).  Integrates alpha_g across
+                     the diffuse band, so on a CURVED interface the r^2-weighted
+                     outer half of the band inflates the volume -> R_vol OVER-reads,
+                     worst at maximum compression (band ~ a fixed cell-count becomes
+                     a large fraction of the small bubble).
+        R_eta_rad -- radially-averaged eta=0.5 contour.  Bins every cell by
+                     r=|x-center| and takes the VOLUME-WEIGHTED mean eta per shell,
+                     then finds the 0.5 crossing.  Averaging over all directions
+                     kills the single-ray grid anisotropy (which makes the eta=0.5
+                     RAY under-read), and tracking the contour avoids the band
+                     over-read of R_vol -> this is the robust radius that lands on KM.
+    Returns (times, R_vol, R_eta_rad); skips corrupt/partial plotfiles silently."""
     import yt
     yt.funcs.mylog.setLevel(40)
     if not os.path.isdir(amrex_output_dir):
-        return np.array([]), np.array([])
+        return np.array([]), np.array([]), np.array([])
     pfs = sorted(os.path.join(amrex_output_dir, d) for d in os.listdir(amrex_output_dir)
                  if os.path.isdir(os.path.join(amrex_output_dir, d)) and d.endswith("cell"))
-    times, radii = [], []
+    times, radii, radii_eta = [], [], []
     for pf in pfs:
         try:
             ds = yt.load(pf)
             dle = ds.domain_left_edge
-            dre = ds.domain_right_edge
             # Octant/symmetry detection: a lo edge sitting at the origin (the
             # bubble center) means that axis is a symmetry plane, so only half the
             # bubble lies along it.  full domain: all lo<0 -> factor 1; octant:
@@ -668,18 +678,43 @@ def extract_radius_volume_history(amrex_output_dir, box_half=BOX_HALF):
             alpha_g = np.clip(1.0 - eta, 0.0, 1.0)
             V_b = float(np.sum(alpha_g * vol)) * sym_factor
             radii.append((3.0 * V_b / (4.0 * np.pi)) ** (1.0 / 3.0))
+            # --- radially-averaged eta=0.5 contour (robust KM-matching radius) ---
+            # center = origin for octant, else domain center.
+            cen = [0.0 if float(dle[_d]) > -1e-6 else 0.5 * float(dle[_d] + ds.domain_right_edge[_d])
+                   for _d in range(3)]
+            x = np.array(reg["x"]) - cen[0]
+            y = np.array(reg["y"]) - cen[1]
+            z = np.array(reg["z"]) - cen[2]
+            r = np.sqrt(x * x + y * y + z * z)
+            rmax = min(float(r.max()), 10.0 * P.R0)
+            edges = np.linspace(0.0, rmax, nbins + 1)
+            idx = np.clip(np.digitize(r, edges) - 1, 0, nbins - 1)
+            rc = 0.5 * (edges[:-1] + edges[1:])
+            wsum = np.bincount(idx, weights=vol, minlength=nbins)
+            esum = np.bincount(idx, weights=eta * vol, minlength=nbins)
+            good = wsum > 0
+            rr = rc[good]; ee = esum[good] / wsum[good]
+            R05 = np.nan
+            for i in range(len(rr) - 1):     # first 0.5 crossing (gas in -> eta 0->1 out)
+                if (ee[i] - 0.5) * (ee[i + 1] - 0.5) < 0:
+                    R05 = rr[i] + (0.5 - ee[i]) * (rr[i + 1] - rr[i]) / (ee[i + 1] - ee[i])
+                    break
+            radii_eta.append(R05)
             times.append(float(ds.current_time))
         except Exception:
             continue
     if not times:
-        return np.array([]), np.array([])
-    t = np.array(times); r = np.array(radii); o = np.argsort(t)
-    return t[o], r[o]
+        return np.array([]), np.array([]), np.array([])
+    t = np.array(times); rv = np.array(radii); re = np.array(radii_eta)
+    o = np.argsort(t)
+    return t[o], rv[o], re[o]
 
 
-def plot_radius_volume(times_s, R_vol, curves, R_eta_t=None, R_eta=None):
-    """Volume-based R/R0 vs time, overlaid with KM/RP (and the eta=0.5 ray R for
-    contrast) -> Images/{SAVE_NAME}_R_volume.*"""
+def plot_radius_volume(times_s, R_vol, curves, R_eta_t=None, R_eta=None,
+                       R_rad_t=None, R_rad=None):
+    """Volume-based R/R0 vs time, overlaid with KM/RP, the eta=0.5 RAY (anisotropy
+    contrast), and the radially-averaged eta=0.5 CONTOUR (the robust KM-matching
+    radius) -> Images/{SAVE_NAME}_R_volume.*"""
     if len(times_s) < 2:
         print("  [R-volume] <2 usable frames -- skipped")
         return
@@ -708,9 +743,13 @@ def plot_radius_volume(times_s, R_vol, curves, R_eta_t=None, R_eta=None):
     if R_eta is not None and R_eta_t is not None and len(R_eta) > 1:
         ax.plot(np.asarray(R_eta_t) * tf, np.asarray(R_eta) / R0, ":", color="tab:gray",
                 lw=1.3, alpha=0.7, label=r"hydro2 $\eta{=}0.5$ ray")
-    # the new volume-based radius
+    # the volume-based radius (over-reads at compression: integrates the band)
     ax.plot(times_s * tf, R_vol / R0, "-o", color="tab:purple", lw=2.0, ms=3,
             label=r"hydro2 $R=(3V_b/4\pi)^{1/3}$ (gas volume)")
+    # radially-averaged eta=0.5 CONTOUR -- robust, lands on KM
+    if R_rad is not None and R_rad_t is not None and np.sum(np.isfinite(R_rad)) > 1:
+        ax.plot(np.asarray(R_rad_t) * tf, np.asarray(R_rad) / R0, "-s", color="tab:red",
+                lw=2.0, ms=3.5, label=r"hydro2 $\eta{=}0.5$ (radial avg)")
     ax.set_xlabel(tl, fontsize=fsl)
     ax.set_ylabel(r"$R / R_0$", fontsize=fsl)
     ax.set_title(f"{SAVE_NAME}: bubble radius from GAS VOLUME (Sch20 eq. 29)",
@@ -725,6 +764,13 @@ def plot_radius_volume(times_s, R_vol, curves, R_eta_t=None, R_eta=None):
     imin = int(np.argmin(R_vol))
     print(f"  [R-volume] wrote {out}.png  (R_min/R0={R_vol[imin] / R0:.4f} at "
           f"t={times_s[imin] * tf:.4f}; sanity R(0)/R0={R_vol[0] / R0:.4f} -- expect ~1.0)")
+    if R_rad is not None and np.sum(np.isfinite(R_rad)) > 1:
+        rr = np.asarray(R_rad, dtype=float)
+        jmin = int(np.nanargmin(rr))
+        km = next((c for c in (curves or []) if c.get("key") == "km"), None)
+        kmin = (np.nanmin(km["R"]) / R0) if km and len(km.get("R", [])) else float("nan")
+        print(f"  [R-eta-radial] R_min/R0={rr[jmin] / R0:.4f} at t={R_rad_t[jmin] * tf:.4f}"
+              f"  (KM R_min/R0={kmin:.4f}; the robust radius to compare to the benchmark)")
 
 
 def main():
@@ -903,9 +949,9 @@ def main():
         print("  Extracting diffuse eta-band (eta=0.1/0.5/0.9 radii)...")
         _bt, _bands = extract_eta_band_history(OUTPUT_DIR, axis="x", x_max=1.5 * P.R0)
         plot_eta_band(_bt, _bands, curves)
-        print("  Extracting volume-based radius (Sch20 eq.29: R=(3 V_gas/4pi)^1/3)...")
-        _vt, _vr = extract_radius_volume_history(OUTPUT_DIR)
-        plot_radius_volume(_vt, _vr, curves, t_sim, R_sim)
+        print("  Extracting volume + radial-avg eta=0.5 radii (one yt pass)...")
+        _vt, _vr, _vre = extract_radius_volume_history(OUTPUT_DIR)
+        plot_radius_volume(_vt, _vr, curves, t_sim, R_sim, _vt, _vre)
 
     out_png = os.path.join(IMG_DIR, f"{SAVE_NAME}.png")
     out_eps = os.path.join(IMG_DIR, f"{SAVE_NAME}.eps")
@@ -949,16 +995,26 @@ def main():
             with np.errstate(divide='ignore', invalid='ignore'):
                 diff_vol_pct = 100.0 * diff_vol_m / R_ref_at
 
+            # Radially-averaged eta=0.5 contour -- the robust KM-matching radius.
+            # Drop NaN frames (no 0.5 crossing) before interpolating to sim grid.
+            _fin = np.isfinite(_vre) if len(_vre) else np.array([], dtype=bool)
+            R_rad_at = (np.interp(t_sim, _vt[_fin], _vre[_fin], left=np.nan, right=np.nan)
+                        if np.sum(_fin) > 1 else np.full_like(t_sim, np.nan))
+            diff_rad_m = R_rad_at - R_ref_at
+            with np.errstate(divide='ignore', invalid='ignore'):
+                diff_rad_pct = 100.0 * diff_rad_m / R_ref_at
+
             out_csv = os.path.join(IMG_DIR, f"{SAVE_NAME}.csv")
             with open(out_csv, 'w') as f:
-                f.write("time_s,time_ms,R_hydro2_m,R_vol_m,R_rp_m,R_km_m,"
-                        "diff_km_m,diff_km_rel_pct,diff_vol_km_m,diff_vol_km_rel_pct\n")
-                for ts, rh, rv, rr, rk, dm, dp, dvm, dvp in zip(
-                        t_sim, R_sim, R_vol_at, R_rp_at, R_km_at,
-                        diff_m, diff_pct, diff_vol_m, diff_vol_pct):
-                    f.write(f"{ts:.9e},{ts*1e3:.6f},{rh:.9e},{rv:.9e},"
+                f.write("time_s,time_ms,R_hydro2_m,R_vol_m,R_eta_radial_m,R_rp_m,R_km_m,"
+                        "diff_km_m,diff_km_rel_pct,diff_vol_km_m,diff_vol_km_rel_pct,"
+                        "diff_radial_km_m,diff_radial_km_rel_pct\n")
+                for ts, rh, rv, rrad, rr, rk, dm, dp, dvm, dvp, drm, drp in zip(
+                        t_sim, R_sim, R_vol_at, R_rad_at, R_rp_at, R_km_at,
+                        diff_m, diff_pct, diff_vol_m, diff_vol_pct, diff_rad_m, diff_rad_pct):
+                    f.write(f"{ts:.9e},{ts*1e3:.6f},{rh:.9e},{rv:.9e},{rrad:.9e},"
                             f"{rr:.9e},{rk:.9e},{dm:.9e},{dp:.6f},"
-                            f"{dvm:.9e},{dvp:.6f}\n")
+                            f"{dvm:.9e},{dvp:.6f},{drm:.9e},{drp:.6f}\n")
             print(f"  wrote {out_csv}")
         else:
             print("  [info] no RP/KM curve -- CSV export skipped.")
