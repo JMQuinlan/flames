@@ -71,4 +71,4 @@ logs/
 *.md
 cspell.json
 *.dat
-
+*.csv
