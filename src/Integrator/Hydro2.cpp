@@ -71,6 +71,16 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp.query_default("p_refinement_criterion", value.p_refinement_criterion, 1e-3);             // pressure-based refinement
         pp.query_default("rho_refinement_criterion", value.rho_refinement_criterion, 1e-6);         // density-based refinement
         pp.query_default("phi_refinement_criterion", value.embedded.refinement_criterion, 0.001);   // solid-boundary refinement
+        {   // optional geometric refinement box: force refinement to max_level inside [lo,hi]
+            amrex::ParmParse ppb("refine_box");
+            std::vector<Set::Scalar> lo, hi;
+            if (ppb.queryarr("lo", lo) && ppb.queryarr("hi", hi)
+                && (int)lo.size() >= AMREX_SPACEDIM && (int)hi.size() >= AMREX_SPACEDIM)
+            {
+                value.refine_box_on = 1;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) { value.refine_box_lo[d] = lo[d]; value.refine_box_hi[d] = hi[d]; }
+            }
+        }
 
         // SOLVER AND REFRENCE CONDITIONS
         pp_query_required("cfl", value.cfl);                // cfl condition
@@ -89,6 +99,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // EMBEDDED SOLID BOUNDARY (see FlowWedge for examples)
         pp_query_default("apply_embedded_solid", value.embedded.apply, 0);  // Apply Solid Boundry 1 --> "Domain has solid boundry"
         pp_query_default("solid.brinkman", value.embedded.brinkman, 0.0);   // Yang(2023) momentum-only Brinkman no-penetration (0=off)
+        pp_query_default("solid.slip", value.embedded.slip, 0);             // 1 = slip wall (penalize only wall-normal momentum); 0 = no-slip
         if (value.embedded.apply)
         {
             if (value.embedded.brinkman <= 0.0)
@@ -2085,8 +2096,27 @@ Hydro2::RHS(int lev,
                 if (chi > 0.0)
                 {
                     const Set::Scalar lam = embedded.brinkman * chi;
-                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
-                        M_rhs(i, j, k, d) += -lam * (M(i, j, k, d) - s_M(i, j, k, d));
+                    Set::Vector nrm = embedded.slip ? Numeric::Gradient(phisol, i, j, k, 0, DX)
+                                                    : Set::Vector::Zero();
+                    const Set::Scalar nmag = embedded.slip ? nrm.norm() : 0.0;
+                    if (embedded.slip && nmag > 1e-8)
+                    {
+                        // SLIP wall: penalize only the wall-NORMAL momentum
+                        // (no-penetration), leaving tangential free.  Normal from
+                        // grad(phi).  (Deep in the solid grad~0 -> falls through to
+                        // the full no-slip branch below to hold the static solid.)
+                        const Set::Vector nhat = nrm / nmag;
+                        Set::Scalar dMn = 0.0;
+                        for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                            dMn += (M(i, j, k, d) - s_M(i, j, k, d)) * nhat(d);
+                        for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                            M_rhs(i, j, k, d) += -lam * dMn * nhat(d);
+                    }
+                    else
+                    {
+                        for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                            M_rhs(i, j, k, d) += -lam * (M(i, j, k, d) - s_M(i, j, k, d));
+                    }
                     // momentum-only: no mass/energy penalty (pressure builds,
                     // arrested KE -> internal energy; energy-conserving).
                 }
@@ -2753,6 +2783,24 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
             if (grad_eta.lpNorm<2>() * dr * 2 > eta_refinement_criterion) tags(i, j, k) = amrex::TagBox::SET;
         });
+    }
+
+    // Geometric refinement box: force refinement to max_level inside [lo,hi]
+    // (targets a region, e.g. the trailing edge, without refining the whole domain)
+    if (refine_box_on)
+    {
+        const Set::Scalar* problo = geom[lev].ProbLo();
+        const Set::Scalar bl0 = refine_box_lo[0], bh0 = refine_box_hi[0];
+        const Set::Scalar bl1 = refine_box_lo[1], bh1 = refine_box_hi[1];
+        for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.tilebox();
+            amrex::Array4<char> const& tags = a_tags.array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Scalar x = problo[0] + (i + 0.5) * DX[0];
+                Set::Scalar y = problo[1] + (j + 0.5) * DX[1];
+                if (x >= bl0 && x <= bh0 && y >= bl1 && y <= bh1) tags(i, j, k) = amrex::TagBox::SET;
+            });
+        }
     }
 
     // EMBEDDED SOLID: refine the diffuse solid boundary
