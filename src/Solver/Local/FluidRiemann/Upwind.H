@@ -40,7 +40,7 @@ public:
         // No parameters to parse
     }
 
-    virtual Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1) override
+    virtual Flux Solve(State lo, State hi, Set::Scalar small, int Spec_Vol = 1) override
     {
         Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
         Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
@@ -98,14 +98,14 @@ public:
             // With Respect to Specific Volume (energies are per unit volume)
             ke = 0.5 * (u * u + v * v) * rho;
             ue = E - ke;
-            p = (gamma - 1.0) * ue - gamma * p0 + p_ref;
+            p = (gamma - 1.0) * ue - gamma * p0;
         }
         else
         {
             // With Respect to Specific Mass (energies are per unit mass)
             ke = 0.5 * (u * u + v * v);
             ue = E - ke;
-            p = (gamma - 1.0) * rho * ue - gamma * p0 + p_ref;
+            p = (gamma - 1.0) * rho * ue - gamma * p0;
         }
 
         // Ensure positive pressure
@@ -164,9 +164,7 @@ public:
     static int Test()
     {
         Upwind solver;
-        int failed = 0;
-        Set::Scalar pref = 10.0;
-        Set::Scalar small = 1E-10;
+        int failed = 0;        Set::Scalar small = 1E-10;
 
         // Test 1: Tangential Velocity Difference - No Normal Flux
         try
@@ -175,8 +173,8 @@ public:
             State center(1.0, 1.0, 1.0, 1.0);
             State right(1.0, 1.0, 2.0, 1.0);
 
-            Flux fluxlo = solver.Solve(center, right, pref, small);
-            Flux fluxhi = solver.Solve(left, center, pref, small);
+            Flux fluxlo = solver.Solve(center, right, small);
+            Flux fluxhi = solver.Solve(left, center, small);
 
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10
                 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10
@@ -204,8 +202,8 @@ public:
             State center(1.0, 0.0, 1.0, 1.0);
             State right(1.0, 0.0, 2.0, 1.0);
 
-            Flux fluxlo = solver.Solve(left, center, pref, small);
-            Flux fluxhi = solver.Solve(center, right, pref, small);
+            Flux fluxlo = solver.Solve(left, center, small);
+            Flux fluxhi = solver.Solve(center, right, small);
 
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10
                 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10
@@ -233,8 +231,8 @@ public:
             State center(1.0, 0.0, 0.0, 1.0);
             State right(1.0, 0.0, 0.0, 1.0);
 
-            Flux fluxhi = solver.Solve(center, right, pref, small);
-            Flux fluxlo = solver.Solve(left, center, pref, small);
+            Flux fluxhi = solver.Solve(center, right, small);
+            Flux fluxlo = solver.Solve(left, center, small);
 
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10
                 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10
@@ -263,8 +261,8 @@ public:
             State center(1.0, 1.0, 0.5, 1.0);
             State right(1.0, 1.0, 0.5, 1.0);
 
-            Flux fluxhi = solver.Solve(center, right, pref, small);
-            Flux fluxlo = solver.Solve(left, center, pref, small);
+            Flux fluxhi = solver.Solve(center, right, small);
+            Flux fluxlo = solver.Solve(left, center, small);
 
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10
                 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10

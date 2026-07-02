@@ -155,14 +155,13 @@ public:
     }
 
     /// Compute mixture pressure from (rho, UE_vol, eta)
-    /// Uses: p = (gamma_eff - 1)*UE_vol - gamma_eff*p0_eff + pref
+    /// Uses: p = (gamma_eff - 1)*UE_vol - gamma_eff*p0_eff
     AMREX_GPU_HOST_DEVICE
     static Set::Scalar MixedPressure(Set::Scalar rho,
                                      Set::Scalar UE_vol,
                                      Set::Scalar eta,
                                      const EOS &eos0,
                                      const EOS &eos1,
-                                     Set::Scalar pref = 0.0,
                                      Set::Scalar small = 1e-16,
                                      Set::Scalar eps_p = 0.0,
                                      Set::Scalar p_cav = 0.0)
@@ -170,7 +169,7 @@ public:
         Set::Scalar gamma_eff = MixedGamma(eta, eos0, eos1);
         Set::Scalar p0_eff = MixedP0(eta, eos0, eos1);
 
-        Set::Scalar press = (gamma_eff - 1.0) * UE_vol - gamma_eff * p0_eff + pref;
+        Set::Scalar press = (gamma_eff - 1.0) * UE_vol - gamma_eff * p0_eff;
         // Phase-dependent floor: gas p >= eps_p, liquid p >= -p_cav (hyperbolicity
         // guarded). The old uniform max(press, small) clipped legitimate liquid
         // tension to ~0; this lets the bounded tension through to plots/NSCBC.
@@ -183,17 +182,16 @@ public:
                                        Set::Scalar UE_vol,
                                        Set::Scalar gamma_eff,
                                        Set::Scalar p0_eff,
-                                       Set::Scalar pref = 0.0,
                                        Set::Scalar small = 1e-16)
     {
-        Set::Scalar press = (gamma_eff - 1.0) * UE_vol - gamma_eff * p0_eff + pref;
+        Set::Scalar press = (gamma_eff - 1.0) * UE_vol - gamma_eff * p0_eff;
         return std::max(press, small); // Doesn't look right
         //return std::max(press, -p0_eff + small); // Breaks
         //return std::max(press, -p0_eff * gamma_eff + small); // Breaks
     }
 
     /// Compute mixture internal energy from (p, eta)
-    /// Uses: UE_vol = (p + pref)*A + B where:
+    /// Uses: UE_vol = p*A + B where:
     ///   A = eta/(gamma0-1) + (1-eta)/(gamma1-1)
     ///   B = eta*gamma0*p0_0/(gamma0-1) + (1-eta)*gamma1*p0_1/(gamma1-1)
     /// This is your current formulation from Mix() function
@@ -202,7 +200,6 @@ public:
                                            Set::Scalar eta,
                                            const EOS &eos0,
                                            const EOS &eos1,
-                                           Set::Scalar pref = 0.0,
                                            Set::Scalar small = 1e-16)
     {
         Set::Scalar gamma0 = eos0.Gamma();
@@ -214,7 +211,7 @@ public:
         Set::Scalar B = (eta * gamma0 * p0_0) / (gamma0 - 1.0)
                         + ((1.0 - eta) * gamma1 * p0_1) / (gamma1 - 1.0);
 
-        Set::Scalar ue_vol = (p + pref) * A + B;
+        Set::Scalar ue_vol = p * A + B;
         return std::max(ue_vol, small);
         // return ue_vol;
     }
@@ -241,10 +238,8 @@ public:
                                         Set::Scalar p,
                                         Set::Scalar eta,
                                         const EOS &eos0,
-                                        const EOS &eos1,
-                                        Set::Scalar pref = 0.0)
+                                        const EOS &eos1)
     {
-        (void)pref;  // p already carries pref (MixedPressure adds it)
         const Set::Scalar small = 1.0e-16;
         const Set::Scalar g0 = eos0.Gamma(), pi0 = eos0.P0(), cv0 = eos0.Cv();
         const Set::Scalar g1 = eos1.Gamma(), pi1 = eos1.P0(), cv1 = eos1.Cv();
@@ -266,7 +261,6 @@ public:
                                        Set::Scalar eta,
                                        const EOS &eos0,
                                        const EOS &eos1,
-                                       Set::Scalar pref = 0.0,
                                        Set::Scalar small = 1e-16)
     {
         Set::Scalar gamma_eff = MixedGamma(eta, eos0, eos1);
@@ -301,11 +295,8 @@ public:
                                        Set::Scalar eta,
                                        const EOS &eos0,
                                        const EOS &eos1,
-                                       Set::Scalar pref = 0.0,
                                        Set::Scalar small = 1e-16)
     {
-        (void)pref;
-
         Set::Scalar gamma0 = eos0.Gamma();
         Set::Scalar gamma1 = eos1.Gamma();
         Set::Scalar p0_0   = eos0.P0();

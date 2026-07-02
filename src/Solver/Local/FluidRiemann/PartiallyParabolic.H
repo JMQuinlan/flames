@@ -41,7 +41,7 @@ public:
     }
 
     // Extended Solve signature for parabolic terms
-    Flux SolveExtended(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, Set::Scalar mu = 0.0, Set::Scalar k_thermal = 0.0, Set::Scalar dt = 0.0, Set::Scalar dx = 0.0, int Spec_Vol = 1)
+    Flux SolveExtended(State lo, State hi, Set::Scalar small, Set::Scalar mu = 0.0, Set::Scalar k_thermal = 0.0, Set::Scalar dt = 0.0, Set::Scalar dx = 0.0, int Spec_Vol = 1)
     {
         Flux total_flux;
 
@@ -69,12 +69,12 @@ public:
             // With Respect to Specific Volume (energies are per unit volume)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small);
             ue_L = E_L - ke_L;
-            p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;
+            p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L;
             h_TL = (ke_L + ue_L + p_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;
+            p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R;
             h_TR = (ke_R + ue_R + p_R);
         }
         else
@@ -82,12 +82,12 @@ public:
             // With Respect to Specific Mass (energies are per unit mass)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small);
             ue_L = E_L - ke_L;
-            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;
+            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L;
             h_TL = ke_L + ue_L + (p_L / rho_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R + p_ref;
+            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R;
             h_TR = ke_R + ue_R + (p_R / rho_R);
         }
 
@@ -272,16 +272,15 @@ public:
     }
 
     // Standard Solve interface (no parabolic terms)
-    virtual Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1) override
+    virtual Flux Solve(State lo, State hi, Set::Scalar small, int Spec_Vol = 1) override
     {
-        return SolveExtended(lo, hi, p_ref, small, 0.0, 0.0, 0.0, 0.0, Spec_Vol);
+        return SolveExtended(lo, hi, small, 0.0, 0.0, 0.0, 0.0, Spec_Vol);
     }
 
     static int Test()
     {
         PartiallyParabolic solver;
         int failed = 0;
-        Set::Scalar pref = 10.0;
         Set::Scalar small = 1E-10;
         Set::Scalar mu = 0.01;
         Set::Scalar k_thermal = 0.01;
@@ -295,7 +294,7 @@ public:
             State right(1.0, 0.0, 0.0, 1.0);
 
             solver.use_parabolic_flux = false;
-            Flux pp_flux = solver.SolveExtended(left, right, pref, small, 0.0, 0.0, 0.0, 0.0);
+            Flux pp_flux = solver.SolveExtended(left, right, small, 0.0, 0.0, 0.0, 0.0);
 
             // For identical states, flux should be zero
             if (fabs(pp_flux.mass) > 1E-10 || fabs(pp_flux.momentum_normal) > 1E-10 || fabs(pp_flux.energy) > 1E-10)
@@ -324,7 +323,7 @@ public:
             solver.use_hyperbolic_flux = false;
             solver.use_parabolic_flux = true;
 
-            Flux parabolic_flux = solver.SolveExtended(left, right, pref, small, mu, k_thermal, dt, dx);
+            Flux parabolic_flux = solver.SolveExtended(left, right, small, mu, k_thermal, dt, dx);
 
             // Viscous flux should be non-zero for velocity gradient
             if (fabs(parabolic_flux.momentum_normal) < 1E-10)
@@ -354,16 +353,16 @@ public:
             solver.use_hyperbolic_flux = true;
             solver.use_parabolic_flux = true;
 
-            Flux combined_flux = solver.SolveExtended(left, right, pref, small, mu, k_thermal, dt, dx);
+            Flux combined_flux = solver.SolveExtended(left, right, small, mu, k_thermal, dt, dx);
 
             // Get hyperbolic-only flux
             solver.use_parabolic_flux = false;
-            Flux hyperbolic_flux = solver.SolveExtended(left, right, pref, small, 0.0, 0.0, 0.0, 0.0);
+            Flux hyperbolic_flux = solver.SolveExtended(left, right, small, 0.0, 0.0, 0.0, 0.0);
 
             // Get parabolic-only flux
             solver.use_hyperbolic_flux = false;
             solver.use_parabolic_flux = true;
-            Flux parabolic_flux = solver.SolveExtended(left, right, pref, small, mu, k_thermal, dt, dx);
+            Flux parabolic_flux = solver.SolveExtended(left, right, small, mu, k_thermal, dt, dx);
 
             // Combined flux should be approximately the sum
             Set::Scalar expected_momentum = hyperbolic_flux.momentum_normal + parabolic_flux.momentum_normal;

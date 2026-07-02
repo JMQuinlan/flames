@@ -67,7 +67,7 @@ public:
     };
 
     virtual Flux7 Solve(const State7 &L, const State7 &R,
-                        Set::Scalar p_ref, Set::Scalar small) override
+                        Set::Scalar small) override
     {
         // Single-phase HLLC, applied independently to each phase. The
         // alpha-weighting is applied later by the integrator's RHS when it
@@ -75,12 +75,12 @@ public:
         PhaseFlux f0 = SolveOnePhase(
             L.rho0, L.M0_normal, L.M0_tangent, L.E0, L.gam0, L.p_inf_0,
             R.rho0, R.M0_normal, R.M0_tangent, R.E0, R.gam0, R.p_inf_0,
-            p_ref, small);
+            small);
 
         PhaseFlux f1 = SolveOnePhase(
             L.rho1, L.M1_normal, L.M1_tangent, L.E1, L.gam1, L.p_inf_1,
             R.rho1, R.M1_normal, R.M1_tangent, R.E1, R.gam1, R.p_inf_1,
-            p_ref, small);
+            small);
 
         Flux7 out;
         out.mass0 = f0.mass;
@@ -134,7 +134,7 @@ private:
         Set::Scalar gamma_L, Set::Scalar p0_L,
         Set::Scalar rho_R, Set::Scalar Mn_R, Set::Scalar Mt_R, Set::Scalar E_R,
         Set::Scalar gamma_R, Set::Scalar p0_R,
-        Set::Scalar p_ref, Set::Scalar small)
+        Set::Scalar small)
     {
         // Floor density. When a phase is essentially absent (alpha -> 0)
         // the integrator should still pass a sensible ambient (rho, p) for
@@ -145,11 +145,11 @@ private:
         // Per-volume kinetic / internal energies.
         Set::Scalar ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small);
         Set::Scalar ue_L = std::max(E_L - ke_L, small);
-        Set::Scalar p_L  = Solver::EOS::EOS::TammannPressure(rho_L, ue_L, gamma_L, p0_L, p_ref, small);
+        Set::Scalar p_L  = Solver::EOS::EOS::TammannPressure(rho_L, ue_L, gamma_L, p0_L, small);
 
         Set::Scalar ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
         Set::Scalar ue_R = std::max(E_R - ke_R, small);
-        Set::Scalar p_R  = Solver::EOS::EOS::TammannPressure(rho_R, ue_R, gamma_R, p0_R, p_ref, small);
+        Set::Scalar p_R  = Solver::EOS::EOS::TammannPressure(rho_R, ue_R, gamma_R, p0_R, small);
 
         // Velocities (with limiter, matches existing HLLC).
         Set::Scalar u_L = Mn_L / (rho_L + small);

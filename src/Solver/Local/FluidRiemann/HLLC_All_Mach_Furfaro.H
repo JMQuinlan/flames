@@ -54,7 +54,7 @@ public:
     // -------------------------------------------------------------------------
     // Solve two-phase Riemann problem
     // -------------------------------------------------------------------------
-    virtual Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1) override
+    virtual Flux Solve(State lo, State hi, Set::Scalar small, int Spec_Vol = 1) override
     {
         // =====================================================================
         // 1. EXTRACT & SANITIZE STATES
@@ -86,8 +86,8 @@ public:
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
             ue_L = std::max(E_L - ke_L, small); // IE per unit volume
             ue_R = std::max(E_R - ke_R, small);
-            p_L = Solver::EOS::EOS::TammannPressure(rho_L, ue_L, gamma_L, p0_L, p_ref, small); // (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;
-            p_R = Solver::EOS::EOS::TammannPressure(rho_R, ue_R, gamma_R, p0_R, p_ref, small); // (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;
+            p_L = Solver::EOS::EOS::TammannPressure(rho_L, ue_L, gamma_L, p0_L, small); // (gamma_L - 1.0) * ue_L - gamma_L * p0_L;
+            p_R = Solver::EOS::EOS::TammannPressure(rho_R, ue_R, gamma_R, p0_R, small); // (gamma_R - 1.0) * ue_R - gamma_R * p0_R;
         }
         else
         {
@@ -96,8 +96,8 @@ public:
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
             ue_L = E_L - ke_L;
             ue_R = E_R - ke_R;
-            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;
-            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R + p_ref;
+            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L;
+            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R;
         }
 
         // Acoustic Speeds

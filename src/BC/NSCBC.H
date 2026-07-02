@@ -83,7 +83,6 @@ public:
     /// @param eos1          EOS for fluid 1
     /// @param geom          Geometry object
     /// @param time          Current simulation time
-    /// @param pref          Reference pressure [Pa]
     template <typename EOS0, typename EOS1>
     void FillBoundary(amrex::MultiFab &density_mf,
                       amrex::MultiFab &momentum_mf,
@@ -95,8 +94,7 @@ public:
                       const EOS0 &eos0,
                       const EOS1 &eos1,
                       const amrex::Geometry &geom,
-                      Set::Scalar time,
-                      Set::Scalar pref)
+                      Set::Scalar time)
     {
         const amrex::Box &domain = geom.Domain();
         const auto dx = geom.CellSizeArray();
@@ -108,7 +106,6 @@ public:
         Set::Scalar pi1_ = eos1.P0();
         Set::Scalar cv0_ = eos0.Cv();
         Set::Scalar cv1_ = eos1.Cv();
-        Set::Scalar pref_local = pref;
         Set::Scalar small_local = small;
 
         // Capture boundary parameters for GPU
@@ -190,7 +187,7 @@ public:
             Set::Scalar pi_mix = (B / A) / gamma_mix;
 
             // Pressure (Motheau Eq. 5)
-            Set::Scalar p_val = (gamma_mix - 1.0) * UE - gamma_mix * pi_mix + pref_local;
+            Set::Scalar p_val = (gamma_mix - 1.0) * UE - gamma_mix * pi_mix;
             if (!(p_val > 0.0))
                 p_val = 1.0e-6;
 
@@ -252,7 +249,7 @@ public:
             // STABILITY FIX: Guard eta to prevent NaN gamma
             // If eta at ghost cell is NaN or out of range, clamp to [0,1]
             // A NaN eta flows through EOS and makes gamma/pi NaN, which then makes
-            // UE = (p + NaN - pref)/(NaN-1) = NaN even when p and rho are finite
+            // UE = (p + NaN)/(NaN-1) = NaN even when p and rho are finite
             if (!(eta_val >= 0.0 && eta_val <= 1.0))
                 eta_val = amrex::max(Set::Scalar(0.0), amrex::min(Set::Scalar(1.0), eta_val));
             if (!std::isfinite(eta_val))
@@ -266,7 +263,7 @@ public:
             Set::Scalar pi_mix = (B / A) / gamma_mix;
 
             // Inverse EOS: compute UE from pressure
-            Set::Scalar UE = (p_val + gamma_mix * pi_mix - pref_local) / (gamma_mix - 1.0);
+            Set::Scalar UE = (p_val + gamma_mix * pi_mix) / (gamma_mix - 1.0);
             if (UE < 0.0)
                 UE = 0.0;
 

@@ -106,7 +106,6 @@ public:
     /// @param eos1          EOS for fluid 1
     /// @param geom          Geometry object
     /// @param time          Current simulation time
-    /// @param pref          Reference pressure [Pa]
     template <typename EOS0, typename EOS1>
     void FillBoundary(amrex::MultiFab &density_mf,
                       amrex::MultiFab &momentum_mf,
@@ -118,8 +117,7 @@ public:
                       const EOS0 &eos0,
                       const EOS1 &eos1,
                       const amrex::Geometry &geom,
-                      Set::Scalar time,
-                      Set::Scalar pref)
+                      Set::Scalar time)
     {
         const amrex::Box &domain = geom.Domain();
         const auto dx = geom.CellSizeArray();
@@ -129,7 +127,6 @@ public:
         // =========================================================================
         // (gamma/p0/cv captures removed - all EOS calls go through Solver::EOS::EOS::*,
         //  e.g. MixedTemperature/MixedPressure take eos0/eos1 directly.)
-        Set::Scalar pref_local = pref;
         Set::Scalar small_local = small;
 
         // Capture boundary parameters for GPU
@@ -198,7 +195,7 @@ public:
             Set::Scalar pi_mix = Solver::EOS::EOS::MixedP0(eta_val, eos0, eos1);
 
             // Pressure (Tammann EOS)
-            Set::Scalar p_val = Solver::EOS::EOS::MixedPressure(rho_val, UE, eta_val, eos0, eos1, pref, small_local);
+            Set::Scalar p_val = Solver::EOS::EOS::MixedPressure(rho_val, UE, eta_val, eos0, eos1, small_local);
 
             // Sound speed
             Set::Scalar a_val = Solver::EOS::EOS::TammannSoundSpeed(rho_val, p_val, gamma_mix, pi_mix, small_local);
@@ -257,7 +254,7 @@ public:
             // EOS quantities via the EOS::EOS class (consistent with compute_prim)
             Set::Scalar gamma_mix = Solver::EOS::EOS::MixedGamma(eta_val, eos0, eos1);
             Set::Scalar pi_mix    = Solver::EOS::EOS::MixedP0(eta_val, eos0, eos1);
-            Set::Scalar UE        = Solver::EOS::EOS::MixedInternalEnergy(p_val, eta_val, eos0, eos1, pref_local, small_local);
+            Set::Scalar UE        = Solver::EOS::EOS::MixedInternalEnergy(p_val, eta_val, eos0, eos1, small_local);
 
             // Velocities (convert un, ut back to vx, vy, vz)
             Set::Scalar vx, vy, vz;
@@ -621,7 +618,7 @@ public:
                             Set::Scalar eta_1 = eta_arr(i1, j1, k);
                             Set::Scalar KE_1 = 0.5 * rho_1 * (vx_1 * vx_1 + vy_1 * vy_1);
                             Set::Scalar UE_1 = E_arr(i1, j1, k) - KE_1;
-                            Set::Scalar p_1 = Solver::EOS::EOS::MixedPressure(rho_1, UE_1, eta_1, eos0, eos1, pref_local, small_local);
+                            Set::Scalar p_1 = Solver::EOS::EOS::MixedPressure(rho_1, UE_1, eta_1, eos0, eos1, small_local);
 
                             // Motheau Eq. 28/32
                             Set::Scalar dx_grad = (ox == 2) ? 6.0 * dx[0] * drho_dx_new : 0.0;
@@ -664,13 +661,13 @@ public:
                             Set::Scalar eta_1 = eta_arr(i1, j1, k);
                             Set::Scalar KE_1 = 0.5 * rho_1 * (vx_1 * vx_1 + vy_1 * vy_1);
                             Set::Scalar UE_1 = E_arr(i1, j1, k) - KE_1;
-                            Set::Scalar p_1 = Solver::EOS::EOS::MixedPressure(rho_1, UE_1, eta_1, eos0, eos1, pref_local, small_local);
+                            Set::Scalar p_1 = Solver::EOS::EOS::MixedPressure(rho_1, UE_1, eta_1, eos0, eos1, small_local);
 
 
                             Set::Scalar eta_2 = eta_arr(i2, j2, k);
                             Set::Scalar KE_2 = 0.5 * rho_2 * (vx_2 * vx_2 + vy_2 * vy_2);
                             Set::Scalar UE_2 = E_arr(i2, j2, k) - KE_2;
-                            Set::Scalar p_2 = Solver::EOS::EOS::MixedPressure(rho_2, UE_2, eta_2, eos0, eos1, pref_local, small_local);
+                            Set::Scalar p_2 = Solver::EOS::EOS::MixedPressure(rho_2, UE_2, eta_2, eos0, eos1, small_local);
 
                             // Motheau Eq. 29/33
                             Set::Scalar dx_grad = (ox == 3) ? -12.0 * dx[0] * drho_dx_new : 0.0;
@@ -719,17 +716,17 @@ public:
                             Set::Scalar eta_1 = eta_arr(i1, j1, k);
                             Set::Scalar KE_1 = 0.5 * rho_1 * (vx_1 * vx_1 + vy_1 * vy_1);
                             Set::Scalar UE_1 = E_arr(i1, j1, k) - KE_1;
-                            Set::Scalar p_1 = Solver::EOS::EOS::MixedPressure(rho_1, UE_1, eta_1, eos0, eos1, pref_local, small_local);
+                            Set::Scalar p_1 = Solver::EOS::EOS::MixedPressure(rho_1, UE_1, eta_1, eos0, eos1, small_local);
 
                             Set::Scalar eta_2 = eta_arr(i2, j2, k);
                             Set::Scalar KE_2 = 0.5 * rho_2 * (vx_2 * vx_2 + vy_2 * vy_2);
                             Set::Scalar UE_2 = E_arr(i2, j2, k) - KE_2;
-                            Set::Scalar p_2 = Solver::EOS::EOS::MixedPressure(rho_2, UE_2, eta_2, eos0, eos1, pref_local, small_local);
+                            Set::Scalar p_2 = Solver::EOS::EOS::MixedPressure(rho_2, UE_2, eta_2, eos0, eos1, small_local);
 
                             Set::Scalar eta_3 = eta_arr(i3, j3, k);
                             Set::Scalar KE_3 = 0.5 * rho_3 * (vx_3 * vx_3 + vy_3 * vy_3);
                             Set::Scalar UE_3 = E_arr(i3, j3, k) - KE_3;
-                            Set::Scalar p_3 = Solver::EOS::EOS::MixedPressure(rho_3, UE_3, eta_3, eos0, eos1, pref_local, small_local);
+                            Set::Scalar p_3 = Solver::EOS::EOS::MixedPressure(rho_3, UE_3, eta_3, eos0, eos1, small_local);
 
                             // Motheau Eq. 30/34
                             Set::Scalar dx_grad = (ox == 4) ? 12.0 * dx[0] * drho_dx_new : 0.0;
@@ -752,7 +749,7 @@ public:
                         // =============================================================
                         // STEP 9: Enforce physical bounds
                         // =============================================================
-                        rho_g = amrex::min(amrex::max(rho_g, pref_local), 1.0e20);
+                        rho_g = amrex::min(amrex::max(rho_g, 0.0), 1.0e20);
                         p_g = amrex::min(amrex::max(p_g, 1.0), 1.0e20);
                         vx_g = amrex::min(amrex::max(vx_g, -1.0e20), 1.0e20);
                         vy_g = amrex::min(amrex::max(vy_g, -1.0e20), 1.0e20);
@@ -764,7 +761,7 @@ public:
                         Set::Scalar eta_g = eta_arr(i, j, k);
                         Set::Scalar gm_g  = Solver::EOS::EOS::MixedGamma(eta_g, eos0, eos1);
                         Set::Scalar pi_g  = Solver::EOS::EOS::MixedP0(eta_g, eos0, eos1);
-                        Set::Scalar UE_g  = Solver::EOS::EOS::MixedInternalEnergy(p_g, eta_g, eos0, eos1, pref_local, small_local);
+                        Set::Scalar UE_g  = Solver::EOS::EOS::MixedInternalEnergy(p_g, eta_g, eos0, eos1, small_local);
                         if (UE_g < 0.0)
                             UE_g = 0.0;
 
