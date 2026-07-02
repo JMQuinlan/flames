@@ -52,6 +52,7 @@ private:
         r.alpha_rho_1 = vl(a.alpha_rho_1, b.alpha_rho_1);
         r.u           = vl(a.u,           b.u          );
         r.v           = vl(a.v,           b.v          );
+        r.w           = vl(a.w,           b.w          );
         r.p_mix       = vl(a.p_mix,       b.p_mix      );
         r.gamma0 = a.gamma0;  r.pi0 = a.pi0;
         r.gamma1 = a.gamma1;  r.pi1 = a.pi1;

@@ -374,6 +374,7 @@ protected:
     Set::Scalar R = 8314.; // [J]/[kmol]-[K] - Probably more common to use
     Set::Scalar Dv = 0.0; // Vapor Diffusivity
     Set::Scalar Y_infinity = 0.0; // Far Feild Vapor Mass Fraction
+    Set::Scalar Lv = 0.0; // Latent heat of vaporization [J/kg] (0 = no evaporative cooling)
 
 
     // CFD Properties

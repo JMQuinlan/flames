@@ -176,6 +176,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                           " chi=", value.marmottant_chi, " sigma_break=", value.marmottant_sigma_break,
                           " sigma_water=", value.sigma);
         pp_query_default("Dv", value.Dv, 0.0);                  // Vapor Diffusivity
+        pp_query_default("Lv", value.Lv, 0.0);                  // Latent heat of vaporization [J/kg] (evaporative cooling sink)
         pp_query_required("epsilon", value.epsilon);            // diffuse interface thickness Y_infinity
         pp_query_default("Y_infinity", value.Y_infinity, 0.0);  // Far Field Vapor Mass Fraction
         pp_query_default("Mob", value.Mob_user, 0.0);           // CH mobility scale M0: M = M0 * epsilon^2
@@ -1241,6 +1242,47 @@ Hydro2::RHS(int lev,
     // kappa_s -> kappas(.,1), sigma_eff -> kappas(.,2) (both plottable); the CSF force
     // below uses BOTH (smooth) so sigma_eff*kappa is uniform across the band (no
     // parasitic currents) yet varies per bubble/region.  See tests/FlowMarmottant.
+
+    // sigma_eff on its own MultiFab WITH one ghost cell so the capillary
+    // tensor Omega below can be evaluated in the ghost ring too (kappas_mf
+    // has zero ghosts).  Defined only when marmottant is on.
+    amrex::MultiFab sig_eff_mf;
+
+    // FillBoundary only fills interior/periodic ghosts.  At NON-periodic
+    // (physical) faces, fill scratch ghosts by zero-gradient clamp from the
+    // nearest interior cell -- for a single ghost layer this equals an even
+    // reflection, which is exactly right on the octant symmetry planes the
+    // bubble is centered on, and a sane default for outflow faces.  Without
+    // this the eta-weighted smoothing window drags kappa_s toward the zeroed
+    // ghosts precisely where the bubble meets the symmetry planes.
+    const amrex::Box dom_box = geom[lev].Domain();
+    auto fill_phys_ghosts = [&](amrex::MultiFab &mf)
+    {
+        const int ilo_ = dom_box.smallEnd(0), ihi_ = dom_box.bigEnd(0);
+        const int jlo_ = dom_box.smallEnd(1), jhi_ = dom_box.bigEnd(1);
+        const bool xp_ = geom[lev].isPeriodic(0);
+        const bool yp_ = geom[lev].isPeriodic(1);
+#if AMREX_SPACEDIM == 3
+        const int klo_ = dom_box.smallEnd(2), khi_ = dom_box.bigEnd(2);
+        const bool zp_ = geom[lev].isPeriodic(2);
+#endif
+        for (amrex::MFIter mfi(mf, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &gbx = mfi.growntilebox(1);
+            auto arr = mf.array(mfi);
+            amrex::ParallelFor(gbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                int ic = i, jc = j, kc = k;
+                if (!xp_) ic = std::min(std::max(i, ilo_), ihi_);
+                if (!yp_) jc = std::min(std::max(j, jlo_), jhi_);
+#if AMREX_SPACEDIM == 3
+                if (!zp_) kc = std::min(std::max(k, klo_), khi_);
+#endif
+                if (ic != i || jc != j || kc != k)
+                    arr(i, j, k) = arr(ic, jc, kc);
+            });
+        }
+    };
+
     if (marmottant)
     {
         const amrex::BoxArray &ba = eta_mf[lev]->boxArray();
@@ -1250,6 +1292,7 @@ Hydro2::RHS(int lev,
         kap_s.setVal(0.0); // init incl. ghosts (kappas has 0 ghosts -> uninit ghosts would be NaN)
         amrex::MultiFab::Copy(kap_s, *kappas_mf[lev], 0, 0, 1, 0); // pointwise kappa = kappas(.,0)
         kap_s.FillBoundary(geom[lev].periodicity());
+        fill_phys_ghosts(kap_s);
 
         // N interface-weighted box-average passes -> de-noised, UNBIASED curvature.
         for (int pass = 0; pass < marmottant_eta_smooth_iters; ++pass)
@@ -1281,28 +1324,46 @@ Hydro2::RHS(int lev,
             }
             amrex::MultiFab::Copy(kap_s, tmp, 0, 0, 1, 0);
             kap_s.FillBoundary(geom[lev].periodicity());
+            fill_phys_ghosts(kap_s);
         }
 
-        // Local Marmottant sigma(R) from the de-noised curvature.
+        // Local Marmottant sigma(R) from the de-noised curvature.  Computed on
+        // the GROWN box into sig_eff_mf (1 ghost) so Omega below can be built
+        // in the ghost ring; kappas_mf keeps the valid-cell diagnostics.
+        sig_eff_mf.define(ba, dm, 1, ng);
+        sig_eff_mf.setVal(0.0);
         const Set::Scalar Rb = marmottant_R_buckling, chi = marmottant_chi;
         const Set::Scalar sbrk = marmottant_sigma_break, sigw = sigma, small_ = small;
         const Set::Scalar dm1 = (Set::Scalar)(AMREX_SPACEDIM - 1);
         for (amrex::MFIter mfi(kap_s, false); mfi.isValid(); ++mfi)
         {
-            const amrex::Box &bx = mfi.validbox();
+            const amrex::Box &vbx = mfi.validbox();
+            const amrex::Box gbx = mfi.growntilebox(1);
             amrex::Array4<const Set::Scalar> const &ks = kap_s.const_array(mfi);
             amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
             amrex::Array4<Set::Scalar> const &kap = kappas_mf[lev]->array(mfi);
-            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            amrex::Array4<Set::Scalar> const &sg = sig_eff_mf.array(mfi);
+            amrex::ParallelFor(gbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 Set::Scalar e = et(i, j, k), w = e * (1.0 - e);
                 Set::Scalar kt = ks(i, j, k), se = 0.0;
-                if (w > 1.0e-6) // interface band
+                // Band gate at 1e-12 (was 1e-6): sigma_eff now decays smoothly
+                // through the exponential tail of the tanh band instead of
+                // truncating Omega with a hard jump at w = 1e-6, which the
+                // centered div(Omega) rectified into a spurious force ring at
+                // the band edge.  kappa_s stays well-defined in the tail --
+                // the window average is dominated by the nearby strong-band
+                // cells (window weight sw >= w > 1e-12).
+                if (w > 1.0e-12) // interface band (incl. tail)
                 {
                     Set::Scalar R = dm1 / (std::abs(kt) + small_);
                     if (R > Rb) { Set::Scalar el = chi * (R * R / (Rb * Rb) - 1.0); se = (el >= sbrk) ? sigw : el; }
                 }
-                kap(i, j, k, 1) = kt; // kappa_s  (de-noised curvature; plottable)
-                kap(i, j, k, 2) = se; // sigma_eff(x)  (used by the CSF force below)
+                sg(i, j, k) = se;         // sigma_eff(x)  (used by Omega below; carries ghosts)
+                if (vbx.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
+                {
+                    kap(i, j, k, 1) = kt; // kappa_s  (de-noised curvature; plottable)
+                    kap(i, j, k, 2) = se; // sigma_eff diagnostic (kappas_mf has no ghosts)
+                }
             });
         }
     }
@@ -1329,15 +1390,22 @@ Hydro2::RHS(int lev,
         const Set::Scalar sig0 = sigma; const int marm = marmottant;
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
-            const amrex::Box &bx = mfi.validbox();
+            // GROWN box: build Omega in the one-cell ghost ring too, from the
+            // BC-filled eta ghosts.  FillBoundary below cannot fill ghosts at
+            // PHYSICAL boundaries; leaving them zero breaks div(Omega) in the
+            // first interior cell -- exactly where an octant-cornered bubble
+            // meets the symmetry planes (REFLECT_EVEN eta ghosts produce the
+            // correctly mirrored Omega there).
+            const amrex::Box bx = mfi.growntilebox(1);
             amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
-            amrex::Array4<const Set::Scalar> const &kp = kappas_mf[lev]->const_array(mfi);
+            amrex::Array4<const Set::Scalar> const &sg = marm ? sig_eff_mf.const_array(mfi)
+                                                              : amrex::Array4<const Set::Scalar>{};
             amrex::Array4<Set::Scalar> const &om = Omega.array(mfi);
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
                 Set::Scalar gem = ge.lpNorm<2>();
                 if (gem < 1.0e-10) return; // Omega = 0 off the interface
-                Set::Scalar se = marm ? kp(i, j, k, 2) : sig0;
+                Set::Scalar se = marm ? sg(i, j, k) : sig0;
                 om(i, j, k, 0) = se * (gem - ge(0) * ge(0) / gem); // xx
                 om(i, j, k, 1) = se * (gem - ge(1) * ge(1) / gem); // yy
 #if AMREX_SPACEDIM == 2
@@ -1710,25 +1778,41 @@ Hydro2::RHS(int lev,
             Set::Scalar E_dot_Vap = 0.0;
             if (apply_vaporization == 1)
             {
-                // Mass fraction of vapor at surface
-                Set::Scalar Y_vs = Y(i, j, k); // rho_eta0(i, j, k) / (rho0(i, j, k) + rho1(i, j, k));
-
-                // Spalding mass transfer number
+                // Spalding mass transfer number (from the vapor-mass-fraction
+                // surrogate Y = (alpha rho)_0 / rho computed above).
                 Set::Scalar B_M = Bm(i, j, k);
                 //B_M = std::max(B_M, 0.0); // Only evaporation, no condensation in this formulation
 
-                // Gas density from fluid 0 (eta=1 corresponds to fluid 0)
-                Set::Scalar rho_g = rho_eta0(i, j, k);
+                // PURE-phase densities rho_k = (alpha rho)_k / alpha_k (the
+                // density0/1_mf primitives from FillGhost4BC).  The old code
+                // used the PARTIAL densities (alpha rho)_k here, which (i)
+                // scaled the evaporation rate by a spurious factor alpha_g and
+                // (ii) made the volume-transfer term blow up where a phase
+                // vanishes (1/max(alpha*rho, small) -> 1e8).
+                Set::Scalar rho_g = std::max(rho0(i, j, k), small);   // gas    (fluid 0; eta = alpha_gas)
+                Set::Scalar rho_l = std::max(rho1(i, j, k), small);   // liquid (fluid 1)
 
-                // Mass-transfer rate (volumetric) -- simplified Spalding form.
-                // m_dot_Vap = rho_g * D_v * (B_M / (1+B_M)) * |grad(eta)|     [kg/m^3/s]
+                // Mass-transfer rate (volumetric) -- simplified Spalding form,
+                // localized to the band by |grad(eta)|.  Dv is a calibrated
+                // input that carries the film-length division of the classical
+                // d^2-law rate (rho_g D_v / delta_film) ln(1+B_M).
                 m_dot_Vap = rho_g * Dv * (B_M / (1.0 + B_M + small)) * grad_eta_mag;
 
-                Set::Scalar inv_rho_g = 1.0 / std::max(rho_eta0(i, j, k), small);
-                Set::Scalar inv_rho_l = 1.0 / std::max(rho_eta1(i, j, k), small);
-                eta_dot_Vap = m_dot_Vap * (inv_rho_l - inv_rho_g);
+                // Volume-fraction source: evaporation (m_dot > 0) GROWS the
+                // gas volume fraction -- gas gains volume at 1/rho_g per unit
+                // transferred mass while liquid loses it at 1/rho_l:
+                //     d(alpha_g)/dt += m_dot (1/rho_g - 1/rho_l) > 0.
+                // (The old (1/rho_l - 1/rho_g) partial-density form had the
+                // sign INVERTED: evaporation shrank the gas volume fraction.)
+                eta_dot_Vap = m_dot_Vap * (1.0 / rho_g - 1.0 / rho_l);
 
-                E_dot_Vap = m_dot_Vap * u.dot(u) * grad_eta_mag * grad_eta_mag;
+                // Evaporative cooling: the stiffened-gas EOSs carry no heat-of-
+                // vaporization offset, so the latent heat enters as an explicit
+                // sink -m_dot * Lv [W/m^3] on the mixture energy (applied in
+                // the Source energy row below; Lv = 0 disables).  Replaces the
+                // old m_dot |u|^2 |grad eta|^2 term, which was dimensionally
+                // inconsistent and never actually applied.
+                E_dot_Vap = -m_dot_Vap * Lv;
             }
             // Vaporization Trackers.  Layout: [_eta, _rho, M..., _E].
             Vap_dot(i, j, k, 0) = eta_dot_Vap;
@@ -1741,11 +1825,51 @@ Hydro2::RHS(int lev,
             // Total:
             Set::Vector Total_Force = Fsv_vector + Fw_vector;
 
+            // ------------------------------------------------------------
+            // Energy work terms in conservative (divergence) form.
+            //
+            // Viscous:   div(tau.u) = u.div(tau) + tau:grad(u).  The second
+            // term is the dissipation Phi >= 0 (arrested KE -> heat); with
+            // only u.div(tau) the total energy is not conserved.
+            //   Phi = 2 mu_eff S:S + (lambda_eff - 2/3 mu_eff) (div u)^2,
+            //   S = sym(grad u).
+            //
+            // Capillary: div(Omega.u) = u.div(Omega) + Omega:grad(u).  The
+            // Omega:grad(u) work term exchanges KE <-> internal energy as the
+            // interface stretches/shrinks, making the surface-tension energy
+            // coupling a pure divergence (globally conservative).  [Tracking
+            // the capillary energy density sigma|grad eta| inside rho E is
+            // the remaining step toward the full Schmidmayer 2017 balance.]
+            // ------------------------------------------------------------
+            Set::Matrix Ssym = 0.5 * (gradu + gradu.transpose());
+            Set::Scalar divu_cell = gradu.trace();
+            Set::Scalar visc_diss = 2.0 * mu_eff * Ssym.squaredNorm()
+                                  + (lambda_eff - (2.0 / 3.0) * mu_eff) * divu_cell * divu_cell;
+
+            Set::Scalar cap_work = 0.0;
+            if (apply_surface_tension)
+            {
+                // Omega : grad(u), symmetric storage 2D [xx,yy,xy] ; 3D [xx,yy,zz,xy,xz,yz].
+#if AMREX_SPACEDIM == 2
+                cap_work = om_cap(i, j, k, 0) * gradu(0, 0)
+                         + om_cap(i, j, k, 1) * gradu(1, 1)
+                         + om_cap(i, j, k, 2) * (gradu(0, 1) + gradu(1, 0));
+#else
+                cap_work = om_cap(i, j, k, 0) * gradu(0, 0)
+                         + om_cap(i, j, k, 1) * gradu(1, 1)
+                         + om_cap(i, j, k, 2) * gradu(2, 2)
+                         + om_cap(i, j, k, 3) * (gradu(0, 1) + gradu(1, 0))
+                         + om_cap(i, j, k, 4) * (gradu(0, 2) + gradu(2, 0))
+                         + om_cap(i, j, k, 5) * (gradu(1, 2) + gradu(2, 1));
+#endif
+            }
+
             // SOURCES.  Layout: [0]=mdot, [1..SD]=momentum, [SD+1]=energy.
             Source(i, j, k, 0) = mdot0;
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
                 Source(i, j, k, 1 + d) = Pdot0(d) + Ldot(d) + div_tau(d) + Total_Force(d);
-            Source(i, j, k, AMREX_SPACEDIM + 1) = qdot0 + u.dot(div_tau) + u.dot(Ldot) + u.dot(Total_Force);// + E_dot_Vap;
+            Source(i, j, k, AMREX_SPACEDIM + 1) = qdot0 + u.dot(div_tau) + visc_diss + u.dot(Ldot)
+                                                + u.dot(Total_Force) + cap_work + E_dot_Vap;
 
             // Lagrange terms to enforce no-penetration
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
@@ -2678,7 +2802,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             Set::Scalar mu_chem = -epsilon * epsilon * lap_eta + f_prime;
             mu_chem_(i,j,k) = mu_chem;
 
-            Bm(i,j,k) = eta(i,j,k) / (1.0 - eta(i,j,k) + small);
+            // Spalding number from the vapor MASS fraction Y = (alpha rho)_0 / rho
+            // (same definition as RHS); the old eta/(1-eta) volume-fraction ratio
+            // was not the Spalding B_M and clobbered the RHS diagnostic.
+            Bm(i,j,k) = SpaldingBM(rho_eta0(i,j,k) / std::max(rho(i,j,k), small), Y_infinity, small);
 
             Ma(i,j,k,0) = v(i,j,k,0) / (a(i,j,k) + small);
             Ma(i,j,k,1) = v(i,j,k,1) / (a(i,j,k) + small);
