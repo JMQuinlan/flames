@@ -92,123 +92,192 @@ def write_phi_bmp(poly, path):
 # ---------- input ----------
 def write_input(bmp, plot, inp):
     mom_x = RHO * U; e_bc = 0.5 * P / (GAMMA - 1)
+    q_inf = 0.5 * RHO * U ** 2
+    base_dx = (DOM_HI[0] - DOM_LO[0]) / N_CELL[0]
+    wall = "no-slip (all momentum)" if not SLIP else "slip (wall-normal only)"
+    plotc = f"amr.plot_dt          = {PLOT_DT}" if PLOT_DT else f"amr.plot_dt          = {STOP_TIME/2.0}"
     rbox = ""
     if REFINE_BOX is not None:
         (xl, yl), (xh, yh) = REFINE_BOX
-        rbox = f"refine_box.lo = {xl} {yl}\nrefine_box.hi = {xh} {yh}\n"
+        rbox = (f"refine_box.lo            = {xl:.4f} {yl:.4f}     # force max_level in a box (trailing-edge targeting)\n"
+                f"refine_box.hi            = {xh:.4f} {yh:.4f}\n")
     txt = f"""#@ [naca0012]
 #@ exe=hydro2
 #@ dim=2
+
+# =============================================================================
+# FlowAirfoil -- NACA 0012, 2D subsonic flow over an EMBEDDED SOLID airfoil
+# (rasterized phi bitmap -> diffuse tanh boundary), for lift/drag VALIDATION
+# against thin-airfoil theory and tabulated NACA data.
+# =============================================================================
+# Condition: Ma {MACH} (c = 1 by construction: p = 1/gamma, rho = 1 -> a = 1, U = Ma).
+#
+#   FLOW:      rho = {RHO},  p = {P:.6f} (= 1/gamma),  U = {U}  (Ma {MACH}).
+#              rho*U = {mom_x:.4f}.   E_per_phase = 0.5*p/(gamma-1) = {e_bc:.6f}.
+#              q_inf = 0.5*rho*U^2 = {q_inf:.6f}.
+#   GEOMETRY:  NACA 0012, chord {CHORD}, from a phi bitmap (fit=coord over the
+#              domain box).  d>0 fluid, d<0 solid -> phi = 0.5*(1+tanh(d/eps)).
+#   WALL:      {wall} Brinkman penalty (solid.slip={SLIP}).
+#              eps = {EPS} skin,  brinkman = {BRINK:.1f} ~ 4*U/eps.
+#   LIFT/DRAG (post-processed):  F = -integral (p-p_inf) grad(phi) dV;
+#              C_l = F_y/(q_inf*c),  C_d = F_x/(q_inf*c).  INVISCID (mu=0) ->
+#              pressure/form drag only (no skin friction).  Two identical ideal
+#              gases (eta=0.5) => the mixture is one perfect-gas air.
+#   BCs:       SUBSONIC -- Dirichlet freestream inflow at xlo, pinned back-pressure
+#              at xhi (energy Dirichlet); far-field top/bottom Neumann.
+# =============================================================================
+
 alamo.program = hydro2
-plot_file = {plot}
-amr.plot_dt = {PLOT_DT if PLOT_DT else STOP_TIME/2.0}
-amr.plot_int = -1
-amr.max_grid_size = 500000
-amr.blocking_factor = 8
-amr.regrid_int = 10
-amr.grid_eff = 0.8
-amr.max_level = {MAX_LEVEL}
-amr.n_cell = {N_CELL[0]} {N_CELL[1]}
-geometry.prob_lo = {DOM_LO[0]} {DOM_LO[1]} 0.0
-geometry.prob_hi = {DOM_HI[0]} {DOM_HI[1]} 0.0
+
+### OUTPUT ###
+plot_file            = {plot}
+{plotc}
+amr.plot_int         = -1
+
+### MESHING ###
+# Base dx = {base_dx:.4f}; AMR refines the airfoil surface (grad phi) + shock.
+# max_level = {MAX_LEVEL} -> dx_finest = base/2^{MAX_LEVEL}; eps = {EPS} diffuse skin.
+amr.max_grid_size    = 500000
+amr.blocking_factor  = 8
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level        = {MAX_LEVEL}
+amr.n_cell           = {N_CELL[0]} {N_CELL[1]}     # both divisible by blocking_factor 8
+
+### DIMENSIONS -- flow in +X ###
+geometry.prob_lo     = {DOM_LO[0]} {DOM_LO[1]} 0.0
+geometry.prob_hi     = {DOM_HI[0]} {DOM_HI[1]} 0.0
 geometry.is_periodic = 0 0 0
-timestep = 1e-6
-dynamictimestep.on = 1
+
+### TIME STEPPING ###
+timestep            = 1e-6
+dynamictimestep.on  = 1
 dynamictimestep.max = 5e-3
 dynamictimestep.min = 1e-10
-cfl = 0.3
-cfl_v = 0.3
-stop_time = {STOP_TIME}
-apply_embedded_solid = 1
-solid.brinkman = {BRINK}
-solid.slip = {SLIP}
-{rbox}
-phi_refinement_criterion = 0.1
-solid.phi.ic.type = bmp
-solid.phi.ic.bmp.filename = {bmp}
-solid.phi.ic.bmp.channel = g
-solid.phi.ic.bmp.min = 0
-solid.phi.ic.bmp.max = 255
-solid.phi.ic.bmp.fit = coord
-solid.phi.ic.bmp.coord.lo = {DOM_LO[0]} {DOM_LO[1]}
-solid.phi.ic.bmp.coord.hi = {DOM_HI[0]} {DOM_HI[1]}
-solid.density.ic.type = constant
-solid.density.ic.constant.value = {RHO}
-solid.momentum.ic.type = constant
+cfl                 = 0.3
+cfl_v               = 0.3
+stop_time           = {STOP_TIME}
+
+# ----------------------------------------------------------------------------
+# EMBEDDED SOLID -- the NACA 0012, from a phi bitmap.  Yang Brinkman wall.
+# ----------------------------------------------------------------------------
+apply_embedded_solid     = 1
+solid.brinkman           = {BRINK}          # YANG penalty ~ 4*U/eps ({wall})
+solid.slip               = {SLIP}              # 0 = no-slip (all momentum); 1 = slip (wall-normal only)
+{rbox}phi_refinement_criterion = 0.1            # refine on the airfoil surface (grad phi)
+
+# Bitmap geometry IC:  pixel/255 -> phi,  fit=coord onto the domain box.
+solid.phi.ic.type            = bmp
+solid.phi.ic.bmp.filename    = {bmp}
+solid.phi.ic.bmp.channel     = g
+solid.phi.ic.bmp.min         = 0
+solid.phi.ic.bmp.max         = 255
+solid.phi.ic.bmp.fit         = coord
+solid.phi.ic.bmp.coord.lo    = {DOM_LO[0]} {DOM_LO[1]}
+solid.phi.ic.bmp.coord.hi    = {DOM_HI[0]} {DOM_HI[1]}
+
+# Prescribed quiescent solid target (air at rest, p = p_inf):
+solid.density.ic.type            = constant
+solid.density.ic.constant.value  = {RHO}
+solid.momentum.ic.type           = constant
 solid.momentum.ic.constant.value = 0.0 0.0
-solid.pressure.ic.type = constant
-solid.pressure.ic.constant.value = {P}
-eta.ic.type = constant
+solid.pressure.ic.type           = constant
+solid.pressure.ic.constant.value = {P:.6f}
+
+### ETA (alpha_1) -- uniform 0.5 (two identical gases => single ideal-gas air) ###
+eta.ic.type       = constant
 eta.ic.constant.value = 0.5
-eta.bc.type.xlo = dirichlet
-eta.bc.val.xlo = 0.5
-eta.bc.type.xhi = neumann
-eta.bc.type.ylo = neumann
-eta.bc.type.yhi = neumann
-eos0.gamma={GAMMA}
-eos0.p0=0.0
-eos0.cp=1005.0
-eos0.cv=717.86
-eos1.gamma={GAMMA}
-eos1.p0=0.0
-eos1.cp=1005.0
-eos1.cv=717.86
-mu0=0.0
-mu0_b=0.0
-mu1=0.0
-mu1_b=0.0
-density0.ic.type=constant
-density0.ic.constant.value={RHO}
-velocity0.ic.type=expression
-velocity0.ic.expression.region0="{U}"
-velocity0.ic.expression.region1="0.0"
-pressure0.ic.type=constant
-pressure0.ic.constant.value={P}
-density1.ic.type=constant
-density1.ic.constant.value={RHO}
-velocity1.ic.type=expression
-velocity1.ic.expression.region0="{U}"
-velocity1.ic.expression.region1="0.0"
-pressure1.ic.type=constant
-pressure1.ic.constant.value={P}
-epsilon=0.1
-sigma=0.0
-Dv=0.0
-pref=0.0
-small=1e-6
-grav=0.0
-density.bc.type.xlo=dirichlet
-density.bc.val.xlo={RHO}
-density.bc.type.xhi=neumann
-density.bc.type.ylo=neumann
-density.bc.type.yhi=neumann
-momentum.bc.type.xlo=dirichlet dirichlet
-momentum.bc.val.xlo={mom_x} 0.0
-momentum.bc.type.xhi=neumann neumann
-momentum.bc.type.ylo=neumann neumann
-momentum.bc.type.yhi=neumann neumann
-energy.bc.type.xlo=dirichlet
-energy.bc.val.xlo={e_bc}
-energy.bc.type.xhi=dirichlet
-energy.bc.val.xhi={e_bc}
-energy.bc.type.ylo=neumann
-energy.bc.type.yhi=neumann
-eta_refinement_criterion=1e10
-omega_refinement_criterion=1e10
-gradu_refinement_criterion=1e10
-p_refinement_criterion=0.1
-rho_refinement_criterion=0.1
-cutoff=1e-16
-m0.ic.constant.value=0.0
-u0.ic.constant.value=0.0 0.0
-q.ic.constant.value=0.0 0.0
-apply_surface_tension=0
-apply_weight=0
-apply_vaporization=0
-Riemann_Solver.type=hllc
-Limiter.type=minmod
-kappa_method=1
-apply_sharpening=0
+eta.bc.type.xlo   = dirichlet          # subsonic inflow
+eta.bc.val.xlo    = 0.5
+eta.bc.type.xhi   = neumann
+eta.bc.type.ylo   = neumann
+eta.bc.type.yhi   = neumann
+
+### EOS (ideal-gas air, gamma = {GAMMA}) -- two identical phases ###
+eos0.gamma = {GAMMA}
+eos0.p0    = 0.0
+eos0.cp    = 1005.0
+eos0.cv    = 717.86
+eos1.gamma = {GAMMA}
+eos1.p0    = 0.0
+eos1.cp    = 1005.0
+eos1.cv    = 717.86
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### FLUID 0 IC (subsonic freestream in +X) ###
+density0.ic.type = constant
+density0.ic.constant.value = {RHO}
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "{U}"      # vx = U
+velocity0.ic.expression.region1 = "0.0"      # vy
+pressure0.ic.type = constant
+pressure0.ic.constant.value = {P:.6f}
+
+### FLUID 1 IC (identical to fluid 0) ###
+density1.ic.type = constant
+density1.ic.constant.value = {RHO}
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "{U}"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = {P:.6f}
+
+### INTERACTIONS ###
+epsilon = 0.1
+sigma   = 0.0
+Dv      = 0.0
+pref    = 0.0
+small   = 1e-6
+grav    = 0.0
+
+### BOUNDARY CONDITIONS ###
+# SUBSONIC: Dirichlet freestream inflow at xlo; pinned back-pressure at xhi
+# (energy Dirichlet, so the domain pressure does not float); far-field Neumann.
+# density.bc = mixture inflow density; energy.bc = PER-PHASE E0=E1=0.5*p/(gamma-1).
+density.bc.type.xlo  = dirichlet
+density.bc.val.xlo   = {RHO}
+density.bc.type.xhi  = neumann
+density.bc.type.ylo  = neumann
+density.bc.type.yhi  = neumann
+
+momentum.bc.type.xlo = dirichlet dirichlet     # Mx = rho*U, My = 0
+momentum.bc.val.xlo  = {mom_x} 0.0
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+energy.bc.type.xlo   = dirichlet
+energy.bc.val.xlo    = {e_bc:.6f}
+energy.bc.type.xhi   = dirichlet          # subsonic outflow: pin back-pressure
+energy.bc.val.xhi    = {e_bc:.6f}
+energy.bc.type.ylo   = neumann
+energy.bc.type.yhi   = neumann
+
+### REFINEMENT CRITERIA -- shock (rho/p gradients) + airfoil (grad phi) ###
+eta_refinement_criterion   = 1e10
+omega_refinement_criterion = 1e10
+gradu_refinement_criterion = 1e10
+p_refinement_criterion     = 0.1
+rho_refinement_criterion   = 0.1
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+
+### SOLVER ###
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+kappa_method        = 1
+apply_sharpening    = 0
 """
     open(inp, "w").write(txt)
 
@@ -304,9 +373,9 @@ if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "sweep"
     if cmd == "gen":
         os.makedirs(TESTDIR, exist_ok=True)
+        REL = "./tests/FlowAirfoil/NACA_0012"     # relative to the flames run dir (portable, like input_Ma1.1)
         write_phi_bmp(naca0012(), os.path.join(TESTDIR, "naca0012.bmp"))
-        write_input(os.path.join(TESTDIR, "naca0012.bmp"),
-                    os.path.join(TESTDIR, "output"), os.path.join(TESTDIR, "input"))
+        write_input(f"{REL}/naca0012.bmp", f"{REL}/output", os.path.join(TESTDIR, "input"))
         print("wrote", TESTDIR, "/{naca0012.bmp,input}")
     elif cmd == "run":
         if len(sys.argv) > 3 and sys.argv[3] == "slip":
