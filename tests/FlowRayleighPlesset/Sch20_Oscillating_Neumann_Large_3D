@@ -50,7 +50,7 @@ amr.max_grid_size  = 32
 amr.blocking_factor = 16
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
-amr.max_level      = 6
+amr.max_level      = 4
 amr.n_cell         = 160 160 160       # base; eta-only AMR -> effective finest 2560^3 (octant)
 
 # n_error_buf pushes the fine patches ~16 dx_finest past the interface band on
