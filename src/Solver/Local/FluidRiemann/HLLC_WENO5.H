@@ -10,7 +10,7 @@
 //          URL: https://www.sciencedirect.com/science/article/pii/S0021999104002281
 //
 // Source: M. J. Del Razo and R. J. LeVeque, "Numerical Methods for Interface Coupling of Compressible
-// and Almost Incompressible Media," SIAM Journal on Scientific Computing, vol. 39, no. 3, pp. B486–B507,
+// and Almost Incompressible Media," SIAM Journal on Scientific Computing, vol. 39, no. 3, pp. B486-B507,
 // Jan. 2017, doi: 10.1137/16m1067834.
 //          URL: https://arxiv.org/abs/1604.08544
 //
@@ -151,7 +151,6 @@ public:
     void reconstructCharacteristicStates(const std::vector<State> &cellAverages,
                                          std::vector<State> &leftStates,
                                          std::vector<State> &rightStates,
-                                         Set::Scalar p_ref,
                                          Set::Scalar small,
                                          int Spec_Vol = 1) const
     {
@@ -208,8 +207,8 @@ public:
                 {
                     ke_L = 0.5 * (u_L * u_L + v_L * v_L) * rho_L;
                     ke_R = 0.5 * (u_R * u_R + v_R * v_R) * rho_R;
-                    p_L = (gamma_L - 1.0) * (E_L - ke_L) - gamma_L * p0_L + p_ref;
-                    p_R = (gamma_R - 1.0) * (E_R - ke_R) - gamma_R * p0_R + p_ref;
+                    p_L = (gamma_L - 1.0) * (E_L - ke_L) - gamma_L * p0_L;
+                    p_R = (gamma_R - 1.0) * (E_R - ke_R) - gamma_R * p0_R;
                     H_L = (E_L + p_L) / rho_L;
                     H_R = (E_R + p_R) / rho_R;
                 }
@@ -217,8 +216,8 @@ public:
                 {
                     ke_L = 0.5 * (u_L * u_L + v_L * v_L);
                     ke_R = 0.5 * (u_R * u_R + v_R * v_R);
-                    p_L = (gamma_L - 1.0) * rho_L * (E_L - ke_L) - gamma_L * p0_L + p_ref;
-                    p_R = (gamma_R - 1.0) * rho_R * (E_R - ke_R) - gamma_R * p0_R + p_ref;
+                    p_L = (gamma_L - 1.0) * rho_L * (E_L - ke_L) - gamma_L * p0_L;
+                    p_R = (gamma_R - 1.0) * rho_R * (E_R - ke_R) - gamma_R * p0_R;
                     H_L = E_L + p_L / rho_L;
                     H_R = E_R + p_R / rho_R;
                 }
@@ -337,7 +336,7 @@ public:
     }
 
     // Solve for a single interface with given left and right states
-    virtual Flux Solve(State lo, State hi, Set::Scalar p_ref, Set::Scalar small, int Spec_Vol = 1) override
+    virtual Flux Solve(State lo, State hi, Set::Scalar small, int Spec_Vol = 1) override
     {
         Set::Scalar rho_L = lo.rho, rho_R = hi.rho;
         Set::Scalar Mn_L = lo.M_normal, Mn_R = hi.M_normal;
@@ -362,12 +361,12 @@ public:
             // With Respect to Specific Volume (energies are per unit volume)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L + small);
             ue_L = E_L - ke_L;
-            p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L + p_ref;
+            p_L = (gamma_L - 1.0) * ue_L - gamma_L * p0_L;
             h_TL = (ke_L + ue_L + p_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R + p_ref;
+            p_R = (gamma_R - 1.0) * ue_R - gamma_R * p0_R;
             h_TR = (ke_R + ue_R + p_R);
         }
         else
@@ -375,12 +374,12 @@ public:
             // With Respect to Specific Mass (energies are per unit mass)
             ke_L = 0.5 * (Mn_L * Mn_L + Mt_L * Mt_L) / (rho_L * rho_L + small);
             ue_L = E_L - ke_L;
-            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L + p_ref;
+            p_L = (gamma_L - 1.0) * rho_L * ue_L - gamma_L * p0_L;
             h_TL = ke_L + ue_L + (p_L / rho_L);
 
             ke_R = 0.5 * (Mn_R * Mn_R + Mt_R * Mt_R) / (rho_R * rho_R + small);
             ue_R = E_R - ke_R;
-            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R + p_ref;
+            p_R = (gamma_R - 1.0) * rho_R * ue_R - gamma_R * p0_R;
             h_TR = ke_R + ue_R + (p_R / rho_R);
         }
 
@@ -520,7 +519,6 @@ public:
 
     // Solve for a domain with cell-averaged values
     std::vector<Flux> SolveArray(const std::vector<State> &cellAverages,
-                                 Set::Scalar p_ref,
                                  Set::Scalar small,
                                  int Spec_Vol = 1)
     {
@@ -531,7 +529,7 @@ public:
         // Perform WENO5 reconstruction
         if (use_characteristic_decomp)
         {
-            weno_.reconstructCharacteristicStates(cellAverages, leftStates, rightStates, p_ref, small, Spec_Vol);
+            weno_.reconstructCharacteristicStates(cellAverages, leftStates, rightStates, small, Spec_Vol);
         }
         else
         {
@@ -541,7 +539,7 @@ public:
         // Solve Riemann problems at each interface
         for (int i = 0; i <= n; i++)
         {
-            interfaceFluxes[i] = Solve(rightStates[i], leftStates[i], p_ref, small, Spec_Vol);
+            interfaceFluxes[i] = Solve(rightStates[i], leftStates[i], small, Spec_Vol);
         }
 
         return interfaceFluxes;
@@ -551,7 +549,6 @@ public:
     {
         HLLC_WENO5 solver;
         int failed = 0;
-        Set::Scalar pref = 10.0;
         Set::Scalar small = 1E-10;
         int Spec_Vol = 1;
 
@@ -561,8 +558,8 @@ public:
             State left(1.0, 1.0, 0.0, 1.0);
             State center(1.0, 1.0, 1.0, 1.0);
             State right(1.0, 1.0, 2.0, 1.0);
-            Flux fluxlo = solver.Solve(center, right, pref, small, Spec_Vol);
-            Flux fluxhi = solver.Solve(left, center, pref, small, Spec_Vol);
+            Flux fluxlo = solver.Solve(center, right, small, Spec_Vol);
+            Flux fluxhi = solver.Solve(left, center, small, Spec_Vol);
 
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
             {
@@ -587,8 +584,8 @@ public:
             State left(1.0, 0.0, 0.0, 1.0);
             State center(1.0, 0.0, 1.0, 1.0);
             State right(1.0, 0.0, 2.0, 1.0);
-            Flux fluxlo = solver.Solve(left, center, pref, small, Spec_Vol);
-            Flux fluxhi = solver.Solve(center, right, pref, small, Spec_Vol);
+            Flux fluxlo = solver.Solve(left, center, small, Spec_Vol);
+            Flux fluxhi = solver.Solve(center, right, small, Spec_Vol);
 
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
             {
@@ -613,8 +610,8 @@ public:
             State left(1.0, 0.0, 0.0, 1.0);
             State center(1.0, 0.0, 0.0, 1.0);
             State right(1.0, 0.0, 0.0, 1.0);
-            Flux fluxhi = solver.Solve(center, right, pref, small, Spec_Vol);
-            Flux fluxlo = solver.Solve(left, center, pref, small, Spec_Vol);
+            Flux fluxhi = solver.Solve(center, right, small, Spec_Vol);
+            Flux fluxlo = solver.Solve(left, center, small, Spec_Vol);
 
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 || fabs(fluxhi.momentum_tangent) > 1E-10 || fabs(fluxlo.momentum_tangent) > 1E-10 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
             {
@@ -638,8 +635,8 @@ public:
             State left(1.0, 1.0, 0.5, 1.0);
             State center(1.0, 1.0, 0.5, 1.0);
             State right(1.0, 1.0, 0.5, 1.0);
-            Flux fluxhi = solver.Solve(center, right, pref, small, Spec_Vol);
-            Flux fluxlo = solver.Solve(left, center, pref, small, Spec_Vol);
+            Flux fluxhi = solver.Solve(center, right, small, Spec_Vol);
+            Flux fluxlo = solver.Solve(left, center, small, Spec_Vol);
 
             if (fabs(fluxhi.mass - fluxlo.mass) > 1E-10 || fabs(fluxhi.momentum_normal - fluxlo.momentum_normal) > 1E-10 || fabs(fluxhi.energy - fluxlo.energy) > 1E-10)
             {
