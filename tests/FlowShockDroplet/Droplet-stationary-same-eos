@@ -33,7 +33,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_Droplet_stationary_uniform_Mob0_fix
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_Droplet_stationary_uniform_Mob0_same_eos
 amr.plot_dt = 0.5e-6
 # amr.plot_int = 1
 
@@ -62,7 +62,8 @@ geometry.prob_hi =  0.010  0.010 0.0
 geometry.is_periodic = 0 0 0
 
 ### STOP ###
-stop_time = 2.0e-5
+# stop_time = 2.0e-5
+stop_time = 5.0e-7
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
@@ -74,13 +75,12 @@ eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x-x_center)**2 + (y-y_center)*
 epsilon = eta.ic.expression.constant.epsilon
 
 ### HYDRO INITIAL CONDITIONS ###
-eos0.gamma = 1.4
-eos0.p0 = 0.0
-mu0 = 1.85e-5
+eos0.gamma = 2.358 # Matched eos for both fluids
+eos0.p0 = 4.01e8
+mu0 = 1.35e-3
 mu0_b = 0.0
 eos1.gamma = 2.358
 eos1.p0 = 4.01e8
-# eos1.p0 = 4.01e6
 mu1 = 1.35e-3
 mu1_b = 0.0
 

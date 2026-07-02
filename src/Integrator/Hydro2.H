@@ -461,6 +461,23 @@ protected:
     // M_floor_gas structurally 0 with the companion on), 0 = unlimited companion (the old
     // behavior, bit-identical, for A/B).
     int ch_companion_pp_limit = 1;
+    // Abgrall-Karni frozen-EOS ("double-flux") cure for the stiffened-mixture
+    // pressure-equilibrium instability (../Shock-droplet_5-Equation.tex, sec:eos-instability).
+    // The five-equation mixture pressure p = (UE - B(eta))/A(eta) is hypersensitive to the
+    // volume fraction (dp/deta ~ gamma_m*p0_eff ~ 5e8 for stiffened water/dodecane), and the
+    // separately-advected eta desyncs from the conservatively-updated energy, so a uniform-p
+    // interface goes linearly unstable from roundoff (nanosecond e-folding). When on, the
+    // per-stage primitive recovery in FillGhost4BC evaluates the mixture EOS PARAMETERS
+    // (gamma_m, p0_eff, and the pressure/temperature blends) from the START-OF-STEP eta^n
+    // (held in eta_old_mf) rather than the current RK-stage eta; UE/KE/velocity still come
+    // from the true conserved state. Freezing gamma,p0 over the step removes the dp/deta
+    // coupling within the step, so the interface is neutrally stable. Mass and momentum stay
+    // fully conservative; energy inherits the standard double-flux interface inconsistency
+    // (Abgrall's theorem -- unavoidable for a variable-gamma contact). This is a
+    // FIVE-equation-closure fix; the full two-state model has no eta-blended EOS and no such
+    // instability. 1 = on (default -- production for the five-equation branch), 0 = off
+    // (legacy pre-cure path, for A/B comparison only).
+    int abgrall_freeze_eos = 1;
     int apply_vaporization = 0;
     int spalding_saturation = 0;       // Stage 2: 1 = Spalding driving force = Antoine saturation Y_s at interface T; 0 = legacy local cell-Y. See SaturationYs.
     int spalding_film_sink = 0;        // Stage 3d: 0 = constant far-field Y_infinity as the Spalding sink (fixed driving -> constant rate). 1 = sample the sink at a FILM distance into the gas (transport-responsive -> sqrt(t) Stefan recession). Requires species_transport.

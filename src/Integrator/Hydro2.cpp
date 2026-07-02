@@ -405,6 +405,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("Mob", value.Mob_user, 0.0);   // CH mobility scale M0: M = M0 * epsilon^2
         pp_query_default("apply_ch_companion", value.apply_ch_companion, 1); // 1: CH companion mass/mom/energy fluxes on (keeps alpharho_k consistent with eta); 0: off
         pp_query_default("ch_companion_pp_limit", value.ch_companion_pp_limit, 1); // 1: Zalesak outflow limiter on the companion (positivity -> M_floor_gas=0); 0: unlimited companion (old behavior, bit-identical)
+        pp_query_default("abgrall_freeze_eos", value.abgrall_freeze_eos, 1); // 1: Abgrall-Karni double-flux (DEFAULT, production) -- freeze mixture EOS params (gamma_m,p0_eff) at start-of-step eta^n in the per-stage primitive recovery, curing the stiffened-mixture interface pressure-equilibrium instability; 0: off (legacy pre-cure path, A/B only). See ../Shock-droplet_5-Equation.tex sec:eos-instability.
         if (value.epsilon <= 0.0)
         {
             Util::Abort(INFO, "epsilon must be positive for Hydro2 Cahn-Hilliard mobility; got ", value.epsilon);
@@ -5376,9 +5377,13 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
 
         auto alpharho0 = alpharho0_mf[lev]->array(mfi);
         auto rho_vap  = rho_vap_mf[lev]->array(mfi);
+        // Start-of-step volume fraction eta^n for the Abgrall-Karni frozen-EOS recovery
+        // (eta_old_mf is solution_old -- untouched through the RK stages, so it holds eta^n).
+        auto eta_old = eta_old_mf[lev]->array(mfi);
 
         const Solver::EOS::Tammann eos0_base = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
+        const int freeze_eos = abgrall_freeze_eos; // local copy for the lambda
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             // Velocity
@@ -5400,9 +5405,18 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             // Kinetic energy
             KE(i, j, k) = 0.5 * rho(i, j, k) * (v(i, j, k, 0) * v(i, j, k, 0) + v(i, j, k, 1) * v(i, j, k, 1));
 
+            // Abgrall-Karni double-flux: evaluate the mixture EOS PARAMETERS from the
+            // start-of-step eta^n (eta_old) instead of the current RK-stage eta when
+            // abgrall_freeze_eos is on. Freezing gamma_m,p0_eff over the step removes the
+            // huge dp/deta ~ gamma_m*p0_eff (~5e8 for stiffened dodecane) coupling that
+            // otherwise lets a roundoff eta perturbation blow the interface pressure up
+            // (../Shock-droplet_5-Equation.tex, sec:eos-instability). UE/KE/velocity below
+            // still use the true conserved state, so mass and momentum stay conservative.
+            const Set::Scalar eta_eos = (freeze_eos != 0) ? eta_old(i, j, k) : eta(i, j, k);
+
             // Mixed EOS properties
-            gamma(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
-            p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
+            gamma(i, j, k) = Solver::EOS::EOS::MixedGamma(eta_eos, eos0_local, eos1_local);
+            p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta_eos, eos0_local, eos1_local);
 
             // Internal energy, floored to the SAME eps_p-equivalent ue_floor the
             // post-update backstop uses. The old clamp to `small` only caught
@@ -5412,15 +5426,15 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             // even while the plotted (post-update) pressure read eps_p. This is
             // the pressure the solver actually consumes, so it must carry the
             // same floor or the backstop never reaches the flux computation.
-            Set::Scalar p_floor = Solver::EOS::EOS::PressureFloor(eta(i, j, k), p0_eff(i, j, k), eps_p, p_cav);
+            Set::Scalar p_floor = Solver::EOS::EOS::PressureFloor(eta_eos, p0_eff(i, j, k), eps_p, p_cav);
             Set::Scalar ue_floor = (p_floor + gamma(i, j, k) * p0_eff(i, j, k) - pref) / (gamma(i, j, k) - 1.0);
             UE(i, j, k) = std::max(E(i, j, k) - KE(i, j, k), ue_floor);
 
-            // Pressure from Tammann EOS
-            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref, small, eps_p, p_cav);
+            // Pressure from Tammann EOS (frozen-eta params under abgrall_freeze_eos)
+            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta_eos, eos0_local, eos1_local, pref, small, eps_p, p_cav);
 
             // Temperature
-            T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local, pref);
+            T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta_eos, eos0_local, eos1_local, pref);
 
             // Sound speed
             a(i, j, k) = Solver::EOS::EOS::TammannSoundSpeed(rho(i, j, k), press(i, j, k), gamma(i, j, k), p0_eff(i, j, k), small);
