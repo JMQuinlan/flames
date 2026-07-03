@@ -268,7 +268,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // SOLVER AND REFRENCE CONDITIONS
         pp_query_required("cfl", value.cfl);                // cfl condition
-        pp_query_default("cfl_v", value.cfl_v, value.cfl);  // cfl condition        pp_query_default("small", value.small, 1.0E-8);       // small regularization value
+        pp_query_default("cfl_v", value.cfl_v, value.cfl);  // cfl condition
+        pp_query_default("small", value.small, 1.0E-8);     // small regularization value
         pp_query_default("cutoff", value.cutoff, 1.0E-6);   // eta cutoff value
 
         // Positivity-preserving flux limiter (Hu-Adams-Shu)
@@ -2863,7 +2864,8 @@ Hydro2::RHS(int lev,
     {
         const Set::Scalar eps_rho_l = eps_rho;
         const Set::Scalar eps_p_l   = eps_p;
-        const Set::Scalar p_cav_l   = p_cav;        const Set::Scalar small_l   = small;
+        const Set::Scalar p_cav_l   = p_cav;
+        const Set::Scalar small_l   = small;
         const Set::Scalar pp_factor = 2.0 * AMREX_SPACEDIM;
         // Source limiter on -> guard the per-phase partial densities in theta and
         // scale the source for positivity in Pass D. Its positivity baseline must
@@ -3405,7 +3407,8 @@ Hydro2::RHS(int lev,
     if (apply_ch_companion != 0 && Mob_user != 0.0)
     {
         const Set::Scalar Mob_l   = Mob_user * epsilon * epsilon * sigma / epsilon; // == Mob in the main loop (constant)
-        const Set::Scalar small_l = small;        const Set::Scalar eps_p_l = eps_p;
+        const Set::Scalar small_l = small;
+        const Set::Scalar eps_p_l = eps_p;
         const Set::Scalar p_cav_l = p_cav;
         // Below this volume fraction the donor intrinsic-density recovery is bounded
         // (matches the diagnostic recovery guard in Advance): the donor rule normally
