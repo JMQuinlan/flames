@@ -40,7 +40,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_Droplet_advection_uniform_eta_old_fix
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_Droplet_advection_uniform_eta-width
 amr.plot_dt = 0.5e-6
 # amr.plot_int = 1
 
@@ -202,4 +202,4 @@ apply_ch_companion = 0
 Mob = 0
 
 ### ABGRALL EOS-FREEZE (off: for debugging) ###
-abgrall_freeze_eos = 0
+# abgrall_freeze_eos = 0

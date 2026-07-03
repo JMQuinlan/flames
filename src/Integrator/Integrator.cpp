@@ -1071,8 +1071,15 @@ Integrator::Evolve()
         if (integrate_variables_before_advance) IntegrateVariables(cur_time, step);
         TimeStep(lev, cur_time, iteration);
         if (integrate_variables_after_advance) IntegrateVariables(cur_time, step);
+        // Advance the clock by the dt the state was ACTUALLY advanced with.
+        // TimeStepComplete may change dt[] for the NEXT step (Hydro2 calls
+        // DynamicTimestep_Update -> SetTimestep there); incrementing cur_time
+        // with the post-update dt[0] desynchronizes the clock from the state
+        // on every step where dt changes (state moved dt_old, clock moved
+        // dt_new -- e.g. the first step after the startup ramp).
+        const amrex::Real dt_used = dt[0];
         TimeStepComplete(cur_time, step);
-        cur_time += dt[0];
+        cur_time += dt_used;
 
         if (amrex::ParallelDescriptor::IOProcessor()) {
             std::cout << "STEP " << step + 1 << " ends."
