@@ -4000,7 +4000,15 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 ? GasEOS_eff(rho_vap(i, j, k) / std::max(alpharho0(i, j, k), small), eos0_base, cv_vap, cp_vap)
                 : eos0_base;
 
-            gammaf(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
+            // EOS evaluations in this post-update pass MUST use the END-OF-STEP
+            // eta (eta_new): E_vol/M/rho here are the updated conserved state, and
+            // recovering them with the stale start-of-step eta fakes a pressure
+            // error dp ~ -Lambda*(u dt/dx)*d(eta) at a translating interface
+            // (~ -3 MPa at CFL 0.2). The floor below then fired on that fake
+            // tension and INJECTED real energy into E_vol every step at the
+            // trailing band -- the uniform-advection wake/lag bug. eta (old) is
+            // kept only for the etadot diagnostic.
+            gammaf(i, j, k) = Solver::EOS::EOS::MixedGamma(eta_new(i, j, k), eos0_local, eos1_local);
 
             etadot(i,j,k) = (eta_new(i,j,k) - eta(i,j,k)) / dt;
         
@@ -4024,9 +4032,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // (PressureFloor blends the two). This replaces the old uniform p >= eps_p
             // (which clamped legitimate lee-side liquid tension to 1 Pa and injected
             // energy every step). UE_vol >= (p_floor + gamma_eff*p0_eff)/(gamma_eff-1).
-            p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
+            p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta_new(i, j, k), eos0_local, eos1_local);
             {
-                Set::Scalar p_floor  = Solver::EOS::EOS::PressureFloor(eta(i, j, k), p0_eff(i, j, k), eps_p, p_cav);
+                Set::Scalar p_floor  = Solver::EOS::EOS::PressureFloor(eta_new(i, j, k), p0_eff(i, j, k), eps_p, p_cav);
                 Set::Scalar ue_floor = (p_floor + gammaf(i, j, k) * p0_eff(i, j, k)) / (gammaf(i, j, k) - 1.0);
                 // Diagnostic: energy injected by the floor (0 if not floored).
                 pp_efloor_(i, j, k) = std::max(ue_floor - UE_vol(i, j, k), 0.0);
@@ -4040,7 +4048,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 {
                     const Set::Scalar press_pre = (gammaf(i, j, k) - 1.0) * UE_vol(i, j, k)
                                                 - gammaf(i, j, k) * p0_eff(i, j, k);
-                    if (eta(i, j, k) >= 0.5)
+                    if (eta_new(i, j, k) >= 0.5)
                     {
                         floor_energy_gas_local += pp_efloor_(i, j, k);
                         p_preflr_min_gas_local = std::min(p_preflr_min_gas_local, press_pre);
@@ -4063,13 +4071,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             E_mas(i,j,k) = E_vol(i,j,k) / (rho(i,j,k) + small);
             UE_mas(i,j,k) = E_mas(i,j,k) - KE_mas(i,j,k);
 
-            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE_vol(i, j, k), eta(i, j, k), eos0_local, eos1_local, small, eps_p, p_cav);
+            press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE_vol(i, j, k), eta_new(i, j, k), eos0_local, eos1_local, small, eps_p, p_cav);
         
             Set::Scalar f_prime = 4.0 * eta_new(i,j,k) * (eta_new(i,j,k) - 0.5) * (eta_new(i,j,k) - 1.0);
             Set::Scalar mu_chem = -epsilon * epsilon * lap_eta + f_prime;
             mu_chem_(i,j,k) = mu_chem;
         
-            Bm(i,j,k) = eta(i,j,k) / (1.0 - eta(i,j,k) + small);
+            Bm(i,j,k) = eta_new(i,j,k) / (1.0 - eta_new(i,j,k) + small);
         
             a(i, j, k) = Solver::EOS::EOS::TammannSoundSpeed(rho(i, j, k), press(i, j, k), gammaf(i, j, k), p0_eff(i, j, k), small);
 
@@ -5712,10 +5720,20 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         auto UE = UE_per_vol_mf[lev]->array(mfi);
         auto KE = KE_per_vol_mf[lev]->array(mfi);
 
+        // Start-of-step eta^n for the Abgrall-Karni frozen-EOS recovery, same as
+        // STEP 4. eta_old_mf holds the fully-ghost-filled eta from the start of
+        // the step (its ghosts were filled before the pointer swap), so reading
+        // it on the grown box is valid. Without this, ghost cells recovered
+        // (gamma, p0) from the CURRENT stage eta while STEP 4 interiors used
+        // eta^n -- an interior/ghost EOS inconsistency at box boundaries
+        // whenever abgrall_freeze_eos is on.
+        auto eta_old = eta_old_mf[lev]->array(mfi);
+
         const Solver::EOS::Tammann eos0_local = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
+        const int freeze_eos = abgrall_freeze_eos; // local copy for the lambda
 
-        // Compute 
+        // Compute
         amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             v(i, j, k, 0) = M(i, j, k, 0) / rho(i, j, k);
             v(i, j, k, 1) = M(i, j, k, 1) / rho(i, j, k);
@@ -5725,13 +5743,16 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             UE(i, j, k) = E(i, j, k) - KE(i, j, k);
             UE(i, j, k) = (UE(i, j, k) < 0.0) ? small : UE(i, j, k);
 
+            // Frozen-eta EOS params under abgrall_freeze_eos, mirroring STEP 4.
+            const Set::Scalar eta_eos = (freeze_eos != 0) ? eta_old(i, j, k) : eta(i, j, k);
+
             //if (!(use_nscbc))
             //{
-                gamma(i, j, k) = Solver::EOS::EOS::MixedGamma(eta(i, j, k), eos0_local, eos1_local);
-                p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta(i, j, k), eos0_local, eos1_local);
-                press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta(i, j, k), eos0_local, eos1_local, small, eps_p, p_cav);
+                gamma(i, j, k) = Solver::EOS::EOS::MixedGamma(eta_eos, eos0_local, eos1_local);
+                p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(eta_eos, eos0_local, eos1_local);
+                press(i, j, k) = Solver::EOS::EOS::MixedPressure(rho(i, j, k), UE(i, j, k), eta_eos, eos0_local, eos1_local, small, eps_p, p_cav);
             //}
-            T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta(i, j, k), eos0_local, eos1_local);
+            T(i, j, k) = Solver::EOS::EOS::MixedTemperature(rho(i, j, k), press(i, j, k), eta_eos, eos0_local, eos1_local);
             a(i, j, k) = Solver::EOS::EOS::TammannSoundSpeed(rho(i, j, k), press(i, j, k), gamma(i, j, k), p0_eff(i, j, k), small);
         });
     }

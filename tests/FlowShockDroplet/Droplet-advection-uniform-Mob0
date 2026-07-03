@@ -1,0 +1,205 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# =============================================================================
+# DROPLET-ADVECTION-UNIFORM-Mob0 -- eta-width isolation: UNIFORM TRANSLATION,
+#                                   NO regrid, NO CH
+# =============================================================================
+# The advection companion to Droplet-stationary-uniform-Mob0: same physics
+# deck (uniform grid at dx = 3.125e-5 m, all reactive physics off, surface
+# tension off, PP limiter off, Mob = 0) EXCEPT both phases move at a single
+# constant velocity u = 250 m/s (+x). The exact solution is "the t=0 droplet
+# translated by u*t": eta should not change shape. Boundaries are zero-
+# gradient neumann (NOT periodic): with a uniform far-field state, neumann
+# inflow at xlo and outflow at xhi are exact (ghost = interior = ambient).
+# The box is extended to x in [-10, +30] mm (1280x640 at the same dx) so the
+# droplet, moving 5 mm over stop_time = 2e-5 s, ends with its leading 2%-eta
+# contour near x = 9.4 mm, ~20 mm (~660 cells) short of xhi -- no wall
+# interaction.
+#
+# READ (against the two references):
+#   * Droplet-stationary-uniform-Mob0 (u=0, this deck minus velocity): FROZEN
+#     after the eos-freeze + ADC-gate + small-parse fixes. Any widening HERE is
+#     therefore PURELY the first-order upwind eta-advection diffusion, with no
+#     CH to oppose it -- the clean per-cell-crossing widening rate.
+#   * Droplet-advection (AMR max_level=4, Mob=130, ST on, PP on): the
+#     production-configuration translation case. (advection-uniform-Mob0
+#     widening) vs (Droplet-advection widening) separates raw upwind diffusion
+#     from the regrid-interpolation contribution and from how much CH claws
+#     back.
+#
+# HISTORY NOTE: before the abgrall_freeze_eos + adc_interface_comp_thresh
+# fixes, translation cases also carried the stiffened-mixture pressure ring
+# and the roundoff-triggered interface-band HLL blast; their widening numbers
+# conflated those pressure-pulse rectifications with true advective diffusion.
+# Numbers from this deck are only comparable to runs at/after those fixes.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_Droplet_advection_uniform_eta_old_fix
+amr.plot_dt = 0.5e-6
+# amr.plot_int = 1
+
+### MESHING -- UNIFORM FINE, NO REGRID ###
+amr.max_grid_size = 128
+amr.blocking_factor = 16
+amr.regrid_int = 1
+amr.grid_eff = 0.8
+amr.n_error_buf = 4
+amr.max_level = 0
+amr.n_cell = 1280 640
+
+### TIME STEPPING ###
+timestep = 1e-11
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1.0e-7
+dynamictimestep.min = 1.0e-15
+cfl = 0.2
+
+### DIMENSIONS ###
+# Non-periodic box, extended in +x for the translation; droplet starts
+# centred at the origin and translates +x.
+geometry.prob_lo = -0.010 -0.010 0.0
+geometry.prob_hi =  0.030  0.010 0.0
+geometry.is_periodic = 0 0 0
+
+### STOP ###
+stop_time = 2.0e-5
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 8.0e-5
+eta.ic.expression.constant.R0 = 4.4e-3
+eta.ic.expression.constant.x_center = 0.0
+eta.ic.expression.constant.y_center = 0.0
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x-x_center)**2 + (y-y_center)**2) - R0)/(sqrt(2)*epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+eos0.gamma = 1.4
+eos0.p0 = 0.0
+mu0 = 1.85e-5
+mu0_b = 0.0
+eos1.gamma = 2.358
+eos1.p0 = 4.01e8
+mu1 = 1.35e-3
+mu1_b = 0.0
+
+density0.ic.type = expression
+density0.ic.expression.constant.rho_amb = 0.9699142
+density0.ic.expression.region0 = "rho_amb"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_nDodecane = 750.0
+density1.ic.expression.region0 = "rho_nDodecane"
+
+# Uniform advection velocity (+x) for BOTH phases (region0 = x-comp, region1 = y-comp).
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "250.0"
+velocity0.ic.expression.region1 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "250.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_amb = 101325.0
+pressure0.ic.expression.region0 = "p_amb"
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_amb = 101325.0
+# Surface tension is OFF -> no Laplace jump (uniform p is the equilibrium).
+pressure1.ic.expression.constant.p_laplace = 0.0
+pressure1.ic.expression.region0 = "p_amb + p_laplace"
+
+eos0.cv = "717.5"
+eos0.cp = "1004.5"
+eos1.cv = "1.08e3"
+eos1.cp = "2546.64"
+
+sigma = 0.025
+
+### REACTIVE PHYSICS -- ALL OFF ###
+apply_vaporization = 0
+species_transport  = 0
+apply_latent_heat  = 0
+apply_cavitation   = 0
+k0_thermal = 0.0
+k1_thermal = 0.0
+
+### BOUNDARY CONDITIONS ###
+# Zero-gradient neumann everywhere. Exact for the uniform ambient at all four
+# boundaries (uniform inflow at xlo, uniform outflow at xhi, tangential flow
+# at ylo/yhi); the droplet never approaches a wall.
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA (inert with max_level=0) ###
+eta_refinement_criterion   = 2e-2
+omega_refinement_criterion = 1e+20
+divu_refinement_criterion  = 1e+20
+rho_refinement_criterion   = 1e+20
+gradu_refinement_criterion = 1e+20
+
+cutoff = 1e-16
+small  = 1e-6
+
+### POSITIVITY-PRESERVING FLUX LIMITER ###
+pp_flux_limiter   = 0
+pp_source_limiter = 0
+eps_p   = 1.0
+eps_rho = 1e-10
+p_cav = 1.0e6
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 0
+apply_weight = 0
+grav = 0.0
+Spec_Vol = 1
+
+### RIEMANN SOLVER ###
+# Band tag kept ON with the compression-magnitude gate (adc_interface_comp_thresh)
+# so this deck also regression-tests the gate under pure translation: uniform u
+# has div_u = 0, so the gated tag must stay silent and the run must be pure HLLC.
+# Set adc_interface_comp_thresh = 0 to reproduce the legacy sign-only tag.
+Riemann_Solver.type = hllc_adc
+Riemann_Solver.hllc_adc.alpha = 12
+Riemann_Solver.hllc_adc.adc_components = 4
+adc_shock_threshold = 0.75
+adc_grow = 4
+adc_interface_band = 0.05
+adc_interface_comp_thresh = 1e-2
+
+### SURFACE-TENSION NORMAL CALC ###
+kappa_method = 1
+smooth_kernel_size = 5
+nghost = 4
+kappa_grad_frac = 0.02
+
+### INTERFACE SHARPENING (off) ###
+apply_sharpening = 0
+
+### CAHN-HILLIARD -- OFF ###
+apply_ch_companion = 0
+Mob = 0
+
+### ABGRALL EOS-FREEZE (off: for debugging) ###
+abgrall_freeze_eos = 0
