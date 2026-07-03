@@ -292,11 +292,18 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("adc_shock_threshold", value.adc_shock_threshold, 0.05);
         pp_query_default("adc_grow", value.adc_grow, 1);
         // Interface-compression tag: OR into the raw shock tag any diffuse-band cell
-        // (min(eta,1-eta) > adc_interface_band) that is also compressing (div_u < 0).
+        // (min(eta,1-eta) > adc_interface_band) that is also compressing.
         // Lands HLL dissipation on the shock-compressed interface band that the
         // Ducros sensor shear-suppresses (cures the windward-contact energy overshoot
         // that drives the liquid pressure/energy floor). 0 = off.
         pp_query_default("adc_interface_band", value.adc_interface_band, 0.0);
+        // Compression-magnitude gate for the band tag: require comp*dr/c (Ducros-sensor
+        // normalization) above this threshold, not merely div_u < 0. The bare sign test
+        // is roundoff-triggered on a quiescent interface and flips the whole ring to
+        // HLL, whose energy diffusion across the stationary contact launches a spurious
+        // MPa startup wave (eta stays put while E diffuses). Real shock compression is
+        // comp*dr/c = O(0.1-1), so 1e-2 passes it and rejects noise.
+        pp_query_default("adc_interface_comp_thresh", value.adc_interface_comp_thresh, 1e-2);
         // Force full HLL (omega = 0 on every face) for the first hll_first_steps
         // step(s), then fall back to the normal shock-tag blend. The interface/
         // contact carbuncle is seeded only by the step-1 startup transient (the
@@ -1610,6 +1617,7 @@ Hydro2::RHS(int lev,
         const Set::Scalar thresh     = adc_shock_threshold;
         const Set::Scalar small_l    = small;
         const Set::Scalar iface_band = adc_interface_band;
+        const Set::Scalar iface_comp_thresh = adc_interface_comp_thresh;
 
         // Raw shock indicator per valid cell.
         for (amrex::MFIter mfi(shock_raw, false); mfi.isValid(); ++mfi)
@@ -1642,12 +1650,17 @@ Hydro2::RHS(int lev,
                 // Interface-compression tag: the Ducros weight kills the sensor on the
                 // sheared diffuse interface, so a shock-compressed contact never trips
                 // the threshold above. Tag it directly when it is inside the band AND
-                // compressing, so HLL dissipation reaches the windward-contact overshoot
-                // that would otherwise feed the liquid pressure/energy floor.
+                // compressing above the magnitude gate, so HLL dissipation reaches the
+                // windward-contact overshoot that would otherwise feed the liquid
+                // pressure/energy floor. The gate uses comp*dr/c (the sensor's own
+                // normalization, minus the Ducros weight): a bare div_u < 0 sign test
+                // fires on roundoff velocities in a quiescent uniform-p interface, and
+                // the resulting HLL energy diffusion across the stationary contact
+                // launches a spurious MPa startup wave via the mixture EOS.
                 if (iface_band > 0.0)
                 {
                     const Set::Scalar eb = std::min(ee(i, j, k), 1.0 - ee(i, j, k));
-                    if (eb > iface_band && div_u < 0.0) raw(i, j, k) = 1.0;
+                    if (eb > iface_band && comp * dr / c > iface_comp_thresh) raw(i, j, k) = 1.0;
                 }
             });
         }

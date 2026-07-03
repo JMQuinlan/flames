@@ -570,9 +570,20 @@ protected:
     // windward droplet face) runs full HLLC and its energy flux carries an
     // antidiffusive overshoot -> bad conserved energy -> the liquid pressure/energy
     // floor. OR into the raw shock tag any diffuse-band cell (min(eta,1-eta) >
-    // adc_interface_band) that is also compressing (div_u < 0), so HLL dissipation
+    // adc_interface_band) that is also compressing, so HLL dissipation
     // reaches the compressed band the Ducros sensor misses. 0 = off (no extra tag).
     Set::Scalar adc_interface_band = 0.0;
+    // Compression-magnitude gate for the interface-band tag. A band cell tags only
+    // when its nondimensional compression comp*dr/c = max(-div_u,0)*dr/c (same
+    // normalization as the Ducros shock sensor, minus the Ducros weight) exceeds
+    // this threshold. A bare sign test (div_u < 0) is roundoff-triggered: in a
+    // quiescent uniform-p droplet, machine-noise velocities tag ~half the band by
+    // step 2, the dilation paints the whole interface ring, and the resulting HLL
+    // energy flux across the stationary contact (E diffuses, eta does not) launches
+    // an MPa-scale startup pressure wave through the mixture EOS. A genuine
+    // shock-compressed contact has comp*dr/c = O(0.1-1), so the default gate keeps
+    // the windward-overshoot cure while ignoring roundoff/acoustic-level compression.
+    Set::Scalar adc_interface_comp_thresh = 1e-2;
 
     // Adaptive Timestep
     bool adaptive_timestep = false;

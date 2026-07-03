@@ -168,12 +168,26 @@ grav = 0.0
 Spec_Vol = 1
 
 ### RIEMANN SOLVER ###
+# NOTE (startup-wave post-mortem): with adc_grow >= 0 the div(u) shock tag replaces
+# the solver's internal pressure-ratio sensor (alpha is then unused), and the
+# adc_interface_band tag used to fire on the bare SIGN of div_u. On this quiescent
+# uniform-p case, roundoff velocities tagged the whole interface ring by step ~2;
+# with adc_components = 4 that meant full-HLL energy diffusion across the stationary
+# contact (E diffuses, eta does not), launching the MPa-scale startup pressure wave
+# through the mixture EOS -- independent of abgrall_freeze_eos. The band tag is now
+# gated by adc_interface_comp_thresh (comp*dr/c > thresh, default 1e-2), which this
+# case must NOT trip. A/B knobs:
+#   adc_interface_band = 0          -> band tag off entirely (E1)
+#   adc_grow = -1                   -> all tagging off, internal sensor only (E2)
+#   Riemann_Solver.hllc_adc.adc_components = 2 -> energy flux stays HLLC (E3)
+#   adc_interface_comp_thresh = 0   -> legacy sign-only gate (reproduces the wave)
 Riemann_Solver.type = hllc_adc
 Riemann_Solver.hllc_adc.alpha = 12
 Riemann_Solver.hllc_adc.adc_components = 4
 adc_shock_threshold = 0.75
 adc_grow = 4
 adc_interface_band = 0.05
+adc_interface_comp_thresh = 1e-2
 
 ### SURFACE-TENSION NORMAL CALC ###
 kappa_method = 1
