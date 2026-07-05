@@ -59,8 +59,17 @@ import matplotlib.pyplot as plt
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
-# Bring in the shared RPE / KM / Chen2D ODE solver (DO NOT modify it).
-sys.path.insert(0, os.path.join(_HERE, '..', 'OtherTests', 'reference'))
+_SOLVER_CANDIDATES = [
+    os.path.join(_HERE, "..", "OtherTests", "reference"),
+    os.path.join(_HERE, "..", "Diagnostic_Tests", "OtherTests", "reference"),
+]
+for _cand in _SOLVER_CANDIDATES:
+    if os.path.isfile(os.path.join(_cand, "rayleigh_plesset_solver.py")):
+        sys.path.insert(0, os.path.abspath(_cand))
+        break
+else:
+    # No candidate found -- fall back to the historical path so the resulting
+    # ImportError at least names a concrete directory.
 from rayleigh_plesset_solver import (                                  # noqa: E402
     Params, solve,
     rayleigh_collapse_time,
