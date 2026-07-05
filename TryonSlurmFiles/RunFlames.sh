@@ -26,10 +26,10 @@ module load gnu9 mpich
 ## 3D Varients ##
 #srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Sch20_Oscillating_Neumann_3D
 #srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Sch20_Oscillating_NSCBC_3D
-srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Sch20_Oscillating_Neumann_Large_3D
+#srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Sch20_Oscillating_Neumann_Large_3D
 #srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Sch20_Oscillating_NSCBC_Large_3D
 
 #srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Sch20_Collapsing_Neumann_3D
 #srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Sch20_Collapsing_NSCBC_3D
-#srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Sch20_Collapsing_Neumann_Large_3D
+srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Sch20_Collapsing_Neumann_Large_3D
 #srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Sch20_Collapsing_NSCBC_Large_3D
