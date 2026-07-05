@@ -60,6 +60,8 @@ from rayleigh_plesset_solver import (                                  # noqa: E
     rayleigh_collapse_time,
     linear_natural_frequency_3d, linear_natural_frequency_chen2d,
 )
+OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Collapsing_3D")
+OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Collapsing_Large_3D")
 
 
 # ============================================================================
