@@ -51,8 +51,8 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 
-# plot_file = /mmfs1//home/spatel6/flames/bin/dodecane_8um/air_dodecane_Ma5_Vap
-plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_air_dodecane_Ma5_Vap
+plot_file = /mmfs1//home/spatel6/flames/bin/dodecane_8um/air_dodecane_Ma5
+#plot_file = /mmfs1/home/jquinlan/runs/dodecane/output_air_dodecane_Ma5_Vap
 
 ### MESHING ###
 amr.plot_dt = 1e-9
@@ -62,9 +62,9 @@ amr.blocking_factor = 16
 amr.regrid_int = 1
 amr.grid_eff = 0.8
 amr.n_error_buf = 12
-amr.max_level = 3
+amr.max_level = 5
 # amr.n_cell = 1024 256
-amr.n_cell = 2048 512
+amr.n_cell = 2304 128
 
 ### TIME STEPPING ###
 ## Static:
@@ -82,7 +82,7 @@ cfl = 0.2
 #geometry.prob_lo = 0.000 0.000 0.0
 #geometry.prob_hi = 0.160 0.080 0.0
 geometry.prob_lo = -2.0e-5 -1.75e-5 0.0
-geometry.prob_hi =  1.2e-4  1.75e-5 0.0
+geometry.prob_hi =  6.0e-4  1.75e-5 0.0
 geometry.is_periodic = 0 0 0
 
 ### TIME STEP ###
@@ -199,7 +199,7 @@ cv_vap            = 1950.0     # dodecane-vapor cv [J/kg/K]  (old eos0 dodecane-
 rhoD_ref  = 1.177e-5   # kg/m/s; this replaces tuning Dv
   rhoD_Tref = 300.0
   rhoD_exp  = 0.5  # 0.5 = C-E scaling
-L_film = 2.0e-7                 # Spalding film thickness [m]: m'' = (rho_g*Dv/L_film)*B'. Dv/L_film = 50 m/s mass-transfer velocity (quasi-steady stagnant-film). Restores the rate magnitude (the bare |grad eta| form was missing 1/L -> ran ~1/epsilon too small).
+L_film = 3.70e-10                 # Spalding film thickness [m]: m'' = (rho_g*Dv/L_film)*B'. Dv/L_film = 50 m/s mass-transfer velocity (quasi-steady stagnant-film). Restores the rate magnitude (the bare |grad eta| form was missing 1/L -> ran ~1/epsilon too small).
 
 ### LATENT HEAT (on) / CONDUCTION (off: never validated 2-phase) ###
 apply_latent_heat = 1
