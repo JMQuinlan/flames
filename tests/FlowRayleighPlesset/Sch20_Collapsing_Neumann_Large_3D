@@ -62,7 +62,7 @@ amr.max_grid_size  = 32
 amr.blocking_factor = 16
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
-amr.max_level      = 4
+amr.max_level      = 5
 amr.n_cell         = 160 160 160       # base; eta-only AMR -> finest dx 7.8e-4 (R0/dx 25.6)
 amr.n_error_buf    = 16
 
