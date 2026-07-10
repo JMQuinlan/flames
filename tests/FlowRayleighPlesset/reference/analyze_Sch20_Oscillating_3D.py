@@ -59,8 +59,17 @@ import matplotlib.pyplot as plt
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
-# Bring in the shared RPE / KM / Chen2D ODE solver (DO NOT modify it).
-sys.path.insert(0, os.path.join(_HERE, '..', 'OtherTests', 'reference'))
+_SOLVER_CANDIDATES = [
+    os.path.join(_HERE, "..", "OtherTests", "reference"),
+    os.path.join(_HERE, "..", "Diagnostic_Tests", "OtherTests", "reference"),
+]
+for _cand in _SOLVER_CANDIDATES:
+    if os.path.isfile(os.path.join(_cand, "rayleigh_plesset_solver.py")):
+        sys.path.insert(0, os.path.abspath(_cand))
+        break
+else:
+    # No candidate found -- fall back to the historical path so the resulting
+    # ImportError at least names a concrete directory.
 from rayleigh_plesset_solver import (                                  # noqa: E402
     Params, solve,
     rayleigh_collapse_time,
@@ -114,8 +123,6 @@ OUTPUT_DIR = os.path.normpath(os.path.join(
 # OVERRIDE (uncomment + edit for your machine):
 OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_3D")
 OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large_3D")
-#OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_3D_WENO3_SHARP")
-#OUTPUT_DIR = os.path.normpath("/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_3D_WENO5")
 
 # ===== PLOT STYLING (publication knobs) =====
 FONT_SIZE_TITLE  = 16
@@ -628,21 +635,31 @@ def plot_ic_pressure_diagnostic(amrex_output_dir, axis="x"):
 BOX_HALF = 0.2   # m; ~10 R0 -- the bubble (R<=R0=0.02) lives well inside this
 
 
-def extract_radius_volume_history(amrex_output_dir, box_half=BOX_HALF):
-    """Per frame, R from the gas-volume integral (Sch20 eq. 29).
-    Returns (times, radii); skips corrupt/partial plotfiles silently."""
+def extract_radius_volume_history(amrex_output_dir, box_half=BOX_HALF, nbins=400):
+    """Per frame, TWO radii from one yt pass:
+        R_vol     -- gas-volume integral (Sch20 eq.29).  Integrates alpha_g across
+                     the diffuse band, so on a CURVED interface the r^2-weighted
+                     outer half of the band inflates the volume -> R_vol OVER-reads,
+                     worst at maximum compression (band ~ a fixed cell-count becomes
+                     a large fraction of the small bubble).
+        R_eta_rad -- radially-averaged eta=0.5 contour.  Bins every cell by
+                     r=|x-center| and takes the VOLUME-WEIGHTED mean eta per shell,
+                     then finds the 0.5 crossing.  Averaging over all directions
+                     kills the single-ray grid anisotropy (which makes the eta=0.5
+                     RAY under-read), and tracking the contour avoids the band
+                     over-read of R_vol -> this is the robust radius that lands on KM.
+    Returns (times, R_vol, R_eta_rad); skips corrupt/partial plotfiles silently."""
     import yt
     yt.funcs.mylog.setLevel(40)
     if not os.path.isdir(amrex_output_dir):
-        return np.array([]), np.array([])
+        return np.array([]), np.array([]), np.array([])
     pfs = sorted(os.path.join(amrex_output_dir, d) for d in os.listdir(amrex_output_dir)
                  if os.path.isdir(os.path.join(amrex_output_dir, d)) and d.endswith("cell"))
-    times, radii = [], []
+    times, radii, radii_eta = [], [], []
     for pf in pfs:
         try:
             ds = yt.load(pf)
             dle = ds.domain_left_edge
-            dre = ds.domain_right_edge
             # Octant/symmetry detection: a lo edge sitting at the origin (the
             # bubble center) means that axis is a symmetry plane, so only half the
             # bubble lies along it.  full domain: all lo<0 -> factor 1; octant:
@@ -654,9 +671,12 @@ def extract_radius_volume_history(amrex_output_dir, box_half=BOX_HALF):
             if not times:
                 print("  [R-volume] geometry: %s -> V_gas x%d"
                       % ("OCTANT" if sym_factor > 1 else "FULL domain", sym_factor))
-            lo = [max(-box_half, float(dle[_d])) for _d in range(3)]
-            hi = [min( box_half, float(dre[_d])) for _d in range(3)]
-            reg = ds.box(ds.arr(lo, "code_length"), ds.arr(hi, "code_length"))
+            # R-FILTER REMOVED (2026-06): integrate alpha_g over the WHOLE domain
+            # (no +/-box_half restriction), so no gas volume can be clipped out or
+            # mis-sampled.  Sch20 Eq.(29) is a sum over ALL grid cells; the far field
+            # is eta=1 -> alpha_g=0 and contributes nothing, so the only effect of the
+            # old box was a (small) risk of cutting the diffuse halo / an expanded bubble.
+            reg = ds.all_data()
             eta = np.array(reg["eta"])
             try:
                 vol = np.array(reg["index", "cell_volume"])
@@ -665,18 +685,43 @@ def extract_radius_volume_history(amrex_output_dir, box_half=BOX_HALF):
             alpha_g = np.clip(1.0 - eta, 0.0, 1.0)
             V_b = float(np.sum(alpha_g * vol)) * sym_factor
             radii.append((3.0 * V_b / (4.0 * np.pi)) ** (1.0 / 3.0))
+            # --- radially-averaged eta=0.5 contour (robust KM-matching radius) ---
+            # center = origin for octant, else domain center.
+            cen = [0.0 if float(dle[_d]) > -1e-6 else 0.5 * float(dle[_d] + ds.domain_right_edge[_d])
+                   for _d in range(3)]
+            x = np.array(reg["x"]) - cen[0]
+            y = np.array(reg["y"]) - cen[1]
+            z = np.array(reg["z"]) - cen[2]
+            r = np.sqrt(x * x + y * y + z * z)
+            rmax = min(float(r.max()), 10.0 * P.R0)
+            edges = np.linspace(0.0, rmax, nbins + 1)
+            idx = np.clip(np.digitize(r, edges) - 1, 0, nbins - 1)
+            rc = 0.5 * (edges[:-1] + edges[1:])
+            wsum = np.bincount(idx, weights=vol, minlength=nbins)
+            esum = np.bincount(idx, weights=eta * vol, minlength=nbins)
+            good = wsum > 0
+            rr = rc[good]; ee = esum[good] / wsum[good]
+            R05 = np.nan
+            for i in range(len(rr) - 1):     # first 0.5 crossing (gas in -> eta 0->1 out)
+                if (ee[i] - 0.5) * (ee[i + 1] - 0.5) < 0:
+                    R05 = rr[i] + (0.5 - ee[i]) * (rr[i + 1] - rr[i]) / (ee[i + 1] - ee[i])
+                    break
+            radii_eta.append(R05)
             times.append(float(ds.current_time))
         except Exception:
             continue
     if not times:
-        return np.array([]), np.array([])
-    t = np.array(times); r = np.array(radii); o = np.argsort(t)
-    return t[o], r[o]
+        return np.array([]), np.array([]), np.array([])
+    t = np.array(times); rv = np.array(radii); re = np.array(radii_eta)
+    o = np.argsort(t)
+    return t[o], rv[o], re[o]
 
 
-def plot_radius_volume(times_s, R_vol, curves, R_eta_t=None, R_eta=None):
-    """Volume-based R/R0 vs time, overlaid with KM/RP (and the eta=0.5 ray R for
-    contrast) -> Images/{SAVE_NAME}_R_volume.*"""
+def plot_radius_volume(times_s, R_vol, curves, R_eta_t=None, R_eta=None,
+                       R_rad_t=None, R_rad=None):
+    """Volume-based R/R0 vs time, overlaid with KM/RP, the eta=0.5 RAY (anisotropy
+    contrast), and the radially-averaged eta=0.5 CONTOUR (the robust KM-matching
+    radius) -> Images/{SAVE_NAME}_R_volume.*"""
     if len(times_s) < 2:
         print("  [R-volume] <2 usable frames -- skipped")
         return
@@ -705,9 +750,13 @@ def plot_radius_volume(times_s, R_vol, curves, R_eta_t=None, R_eta=None):
     if R_eta is not None and R_eta_t is not None and len(R_eta) > 1:
         ax.plot(np.asarray(R_eta_t) * tf, np.asarray(R_eta) / R0, ":", color="tab:gray",
                 lw=1.3, alpha=0.7, label=r"hydro2 $\eta{=}0.5$ ray")
-    # the new volume-based radius
+    # the volume-based radius (over-reads at compression: integrates the band)
     ax.plot(times_s * tf, R_vol / R0, "-o", color="tab:purple", lw=2.0, ms=3,
             label=r"hydro2 $R=(3V_b/4\pi)^{1/3}$ (gas volume)")
+    # radially-averaged eta=0.5 CONTOUR -- robust, lands on KM
+    if R_rad is not None and R_rad_t is not None and np.sum(np.isfinite(R_rad)) > 1:
+        ax.plot(np.asarray(R_rad_t) * tf, np.asarray(R_rad) / R0, "-s", color="tab:red",
+                lw=2.0, ms=3.5, label=r"hydro2 $\eta{=}0.5$ (radial avg)")
     ax.set_xlabel(tl, fontsize=fsl)
     ax.set_ylabel(r"$R / R_0$", fontsize=fsl)
     ax.set_title(f"{SAVE_NAME}: bubble radius from GAS VOLUME (Sch20 eq. 29)",
@@ -722,9 +771,215 @@ def plot_radius_volume(times_s, R_vol, curves, R_eta_t=None, R_eta=None):
     imin = int(np.argmin(R_vol))
     print(f"  [R-volume] wrote {out}.png  (R_min/R0={R_vol[imin] / R0:.4f} at "
           f"t={times_s[imin] * tf:.4f}; sanity R(0)/R0={R_vol[0] / R0:.4f} -- expect ~1.0)")
+    if R_rad is not None and np.sum(np.isfinite(R_rad)) > 1:
+        rr = np.asarray(R_rad, dtype=float)
+        jmin = int(np.nanargmin(rr))
+        km = next((c for c in (curves or []) if c.get("key") == "km"), None)
+        kmin = (np.nanmin(km["R"]) / R0) if km and len(km.get("R", [])) else float("nan")
+        print(f"  [R-eta-radial] R_min/R0={rr[jmin] / R0:.4f} at t={R_rad_t[jmin] * tf:.4f}"
+              f"  (KM R_min/R0={kmin:.4f}; the robust radius to compare to the benchmark)")
+
+
+# ===========================================================================
+# Bubble SPHERICITY / deformation vs time
+# ---------------------------------------------------------------------------
+# On a Cartesian octant the bubble cannot deform in an ellipsoidal (l=2) mode
+# (the x<->y<->z symmetry forces the inertia tensor isotropic), so an inertia
+# tensor reads "perfectly spherical" no matter what.  The real grid-induced mode
+# is l=4 (cubic): does the interface bulge toward the AXES, the EDGE diagonals,
+# or the CORNER (body) diagonal?  We cast eta=0.5 rays along each family and
+# compare their radii.  A diffuse band offsets all rays equally, so the SPREAD
+# is a clean relative deformation measure (immune to the band that biases R_vol).
+# ===========================================================================
+def _sphericity_directions(octant):
+    a = 1.0 / np.sqrt(2.0); b = 1.0 / np.sqrt(3.0)
+    base = {"axis":   [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)],
+            "edge":   [(a, a, 0.0), (a, 0.0, a), (0.0, a, a)],
+            "corner": [(b, b, b)]}
+    if octant:
+        return base
+    # full domain: include sign flips so we sample the whole sphere
+    def flips(v):
+        out = set()
+        for sx in (1.0, -1.0):
+            for sy in (1.0, -1.0):
+                for sz in (1.0, -1.0):
+                    out.add((sx * v[0], sy * v[1], sz * v[2]))
+        return list(out)
+    return {k: [w for v in vs for w in flips(v)] for k, vs in base.items()}
+
+
+def _fibonacci_dirs(n, octant):
+    """n roughly-uniform unit directions (golden-angle spiral; deterministic).
+    For an octant, fold into the +++ octant (the bubble is reflection-symmetric)."""
+    ga = np.pi * (3.0 - np.sqrt(5.0))
+    out = []
+    for i in range(n):
+        z = 1.0 - 2.0 * (i + 0.5) / n
+        rad = np.sqrt(max(0.0, 1.0 - z * z))
+        th = ga * i
+        v = (np.cos(th) * rad, np.sin(th) * rad, z)
+        if octant:
+            v = (abs(v[0]), abs(v[1]), abs(v[2]))
+        out.append(v)
+    return out
+
+
+def _ray_eta_radius(ds, center, direction, Lmax):
+    """Distance from `center` along `direction` (unit) to the eta=0.5 crossing."""
+    end = (center[0] + direction[0] * Lmax,
+           center[1] + direction[1] * Lmax,
+           center[2] + direction[2] * Lmax)
+    try:
+        ray = ds.ray(center, end)
+        t = np.array(ray["t"], dtype=float)          # parametric 0..1 along ray
+        eta = np.array(ray["eta"], dtype=float)
+    except Exception:
+        return np.nan
+    if len(t) < 2:
+        return np.nan
+    o = np.argsort(t); t = t[o]; eta = eta[o]
+    d = t * Lmax                                      # |end-center| = Lmax (unit dir)
+    for i in range(len(d) - 1):                        # first 0.5 crossing outward
+        if (eta[i] - 0.5) * (eta[i + 1] - 0.5) < 0:
+            return d[i] + (0.5 - eta[i]) * (d[i + 1] - d[i]) / (eta[i + 1] - eta[i])
+    return np.nan
+
+
+def extract_sphericity_history(amrex_output_dir, Lmax=None):
+    """Per frame, two complementary deformation measures:
+
+      K  -- the INTERFACE-weighted cubic invariant  <g>_band - 3/5, with
+            g = (x^4+y^4+z^4)/r^4  (g=1 along an axis, 1/2 edge, 1/3 corner;
+            sphere average = 3/5).  Volume-integrated (NO ray-sampling bias) and
+            band-focused (weight alpha_g(1-alpha_g)) -> reads ~0 for a sphere
+            (IC sphere baseline ~2e-5) and is the trustworthy deformation scalar.
+            K>0 => interface bulges toward the AXES (faces push out);
+            K<0 => bulges toward the CORNERS (diamond/octahedral).
+      R_axis/R_edge/R_corner -- mean eta=0.5 RAY radius along each direction
+            family.  Interpretable "which way" picture, BUT carries a grid-sampling
+            floor ~dx/2R (~4% at R0/dx~13, larger as the bubble shrinks), so read
+            their SPREAD only relative to the t=0 baseline; trust K for magnitude.
+
+      R_min/R_max -- deepest/shallowest eta=0.5 radius over a 32-direction sweep.
+            R_min is the JET DEPTH (a localized inward liquid spike drops the deepest
+            interface well below the mean); the R_min..R_max band is the asymmetry
+            envelope, complementary to the (direction-averaging) family radii.
+
+    Returns (times, R_axis, R_edge, R_corner, K, R_min, R_max)."""
+    import yt
+    yt.funcs.mylog.setLevel(40)
+    if not os.path.isdir(amrex_output_dir):
+        return (np.array([]),) * 7
+    pfs = sorted(os.path.join(amrex_output_dir, d) for d in os.listdir(amrex_output_dir)
+                 if os.path.isdir(os.path.join(amrex_output_dir, d)) and d.endswith("cell"))
+    times, Ra, Re, Rc, Kk, Rmn, Rmx = [], [], [], [], [], [], []
+    for pf in pfs:
+        try:
+            ds = yt.load(pf)
+            dle = ds.domain_left_edge; dre = ds.domain_right_edge
+            octant = all(float(dle[d]) > -1e-6 for d in range(3))
+            center = [0.0, 0.0, 0.0] if octant else \
+                     [0.5 * float(dle[d] + dre[d]) for d in range(3)]
+            lmax = Lmax if Lmax else 5.0 * P.R0
+            # --- interface-weighted cubic invariant K (the robust scalar) -------
+            ad = ds.all_data()
+            x = np.array(ad["x"]) - center[0]
+            y = np.array(ad["y"]) - center[1]
+            z = np.array(ad["z"]) - center[2]
+            eta = np.array(ad["eta"])
+            try:
+                vol = np.array(ad["index", "cell_volume"])
+            except Exception:
+                vol = np.array(ad["cell_volume"])
+            ag = np.clip(1.0 - eta, 0.0, 1.0)
+            r4 = (x * x + y * y + z * z) ** 2
+            m = r4 > 0
+            g = (x[m] ** 4 + y[m] ** 4 + z[m] ** 4) / r4[m]
+            w = ag[m] * (1.0 - ag[m]) * vol[m]             # interface band weight
+            K = float(np.sum(w * g) / np.sum(w) - 0.6) if np.sum(w) > 0 else np.nan
+            # --- ray radii along axis / edge / corner families (interpretable) --
+            dirs = _sphericity_directions(octant)
+            grp = {}
+            for name, vs in dirs.items():
+                rr = [_ray_eta_radius(ds, center, v, lmax) for v in vs]
+                rr = [q for q in rr if np.isfinite(q)]
+                grp[name] = float(np.mean(rr)) if rr else np.nan
+            # --- dense sweep for the jet-depth envelope (min = jet tip) ----------
+            rd = [_ray_eta_radius(ds, center, v, lmax) for v in _fibonacci_dirs(32, octant)]
+            rd = [q for q in rd if np.isfinite(q)]
+            rmin = float(np.min(rd)) if rd else np.nan
+            rmax = float(np.max(rd)) if rd else np.nan
+            times.append(float(ds.current_time))
+            Ra.append(grp["axis"]); Re.append(grp["edge"]); Rc.append(grp["corner"])
+            Kk.append(K); Rmn.append(rmin); Rmx.append(rmax)
+        except Exception:
+            continue
+    if not times:
+        return (np.array([]),) * 7
+    t = np.array(times); o = np.argsort(t)
+    return (t[o], np.array(Ra)[o], np.array(Re)[o], np.array(Rc)[o],
+            np.array(Kk)[o], np.array(Rmn)[o], np.array(Rmx)[o])
+
+
+def plot_sphericity(times_s, R_axis, R_edge, R_corner, K, R_min=None, R_max=None):
+    """Top: axis/edge/corner eta=0.5 radii + the min..max jet-depth envelope
+    (interpretable shape).  Bottom: the interface cubic invariant K (robust
+    deformation, 0=sphere) -> _sphericity.*"""
+    if len(times_s) < 2:
+        print("  [sphericity] <2 usable frames -- skipped")
+        return
+    tu = globals().get("TIME_UNIT", "us")
+    tf, tl = (1.0e3, r"$t$ [ms]") if tu == "ms" else \
+             ((1.0e6, r"$t$ [$\mu$s]") if tu == "us" else (1.0, r"$t$"))
+    R0 = P.R0
+    fw = globals().get("FIG_WIDTH", 11); fh = globals().get("FIG_HEIGHT", 6.5)
+    fsl = globals().get("FONT_SIZE_LABEL", 14); fst = globals().get("FONT_SIZE_TITLE", 16)
+    fsk = globals().get("FONT_SIZE_TICK", 11); fsg = globals().get("FONT_SIZE_LEGEND", 12)
+    dpi = globals().get("DPI", 180)
+    K = np.asarray(K, dtype=float)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(fw, fh), sharex=True,
+                                   gridspec_kw={"height_ratios": [2, 1]})
+    # jet-depth envelope: min..max eta=0.5 radius over a 32-direction sweep
+    if R_min is not None and R_max is not None and np.sum(np.isfinite(R_min)) > 1:
+        ax1.fill_between(times_s * tf, np.asarray(R_min) / R0, np.asarray(R_max) / R0,
+                         color="0.7", alpha=0.30, label="min..max envelope")
+        ax1.plot(times_s * tf, np.asarray(R_min) / R0, "-", color="tab:red", lw=1.4,
+                 alpha=0.9, label="min (jet depth)")
+    ax1.plot(times_s * tf, R_axis / R0, "-o", color="tab:blue",  ms=3, lw=1.8, label="axis  (100)")
+    ax1.plot(times_s * tf, R_edge / R0, "-s", color="tab:orange", ms=3, lw=1.8, label="edge  (110)")
+    ax1.plot(times_s * tf, R_corner / R0, "-^", color="tab:green", ms=3, lw=1.8, label="corner (111)")
+    ax1.set_ylabel(r"$R_{\eta=0.5} / R_0$", fontsize=fsl)
+    ax1.set_title(f"{SAVE_NAME}: bubble sphericity (rays = shape; K = robust deformation)",
+                  fontsize=fst, fontweight="bold")
+    ax1.grid(True, alpha=0.3); ax1.tick_params(labelsize=fsk)
+    ax1.legend(fontsize=fsg, loc="best",
+               title="$\\eta{=}0.5$ ray  (spread incl. ~dx/2R grid floor)")
+    # cubic invariant K: 0 = sphere; sign = bulge direction
+    ax2.axhline(0.0, color="0.6", lw=1.0)
+    ax2.plot(times_s * tf, K, "-", color="tab:red", lw=2.0)
+    ax2.fill_between(times_s * tf, 0, K, where=(K >= 0), color="tab:blue",  alpha=0.18)
+    ax2.fill_between(times_s * tf, 0, K, where=(K < 0),  color="tab:green", alpha=0.18)
+    ax2.set_ylabel("cubic invariant $K$\n(+axis / −corner)", fontsize=fsl - 3)
+    ax2.set_xlabel(tl, fontsize=fsl)
+    ax2.grid(True, alpha=0.3); ax2.tick_params(labelsize=fsk)
+    plt.tight_layout()
+    out = os.path.join(IMG_DIR, f"{SAVE_NAME}_sphericity")
+    fig.savefig(out + ".png", dpi=dpi, bbox_inches="tight")
+    fig.savefig(out + ".eps", dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    if np.any(np.isfinite(K)):
+        j = int(np.nanargmax(np.abs(K)))
+        print(f"  [sphericity] wrote {out}.png  (peak |K|={abs(K[j]):.4f} at "
+              f"t={times_s[j] * tf:.4f} -> {'axis' if K[j] >= 0 else 'corner'}-bulge; "
+              f"sphere baseline |K|~2e-5)")
 
 
 def main():
+    global OUTPUT_DIR
+    if len(sys.argv) > 1:                       # wrapper / CLI override of the dir
+        OUTPUT_DIR = os.path.normpath(sys.argv[1])
+        print(f"  [OUTPUT_DIR override] {OUTPUT_DIR}")
     tau_c = rayleigh_collapse_time(P)
     # Time-axis: convert simulation time (seconds) -> plot units.
     if TIME_UNIT == 'ms':
@@ -900,9 +1155,12 @@ def main():
         print("  Extracting diffuse eta-band (eta=0.1/0.5/0.9 radii)...")
         _bt, _bands = extract_eta_band_history(OUTPUT_DIR, axis="x", x_max=1.5 * P.R0)
         plot_eta_band(_bt, _bands, curves)
-        print("  Extracting volume-based radius (Sch20 eq.29: R=(3 V_gas/4pi)^1/3)...")
-        _vt, _vr = extract_radius_volume_history(OUTPUT_DIR)
-        plot_radius_volume(_vt, _vr, curves, t_sim, R_sim)
+        print("  Extracting volume + radial-avg eta=0.5 radii (one yt pass)...")
+        _vt, _vr, _vre = extract_radius_volume_history(OUTPUT_DIR)
+        plot_radius_volume(_vt, _vr, curves, t_sim, R_sim, _vt, _vre)
+        print("  Extracting bubble sphericity (cubic invariant K + axis/edge/corner rays)...")
+        _st, _sa, _se, _sc, _sk, _smn, _smx = extract_sphericity_history(OUTPUT_DIR)
+        plot_sphericity(_st, _sa, _se, _sc, _sk, _smn, _smx)
 
     out_png = os.path.join(IMG_DIR, f"{SAVE_NAME}.png")
     out_eps = os.path.join(IMG_DIR, f"{SAVE_NAME}.eps")
@@ -946,16 +1204,26 @@ def main():
             with np.errstate(divide='ignore', invalid='ignore'):
                 diff_vol_pct = 100.0 * diff_vol_m / R_ref_at
 
+            # Radially-averaged eta=0.5 contour -- the robust KM-matching radius.
+            # Drop NaN frames (no 0.5 crossing) before interpolating to sim grid.
+            _fin = np.isfinite(_vre) if len(_vre) else np.array([], dtype=bool)
+            R_rad_at = (np.interp(t_sim, _vt[_fin], _vre[_fin], left=np.nan, right=np.nan)
+                        if np.sum(_fin) > 1 else np.full_like(t_sim, np.nan))
+            diff_rad_m = R_rad_at - R_ref_at
+            with np.errstate(divide='ignore', invalid='ignore'):
+                diff_rad_pct = 100.0 * diff_rad_m / R_ref_at
+
             out_csv = os.path.join(IMG_DIR, f"{SAVE_NAME}.csv")
             with open(out_csv, 'w') as f:
-                f.write("time_s,time_ms,R_hydro2_m,R_vol_m,R_rp_m,R_km_m,"
-                        "diff_km_m,diff_km_rel_pct,diff_vol_km_m,diff_vol_km_rel_pct\n")
-                for ts, rh, rv, rr, rk, dm, dp, dvm, dvp in zip(
-                        t_sim, R_sim, R_vol_at, R_rp_at, R_km_at,
-                        diff_m, diff_pct, diff_vol_m, diff_vol_pct):
-                    f.write(f"{ts:.9e},{ts*1e3:.6f},{rh:.9e},{rv:.9e},"
+                f.write("time_s,time_ms,R_hydro2_m,R_vol_m,R_eta_radial_m,R_rp_m,R_km_m,"
+                        "diff_km_m,diff_km_rel_pct,diff_vol_km_m,diff_vol_km_rel_pct,"
+                        "diff_radial_km_m,diff_radial_km_rel_pct\n")
+                for ts, rh, rv, rrad, rr, rk, dm, dp, dvm, dvp, drm, drp in zip(
+                        t_sim, R_sim, R_vol_at, R_rad_at, R_rp_at, R_km_at,
+                        diff_m, diff_pct, diff_vol_m, diff_vol_pct, diff_rad_m, diff_rad_pct):
+                    f.write(f"{ts:.9e},{ts*1e3:.6f},{rh:.9e},{rv:.9e},{rrad:.9e},"
                             f"{rr:.9e},{rk:.9e},{dm:.9e},{dp:.6f},"
-                            f"{dvm:.9e},{dvp:.6f}\n")
+                            f"{dvm:.9e},{dvp:.6f},{drm:.9e},{drp:.6f}\n")
             print(f"  wrote {out_csv}")
         else:
             print("  [info] no RP/KM curve -- CSV export skipped.")

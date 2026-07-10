@@ -90,6 +90,7 @@ public:
         r.alpha_rho_1 = scalar(Qm1.alpha_rho_1, Q0.alpha_rho_1, Qp1.alpha_rho_1);
         r.u           = scalar(Qm1.u,           Q0.u,           Qp1.u          );
         r.v           = scalar(Qm1.v,           Q0.v,           Qp1.v          );
+        r.w           = scalar(Qm1.w,           Q0.w,           Qp1.w          );
         r.p_mix       = scalar(Qm1.p_mix,       Q0.p_mix,       Qp1.p_mix      );
         r.gamma0 = Q0.gamma0;  r.pi0 = Q0.pi0;
         r.gamma1 = Q0.gamma1;  r.pi1 = Q0.pi1;
