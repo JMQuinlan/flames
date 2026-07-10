@@ -14,8 +14,8 @@
 #              q_inf = 0.5*rho*U^2 = 0.125000.
 #   GEOMETRY:  NACA 0012, chord 1.0, from a phi bitmap (fit=coord over the
 #              domain box).  d>0 fluid, d<0 solid -> phi = 0.5*(1+tanh(d/eps)).
-#   WALL:      no-slip (all momentum) Brinkman penalty (solid.slip=0).
-#              eps = 0.01 skin,  brinkman = 200.0 ~ 4*U/eps.
+#   WALL:      slip (wall-normal only) Brinkman penalty (solid.slip=1).
+#              eps = 0.02 skin,  brinkman = 100.0 ~ 4*U/eps.
 #   LIFT/DRAG (post-processed):  F = -integral (p-p_inf) grad(phi) dV;
 #              C_l = F_y/(q_inf*c),  C_d = F_x/(q_inf*c).  INVISCID (mu=0) ->
 #              pressure/form drag only (no skin friction).  Two identical ideal
@@ -33,7 +33,7 @@ amr.plot_int         = -1
 
 ### MESHING ###
 # Base dx = 0.0625; AMR refines the airfoil surface (grad phi) + shock.
-# max_level = 3 -> dx_finest = base/2^3; eps = 0.01 diffuse skin.
+# max_level = 3 -> dx_finest = base/2^3; eps = 0.02 diffuse skin.
 amr.max_grid_size    = 500000
 amr.blocking_factor  = 8
 amr.regrid_int       = 10
@@ -59,8 +59,8 @@ stop_time           = 16.0
 # EMBEDDED SOLID -- the NACA 0012, from a phi bitmap.  Yang Brinkman wall.
 # ----------------------------------------------------------------------------
 apply_embedded_solid     = 1
-solid.brinkman           = 200.0          # YANG penalty ~ 4*U/eps (no-slip (all momentum))
-solid.slip               = 0              # 0 = no-slip (all momentum); 1 = slip (wall-normal only)
+solid.brinkman           = 100.0          # YANG penalty ~ 4*U/eps (slip (wall-normal only))
+solid.slip               = 1              # 0 = no-slip (all momentum); 1 = slip (wall-normal only)
 phi_refinement_criterion = 0.1            # refine on the airfoil surface (grad phi)
 
 # Bitmap geometry IC:  pixel/255 -> phi,  fit=coord onto the domain box.

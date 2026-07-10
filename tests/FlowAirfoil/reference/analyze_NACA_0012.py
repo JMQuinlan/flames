@@ -41,9 +41,9 @@ DOM_LO, DOM_HI = (-4.0, -5.0), (8.0, 5.0)
 N_CELL = (192, 160)                # base halved-cell (was 96x80); divisible by 8
 MAX_LEVEL = 3                      # +1 refinement level (was 2)
 NX_BMP, NY_BMP = 1600, 1334
-EPS = 0.01                         # /4 (was 0.04); finest dx 0.0078 -> band ~2-3 cells
+EPS = 0.02                         # finest dx 0.0078 -> eps/dx = 2.56 (resolved skin; 0.01 was ~1.3 cells)
 BRINK = 4 * U / EPS
-SLIP = 0                           # 0 = no-slip Brinkman (default); 1 = slip (normal-only)
+SLIP = 1                           # 0 = no-slip Brinkman; 1 = slip (normal-only) -- consistent wall for mu=0 Euler
 REFINE_BOX = None                  # ((xlo,ylo),(xhi,yhi)) geometric box -> max_level inside (TE targeting)
 P_INF = P
 STOP_TIME = 16.0                   # subsonic settling (slow flow)
