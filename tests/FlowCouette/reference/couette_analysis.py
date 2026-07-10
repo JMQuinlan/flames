@@ -29,7 +29,12 @@ yt.funcs.mylog.setLevel(40)
 # ============================================================================
 
 case_name        = 'Couette_Single'
-amrex_output_dir = r'../../../bin/tests/FlowCouette/output_single'
+# Output dir: the aggregator passes it as argv[1]; otherwise use a default.
+# Toggle the default between INCLINE (/mmfs1, active) and DESKTOP (comment swap).
+import sys
+_OUT_INCLINE = r'/mmfs1/home/ttryon/flames/bin/tests/FlowCouette/UNIT_TEST_2D/output_single'
+_OUT_DESKTOP = r'../../../bin/tests/FlowCouette/UNIT_TEST_2D/output_single'
+amrex_output_dir = sys.argv[1] if len(sys.argv) > 1 else _OUT_INCLINE  # -> _OUT_DESKTOP for desktop
 
 # Geometry (must match input_hydro2_single)
 y_min  = 0.0
@@ -103,9 +108,12 @@ print(f"  using {os.path.basename(last_plot)}, t_sim = {sim_time:.4f} s")
 # EXTRACT NUMERICAL PROFILE
 # ============================================================================
 
+# z midplane: 0.0 in 2D (domain z = [0,0]); the central z-plane in a 3D
+# z-extension run (z=0 would be a boundary face).
+zmid = lambda d: float(0.5 * (d.domain_left_edge[2] + d.domain_right_edge[2]))
 ray = ds.ray(
-    ds.arr([x_slice, y_min, 0.0], 'code_length'),
-    ds.arr([x_slice, y_max, 0.0], 'code_length'),
+    ds.arr([x_slice, y_min, zmid(ds)], 'code_length'),
+    ds.arr([x_slice, y_max, zmid(ds)], 'code_length'),
 )
 order = np.argsort(ray['y'])
 y_num = np.array(ray['y'][order])
@@ -240,8 +248,8 @@ for pf in plot_files:
     try:
         ds_f      = yt.load(pf)
         ray_f     = ds_f.ray(
-            ds_f.arr([x_slice, y_min, 0.0], 'code_length'),
-            ds_f.arr([x_slice, y_max, 0.0], 'code_length'),
+            ds_f.arr([x_slice, y_min, zmid(ds_f)], 'code_length'),
+            ds_f.arr([x_slice, y_max, zmid(ds_f)], 'code_length'),
         )
         order_f   = np.argsort(ray_f['y'])
         y_f       = np.array(ray_f['y'][order_f])

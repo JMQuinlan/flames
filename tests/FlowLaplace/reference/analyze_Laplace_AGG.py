@@ -44,12 +44,22 @@ from analyze_Laplace import (                                    # noqa: E402
 # ============================================================================
 
 # Glob roots searched for output_R*_Sigma* plot directories.
+# Where to look for output_R*_Sigma* plotfile dirs.  The UNIT_TEST roots (where
+# the unit-test matrix lands) are listed first; INCLINE /mmfs1 is the default
+# top entry.  The aggregator can also pass an explicit root as argv[1].
 SEARCH_ROOTS = [
+    # --- UNIT_TEST_2D matrix (INCLINE /mmfs1 first, then desktop) ---
+    "/mmfs1/home/ttryon/flames/bin/tests/FlowLaplace/UNIT_TEST_2D",
+    os.path.join(_REPO, "bin", "tests", "FlowLaplace", "UNIT_TEST_2D"),
+    os.path.join(os.getcwd(), "bin", "tests", "FlowLaplace", "UNIT_TEST_2D"),
+    # --- legacy / standalone locations ---
     os.path.join(_REPO, "tests", "FlowLaplace"),
     os.path.join(_REPO, "bin", "tests", "FlowLaplace"),
     os.path.join(os.getcwd(), "tests", "FlowLaplace"),
     os.path.join(os.getcwd(), "bin", "tests", "FlowLaplace"),
 ]
+if len(sys.argv) > 1:                    # explicit root override (aggregator)
+    SEARCH_ROOTS.insert(0, sys.argv[1])
 
 # Color per radius, line style per sigma (extend if the matrix grows).
 R_COLORS = {1.0e-3: "#1f77b4", 1.0e-4: "#ff7f0e", 1.0e-5: "#2ca02c"}

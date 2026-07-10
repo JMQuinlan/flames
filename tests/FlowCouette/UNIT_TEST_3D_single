@@ -1,0 +1,172 @@
+#@ exe=hydro2
+#@ dim=3
+# alamo.program = hydro2
+
+# =============================================================================
+# SINGLE-PHASE PLANAR COUETTE TEST (classical no-slip plates)
+# =============================================================================
+# Pure single-phase fluid sheared between two no-slip plates:
+#   bottom wall (y = 0) : stationary, u = 0
+#   top    wall (y = H) : moving,     u = U_top
+#
+# eta is forced to 0 so only phase 1 is active; phase 0 is degenerate.
+# Both EOS slots still carry valid constants (required by the parser) but
+# phase 0 has zero volume fraction everywhere.
+#
+# Analytical steady-state (textbook 1D Couette, single fluid):
+#     u(y) = U_top * y / H
+#     du/dy = U_top / H (uniform shear)
+# Time to reach steady state: tau ~ H^2 / (pi^2 nu) ~ 9.1 s for nu = mu/rho.
+# stop_time = 30 s = ~3.3 tau, well past steady state.
+# =============================================================================
+
+### OUTPUT ###
+# plot_file = ./tests/FlowCouette/UNIT_TEST_3D/output_single                                  # DESKTOP (run from bin/)
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowCouette/UNIT_TEST_3D/output_single   # INCLINE /mmfs1 (default)
+
+### MESHING ###
+amr.plot_dt = 0.5
+amr.max_level = 1
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.grid_eff = 0.8
+amr.n_cell = 4 64 4
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0 0.0 0.0       # [ m ]
+geometry.prob_hi = 0.1875 3.0 0.1875    # [ m ]
+geometry.is_periodic = 1 0 1
+
+### TIME STEP ###
+timestep  = 1.0e-3
+stop_time = 30.0
+
+### HYDRO PARAM ###
+
+### EQUATION OF STATE -- single fluid (both phases identical) ###
+# gamma = 3.0, p0 = 100 (matches original `input`'s gamma + pref).
+# Both eos slots carry the same constants so the test is single-phase by
+# degeneracy of the two-phase 6-eq formulation.
+eos0.gamma = 3.0
+eos0.p0    = 100.0
+eos0.cv    = 1.0
+eos0.cp    = 3.0
+
+eos1.gamma = 3.0
+eos1.p0    = 100.0
+eos1.cv    = 1.0
+eos1.cp    = 3.0
+
+cfl   = 0.4
+mu0   = 10.0
+mu1   = 10.0
+
+### ETA IC ###
+# Band carrier for the embedded velocity-step driver.  Identical to the
+# original `input` file.  eta = 1 in 0.5 < y < 2.5, eta = 0 outside.
+eta.ic.type = expression
+eta.ic.expression.constant.eps   = 0.20
+eta.ic.expression.region0        = 0.0 # "(0.5*tanh((y - 0.5)/eps) - 0.5*tanh((y - 2.5)/eps))"
+epsilon = eta.ic.expression.constant.eps
+
+### SOURCE-TERM ICs (off) ###
+m0.ic.type = constant
+m0.ic.constant.value = "0.0"
+
+u0.ic.type = expression
+u0.ic.expression.region0 = "0.001*(y>1.5)"
+u0.ic.expression.region1 = "0.0"
+
+q.ic.type = expression
+q.ic.expression.region0 = "0.0"
+q.ic.expression.region1 = "0.0"
+
+### PER-PHASE PRIMARIES ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "100.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "100.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "100.0"
+
+velocity1.ic.type = expression
+# Linear ramp IC = an OK guess for steady state (accelerates convergence).
+# Plate velocities are enforced by the Dirichlet momentum BCs below; this IC
+# just gives the solver a sensible starting field.
+velocity1.ic.expression.region0 = "0.1 * y / 3.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "100.0"
+
+### HYDRO BC ###
+# No-slip Dirichlet plates in y; periodic in x.
+#   bottom (ylo) : u = 0,  v = 0    -> momentum = rho * (0, 0)    = (0, 0)
+#   top    (yhi) : u = U_top = 0.1, v = 0
+#                   -> momentum = rho * (U_top, 0) = (100*0.1, 0) = (10, 0)
+# Density / energy use neumann (zero-gradient) since walls are impermeable.
+pf.eta.bc.type.xlo = neumann
+pf.eta.bc.type.xhi = neumann
+pf.eta.bc.type.ylo = neumann
+pf.eta.bc.type.yhi = neumann
+pf.eta.bc.type.zlo = periodic
+pf.eta.bc.type.zhi = periodic
+
+density.bc.type.xhi = periodic
+density.bc.type.xlo = periodic
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+density.bc.type.zlo = periodic
+density.bc.type.zhi = periodic
+density.bc.val.xhi = 0.0
+density.bc.val.xlo = 0.0
+density.bc.val.ylo = 0.0
+density.bc.val.yhi = 0.0
+density.bc.val.zlo = 0.0
+density.bc.val.zhi = 0.0
+
+energy.bc.type.xhi = periodic
+energy.bc.type.xlo = periodic
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+energy.bc.type.zlo = periodic
+energy.bc.type.zhi = periodic
+energy.bc.val.xhi = 0.0
+energy.bc.val.xlo = 0.0
+energy.bc.val.ylo = 0.0
+energy.bc.val.yhi = 0.0
+energy.bc.val.zlo = 0.0
+energy.bc.val.zhi = 0.0
+
+momentum.bc.type.xlo = periodic periodic periodic
+momentum.bc.type.xhi = periodic periodic periodic
+momentum.bc.type.ylo = dirichlet dirichlet dirichlet
+momentum.bc.type.yhi = dirichlet dirichlet dirichlet
+momentum.bc.type.zlo = periodic periodic periodic
+momentum.bc.type.zhi = periodic periodic periodic
+momentum.bc.val.xlo = 0.0 0.0 0.0
+momentum.bc.val.xhi = 0.0 0.0 0.0
+momentum.bc.val.ylo = 0.0 0.0 0.0         # bottom plate stationary
+momentum.bc.val.yhi = 10.0 0.0 0.0        # top plate u = 0.1, M_x = rho * 0.1 = 10
+momentum.bc.val.zlo = 0.0 0.0 0.0
+momentum.bc.val.zhi = 0.0 0.0 0.0
+
+### HYDRO REFINEMENT CRITERIA ###
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+
+### NUMERICS -- standardized: HLLC + WENO3 + RK3 ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3

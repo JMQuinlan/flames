@@ -1,0 +1,175 @@
+#@ [case1]
+#@ exe=hydro2
+#@ dim=2
+
+# alamo.program = hydro2
+
+# =============================================================================
+# TAYLOR-GREEN VORTEX -- hydro2 single-phase variant (Updated to new EOS form)
+# =============================================================================
+# Classical Taylor-Green vortex on a 2*pi x 2*pi periodic box.  Single phase
+# by degeneracy: eos0 == eos1, mu0 == mu1, density0 == density1, AND both
+# per-phase pressure ICs carry the same TGV expression so the equalized IC
+# state is exactly the analytical Taylor-Green field.
+#
+# Analytical IC (incompressible Taylor-Green):
+#   u(x, y, 0) =  sin(x) * cos(y)
+#   v(x, y, 0) = -cos(x) * sin(y)
+#   p(x, y, 0) = p0 + 0.25 * (cos(2x) + cos(2y))
+# Decay in the incompressible limit:
+#   u(x, y, t) =  sin(x) cos(y) exp(-2 nu t)
+#   nu = mu / rho = 0.01 / 1.0 = 0.01,  e-folding ~ 1/(2*nu) = 50 s.
+#
+# eta convention: eta = 1 everywhere -> pure phase 0 (the active fluid here).
+# =============================================================================
+
+### OUTPUT ###
+# plot_file = ./tests/FlowTaylorGreenVortex/UNIT_TEST_2D/TaylorGreenDecay                                  # DESKTOP (run from bin/)
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTaylorGreenVortex/UNIT_TEST_2D/TaylorGreenDecay   # INCLINE /mmfs1 (default)
+
+### MESHING ###
+amr.plot_dt        = 0.5
+amr.max_grid_size  = 64
+amr.blocking_factor = 8
+amr.regrid_int     = 10
+amr.grid_eff       = 0.8
+amr.max_level      = 0
+amr.n_cell         = 256 256
+
+### DIMENSIONS ###
+# Taylor-Green Vortex on [0, 2pi] x [0, 2pi] domain
+geometry.prob_lo     = 0.0 0.0 0.0
+geometry.prob_hi     = 6.283185307 6.283185307 0.0   # 2*pi
+geometry.is_periodic = 1 1 0                          # CRITICAL: TGV requires full periodicity
+
+### TIME STEP ###
+timestep  = 1.0e-4
+stop_time = 10.0
+
+### HYDRO PARAM ###
+
+### EQUATION OF STATE -- single fluid (both phases identical, ideal gas) ###
+# gamma = 1.4 matches the original.  cv = 1.0, cp = gamma = 1.4 in normalized
+# units (TGV is incompressible-style; thermal physics is not exercised).
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cv    = 1.0
+eos0.cp    = 1.4
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 1.0
+eos1.cp    = 1.4
+
+cfl   = 0.5
+mu0   = 0.01      # adjust for desired Re = rho * U * L / mu
+mu0_b = 0.0       # no bulk viscosity for incompressible TGV
+mu1   = 0.01
+mu1_b = 0.0
+
+### ETA IC ###
+# Pure phase 0 throughout the box (eta = 1).  No interface dynamics;
+# epsilon is a parser-required placeholder.
+eta.ic.type = expression
+eta.ic.expression.region0 = "1.0"
+epsilon = 0.01
+
+### SOURCE-TERM ICs (off) ###
+m0.ic.type = constant
+m0.ic.constant.value = "0.0"
+
+u0.ic.type = expression
+u0.ic.expression.region0 = "0.0"
+u0.ic.expression.region1 = "0.0"
+
+q.ic.type = expression
+q.ic.expression.region0 = "0.0"
+q.ic.expression.region1 = "0.0"
+
+### PER-PHASE PRIMARIES ###
+# Phase 0 (active -- carries the Taylor-Green field).
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+
+# Taylor-Green velocity field.
+#   u =  sin(x) * cos(y)
+#   v = -cos(x) * sin(y)
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "sin(x) * cos(y)"
+velocity0.ic.expression.region1 = "-cos(x) * sin(y)"
+
+# Taylor-Green pressure field.
+#   p = p_0 + (rho / 4) * (cos(2x) + cos(2y))
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "100.0 + 0.25 * (cos(2.0*x) + cos(2.0*y))"
+
+# Phase 1 (degenerate copy -- same fields as phase 0 to keep the IC
+# self-consistent under the equalize_ic_pressure / linear Mix() weighting,
+# since the parser requires per-phase ICs to be defined regardless).
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "sin(x) * cos(y)"
+velocity1.ic.expression.region1 = "-cos(x) * sin(y)"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "100.0 + 0.25 * (cos(2.0*x) + cos(2.0*y))"
+
+### HYDRO BC -- ALL PERIODIC ###
+pf.eta.bc.type.xlo = periodic
+pf.eta.bc.type.xhi = periodic
+pf.eta.bc.type.ylo = periodic
+pf.eta.bc.type.yhi = periodic
+
+density.bc.type.xlo = periodic
+density.bc.type.xhi = periodic
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+
+energy.bc.type.xlo = periodic
+energy.bc.type.xhi = periodic
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+
+momentum.bc.type.xlo = periodic periodic
+momentum.bc.type.xhi = periodic periodic
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+### REFINEMENT CRITERIA ###
+# Refine on vorticity / velocity-gradient to capture vortex cores
+# (only matters if amr.max_level > 0).
+eta_refinement_criterion   = 1.0e+10
+omega_refinement_criterion = 0.1
+gradu_refinement_criterion = 0.1
+rho_refinement_criterion   = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+cutoff = 0.01
+
+amr.abort_on_nan = 1
+small = 1E-8
+
+
+### PHYSICS FLAGS ###
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+
+### DYNAMIC TIMESTEP ###
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 1
+dynamictimestep.cfl     = 0.5
+dynamictimestep.max     = 1.0
+dynamictimestep.min     = 1.0e-12
+
+### IC PRESSURE EQUALIZATION ###
+# Both per-phase pressure ICs are identical here, so this is a no-op;
+# kept on for consistency with the rest of the test suite.
+equalize_ic_pressure = 1
+
+### NUMERICS -- standardized: HLLC + WENO3 + RK3 ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3

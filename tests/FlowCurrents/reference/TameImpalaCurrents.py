@@ -43,6 +43,7 @@ yt.funcs.mylog.setLevel(50)
 
 # ---- paths -----------------------------------------------------------------
 AMREX_OUTPUT_DIR = r'../../../bin/tests/FlowCurrents/output_currents'
+AMREX_OUTPUT_DIR = r'/mmfs1/home/ttryon/flames/bin/tests/FlowCurrents/output_currents' # INCLINE
 
 IMAGE_DIR        = "./Images"          # standalone frames go here
 GIF_PATH         = "./Images/Currents.gif"
@@ -97,7 +98,7 @@ SHOW_STREAMLINES = True
 # lines that just deform with the flow (the album look).  'grid' seeds a fixed
 # lattice; 'auto' = matplotlib's default (bobbles).
 STREAM_SEED_MODE = "inlet"            # 'inlet' | 'grid' | 'auto'
-STREAM_N_SEEDS   = 54                 # for 'inlet': number of lines (evenly spaced in y)
+STREAM_N_SEEDS   = 50                 # for 'inlet': number of lines (evenly spaced in y)
 STREAM_SEED_INSET = 0.02              # seed this fraction of the width in from the left edge
 STREAM_GRID_NX   = 26                 # for 'grid'
 STREAM_GRID_NY   = 18
@@ -141,9 +142,9 @@ FRAME_PREFIX   = "currents_"
 
 # ---- gif --------------------------------------------------------------------
 MAKE_GIF        = True
-GIF_FPS         = 20
+GIF_FPS         = 15
 GIF_LOOP        = 0                    # 0 = loop forever
-GIF_MAX_FRAMES  = 240                 # subsample if more frames than this
+GIF_MAX_FRAMES  = 10000 #240                 # subsample if more frames than this
 GIF_BOOMERANG   = False               # play forward then reverse (seamless loop)
 
 # =============================================================================

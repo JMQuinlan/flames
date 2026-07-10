@@ -54,13 +54,21 @@ public:
     static void Parse(Hydro2& value, IO::ParmParse& pp);
     virtual ~Hydro2()
     {
-        /// Boundry Conditions
-        delete density_bc;
-        delete momentum_bc;
-        delete energy_bc;
-        delete pressure_bc;
-        delete eta_bc;
-        delete temperature_bc;
+        /// Boundry Conditions.
+        // In the NSCBC path density/energy/momentum_bc are aliased to the
+        // bc_nothing MEMBER object (not heap-allocated); deleting those would
+        // free a non-heap pointer (double-free at teardown).  Guard every BC
+        // delete against the member BC objects.
+        auto safe_delete_bc = [&](BC::BC<Set::Scalar>* p) {
+            if (p && p != &bc_nothing && p != &neumann_bc_1 && p != &neumann_bc_D)
+                delete p;
+        };
+        safe_delete_bc(density_bc);
+        safe_delete_bc(momentum_bc);
+        safe_delete_bc(energy_bc);
+        safe_delete_bc(pressure_bc);
+        safe_delete_bc(eta_bc);
+        safe_delete_bc(temperature_bc);
 
         /// Inital Conditions
         // ETA
@@ -329,6 +337,7 @@ protected:
     Set::Scalar c_max = 0.0;
     Set::Scalar vx_max = 0.0;
     Set::Scalar vy_max = 0.0;
+    Set::Scalar vz_max = 0.0;
     Set::Scalar F_max = 0.0;
     Set::Scalar rho_min = 1e10;
 

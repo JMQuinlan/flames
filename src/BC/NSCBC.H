@@ -5,6 +5,7 @@
 #include "IO/ParmParse.H"
 #include "Set/Set.H"
 #include "Solver/EOS/EOS.H"
+#include "Util/Util.H"
 #include <AMReX_Geometry.H>
 #include <AMReX_MultiFab.H>
 
@@ -98,6 +99,14 @@ public:
                       Set::Scalar time,
                       Set::Scalar pref)
     {
+#if AMREX_SPACEDIM == 3
+        // The simple (nghost=2) NSCBC variant was never ported/validated for 3D:
+        // its transverse LODI uses a single tangential direction and its corner
+        // closure is 2D-only, so it would silently misbehave in 3D. Use NSCBC4
+        // (nghost=4) for 3D simulations, which is fully validated (faces+edges+
+        // corners). Fail loudly rather than produce wrong boundary data.
+        Util::Abort(INFO, "Simple NSCBC (nghost=2) is 2D-only; use NSCBC4 (nghost=4) for 3D runs.");
+#endif
         const amrex::Box &domain = geom.Domain();
         const auto dx = geom.CellSizeArray();
 

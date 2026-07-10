@@ -1,0 +1,38 @@
+diff --git a/Src/AmrCore/AMReX_FillPatchUtil_I.H b/Src/AmrCore/AMReX_FillPatchUtil_I.H
+index 2605fdf0a..2933e1003 100644
+--- a/Src/AmrCore/AMReX_FillPatchUtil_I.H
++++ b/Src/AmrCore/AMReX_FillPatchUtil_I.H
+@@ -1106,16 +1106,26 @@ InterpFromCoarseLevel (MF& mf, IntVect const& nghost, Real time,
+ 
+ #ifndef AMREX_USE_EB
+         amrex::ignore_unused(index_space);
++        mf_crse_patch.define(ba_crse_patch, dm, ncomp, 0);
+ #else
+-        if (index_space) {
+-            auto factory = makeEBFabFactory(index_space, cgeom, ba_crse_patch, dm,
+-                                            {0,0,0}, EBSupport::basic);
+-            mf_crse_patch.define(ba_crse_patch, dm, ncomp, 0, MFInfo(), *factory);
+-        } else
+-#endif
+-        {
++        // ALAMO PATCH: the EB coarse-patch factory only works for FArrayBox.
++        // Alamo's custom FabArray<BaseFab<T>> (Eigen-matrix node) fields can't
++        // take an EBFArrayBoxFactory, and alamo never builds an EB index space
++        // (index_space is always null for them), so this branch is dead at
++        // runtime -- guard it so it compiles out for non-FArrayBox FABs.
++        bool alamo_eb_defined = false;
++        if constexpr (std::is_same_v<FAB, amrex::FArrayBox>) {
++            if (index_space) {
++                auto factory = makeEBFabFactory(index_space, cgeom, ba_crse_patch, dm,
++                                                {0,0,0}, EBSupport::basic);
++                mf_crse_patch.define(ba_crse_patch, dm, ncomp, 0, MFInfo(), *factory);
++                alamo_eb_defined = true;
++            }
++        }
++        if (!alamo_eb_defined) {
+             mf_crse_patch.define(ba_crse_patch, dm, ncomp, 0);
+         }
++#endif
+         detail::mf_set_domain_bndry (mf_crse_patch, cgeom);
+     }
+ 

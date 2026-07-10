@@ -70,3 +70,7 @@ logs/
 .claude/
 *.csv
 *.tar.gz
+tmp_*/
+output_*/
+/tmp_*
+Backtrace.*

@@ -45,6 +45,7 @@ import oblique_shock_theory as ost
 MACH          = 2.0                       # freestream Mach (overridable via argv[1])
 GAMMA         = 1.4
 OUTPUT_TMPL   = "../../../bin/tests/FlowWedge/output_Ma{ma}"        # plotfile dir, {ma} -> str(MACH)
+OUTPUT_TMPL   = "/mmfs1/home/ttryon/flames/bin/tests/FlowWedge/output_Ma{ma}"        #
 FRAME         = "last"                    # 'last' or an integer plotfile index
 
 # ---- WEDGE GEOMETRY (must match the input file) ---------------------------
@@ -102,7 +103,7 @@ MEAS_MS    = 12                   # measured-point marker size (scatter)
 
 # ---- FIGURE / TYPOGRAPHY --------------------------------------------------
 FIGSIZE    = (11.0, 6.2)
-DEBUG_Info = 1                    # 1 -> show the data/annotation textbox; else hide it
+DEBUG_Info = 0                    # 1 -> show the data/annotation textbox; else hide it
 DPI        = 140
 FONT_TITLE = 15
 FONT_LABEL = 12.5

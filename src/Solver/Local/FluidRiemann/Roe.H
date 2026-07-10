@@ -120,6 +120,10 @@ public:
         recover(lo, aL, a2L, rhoL, uL, vL, pL, cL, HL, Y0L, Y1L);
         recover(hi, aR, a2R, rhoR, uR, vR, pR, cR, HR, Y0R, Y1R);
 
+        // 2nd tangential velocity (3D shear; 0 in 2D, making every w-term below a no-op).
+        const Set::Scalar wL = lo.M_tangent2 / std::max(rhoL, small);
+        const Set::Scalar wR = hi.M_tangent2 / std::max(rhoR, small);
+
         // ============================================================
         // 2. Roe averages (Vinokur-Liu sqrt-ρ weighting)
         // ============================================================
@@ -130,6 +134,7 @@ public:
         const Set::Scalar rho_hat   = sqrtL * sqrtR;
         const Set::Scalar u_hat     = (sqrtL * uL + sqrtR * uR) / wsum;
         const Set::Scalar v_hat     = (sqrtL * vL + sqrtR * vR) / wsum;
+        const Set::Scalar w_hat     = (sqrtL * wL + sqrtR * wR) / wsum;   // 2nd tangent (3D; 0 in 2D)
         const Set::Scalar H_hat     = (sqrtL * HL + sqrtR * HR) / wsum;
         const Set::Scalar Y0_hat    = (sqrtL * Y0L + sqrtR * Y0R) / wsum;
         const Set::Scalar Y1_hat    = 1.0 - Y0_hat;
@@ -146,7 +151,7 @@ public:
                                 + alpha2_hat * lo.gamma1 * lo.pi1 / (lo.gamma1 - 1.0);
         const Set::Scalar gamma_eff = 1.0 + 1.0 / std::max(Aeff, small);
         const Set::Scalar pi_eff    = (Beff / std::max(Aeff, small)) / gamma_eff;
-        const Set::Scalar ke_hat    = 0.5 * (u_hat * u_hat + v_hat * v_hat);
+        const Set::Scalar ke_hat    = 0.5 * (u_hat * u_hat + v_hat * v_hat + w_hat * w_hat);
         Set::Scalar p_hat = (gamma_eff - 1.0) / gamma_eff
                           * rho_hat * (H_hat - ke_hat)
                           - pi_eff;
@@ -166,6 +171,7 @@ public:
         const Set::Scalar Drho   = rhoR - rhoL;
         const Set::Scalar Du     = uR   - uL;
         const Set::Scalar Dv     = vR   - vL;
+        const Set::Scalar Dw     = wR   - wL;   // 2nd tangent jump (3D; 0 in 2D)
         const Set::Scalar Dp     = pR   - pL;
         const Set::Scalar Darh0  = hi.alpha_rho_0 - lo.alpha_rho_0;
         const Set::Scalar Darh1  = hi.alpha_rho_1 - lo.alpha_rho_1;
@@ -179,6 +185,7 @@ public:
         const Set::Scalar a3     = (Dp + rho_hat * c_hat * Du) / (2.0 * c2_hat);    // u+c
         const Set::Scalar a2_rho = Drho - Dp / c2_hat;                              // entropy density
         const Set::Scalar a2_v   = rho_hat * Dv;                                    // shear momentum
+        const Set::Scalar a2_w   = rho_hat * Dw;                                    // 2nd shear momentum (3D; 0 in 2D)
         const Set::Scalar aY0    = Darh0 - Y0_hat * Drho;                           // species 0 LD
         const Set::Scalar aY1    = Darh1 - Y1_hat * Drho;                           // species 1 LD
         // E_k waves are pure LD with amplitude ΔE_k (eigenvector is the unit
@@ -213,12 +220,15 @@ public:
         // Mixture tangential momentum: acoustic+entropy waves carry v̂·D_ρ;
         // the shear wave adds the LD ρ̂·Δv jump.
         const Set::Scalar D_Mt = v_hat * D_rho + abs_l2 * a2_v;
+        // Mixture 2nd tangential momentum: same structure as D_Mt (3D; 0 in 2D).
+        const Set::Scalar D_Mt2 = w_hat * D_rho + abs_l2 * a2_w;
 
         // Mixture total energy ρE: acoustic ± ûĉ Hugoniot dispersion, entropy ½(û²+v̂²),
         // plus shear advection of v̂.
         const Set::Scalar D_rhoE = abs_l1 * a1 * (H_hat - u_hat * c_hat)
                                  + abs_l2 * a2_rho * ke_hat
                                  + abs_l2 * a2_v * v_hat
+                                 + abs_l2 * a2_w * w_hat
                                  + abs_l3 * a3 * (H_hat + u_hat * c_hat);
 
         // Per-phase masses (αρ)_k: Larrouturou-style — the acoustic waves
@@ -236,7 +246,7 @@ public:
         // ============================================================
         // 8. Build L and R Euler-like fluxes.
         // ============================================================
-        auto build_flux = [&](Set::Scalar u, Set::Scalar v, Set::Scalar p,
+        auto build_flux = [&](Set::Scalar u, Set::Scalar v, Set::Scalar w, Set::Scalar p,
                               Set::Scalar arh0, Set::Scalar arh1,
                               Set::Scalar E0, Set::Scalar E1, Set::Scalar Etot,
                               Set::Scalar rho) -> Flux
@@ -246,14 +256,15 @@ public:
             f.mass1            = arh1 * u;
             f.momentum_normal  = rho * u * u + p;
             f.momentum_tangent = rho * u * v;
+            f.momentum_tangent2 = rho * u * w;   // 2nd tangent (3D; 0 in 2D)
             f.energy_total     = u * (Etot + p);
             f.energy0          = E0 * u;
             f.energy1          = E1 * u;
             return f;
         };
 
-        const Flux F_L = build_flux(uL, vL, pL, lo.alpha_rho_0, lo.alpha_rho_1, lo.E0, lo.E1, lo.E_total, rhoL);
-        const Flux F_R = build_flux(uR, vR, pR, hi.alpha_rho_0, hi.alpha_rho_1, hi.E0, hi.E1, hi.E_total, rhoR);
+        const Flux F_L = build_flux(uL, vL, wL, pL, lo.alpha_rho_0, lo.alpha_rho_1, lo.E0, lo.E1, lo.E_total, rhoL);
+        const Flux F_R = build_flux(uR, vR, wR, pR, hi.alpha_rho_0, hi.alpha_rho_1, hi.E0, hi.E1, hi.E_total, rhoR);
 
         // ============================================================
         // 9. Roe flux assembly: F.k = ½(F_L.k + F_R.k) − ½ D.k.
@@ -263,6 +274,7 @@ public:
         fl.mass1            = 0.5 * (F_L.mass1            + F_R.mass1)            - 0.5 * D_arh1;
         fl.momentum_normal  = 0.5 * (F_L.momentum_normal  + F_R.momentum_normal)  - 0.5 * D_Mn;
         fl.momentum_tangent = 0.5 * (F_L.momentum_tangent + F_R.momentum_tangent) - 0.5 * D_Mt;
+        fl.momentum_tangent2 = 0.5 * (F_L.momentum_tangent2 + F_R.momentum_tangent2) - 0.5 * D_Mt2;
         fl.energy_total     = 0.5 * (F_L.energy_total     + F_R.energy_total)     - 0.5 * D_rhoE;
         fl.energy0          = 0.5 * (F_L.energy0          + F_R.energy0)          - 0.5 * D_E0;
         fl.energy1          = 0.5 * (F_L.energy1          + F_R.energy1)          - 0.5 * D_E1;

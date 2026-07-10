@@ -65,7 +65,12 @@ public:
     }
     virtual void Add(const int& lev, Set::Field<Set::Scalar>& a_field, Set::Scalar a_time = 0.0) override
     {
-        Util::Assert(INFO, TEST(a_field[lev]->nComp() == (int)f.size()));
+        // Allow a field with MORE components than regionN entries: the loop below
+        // writes only the f.size() supplied components, leaving the rest at their
+        // current (pre-set, e.g. zeroed) value.  This lets a 3-component velocity
+        // take a 2-region (in-plane) IC with vz defaulting to 0, while still
+        // catching the real error of MORE regions than components (-> OOB write).
+        Util::Assert(INFO, TEST(a_field[lev]->nComp() >= (int)f.size()));
         for (amrex::MFIter mfi(*a_field[lev], amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
         {
             amrex::Box bx;// = mfi.tilebox();

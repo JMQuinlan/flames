@@ -46,10 +46,11 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
                 in(i,j,k,n) = m_bc_func[Face::XLO][n](x,y,z,t);
             else if(BCUtil::IsNeumann(m_bc_type[Face::XLO][n]))
                 in(i,j,k,n) = in(i-glevel[0],j,k,n) - (m_bc_func[Face::XLO].size() > 0 ? m_bc_func[Face::XLO][n](x,y,z,t)*DX[0] : 0);
+            // Mirror across the lo face (at lo.x-1/2): ghost i -> interior 2*lo.x-1-i.
             else if(BCUtil::IsReflectEven(m_bc_type[Face::XLO][n]))
-                in(i,j,k,n) = in(1-glevel[0],j,k,n);
+                in(i,j,k,n) = in(2*lo.x - 1 - i,j,k,n);
             else if(BCUtil::IsReflectOdd(m_bc_type[Face::XLO][n]))
-                in(i,j,k,n) = -in(1-glevel[0],j,k,n);
+                in(i,j,k,n) = -in(2*lo.x - 1 - i,j,k,n);
             else if(BCUtil::IsPeriodic(m_bc_type[Face::XLO][n])) {}
             else
                 Util::Abort(INFO, "Incorrect boundary conditions");
@@ -60,10 +61,11 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
                 in(i,j,k,n) = m_bc_func[Face::XHI][n](x,y,z,t);
             else if(BCUtil::IsNeumann(m_bc_type[Face::XHI][n]))
                 in(i,j,k,n) = in(i-glevel[0],j,k,n) - (m_bc_func[Face::XHI].size() > 0 ? m_bc_func[Face::XHI][n](x,y,z,t)*DX[0] : 0);
+            // Mirror across the hi face (at hi.x+1/2): ghost i -> interior 2*hi.x+1-i.
             else if(BCUtil::IsReflectEven(m_bc_type[Face::XHI][n]))
-                in(i,j,k,n) = in(hi.x-glevel[0],j,k,n);
+                in(i,j,k,n) = in(2*hi.x + 1 - i,j,k,n);
             else if(BCUtil::IsReflectOdd(m_bc_type[Face::XHI][n]))
-                in(i,j,k,n) = -in(hi.x-glevel[0],j,k,n);
+                in(i,j,k,n) = -in(2*hi.x + 1 - i,j,k,n);
             else if(BCUtil::IsPeriodic(m_bc_type[Face::XHI][n])) {}
             else
                 Util::Abort(INFO, "Incorrect boundary conditions");
@@ -76,9 +78,9 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
             else if (BCUtil::IsNeumann(m_bc_type[Face::YLO][n]))
                 in(i,j,k,n) = in(i,j-glevel[1],k,n) - (m_bc_func[Face::YLO].size() > 0 ? m_bc_func[Face::YLO][n](x,y,z,t)*DX[1] : 0);
             else if (BCUtil::IsReflectEven(m_bc_type[Face::YLO][n]))
-                in(i,j,k,n) = in(i,j-glevel[1],k,n);
+                in(i,j,k,n) = in(i,2*lo.y - 1 - j,k,n);
             else if (BCUtil::IsReflectOdd(m_bc_type[Face::YLO][n]))
-                in(i,j,k,n) = -in(i,j-glevel[1],k,n);
+                in(i,j,k,n) = -in(i,2*lo.y - 1 - j,k,n);
             else if(BCUtil::IsPeriodic(m_bc_type[Face::YLO][n])) {}
             else
                 Util::Abort(INFO, "Incorrect boundary conditions");
@@ -90,9 +92,9 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
             else if (BCUtil::IsNeumann(m_bc_type[Face::YHI][n]))
                 in(i,j,k,n) = in(i,j-glevel[1],k,n) - (m_bc_func[Face::YHI].size() > 0 ? m_bc_func[Face::YHI][n](x,y,z,t)*DX[1] : 0);
             else if (BCUtil::IsReflectEven(m_bc_type[Face::YHI][n]))
-                in(i,j,k,n) = in(i,hi.y-glevel[1],k,n);
+                in(i,j,k,n) = in(i,2*hi.y + 1 - j,k,n);
             else if (BCUtil::IsReflectOdd(m_bc_type[Face::YHI][n]))
-                in(i,j,k,n) = -in(i,hi.y-glevel[1],k,n);
+                in(i,j,k,n) = -in(i,2*hi.y + 1 - j,k,n);
             else if(BCUtil::IsPeriodic(m_bc_type[Face::YHI][n])) {}
             else
                 Util::Abort(INFO, "Incorrect boundary conditions");
@@ -106,9 +108,9 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
             else if (BCUtil::IsNeumann(m_bc_type[Face::ZLO][n]))
                 in(i,j,k,n) = in(i,j,k-glevel[2],n) - (m_bc_func[Face::ZLO].size() > 0 ? m_bc_func[Face::ZLO][n](x,y,z,t)*DX[2] : 0);
             else if (BCUtil::IsReflectEven(m_bc_type[Face::ZLO][n]))
-                in(i,j,k,n) = in(i,j,1-glevel[2],n);
+                in(i,j,k,n) = in(i,j,2*lo.z - 1 - k,n);
             else if (BCUtil::IsReflectOdd(m_bc_type[Face::ZLO][n]))
-                in(i,j,k,n) = -in(i,j,1-glevel[2],n);
+                in(i,j,k,n) = -in(i,j,2*lo.z - 1 - k,n);
             else if(BCUtil::IsPeriodic(m_bc_type[Face::ZLO][n])) {}
             else Util::Abort(INFO, "Incorrect boundary conditions");
         }
@@ -119,9 +121,9 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
             else if(BCUtil::IsNeumann(m_bc_type[Face::ZHI][n]))
                 in(i,j,k,n) = in(i,j,k-glevel[2],n) - (m_bc_func[Face::ZHI].size() > 0 ? m_bc_func[Face::ZHI][n](x,y,z,t)*DX[2] : 0);
             else if(BCUtil::IsReflectEven(m_bc_type[Face::ZHI][n]))
-                in(i,j,k,n) = in(i,j,hi.z-glevel[2],n);
+                in(i,j,k,n) = in(i,j,2*hi.z + 1 - k,n);
             else if(BCUtil::IsReflectOdd(m_bc_type[Face::ZHI][n]))
-                in(i,j,k,n) = -in(i,j,hi.z-glevel[2],n);
+                in(i,j,k,n) = -in(i,j,2*hi.z + 1 - k,n);
             else if(BCUtil::IsPeriodic(m_bc_type[Face::ZHI][n])) {}
             else Util::Abort(INFO, "Incorrect boundary conditions");
         }

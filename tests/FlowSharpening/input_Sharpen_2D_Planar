@@ -1,0 +1,137 @@
+#@ [sharpen_2d_planar]
+#@ exe=hydro2
+#@ dim=2
+# =============================================================================
+# INTERFACE-SHARPENING UNIT TEST -- 2D PLANAR, MECHANICAL EQUILIBRIUM
+# =============================================================================
+# A deliberately OVER-SMEARED planar interface in a quiescent, uniform-pressure,
+# equal-density box.  With v=0, uniform p, equal rho and sigma=0 the hydro CANNOT
+# move the interface -- so any change in eta is due ONLY to the sharpening.
+# Run twice (apply_sharpening=0 vs 1, override on the command line) and compare:
+#   (1) CONSERVATION: integral of rho_eta0 (phase-0 mass) must stay constant.
+#   (2) SHARPENING:   the eta 10-90% band width must SHRINK toward ~epsilon.
+# A scheme that sharpens but drifts the mass integral FAILS "conservative".
+# Checker: reference/check_sharpening.py
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/FlowSharpening/output_Sharpen_2D_Planar
+
+### MESHING (uniform, no AMR -> clean global integrals) ###
+amr.plot_int        = 2
+amr.max_grid_size   = 32
+amr.blocking_factor = 8
+amr.max_level       = 0
+amr.n_cell          = 128 128
+nghost = 4
+
+### TIME ###
+timestep                = 1.0e-5
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-2
+dynamictimestep.min     = 1.0e-12
+cfl                     = 0.4
+stop_time               = 0.15
+
+### DIMENSIONS -- periodic in y (tangential), neumann in x (interface normal) ###
+geometry.prob_lo     = 0.0 0.0
+geometry.prob_hi     = 1.0 1.0
+geometry.is_periodic = 0 1
+
+### ETA IC -- deliberately WIDE planar smear at x=0.5 (band ~15 cells) ###
+eta.ic.type = expression
+eta.ic.expression.constant.eps_ic = 0.05
+eta.ic.expression.region0 = "0.5*(1.0 + tanh((x - 0.5)/eps_ic))"
+
+### sharpening target thickness (~1 cell; dx = 0.01) ###
+epsilon = 0.008
+
+### EOS -- two identical ideal gases (phases distinguished only by eta) ###
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cv    = 720.0
+eos0.cp    = 1008.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 720.0
+eos1.cp    = 1008.0
+
+### HYDRO IC -- equal density, uniform pressure, zero velocity (equilibrium) ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "1.0"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "1.0"
+
+### NO viscosity / surface tension (so hydro stays static) ###
+mu0 = 0.0
+mu0_b = 0.0
+mu1 = 0.0
+mu1_b = 0.0
+sigma = 0.0
+pref  = 0.0
+
+### BCs -- neumann on x faces (no eta flux: eta~0/1 there), periodic in y ###
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+### REFINEMENT (off) ###
+eta_refinement_criterion   = 1.0e+10
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCE ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS ###
+apply_surface_tension = 0
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+grav                  = 0.0
+
+### NUMERICS ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3
+kappa_method        = 1
+
+### INTERFACE SHARPENING (override apply_sharpening on the CLI: 0 vs 1) ###
+apply_sharpening     = 0
+sharpening_frequency = 2
+reinit_max_iter      = 10
+density_max_iter     = 10
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+
+equalize_ic_pressure = 1

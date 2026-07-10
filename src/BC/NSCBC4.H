@@ -374,8 +374,13 @@ public:
                     corner_box.setSmall(1, (cy == 1) ? jbdry_y + 1 : jbdry_y - ng);
                     corner_box.setBig(1, (cy == 1) ? jbdry_y + ng : jbdry_y - 1);
 #if AMREX_SPACEDIM == 3
-                    corner_box.setSmall(2, domain.smallEnd(2));
-                    corner_box.setBig(2, domain.bigEnd(2));
+                    // Clamp to THIS box's z-range (validbox), not the full domain:
+                    // with MPI z-decomposition a corner-touching box covers only
+                    // part of z, and writing the full domain z-range would run off
+                    // the FAB end -> heap corruption.  (The z-parallel edge is the
+                    // union over all z-boxes.)
+                    corner_box.setSmall(2, bx.smallEnd(2));
+                    corner_box.setBig(2, bx.bigEnd(2));
 #endif
 
                     // Capture parameters for GPU
@@ -418,6 +423,11 @@ public:
                             vx_c = un_tmp;
                             vy_c = ut_tmp;
                         }
+#if AMREX_SPACEDIM == 3
+                        // z-velocity is tangential to this (x,y) edge (the edge runs
+                        // along z); extrapolate it as a zero-gradient passive scalar.
+                        const Set::Scalar vz_c = M_arr(ic, jc, k, 2) / (rho_c + small_local);
+#endif
 
                         Set::Scalar a2_c = a_c * a_c;
                         Set::Scalar Mx_c = std::abs(vx_c) / (a_c + small_local);
@@ -769,11 +779,18 @@ public:
                         if (UE_g < 0.0)
                             UE_g = 0.0;
 
+#if AMREX_SPACEDIM == 3
+                        Set::Scalar KE_g = 0.5 * rho_g * (vx_g * vx_g + vy_g * vy_g + vz_c * vz_c);
+#else
                         Set::Scalar KE_g = 0.5 * rho_g * (vx_g * vx_g + vy_g * vy_g);
+#endif
 
                         rho_arr(i, j, k) = rho_g;
                         M_arr(i, j, k, 0) = rho_g * vx_g;
                         M_arr(i, j, k, 1) = rho_g * vy_g;
+#if AMREX_SPACEDIM == 3
+                        M_arr(i, j, k, 2) = rho_g * vz_c;
+#endif
                         E_arr(i, j, k) = UE_g + KE_g;
 
                         // Write gamma, pi, pressure for the Riemann solver to read at flux time
@@ -783,6 +800,260 @@ public:
                     }); // end ParallelFor corner_box
 
                 } // end corner loops (cx, cy)
+
+#if AMREX_SPACEDIM == 3
+            // =====================================================================
+            // STEP 1b: 3D EDGES in the (x,z) and (y,z) planes.
+            // =====================================================================
+            // The (x,y) plane (z-parallel edges) is handled by the corner block
+            // above. Here we treat the remaining 8 edges: the (x,z) plane
+            // (y-parallel, 4 edges) and the (y,z) plane (x-parallel, 4 edges).
+            // Each edge is a 2x2-coupled LODI in its two boundary-normal
+            // directions (d1,d2); the edge-tangential velocity (dt) is carried as
+            // a zero-gradient passive scalar. Ghosts use linear, gradient-corrected
+            // extrapolation in the (d1,d2) ghost quadrant (the d1,d2 gradients are
+            // the LODI-reconstructed ones). dt range = valid only, so the 3D
+            // corners (all three ghost) are excluded and handled separately.
+            // =====================================================================
+            {
+                const int edge_planes[2][3] = { {0, 2, 1}, {1, 2, 0} }; // {d1,d2,dt}
+                for (int ep = 0; ep < 2; ++ep)
+                {
+                    const int d1 = edge_planes[ep][0];
+                    const int d2 = edge_planes[ep][1];
+                    const int dt = edge_planes[ep][2];
+                    BoundaryParams P1lo = (d1 == 0) ? params_xlo_local : params_ylo_local;
+                    BoundaryParams P1hi = (d1 == 0) ? params_xhi_local : params_yhi_local;
+                    BoundaryParams P2lo = params_zlo_local;
+                    BoundaryParams P2hi = params_zhi_local;
+
+                    for (int c1 = 0; c1 < 2; ++c1)
+                        for (int c2 = 0; c2 < 2; ++c2)
+                        {
+                            BoundaryParams p1 = (c1 == 0) ? P1lo : P1hi;
+                            BoundaryParams p2 = (c2 == 0) ? P2lo : P2hi;
+                            if (p1.type == Type::None || p2.type == Type::None)
+                                continue;
+
+                            int b1 = (c1 == 0) ? domain.smallEnd(d1) : domain.bigEnd(d1);
+                            int b2 = (c2 == 0) ? domain.smallEnd(d2) : domain.bigEnd(d2);
+                            bool t1 = (c1 == 0) ? (bx.smallEnd(d1) == domain.smallEnd(d1))
+                                                : (bx.bigEnd(d1) == domain.bigEnd(d1));
+                            bool t2 = (c2 == 0) ? (bx.smallEnd(d2) == domain.smallEnd(d2))
+                                                : (bx.bigEnd(d2) == domain.bigEnd(d2));
+                            if (!t1 || !t2)
+                                continue;
+
+                            int ng = 4;
+                            int s1 = (c1 == 1) ? 1 : -1;
+                            int s2 = (c2 == 1) ? 1 : -1;
+
+                            amrex::Box ebox;
+                            ebox.setSmall(d1, (c1 == 1) ? b1 + 1 : b1 - ng);
+                            ebox.setBig(d1,   (c1 == 1) ? b1 + ng : b1 - 1);
+                            ebox.setSmall(d2, (c2 == 1) ? b2 + 1 : b2 - ng);
+                            ebox.setBig(d2,   (c2 == 1) ? b2 + ng : b2 - 1);
+                            ebox.setSmall(dt, bx.smallEnd(dt));
+                            ebox.setBig(dt,   bx.bigEnd(dt));
+
+                            Set::Scalar p1t = p1.target_p, p2t = p2.target_p;
+                            Set::Scalar sig1 = p1.sigma, sig2 = p2.sigma;
+                            Set::Scalar bet1 = p1.beta, bet2 = p2.beta;
+                            Set::Scalar Lr1 = p1.L_ref, Lr2 = p2.L_ref;
+                            Type ty1 = p1.type, ty2 = p2.type;
+                            int b1l = b1, b2l = b2, s1l = s1, s2l = s2;
+                            int d1l = d1, d2l = d2, dtl = dt, cc1 = c1, cc2 = c2;
+
+                            amrex::ParallelFor(ebox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                                int gidx[3] = {i, j, k};
+                                int cidx[3] = {i, j, k};
+                                cidx[d1l] = b1l;
+                                cidx[d2l] = b2l;
+
+                                // corner-cell primitives (rho/p/a/gm/pi are dir-independent)
+                                Set::Scalar rho_c, ua_t, ub_t, p_c, a_c, gm_c, pi_c;
+                                compute_prim(eta_arr, rho_arr, M_arr, E_arr, cidx[0], cidx[1], cidx[2], 0, rho_c, ua_t, ub_t, p_c, a_c, gm_c, pi_c);
+                                Set::Scalar inv_rc = 1.0 / (rho_c + small_local);
+                                Set::Scalar v1_c = M_arr(cidx[0], cidx[1], cidx[2], d1l) * inv_rc;
+                                Set::Scalar v2_c = M_arr(cidx[0], cidx[1], cidx[2], d2l) * inv_rc;
+                                Set::Scalar vt_c = M_arr(cidx[0], cidx[1], cidx[2], dtl) * inv_rc;
+                                Set::Scalar a2_c = a_c * a_c;
+                                Set::Scalar Mn1 = std::abs(v1_c) / (a_c + small_local);
+                                Set::Scalar Mn2 = std::abs(v2_c) / (a_c + small_local);
+
+                                // d1 one-sided derivatives
+                                int n1a[3] = {cidx[0], cidx[1], cidx[2]}; n1a[d1l] = b1l - s1l;
+                                int n1b[3] = {cidx[0], cidx[1], cidx[2]}; n1b[d1l] = b1l - 2 * s1l;
+                                Set::Scalar r1a, t1a, t1b, pp1a, aa1, gg1, ii1;
+                                Set::Scalar r1b, t1c, t1d, pp1b, aa2, gg2, ii2;
+                                compute_prim(eta_arr, rho_arr, M_arr, E_arr, n1a[0], n1a[1], n1a[2], 0, r1a, t1a, t1b, pp1a, aa1, gg1, ii1);
+                                compute_prim(eta_arr, rho_arr, M_arr, E_arr, n1b[0], n1b[1], n1b[2], 0, r1b, t1c, t1d, pp1b, aa2, gg2, ii2);
+                                Set::Scalar v1_1a = M_arr(n1a[0], n1a[1], n1a[2], d1l) / (r1a + small_local);
+                                Set::Scalar v2_1a = M_arr(n1a[0], n1a[1], n1a[2], d2l) / (r1a + small_local);
+                                Set::Scalar v1_1b = M_arr(n1b[0], n1b[1], n1b[2], d1l) / (r1b + small_local);
+                                Set::Scalar v2_1b = M_arr(n1b[0], n1b[1], n1b[2], d2l) / (r1b + small_local);
+                                Set::Scalar fd1 = (Set::Scalar)s1l;
+                                Set::Scalar drho_d1 = fd1 * (3.0 * rho_c - 4.0 * r1a + r1b) / (2.0 * dx[d1l]);
+                                Set::Scalar dv1_d1  = fd1 * (3.0 * v1_c - 4.0 * v1_1a + v1_1b) / (2.0 * dx[d1l]);
+                                Set::Scalar dv2_d1  = fd1 * (3.0 * v2_c - 4.0 * v2_1a + v2_1b) / (2.0 * dx[d1l]);
+                                Set::Scalar dp_d1   = fd1 * (3.0 * p_c - 4.0 * pp1a + pp1b) / (2.0 * dx[d1l]);
+
+                                // d2 one-sided derivatives
+                                int n2a[3] = {cidx[0], cidx[1], cidx[2]}; n2a[d2l] = b2l - s2l;
+                                int n2b[3] = {cidx[0], cidx[1], cidx[2]}; n2b[d2l] = b2l - 2 * s2l;
+                                Set::Scalar r2a, s2a, s2b, pp2a, ba1, hg1, ji1;
+                                Set::Scalar r2b, s2c, s2d, pp2b, ba2, hg2, ji2;
+                                compute_prim(eta_arr, rho_arr, M_arr, E_arr, n2a[0], n2a[1], n2a[2], 0, r2a, s2a, s2b, pp2a, ba1, hg1, ji1);
+                                compute_prim(eta_arr, rho_arr, M_arr, E_arr, n2b[0], n2b[1], n2b[2], 0, r2b, s2c, s2d, pp2b, ba2, hg2, ji2);
+                                Set::Scalar v1_2a = M_arr(n2a[0], n2a[1], n2a[2], d1l) / (r2a + small_local);
+                                Set::Scalar v2_2a = M_arr(n2a[0], n2a[1], n2a[2], d2l) / (r2a + small_local);
+                                Set::Scalar v1_2b = M_arr(n2b[0], n2b[1], n2b[2], d1l) / (r2b + small_local);
+                                Set::Scalar v2_2b = M_arr(n2b[0], n2b[1], n2b[2], d2l) / (r2b + small_local);
+                                Set::Scalar fd2 = (Set::Scalar)s2l;
+                                Set::Scalar drho_d2 = fd2 * (3.0 * rho_c - 4.0 * r2a + r2b) / (2.0 * dx[d2l]);
+                                Set::Scalar dv1_d2  = fd2 * (3.0 * v1_c - 4.0 * v1_2a + v1_2b) / (2.0 * dx[d2l]);
+                                Set::Scalar dv2_d2  = fd2 * (3.0 * v2_c - 4.0 * v2_2a + v2_2b) / (2.0 * dx[d2l]);
+                                Set::Scalar dp_d2   = fd2 * (3.0 * p_c - 4.0 * pp2a + pp2b) / (2.0 * dx[d2l]);
+
+                                // LODI waves (d1, d2)
+                                Set::Scalar L1_1 = (v1_c - a_c) * (dp_d1 - rho_c * a_c * dv1_d1);
+                                Set::Scalar L2_1 = (std::abs(v1_c) > 1.0e-14) ? v1_c * (a2_c * drho_d1 - dp_d1) : 0.0;
+                                Set::Scalar L3_1 = (std::abs(v1_c) > 1.0e-14) ? v1_c * dv2_d1 : 0.0;
+                                Set::Scalar L4_1 = (v1_c + a_c) * (dp_d1 + rho_c * a_c * dv1_d1);
+                                Set::Scalar L1_2 = (v2_c - a_c) * (dp_d2 - rho_c * a_c * dv2_d2);
+                                Set::Scalar L2_2 = (std::abs(v2_c) > 1.0e-14) ? v2_c * (a2_c * drho_d2 - dp_d2) : 0.0;
+                                Set::Scalar L3_2 = (std::abs(v2_c) > 1.0e-14) ? v2_c * dv1_d2 : 0.0;
+                                Set::Scalar L4_2 = (v2_c + a_c) * (dp_d2 + rho_c * a_c * dv2_d2);
+
+                                // 2x2 coupled incoming waves
+                                Set::Scalar K1 = sig1 * (1.0 - Mn1 * Mn1) * a_c / Lr1;
+                                Set::Scalar K2 = sig2 * (1.0 - Mn2 * Mn2) * a_c / Lr2;
+                                Set::Scalar ab2 = (1.0 - 0.5 * (bet1 + bet2)) / 2.0;
+                                Set::Scalar Lin1 = (cc1 == 1) ? L1_1 : L4_1;
+                                Set::Scalar Lin2 = (cc2 == 1) ? L1_2 : L4_2;
+                                if (ty1 == Type::Outflow && ty2 == Type::Outflow)
+                                {
+                                    Set::Scalar bb1 = K1 * (p_c - p1t), bb2 = K2 * (p_c - p2t);
+                                    Set::Scalar det = 1.0 / (1.0 - ab2 * ab2 + 1.0e-20);
+                                    Lin1 = det * (bb1 - ab2 * bb2);
+                                    Lin2 = det * (bb2 - ab2 * bb1);
+                                }
+                                else if (ty1 == Type::Outflow && ty2 == Type::Inflow) { Lin1 = K1 * (p_c - p1t); Lin2 = 0.0; }
+                                else if (ty1 == Type::Inflow && ty2 == Type::Outflow) { Lin1 = 0.0; Lin2 = K2 * (p_c - p2t); }
+                                else { Lin1 = 0.0; Lin2 = 0.0; }
+                                if (cc1 == 1) L1_1 = Lin1; else L4_1 = Lin1;
+                                if (cc2 == 1) L1_2 = Lin2; else L4_2 = Lin2;
+
+                                // reconstruct LODI-corrected gradients
+                                Set::Scalar xi1_1 = L1_1 / (v1_c - a_c + small_local);
+                                Set::Scalar xi2_1 = (std::abs(v1_c) > 1.0e-14) ? L2_1 / v1_c : 0.0;
+                                Set::Scalar xi3_1 = (std::abs(v1_c) > 1.0e-14) ? L3_1 / v1_c : 0.0;
+                                Set::Scalar xi4_1 = L4_1 / (v1_c + a_c + small_local);
+                                Set::Scalar dp_d1n   = 0.5 * (xi1_1 + xi4_1);
+                                Set::Scalar dv1_d1n  = (xi4_1 - xi1_1) / (2.0 * (rho_c + small_local) * a_c + small_local);
+                                Set::Scalar drho_d1n = (xi2_1 + 0.5 * (xi1_1 + xi4_1)) / (a2_c + small_local);
+                                Set::Scalar dv2_d1n  = xi3_1;
+                                Set::Scalar xi1_2 = L1_2 / (v2_c - a_c + small_local);
+                                Set::Scalar xi2_2 = (std::abs(v2_c) > 1.0e-14) ? L2_2 / v2_c : 0.0;
+                                Set::Scalar xi3_2 = (std::abs(v2_c) > 1.0e-14) ? L3_2 / v2_c : 0.0;
+                                Set::Scalar xi4_2 = L4_2 / (v2_c + a_c + small_local);
+                                Set::Scalar dp_d2n   = 0.5 * (xi1_2 + xi4_2);
+                                Set::Scalar dv2_d2n  = (xi4_2 - xi1_2) / (2.0 * (rho_c + small_local) * a_c + small_local);
+                                Set::Scalar drho_d2n = (xi2_2 + 0.5 * (xi1_2 + xi4_2)) / (a2_c + small_local);
+                                Set::Scalar dv1_d2n  = xi3_2;
+
+                                // linear (gradient-corrected) ghost extrapolation
+                                Set::Scalar off1 = (Set::Scalar)(gidx[d1l] - b1l) * dx[d1l];
+                                Set::Scalar off2 = (Set::Scalar)(gidx[d2l] - b2l) * dx[d2l];
+                                Set::Scalar rho_g = rho_c + off1 * drho_d1n + off2 * drho_d2n;
+                                Set::Scalar v1_g  = v1_c  + off1 * dv1_d1n  + off2 * dv1_d2n;
+                                Set::Scalar v2_g  = v2_c  + off1 * dv2_d1n  + off2 * dv2_d2n;
+                                Set::Scalar p_g   = p_c   + off1 * dp_d1n   + off2 * dp_d2n;
+
+                                rho_g = amrex::min(amrex::max(rho_g, pref_local), 1.0e20);
+                                p_g   = amrex::min(amrex::max(p_g, 1.0e-6), 1.0e20);
+
+                                Set::Scalar eta_g = eta_arr(gidx[0], gidx[1], gidx[2]);
+                                Set::Scalar gm_g  = Solver::EOS::EOS::MixedGamma(eta_g, eos0, eos1);
+                                Set::Scalar pi_g  = Solver::EOS::EOS::MixedP0(eta_g, eos0, eos1);
+                                Set::Scalar UE_g  = Solver::EOS::EOS::MixedInternalEnergy(p_g, eta_g, eos0, eos1, pref_local, small_local);
+                                if (UE_g < 0.0) UE_g = 0.0;
+                                Set::Scalar KE_g = 0.5 * rho_g * (v1_g * v1_g + v2_g * v2_g + vt_c * vt_c);
+
+                                rho_arr(gidx[0], gidx[1], gidx[2]) = rho_g;
+                                M_arr(gidx[0], gidx[1], gidx[2], d1l) = rho_g * v1_g;
+                                M_arr(gidx[0], gidx[1], gidx[2], d2l) = rho_g * v2_g;
+                                M_arr(gidx[0], gidx[1], gidx[2], dtl) = rho_g * vt_c;
+                                E_arr(gidx[0], gidx[1], gidx[2]) = UE_g + KE_g;
+                                gamma_arr(gidx[0], gidx[1], gidx[2]) = gm_g;
+                                pi_arr(gidx[0], gidx[1], gidx[2]) = pi_g;
+                                p_arr(gidx[0], gidx[1], gidx[2]) = p_g;
+                            });
+                        }
+                }
+            }
+
+            // =====================================================================
+            // STEP 1c: 3D CORNERS (8 of them, triple-ghost cubes).
+            // =====================================================================
+            // The dimension-split flux reconstruction never reads the triple-ghost
+            // corner cells, so an elaborate 3x3-coupled LODI buys nothing; fill them
+            // by constant extrapolation from the corner boundary cell so they hold a
+            // physical, non-stale state (robustness + clean output). Runs after the
+            // edges; the triple-ghost region is disjoint from faces (1 ghost) and
+            // edges (2 ghost / 1 valid).
+            // =====================================================================
+            for (int cx = 0; cx < 2; ++cx)
+                for (int cy = 0; cy < 2; ++cy)
+                    for (int cz = 0; cz < 2; ++cz)
+                    {
+                        BoundaryParams pcx = (cx == 0) ? params_xlo_local : params_xhi_local;
+                        BoundaryParams pcy = (cy == 0) ? params_ylo_local : params_yhi_local;
+                        BoundaryParams pcz = (cz == 0) ? params_zlo_local : params_zhi_local;
+                        if (pcx.type == Type::None || pcy.type == Type::None || pcz.type == Type::None)
+                            continue;
+                        int ibx = (cx == 0) ? domain.smallEnd(0) : domain.bigEnd(0);
+                        int jby = (cy == 0) ? domain.smallEnd(1) : domain.bigEnd(1);
+                        int kbz = (cz == 0) ? domain.smallEnd(2) : domain.bigEnd(2);
+                        bool tcx = (cx == 0) ? (bx.smallEnd(0) == domain.smallEnd(0)) : (bx.bigEnd(0) == domain.bigEnd(0));
+                        bool tcy = (cy == 0) ? (bx.smallEnd(1) == domain.smallEnd(1)) : (bx.bigEnd(1) == domain.bigEnd(1));
+                        bool tcz = (cz == 0) ? (bx.smallEnd(2) == domain.smallEnd(2)) : (bx.bigEnd(2) == domain.bigEnd(2));
+                        if (!tcx || !tcy || !tcz)
+                            continue;
+
+                        int ng = 4;
+                        amrex::Box cbox;
+                        cbox.setSmall(0, (cx == 1) ? ibx + 1 : ibx - ng); cbox.setBig(0, (cx == 1) ? ibx + ng : ibx - 1);
+                        cbox.setSmall(1, (cy == 1) ? jby + 1 : jby - ng); cbox.setBig(1, (cy == 1) ? jby + ng : jby - 1);
+                        cbox.setSmall(2, (cz == 1) ? kbz + 1 : kbz - ng); cbox.setBig(2, (cz == 1) ? kbz + ng : kbz - 1);
+                        int ibxl = ibx, jbyl = jby, kbzl = kbz;
+
+                        amrex::ParallelFor(cbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                            Set::Scalar rho_b, u1, u2, p_b, a_b, gm_b, pi_b;
+                            compute_prim(eta_arr, rho_arr, M_arr, E_arr, ibxl, jbyl, kbzl, 0, rho_b, u1, u2, p_b, a_b, gm_b, pi_b);
+                            Set::Scalar inv = 1.0 / (rho_b + small_local);
+                            Set::Scalar vx_b = M_arr(ibxl, jbyl, kbzl, 0) * inv;
+                            Set::Scalar vy_b = M_arr(ibxl, jbyl, kbzl, 1) * inv;
+                            Set::Scalar vz_b = M_arr(ibxl, jbyl, kbzl, 2) * inv;
+                            Set::Scalar eta_g = eta_arr(i, j, k);
+                            Set::Scalar gm_g = Solver::EOS::EOS::MixedGamma(eta_g, eos0, eos1);
+                            Set::Scalar pi_g = Solver::EOS::EOS::MixedP0(eta_g, eos0, eos1);
+                            Set::Scalar p_g = amrex::max(p_b, 1.0e-6);
+                            Set::Scalar UE_g = Solver::EOS::EOS::MixedInternalEnergy(p_g, eta_g, eos0, eos1, pref_local, small_local);
+                            if (UE_g < 0.0) UE_g = 0.0;
+                            Set::Scalar rho_g = amrex::max(rho_b, pref_local);
+                            Set::Scalar KE_g = 0.5 * rho_g * (vx_b * vx_b + vy_b * vy_b + vz_b * vz_b);
+                            rho_arr(i, j, k) = rho_g;
+                            M_arr(i, j, k, 0) = rho_g * vx_b;
+                            M_arr(i, j, k, 1) = rho_g * vy_b;
+                            M_arr(i, j, k, 2) = rho_g * vz_b;
+                            E_arr(i, j, k) = UE_g + KE_g;
+                            gamma_arr(i, j, k) = gm_g;
+                            pi_arr(i, j, k) = pi_g;
+                            p_arr(i, j, k) = p_g;
+                        });
+                    }
+#endif
 
         // =====================================================================
         // STEP 2: FILL EDGES (SKIP CORNERS - ALREADY FILLED)
@@ -910,6 +1181,27 @@ public:
                         // STEP 7: Apply BC-specific modification to incoming wave
                         // For X-LO: L4 is incoming (speed un+a > 0 entering domain)
                         // =============================================================
+#if AMREX_SPACEDIM == 3
+                        // 2nd transverse (z) contribution to the transverse terms.
+                        {
+                            Set::Scalar ut2b = M_arr(i_bnd, j, k, 2) / rho_bnd;
+                            if (k > domain.smallEnd(2) && k < domain.bigEnd(2))
+                            {
+                                Set::Scalar r_p,u_p,t_p,pp_p,a_p,g_p,pi_p;
+                                compute_prim(eta_arr, rho_arr, M_arr, E_arr, i_bnd, j, k + 1, idir, r_p,u_p,t_p,pp_p,a_p,g_p,pi_p);
+                                Set::Scalar r_m,u_m,t_m,pp_m,a_m,g_m,pi_m;
+                                compute_prim(eta_arr, rho_arr, M_arr, E_arr, i_bnd, j, k - 1, idir, r_m,u_m,t_m,pp_m,a_m,g_m,pi_m);
+                                Set::Scalar inv2 = 1.0 / (2.0 * dx[2]);
+                                Set::Scalar dr2 = (r_p - r_m) * inv2;
+                                Set::Scalar du2 = (u_p - u_m) * inv2;
+                                Set::Scalar dp2 = (pp_p - pp_m) * inv2;
+                                Set::Scalar dw2 = (M_arr(i_bnd,j,k+1,2)/(r_p+small_local) - M_arr(i_bnd,j,k-1,2)/(r_m+small_local)) * inv2;
+                                T1 += ut2b * (dp2 - rho_bnd * a_bnd * du2) + gm_bnd * p_bnd * dw2;
+                                T4 += ut2b * (dp2 + rho_bnd * a_bnd * du2) + gm_bnd * p_bnd * dw2;
+                                T2 += ut2b * (a2_bnd * dr2 - dp2) + (a2_bnd * rho_bnd - gm_bnd * p_bnd) * dw2;
+                            }
+                        }
+#endif
                         Set::Scalar K = params_xlo_local.sigma * (1.0 - M_loc * M_loc) * a_bnd / (params_xlo_local.L_ref);
 
                         if (params_xlo_local.type == Type::Outflow)
@@ -946,6 +1238,28 @@ public:
                         Set::Scalar dun_dx_new  = (xi4 - xi1) / (2.0 * (rho_bnd + small_local) * a_bnd + small_local);
                         Set::Scalar drho_dx_new = (xi2 + 0.5 * (xi1 + xi4)) / (a2_bnd + small_local);
                         Set::Scalar dut_dx_new  = xi3;
+
+#if AMREX_SPACEDIM == 3
+                        // --- 2nd tangential velocity (vz for an x-face): advected shear wave. ---
+                        // ut2 is carried by the shear characteristic (speed un); for OUTFLOW it
+                        // passes through unchanged (dut2/dn keeps its interior value), for INFLOW
+                        // it is relaxed toward target_w.  Computed inline from M[2] (set_ghost
+                        // zeroes the out-of-plane component; we overwrite it + its KE below).
+                        Set::Scalar ut2_bnd = M_arr(i_bnd,     j, k, 2) / rho_bnd;
+                        Set::Scalar ut2_m1  = M_arr(i_bnd + 1, j, k, 2) / (rho_m1 + small_local);
+                        Set::Scalar ut2_m2  = M_arr(i_bnd + 2, j, k, 2) / (rho_m2 + small_local);
+                        Set::Scalar dut2_dx_new = (-3.0 * ut2_bnd + 4.0 * ut2_m1 - ut2_m2) / (2.0 * delta);
+                        if (params_xlo_local.type == Type::Inflow)
+                        {
+                            Set::Scalar K_shear = params_xlo_local.relax_w * a_bnd / params_xlo_local.L_ref;
+                            Set::Scalar L3b = K_shear * (ut2_bnd - params_xlo_local.target_w);
+                            dut2_dx_new = (std::abs(un_bnd) > 1.0e-14) ? L3b / un_bnd : 0.0;
+                        }
+                        Set::Scalar ut2_g1 = ut2_m1 - 2.0 * delta * dut2_dx_new;
+                        Set::Scalar ut2_g2 = -2.0 * ut2_m1 - 3.0 * ut2_bnd + 6.0 * ut2_g1 + 6.0 * delta * dut2_dx_new;
+                        Set::Scalar ut2_g3 = 3.0 * ut2_m1 + 10.0 * ut2_bnd - 18.0 * ut2_g1 + 6.0 * ut2_g2 - 12.0 * delta * dut2_dx_new;
+                        Set::Scalar ut2_g4 = -2.0 * ut2_m1 - 13.0 * ut2_bnd + 24.0 * ut2_g1 - 12.0 * ut2_g2 + 4.0 * ut2_g3 + 12.0 * delta * dut2_dx_new;
+#endif
 
                         // =============================================================
                         // STEP 9: Fill ALL 4 ghost cell layers (Motheau Eq. 27-30)
@@ -994,6 +1308,15 @@ public:
                         rho_g4 = amrex::max(rho_g4, small_local);
                         p_g4 = amrex::max(p_g4, 1.0e-6);
                         set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i_bnd - 4, j, k, idir, rho_g4, un_g4, ut_g4, p_g4);
+
+#if AMREX_SPACEDIM == 3
+                        // set_ghost zeroed the out-of-plane momentum and its KE; write the
+                        // advected 2nd-tangential momentum and add its kinetic energy.
+                        M_arr(i_bnd - 1, j, k, 2) = rho_g1 * ut2_g1; E_arr(i_bnd - 1, j, k) += 0.5 * rho_g1 * ut2_g1 * ut2_g1;
+                        M_arr(i_bnd - 2, j, k, 2) = rho_g2 * ut2_g2; E_arr(i_bnd - 2, j, k) += 0.5 * rho_g2 * ut2_g2 * ut2_g2;
+                        M_arr(i_bnd - 3, j, k, 2) = rho_g3 * ut2_g3; E_arr(i_bnd - 3, j, k) += 0.5 * rho_g3 * ut2_g3 * ut2_g3;
+                        M_arr(i_bnd - 4, j, k, 2) = rho_g4 * ut2_g4; E_arr(i_bnd - 4, j, k) += 0.5 * rho_g4 * ut2_g4 * ut2_g4;
+#endif
                     }); // end ParallelFor ghost_box
                 } // end j loop
             } // end X-LO boundary
@@ -1107,6 +1430,27 @@ public:
                         // STEP 7: Apply BC-specific modification to incoming wave
                         // For X-HI: L1 is incoming (speed un-a < 0 entering domain)
                         // =============================================================
+#if AMREX_SPACEDIM == 3
+                        // 2nd transverse (z) contribution to the transverse terms.
+                        {
+                            Set::Scalar ut2b = M_arr(i_bnd, j, k, 2) / rho_bnd;
+                            if (k > domain.smallEnd(2) && k < domain.bigEnd(2))
+                            {
+                                Set::Scalar r_p,u_p,t_p,pp_p,a_p,g_p,pi_p;
+                                compute_prim(eta_arr, rho_arr, M_arr, E_arr, i_bnd, j, k + 1, idir, r_p,u_p,t_p,pp_p,a_p,g_p,pi_p);
+                                Set::Scalar r_m,u_m,t_m,pp_m,a_m,g_m,pi_m;
+                                compute_prim(eta_arr, rho_arr, M_arr, E_arr, i_bnd, j, k - 1, idir, r_m,u_m,t_m,pp_m,a_m,g_m,pi_m);
+                                Set::Scalar inv2 = 1.0 / (2.0 * dx[2]);
+                                Set::Scalar dr2 = (r_p - r_m) * inv2;
+                                Set::Scalar du2 = (u_p - u_m) * inv2;
+                                Set::Scalar dp2 = (pp_p - pp_m) * inv2;
+                                Set::Scalar dw2 = (M_arr(i_bnd,j,k+1,2)/(r_p+small_local) - M_arr(i_bnd,j,k-1,2)/(r_m+small_local)) * inv2;
+                                T1 += ut2b * (dp2 - rho_bnd * a_bnd * du2) + gm_bnd * p_bnd * dw2;
+                                T4 += ut2b * (dp2 + rho_bnd * a_bnd * du2) + gm_bnd * p_bnd * dw2;
+                                T2 += ut2b * (a2_bnd * dr2 - dp2) + (a2_bnd * rho_bnd - gm_bnd * p_bnd) * dw2;
+                            }
+                        }
+#endif
                         Set::Scalar K = params_xhi_local.sigma * (1.0 - M_loc * M_loc) * a_bnd / (params_xhi_local.L_ref);
 
                         if (params_xhi_local.type == Type::Outflow)
@@ -1191,6 +1535,28 @@ public:
                         rho_g4 = amrex::max(rho_g4, small_local);
                         p_g4 = amrex::max(p_g4, 1.0e-6);
                         set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i_bnd + 4, j, k, idir, rho_g4, un_g4, ut_g4, p_g4);
+
+#if AMREX_SPACEDIM == 3
+                        {
+                            // 2nd tangential velocity (vz, comp 2) advected shear wave + ghost KE.
+                            Set::Scalar ut2_bnd = M_arr(i_bnd,     j, k, 2) / rho_bnd;
+                            Set::Scalar ut2_m1  = M_arr(i_bnd - 1, j, k, 2) / (rho_m1 + small_local);
+                            Set::Scalar ut2_m2  = M_arr(i_bnd - 2, j, k, 2) / (rho_m2 + small_local);
+                            Set::Scalar g = (3.0 * ut2_bnd - 4.0 * ut2_m1 + ut2_m2) / (2.0 * delta);
+                            if (params_xhi_local.type == Type::Inflow) {
+                                Set::Scalar K_shear = params_xhi_local.relax_w * a_bnd / params_xhi_local.L_ref;
+                                g = (std::abs(un_bnd) > 1.0e-14) ? (K_shear * (ut2_bnd - params_xhi_local.target_w)) / un_bnd : 0.0;
+                            }
+                            Set::Scalar u1 = ut2_m1 + 2.0 * delta * g;
+                            Set::Scalar u2 = -2.0*ut2_m1 - 3.0*ut2_bnd + 6.0*u1 - 6.0*delta*g;
+                            Set::Scalar u3 = 3.0*ut2_m1 + 10.0*ut2_bnd - 18.0*u1 + 6.0*u2 + 12.0*delta*g;
+                            Set::Scalar u4 = -2.0*ut2_m1 - 13.0*ut2_bnd + 24.0*u1 - 12.0*u2 + 4.0*u3 - 12.0*delta*g;
+                            M_arr(i_bnd+1,j,k,2)=rho_g1*u1; E_arr(i_bnd+1,j,k)+=0.5*rho_g1*u1*u1;
+                            M_arr(i_bnd+2,j,k,2)=rho_g2*u2; E_arr(i_bnd+2,j,k)+=0.5*rho_g2*u2*u2;
+                            M_arr(i_bnd+3,j,k,2)=rho_g3*u3; E_arr(i_bnd+3,j,k)+=0.5*rho_g3*u3*u3;
+                            M_arr(i_bnd+4,j,k,2)=rho_g4*u4; E_arr(i_bnd+4,j,k)+=0.5*rho_g4*u4*u4;
+                        }
+#endif
                     }); // end ParallelFor ghost_box
                 } // end j loop
             } // end X-HI boundary
@@ -1309,6 +1675,27 @@ public:
                         // STEP 7: Apply BC-specific modification to incoming wave
                         // For Y-LO: L4 is incoming (speed un+a > 0 entering domain)
                         // =============================================================
+#if AMREX_SPACEDIM == 3
+                        // 2nd transverse (z) contribution to the transverse terms.
+                        {
+                            Set::Scalar ut2b = M_arr(i, j_bnd, k, 2) / rho_bnd;
+                            if (k > domain.smallEnd(2) && k < domain.bigEnd(2))
+                            {
+                                Set::Scalar r_p,u_p,t_p,pp_p,a_p,g_p,pi_p;
+                                compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd, k + 1, idir, r_p,u_p,t_p,pp_p,a_p,g_p,pi_p);
+                                Set::Scalar r_m,u_m,t_m,pp_m,a_m,g_m,pi_m;
+                                compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd, k - 1, idir, r_m,u_m,t_m,pp_m,a_m,g_m,pi_m);
+                                Set::Scalar inv2 = 1.0 / (2.0 * dx[2]);
+                                Set::Scalar dr2 = (r_p - r_m) * inv2;
+                                Set::Scalar du2 = (u_p - u_m) * inv2;
+                                Set::Scalar dp2 = (pp_p - pp_m) * inv2;
+                                Set::Scalar dw2 = (M_arr(i,j_bnd,k+1,2)/(r_p+small_local) - M_arr(i,j_bnd,k-1,2)/(r_m+small_local)) * inv2;
+                                T1 += ut2b * (dp2 - rho_bnd * a_bnd * du2) + gm_bnd * p_bnd * dw2;
+                                T4 += ut2b * (dp2 + rho_bnd * a_bnd * du2) + gm_bnd * p_bnd * dw2;
+                                T2 += ut2b * (a2_bnd * dr2 - dp2) + (a2_bnd * rho_bnd - gm_bnd * p_bnd) * dw2;
+                            }
+                        }
+#endif
                         Set::Scalar K = params_ylo_local.sigma * (1.0 - M_loc * M_loc) * a_bnd / (params_ylo_local.L_ref);
 
                         if (params_ylo_local.type == Type::Outflow)
@@ -1389,6 +1776,28 @@ public:
                         rho_g4 = amrex::max(rho_g4, small_local);
                         p_g4 = amrex::max(p_g4, 1.0e-6);
                         set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j_bnd - 4, k, idir, rho_g4, un_g4, ut_g4, p_g4);
+
+#if AMREX_SPACEDIM == 3
+                        {
+                            // 2nd tangential velocity (vz, comp 2) advected shear wave + ghost KE.
+                            Set::Scalar ut2_bnd = M_arr(i, j_bnd,     k, 2) / rho_bnd;
+                            Set::Scalar ut2_m1  = M_arr(i, j_bnd + 1, k, 2) / (rho_m1 + small_local);
+                            Set::Scalar ut2_m2  = M_arr(i, j_bnd + 2, k, 2) / (rho_m2 + small_local);
+                            Set::Scalar g = (-3.0 * ut2_bnd + 4.0 * ut2_m1 - ut2_m2) / (2.0 * delta);
+                            if (params_ylo_local.type == Type::Inflow) {
+                                Set::Scalar K_shear = params_ylo_local.relax_w * a_bnd / params_ylo_local.L_ref;
+                                g = (std::abs(un_bnd) > 1.0e-14) ? (K_shear * (ut2_bnd - params_ylo_local.target_w)) / un_bnd : 0.0;
+                            }
+                            Set::Scalar u1 = ut2_m1 - 2.0 * delta * g;
+                            Set::Scalar u2 = -2.0*ut2_m1 - 3.0*ut2_bnd + 6.0*u1 + 6.0*delta*g;
+                            Set::Scalar u3 = 3.0*ut2_m1 + 10.0*ut2_bnd - 18.0*u1 + 6.0*u2 - 12.0*delta*g;
+                            Set::Scalar u4 = -2.0*ut2_m1 - 13.0*ut2_bnd + 24.0*u1 - 12.0*u2 + 4.0*u3 + 12.0*delta*g;
+                            M_arr(i,j_bnd-1,k,2)=rho_g1*u1; E_arr(i,j_bnd-1,k)+=0.5*rho_g1*u1*u1;
+                            M_arr(i,j_bnd-2,k,2)=rho_g2*u2; E_arr(i,j_bnd-2,k)+=0.5*rho_g2*u2*u2;
+                            M_arr(i,j_bnd-3,k,2)=rho_g3*u3; E_arr(i,j_bnd-3,k)+=0.5*rho_g3*u3*u3;
+                            M_arr(i,j_bnd-4,k,2)=rho_g4*u4; E_arr(i,j_bnd-4,k)+=0.5*rho_g4*u4*u4;
+                        }
+#endif
                     }); // end ParallelFor ghost_box
                 } // end i loop
             } // end Y-LO boundary
@@ -1499,6 +1908,27 @@ public:
                         // STEP 7: Apply BC-specific modification to incoming wave
                         // For Y-HI: L1 is incoming (speed un-a < 0 entering domain)
                         // =============================================================
+#if AMREX_SPACEDIM == 3
+                        // 2nd transverse (z) contribution to the transverse terms.
+                        {
+                            Set::Scalar ut2b = M_arr(i, j_bnd, k, 2) / rho_bnd;
+                            if (k > domain.smallEnd(2) && k < domain.bigEnd(2))
+                            {
+                                Set::Scalar r_p,u_p,t_p,pp_p,a_p,g_p,pi_p;
+                                compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd, k + 1, idir, r_p,u_p,t_p,pp_p,a_p,g_p,pi_p);
+                                Set::Scalar r_m,u_m,t_m,pp_m,a_m,g_m,pi_m;
+                                compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j_bnd, k - 1, idir, r_m,u_m,t_m,pp_m,a_m,g_m,pi_m);
+                                Set::Scalar inv2 = 1.0 / (2.0 * dx[2]);
+                                Set::Scalar dr2 = (r_p - r_m) * inv2;
+                                Set::Scalar du2 = (u_p - u_m) * inv2;
+                                Set::Scalar dp2 = (pp_p - pp_m) * inv2;
+                                Set::Scalar dw2 = (M_arr(i,j_bnd,k+1,2)/(r_p+small_local) - M_arr(i,j_bnd,k-1,2)/(r_m+small_local)) * inv2;
+                                T1 += ut2b * (dp2 - rho_bnd * a_bnd * du2) + gm_bnd * p_bnd * dw2;
+                                T4 += ut2b * (dp2 + rho_bnd * a_bnd * du2) + gm_bnd * p_bnd * dw2;
+                                T2 += ut2b * (a2_bnd * dr2 - dp2) + (a2_bnd * rho_bnd - gm_bnd * p_bnd) * dw2;
+                            }
+                        }
+#endif
                         Set::Scalar K = params_yhi_local.sigma * (1.0 - M_loc * M_loc) * a_bnd  / (params_yhi_local.L_ref);
 
                         if (params_yhi_local.type == Type::Outflow)
@@ -1579,9 +2009,360 @@ public:
                         rho_g4 = amrex::max(rho_g4, small_local);
                         p_g4 = amrex::max(p_g4, 1.0e-6);
                         set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j_bnd + 4, k, idir, rho_g4, un_g4, ut_g4, p_g4);
+
+#if AMREX_SPACEDIM == 3
+                        {
+                            // 2nd tangential velocity (vz, comp 2) advected shear wave + ghost KE.
+                            Set::Scalar ut2_bnd = M_arr(i, j_bnd,     k, 2) / rho_bnd;
+                            Set::Scalar ut2_m1  = M_arr(i, j_bnd - 1, k, 2) / (rho_m1 + small_local);
+                            Set::Scalar ut2_m2  = M_arr(i, j_bnd - 2, k, 2) / (rho_m2 + small_local);
+                            Set::Scalar g = (3.0 * ut2_bnd - 4.0 * ut2_m1 + ut2_m2) / (2.0 * delta);
+                            if (params_yhi_local.type == Type::Inflow) {
+                                Set::Scalar K_shear = params_yhi_local.relax_w * a_bnd / params_yhi_local.L_ref;
+                                g = (std::abs(un_bnd) > 1.0e-14) ? (K_shear * (ut2_bnd - params_yhi_local.target_w)) / un_bnd : 0.0;
+                            }
+                            Set::Scalar u1 = ut2_m1 + 2.0 * delta * g;
+                            Set::Scalar u2 = -2.0*ut2_m1 - 3.0*ut2_bnd + 6.0*u1 - 6.0*delta*g;
+                            Set::Scalar u3 = 3.0*ut2_m1 + 10.0*ut2_bnd - 18.0*u1 + 6.0*u2 + 12.0*delta*g;
+                            Set::Scalar u4 = -2.0*ut2_m1 - 13.0*ut2_bnd + 24.0*u1 - 12.0*u2 + 4.0*u3 - 12.0*delta*g;
+                            M_arr(i,j_bnd+1,k,2)=rho_g1*u1; E_arr(i,j_bnd+1,k)+=0.5*rho_g1*u1*u1;
+                            M_arr(i,j_bnd+2,k,2)=rho_g2*u2; E_arr(i,j_bnd+2,k)+=0.5*rho_g2*u2*u2;
+                            M_arr(i,j_bnd+3,k,2)=rho_g3*u3; E_arr(i,j_bnd+3,k)+=0.5*rho_g3*u3*u3;
+                            M_arr(i,j_bnd+4,k,2)=rho_g4*u4; E_arr(i,j_bnd+4,k)+=0.5*rho_g4*u4*u4;
+                        }
+#endif
                     }); // end ParallelFor ghost_box
                 } // end i loop
             } // end Y-HI boundary
+
+#if AMREX_SPACEDIM == 3
+            // =====================================================================
+            // Z-LO BOUNDARY (3D; normal=z, transverse=x; mirrors X-LO with k<->i)
+            // =====================================================================
+            if (bx.smallEnd(2) == domain.smallEnd(2) && params_zlo_local.type != Type::None)
+            {
+                int idir = 2;   // z-direction
+                Set::Scalar delta = dx[2];
+                int k_bnd = domain.smallEnd(2);
+
+                // Valid transverse (x,y) plane clamped to this box (faces only;
+                // edges/corners are handled separately).
+                int ilo = amrex::max(bx.smallEnd(0), domain.smallEnd(0));
+                int ihi = amrex::min(bx.bigEnd(0),   domain.bigEnd(0));
+                int jlo = amrex::max(bx.smallEnd(1), domain.smallEnd(1));
+                int jhi = amrex::min(bx.bigEnd(1),   domain.bigEnd(1));
+                if (ilo <= ihi && jlo <= jhi)
+                {
+                    amrex::Box ghost_box;
+                    ghost_box.setSmall(0, ilo);          ghost_box.setBig(0, ihi);
+                    ghost_box.setSmall(1, jlo);          ghost_box.setBig(1, jhi);
+                    ghost_box.setSmall(2, k_bnd - 4);    ghost_box.setBig(2, k_bnd - 1);
+
+                    amrex::ParallelFor(ghost_box, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                        Set::Scalar rho_bnd, un_bnd, ut_bnd, p_bnd, a_bnd, gm_bnd, pi_bnd;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j, k_bnd, idir, rho_bnd, un_bnd, ut_bnd, p_bnd, a_bnd, gm_bnd, pi_bnd);
+
+                        Set::Scalar rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j, k_bnd + 1, idir, rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1);
+                        Set::Scalar rho_m2, un_m2, ut_m2, p_m2, a_m2, gm_m2, pi_m2;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j, k_bnd + 2, idir, rho_m2, un_m2, ut_m2, p_m2, a_m2, gm_m2, pi_m2);
+
+                        // Normal (z) one-sided forward FD (lo side).
+                        Set::Scalar drho_dx = (-3.0 * rho_bnd + 4.0 * rho_m1 - rho_m2) / (2.0 * delta);
+                        Set::Scalar dun_dx  = (-3.0 * un_bnd  + 4.0 * un_m1  - un_m2 ) / (2.0 * delta);
+                        Set::Scalar dut_dx  = (-3.0 * ut_bnd  + 4.0 * ut_m1  - ut_m2 ) / (2.0 * delta);
+                        Set::Scalar dp_dx   = (-3.0 * p_bnd   + 4.0 * p_m1   - p_m2  ) / (2.0 * delta);
+
+                        // Transverse (x) centered FD.
+                        Set::Scalar drho_dy = 0.0, dun_dy = 0.0, dut_dy = 0.0, dp_dy = 0.0;
+                        if (i > domain.smallEnd(0) && i < domain.bigEnd(0))
+                        {
+                            Set::Scalar rho_ip, un_ip, ut_ip, p_ip, a_ip, gm_ip, pi_ip;
+                            compute_prim(eta_arr, rho_arr, M_arr, E_arr, i + 1, j, k_bnd, idir, rho_ip, un_ip, ut_ip, p_ip, a_ip, gm_ip, pi_ip);
+                            Set::Scalar rho_im, un_im, ut_im, p_im, a_im, gm_im, pi_im;
+                            compute_prim(eta_arr, rho_arr, M_arr, E_arr, i - 1, j, k_bnd, idir, rho_im, un_im, ut_im, p_im, a_im, gm_im, pi_im);
+                            drho_dy = (rho_ip - rho_im) / (2.0 * dx[0]);
+                            dun_dy  = (un_ip  - un_im ) / (2.0 * dx[0]);
+                            dut_dy  = (ut_ip  - ut_im ) / (2.0 * dx[0]);
+                            dp_dy   = (p_ip   - p_im  ) / (2.0 * dx[0]);
+                        }
+
+                        Set::Scalar a2_bnd = a_bnd * a_bnd;
+                        Set::Scalar M_loc = std::abs(un_bnd) / (a_bnd + small_local);
+
+                        Set::Scalar L1 = (un_bnd - a_bnd) * (dp_dx - rho_bnd * a_bnd * dun_dx);
+                        Set::Scalar L2 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * (a2_bnd * drho_dx - dp_dx) : 0.0;
+                        Set::Scalar L3 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * dut_dx : 0.0;
+                        Set::Scalar L4 = (un_bnd + a_bnd) * (dp_dx + rho_bnd * a_bnd * dun_dx);
+
+                        Set::Scalar T1 = ut_bnd * (dp_dy - rho_bnd * a_bnd * dun_dy) + gm_bnd * p_bnd * dut_dy;
+                        Set::Scalar T4 = ut_bnd * (dp_dy + rho_bnd * a_bnd * dun_dy) + gm_bnd * p_bnd * dut_dy;
+                        Set::Scalar T2 = (std::abs(un_bnd) > 1.0e-14) ? ut_bnd * (a2_bnd * drho_dy - dp_dy) + (a2_bnd * rho_bnd - gm_bnd * p_bnd) * dut_dy : 0.0;
+                        Set::Scalar T3 = (std::abs(un_bnd) > 1.0e-14) ? ut_bnd * dut_dy + (1.0 / rho_bnd) * dp_dy : 0.0;
+
+                        // lo side: L4 is incoming.
+                        // 2nd transverse (y) contribution to the transverse terms.
+                        {
+                            Set::Scalar ut2b = M_arr(i, j, k_bnd, 1) / rho_bnd;
+                            if (j > domain.smallEnd(1) && j < domain.bigEnd(1))
+                            {
+                                Set::Scalar r_p,u_p,t_p,pp_p,a_p,g_p,pi_p;
+                                compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j + 1, k_bnd, idir, r_p,u_p,t_p,pp_p,a_p,g_p,pi_p);
+                                Set::Scalar r_m,u_m,t_m,pp_m,a_m,g_m,pi_m;
+                                compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j - 1, k_bnd, idir, r_m,u_m,t_m,pp_m,a_m,g_m,pi_m);
+                                Set::Scalar inv2 = 1.0 / (2.0 * dx[1]);
+                                Set::Scalar dr2 = (r_p - r_m) * inv2;
+                                Set::Scalar du2 = (u_p - u_m) * inv2;
+                                Set::Scalar dp2 = (pp_p - pp_m) * inv2;
+                                Set::Scalar dw2 = (M_arr(i,j+1,k_bnd,1)/(r_p+small_local) - M_arr(i,j-1,k_bnd,1)/(r_m+small_local)) * inv2;
+                                T1 += ut2b * (dp2 - rho_bnd * a_bnd * du2) + gm_bnd * p_bnd * dw2;
+                                T4 += ut2b * (dp2 + rho_bnd * a_bnd * du2) + gm_bnd * p_bnd * dw2;
+                                T2 += ut2b * (a2_bnd * dr2 - dp2) + (a2_bnd * rho_bnd - gm_bnd * p_bnd) * dw2;
+                            }
+                        }
+                        Set::Scalar K = params_zlo_local.sigma * (1.0 - M_loc * M_loc) * a_bnd / (params_zlo_local.L_ref);
+                        if (params_zlo_local.type == Type::Outflow)
+                        {
+                            L4 = K * (p_bnd - params_zlo_local.target_p) - (1.0 - params_zlo_local.beta) * T4;
+                        }
+                        else if (params_zlo_local.type == Type::Inflow)
+                        {
+                            Set::Scalar er = params_zlo_local.relax_u;
+                            Set::Scalar K_acoustic = er * rho_bnd * (1.0 - M_loc * M_loc) / params_zlo_local.L_ref;
+                            Set::Scalar K_entropy  = er * rho_bnd * a_bnd * (gm_bnd - 1.0) / params_zlo_local.L_ref;
+                            Set::Scalar K_shear    = er * a_bnd / params_zlo_local.L_ref;
+                            Set::Scalar eta_bnd = eta_arr(i, j, k_bnd);
+                            Set::Scalar cv_mix = eta_bnd * cv0_ + (1.0 - eta_bnd) * cv1_;
+                            Set::Scalar T_bnd = (p_bnd + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
+                            L4 = K_acoustic * (un_bnd - params_zlo_local.target_u) - T4;
+                            L2 = K_entropy  * (T_bnd - params_zlo_local.target_T) - T2;
+                            L3 = K_shear    * (ut_bnd - params_zlo_local.target_v) - T3;
+                        }
+
+                        Set::Scalar xi1 = L1 / (un_bnd - a_bnd + small_local);
+                        Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_bnd : 0.0;
+                        Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_bnd : 0.0;
+                        Set::Scalar xi4 = L4 / (un_bnd + a_bnd + small_local);
+
+                        Set::Scalar dp_dx_new   = 0.5 * (xi1 + xi4);
+                        Set::Scalar dun_dx_new  = (xi4 - xi1) / (2.0 * (rho_bnd + small_local) * a_bnd + small_local);
+                        Set::Scalar drho_dx_new = (xi2 + 0.5 * (xi1 + xi4)) / (a2_bnd + small_local);
+                        Set::Scalar dut_dx_new  = xi3;
+
+                        // Ghost layers (lo-side Motheau Eq. 27-30), in -z.
+                        Set::Scalar rho_g1 = rho_m1 - 2.0 * delta * drho_dx_new;
+                        Set::Scalar un_g1  = un_m1  - 2.0 * delta * dun_dx_new;
+                        Set::Scalar ut_g1  = ut_m1  - 2.0 * delta * dut_dx_new;
+                        Set::Scalar p_g1   = p_m1   - 2.0 * delta * dp_dx_new;
+                        rho_g1 = amrex::max(rho_g1, small_local); p_g1 = amrex::max(p_g1, 1.0e-6);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j, k_bnd - 1, idir, rho_g1, un_g1, ut_g1, p_g1);
+
+                        Set::Scalar rho_g2 = -2.0 * rho_m1 - 3.0 * rho_bnd + 6.0 * rho_g1 + 6.0 * delta * drho_dx_new;
+                        Set::Scalar un_g2  = -2.0 * un_m1  - 3.0 * un_bnd  + 6.0 * un_g1  + 6.0 * delta * dun_dx_new;
+                        Set::Scalar ut_g2  = -2.0 * ut_m1  - 3.0 * ut_bnd  + 6.0 * ut_g1  + 6.0 * delta * dut_dx_new;
+                        Set::Scalar p_g2   = -2.0 * p_m1   - 3.0 * p_bnd   + 6.0 * p_g1   + 6.0 * delta * dp_dx_new;
+                        rho_g2 = amrex::max(rho_g2, small_local); p_g2 = amrex::max(p_g2, 1.0e-6);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j, k_bnd - 2, idir, rho_g2, un_g2, ut_g2, p_g2);
+
+                        Set::Scalar rho_g3 = 3.0 * rho_m1 + 10.0 * rho_bnd - 18.0 * rho_g1 + 6.0 * rho_g2 - 12.0 * delta * drho_dx_new;
+                        Set::Scalar un_g3  = 3.0 * un_m1  + 10.0 * un_bnd  - 18.0 * un_g1  + 6.0 * un_g2  - 12.0 * delta * dun_dx_new;
+                        Set::Scalar ut_g3  = 3.0 * ut_m1  + 10.0 * ut_bnd  - 18.0 * ut_g1  + 6.0 * ut_g2  - 12.0 * delta * dut_dx_new;
+                        Set::Scalar p_g3   = 3.0 * p_m1   + 10.0 * p_bnd   - 18.0 * p_g1   + 6.0 * p_g2   - 12.0 * delta * dp_dx_new;
+                        rho_g3 = amrex::max(rho_g3, small_local); p_g3 = amrex::max(p_g3, 1.0e-6);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j, k_bnd - 3, idir, rho_g3, un_g3, ut_g3, p_g3);
+
+                        Set::Scalar rho_g4 = -2.0 * rho_m1 - 13.0 * rho_bnd + 24.0 * rho_g1 - 12.0 * rho_g2 + 4.0 * rho_g3 + 12.0 * delta * drho_dx_new;
+                        Set::Scalar un_g4  = -2.0 * un_m1  - 13.0 * un_bnd  + 24.0 * un_g1  - 12.0 * un_g2  + 4.0 * un_g3  + 12.0 * delta * dun_dx_new;
+                        Set::Scalar ut_g4  = -2.0 * ut_m1  - 13.0 * ut_bnd  + 24.0 * ut_g1  - 12.0 * ut_g2  + 4.0 * ut_g3  + 12.0 * delta * dut_dx_new;
+                        Set::Scalar p_g4   = -2.0 * p_m1   - 13.0 * p_bnd   + 24.0 * p_g1   - 12.0 * p_g2   + 4.0 * p_g3   + 12.0 * delta * dp_dx_new;
+                        rho_g4 = amrex::max(rho_g4, small_local); p_g4 = amrex::max(p_g4, 1.0e-6);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j, k_bnd - 4, idir, rho_g4, un_g4, ut_g4, p_g4);
+
+                        {
+                            // 2nd tangential velocity (vy, comp 1) advected shear wave + ghost KE.
+                            Set::Scalar ut2_bnd = M_arr(i, j, k_bnd,     1) / rho_bnd;
+                            Set::Scalar ut2_m1  = M_arr(i, j, k_bnd + 1, 1) / (rho_m1 + small_local);
+                            Set::Scalar ut2_m2  = M_arr(i, j, k_bnd + 2, 1) / (rho_m2 + small_local);
+                            Set::Scalar g = (-3.0 * ut2_bnd + 4.0 * ut2_m1 - ut2_m2) / (2.0 * delta);
+                            if (params_zlo_local.type == Type::Inflow) {
+                                Set::Scalar K_shear = params_zlo_local.relax_w * a_bnd / params_zlo_local.L_ref;
+                                g = (std::abs(un_bnd) > 1.0e-14) ? (K_shear * (ut2_bnd - params_zlo_local.target_w)) / un_bnd : 0.0;
+                            }
+                            Set::Scalar u1 = ut2_m1 - 2.0 * delta * g;
+                            Set::Scalar u2 = -2.0*ut2_m1 - 3.0*ut2_bnd + 6.0*u1 + 6.0*delta*g;
+                            Set::Scalar u3 = 3.0*ut2_m1 + 10.0*ut2_bnd - 18.0*u1 + 6.0*u2 - 12.0*delta*g;
+                            Set::Scalar u4 = -2.0*ut2_m1 - 13.0*ut2_bnd + 24.0*u1 - 12.0*u2 + 4.0*u3 + 12.0*delta*g;
+                            M_arr(i,j,k_bnd-1,1)=rho_g1*u1; E_arr(i,j,k_bnd-1)+=0.5*rho_g1*u1*u1;
+                            M_arr(i,j,k_bnd-2,1)=rho_g2*u2; E_arr(i,j,k_bnd-2)+=0.5*rho_g2*u2*u2;
+                            M_arr(i,j,k_bnd-3,1)=rho_g3*u3; E_arr(i,j,k_bnd-3)+=0.5*rho_g3*u3*u3;
+                            M_arr(i,j,k_bnd-4,1)=rho_g4*u4; E_arr(i,j,k_bnd-4)+=0.5*rho_g4*u4*u4;
+                        }
+                    }); // end ParallelFor Z-LO
+                }
+            } // end Z-LO boundary
+
+            // =====================================================================
+            // Z-HI BOUNDARY (3D; normal=z, transverse=x; mirrors X-HI with k<->i)
+            // =====================================================================
+            if (bx.bigEnd(2) == domain.bigEnd(2) && params_zhi_local.type != Type::None)
+            {
+                int idir = 2;   // z-direction
+                Set::Scalar delta = dx[2];
+                int k_bnd = domain.bigEnd(2);
+
+                int ilo = amrex::max(bx.smallEnd(0), domain.smallEnd(0));
+                int ihi = amrex::min(bx.bigEnd(0),   domain.bigEnd(0));
+                int jlo = amrex::max(bx.smallEnd(1), domain.smallEnd(1));
+                int jhi = amrex::min(bx.bigEnd(1),   domain.bigEnd(1));
+                if (ilo <= ihi && jlo <= jhi)
+                {
+                    amrex::Box ghost_box;
+                    ghost_box.setSmall(0, ilo);          ghost_box.setBig(0, ihi);
+                    ghost_box.setSmall(1, jlo);          ghost_box.setBig(1, jhi);
+                    ghost_box.setSmall(2, k_bnd + 1);    ghost_box.setBig(2, k_bnd + 4);
+
+                    amrex::ParallelFor(ghost_box, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                        Set::Scalar rho_bnd, un_bnd, ut_bnd, p_bnd, a_bnd, gm_bnd, pi_bnd;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j, k_bnd, idir, rho_bnd, un_bnd, ut_bnd, p_bnd, a_bnd, gm_bnd, pi_bnd);
+
+                        Set::Scalar rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j, k_bnd - 1, idir, rho_m1, un_m1, ut_m1, p_m1, a_m1, gm_m1, pi_m1);
+                        Set::Scalar rho_m2, un_m2, ut_m2, p_m2, a_m2, gm_m2, pi_m2;
+                        compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j, k_bnd - 2, idir, rho_m2, un_m2, ut_m2, p_m2, a_m2, gm_m2, pi_m2);
+
+                        // Normal (z) one-sided backward FD (hi side).
+                        Set::Scalar drho_dx = (3.0 * rho_bnd - 4.0 * rho_m1 + rho_m2) / (2.0 * delta);
+                        Set::Scalar dun_dx  = (3.0 * un_bnd  - 4.0 * un_m1  + un_m2 ) / (2.0 * delta);
+                        Set::Scalar dut_dx  = (3.0 * ut_bnd  - 4.0 * ut_m1  + ut_m2 ) / (2.0 * delta);
+                        Set::Scalar dp_dx   = (3.0 * p_bnd   - 4.0 * p_m1   + p_m2  ) / (2.0 * delta);
+
+                        Set::Scalar drho_dy = 0.0, dun_dy = 0.0, dut_dy = 0.0, dp_dy = 0.0;
+                        if (i > domain.smallEnd(0) && i < domain.bigEnd(0))
+                        {
+                            Set::Scalar rho_ip, un_ip, ut_ip, p_ip, a_ip, gm_ip, pi_ip;
+                            compute_prim(eta_arr, rho_arr, M_arr, E_arr, i + 1, j, k_bnd, idir, rho_ip, un_ip, ut_ip, p_ip, a_ip, gm_ip, pi_ip);
+                            Set::Scalar rho_im, un_im, ut_im, p_im, a_im, gm_im, pi_im;
+                            compute_prim(eta_arr, rho_arr, M_arr, E_arr, i - 1, j, k_bnd, idir, rho_im, un_im, ut_im, p_im, a_im, gm_im, pi_im);
+                            drho_dy = (rho_ip - rho_im) / (2.0 * dx[0]);
+                            dun_dy  = (un_ip  - un_im ) / (2.0 * dx[0]);
+                            dut_dy  = (ut_ip  - ut_im ) / (2.0 * dx[0]);
+                            dp_dy   = (p_ip   - p_im  ) / (2.0 * dx[0]);
+                        }
+
+                        Set::Scalar a2_bnd = a_bnd * a_bnd;
+                        Set::Scalar M_loc = std::abs(un_bnd) / (a_bnd + small_local);
+
+                        Set::Scalar L1 = (un_bnd - a_bnd) * (dp_dx - rho_bnd * a_bnd * dun_dx);
+                        Set::Scalar L2 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * (a2_bnd * drho_dx - dp_dx) : 0.0;
+                        Set::Scalar L3 = (std::abs(un_bnd) > 1.0e-14) ? un_bnd * dut_dx : 0.0;
+                        Set::Scalar L4 = (un_bnd + a_bnd) * (dp_dx + rho_bnd * a_bnd * dun_dx);
+
+                        Set::Scalar T1 = ut_bnd * (dp_dy - rho_bnd * a_bnd * dun_dy) + gm_bnd * p_bnd * dut_dy;
+                        Set::Scalar T4 = ut_bnd * (dp_dy + rho_bnd * a_bnd * dun_dy) + gm_bnd * p_bnd * dut_dy;
+                        Set::Scalar T2 = (std::abs(un_bnd) > 1.0e-14) ? ut_bnd * (a2_bnd * drho_dy - dp_dy) + (a2_bnd * rho_bnd - gm_bnd * p_bnd) * dut_dy : 0.0;
+                        Set::Scalar T3 = (std::abs(un_bnd) > 1.0e-14) ? ut_bnd * dut_dy + (1.0 / rho_bnd) * dp_dy : 0.0;
+
+                        // hi side: L1 is incoming.
+                        // 2nd transverse (y) contribution to the transverse terms.
+                        {
+                            Set::Scalar ut2b = M_arr(i, j, k_bnd, 1) / rho_bnd;
+                            if (j > domain.smallEnd(1) && j < domain.bigEnd(1))
+                            {
+                                Set::Scalar r_p,u_p,t_p,pp_p,a_p,g_p,pi_p;
+                                compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j + 1, k_bnd, idir, r_p,u_p,t_p,pp_p,a_p,g_p,pi_p);
+                                Set::Scalar r_m,u_m,t_m,pp_m,a_m,g_m,pi_m;
+                                compute_prim(eta_arr, rho_arr, M_arr, E_arr, i, j - 1, k_bnd, idir, r_m,u_m,t_m,pp_m,a_m,g_m,pi_m);
+                                Set::Scalar inv2 = 1.0 / (2.0 * dx[1]);
+                                Set::Scalar dr2 = (r_p - r_m) * inv2;
+                                Set::Scalar du2 = (u_p - u_m) * inv2;
+                                Set::Scalar dp2 = (pp_p - pp_m) * inv2;
+                                Set::Scalar dw2 = (M_arr(i,j+1,k_bnd,1)/(r_p+small_local) - M_arr(i,j-1,k_bnd,1)/(r_m+small_local)) * inv2;
+                                T1 += ut2b * (dp2 - rho_bnd * a_bnd * du2) + gm_bnd * p_bnd * dw2;
+                                T4 += ut2b * (dp2 + rho_bnd * a_bnd * du2) + gm_bnd * p_bnd * dw2;
+                                T2 += ut2b * (a2_bnd * dr2 - dp2) + (a2_bnd * rho_bnd - gm_bnd * p_bnd) * dw2;
+                            }
+                        }
+                        Set::Scalar K = params_zhi_local.sigma * (1.0 - M_loc * M_loc) * a_bnd / (params_zhi_local.L_ref);
+                        if (params_zhi_local.type == Type::Outflow)
+                        {
+                            L1 = K * (p_bnd - params_zhi_local.target_p) - (1.0 - params_zhi_local.beta) * T1;
+                        }
+                        else if (params_zhi_local.type == Type::Inflow)
+                        {
+                            Set::Scalar er = params_zhi_local.relax_u;
+                            Set::Scalar K_acoustic = er * rho_bnd * (1.0 - M_loc * M_loc) / params_zhi_local.L_ref;
+                            Set::Scalar K_entropy  = er * rho_bnd * a_bnd * (gm_bnd - 1.0) / params_zhi_local.L_ref;
+                            Set::Scalar K_shear    = er * a_bnd / params_zhi_local.L_ref;
+                            Set::Scalar eta_bnd = eta_arr(i, j, k_bnd);
+                            Set::Scalar cv_mix = eta_bnd * cv0_ + (1.0 - eta_bnd) * cv1_;
+                            Set::Scalar T_bnd = (p_bnd + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
+                            L1 = -K_acoustic * (un_bnd - params_zhi_local.target_u) - T1;
+                            L2 = K_entropy  * (T_bnd - params_zhi_local.target_T) - T2;
+                            L3 = K_shear    * (ut_bnd - params_zhi_local.target_v) - T3;
+                        }
+
+                        Set::Scalar xi1 = L1 / (un_bnd - a_bnd + small_local);
+                        Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_bnd : 0.0;
+                        Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_bnd : 0.0;
+                        Set::Scalar xi4 = L4 / (un_bnd + a_bnd + small_local);
+
+                        Set::Scalar dp_dx_new   = 0.5 * (xi1 + xi4);
+                        Set::Scalar dun_dx_new  = (xi4 - xi1) / (2.0 * (rho_bnd + small_local) * a_bnd + small_local);
+                        Set::Scalar drho_dx_new = (xi2 + 0.5 * (xi1 + xi4)) / (a2_bnd + small_local);
+                        Set::Scalar dut_dx_new  = xi3;
+
+                        // Ghost layers (hi-side Motheau Eq. 31-34), in +z.
+                        Set::Scalar rho_g1 = rho_m1 + 2.0 * delta * drho_dx_new;
+                        Set::Scalar un_g1  = un_m1  + 2.0 * delta * dun_dx_new;
+                        Set::Scalar ut_g1  = ut_m1  + 2.0 * delta * dut_dx_new;
+                        Set::Scalar p_g1   = p_m1   + 2.0 * delta * dp_dx_new;
+                        rho_g1 = amrex::max(rho_g1, small_local); p_g1 = amrex::max(p_g1, 1.0e-6);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j, k_bnd + 1, idir, rho_g1, un_g1, ut_g1, p_g1);
+
+                        Set::Scalar rho_g2 = -2.0 * rho_m1 - 3.0 * rho_bnd + 6.0 * rho_g1 - 6.0 * delta * drho_dx_new;
+                        Set::Scalar un_g2  = -2.0 * un_m1  - 3.0 * un_bnd  + 6.0 * un_g1  - 6.0 * delta * dun_dx_new;
+                        Set::Scalar ut_g2  = -2.0 * ut_m1  - 3.0 * ut_bnd  + 6.0 * ut_g1  - 6.0 * delta * dut_dx_new;
+                        Set::Scalar p_g2   = -2.0 * p_m1   - 3.0 * p_bnd   + 6.0 * p_g1   - 6.0 * delta * dp_dx_new;
+                        rho_g2 = amrex::max(rho_g2, small_local); p_g2 = amrex::max(p_g2, 1.0e-6);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j, k_bnd + 2, idir, rho_g2, un_g2, ut_g2, p_g2);
+
+                        Set::Scalar rho_g3 = 3.0 * rho_m1 + 10.0 * rho_bnd - 18.0 * rho_g1 + 6.0 * rho_g2 + 12.0 * delta * drho_dx_new;
+                        Set::Scalar un_g3  = 3.0 * un_m1  + 10.0 * un_bnd  - 18.0 * un_g1  + 6.0 * un_g2  + 12.0 * delta * dun_dx_new;
+                        Set::Scalar ut_g3  = 3.0 * ut_m1  + 10.0 * ut_bnd  - 18.0 * ut_g1  + 6.0 * ut_g2  + 12.0 * delta * dut_dx_new;
+                        Set::Scalar p_g3   = 3.0 * p_m1   + 10.0 * p_bnd   - 18.0 * p_g1   + 6.0 * p_g2   + 12.0 * delta * dp_dx_new;
+                        rho_g3 = amrex::max(rho_g3, small_local); p_g3 = amrex::max(p_g3, 1.0e-6);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j, k_bnd + 3, idir, rho_g3, un_g3, ut_g3, p_g3);
+
+                        Set::Scalar rho_g4 = -2.0 * rho_m1 - 13.0 * rho_bnd + 24.0 * rho_g1 - 12.0 * rho_g2 + 4.0 * rho_g3 - 12.0 * delta * drho_dx_new;
+                        Set::Scalar un_g4  = -2.0 * un_m1  - 13.0 * un_bnd  + 24.0 * un_g1  - 12.0 * un_g2  + 4.0 * un_g3  - 12.0 * delta * dun_dx_new;
+                        Set::Scalar ut_g4  = -2.0 * ut_m1  - 13.0 * ut_bnd  + 24.0 * ut_g1  - 12.0 * ut_g2  + 4.0 * ut_g3  - 12.0 * delta * dut_dx_new;
+                        Set::Scalar p_g4   = -2.0 * p_m1   - 13.0 * p_bnd   + 24.0 * p_g1   - 12.0 * p_g2   + 4.0 * p_g3   - 12.0 * delta * dp_dx_new;
+                        rho_g4 = amrex::max(rho_g4, small_local); p_g4 = amrex::max(p_g4, 1.0e-6);
+                        set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j, k_bnd + 4, idir, rho_g4, un_g4, ut_g4, p_g4);
+
+                        {
+                            // 2nd tangential velocity (vy, comp 1) advected shear wave + ghost KE.
+                            Set::Scalar ut2_bnd = M_arr(i, j, k_bnd,     1) / rho_bnd;
+                            Set::Scalar ut2_m1  = M_arr(i, j, k_bnd - 1, 1) / (rho_m1 + small_local);
+                            Set::Scalar ut2_m2  = M_arr(i, j, k_bnd - 2, 1) / (rho_m2 + small_local);
+                            Set::Scalar g = (3.0 * ut2_bnd - 4.0 * ut2_m1 + ut2_m2) / (2.0 * delta);
+                            if (params_zhi_local.type == Type::Inflow) {
+                                Set::Scalar K_shear = params_zhi_local.relax_w * a_bnd / params_zhi_local.L_ref;
+                                g = (std::abs(un_bnd) > 1.0e-14) ? (K_shear * (ut2_bnd - params_zhi_local.target_w)) / un_bnd : 0.0;
+                            }
+                            Set::Scalar u1 = ut2_m1 + 2.0 * delta * g;
+                            Set::Scalar u2 = -2.0*ut2_m1 - 3.0*ut2_bnd + 6.0*u1 - 6.0*delta*g;
+                            Set::Scalar u3 = 3.0*ut2_m1 + 10.0*ut2_bnd - 18.0*u1 + 6.0*u2 + 12.0*delta*g;
+                            Set::Scalar u4 = -2.0*ut2_m1 - 13.0*ut2_bnd + 24.0*u1 - 12.0*u2 + 4.0*u3 - 12.0*delta*g;
+                            M_arr(i,j,k_bnd+1,1)=rho_g1*u1; E_arr(i,j,k_bnd+1)+=0.5*rho_g1*u1*u1;
+                            M_arr(i,j,k_bnd+2,1)=rho_g2*u2; E_arr(i,j,k_bnd+2)+=0.5*rho_g2*u2*u2;
+                            M_arr(i,j,k_bnd+3,1)=rho_g3*u3; E_arr(i,j,k_bnd+3)+=0.5*rho_g3*u3*u3;
+                            M_arr(i,j,k_bnd+4,1)=rho_g4*u4; E_arr(i,j,k_bnd+4)+=0.5*rho_g4*u4*u4;
+                        }
+                    }); // end ParallelFor Z-HI
+                }
+            } // end Z-HI boundary
+#endif
 
         } // end MFIter loop
 

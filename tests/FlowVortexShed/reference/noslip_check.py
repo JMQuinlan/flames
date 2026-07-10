@@ -21,4 +21,7 @@ for yi, pi, vi in zip(y, phi, vx):
 # where does phi cross 0.5 and where does vx first become nonzero?
 i_phi = np.argmin(np.abs(phi - 0.5))
 print(f"\nphi=0.5 at y ~ {y[i_phi]:.3f} (cylinder surface, expect ~0.5)")
-print(f"max|vx| where phi<0.5 (inside solid): {np.max(np.abs(vx[phi<0.5])) if np.any(phi<0.5) else 0:.4e}  (expect ~0 = no-slip)")
+noslip_violation = float(np.max(np.abs(vx[phi < 0.5]))) if np.any(phi < 0.5) else 0.0
+print(f"max|vx| where phi<0.5 (inside solid): {noslip_violation:.4e}  (expect ~0 = no-slip)")
+# Standardized line the aggregator parses (the no-slip violation IS the error).
+print(f"UNIT_TEST_RESULT max_err={noslip_violation:.4e} avg_err={noslip_violation:.4e}")

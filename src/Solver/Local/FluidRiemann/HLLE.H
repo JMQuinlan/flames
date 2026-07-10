@@ -98,7 +98,7 @@ public:
                                 / (denSM + (denSM >= 0.0 ? small : -small));
 
         // ---------- Build L and R fluxes ---------------------------------
-        auto build_flux = [&](Set::Scalar u, Set::Scalar v, Set::Scalar p,
+        auto build_flux = [&](Set::Scalar u, Set::Scalar v, Set::Scalar w, Set::Scalar p,
                               Set::Scalar arh0, Set::Scalar arh1,
                               Set::Scalar E0, Set::Scalar E1, Set::Scalar Etot,
                               Set::Scalar rho) -> Flux
@@ -108,14 +108,17 @@ public:
             f.mass1            = arh1 * u;
             f.momentum_normal  = rho * u * u + p;
             f.momentum_tangent = rho * u * v;
+            f.momentum_tangent2 = rho * u * w;   // 2nd tangent (3D; 0 in 2D)
             f.energy_total     = u * (Etot + p);
             f.energy0          = E0 * u;
             f.energy1          = E1 * u;
             return f;
         };
 
-        const Flux F_L = build_flux(uL, vL, pL, lo.alpha_rho_0, lo.alpha_rho_1, lo.E0, lo.E1, lo.E_total, rhoL);
-        const Flux F_R = build_flux(uR, vR, pR, hi.alpha_rho_0, hi.alpha_rho_1, hi.E0, hi.E1, hi.E_total, rhoR);
+        const Set::Scalar wL = lo.M_tangent2 / rhoL;   // 2nd tangential velocity (3D; 0 in 2D)
+        const Set::Scalar wR = hi.M_tangent2 / rhoR;
+        const Flux F_L = build_flux(uL, vL, wL, pL, lo.alpha_rho_0, lo.alpha_rho_1, lo.E0, lo.E1, lo.E_total, rhoL);
+        const Flux F_R = build_flux(uR, vR, wR, pR, hi.alpha_rho_0, hi.alpha_rho_1, hi.E0, hi.E1, hi.E_total, rhoR);
 
         // ---------- Dispatch ---------------------------------------------
         Flux fl;
@@ -141,6 +144,7 @@ public:
             fl.mass1            = inv * (S_R * F_L.mass1            - S_L * F_R.mass1            + slsr * (hi.alpha_rho_1 - lo.alpha_rho_1));
             fl.momentum_normal  = inv * (S_R * F_L.momentum_normal  - S_L * F_R.momentum_normal  + slsr * (hi.M_normal    - lo.M_normal));
             fl.momentum_tangent = inv * (S_R * F_L.momentum_tangent - S_L * F_R.momentum_tangent + slsr * (hi.M_tangent   - lo.M_tangent));
+            fl.momentum_tangent2 = inv * (S_R * F_L.momentum_tangent2 - S_L * F_R.momentum_tangent2 + slsr * (hi.M_tangent2 - lo.M_tangent2));
             fl.energy_total     = inv * (S_R * F_L.energy_total     - S_L * F_R.energy_total     + slsr * (hi.E_total     - lo.E_total));
             fl.energy0          = inv * (S_R * F_L.energy0          - S_L * F_R.energy0          + slsr * (hi.E0          - lo.E0));
             fl.energy1          = inv * (S_R * F_L.energy1          - S_L * F_R.energy1          + slsr * (hi.E1          - lo.E1));

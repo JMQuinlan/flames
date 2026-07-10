@@ -13,15 +13,12 @@
 #include "IO/WriteMetaData.H"
 #include "AMReX_ParmParse.H"
 
-#if AMREX_SPACEDIM==2
 #include "Integrator/Hydro2.H"
-#endif
 
 int main (int argc, char* argv[])
 {
     Util::Initialize(argc,argv);
 
-    #if AMREX_SPACEDIM==2
     IO::ParmParse pp;
     srand(2);
 
@@ -31,11 +28,6 @@ int main (int argc, char* argv[])
     integrator->InitData();
     integrator->Evolve();
     delete integrator;
-    #else
-
-    Util::Abort(INFO,"hydro2 currently works only in 2d");
-
-    #endif
 
     Util::Finalize();
-} 
+}
