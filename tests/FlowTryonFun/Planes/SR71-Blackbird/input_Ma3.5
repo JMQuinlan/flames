@@ -1,0 +1,198 @@
+#@ [sr71_ma35_stl_3d]
+#@ exe=hydro2
+#@ dim=3
+
+# =============================================================================
+# FlowTryonFun -- SR-71 Blackbird, 3D supersonic flow over an EMBEDDED SOLID
+# from an STL CAD mesh (IC::STL -> self-contained Util::STL signed distance -> diffuse
+# phi), at PHYSICAL air values and REAL aircraft size (for lift/drag).
+# =============================================================================
+# Condition: Ma 3.5 at 85,000 ft (US Standard Atmosphere, 25,908 m).
+#
+#   ATMOSPHERE (85,000 ft):  T = 222.56 K,  p = 2183.7 Pa,  rho = 0.03418 kg/m^3,
+#                            a = 299.06 m/s.   U = Ma*a = 3.5*299.06 = 1046.72 m/s.
+#   rho*U = 35.779 (kg/m^2 s).   E_per_phase = 0.5*p/(gamma-1) = 2729.61 J/m^3.
+#   Freestream dynamic pressure  q_inf = 0.5*rho*U^2 = 18725 Pa.
+#
+#   GEOMETRY: real SR-71 length 32.74 m (107'5"), span 16.94 m, height 5.64 m.
+#   FLOW is -X -> +X.  The CAD STL's native long axis is Z, so it was rotated to
+#   align the fuselage with X, wings with Y (horizontal), height with Z, and the
+#   NOSE pointing -X (into the oncoming flow) -> SR71_xflow.STL.  read_stl_file
+#   then does  vertex -> vertex*scale + center:
+#     scale  = 32.74 / 99.67 = 0.328483  m/model-unit  (length -> real 32.74 m)
+#     center = -scale * rotated_bbox_center = (16.3716, 11.2090, -2.3521)
+#   -> placed airframe:  x[-16.37, 16.37]  y[-8.87, 8.87]  z[-2.25, 2.25]  (m),
+#      nose at x=-16.37.  (Length exact; STL span 17.74 m / height 4.50 m -- a few
+#      % off, tails short; planform area within a few %.)
+#
+#   LIFT/DRAG: integrate pressure (and viscous if mu>0) over the phi=0.5 surface;
+#   nondimensionalize with q_inf=18725 Pa and S_ref=149.1 m^2 (SR-71 wing area):
+#     C_L = L/(q_inf*S_ref),  C_D = D/(q_inf*S_ref).
+#   Two identical ideal gases (eta=0.5) so the mixture is one perfect-gas air.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+#plot_file = ./tests/FlowTryonFun/Planes/SR71-Blackbird/output_Ma3.5
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTryonFun/Planes/SR71-Blackbird/output_Ma3.5
+
+### MESHING ###
+# Base dx = 0.5 m; AMR refines the airframe surface + bow/wing shocks.
+# max_level=4 -> dx_finest = 0.5/2^4 = 0.03125 m (forces-resolution).  The diffuse
+# skin eps=0.09375 m is 3 finest cells wide.  WARNING: this is an EXPENSIVE 3D run
+# (16x finer than max_level=2 near the surface, ~46k steps); run it on the cluster.
+# Drop to max_level=2-3 for a quick first look.
+amr.plot_dt          = 0.02
+amr.max_grid_size    = 64
+amr.blocking_factor  = 16
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level        = 4
+amr.n_cell           = 192 32 48     # dx=0.5 cubic; y=0..16 half-body; all div by blocking_factor 16
+amr.n_error_buf      = 8
+nghost = 4
+
+### DIMENSIONS (meters) -- flow in +X (from -X to +X) ###
+geometry.prob_lo     = -32.0   0.0 -12.0     # ~15 m upstream of nose
+geometry.prob_hi     =  64.0  16.0  12.0     # ~48 m wake
+geometry.is_periodic = 0 0 0
+
+### TIME STEPPING ###
+timestep            = 1e-7
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 6.5e-6         # ~ cfl*dx_finest/(U+c) = 0.3*0.03125/1346
+dynamictimestep.min = 1e-10
+cfl                 = 0.3
+cfl_v               = 0.3
+stop_time           = 0.3            # ~3 flow-through times (L=96 m, U=1047 -> 0.092 s each)
+
+# ----------------------------------------------------------------------------
+# EMBEDDED SOLID -- the SR-71, from STL.  Yang full-flux porous wall.
+# ----------------------------------------------------------------------------
+apply_embedded_solid = 1
+solid.brinkman       = 45000          # YANG penalty ~4*U/eps = 4*1047/0.09375 (no-pen + no-slip); brinkman*dt_max=0.29<2
+phi_refinement_criterion = 0.1        # refine on the airframe surface (grad phi)
+
+# STL geometry IC.  d>0 fluid, d<0 solid -> phi = 0.5*(1+tanh(d/eps)).
+# SR71_xflow.STL = the CAD mesh rotated to fly +X nose-first (see header).
+solid.phi.ic.type                 = stl
+solid.phi.ic.stl.filename         = ./tests/FlowTryonFun/Planes/SR71-Blackbird/SR71_xflow.STL
+solid.phi.ic.stl.scale            = 0.328483          # 32.74 m / 99.67 model-units -> real length
+solid.phi.ic.stl.center           = 16.3716 11.2090 -2.3521   # -scale*rotated_bbox_center -> origin-centered (m)
+solid.phi.ic.stl.eps              = 0.09375           # diffuse half-width = 3 finest cells (3*0.03125)
+solid.phi.ic.stl.reverse_normal   = 0                # set 1 if the solid comes out inverted (fluid<->solid swapped)
+
+# Prescribed quiescent solid target (physical air at rest, p=p_inf):
+solid.density.ic.type = constant
+solid.density.ic.constant.value = 0.03418
+solid.momentum.ic.type = constant
+solid.momentum.ic.constant.value = 0.0 0.0 0.0
+solid.pressure.ic.type = constant
+solid.pressure.ic.constant.value = 2183.7
+
+### ETA (alpha_1) -- uniform 0.5 (two identical gases => single ideal-gas air) ###
+eta.ic.type = constant
+eta.ic.constant.value = 0.5
+eta.bc.type.xlo = dirichlet            # supersonic inflow (all characteristics enter)
+eta.bc.val.xlo  = 0.5
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = Symmetry        # y=0 symmetry plane (half-body)
+eta.bc.type.yhi = neumann
+eta.bc.type.zlo = neumann
+eta.bc.type.zhi = neumann
+
+### EOS (ideal-gas air, gamma = 1.4) -- two identical phases ###
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cp    = 1005.0
+eos0.cv    = 717.86
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp    = 1005.0
+eos1.cv    = 717.86
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### FLUID 0 IC (supersonic freestream in +X) ###
+density0.ic.type = constant
+density0.ic.constant.value = 0.03418
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "1046.72"    # vx = U
+velocity0.ic.expression.region1 = "0.0"        # vy
+velocity0.ic.expression.region2 = "0.0"        # vz
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 2183.7
+
+### FLUID 1 IC (identical to fluid 0) ###
+density1.ic.type = constant
+density1.ic.constant.value = 0.03418
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "1046.72"
+velocity1.ic.expression.region1 = "0.0"
+velocity1.ic.expression.region2 = "0.0"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 2183.7
+
+### INTERACTIONS ###
+epsilon = 0.1
+sigma   = 0.0
+Dv      = 0.0
+pref    = 0.0
+small   = 1e-6
+grav    = 0.0
+
+### BOUNDARY CONDITIONS ###
+# Supersonic inflow at xlo: Dirichlet rho/M/E.  Outflow xhi + far-field y/z: Neumann.
+# density.bc = MIXTURE inflow density (= rho_phys).  energy.bc = PER-PHASE
+# internal energy E0=E1 = 0.5*p/(gamma-1) (NOT the mixture total).
+density.bc.type.xlo  = dirichlet
+density.bc.val.xlo   = 0.03418
+density.bc.type.xhi  = neumann
+density.bc.type.ylo  = Symmetry
+density.bc.type.yhi  = neumann
+density.bc.type.zlo  = neumann
+density.bc.type.zhi  = neumann
+
+# momentum (Mx, My, Mz): inflow drives Mx = rho*U = 35.779, transverse 0.
+momentum.bc.type.xlo = dirichlet dirichlet dirichlet
+momentum.bc.val.xlo  = 35.779 0.0 0.0
+momentum.bc.type.xhi = neumann neumann neumann
+momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD REFLECT_EVEN  # Mx even, My(normal) odd, Mz even
+momentum.bc.type.yhi = neumann neumann neumann
+momentum.bc.type.zlo = neumann neumann neumann
+momentum.bc.type.zhi = neumann neumann neumann
+
+energy.bc.type.xlo   = dirichlet
+energy.bc.val.xlo    = 2729.61
+energy.bc.type.xhi   = neumann
+energy.bc.type.ylo   = Symmetry
+energy.bc.type.yhi   = neumann
+energy.bc.type.zlo   = neumann
+energy.bc.type.zhi   = neumann
+
+### REFINEMENT CRITERIA -- shock (rho/p gradients) + airframe (grad phi) ###
+eta_refinement_criterion   = 1e10
+omega_refinement_criterion = 1e10
+gradu_refinement_criterion = 1e10
+p_refinement_criterion     = 0.1
+rho_refinement_criterion   = 0.1
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+
+### SOLVER ###
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+kappa_method        = 1
+apply_sharpening    = 0

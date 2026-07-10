@@ -1,0 +1,177 @@
+#@ [naca0012]
+#@ exe=hydro2
+#@ dim=2
+
+# =============================================================================
+# FlowAirfoil -- NACA 0012, 2D subsonic flow over an EMBEDDED SOLID airfoil
+# (rasterized phi bitmap -> diffuse tanh boundary), for lift/drag VALIDATION
+# against thin-airfoil theory and tabulated NACA data.
+# =============================================================================
+# Condition: Ma 0.5 (c = 1 by construction: p = 1/gamma, rho = 1 -> a = 1, U = Ma).
+#
+#   FLOW:      rho = 1.0,  p = 0.714286 (= 1/gamma),  U = 0.5  (Ma 0.5).
+#              rho*U = 0.5000.   E_per_phase = 0.5*p/(gamma-1) = 0.892857.
+#              q_inf = 0.5*rho*U^2 = 0.125000.
+#   GEOMETRY:  NACA 0012, chord 1.0, from a phi bitmap (fit=coord over the
+#              domain box).  d>0 fluid, d<0 solid -> phi = 0.5*(1+tanh(d/eps)).
+#   WALL:      slip (wall-normal only) Brinkman penalty (solid.slip=1).
+#              eps = 0.02 skin,  brinkman = 100.0 ~ 4*U/eps.
+#   LIFT/DRAG (post-processed):  F = -integral (p-p_inf) grad(phi) dV;
+#              C_l = F_y/(q_inf*c),  C_d = F_x/(q_inf*c).  INVISCID (mu=0) ->
+#              pressure/form drag only (no skin friction).  Two identical ideal
+#              gases (eta=0.5) => the mixture is one perfect-gas air.
+#   BCs:       SUBSONIC -- Dirichlet freestream inflow at xlo, pinned back-pressure
+#              at xhi (energy Dirichlet); far-field top/bottom Neumann.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file            = ./tests/FlowAirfoil/NACA_0012/output
+amr.plot_dt          = 8.0
+amr.plot_int         = -1
+
+### MESHING ###
+# Base dx = 0.0625; AMR refines the airfoil surface (grad phi) + shock.
+# max_level = 3 -> dx_finest = base/2^3; eps = 0.02 diffuse skin.
+amr.max_grid_size    = 500000
+amr.blocking_factor  = 8
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level        = 3
+amr.n_cell           = 192 160     # both divisible by blocking_factor 8
+
+### DIMENSIONS -- flow in +X ###
+geometry.prob_lo     = -4.0 -5.0 0.0
+geometry.prob_hi     = 8.0 5.0 0.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEPPING ###
+timestep            = 1e-6
+dynamictimestep.on  = 1
+dynamictimestep.max = 5e-3
+dynamictimestep.min = 1e-10
+cfl                 = 0.3
+cfl_v               = 0.3
+stop_time           = 16.0
+
+# ----------------------------------------------------------------------------
+# EMBEDDED SOLID -- the NACA 0012, from a phi bitmap.  Yang Brinkman wall.
+# ----------------------------------------------------------------------------
+apply_embedded_solid     = 1
+solid.brinkman           = 100.0          # YANG penalty ~ 4*U/eps (slip (wall-normal only))
+solid.slip               = 1              # 0 = no-slip (all momentum); 1 = slip (wall-normal only)
+phi_refinement_criterion = 0.1            # refine on the airfoil surface (grad phi)
+
+# Bitmap geometry IC:  pixel/255 -> phi,  fit=coord onto the domain box.
+solid.phi.ic.type            = bmp
+solid.phi.ic.bmp.filename    = ./tests/FlowAirfoil/NACA_0012/naca0012.bmp
+solid.phi.ic.bmp.channel     = g
+solid.phi.ic.bmp.min         = 0
+solid.phi.ic.bmp.max         = 255
+solid.phi.ic.bmp.fit         = coord
+solid.phi.ic.bmp.coord.lo    = -4.0 -5.0
+solid.phi.ic.bmp.coord.hi    = 8.0 5.0
+
+# Prescribed quiescent solid target (air at rest, p = p_inf):
+solid.density.ic.type            = constant
+solid.density.ic.constant.value  = 1.0
+solid.momentum.ic.type           = constant
+solid.momentum.ic.constant.value = 0.0 0.0
+solid.pressure.ic.type           = constant
+solid.pressure.ic.constant.value = 0.714286
+
+### ETA (alpha_1) -- uniform 0.5 (two identical gases => single ideal-gas air) ###
+eta.ic.type       = constant
+eta.ic.constant.value = 0.5
+eta.bc.type.xlo   = dirichlet          # subsonic inflow
+eta.bc.val.xlo    = 0.5
+eta.bc.type.xhi   = neumann
+eta.bc.type.ylo   = neumann
+eta.bc.type.yhi   = neumann
+
+### EOS (ideal-gas air, gamma = 1.4) -- two identical phases ###
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cp    = 1005.0
+eos0.cv    = 717.86
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp    = 1005.0
+eos1.cv    = 717.86
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### FLUID 0 IC (subsonic freestream in +X) ###
+density0.ic.type = constant
+density0.ic.constant.value = 1.0
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.5"      # vx = U
+velocity0.ic.expression.region1 = "0.0"      # vy
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 0.714286
+
+### FLUID 1 IC (identical to fluid 0) ###
+density1.ic.type = constant
+density1.ic.constant.value = 1.0
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.5"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 0.714286
+
+### INTERACTIONS ###
+epsilon = 0.1
+sigma   = 0.0
+Dv      = 0.0
+pref    = 0.0
+small   = 1e-6
+grav    = 0.0
+
+### BOUNDARY CONDITIONS ###
+# SUBSONIC: Dirichlet freestream inflow at xlo; pinned back-pressure at xhi
+# (energy Dirichlet, so the domain pressure does not float); far-field Neumann.
+# density.bc = mixture inflow density; energy.bc = PER-PHASE E0=E1=0.5*p/(gamma-1).
+density.bc.type.xlo  = dirichlet
+density.bc.val.xlo   = 1.0
+density.bc.type.xhi  = neumann
+density.bc.type.ylo  = neumann
+density.bc.type.yhi  = neumann
+
+momentum.bc.type.xlo = dirichlet dirichlet     # Mx = rho*U, My = 0
+momentum.bc.val.xlo  = 0.5 0.0
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+energy.bc.type.xlo   = dirichlet
+energy.bc.val.xlo    = 0.892857
+energy.bc.type.xhi   = dirichlet          # subsonic outflow: pin back-pressure
+energy.bc.val.xhi    = 0.892857
+energy.bc.type.ylo   = neumann
+energy.bc.type.yhi   = neumann
+
+### REFINEMENT CRITERIA -- shock (rho/p gradients) + airfoil (grad phi) ###
+eta_refinement_criterion   = 1e10
+omega_refinement_criterion = 1e10
+gradu_refinement_criterion = 1e10
+p_refinement_criterion     = 0.1
+rho_refinement_criterion   = 0.1
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+
+### SOLVER ###
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+kappa_method        = 1
+apply_sharpening    = 0
