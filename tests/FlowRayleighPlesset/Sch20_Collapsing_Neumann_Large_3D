@@ -62,8 +62,8 @@ amr.max_grid_size  = 32
 amr.blocking_factor = 32
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
-amr.max_level      = 4
-amr.n_cell         = 320 320 320       # base dx 6.25e-3; max_level 4 -> finest dx 3.906e-4 (R0/dx 51.2)
+amr.max_level      = 5
+amr.n_cell         = 160 160 160       # base dx 6.25e-3; max_level 4 -> finest dx 3.906e-4 (R0/dx 51.2)
 amr.n_error_buf    = 16
 
 # Permanently refined box around the bubble: force max_level everywhere inside
