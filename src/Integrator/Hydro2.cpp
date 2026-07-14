@@ -98,12 +98,30 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // EMBEDDED SOLID BOUNDARY (see FlowWedge for examples)
         pp_query_default("apply_embedded_solid", value.embedded.apply, 0);  // Apply Solid Boundry 1 --> "Domain has solid boundry"
-        pp_query_default("solid.brinkman", value.embedded.brinkman, 0.0);   // Yang(2023) momentum-only Brinkman no-penetration (0=off)
+        // Yang(2023) momentum-only Brinkman no-penetration penalty:
+        //   unset / < 0  ->  AUTO (default): per-cell lambda = 3*(|u|+c)/dx_min,
+        //                    i.e. lambda*dt = 3*cfl under the acoustic CFL --
+        //                    explicitly stable (cfl <= 0.5) and at/above the
+        //                    recommended 2x(4U/eps) no-penetration scale for any
+        //                    resolvable skin.
+        //   > 0          ->  explicit constant penalty (user-calibrated).
+        //   = 0          ->  penalty OFF; legacy phi-graded momentum projection
+        //                    wall in FillGhost4BC instead.
+        pp_query_default("solid.brinkman", value.embedded.brinkman, -1.0);
+        // Penalty weight exponent p in lambda*(1-phi)^p.  p=1 (default, legacy)
+        // drags the FLUID side of the diffuse band too (phi=0.9 feels lambda/10),
+        // injecting a momentum deficit ~ the band width into the boundary layer
+        // -> premature laminar separation on lifting bodies.  p=2 localizes the
+        // drag to the body side (phi=0.9 feels lambda/100); recommended for
+        // airfoil/external-flow cases.
+        pp_query_default("solid.penalty_power", value.embedded.penalty_power, 1.0);
         pp_query_default("solid.slip", value.embedded.slip, 0);             // 1 = slip wall (penalize only wall-normal momentum); 0 = no-slip
         if (value.embedded.apply)
         {
-            if (value.embedded.brinkman <= 0.0)
-                Util::Message(INFO, "embedded solid: Yang full-flux wall, auto momentum projection (solid.brinkman not set)");
+            if (value.embedded.brinkman == 0.0)
+                Util::Message(INFO, "embedded solid: Yang full-flux wall, auto momentum projection (solid.brinkman = 0)");
+            else if (value.embedded.brinkman < 0.0)
+                Util::Message(INFO, "embedded solid: Yang full-flux porous wall, AUTO brinkman = 3*(|u|+c)/dx (solid.brinkman not set)");
             else
                 Util::Message(INFO, "embedded solid: Yang full-flux porous wall, solid.brinkman=", value.embedded.brinkman);
             // Skips pressure relaxation within the solid (acts likes Hydro do-not-solve type solid)
@@ -215,7 +233,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("density_relax", value.omega_relax, 0.5);                          // Relaxation parameter (0.3-0.7 typical)
 
         // BOUNDRY CONDITITIONS
-        pp_query_default("nghost", value.nghost, 2); // Number of Ghost Cells (NOTE: NSCBC can only use 2 or 4 nghost) ### WIP ### Add nghost cabability for nghost
+        pp_query_default("nghost", value.nghost, 4); // Number of Ghost Cells.  Default 4: the face-reconstruction
+                                                     // window reads 3 ghost cells (any limiter; weno5 uses them all),
+                                                     // so nghost=2 causes out-of-bounds ghost reads -> NaNs.
+                                                     // (NOTE: NSCBC can only use 2 or 4 nghost)
 
         bool uses_nscbc = false;
         std::vector<std::string> bc_faces = { "xlo", "xhi", "ylo", "yhi" };
@@ -1964,6 +1985,8 @@ Hydro2::RHS(int lev,
                 const int dj = hi_j - lo_j;
                 const int dk = hi_k - lo_k;
                 Solver::Local::Limiter::Primitive prim[6];
+                // NOTE: the window reads 3 ghost cells past the valid box, so
+                // nghost >= 3 is required for ANY limiter (default nghost = 4).
                 for (int s = -2; s <= 3; ++s)
                 {
                     Solver::Local::FluidRiemann::State raw =
@@ -2367,12 +2390,36 @@ Hydro2::RHS(int lev,
             // term phi0/kappa (u_S - u); orig. Angot 1999 / Liu & Vasilyev
             // 2007)
             // ============================================================
-            if (embedded.apply && embedded.brinkman > 0.0)
+            if (embedded.apply && embedded.brinkman != 0.0)
             {
                 const Set::Scalar chi = 1.0 - phi_c;
                 if (chi > 0.0)
                 {
-                    const Set::Scalar lam = embedded.brinkman * chi;
+                    // AUTO penalty (solid.brinkman unset, default -1):
+                    //     lambda = C_auto * (|u| + c) / dx_min,   C_auto = 3.
+                    // Under the acoustic CFL dt = cfl*dx/(|u|+c) this gives
+                    // lambda*dt = C_auto*cfl IDENTICALLY (state- and grid-
+                    // independent): explicitly stable for cfl <= 0.5 with
+                    // safety margin (limit is lambda*dt < 2).  It also sits
+                    // at or above the recommended 2x(4 U/eps) no-penetration
+                    // scale for any resolvable skin (eps >= ~1.3 dx), since
+                    // c >= U subsonic.  A fixed-dt run with a large user
+                    // timestep bypasses this guarantee -- set solid.brinkman
+                    // explicitly there.
+                    Set::Scalar lam0 = embedded.brinkman;
+                    if (lam0 < 0.0)
+                    {
+                        const Set::Scalar dx_min_b = std::min({ AMREX_D_DECL(DX[0], DX[1], DX[2]) });
+                        lam0 = 3.0 * (u.norm() + a(i, j, k)) / dx_min_b;
+                    }
+                    // Penalty weight (1-phi)^p: p=1 legacy linear; p=2 localizes
+                    // the drag to the body side of the diffuse band (the fluid
+                    // side of the skin no longer saps boundary-layer momentum).
+                    const Set::Scalar pp_ = embedded.penalty_power;
+                    const Set::Scalar chi_w = (pp_ == 1.0) ? chi
+                                            : (pp_ == 2.0) ? chi * chi
+                                            : std::pow(chi, pp_);
+                    const Set::Scalar lam = lam0 * chi_w;
                     Set::Vector nrm = embedded.slip ? Numeric::Gradient(phisol, i, j, k, 0, DX)
                                                     : Set::Vector::Zero();
                     const Set::Scalar nmag = embedded.slip ? nrm.norm() : 0.0;
@@ -4058,10 +4105,11 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     // ------------------------------------------------------------
     // STEP 2b: EMBEDDED SOLID BOUNDARY auto wall + ghost fill.
     // ------------------------------------------------------------
-    // Fill the static indicator's ghosts, then (only when solid.brinkman was
-    // not provided) apply a dt-independent, unconditionally-stable momentum-
+    // Fill the static indicator's ghosts, then (only when solid.brinkman == 0
+    // EXPLICITLY) apply a dt-independent, unconditionally-stable momentum-
     // only projection toward the solid velocity, graded by phi.  When
-    // solid.brinkman > 0 the explicit RHS penalty is the wall and this is
+    // solid.brinkman > 0 (explicit) or < 0 (AUTO wavespeed-scaled, the
+    // default) the RHS Brinkman penalty is the wall and this is
     // skipped.  This runs BEFORE the STEP 4 primitive recovery so the EOS sees
     // a sensible (finite p, c) state inside the solid, and it is IDEMPOTENT --
     // safe to call from RHS, the post-stage hook, and the post-integration
@@ -4086,17 +4134,19 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             const Set::Scalar brink_  = embedded.brinkman;
 
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                // Auto wall (used only when solid.brinkman not provided): a
-                // dt-independent, unconditionally-stable momentum-only
-                // projection toward the solid velocity, graded by phi:
+                // Projection wall (used only when solid.brinkman == 0
+                // EXPLICITLY): a dt-independent, unconditionally-stable
+                // momentum-only projection toward the solid velocity, graded
+                // by phi:
                 //   M <- phi*M + (1-phi)*M_solid  (= the rest-init blend applied
-                // every step).  When solid.brinkman > 0 the explicit RHS penalty
+                // every step).  When solid.brinkman != 0 (explicit constant or
+                // AUTO wavespeed-scaled, the default) the RHS Brinkman penalty
                 // is the wall instead and this is skipped.  Mass/per-phase
                 // energy keep their evolved (full-flux) values; only the
                 // momentum is projected and the redundant total energy E is
                 // recomputed consistently (rho already = rho_eta0+rho_eta1 from
                 // STEP 2 above).
-                if (brink_ <= 0.0)
+                if (brink_ == 0.0)
                 {
                     const Set::Scalar w = std::min(std::max(phi(i, j, k), 0.0), 1.0);
                     for (int d = 0; d < AMREX_SPACEDIM; ++d)
@@ -4436,9 +4486,39 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
                 // identical either way.  Energies stay the equilibrium re-derivation.
                 const Set::Scalar r0   = std::max(rho0(i, j, k), 0.0);
                 const Set::Scalar r1   = std::max(rho1(i, j, k), 0.0);
-                const Set::Scalar scale = rho_g / std::max(r0 + r1, small_ns);
-                rho0(i, j, k) = r0 * scale;
-                rho1(i, j, k) = r1 * scale;
+                // DEGENERATE-RATIO GUARD: on refined levels the per-phase
+                // ghosts at PHYSICAL boundaries carry no BC (density_bc is
+                // bc_nothing in the NSCBC path), so at freshly-regridded
+                // physical-corner cells r0/r1 can be stale zeros or equal
+                // garbage.  Rescaling a meaningless ratio partitioned the
+                // eta=1 airfoil corner 50/50 -> vacuum states -> relaxation
+                // blow-up -> NaN.  If the existing per-phase basis does not
+                // plausibly represent the LODI mixture, fall back to the
+                // eta split (exact at pure-phase cells, which is what sits
+                // at far-field corners; the RP interface never touches an
+                // NSCBC physical boundary).
+                const Set::Scalar rsum  = r0 + r1;
+                const Set::Scalar frac0 = r0 / std::max(rsum, small_ns);
+                // The ratio is trustworthy only if it is consistent with the
+                // (reliably extrapolated) eta ghost where eta is unambiguous:
+                // at a PURE-phase ghost (a1 or a2 ~ 1) essentially all mass
+                // must sit in that phase.  Mixed-eta ghosts keep the ratio
+                // (mass fraction != volume fraction there by design).
+                const bool degenerate =
+                       (rsum <= 1.0e-3 * rho_g)
+                    || (a1 > 0.999 && frac0 < 0.9)
+                    || (a2 > 0.999 && frac0 > 0.1);
+                if (!degenerate)
+                {
+                    const Set::Scalar scale = rho_g / std::max(rsum, small_ns);
+                    rho0(i, j, k) = r0 * scale;
+                    rho1(i, j, k) = r1 * scale;
+                }
+                else
+                {
+                    rho0(i, j, k) = a1 * rho_g;
+                    rho1(i, j, k) = a2 * rho_g;
+                }
                 E0(i, j, k)   = a1 * (p_g + g0_ns * pi0_ns) / std::max(g0_ns - 1.0, small_ns);
                 E1(i, j, k)   = a2 * (p_g + g1_ns * pi1_ns) / std::max(g1_ns - 1.0, small_ns);
             });
@@ -4468,6 +4548,51 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         FillBoundariesWithBC(lev, time, density_bc, {
             rho_eta0_mf[lev].get(), rho_eta1_mf[lev].get()
         });
+        // At DIRICHLET density faces the shared per-phase fill above wrote the
+        // SAME value into BOTH (alpha rho)_k -- doubling the mixture.  The
+        // documented semantic of density.bc is the MIXTURE density (comment at
+        // the top of this branch), so re-partition those physical ghosts by
+        // the (STEP-3 BC-filled) eta ghost.  Only cells OUTSIDE the domain on
+        // a Dirichlet face are touched; valid cells and neumann/reflect-face
+        // ghosts (exact per-phase mirrors) are untouched, so the RP interface
+        // mass-conservation fix above is unaffected.
+        {
+            const amrex::BCRec drec = density_bc->GetBCRec();
+            amrex::GpuArray<int, AMREX_SPACEDIM> dir_lo{}, dir_hi{};
+            bool any_dirichlet = false;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                dir_lo[d] = BC::BCUtil::IsDirichlet(drec.lo(d)) ? 1 : 0;
+                dir_hi[d] = BC::BCUtil::IsDirichlet(drec.hi(d)) ? 1 : 0;
+                any_dirichlet = any_dirichlet || dir_lo[d] || dir_hi[d];
+            }
+            if (any_dirichlet)
+            {
+                const amrex::Box dom = geom[lev].Domain();
+                for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+                {
+                    const amrex::Box &ghostbox = mfi.growntilebox(nghost);
+                    auto eta  = eta_mf[lev]->array(mfi);
+                    auto rho0 = rho_eta0_mf[lev]->array(mfi);
+                    auto rho1 = rho_eta1_mf[lev]->array(mfi);
+                    amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                        const int idx[3] = { i, j, k };
+                        bool on_dirichlet_face = false;
+                        for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                        {
+                            if (idx[d] < dom.smallEnd(d) && dir_lo[d]) on_dirichlet_face = true;
+                            if (idx[d] > dom.bigEnd(d)   && dir_hi[d]) on_dirichlet_face = true;
+                        }
+                        if (!on_dirichlet_face) return;
+                        const Set::Scalar a1 = std::max(0.0, std::min(1.0, eta(i, j, k)));
+                        // Both fabs hold the same (mixture) Dirichlet value here.
+                        const Set::Scalar rho_mix = rho0(i, j, k);
+                        rho0(i, j, k) = a1 * rho_mix;
+                        rho1(i, j, k) = (1.0 - a1) * rho_mix;
+                    });
+                }
+            }
+        }
         // Mixture density is the consistent sum of the partial densities.
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {

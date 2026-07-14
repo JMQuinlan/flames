@@ -1,26 +1,30 @@
 """
-NACA 0012 lift/drag validation for Hydro2 (embedded-solid, single-gas compressible).
+NACA 0012 lift/drag ANALYSIS for Hydro2 (embedded-solid, compressible).
 
-Sweeps angle of attack, runs the solver, and computes Cl, Cd, L/D TWO independent
-ways from each plotfile:
-  (A) pressure surface integral   F = -∫ (p-p_inf) ∇phi dV        (pressure/form force)
-  (B) Brinkman penalty reaction   F =  ∫ brinkman (1-phi)(M-Ms) dV (force the wall applies)
-For a well-resolved inviscid body these should AGREE.  Both are compared against:
-  - analytical thin-airfoil + Prandtl-Glauert:  Cl = (2*pi/beta) * alpha,  beta=sqrt(1-M^2)
-  - tabulated NACA 0012 experiment (Abbott & von Doenhoff / NASA Ladson TM-4074)
+ANALYSIS-ONLY: this script never runs the solver.  overnight_study.py runs the
+AoA sweep; each case directory holds a copy of the exact input that was run,
+and this script
+  * auto-detects case directories and their AoA from the directory NAME
+    (aoa04, aoa12, aoa07.5, a004.0, ... -- no AOAS list to keep in sync), and
+  * reads the flow constants it needs (rho, U, p_inf, gamma, mu, brinkman)
+    from that per-case input copy -- so it always normalizes with the q_inf
+    the case actually ran, not a hard-coded one.
 
-NOTE (honest): the run is INVISCID (mu=0).  So:
-  - Cl should match theory/experiment in the linear (pre-stall) range.
-  - Cd is PRESSURE/wave drag only; subcritical-subsonic inviscid Cd ~ 0 (d'Alembert),
-    so it will sit FAR below the viscous experimental Cd (~0.006). That gap quantifies
-    the missing skin friction -- a known limitation, not a solver bug.
+Forces, TWO independent ways per plotfile:
+  (A) pressure surface integral   F = -integral (p - p_inf) grad(phi) dV
+  (B) Brinkman penalty reaction   F =  integral brinkman (1-phi)(M - Ms) dV
+      (only when the case ran an explicit constant solid.brinkman > 0;
+       skipped for the AUTO wavespeed-scaled penalty, which is per-cell)
+Compared against thin-airfoil + Prandtl-Glauert (Cl = 2 pi alpha / beta) and
+tabulated NACA 0012 experiment (Abbott & von Doenhoff / NASA Ladson TM-4074).
 
 usage:
-  python3 analyze_NACA_0012.py gen           # write the default BMP + standalone input (AoA=0)
-  python3 analyze_NACA_0012.py run <AoA>     # single case
-  python3 analyze_NACA_0012.py sweep         # full AoA sweep + plot
+  python3 analyze_NACA_0012.py [workdir]      # default /tmp/naca_overnight
+
+The geometry helpers (naca0012 / rotate / write_phi_bmp) live here as a small
+shared library; overnight_study.py imports them to generate per-case bitmaps.
 """
-import os, sys, glob, math, subprocess
+import os, sys, glob, math, re
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -29,26 +33,27 @@ os.makedirs(IMAGES, exist_ok=True)
 TESTDIR = os.path.normpath(os.path.join(HERE, "..", "NACA_0012"))
 FLAMES = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
 SOLVER = os.path.join(FLAMES, "bin", "hydro2-2d-g++")
-WORK = "/tmp/naca0012"
+WORK = "/tmp/naca_overnight"                      # default sweep work dir
 
-# ---- flow + numerics ----
+# ---- geometry / raster constants ----
+CHORD = 1.0
+DOM_LO, DOM_HI = (-4.0, -5.0), (8.0, 5.0)   # (legacy full-domain box; kept for sibling scripts)
+# TIGHT bitmap raster box: IC::BMP clamps to the edge pixel outside coord.lo/hi
+# (edge = pure fluid), so the bmp only needs to cover the foil + margin.  This
+# keeps the file small at sharp skins.  MUST match solid.phi.ic.bmp.coord.lo/hi
+# in the template input.  Covers all rotations to AoA ~ 20 deg.
+BMP_LO, BMP_HI = (-0.75, -0.5), (1.0, 0.5)
+EPS = 0.0025                       # solid tanh skin baked into generated bitmaps
+                                   # (1.28 finest cells at max_level 5; sharp effective TE)
+NX_BMP, NY_BMP = 1400, 800         # pixel = 0.00125 = EPS/2 over the tight box
+
+# ---- reference/legacy constants (per-case analysis parses the case input
+# ---- instead; these are defaults for sibling scripts that import us) ----
 GAMMA = 1.4
-MACH = 0.5
+MACH = 0.3
 RHO, P = 1.0, 1.0 / GAMMA          # c = sqrt(gamma p/rho) = 1  ->  U = Mach
 U = MACH
-CHORD = 1.0
-DOM_LO, DOM_HI = (-4.0, -5.0), (8.0, 5.0)
-N_CELL = (192, 160)                # base halved-cell (was 96x80); divisible by 8
-MAX_LEVEL = 3                      # +1 refinement level (was 2)
-NX_BMP, NY_BMP = 1600, 1334
-EPS = 0.02                         # finest dx 0.0078 -> eps/dx = 2.56 (resolved skin; 0.01 was ~1.3 cells)
-BRINK = 4 * U / EPS
-SLIP = 1                           # 0 = no-slip Brinkman; 1 = slip (normal-only) -- consistent wall for mu=0 Euler
-REFINE_BOX = None                  # ((xlo,ylo),(xhi,yhi)) geometric box -> max_level inside (TE targeting)
 P_INF = P
-STOP_TIME = 16.0                   # subsonic settling (slow flow)
-PLOT_DT = 0                        # 0 -> single plot at stop_time/2; else write every PLOT_DT (Cl history)
-AOAS = [0, 2, 4, 6, 8, 10]
 Q_INF = 0.5 * RHO * U ** 2
 BETA_PG = math.sqrt(1 - MACH ** 2)
 
@@ -56,7 +61,7 @@ BETA_PG = math.sqrt(1 - MACH ** 2)
 EXP_LIFT_SLOPE = 0.11              # dCl/dAoA per deg (linear range)
 EXP_CD0 = 0.0065                   # min profile drag (viscous)
 
-# ---------- geometry ----------
+# ---------- geometry (shared with overnight_study.py) ----------
 def naca0012(n=80):
     xc = 0.5 * (1 - np.cos(np.linspace(0, np.pi, n)))      # cosine spacing 0..1
     yt = 0.6 * (0.2969*np.sqrt(xc) - 0.1260*xc - 0.3516*xc**2 + 0.2843*xc**3 - 0.1015*xc**4)
@@ -71,7 +76,7 @@ def rotate(poly, deg):
 def write_phi_bmp(poly, path):
     from matplotlib.path import Path
     from PIL import Image
-    x = np.linspace(DOM_LO[0], DOM_HI[0], NX_BMP); y = np.linspace(DOM_LO[1], DOM_HI[1], NY_BMP)
+    x = np.linspace(BMP_LO[0], BMP_HI[0], NX_BMP); y = np.linspace(BMP_LO[1], BMP_HI[1], NY_BMP)
     X, Y = np.meshgrid(x, y)
     inside = Path(poly).contains_points(np.column_stack([X.ravel(), Y.ravel()])).reshape(X.shape)
     d2 = np.full(X.shape, np.inf)
@@ -89,197 +94,51 @@ def write_phi_bmp(poly, path):
     g = np.clip(np.round(255*np.flipud(phi)), 0, 255).astype(np.uint8)
     Image.fromarray(np.dstack([g, g, g]), "RGB").save(path)
 
-# ---------- input ----------
-def write_input(bmp, plot, inp):
-    mom_x = RHO * U; e_bc = 0.5 * P / (GAMMA - 1)
-    q_inf = 0.5 * RHO * U ** 2
-    base_dx = (DOM_HI[0] - DOM_LO[0]) / N_CELL[0]
-    wall = "no-slip (all momentum)" if not SLIP else "slip (wall-normal only)"
-    plotc = f"amr.plot_dt          = {PLOT_DT}" if PLOT_DT else f"amr.plot_dt          = {STOP_TIME/2.0}"
-    rbox = ""
-    if REFINE_BOX is not None:
-        (xl, yl), (xh, yh) = REFINE_BOX
-        rbox = (f"refine_box.lo            = {xl:.4f} {yl:.4f}     # force max_level in a box (trailing-edge targeting)\n"
-                f"refine_box.hi            = {xh:.4f} {yh:.4f}\n")
-    txt = f"""#@ [naca0012]
-#@ exe=hydro2
-#@ dim=2
+# ---------- case discovery ----------
+# AoA from the directory NAME: aoa04, aoa12, aoa07.5, aoa_4, a004.0, ...
+_AOA_PATTERNS = [re.compile(r"aoa[-_]?(-?\d+(?:\.\d+)?)", re.I),
+                 re.compile(r"^a[-_]?(-?\d+(?:\.\d+)?)$", re.I)]
 
-# =============================================================================
-# FlowAirfoil -- NACA 0012, 2D subsonic flow over an EMBEDDED SOLID airfoil
-# (rasterized phi bitmap -> diffuse tanh boundary), for lift/drag VALIDATION
-# against thin-airfoil theory and tabulated NACA data.
-# =============================================================================
-# Condition: Ma {MACH} (c = 1 by construction: p = 1/gamma, rho = 1 -> a = 1, U = Ma).
-#
-#   FLOW:      rho = {RHO},  p = {P:.6f} (= 1/gamma),  U = {U}  (Ma {MACH}).
-#              rho*U = {mom_x:.4f}.   E_per_phase = 0.5*p/(gamma-1) = {e_bc:.6f}.
-#              q_inf = 0.5*rho*U^2 = {q_inf:.6f}.
-#   GEOMETRY:  NACA 0012, chord {CHORD}, from a phi bitmap (fit=coord over the
-#              domain box).  d>0 fluid, d<0 solid -> phi = 0.5*(1+tanh(d/eps)).
-#   WALL:      {wall} Brinkman penalty (solid.slip={SLIP}).
-#              eps = {EPS} skin,  brinkman = {BRINK:.1f} ~ 4*U/eps.
-#   LIFT/DRAG (post-processed):  F = -integral (p-p_inf) grad(phi) dV;
-#              C_l = F_y/(q_inf*c),  C_d = F_x/(q_inf*c).  INVISCID (mu=0) ->
-#              pressure/form drag only (no skin friction).  Two identical ideal
-#              gases (eta=0.5) => the mixture is one perfect-gas air.
-#   BCs:       SUBSONIC -- Dirichlet freestream inflow at xlo, pinned back-pressure
-#              at xhi (energy Dirichlet); far-field top/bottom Neumann.
-# =============================================================================
+def detect_aoa(name):
+    base = os.path.basename(os.path.normpath(name))
+    for pat in _AOA_PATTERNS:
+        mm = pat.search(base)
+        if mm:
+            return float(mm.group(1))
+    return None
 
-alamo.program = hydro2
+def parse_case_input(inp_path):
+    """Flow constants from the input copy the case actually ran."""
+    txt = open(inp_path).read()
+    def val(key, default=None):
+        mm = re.search(rf"^\s*{re.escape(key)}\s*=\s*([^#\n]+)", txt, re.M)
+        return mm.group(1).split()[0] if mm else default
+    rho = float(val("density0.ic.constant.value", "1.0"))
+    u   = float(val("velocity0.ic.expression.region0", "0").strip('"\''))
+    p   = float(val("pressure0.ic.constant.value", str(1.0 / 1.4)))
+    gam = float(val("eos0.gamma", "1.4"))
+    mu  = float(val("mu0", "0.0"))
+    brk = float(val("solid.brinkman", "-1.0"))
+    ppw = float(val("solid.penalty_power", "1.0"))
+    c   = math.sqrt(gam * p / rho)
+    return dict(rho=rho, U=u, p_inf=p, gamma=gam, mu=mu, brinkman=brk, penalty_power=ppw,
+                mach=u / c, q_inf=0.5 * rho * u * u,
+                re=(rho * u * CHORD / mu) if mu > 0 else float("inf"))
 
-### OUTPUT ###
-plot_file            = {plot}
-{plotc}
-amr.plot_int         = -1
-
-### MESHING ###
-# Base dx = {base_dx:.4f}; AMR refines the airfoil surface (grad phi) + shock.
-# max_level = {MAX_LEVEL} -> dx_finest = base/2^{MAX_LEVEL}; eps = {EPS} diffuse skin.
-amr.max_grid_size    = 500000
-amr.blocking_factor  = 8
-amr.regrid_int       = 10
-amr.grid_eff         = 0.8
-amr.max_level        = {MAX_LEVEL}
-amr.n_cell           = {N_CELL[0]} {N_CELL[1]}     # both divisible by blocking_factor 8
-
-### DIMENSIONS -- flow in +X ###
-geometry.prob_lo     = {DOM_LO[0]} {DOM_LO[1]} 0.0
-geometry.prob_hi     = {DOM_HI[0]} {DOM_HI[1]} 0.0
-geometry.is_periodic = 0 0 0
-
-### TIME STEPPING ###
-timestep            = 1e-6
-dynamictimestep.on  = 1
-dynamictimestep.max = 5e-3
-dynamictimestep.min = 1e-10
-cfl                 = 0.3
-cfl_v               = 0.3
-stop_time           = {STOP_TIME}
-
-# ----------------------------------------------------------------------------
-# EMBEDDED SOLID -- the NACA 0012, from a phi bitmap.  Yang Brinkman wall.
-# ----------------------------------------------------------------------------
-apply_embedded_solid     = 1
-solid.brinkman           = {BRINK}          # YANG penalty ~ 4*U/eps ({wall})
-solid.slip               = {SLIP}              # 0 = no-slip (all momentum); 1 = slip (wall-normal only)
-{rbox}phi_refinement_criterion = 0.1            # refine on the airfoil surface (grad phi)
-
-# Bitmap geometry IC:  pixel/255 -> phi,  fit=coord onto the domain box.
-solid.phi.ic.type            = bmp
-solid.phi.ic.bmp.filename    = {bmp}
-solid.phi.ic.bmp.channel     = g
-solid.phi.ic.bmp.min         = 0
-solid.phi.ic.bmp.max         = 255
-solid.phi.ic.bmp.fit         = coord
-solid.phi.ic.bmp.coord.lo    = {DOM_LO[0]} {DOM_LO[1]}
-solid.phi.ic.bmp.coord.hi    = {DOM_HI[0]} {DOM_HI[1]}
-
-# Prescribed quiescent solid target (air at rest, p = p_inf):
-solid.density.ic.type            = constant
-solid.density.ic.constant.value  = {RHO}
-solid.momentum.ic.type           = constant
-solid.momentum.ic.constant.value = 0.0 0.0
-solid.pressure.ic.type           = constant
-solid.pressure.ic.constant.value = {P:.6f}
-
-### ETA (alpha_1) -- uniform 0.5 (two identical gases => single ideal-gas air) ###
-eta.ic.type       = constant
-eta.ic.constant.value = 0.5
-eta.bc.type.xlo   = dirichlet          # subsonic inflow
-eta.bc.val.xlo    = 0.5
-eta.bc.type.xhi   = neumann
-eta.bc.type.ylo   = neumann
-eta.bc.type.yhi   = neumann
-
-### EOS (ideal-gas air, gamma = {GAMMA}) -- two identical phases ###
-eos0.gamma = {GAMMA}
-eos0.p0    = 0.0
-eos0.cp    = 1005.0
-eos0.cv    = 717.86
-eos1.gamma = {GAMMA}
-eos1.p0    = 0.0
-eos1.cp    = 1005.0
-eos1.cv    = 717.86
-mu0   = 0.0
-mu0_b = 0.0
-mu1   = 0.0
-mu1_b = 0.0
-
-### FLUID 0 IC (subsonic freestream in +X) ###
-density0.ic.type = constant
-density0.ic.constant.value = {RHO}
-velocity0.ic.type = expression
-velocity0.ic.expression.region0 = "{U}"      # vx = U
-velocity0.ic.expression.region1 = "0.0"      # vy
-pressure0.ic.type = constant
-pressure0.ic.constant.value = {P:.6f}
-
-### FLUID 1 IC (identical to fluid 0) ###
-density1.ic.type = constant
-density1.ic.constant.value = {RHO}
-velocity1.ic.type = expression
-velocity1.ic.expression.region0 = "{U}"
-velocity1.ic.expression.region1 = "0.0"
-pressure1.ic.type = constant
-pressure1.ic.constant.value = {P:.6f}
-
-### INTERACTIONS ###
-epsilon = 0.1
-sigma   = 0.0
-Dv      = 0.0
-pref    = 0.0
-small   = 1e-6
-grav    = 0.0
-
-### BOUNDARY CONDITIONS ###
-# SUBSONIC: Dirichlet freestream inflow at xlo; pinned back-pressure at xhi
-# (energy Dirichlet, so the domain pressure does not float); far-field Neumann.
-# density.bc = mixture inflow density; energy.bc = PER-PHASE E0=E1=0.5*p/(gamma-1).
-density.bc.type.xlo  = dirichlet
-density.bc.val.xlo   = {RHO}
-density.bc.type.xhi  = neumann
-density.bc.type.ylo  = neumann
-density.bc.type.yhi  = neumann
-
-momentum.bc.type.xlo = dirichlet dirichlet     # Mx = rho*U, My = 0
-momentum.bc.val.xlo  = {mom_x} 0.0
-momentum.bc.type.xhi = neumann neumann
-momentum.bc.type.ylo = neumann neumann
-momentum.bc.type.yhi = neumann neumann
-
-energy.bc.type.xlo   = dirichlet
-energy.bc.val.xlo    = {e_bc:.6f}
-energy.bc.type.xhi   = dirichlet          # subsonic outflow: pin back-pressure
-energy.bc.val.xhi    = {e_bc:.6f}
-energy.bc.type.ylo   = neumann
-energy.bc.type.yhi   = neumann
-
-### REFINEMENT CRITERIA -- shock (rho/p gradients) + airfoil (grad phi) ###
-eta_refinement_criterion   = 1e10
-omega_refinement_criterion = 1e10
-gradu_refinement_criterion = 1e10
-p_refinement_criterion     = 0.1
-rho_refinement_criterion   = 0.1
-cutoff = 1e-16
-
-### SOURCE TERMS ###
-m0.ic.constant.value = 0.0
-u0.ic.constant.value = 0.0 0.0
-q.ic.constant.value  = 0.0 0.0
-
-apply_surface_tension = 0
-apply_weight          = 0
-apply_vaporization    = 0
-
-### SOLVER ###
-Riemann_Solver.type = hllc
-Limiter.type        = minmod
-kappa_method        = 1
-apply_sharpening    = 0
-"""
-    open(inp, "w").write(txt)
+def find_cases(work):
+    """Case dirs under `work` that have an input copy, a plotfile, and a
+    parsable AoA in their name."""
+    cases = []
+    for rd in sorted(glob.glob(os.path.join(work, "*"))):
+        if not os.path.isdir(rd):
+            continue
+        aoa = detect_aoa(rd)
+        inp = os.path.join(rd, "input")
+        pfs = sorted(glob.glob(os.path.join(rd, "out", "*cell")))
+        if aoa is None or not os.path.isfile(inp) or not pfs:
+            continue
+        cases.append(dict(rd=rd, aoa=aoa, inp=inp, plot=os.path.join(rd, "out")))
+    return sorted(cases, key=lambda c: c["aoa"])
 
 # ---------- forces (two methods) ----------
 def _grids(plot):
@@ -292,97 +151,106 @@ def _grids(plot):
     g = lambda f: np.asarray(cg[f])[:, :, 0]
     return g, float(dx[0]), float(dx[1])
 
-def forces_pressure(plot):
+def forces_pressure(plot, p_inf=P_INF):
     g, dx, dy = _grids(plot)
     phi = g("phi"); p = g("pressure")
     gx = np.gradient(phi, dx, axis=0); gy = np.gradient(phi, dy, axis=1)
-    pp = p - P_INF
+    pp = p - p_inf
     Fx = -np.sum(pp * gx) * dx * dy; Fy = -np.sum(pp * gy) * dx * dy
     return Fx, Fy
 
-def forces_penalty(plot):
+def forces_penalty(plot, brinkman, penalty_power=1.0):
+    """Brinkman reaction force.  Only valid for an explicit CONSTANT penalty
+    (brinkman > 0); the AUTO penalty is per-cell wavespeed-scaled and cannot
+    be reconstructed from the plotfile -> return None.  The weight matches the
+    solver: lambda * (1-phi)^penalty_power."""
+    if brinkman is None or brinkman <= 0.0:
+        return None
     g, dx, dy = _grids(plot)
     phi = g("phi"); Mx = g("momentumx"); My = g("momentumy")
-    # solid momentum ~ 0 (static).  F_on_solid = ∫ brinkman (1-phi)(M - Ms) dV
-    Fx = np.sum(BRINK * (1 - phi) * Mx) * dx * dy
-    Fy = np.sum(BRINK * (1 - phi) * My) * dx * dy
+    w = brinkman * (1 - phi) ** penalty_power
+    Fx = np.sum(w * Mx) * dx * dy
+    Fy = np.sum(w * My) * dx * dy
     return Fx, Fy
 
-# ---------- driver ----------
-def run_case(aoa, tag=None):
-    rd = os.path.join(WORK, tag or f"a{aoa:05.1f}"); os.makedirs(rd, exist_ok=True)
-    bmp = os.path.join(rd, "phi.bmp"); plot = os.path.join(rd, "out"); inp = os.path.join(rd, "input")
-    write_phi_bmp(rotate(naca0012(), aoa), bmp)
-    write_input(bmp, plot, inp)
-    env = dict(os.environ, OMP_NUM_THREADS="1")
-    with open(os.path.join(rd, "log"), "w") as lf:
-        r = subprocess.run([os.path.abspath(SOLVER), os.path.abspath(inp)], cwd=rd, env=env,
-                           stdout=lf, stderr=subprocess.STDOUT, timeout=5400)
-    if r.returncode != 0 or not glob.glob(plot + "/*cell"):
-        return None
-    (Fxp, Fyp), (Fxk, Fyk) = forces_pressure(plot), forces_penalty(plot)
-    return dict(aoa=aoa,
-                Cl_p=Fyp/(Q_INF*CHORD), Cd_p=Fxp/(Q_INF*CHORD),
-                Cl_k=Fyk/(Q_INF*CHORD), Cd_k=Fxk/(Q_INF*CHORD), plot=plot)
+# ---------- analysis ----------
+def analyze_case(case):
+    cfg = parse_case_input(case["inp"])
+    qc = cfg["q_inf"] * CHORD
+    Fxp, Fyp = forces_pressure(case["plot"], cfg["p_inf"])
+    row = dict(aoa=case["aoa"], rd=case["rd"], cfg=cfg,
+               Cl_p=Fyp / qc, Cd_p=Fxp / qc, Cl_k=None, Cd_k=None)
+    pen = forces_penalty(case["plot"], cfg["brinkman"], cfg.get("penalty_power", 1.0))
+    if pen is not None:
+        row["Cl_k"] = pen[1] / qc; row["Cd_k"] = pen[0] / qc
+    return row
 
-def sweep():
-    os.makedirs(WORK, exist_ok=True)
+def analyze_workdir(work=WORK, quiet=False):
+    cases = find_cases(work)
+    if not cases:
+        if not quiet:
+            print(f"no analyzable cases under {work} (need <dir with AoA in name>/input + out/*cell)")
+        return []
     rows = []
-    for a in AOAS:
-        r = run_case(a)
-        if r is None:
-            print(f"AoA={a}: FAILED"); continue
+    for c in cases:
+        try:
+            r = analyze_case(c)
+        except Exception as e:
+            if not quiet:
+                print(f"  {os.path.basename(c['rd'])}: analysis FAILED ({e!r})")
+            continue
         rows.append(r)
-        print(f"AoA={a:2d}: Cl(press)={r['Cl_p']:+.4f} Cl(pen)={r['Cl_k']:+.4f} "
-              f"(theory {2*math.pi/BETA_PG*math.radians(a):+.4f})  "
-              f"Cd(press)={r['Cd_p']:.4f} Cd(pen)={r['Cd_k']:.4f}")
-    plot_results(rows)
+        if not quiet:
+            beta = math.sqrt(max(1e-12, 1 - r["cfg"]["mach"] ** 2))
+            th = 2 * math.pi / beta * math.radians(r["aoa"])
+            pen = "" if r["Cl_k"] is None else f" Cl(pen)={r['Cl_k']:+.4f} Cd(pen)={r['Cd_k']:.4f}"
+            print(f"  AoA={r['aoa']:5.1f}: Cl={r['Cl_p']:+.4f} (theory {th:+.4f})  Cd={r['Cd_p']:.4f}{pen}")
+    if rows:
+        plot_results(rows)
+    return rows
 
 def plot_results(rows):
     import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
+    rows = sorted(rows, key=lambda r: r["aoa"])
+    cfg = rows[0]["cfg"]                       # sweep shares one flow condition
+    mach = cfg["mach"]; beta = math.sqrt(max(1e-12, 1 - mach ** 2))
     A = np.array([r["aoa"] for r in rows]); ar = np.radians(A)
-    Clp = np.array([r["Cl_p"] for r in rows]); Clk = np.array([r["Cl_k"] for r in rows])
-    Cdp = np.array([r["Cd_p"] for r in rows]); Cdk = np.array([r["Cd_k"] for r in rows])
-    Cl_th = 2*np.pi/BETA_PG * ar
+    Clp = np.array([r["Cl_p"] for r in rows]); Cdp = np.array([r["Cd_p"] for r in rows])
+    have_pen = all(r["Cl_k"] is not None for r in rows)
+    Cl_th = 2 * np.pi / beta * ar
     Cl_exp = EXP_LIFT_SLOPE * A
+    re_str = "inviscid" if not np.isfinite(cfg["re"]) else f"Re={cfg['re']:.0f}"
+
     fig, ax = plt.subplots(1, 3, figsize=(16, 4.7))
     ax[0].plot(A, Clp, "o-", label="CFD: pressure ∫p∇φ")
-    ax[0].plot(A, Clk, "s--", label="CFD: Brinkman reaction")
-    ax[0].plot(A, Cl_th, "r-", label=f"thin-airfoil 2πα/β (M={MACH})")
+    if have_pen:
+        ax[0].plot(A, [r["Cl_k"] for r in rows], "s--", label="CFD: Brinkman reaction")
+    ax[0].plot(A, Cl_th, "r-", label=f"thin-airfoil 2πα/β (M={mach:.2f})")
     ax[0].plot(A, Cl_exp, "k:", label="NACA exp (0.11/deg)")
     ax[0].set_title("Lift  Cl"); ax[0].set_ylabel("Cl")
     ax[1].plot(A, Cdp, "o-", label="CFD: pressure")
-    ax[1].plot(A, Cdk, "s--", label="CFD: Brinkman")
-    ax[1].axhline(EXP_CD0, color="k", ls=":", label=f"NACA exp Cd0≈{EXP_CD0} (viscous)")
-    ax[1].set_title("Drag  Cd (inviscid → no skin friction)"); ax[1].set_ylabel("Cd")
+    if have_pen:
+        ax[1].plot(A, [r["Cd_k"] for r in rows], "s--", label="CFD: Brinkman")
+    ax[1].axhline(EXP_CD0, color="k", ls=":", label=f"NACA exp Cd0≈{EXP_CD0}")
+    ax[1].set_title(f"Drag  Cd ({re_str})"); ax[1].set_ylabel("Cd")
     with np.errstate(divide="ignore", invalid="ignore"):
-        ax[2].plot(A, Clp/Cdp, "o-", label="CFD: pressure")
-        ax[2].plot(A, Clk/Cdk, "s--", label="CFD: Brinkman")
+        ax[2].plot(A, Clp / np.where(Cdp == 0, np.nan, Cdp), "o-", label="CFD: pressure")
     ax[2].set_title("L/D"); ax[2].set_ylabel("L/D")
     for a in ax:
         a.set_xlabel("angle of attack (deg)"); a.legend(fontsize=8); a.grid(alpha=0.3)
-    fig.suptitle(f"NACA 0012 @ M={MACH} (inviscid) — CFD (2 force methods) vs theory vs NACA experiment")
+    fig.suptitle(f"NACA 0012 @ M={mach:.2f} {re_str} — CFD vs theory vs NACA experiment "
+                 f"({len(rows)} cases, AoA auto-detected)")
     out = os.path.join(IMAGES, "naca0012_polars.png")
-    plt.tight_layout(); plt.savefig(out, dpi=110); print("wrote", out)
+    plt.tight_layout(); plt.savefig(out, dpi=110); plt.close()
+    print("wrote", out)
     if len(A) > 1:
-        sl_p = np.polyfit(ar, Clp, 1)[0]; sl_k = np.polyfit(ar, Clk, 1)[0]
-        print(f"\nlift slope dCl/dα:  pressure={sl_p:.2f}/rad  Brinkman={sl_k:.2f}/rad  "
-              f"theory 2π/β={2*np.pi/BETA_PG:.2f}/rad  exp≈{math.degrees(EXP_LIFT_SLOPE):.2f}/rad")
+        # fit the lift slope on the pre-stall linear range only
+        lin = A <= 10.0
+        if lin.sum() > 1:
+            sl_p = np.polyfit(ar[lin], Clp[lin], 1)[0]
+            print(f"lift slope dCl/dα (α≤10°): CFD={sl_p:.2f}/rad   "
+                  f"theory 2π/β={2*np.pi/beta:.2f}/rad   "
+                  f"exp≈{math.degrees(EXP_LIFT_SLOPE):.2f}/rad")
 
 if __name__ == "__main__":
-    cmd = sys.argv[1] if len(sys.argv) > 1 else "sweep"
-    if cmd == "gen":
-        os.makedirs(TESTDIR, exist_ok=True)
-        REL = "./tests/FlowAirfoil/NACA_0012"     # relative to the flames run dir (portable, like input_Ma1.1)
-        write_phi_bmp(naca0012(), os.path.join(TESTDIR, "naca0012.bmp"))
-        write_input(f"{REL}/naca0012.bmp", f"{REL}/output", os.path.join(TESTDIR, "input"))
-        print("wrote", TESTDIR, "/{naca0012.bmp,input}")
-    elif cmd == "run":
-        if len(sys.argv) > 3 and sys.argv[3] == "slip":
-            SLIP = 1; print("SLIP wall enabled")
-        r = run_case(float(sys.argv[2]))
-        print(r if r is None else
-              f"AoA={r['aoa']}: Cl_press={r['Cl_p']:+.4f} Cl_pen={r['Cl_k']:+.4f} "
-              f"Cd_press={r['Cd_p']:.4f} Cd_pen={r['Cd_k']:.4f}")
-    else:
-        sweep()
+    analyze_workdir(sys.argv[1] if len(sys.argv) > 1 else WORK)

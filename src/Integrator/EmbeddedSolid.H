@@ -15,7 +15,18 @@ public:
     int          apply = 0;                  // was apply_embedded_solid
     int          slip = 0;                   // 1 = slip wall: penalize only wall-NORMAL momentum
                                              // (no-penetration); 0 = no-slip (all components, default)
-    Set::Scalar  brinkman = 0.0;             // was solid_brinkman (kappa=1/brinkman; <=0 -> auto wall)
+    Set::Scalar  brinkman = -1.0;            // Brinkman penalty (kappa=1/brinkman).
+                                             //   < 0 (default): AUTO, lambda = 3*(|u|+c)/dx per cell
+                                             //   > 0: explicit constant
+                                             //   = 0: penalty off -> phi-graded momentum projection wall
+    Set::Scalar  penalty_power = 1.0;        // Exponent p in the penalty weight (1-phi)^p.
+                                             //   1 (default): legacy linear weight -- exerts drag across
+                                             //     the FULL diffuse band incl. the fluid side (phi ~ 0.9
+                                             //     still feels lambda/10), which thickens the effective
+                                             //     boundary layer by ~the band width and causes premature
+                                             //     laminar separation on lifting bodies.
+                                             //   2: quadratic -- localizes the drag to the body side
+                                             //     (phi = 0.9 feels lambda/100); recommended for airfoils.
     Set::Scalar  relax_skip = 0.0;           // was solid_relax_skip (skip relax/sharpen/CFL where phi<this; =0.5)
     Set::Scalar  refinement_criterion = NAN; // was phi_refinement_criterion
     // indicator + gradient

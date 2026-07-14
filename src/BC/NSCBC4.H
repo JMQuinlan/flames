@@ -52,7 +52,10 @@ public:
         Set::Scalar target_u = 0.0;      ///< Target normal velocity [m/s]
         Set::Scalar target_v = 0.0;      ///< Target tangential velocity [m/s]
         Set::Scalar target_w = 0.0;      ///< Target second tangential velocity [m/s] (3D only)
-        Set::Scalar target_T = 300.0;    ///< Target temperature [K]
+        Set::Scalar target_T = NAN;      ///< Target temperature.  NAN (default) = derive
+                                         ///  from target_p at the local density/EOS --
+                                         ///  an absolute default (300 K) is a trap in
+                                         ///  any non-SI unit system.
         Set::Scalar target_p = 101325.0; ///< Target pressure [Pa]
 
         // Relaxation coefficients (0.2-0.5 typical)
@@ -1211,17 +1214,29 @@ public:
                         else if (params_xlo_local.type == Type::Inflow)
                         {
                             Set::Scalar er = params_xlo_local.relax_u;
-                            Set::Scalar K_acoustic = er * rho_bnd * (1.0 - M_loc * M_loc) / params_xlo_local.L_ref;
-                            Set::Scalar K_entropy = er * rho_bnd * a_bnd * (gm_bnd - 1.0) / params_xlo_local.L_ref;
-                            Set::Scalar K_shear = er * a_bnd / params_xlo_local.L_ref;
-
-                            // Temperature (for entropy relaxation)
+                            // Dimensionally-consistent Yoo-Im-style relaxation rates (LODI wave
+                            // amplitudes carry [pressure/time]):
+                            //   acoustic: er*rho*a^2*(1-M^2)/L  (a^2 was MISSING: 1.4e5x too weak
+                            //             at p = 1 bar; invisible in c=1-normalized runs)
+                            //   entropy:  er*rho*a*(gm-1)*cv/L  (cv was MISSING)
                             Set::Scalar eta_bnd = eta_arr(i_bnd, j, k);
                             Set::Scalar cv_mix = eta_bnd * cv0_ + (1.0 - eta_bnd) * cv1_;
+                            Set::Scalar K_acoustic = er * rho_bnd * a2_bnd * (1.0 - M_loc * M_loc) / params_xlo_local.L_ref;
+                            Set::Scalar K_entropy = er * rho_bnd * a_bnd * (gm_bnd - 1.0) * cv_mix / params_xlo_local.L_ref;
+                            Set::Scalar K_shear = er * a_bnd / params_xlo_local.L_ref;
+
                             Set::Scalar T_bnd = (p_bnd + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
+                            // target_T semantics: NAN (the default) = "temperature consistent
+                            // with target_p at the local density/EOS".  The old absolute default
+                            // (300 K) poisoned any non-SI run: a c=1-normalized flow has
+                            // T ~ 2.5e-3, so the entropy wave tried to heat the inflow 1.2e5x ->
+                            // negative ghost densities -> vacuum -> NaN at the face center.
+                            Set::Scalar T_tgt = params_xlo_local.target_T;
+                            if (!(T_tgt == T_tgt))
+                                T_tgt = (params_xlo_local.target_p + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
 
                             L4 = K_acoustic * (un_bnd - params_xlo_local.target_u) - T4;
-                            L2 = K_entropy * (T_bnd - params_xlo_local.target_T) - T2;
+                            L2 = K_entropy * (T_bnd - T_tgt) - T2;
                             L3 = K_shear * (ut_bnd - params_xlo_local.target_v) - T3;
                         }
 
@@ -1229,8 +1244,13 @@ public:
                         // STEP 8: Reconstruct modified gradients (Motheau Eq. 54)
                         // =============================================================
                         Set::Scalar xi1 = L1 / (un_bnd - a_bnd + small_local);
-                        Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_bnd : 0.0;
-                        Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_bnd : 0.0;
+                        // Eigenvalue-clamped inversion: OUTFLOW L2,L3 ~ un so L/un stays
+                        // finite as un -> 0, but the INFLOW relaxation amplitudes are NOT
+                        // proportional to un -- an unguarded 1/un amplified them without
+                        // bound near transient stagnation.  Clamp |un| at 1e-3*a.
+                        Set::Scalar un_inv = (un_bnd >= 0.0 ? 1.0 : -1.0) * amrex::max(std::abs(un_bnd), 1.0e-3 * a_bnd);
+                        Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_inv : 0.0;
+                        Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_inv : 0.0;
                         Set::Scalar xi4 = L4 / (un_bnd + a_bnd + small_local);
 
                         // Motheau Eq. 26 inversion for paper-style L (see corner block).
@@ -1460,17 +1480,29 @@ public:
                         else if (params_xhi_local.type == Type::Inflow)
                         {
                             Set::Scalar er = params_xhi_local.relax_u;
-                            Set::Scalar K_acoustic = er * rho_bnd * (1.0 - M_loc * M_loc) / params_xhi_local.L_ref;
-                            Set::Scalar K_entropy = er * rho_bnd * a_bnd * (gm_bnd - 1.0) / params_xhi_local.L_ref;
-                            Set::Scalar K_shear = er * a_bnd / params_xhi_local.L_ref;
-
-                            // Temperature (for entropy relaxation)
+                            // Dimensionally-consistent Yoo-Im-style relaxation rates (LODI wave
+                            // amplitudes carry [pressure/time]):
+                            //   acoustic: er*rho*a^2*(1-M^2)/L  (a^2 was MISSING: 1.4e5x too weak
+                            //             at p = 1 bar; invisible in c=1-normalized runs)
+                            //   entropy:  er*rho*a*(gm-1)*cv/L  (cv was MISSING)
                             Set::Scalar eta_bnd = eta_arr(i_bnd, j, k);
                             Set::Scalar cv_mix = eta_bnd * cv0_ + (1.0 - eta_bnd) * cv1_;
+                            Set::Scalar K_acoustic = er * rho_bnd * a2_bnd * (1.0 - M_loc * M_loc) / params_xhi_local.L_ref;
+                            Set::Scalar K_entropy = er * rho_bnd * a_bnd * (gm_bnd - 1.0) * cv_mix / params_xhi_local.L_ref;
+                            Set::Scalar K_shear = er * a_bnd / params_xhi_local.L_ref;
+
                             Set::Scalar T_bnd = (p_bnd + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
+                            // target_T semantics: NAN (the default) = "temperature consistent
+                            // with target_p at the local density/EOS".  The old absolute default
+                            // (300 K) poisoned any non-SI run: a c=1-normalized flow has
+                            // T ~ 2.5e-3, so the entropy wave tried to heat the inflow 1.2e5x ->
+                            // negative ghost densities -> vacuum -> NaN at the face center.
+                            Set::Scalar T_tgt = params_xhi_local.target_T;
+                            if (!(T_tgt == T_tgt))
+                                T_tgt = (params_xhi_local.target_p + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
 
                             L1 = -K_acoustic * (un_bnd - params_xhi_local.target_u) - T1;
-                            L2 = K_entropy * (T_bnd - params_xhi_local.target_T) - T2;
+                            L2 = K_entropy * (T_bnd - T_tgt) - T2;
                             L3 = K_shear * (ut_bnd - params_xhi_local.target_v) - T3;
                         }
 
@@ -1478,8 +1510,13 @@ public:
                         // STEP 8: Reconstruct modified gradients (Motheau Eq. 54)
                         // =============================================================
                         Set::Scalar xi1 = L1 / (un_bnd - a_bnd + small_local);
-                        Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_bnd : 0.0;
-                        Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_bnd : 0.0;
+                        // Eigenvalue-clamped inversion: OUTFLOW L2,L3 ~ un so L/un stays
+                        // finite as un -> 0, but the INFLOW relaxation amplitudes are NOT
+                        // proportional to un -- an unguarded 1/un amplified them without
+                        // bound near transient stagnation.  Clamp |un| at 1e-3*a.
+                        Set::Scalar un_inv = (un_bnd >= 0.0 ? 1.0 : -1.0) * amrex::max(std::abs(un_bnd), 1.0e-3 * a_bnd);
+                        Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_inv : 0.0;
+                        Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_inv : 0.0;
                         Set::Scalar xi4 = L4 / (un_bnd + a_bnd + small_local);
 
                         // Motheau Eq. 26 inversion for paper-style L (see corner block).
@@ -1705,17 +1742,29 @@ public:
                         else if (params_ylo_local.type == Type::Inflow)
                         {
                             Set::Scalar er = params_ylo_local.relax_u;
-                            Set::Scalar K_acoustic = er * rho_bnd * (1.0 - M_loc * M_loc) / params_ylo_local.L_ref;
-                            Set::Scalar K_entropy = er * rho_bnd * a_bnd * (gm_bnd - 1.0) / params_ylo_local.L_ref;
-                            Set::Scalar K_shear = er * a_bnd / params_ylo_local.L_ref;
-
-                            // Temperature
+                            // Dimensionally-consistent Yoo-Im-style relaxation rates (LODI wave
+                            // amplitudes carry [pressure/time]):
+                            //   acoustic: er*rho*a^2*(1-M^2)/L  (a^2 was MISSING: 1.4e5x too weak
+                            //             at p = 1 bar; invisible in c=1-normalized runs)
+                            //   entropy:  er*rho*a*(gm-1)*cv/L  (cv was MISSING)
                             Set::Scalar eta_bnd = eta_arr(i, j_bnd, k);
                             Set::Scalar cv_mix = eta_bnd * cv0_ + (1.0 - eta_bnd) * cv1_;
+                            Set::Scalar K_acoustic = er * rho_bnd * a2_bnd * (1.0 - M_loc * M_loc) / params_ylo_local.L_ref;
+                            Set::Scalar K_entropy = er * rho_bnd * a_bnd * (gm_bnd - 1.0) * cv_mix / params_ylo_local.L_ref;
+                            Set::Scalar K_shear = er * a_bnd / params_ylo_local.L_ref;
+
                             Set::Scalar T_bnd = (p_bnd + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
+                            // target_T semantics: NAN (the default) = "temperature consistent
+                            // with target_p at the local density/EOS".  The old absolute default
+                            // (300 K) poisoned any non-SI run: a c=1-normalized flow has
+                            // T ~ 2.5e-3, so the entropy wave tried to heat the inflow 1.2e5x ->
+                            // negative ghost densities -> vacuum -> NaN at the face center.
+                            Set::Scalar T_tgt = params_ylo_local.target_T;
+                            if (!(T_tgt == T_tgt))
+                                T_tgt = (params_ylo_local.target_p + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
 
                             L4 = K_acoustic * (un_bnd - params_ylo_local.target_v) - T4;
-                            L2 = K_entropy * (T_bnd - params_ylo_local.target_T) - T2;
+                            L2 = K_entropy * (T_bnd - T_tgt) - T2;
                             L3 = K_shear * (ut_bnd - params_ylo_local.target_u) - T3;
                         }
 
@@ -1723,8 +1772,13 @@ public:
                         // STEP 8: Reconstruct modified gradients (Motheau Eq. 54)
                         // =============================================================
                         Set::Scalar xi1 = L1 / (un_bnd - a_bnd + small_local);
-                        Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_bnd : 0.0;
-                        Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_bnd : 0.0;
+                        // Eigenvalue-clamped inversion: OUTFLOW L2,L3 ~ un so L/un stays
+                        // finite as un -> 0, but the INFLOW relaxation amplitudes are NOT
+                        // proportional to un -- an unguarded 1/un amplified them without
+                        // bound near transient stagnation.  Clamp |un| at 1e-3*a.
+                        Set::Scalar un_inv = (un_bnd >= 0.0 ? 1.0 : -1.0) * amrex::max(std::abs(un_bnd), 1.0e-3 * a_bnd);
+                        Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_inv : 0.0;
+                        Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_inv : 0.0;
                         Set::Scalar xi4 = L4 / (un_bnd + a_bnd + small_local);
 
                         // Motheau Eq. 26 inversion for paper-style L (see corner block).
@@ -1938,17 +1992,29 @@ public:
                         else if (params_yhi_local.type == Type::Inflow)
                         {
                             Set::Scalar er = params_yhi_local.relax_u;
-                            Set::Scalar K_acoustic = er * rho_bnd * (1.0 - M_loc * M_loc) / params_yhi_local.L_ref;
-                            Set::Scalar K_entropy = er * rho_bnd * a_bnd * (gm_bnd - 1.0) / params_yhi_local.L_ref;
-                            Set::Scalar K_shear = er * a_bnd / params_yhi_local.L_ref;
-
-                            // Temperature
+                            // Dimensionally-consistent Yoo-Im-style relaxation rates (LODI wave
+                            // amplitudes carry [pressure/time]):
+                            //   acoustic: er*rho*a^2*(1-M^2)/L  (a^2 was MISSING: 1.4e5x too weak
+                            //             at p = 1 bar; invisible in c=1-normalized runs)
+                            //   entropy:  er*rho*a*(gm-1)*cv/L  (cv was MISSING)
                             Set::Scalar eta_bnd = eta_arr(i, j_bnd, k);
                             Set::Scalar cv_mix = eta_bnd * cv0_ + (1.0 - eta_bnd) * cv1_;
+                            Set::Scalar K_acoustic = er * rho_bnd * a2_bnd * (1.0 - M_loc * M_loc) / params_yhi_local.L_ref;
+                            Set::Scalar K_entropy = er * rho_bnd * a_bnd * (gm_bnd - 1.0) * cv_mix / params_yhi_local.L_ref;
+                            Set::Scalar K_shear = er * a_bnd / params_yhi_local.L_ref;
+
                             Set::Scalar T_bnd = (p_bnd + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
+                            // target_T semantics: NAN (the default) = "temperature consistent
+                            // with target_p at the local density/EOS".  The old absolute default
+                            // (300 K) poisoned any non-SI run: a c=1-normalized flow has
+                            // T ~ 2.5e-3, so the entropy wave tried to heat the inflow 1.2e5x ->
+                            // negative ghost densities -> vacuum -> NaN at the face center.
+                            Set::Scalar T_tgt = params_yhi_local.target_T;
+                            if (!(T_tgt == T_tgt))
+                                T_tgt = (params_yhi_local.target_p + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
 
                             L1 = -K_acoustic * (un_bnd - params_yhi_local.target_v) - T1;
-                            L2 = K_entropy * (T_bnd - params_yhi_local.target_T) - T2;
+                            L2 = K_entropy * (T_bnd - T_tgt) - T2;
                             L3 = K_shear * (ut_bnd - params_yhi_local.target_u) - T3;
                         }
 
@@ -1956,8 +2022,13 @@ public:
                         // STEP 8: Reconstruct modified gradients (Motheau Eq. 54)
                         // =============================================================
                         Set::Scalar xi1 = L1 / (un_bnd - a_bnd + small_local);
-                        Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_bnd : 0.0;
-                        Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_bnd : 0.0;
+                        // Eigenvalue-clamped inversion: OUTFLOW L2,L3 ~ un so L/un stays
+                        // finite as un -> 0, but the INFLOW relaxation amplitudes are NOT
+                        // proportional to un -- an unguarded 1/un amplified them without
+                        // bound near transient stagnation.  Clamp |un| at 1e-3*a.
+                        Set::Scalar un_inv = (un_bnd >= 0.0 ? 1.0 : -1.0) * amrex::max(std::abs(un_bnd), 1.0e-3 * a_bnd);
+                        Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_inv : 0.0;
+                        Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_inv : 0.0;
                         Set::Scalar xi4 = L4 / (un_bnd + a_bnd + small_local);
 
                         // Motheau Eq. 26 inversion for paper-style L (see corner block).
@@ -2128,20 +2199,31 @@ public:
                         else if (params_zlo_local.type == Type::Inflow)
                         {
                             Set::Scalar er = params_zlo_local.relax_u;
-                            Set::Scalar K_acoustic = er * rho_bnd * (1.0 - M_loc * M_loc) / params_zlo_local.L_ref;
-                            Set::Scalar K_entropy  = er * rho_bnd * a_bnd * (gm_bnd - 1.0) / params_zlo_local.L_ref;
-                            Set::Scalar K_shear    = er * a_bnd / params_zlo_local.L_ref;
+                            // Dimensionally-consistent relaxation rates (see the x-face comments):
+                            // a^2 restored in K_acoustic, cv in K_entropy; target_T = NAN derives
+                            // a target consistent with target_p at the local density/EOS.
                             Set::Scalar eta_bnd = eta_arr(i, j, k_bnd);
                             Set::Scalar cv_mix = eta_bnd * cv0_ + (1.0 - eta_bnd) * cv1_;
+                            Set::Scalar K_acoustic = er * rho_bnd * a2_bnd * (1.0 - M_loc * M_loc) / params_zlo_local.L_ref;
+                            Set::Scalar K_entropy  = er * rho_bnd * a_bnd * (gm_bnd - 1.0) * cv_mix / params_zlo_local.L_ref;
+                            Set::Scalar K_shear    = er * a_bnd / params_zlo_local.L_ref;
                             Set::Scalar T_bnd = (p_bnd + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
+                            Set::Scalar T_tgt = params_zlo_local.target_T;
+                            if (!(T_tgt == T_tgt))
+                                T_tgt = (params_zlo_local.target_p + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
                             L4 = K_acoustic * (un_bnd - params_zlo_local.target_u) - T4;
-                            L2 = K_entropy  * (T_bnd - params_zlo_local.target_T) - T2;
+                            L2 = K_entropy  * (T_bnd - T_tgt) - T2;
                             L3 = K_shear    * (ut_bnd - params_zlo_local.target_v) - T3;
                         }
 
                         Set::Scalar xi1 = L1 / (un_bnd - a_bnd + small_local);
-                        Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_bnd : 0.0;
-                        Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_bnd : 0.0;
+                        // Eigenvalue-clamped inversion: OUTFLOW L2,L3 ~ un so L/un stays
+                        // finite as un -> 0, but the INFLOW relaxation amplitudes are NOT
+                        // proportional to un -- an unguarded 1/un amplified them without
+                        // bound near transient stagnation.  Clamp |un| at 1e-3*a.
+                        Set::Scalar un_inv = (un_bnd >= 0.0 ? 1.0 : -1.0) * amrex::max(std::abs(un_bnd), 1.0e-3 * a_bnd);
+                        Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_inv : 0.0;
+                        Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_inv : 0.0;
                         Set::Scalar xi4 = L4 / (un_bnd + a_bnd + small_local);
 
                         Set::Scalar dp_dx_new   = 0.5 * (xi1 + xi4);
@@ -2290,20 +2372,31 @@ public:
                         else if (params_zhi_local.type == Type::Inflow)
                         {
                             Set::Scalar er = params_zhi_local.relax_u;
-                            Set::Scalar K_acoustic = er * rho_bnd * (1.0 - M_loc * M_loc) / params_zhi_local.L_ref;
-                            Set::Scalar K_entropy  = er * rho_bnd * a_bnd * (gm_bnd - 1.0) / params_zhi_local.L_ref;
-                            Set::Scalar K_shear    = er * a_bnd / params_zhi_local.L_ref;
+                            // Dimensionally-consistent relaxation rates (see the x-face comments):
+                            // a^2 restored in K_acoustic, cv in K_entropy; target_T = NAN derives
+                            // a target consistent with target_p at the local density/EOS.
                             Set::Scalar eta_bnd = eta_arr(i, j, k_bnd);
                             Set::Scalar cv_mix = eta_bnd * cv0_ + (1.0 - eta_bnd) * cv1_;
+                            Set::Scalar K_acoustic = er * rho_bnd * a2_bnd * (1.0 - M_loc * M_loc) / params_zhi_local.L_ref;
+                            Set::Scalar K_entropy  = er * rho_bnd * a_bnd * (gm_bnd - 1.0) * cv_mix / params_zhi_local.L_ref;
+                            Set::Scalar K_shear    = er * a_bnd / params_zhi_local.L_ref;
                             Set::Scalar T_bnd = (p_bnd + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
+                            Set::Scalar T_tgt = params_zhi_local.target_T;
+                            if (!(T_tgt == T_tgt))
+                                T_tgt = (params_zhi_local.target_p + pi_bnd) / (rho_bnd * cv_mix * (gm_bnd - 1.0) + small_local);
                             L1 = -K_acoustic * (un_bnd - params_zhi_local.target_u) - T1;
-                            L2 = K_entropy  * (T_bnd - params_zhi_local.target_T) - T2;
+                            L2 = K_entropy  * (T_bnd - T_tgt) - T2;
                             L3 = K_shear    * (ut_bnd - params_zhi_local.target_v) - T3;
                         }
 
                         Set::Scalar xi1 = L1 / (un_bnd - a_bnd + small_local);
-                        Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_bnd : 0.0;
-                        Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_bnd : 0.0;
+                        // Eigenvalue-clamped inversion: OUTFLOW L2,L3 ~ un so L/un stays
+                        // finite as un -> 0, but the INFLOW relaxation amplitudes are NOT
+                        // proportional to un -- an unguarded 1/un amplified them without
+                        // bound near transient stagnation.  Clamp |un| at 1e-3*a.
+                        Set::Scalar un_inv = (un_bnd >= 0.0 ? 1.0 : -1.0) * amrex::max(std::abs(un_bnd), 1.0e-3 * a_bnd);
+                        Set::Scalar xi2 = (std::abs(un_bnd) > 1.0e-14) ? L2 / un_inv : 0.0;
+                        Set::Scalar xi3 = (std::abs(un_bnd) > 1.0e-14) ? L3 / un_inv : 0.0;
                         Set::Scalar xi4 = L4 / (un_bnd + a_bnd + small_local);
 
                         Set::Scalar dp_dx_new   = 0.5 * (xi1 + xi4);
