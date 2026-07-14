@@ -1,13 +1,17 @@
 #@ [flowdrivenbubble_highamp]
 #@ exe=hydro2
-#@ dim=2
+#@ dim=3
 
 # =============================================================================
-# FLOW-DRIVEN BUBBLE -- Case 2: HIGH-AMPLITUDE (NONLINEAR) BENCHMARK
+# FLOW-DRIVEN BUBBLE -- Case 2: HIGH-AMPLITUDE (NONLINEAR) BENCHMARK -- 3D OCTANT
 # =============================================================================
 # Identical to input_LowAmp in EVERY respect except the drive amplitude:
 # A = 5.0e6 Pa instead of 1.0e2 Pa.  Comparing this run against LowAmp
 # (scaled by the amplitude ratio 5e4) isolates the nonlinear response.
+#
+# GEOMETRY: +x+y+z OCTANT [0, 0.04]^3 (= full domain +/- 2 R0) with SYMMETRY
+# (reflect) BCs on the inner faces and the sinusoidal pressure drive on the
+# three OUTER faces (xhi/yhi/zhi) -- see input_LowAmp for the full rationale.
 #
 # Drive: single-frequency sine on the wall pressure,
 #   p_wall(t) = p_inf + A sin(2 pi f t),   A = 5 MPa,  f = 81.54 Hz = f0/2
@@ -20,7 +24,7 @@
 # collapse when the drive swings positive (peak 5.1 MPa, comparable to the
 # Sch20 collapsing case's p_inf = 5 MPa).  Collapse timing/violence is the
 # benchmark quantity; timestepping and output cadence are tightened
-# accordingly (cfl 0.4, dt_min 1e-14, plot_dt 5e-5).
+# accordingly (cfl 0.4, dt_min 1e-14, plot_dt 1e-4).
 #
 # NO vaporization (the tension phase is carried entirely by the liquid EOS).
 # Surface tension ON (sigma = 72.8e-3).
@@ -34,13 +38,13 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_HighAmp
 
 ### MESHING ###
 amr.plot_int       = -1
-amr.plot_dt        = 5.0e-5         # ~245 frames per drive period -- resolves the collapses
-amr.max_grid_size  = 500000
-amr.blocking_factor = 2
+amr.plot_dt        = 1.0e-4         # ~123 frames per drive period -- resolves the collapses
+amr.max_grid_size  = 32
+amr.blocking_factor = 32
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
 amr.max_level      = 2
-amr.n_cell         = 64 64          # base dx 1.25e-3; finest dx 3.125e-4 -> R0/dx = 64
+amr.n_cell         = 32 32 32       # base dx 1.25e-3; finest dx 3.125e-4 -> R0/dx = 64
 
 # n_error_buf pushes the fine patches past the interface band so the
 # coarse-fine boundary sits in pure water (Q-Fix density partition is exact
@@ -48,11 +52,12 @@ amr.n_cell         = 64 64          # base dx 1.25e-3; finest dx 3.125e-4 -> R0/
 amr.n_error_buf    = 16
 
 # Permanently refined box over the bubble: forces max_level over the whole
-# bubble (interior included), not just the eta band.  1.5 R0 half-width; if
-# the bubble grows past 1.5 R0 during the tension half-cycle the eta-band
-# criterion still tracks the interface outside the box.
-refine_box.lo = -0.03 -0.03
-refine_box.hi =  0.03  0.03
+# bubble (interior included), not just the eta band.  Octant: bubble center
+# is the origin, so the box is [0, 1.5 R0]^3.  If the bubble grows past
+# 1.5 R0 during the tension half-cycle the eta-band criterion still tracks
+# the interface outside the box.
+refine_box.lo = 0.0  0.0  0.0
+refine_box.hi = 0.03 0.03 0.03
 
 nghost = 4
 
@@ -64,10 +69,9 @@ dynamictimestep.max     = 1.0e-5
 dynamictimestep.min     = 1.0e-14
 cfl                     = 0.4
 
-### DIMENSIONS ###
-# 4 R0 across -- small on purpose: the walls drive the bubble.
-geometry.prob_lo     = -0.04 -0.04 0.0
-geometry.prob_hi     =  0.04  0.04 0.0
+### DIMENSIONS -- +x+y+z octant, full domain 4 R0 across ###
+geometry.prob_lo     = 0.0  0.0  0.0
+geometry.prob_hi     = 0.04 0.04 0.04
 geometry.is_periodic = 0 0 0
 stop_time            = 3.68e-2      # 3 drive periods (T = 12.26 ms)
 
@@ -76,7 +80,7 @@ stop_time            = 3.68e-2      # 3 drive periods (T = 12.26 ms)
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = 6.4e-4     # ~ 2 cells across the band at finest
 eta.ic.expression.constant.R0      = 0.02
-eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y) - R0)/epsilon))"
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
 
 ### EQUATION OF STATE -- Sch20 water (Tammann) + air (ideal gas) ###
@@ -111,10 +115,10 @@ pressure0.ic.type = expression
 pressure0.ic.expression.constant.p_inf = 1.0e5
 pressure0.ic.expression.region0 = "p_inf"
 
-# Gas interior: 2D-cylindrical Laplace equilibrium p_b = p_inf + sigma/R0
-# (= 1e5 + 3.64 Pa; small, but keeps the bubble static before the drive).
+# Gas interior: 3D spherical Laplace equilibrium p_b = p_inf + 2*sigma/R0
+# (= 1e5 + 7.28 Pa; small, but keeps the bubble static before the drive).
 pressure1.ic.type = expression
-pressure1.ic.expression.constant.p_b = 100003.64
+pressure1.ic.expression.constant.p_b = 100007.28
 pressure1.ic.expression.region0 = "p_b"
 
 ### VISCOSITY (inviscid) ###
@@ -127,38 +131,56 @@ mu1_b = 0.0
 sigma = 72.8e-3
 pref  = 0.0
 
-### BOUNDARY CONDITIONS -- PRIMITIVE MODE, sinusoidal pressure on all walls ###
-# p_wall(t) = p_inf + amp*sin(w*t);  w = 2 pi f, f = 81.54 Hz = f0/2.
-# Density/momentum/energy are zero-gradient: the walls behave as a pressure
-# reservoir, free to exchange mass/momentum as the drive demands.
+### BOUNDARY CONDITIONS -- PRIMITIVE MODE, octant symmetry + driven outer walls ###
+# Inner faces (xlo/ylo/zlo): symmetry, same reflect pattern as the
+# Sch20_*_Large_3D octant variants.
+# Outer faces (xhi/yhi/zhi): p_wall(t) = p_inf + amp*sin(w*t); w = 2 pi f,
+# f = 81.54 Hz = f0/2.  Density/momentum/energy are zero-gradient there: the
+# outer walls behave as a pressure reservoir, free to exchange mass/momentum
+# as the drive demands.
 bc.primitive = 1
 
 pressure.bc.constant.p_inf = 1.0e5
 pressure.bc.constant.amp   = 5.0e6          # 5 MPa -- tension on the negative half-cycle
 pressure.bc.constant.w     = 512.35         # 2*pi*81.54 Hz
-pressure.bc.type.xlo = dirichlet
-pressure.bc.val.xlo  = "p_inf + amp*sin(w*t)"
+pressure.bc.type.xlo = REFLECT_EVEN
 pressure.bc.type.xhi = dirichlet
 pressure.bc.val.xhi  = "p_inf + amp*sin(w*t)"
-pressure.bc.type.ylo = dirichlet
-pressure.bc.val.ylo  = "p_inf + amp*sin(w*t)"
+pressure.bc.type.ylo = REFLECT_EVEN
 pressure.bc.type.yhi = dirichlet
 pressure.bc.val.yhi  = "p_inf + amp*sin(w*t)"
+pressure.bc.type.zlo = REFLECT_EVEN
+pressure.bc.type.zhi = dirichlet
+pressure.bc.val.zhi  = "p_inf + amp*sin(w*t)"
 
-density.bc.type.xlo = neumann
+# eta: symmetry (reflect_even) on inner faces, neumann far-field
+eta.bc.type.xlo = REFLECT_EVEN
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = REFLECT_EVEN
+eta.bc.type.yhi = neumann
+eta.bc.type.zlo = REFLECT_EVEN
+eta.bc.type.zhi = neumann
+
+density.bc.type.xlo = REFLECT_EVEN
 density.bc.type.xhi = neumann
-density.bc.type.ylo = neumann
+density.bc.type.ylo = REFLECT_EVEN
 density.bc.type.yhi = neumann
+density.bc.type.zlo = REFLECT_EVEN
+density.bc.type.zhi = neumann
 
-energy.bc.type.xlo = neumann
+energy.bc.type.xlo = REFLECT_EVEN
 energy.bc.type.xhi = neumann
-energy.bc.type.ylo = neumann
+energy.bc.type.ylo = REFLECT_EVEN
 energy.bc.type.yhi = neumann
+energy.bc.type.zlo = REFLECT_EVEN
+energy.bc.type.zhi = neumann
 
-momentum.bc.type.xlo = neumann neumann
-momentum.bc.type.xhi = neumann neumann
-momentum.bc.type.ylo = neumann neumann
-momentum.bc.type.yhi = neumann neumann
+momentum.bc.type.xlo = REFLECT_ODD  REFLECT_EVEN REFLECT_EVEN
+momentum.bc.type.xhi = neumann neumann neumann
+momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD  REFLECT_EVEN
+momentum.bc.type.yhi = neumann neumann neumann
+momentum.bc.type.zlo = REFLECT_EVEN REFLECT_EVEN REFLECT_ODD
+momentum.bc.type.zhi = neumann neumann neumann
 
 ### REFINEMENT -- eta band + permanent refine_box (above) ###
 eta_refinement_criterion   = 1.0e-1
@@ -180,15 +202,15 @@ apply_weight          = 0
 apply_vaporization    = 0
 grav                  = 0.0
 
-### NUMERICS -- WENO3 + SSPRK3 (project-standard for bubble tests) ###
+### NUMERICS -- WENO5 + SSPRK3 (project-standard for the 3D Sch20 tests) ###
 Riemann_Solver.type = hllc
-Limiter.type        = weno3
+Limiter.type        = weno5
 integration.type    = RungeKutta
 integration.rk.type = 3
 kappa_method        = 1
 
 apply_sharpening     = 0
-sharpening_frequency = 50
+sharpening_frequency = 20
 reinit_max_iter      = 100
 reinit_tolerance     = 1e-6
 omega_relax          = 0.5

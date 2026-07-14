@@ -1,26 +1,34 @@
 # -*- coding: utf-8 -*-
 """
 ===============================================================================
-FLOW-DRIVEN BUBBLE -- RADIUS HISTORY  R(t)
+FLOW-DRIVEN BUBBLE -- RADIUS HISTORY  R(t)   (3D OCTANT)
 ===============================================================================
 
 PURPOSE:
     Post-process the FlowDrivenBubble runs (input_LowAmp / input_HighAmp):
-    an air bubble in water driven by a sinusoidal wall pressure
+    an air bubble in water, simulated as a +x+y+z OCTANT with symmetry BCs
+    on the inner faces (bubble center at the origin, same convention as the
+    Sch20_*_Large_3D variants), driven by a sinusoidal wall pressure
         p_wall(t) = p_inf + A sin(2 pi f t)
-    imposed through the primitive BC path.  For every plotfile this script
-    extracts the bubble radius TWO independent ways and plots both:
+    imposed on the outer faces through the primitive BC path.  For every
+    plotfile this script extracts the bubble radius TWO independent ways and
+    plots both:
 
-        1) VOLUME radius   -- gas volume V = sum (1 - eta) V_cell over all
-           leaf cells, converted to an equivalent radius:
-               2D:  R = sqrt(V / pi)            (cylindrical / area based)
-               3D:  R = (3 V / (4 pi))^(1/3)    ("assumed spherical")
-        2) ETA=0.5 radius  -- radially-binned average eta(r) about the bubble
-           center; R is the interpolated eta = 0.5 crossing of the binned
-           profile (angle-averaged interface radius).
+        1) VOLUME radius   -- gas volume V = sym_factor * sum (1-eta) V_cell
+           over all leaf cells, converted to an assumed-spherical radius:
+               3D:  R = (3 V / (4 pi))^(1/3)
+               2D:  R = sqrt(V / pi)           (cylindrical / area based)
+           sym_factor = 2^(number of symmetry planes) is auto-detected from
+           the domain: an axis whose lower edge sits at the bubble center is
+           a symmetry plane (octant run -> sym_factor = 8; full domain -> 1).
+        2) ETA=0.5 radius  -- radially-binned, volume-weighted average eta(r)
+           about the bubble center; R is the interpolated eta = 0.5 crossing
+           of the binned profile (angle-averaged interface radius).  The
+           octant needs no volume correction here -- by symmetry the radial
+           profile over one octant equals the full-sphere profile.
 
     Agreement between the two is a shape-integrity check: they separate when
-    the bubble departs from a circle/sphere or the interface band smears.
+    the bubble departs from a sphere or the interface band smears.
 
 USAGE:
     python tests/FlowDrivenBubble/reference/analyze_radius.py
@@ -70,17 +78,22 @@ RUNS = [
 # ]
 
 # ===== PROBLEM PARAMETERS (must match the input files) =====
-DIM      = 2          # 2 -> R = sqrt(V/pi); 3 -> R = (3V/4pi)^(1/3)
-R0       = 0.02       # initial bubble radius [m]
-CENTER   = (0.0, 0.0) # bubble center (x, y) [m]
-P_INF    = 1.0e5      # ambient pressure [Pa]
-F_DRIVE  = 81.54      # drive frequency [Hz]  (f0/2, Minnaert f0 = 163.09 Hz)
+DIM      = 3               # 3 -> R = (3V/4pi)^(1/3); 2 -> R = sqrt(V/pi)
+R0       = 0.02            # initial bubble radius [m]
+CENTER   = (0.0, 0.0, 0.0) # bubble center [m] (origin for the octant runs)
+P_INF    = 1.0e5           # ambient pressure [Pa]
+F_DRIVE  = 81.54           # drive frequency [Hz]  (f0/2, Minnaert f0 = 163.09 Hz)
 T_DRIVE  = 1.0 / F_DRIVE
+
+# Symmetry factor: None -> auto-detect from the domain (an axis whose lower
+# edge coincides with CENTER is a symmetry plane; octant -> 8).  Set to an
+# integer (1, 2, 4, 8) to override the auto-detection.
+SYM_FACTOR = None
 
 # ===== EXTRACTION KNOBS =====
 ETA_THRESHOLD = 0.5     # interface level for the contour radius
 N_RADIAL_BINS = 400     # radial bins for the angle-averaged eta(r) profile
-R_BIN_MAX     = 0.04    # outer radius of the binned profile [m] (half-domain)
+R_BIN_MAX     = 0.04    # outer radius of the binned profile [m] (= octant edge)
 
 # ===== DRIVE OVERLAY =====
 SHOW_DRIVE  = True            # overlay normalized drive sin(2 pi f t) (right axis)
@@ -102,7 +115,7 @@ FIG_HEIGHT = 6.5
 LEGEND_LOC = "best"
 
 # ===== AXIS LABELS / TITLE (every string the user might rephrase) =====
-TITLE_STR    = "Flow-Driven Bubble: R(t)"
+TITLE_STR    = "Flow-Driven Bubble (3D octant): R(t)"
 XLABEL_STR   = r"$t / T_{drive}$"
 YLABEL_STR   = r"$R / R_0$"
 DRIVE_YLABEL = r"$(p_{wall} - p_\infty)/A$"
@@ -136,13 +149,30 @@ def _list_plotfiles(out_dir):
     )
 
 
+def _sym_factor(ds):
+    """2**(number of symmetry planes).  An axis whose domain lower edge sits
+    at the bubble center is a symmetry plane (octant convention of the
+    Sch20_*_Large_3D tests).  Overridden by SYM_FACTOR if set."""
+    if SYM_FACTOR is not None:
+        return float(SYM_FACTOR)
+    lo = np.array(ds.domain_left_edge.to_value())
+    hi = np.array(ds.domain_right_edge.to_value())
+    n_sym = 0
+    for d in range(DIM):
+        width = hi[d] - lo[d]
+        if abs(lo[d] - CENTER[d]) < 1.0e-6 * width:
+            n_sym += 1
+    return float(2 ** n_sym)
+
+
 def extract_radius_history(out_dir):
     """Walk every plotfile in out_dir and return
         (t, R_vol, R_eta, n_skipped)
     with all arrays sorted by time.
 
-    R_vol : equivalent radius from the gas volume  V = sum (1-eta) V_cell
-            (2D: sqrt(V/pi), 3D: cbrt(3V/4pi) -- see DIM).
+    R_vol : assumed-spherical radius from the symmetry-corrected gas volume
+            V = sym_factor * sum (1-eta) V_cell
+            (3D: cbrt(3V/4pi), 2D: sqrt(V/pi) -- see DIM).
     R_eta : eta = ETA_THRESHOLD crossing of the radially-binned, angle-
             averaged eta(r) profile about CENTER (NaN if no crossing).
 
@@ -156,8 +186,7 @@ def extract_radius_history(out_dir):
     n_skipped = 0
 
     bin_edges = np.linspace(0.0, R_BIN_MAX, N_RADIAL_BINS + 1)
-    bin_lo, bin_hi = bin_edges[:-1], bin_edges[1:]
-    bin_mid = 0.5 * (bin_lo + bin_hi)
+    bin_mid = 0.5 * (bin_edges[:-1] + bin_edges[1:])
 
     for pf in _list_plotfiles(out_dir):
         try:
@@ -171,19 +200,21 @@ def extract_radius_history(out_dir):
             except Exception:
                 vol = np.array(reg["cell_volume"])
 
-            # ---- 1) volume radius --------------------------------------
+            # ---- 1) volume radius (symmetry-corrected) ------------------
             alpha_g = np.clip(1.0 - eta, 0.0, 1.0)
-            Vg = float(np.sum(alpha_g * vol))
+            Vg = float(np.sum(alpha_g * vol)) * _sym_factor(ds)
             if DIM == 2:
                 R_vol.append(np.sqrt(Vg / np.pi))
             else:
                 R_vol.append((3.0 * Vg / (4.0 * np.pi)) ** (1.0 / 3.0))
 
-            # ---- 2) angle-averaged eta = 0.5 radius --------------------
+            # ---- 2) angle-averaged eta = 0.5 radius ---------------------
+            # (no symmetry correction needed: the octant's radial profile
+            # equals the full sphere's by symmetry)
             if DIM == 2:
                 r = np.sqrt(x * x + y * y)
             else:
-                z = np.array(reg["z"])
+                z = np.array(reg["z"]) - CENTER[2]
                 r = np.sqrt(x * x + y * y + z * z)
             # volume-weighted mean eta per radial bin (leaf cells only --
             # yt's all_data already excludes covered coarse cells)
@@ -242,12 +273,13 @@ def main():
     r_scale = R0 if NONDIM_RADIUS else 1.0
 
     print("=" * 70)
-    print("FLOW-DRIVEN BUBBLE -- RADIUS HISTORY")
+    print("FLOW-DRIVEN BUBBLE -- RADIUS HISTORY  (3D octant)")
     print("=" * 70)
-    print(f"  DIM      = {DIM}  "
+    print(f"  DIM       = {DIM}  "
           f"({'R = sqrt(V/pi)' if DIM == 2 else 'R = (3V/4pi)^(1/3)'})")
-    print(f"  R0       = {R0}")
-    print(f"  f_drive  = {F_DRIVE} Hz   (T_drive = {T_DRIVE*1e3:.3f} ms)")
+    print(f"  R0        = {R0}")
+    print(f"  f_drive   = {F_DRIVE} Hz   (T_drive = {T_DRIVE*1e3:.3f} ms)")
+    print(f"  sym       = {'auto-detect' if SYM_FACTOR is None else SYM_FACTOR}")
     print()
 
     plt.rcParams.update({
