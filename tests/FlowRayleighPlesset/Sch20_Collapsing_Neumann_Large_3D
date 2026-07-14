@@ -63,8 +63,18 @@ amr.blocking_factor = 32
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
 amr.max_level      = 4
-amr.n_cell         = 320 320 320       # base; eta-only AMR -> finest dx 7.8e-4 (R0/dx 25.6)
+amr.n_cell         = 320 320 320       # base dx 6.25e-3; max_level 4 -> finest dx 3.906e-4 (R0/dx 51.2)
 amr.n_error_buf    = 16
+
+# Permanently refined box around the bubble: force max_level everywhere inside
+# [lo,hi], not just the eta interface band.  Keeps the ENTIRE bubble (interior
+# gas included) at dx_finest = 3.906e-4 through collapse and rebound, so the
+# initial radius is ~51 cells across and R_min is resolved by the same mesh
+# rather than whatever the shrinking eta band happens to tag.  Octant: bubble
+# center is the origin, so the box is [0, 1.5*R0]^3.  Cost: ~77^3 ~ 460k finest
+# cells -- small next to the eta-band patches.
+refine_box.lo = 0.0  0.0  0.0
+refine_box.hi = 0.03 0.03 0.03
 
 nghost = 4
 

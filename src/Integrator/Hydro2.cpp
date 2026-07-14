@@ -3072,13 +3072,21 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
         const Set::Scalar* problo = geom[lev].ProbLo();
         const Set::Scalar bl0 = refine_box_lo[0], bh0 = refine_box_hi[0];
         const Set::Scalar bl1 = refine_box_lo[1], bh1 = refine_box_hi[1];
+#if AMREX_SPACEDIM == 3
+        const Set::Scalar bl2 = refine_box_lo[2], bh2 = refine_box_hi[2];
+#endif
         for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi) {
             const amrex::Box& bx = mfi.tilebox();
             amrex::Array4<char> const& tags = a_tags.array(mfi);
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 Set::Scalar x = problo[0] + (i + 0.5) * DX[0];
                 Set::Scalar y = problo[1] + (j + 0.5) * DX[1];
-                if (x >= bl0 && x <= bh0 && y >= bl1 && y <= bh1) tags(i, j, k) = amrex::TagBox::SET;
+                bool inside = (x >= bl0 && x <= bh0 && y >= bl1 && y <= bh1);
+#if AMREX_SPACEDIM == 3
+                Set::Scalar z = problo[2] + (k + 0.5) * DX[2];
+                inside = inside && (z >= bl2 && z <= bh2);
+#endif
+                if (inside) tags(i, j, k) = amrex::TagBox::SET;
             });
         }
     }

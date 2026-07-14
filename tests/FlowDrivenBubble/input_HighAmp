@@ -1,0 +1,199 @@
+#@ [flowdrivenbubble_highamp]
+#@ exe=hydro2
+#@ dim=2
+
+# =============================================================================
+# FLOW-DRIVEN BUBBLE -- Case 2: HIGH-AMPLITUDE (NONLINEAR) BENCHMARK
+# =============================================================================
+# Identical to input_LowAmp in EVERY respect except the drive amplitude:
+# A = 5.0e6 Pa instead of 1.0e2 Pa.  Comparing this run against LowAmp
+# (scaled by the amplitude ratio 5e4) isolates the nonlinear response.
+#
+# Drive: single-frequency sine on the wall pressure,
+#   p_wall(t) = p_inf + A sin(2 pi f t),   A = 5 MPa,  f = 81.54 Hz = f0/2
+# (same radius R0 = 0.02 m and frequency as LowAmp; f0 = 163.09 Hz is the
+# spherical Minnaert natural frequency at ambient 1e5 Pa).
+#
+# NOTE the trough pressure is p_inf - A = -4.9 MPa: the liquid spends half of
+# each cycle in TENSION.  Expect strong nonlinear response -- rapid growth
+# during the tension half-cycle followed by an inertial (Rayleigh-type)
+# collapse when the drive swings positive (peak 5.1 MPa, comparable to the
+# Sch20 collapsing case's p_inf = 5 MPa).  Collapse timing/violence is the
+# benchmark quantity; timestepping and output cadence are tightened
+# accordingly (cfl 0.4, dt_min 1e-14, plot_dt 5e-5).
+#
+# NO vaporization (the tension phase is carried entirely by the liquid EOS).
+# Surface tension ON (sigma = 72.8e-3).
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+# plot_file = ./tests/FlowDrivenBubble/output_HighAmp
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_HighAmp
+
+### MESHING ###
+amr.plot_int       = -1
+amr.plot_dt        = 5.0e-5         # ~245 frames per drive period -- resolves the collapses
+amr.max_grid_size  = 500000
+amr.blocking_factor = 2
+amr.regrid_int     = 10
+amr.grid_eff       = 0.8
+amr.max_level      = 2
+amr.n_cell         = 64 64          # base dx 1.25e-3; finest dx 3.125e-4 -> R0/dx = 64
+
+# n_error_buf pushes the fine patches past the interface band so the
+# coarse-fine boundary sits in pure water (Q-Fix density partition is exact
+# there).  Same rationale as the Sch20 tests.
+amr.n_error_buf    = 16
+
+# Permanently refined box over the bubble: forces max_level over the whole
+# bubble (interior included), not just the eta band.  1.5 R0 half-width; if
+# the bubble grows past 1.5 R0 during the tension half-cycle the eta-band
+# criterion still tracks the interface outside the box.
+refine_box.lo = -0.03 -0.03
+refine_box.hi =  0.03  0.03
+
+nghost = 4
+
+### TIME STEPPING ###
+timestep                = 1.0e-8
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-5
+dynamictimestep.min     = 1.0e-14
+cfl                     = 0.4
+
+### DIMENSIONS ###
+# 4 R0 across -- small on purpose: the walls drive the bubble.
+geometry.prob_lo     = -0.04 -0.04 0.0
+geometry.prob_hi     =  0.04  0.04 0.0
+geometry.is_periodic = 0 0 0
+stop_time            = 3.68e-2      # 3 drive periods (T = 12.26 ms)
+
+### ETA INITIAL CONDITIONS ###
+# eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 6.4e-4     # ~ 2 cells across the band at finest
+eta.ic.expression.constant.R0      = 0.02
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y) - R0)/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### EQUATION OF STATE -- Sch20 water (Tammann) + air (ideal gas) ###
+eos0.gamma = 2.35
+eos0.p0    = 1.0e9
+eos0.cv    = 1781.0
+eos0.cp    = 4186.0
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 714.286
+eos1.cp    = 1000.0
+
+### HYDRO INITIAL CONDITIONS ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1000.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Liquid starts at uniform ambient pressure -- the drive comes entirely from
+# the walls, so there is no initial RPE field.
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_inf = 1.0e5
+pressure0.ic.expression.region0 = "p_inf"
+
+# Gas interior: 2D-cylindrical Laplace equilibrium p_b = p_inf + sigma/R0
+# (= 1e5 + 3.64 Pa; small, but keeps the bubble static before the drive).
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_b = 100003.64
+pressure1.ic.expression.region0 = "p_b"
+
+### VISCOSITY (inviscid) ###
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION -- ON for this benchmark ###
+sigma = 72.8e-3
+pref  = 0.0
+
+### BOUNDARY CONDITIONS -- PRIMITIVE MODE, sinusoidal pressure on all walls ###
+# p_wall(t) = p_inf + amp*sin(w*t);  w = 2 pi f, f = 81.54 Hz = f0/2.
+# Density/momentum/energy are zero-gradient: the walls behave as a pressure
+# reservoir, free to exchange mass/momentum as the drive demands.
+bc.primitive = 1
+
+pressure.bc.constant.p_inf = 1.0e5
+pressure.bc.constant.amp   = 5.0e6          # 5 MPa -- tension on the negative half-cycle
+pressure.bc.constant.w     = 512.35         # 2*pi*81.54 Hz
+pressure.bc.type.xlo = dirichlet
+pressure.bc.val.xlo  = "p_inf + amp*sin(w*t)"
+pressure.bc.type.xhi = dirichlet
+pressure.bc.val.xhi  = "p_inf + amp*sin(w*t)"
+pressure.bc.type.ylo = dirichlet
+pressure.bc.val.ylo  = "p_inf + amp*sin(w*t)"
+pressure.bc.type.yhi = dirichlet
+pressure.bc.val.yhi  = "p_inf + amp*sin(w*t)"
+
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT -- eta band + permanent refine_box (above) ###
+eta_refinement_criterion   = 1.0e-1
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS ###
+apply_surface_tension = 1
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+grav                  = 0.0
+
+### NUMERICS -- WENO3 + SSPRK3 (project-standard for bubble tests) ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3
+kappa_method        = 1
+
+apply_sharpening     = 0
+sharpening_frequency = 50
+reinit_max_iter      = 100
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+relax_diag           = 1
+
+# Put the per-phase IC pressures in the energy-conserving equilibrium Mix()
+# would produce (kills the step-1 pressure kick; same as Sch20 tests).
+equalize_ic_pressure = 1
