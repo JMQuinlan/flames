@@ -49,8 +49,11 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_HighAmp
 ### MESHING ###
 amr.plot_int       = -1
 amr.plot_dt        = 1.0e-4         # ~123 frames per drive period -- resolves the collapses
-amr.max_grid_size  = 32
-amr.blocking_factor = 32
+# 16^3 boxes: with 32 the level-0 domain was a SINGLE grid on ONE rank
+# (level 1 only 8 grids) -- most of a 128-rank node sat idle (measured
+# 24 s/step on the LowAmp twin).  16 gives 8/64/512 grids on levels 0/1/2.
+amr.max_grid_size  = 16
+amr.blocking_factor = 16
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
 amr.max_level      = 2
@@ -226,7 +229,7 @@ sharpening_frequency = 20
 reinit_max_iter      = 100
 reinit_tolerance     = 1e-6
 omega_relax          = 0.5
-relax_diag           = 1
+relax_diag           = 0    # off for production: 3 domain-wide reductions + log spam per step
 
 # Put the per-phase IC pressures in the energy-conserving equilibrium Mix()
 # would produce (kills the step-1 pressure kick; same as Sch20 tests).
