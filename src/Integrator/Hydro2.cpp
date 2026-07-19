@@ -5069,6 +5069,7 @@ void Hydro2::RelaxAndReinit(int lev)
     const Set::Scalar alpha_floor = 1.0e-12;
     const Set::Scalar DIV_FLOOR   = 1.0e-30;
     const Set::Scalar small_loc   = small;        // kept for legacy callers
+    const Set::Scalar cutoff_loc  = cutoff;       // pure-cell guard threshold
     const int         max_iter    = 30;
     const Set::Scalar newton_tol  = 1.0e-10;
     const int         bisect_max  = 120;
@@ -5148,6 +5149,53 @@ void Hydro2::RelaxAndReinit(int lev)
             // SG positivity floor (Sau09 Sec.3): p_k + pi_k > 0.
             p0_pre = std::max(p0_pre, -pi0_ + DIV_FLOOR);
             p1_pre = std::max(p1_pre, -pi1_ + DIV_FLOOR);
+
+            // -----------------------------------------------------------
+            // PURE-CELL GUARD: relaxation is an interface operation
+            // (Sau09/Sch20 relax alpha between phases -- meaningless when
+            // one phase is below the eta cutoff).  In near-pure cells the
+            // trace phase's E_k is alpha-amplified noise: p_pre =
+            // (gam-1)E_k/alpha - gam pi turns roundoff into MPa at
+            // alpha ~ 1e-12, and when the trace pressure floors at -pi
+            // the volume constraint f(p) goes CONSTANT (plateau at
+            // |f| ~ 1/gamma_gas: no root exists, Newton and bisection
+            // both spin to max_iter).  The floored state is NOT confined
+            // to sub-cutoff cells -- band-TAIL cells (eta ~ 1e-4..1e-2)
+            // hit it through advection over/undershoot of the steep
+            // trace E_k profile -- so the guard fires on EITHER
+            // (a) eta beyond cutoff, or (b) either phase's pre-relax
+            // pressure sitting at its positivity floor (that phase's
+            // v(p) has lost EOS meaning: the solve is garbage-in).
+            // Skip the solve: freeze alpha AND eta (no eta stomp to the
+            // alpha_floor clamp), and do only the energy-consistent
+            // reinit so both per-phase energies return to mechanical
+            // equilibrium with the conserved mixture state
+            // (self-healing: next step's p_pre is then consistent and
+            // the cell rejoins the Newton path).
+            // -----------------------------------------------------------
+            const bool p0_floored = (p0_pre <= -pi0_ + std::max(2.0 * DIV_FLOOR, 1.0e-9 * pi0_));
+            const bool p1_floored = (p1_pre <= -pi1_ + std::max(2.0 * DIV_FLOOR, 1.0e-9 * pi1_));
+            if (eta(i, j, k) < cutoff_loc || eta(i, j, k) > 1.0 - cutoff_loc
+                || p0_floored || p1_floored)
+            {
+                Set::Scalar rho_p  = arh0_loc + arh1_loc;
+                Set::Scalar ke_p   = 0.5 * (AMREX_D_TERM(M_(i, j, k, 0) * M_(i, j, k, 0),
+                                                       + M_(i, j, k, 1) * M_(i, j, k, 1),
+                                                       + M_(i, j, k, 2) * M_(i, j, k, 2))) / std::max(rho_p, small_loc);
+                Set::Scalar rhoe_p = std::max(E_(i, j, k) - ke_p, small_loc);
+                Set::Scalar p_pure = Solver::EOS::EOS::ReinitMixturePressure(rhoe_p, a1, a2,
+                                                                            gam0, pi0_, gam1, pi1_, small_loc);
+                p_pure = std::max(p_pure, -std::min(pi0_, pi1_) + small_loc);
+                E0_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_pure, a1, gam0, pi0_, small_loc);
+                E1_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_pure, a2, gam1, pi1_, small_loc);
+                if (diag_on)
+                {
+                    diag_arr(i, j, k, 0) = 0.0;
+                    diag_arr(i, j, k, 1) = 0.0;
+                    diag_arr(i, j, k, 2) = 0.0;
+                }
+                return;
+            }
 
             // -----------------------------------------------------------
             // Newton on f(p) = arh0*v0(p) + arh1*v1(p) - 1 = 0, with
