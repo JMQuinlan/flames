@@ -29,14 +29,16 @@
 #   p_wall(t) = p_inf + A sin(2 pi f t)
 #   A = 1.0e4 Pa  (0.1 bar -- peak pressure 1.1e5 Pa).  Linear response
 #     dR/R0 = A/(3 gamma p_inf (1 - (f/f0)^2)) = 3.2e-2 -- comfortably linear
-#     (3%) AND ~2 finest cells of radial signal.  The original A = 1e2 gave
-#     dR = 0.02 finest cells: unmeasurable against relaxation noise.
+#     (3%): ~1 finest cell of radial signal, and a ~10% GAS-VOLUME signal
+#     (the gas-volume radius is the metric here -- it resolves sub-cell
+#     motion).  The original A = 1e2 gave dR = 0.02 cells: unmeasurable.
 #   f = f0 / 2 = 81.54 Hz, half the spherical Minnaert natural frequency
 #     f0 = (1/(2 pi R0)) sqrt(3 gamma_g p_inf / rho_l)
 #        = (1/(2 pi 0.02)) sqrt(3*1.4*1e5/1000) = 163.09 Hz
-#   Drive period T = 12.26 ms; stop_time = 1 T.  Acoustic CFL (c_l ~ 1533,
-#   finest dx 3.125e-4 -> dt ~ 8e-8) makes each period ~150k steps -- one
-#   period IS the affordable benchmark; do not restore 3 T casually.
+#   Drive period T = 12.26 ms; stop_time = 1 T.  Acoustic CFL at the level-1
+#   finest (dx 6.25e-4) gives dt ~ 6e-7 -> ~20k steps/period.  Measured cost
+#   at max_level 2 / blocking 32 was 24 s/step (~11 days/period) -- do not
+#   restore max_level 2 or 3 T casually.
 #
 # NOTE (benchmark reference): Minnaert assumes an UNBOUNDED liquid.  The
 # driven wall sits at 2 R0 (axis), which removes far-field liquid inertia and
@@ -65,12 +67,20 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_LowAmp
 ### MESHING ###
 amr.plot_int       = -1
 amr.plot_dt        = 2.5e-4         # ~49 frames per drive period (3D plotfiles are big)
-amr.max_grid_size  = 32
-amr.blocking_factor = 32
+# max_grid_size/blocking_factor 16: with 32 the level-0 domain was a SINGLE
+# 32^3 grid on ONE rank (and level 1 only 8 grids) -- most of a 128-rank node
+# sat idle while one rank serialized the coarse levels.  16^3 boxes give
+# 8/64 grids on levels 0/1.
+amr.max_grid_size  = 16
+amr.blocking_factor = 16
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
-amr.max_level      = 2
-amr.n_cell         = 32 32 32       # base dx 1.25e-3; finest dx 3.125e-4 -> R0/dx = 64
+# max_level 1 (R0/dx = 32): the linear benchmark's signal is a smooth ~3%
+# VOLUME oscillation read by the gas-volume integral (sub-cell sensitive);
+# it does not need R0/dx = 64, and dropping level 2 cuts cells ~10x and
+# doubles dt (observed cost at max_level 2: 24 s/step, ~11 days/period).
+amr.max_level      = 1
+amr.n_cell         = 32 32 32       # base dx 1.25e-3; finest dx 6.25e-4 -> R0/dx = 32
 
 # n_error_buf pushes the fine patches past the interface band so the
 # coarse-fine boundary sits in pure water (Q-Fix density partition is exact
@@ -102,7 +112,7 @@ stop_time            = 1.23e-2      # 1 drive period (T = 12.26 ms); ~150k steps
 ### ETA INITIAL CONDITIONS ###
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 6.4e-4     # ~ 2 cells across the band at finest
+eta.ic.expression.constant.epsilon = 1.28e-3    # ~ 2 cells across the band at level-1 finest (dx 6.25e-4)
 eta.ic.expression.constant.R0      = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
@@ -238,7 +248,7 @@ sharpening_frequency = 20
 reinit_max_iter      = 100
 reinit_tolerance     = 1e-6
 omega_relax          = 0.5
-relax_diag           = 1
+relax_diag           = 0    # off for production: 3 domain-wide reductions + log spam per step
 
 # Put the per-phase IC pressures in the energy-conserving equilibrium Mix()
 # would produce (kills the step-1 pressure kick; same as Sch20 tests).
