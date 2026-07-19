@@ -5,9 +5,11 @@
 # =============================================================================
 # FLOW-DRIVEN BUBBLE -- Case 2: HIGH-AMPLITUDE (NONLINEAR) BENCHMARK -- 3D OCTANT
 # =============================================================================
-# Identical to input_LowAmp in EVERY respect except the drive amplitude:
-# A = 5.0e6 Pa instead of 1.0e2 Pa.  Comparing this run against LowAmp
-# (scaled by the amplitude ratio 5e4) isolates the nonlinear response.
+# Same geometry, fluids, and drive frequency as input_LowAmp; the drive
+# amplitude is A = 5.0e6 Pa instead of 1.0e4 Pa.  Comparing this run against
+# LowAmp (scaled by the amplitude ratio 500) isolates the nonlinear response.
+# (Unlike LowAmp, surface tension stays ON here -- curvature matters at
+# collapse -- so the two inputs also differ in sigma and the gas IC.)
 #
 # GEOMETRY: +x+y+z OCTANT [0, 0.04]^3 (= full domain +/- 2 R0) with SYMMETRY
 # (reflect) BCs on the inner faces and the sinusoidal pressure drive on the
@@ -18,13 +20,21 @@
 # (same radius R0 = 0.02 m and frequency as LowAmp; f0 = 163.09 Hz is the
 # spherical Minnaert natural frequency at ambient 1e5 Pa).
 #
-# NOTE the trough pressure is p_inf - A = -4.9 MPa: the liquid spends half of
-# each cycle in TENSION.  Expect strong nonlinear response -- rapid growth
-# during the tension half-cycle followed by an inertial (Rayleigh-type)
-# collapse when the drive swings positive (peak 5.1 MPa, comparable to the
-# Sch20 collapsing case's p_inf = 5 MPa).  Collapse timing/violence is the
-# benchmark quantity; timestepping and output cadence are tightened
-# accordingly (cfl 0.4, dt_min 1e-14, plot_dt 1e-4).
+# SEQUENCE: with p_wall = p_inf + A sin(w t), the FIRST half-cycle is
+# COMPRESSION (peak 5.1 MPa at T/4 = 3.06 ms, comparable to the Sch20
+# collapsing case's p_inf = 5 MPa).  Expect an inertial (Rayleigh-type)
+# driven collapse within the first ~1-2 ms (Rayleigh time at 3 MPa is
+# ~0.33 ms) followed by rebound.  The trough p_inf - A = -4.9 MPa (liquid
+# in TENSION, rapid growth) only arrives in the SECOND half-cycle
+# (t > 6.13 ms) -- flip the sign of `amp` for a tension-first/growth-first
+# variant.  Collapse timing/violence is the benchmark quantity; timestepping
+# and output cadence are tightened accordingly (cfl 0.4, dt_min 1e-14,
+# plot_dt 1e-4).
+#
+# COST: acoustic CFL (c_l ~ 1533, finest dx 3.125e-4) gives dt ~ 8e-8 s
+# -> ~150k steps per drive period.  stop_time = 5 ms captures the full
+# compression ramp + first collapse + rebound in ~60k steps; the original
+# 3-period stop_time (450k steps) is a multi-day multi-node run.
 #
 # NO vaporization (the tension phase is carried entirely by the liquid EOS).
 # Surface tension ON (sigma = 72.8e-3).
@@ -73,12 +83,14 @@ cfl                     = 0.4
 geometry.prob_lo     = 0.0  0.0  0.0
 geometry.prob_hi     = 0.04 0.04 0.04
 geometry.is_periodic = 0 0 0
-stop_time            = 3.68e-2      # 3 drive periods (T = 12.26 ms)
+stop_time            = 5.0e-3       # compression ramp + first collapse + rebound (~60k steps)
 
 ### ETA INITIAL CONDITIONS ###
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 6.4e-4     # ~ 2 cells across the band at finest
+eta.ic.expression.constant.epsilon = 1.28e-3    # ~ 4 cells across the band at finest -- sigma is ON,
+                                                # and the CSF curvature needs a resolved band (2 cells
+                                                # is too thin; matches the Sch20 3D convention)
 eta.ic.expression.constant.R0      = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon

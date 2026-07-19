@@ -27,22 +27,33 @@
 #
 # Drive: single-frequency sine on the wall pressure,
 #   p_wall(t) = p_inf + A sin(2 pi f t)
-#   A = 1.0e2 Pa  (0.001 bar -- peak pressure 1.001e5 Pa, just above ambient)
+#   A = 1.0e4 Pa  (0.1 bar -- peak pressure 1.1e5 Pa).  Linear response
+#     dR/R0 = A/(3 gamma p_inf (1 - (f/f0)^2)) = 3.2e-2 -- comfortably linear
+#     (3%) AND ~2 finest cells of radial signal.  The original A = 1e2 gave
+#     dR = 0.02 finest cells: unmeasurable against relaxation noise.
 #   f = f0 / 2 = 81.54 Hz, half the spherical Minnaert natural frequency
 #     f0 = (1/(2 pi R0)) sqrt(3 gamma_g p_inf / rho_l)
 #        = (1/(2 pi 0.02)) sqrt(3*1.4*1e5/1000) = 163.09 Hz
-#   (3D spherical sim -- Minnaert applies directly; surface-tension correction
-#   is O(2 sigma/R0 / p_inf) = 7e-5, negligible.)
-#   Drive period T = 12.26 ms; stop_time = 3 T.  Trim stop_time to 1-2 T if
-#   the INCLINE allocation is tight -- one full period already gives the
-#   linear response amplitude.
+#   Drive period T = 12.26 ms; stop_time = 1 T.  Acoustic CFL (c_l ~ 1533,
+#   finest dx 3.125e-4 -> dt ~ 8e-8) makes each period ~150k steps -- one
+#   period IS the affordable benchmark; do not restore 3 T casually.
+#
+# NOTE (benchmark reference): Minnaert assumes an UNBOUNDED liquid.  The
+# driven wall sits at 2 R0 (axis), which removes far-field liquid inertia and
+# raises the effective natural frequency ~40% (~230 Hz).  Compare against a
+# FINITE-DOMAIN RP integration with r_inf = 2 R0 (Chen-style), not the
+# infinite-domain linear response, or the amplitude/phase will not match.
 #
 # Expected response: LINEAR -- radial oscillation amplitude proportional to
 # A, sinusoidal at the drive frequency, |dR|/R0 << 1.  This is the linear
-# twin of input_HighAmp (A = 5 MPa): identical in every respect except the
-# drive amplitude, so LowAmp response scaled by 5e4 isolates nonlinearity.
+# twin of input_HighAmp (A = 5 MPa): same drive frequency and geometry, so
+# LowAmp response scaled by the amplitude ratio 500 isolates nonlinearity.
 #
-# NO vaporization.  Surface tension ON (sigma = 72.8e-3).
+# NO vaporization.  Surface tension OFF: its static correction is
+# O(2 sigma/R0 / p_inf) = 7e-5 (negligible), and with mu = 0 the CSF
+# parasitic currents are UNDAMPED -- at this signal level they are the
+# dominant noise source.  (HighAmp keeps sigma on; the 2 sigma/R0 Laplace
+# jump there is equally negligible but curvature matters at collapse.)
 # =============================================================================
 
 alamo.program = hydro2
@@ -86,7 +97,7 @@ cfl                     = 0.5
 geometry.prob_lo     = 0.0  0.0  0.0
 geometry.prob_hi     = 0.04 0.04 0.04
 geometry.is_periodic = 0 0 0
-stop_time            = 3.68e-2      # 3 drive periods (T = 12.26 ms)
+stop_time            = 1.23e-2      # 1 drive period (T = 12.26 ms); ~150k steps at acoustic CFL
 
 ### ETA INITIAL CONDITIONS ###
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
@@ -128,10 +139,9 @@ pressure0.ic.type = expression
 pressure0.ic.expression.constant.p_inf = 1.0e5
 pressure0.ic.expression.region0 = "p_inf"
 
-# Gas interior: 3D spherical Laplace equilibrium p_b = p_inf + 2*sigma/R0
-# (= 1e5 + 7.28 Pa; small, but keeps the bubble static before the drive).
+# Gas interior: sigma = 0 here, so Laplace equilibrium is just p_b = p_inf.
 pressure1.ic.type = expression
-pressure1.ic.expression.constant.p_b = 100007.28
+pressure1.ic.expression.constant.p_b = 1.0e5
 pressure1.ic.expression.region0 = "p_b"
 
 ### VISCOSITY (inviscid) ###
@@ -140,8 +150,9 @@ mu0_b = 0.0
 mu1   = 0.0
 mu1_b = 0.0
 
-### SURFACE TENSION -- ON for this benchmark ###
-sigma = 72.8e-3
+### SURFACE TENSION -- OFF (negligible correction; undamped parasitic
+### currents would swamp the 2-cell linear signal -- see header) ###
+sigma = 0.0
 pref  = 0.0
 
 ### BOUNDARY CONDITIONS -- PRIMITIVE MODE, octant symmetry + driven outer walls ###
@@ -154,7 +165,7 @@ pref  = 0.0
 bc.primitive = 1
 
 pressure.bc.constant.p_inf = 1.0e5
-pressure.bc.constant.amp   = 1.0e2          # 0.001 bar
+pressure.bc.constant.amp   = 1.0e4          # 0.1 bar -- dR/R0 = 3.2e-2, ~2 finest cells
 pressure.bc.constant.w     = 512.35         # 2*pi*81.54 Hz
 pressure.bc.type.xlo = REFLECT_EVEN
 pressure.bc.type.xhi = dirichlet
@@ -209,7 +220,7 @@ u0.ic.constant.value = 0.0 0.0
 q.ic.constant.value  = 0.0 0.0
 
 ### PHYSICS FLAGS ###
-apply_surface_tension = 1
+apply_surface_tension = 0
 apply_buoyancy        = 0
 apply_weight          = 0
 apply_vaporization    = 0
