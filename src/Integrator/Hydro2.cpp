@@ -4553,6 +4553,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
                         // Find nearest layer-2 ghost cell and copy its value
                         int i_copy = i;
                         int j_copy = j;
+                        int k_copy = k;
 
                         // Clamp to layer-2 boundary
                         if (i < ghostEffbox.smallEnd(0))
@@ -4563,13 +4564,22 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
                             j_copy = ghostEffbox.smallEnd(1);
                         if (j > ghostEffbox.bigEnd(1))
                             j_copy = ghostEffbox.bigEnd(1);
+#if AMREX_SPACEDIM == 3
+                        if (k < ghostEffbox.smallEnd(2))
+                            k_copy = ghostEffbox.smallEnd(2);
+                        if (k > ghostEffbox.bigEnd(2))
+                            k_copy = ghostEffbox.bigEnd(2);
+#endif
 
                         // Zero-gradient extrapolation (copy from layer 2)
-                        rho0(i, j, k) = rho0(i_copy, j_copy, k);
-                        rho1(i, j, k) = rho1(i_copy, j_copy, k);
-                        M(i, j, k, 0) = M(i_copy, j_copy, k, 0);
-                        M(i, j, k, 1) = M(i_copy, j_copy, k, 1);
-                        E(i, j, k) = E(i_copy, j_copy, k);
+                        rho0(i, j, k) = rho0(i_copy, j_copy, k_copy);
+                        rho1(i, j, k) = rho1(i_copy, j_copy, k_copy);
+                        M(i, j, k, 0) = M(i_copy, j_copy, k_copy, 0);
+                        M(i, j, k, 1) = M(i_copy, j_copy, k_copy, 1);
+#if AMREX_SPACEDIM == 3
+                        M(i, j, k, 2) = M(i_copy, j_copy, k_copy, 2);
+#endif
+                        E(i, j, k) = E(i_copy, j_copy, k_copy);
                     }
                 });
             }
