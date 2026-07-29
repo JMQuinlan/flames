@@ -2776,7 +2776,17 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         const Set::Scalar pi0_  = eos0_local.P0();
         const Set::Scalar gam1_ = eos1_local.Gamma();
         const Set::Scalar pi1_  = eos1_local.P0();
-        const Set::Scalar alpha_floor = 1.0e-6;
+        // DIVIDE floor only -- must NOT be a physical clamp.  With alpha_floor
+        // = 1e-6 the per-phase recovery p_k = (gam-1)E_k/alpha_k - gam*pi
+        // divides E_k (built with the TRUE alpha) by the CLAMPED alpha; the
+        // 1e-6 mismatch times pi = 1e9 misprices pure-liquid pressure by
+        // +2.35 kPa per pass (and -1 kPa in gas via the floored trace phase),
+        // a secular per-stage ratchet that dug a vacuum at the bubble center
+        // in FlowDrivenBubble (NaN at step 9123).  1e-30 keeps the divide
+        // finite while preserving the exact E_k/alpha_k cancellation; trace-
+        // phase garbage is then weighted by the TRUE tiny alpha and cancels.
+        // (Same lesson as the limiter ToPrimitive/ToState divide floor.)
+        const Set::Scalar alpha_floor = 1.0e-30;
 
         amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &vz_max_local, &F_max_local, &rho_min_local] AMREX_GPU_DEVICE(int i, int j, int k)
         {
@@ -4174,7 +4184,17 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         const Set::Scalar pi0_ = eos0_local.P0();
         const Set::Scalar gam1 = eos1_local.Gamma();
         const Set::Scalar pi1_ = eos1_local.P0();
-        const Set::Scalar alpha_floor = 1.0e-6;
+        // DIVIDE floor only -- must NOT be a physical clamp.  With alpha_floor
+        // = 1e-6 the per-phase recovery p_k = (gam-1)E_k/alpha_k - gam*pi
+        // divides E_k (built with the TRUE alpha) by the CLAMPED alpha; the
+        // 1e-6 mismatch times pi = 1e9 misprices pure-liquid pressure by
+        // +2.35 kPa per pass (and -1 kPa in gas via the floored trace phase),
+        // a secular per-stage ratchet that dug a vacuum at the bubble center
+        // in FlowDrivenBubble (NaN at step 9123).  1e-30 keeps the divide
+        // finite while preserving the exact E_k/alpha_k cancellation; trace-
+        // phase garbage is then weighted by the TRUE tiny alpha and cancels.
+        // (Same lesson as the limiter ToPrimitive/ToState divide floor.)
+        const Set::Scalar alpha_floor = 1.0e-30;
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             // Volume fraction with floor.
@@ -4644,7 +4664,17 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         const Set::Scalar pi0_ = eos0_local.P0();
         const Set::Scalar gam1 = eos1_local.Gamma();
         const Set::Scalar pi1_ = eos1_local.P0();
-        const Set::Scalar alpha_floor = 1.0e-6;
+        // DIVIDE floor only -- must NOT be a physical clamp.  With alpha_floor
+        // = 1e-6 the per-phase recovery p_k = (gam-1)E_k/alpha_k - gam*pi
+        // divides E_k (built with the TRUE alpha) by the CLAMPED alpha; the
+        // 1e-6 mismatch times pi = 1e9 misprices pure-liquid pressure by
+        // +2.35 kPa per pass (and -1 kPa in gas via the floored trace phase),
+        // a secular per-stage ratchet that dug a vacuum at the bubble center
+        // in FlowDrivenBubble (NaN at step 9123).  1e-30 keeps the divide
+        // finite while preserving the exact E_k/alpha_k cancellation; trace-
+        // phase garbage is then weighted by the TRUE tiny alpha and cancels.
+        // (Same lesson as the limiter ToPrimitive/ToState divide floor.)
+        const Set::Scalar alpha_floor = 1.0e-30;
 
         amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             Set::Scalar a1 = std::min(std::max(eta(i, j, k), alpha_floor), 1.0 - alpha_floor);
@@ -5090,7 +5120,7 @@ void Hydro2::RelaxAndReinit(int lev)
     // Optional Newton diagnostic.  Per cell write {iter_count, |f(p_final)|};
     // after the ParallelFor reduce to {max iters, max residual, unconverged
     // cell count} and print a one-line summary.
-    const bool diag_on = true; //(relax_diag != 0.0);
+    const bool diag_on = (relax_diag != 0);
     std::unique_ptr<amrex::MultiFab> diag_mf;
     if (diag_on)
     {
@@ -5186,8 +5216,17 @@ void Hydro2::RelaxAndReinit(int lev)
                 Set::Scalar p_pure = Solver::EOS::EOS::ReinitMixturePressure(rhoe_p, a1, a2,
                                                                             gam0, pi0_, gam1, pi1_, small_loc);
                 p_pure = std::max(p_pure, -std::min(pi0_, pi1_) + small_loc);
-                E0_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_pure, a1, gam0, pi0_, small_loc);
-                E1_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_pure, a2, gam1, pi1_, small_loc);
+                // Write E_k with the FROZEN raw eta (clamped only to [0,1]),
+                // NOT the alpha_floor-clamped a1: eta stays frozen in this
+                // branch, so the recovery divide E_k/eta only cancels exactly
+                // when E_k was built with the same eta.  Using the 1e-12-
+                // clamped a1 here re-creates the divide-floor mispricing in
+                // the band tail (eta ~ 1e-14..1e-6) that this guard exists
+                // to prevent.
+                const Set::Scalar a1g = std::min(std::max(eta(i, j, k), 0.0), 1.0);
+                const Set::Scalar a2g = 1.0 - a1g;
+                E0_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_pure, a1g, gam0, pi0_, small_loc);
+                E1_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_pure, a2g, gam1, pi1_, small_loc);
                 if (diag_on)
                 {
                     diag_arr(i, j, k, 0) = 0.0;
