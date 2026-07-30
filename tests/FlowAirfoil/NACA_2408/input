@@ -1,9 +1,9 @@
-#@ [naca0012]
+#@ [naca2408]
 #@ exe=hydro2
 #@ dim=2
 
 # =============================================================================
-# FlowAirfoil -- NACA 0012, 2D subsonic flow over an EMBEDDED SOLID airfoil
+# FlowAirfoil -- NACA 2408, 2D subsonic flow over an EMBEDDED SOLID airfoil
 # (rasterized phi bitmap -> diffuse tanh boundary), for lift/drag VALIDATION
 # against thin-airfoil theory and tabulated NACA data.
 # =============================================================================
@@ -16,7 +16,9 @@
 #   FLOW:      rho = 1.0,  p = 0.714286 (= 1/gamma),  U = 0.3  (Ma 0.3).
 #              rho*U = 0.3000.   E0 = p/(gamma-1) = 1.785714 (eta=1; E1 ~ 0).
 #              q_inf = 0.5*rho*U^2 = 0.045000.
-#   GEOMETRY:  NACA 0012 at AoA = 4 deg (nose-up, rotated into the bitmap),
+#   GEOMETRY:  NACA 2408 (2% camber @ 40%c, 8% thick) -- thin+cambered:
+#              the stable low-Re regime.  alpha_L0 ~ -2.07 deg (thin-airfoil),
+#              so Cl(alpha=0) ~ 0.23.  Base bitmap at AoA = 0,
 #              chord 1.0, from a phi bitmap (fit=coord over the domain box).
 #              d>0 fluid, d<0 solid -> phi = 0.5*(1+tanh(d/eps)).
 #              Thin-airfoil + Prandtl-Glauert at Ma 0.3: Cl = 2*pi*alpha/beta
@@ -26,7 +28,7 @@
 #              the band-merged blunt TE was identified as the lift-killer
 #              (splitter A/B: Cl 0.15->0.32; eps 0.01->0.005 moved separation
 #              25%c -> 60%c).  Halving eps again sharpens the effective TE.
-#              mu = 3e-5 -> Re_c = rho*U*c/mu = 10,000.  The boundary layer is what
+#              mu = 6e-6 -> Re_c = rho*U*c/mu = 50,000.  The boundary layer is what
 #              enforces the Kutta condition at the (diffuse, rounded) trailing
 #              edge -- inviscid+slip developed no circulation (Cl ~ 0) and shed
 #              vortices off the rounded TE continuously.
@@ -46,7 +48,7 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file            = ./tests/FlowAirfoil/NACA_0012/output
+plot_file            = ./tests/FlowAirfoil/NACA_2408/output
 amr.plot_dt          = 0.5
 amr.plot_int         = -1
 
@@ -57,7 +59,7 @@ amr.max_grid_size    = 500000
 amr.blocking_factor  = 16
 amr.regrid_int       = 10
 amr.grid_eff         = 0.8
-amr.max_level        = 5           # eps=0.0025 -> 1.28 finest cells (dx_finest = 0.00195)
+amr.max_level        = 6           # eps=0.0025 -> 2.56 finest cells (dx_finest = 0.00098)
 amr.n_cell           = 160 64      # dx = 0.0625 on the [-2,8]x[-2,2] domain; divisible by blocking_factor 16
 
 ### DIMENSIONS -- flow in +X ###
@@ -84,7 +86,7 @@ cfl_v               = 0.3
 stop_time           = 24.0
 
 # ----------------------------------------------------------------------------
-# EMBEDDED SOLID -- the NACA 0012, from a phi bitmap.  Yang Brinkman wall.
+# EMBEDDED SOLID -- the NACA 2408, from a phi bitmap.  Yang Brinkman wall.
 # ----------------------------------------------------------------------------
 # (refine_box over the BL/wake was TESTED and removed: forcing the aft shear
 #  zone to 100% finest level changed nothing -- the lift-off is not a
@@ -107,7 +109,7 @@ phi_refinement_criterion = 0.1
 # are pure fluid) so the raster stays small at the sharp eps=0.0025 skin
 # (pixel = eps/2).  MUST match BMP_LO/BMP_HI in analyze_NACA_0012.py.
 solid.phi.ic.type            = bmp
-solid.phi.ic.bmp.filename    = ../tests/FlowAirfoil/NACA_0012/naca0012.bmp
+solid.phi.ic.bmp.filename    = ../tests/FlowAirfoil/NACA_2408/naca2408.bmp
 solid.phi.ic.bmp.channel     = g
 solid.phi.ic.bmp.min         = 0
 solid.phi.ic.bmp.max         = 255
@@ -144,15 +146,15 @@ eos1.gamma = 1.4
 eos1.p0    = 0.0
 eos1.cp    = 1005.0
 eos1.cv    = 717.86
-# Viscosity sized for Re_c = rho*U*c/mu = 1*0.3*1/3e-5 = 10,000 -- the highest
+# Viscosity sized for Re_c = rho*U*c/mu = 1*0.3*1/6e-6 = 50,000 -- the highest
 # Re the CURRENT grid honestly supports: the LE boundary layer at ~1% chord is
 # delta ~ 5*sqrt(nu*x/U) ~ 5e-3 ~ 2.6 finest cells (the Re=250k attempt had
 # ~0.5 cells there and separated AT the LE at every alpha -- LE vortex
 # shedding, suction peak displaced to midchord).  delta_TE ~ 0.05 ~ 26 cells.
 # Viscous dt limit ~ 0.04 >> acoustic dt: not limiting.
-mu0   = 3e-5
+mu0   = 6e-6
 mu0_b = 0.0
-mu1   = 3e-5
+mu1   = 6e-6
 mu1_b = 0.0
 
 ### FLUID 0 IC (subsonic freestream in +X) ###

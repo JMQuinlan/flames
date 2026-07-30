@@ -13,7 +13,8 @@ analyze_NACA_0012.py).
   * Scheduling: MAX_PAR=3 cases at a time, NP_RANKS=8 MPI ranks each.
   * After every finished case the polar plot is refreshed via
     analyze_NACA_0012.analyze_workdir() -- rerun that anytime standalone:
-        python3 analyze_NACA_0012.py /tmp/naca_overnight
+        python3 analyze_NACA_0012.py    (defaults to the shared WORK dir,
+                                         bin/tests/FlowAirfoil/NACA_0012/sweep)
 """
 import os, re, sys, glob, subprocess, traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -26,8 +27,8 @@ import analyze_NACA_0012 as m
 MAX_PAR  = 3                                   # concurrent cases
 NP_RANKS = 10                                   # MPI ranks per case
 MPIRUN   = ["mpirun", "-np", str(NP_RANKS)]
-AOAS     = list(range(0, 21))                  # 0..20 deg, 1-deg steps
-WORK     = m.WORK                              # /tmp/naca_overnight (shared with analyzer)
+AOAS     = list(range(0, 17, 2))               # 0..16 deg, 2-deg steps (Re 250k sweep)
+WORK     = m.WORK                              # bin/tests/FlowAirfoil/NACA_0012/sweep (shared with analyzer)
 TEMPLATE = os.path.join(m.TESTDIR, "input")
 TIMEOUT  = 400000                              # s, per case
 
@@ -44,7 +45,8 @@ def plot_solid(bmp, tag):
         ax_.imshow(a, origin="upper", extent=ext, cmap="gray", aspect="equal", interpolation="nearest")
         ax_.set_xlim(*xl); ax_.set_ylim(*yl)
         ax_.set_title(f"{tag} solid phi (eps={m.EPS}): {tt}"); ax_.set_xlabel("x")
-    plt.tight_layout(); plt.savefig(os.path.join(m.IMAGES, f"initial_solid_{tag}.png"), dpi=120); plt.close()
+    sweep_tag = os.path.basename(os.path.normpath(WORK))
+    plt.tight_layout(); plt.savefig(os.path.join(m.images_dir(sweep_tag), f"initial_solid_{tag}.png"), dpi=120); plt.close()
 
 
 def prepare(aoa):
@@ -52,7 +54,7 @@ def prepare(aoa):
     tag = f"aoa{aoa:02d}"
     rd = os.path.join(WORK, tag); os.makedirs(rd, exist_ok=True)
     bmp = os.path.join(rd, "phi.bmp"); plot = os.path.join(rd, "out"); inp = os.path.join(rd, "input")
-    m.write_phi_bmp(m.rotate(m.naca0012(), float(aoa)), bmp)
+    m.write_phi_bmp(m.rotate(m.profile(), float(aoa)), bmp)
     txt = open(TEMPLATE).read()
     txt, n_pf = re.subn(r"(?m)^(plot_file\s*=\s*).*$", lambda mm: mm.group(1) + plot, txt)
     txt, n_bm = re.subn(r"(?m)^(solid\.phi\.ic\.bmp\.filename\s*=\s*).*$", lambda mm: mm.group(1) + bmp, txt)
@@ -89,10 +91,31 @@ def main():
     print(f"template: {TEMPLATE}\nwork dir: {WORK}", flush=True)
     print("=" * 60, flush=True)
 
-    cases = [prepare(a) for a in AOAS]
+    # RESUME SUPPORT: a case whose last plotfile already reached stop_time is
+    # complete -- skip it (crash/restart safe).  Everything else (fresh, or
+    # partially run) is re-prepared and re-run from t=0.
+    stop_m = re.search(r"(?m)^stop_time\s*=\s*([0-9.eE+-]+)", open(TEMPLATE).read())
+    t_stop = float(stop_m.group(1)) if stop_m else 1e30
+
+    def is_complete(aoa):
+        pfs = sorted(glob.glob(os.path.join(WORK, f"aoa{aoa:02d}", "out", "*cell")))
+        if not pfs:
+            return False
+        try:
+            import yt; yt.set_log_level(50)
+            return float(yt.load(pfs[-1]).current_time) >= 0.98 * t_stop
+        except Exception:
+            return False
+
+    todo = [a for a in AOAS if not is_complete(a)]
+    if len(todo) < len(AOAS):
+        print(f"resume: skipping {len(AOAS)-len(todo)} already-complete case(s): "
+              f"{[a for a in AOAS if a not in todo]}", flush=True)
+
+    cases = [prepare(a) for a in todo]
     print(f"prepared {len(cases)} cases (+ initial solid plots); launching ...", flush=True)
 
-    n_done = 0
+    n_done = len(AOAS) - len(todo)
     with ThreadPoolExecutor(MAX_PAR) as ex:
         futs = {ex.submit(solve, c): c for c in cases}
         for fut in as_completed(futs):
@@ -102,15 +125,23 @@ def main():
                 print(f"  {c['tag']}: FAILED (rc={c.get('rc')}, {c.get('err', '')})", flush=True)
                 continue
             n_done += 1
-            print(f"  {c['tag']}: done ({n_done}/{len(cases)})", flush=True)
-            # live polar refresh -- analysis auto-detects every finished case
+            print(f"  {c['tag']}: done ({n_done}/{len(AOAS)})", flush=True)
+            # Live polar refresh at a CHEAP covering-grid level (lev=3, ~40k
+            # cells vs ~10.5M at finest) -- the finest-level pass on a full
+            # window of snapshots peaks ~1 GB/snapshot and, stacked on top of
+            # the running MPI ranks, OOM'd the machine mid-sweep once.
+            # Finished cases are cached (analysis.json), so this stays O(1)
+            # per completion.  Run the standalone CLI at the end for the
+            # finest-level publication polar.
             try:
-                m.analyze_workdir(WORK)
+                m.analyze_workdir(WORK, lev=3)
             except Exception:
                 print("  analysis EXCEPTION:", traceback.format_exc(), flush=True)
 
     print("\n==== SWEEP DONE ====", flush=True)
-    print(f"final analysis:  python3 {os.path.join(m.HERE, 'analyze_NACA_0012.py')} {WORK}", flush=True)
+    print("Live polars used a coarse force grid (lev=3).  For the final,", flush=True)
+    print("finest-level polar run (solvers idle, so the RAM spike is safe):", flush=True)
+    print(f"  python3 {os.path.join(m.HERE, 'analyze_NACA_0012.py')} {WORK}", flush=True)
 
 
 if __name__ == "__main__":
