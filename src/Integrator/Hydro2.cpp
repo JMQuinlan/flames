@@ -2829,6 +2829,31 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 Set::Scalar r1p  = arh1 / a2;
                 Set::Scalar p0_loc = Solver::EOS::EOS::PhasicPressureFromEnergy(E0_p(i, j, k), a1, gam0_, pi0_, small);
                 Set::Scalar p1_loc = Solver::EOS::EOS::PhasicPressureFromEnergy(E1_p(i, j, k), a2, gam1_, pi1_, small);
+                // TRACE-PHASE SLAVING: recovering a vanished phase's pressure
+                // from E_k/alpha_k is ill-conditioned by gam*pi/p (~2.4e4 for
+                // water at 1 bar) -- any alpha inconsistency becomes ~1e5 Pa of
+                // garbage that the limiter reconstructs across the band tail
+                // (the residual secular leak after the alpha-floor fix).  A
+                // phase below the eta cutoff is dynamically irrelevant: slave
+                // its pressure to the dominant phase (mechanical equilibrium).
+                {
+                    // SMOOTH slaving: a hard threshold leaves a discontinuous
+                    // seam in the p_k field at the switch contour, which the
+                    // limiter reads as a real pressure feature (measured: a
+                    // persistent -30% dip parked at the eta = 1e-2 contour
+                    // pumping gas from the bubble center into the band).
+                    // Blend raw -> dominant over alpha in [SLAVE_LO, SLAVE_HI]
+                    // with a C1 smoothstep: no seam, fully slaved below 1%,
+                    // fully raw above 10%.
+                    const Set::Scalar SLAVE_LO = 1.0e-2, SLAVE_HI = 1.0e-1;
+                    Set::Scalar w0 = std::min(std::max((a1 - SLAVE_LO) / (SLAVE_HI - SLAVE_LO), 0.0), 1.0);
+                    w0 = w0 * w0 * (3.0 - 2.0 * w0);
+                    Set::Scalar w1 = std::min(std::max((a2 - SLAVE_LO) / (SLAVE_HI - SLAVE_LO), 0.0), 1.0);
+                    w1 = w1 * w1 * (3.0 - 2.0 * w1);
+                    const Set::Scalar p0_raw = p0_loc, p1_raw = p1_loc;
+                    p0_loc = w0 * p0_raw + (1.0 - w0) * p1_raw;
+                    p1_loc = w1 * p1_raw + (1.0 - w1) * p0_raw;
+                }
                 Set::Scalar c0_loc = Solver::EOS::EOS::PhasicSoundSpeed(r0p, p0_loc, gam0_, pi0_, small);
                 Set::Scalar c1_loc = Solver::EOS::EOS::PhasicSoundSpeed(r1p, p1_loc, gam1_, pi1_, small);
                 Set::Scalar Y0 = arh0 / std::max(rho(i, j, k), small);
@@ -4224,6 +4249,20 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             // Per-phase pressures from canonical (alpha rho e)_k (Sau09 II.3).
             Set::Scalar p0_loc = Solver::EOS::EOS::PhasicPressureFromEnergy(E0_arr(i, j, k), a1, gam0, pi0_, small);
             Set::Scalar p1_loc = Solver::EOS::EOS::PhasicPressureFromEnergy(E1_arr(i, j, k), a2, gam1, pi1_, small);
+            // TRACE-PHASE SLAVING (see flux-loop recovery for rationale):
+            // a vanished phase's E_k/alpha_k pressure is gam*pi/p-amplified
+            // noise; slave it to the dominant phase below the eta cutoff.
+            {
+                // SMOOTH slaving (see flux-loop recovery block for rationale).
+                const Set::Scalar SLAVE_LO = 1.0e-2, SLAVE_HI = 1.0e-1;
+                Set::Scalar w0 = std::min(std::max((a1 - SLAVE_LO) / (SLAVE_HI - SLAVE_LO), 0.0), 1.0);
+                w0 = w0 * w0 * (3.0 - 2.0 * w0);
+                Set::Scalar w1 = std::min(std::max((a2 - SLAVE_LO) / (SLAVE_HI - SLAVE_LO), 0.0), 1.0);
+                w1 = w1 * w1 * (3.0 - 2.0 * w1);
+                const Set::Scalar p0_raw = p0_loc, p1_raw = p1_loc;
+                p0_loc = w0 * p0_raw + (1.0 - w0) * p1_raw;
+                p1_loc = w1 * p1_raw + (1.0 - w1) * p0_raw;
+            }
 
             // Per-phase sound speeds.
             Set::Scalar c0_loc = Solver::EOS::EOS::PhasicSoundSpeed(rho0_pure, p0_loc, gam0, pi0_, small);
@@ -4696,6 +4735,18 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             Set::Scalar rho1_pure = arh1 / a2;
             Set::Scalar p0_loc = Solver::EOS::EOS::PhasicPressureFromEnergy(E0_arr(i, j, k), a1, gam0, pi0_, small);
             Set::Scalar p1_loc = Solver::EOS::EOS::PhasicPressureFromEnergy(E1_arr(i, j, k), a2, gam1, pi1_, small);
+            // TRACE-PHASE SLAVING (see flux-loop recovery for rationale).
+            {
+                // SMOOTH slaving (see flux-loop recovery block for rationale).
+                const Set::Scalar SLAVE_LO = 1.0e-2, SLAVE_HI = 1.0e-1;
+                Set::Scalar w0 = std::min(std::max((a1 - SLAVE_LO) / (SLAVE_HI - SLAVE_LO), 0.0), 1.0);
+                w0 = w0 * w0 * (3.0 - 2.0 * w0);
+                Set::Scalar w1 = std::min(std::max((a2 - SLAVE_LO) / (SLAVE_HI - SLAVE_LO), 0.0), 1.0);
+                w1 = w1 * w1 * (3.0 - 2.0 * w1);
+                const Set::Scalar p0_raw = p0_loc, p1_raw = p1_loc;
+                p0_loc = w0 * p0_raw + (1.0 - w0) * p1_raw;
+                p1_loc = w1 * p1_raw + (1.0 - w1) * p0_raw;
+            }
             Set::Scalar c0_loc = Solver::EOS::EOS::PhasicSoundSpeed(rho0_pure, p0_loc, gam0, pi0_, small);
             Set::Scalar c1_loc = Solver::EOS::EOS::PhasicSoundSpeed(rho1_pure, p1_loc, gam1, pi1_, small);
 
@@ -5179,6 +5230,37 @@ void Hydro2::RelaxAndReinit(int lev)
             // SG positivity floor (Sau09 Sec.3): p_k + pi_k > 0.
             p0_pre = std::max(p0_pre, -pi0_ + DIV_FLOOR);
             p1_pre = std::max(p1_pre, -pi1_ + DIV_FLOOR);
+
+            // -----------------------------------------------------------
+            // TRACE-PHASE SLAVING (relax): same ill-conditioning as the
+            // recovery paths -- p_pre = (gam-1)E_k/alpha - gam*pi turns a
+            // 4e-5 relative E/alpha inconsistency into a 100% pressure
+            // error at gam*pi/p ~ 2.4e4.  Below the guard cutoff those
+            // cells skip the Newton entirely, but in the band tail ABOVE
+            // cutoff (eta ~ 1e-4..1e-2) the Newton ingests the mispriced
+            // trace p_pre and MOVES alpha off its garbage relaxation
+            // volume -- a secular interface-erosion loop (the residual
+            // exponential drain after the recovery slaving landed).
+            // Slave the trace phase's p_pre to the dominant phase's:
+            // with p0_pre == p1_pre the volume constraint is satisfied
+            // at p_pre exactly (v_k = v_k^0 -> f = a1+a2-1 = 0), so the
+            // Newton converges immediately and alpha is NOT moved --
+            // which is the correct physical outcome for a cell whose
+            // trace phase has no independent pressure to relax against.
+            // -----------------------------------------------------------
+            {
+                // SMOOTH blend (see recovery blocks): hard switches leave a
+                // seam the dynamics lock onto.
+                const Set::Scalar SLAVE_LO = 1.0e-2, SLAVE_HI = 1.0e-1;
+                const Set::Scalar er = eta(i, j, k);
+                Set::Scalar w0 = std::min(std::max((er - SLAVE_LO) / (SLAVE_HI - SLAVE_LO), 0.0), 1.0);
+                w0 = w0 * w0 * (3.0 - 2.0 * w0);
+                Set::Scalar w1 = std::min(std::max(((1.0 - er) - SLAVE_LO) / (SLAVE_HI - SLAVE_LO), 0.0), 1.0);
+                w1 = w1 * w1 * (3.0 - 2.0 * w1);
+                const Set::Scalar p0_raw = p0_pre, p1_raw = p1_pre;
+                p0_pre = w0 * p0_raw + (1.0 - w0) * p1_raw;
+                p1_pre = w1 * p1_raw + (1.0 - w1) * p0_raw;
+            }
 
             // -----------------------------------------------------------
             // PURE-CELL GUARD: relaxation is an interface operation

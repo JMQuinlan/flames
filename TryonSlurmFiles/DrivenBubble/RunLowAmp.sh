@@ -11,6 +11,5 @@
 module purge
 module load gnu9 mpich
 
-
 ## 3D Varients ##
 srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowDrivenBubble/input_LowAmp
