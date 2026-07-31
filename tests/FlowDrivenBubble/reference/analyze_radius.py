@@ -68,14 +68,14 @@ RUNS = [
          color="tab:red"),
 ]
 # OVERRIDE (uncomment + edit for INCLINE):
-# RUNS = [
-#     dict(label="LowAmp (A = 0.001 bar)",
-#          out_dir="/mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_LowAmp",
-#          color="tab:blue"),
+RUNS = [
+     dict(label="LowAmp (A = 0.001 bar)",
+          out_dir="/mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_LowAmp",
+          color="tab:blue")
 #     dict(label="HighAmp (A = 5 MPa)",
 #          out_dir="/mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_HighAmp",
 #          color="tab:red"),
-# ]
+]
 
 # ===== PROBLEM PARAMETERS (must match the input files) =====
 DIM      = 3               # 3 -> R = (3V/4pi)^(1/3); 2 -> R = sqrt(V/pi)
