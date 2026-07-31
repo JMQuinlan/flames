@@ -43,8 +43,6 @@ q.ic.constant.value = 0.0
 ### SOLVER ###
 cfl = 0.4
 Riemann_Solver.type = hllc
-Spec_Vol = 1
-static_eta = 1
 
 ### EOS - IDEAL GAS (AIR) ###
 eos0.gamma = 1.4

@@ -417,9 +417,12 @@ void Hydro::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 E_new(i, j, k, 0) = E_solid(i, j, k, 0);
             }
 
-            // Calculate u_new from updated momentum and density
-            Set::Vector u_new(M_new(i, j, k, 0) / (rho_new(i, j, k) + small),
-                              M_new(i, j, k, 1) / (rho_new(i, j, k) + small));
+            // Calculate u_new from updated momentum and density.
+            // (Hydro is a 2D-only solver -- it asserts AMREX_SPACEDIM==2 at runtime;
+            // the z placeholder only exists so the file compiles in a 3D build.)
+            Set::Vector u_new(AMREX_D_DECL(M_new(i, j, k, 0) / (rho_new(i, j, k) + small),
+                                           M_new(i, j, k, 1) / (rho_new(i, j, k) + small),
+                                           0.0));
 
             Set::Matrix gradu = Numeric::Gradient(u, i, j, k, DX);
             omega(i, j, k) = eta * (gradu(1, 0) - gradu(0, 1));
@@ -616,28 +619,47 @@ void Hydro::RHS(int lev, Set::Scalar /*time*/,
             Set::Vector Ldot0 = Set::Vector::Zero();
             Set::Vector div_tau = Set::Vector::Zero();
             
+            // Effective Viscosities
+            // rho(i, j, k) = eta * rho(i, j, k) + (1.0 - eta) * rho_solid(i, j, k);
+            // Fudging Solid Viscosities to be higher that the liquid to help enforce no slip and no penentration
+            Set::Scalar mu_solid = 100 * mu;
+            Set::Scalar mu_b_solid = 100 * mu_b;
+
+            // Effective Viscosities ()_0 * eta + ()_1 * (1-eta)
+            Set::Scalar mu_eff = eta_patch(i, j, k) * mu + (1.0 - eta_patch(i, j, k)) * mu_solid;
+            Set::Scalar lambda_eff = eta_patch(i, j, k) * mu_b + (1.0 - eta_patch(i, j, k)) * mu_b_solid;
+            Set::Vector grad_mu = (mu - mu_solid) * grad_eta;
+            Set::Vector grad_lambda = (mu_b - mu_b_solid) * grad_eta;
+
+
             for (int p = 0; p < 2; p++)             // i
                 for (int q = 0; q < 2; q++)         // j
                     for (int r = 0; r < 2; r++)     // k
                         for (int s = 0; s < 2; s++) // l
                         {
                             Set::Scalar Mpqrs = 0.0;
+                            Set::Scalar dMpqrs = 0.0;
                             if ((p == r) and (q == s))
                             {
-                                Mpqrs += mu;
+                                Mpqrs += mu_eff;
+                                dMpqrs += grad_mu(q);
                             }
                             if ((p == s) and (q == r))
                             {
-                                Mpqrs += mu;
+                                Mpqrs += mu_eff;
+                                dMpqrs += grad_mu(q);
                             }
                             if ((p == q) and (r == s))
                             {
-                                Mpqrs += mu_b - (2.0 / 3.0) * mu; 
+                                Mpqrs += lambda_eff - (2.0 / 3.0) * mu_eff;
+                                dMpqrs += grad_lambda(q) - (2.0 / 3.0) * grad_mu(q);
                             }
 
                             div_tau(p) += Mpqrs * hess_u(r, s, q);
-                            Ldot0(p) += 0.5 * Mpqrs *(u(r) - u0(r)) * hess_eta(q, s);
-                            //Ldot0(p) += 0.5 * (u(r) - u0(r)) * gradM(s) * grad_eta(q, s);
+                            Ldot0(p) += 0.5 * Mpqrs * (u(r) - u0(r)) * hess_eta(q, s);
+
+                            // Grad visc terms
+                            div_tau(p) += dMpqrs * gradu(r, s);
                         }
 
             Source(i,j, k, 0) = mdot0;

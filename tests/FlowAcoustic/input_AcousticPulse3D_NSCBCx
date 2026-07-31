@@ -1,0 +1,151 @@
+#@ [acoustic_pulse_3d_nscbcx]
+#@ exe=hydro2
+#@ dim=3
+
+# ============================================================================
+# 3D OBLIQUE ACOUSTIC PULSE -> NSCBC4 OUTFLOW on the z-faces (x,y periodic).
+# ============================================================================
+# A spherical Gaussian pressure pulse at the domain center.  Its spherical
+# wavefront strikes the planar z-lo/z-hi NSCBC faces OBLIQUELY everywhere off
+# the z-axis, so the transverse LODI terms (Increment 2) and the 2nd tangential
+# velocity (Increment 1b) are genuinely exercised.  x,y are periodic, so NO
+# NSCBC edges/corners are involved -- this isolates the FACE treatment.
+#
+# Non-reflection metric: after the wave exits (t ~ 0.6), the residual
+# max|p - p_base| in the domain should be small.  Compare against the reflecting
+# reference input_AcousticPulse3D_Wall (neumann z-faces) which traps the wave.
+
+### OUTPUT ###
+plot_file = ./tests/FlowAcoustic/output_Pulse3D_NSCBCx
+amr.plot_int = 20
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.grid_eff = 0.8
+amr.n_cell = 48 48 48
+
+### DIMENSIONS ###
+geometry.prob_lo = -0.5 -0.5 -0.5
+geometry.prob_hi =  0.5  0.5  0.5
+geometry.is_periodic = 0 1 1
+
+### TIME STEP ###
+timestep  = 2.0e-3
+stop_time = 0.6
+
+### DIFFUSE INTERFACE (single phase: eta=0 -> all fluid 1) ###
+eta.ic.type = constant
+eta.ic.constant.value = 0.0
+epsilon = 0.01
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+### SOLVER ###
+cfl = 0.4
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+### EOS - IDEAL GAS (AIR) ###
+eos0.gamma = 1.4
+eos0.p0 = 0.0
+eos0.cp = 1004.5
+eos0.cv = 717.5
+eos1.gamma = 1.4
+eos1.p0 = 0.0
+eos1.cp = 1004.5
+eos1.cv = 717.5
+
+mu0 = 0.0
+mu1 = 0.0
+sigma = 0.0
+pref = 0.0
+
+### INITIAL CONDITIONS - centered spherical acoustic pulse (in fluid 1) ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+
+density1.ic.type = expression
+density1.ic.expression.constant.rho_base = 1.0
+density1.ic.expression.constant.amp      = 0.05
+density1.ic.expression.constant.sig      = 0.08
+density1.ic.expression.constant.c2       = 1.4
+density1.ic.expression.region0 = "rho_base + amp * exp(-(x*x + y*y + z*z)/(sig*sig)) / c2"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "0.0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_base = 1.0
+pressure1.ic.expression.constant.amp    = 0.05
+pressure1.ic.expression.constant.sig    = 0.08
+pressure1.ic.expression.region0 = "p_base + amp * exp(-(x*x + y*y + z*z)/(sig*sig))"
+
+### BOUNDARY CONDITIONS : x,y periodic ; z = NSCBC4 outflow ###
+nghost = 4
+
+density.bc.type.xlo = nscbc_outflow
+density.bc.type.xhi = nscbc_outflow
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+density.bc.type.zlo = periodic
+density.bc.type.zhi = periodic
+
+energy.bc.type.xlo = nscbc_outflow
+energy.bc.type.xhi = nscbc_outflow
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+energy.bc.type.zlo = periodic
+energy.bc.type.zhi = periodic
+
+momentum.bc.type.xlo = nscbc_outflow nscbc_outflow nscbc_outflow
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow nscbc_outflow
+momentum.bc.type.ylo = periodic periodic periodic
+momentum.bc.type.yhi = periodic periodic periodic
+momentum.bc.type.zlo = periodic periodic periodic
+momentum.bc.type.zhi = periodic periodic periodic
+
+### NSCBC4 PARAMETERS ###
+nscbc.small = 1.0e-10
+nscbc.xlo.type = outflow
+nscbc.xlo.target_p = 1.0
+nscbc.xlo.target_u = 0.0
+nscbc.xlo.target_v = 0.0
+nscbc.xlo.target_w = 0.0
+nscbc.xlo.sigma = 0.25
+nscbc.xlo.beta  = 0.5
+nscbc.xlo.L_ref = 1.0
+nscbc.xhi.type = outflow
+nscbc.xhi.target_p = 1.0
+nscbc.xhi.target_u = 0.0
+nscbc.xhi.target_v = 0.0
+nscbc.xhi.target_w = 0.0
+nscbc.xhi.sigma = 0.25
+nscbc.xhi.beta  = 0.5
+nscbc.xhi.L_ref = 1.0
+
+### REFINEMENT (disabled) ###
+eta_refinement_criterion   = 1000.0
+omega_refinement_criterion = 1000.0
+gradu_refinement_criterion = 1000.0
+rho_refinement_criterion   = 1000.0
+p_refinement_criterion     = 1000.0
+
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+apply_sharpening = 0
+apply_ahe = 1
+ahe.method = 0

@@ -12,11 +12,20 @@ import os
 yt.funcs.mylog.setLevel(40)
 
 # Configuration
-case_name = 'Garrick'
+# case_name selects the exact case -> its {case_name}.hdf5 exact solution AND
+# its output_{case_name} plotfile dir.  The aggregator passes it as argv[1]
+# (e.g. Toro1a, Toro2, Garrick); default is Garrick for standalone use.
+import sys
+case_name = sys.argv[1] if len(sys.argv) > 1 else 'Garrick'
 Tammann = '.' # Change to "." for not Tammann and "TammannEOS" for Tamman
 #Tammann = '.' # Change to "." for not Tammann and "TammannEOS" for Tamman
-hdf5_file = fr'{Tammann}\{case_name}.hdf5'
-amrex_output_dir = fr'..\..\..\bin\tests\FlowRiemannUnitTests\output_{case_name}'
+hdf5_file = os.path.join(Tammann, f'{case_name}.hdf5')   # os.path.join: works on Linux (INCLINE) too, not just Windows '\'
+# Output dir: argv[2] overrides; else the dual INCLINE/desktop UNIT_TEST default.
+# Toggle the default between INCLINE (/mmfs1, active) and DESKTOP (comment swap).
+#_OUT_INCLINE = fr'../../../bin/tests/FlowRiemannUnitTests/output_{case_name}'
+_OUT_INCLINE = fr'/mmfs1/home/ttryon/flames/bin/tests/FlowRiemannUnitTests/UNIT_TEST_2D/output_{case_name}'
+_OUT_DESKTOP = fr'../../../bin/tests/FlowRiemannUnitTests/UNIT_TEST_2D/output_{case_name}'
+amrex_output_dir = sys.argv[2] if len(sys.argv) > 2 else _OUT_INCLINE  # -> _OUT_DESKTOP for desktop
 
 # Case name mapping
 case_to_group = {
@@ -78,20 +87,30 @@ print(f"\nAvailable fields:")
 for field in ds.field_list:
     print(f"  {field}")
 
-# Create a ray (1D line) through the domain at y=0
-print(f"\nExtracting 1D slice at y=0...")
-
-# Define the ray from x=-1 to x=1 at y=0, z=0
-ray_start = ds.arr([-1.0, 0.0, 0.0], 'code_length')
-ray_end = ds.arr([1.0, 0.0, 0.0], 'code_length')
+# Slice axis: argv[3] = 'x' (default, 2D x-normal) or 'z' (3D z-normal shock tube,
+# e.g. UNIT_TEST_3D_Toro*/Garrick).  The exact .hdf5 solution is 1D, so we compare
+# its 1D profile against the numerical normal-direction ray regardless of which
+# physical axis is the shock normal.  For 'z' we ray along z and use velocityz.
+axis = sys.argv[3] if len(sys.argv) > 3 else 'x'
+lo = float(ds.domain_left_edge[0 if axis == 'x' else 2])
+hi = float(ds.domain_right_edge[0 if axis == 'x' else 2])
+if axis == 'z':
+    ray_start = ds.arr([0.0, 0.0, lo], 'code_length')
+    ray_end   = ds.arr([0.0, 0.0, hi], 'code_length')
+    vel_field = 'velocityz'
+else:
+    ray_start = ds.arr([lo, 0.0, 0.0], 'code_length')
+    ray_end   = ds.arr([hi, 0.0, 0.0], 'code_length')
+    vel_field = 'velocityx'
+print(f"\nExtracting 1D slice along {axis} in [{lo}, {hi}]...")
 
 ray = ds.ray(ray_start, ray_end)
 
-# Sort by x coordinate
-sort_indices = np.argsort(ray['x'])
+# Sort by the normal coordinate
+sort_indices = np.argsort(ray[axis])
 
-x_numerical = np.array(ray['x'][sort_indices])
-velocity_numerical = np.array(ray['velocityx'][sort_indices])
+x_numerical = np.array(ray[axis][sort_indices])
+velocity_numerical = np.array(ray[vel_field][sort_indices])
 pressure_numerical = np.array(ray['pressure'][sort_indices])
 density_numerical = np.array(ray['density'][sort_indices])
 
@@ -175,6 +194,7 @@ axes[2].set_xlim([x_exact[0], x_exact[-1]])
 
 
 plt.tight_layout()
+os.makedirs('./Images', exist_ok=True)
 output_filename = f'./Images/{case_name}_comparison'
 plt.savefig(output_filename+'.png', format='png', dpi=300, bbox_inches='tight')
 plt.savefig(output_filename+'.eps', format='eps', bbox_inches='tight')

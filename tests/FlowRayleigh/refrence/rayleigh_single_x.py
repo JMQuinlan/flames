@@ -52,7 +52,7 @@ rho = 100.0                      # Fluid density (kg/m^3)
 nu = mu / rho                    # Kinematic viscosity (m^2/s)
 
 # File paths
-amrex_output_dir = r'..\..\..\bin\tests\FlowRayleigh\FlowRayleigh'
+amrex_output_dir = r'..\..\..\bin\tests\FlowRayleigh\FlowRayleighx'
 
 # Plotting customization
 FONT_SIZE_TITLE = 16

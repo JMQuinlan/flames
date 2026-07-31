@@ -159,8 +159,6 @@ apply_surface_tension = 1
 apply_buoyancy = 0
 apply_weight = 0
 apply_vaporization = 1
-static_eta = 0                 #Interface must move
-Spec_Vol = 1
 grav = 9.81
 
 ### SOLVER SETTINGS ###

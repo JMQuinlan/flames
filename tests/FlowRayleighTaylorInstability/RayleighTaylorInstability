@@ -173,7 +173,6 @@ u0.ic.constant.value = 0.0
 apply_surface_tension = 1  # Enable surface tension
 apply_buoyancy = 0        # Not needed, using gravity instead
 apply_weight = 1          # Enable gravity
-Spec_Vol = 1              # Using volume-specific energy
 
 grav = 9.81               # Gravity [m/s2]
 

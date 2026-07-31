@@ -1,0 +1,146 @@
+#@ [r1.0e-4_sigma7.3e-2_3d]
+#@ exe=hydro2
+#@ dim=3
+
+# =============================================================================
+# 3D Laplace pressure test (air/water) -- SPHERE  R = 0.0001 m, sigma = 0.073 N/m
+# =============================================================================
+# Spherical bubble at rest; gas pressure Laplace-balanced against the liquid:
+#     p_gas - p_liquid = 2 sigma / R = 1460 Pa   (3D Young-Laplace, 2 curvatures)
+# A correct Brackbill CSF holds the sphere motionless at R0 = 0.0001 m.
+# Interface: r = sqrt(x^2 + y^2 + z^2)  (sphere).  Mesh 32^3 + 1 AMR level.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+# plot_file = ./tests/FlowLaplace/UNIT_TEST_3D/output_R1.0e-4_Sigma7.3e-2                                  # DESKTOP (run from bin/)
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowLaplace/UNIT_TEST_3D/output_R1.0e-4_Sigma7.3e-2   # INCLINE /mmfs1 (default)
+
+### MESHING ###
+amr.plot_int        = -1
+amr.plot_dt         = 8.153687837e-08
+amr.max_grid_size   = 32
+amr.blocking_factor = 2
+amr.regrid_int      = 10
+amr.grid_eff        = 0.8
+amr.max_level       = 1
+amr.n_cell          = 32 32 32
+
+nghost = 4
+
+### TIME STEPPING ###
+timestep                = 1.0e-12
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.630737567e-08
+dynamictimestep.min     = 1.0e-14
+cfl                     = 0.3
+
+### DIMENSIONS (cube) ###
+geometry.prob_lo     = -0.0002 -0.0002 -0.0002
+geometry.prob_hi     =  0.0002  0.0002  0.0002
+geometry.is_periodic = 0 0 0
+stop_time            = 3.261475135e-06
+
+### ETA IC -- sphere: eta=0 inside (air, phase 1), eta=1 outside (water, phase 0) ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 1.25e-05
+eta.ic.expression.constant.R0      = 0.0001
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### EQUATION OF STATE -- Sch20 Tammann water + ideal-gas air ###
+eos0.gamma = 2.35
+eos0.p0    = 1.0e9
+eos0.cp    = 4186.0
+eos0.cv    = 1781.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp    = 1000.0
+eos1.cv    = 714.286
+
+### HYDRO IC ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1000"
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Laplace-balanced: p_gas - p_liquid = 2 sigma/R = 1460 Pa
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "101325"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "102785"
+
+### VISCOSITY (zero -- pure Laplace test) ###
+mu0 = 0.0
+mu0_b = 0.0
+mu1 = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION ###
+sigma = 0.073
+pref  = 0.0
+
+### BC -- Neumann on all 6 faces (sphere far from boundary) ###
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+density.bc.type.zlo = neumann
+density.bc.type.zhi = neumann
+
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+energy.bc.type.zlo = neumann
+energy.bc.type.zhi = neumann
+
+momentum.bc.type.xlo = neumann neumann neumann
+momentum.bc.type.xhi = neumann neumann neumann
+momentum.bc.type.ylo = neumann neumann neumann
+momentum.bc.type.yhi = neumann neumann neumann
+momentum.bc.type.zlo = neumann neumann neumann
+momentum.bc.type.zhi = neumann neumann neumann
+
+### REFINEMENT -- eta-only at the interface band ###
+eta_refinement_criterion   = 1.0e-1
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS ###
+apply_surface_tension = 1
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+grav                  = 0.0
+
+### NUMERICS ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3
+kappa_method        = 1
+
+apply_sharpening     = 0
+sharpening_frequency = 50
+reinit_max_iter      = 100
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+relax_diag           = 1

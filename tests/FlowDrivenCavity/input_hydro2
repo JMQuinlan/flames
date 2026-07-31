@@ -1,0 +1,170 @@
+#@ exe=hydro2
+#@ dim=2
+# alamo.program = hydro2
+
+# =============================================================================
+# LID-DRIVEN SQUARE CAVITY -- hydro2 single-phase variant
+# =============================================================================
+# Hydro2 6-eq port of FlowDrivenCavity/input.  Single-phase by degeneracy:
+# eos0 == eos1, mu0 == mu1, density0 == density1, eta = 1 everywhere
+# (only phase 0 physically active).
+#
+# Setup:
+#   Square cavity x = [-12, 12] m, y = [-12, 12] m  (L = 24 m).
+#   Top   wall (yhi) : LID, moving at u_lid = 500 m/s in +x  (Dirichlet)
+#   Other walls      : no-slip, stationary                    (Dirichlet)
+#   rho = 1.2 kg/m^3,  mu = 20 Pa.s,  p = 1 atm.
+#
+# Note on the lid velocity:  with p ~ 1.03e5 and rho = 1.2, c_air ~ 347 m/s,
+# so u_lid = 500 m/s is *supersonic* (Ma ~ 1.44).  This isn't the textbook
+# Ghia / Re = 100 incompressible cavity -- it's the existing test as it
+# stands.  If you want the canonical incompressible reference, drop u_lid
+# to ~30-50 m/s.
+#
+# Reynolds number:  Re = rho * u_lid * L / mu  =  1.2 * 500 * 24 / 20 = 720.
+#
+# Validation:
+#   reference/reference-2d.csv + reference/movie.gif.
+# =============================================================================
+
+### OUTPUT ###
+plot_file = tests/FlowDrivenCavity/output
+
+### MESHING ###
+amr.plot_dt        = 0.1
+amr.max_grid_size  = 500000
+amr.blocking_factor = 2
+amr.regrid_int     = 100
+amr.grid_eff       = 0.8
+amr.max_level      = 2
+amr.n_cell         = 32 32
+
+### DIMENSIONS ###
+geometry.prob_lo     = -12.0 -12.0 0.0       # [ m ]
+geometry.prob_hi     =  12.0  12.0 0.0       # [ m ]
+geometry.is_periodic = 0 0 0
+
+### TIME STEP ###
+timestep  = 2.0e-5
+stop_time = 1.0
+
+### HYDRO PARAM ###
+
+### EQUATION OF STATE -- single fluid (both phases identical, ideal gas) ###
+# gamma = 1.4 matches the original.  cv = 1.0, cp = gamma = 1.4 in normalized
+# units; the test exercises momentum diffusion + advection, not thermal
+# physics.  p0 = 0 (ideal gas; the OLD input's pref = 103320 was being used
+# as the reference-pressure offset, but in hydro2 that role is played by
+# eos*.p0 (Tammann stiffening), which is 0 for ideal gas -- the absolute
+# pressure 1.03e5 instead lives in the pressure IC field below).
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cv    = 1.0
+eos0.cp    = 1.4
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 1.0
+eos1.cp    = 1.4
+
+cfl   = 0.4
+mu0   = 20.0
+mu1   = 20.0
+
+### ETA IC ###
+# Pure phase 0 throughout (eta = 1).  No interface dynamics; epsilon is a
+# parser-required placeholder.
+eta.ic.type = expression
+eta.ic.expression.region0 = "1.0"
+epsilon = 0.01
+
+### SOURCE-TERM ICs (off) ###
+m0.ic.type = constant
+m0.ic.constant.value = "0.0"
+
+u0.ic.type = expression
+u0.ic.expression.region0 = "0.0"
+u0.ic.expression.region1 = "0.0"
+
+q.ic.type = expression
+q.ic.expression.region0 = "0.0"
+q.ic.expression.region1 = "0.0"
+
+### PER-PHASE PRIMARIES ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.2"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"            # u_x
+velocity0.ic.expression.region1 = "0.0"            # u_y
+
+# 1 atm initial pressure.
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "103320.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.2"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "103320.0"
+
+### HYDRO BC ###
+# eta: neumann everywhere (zero-gradient).
+pf.eta.bc.type.xlo = neumann
+pf.eta.bc.type.xhi = neumann
+pf.eta.bc.type.ylo = neumann
+pf.eta.bc.type.yhi = neumann
+
+# Density: zero-gradient on all four walls.
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+density.bc.val.xhi = 0.0
+density.bc.val.xlo = 0.0
+density.bc.val.ylo = 0.0
+density.bc.val.yhi = 0.0
+
+# Energy: Neumann everywhere (no heat flux through walls).
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+energy.bc.val.xhi = 0.0
+energy.bc.val.xlo = 0.0
+energy.bc.val.ylo = 0.0
+energy.bc.val.yhi = 0.0
+
+# Momentum: no-slip Dirichlet on ALL FOUR walls (square cavity).
+# Three walls stationary; top wall (yhi) is the moving lid.
+#   lid velocity u_lid = 500 m/s, density rho = 1.2 -> M_x = rho * u_lid = 600.
+momentum.bc.type.xlo = dirichlet dirichlet
+momentum.bc.type.xhi = dirichlet dirichlet
+momentum.bc.type.ylo = dirichlet dirichlet
+momentum.bc.type.yhi = dirichlet dirichlet
+momentum.bc.val.xlo = 0.0   0.0
+momentum.bc.val.xhi = 0.0   0.0
+momentum.bc.val.ylo = 0.0   0.0
+momentum.bc.val.yhi = 600.0 0.0            # lid: u_x = 500, M_x = 1.2 * 500
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion   = 1.1
+omega_refinement_criterion = 10.55
+gradu_refinement_criterion = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+cutoff = 0.01
+
+amr.abort_on_nan = 0
+small = 1E-8
+
+
+### NUMERICS -- standardized: HLLC + WENO3 + RK3 ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3

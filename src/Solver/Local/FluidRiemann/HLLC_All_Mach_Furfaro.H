@@ -59,7 +59,7 @@ public:
                          value.interface_pressure_relaxation, 1.0);
     }
 
-    virtual Flux Solve(State lo, State hi, Set::Scalar /*p_ref*/, Set::Scalar small, int /*Spec_Vol*/ = 1) override
+    virtual Flux Solve(State lo, State hi, Set::Scalar /*p_ref*/, Set::Scalar small) override
     {
         const Set::Scalar alpha_floor = 1.0e-12;
 
@@ -129,6 +129,7 @@ public:
             fl.energy0          = lo.E0 * uL;
             fl.energy1          = lo.E1 * uL;
             fl.u_interface      = uL;
+            fl.momentum_tangent2 = (fl.mass0 + fl.mass1) * (lo.M_tangent2 / rhoL); // 3D 2nd tangent; 0 in 2D
             return fl;
         }
         if (S_R <= 0.0)
@@ -141,6 +142,7 @@ public:
             fl.energy0          = hi.E0 * uR;
             fl.energy1          = hi.E1 * uR;
             fl.u_interface      = uR;
+            fl.momentum_tangent2 = (fl.mass0 + fl.mass1) * (hi.M_tangent2 / rhoR); // 3D 2nd tangent; 0 in 2D
             return fl;
         }
 
@@ -249,6 +251,7 @@ public:
                           hi.E_total, hi.E0, hi.E1);
         }
         fl.u_interface = S_M;
+        fl.momentum_tangent2 = (fl.mass0 + fl.mass1) * ((S_M >= 0.0) ? lo.M_tangent2 / rhoL : hi.M_tangent2 / rhoR); // 3D 2nd tangent; 0 in 2D
         return fl;
     }
 };

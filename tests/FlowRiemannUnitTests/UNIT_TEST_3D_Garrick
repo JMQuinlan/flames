@@ -1,0 +1,147 @@
+#@ [case1]
+#@ exe=hydro2
+#@ dim=3
+
+# Garrick et al. (2017) Section 4.1 - Gas-Liquid Riemann Problem (3D, z-normal)
+# Reference: https://www.sciencedirect.com/science/article/pii/S0021999117301948
+# Equation 68
+#
+# z-rotated version of input_Garrick: the Riemann discontinuity is normal to z,
+# with x AND y transverse and periodic.  The solution must reproduce the SAME
+# 1D Garrick profile as input_Garrick_x (rotational invariance) -- a direct
+# check that the z-direction flux is correct in the 3D solver.
+
+### OUTPUT ###
+# plot_file = ./tests/FlowRiemannUnitTests/UNIT_TEST_3D/output_Garrick                                  # DESKTOP (run from bin/)
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRiemannUnitTests/UNIT_TEST_3D/output_Garrick   # INCLINE /mmfs1 (default)
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+# Interface at z=0 (sharp transition)
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = "1.25e-3"
+eta.ic.expression.region0 = "0.5 * (1.0 + tanh(z / epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+amr.plot_int = 50
+
+### MESHING ###
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.grid_eff = 0.8
+amr.n_cell = 16 16 800
+
+### DIMENSIONS ###
+geometry.prob_lo = -0.02  -0.02  -1.0 # [ m ]
+geometry.prob_hi =  0.02   0.02   1.0 # [ m ]
+geometry.is_periodic = 1 1 0
+
+### TIME STEP ###
+timestep  = 1.0e-4 # 2.5e-4
+stop_time = 0.2
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+### HYDRO PARAM ###
+cfl   = 0.4
+relax_diag = 1
+
+## EOS ##
+eos0.gamma = 5.5
+eos1.gamma = 1.4
+eos0.p0 = 1.505
+eos1.p0 = 0.0
+eos0.cp = 1004.5
+eos1.cp = 1004.5
+eos0.cv = 717.5
+eos1.cv = 717.5
+
+## Viscosity ##
+mu0   = 0.0
+mu1   = 0.0
+
+### Surface tension coefficient ###
+sigma = 0.0       # No surface tension in this test
+
+### Reference pressure ###
+pref = 0.0
+
+### IC State - Fluid 0 (z < 0) - LIQUID ###
+density0.ic.type = constant
+density0.ic.constant.value = 0.991
+
+velocity0.ic.type = constant
+velocity0.ic.constant.value = 0.0 0.0
+
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 3.059e-4
+
+cp0 = 1.4
+cv0 = 1.0
+
+### IC State - Fluid 1 (z > 0) - GAS ###
+density1.ic.type = constant
+density1.ic.constant.value = 1.241
+
+velocity1.ic.type = constant
+velocity1.ic.constant.value = 0.0 0.0
+
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 2.753
+
+cp1 = 1.4
+cv1 = 1.0
+
+### HYDRO BC ###
+# z: non-reflecting (neumann);  x,y: transverse periodic.
+density.bc.type.xlo = periodic
+density.bc.type.xhi = periodic
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+density.bc.type.zlo = neumann
+density.bc.type.zhi = neumann
+
+energy.bc.type.xlo = periodic
+energy.bc.type.xhi = periodic
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+energy.bc.type.zlo = neumann
+energy.bc.type.zhi = neumann
+
+momentum.bc.type.xlo = periodic periodic periodic
+momentum.bc.type.xhi = periodic periodic periodic
+momentum.bc.type.ylo = periodic periodic periodic
+momentum.bc.type.yhi = periodic periodic periodic
+momentum.bc.type.zlo = neumann neumann neumann
+momentum.bc.type.zhi = neumann neumann neumann
+
+### HYDRO REFINEMENT CRITERIA ###
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+kappa_method = 1
+Dv = 0
+g = 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+
+apply_sharpening = 0
+sharpening_frequency = 100
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+omega_relax = 0.5;
+
+#Sch20 stiff-limit (no shock correction; matches Sch20 paper exactly):
+apply_ahe   = 1
+ahe.method  = 0

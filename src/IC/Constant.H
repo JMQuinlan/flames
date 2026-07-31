@@ -36,15 +36,21 @@ public:
 
     virtual void Add(const int &lev, Set::Field<Set::Scalar> &a_field, Set::Scalar /*time*/) override
     {
-        Util::Assert(INFO,TEST((m_value.size() == 1 || (int)m_value.size() == (int)a_field[lev]->nComp())));
+        // Allow fewer values than components: 1 value broadcasts to all; otherwise
+        // the first m_value.size() components are set and any remaining components
+        // keep their current (pre-set, e.g. zeroed) value.  Lets a 2-value velocity
+        // IC drive a 3-component field with vz defaulting to 0.  Still errors on
+        // MORE values than components.
+        Util::Assert(INFO,TEST((m_value.size() >= 1 && (int)m_value.size() <= (int)a_field[lev]->nComp())));
         for (amrex::MFIter mfi(*a_field[lev],amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
         {
             const amrex::Box& bx = mfi.growntilebox();
             amrex::Array4<Set::Scalar> const& field = a_field[lev]->array(mfi);
             for (int m = 0; m < a_field[lev]->nComp(); m++)
                 amrex::ParallelFor (bx,[=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                field(i,j,k,m) += m_value.size() == 1 ? m_value[0] : m_value[m];
-            });  
+                field(i,j,k,m) += (m_value.size() == 1) ? m_value[0]
+                                : (m < (int)m_value.size() ? m_value[m] : 0.0);
+            });
         }
     }
 

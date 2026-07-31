@@ -1,0 +1,196 @@
+#@ [2d-underwater-explosion]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/RayleighPlesset/output_underwater_explosion
+amr.plot_dt = 5e-4
+#amr.plot_int = 10
+
+### MESHING ###
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.regrid_int = 50
+amr.grid_eff = 0.8
+amr.max_level = 3
+amr.n_cell = 64 64
+
+### TIME STEPPING ###
+timestep = 1e-6
+dynamictimestep.on = 1
+dynamictimestep.verbose = 1
+dynamictimestep.max = 1e-2
+dynamictimestep.min = 1e-12
+cfl = 0.3
+cfl_v = 0.3
+
+### DIMENSIONS ###
+# Centered at origin: bubble at (0,0) with radius 0.16
+# Domain large enough to capture dynamics
+geometry.prob_lo = -1.0 -1.0 0.0
+geometry.prob_hi =  1.0  1.0 0.0
+geometry.is_periodic = 0 0 0
+
+stop_time = 0.25
+
+### ETA INITIAL CONDITIONS ###
+# Spherical bubble centered at (0,0) with radius R0 = 0.16
+# Paper uses: phi = 0.5 * (1 + tanh((r - R0)/(2*epsilon)))
+# where r = sqrt(x^2 + y^2)
+# 
+# Since eta = 1 - phi (eta=1 is water):
+# eta = 0.5 * (1 - tanh((r - R0)/(2*epsilon)))
+
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.002
+eta.ic.expression.constant.R0 = 0.16
+eta.ic.expression.region0 = "0.5 * (1.0 - tanh((sqrt(x*x + y*y) - R0)/(2.0*epsilon)))"
+
+epsilon = eta.ic.expression.constant.epsilon
+
+### HYDRO INITIAL CONDITIONS ###
+
+# ----------------------------
+# EOS Parameters
+# ----------------------------
+# Water (fluid 0): Stiffened gas
+gamma0 = 5.5
+p0_0 = 4921.15
+
+# Gas (fluid 1): Ideal gas
+gamma1 = 1.4
+p0_1 = 0.0
+
+# ----------------------------
+# Density Initial Conditions
+# From paper equation (30):
+# rho_1 = 1.025 (water)
+# rho_2 = 1.63 (gas)
+# ----------------------------
+
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.025"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.63"
+
+# ----------------------------
+# Velocity Initial Conditions
+# u = 0 everywhere (quiescent)
+# ----------------------------
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# ----------------------------
+# Pressure Initial Conditions
+# From paper equation (30): P = 10*phi + 83810*(1-phi)
+# 
+# With r = sqrt(x^2 + y^2):
+# phi = 0.5 * (1 + tanh((r - R0)/(2*epsilon)))
+# 
+# Inside bubble (r < R0): phi -> 1, P -> 10
+# Outside bubble (r > R0): phi -> 0, P -> 83810
+#
+# Since eta = 1 - phi:
+# P = 10*(1-eta) + 83810*eta = 10 + 83800*eta
+# ----------------------------
+
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.R0 = 0.16
+pressure0.ic.expression.constant.epsilon = 0.002
+pressure0.ic.expression.region0 = "10.0 + 83800.0 * 0.5 * (1.0 - tanh((sqrt(x*x + y*y) - R0)/(2.0*epsilon)))"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.R0 = 0.16
+pressure1.ic.expression.constant.epsilon = 0.002
+pressure1.ic.expression.region0 = "10.0 + 83800.0 * 0.5 * (1.0 - tanh((sqrt(x*x + y*y) - R0)/(2.0*epsilon)))"
+
+# ----------------------------
+# Specific Heats
+# Water: gamma = 5.5 -> cv = R/(gamma-1) = R/4.5
+# Gas: gamma = 1.4 -> cv = R/(gamma-1) = R/0.4
+# Using cp = gamma*cv
+# ----------------------------
+
+cp0 = "1000.0"
+cp1 = "1000.0"
+cv0 = "222.222"
+cv1 = "714.286"
+
+# ----------------------------
+# Viscosity (inviscid)
+# ----------------------------
+
+mu0 = 0.0
+mu0_b = 0.0
+mu1 = 0.0
+mu1_b = 0.0
+
+# ----------------------------
+# Surface tension OFF
+# (not included in paper's test case)
+# ----------------------------
+
+sigma = 0.0
+pref = 0.0
+
+### BOUNDARY CONDITIONS ###
+# Neumann (extrapolation) on all boundaries
+
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion = 1e-3
+omega_refinement_criterion = 100.0
+p_refinement_criterion = 1e4
+rho_refinement_criterion = 1e2
+gradu_refinement_criterion = 1e2
+
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+
+### ADDITIONAL SOURCES ###
+
+apply_surface_tension = 0
+apply_buoyancy = 0
+apply_weight = 0
+grav = 0.0
+
+### SOLVER ###
+
+Riemann_Solver.type = hllc
+kappa_method = 1
+
+### INTERFACE SHARPENING ###
+apply_sharpening = 0
+sharpening_frequency = 10
+reinit_max_iter = 5
+reinit_tolerance = 1e-5
+omega_relax = 0.5; 

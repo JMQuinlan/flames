@@ -5,7 +5,10 @@
 
 ### OUTPUT ###
 plot_file = ./tests/FlowRiemannUnitTests/output_Toro1b_Roe_Sharp_Interface
-Riemann_Solver.type = roe
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3
 
 eta.ic.type = constant
 eta.ic.expression.constant.epsilon  = 111111.0005
@@ -50,8 +53,15 @@ q.ic.constant.value = 0.0
 
 ### HYDRO PARAM ###
 
-gamma0 = 1.4
-gamma1 = 1.4
+### EQUATION OF STATE -- ideal gas (CPG); eos.backend defaults to native ###
+eos0.gamma = 1.4
+eos1.gamma = 1.4
+eos0.p0 = 0.0
+eos1.p0 = 0.0
+eos0.cp = 1.4
+eos1.cp = 1.4
+eos0.cv = 1.0
+eos1.cv = 1.0
 cfl   = 0.4
 mu0   = 0.0
 mu1   = 0.0
@@ -105,11 +115,7 @@ temperature0.ic.expression.region0 = "294.0"
 temperature1.ic.type = expression
 temperature1.ic.expression.region0 = "294.0"
 
-cp0 = "1.4"
-cv0 = "1.0"
 
-cp1 = "1.4"
-cv1 = "1.0"
 
 ### ETA BC  ###
 
@@ -143,6 +149,4 @@ gradu_refinement_criterion = 100000.0
 rho_refinement_criterion   = 100000.0
 p_refinement_criterion     = 100000.0
 
-static_eta = 1
-Spec_Vol = 1
 

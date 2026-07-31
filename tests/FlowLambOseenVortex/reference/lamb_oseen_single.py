@@ -54,7 +54,12 @@ xc, yc = 5.0, 5.0                # Center of the vortex
 L = 10.0                         # Domain length (m)
 
 # File paths
-amrex_output_dir = r'..\..\..\bin\tests\FlowLambOseenVortex\FlowLambOseenVortex'
+# Output dir: the aggregator passes it as argv[1]; otherwise use a default.
+# Toggle the default between INCLINE (/mmfs1, active) and DESKTOP (comment swap).
+import sys
+_OUT_INCLINE = r'/mmfs1/home/ttryon/flames/bin/tests/FlowLambOseenVortex/UNIT_TEST_2D/FlowLambOseenVortex'
+_OUT_DESKTOP = r'../../../bin/tests/FlowLambOseenVortex/UNIT_TEST_2D/FlowLambOseenVortex'
+amrex_output_dir = sys.argv[1] if len(sys.argv) > 1 else _OUT_INCLINE  # -> _OUT_DESKTOP for desktop
 
 # Plotting customization
 FONT_SIZE_TITLE = 16
@@ -173,8 +178,10 @@ for i, plot_file in enumerate(plot_files):
     y_min = float(ds.domain_left_edge[1])
     y_max = float(ds.domain_right_edge[1])
     
-    ray_start = ds.arr([x_sample, y_min, 0.0], 'code_length')
-    ray_end = ds.arr([x_sample, y_max, 0.0], 'code_length')
+    # z midplane: 0.0 in 2D; central z-plane in a 3D z-extension (z=0 is a face).
+    zmid = float(0.5 * (ds.domain_left_edge[2] + ds.domain_right_edge[2]))
+    ray_start = ds.arr([x_sample, y_min, zmid], 'code_length')
+    ray_end = ds.arr([x_sample, y_max, zmid], 'code_length')
     ray = ds.ray(ray_start, ray_end)
     
     sort_indices = np.argsort(ray['y'])

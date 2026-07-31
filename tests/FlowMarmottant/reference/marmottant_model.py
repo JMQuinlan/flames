@@ -132,13 +132,33 @@ def _coated_chen2d_ode(t, y, P):
 
 def solve_coated(P, t_end, n_eval=4000):
     """Integrate the coated Chen-2D RPE. Returns (t, R, Rdot).
-    Requires scipy (already a dependency of the other reference scripts)."""
-    from scipy.integrate import solve_ivp
-    t_eval = np.linspace(0.0, t_end, n_eval)
-    sol = solve_ivp(_coated_chen2d_ode, (0.0, t_end), [P.R0, P.Rdot0],
-                    t_eval=t_eval, args=(P,), method="LSODA",
-                    rtol=1e-8, atol=1e-12, max_step=t_end / 500.0)
-    return sol.t, sol.y[0], sol.y[1]
+    Uses scipy's LSODA when available; otherwise a fixed-step RK4 fallback
+    (dt = t_end/2e5, fine enough for the collapse/rebound spikes)."""
+    try:
+        from scipy.integrate import solve_ivp
+        t_eval = np.linspace(0.0, t_end, n_eval)
+        sol = solve_ivp(_coated_chen2d_ode, (0.0, t_end), [P.R0, P.Rdot0],
+                        t_eval=t_eval, args=(P,), method="LSODA",
+                        rtol=1e-8, atol=1e-12, max_step=t_end / 500.0)
+        return sol.t, sol.y[0], sol.y[1]
+    except ImportError:
+        n_steps = 200_000
+        dt = t_end / n_steps
+        keep = max(1, n_steps // n_eval)
+        y = np.array([P.R0, P.Rdot0])
+        T, R, Rd = [0.0], [y[0]], [y[1]]
+        f = lambda t, y: np.asarray(_coated_chen2d_ode(t, y, P))
+        t = 0.0
+        for s in range(n_steps):
+            k1 = f(t, y)
+            k2 = f(t + 0.5 * dt, y + 0.5 * dt * k1)
+            k3 = f(t + 0.5 * dt, y + 0.5 * dt * k2)
+            k4 = f(t + dt, y + dt * k3)
+            y = y + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
+            t += dt
+            if (s + 1) % keep == 0:
+                T.append(t); R.append(y[0]); Rd.append(y[1])
+        return np.array(T), np.array(R), np.array(Rd)
 
 
 # ---------------------------------------------------------------------------

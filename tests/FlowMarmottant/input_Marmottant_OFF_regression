@@ -5,14 +5,14 @@
 # =============================================================================
 # CONSTANT-SIGMA REGRESSION TWIN of input_Marmottant_Laplace_Static
 # =============================================================================
-# Identical setup to input_Marmottant_Laplace_Static EXCEPT apply_marmottant=0
+# Identical setup to input_Marmottant_Laplace_Static EXCEPT marmottant=0
 # and a constant sigma = sigma_0 = 3.4153 (the Marmottant rest tension at R0).
 #
 # At rest the Marmottant run reconstructs sigma_eff(R0) = sigma_0 = 3.4153, so
 # this constant-sigma run and the Marmottant run must hold the SAME equilibrium:
 #   p_gas - p_liquid = sigma_0/R0 = 3.4153/0.02 = 170.77  ->  p_gas = 670.77.
 #
-# PURPOSE: with apply_marmottant=0 the constant-sigma code path is exercised
+# PURPOSE: with marmottant=0 the constant-sigma code path is exercised
 # (proves the gate adds zero collateral). If THIS holds equilibrium but
 # input_Marmottant_Laplace_Static drifts, the bug is in the Marmottant branch,
 # not the CSF machinery.  sigma_eff in the plotfile should be a constant 3.4153
@@ -97,7 +97,7 @@ sigma = 3.4153
 pref = 0.0
 
 ### MARMOTTANT OFF (constant-sigma path) ###
-apply_marmottant = 0
+marmottant = 0
 
 ### BOUNDARY CONDITIONS - NSCBC4 outflow ###
 density.bc.type.xhi  = nscbc_outflow

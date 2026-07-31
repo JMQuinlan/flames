@@ -47,7 +47,12 @@ y_max_sim = 0.5                  # geometry.prob_hi (y-component)
 H = y_max_sim - y_min_sim        # Total height (1.0 m)
 
 # File paths
-amrex_output_dir = r'..\..\..\bin\tests\FlowPoiseuille\FlowPoiseuillex'
+# Output dir: the aggregator passes it as argv[1]; otherwise use a default.
+# Toggle the default between INCLINE (/mmfs1, active) and DESKTOP (comment swap).
+import sys
+_OUT_INCLINE = r'/mmfs1/home/ttryon/flames/bin/tests/FlowPoseuille/UNIT_TEST_2D/FlowPoiseuillex'
+_OUT_DESKTOP = r'../../../bin/tests/FlowPoseuille/UNIT_TEST_2D/FlowPoiseuillex'
+amrex_output_dir = sys.argv[1] if len(sys.argv) > 1 else _OUT_INCLINE  # -> _OUT_DESKTOP for desktop
 
 # Plotting customization
 FONT_SIZE_TITLE = 16
@@ -186,8 +191,10 @@ y_min = float(ds.domain_left_edge[1])
 y_max = float(ds.domain_right_edge[1])
 
 # Define the ray from bottom to top at x=0, z=0
-ray_start = ds.arr([0.0, y_min, 0.0], 'code_length')
-ray_end = ds.arr([0.0, y_max, 0.0], 'code_length')
+# z midplane: 0.0 in 2D; central z-plane in a 3D z-extension run (z=0 is a face).
+zmid = float(0.5 * (ds.domain_left_edge[2] + ds.domain_right_edge[2]))
+ray_start = ds.arr([0.0, y_min, zmid], 'code_length')
+ray_end = ds.arr([0.0, y_max, zmid], 'code_length')
 ray = ds.ray(ray_start, ray_end)
 
 # Sort by y coordinate
@@ -342,8 +349,9 @@ if create_gif:
         time_temp = float(ds_temp.current_time)
         
         # Extract data
-        ray_start_temp = ds_temp.arr([0.0, y_min, 0.0], 'code_length')
-        ray_end_temp = ds_temp.arr([0.0, y_max, 0.0], 'code_length')
+        zmid_temp = float(0.5 * (ds_temp.domain_left_edge[2] + ds_temp.domain_right_edge[2]))
+        ray_start_temp = ds_temp.arr([0.0, y_min, zmid_temp], 'code_length')
+        ray_end_temp = ds_temp.arr([0.0, y_max, zmid_temp], 'code_length')
         ray_temp = ds_temp.ray(ray_start_temp, ray_end_temp)
         
         sort_indices_temp = np.argsort(ray_temp['y'])

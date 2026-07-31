@@ -180,8 +180,6 @@ p_refinement_criterion     = 100000.0
 apply_surface_tension = 0
 apply_buoyancy = 0
 apply_weight = 0
-Spec_Vol = 1
-static_eta = 0
 
 ### NUMERICAL METHODS ###
 Riemann_Solver = 1 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"

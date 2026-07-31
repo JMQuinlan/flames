@@ -1,0 +1,162 @@
+#@ [acoustic_bc_1d_fourier]
+#@ exe=hydro2
+#@ dim=2
+#@
+# =============================================================================
+# TIME-DEPENDENT PRIMITIVE BC TEST -- FOURIER-SERIES acoustic source (1D)
+# =============================================================================
+# Stress-test of the primitive BC path with a COMPLEX (multi-frequency) wave:
+# a 3-term square-wave Fourier partial sum injected at xlo.
+#
+#   S(t) = A * ( sin(w t) + sin(3 w t)/3 + sin(5 w t)/5 ),   w = 2*pi*f, f = 4
+#
+# Each harmonic is a separate right-traveling d'Alembert wave at the SAME c0
+# (linear acoustics is non-dispersive), so the analytic reference is just
+# S(t - x/c0) shifted in space. If the BC + reconstruction work, the sim
+# reproduces the full waveform; any harmonic-dependent numerical dissipation
+# shows up as the high harmonics damping faster (waveform rounding).
+#
+# Impedance-matched injection (clean right-traveling wave, minimal reflection):
+#   p'  = S(t)            ->  pressure.bc
+#   M_x = S(t)/c0         ->  momentum.bc   (since M_x' = p'/c0 at linear order)
+#   rho = rho0 + S(t)/c0^2 -> density.bc    (rho' = p'/c0^2)
+#
+# Base state: rho0=1, p0=1, ideal-gas air (gamma=1.4) -> c0=sqrt(1.4)=1.18322.
+# Numerics: WENO3 + SSP-RK3 (low dissipation, no decay correction needed).
+# stop_time chosen so the front (x=c0*t) stays inside: c0*0.7 = 0.83.
+#
+# Analyze with: python tests/FlowAcoustic/reference/AnalyzeBC_Fourier.py
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file   = ./tests/FlowAcoustic/output_AcousticBC_Fourier
+amr.plot_dt = 0.01
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.grid_eff = 0.8
+amr.n_cell = 400 4
+
+nghost = 4
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0  -0.01  0.0
+geometry.prob_hi = 1.0   0.01  0.0
+geometry.is_periodic = 0 1 0
+
+### TIME STEP ###
+timestep  = 8.0e-4         # CFL ~0.38 (limit 0.4*dx/c0 = 8.5e-4)
+cfl       = 0.4
+stop_time = 0.7
+
+### DIFFUSE INTERFACE (single phase: eta=0 -> phase 1 active, frozen) ###
+eta.ic.type = constant
+eta.ic.constant.value = 0.0
+epsilon = 0.005
+
+### DIFFUSE BOUNDARY SOURCES ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+### SOLVER -- low-dissipation: WENO3 reconstruction + SSP-RK3 ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno5
+integration.type    = RungeKutta
+integration.rk.type = 4
+
+### EOS - IDEAL GAS (AIR) ###
+eos0.gamma = 1.4
+eos0.p0 = 0.0
+eos0.cp = 1004.5
+eos0.cv = 717.5
+eos1.gamma = 1.4
+eos1.p0 = 0.0
+eos1.cp = 1004.5
+eos1.cv = 717.5
+
+### VISCOSITY ###
+mu0 = 0.0
+mu1 = 0.0
+
+### SURFACE TENSION ###
+sigma = 0.0
+pref  = 0.0
+
+### INITIAL CONDITIONS - uniform base state at rest (wave enters from xlo) ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "0.0"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "1.0"
+
+# =============================================================================
+# PRIMITIVE / PHASE-SPECIFIC BOUNDARY CONDITIONS  (Fourier source on xlo)
+# S(t) = A*(sin(w t) + sin(3 w t)/3 + sin(5 w t)/5),  w = 2*pi*4 = 25.13274123
+# =============================================================================
+bc.primitive = 1
+
+# ---- PRESSURE: Fourier source on xlo, neumann (outflow) on xhi ----
+pressure.bc.constant.p_base = 1.0
+pressure.bc.constant.A      = 0.107
+pressure.bc.constant.w      = 25.13274123      # 2*pi*f, f = 4
+pressure.bc.type.xlo = dirichlet
+pressure.bc.val.xlo  = "p_base + A*(sin(w*t) + sin(3*w*t)/3 + sin(5*w*t)/5)"
+pressure.bc.type.xhi = neumann
+pressure.bc.val.xhi  = "0.0"
+pressure.bc.type.ylo = periodic
+pressure.bc.type.yhi = periodic
+
+# ---- DENSITY: rho0 + S(t)/c0^2 on xlo ----
+density.bc.constant.rho_base = 1.0
+density.bc.constant.A        = 0.107
+density.bc.constant.c0sq     = 1.4             # c0^2 = gamma*p0/rho0
+density.bc.constant.w        = 25.13274123
+density.bc.type.xlo = dirichlet
+density.bc.val.xlo  = "rho_base + (A/c0sq)*(sin(w*t) + sin(3*w*t)/3 + sin(5*w*t)/5)"
+density.bc.type.xhi = neumann
+density.bc.val.xhi  = "0.0"
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+
+# ---- MOMENTUM: M_x = S(t)/c0 on xlo (impedance-matched) ----
+momentum.bc.constant.A   = 0.107
+momentum.bc.constant.c0  = 1.1832159566
+momentum.bc.constant.w   = 25.13274123
+momentum.bc.type.xlo = dirichlet dirichlet
+momentum.bc.val.xlo  = "(A/c0)*(sin(w*t) + sin(3*w*t)/3 + sin(5*w*t)/5)" "0.0"
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.val.xhi  = "0.0" "0.0"
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+# ---- ENERGY BC: unused for the physical fill in primitive mode; keep neumann ----
+energy.bc.type.xlo = neumann
+energy.bc.val.xlo  = "0.0"
+energy.bc.type.xhi = neumann
+energy.bc.val.xhi  = "0.0"
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+
+# eta BC: omitted -> defaults to ZeroNeumann (eta stays 0).
+
+### REFINEMENT CRITERIA (DISABLED) ###
+eta_refinement_criterion   = 1000.0
+omega_refinement_criterion = 1000.0
+gradu_refinement_criterion = 1000.0
+rho_refinement_criterion   = 1000.0
+p_refinement_criterion     = 1000.0

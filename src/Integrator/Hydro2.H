@@ -2,6 +2,7 @@
 #define INTEGRATOR_HYDRO2_H
 
 #include "Integrator/Integrator.H"
+#include "Integrator/EmbeddedSolid.H"
 #include "IO/ParmParse.H"
 
 // Boundry Conditions
@@ -20,11 +21,8 @@
 #include "Solver/Local/FluidRiemann/HLLC.H"
 #include "Solver/Local/FluidRiemann/HLLC_All_Mach.H"
 #include "Solver/Local/FluidRiemann/HLLC_All_Mach_Furfaro.H"
-#include "Solver/Local/FluidRiemann/HLLC_WENO5.H"
 #include "Solver/Local/FluidRiemann/HLLE.H"
-// #include "Solver/Local/FluidRiemann/HLLE_WENO5.H"
 #include "Solver/Local/FluidRiemann/HLLCE.H"
-// #include "Solver/Local/FluidRiemann/HLLCE_WENO5.H"
 // #include "Solver/Local/FluidRiemann/PartiallyParabolic.H"
 #include "Solver/Local/FluidRiemann/Upwind.H"
 #include "Solver/Local/FluidRiemann/Lax_Friedrich.H"
@@ -56,17 +54,27 @@ public:
     static void Parse(Hydro2& value, IO::ParmParse& pp);
     virtual ~Hydro2()
     {
-        /// Boundry Conditions
-        delete density_bc;
-        delete momentum_bc;
-        delete energy_bc;
-        delete eta_bc;
-        delete temperature_bc;
+        /// Boundry Conditions.
+        // In the NSCBC path density/energy/momentum_bc are aliased to the
+        // bc_nothing MEMBER object (not heap-allocated); deleting those would
+        // free a non-heap pointer (double-free at teardown).  Guard every BC
+        // delete against the member BC objects.
+        auto safe_delete_bc = [&](BC::BC<Set::Scalar>* p) {
+            if (p && p != &bc_nothing && p != &neumann_bc_1 && p != &neumann_bc_D)
+                delete p;
+        };
+        safe_delete_bc(density_bc);
+        safe_delete_bc(momentum_bc);
+        safe_delete_bc(energy_bc);
+        safe_delete_bc(pressure_bc);
+        safe_delete_bc(eta_bc);
+        safe_delete_bc(temperature_bc);
 
         /// Inital Conditions
         // ETA
         delete eta_ic;
         delete etadot_ic;
+        // EMBEDDED SOLID: ICs/BCs owned by the EmbeddedSolid destructor.
         // FLUID 0
         delete density0_ic;
         delete velocity0_ic;
@@ -157,6 +165,9 @@ private:
     void FillGhost4BC(int lev, Set::Scalar time);
     // Zero every derived/scratch MultiFabs
     void ZeroDerivedScratchFields(int lev);
+    // Derive the per-phase embedded-solid target from the single solid
+    // density/pressure, split by local eta (option 3a).
+    void InitEmbeddedSolidTarget(int lev, Set::Scalar time);
 
 protected:
     // FLUID 0
@@ -227,7 +238,6 @@ protected:
     Set::Field<Set::Scalar> Source_mf;      // Sumation of Source Terms
     Set::Field<Set::Scalar> flux_mf;        // Riemann Solver Fluxes
     Set::Field<Set::Scalar> Fsv_mf;         // Surface Tension
-    Set::Field<Set::Scalar> sigma_eff_mf;   // Effective surface tension (Marmottant diagnostic)
     Set::Field<Set::Scalar> Fw_mf;          // Weight Force
     Set::Field<Set::Scalar> Bm_mf;          // Spalding Number
     Set::Field<Set::Scalar> Y_mf;           // Mass Fraction
@@ -263,6 +273,17 @@ protected:
     Set::Field<Set::Scalar> eta_old_mf;
     Set::Field<Set::Scalar> hess_eta_mf;
     Set::Field<Set::Scalar> n_hat_mf;
+
+    // ------------------------------------------------------------------
+    // EMBEDDED SOLID BOUNDARY (diffuse-interface immersed boundary)
+    // ------------------------------------------------------------------
+    // phi is the SOLID indicator: phi = 1 -> fluid, phi = 0 -> solid.
+    // It is DISTINCT from eta, which in Hydro2 is the fluid-fluid volume
+    // fraction alpha_1.  (In the single-phase Hydro solver the field named
+    // eta plays the role that phi plays here.)  Static in this first
+    // implementation: phi is set from its IC and never evolved.
+    // All embedded-solid state + per-cell wall physics is consolidated here.
+    EmbeddedSolid embedded;
 protected:
 
     int n_step = 0;
@@ -270,8 +291,13 @@ protected:
     BC::BC<Set::Scalar>* density_bc = nullptr;
     BC::BC<Set::Scalar>* momentum_bc = nullptr;
     BC::BC<Set::Scalar>* energy_bc = nullptr;
+    BC::BC<Set::Scalar>* pressure_bc = nullptr;   // primitive pressure BC (bc.primitive=1)
     BC::BC<Set::Scalar>* eta_bc = nullptr;
     BC::BC<Set::Scalar>* temperature_bc = nullptr;
+
+    // 0 = conservative BC path (density, momentum, energy); 1 = primitive path
+    // (density, momentum, pressure, eta) with EOS reconstruction of E_k.
+    int bc_primitive = 0;
 
     IC::IC<Set::Scalar>* velocity0_ic = nullptr;
     IC::IC<Set::Scalar>* pressure0_ic = nullptr;
@@ -296,6 +322,9 @@ protected:
     IC::IC<Set::Scalar>* eta_ic = nullptr;
     IC::IC<Set::Scalar>* etadot_ic = nullptr;
 
+    // EMBEDDED SOLID: indicator IC/BC + prescribed per-phase target state are
+    // now held by the `embedded` member (Integrator::EmbeddedSolid).
+
     BC::Nothing bc_nothing;
 
     BC::Constant neumann_bc_1 = BC::Constant::ZeroNeumann(1);
@@ -308,10 +337,16 @@ protected:
     Set::Scalar c_max = 0.0;
     Set::Scalar vx_max = 0.0;
     Set::Scalar vy_max = 0.0;
+    Set::Scalar vz_max = 0.0;
     Set::Scalar F_max = 0.0;
     Set::Scalar rho_min = 1e10;
 
     Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion=NAN;
+    // optional geometric refinement box (force max_level inside): refine_box.lo/hi
+    int refine_box_on=0;
+    Set::Scalar refine_box_lo[AMREX_SPACEDIM] = {AMREX_D_DECL(0,0,0)};
+    Set::Scalar refine_box_hi[AMREX_SPACEDIM] = {AMREX_D_DECL(0,0,0)};
+    // grad(phi) solid-boundary refinement is now embedded.refinement_criterion
     // FLUID 0
     Set::Scalar gamma0 = NAN, p0_0 = NAN, mu0 = NAN, mu0_b = NAN, MW0 = NAN;
     Set::Scalar b0 = NAN, q0EOS = NAN;
@@ -325,19 +360,30 @@ protected:
     // Interaction Parameters
     Set::Scalar sigma = NAN;
     Set::Scalar epsilon = NAN;
+
+    // --- Marmottant (2005) coated-bubble surface tension (toggle: marmottant=1) ---
+    // An ADD-ON to the existing CSF surface tension: when on, the constant sigma is
+    // replaced by the LOCAL Marmottant piecewise sigma(R(x)), with the radius taken
+    // per-cell from the SMOOTHED-eta curvature (Brackbill de-noising) so non-spherical
+    // and multi-bubble shells are captured.  `sigma` (above) is reused as sigma_water
+    // (the post-rupture / bare gas-water tension).
+    // Ref: Marmottant et al., JASA 118 (2005) 3499, Eq.(4); Brackbill et al. JCP 100 (1992) 335.
+    int marmottant = 0;                       // 0 = constant sigma; 1 = Marmottant sigma(R(x))
+    Set::Scalar marmottant_R_buckling = NAN;  // R_buckling: below this, sigma=0 (buckled)
+    Set::Scalar marmottant_chi = NAN;         // chi: shell elastic modulus [N/m]
+    Set::Scalar marmottant_sigma_break = NAN; // sigma_break-up: rupture tension (>= sigma_water)
+    int marmottant_eta_smooth_iters = 4;      // # box-average passes that de-noise eta before d/dx
+    int marmottant_kappa_smooth_iters = 8;    // # interface-weighted passes on kappa AFTER d/dx (tangential averaging)
+    int marmottant_height_function = 1;       // 1 = height-function curvature (column-integrated eta; noise-immune,
+                                              // Popinet 2009 style) with pointwise fallback; 0 = pointwise only
+    int marmottant_sigma_smooth_iters = 4;    // # interface-weighted passes on sigma_eff AFTER classification
+                                              // (severs the patchy-tension -> parasitic-current -> eta-noise loop)
     Set::Scalar g = 9.81; // m/s^2
     // Set::Scalar R = 8.314; // [J]/[mol]-[K]
     Set::Scalar R = 8314.; // [J]/[kmol]-[K] - Probably more common to use
     Set::Scalar Dv = 0.0; // Vapor Diffusivity
     Set::Scalar Y_infinity = 0.0; // Far Feild Vapor Mass Fraction
-
-    // Marmottant (2005) coated-bubble surface tension (sigma reconstructed
-    // from local curvature -> effective radius).  Gated by apply_marmottant.
-    int         apply_marmottant = 0;
-    Set::Scalar marm_chi         = NAN;   // shell elastic modulus chi [N/m]
-    Set::Scalar marm_R_buck      = NAN;   // buckling radius (sigma=0) [m]
-    Set::Scalar marm_sigma_break = 0.072; // rupture tension (water) [N/m]
-    Set::Scalar marm_geom_factor = 1.0;   // c_d: 2D-planar/cyl=1, sphere/axisym=2
+    Set::Scalar Lv = 0.0; // Latent heat of vaporization [J/kg] (0 = no evaporative cooling)
 
 
     // CFD Properties
@@ -351,9 +397,30 @@ protected:
     // Booleans
     int apply_surface_tension = 1;
     int apply_weight = 0;
-    int static_eta = 0;
     int apply_vaporization = 0;
-    int Spec_Vol = 1;
+
+    // EMBEDDED SOLID BOUNDARY controls now live on the `embedded` member:
+    //   embedded.apply = 0 -> no immersed solid (default; behavior unchanged)
+    //   embedded.apply = 1 -> mask fluxes by phi + penalize toward solid state
+
+    // YANG (2023) DIFFUSE-DOMAIN no-penetration via MOMENTUM-ONLY Brinkman
+    // penalization.  0 = off.  >0 adds -coeff*(1-phi)*(M - M_solid) to the
+    // momentum RHS only (mass/energy left to evolve), so the arrested normal
+    // kinetic energy converts to internal energy (stagnation heating) and the
+    // wall pressure builds self-consistently from the EOS -> the flow reflects
+    // WITHOUT a ghost-fluid mirror.  This is the genuine diffuse-interface
+    // no-penetration of Yang et al. 2023 (term phi0/kappa (u_S - u); orig.
+    // Angot 1999 / Liu & Vasilyev 2007), the true-diffuse-interface alternative
+    // to `solid.reflect`.  Distinct from the full-state `lagrange` penalty,
+    // which also pins density+energy and therefore clamps the wall pressure.
+    // (now embedded.brinkman)
+
+    // Phi threshold below which the SOLID is skipped by pressure relaxation,
+    // interface sharpening and the CFL reduction.  The stiff pressure-relaxation
+    // Newton DIVERGES on the penalized full-flux solid state (especially
+    // low-Mach), so relaxation must skip the solid -- this threshold
+    // (0.5 = the geometric solid side) keeps that skip on.  Fixed at 0.5.
+    // (now embedded.relax_skip)
 
     // ------------------------------------------------------------------
     // Artificial heat exchange (AHE) - Schmidmayer 2020 eq. 13 r-source
@@ -426,6 +493,15 @@ protected:
     int density_max_iter = 10;
     Set::Scalar density_tol = 1e-8;
     Set::Scalar omega_relax = 0.5;
+
+    // IC pressure equalization (Mix() formula switch).
+    //   0 = legacy linear alpha-weighted average:  p_mix = a0*p_0 + a1*p_1
+    //   1 = energy-conserving gamma-weighted form (matches ReinitMixturePressure):
+    //         p_mix = (a0*p_0/(g0-1) + a1*p_1/(g1-1)) / (a0/(g0-1) + a1/(g1-1))
+    // The second form makes the IC state already equal to what the first
+    // RelaxAndReinit step would compute, eliminating the per-step IC kick
+    // that seeds a small acoustic transient at diffuse interfaces.
+    int equalize_ic_pressure = 0;
 
 
     // NGHOST

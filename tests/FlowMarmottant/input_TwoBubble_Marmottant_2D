@@ -1,0 +1,157 @@
+#@ [twobubble_marmottant_2d]
+#@ exe=hydro2
+#@ dim=2
+# =============================================================================
+# MARMOTTANT TWO-BUBBLE TEST -- 2D  (LOCAL sigma(R) discriminator)
+# =============================================================================
+# Two coated gas bubbles of DIFFERENT radii, each in its own Laplace balance:
+#   A: center (-0.35,0), R_a=0.15  -> sigma(R_a)=chi(R_a^2/Rb^2-1)=0.1(2.25-1)=0.125
+#                                  -> dP_A=(d-1)sigma/R_a=0.125/0.15=0.8333
+#   B: center (+0.35,0), R_b=0.25  -> sigma(R_b)=0.1(6.25-1)=0.525
+#                                  -> dP_B=0.525/0.25=2.1
+# (Marmottant: Rb=0.1, chi=0.1, sigma_break=100 -> no rupture.)
+# A GLOBAL averaged radius gives ONE sigma -> mis-tensions both bubbles -> drift.
+# The LOCAL sigma(R(x)) gives each bubble its own sigma -> both stay put.
+# Analysis: reference/check_marmottant_twobubble.py  (splits domain at x=0)
+# =============================================================================
+
+alamo.program = hydro2
+plot_file = ./tests/FlowMarmottant/output_TwoBubble_Marmottant_2D
+
+### MESHING ###
+amr.plot_int        = 20
+amr.max_grid_size   = 32
+amr.blocking_factor = 8
+amr.max_level       = 0
+amr.n_cell          = 224 224
+nghost = 4
+
+### TIME ###
+timestep                = 1.0e-6
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-2
+dynamictimestep.min     = 1.0e-12
+cfl                     = 0.4
+stop_time               = 0.6
+
+### DIMENSIONS ###
+geometry.prob_lo     = -0.7 -0.7
+geometry.prob_hi     =  0.7  0.7
+geometry.is_periodic = 0 0
+
+### ETA IC -- two gas bubbles (eta=0 inside each, =1 in liquid) ###
+# eta = L_A * L_B,  L_i = 0.5(1+tanh((r_i-R_i)/eps)) = 1 outside bubble i, 0 inside.
+eta.ic.type = expression
+eta.ic.expression.constant.xA  = -0.35
+eta.ic.expression.constant.xB  =  0.35
+eta.ic.expression.constant.Ra  = 0.15
+eta.ic.expression.constant.Rb  = 0.25
+eta.ic.expression.constant.eps = 0.0156
+eta.ic.expression.region0 = "0.25*(1.0+tanh((sqrt((x-xA)^2+y*y)-Ra)/eps))*(1.0+tanh((sqrt((x-xB)^2+y*y)-Rb)/eps))"
+epsilon = 0.0156
+
+### EOS -- ideal gas both phases (phase0=liquid, phase1=gas) ###
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cv    = 720.0
+eos0.cp    = 1008.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 720.0
+eos1.cp    = 1008.0
+
+### HYDRO IC ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "10.0"
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+# p = p_out + dP_A*gas_A + dP_B*gas_B,  gas_i = 0.5(1-tanh((r_i-R_i)/eps)) inside bubble i.
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_out = 10.0
+pressure0.ic.expression.constant.dPA   = 0.83333
+pressure0.ic.expression.constant.dPB   = 2.1
+pressure0.ic.expression.constant.xA    = -0.35
+pressure0.ic.expression.constant.xB    =  0.35
+pressure0.ic.expression.constant.Ra    = 0.15
+pressure0.ic.expression.constant.Rb    = 0.25
+pressure0.ic.expression.constant.eps   = 0.0156
+pressure0.ic.expression.region0 = "p_out + dPA*0.5*(1.0-tanh((sqrt((x-xA)^2+y*y)-Ra)/eps)) + dPB*0.5*(1.0-tanh((sqrt((x-xB)^2+y*y)-Rb)/eps))"
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_out = 10.0
+pressure1.ic.expression.constant.dPA   = 0.83333
+pressure1.ic.expression.constant.dPB   = 2.1
+pressure1.ic.expression.constant.xA    = -0.35
+pressure1.ic.expression.constant.xB    =  0.35
+pressure1.ic.expression.constant.Ra    = 0.15
+pressure1.ic.expression.constant.Rb    = 0.25
+pressure1.ic.expression.constant.eps   = 0.0156
+pressure1.ic.expression.region0 = "p_out + dPA*0.5*(1.0-tanh((sqrt((x-xA)^2+y*y)-Ra)/eps)) + dPB*0.5*(1.0-tanh((sqrt((x-xB)^2+y*y)-Rb)/eps))"
+
+### VISCOSITY (inviscid) ###
+mu0 = 0.0
+mu0_b = 0.0
+mu1 = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION + MARMOTTANT (LOCAL) ###
+apply_surface_tension = 1
+sigma = 0.072
+pref  = 0.0
+kappa_method = 1
+marmottant                  = 1
+marmottant.R_buckling       = 0.1
+marmottant.chi              = 0.1
+marmottant.sigma_break      = 100.0
+marmottant.eta_smooth_iters = 12
+
+### BCs -- neumann all faces ###
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = neumann
+eta.bc.type.yhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT (off) ###
+eta_refinement_criterion   = 1.0e+10
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCE ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS ###
+apply_buoyancy     = 0
+apply_weight       = 0
+apply_vaporization = 0
+grav               = 0.0
+
+### NUMERICS ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3
+apply_sharpening     = 0
+equalize_ic_pressure = 1

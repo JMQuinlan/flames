@@ -1,0 +1,179 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=3
+#@
+
+# ============================================================================
+# FlowVortex -- TWO-PHASE (Integrator::Hydro2, 6-equation) flow past an
+# EMBEDDED SOLID cylinder at Re = 40.  Two-phase analogue of input_hydro.
+#
+#   phi  = SOLID indicator (1 = fluid, 0 = solid)   [NEW field, != eta]
+#   eta  = alpha_1 = 1 everywhere (single-phase limit; pure phase 0)
+#
+#   Re = rho * U * D / mu = 100 * 1 * 1.0 / 2.5 = 40,   D = 2*R0 = 1.0
+#   Ma = U / c = 1 / 5 = 0.2   (c = sqrt(gamma p / rho) = sqrt(1.4*1785.71/100))
+#
+# No-slip AND no-penetration at the cylinder are enforced entirely by the YANG
+# (1-phi)/kappa momentum Brinkman penalty (solid.brinkman): it drives the full
+# velocity vector to zero in the solid, so it provides no-slip by itself.  The
+# fluid viscosity (mu0/mu1) gives the boundary layer.  Do NOT add a solid
+# viscosity blend -- under the full-flux Yang wall it destabilizes the low-Mach
+# case (dt collapse ~t=0.15).
+# ============================================================================
+
+# alamo.program = hydro2   # only for the unified 'alamo' exe; the standalone
+#                           # hydro2 exe (this test, #@ exe=hydro2) just warns.
+
+### OUTPUT ###
+# plot_file = ./tests/FlowVortexShed/UNIT_TEST_3D/output_hydro2                                  # DESKTOP (run from bin/)
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowVortexShed/UNIT_TEST_3D/output_hydro2   # INCLINE /mmfs1 (default)
+
+### MESHING ###
+amr.plot_dt          = 0.25
+amr.max_grid_size    = 500000
+amr.blocking_factor  = 4
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level        = 2
+amr.n_cell           = 144 48 48
+amr.n_error_buf      = 16
+
+### DIMENSIONS ###
+geometry.prob_lo     = -3.0 -3.0 -3.0
+geometry.prob_hi     =  12.0  3.0  3.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEPPING ###
+timestep            = 1e-5
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 5e-3
+dynamictimestep.min = 1e-9
+cfl                 = 0.4
+stop_time           = 60.0
+
+# ----------------------------------------------------------------------------
+# EMBEDDED SOLID BOUNDARY
+# ----------------------------------------------------------------------------
+apply_embedded_solid = 1
+solid.brinkman       = 70             # YANG penalty ~4*U/eps (U=1, eps=0.06): gives BOTH no-penetration AND no-slip (drives u->0 in the solid)
+phi_refinement_criterion = 0.1
+
+# Cylinder of radius R0 at the origin: r>R0 -> phi=1 (fluid), r<R0 -> phi=0 (solid)
+solid.phi.ic.type = expression
+solid.phi.ic.expression.constant.R0  = 0.5
+solid.phi.ic.expression.constant.eps = 0.06
+solid.phi.ic.expression.region0 = "0.5*(1.0 + tanh((sqrt(x*x + y*y + z*z) - R0)/eps))"
+
+# Prescribed quiescent solid target.  The cylinder straddles the eta interface
+# at y=0, so the solid target is made CONSISTENT with the local alpha_1 = eta
+# (otherwise a top-half solid cell would have rho_eta0=100 with alpha_1~0 ->
+# divide blow-up).  Both fluids are identical, so the physical solid state is
+# uniform (rho=100, p=1785.71, u=0) regardless of the split:
+#   rho_eta0 = alpha_1 * 100,    rho_eta1 = (1-alpha_1) * 100
+#   E0       = alpha_1 * 4464.28, E1       = (1-alpha_1) * 4464.28
+solid.density.ic.type = constant
+solid.density.ic.constant.value = 100.0
+solid.momentum.ic.type = constant
+solid.momentum.ic.constant.value = 0.0 0.0 0.0
+solid.pressure.ic.type = constant
+solid.pressure.ic.constant.value = 1785.712
+
+### ETA (alpha_1) IC -- bottom half eta=1, top half eta=0 (tracer test) ###
+# Identical fluids, so eta is a passive color: it should advect cleanly and
+# deflect around the cylinder, exercising the full two-phase machinery.
+eta.ic.type = expression
+eta.ic.expression.constant.eps = 0.15
+eta.ic.expression.region0 = "0.5*(1.0 - tanh(y/eps))"
+
+### EOS ###
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cp    = 1005.0
+eos0.cv    = 717.86
+mu0   = 2.5
+mu0_b = 0.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp    = 1005.0
+eos1.cv    = 717.86
+mu1   = 2.5
+mu1_b = 0.0
+
+### FLUID 0 IC (uniform inflow in +x) ###
+density0.ic.type = constant
+density0.ic.constant.value = 100.0
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "1.0"
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 1785.71
+
+### FLUID 1 IC (negligible) ###
+density1.ic.type = constant
+density1.ic.constant.value = 100.0
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "1.0"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 1785.71
+
+### INTERACTIONS ###
+epsilon = 0.1
+sigma   = 0.0
+Dv      = 0.0
+pref    = 0.0
+small   = 1e-6
+grav    = 0.0
+
+### BOUNDARY CONDITIONS ###
+# Inflow xlo (Dirichlet rho=100, M=rho*U=100), outflow xhi, free-stream top/bottom.
+density.bc.type.xlo  = dirichlet
+density.bc.val.xlo   = 100.0
+density.bc.type.xhi  = neumann
+density.bc.type.ylo  = neumann
+density.bc.type.yhi  = neumann
+density.bc.type.zlo  = neumann
+density.bc.type.zhi  = neumann
+
+momentum.bc.type.xlo = dirichlet neumann neumann
+momentum.bc.val.xlo  = 100.0 0.0 0.0
+momentum.bc.type.xhi = neumann neumann neumann
+momentum.bc.type.ylo = dirichlet dirichlet dirichlet
+momentum.bc.val.ylo  = 100.0 0.0 0.0
+momentum.bc.type.yhi = dirichlet dirichlet dirichlet
+momentum.bc.val.yhi  = 100.0 0.0 0.0
+momentum.bc.type.zlo = dirichlet dirichlet dirichlet
+momentum.bc.val.zlo  = 100.0 0.0 0.0
+momentum.bc.type.zhi = dirichlet dirichlet dirichlet
+momentum.bc.val.zhi  = 100.0 0.0 0.0
+
+energy.bc.type.xlo   = neumann
+energy.bc.type.xhi   = neumann
+energy.bc.type.ylo   = neumann
+energy.bc.type.yhi   = neumann
+energy.bc.type.zlo   = neumann
+energy.bc.type.zhi   = neumann
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion   = 1e10
+omega_refinement_criterion = 0.5
+gradu_refinement_criterion = 1.0e8
+p_refinement_criterion     = 1e10
+rho_refinement_criterion   = 1e10
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+
+### SOLVER ###
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+kappa_method        = 1
+apply_sharpening    = 0

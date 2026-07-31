@@ -58,7 +58,7 @@ public:
 
     /// HLLC star-state algebra per Saurel 2009 §3.1.2.
     /// The face is conceptually between the L (low) and R (hi) state.
-    virtual Flux Solve(State lo, State hi, Set::Scalar /*p_ref*/, Set::Scalar small, int /*Spec_Vol*/ = 1) override
+    virtual Flux Solve(State lo, State hi, Set::Scalar /*p_ref*/, Set::Scalar small) override
     {
         // ====================================================================
         // 1. Primitive recovery on each side.
@@ -87,8 +87,12 @@ public:
         {
             alpha  = std::min(std::max(s.alpha, alpha_floor), 1.0 - alpha_floor);
             alpha2 = 1.0 - alpha;
-            arh0   = std::max(s.alpha_rho_0, small);
-            arh1   = std::max(s.alpha_rho_1, small);
+            // Phase masses clamped at ZERO only: these feed the advective
+            // fluxes directly, and a positive floor (small) would export
+            // ~small*u of fictitious trace-phase mass through every
+            // pure-phase face.  Divides below are protected by rho/alpha.
+            arh0   = std::max(s.alpha_rho_0, 0.0);
+            arh1   = std::max(s.alpha_rho_1, 0.0);
             rho    = std::max(arh0 + arh1, small);
             u      = s.M_normal  / rho;
             v      = s.M_tangent / rho;
@@ -99,8 +103,12 @@ public:
 
             // Per-phase pressures from canonical (alpha rho e)_k.
             // Saurel 2009 eq. II.3: p_k = (gamma-1) rho_k e_k - gamma pi_k.
-            p0 = Solver::EOS::EOS::PhasicPressureFromEnergy(s.E0, alpha,  s.gamma0, s.pi0, small);
-            p1 = Solver::EOS::EOS::PhasicPressureFromEnergy(s.E1, alpha2, s.gamma1, s.pi1, small);
+            // Pass alpha_floor (not small=1e-8) as the divide floor: alpha is
+            // already clamped at alpha_floor above, and the helper's internal
+            // max(alpha, small) would otherwise re-floor trace-phase cells at
+            // 1e-8, railing p_k to -pi_k there (see the alpha_floor comment).
+            p0 = Solver::EOS::EOS::PhasicPressureFromEnergy(s.E0, alpha,  s.gamma0, s.pi0, alpha_floor);
+            p1 = Solver::EOS::EOS::PhasicPressureFromEnergy(s.E1, alpha2, s.gamma1, s.pi1, alpha_floor);
 
             // Per-phase sound speeds.
             c0 = Solver::EOS::EOS::PhasicSoundSpeed(rho0, p0, s.gamma0, s.pi0, small);
@@ -331,6 +339,18 @@ public:
             fl.u_interface = uR;
         }
 
+        // Second tangential momentum (3D): the tangential velocity is constant
+        // across the acoustic waves and is simply advected across the contact,
+        // exactly like momentum_tangent.  In every wave case the existing
+        // momentum_tangent equals (total mass flux) * v_t(upwind of contact), so
+        // the second tangent is that same mass flux times w_t2(upwind).  In 2D
+        // M_tangent2 == 0, so this is identically zero (no-op).
+        {
+            const Set::Scalar wL = lo.M_tangent2 / rhoL;
+            const Set::Scalar wR = hi.M_tangent2 / rhoR;
+            fl.momentum_tangent2 = (fl.mass0 + fl.mass1) * ((S_M >= 0.0) ? wL : wR);
+        }
+
         // ====================================================================
         // Error checking
         // ====================================================================
@@ -338,6 +358,7 @@ public:
           or (fl.mass1 != fl.mass1)
           or (fl.momentum_normal  != fl.momentum_normal)
           or (fl.momentum_tangent != fl.momentum_tangent)
+          or (fl.momentum_tangent2 != fl.momentum_tangent2)
           or (fl.energy_total     != fl.energy_total)
           or (fl.energy0          != fl.energy0)
           or (fl.energy1          != fl.energy1)

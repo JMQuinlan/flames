@@ -172,7 +172,6 @@ apply_weight          = 0
 apply_vaporization    = 0
 apply_sharpening      = 0
 apply_ahe             = 0
-Spec_Vol              = 1
 grav                  = 0.0
 
 ### NUMERICS ###

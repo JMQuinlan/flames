@@ -6,7 +6,7 @@
 # MARMOTTANT (2005) LAPLACE-EQUILIBRIUM / CURVATURE-RECONSTRUCTION TEST
 # 2D cylindrical bubble, scaled units, NSCBC4.  (See bin/Marmottant.md.)
 # =============================================================================
-# Static counterpart of Bubble_UNIT_TEST2_Laplase, but with apply_marmottant=1.
+# Static counterpart of Bubble_UNIT_TEST2_Laplase, but with marmottant=1.
 # The bubble sits on the Marmottant ELASTIC ramp at rest, so sigma_eff(R0)=sigma_0
 # and the gas pressure is Laplace-balanced against that *reconstructed* tension:
 #
@@ -114,11 +114,21 @@ sigma = 7.28
 pref = 0.0
 
 ### MARMOTTANT (2005) COATED-BUBBLE SURFACE TENSION ###
-apply_marmottant   = 1
-marm.chi           = 14.56
-marm.R_buckling    = 0.018
-marm.sigma_break   = 7.28
-marm.geom_factor   = 1.0
+marmottant         = 1
+# HEIGHT-FUNCTION curvature (marmottant.height_function=1, the default) with
+# spaced columns (L ~ 2.3 eps/dx, auto) needs only SHALLOW smoothing: eta 8 /
+# kappa 8 / sigma 4.  Validated: sigma_eff(t=0.5ms) = 3.28 (256^2) / 3.44
+# (512^2) vs target 3.415; R drift at 10ms: +4.6% (256^2), +11.7% (512^2,
+# STABLE -- pointwise curvature had NO stable+accurate config at 512^2).
+# Remaining slow drift tracks progressive eta-band roughening (profile
+# maintenance, not curvature estimation) -- see dissertation notes.
+marmottant.eta_smooth_iters   = 8
+marmottant.kappa_smooth_iters = 8
+marmottant.sigma_smooth_iters = 4
+marmottant.chi           = 14.56
+marmottant.R_buckling    = 0.018
+marmottant.sigma_break   = 7.28
+# geom factor is automatic: R = (SPACEDIM-1)/kappa (planar/cyl vs sphere)
 
 ### BOUNDARY CONDITIONS - NSCBC4 outflow ###
 density.bc.type.xhi  = nscbc_outflow

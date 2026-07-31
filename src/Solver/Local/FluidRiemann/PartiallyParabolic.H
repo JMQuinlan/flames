@@ -32,7 +32,7 @@ public:
 
     static void Parse(PartiallyParabolic & /*value*/, IO::ParmParse & /*pp*/) {}
 
-    virtual Flux Solve(State /*lo*/, State /*hi*/, Set::Scalar /*p_ref*/, Set::Scalar /*small*/, int /*Spec_Vol*/ = 1) override
+    virtual Flux Solve(State /*lo*/, State /*hi*/, Set::Scalar /*p_ref*/, Set::Scalar /*small*/) override
     {
         Util::Abort(INFO, "Solver " + std::string(name) + " is not yet ported to the 6-equation diffuse-interface model. Use HLLC.");
         return Flux();

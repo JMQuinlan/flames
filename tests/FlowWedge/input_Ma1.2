@@ -1,0 +1,186 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# ============================================================================
+# FlowWedge -- TWO-PHASE (Integrator::Hydro2, 6-equation) SUPERSONIC flow over an
+# embedded 15-degree half-angle WEDGE.  Tests whether the phi embedded solid
+# resolves the attached OBLIQUE SHOCK and reproduces the theta-beta-Mach
+# relation.
+#
+#   Ma = 1.2   (freestream).  Reference state: rho=1, p=1/gamma=0.714286 so that
+#   c = sqrt(gamma p / rho) = 1  ->  U = Ma = 1.2,  M_x = rho*U = 1.2.
+#   Total energy/vol  E = p/(gamma-1) + 0.5*rho*U^2 = 1.785714 + 0.5*1.2*1.2 = 2.505714.
+#
+#   Wedge: half-angle theta = 15deg, apex at (x0,0) = (-0.5, 0), base at xb = 1.5.
+#   Analytical (weak) oblique shock angle for theta=15deg, Ma=1.2:  DETACHED bow shock (theta=15 > theta_max(1.2)~3.3deg).
+#
+# Single-phase limit: eta = alpha_1 = 0.5 everywhere with TWO IDENTICAL fluids
+# (phase 0 == phase 1), so the mixture behaves as one ideal gas while both phasic
+# masses stay nonzero (avoids the alpha_2 -> 0 degeneracy).  INVISCID (mu = 0);
+# no-penetration at the wedge comes purely from the cutoff freeze (slip wall),
+# which is what an inviscid oblique-shock test wants.
+# ============================================================================
+
+### OUTPUT ###
+#plot_file = ./tests/FlowWedge/output_Ma1.2
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowWedge/output_Ma1.2
+
+### MESHING ###
+amr.plot_dt          = 0.5
+amr.max_grid_size    = 500000
+amr.blocking_factor  = 4
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level        = 3
+amr.n_cell           = 192 128        # dx = 6/192 = 0.03125 = dy = 4/128
+amr.n_error_buf      = 8
+
+### DIMENSIONS ###
+geometry.prob_lo     = -2.0 -2.0 0.0
+geometry.prob_hi     =  4.0  2.0 0.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEPPING ###
+timestep            = 1e-6
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 3e-3
+dynamictimestep.min = 1e-9
+cfl                 = 0.3
+cfl_v               = 0.3
+stop_time           = 30.0            # L/U = 6/1.2 = 5
+
+# ----------------------------------------------------------------------------
+# EMBEDDED SOLID -- the 15deg wedge.  phi = 1 fluid, phi = 0 solid.
+# ----------------------------------------------------------------------------
+# YANG (2023) diffuse-domain method (the ONLY embedded-solid mode): full Euler
+# flux everywhere + a (1-phi)/kappa momentum Brinkman penalty as the wall.  No
+# cutoff freeze / flux masking / Riemann reflect.  solid.brinkman ~ 4*U/eps sets
+# the wall stiffness (kappa = 1/brinkman); the diffuse wall is accurate to O(eps)
+# so the shock sits ~eps off the phi=0.5 surface and converges as eps -> 0.
+# Explicit-penalty stability: solid.brinkman * dt < 2 (see dynamictimestep.max).
+apply_embedded_solid = 1
+solid.brinkman       = 500           # ~4*U/eps, U=1.2, eps=0.01  (kappa = 1/500)
+phi_refinement_criterion = 0.1        # refine the wedge boundary
+
+# Wedge as the intersection of three half-planes (upper ramp, lower ramp, base),
+# signed distance D = max(g_upper, g_lower, g_base):  D>0 fluid, D<0 solid.
+#   g_upper =  y cos(th) - (x-x0) sin(th)   (fluid above the upper ramp)
+#   g_lower = -y cos(th) - (x-x0) sin(th)   (fluid below the lower ramp)
+#   g_base  =  x - xb                       (fluid behind the base)
+# th=15deg: cos=0.9659258, sin=0.2588190.
+solid.phi.ic.type = expression
+solid.phi.ic.expression.constant.cth = 0.9659258
+solid.phi.ic.expression.constant.sth = 0.2588190
+solid.phi.ic.expression.constant.x0  = -0.5
+solid.phi.ic.expression.constant.xb  = 1.5
+solid.phi.ic.expression.constant.eps = 0.001
+solid.phi.ic.expression.region0 = "0.5*(1.0 + tanh( max(max( y*cth - (x-x0)*sth, -y*cth - (x-x0)*sth ), x - xb ) / eps ))"
+
+# Prescribed quiescent solid target, eta-consistent (alpha_1 = 0.5):
+#   rho_eta0 = rho_eta1 = 0.5*rho_solid = 0.5,  M = 0,
+#   E0 = E1 = 0.5*p_solid/(gamma-1) = 0.5*1.785714 = 0.892857  (u=0, p=p_inf)
+solid.density.ic.type = constant
+solid.density.ic.constant.value = 1.0
+solid.momentum.ic.type = constant
+solid.momentum.ic.constant.value = 0.0 0.0
+solid.pressure.ic.type = constant
+solid.pressure.ic.constant.value = 0.714286
+
+### ETA (alpha_1) IC -- uniform 0.5 (two identical fluids => single ideal gas) ###
+eta.ic.type = constant
+eta.ic.constant.value = 0.5
+# Pin alpha_1 = 0.5 at the supersonic inflow (all characteristics enter).
+eta.bc.type.xlo = dirichlet
+eta.bc.val.xlo  = 0.5
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = neumann
+eta.bc.type.yhi = neumann
+
+### EOS (ideal gas, gamma = 1.4, p0 = 0) ###
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cp    = 1005.0
+eos0.cv    = 717.86
+mu0   = 0.0
+mu0_b = 0.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp    = 1005.0
+eos1.cv    = 717.86
+mu1   = 0.0
+mu1_b = 0.0
+
+### FLUID 0 IC (supersonic freestream in +x) ###
+density0.ic.type = constant
+density0.ic.constant.value = 1.0
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "1.2"
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 0.714286
+
+### FLUID 1 IC (identical to fluid 0) ###
+density1.ic.type = constant
+density1.ic.constant.value = 1.0
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "1.2"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 0.714286
+
+### INTERACTIONS ###
+epsilon = 0.1
+sigma   = 0.0
+Dv      = 0.0
+pref    = 0.0
+small   = 1e-6
+grav    = 0.0
+
+### BOUNDARY CONDITIONS ###
+# SUPERSONIC inflow xlo: ALL characteristics enter -> Dirichlet on rho, M, E.
+# Supersonic outflow xhi + far-field top/bottom: Neumann (zero-gradient extrap).
+density.bc.type.xlo  = dirichlet
+density.bc.val.xlo   = 1.0
+density.bc.type.xhi  = neumann
+density.bc.type.ylo  = neumann
+density.bc.type.yhi  = neumann
+
+momentum.bc.type.xlo = dirichlet dirichlet
+momentum.bc.val.xlo  = 1.2 0.0
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+energy.bc.type.xlo   = dirichlet
+energy.bc.val.xlo    = 0.892857   # per-phase E0=E1=alpha_1*p/(gamma-1); NOT the mixture total E
+energy.bc.type.xhi   = neumann
+energy.bc.type.ylo   = neumann
+energy.bc.type.yhi   = neumann
+
+### REFINEMENT CRITERIA ###
+# Refine on the shock (density + pressure gradients) and the wedge boundary;
+# eta/omega/gradu OFF.  Criterion compares |grad field| * 2 * dx > criterion.
+eta_refinement_criterion   = 1e10
+omega_refinement_criterion = 1e10
+gradu_refinement_criterion = 1e10
+p_refinement_criterion     = 0.1
+rho_refinement_criterion   = 0.1
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+
+### SOLVER ###
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+kappa_method        = 1
+apply_sharpening    = 0

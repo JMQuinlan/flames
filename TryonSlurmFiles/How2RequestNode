@@ -1,0 +1,1 @@
+srun -N 1 --ntasks-per-node=128 --partition=compute -t 24:00:00 --pty bash

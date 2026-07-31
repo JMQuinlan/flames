@@ -115,11 +115,11 @@ sigma = 7.28
 pref  = 0.0
 
 ### MARMOTTANT (2005) COATED-BUBBLE SURFACE TENSION ###
-apply_marmottant   = 1
-marm.chi           = 14.56
-marm.R_buckling    = 0.018
-marm.sigma_break   = 7.28
-marm.geom_factor   = 1.0
+marmottant         = 1
+marmottant.chi           = 14.56
+marmottant.R_buckling    = 0.018
+marmottant.sigma_break   = 7.28
+# geom factor is automatic: R = (SPACEDIM-1)/kappa (planar/cyl vs sphere)
 
 ### BOUNDARY CONDITIONS - NSCBC4 non-reflecting outflow, target = 500 ###
 density.bc.type.xhi  = nscbc_outflow

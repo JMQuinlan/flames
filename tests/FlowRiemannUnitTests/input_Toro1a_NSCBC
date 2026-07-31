@@ -169,9 +169,8 @@ gradu_refinement_criterion = 100000.0
 rho_refinement_criterion   = 100000.0
 p_refinement_criterion     = 100000.0
 
-static_eta = 1
-Spec_Vol = 1
 
 Riemann_Solver.type = hllc
-#integration.type=RungeKutta
-#integration.rk.type=4
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3

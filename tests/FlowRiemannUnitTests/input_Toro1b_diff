@@ -4,7 +4,10 @@
 
 ### OUTPUT ###
 plot_file = ./tests/FlowRiemannUnitTests/output_Toro1b_Roe_epsilon_1e-3
-Riemann_Solver.type = roe
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3
 
 eta.ic.type = expression
 eta.ic.expression.constant.epsilon = "1e-3"
@@ -34,13 +37,18 @@ q.ic.type = constant
 q.ic.constant.value = 0.0
 
 ### HYDRO PARAM ###
-gamma0 = 1.4
-gamma1 = 1.4
+### EQUATION OF STATE -- ideal gas (CPG); eos.backend defaults to native ###
+eos0.gamma = 1.4
+eos1.gamma = 1.4
+eos0.p0 = 0.0
+eos1.p0 = 0.0
+eos0.cp = 1.4
+eos1.cp = 1.4
+eos0.cv = 1.0
+eos1.cv = 1.0
 cfl   = 0.4
 mu0   = 0.0
 mu1   = 0.0
-p0_0  = 0.0
-p0_1  = 0.0
 
 ### Surface tension coefficient ###
 sigma = 1000
@@ -62,8 +70,6 @@ pressure0.ic.type = expression
 pressure0.ic.expression.constant.p_L = "1.0"
 pressure0.ic.expression.region0 = "p_L"
 
-cp0 = "1.4"
-cv0 = "1.0"
 
 ### IC State - Fluid 1 (Right side, x > 0) ###
 density1.ic.type = expression
@@ -79,8 +85,6 @@ pressure1.ic.type = expression
 pressure1.ic.expression.constant.p_R = "0.1"
 pressure1.ic.expression.region0 = "p_R"
 
-cp1 = "1.4"
-cv1 = "1.0"
 
 ### ETA BC  ###
 pf.eta.bc.type.xlo = neumann
@@ -111,4 +115,3 @@ gradu_refinement_criterion = 100000.0
 rho_refinement_criterion   = 100000.0
 p_refinement_criterion     = 100000.0
 
-Spec_Vol = 1

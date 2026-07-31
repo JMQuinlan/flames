@@ -9,6 +9,9 @@
 ### OUTPUT ###
 plot_file = ./tests/FlowRiemannUnitTests/output_Garrick
 Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3
 
 # Interface at x=0 (sharp transition)
 eta.ic.type = expression
@@ -135,7 +138,6 @@ gradu_refinement_criterion = 100000.0
 rho_refinement_criterion   = 100000.0
 p_refinement_criterion     = 100000.0
 
-Spec_Vol = 1
 kappa_method = 1
 Dv = 0
 g = 0.0

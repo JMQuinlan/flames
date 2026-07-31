@@ -2,7 +2,7 @@
 
 Validation suite for the diffuse-interface Marmottant model on the
 `Hydro2_6Eqn_Marmottant` branch. Theory and design: `bin/Marmottant.md`.
-Implementation: `apply_marmottant` + `marm.*` in `src/Integrator/Hydro2.{cpp,H}`.
+Implementation: `marmottant` + `marmottant.*` in `src/Integrator/Hydro2.{cpp,H}`.
 
 The code reconstructs an effective radius from the local mean curvature,
 `R_eff = geom_factor/|kappa|`, and feeds it through the three-regime
@@ -13,10 +13,10 @@ The code reconstructs an effective radius from the local mean curvature,
 | param          | value   | meaning                                  |
 |----------------|---------|------------------------------------------|
 | `R0`           | 0.02    | initial bubble radius                    |
-| `marm.chi`     | 14.56   | shell elastic modulus χ                  |
-| `marm.R_buckling` | 0.018 | buckling radius (σ=0)                   |
-| `marm.sigma_break`| 7.28  | rupture tension (scaled "water")        |
-| `marm.geom_factor`| 1.0   | c_d: 2D-planar/cylinder = 1             |
+| `marmottant.chi`     | 14.56   | shell elastic modulus χ                  |
+| `marmottant.R_buckling` | 0.018 | buckling radius (σ=0)                   |
+| `marmottant.sigma_break`| 7.28  | rupture tension (scaled "water")        |
+| *(geometry)*   | auto    | R = (SPACEDIM-1)/κ: cylinder in 2D, sphere in 3D |
 
 Derived: `σ₀ = σ(R0) = 3.4153` (elastic), `R_rupt = 0.022045`,
 2D Laplace jump `σ₀/R0 = 170.77`, balanced `p_gas = 670.77`.
@@ -27,7 +27,7 @@ So R0 sits on the elastic ramp, `R_buck/R0 = 0.90`, `R_rupt/R0 = 1.10`.
 - **`input_Marmottant_Laplace_Static`** — bubble Laplace-balanced at rest on the
   elastic ramp; should hold `R = R0` forever. Validates the σ(R_eff)
   reconstruction and the σ_eff diagnostic field.
-- **`input_Marmottant_OFF_regression`** — identical, but `apply_marmottant=0`
+- **`input_Marmottant_OFF_regression`** — identical, but `marmottant=0`
   with constant `sigma = σ₀ = 3.4153`. Same equilibrium; isolates any
   Marmottant-branch bug from the shared CSF machinery.
 - **`input_Marmottant_Oscillating`** — gas driven below balance (`p_gas=400`) so
@@ -65,7 +65,7 @@ python tests/FlowMarmottant/reference/analyze_Marmottant_Laplace.py
 Validation order (per `bin/Marmottant.md`): regression (OFF) → static Laplace
 (reconstruction) → oscillating (physics).
 
-> Note: `marm.geom_factor = 1.0` (2D-planar) is the deferred-geometry default;
-> set `2.0` for a true axisymmetric sphere when the 2D/3D split lands. The
+> Note: the geometry factor is now automatic — the code reconstructs
+> R = (SPACEDIM-1)/kappa (cylinder in 2D, sphere in 3D). The
 > reference model uses the same R² area law as the code, so these scripts test
 > *implementation correctness*, not the 2D area-law physics.

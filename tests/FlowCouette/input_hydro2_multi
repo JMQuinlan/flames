@@ -1,0 +1,187 @@
+#@ exe=hydro2
+#@ dim=2
+# alamo.program = hydro2
+
+# =============================================================================
+# TWO-FLUID PLANAR COUETTE TEST (classical no-slip Couette, stress-matched)
+# =============================================================================
+# Two fluid layers stacked vertically, sheared by a top plate moving at U_top
+# and a stationary bottom plate.  Steady state is the textbook 2-layer
+# Couette profile: piecewise-linear u(y) with shear stress mu * du/dy
+# continuous across the interface.
+#
+# Layout:
+#   y in [0, y_int]      : phase 1 (lower fluid B)  -- low density, low mu
+#   y in [y_int, H]      : phase 0 (upper fluid A)  -- high density, high mu
+#   interface at y_int = 1.5 m
+#
+# Phase 0 (top)    : eos0  -- rho=100, mu=2.0, gamma=3.0,  p0=100
+# Phase 1 (bottom) : eos1  -- rho= 50, mu=1.0, gamma=1.4,  p0=  0
+#
+#   Mild 2:1 ratios so the analytical piecewise lines are visually distinct
+#   (each segment has a clear nonzero slope) and the sim reaches steady
+#   state well within stop_time = 30 s.  Diffusion timescales:
+#     tau ~ H^2 / (pi^2 nu),   nu = mu/rho
+#     lower : nu_B = 1/50  = 0.02  -> tau ~ 45.6 s
+#     upper : nu_A = 2/100 = 0.02  -> tau ~ 45.6 s
+#   stop_time = 30 s is ~0.66 tau; bump to 60-120 s for higher fidelity.
+#
+# BCs:
+#   bottom (ylo) : DIRICHLET no-slip, u = 0,      v = 0
+#   top    (yhi) : DIRICHLET no-slip, u = U_top,  v = 0   (momentum = rho_A * U_top)
+#   sides (x)    : periodic
+#
+# Analytical steady-state (closed form, see couette_analysis_multi.py):
+#   A1 = U_top / [y_int + (mu_B/mu_A)*(H - y_int)]
+#   A2 = (mu_B / mu_A) * A1
+#   u(y) = A1 * y                                   y <= y_int
+#   u(y) = A1 * y_int + A2 * (y - y_int)            y > y_int
+# Plug-in numbers:
+#   A1 = 0.1 / [1.5 + (1/2)*1.5]      = 0.04444 1/s   (lower)
+#   A2 = (1/2) * 0.04444              = 0.02222 1/s   (upper)
+#   u(y_int) = 0.04444 * 1.5          = 0.0667 m/s
+#   u(H)     = 0.0667 + 0.02222*1.5   = 0.1   m/s   (matches top plate)
+# =============================================================================
+
+### OUTPUT ###
+plot_file = ./tests/FlowCouette/output_multi
+
+### MESHING ###
+amr.plot_dt = 0.5
+amr.max_level = 1
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.grid_eff = 0.8
+amr.n_cell = 4 64 0
+
+### DIMENSIONS ###
+geometry.prob_lo = 0.0 0.0 0.0       # [ m ]
+geometry.prob_hi = 0.1874 3.0 0.0    # [ m ]
+geometry.is_periodic = 1 0 0
+
+### TIME STEP ###
+timestep  = 1.0e-3
+stop_time = 120.0
+
+### HYDRO PARAM ###
+
+### EQUATION OF STATE -- two distinct fluids ###
+# Phase 0 = upper fluid A (denser, more viscous).
+eos0.gamma = 3.0
+eos0.p0    = 100.0
+eos0.cv    = 1.0
+eos0.cp    = 3.0
+
+# Phase 1 = lower fluid B (lighter, less viscous, ideal gas).
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 2.5
+eos1.cp    = 3.5
+
+cfl   = 0.4
+mu0   = 2.0       # upper fluid dynamic viscosity (was 10 -- softened to 2:1)
+mu1   = 1.0       # lower fluid dynamic viscosity
+
+### ETA IC ###
+# eta = 1 in upper half (phase 0 = fluid A), eta = 0 in lower half (phase 1 = B).
+# Smeared at y_int = 1.5 with tanh of width eps.
+eta.ic.type = expression
+eta.ic.expression.constant.eps   = 0.10
+eta.ic.expression.constant.y_int = 1.5
+eta.ic.expression.region0        = "0.5*(1.0 + tanh((y - y_int)/eps))"
+epsilon = eta.ic.expression.constant.eps
+
+### SOURCE-TERM ICs (off) ###
+m0.ic.type = constant
+m0.ic.constant.value = "0.0"
+
+u0.ic.type = expression
+u0.ic.expression.region0 = "0.0"
+u0.ic.expression.region1 = "0.0"
+
+q.ic.type = expression
+q.ic.expression.region0 = "0.0"
+q.ic.expression.region1 = "0.0"
+
+### PER-PHASE PRIMARIES ###
+# Densities.
+density0.ic.type = expression
+density0.ic.expression.region0 = "100.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "50.0"          # was 10 -- softened to 2:1
+
+# Velocity IC: linear ramp from u=0 at bottom to u=U_top at top -- already a
+# rough guess for steady state, accelerates approach to closed-form profile.
+# Both per-phase velocities set to the SAME ramp so the IC has no velocity
+# jump at the diffuse interface.
+#
+# CONVENTION:  expression.region0 = x-velocity (u),  region1 = y-velocity (v).
+# Both components are REQUIRED (the field is 2-component); the suffix "regionN"
+# indexes the component, NOT a spatial region.
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.1 * y / 3.0"    # u_x = U_top * y/H
+velocity0.ic.expression.region1 = "0.0"              # u_y = 0
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.1 * y / 3.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Uniform pressure both phases (mechanical equilibrium at IC).
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "100.0"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "100.0"
+
+### HYDRO BC ###
+# Sides periodic.  Bottom (ylo) no-slip stationary; top (yhi) no-slip moving
+# at u = U_top = 0.1 m/s.  Momentum at the wall = rho * u.
+#   bottom wall  : rho_B * 0   = 0
+#   top    wall  : rho_A * 0.1 = 10
+# Density / energy use neumann (zero-gradient) since walls are impermeable.
+pf.eta.bc.type.xlo = neumann
+pf.eta.bc.type.xhi = neumann
+pf.eta.bc.type.ylo = neumann
+pf.eta.bc.type.yhi = neumann
+
+density.bc.type.xhi = periodic
+density.bc.type.xlo = periodic
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+density.bc.val.xhi = 0.0
+density.bc.val.xlo = 0.0
+density.bc.val.ylo = 0.0
+density.bc.val.yhi = 0.0
+
+energy.bc.type.xhi = periodic
+energy.bc.type.xlo = periodic
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+energy.bc.val.xhi = 0.0
+energy.bc.val.xlo = 0.0
+energy.bc.val.ylo = 0.0
+energy.bc.val.yhi = 0.0
+
+momentum.bc.type.xlo = periodic periodic
+momentum.bc.type.xhi = periodic periodic
+momentum.bc.type.ylo = dirichlet dirichlet
+momentum.bc.type.yhi = dirichlet dirichlet
+momentum.bc.val.xlo = 0.0 0.0
+momentum.bc.val.xhi = 0.0 0.0
+momentum.bc.val.ylo = 0.0 0.0            # bottom plate stationary
+momentum.bc.val.yhi = 10.0 0.0           # top plate u = 0.1, rho_A = 100, M_x = 10
+
+### HYDRO REFINEMENT CRITERIA ###
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+
+### NUMERICS -- standardized: HLLC + WENO3 + RK3 ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3

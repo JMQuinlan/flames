@@ -196,12 +196,11 @@ apply_surface_tension = 0
 apply_buoyancy        = 0
 apply_weight          = 0
 apply_vaporization    = 0
-Spec_Vol              = 1
 grav                  = 0.0
 
-### NUMERICS -- Sch20 uses WENO5 + SSPRK3 for these cases ###
+### NUMERICS -- Sch20 nominal: WENO3 + SSPRK3 (project-standard for Sch20 tests) ###
 Riemann_Solver.type = hllc
-Limiter.type        = weno5
+Limiter.type        = weno3
 integration.type    = RungeKutta
 integration.rk.type = 3
 kappa_method        = 1
