@@ -115,16 +115,26 @@ pref = 0.0
 
 ### MARMOTTANT (2005) COATED-BUBBLE SURFACE TENSION ###
 marmottant         = 1
-# HEIGHT-FUNCTION curvature (marmottant.height_function=1, the default) with
-# spaced columns (L ~ 2.3 eps/dx, auto) needs only SHALLOW smoothing: eta 8 /
-# kappa 8 / sigma 4.  Validated: sigma_eff(t=0.5ms) = 3.28 (256^2) / 3.44
-# (512^2) vs target 3.415; R drift at 10ms: +4.6% (256^2), +11.7% (512^2,
-# STABLE -- pointwise curvature had NO stable+accurate config at 512^2).
-# Remaining slow drift tracks progressive eta-band roughening (profile
-# maintenance, not curvature estimation) -- see dissertation notes.
-marmottant.eta_smooth_iters   = 8
-marmottant.kappa_smooth_iters = 8
-marmottant.sigma_smooth_iters = 4
+# ADVECTED-SHELL formulation (replaces the old curvature-derived sigma(R(x))).
+# sigma is a function of the shell's AREAL STRAIN, carried by a conserved shell
+# density c = Gamma|grad eta| advected as an 8th RK primary:
+#     Gamma = c/|grad eta| ,  sigma = chi (Gamma_buck/Gamma - 1) ,
+#     Gamma_buck = (R0/R_buckling)^2 ,  Gamma_0 = 1 at t=0.
+# This is the SAME sigma(A) law, with A carried by the shell rather than
+# re-derived from a second derivative of eta every step.  Why it replaced sigma(R):
+#   * sigma(R) amplified curvature error 10.5x at R0/R_buck = 1.11, so a 1% kappa
+#     error became a 10% tension error.  No curvature enters sigma now.
+#   * sigma(R) evaluated each cell from ITS OWN level-set radius, but the band
+#     spans R0 +- 3eps = 0.010..0.030 while R_buck = 0.018 -- so ~24% of band
+#     cells read "buckled" (sigma=0) even on a perfect circle, at EVERY
+#     resolution (26.8/24.4/24.3/23.6% at eps/dx = 2/4/8/16).  Gamma = c/|grad eta|
+#     is uniform across the band by construction, so this cannot happen.
+#   * The old path drifted R by +29.8% at 10 ms (hf=0) / +34.4% (hf=1), and by
+#     then reported sigma_eff=3.34 -> R_eff=0.0200 while the bubble was actually
+#     at R=0.0260, past R_rupt=0.02204: local kappa had decoupled from the shell.
+# The eta/kappa/sigma smoothing passes and height_function knob are GONE.
+# Reference (constant sigma, same numerics): R drift +0.91%, shape e4=0.0002 at 10 ms.
+marmottant.R0            = 0.02      # reference radius: shell starts UNSTRAINED here
 marmottant.chi           = 14.56
 marmottant.R_buckling    = 0.018
 marmottant.sigma_break   = 7.28

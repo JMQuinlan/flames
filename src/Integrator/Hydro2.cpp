@@ -176,19 +176,37 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // INTERACTIONS
         pp_query_default("sigma", value.sigma, 0.0);            // Surface tension condition (= sigma_water when marmottant=1)
-        // Marmottant (2005) coated-bubble surface tension -- add-on to the CSF term.
-        pp_query_default("marmottant", value.marmottant, 0);                       // 0=const sigma, 1=Marmottant sigma(R)
+        // Marmottant (2005) coated-bubble surface tension -- ADVECTED-SHELL form.
+        // sigma is a function of the shell's areal strain Gamma_0/Gamma, carried by
+        // the conserved shell density c (see Hydro2.H).  No curvature is involved,
+        // so the eta/kappa/sigma smoothing passes and the height-function curvature
+        // that the old sigma(R(x)) path needed are GONE.
+        pp_query_default("marmottant", value.marmottant, 0);                       // 0=const sigma, 1=Marmottant sigma(Gamma)
         pp_query_default("marmottant.R_buckling", value.marmottant_R_buckling, 0.0);   // buckling radius [m]
         pp_query_default("marmottant.chi",        value.marmottant_chi, 0.0);          // shell elastic modulus [N/m]
         pp_query_default("marmottant.sigma_break",value.marmottant_sigma_break, 1.0e30); // rupture tension (default huge = never rupture)
-        pp_query_default("marmottant.eta_smooth_iters", value.marmottant_eta_smooth_iters, 8); // eta box-average passes (curvature de-noising)
-        pp_query_default("marmottant.kappa_smooth_iters", value.marmottant_kappa_smooth_iters, 8); // interface-weighted kappa passes (tangential averaging)
-        pp_query_default("marmottant.sigma_smooth_iters", value.marmottant_sigma_smooth_iters, 4); // sigma_eff passes (de-patch the tension force)
-        pp_query_default("marmottant.height_function", value.marmottant_height_function, 1); // height-function curvature (0 = pointwise only)
+        pp_query_default("marmottant.R0",         value.marmottant_R0, 0.0);           // reference radius: shell starts UNSTRAINED here
         if (value.marmottant)
-            Util::Message(INFO, "Marmottant ON: R_buckling=", value.marmottant_R_buckling,
-                          " chi=", value.marmottant_chi, " sigma_break=", value.marmottant_sigma_break,
+        {
+            if (!(value.marmottant_R0 > 0.0))
+                Util::Abort(INFO, "marmottant=1 requires marmottant.R0 > 0 "
+                                  "(the radius at which the shell is unstrained, Gamma=Gamma_0=1)");
+            if (!(value.marmottant_R_buckling > 0.0))
+                Util::Abort(INFO, "marmottant=1 requires marmottant.R_buckling > 0");
+            // Gamma_0 == 1 by construction (c is initialized to |grad eta|), so the
+            // buckling areal density follows from Marmottant's A/A_buck = (R/R_buck)^2
+            // evaluated at the reference state.  This reproduces the previous
+            // calibration exactly:  sigma(t=0) = chi ((R0/R_buck)^2 - 1).
+            value.marmottant_Gamma_buck = (value.marmottant_R0 * value.marmottant_R0)
+                                        / (value.marmottant_R_buckling * value.marmottant_R_buckling);
+            Util::Message(INFO, "Marmottant ON (advected shell): R0=", value.marmottant_R0,
+                          " R_buckling=", value.marmottant_R_buckling,
+                          " chi=", value.marmottant_chi,
+                          " Gamma_buck=", value.marmottant_Gamma_buck,
+                          " sigma(t=0)=", value.marmottant_chi * (value.marmottant_Gamma_buck - 1.0),
+                          " sigma_break=", value.marmottant_sigma_break,
                           " sigma_water=", value.sigma);
+        }
         pp_query_default("Dv", value.Dv, 0.0);                  // Vapor Diffusivity
         pp_query_default("Lv", value.Lv, 0.0);                  // Latent heat of vaporization [J/kg] (evaporative cooling sink)
         pp_query_required("epsilon", value.epsilon);            // diffuse interface thickness Y_infinity
@@ -339,6 +357,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.rho_eta1_mf,      value.density_bc,  1, nghost,  "rho_eta1",     true, true);
         value.RegisterNewFab(value.rho_eta0_old_mf,  value.density_bc,  1, nghost,  "rho_eta0_old", false,true);
         value.RegisterNewFab(value.rho_eta1_old_mf,  value.density_bc,  1, nghost,  "rho_eta1_old", false,true);
+
+        // Advected shell density c = Gamma|grad eta| (8th RK primary) + its
+        // diagnostic areal density Gamma = c/|grad eta|.  Shares eta's BC: c is a
+        // passive advected scalar with the same zero-gradient far-field behaviour.
+        value.RegisterNewFab(value.shell_mf,         value.eta_bc,      1, nghost,  "shell",        true, true);
+        value.RegisterNewFab(value.shell_old_mf,     value.eta_bc,      1, nghost,  "shell_old",    false,true);
+        value.RegisterNewFab(value.Gamma_mf,        &value.bc_nothing,  1, 0,       "Gamma",        true, false);
 
         value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing,  1, 0,       "etadot",       true, false);
         value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing,  4, 0,       "hess_eta",     false,false, { "00", "01", "10", "11" });
@@ -563,6 +588,33 @@ void Hydro2::Initialize(int lev)
     eta_ic          ->Initialize(lev, eta_old_mf, 0.0);
     etadot_mf[lev]  ->setVal(0.0);
     hess_eta_mf[lev]->setVal(0.0);
+
+    // ------------------------------------------------------------------
+    // SHELL (Marmottant advected-shell): c = Gamma_0 |grad eta| with Gamma_0 = 1.
+    // Using the SAME discrete gradient the RHS later uses to recover
+    // Gamma = c/|grad eta| makes Gamma identically 1 at t=0 to machine
+    // precision -- so the shell starts exactly unstrained, uniformly across the
+    // whole band, and sigma(t=0) = chi(Gamma_buck - 1) exactly.
+    // ------------------------------------------------------------------
+    shell_mf[lev]   ->setVal(0.0);
+    shell_old_mf[lev]->setVal(0.0);
+    Gamma_mf[lev]   ->setVal(0.0);
+    {
+        const Set::Scalar *DX = geom[lev].CellSize();
+        eta_mf[lev]->FillBoundary(geom[lev].periodicity());
+        for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
+            amrex::Array4<Set::Scalar> const &c = shell_mf[lev]->array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                c(i, j, k) = Numeric::Gradient(et, i, j, k, 0, DX).lpNorm<2>();
+            });
+        }
+        shell_mf[lev]->FillBoundary(geom[lev].periodicity());
+        amrex::MultiFab::Copy(*shell_old_mf[lev], *shell_mf[lev], 0, 0, 1,
+                              shell_mf[lev]->nGrow());
+    }
 
     // SOURCE TERMS
     Fw_mf[lev]      ->setVal(0.0);
@@ -1011,13 +1063,15 @@ Hydro2::RHS(int lev,
     amrex::MultiFab &eta_rhs_mf,
     amrex::MultiFab &E0_rhs_mf,
     amrex::MultiFab &E1_rhs_mf,
+    amrex::MultiFab &shell_rhs_mf,
     const amrex::MultiFab &rho_eta0_mf_in,
     const amrex::MultiFab &rho_eta1_mf_in,
     const amrex::MultiFab &M_mf_in,
     const amrex::MultiFab &E_mf_in,
     const amrex::MultiFab &eta_mf_in,
     const amrex::MultiFab &E0_mf_in,
-    const amrex::MultiFab &E1_mf_in)
+    const amrex::MultiFab &E1_mf_in,
+    const amrex::MultiFab &shell_mf_in)
 {
     BL_PROFILE("Integrator::Hydro2::RHS");
 
@@ -1032,6 +1086,8 @@ Hydro2::RHS(int lev,
     amrex::MultiFab::Copy(*eta_mf[lev],            eta_mf_in,      0, 0, 1,              0);
     amrex::MultiFab::Copy(*energy0_mf[lev],        E0_mf_in,       0, 0, 1,              0);
     amrex::MultiFab::Copy(*energy1_mf[lev],        E1_mf_in,       0, 0, 1,              0);
+    amrex::MultiFab::Copy(*shell_mf[lev],          shell_mf_in,    0, 0, 1,              0);
+    shell_mf[lev]->FillBoundary(geom[lev].periodicity());
 
     // Eta Fields
 
@@ -1242,419 +1298,88 @@ Hydro2::RHS(int lev,
     FillBoundariesWithBC(lev, time, energy_bc, { mu_chem_mf[lev].get() });
 
     // ------------------------------------------------------------
-    // MARMOTTANT (2005) coated-bubble surface tension  [add-on to the CSF term]
+    // MARMOTTANT (2005) coated-bubble surface tension -- ADVECTED SHELL
     // ------------------------------------------------------------
-    // LOCAL sigma(R(x)): the shell tension varies point-to-point so non-spherical and
-    // multi-bubble shells are captured.  A raw pointwise R=1/kappa is unstable -- the
-    // diffuse curvature is noisy and the piecewise sigma(R) RECTIFIES that noise into
-    // a spurious force (drift to R/R0~1.2).  We de-noise by a LOCAL interface-weighted
-    // average of the curvature over a small window (N box passes):
-    //     kappa_s(x) = sum_win w*kappa / sum_win w ,   w = eta(1-eta)
-    // Because the curvature noise is ~ZERO-MEAN (per-cell swings about the true value),
-    // averaging kappa is UNBIASED -- unlike smoothing eta first (Brackbill), which
-    // shifts a convex contour and biases the radius (drift grows with #passes).  Then
-    //     R(x) = (d-1)/|kappa_s(x)| ,  sigma_eff(x) = sigma(R(x))   [Marmottant Eq.4].
-    // kappa_s -> kappas(.,1), sigma_eff -> kappas(.,2) (both plottable); the CSF force
-    // below uses BOTH (smooth) so sigma_eff*kappa is uniform across the band (no
-    // parasitic currents) yet varies per bubble/region.  See tests/FlowMarmottant.
-
-    // sigma_eff on its own MultiFab WITH one ghost cell so the capillary
-    // tensor Omega below can be evaluated in the ghost ring too (kappas_mf
-    // has zero ghosts).  Defined only when marmottant is on.
+    // sigma is a function of the shell's AREAL STRAIN, not of the local curvature.
+    // The lipid monolayer is a MATERIAL carried by the interface, so we transport a
+    // conserved shell density  c = Gamma |grad eta|  as an RK primary
+    // (d(c)/dt + div(c u) = 0, discretized with the interface velocity below), and
+    //
+    //     Gamma = c / |grad eta|                        shell per unit AREA
+    //     sigma = chi (Gamma_buck/Gamma - 1)            elastic
+    //           = 0                                     buckled  (Gamma >= Gamma_buck)
+    //           = sigma_water                           ruptured (elastic >= sigma_break)
+    //
+    // Gamma_buck/Gamma IS Marmottant's area ratio A/A_buck, so this is the same
+    // sigma(A) law -- with A carried by the shell instead of re-derived from a
+    // second derivative of eta every step.  What that buys, vs. the old sigma(R(x)):
+    //
+    //  * No curvature enters the tension, so there is nothing for the elastic law
+    //    to amplify.  sigma(R) had d(sigma)/sigma = 2(R/Rb)^2/((R/Rb)^2-1) dR/R
+    //    = 10.5x at R0/Rb = 1.11, which turned a 1% kappa error into 10% tension.
+    //  * Gamma is uniform ACROSS the band by construction: c and |grad eta| share
+    //    the same profile, so c/|grad eta| is flat through the band thickness.  The
+    //    old per-cell R = (d-1)/kappa gave every cell in the band its OWN level-set
+    //    radius, so with the band spanning R0 +- 3eps and R_buck inside that range,
+    //    ~24% of band cells were permanently mis-classified "buckled" (sigma=0) even
+    //    on a perfect circle -- and that fraction did NOT converge under refinement.
+    //  * Shell material is conserved, so stretching genuinely dilutes Gamma and the
+    //    rupture branch is reached for the right physical reason.
+    //  * Tangential (Marangoni) redistribution of shell material is represented;
+    //    eta alone cannot express it, since sliding material along a level set
+    //    leaves eta identically unchanged.
+    //  * Nonspherical shells and multiple bubbles need no labelling or geometry.
+    //
+    // sigma_eff carries one ghost cell so the capillary tensor Omega below can be
+    // built in the ghost ring too (kappas_mf has zero ghosts).  It is evaluated on
+    // the GROWN box directly from eta/shell (both of which have filled ghosts), so
+    // the ghost ring is genuinely computed rather than left zero at physical faces.
     amrex::MultiFab sig_eff_mf;
-
-    // FillBoundary only fills interior/periodic ghosts.  At NON-periodic
-    // (physical) faces, fill scratch ghosts by zero-gradient clamp from the
-    // nearest interior cell -- for a single ghost layer this equals an even
-    // reflection, which is exactly right on the octant symmetry planes the
-    // bubble is centered on, and a sane default for outflow faces.  Without
-    // this the eta-weighted smoothing window drags kappa_s toward the zeroed
-    // ghosts precisely where the bubble meets the symmetry planes.
-    const amrex::Box dom_box = geom[lev].Domain();
-    auto fill_phys_ghosts = [&](amrex::MultiFab &mf)
-    {
-        const int ilo_ = dom_box.smallEnd(0), ihi_ = dom_box.bigEnd(0);
-        const int jlo_ = dom_box.smallEnd(1), jhi_ = dom_box.bigEnd(1);
-        const bool xp_ = geom[lev].isPeriodic(0);
-        const bool yp_ = geom[lev].isPeriodic(1);
-#if AMREX_SPACEDIM == 3
-        const int klo_ = dom_box.smallEnd(2), khi_ = dom_box.bigEnd(2);
-        const bool zp_ = geom[lev].isPeriodic(2);
-#endif
-        for (amrex::MFIter mfi(mf, false); mfi.isValid(); ++mfi)
-        {
-            const amrex::Box &gbx = mfi.growntilebox(1);
-            auto arr = mf.array(mfi);
-            amrex::ParallelFor(gbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                int ic = i, jc = j, kc = k;
-                if (!xp_) ic = std::min(std::max(i, ilo_), ihi_);
-                if (!yp_) jc = std::min(std::max(j, jlo_), jhi_);
-#if AMREX_SPACEDIM == 3
-                if (!zp_) kc = std::min(std::max(k, klo_), khi_);
-#endif
-                if (ic != i || jc != j || kc != k)
-                    arr(i, j, k) = arr(ic, jc, kc);
-            });
-        }
-    };
 
     if (marmottant)
     {
         const amrex::BoxArray &ba = eta_mf[lev]->boxArray();
         const amrex::DistributionMapping &dm = eta_mf[lev]->DistributionMap();
-        const int ng = 1; // one box-average pass reach (FillBoundary refills each pass)
-        // ETA-FIRST DE-NOISING.  kappa is built from SECOND derivatives of
-        // eta, so cell-scale wiggles in the advected eta band amplify as
-        // 1/dx^2 and drown the geometric signal (measured on the Laplace
-        // test: raw-kappa std ~ 60x the -1/R signal, worse at FINER dx, so
-        // sigma_eff mis-classifies band cells into buckled/ruptured and the
-        // static bubble drifts).  Smoothing kappa after differentiation
-        // cannot recover the signal; smoothing ETA before differentiation
-        // kills the noise at the source (standard CSF color-function
-        // practice, and what the marmottant.eta_smooth_iters name promises).
-        // Unweighted 3^d box average: preserves the monotone band profile
-        // and its midpoint; N passes ~ Gaussian of width sqrt(N/3) dx.
-        amrex::MultiFab eta_s(ba, dm, 1, ng);
-        eta_s.setVal(0.0);
-        amrex::MultiFab::Copy(eta_s, *eta_mf[lev], 0, 0, 1, 0);
-        eta_s.FillBoundary(geom[lev].periodicity());
-        fill_phys_ghosts(eta_s);
-        for (int pass = 0; pass < marmottant_eta_smooth_iters; ++pass)
-        {
-            amrex::MultiFab tmp(ba, dm, 1, ng);
-            for (amrex::MFIter mfi(eta_s, false); mfi.isValid(); ++mfi)
-            {
-                const amrex::Box &bx = mfi.validbox();
-                amrex::Array4<const Set::Scalar> const &es = eta_s.const_array(mfi);
-                amrex::Array4<Set::Scalar> const &t = tmp.array(mfi);
-                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                    Set::Scalar s = 0.0, n = 0.0;
-                    for (int dj = -1; dj <= 1; ++dj)
-                        for (int di = -1; di <= 1; ++di)
-                        {
-#if AMREX_SPACEDIM == 3
-                            for (int dk = -1; dk <= 1; ++dk) { s += es(i+di, j+dj, k+dk); n += 1.0; }
-#else
-                            s += es(i+di, j+dj, k); n += 1.0;
-#endif
-                        }
-                    t(i, j, k) = s / n;
-                });
-            }
-            amrex::MultiFab::Copy(eta_s, tmp, 0, 0, 1, 0);
-            eta_s.FillBoundary(geom[lev].periodicity());
-            fill_phys_ghosts(eta_s);
-        }
-
-        // Curvature FROM the smoothed eta -- the same kappa_method=1 formula
-        // as the raw field, kappa = -div(grad eta / |grad eta|).  Valid box
-        // only (the +-1 stencil reads eta_s's filled ghost ring); kap_s's own
-        // ghost ring is refilled below for the grown-box sigma_eff kernel.
-        amrex::MultiFab kap_s(ba, dm, 1, ng);
-        kap_s.setVal(0.0);
-        {
-            const Set::Scalar small_k = small;
-            for (amrex::MFIter mfi(kap_s, false); mfi.isValid(); ++mfi)
-            {
-                const amrex::Box &bx = mfi.validbox();
-                amrex::Array4<const Set::Scalar> const &es = eta_s.const_array(mfi);
-                amrex::Array4<Set::Scalar> const &ksm = kap_s.array(mfi);
-                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                    auto sten = Numeric::GetStencil(i, j, k, domain);
-                    Set::Vector g = Numeric::Gradient(es, i, j, k, 0, DX);
-                    Set::Scalar gm = g.lpNorm<2>();
-                    Set::Matrix H = Numeric::Hessian(es, i, j, k, 0, DX, sten);
-                    Set::Scalar lap = Numeric::Laplacian(es, i, j, k, 0, DX);
-                    Set::Vector gmg = (1.0 / (gm + small_k)) * (H * g);
-                    ksm(i, j, k) = -((lap / (gm + small_k)) - (g.dot(gmg) / (gm * gm + small_k)));
-                });
-            }
-        }
-        kap_s.FillBoundary(geom[lev].periodicity());
-        fill_phys_ghosts(kap_s);
-
-        // HEIGHT-FUNCTION CURVATURE (Popinet 2009 adapted to the diffuse
-        // band): for each strong-band cell, integrate RAW eta along +-N cells
-        // of the normal-dominant axis in 3 adjacent columns; kappa follows
-        // from finite differences of the integrated heights,
-        //   2D:  kappa = -H'' / (1 + H'^2)^{3/2}
-        // (sign: eta=0 inside the bubble -> convex patch gives kappa < 0,
-        // matching the -div(n_hat) convention of the pointwise path).
-        // Integration AVERAGES the cell-scale eta noise that pointwise
-        // differentiation amplifies -- the estimator is noise-immune without
-        // deep filtering.  Columns that do not saturate 0 -> 1 (interface
-        // leaves the window: another interface nearby, domain edge, torn
-        // band) keep the pointwise fallback value already in kap_s.
-        if (marmottant_height_function)
-        {
-            const Set::Scalar dxm2 = std::min(DX[0], DX[1]);
-            int NH = (int)std::ceil(7.0 * epsilon / dxm2) + 2;  // full tanh saturation span
-            NH = std::min(NH, 64);                              // coarse-level / runaway guard
-            // Column SPACING L: the height second-difference uses columns at
-            // -L, 0, +L, dividing the height-noise contribution to H'' by
-            // ~L^2 at an O((L dx / R)^2) sagitta bias.  Adjacent columns
-            // (L=1) are the sharp-VOF convention and are noise-dominated for
-            // a diffuse band whose columns span ~14 eps/dx cells; L ~ 2.3
-            // eps/dx keeps the bias at the few-%% level while cutting the
-            // measured kappa scatter ~10x (numpy A/B on the 512^2 Laplace).
-            const int LH = std::max(2, (int)std::round(2.3 * epsilon / dxm2));
-            const int NGH = NH + LH + 1;                        // column end + spaced-column reach
-            // Columns integrate the SMOOTHED eta_s: the box average is
-            // conservative (preserves column integrals up to tangential
-            // mixing, which only helps H), and its clean saturation tails
-            // make the end-cell check reliable -- raw-eta tail wiggles were
-            // failing the check and silently dropping cells to the noisy
-            // pointwise fallback.
-            amrex::MultiFab eta_hf(ba, dm, 1, NGH);
-            eta_hf.setVal(0.0);
-            amrex::MultiFab::Copy(eta_hf, eta_s, 0, 0, 1, 0);
-            eta_hf.FillBoundary(geom[lev].periodicity());
-            {   // physical ghosts to FULL depth by EVEN REFLECTION (exact on
-                // symmetry planes; harmless clamp-like at outflow faces).
-                const int ilo_ = dom_box.smallEnd(0), ihi_ = dom_box.bigEnd(0);
-                const int jlo_ = dom_box.smallEnd(1), jhi_ = dom_box.bigEnd(1);
-                const bool xp_ = geom[lev].isPeriodic(0), yp_ = geom[lev].isPeriodic(1);
-#if AMREX_SPACEDIM == 3
-                const int klo_ = dom_box.smallEnd(2), khi_ = dom_box.bigEnd(2);
-                const bool zp_ = geom[lev].isPeriodic(2);
-#endif
-                for (amrex::MFIter mfi(eta_hf, false); mfi.isValid(); ++mfi)
-                {
-                    const amrex::Box gbx = mfi.growntilebox(NGH);
-                    auto arr = eta_hf.array(mfi);
-                    amrex::ParallelFor(gbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                        int ic = i, jc = j, kc = k;
-                        if (!xp_) { if (i < ilo_) ic = 2 * ilo_ - 1 - i; else if (i > ihi_) ic = 2 * ihi_ + 1 - i; }
-                        if (!yp_) { if (j < jlo_) jc = 2 * jlo_ - 1 - j; else if (j > jhi_) jc = 2 * jhi_ + 1 - j; }
-#if AMREX_SPACEDIM == 3
-                        if (!zp_) { if (k < klo_) kc = 2 * klo_ - 1 - k; else if (k > khi_) kc = 2 * khi_ + 1 - k; }
-#endif
-                        if (ic != i || jc != j || kc != k)
-                            arr(i, j, k) = arr(ic, jc, kc);
-                    });
-                }
-            }
-            for (amrex::MFIter mfi(kap_s, false); mfi.isValid(); ++mfi)
-            {
-                const amrex::Box &bx = mfi.validbox();
-                amrex::Array4<const Set::Scalar> const &eh = eta_hf.const_array(mfi);
-                amrex::Array4<Set::Scalar> const &ksm = kap_s.array(mfi);
-                const Set::Scalar dx0 = DX[0], dx1 = DX[1];
-                const int N = NH, L = LH;
-                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                    Set::Scalar e0 = eh(i, j, k), wb = e0 * (1.0 - e0);
-                    if (wb < 1.0e-4) return;                     // tail: keep fallback
-#if AMREX_SPACEDIM == 2
-                    Set::Scalar gx = eh(i+1, j, k) - eh(i-1, j, k);
-                    Set::Scalar gy = eh(i, j+1, k) - eh(i, j-1, k);
-                    Set::Scalar H[3];
-                    bool ok = true;
-                    if (std::abs(gy) >= std::abs(gx))
-                    {   // normal ~ y: columns along y at i-1, i, i+1
-                        Set::Scalar elo = eh(i, j - N, k), ehi = eh(i, j + N, k);
-                        ok = (elo < 0.05 && ehi > 0.95) || (elo > 0.95 && ehi < 0.05);
-                        if (ok)
-                            for (int c = -1; c <= 1; ++c)
-                            {
-                                Set::Scalar s = 0.0;
-                                for (int m = -N; m <= N; ++m) s += eh(i + c * L, j + m, k);
-                                H[c + 1] = s * dx1;
-                            }
-                        if (ok)
-                        {
-                            Set::Scalar Hp  = (H[2] - H[0]) / (2.0 * L * dx0);
-                            Set::Scalar Hpp = (H[2] - 2.0 * H[1] + H[0]) / ((L * dx0) * (L * dx0));
-                            ksm(i, j, k) = -Hpp / std::pow(1.0 + Hp * Hp, 1.5);
-                        }
-                    }
-                    else
-                    {   // normal ~ x: columns along x at j-L, j, j+L
-                        Set::Scalar elo = eh(i - N, j, k), ehi = eh(i + N, j, k);
-                        ok = (elo < 0.05 && ehi > 0.95) || (elo > 0.95 && ehi < 0.05);
-                        if (ok)
-                            for (int c = -1; c <= 1; ++c)
-                            {
-                                Set::Scalar s = 0.0;
-                                for (int m = -N; m <= N; ++m) s += eh(i + m, j + c * L, k);
-                                H[c + 1] = s * dx0;
-                            }
-                        if (ok)
-                        {
-                            Set::Scalar Hp  = (H[2] - H[0]) / (2.0 * L * dx1);
-                            Set::Scalar Hpp = (H[2] - 2.0 * H[1] + H[0]) / ((L * dx1) * (L * dx1));
-                            ksm(i, j, k) = -Hpp / std::pow(1.0 + Hp * Hp, 1.5);
-                        }
-                    }
-#else
-                    // 3D: dominant axis by largest |central difference|; 3x3
-                    // column stack; total curvature (sum of principals) to
-                    // match the -div(n_hat) convention (R = 2/|kappa|).
-                    Set::Scalar g[3] = { eh(i+1,j,k) - eh(i-1,j,k),
-                                         eh(i,j+1,k) - eh(i,j-1,k),
-                                         eh(i,j,k+1) - eh(i,j,k-1) };
-                    int a = 0;
-                    if (std::abs(g[1]) > std::abs(g[a])) a = 1;
-                    if (std::abs(g[2]) > std::abs(g[a])) a = 2;
-                    const int u = (a + 1) % 3, v = (a + 2) % 3;
-                    const Set::Scalar DXa[3] = { dx0, dx1, DX[2] };
-                    auto E = [&](int du, int dv, int m) -> Set::Scalar {
-                        int off[3] = { 0, 0, 0 };
-                        off[u] = du; off[v] = dv; off[a] = m;
-                        return eh(i + off[0], j + off[1], k + off[2]);
-                    };
-                    Set::Scalar elo = E(0, 0, -N), ehi = E(0, 0, N);
-                    if (!((elo < 0.05 && ehi > 0.95) || (elo > 0.95 && ehi < 0.05))) return;
-                    Set::Scalar Hc[3][3];
-                    for (int du = -1; du <= 1; ++du)
-                        for (int dv = -1; dv <= 1; ++dv)
-                        {
-                            Set::Scalar s = 0.0;
-                            for (int m = -N; m <= N; ++m) s += E(du * L, dv * L, m);
-                            Hc[du + 1][dv + 1] = s * DXa[a];
-                        }
-                    const Set::Scalar Lu = L * DXa[u], Lv = L * DXa[v];
-                    Set::Scalar hu  = (Hc[2][1] - Hc[0][1]) / (2.0 * Lu);
-                    Set::Scalar hv  = (Hc[1][2] - Hc[1][0]) / (2.0 * Lv);
-                    Set::Scalar huu = (Hc[2][1] - 2.0 * Hc[1][1] + Hc[0][1]) / (Lu * Lu);
-                    Set::Scalar hvv = (Hc[1][2] - 2.0 * Hc[1][1] + Hc[1][0]) / (Lv * Lv);
-                    Set::Scalar huv = (Hc[2][2] - Hc[0][2] - Hc[2][0] + Hc[0][0]) / (4.0 * Lu * Lv);
-                    ksm(i, j, k) = -(huu * (1.0 + hv * hv) + hvv * (1.0 + hu * hu) - 2.0 * huv * hu * hv)
-                                   / std::pow(1.0 + hu * hu + hv * hv, 1.5);
-#endif
-                });
-            }
-            kap_s.FillBoundary(geom[lev].periodicity());
-            fill_phys_ghosts(kap_s);
-        }
-
-        // (b) TANGENTIAL AVERAGING of the eta-derived kappa: interface-weighted
-        // box-average passes.  The band weight eta(1-eta) concentrates each
-        // average on the interface sheet, so repeated passes propagate kappa
-        // information ALONG the band -- shells vary slowly along the surface,
-        // so this recovers the few-%% pointwise accuracy the narrow Marmottant
-        // elastic window (R_buck..R_rupt ~ +-10%% in kappa) demands.  Radial
-        // mixing across the band biases kappa by only ~(band/2R)^2.
-        for (int pass = 0; pass < marmottant_kappa_smooth_iters; ++pass)
-        {
-            amrex::MultiFab tmp(ba, dm, 1, ng);
-            for (amrex::MFIter mfi(kap_s, false); mfi.isValid(); ++mfi)
-            {
-                const amrex::Box &bx = mfi.validbox();
-                amrex::Array4<const Set::Scalar> const &ks = kap_s.const_array(mfi);
-                amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
-                amrex::Array4<Set::Scalar> const &t = tmp.array(mfi);
-                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                    Set::Scalar sw = 0.0, swk = 0.0;
-                    for (int dj = -1; dj <= 1; ++dj)
-                        for (int di = -1; di <= 1; ++di)
-                        {
-#if AMREX_SPACEDIM == 3
-                            for (int dk = -1; dk <= 1; ++dk) {
-                                Set::Scalar e = et(i+di,j+dj,k+dk); Set::Scalar w = e*(1.0-e);
-                                sw += w; swk += w*ks(i+di,j+dj,k+dk);
-                            }
-#else
-                            Set::Scalar e = et(i+di,j+dj,k); Set::Scalar w = e*(1.0-e);
-                            sw += w; swk += w*ks(i+di,j+dj,k);
-#endif
-                        }
-                    t(i, j, k) = (sw > 1.0e-12) ? swk / sw : ks(i, j, k); // weighted; bulk -> unchanged
-                });
-            }
-            amrex::MultiFab::Copy(kap_s, tmp, 0, 0, 1, 0);
-            kap_s.FillBoundary(geom[lev].periodicity());
-            fill_phys_ghosts(kap_s);
-        }
-
-        // Local Marmottant sigma(R) from the de-noised curvature.  Computed on
-        // the GROWN box into sig_eff_mf (1 ghost) so Omega below can be built
-        // in the ghost ring; kappas_mf keeps the valid-cell diagnostics.
-        sig_eff_mf.define(ba, dm, 1, ng);
+        sig_eff_mf.define(ba, dm, 1, 1);
         sig_eff_mf.setVal(0.0);
-        const Set::Scalar Rb = marmottant_R_buckling, chi = marmottant_chi;
-        const Set::Scalar sbrk = marmottant_sigma_break, sigw = sigma, small_ = small;
-        const Set::Scalar dm1 = (Set::Scalar)(AMREX_SPACEDIM - 1);
-        for (amrex::MFIter mfi(kap_s, false); mfi.isValid(); ++mfi)
+
+        const Set::Scalar chi_ = marmottant_chi, Gb = marmottant_Gamma_buck;
+        const Set::Scalar sbrk = marmottant_sigma_break, sigw = sigma;
+        for (amrex::MFIter mfi(sig_eff_mf, false); mfi.isValid(); ++mfi)
         {
             const amrex::Box &vbx = mfi.validbox();
-            const amrex::Box gbx = mfi.growntilebox(1);
-            amrex::Array4<const Set::Scalar> const &ks = kap_s.const_array(mfi);
+            const amrex::Box gbx  = mfi.growntilebox(1);
             amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
+            amrex::Array4<const Set::Scalar> const &cs = shell_mf[lev]->const_array(mfi);
+            amrex::Array4<Set::Scalar> const &sg  = sig_eff_mf.array(mfi);
+            amrex::Array4<Set::Scalar> const &Gm  = Gamma_mf[lev]->array(mfi);
             amrex::Array4<Set::Scalar> const &kap = kappas_mf[lev]->array(mfi);
-            amrex::Array4<Set::Scalar> const &sg = sig_eff_mf.array(mfi);
             amrex::ParallelFor(gbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                Set::Scalar e = et(i, j, k), w = e * (1.0 - e);
-                Set::Scalar kt = ks(i, j, k), se = 0.0;
-                // Band gate at 1e-12 (was 1e-6): sigma_eff now decays smoothly
-                // through the exponential tail of the tanh band instead of
-                // truncating Omega with a hard jump at w = 1e-6, which the
-                // centered div(Omega) rectified into a spurious force ring at
-                // the band edge.  kappa_s stays well-defined in the tail --
-                // the window average is dominated by the nearby strong-band
-                // cells (window weight sw >= w > 1e-12).
-                if (w > 1.0e-12) // interface band (incl. tail)
+                Set::Scalar gem = Numeric::Gradient(et, i, j, k, 0, DX).lpNorm<2>();
+                Set::Scalar se = 0.0, G = 0.0;
+                // Gate on |grad eta|: off the interface there is no shell and no
+                // area to normalise by.  Omega is identically zero there anyway.
+                if (gem > 1.0e-10)
                 {
-                    // SIGNED effective radius R = -(d-1)/kappa (diffuse-Marmottant
-                    // writeup Eq. 4).  With eta=0 inside the bubble, grad(eta)
-                    // points outward and kappa = -div(n_hat) < 0 on a CONVEX
-                    // patch -> R > 0 -> elastic/ruptured branches as before.
-                    // A locally CONCAVE (inverted/wrinkled) patch has kappa > 0
-                    // -> R < 0 <= R_buck -> buckled, sigma = 0: local buckling
-                    // of compressed shell patches, which abs(kappa) discarded.
-                    // Sign-preserving regularization keeps |denom| >= small_.
-                    Set::Scalar R = -dm1 / (kt + ((kt >= 0.0) ? small_ : -small_));
-                    if (R > Rb) { Set::Scalar el = chi * (R * R / (Rb * Rb) - 1.0); se = (el >= sbrk) ? sigw : el; }
+                    G = cs(i, j, k) / gem;             // areal shell density
+                    if (G > 0.0 && G < Gb)             // stretched -> elastic branch
+                    {
+                        Set::Scalar el = chi_ * (Gb / G - 1.0);
+                        se = (el >= sbrk) ? sigw : el;
+                    }
+                    // G >= Gb: compressed past buckling -> sigma = 0 (se stays 0)
                 }
-                sg(i, j, k) = se;         // sigma_eff(x)  (used by Omega below; carries ghosts)
+                sg(i, j, k) = se;
                 if (vbx.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
                 {
-                    kap(i, j, k, 1) = kt; // kappa_s  (de-noised curvature; plottable)
-                    kap(i, j, k, 2) = se; // sigma_eff diagnostic (overwritten below after smoothing)
+                    Gm(i, j, k)     = G;
+                    kap(i, j, k, 2) = se;   // sigma_eff diagnostic (plottable)
                 }
             });
         }
-
-        // (a) SIGMA_EFF SMOOTHING after classification.  The piecewise
-        // sigma(R) map saturates hard at 0 (buckled) and sigma_water
-        // (ruptured), so residual kappa scatter produces a cell-scale
-        // PATCHWORK of tension.  The momentum force div(Omega) rectifies
-        // those jumps into parasitic currents that re-roughen eta -- the
-        // measured noise feedback loop.  Interface-weighted box passes on
-        // sigma_eff give Omega a smooth tension field (the classification
-        // itself is untouched); bulk cells keep their value (sigma_eff = 0).
-        for (int pass = 0; pass < marmottant_sigma_smooth_iters; ++pass)
-        {
-            amrex::MultiFab tmp(ba, dm, 1, ng);
-            for (amrex::MFIter mfi(sig_eff_mf, false); mfi.isValid(); ++mfi)
-            {
-                const amrex::Box &bx = mfi.validbox();
-                amrex::Array4<const Set::Scalar> const &sg = sig_eff_mf.const_array(mfi);
-                amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
-                amrex::Array4<Set::Scalar> const &t = tmp.array(mfi);
-                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                    Set::Scalar sw = 0.0, sws = 0.0;
-                    for (int dj = -1; dj <= 1; ++dj)
-                        for (int di = -1; di <= 1; ++di)
-                        {
-#if AMREX_SPACEDIM == 3
-                            for (int dk = -1; dk <= 1; ++dk) {
-                                Set::Scalar e = et(i+di,j+dj,k+dk); Set::Scalar w = e*(1.0-e);
-                                sw += w; sws += w*sg(i+di,j+dj,k+dk);
-                            }
-#else
-                            Set::Scalar e = et(i+di,j+dj,k); Set::Scalar w = e*(1.0-e);
-                            sw += w; sws += w*sg(i+di,j+dj,k);
-#endif
-                        }
-                    t(i, j, k) = (sw > 1.0e-12) ? sws / sw : sg(i, j, k);
-                });
-            }
-            amrex::MultiFab::Copy(sig_eff_mf, tmp, 0, 0, 1, 0);
-            sig_eff_mf.FillBoundary(geom[lev].periodicity());
-            fill_phys_ghosts(sig_eff_mf);
-        }
-        // refresh the plottable diagnostic with the SMOOTHED tension Omega sees
-        amrex::MultiFab::Copy(*kappas_mf[lev], sig_eff_mf, 0, 2, 1, 0);
+        // Interior/periodic ghosts from neighbours; physical-face ghosts keep the
+        // values computed on the grown box above.
+        sig_eff_mf.FillBoundary(geom[lev].periodicity());
     }
 
     // ------------------------------------------------------------
@@ -1735,6 +1460,8 @@ Hydro2::RHS(int lev,
         Set::Patch<Set::Scalar> M_rhs       = M_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> E_rhs       = E_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> eta_rhs     = eta_rhs_mf.array(mfi);
+        Set::Patch<Set::Scalar> shell_rhs   = shell_rhs_mf.array(mfi);
+        Set::Patch<const Set::Scalar> shell = shell_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> E0_rhs      = E0_rhs_mf.array(mfi);    // per-phase internal energy
         Set::Patch<Set::Scalar> E1_rhs      = E1_rhs_mf.array(mfi);
 
@@ -2438,6 +2165,32 @@ Hydro2::RHS(int lev,
             eta_rhs(i, j, k) = eta_advect + eta_dot_Vap;
 
             // ------------------------------------------------------------
+            // SHELL row (Marmottant advected shell), c = Gamma|grad eta|:
+            //   d(c)/dt + div(c u) = 0
+            // NOTE this is the CONSERVATIVE divergence, unlike the eta row above.
+            // eta obeys D(alpha)/Dt = 0 (an advected indicator, hence the
+            // -div(alpha u) + alpha div(u) form); the shell obeys a genuine
+            // CONSERVATION law -- that is the whole point, since the shell is a
+            // finite amount of lipid that must not be created or destroyed when
+            // the interface stretches.  Same face-upwind values and same
+            // interface velocity S_M as eta, so the two stay co-located.
+            Set::Scalar c_face_xlo = (flux_xlo.u_interface > 0.0) ? shell(i - 1, j, k) : shell(i,     j, k);
+            Set::Scalar c_face_xhi = (flux_xhi.u_interface > 0.0) ? shell(i,     j, k) : shell(i + 1, j, k);
+            Set::Scalar c_face_ylo = (flux_ylo.u_interface > 0.0) ? shell(i, j - 1, k) : shell(i, j,     k);
+            Set::Scalar c_face_yhi = (flux_yhi.u_interface > 0.0) ? shell(i, j,     k) : shell(i, j + 1, k);
+            const Set::Scalar div_uC_x = (flux_xhi.u_interface * c_face_xhi
+                                        - flux_xlo.u_interface * c_face_xlo) / DX[0];
+            const Set::Scalar div_uC_y = (flux_yhi.u_interface * c_face_yhi
+                                        - flux_ylo.u_interface * c_face_ylo) / DX[1];
+#if AMREX_SPACEDIM == 3
+            Set::Scalar c_face_zlo = (flux_zlo.u_interface > 0.0) ? shell(i, j, k - 1) : shell(i, j, k);
+            Set::Scalar c_face_zhi = (flux_zhi.u_interface > 0.0) ? shell(i, j, k)     : shell(i, j, k + 1);
+            const Set::Scalar div_uC_z = (flux_zhi.u_interface * c_face_zhi
+                                        - flux_zlo.u_interface * c_face_zlo) / DX[2];
+#endif
+            shell_rhs(i, j, k) = -(AMREX_D_TERM(div_uC_x, + div_uC_y, + div_uC_z));
+
+            // ------------------------------------------------------------
             // Phase-mass rows (pure conservation, no source from h):
             //   d(alpha rho)_k / dt + div((alpha rho)_k u) = 0
             // ------------------------------------------------------------
@@ -2734,6 +2487,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     std::swap(rho_eta1_old_mf[lev],        rho_eta1_mf[lev]);
     std::swap(energy0_old_mf[lev],         energy0_mf[lev]);
     std::swap(energy1_old_mf[lev],         energy1_mf[lev]);
+    std::swap(shell_old_mf[lev],           shell_mf[lev]);
 
     // ------------------------------------------------------------
     // Time Integration
@@ -2756,6 +2510,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     solution_new.emplace_back(*eta_mf[lev].get(),               amrex::MakeType::make_alias, 0, 1);
     solution_new.emplace_back(*energy0_mf[lev].get(),           amrex::MakeType::make_alias, 0, 1);
     solution_new.emplace_back(*energy1_mf[lev].get(),           amrex::MakeType::make_alias, 0, 1);
+    solution_new.emplace_back(*shell_mf[lev].get(),             amrex::MakeType::make_alias, 0, 1);
 
     amrex::Vector<amrex::MultiFab> solution_old;
     solution_old.emplace_back(*rho_eta0_old_mf[lev].get(),      amrex::MakeType::make_alias, 0, 1);
@@ -2765,6 +2520,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     solution_old.emplace_back(*eta_old_mf[lev].get(),           amrex::MakeType::make_alias, 0, 1);
     solution_old.emplace_back(*energy0_old_mf[lev].get(),       amrex::MakeType::make_alias, 0, 1);
     solution_old.emplace_back(*energy1_old_mf[lev].get(),       amrex::MakeType::make_alias, 0, 1);
+    solution_old.emplace_back(*shell_old_mf[lev].get(),         amrex::MakeType::make_alias, 0, 1);
 
     amrex::TimeIntegrator timeintegrator(solution_new, time);
 
@@ -2772,11 +2528,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                                amrex::Vector<amrex::MultiFab> &rhs_mf,
                                amrex::Vector<amrex::MultiFab> &solution_mf,
                                const Set::Scalar time) {
-        // rhs_mf:      [0]=rho_eta0_rhs, [1]=rho_eta1_rhs, [2]=M_rhs, [3]=E_rhs, [4]=eta_rhs, [5]=E0_rhs, [6]=E1_rhs
-        // solution_mf: [0]=rho_eta0,     [1]=rho_eta1,     [2]=M,     [3]=E,     [4]=eta,     [5]=E0,     [6]=E1
+        // rhs_mf:      [0]=rho_eta0_rhs, [1]=rho_eta1_rhs, [2]=M_rhs, [3]=E_rhs, [4]=eta_rhs, [5]=E0_rhs, [6]=E1_rhs, [7]=shell_rhs
+        // solution_mf: [0]=rho_eta0,     [1]=rho_eta1,     [2]=M,     [3]=E,     [4]=eta,     [5]=E0,     [6]=E1,     [7]=shell
         RHS(lev, time,
-            rhs_mf[0], rhs_mf[1], rhs_mf[2], rhs_mf[3], rhs_mf[4], rhs_mf[5], rhs_mf[6],
-            solution_mf[0], solution_mf[1], solution_mf[2], solution_mf[3], solution_mf[4], solution_mf[5], solution_mf[6]);
+            rhs_mf[0], rhs_mf[1], rhs_mf[2], rhs_mf[3], rhs_mf[4], rhs_mf[5], rhs_mf[6], rhs_mf[7],
+            solution_mf[0], solution_mf[1], solution_mf[2], solution_mf[3], solution_mf[4], solution_mf[5], solution_mf[6], solution_mf[7]);
     });
 
     timeintegrator.set_post_stage_action([&](amrex::Vector<amrex::MultiFab> &stage_mf, Set::Scalar time) {
@@ -2788,6 +2544,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         amrex::MultiFab::Copy(*eta_mf[lev],            stage_mf[4], 0, 0, 1,              nghost);
         amrex::MultiFab::Copy(*energy0_mf[lev],        stage_mf[5], 0, 0, 1,              nghost);
         amrex::MultiFab::Copy(*energy1_mf[lev],        stage_mf[6], 0, 0, 1,              nghost);
+        amrex::MultiFab::Copy(*shell_mf[lev],          stage_mf[7], 0, 0, 1,              nghost);
 
         // Clamp eta in domain prior to ghost fill (state can drift slightly outside [0,1])
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
@@ -2810,6 +2567,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         amrex::MultiFab::Copy(stage_mf[4], *eta_mf[lev],            0, 0, 1,              nghost);
         amrex::MultiFab::Copy(stage_mf[5], *energy0_mf[lev],        0, 0, 1,              nghost);
         amrex::MultiFab::Copy(stage_mf[6], *energy1_mf[lev],        0, 0, 1,              nghost);
+        amrex::MultiFab::Copy(stage_mf[7], *shell_mf[lev],          0, 0, 1,              nghost);
 
     });
 
@@ -4307,6 +4065,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         FillPatch(lev, time, momentum_mf,        *momentum_mf[lev],       *momentum_bc, 0);
         FillPatch(lev, time, energy_per_vol_mf,  *energy_per_vol_mf[lev], *energy_bc,   0);
         FillPatch(lev, time, eta_mf,             *eta_mf[lev],            *eta_bc,      0);
+        FillPatch(lev, time, shell_mf,           *shell_mf[lev],          *eta_bc,      0);
         FillPatch(lev, time, energy0_mf,         *energy0_mf[lev],        *energy_bc,   0);
         FillPatch(lev, time, energy1_mf,         *energy1_mf[lev],        *energy_bc,   0);
     }
@@ -5345,6 +5104,49 @@ void Hydro2::RelaxAndReinit(int lev)
     // Optional Newton diagnostic.  Per cell write {iter_count, |f(p_final)|};
     // after the ParallelFor reduce to {max iters, max residual, unconverged
     // cell count} and print a one-line summary.
+    // ------------------------------------------------------------------
+    // SHELL / Gamma PRESERVATION across pressure relaxation.
+    //
+    // The relaxation below rewrites alpha_1 (= eta) thermodynamically: it drives
+    // the two phase pressures to equilibrium by moving volume between phases.
+    // NO MATERIAL MOVES.  But the shell density c = Gamma|grad eta| is defined
+    // against the band profile, so a change in |grad eta| that does not
+    // correspond to interface motion would silently change
+    // Gamma = c/|grad eta| -- i.e. pressure relaxation would appear to
+    // stretch or compress the lipid monolayer, which is unphysical.
+    //
+    // So we snapshot Gamma BEFORE the relaxation and restore it AFTER by
+    // rescaling c with the SAME discrete gradient operator:
+    //
+    //     c_new = Gamma_old * |grad eta|_new
+    //
+    // The invariant preserved is the areal density Gamma (and hence
+    // int Gamma dA, the physical shell mass), not int c dV -- which is correct,
+    // since int c dV = int Gamma |grad eta| dV = int Gamma dA changes only when
+    // the surface area genuinely changes.
+    // ------------------------------------------------------------------
+    std::unique_ptr<amrex::MultiFab> Gamma_snapshot;
+    if (marmottant)
+    {
+        const Set::Scalar *DXr = geom[lev].CellSize();
+        Gamma_snapshot = std::make_unique<amrex::MultiFab>(
+            eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, 0);
+        Gamma_snapshot->setVal(0.0);
+        eta_mf[lev]->FillBoundary(geom[lev].periodicity());
+        for (amrex::MFIter mfi(*Gamma_snapshot, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
+            amrex::Array4<const Set::Scalar> const &cs = shell_mf[lev]->const_array(mfi);
+            amrex::Array4<Set::Scalar> const &Gs = Gamma_snapshot->array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Scalar gm = Numeric::Gradient(et, i, j, k, 0, DXr).lpNorm<2>();
+                // Sentinel < 0 marks "no band here" so the restore below leaves c alone.
+                Gs(i, j, k) = (gm > 1.0e-10) ? cs(i, j, k) / gm : -1.0;
+            });
+        }
+    }
+
     const bool diag_on = true; //(relax_diag != 0.0);
     std::unique_ptr<amrex::MultiFab> diag_mf;
     if (diag_on)
@@ -5610,6 +5412,30 @@ void Hydro2::RelaxAndReinit(int lev)
             // rho_eta{0,1}, momentum, energy_per_vol are NOT touched
             // (they are conserved through relaxation by construction).
         });
+    }
+
+    // ----------------------------------------------------------------
+    // Restore Gamma: c_new = Gamma_old * |grad eta|_new  (see the snapshot
+    // above).  Pressure relaxation moved volume, not lipid, so the areal
+    // shell density must come through unchanged.
+    // ----------------------------------------------------------------
+    if (marmottant && Gamma_snapshot)
+    {
+        const Set::Scalar *DXr = geom[lev].CellSize();
+        eta_mf[lev]->FillBoundary(geom[lev].periodicity());
+        for (amrex::MFIter mfi(*Gamma_snapshot, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
+            amrex::Array4<const Set::Scalar> const &Gs = Gamma_snapshot->const_array(mfi);
+            amrex::Array4<Set::Scalar> const &cs = shell_mf[lev]->array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                if (Gs(i, j, k) < 0.0) return;   // no band before relaxation
+                Set::Scalar gm = Numeric::Gradient(et, i, j, k, 0, DXr).lpNorm<2>();
+                if (gm > 1.0e-10) cs(i, j, k) = Gs(i, j, k) * gm;
+            });
+        }
+        shell_mf[lev]->FillBoundary(geom[lev].periodicity());
     }
 
     // ----------------------------------------------------------------

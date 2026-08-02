@@ -131,13 +131,15 @@ protected:
         amrex::MultiFab &eta_rhs_mf,
         amrex::MultiFab &E0_rhs_mf,
         amrex::MultiFab &E1_rhs_mf,
+        amrex::MultiFab &shell_rhs_mf,
         const amrex::MultiFab &rho_eta0_mf_in,
         const amrex::MultiFab &rho_eta1_mf_in,
         const amrex::MultiFab &M_mf,
         const amrex::MultiFab &E_mf,
         const amrex::MultiFab &eta_mf_in,
         const amrex::MultiFab &E0_mf_in,
-        const amrex::MultiFab &E1_mf_in);
+        const amrex::MultiFab &E1_mf_in,
+        const amrex::MultiFab &shell_mf_in);
 
     // Post-stage pressure relaxation + reinitialization (Saurel-Petitpas-Berry
     // 2009 §3.5 / Schmidmayer 2020 §3.3).  Runs in-place on the working
@@ -271,6 +273,12 @@ protected:
     //Set::Field<Set::Scalar> eta_mf_in;
     Set::Field<Set::Scalar> etadot_mf;
     Set::Field<Set::Scalar> eta_old_mf;
+
+    // Advected shell density  c = Gamma |grad eta|  (Marmottant, see below).
+    // An 8th RK primary; conserved by  d(c)/dt + div(c u) = 0.
+    Set::Field<Set::Scalar> shell_mf;
+    Set::Field<Set::Scalar> shell_old_mf;
+    Set::Field<Set::Scalar> Gamma_mf;      // diagnostic: c/|grad eta| (plottable)
     Set::Field<Set::Scalar> hess_eta_mf;
     Set::Field<Set::Scalar> n_hat_mf;
 
@@ -362,22 +370,35 @@ protected:
     Set::Scalar epsilon = NAN;
 
     // --- Marmottant (2005) coated-bubble surface tension (toggle: marmottant=1) ---
-    // An ADD-ON to the existing CSF surface tension: when on, the constant sigma is
-    // replaced by the LOCAL Marmottant piecewise sigma(R(x)), with the radius taken
-    // per-cell from the SMOOTHED-eta curvature (Brackbill de-noising) so non-spherical
-    // and multi-bubble shells are captured.  `sigma` (above) is reused as sigma_water
-    // (the post-rupture / bare gas-water tension).
-    // Ref: Marmottant et al., JASA 118 (2005) 3499, Eq.(4); Brackbill et al. JCP 100 (1992) 335.
-    int marmottant = 0;                       // 0 = constant sigma; 1 = Marmottant sigma(R(x))
-    Set::Scalar marmottant_R_buckling = NAN;  // R_buckling: below this, sigma=0 (buckled)
+    // ADVECTED-SHELL formulation.  The shell tension is a function of the lipid
+    // monolayer's AREAL STRAIN -- a material property carried BY the interface --
+    // not of the local curvature.  We therefore transport a conserved shell
+    // density  c = Gamma |grad eta|  (shell material per unit VOLUME):
+    //
+    //     d(c)/dt + div(c u) = 0            (plain conservation law)
+    //     Gamma  = c / |grad eta|           (shell material per unit AREA)
+    //     sigma  = chi (Gamma_buck/Gamma - 1)      [elastic]
+    //            = 0                                [buckled,  Gamma >= Gamma_buck]
+    //            = sigma_water                      [ruptured, elastic >= sigma_break]
+    //
+    // Gamma_buck/Gamma is exactly Marmottant's area ratio A/A_buck, so this is
+    // the same sigma(A) law -- but with A carried by the shell instead of
+    // re-derived from curvature every step.  Consequences vs. the old sigma(R):
+    //   * no curvature anywhere in the tension -> nothing to amplify or filter
+    //   * shell material is conserved, so stretching genuinely dilutes Gamma and
+    //     the elastic/rupture branches are reached for the right reason
+    //   * Gamma is uniform ACROSS the band by construction (c and |grad eta| share
+    //     the same profile), so the band cannot be split into "buckled" inner
+    //     cells and "elastic" outer cells the way sigma(R(x)) did
+    //   * nonspherical shells and multiple bubbles need no labelling
+    // `sigma` (above) is reused as sigma_water (post-rupture / bare tension).
+    // Ref: Marmottant et al., JASA 118 (2005) 3499, Eq.(4).
+    int marmottant = 0;                       // 0 = constant sigma; 1 = Marmottant sigma(Gamma)
+    Set::Scalar marmottant_R_buckling = NAN;  // R_buckling: shell buckles at this radius
     Set::Scalar marmottant_chi = NAN;         // chi: shell elastic modulus [N/m]
     Set::Scalar marmottant_sigma_break = NAN; // sigma_break-up: rupture tension (>= sigma_water)
-    int marmottant_eta_smooth_iters = 4;      // # box-average passes that de-noise eta before d/dx
-    int marmottant_kappa_smooth_iters = 8;    // # interface-weighted passes on kappa AFTER d/dx (tangential averaging)
-    int marmottant_height_function = 1;       // 1 = height-function curvature (column-integrated eta; noise-immune,
-                                              // Popinet 2009 style) with pointwise fallback; 0 = pointwise only
-    int marmottant_sigma_smooth_iters = 4;    // # interface-weighted passes on sigma_eff AFTER classification
-                                              // (severs the patchy-tension -> parasitic-current -> eta-noise loop)
+    Set::Scalar marmottant_R0 = NAN;          // reference radius: shell is initialized UNSTRAINED here
+    Set::Scalar marmottant_Gamma_buck = NAN;  // derived: (R0/R_buckling)^2, with Gamma_0 == 1
     Set::Scalar g = 9.81; // m/s^2
     // Set::Scalar R = 8.314; // [J]/[mol]-[K]
     Set::Scalar R = 8314.; // [J]/[kmol]-[K] - Probably more common to use
