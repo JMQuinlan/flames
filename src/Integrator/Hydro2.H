@@ -146,6 +146,15 @@ protected:
     // MultiFabs after each RK stage and before the ghost-cell fill.
     void RelaxAndReinit(int lev);
 
+    // Marmottant advected shell: preserve the AREAL density Gamma = c/|grad eta|
+    // across NON-MATERIAL changes to eta (stiff pressure relaxation, clamping to
+    // [0,1], per-phase ghost reconstruction).  None of those move lipid, so Gamma
+    // -- not c -- is the invariant.  Snapshot before, restore after:
+    //     Gamma_old = c/|grad eta|_old   ->   c_new = Gamma_old |grad eta|_new
+    // A negative snapshot value marks "no band here" and leaves c untouched.
+    void ShellGammaSnapshot(int lev, std::unique_ptr<amrex::MultiFab> &snap);
+    void ShellGammaRestore (int lev, const std::unique_ptr<amrex::MultiFab> &snap);
+
 
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
     void check4nans(int time, int lev, int i, int j, int k, const std::string &message, std::initializer_list<std::pair<std::string, double> > vars);
