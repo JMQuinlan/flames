@@ -107,7 +107,7 @@ cfl                     = 0.5
 geometry.prob_lo     = 0.0  0.0  0.0
 geometry.prob_hi     = 0.04 0.04 0.04
 geometry.is_periodic = 0 0 0
-stop_time            = 1.23e-2      # 1 drive period (T = 12.26 ms); ~150k steps at acoustic CFL
+stop_time            = 0.1
 
 ### ETA INITIAL CONDITIONS ###
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
