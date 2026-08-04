@@ -65,8 +65,8 @@ namespace Limiter
 struct Primitive
 {
     Set::Scalar alpha       = 0.0;  // alpha_1 (volume fraction of phase 0)
-    Set::Scalar alpha_rho_0 = 0.0;  // partial density 0  (= alpha_1 rho_1)
-    Set::Scalar alpha_rho_1 = 0.0;  // partial density 1  (= alpha_2 rho_2)
+    Set::Scalar alpha_rho_0 = 0.0;  // PURE density rho_1 (slot name legacy; see ToPrimitive)
+    Set::Scalar alpha_rho_1 = 0.0;  // PURE density rho_2 (slot name legacy; see ToPrimitive)
     Set::Scalar u           = 0.0;  // mixture velocity, normal component
     Set::Scalar v           = 0.0;  // mixture velocity, tangent component
     Set::Scalar w           = 0.0;  // mixture velocity, 2nd tangent (3D; 0 in 2D)
@@ -125,9 +125,22 @@ ToPrimitive(const Solver::Local::FluidRiemann::State &s, Set::Scalar /*small*/)
     Primitive p;
     p.alpha       = std::min(std::max(s.alpha, alpha_floor), 1.0 - alpha_floor);
     Set::Scalar a2 = 1.0 - p.alpha;
-    // Partial densities: NO division, NO floor.  Conservative quantities.
-    p.alpha_rho_0 = s.alpha_rho_0;
-    p.alpha_rho_1 = s.alpha_rho_1;
+    // Mass channel: reconstruct PURE densities rho_k = (alpha rho)_k/alpha_k,
+    // NOT the partial densities.  The partial densities jump 1000x across a
+    // few band cells; component-wise high-order reconstruction of that
+    // profile under/overshoots, the post-stage positivity clip converts each
+    // undershoot into CREATED MASS, and a mass "snowplow" parks at any
+    // moving band edge (UT_ADV: +150% total gas mass in 8 ms of pure
+    // translation; first-order Godunov, which cannot overshoot, is exact to
+    // 0.00%).  The pure densities are ~constant fields (all tanh steepness
+    // lives in alpha, which is bounded), so the reconstructed product
+    // alpha_face * rho_pure_face is smooth, non-negative by construction,
+    // and telescoping-consistent.  Slot names kept (alpha_rho_*) so the
+    // concrete limiters need no changes; ToState rebuilds the partials with
+    // the SAME clamped alpha, making the Godunov (cell-center) roundtrip an
+    // exact identity.
+    p.alpha_rho_0 = s.alpha_rho_0 / p.alpha;   // rho_0 pure (alpha clamped >= 1e-12)
+    p.alpha_rho_1 = s.alpha_rho_1 / a2;        // rho_1 pure
     // Mixture velocity (one velocity for all phases in the equilibrium-
     // velocity 6-eq model; Sch20 eq. 13).
     Set::Scalar rho = s.alpha_rho_0 + s.alpha_rho_1;
@@ -164,12 +177,13 @@ ToState(const Primitive &p, Set::Scalar /*small*/)
     Solver::Local::FluidRiemann::State s;
     Set::Scalar a1 = std::min(std::max(p.alpha, alpha_floor), 1.0 - alpha_floor);
     Set::Scalar a2 = 1.0 - a1;
-    // Limiter overshoot can drive partial densities slightly negative;
-    // clamp to 0 (NOT to small=1e-8 -- that re-introduces the floor
-    // distortion in pure-other-phase cells).
+    // Rebuild partial densities from the reconstructed PURE densities and
+    // the clamped face alpha (see ToPrimitive): non-negative by
+    // construction, and an exact roundtrip when the limiter returns the
+    // cell-center value (both directions use the same clamped alpha).
     s.alpha       = a1;
-    s.alpha_rho_0 = std::max(p.alpha_rho_0, 0.0);
-    s.alpha_rho_1 = std::max(p.alpha_rho_1, 0.0);
+    s.alpha_rho_0 = a1 * std::max(p.alpha_rho_0, 0.0);
+    s.alpha_rho_1 = a2 * std::max(p.alpha_rho_1, 0.0);
     Set::Scalar rho = s.alpha_rho_0 + s.alpha_rho_1;
     s.M_normal    = rho * p.u;
     s.M_tangent   = rho * p.v;
