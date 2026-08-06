@@ -95,6 +95,12 @@ NSCBC4::BoundaryParams NSCBC4::ParseFace(IO::ParmParse &pp, std::string face_nam
     // Parse outflow parameters
     pp.query((face_name + ".sigma").c_str(), params.sigma);
 
+    // Parse the time-dependent pressure drive (acoustic forcing through the
+    // incoming characteristic; see BoundaryParams for semantics).
+    pp.query((face_name + ".drive_amp").c_str(),   params.drive_amp);
+    pp.query((face_name + ".drive_omega").c_str(), params.drive_omega);
+    pp.query((face_name + ".drive_phase").c_str(), params.drive_phase);
+
     // Parse reference length
     pp.query((face_name + ".L_ref").c_str(), params.L_ref);
 

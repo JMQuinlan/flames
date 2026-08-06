@@ -50,6 +50,12 @@ public:
         Set::Scalar relax_T = 0.3;
         Set::Scalar beta = 0.6;
         Set::Scalar sigma = 0.25;
+
+        // Time-dependent pressure drive (see NSCBC4::BoundaryParams -- same
+        // semantics): p_target_eff(t) = target_p + drive_amp*sin(drive_omega*t + drive_phase).
+        Set::Scalar drive_amp   = 0.0;
+        Set::Scalar drive_omega = 0.0;
+        Set::Scalar drive_phase = 0.0;
         Set::Scalar L_ref = 1.0;
     };
 
@@ -128,6 +134,19 @@ public:
 #if AMREX_SPACEDIM == 3
         BoundaryParams params_zlo_local = params_zlo;
         BoundaryParams params_zhi_local = params_zhi;
+#endif
+        // Apply the time-dependent pressure drive to the per-call effective
+        // targets (all downstream face/corner logic reads these locals).
+        auto apply_drive = [time](BoundaryParams &prm) {
+            prm.target_p += prm.drive_amp * std::sin(prm.drive_omega * time + prm.drive_phase);
+        };
+        apply_drive(params_xlo_local);
+        apply_drive(params_xhi_local);
+        apply_drive(params_ylo_local);
+        apply_drive(params_yhi_local);
+#if AMREX_SPACEDIM == 3
+        apply_drive(params_zlo_local);
+        apply_drive(params_zhi_local);
 #endif
 
         // =========================================================================
