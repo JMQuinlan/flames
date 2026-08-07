@@ -2267,6 +2267,21 @@ Hydro2::RHS(int lev,
             const Set::Scalar div_s_u = gradu.trace() - n_hat.dot(gradu * n_hat);
             shell_rhs(i, j, k) = -u_dot_gradG - shell(i, j, k) * div_s_u;
 
+            // NOTE: a surface-diffusion term  + D_s grad_s^2(Gamma)  (Stone 1990)
+            // was implemented and tested here, then removed.  It does not fix the
+            // Gamma feedback instability.  Measured at eps = 4 finest cells / 4 AMR
+            // levels, sigma spread at t = 0.5 ms:
+            //   tangential grad_s^2:  D_s = 0 / 1e-5 / 1e-4 / 1e-3 -> 226 / 225 / 204 / 192 %
+            //   full Laplacian:       D_s = 1e-4 / 1e-3 / 1e-2     -> 194 / 168 / 73 %
+            // Only D_s = 1e-2 bites, and that sits AT the explicit diffusion limit
+            // (dt_max = dx^2/4D_s = 9.5e-7 vs the subcycled fine dt of 6.9e-7) while
+            // still growing exponentially -- delayed, not stabilized, at a diffusivity
+            // ~10 orders above real lipid values.  The unstable modes live in the
+            // band-NORMAL degrees of freedom of Gamma, which are unphysical for a
+            // surface field; damping cannot fix a mode whose root cause is that the
+            // degree of freedom should not exist.
+
+
             // ------------------------------------------------------------
             // Phase-mass rows (pure conservation, no source from h):
             //   d(alpha rho)_k / dt + div((alpha rho)_k u) = 0
