@@ -112,7 +112,7 @@ stop_time            = 0.1
 ### ETA INITIAL CONDITIONS ###
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 1.28e-3    # ~ 2 cells across the band at level-1 finest (dx 6.25e-4)
+eta.ic.expression.constant.epsilon = 1.0 # 1.28e-3    # ~ 2 cells across the band at level-1 finest (dx 6.25e-4)
 eta.ic.expression.constant.R0      = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
