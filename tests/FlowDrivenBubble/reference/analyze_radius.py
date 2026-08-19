@@ -280,10 +280,25 @@ def extract_radius_history(out_dir):
             # CONSTANT offset while leaving the eta=0.5 crossing untouched
             # (the crossing takes the FIRST rise from the center) -- the
             # signature is a flat, too-large R_vol over an oscillating R_eta.
+            # frame-0 IC discriminator: a healthy IC has interior eta ~ 0
+            # (pure gas) and far-field eta ~ 1 (pure liquid).  A FLAT-0.5
+            # field (broken IC: the tanh smearing width failed to evaluate,
+            # tanh(x/inf) = 0 -> eta = 0.5 everywhere) shows interior ~ 0.5
+            # AND far-field ~ 0.5 -- and the run is NOT a bubble benchmark.
+            if not times:
+                inner = r < 0.5 * R0
+                if np.any(inner):
+                    ein = float(np.average(eta[inner], weights=vol[inner]))
+                    print(f"    [frame0] interior mean(eta) [r<0.5R0] = "
+                          f"{ein:.4f}  (healthy IC ~ 0; flat-0.5 broken IC "
+                          f"~ 0.5)")
             ff = r > 1.5 * R0
             if np.any(ff):
                 ff_gas = float(np.average(np.clip(1.0 - eta[ff], 0.0, 1.0),
                                           weights=vol[ff]))
+                if not times:
+                    print(f"    [frame0] far-field mean(eta) [r>1.5R0] = "
+                          f"{1.0 - ff_gas:.4f}  (healthy IC ~ 1)")
                 if ff_gas > 1.0e-3:
                     print(f"    [warn] {os.path.basename(pf)}: far-field "
                           f"mean(1-eta) = {ff_gas:.3e} at r > 1.5 R0 -- "
@@ -394,7 +409,25 @@ def render_shape_frames(out_dir, label, color):
                                     for l in SHAPE_LEVELS],
                         linestyles=["--" if abs(l - 0.5) > 1e-9 else "-"
                                     for l in SHAPE_LEVELS])
-        ax.clabel(cs, fmt="%.2g", fontsize=7, inline=True)
+        # Pin each contour label where the contour crosses the y = x
+        # diagonal: fixed, predictable label positions frame to frame
+        # (matplotlib's automatic placement wanders along the contour and
+        # makes the GIF jitter).  Levels that never cross the diagonal are
+        # left unlabeled.
+        diag = np.diagonal(eta_s)          # eta along y = x (FRB is square)
+        sdia = np.linspace(ext[0], ext[1], len(diag)) * np.sqrt(2.0)
+        manual_pos = []
+        for lvl in SHAPE_LEVELS:
+            cross = np.where(np.diff(np.sign(diag - lvl)) != 0)[0]
+            if len(cross) > 0:
+                i0 = cross[0]
+                frac = (lvl - diag[i0]) / (diag[i0 + 1] - diag[i0]
+                                           if diag[i0 + 1] != diag[i0] else 1.0)
+                s_lab = (sdia[i0] + frac * (sdia[i0 + 1] - sdia[i0])) / np.sqrt(2.0)
+                manual_pos.append((s_lab, s_lab))
+        if manual_pos:
+            ax.clabel(cs, fmt="%.2g", fontsize=7, inline=True,
+                      manual=manual_pos)
         # initial-radius reference circle
         th = np.linspace(0, np.pi / 2, 100)
         ax.plot(np.cos(th), np.sin(th), ls=":", color="0.35", lw=0.8)
