@@ -95,11 +95,6 @@ ETA_THRESHOLD = 0.5     # interface level for the contour radius
 N_RADIAL_BINS = 400     # radial bins for the angle-averaged eta(r) profile
 R_BIN_MAX     = 0.04    # outer radius of the binned profile [m] (= octant edge)
 
-# ===== DRIVE OVERLAY =====
-SHOW_DRIVE  = True            # overlay normalized drive sin(2 pi f t) (right axis)
-DRIVE_COLOR = "0.6"
-DRIVE_LW    = 1.0
-
 # ===== PLOT STYLING (publication knobs) =====
 FONT_SIZE_TITLE  = 16
 FONT_SIZE_LABEL  = 14
@@ -112,18 +107,29 @@ LINE_WIDTH_ETA = 1.5    # eta=0.5-radius curves (dashed)
 DPI        = 180
 FIG_WIDTH  = 11
 FIG_HEIGHT = 6.5
-LEGEND_LOC = "best"
+LEGEND_LOC = "upper left"
 
 # ===== AXIS LABELS / TITLE (every string the user might rephrase) =====
 TITLE_STR    = "Flow-Driven Bubble (3D octant): R(t)"
 XLABEL_STR   = r"$t / T_{drive}$"
 YLABEL_STR   = r"$R / R_0$"
-DRIVE_YLABEL = r"$(p_{wall} - p_\infty)/A$"
 LABEL_VOL    = "volume"       # appended to run label, e.g. "LowAmp -- volume"
 LABEL_ETA    = r"$\eta=0.5$"
 NONDIM_TIME   = True    # plot t / T_drive instead of t [s]
 NONDIM_RADIUS = True    # plot R / R0 instead of R [m]
 SAVE_NAME     = "FlowDrivenBubble_radius"
+
+# ===== BUBBLE-SHAPE GIF =====
+# For every plotfile, render the eta field on the z ~ 0 midplane slice (the
+# bubble cross-section through its center) with the eta = 0.5 contour
+# overlaid, write one PNG per frame into Images/ShapeFrames_<label>/ (pull
+# individual frames into figures from there), and assemble an animated GIF
+# in Images/ (one per run).
+SHAPE_GIF      = True
+SHAPE_RES      = 512          # slice raster resolution [px]
+SHAPE_CMAP     = "RdBu"       # eta colormap (gas red -> liquid blue)
+SHAPE_MS_PER_FRAME = 80       # GIF frame duration [ms]
+SHAPE_MAX_FRAMES   = 400      # safety cap (subsamples evenly if exceeded)
 
 # ============================================================================
 # ==========================  END CONFIGURATION  =============================
@@ -236,6 +242,21 @@ def extract_radius_history(out_dir):
                     R_c = rp[i - 1] + frac * (rp[i] - rp[i - 1])
             R_eta.append(R_c)
 
+            # ---- far-field gas-fraction diagnostic ----------------------
+            # A nonzero far-field (1 - eta) inflates the volume radius with a
+            # CONSTANT offset while leaving the eta=0.5 crossing untouched
+            # (the crossing takes the FIRST rise from the center) -- the
+            # signature is a flat, too-large R_vol over an oscillating R_eta.
+            ff = r > 1.5 * R0
+            if np.any(ff):
+                ff_gas = float(np.average(np.clip(1.0 - eta[ff], 0.0, 1.0),
+                                          weights=vol[ff]))
+                if ff_gas > 1.0e-3:
+                    print(f"    [warn] {os.path.basename(pf)}: far-field "
+                          f"mean(1-eta) = {ff_gas:.3e} at r > 1.5 R0 -- "
+                          f"R_vol is inflated by spurious far-field gas "
+                          f"(sym={_sym_factor(ds):.0f}, rawV={Vg:.3e})")
+
             times.append(float(ds.current_time))
         except Exception:
             n_skipped += 1
@@ -262,6 +283,85 @@ def print_extrema(label, t, R):
     print(f"    {label:<28s}: R_max/R0 = {R[j_max]/R0:.4f} "
           f"(t/T = {t[j_max]/T_DRIVE:.3f}),  "
           f"R_min/R0 = {R[j_min]/R0:.4f} (t/T = {t[j_min]/T_DRIVE:.3f})")
+
+
+# ============================================================================
+# BUBBLE-SHAPE FRAMES + GIF
+# ============================================================================
+
+def render_shape_frames(out_dir, label, color):
+    """Render the z ~ 0 midplane eta slice of every plotfile to a PNG frame
+    (Images/ShapeFrames_<label>/frame_NNNN.png) and assemble them into
+    Images/FlowDrivenBubble_shape_<label>.gif.  Skips corrupt plotfiles."""
+    import yt
+    from PIL import Image
+    yt.funcs.mylog.setLevel(40)
+
+    safe = "".join(c if c.isalnum() else "_" for c in label).strip("_")
+    frame_dir = os.path.join(IMG_DIR, f"ShapeFrames_{safe}")
+    os.makedirs(frame_dir, exist_ok=True)
+
+    pfs = _list_plotfiles(out_dir)
+    if len(pfs) > SHAPE_MAX_FRAMES:
+        idx = np.linspace(0, len(pfs) - 1, SHAPE_MAX_FRAMES).astype(int)
+        pfs = [pfs[i] for i in sorted(set(idx))]
+
+    entries = []   # (time, png_path)
+    for pf in pfs:
+        try:
+            ds = yt.load(pf)
+            lo = np.array(ds.domain_left_edge.to_value())
+            hi = np.array(ds.domain_right_edge.to_value())
+            # Slice just inside the domain at the bubble-center z plane
+            # (octant: CENTER sits on the zlo face -> nudge half a fine cell in).
+            dz_fine = (hi[2] - lo[2]) / (ds.domain_dimensions[2] * 2 ** ds.max_level)
+            z0 = max(CENTER[2], lo[2]) + 0.5 * dz_fine
+            slc = ds.slice(2, z0)
+            cen = ((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, z0)
+            wid = ((hi[0] - lo[0], "cm"), (hi[1] - lo[1], "cm"))
+            frb = slc.to_frb(width=wid[0], resolution=SHAPE_RES, center=cen,
+                             height=wid[1])
+            eta2d = np.array(frb["eta"])
+            entries.append((float(ds.current_time), eta2d, lo, hi))
+        except Exception:
+            continue
+
+    if len(entries) < 2:
+        print(f"  [shape] <2 usable frames for {label} -- GIF skipped")
+        return
+
+    entries.sort(key=lambda e: e[0])
+    png_paths = []
+    for i, (t, eta2d, lo, hi) in enumerate(entries):
+        fig, ax = plt.subplots(figsize=(6.0, 6.0))
+        ext = [lo[0] / R0, hi[0] / R0, lo[1] / R0, hi[1] / R0]
+        ax.imshow(eta2d, origin="lower", extent=ext, cmap=SHAPE_CMAP,
+                  vmin=0.0, vmax=1.0, interpolation="nearest")
+        ax.contour(np.linspace(ext[0], ext[1], eta2d.shape[1]),
+                   np.linspace(ext[2], ext[3], eta2d.shape[0]),
+                   eta2d, levels=[ETA_THRESHOLD], colors="k", linewidths=1.2)
+        # initial-radius reference circle
+        th = np.linspace(0, np.pi / 2, 100)
+        ax.plot(np.cos(th), np.sin(th), ls=":", color="0.35", lw=0.8)
+        ax.set_xlabel(r"$x / R_0$", fontsize=FONT_SIZE_LABEL)
+        ax.set_ylabel(r"$y / R_0$", fontsize=FONT_SIZE_LABEL)
+        ax.set_title(f"{label}   $t/T_{{drive}}$ = {t / T_DRIVE:.3f}",
+                     fontsize=FONT_SIZE_LABEL)
+        ax.set_aspect("equal")
+        ax.tick_params(labelsize=FONT_SIZE_TICK)
+        png = os.path.join(frame_dir, f"frame_{i:04d}.png")
+        fig.savefig(png, dpi=110, bbox_inches="tight")
+        plt.close(fig)
+        png_paths.append(png)
+
+    # assemble GIF (frames stay on disk for figure-pulling)
+    from PIL import Image
+    imgs = [Image.open(p).convert("P", palette=Image.ADAPTIVE) for p in png_paths]
+    gif = os.path.join(IMG_DIR, f"FlowDrivenBubble_shape_{safe}.gif")
+    imgs[0].save(gif, save_all=True, append_images=imgs[1:],
+                 duration=SHAPE_MS_PER_FRAME, loop=0)
+    print(f"  [shape] wrote {len(png_paths)} frames -> {frame_dir}")
+    print(f"  [shape] wrote {gif}")
 
 
 # ============================================================================
@@ -318,24 +418,13 @@ def main():
                 lw=LINE_WIDTH_ETA, alpha=0.8,
                 label=f"{run['label']} -- {LABEL_ETA}")
 
+        if SHAPE_GIF:
+            render_shape_frames(out_dir, run["label"], run["color"])
+
     if not any_loaded:
         print("\n  [info] nothing loaded -- run the sims first. No plot written.")
         return
 
-    # ---- normalized drive overlay (right axis) ----------------------------
-    if SHOW_DRIVE:
-        t_d = np.linspace(0.0, t_end_seen, 2000)
-        ax2 = ax.twinx()
-        ax2.plot(t_d / t_scale, np.sin(2.0 * np.pi * F_DRIVE * t_d),
-                 color=DRIVE_COLOR, lw=DRIVE_LW, ls=":", zorder=0)
-        ax2.set_ylabel(DRIVE_YLABEL, color=DRIVE_COLOR,
-                       fontsize=FONT_SIZE_LABEL)
-        ax2.tick_params(axis="y", colors=DRIVE_COLOR,
-                        labelsize=FONT_SIZE_TICK)
-        ax2.set_ylim(-1.05, 1.05)
-
-    ax.axhline(1.0 if NONDIM_RADIUS else R0, color="k", lw=0.5, ls=":",
-               alpha=0.4, label="initial $R_0$")
     ax.set_xlabel(XLABEL_STR if NONDIM_TIME else r"$t$ [s]",
                   fontsize=FONT_SIZE_LABEL)
     ax.set_ylabel(YLABEL_STR if NONDIM_RADIUS else r"$R$ [m]",
