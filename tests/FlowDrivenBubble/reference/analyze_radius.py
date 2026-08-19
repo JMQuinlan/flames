@@ -90,6 +90,23 @@ T_DRIVE  = 1.0 / F_DRIVE
 # integer (1, 2, 4, 8) to override the auto-detection.
 SYM_FACTOR = None
 
+# Volume-radius baseline:
+#   "R0"    -- normalize R_vol by the nominal R0 (absolute; the default
+#              behavior, correct when the plotfiles are trustworthy).
+#   "frame" -- normalize R_vol by ITS OWN value at plotfile index
+#              BASELINE_FRAME (0-based; 1 = the 2nd plotfile).  Use when the
+#              absolute volume integral carries a constant contamination
+#              (e.g. the INCLINE R_vol/R0 ~ 1.96 flat curve): the derived
+#              baseline is printed, and the normalized curve reveals the
+#              TRUE relative oscillation.  Discriminator, printed per run:
+#              if the volume contamination is MULTIPLICATIVE (a factor, e.g.
+#              a wrong symmetry count) the normalized volume amplitude will
+#              MATCH the eta-radius amplitude; if it is ADDITIVE (constant
+#              spurious volume) the normalized amplitude will be strongly
+#              DILUTED relative to the eta radius.
+R_VOL_BASELINE = "frame"
+BASELINE_FRAME = 1
+
 # ===== EXTRACTION KNOBS =====
 ETA_THRESHOLD = 0.5     # interface level for the contour radius
 N_RADIAL_BINS = 400     # radial bins for the angle-averaged eta(r) profile
@@ -130,6 +147,10 @@ SHAPE_RES      = 512          # slice raster resolution [px]
 SHAPE_CMAP     = "RdBu"       # eta colormap (gas red -> liquid blue)
 SHAPE_MS_PER_FRAME = 80       # GIF frame duration [ms]
 SHAPE_MAX_FRAMES   = 400      # safety cap (subsamples evenly if exceeded)
+SHAPE_LEVELS   = [0.01, 0.1, 0.5, 0.9, 0.99]   # eta contour levels drawn
+SHAPE_SMOOTH_CELLS = 0.75     # gaussian smoothing of the raster, in units of
+                              # FINEST-CELL widths (sub-cell -> kills the
+                              # pixel staircase without moving the contours)
 
 # ============================================================================
 # ==========================  END CONFIGURATION  =============================
@@ -209,6 +230,18 @@ def extract_radius_history(out_dir):
             # ---- 1) volume radius (symmetry-corrected) ------------------
             alpha_g = np.clip(1.0 - eta, 0.0, 1.0)
             Vg = float(np.sum(alpha_g * vol)) * _sym_factor(ds)
+            # First-frame forensics (always printed): every input to the
+            # volume radius, so a wrong R_vol(0) identifies its own cause.
+            if not times:
+                lev = np.array(reg["index", "grid_level"]).astype(int)
+                print(f"    [frame0] sym={_sym_factor(ds):.0f}  "
+                      f"rawV={Vg / _sym_factor(ds):.4e}  "
+                      f"domainV={float(np.sum(vol)):.4e}  "
+                      f"R_vol/R0={(3.0 * Vg / (4.0 * np.pi)) ** (1.0/3.0) / R0:.4f}")
+                for L in range(int(lev.max()) + 1):
+                    m = lev == L
+                    print(f"    [frame0] level {L}: cells={int(m.sum())}, "
+                          f"gasV={float(np.sum((alpha_g * vol)[m])):.4e}")
             if DIM == 2:
                 R_vol.append(np.sqrt(Vg / np.pi))
             else:
@@ -322,7 +355,8 @@ def render_shape_frames(out_dir, label, color):
             frb = slc.to_frb(width=wid[0], resolution=SHAPE_RES, center=cen,
                              height=wid[1])
             eta2d = np.array(frb["eta"])
-            entries.append((float(ds.current_time), eta2d, lo, hi))
+            n_fine = int(ds.domain_dimensions[0]) * 2 ** int(ds.max_level)
+            entries.append((float(ds.current_time), eta2d, lo, hi, n_fine))
         except Exception:
             continue
 
@@ -331,15 +365,36 @@ def render_shape_frames(out_dir, label, color):
         return
 
     entries.sort(key=lambda e: e[0])
+    try:
+        from scipy.ndimage import gaussian_filter
+    except Exception:
+        gaussian_filter = None
     png_paths = []
-    for i, (t, eta2d, lo, hi) in enumerate(entries):
+    for i, (t, eta2d, lo, hi, _n_fine_across) in enumerate(entries):
         fig, ax = plt.subplots(figsize=(6.0, 6.0))
         ext = [lo[0] / R0, hi[0] / R0, lo[1] / R0, hi[1] / R0]
-        ax.imshow(eta2d, origin="lower", extent=ext, cmap=SHAPE_CMAP,
-                  vmin=0.0, vmax=1.0, interpolation="nearest")
-        ax.contour(np.linspace(ext[0], ext[1], eta2d.shape[1]),
-                   np.linspace(ext[2], ext[3], eta2d.shape[0]),
-                   eta2d, levels=[ETA_THRESHOLD], colors="k", linewidths=1.2)
+        # Sub-cell gaussian smoothing: the FRB raster reproduces the finest
+        # cells as flat blocks; smoothing by ~0.75 cell widths (in px) turns
+        # the staircase into the smooth tanh band the data represents
+        # without displacing the contour positions.
+        eta_s = eta2d
+        if gaussian_filter is not None and SHAPE_SMOOTH_CELLS > 0:
+            # px per finest cell = SHAPE_RES / n_finest_cells_across
+            eta_s = gaussian_filter(eta2d, sigma=SHAPE_SMOOTH_CELLS
+                                    * SHAPE_RES / max(1, _n_fine_across),
+                                    mode="nearest")
+        xg = np.linspace(ext[0], ext[1], eta_s.shape[1])
+        yg = np.linspace(ext[2], ext[3], eta_s.shape[0])
+        ax.imshow(eta_s, origin="lower", extent=ext, cmap=SHAPE_CMAP,
+                  vmin=0.0, vmax=1.0, interpolation="bilinear", alpha=0.85)
+        # Band structure: thin lines at the outer levels, bold at eta = 0.5.
+        cs = ax.contour(xg, yg, eta_s, levels=SHAPE_LEVELS,
+                        colors=["0.25"] * len(SHAPE_LEVELS),
+                        linewidths=[0.7 if abs(l - 0.5) > 1e-9 else 1.8
+                                    for l in SHAPE_LEVELS],
+                        linestyles=["--" if abs(l - 0.5) > 1e-9 else "-"
+                                    for l in SHAPE_LEVELS])
+        ax.clabel(cs, fmt="%.2g", fontsize=7, inline=True)
         # initial-radius reference circle
         th = np.linspace(0, np.pi / 2, 100)
         ax.plot(np.cos(th), np.sin(th), ls=":", color="0.35", lw=0.8)
@@ -412,8 +467,30 @@ def main():
         print_extrema(f"{run['label']} ({LABEL_VOL})", t, R_v)
         print_extrema(f"{run['label']} ({LABEL_ETA})", t, R_e)
 
-        ax.plot(t / t_scale, R_v / r_scale, "-", color=run["color"],
-                lw=LINE_WIDTH_VOL, label=f"{run['label']} -- {LABEL_VOL}")
+        # Volume-curve baseline (see R_VOL_BASELINE): nominal R0, or the
+        # curve's own value at BASELINE_FRAME (2nd plotfile by default).
+        vol_base = r_scale
+        vol_lab = f"{run['label']} -- {LABEL_VOL}"
+        if R_VOL_BASELINE == "frame" and len(R_v) > BASELINE_FRAME:
+            vol_base = float(R_v[BASELINE_FRAME])
+            print(f"    derived volume baseline (frame {BASELINE_FRAME}): "
+                  f"R_vol = {vol_base:.6e} m = {vol_base / R0:.4f} R0"
+                  + ("  [!! absolute volume radius is off nominal by >2% -- "
+                     "see frame0 forensics]" if abs(vol_base / R0 - 1) > 0.02
+                     else ""))
+            vol_lab += " (self-normalized)"
+            # additive-vs-multiplicative discriminator
+            fin_v = np.isfinite(R_v); fin_e = np.isfinite(R_e)
+            if fin_v.sum() > 3 and fin_e.sum() > 3:
+                amp_v = (np.nanmax(R_v) - np.nanmin(R_v)) / vol_base
+                amp_e = (np.nanmax(R_e) - np.nanmin(R_e)) / R0
+                print(f"    osc amplitude: volume {amp_v:.4f} vs eta=0.5 "
+                      f"{amp_e:.4f} -> "
+                      + ("consistent (multiplicative offset, e.g. symmetry "
+                         "factor)" if amp_v > 0.5 * amp_e else
+                         "volume DILUTED (additive spurious volume)"))
+        ax.plot(t / t_scale, R_v / vol_base, "-", color=run["color"],
+                lw=LINE_WIDTH_VOL, label=vol_lab)
         ax.plot(t / t_scale, R_e / r_scale, "--", color=run["color"],
                 lw=LINE_WIDTH_ETA, alpha=0.8,
                 label=f"{run['label']} -- {LABEL_ETA}")
