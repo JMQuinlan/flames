@@ -187,25 +187,24 @@ def main(out_dir):
     # ---- automatic verdict hints ---------------------------------------
     print("\n--- verdict hints " + "-" * 42)
     band0 = (rows[0]["r099"] - rows[0]["r010"]) / R0
-    print(f"  H1 band width at t=0: {band0:.3f} R0 "
-          f"({'SUSPICIOUSLY THIN -- check epsilon vs finest dx'
-          if band0 < 0.05 else 'plausible'})")
+    v1 = "SUSPICIOUSLY THIN -- check epsilon vs finest dx" if band0 < 0.05 else "plausible"
+    print(f"  H1 band width at t=0: {band0:.3f} R0 ({v1})")
     m1d = (rows[-1]["m1"] / m10 - 1) * 100
-    print(f"  H2 gas-mass drift over run: {m1d:+.2f}% "
-          f"({'LEAKING' if abs(m1d) > 2 else 'conserved-ish'})")
+    v2 = "LEAKING" if abs(m1d) > 2 else "conserved-ish"
+    print(f"  H2 gas-mass drift over run: {m1d:+.2f}% ({v2})")
     bandN = (rows[-1]["r099"] - rows[-1]["r010"]) / R0
-    print(f"  H3 band width now: {bandN:.3f} R0 "
-          f"({'SMEARED >3x initial' if bandN > 3 * band0 else 'held'})")
+    v3 = "SMEARED >3x initial" if bandN > 3 * band0 else "held"
+    print(f"  H3 band width now: {bandN:.3f} R0 ({v3})")
     Ks = [rw["K"] for rw in rows if np.isfinite(rw["K"])]
     if Ks:
         j = int(np.argmax(np.abs(Ks)))
-        print(f"  H4 peak |K| = {abs(Ks[j]):.4f} "
-              f"({'AXIS-bulge (grid mode)' if Ks[j] > 0 else 'CORNER-bulge (drive anisotropy)'}"
-              f"; sphere ~ 2e-5)")
+        v4 = "AXIS-bulge (grid mode)" if Ks[j] > 0 else "CORNER-bulge (drive anisotropy)"
+        print(f"  H4 peak |K| = {abs(Ks[j]):.4f} ({v4}; sphere ~ 2e-5)")
     dts = [rw["dt_eff"] for rw in rows if np.isfinite(rw["dt_eff"])]
     if len(dts) > 2:
-        print(f"  H5 dt_eff: first {dts[0]:.3e} -> last {dts[-1]:.3e} "
-              f"({'STRANGLING (x%.0f)' % (dts[0]/dts[-1]) if dts[-1] < dts[0]/3 else 'stable'})")
+        v5 = ("STRANGLING (x%.0f)" % (dts[0] / dts[-1])
+              if dts[-1] < dts[0] / 3 else "stable")
+        print(f"  H5 dt_eff: first {dts[0]:.3e} -> last {dts[-1]:.3e} ({v5})")
     print("-" * 60)
 
 
