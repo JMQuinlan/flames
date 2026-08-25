@@ -204,6 +204,32 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         
         // Newton diagnostic for stiff pressure relaxation.
         pp_query_default("relax_diag", value.relax_diag, 0); // 1 = print per-stage {max_iters, max_residual, count_unconverged}.
+        pp_query_default("clip_ghost_only", value.clip_ghost_only, 0); // 1 = FillGhost STEP-9 positivity clip touches GHOST cells only (per-phase mass conservation)
+
+        // Symmetry-face detection: a domain face whose normal-momentum BC is
+        // REFLECT_ODD is a symmetry plane; its advective fluxes are enforced
+        // to the exact u*=0 solution in RHS (see symmetrize()).
+        {
+            const char* faces[6] = {"xlo", "xhi", "ylo", "yhi", "zlo", "zhi"};
+            for (int f = 0; f < 2 * AMREX_SPACEDIM; ++f)
+            {
+                const int d = f / 2;
+                const bool is_lo = (f % 2 == 0);
+                std::vector<std::string> mom_bc;
+                std::string key = std::string("momentum.bc.type.") + faces[d * 2 + (is_lo ? 0 : 1)];
+                if (pp.queryarr(key.c_str(), mom_bc) && (int)mom_bc.size() > d)
+                {
+                    std::string t = mom_bc[d];
+                    for (auto &c : t) c = toupper(c);
+                    const bool sym = (t == "REFLECT_ODD");
+                    if (is_lo) value.sym_face_lo[d] = sym;
+                    else       value.sym_face_hi[d] = sym;
+                    if (sym)
+                        Util::Message(INFO, "symmetry face detected: ", faces[d * 2 + (is_lo ? 0 : 1)],
+                                      " (exact u*=0 flux enforced)");
+                }
+            }
+        }
 
         // INTERFACE COMPRESSION
         pp_query_default("apply_sharpening", value.apply_sharpening, false);
@@ -1433,6 +1459,14 @@ Hydro2::RHS(int lev,
     }
 
     // Main time integration loop
+    // [DIAG RHSDECOMP] per-cell boundary-flux + source stash
+    amrex::MultiFab rhsp_fxlo_mf(rho_eta1_rhs_mf.boxArray(), rho_eta1_rhs_mf.DistributionMap(), 1, 0);
+    amrex::MultiFab rhsp_fxhi_mf(rho_eta1_rhs_mf.boxArray(), rho_eta1_rhs_mf.DistributionMap(), 1, 0);
+    amrex::MultiFab rhsp_fylo_mf(rho_eta1_rhs_mf.boxArray(), rho_eta1_rhs_mf.DistributionMap(), 1, 0);
+    amrex::MultiFab rhsp_fyhi_mf(rho_eta1_rhs_mf.boxArray(), rho_eta1_rhs_mf.DistributionMap(), 1, 0);
+    amrex::MultiFab rhsp_src_mf (rho_eta1_rhs_mf.boxArray(), rho_eta1_rhs_mf.DistributionMap(), 1, 0);
+    rhsp_fxlo_mf.setVal(0.0); rhsp_fxhi_mf.setVal(0.0); rhsp_fylo_mf.setVal(0.0);
+    rhsp_fyhi_mf.setVal(0.0); rhsp_src_mf.setVal(0.0);
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
@@ -1454,6 +1488,11 @@ Hydro2::RHS(int lev,
         // OUTPUTS
         Set::Patch<Set::Scalar> rho_eta0_rhs = rho_eta0_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> rho_eta1_rhs = rho_eta1_rhs_mf.array(mfi);
+        auto rhsp_fxlo = rhsp_fxlo_mf.array(mfi);
+        auto rhsp_fxhi = rhsp_fxhi_mf.array(mfi);
+        auto rhsp_fylo = rhsp_fylo_mf.array(mfi);
+        auto rhsp_fyhi = rhsp_fyhi_mf.array(mfi);
+        auto rhsp_src  = rhsp_src_mf.array(mfi);
         Set::Patch<Set::Scalar> M_rhs       = M_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> E_rhs       = E_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> eta_rhs     = eta_rhs_mf.array(mfi);
@@ -1999,6 +2038,38 @@ Hydro2::RHS(int lev,
                 flux_zlo = compute_face(i,     j,     k - 1, i,     j,     k,     Z_dir);
                 flux_zhi = compute_face(i,     j,     k,     i,     j,     k + 1, Z_dir);
 #endif
+
+                // ------------------------------------------------------
+                // SYMMETRY-FACE FLUX ENFORCEMENT.  At a REFLECT domain
+                // face the exact Riemann solution has u* = 0: the only
+                // nonzero flux component is the normal-momentum (pressure)
+                // term.  Computing it numerically instead leaves a
+                // roundoff residual of order eps*|S_L|*rho_eta (the stiff
+                // sound speed amplifies machine eps ~1e-16 to ~1e-13),
+                // applied with the SAME SIGN at the SAME cells every step
+                // -- a coherent mass/energy pump through the symmetry
+                // plane that feeds back exponentially in driven octant/
+                // quadrant runs (measured: 100%% of the gas-mass
+                // instability enters via the reflect faces; RHSDECOMP
+                // budget closes to 1e-25 with them zeroed analytically).
+                // ------------------------------------------------------
+                auto symmetrize = [](Solver::Local::FluidRiemann::Flux &f) {
+                    f.mass0 = 0.0;
+                    f.mass1 = 0.0;
+                    f.momentum_tangent  = 0.0;
+                    f.momentum_tangent2 = 0.0;
+                    f.energy_total = 0.0;
+                    f.energy0 = 0.0;
+                    f.energy1 = 0.0;
+                };
+                if (sym_face_lo[0] && i == domain.smallEnd(0)) symmetrize(flux_xlo);
+                if (sym_face_hi[0] && i == domain.bigEnd(0))   symmetrize(flux_xhi);
+                if (sym_face_lo[1] && j == domain.smallEnd(1)) symmetrize(flux_ylo);
+                if (sym_face_hi[1] && j == domain.bigEnd(1))   symmetrize(flux_yhi);
+#if AMREX_SPACEDIM == 3
+                if (sym_face_lo[2] && k == domain.smallEnd(2)) symmetrize(flux_zlo);
+                if (sym_face_hi[2] && k == domain.bigEnd(2))   symmetrize(flux_zhi);
+#endif
             }
             catch (...)
             {
@@ -2178,6 +2249,15 @@ Hydro2::RHS(int lev,
 
             rho_eta0_rhs(i, j, k) = rho_eta0_flux + Source(i, j, k, 0) * (eta(i, j, k))         + m_dot_Vap;
             rho_eta1_rhs(i, j, k) = rho_eta1_flux + Source(i, j, k, 0) * (1.0 - eta(i, j, k))   - m_dot_Vap;
+            // [DIAG RHSDECOMP] stash boundary-face mass1 fluxes + source terms
+            if (rhsp_fxlo.contains(i, j, k))
+            {
+                rhsp_fxlo(i, j, k) = flux_xlo.mass1;
+                rhsp_fxhi(i, j, k) = flux_xhi.mass1;
+                rhsp_fylo(i, j, k) = flux_ylo.mass1;
+                rhsp_fyhi(i, j, k) = flux_yhi.mass1;
+                rhsp_src (i, j, k) = Source(i, j, k, 0) * (1.0 - eta(i, j, k)) - m_dot_Vap;
+            }
 
             // Diagnostic mass flux (kept for plotfile compatibility):
             rho_flux(i, j, k) = rho_eta0_flux + rho_eta1_flux;
@@ -2438,6 +2518,40 @@ Hydro2::RHS(int lev,
 #endif
         });
     }
+    // [DIAG RHSDECOMP] mass1 RHS budget: sum(rhs)*dV must equal
+    // net boundary influx + interior sources.  Printed every 300 calls.
+    if (relax_diag)
+    {
+        const amrex::Box &dom = geom[lev].Domain();
+        Set::Scalar bx_lo = 0, bx_hi = 0, by_lo = 0, by_hi = 0, src_sum = 0;
+        for (amrex::MFIter pmfi(rhsp_fxlo_mf, false); pmfi.isValid(); ++pmfi)
+        {
+            const amrex::Box &pbx = pmfi.validbox();
+            auto flo = rhsp_fxlo_mf.array(pmfi);
+            auto fhi = rhsp_fxhi_mf.array(pmfi);
+            auto glo = rhsp_fylo_mf.array(pmfi);
+            auto ghi = rhsp_fyhi_mf.array(pmfi);
+            auto sr  = rhsp_src_mf.array(pmfi);
+            amrex::LoopOnCpu(pbx, [&](int i, int j, int k) {
+                if (i == dom.smallEnd(0)) bx_lo += flo(i, j, k) * DX[1];
+                if (i == dom.bigEnd(0))   bx_hi -= fhi(i, j, k) * DX[1];
+                if (j == dom.smallEnd(1)) by_lo += glo(i, j, k) * DX[0];
+                if (j == dom.bigEnd(1))   by_hi -= ghi(i, j, k) * DX[0];
+                src_sum += sr(i, j, k) * DX[0] * DX[1];
+            });
+        }
+        Set::Scalar rhs_sum = rho_eta1_rhs_mf.sum(0) * DX[0] * DX[1];
+        static int _rd_n = 0;
+        if ((_rd_n++ % 300) == 0)
+        {
+            char b[260];
+            snprintf(b, 260, "RHSDECOMP rhs=%.6e bxlo=%.6e bxhi=%.6e bylo=%.6e byhi=%.6e src=%.6e gap=%.3e",
+                     rhs_sum, bx_lo, bx_hi, by_lo, by_hi, src_sum,
+                     rhs_sum - (bx_lo + bx_hi + by_lo + by_hi + src_sum));
+            Util::Message(INFO, b);
+        }
+    }
+
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2449,6 +2563,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     amrex::Box domain = geom[lev].Domain();
 
     step_counter[lev]++;
+    if (relax_diag) { char _mt[128]; snprintf(_mt, 128, "MASSTRACK advance_entry lev=%d sum1=%.14e", lev, rho_eta1_mf[lev]->sum(0)); Util::Message(INFO, _mt); }
 
     // Swapping pointers (6-eq primaries -- canonical set)
     std::swap(density_old_mf[lev],         density_mf[lev]);
@@ -2669,11 +2784,18 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     }
 
     // ENFORCE POSITIVITY after time advance
+    // [DIAG] measure clip-created mass (CLIPLEDGER, gated on relax_diag)
+    Set::Scalar _clip0 = 0.0, _clip1 = 0.0;
     for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
         auto rho_eta0 = rho_eta0_mf[lev]->array(mfi);
         auto rho_eta1 = rho_eta1_mf[lev]->array(mfi);
+        if (relax_diag)
+            amrex::LoopOnCpu(bx, [&](int i, int j, int k) {
+                if (rho_eta0(i, j, k) < 0.0) _clip0 -= rho_eta0(i, j, k);
+                if (rho_eta1(i, j, k) < 0.0) _clip1 -= rho_eta1(i, j, k);
+            });
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             // NEGATIVITY clip only -- flooring at `small` (1e-6) parks an
@@ -2689,6 +2811,20 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             rho_eta1(i, j, k) = std::max(rho_eta1(i, j, k), 0.0);
         });
     }
+    if (relax_diag && (_clip0 > 0.0 || _clip1 > 0.0))
+    {
+        static Set::Scalar _clip0_cum = 0.0, _clip1_cum = 0.0;
+        static int _clip_n = 0;
+        _clip0_cum += _clip0; _clip1_cum += _clip1;
+        if ((_clip_n++ % 200) == 0)
+        {
+            char b[200];
+            snprintf(b, 200, "CLIPLEDGER step-created0=%.4e step-created1=%.4e cum0=%.4e cum1=%.4e",
+                     _clip0, _clip1, _clip0_cum, _clip1_cum);
+            Util::Message(INFO, b);
+        }
+    }
+    if (relax_diag) { char _mt[128]; snprintf(_mt, 128, "MASSTRACK advance_exit  lev=%d sum1=%.14e", lev, rho_eta1_mf[lev]->sum(0)); Util::Message(INFO, _mt); }
     // ============================================================
     // POST-INTEGRATION PRIMITIVE REFRESH.
     // ============================================================
@@ -4309,7 +4445,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     // Primitives are computed first (STEP 4 above), then the Newton enforces 
     // p_0 = p_1 on thecanonical primaries (eta, E_0, E_1) before any source/flux
     // ============================================================
-    Util::Message(INFO, "FillGhost4BC pre-relax: relax_diag=", relax_diag, " lev=", lev);
+    if (relax_diag) { char _mt[128]; snprintf(_mt, 128, "MASSTRACK fillghost_in  lev=%d sum1=%.14e", lev, rho_eta1_mf[lev]->sum(0)); Util::Message(INFO, _mt); }
     RelaxAndReinit(lev);
 
     // ------------------------------------------------------------
@@ -4681,10 +4817,21 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         auto rho_eta1 = rho_eta1_mf[lev]->array(mfi);
         auto rho = density_mf[lev]->array(mfi);
         auto eta = eta_mf[lev]->array(mfi);
+        auto M = momentum_mf[lev]->array(mfi);
 
         amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             rho(i, j, k) = std::max(rho_eta0(i, j, k) + rho_eta1(i, j, k), small);
             eta(i, j, k) = std::max(0.0, std::min(1.0, eta(i, j, k)));
+            // VACUUM-CONSISTENT MOMENTUM: a cell whose density sits at/near
+            // the floor carries no physical momentum -- retaining finite M
+            // there manufactures u = M/rho_floor ~ 1e8 velocities (CFL
+            // collapse to dt ~ 1e-12, then NaN; the divide-floor disease,
+            // 4th appearance -- observed as the focal-corner vacuum crash
+            // in the driven quadrant/octant).  1e-5 kg/m^3 is 4+ orders
+            // below any physical state in the water/air system.
+            if (rho(i, j, k) < 1.0e-5)
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    M(i, j, k, d) = 0.0;
         });
     }
 
@@ -4820,12 +4967,29 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         auto gamma = gamma_mf[lev]->array(mfi);
         auto p0_eff = p0_mf[lev]->array(mfi);
 
+        const amrex::Box vbx8 = mfi.validbox();
         amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             // Check for NaN in any field
             bool has_nan = !std::isfinite(rho_eta0(i, j, k)) || !std::isfinite(rho_eta1(i, j, k)) || !std::isfinite(rho(i, j, k)) || !std::isfinite(eta(i, j, k)) || !std::isfinite(M(i, j, k, 0)) || !std::isfinite(M(i, j, k, 1)) || !std::isfinite(E(i, j, k)) || !std::isfinite(press(i, j, k)) || !std::isfinite(v(i, j, k, 0)) || !std::isfinite(v(i, j, k, 1)) || !std::isfinite(T(i, j, k)) || !std::isfinite(a(i, j, k)) || !std::isfinite(gamma(i, j, k)) || !std::isfinite(p0_eff(i, j, k));
 
             if (has_nan)
             {
+                // [DIAG] STEP-8 repair ledger: this overwrite REPLACES the
+                // cell's per-phase MASSES with a neighbor's -- silent mass
+                // creation/destruction if it ever fires on valid cells.
+                {
+                    char b[220];
+                    snprintf(b, 220, "STEP8REPAIR lev=%d i=%d j=%d valid=%d re0=%.3e re1=%.3e "
+                             "finite[re0=%d re1=%d rho=%d p=%d v=%d T=%d a=%d gam=%d]",
+                             lev, i, j,
+                             (int)vbx8.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))),
+                             (double)rho_eta0(i, j, k), (double)rho_eta1(i, j, k),
+                             (int)std::isfinite(rho_eta0(i, j, k)), (int)std::isfinite(rho_eta1(i, j, k)),
+                             (int)std::isfinite(rho(i, j, k)), (int)std::isfinite(press(i, j, k)),
+                             (int)std::isfinite(v(i, j, k, 0)), (int)std::isfinite(T(i, j, k)),
+                             (int)std::isfinite(a(i, j, k)), (int)std::isfinite(gamma(i, j, k)));
+                    Util::Message(INFO, b);
+                }
                 // Repair by copying from nearest valid neighbor
 
                 // Try left neighbor (i-1)
@@ -4960,17 +5124,54 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         auto press = pressure_mf[lev]->array(mfi);
         auto E = energy_per_vol_mf[lev]->array(mfi);
 
+        // [DIAG] STEP-9 clip ledger on VALID cells (the uninstrumented mass
+        // source: this clip runs EVERY RK STAGE via post_stage FillGhost and
+        // growntilebox INCLUDES the valid region).  Gated on relax_diag.
+        if (relax_diag)
+        {
+            const amrex::Box &vbx9 = mfi.validbox();
+            Set::Scalar c0 = 0.0, c1 = 0.0;
+            amrex::LoopOnCpu(vbx9, [&](int i, int j, int k) {
+                if (rho_eta0(i, j, k) < 0.0) c0 -= rho_eta0(i, j, k);
+                if (rho_eta1(i, j, k) < 0.0) c1 -= rho_eta1(i, j, k);
+            });
+            if (c0 > 0.0 || c1 > 0.0)
+            {
+                static Set::Scalar cum0 = 0.0, cum1 = 0.0;
+                static int nrep = 0;
+                cum0 += c0; cum1 += c1;
+                if ((nrep++ % 500) == 0)
+                {
+                    char b[200];
+                    snprintf(b, 200, "STEP9CLIP valid-created0=%.4e valid-created1=%.4e cum0=%.4e cum1=%.4e",
+                             c0, c1, cum0, cum1);
+                    Util::Message(INFO, b);
+                }
+            }
+        }
+        // FIX (gated on clip_ghost_only): restrict the STEP-9 positivity clip
+        // to GHOST cells.  Valid-cell mid-stage undershoots are transient RK
+        // stage states -- zeroing them CREATES phase mass every stage (the
+        // quadrant/octant driven-bubble mass instability); the final combined
+        // state is protected by the post-advance clip, which is measured and
+        // near-silent.
+        const amrex::Box vbx_keep = mfi.validbox();
+        const int ghost_only = clip_ghost_only;
         amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            const bool in_valid = vbx_keep.contains(amrex::IntVect(AMREX_D_DECL(i, j, k)));
             // Enforce rho = rho_eta0 + rho_eta1
             Set::Scalar rho_calc = rho_eta0(i, j, k) + rho_eta1(i, j, k);
             rho(i, j, k) = rho_calc;
 
-            // Enforce positivity (rho_eta: NEGATIVITY clip only -- see the
-            // post-advance positivity block for why flooring at `small`
-            // creates a mass pump at the tanh-tail contour)
+            // Enforce positivity (rho_eta: NEGATIVITY clip only; and with
+            // clip_ghost_only=1, ghosts only -- valid-cell stage states pass
+            // through untouched to preserve per-phase mass conservation)
             rho(i, j, k) = std::max(rho(i, j, k), small);
-            rho_eta0(i, j, k) = std::max(rho_eta0(i, j, k), 0.0);
-            rho_eta1(i, j, k) = std::max(rho_eta1(i, j, k), 0.0);
+            if (!ghost_only || !in_valid)
+            {
+                rho_eta0(i, j, k) = std::max(rho_eta0(i, j, k), 0.0);
+                rho_eta1(i, j, k) = std::max(rho_eta1(i, j, k), 0.0);
+            }
             press(i, j, k) = std::max(press(i, j, k), 1.0e-6);
             E(i, j, k) = std::max(E(i, j, k), 1.0e-10);
 
@@ -5147,6 +5348,54 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         Util::Message(INFO, "\n" + nan_details);
         Util::Abort(INFO, "NaN detected in FillGhost4BC - see details above");
     }
+
+    // ================================================================
+    // REFLECT-MIRROR AUDIT (temporary diagnostic, gated on relax_diag):
+    // at xlo/ylo domain faces with REFLECT BCs, ghost layer -g must be
+    // the exact mirror of interior layer +g-1: even fields equal, normal
+    // momentum negated.  Any asymmetry here seeds a nonzero mass flux
+    // through the symmetry plane (quadrant/octant gas-mass instability).
+    // ================================================================
+    if (relax_diag)
+    {
+        const amrex::Box &dom = geom[lev].Domain();
+        Set::Scalar a_eta = 0, a_r0 = 0, a_r1 = 0, a_Mn = 0, a_E0 = 0, a_E1 = 0;
+        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &vbx = mfi.validbox();
+            if (vbx.smallEnd(0) != dom.smallEnd(0)) continue;
+            auto ge = eta_mf[lev]->array(mfi);
+            auto g0 = rho_eta0_mf[lev]->array(mfi);
+            auto g1 = rho_eta1_mf[lev]->array(mfi);
+            auto gM = momentum_mf[lev]->array(mfi);
+            auto gE0 = energy0_mf[lev]->array(mfi);
+            auto gE1 = energy1_mf[lev]->array(mfi);
+            const int klo = (AMREX_SPACEDIM == 3) ? vbx.smallEnd(2) : 0;
+            const int khi = (AMREX_SPACEDIM == 3) ? vbx.bigEnd(2) : 0;
+            for (int k = klo; k <= khi; ++k)
+                for (int j = vbx.smallEnd(1); j <= vbx.bigEnd(1); ++j)
+                    for (int g = 1; g <= nghost; ++g)
+                    {
+                        const int ig = dom.smallEnd(0) - g;      // ghost
+                        const int im = dom.smallEnd(0) + g - 1;  // mirror
+                        a_eta = std::max(a_eta, std::abs(ge(ig,j,k) - ge(im,j,k)));
+                        a_r0  = std::max(a_r0,  std::abs(g0(ig,j,k) - g0(im,j,k)));
+                        a_r1  = std::max(a_r1,  std::abs(g1(ig,j,k) - g1(im,j,k)));
+                        a_Mn  = std::max(a_Mn,  std::abs(gM(ig,j,k,0) + gM(im,j,k,0)));
+                        a_E0  = std::max(a_E0,  std::abs(gE0(ig,j,k) - gE0(im,j,k)));
+                        a_E1  = std::max(a_E1,  std::abs(gE1(ig,j,k) - gE1(im,j,k)));
+                    }
+        }
+        static int _ma_count = 0;
+        if ((_ma_count++ % 200) == 0 && (a_eta + a_r0 + a_r1 + a_Mn + a_E0 + a_E1) > 0)
+        {
+            char b[240];
+            snprintf(b, 240, "MIRRORAUDIT lev=%d asym: eta=%.3e r0=%.3e r1=%.3e Mn=%.3e E0=%.3e E1=%.3e",
+                     lev, a_eta, a_r0, a_r1, a_Mn, a_E0, a_E1);
+            Util::Message(INFO, b);
+        }
+    }
+    if (relax_diag) { char _mt[128]; snprintf(_mt, 128, "MASSTRACK fillghost_out lev=%d sum1=%.14e", lev, rho_eta1_mf[lev]->sum(0)); Util::Message(INFO, _mt); }
 } // end FillGhost4BC()
 
 
@@ -5171,7 +5420,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
 void Hydro2::RelaxAndReinit(int lev)
 {
     BL_PROFILE("Integrator::Hydro2::RelaxAndReinit");
-    Util::Message(INFO, "RelaxAndReinit");
+    if (relax_diag) { char _mt[128]; snprintf(_mt, 128, "MASSTRACK relax_entry   lev=%d sum1=%.14e", lev, rho_eta1_mf[lev]->sum(0)); Util::Message(INFO, _mt); }
 
     // Constants for iteration
     const Set::Scalar alpha_floor = 1.0e-12;
@@ -5597,6 +5846,7 @@ void Hydro2::RelaxAndReinit(int lev)
                 newton_tol, ".  Newton is failing to relax pressure in those cells.");
         }
     }
+    if (relax_diag) { char _mt[128]; snprintf(_mt, 128, "MASSTRACK relax_exit    lev=%d sum1=%.14e", lev, rho_eta1_mf[lev]->sum(0)); Util::Message(INFO, _mt); }
 } // end RelaxAndReinit()
 
 
