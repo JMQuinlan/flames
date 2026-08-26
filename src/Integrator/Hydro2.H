@@ -132,6 +132,7 @@ protected:
         amrex::MultiFab &E0_rhs_mf,
         amrex::MultiFab &E1_rhs_mf,
         amrex::MultiFab &shell_rhs_mf,
+        amrex::MultiFab &cfun_rhs_mf,
         const amrex::MultiFab &rho_eta0_mf_in,
         const amrex::MultiFab &rho_eta1_mf_in,
         const amrex::MultiFab &M_mf,
@@ -139,12 +140,62 @@ protected:
         const amrex::MultiFab &eta_mf_in,
         const amrex::MultiFab &E0_mf_in,
         const amrex::MultiFab &E1_mf_in,
-        const amrex::MultiFab &shell_mf_in);
+        const amrex::MultiFab &shell_mf_in,
+        const amrex::MultiFab &cfun_mf_in);
 
     // Post-stage pressure relaxation + reinitialization (Saurel-Petitpas-Berry
     // 2009 §3.5 / Schmidmayer 2020 §3.3).  Runs in-place on the working
     // MultiFabs after each RK stage and before the ghost-cell fill.
     void RelaxAndReinit(int lev);
+
+    // ------------------------------------------------------------------
+    // CAPILLARY OPERATOR  L_cap   (Schmidmayer 2017 eq. 17, sec. 4.2.2)
+    // ------------------------------------------------------------------
+    // Second of the three split operators:  U^{n+1} = L_relax L_cap L_hyper(U^n).
+    // Explicit finite-volume update touching ONLY momentum and rho E + eps_sigma:
+    //
+    //  (rho u)^cap = (rho u)^hyp - sigma dt { -d_x||w||    + d_x(w1^2/||w||)
+    //                                                      + d_y(w1 w2/||w||) }
+    //  (rho v)^cap = (rho v)^hyp - sigma dt { -d_y||w||    + d_x(w1 w2/||w||)
+    //                                                      + d_y(w2^2/||w||) }
+    //  (rhoE+e)^cap= (rhoE+e)^hyp- sigma dt { d_x[(w1^2 u + w1 w2 v)/||w||]
+    //                                       + d_y[(w1 w2 u + w2^2 v)/||w||] }
+    //
+    // w = grad(c) by second-order finite differences; face values are the
+    // arithmetic average of the two neighbouring cell values, which telescopes
+    // and is therefore discretely conservative.
+    //
+    // The energy update carries NO bare ||w|| u term: L_hyper already advects
+    // (rho E + eps_sigma) with the hydrodynamic flux, so eps_sigma u is
+    // accounted for there and L_cap supplies only the w (x) w / ||w||
+    // contraction.  Double-counting it would re-create the energy source this
+    // whole exercise exists to remove.
+    void CapillaryOperator(int lev, Set::Scalar dt);
+
+    // Set while the SSPRK3 stages are running under the split scheme, so the
+    // per-stage FillGhost4BC does NOT fire the relaxation.  Schmidmayer applies
+    // L_relax once per step, after L_cap -- not between RK stages.
+    bool defer_relax = false;
+
+    // ------------------------------------------------------------------
+    // cfun_resync : rebuild c from eta instead of advecting it independently
+    // ------------------------------------------------------------------
+    // Schmidmayer advects c on its own (dc/dt + u.grad c = 0) SPECIFICALLY so
+    // it does not inherit the relaxation source mu(P1-P2) that alpha_1 carries.
+    // The cost is that pure advection is non-conservative and diffusive, so c
+    // wanders off the interface it is meant to mark: measured here, c and eta
+    // separated to 2.28% in R (and max|c-eta| = 0.26) over 15 ms at eps/dx=4,
+    // moving in OPPOSITE directions.  The capillary force was then acting on an
+    // interface 2.3% from the material one.
+    //
+    // With this on, c is a slaved diagnostic  c := eta, rebuilt every substep,
+    // so it tracks the interface exactly.  The relaxation contamination that
+    // originally motivated a separate c is now blocked by the operator
+    // splitting instead: L_cap runs BEFORE L_relax, so c is read at the
+    // post-advection / pre-relaxation state.
+    //
+    // 0 = Schmidmayer (independent transport), 1 = slaved to eta.
+    int cfun_resync = 0;
 
     // Marmottant advected shell: preserve the AREAL density Gamma = c/|grad eta|
     // across NON-MATERIAL changes to eta (stiff pressure relaxation, clamping to
@@ -288,6 +339,28 @@ protected:
     Set::Field<Set::Scalar> shell_mf;
     Set::Field<Set::Scalar> shell_old_mf;
     Set::Field<Set::Scalar> Gamma_mf;      // diagnostic: c/|grad eta| (plottable)
+
+    // ------------------------------------------------------------------
+    // COLOUR FUNCTION  c  (Schmidmayer et al. 2017, eq. 3)
+    // ------------------------------------------------------------------
+    // A 9th RK primary obeying PURE ADVECTION,  dc/dt + u.grad(c) = 0, and
+    // normalised by its jump so c runs 0 -> 1 across the interface.  The
+    // capillary tensor and the capillary energy are built from grad(c), NOT
+    // grad(eta):
+    //     Omega  = sigma (|grad c| I - grad c (x) grad c / |grad c|)
+    //     e_cap  = sigma |grad c|
+    //
+    // Why this is required rather than cosmetic: eta = alpha_1 is rewritten by
+    // the stiff pressure relaxation and by the [0,1] clamp, neither of which
+    // moves any material or touches the conserved rho E.  Building e_cap on
+    // eta therefore makes the capillary energy jump for reasons the
+    // conservative energy flux cannot account for, and the mismatch lands in
+    // the recovered internal energy as a spurious interface pressure.  c moves
+    // ONLY by advection, so its evolution is exactly what the flux accounts
+    // for and the energy budget can close.  Measured before this was added:
+    // capillary_closure=1 made |u|max 22x WORSE at 0.75 ms.
+    Set::Field<Set::Scalar> cfun_mf;
+    Set::Field<Set::Scalar> cfun_old_mf;
     Set::Field<Set::Scalar> hess_eta_mf;
     Set::Field<Set::Scalar> n_hat_mf;
 
@@ -426,6 +499,55 @@ protected:
 
     // Booleans
     int apply_surface_tension = 1;
+    // Gate on the capillary work term u.(div Omega) in the rho E source.
+    // rho E here does NOT carry the surface energy sigma|grad eta| (see the
+    // note above the energy sources in RHS), yet it is inverted as
+    // UE = rho E - KE to recover the internal energy and hence the pressure.
+    // Capillary work therefore accumulates in rho E and is read back as
+    // thermodynamic internal energy at the interface.  Setting this to 0
+    // breaks that loop; it is a DIAGNOSTIC, not a physically complete choice
+    // -- the complete fix is the Schmidmayer 2017 closure that puts
+    // sigma|grad eta| into the conserved state.
+    int capillary_work = 1;
+    // DIAGNOSTIC: interface-localised artificial viscosity.
+    //   mu_art = C * rho * a * dx * 4 eta (1-eta),   F_art = mu_art * lap(u)
+    // applied as a body-force pair (momentum gets F_art, energy gets u.F_art),
+    // which is the self-consistent pattern.  mu_art is O(dx), i.e. exactly the
+    // SCALE of dissipation an upwind Riemann solver supplies, so it vanishes
+    // under refinement.  Purpose: measure how much dissipation the capillary
+    // instability needs in units of what upwinding could actually provide.
+    // C = O(1) => putting Omega in the flux (Schmidmayer 2017) would suffice;
+    // C >> 10 => it would not.  Default 0 = off, nothing changes.
+    Set::Scalar art_visc_coeff = 0.0;
+
+    // ------------------------------------------------------------------
+    // CAPILLARY ENERGY CLOSURE  (Schmidmayer et al. 2017)
+    // ------------------------------------------------------------------
+    // Capillarity is an INTERNAL force: the work it does on the fluid has to
+    // be paid out of the surface energy.  In the body-force treatment the
+    // fluid is credited u.(div Omega) and the surface energy is never
+    // debited, because sigma|grad eta| is only a diagnostic.  Measured on the
+    // constant-sigma Laplace case: gas mass exactly conserved, no gas leaves
+    // the domain, yet gas internal energy grows +19.85% by 13 ms while
+    // int(u.Fsv)dV runs +0.53 -> +245.  That is the drift's energy source.
+    //
+    // With this flag on, the conserved total becomes the full Schmidmayer
+    // energy and the capillary work moves from the source into the flux:
+    //
+    //   rho E_t = UE + KE + e_cap,      e_cap = sigma_eff |grad eta|
+    //   d(rho E_t)/dt + div[(rho E_t + p) u - Omega.u] = 0
+    //
+    // Expanding that reproduces d(rho E_f)/dt = -div[(rho E_f + p)u] + u.F
+    // exactly, so the u.F SOURCE must be dropped when this is on (it is now
+    // implicit in the flux) -- which is why capillary_work=0 on its own blew
+    // up: the source was removed without adding the flux or the state term.
+    //
+    // The momentum side is left as the existing source +div(Omega): putting
+    // Omega in the momentum flux was shown to be algebraically identical
+    // (M_flux_new = M_flux_old + sum_d (Omega_hi - Omega_lo)/dx_d).
+    //
+    // Default 0 = unchanged behaviour.
+    int capillary_closure = 0;
     int apply_weight = 0;
     int apply_vaporization = 0;
 

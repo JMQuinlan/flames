@@ -46,6 +46,56 @@
 namespace Integrator
 {
 
+// ----------------------------------------------------------------------
+// CAPILLARY ENERGY CLOSURE helpers (see Hydro2.H, capillary_closure).
+//
+// e_cap = sigma_eff |grad eta| is a STATE FUNCTION of (eta, Gamma), never an
+// independently transported field -- so it can be recomputed identically at
+// every site that assembles or inverts rho E, and can never drift out of
+// step with eta.  Both helpers mirror the sigma_eff evaluation in RHS
+// exactly; keep them in sync if the Marmottant branch structure changes.
+// ----------------------------------------------------------------------
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+static Set::Scalar SigmaEffFromGamma(Set::Scalar Gamma, Set::Scalar grad_eta_mag,
+                                     int marm, Set::Scalar sig_const,
+                                     Set::Scalar chi_, Set::Scalar Gb,
+                                     Set::Scalar sbrk, Set::Scalar sigw)
+{
+    if (grad_eta_mag <= 1.0e-10) return 0.0;   // off the interface: no shell
+    if (!marm) return sig_const;
+    Set::Scalar se = 0.0;
+    if (Gamma > 0.0 && Gamma < Gb)             // stretched -> elastic branch
+    {
+        const Set::Scalar el = chi_ * (Gb / Gamma - 1.0);
+        se = (el >= sbrk) ? sigw : el;
+    }
+    return se;                                 // Gamma >= Gb: buckled, sigma = 0
+}
+
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+static Set::Scalar CapEnergyAt(const amrex::Array4<const Set::Scalar> &eta,
+                               const amrex::Array4<const Set::Scalar> &shell,
+                               int i, int j, int k, const Set::Scalar *DX,
+                               int marm, Set::Scalar sig_const, Set::Scalar chi_,
+                               Set::Scalar Gb, Set::Scalar sbrk, Set::Scalar sigw)
+{
+    // The centred gradient reads i+-1, so the outermost ghost ring has no
+    // valid stencil.  e_cap is identically zero away from the interface, and
+    // the interface never reaches the outer ghosts in any case, so returning
+    // 0 there is exact rather than merely safe.
+    if (!eta.contains(i - 1, j, k) || !eta.contains(i + 1, j, k)) return 0.0;
+#if AMREX_SPACEDIM > 1
+    if (!eta.contains(i, j - 1, k) || !eta.contains(i, j + 1, k)) return 0.0;
+#endif
+#if AMREX_SPACEDIM > 2
+    if (!eta.contains(i, j, k - 1) || !eta.contains(i, j, k + 1)) return 0.0;
+#endif
+    const Set::Vector ge = Numeric::Gradient(eta, i, j, k, 0, DX);
+    const Set::Scalar gem = ge.lpNorm<2>();
+    const Set::Scalar G = marm ? shell(i, j, k) : 0.0;
+    return SigmaEffFromGamma(G, gem, marm, sig_const, chi_, Gb, sbrk, sigw) * gem;
+}
+
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 static Set::Scalar SpaldingBM(Set::Scalar Y_local, Set::Scalar Y_inf, Set::Scalar small)
 {
@@ -93,6 +143,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // OPTIONAL SOURCE TERMS
         pp_query_default("apply_surface_tension", value.apply_surface_tension, false);  // Apply surface tension when solving, default: true --> "Apply Surface Tension"
+        pp_query_default("capillary_work", value.capillary_work, 1);  // include u.(div Omega) in the rho E source (diagnostic gate, see Hydro2.H)
+        pp_query_default("art_visc_coeff", value.art_visc_coeff, 0.0);  // interface-localised artificial viscosity C (diagnostic, see Hydro2.H)
+        pp_query_default("capillary_closure", value.capillary_closure, 0);
+        pp_query_default("cfun_resync", value.cfun_resync, 0);  // rebuild c from eta each substep (see Hydro2.H)  // Schmidmayer 2017 capillary energy closure (see Hydro2.H)
+        // The u.(div Omega) source is implicit in the flux once the closure is
+        // on, so it must not also be applied as a source.
+        if (value.capillary_closure) value.capillary_work = 0;
         pp_query_default("apply_weight", value.apply_weight, false);                    // Apply weight when solving, default: false --> "No Weight"
         pp_query_default("apply_vaporization", value.apply_vaporization, false);        // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
@@ -363,6 +420,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // passive advected scalar with the same zero-gradient far-field behaviour.
         value.RegisterNewFab(value.shell_mf,         value.eta_bc,      1, nghost,  "shell",        true, true);
         value.RegisterNewFab(value.shell_old_mf,     value.eta_bc,      1, nghost,  "shell_old",    false,true);
+        // Colour function c (Schmidmayer 2017 eq. 3): 9th RK primary, pure advection.
+        value.RegisterNewFab(value.cfun_mf,          value.eta_bc,      1, nghost,  "cfun",         true, true);
+        value.RegisterNewFab(value.cfun_old_mf,      value.eta_bc,      1, nghost,  "cfun_old",     false,true);
         value.RegisterNewFab(value.Gamma_mf,        &value.bc_nothing,  1, 0,       "Gamma",        true, false);
 
         value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing,  1, 0,       "etadot",       true, false);
@@ -599,6 +659,11 @@ void Hydro2::Initialize(int lev)
     // ------------------------------------------------------------------
     shell_mf[lev]    ->setVal(1.0);
     shell_old_mf[lev]->setVal(1.0);
+    // c is initialised FROM eta and normalised by its jump.  eta already runs
+    // 0 -> 1 across the band, so [c] = 1 and c = eta at t = 0.  They diverge
+    // afterwards: eta is relaxed and clamped, c only advects.
+    amrex::MultiFab::Copy(*cfun_mf[lev],     *eta_mf[lev], 0, 0, 1, nghost);
+    amrex::MultiFab::Copy(*cfun_old_mf[lev], *eta_mf[lev], 0, 0, 1, nghost);
     Gamma_mf[lev]    ->setVal(0.0);
 
     // SOURCE TERMS
@@ -777,6 +842,14 @@ void Hydro2::Mix(int lev)
     {
         const amrex::Box &bx = mfi.growntilebox();
 
+        // Capillary-energy closure inputs (see Hydro2.H).
+        const int cap_close = capillary_closure, marm_ic = marmottant;
+        const Set::Scalar sig_ic = sigma, chi_ic = marmottant_chi;
+        const Set::Scalar Gb_ic = marmottant_Gamma_buck;
+        const Set::Scalar sbrk_ic = marmottant_sigma_break, sigw_ic = sigma;
+        amrex::Array4<const Set::Scalar> const &shell_ic = shell_mf[lev]->const_array(mfi);
+        amrex::Array4<const Set::Scalar> const &cfun_ic  = cfun_mf[lev]->const_array(mfi);
+
         // DIFFUSIVE BOUNDRY
         Set::Patch<const Set::Scalar> eta = eta_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> rho_eta0 = rho_eta0_mf.Patch(lev, mfi);
@@ -930,8 +1003,12 @@ void Hydro2::Mix(int lev)
             UE_vol(i, j, k) = E0_arr(i, j, k) + E1_arr(i, j, k);
             UE_mas(i, j, k) = (rho(i, j, k) > small) ? UE_vol(i, j, k) / rho(i, j, k) : 0.0;
 
-            // Redundant total energy rho E (Schmidmayer 2020 eq. 16):
-            E_vol(i, j, k)     = KE_vol(i, j, k) + UE_vol(i, j, k);
+            // Redundant total energy rho E (Schmidmayer 2020 eq. 16), plus the
+            // capillary energy when the closure is on (Schmidmayer 2017).
+            E_vol(i, j, k)     = KE_vol(i, j, k) + UE_vol(i, j, k)
+                               + (cap_close ? CapEnergyAt(cfun_ic, shell_ic, i, j, k, DX,
+                                                          marm_ic, sig_ic, chi_ic, Gb_ic,
+                                                          sbrk_ic, sigw_ic) : 0.0);
             E_vol_old(i, j, k) = E_vol(i, j, k);
             E_mas(i, j, k)     = KE_mas(i, j, k) + UE_mas(i, j, k);
             E_mas_old(i, j, k) = E_mas(i, j, k);
@@ -1049,6 +1126,7 @@ Hydro2::RHS(int lev,
     amrex::MultiFab &E0_rhs_mf,
     amrex::MultiFab &E1_rhs_mf,
     amrex::MultiFab &shell_rhs_mf,
+    amrex::MultiFab &cfun_rhs_mf,
     const amrex::MultiFab &rho_eta0_mf_in,
     const amrex::MultiFab &rho_eta1_mf_in,
     const amrex::MultiFab &M_mf_in,
@@ -1056,7 +1134,8 @@ Hydro2::RHS(int lev,
     const amrex::MultiFab &eta_mf_in,
     const amrex::MultiFab &E0_mf_in,
     const amrex::MultiFab &E1_mf_in,
-    const amrex::MultiFab &shell_mf_in)
+    const amrex::MultiFab &shell_mf_in,
+    const amrex::MultiFab &cfun_mf_in)
 {
     BL_PROFILE("Integrator::Hydro2::RHS");
 
@@ -1073,6 +1152,14 @@ Hydro2::RHS(int lev,
     amrex::MultiFab::Copy(*energy1_mf[lev],        E1_mf_in,       0, 0, 1,              0);
     amrex::MultiFab::Copy(*shell_mf[lev],          shell_mf_in,    0, 0, 1,              0);
     shell_mf[lev]->FillBoundary(geom[lev].periodicity());
+    amrex::MultiFab::Copy(*cfun_mf[lev],           cfun_mf_in,     0, 0, 1,              0);
+    if (cfun_resync)
+    {
+        // c := eta at the start of every substep (see Hydro2.H).  c stops being
+        // an independent variable and becomes a slaved marker of the interface.
+        amrex::MultiFab::Copy(*cfun_mf[lev], *eta_mf[lev], 0, 0, 1, nghost);
+    }
+    cfun_mf[lev]->FillBoundary(geom[lev].periodicity());
 
     // Eta Fields
 
@@ -1334,7 +1421,12 @@ Hydro2::RHS(int lev,
         {
             const amrex::Box &vbx = mfi.validbox();
             const amrex::Box gbx  = mfi.growntilebox(1);
-            amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
+            // The interface gate must use the SAME field the capillary tensor
+            // is built from, or the shell tension and Omega end up gated on
+            // two different interfaces once c and eta separate.
+            amrex::Array4<const Set::Scalar> const &et = capillary_closure
+                                                       ? cfun_mf[lev]->const_array(mfi)
+                                                       : eta_mf[lev]->const_array(mfi);
             amrex::Array4<const Set::Scalar> const &cs = shell_mf[lev]->const_array(mfi);
             amrex::Array4<Set::Scalar> const &sg  = sig_eff_mf.array(mfi);
             amrex::Array4<Set::Scalar> const &Gm  = Gamma_mf[lev]->array(mfi);
@@ -1393,19 +1485,21 @@ Hydro2::RHS(int lev,
         const Set::Scalar sig0 = sigma; const int marm = marmottant;
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
-            // GROWN box: build Omega in the one-cell ghost ring too, from the
-            // BC-filled eta ghosts.  FillBoundary below cannot fill ghosts at
-            // PHYSICAL boundaries; leaving them zero breaks div(Omega) in the
-            // first interior cell -- exactly where an octant-cornered bubble
-            // meets the symmetry planes (REFLECT_EVEN eta ghosts produce the
-            // correctly mirrored Omega there).
             const amrex::Box bx = mfi.growntilebox(1);
             amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
             amrex::Array4<const Set::Scalar> const &sg = marm ? sig_eff_mf.const_array(mfi)
                                                               : amrex::Array4<const Set::Scalar>{};
             amrex::Array4<Set::Scalar> const &om = Omega.array(mfi);
+            // Schmidmayer 2017 builds Omega from the COLOUR FUNCTION gradient.
+            // eta is rewritten by relaxation/clamping without moving material,
+            // so grad(eta) makes the capillary force respond to thermodynamic
+            // adjustment; grad(c) does not.  Gated so cap_c=0 keeps the old
+            // behaviour exactly.
+            amrex::Array4<const Set::Scalar> const &cf = cfun_mf[lev]->const_array(mfi);
+            const int use_c = capillary_closure;
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
+                Set::Vector ge = use_c ? Numeric::Gradient(cf, i, j, k, 0, DX)
+                                       : Numeric::Gradient(et, i, j, k, 0, DX);
                 Set::Scalar gem = ge.lpNorm<2>();
                 if (gem < 1.0e-10) return; // Omega = 0 off the interface
                 Set::Scalar se = marm ? sg(i, j, k) : sig0;
@@ -1451,6 +1545,9 @@ Hydro2::RHS(int lev,
         Set::Patch<Set::Scalar> eta_rhs     = eta_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> shell_rhs   = shell_rhs_mf.array(mfi);
         Set::Patch<const Set::Scalar> shell = shell_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar> cfun_rhs    = cfun_rhs_mf.array(mfi);
+        Set::Patch<const Set::Scalar> cfun  = cfun_mf.Patch(lev, mfi);
+        const int cfun_resync_l = cfun_resync;
         Set::Patch<Set::Scalar> E0_rhs      = E0_rhs_mf.array(mfi);    // per-phase internal energy
         Set::Patch<Set::Scalar> E1_rhs      = E1_rhs_mf.array(mfi);
 
@@ -1602,6 +1699,19 @@ Hydro2::RHS(int lev,
             Set::Vector grad_mu = (mu0 - mu1) * grad_eta;
             Set::Vector grad_lambda = (mu0_b - mu1_b) * grad_eta;
 
+            // DIAGNOSTIC interface-localised artificial viscosity (see Hydro2.H).
+            // Body-force pair: momentum gets F_art, energy gets u.F_art below.
+            Set::Vector F_art = Set::Vector::Zero();
+            if (art_visc_coeff > 0.0)
+            {
+                const Set::Scalar w_i = 4.0 * eta(i, j, k) * (1.0 - eta(i, j, k));
+                const Set::Scalar mu_art = art_visc_coeff * rho(i, j, k) * a(i, j, k)
+                                         * DX[0] * std::max(w_i, 0.0);
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    for (int p = 0; p < AMREX_SPACEDIM; ++p)
+                        F_art(d) += mu_art * hess_u(d, p, p);
+            }
+
             // EMBEDDED SOLID
             Set::Scalar phi_c = 1.0;
             if (embedded.apply)
@@ -1666,13 +1776,13 @@ Hydro2::RHS(int lev,
             // ------------------------------------------------------------
             // Fsv =  simga * kappa * grad_eta
             Set::Vector Fsv_vector = Set::Vector::Zero();
-            if (apply_surface_tension)
+            // Under the split scheme the capillary terms belong to L_cap
+            // (Schmidmayer eq. 17); applying them here too would double-count.
+            if (apply_surface_tension && !capillary_closure)
             {
                 // Conservative continuum-surface-stress force  F = div(Omega)
                 // (Schmidmayer 2017).  Centered divergence of the capillary stress
-                // tensor stored in om_cap.  Reduces to sigma*kappa*grad(eta) for
-                // constant sigma, and adds Marangoni automatically for varying sigma.
-                // Storage: 2D [xx,yy,xy] ; 3D [xx,yy,zz,xy,xz,yz].
+                // tensor stored in om_cap.
                 const Set::Scalar idx = 0.5 / DX[0], idy = 0.5 / DX[1];
 #if AMREX_SPACEDIM == 2
                 Fsv_vector(0) = (om_cap(i+1,j,k,0) - om_cap(i-1,j,k,0)) * idx
@@ -1828,7 +1938,7 @@ Hydro2::RHS(int lev,
 
 
             // Total:
-            Set::Vector Total_Force = Fsv_vector + Fw_vector;
+            Set::Vector Total_Force = Fsv_vector + Fw_vector + F_art;
 
             // ------------------------------------------------------------
             // Energy work terms in conservative (divergence) form.
@@ -1869,8 +1979,12 @@ Hydro2::RHS(int lev,
             Source(i, j, k, 0) = mdot0;
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
                 Source(i, j, k, 1 + d) = Pdot0(d) + Ldot(d) + div_tau(d) + Total_Force(d);
+            // Capillary work is split out from Total_Force so it can be gated:
+            // rho E does not carry sigma|grad eta|, so this term is later
+            // re-read as internal energy by UE = rho E - KE.  See Hydro2.H.
+            const Set::Scalar cap_w = capillary_work ? u.dot(Fsv_vector) : 0.0;
             Source(i, j, k, AMREX_SPACEDIM + 1) = qdot0 + u.dot(div_tau) + visc_diss + u.dot(Ldot)
-                                                + u.dot(Total_Force) + E_dot_Vap;
+                                                + u.dot(Fw_vector) + u.dot(F_art) + cap_w + E_dot_Vap;
 
             // Lagrange terms to enforce no-penetration
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
@@ -1997,6 +2111,22 @@ Hydro2::RHS(int lev,
                 Util::ParallelMessage(INFO, "lev=", lev, " i=", i, " j=", j, " k=", k);
                 Util::Abort(INFO);
             }
+
+
+            // NOTE: two rearrangements of the capillary force were implemented and
+            // REMOVED.  (1) div(Omega) from face-evaluated Omega; (2) Omega carried
+            // in the momentum flux, F = rho u u + p I - Omega, subtracted from the
+            // Riemann fluxes.  These are ALGEBRAICALLY IDENTICAL -- differencing
+            // face fluxes reproduces the face divergence exactly -- and measured
+            // identical to 5 s.f. at t=20us on the static R0=24mm bubble (|u|max
+            // 0.05015 both).  Both are WORSE than the cell-centred 2*dx source
+            // (|u|max at 0.3ms: 29.9 source vs 78.0 face-Fsv), and (2) additionally
+            // crashed before 0.18 ms because subtracting Omega AFTER the Riemann
+            // solve leaves the solver's wave speeds unaware of it, so the fluxes
+            // stop being consistent with the reconstructed states.
+            // A real flux-form treatment needs Omega inside the WAVE STRUCTURE
+            // (modified signal speeds), i.e. a change to the Riemann solver itself
+            // -- not a rearrangement of where div(Omega) is evaluated.
 
             // ============================================================
             // Saurel-Abgrall non-conservative discretization for alpha and
@@ -2267,6 +2397,53 @@ Hydro2::RHS(int lev,
             const Set::Scalar div_s_u = gradu.trace() - n_hat.dot(gradu * n_hat);
             shell_rhs(i, j, k) = -u_dot_gradG - shell(i, j, k) * div_s_u;
 
+            // ------------------------------------------------------------
+            // COLOUR FUNCTION  dc/dt + u.grad(c) = 0   (Schmidmayer 2017 eq. 3)
+            // ------------------------------------------------------------
+            // Pure advection -- no stretch source, unlike the shell.  Uses the
+            // SAME limiter reconstruction as eta and the shell so the three
+            // fields can never see different numerical viscosities.
+            auto cfun_face = [&](int di, int dj, int dk, Set::Scalar &qL, Set::Scalar &qR)
+            {
+                Solver::Local::Limiter::Primitive prim[6];
+                for (int sft = -2; sft <= 3; ++sft)
+                    prim[sft + 2].alpha = cfun(i + sft * di, j + sft * dj, k + sft * dk);
+                Solver::Local::Limiter::Primitive stL[5] =
+                    { prim[0], prim[1], prim[2], prim[3], prim[4] };
+                Solver::Local::Limiter::Primitive stR[5] =
+                    { prim[5], prim[4], prim[3], prim[2], prim[1] };
+                qL = limiter->Reconstruct(stL).alpha;
+                qR = limiter->Reconstruct(stR).alpha;
+            };
+            auto cfun_face_lo = [&](int di, int dj, int dk, Set::Scalar &qL, Set::Scalar &qR)
+            {
+                Solver::Local::Limiter::Primitive prim[6];
+                for (int sft = -2; sft <= 3; ++sft)
+                    prim[sft + 2].alpha = cfun(i + (sft - 1) * di, j + (sft - 1) * dj, k + (sft - 1) * dk);
+                Solver::Local::Limiter::Primitive stL[5] =
+                    { prim[0], prim[1], prim[2], prim[3], prim[4] };
+                Solver::Local::Limiter::Primitive stR[5] =
+                    { prim[5], prim[4], prim[3], prim[2], prim[1] };
+                qL = limiter->Reconstruct(stL).alpha;
+                qR = limiter->Reconstruct(stR).alpha;
+            };
+            Set::Scalar cxL, cxR, cxlL, cxlR, cyL, cyR, cylL, cylR;
+            cfun_face   (1, 0, 0, cxL,  cxR);
+            cfun_face_lo(1, 0, 0, cxlL, cxlR);
+            cfun_face   (0, 1, 0, cyL,  cyR);
+            cfun_face_lo(0, 1, 0, cylL, cylR);
+            const Set::Scalar dcx = (ux > 0.0) ? (cxL - cxlL) / DX[0] : (cxR - cxlR) / DX[0];
+            const Set::Scalar dcy = (uy > 0.0) ? (cyL - cylL) / DX[1] : (cyR - cylR) / DX[1];
+#if AMREX_SPACEDIM == 3
+            Set::Scalar czL, czR, czlL, czlR;
+            cfun_face   (0, 0, 1, czL,  czR);
+            cfun_face_lo(0, 0, 1, czlL, czlR);
+            const Set::Scalar dcz = (uz > 0.0) ? (czL - czlL) / DX[2] : (czR - czlR) / DX[2];
+#endif
+            cfun_rhs(i, j, k) = cfun_resync_l
+                              ? 0.0     // slaved to eta; RK must not evolve it
+                              : -(AMREX_D_TERM(ux * dcx, + uy * dcy, + uz * dcz));
+
             // NOTE: a surface-diffusion term  + D_s grad_s^2(Gamma)  (Stone 1990)
             // was implemented and tested here, then removed.  It does not fix the
             // Gamma feedback instability.  Measured at eps = 4 finest cells / 4 AMR
@@ -2338,6 +2515,44 @@ Hydro2::RHS(int lev,
                               (flux_xlo.energy_total - flux_xhi.energy_total) / DX[0],
                             + (flux_ylo.energy_total - flux_yhi.energy_total) / DX[1],
                             + (flux_zlo.energy_total - flux_zhi.energy_total) / DX[2]);
+
+            // CAPILLARY ENERGY CLOSURE (Schmidmayer 2017): the energy flux
+            // carries -Omega.u, i.e. the RHS gains +div(Omega.u).  G is built
+            // cell-centred and averaged to faces, so the face value is shared
+            // between neighbours and the sum telescopes -- discretely
+            // conservative.  Note the (hi - lo) ordering here is the OPPOSITE
+            // of the (lo - hi) convention above, because that term is -div(F)
+            // while this one is +div(G).
+            if (false && apply_surface_tension)   // superseded by L_cap
+            {
+                auto Gcap = [&](int ii, int jj, int kk, int d) -> Set::Scalar {
+#if AMREX_SPACEDIM == 2
+                    const Set::Scalar oxx = om_cap(ii,jj,kk,0), oyy = om_cap(ii,jj,kk,1);
+                    const Set::Scalar oxy = om_cap(ii,jj,kk,2);
+                    const Set::Scalar ux = v(ii,jj,kk,0), uy = v(ii,jj,kk,1);
+                    return (d == 0) ? (oxx * ux + oxy * uy) : (oxy * ux + oyy * uy);
+#else
+                    const Set::Scalar oxx = om_cap(ii,jj,kk,0), oyy = om_cap(ii,jj,kk,1);
+                    const Set::Scalar ozz = om_cap(ii,jj,kk,2), oxy = om_cap(ii,jj,kk,3);
+                    const Set::Scalar oxz = om_cap(ii,jj,kk,4), oyz = om_cap(ii,jj,kk,5);
+                    const Set::Scalar ux = v(ii,jj,kk,0), uy = v(ii,jj,kk,1), uz = v(ii,jj,kk,2);
+                    if (d == 0) return oxx * ux + oxy * uy + oxz * uz;
+                    if (d == 1) return oxy * ux + oyy * uy + oyz * uz;
+                    return              oxz * ux + oyz * uy + ozz * uz;
+#endif
+                };
+                Set::Scalar cap_div = 0.0;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                {
+                    const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                    const Set::Scalar g_hi = 0.5 * (Gcap(i, j, k, d)
+                                                  + Gcap(i + di, j + dj, k + dk, d));
+                    const Set::Scalar g_lo = 0.5 * (Gcap(i - di, j - dj, k - dk, d)
+                                                  + Gcap(i, j, k, d));
+                    cap_div += (g_hi - g_lo) / DX[d];
+                }
+                E_flux(i, j, k) += cap_div;
+            }
             E_rhs(i, j, k)  = E_flux(i, j, k) + Source(i, j, k, AMREX_SPACEDIM + 1);
 
             // ------------------------------------------------------------
@@ -2580,6 +2795,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     std::swap(energy0_old_mf[lev],         energy0_mf[lev]);
     std::swap(energy1_old_mf[lev],         energy1_mf[lev]);
     std::swap(shell_old_mf[lev],           shell_mf[lev]);
+    std::swap(cfun_old_mf[lev],            cfun_mf[lev]);
 
     // ------------------------------------------------------------
     // Time Integration
@@ -2603,6 +2819,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     solution_new.emplace_back(*energy0_mf[lev].get(),           amrex::MakeType::make_alias, 0, 1);
     solution_new.emplace_back(*energy1_mf[lev].get(),           amrex::MakeType::make_alias, 0, 1);
     solution_new.emplace_back(*shell_mf[lev].get(),             amrex::MakeType::make_alias, 0, 1);
+    solution_new.emplace_back(*cfun_mf[lev].get(),              amrex::MakeType::make_alias, 0, 1);
 
     amrex::Vector<amrex::MultiFab> solution_old;
     solution_old.emplace_back(*rho_eta0_old_mf[lev].get(),      amrex::MakeType::make_alias, 0, 1);
@@ -2613,6 +2830,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     solution_old.emplace_back(*energy0_old_mf[lev].get(),       amrex::MakeType::make_alias, 0, 1);
     solution_old.emplace_back(*energy1_old_mf[lev].get(),       amrex::MakeType::make_alias, 0, 1);
     solution_old.emplace_back(*shell_old_mf[lev].get(),         amrex::MakeType::make_alias, 0, 1);
+    solution_old.emplace_back(*cfun_old_mf[lev].get(),          amrex::MakeType::make_alias, 0, 1);
 
     amrex::TimeIntegrator timeintegrator(solution_new, time);
 
@@ -2623,8 +2841,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         // rhs_mf:      [0]=rho_eta0_rhs, [1]=rho_eta1_rhs, [2]=M_rhs, [3]=E_rhs, [4]=eta_rhs, [5]=E0_rhs, [6]=E1_rhs, [7]=shell_rhs
         // solution_mf: [0]=rho_eta0,     [1]=rho_eta1,     [2]=M,     [3]=E,     [4]=eta,     [5]=E0,     [6]=E1,     [7]=shell
         RHS(lev, time,
-            rhs_mf[0], rhs_mf[1], rhs_mf[2], rhs_mf[3], rhs_mf[4], rhs_mf[5], rhs_mf[6], rhs_mf[7],
-            solution_mf[0], solution_mf[1], solution_mf[2], solution_mf[3], solution_mf[4], solution_mf[5], solution_mf[6], solution_mf[7]);
+            rhs_mf[0], rhs_mf[1], rhs_mf[2], rhs_mf[3], rhs_mf[4], rhs_mf[5], rhs_mf[6], rhs_mf[7], rhs_mf[8],
+            solution_mf[0], solution_mf[1], solution_mf[2], solution_mf[3], solution_mf[4], solution_mf[5], solution_mf[6], solution_mf[7], solution_mf[8]);
     });
 
     timeintegrator.set_post_stage_action([&](amrex::Vector<amrex::MultiFab> &stage_mf, Set::Scalar time) {
@@ -2637,6 +2855,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         amrex::MultiFab::Copy(*energy0_mf[lev],        stage_mf[5], 0, 0, 1,              nghost);
         amrex::MultiFab::Copy(*energy1_mf[lev],        stage_mf[6], 0, 0, 1,              nghost);
         amrex::MultiFab::Copy(*shell_mf[lev],          stage_mf[7], 0, 0, 1,              nghost);
+        amrex::MultiFab::Copy(*cfun_mf[lev],           stage_mf[8], 0, 0, 1,              nghost);
 
         // Everything from here to the end of this hook changes eta WITHOUT moving
         // material (clamping to [0,1], per-phase ghost reconstruction, stiff
@@ -2668,6 +2887,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         amrex::MultiFab::Copy(stage_mf[6], *energy1_mf[lev],        0, 0, 1,              nghost);
         ShellGammaRestore(lev, Gamma_stage);
         amrex::MultiFab::Copy(stage_mf[7], *shell_mf[lev],          0, 0, 1,              nghost);
+        amrex::MultiFab::Copy(stage_mf[8], *cfun_mf[lev],           0, 0, 1,              nghost);
 
     });
 
@@ -2684,7 +2904,25 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         }
     }
 
+    // ------------------------------------------------------------------
+    // OPERATOR CHAIN  (Schmidmayer 2017 sec. 4.2):
+    //     U^{n+1} = L_relax ( L_cap ( L_hyper (U^n) ) )
+    // L_hyper is the SSPRK3 advance of the hyperbolic submodel (16) -- the
+    // capillary terms are gated out of RHS above.  L_cap and L_relax then run
+    // ONCE per step, in that order.
+    // ------------------------------------------------------------------
+    defer_relax = (capillary_closure != 0);
     timeintegrator.advance(solution_old, solution_new, time, dt);
+    if (capillary_closure)
+    {
+        defer_relax = false;
+        CapillaryOperator(lev, dt);          // L_cap
+        RelaxAndReinit(lev);                 // L_relax
+        FillGhost4BC(lev, time + dt);        // ghosts consistent with the relaxed state
+        // No copy-back: solution_new aliases momentum_mf / energy_per_vol_mf /
+        // eta_mf / energy{0,1}_mf (MakeType::make_alias above), so the in-place
+        // updates from L_cap and L_relax are already visible in the state.
+    }
 
     // ------------------------------------------------------------------
     // Feed FluxRegister for reflux at coarse-fine boundaries.
@@ -2898,6 +3136,16 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> E0_p = energy0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> E1_p = energy1_mf.Patch(lev, mfi);
 
+        // Capillary-energy closure inputs (see Hydro2.H).  NOTE: this loop
+        // aliases `eta` to eta_OLD; rho E here is current, so e_cap must be
+        // built from eta_new.
+        const int cap_close_p = capillary_closure, marm_p = marmottant;
+        const Set::Scalar sig_p = sigma, chi_p = marmottant_chi;
+        const Set::Scalar Gb_p = marmottant_Gamma_buck;
+        const Set::Scalar sbrk_p = marmottant_sigma_break, sigw_p = sigma;
+        amrex::Array4<const Set::Scalar> const &shell_p = shell_mf[lev]->const_array(mfi);
+        amrex::Array4<const Set::Scalar> const &cfun_p  = cfun_mf[lev]->const_array(mfi);
+
         // EMBEDDED SOLID indicator (empty Array4 when feature is off).
         Set::Patch<const Set::Scalar> phisol = embedded.phi_mf.Patch(lev, mfi);
 
@@ -2934,7 +3182,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             KE_vol(i,j,k) = 0.5 * rho(i,j,k) * (AMREX_D_TERM(v(i,j,k,0) * v(i,j,k,0), + v(i,j,k,1) * v(i,j,k,1), + v(i,j,k,2) * v(i,j,k,2)));
             KE_mas(i,j,k) = 0.5 * (AMREX_D_TERM(v(i,j,k,0) * v(i,j,k,0), + v(i,j,k,1) * v(i,j,k,1), + v(i,j,k,2) * v(i,j,k,2)));
 
-            UE_vol(i,j,k) = E_vol(i,j,k) - KE_vol(i,j,k);
+            // Debit the capillary energy: with the closure on, rho E carries
+            // e_cap, so the internal energy is rho E - KE - e_cap.
+            UE_vol(i,j,k) = E_vol(i,j,k) - KE_vol(i,j,k)
+                          - (cap_close_p ? CapEnergyAt(cfun_p, shell_p, i, j, k, DX,
+                                                       marm_p, sig_p, chi_p, Gb_p,
+                                                       sbrk_p, sigw_p) : 0.0);
             UE_vol(i, j, k) = (UE_vol(i, j, k) < 0.0) ? small : UE_vol(i, j, k);
             E_mas(i,j,k) = E_vol(i,j,k) / (rho(i,j,k) + small);
             UE_mas(i,j,k) = E_mas(i,j,k) - KE_mas(i,j,k);
@@ -3054,8 +3307,44 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     Set::Scalar wave_speed = c_max + sqrt(AMREX_D_TERM(vx_max * vx_max, + vy_max * vy_max, + vz_max * vz_max));
     Set::Scalar dt_acoustic = cfl * dx_min / (wave_speed + small);
 
+    // VISCOUS (explicit diffusion).  The stability limit for a (2d+1)-point
+    // Laplacian in d dimensions is dt <= dx^2 / (2 d nu), nu = mu/rho.  The
+    // previous form omitted the 2d, so with the default cfl_v = cfl = 0.3 it was
+    // ~20%% too permissive in 2D (limit coefficient 0.25) and 6x too permissive
+    // in 3D.  That is why mu0=mu1=0.05 blew up immediately at eps/dx=4 -- dt
+    // stayed at the acoustic 6.9e-7 against a true gas-phase limit of 3.8e-7,
+    // Total_Force reached -3.7e7 and dt collapsed to the 1e-12 floor.
+    // rho_min with mu_max is the conservative pairing: the binding phase is the
+    // one with the largest nu = mu/rho.
     Set::Scalar mu_max = std::max(mu0, mu1);
-    Set::Scalar dt_viscous = cfl_v * rho_min * dx_min * dx_min / (mu_max + small);
+    // The diagnostic artificial viscosity mu_art = C rho a dx w has kinematic
+    // value nu_art = C a dx w <= C c_max dx_min, independent of rho, so it adds
+    // directly to nu.  Without this the C > ~1 runs would blow up on a stale
+    // timestep rather than on the physics under test.
+    Set::Scalar nu_total = mu_max / (rho_min + small)
+                         + art_visc_coeff * c_max * dx_min;
+    Set::Scalar dt_viscous = cfl_v * dx_min * dx_min
+                           / (2.0 * AMREX_SPACEDIM * (nu_total + small));
+
+    // CAPILLARY (Brackbill, Kothe & Zemach, JCP 100 (1992) 335).  An explicit
+    // surface-tension force cannot resolve capillary waves faster than
+    //     dt <= sqrt(rho_bar dx^3 / (2 pi sigma)).
+    // This scales as dx^1.5 while the acoustic CFL scales as dx, so REFINING a
+    // surface-tension problem eventually violates it no matter how small the
+    // acoustic dt is.  Measured on the static R0=24mm bubble (inviscid,
+    // sigma=7.28): dt_acoustic/dt_cap = 0.70 / 0.99 / 1.40 at eps/dx = 2 / 4 / 8,
+    // tracking the observed parasitic-current growth 3365 / 9630 / 103169 /s.
+    // NOTE this constraint alone does NOT cure those currents -- capping dt at
+    // 0.25 dt_cap cut the growth rate only 33%% (eps/dx=4) and 9%% (eps/dx=8).
+    // It is a correctness fix; the residual grid-aligned (n=4) force imbalance is
+    // a separate, unsolved problem.
+    // sigma is the largest tension the capillary term can apply: with
+    // marmottant=1 the elastic branch is clamped at sigma_break -> sigma_water,
+    // which is this same `sigma`.
+    Set::Scalar dt_capillary = 1.0e30;
+    if (apply_surface_tension && sigma > 0.0)
+        dt_capillary = cfl_v * std::sqrt(rho_min * dx_min * dx_min * dx_min
+                                       / (2.0 * Set::Constant::Pi * sigma));
 
     Set::Scalar a_max = F_max / (rho_min + small);
     Set::Scalar dt_force = cfl_v * sqrt(dx_min / (a_max + small));
@@ -3063,7 +3352,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     Set::Scalar Mob = 0.01 * dx_min * dx_min;
     Set::Scalar dt_allen_cahn = 0.5 * dx_min * dx_min / (Mob + small);
 
-    Set::Scalar dt_max = std::min({ dt_acoustic, dt_viscous, dt_force, dt_allen_cahn });
+    Set::Scalar dt_max = std::min({ dt_acoustic, dt_viscous, dt_force, dt_allen_cahn, dt_capillary });
     dt_max = dt_max * 0.9;
 
     // Debugging to report cfl constants used. Change bool to show
@@ -3074,6 +3363,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Util::Message(INFO, "  vx_max = ", vx_max, " m/s");
         Util::Message(INFO, "  vy_max = ", vy_max, " m/s");
         Util::Message(INFO, "  vz_max = ", vz_max, " m/s");
+        Util::Message(INFO, "  dt_acoustic  = ", dt_acoustic,  " s");
+        Util::Message(INFO, "  dt_viscous   = ", dt_viscous,   " s");
+        Util::Message(INFO, "  dt_capillary = ", dt_capillary, " s");
         Util::Message(INFO, "  dt_max = ", dt_max, " s");
     }
 
@@ -4166,6 +4458,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         FillPatch(lev, time, energy_per_vol_mf,  *energy_per_vol_mf[lev], *energy_bc,   0);
         FillPatch(lev, time, eta_mf,             *eta_mf[lev],            *eta_bc,      0);
         FillPatch(lev, time, shell_mf,           *shell_mf[lev],          *eta_bc,      0);
+        FillPatch(lev, time, cfun_mf,            *cfun_mf[lev],           *eta_bc,      0);
         FillPatch(lev, time, energy0_mf,         *energy0_mf[lev],        *energy_bc,   0);
         FillPatch(lev, time, energy1_mf,         *energy1_mf[lev],        *energy_bc,   0);
     }
@@ -4368,7 +4661,9 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     // p_0 = p_1 on thecanonical primaries (eta, E_0, E_1) before any source/flux
     // ============================================================
     Util::Message(INFO, "FillGhost4BC pre-relax: relax_diag=", relax_diag, " lev=", lev);
-    RelaxAndReinit(lev);
+    // Schmidmayer 2017: U^{n+1} = L_relax L_cap L_hyper(U^n) -- relaxation runs
+    // ONCE per step, after the capillary operator, not between RK stages.
+    if (!defer_relax) RelaxAndReinit(lev);
 
     // ------------------------------------------------------------
     // STEP 5: Fill CONSERVATIVE ghost cells (rho, M, E)
@@ -4732,6 +5027,14 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     {
         const amrex::Box &ghostbox = mfi.growntilebox(nghost);
 
+        // Capillary-energy closure inputs (see Hydro2.H).
+        const int cap_close_g = capillary_closure, marm_g = marmottant;
+        const Set::Scalar sig_g = sigma, chi_g = marmottant_chi;
+        const Set::Scalar Gb_g = marmottant_Gamma_buck;
+        const Set::Scalar sbrk_g = marmottant_sigma_break, sigw_g = sigma;
+        auto shell_g   = shell_mf[lev]->const_array(mfi);
+        auto cfun_g    = cfun_mf[lev]->const_array(mfi);
+
         auto rho       = density_mf[lev]->array(mfi);
         auto eta       = eta_mf[lev]->array(mfi);
         auto arh0_arr  = rho_eta0_mf[lev]->array(mfi);
@@ -4794,7 +5097,10 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             // rho E = sum_k (alpha rho e)_k + 0.5 rho |u|^2  (Sch20 eq. 16).
             // This overwrite is the BC-consistency guarantee for the 6-eq model.
             UE(i, j, k) = E0_arr(i, j, k) + E1_arr(i, j, k);
-            E(i, j, k)  = UE(i, j, k) + KE(i, j, k);
+            E(i, j, k)  = UE(i, j, k) + KE(i, j, k)
+                        + (cap_close_g ? CapEnergyAt(cfun_g, shell_g, i, j, k, DX,
+                                                     marm_g, sig_g, chi_g, Gb_g,
+                                                     sbrk_g, sigw_g) : 0.0);
 
             // Diagnostic per-phase primitives.
             rho0_arr(i, j, k) = rho0_pure;
@@ -5225,6 +5531,101 @@ void Hydro2::ShellGammaRestore(int lev, const std::unique_ptr<amrex::MultiFab> &
     shell_mf[lev]->FillBoundary(geom[lev].periodicity());
 }
 
+
+// ======================================================================
+// L_cap : Schmidmayer 2017 eq. (17) / sec. 4.2.2.  See Hydro2.H.
+// ======================================================================
+void Hydro2::CapillaryOperator(int lev, Set::Scalar dt)
+{
+    if (!apply_surface_tension) return;
+
+    const Set::Scalar *DX = geom[lev].CellSize();
+    const Set::Scalar sig_const = sigma;
+    const int marm = marmottant;
+    // L_cap runs after L_hyper and before L_relax, so eta here is the
+    // post-advection / pre-relaxation interface -- the right thing to mark.
+    if (cfun_resync)
+        amrex::MultiFab::Copy(*cfun_mf[lev], *eta_mf[lev], 0, 0, 1, nghost);
+    const Set::Scalar chi_ = marmottant_chi, Gb = marmottant_Gamma_buck;
+    const Set::Scalar sbrk = marmottant_sigma_break, sigw = sigma;
+
+    // Cell-centred capillary primitives, one ghost so the face averages below
+    // have both neighbours.  Layout: [0]=||w||, [1]=w1^2/||w||,
+    // [2]=w2^2/||w||, [3]=w1w2/||w||, [4]=sigma_eff.
+    const int NQ = 5;
+    amrex::MultiFab Q(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), NQ, 1);
+    Q.setVal(0.0);
+    for (amrex::MFIter mfi(Q, false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box bx = mfi.growntilebox(1);
+        auto q  = Q.array(mfi);
+        auto cf = cfun_mf[lev]->const_array(mfi);
+        auto sh = shell_mf[lev]->const_array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            if (!cf.contains(i - 1, j, k) || !cf.contains(i + 1, j, k)) return;
+            if (!cf.contains(i, j - 1, k) || !cf.contains(i, j + 1, k)) return;
+            Set::Vector w = Numeric::Gradient(cf, i, j, k, 0, DX);
+            const Set::Scalar wn = w.lpNorm<2>();
+            if (wn < 1.0e-10) return;
+            const Set::Scalar se = SigmaEffFromGamma(marm ? sh(i, j, k) : 0.0, wn,
+                                                     marm, sig_const, chi_, Gb, sbrk, sigw);
+            q(i, j, k, 0) = wn;
+            q(i, j, k, 1) = w(0) * w(0) / wn;
+            q(i, j, k, 2) = w(1) * w(1) / wn;
+            q(i, j, k, 3) = w(0) * w(1) / wn;
+            q(i, j, k, 4) = se;
+        });
+    }
+    Q.FillBoundary(geom[lev].periodicity());
+
+    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
+        auto q  = Q.const_array(mfi);
+        auto M  = momentum_mf[lev]->array(mfi);
+        auto E  = energy_per_vol_mf[lev]->array(mfi);
+        auto v  = velocity_mf[lev]->const_array(mfi);
+        const Set::Scalar dtl = dt, dxl = DX[0], dyl = DX[1];
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            // Face value = arithmetic average of the two neighbouring cells
+            // (Schmidmayer sec. 4.2.2).  Shared between neighbours, so the
+            // sum telescopes and the update is discretely conservative.
+            auto fx = [&](int c, int s) { return 0.5 * (q(i, j, k, c) + q(i + s, j, k, c)); };
+            auto fy = [&](int c, int s) { return 0.5 * (q(i, j, k, c) + q(i, j + s, k, c)); };
+            // sigma_eff at faces, so a spatially varying (Marmottant) tension
+            // carries the Marangoni contribution through the same averaging.
+            const Set::Scalar sxp = 0.5 * (q(i, j, k, 4) + q(i + 1, j, k, 4));
+            const Set::Scalar sxm = 0.5 * (q(i, j, k, 4) + q(i - 1, j, k, 4));
+            const Set::Scalar syp = 0.5 * (q(i, j, k, 4) + q(i, j + 1, k, 4));
+            const Set::Scalar sym = 0.5 * (q(i, j, k, 4) + q(i, j - 1, k, 4));
+
+            const Set::Scalar dNx = (sxp * fx(0, 1) - sxm * fx(0, -1)) / dxl;
+            const Set::Scalar dNy = (syp * fy(0, 1) - sym * fy(0, -1)) / dyl;
+            const Set::Scalar d11x = (sxp * fx(1, 1) - sxm * fx(1, -1)) / dxl;
+            const Set::Scalar d12x = (sxp * fx(3, 1) - sxm * fx(3, -1)) / dxl;
+            const Set::Scalar d12y = (syp * fy(3, 1) - sym * fy(3, -1)) / dyl;
+            const Set::Scalar d22y = (syp * fy(2, 1) - sym * fy(2, -1)) / dyl;
+
+            M(i, j, k, 0) -= dtl * (-dNx + d11x + d12y);
+            M(i, j, k, 1) -= dtl * (-dNy + d12x + d22y);
+
+            // Energy: d_x[(w1^2 u + w1 w2 v)/||w||] + d_y[(w1 w2 u + w2^2 v)/||w||],
+            // with u,v also face-averaged so the flux is single-valued.
+            auto uf = [&](int d, int s) {
+                return (d == 0) ? 0.5 * (v(i, j, k, 0) + v(i + s, j, k, 0))
+                                : 0.5 * (v(i, j, k, 0) + v(i, j + s, k, 0)); };
+            auto vf = [&](int d, int s) {
+                return (d == 0) ? 0.5 * (v(i, j, k, 1) + v(i + s, j, k, 1))
+                                : 0.5 * (v(i, j, k, 1) + v(i, j + s, k, 1)); };
+            const Set::Scalar Ex = (sxp * (fx(1, 1) * uf(0, 1) + fx(3, 1) * vf(0, 1))
+                                  - sxm * (fx(1, -1) * uf(0, -1) + fx(3, -1) * vf(0, -1))) / dxl;
+            const Set::Scalar Ey = (syp * (fy(3, 1) * uf(1, 1) + fy(2, 1) * vf(1, 1))
+                                  - sym * (fy(3, -1) * uf(1, -1) + fy(2, -1) * vf(1, -1))) / dyl;
+            E(i, j, k) -= dtl * (Ex + Ey);
+        });
+    }
+}
+
 void Hydro2::RelaxAndReinit(int lev)
 {
     BL_PROFILE("Integrator::Hydro2::RelaxAndReinit");
@@ -5275,6 +5676,41 @@ void Hydro2::RelaxAndReinit(int lev)
         diag_mf->setVal(0.0);
     }
 
+    // ------------------------------------------------------------------
+    // CAPILLARY ENERGY SNAPSHOT (see Hydro2.H, capillary_closure).
+    //
+    // Schmidmayer 2017 splits the operators as L_relax(L_cap(L_hyper(U))),
+    // so the capillary energy entering the relaxation is already fixed; and
+    // their eps_sigma = sigma|grad c| is built from a colour function the
+    // relaxation never touches.  Here eps_sigma is built from eta = alpha_1,
+    // which the relaxation DOES rewrite (eta = a1_new below).  Evaluating it
+    // inside the kernel is then a race: e_cap at cell i reads eta at i+-1,
+    // which may or may not already have been relaxed depending on traversal
+    // order.  Freeze it here, from the pre-relaxation eta, to reproduce the
+    // same invariant deterministically.
+    std::unique_ptr<amrex::MultiFab> ecap_snap;
+    if (capillary_closure)
+    {
+        ecap_snap = std::make_unique<amrex::MultiFab>(
+            eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, 0);
+        const int marm_s = marmottant;
+        const Set::Scalar sig_s = sigma, chi_s = marmottant_chi;
+        const Set::Scalar Gb_s = marmottant_Gamma_buck;
+        const Set::Scalar sbrk_s = marmottant_sigma_break, sigw_s = sigma;
+        const Set::Scalar *DXs = geom[lev].CellSize();
+        for (amrex::MFIter mfi(*ecap_snap, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto ec = ecap_snap->array(mfi);
+            auto cf = cfun_mf[lev]->const_array(mfi);
+            auto sh = shell_mf[lev]->const_array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                ec(i, j, k) = CapEnergyAt(cf, sh, i, j, k, DXs, marm_s, sig_s,
+                                          chi_s, Gb_s, sbrk_s, sigw_s);
+            });
+        }
+    }
+
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
@@ -5286,6 +5722,11 @@ void Hydro2::RelaxAndReinit(int lev)
         auto E_    = energy_per_vol_mf[lev]->array(mfi);
         auto E0_   = energy0_mf[lev]->array(mfi);
         auto E1_   = energy1_mf[lev]->array(mfi);
+        // Capillary-energy closure: read the frozen pre-relaxation snapshot
+        // built above, never eta directly (the kernel rewrites eta).
+        const int cap_close_x = capillary_closure;
+        amrex::Array4<const Set::Scalar> ecap_s;
+        if (capillary_closure) ecap_s = ecap_snap->const_array(mfi);
 
         // EMBEDDED SOLID indicator (empty Array4 when feature is off).
         Set::Patch<const Set::Scalar> phisol = embedded.phi_mf.Patch(lev, mfi);
@@ -5494,7 +5935,13 @@ void Hydro2::RelaxAndReinit(int lev)
             Set::Scalar ke      = 0.5 * (AMREX_D_TERM(M_(i, j, k, 0) * M_(i, j, k, 0),
                                                     + M_(i, j, k, 1) * M_(i, j, k, 1),
                                                     + M_(i, j, k, 2) * M_(i, j, k, 2))) / std::max(rho_loc, small_loc);
-            Set::Scalar rho_e   = std::max(E_(i, j, k) - ke, small_loc);
+            // Debit the capillary energy before the EOS inversion: with the
+            // closure on, rho E carries e_cap, and reading it as internal
+            // energy inflates p at the interface (dt collapse).  This is the
+            // THIRD rho E inversion site -- it names its local `rho_e`, which
+            // is why the E_vol - KE grep did not surface it.
+            Set::Scalar rho_e   = std::max(E_(i, j, k) - ke
+                                  - (cap_close_x ? ecap_s(i, j, k) : 0.0), small_loc);
 
             Set::Scalar p_reinit = Solver::EOS::EOS::ReinitMixturePressure(rho_e, a1_new, a2_new,
                                                                           gam0, pi0_, gam1, pi1_, small_loc);
@@ -5750,6 +6197,14 @@ void Hydro2::PostAverageDown(int coarse_lev)
         auto rho   = density_mf[coarse_lev]    ->array(mfi);
         auto v     = velocity_mf[coarse_lev]   ->array(mfi);
         auto mask  = fine_cover_mask.const_array(mfi);
+        // Capillary-energy closure inputs (see Hydro2.H).
+        const int cap_close_r = capillary_closure, marm_r = marmottant;
+        const Set::Scalar sig_r = sigma, chi_r = marmottant_chi;
+        const Set::Scalar Gb_r = marmottant_Gamma_buck;
+        const Set::Scalar sbrk_r = marmottant_sigma_break, sigw_r = sigma;
+        auto shell_r = shell_mf[coarse_lev]->const_array(mfi);
+        auto cfun_r  = cfun_mf[coarse_lev]->const_array(mfi);
+        const Set::Scalar *DXr = geom[coarse_lev].CellSize();
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
@@ -5769,7 +6224,10 @@ void Hydro2::PostAverageDown(int coarse_lev)
             const Set::Scalar KE = 0.5 * rho_safe * (AMREX_D_TERM(v(i, j, k, 0) * v(i, j, k, 0),
                                                                + v(i, j, k, 1) * v(i, j, k, 1),
                                                                + v(i, j, k, 2) * v(i, j, k, 2)));
-            const Set::Scalar e_int = E_vol(i, j, k) - KE;
+            const Set::Scalar e_int = E_vol(i, j, k) - KE
+                                    - (cap_close_r ? CapEnergyAt(cfun_r, shell_r, i, j, k, DXr,
+                                                                 marm_r, sig_r, chi_r, Gb_r,
+                                                                 sbrk_r, sigw_r) : 0.0);
 
             // Sau09 III.5:  e_int = sum_k alpha_k * (p + gamma_k * pi_k) / (gamma_k - 1)
             //   p_mix * [a0/(g0-1) + a1/(g1-1)] = e_int - [a0*g0*pi0/(g0-1) + a1*g1*pi1/(g1-1)]
