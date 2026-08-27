@@ -2160,7 +2160,22 @@ Hydro2::RHS(int lev,
             a_face_xhi = std::min(std::max(a_face_xhi, 0.0), 1.0);
             a_face_ylo = std::min(std::max(a_face_ylo, 0.0), 1.0);
             a_face_yhi = std::min(std::max(a_face_yhi, 0.0), 1.0);
+            // Colour function c: face-upwind on the SAME contact velocity as
+            // alpha, so c and eta share one discrete advection operator.
+            // Schmidmayer 2017 sec. 4.2.1: the c row of H_nc is -c, exactly as
+            // the alpha_1 row is -alpha_1, and both are driven by the Riemann
+            // star velocity u*.  Advecting c with the cell-centred u instead
+            // (as the first implementation did) gives it a different truncation
+            // error from eta, and the two separate -- measured at 2.28% in R
+            // over 15 ms.  NOT clamped to [0,1]: c is a marker, and clipping it
+            // would inject exactly the non-material change we are avoiding.
+            const Set::Scalar c_face_xlo = (flux_xlo.u_interface > 0.0) ? cfun(i - 1, j, k) : cfun(i,     j, k);
+            const Set::Scalar c_face_xhi = (flux_xhi.u_interface > 0.0) ? cfun(i,     j, k) : cfun(i + 1, j, k);
+            const Set::Scalar c_face_ylo = (flux_ylo.u_interface > 0.0) ? cfun(i, j - 1, k) : cfun(i, j,     k);
+            const Set::Scalar c_face_yhi = (flux_yhi.u_interface > 0.0) ? cfun(i, j,     k) : cfun(i, j + 1, k);
 #if AMREX_SPACEDIM == 3
+            const Set::Scalar c_face_zlo = (flux_zlo.u_interface > 0.0) ? cfun(i, j, k - 1) : cfun(i, j, k);
+            const Set::Scalar c_face_zhi = (flux_zhi.u_interface > 0.0) ? cfun(i, j, k)     : cfun(i, j, k + 1);
             Set::Scalar a_face_zlo = (flux_zlo.u_interface > 0.0) ? eta(i, j, k - 1) : eta(i, j, k);
             Set::Scalar a_face_zhi = (flux_zhi.u_interface > 0.0) ? eta(i, j, k)     : eta(i, j, k + 1);
             a_face_zlo = std::min(std::max(a_face_zlo, 0.0), 1.0);
@@ -2400,49 +2415,23 @@ Hydro2::RHS(int lev,
             // ------------------------------------------------------------
             // COLOUR FUNCTION  dc/dt + u.grad(c) = 0   (Schmidmayer 2017 eq. 3)
             // ------------------------------------------------------------
-            // Pure advection -- no stretch source, unlike the shell.  Uses the
-            // SAME limiter reconstruction as eta and the shell so the three
-            // fields can never see different numerical viscosities.
-            auto cfun_face = [&](int di, int dj, int dk, Set::Scalar &qL, Set::Scalar &qR)
-            {
-                Solver::Local::Limiter::Primitive prim[6];
-                for (int sft = -2; sft <= 3; ++sft)
-                    prim[sft + 2].alpha = cfun(i + sft * di, j + sft * dj, k + sft * dk);
-                Solver::Local::Limiter::Primitive stL[5] =
-                    { prim[0], prim[1], prim[2], prim[3], prim[4] };
-                Solver::Local::Limiter::Primitive stR[5] =
-                    { prim[5], prim[4], prim[3], prim[2], prim[1] };
-                qL = limiter->Reconstruct(stL).alpha;
-                qR = limiter->Reconstruct(stR).alpha;
-            };
-            auto cfun_face_lo = [&](int di, int dj, int dk, Set::Scalar &qL, Set::Scalar &qR)
-            {
-                Solver::Local::Limiter::Primitive prim[6];
-                for (int sft = -2; sft <= 3; ++sft)
-                    prim[sft + 2].alpha = cfun(i + (sft - 1) * di, j + (sft - 1) * dj, k + (sft - 1) * dk);
-                Solver::Local::Limiter::Primitive stL[5] =
-                    { prim[0], prim[1], prim[2], prim[3], prim[4] };
-                Solver::Local::Limiter::Primitive stR[5] =
-                    { prim[5], prim[4], prim[3], prim[2], prim[1] };
-                qL = limiter->Reconstruct(stL).alpha;
-                qR = limiter->Reconstruct(stR).alpha;
-            };
-            Set::Scalar cxL, cxR, cxlL, cxlR, cyL, cyR, cylL, cylR;
-            cfun_face   (1, 0, 0, cxL,  cxR);
-            cfun_face_lo(1, 0, 0, cxlL, cxlR);
-            cfun_face   (0, 1, 0, cyL,  cyR);
-            cfun_face_lo(0, 1, 0, cylL, cylR);
-            const Set::Scalar dcx = (ux > 0.0) ? (cxL - cxlL) / DX[0] : (cxR - cxlR) / DX[0];
-            const Set::Scalar dcy = (uy > 0.0) ? (cyL - cylL) / DX[1] : (cyR - cylR) / DX[1];
+            // Discretised EXACTLY as the alpha_1 row above: -div(c u*) + c div(u*),
+            // with u* the HLLC contact velocity.  Same flux, same star velocity,
+            // same truncation error -- so c and eta cannot drift apart for
+            // numerical reasons, only through the physical difference between
+            // them (alpha_1 carries the relaxation source mu(P1-P2); c does not).
+            const Set::Scalar div_uC_x = (flux_xhi.u_interface * c_face_xhi
+                                        - flux_xlo.u_interface * c_face_xlo) / DX[0];
+            const Set::Scalar div_uC_y = (flux_yhi.u_interface * c_face_yhi
+                                        - flux_ylo.u_interface * c_face_ylo) / DX[1];
 #if AMREX_SPACEDIM == 3
-            Set::Scalar czL, czR, czlL, czlR;
-            cfun_face   (0, 0, 1, czL,  czR);
-            cfun_face_lo(0, 0, 1, czlL, czlR);
-            const Set::Scalar dcz = (uz > 0.0) ? (czL - czlL) / DX[2] : (czR - czlR) / DX[2];
+            const Set::Scalar div_uC_z = (flux_zhi.u_interface * c_face_zhi
+                                        - flux_zlo.u_interface * c_face_zlo) / DX[2];
 #endif
             cfun_rhs(i, j, k) = cfun_resync_l
                               ? 0.0     // slaved to eta; RK must not evolve it
-                              : -(AMREX_D_TERM(ux * dcx, + uy * dcy, + uz * dcz));
+                              : -(AMREX_D_TERM(div_uC_x, + div_uC_y, + div_uC_z))
+                                + cfun(i, j, k) * div_u;
 
             // NOTE: a surface-diffusion term  + D_s grad_s^2(Gamma)  (Stone 1990)
             // was implemented and tested here, then removed.  It does not fix the
