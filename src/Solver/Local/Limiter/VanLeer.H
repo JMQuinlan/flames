@@ -40,9 +40,18 @@ public:
 private:
     static inline Set::Scalar vl(Set::Scalar a, Set::Scalar b)
     {
-        constexpr Set::Scalar small = 1.0e-30;
+        // Harmonic-mean (van Leer) limiter:  phi = 2ab/(a+b)  for ab > 0.
+        // No epsilon guard is needed: ab > 0 forces a and b to share a sign,
+        // so |a+b| >= 2 sqrt(ab) > 0 and the denominator cannot vanish.  The
+        // previous form added a POSITIVE small to the denominator, which for
+        // two tiny NEGATIVE slopes could flip its sign and return a slope of
+        // the wrong sign (magnitude ~1e-32, so never visible in a result, but
+        // wrong).  Guard the division only against true denormals, preserving
+        // the sign.
         if (a * b <= 0.0) return 0.0;
-        return 2.0 * a * b / (a + b + small);
+        const Set::Scalar den = a + b;
+        if (std::abs(den) < 1.0e-300) return 0.0;
+        return 2.0 * a * b / den;
     }
     static Primitive limit(const Primitive &a, const Primitive &b)
     {
