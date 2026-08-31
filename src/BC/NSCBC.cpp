@@ -83,6 +83,9 @@ NSCBC::BoundaryParams NSCBC::ParseFace(IO::ParmParse &pp, std::string face_name)
     pp.query((face_name + ".target_w").c_str(), params.target_w);
     pp.query((face_name + ".target_T").c_str(), params.target_T);
     pp.query((face_name + ".target_p").c_str(), params.target_p);
+    pp.query((face_name + ".drive_amp").c_str(),   params.drive_amp);
+    pp.query((face_name + ".drive_omega").c_str(), params.drive_omega);
+    pp.query((face_name + ".drive_phase").c_str(), params.drive_phase);
 
     // Parse relaxation coefficients
     pp.query((face_name + ".relax_u").c_str(), params.relax_u);

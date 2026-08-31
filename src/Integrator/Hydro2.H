@@ -687,6 +687,9 @@ protected:
     //   relax_diag = 1  : every stage print {max_iters, max_residual}
     //                     plus AUTO-warn if any cell hits max_iter without converging.
     int relax_diag = 0;
+    int clip_ghost_only = 0;
+    bool sym_face_lo[3] = {false, false, false};
+    bool sym_face_hi[3] = {false, false, false};
 
 };
 }

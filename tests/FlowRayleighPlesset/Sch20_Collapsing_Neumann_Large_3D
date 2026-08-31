@@ -57,14 +57,24 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20
 
 ### MESHING ###
 amr.plot_int       = -1
-amr.plot_dt        = 4.0e-6        # ~ tau_c/65 -> fine sampling through collapse
+amr.plot_dt        = 1.0e-6 
 amr.max_grid_size  = 32
 amr.blocking_factor = 32
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
-amr.max_level      = 5
-amr.n_cell         = 160 160 160       # base; eta-only AMR -> finest dx 7.8e-4 (R0/dx 25.6)
-amr.n_error_buf    = 16
+amr.max_level      = 6
+amr.n_cell         = 160 160 160       # base dx 6.25e-3; max_level 4 -> finest dx 3.906e-4 (R0/dx 51.2)
+amr.n_error_buf    = 4
+
+# Permanently refined box around the bubble: force max_level everywhere inside
+# [lo,hi], not just the eta interface band.  Keeps the ENTIRE bubble (interior
+# gas included) at dx_finest = 3.906e-4 through collapse and rebound, so the
+# initial radius is ~51 cells across and R_min is resolved by the same mesh
+# rather than whatever the shrinking eta band happens to tag.  Octant: bubble
+# center is the origin, so the box is [0, 1.5*R0]^3.  Cost: ~77^3 ~ 460k finest
+# cells -- small next to the eta-band patches.
+refine_box.lo = 0.0  0.0  0.0
+refine_box.hi = 0.03 0.03 0.03
 
 nghost = 4
 
@@ -85,7 +95,8 @@ stop_time            = 4.0e-4      # ~ 1.55 tau_c -- collapse + first rebound
 ### ETA INITIAL CONDITIONS ###
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.0016     # ~ 2 cells across the band
+eta.ic.expression.constant.epsilon = 0.0004     # ~ 2 cells across the band
+#eta.ic.expression.constant.epsilon = 0.0016     # ~ 2 cells across the band
 eta.ic.expression.constant.R0      = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
@@ -197,9 +208,9 @@ integration.type    = RungeKutta
 integration.rk.type = 3
 kappa_method        = 1
 
-apply_sharpening     = 0
+apply_sharpening     = 1
 sharpening_frequency = 50
 reinit_max_iter      = 100
 reinit_tolerance     = 1e-6
 omega_relax          = 0.5
-relax_diag           = 1
+relax_diag           = 0

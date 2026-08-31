@@ -1,0 +1,201 @@
+#@ [ut_adv_periodic]
+#@ exe=hydro2
+#@ dim=2
+
+# =============================================================================
+# UT-RA: RELAXATION + ACOUSTIC DRIVE, NO CORNERS -- planar gas slab in a strip
+# Factor isolation: R+A (hypothesis 1: BC vs pressure relaxation, secular
+# pressure build/drop).  Planar analogue of the bubble: gas slab x < 0.02
+# (reflect xlo = symmetry plane), tanh band at x = 0.02, liquid to the driven
+# xhi wall.  Periodic y -> zero corner effects.  ~150k steps.
+# Pass: slab-averaged gas pressure oscillates about 1e5 with NO secular trend;
+# per-phase total masses constant.
+# =============================================================================
+# 2D quarter-plane analogue of input_LowAmp, built to hunt the 3D NaN locally:
+# same drive architecture (primitive-BC sinusoidal wall pressure on the outer
+# faces, symmetry on the inner faces), but with the Garrick et al. (2017)
+# nondimensional gas/liquid pair used by the FlowRiemannUnitTests/Angled_2D
+# and FlowConservativeCheck tests:
+#
+#   Liquid (phase 0): gamma = 5.5, pi = 1.505, rho = 0.991
+#   Gas    (phase 1): gamma = 1.4, pi = 0,     rho = 1.241
+#
+# The Garrick RIEMANN ICs (p_liq = 3.059e-4, p_gas = 2.753) are a
+# disequilibrium shock-tube pair -- unusable for a quiescent bubble -- so both
+# phases start at a common ambient p_amb = 1.0 (order-unity nondim; liquid
+# stiffness pi/p_amb = 1.5 preserves the stiff-liquid character).
+#
+# Geometry: +x+y QUADRANT [0, 1]^2 = full domain 4 R0 across, R0 = 0.5,
+# mirroring the 3D octant layout (domain = 2 R0 per quadrant side).
+#
+# Drive (2D cylindrical Minnaert, sigma = 0):
+#   f0 = (1/(2 pi R0)) sqrt(3 gamma_g p_amb / rho_l)
+#      = (1/(pi)) sqrt(3*1.4*1.0/0.991) = 0.6553      [nondim]
+#   f  = f0/2 = 0.3277,  w = 2 pi f = 2.059,  T = 1/f = 3.052
+#   amp = 0.1 (10% of ambient -- same ratio as the physical LowAmp 0.1 bar):
+#   linear response dR/R0 = amp/(3 gamma p_amb (1 - (f/f0)^2)) = 3.0e-2.
+#   (2D disk Minnaert differs from the 3D sphere by an O(1) log factor in
+#   the induced liquid inertia -- fine for a UNIT test; the reference curve
+#   is a finite-domain cylindrical RP, not the 3D KM.)
+#
+# Cost: liquid c = sqrt(5.5*(1+1.505)/0.991) = 3.73; finest dx = 1/64
+# -> dt ~ 2e-3, ~1500 steps/period.  Runs locally in minutes.
+#
+# Surface tension OFF (LowAmp convention).  NO vaporization.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = ./tests/FlowDrivenBubble/output_LowAmp_2D_Phys
+
+### MESHING ###
+amr.plot_int       = -1
+amr.plot_dt        = 5.0e-4        # 16 frames; band position vs -1.0*t is the metric
+amr.max_grid_size  = 64
+amr.blocking_factor = 8
+amr.regrid_int     = 10
+amr.grid_eff       = 0.8
+amr.max_level      = 0
+amr.n_cell         = 64 8           # uniform dx 6.25e-4 (matches quadrant finest); no AMR
+amr.n_error_buf    = 16
+
+# Permanently refined box over the bubble (quadrant: center = origin).
+
+nghost = 4
+
+### TIME STEPPING ###
+timestep                = 1.0e-7
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-5
+dynamictimestep.min     = 1.0e-13
+cfl                     = 0.5
+
+### DIMENSIONS -- +x+y quadrant, full domain 4 R0 across ###
+geometry.prob_lo     = 0.0 0.0
+geometry.prob_hi     = 0.04 0.005
+geometry.is_periodic = 1 1
+stop_time            = 8.0e-3       # displacement u*t = 8e-3 m = 12.8 cells leftward
+
+### ETA -- planar band: gas slab x<0.02, liquid outside (bubble analogue) ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 1.28e-3
+eta.ic.expression.constant.R0      = 0.02
+eta.ic.expression.region0 = "1.0 - 0.5*(tanh((x - 0.01)/epsilon) - tanh((x - 0.03)/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### EQUATION OF STATE -- Sch20 water (Tammann) + air (ideal gas) ###
+eos0.gamma = 2.35
+eos0.p0    = 1.0e9
+eos0.cv    = 1781.0
+eos0.cp    = 4186.0
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 714.286
+eos1.cp    = 1000.0
+
+### HYDRO INITIAL CONDITIONS ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1000.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "1.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "1.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Both phases at the common ambient (quiescent equilibrium; sigma = 0).
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_amb = 1.0e5
+pressure0.ic.expression.region0 = "p_amb"
+
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_amb = 1.0e5
+pressure1.ic.expression.region0 = "p_amb"
+
+### VISCOSITY (inviscid) ###
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION -- OFF (LowAmp convention) ###
+sigma = 0.0
+pref  = 0.0
+
+### BOUNDARY CONDITIONS -- PRIMITIVE MODE, quadrant symmetry + driven outer walls ###
+# Inner faces (xlo/ylo): symmetry.  Outer faces (xhi/yhi): sinusoidal
+# pressure reservoir p_wall(t) = p_amb + amp*sin(w*t); density/momentum/
+# energy zero-gradient there.
+bc.primitive = 0
+
+pressure.bc.type.xlo = neumann
+pressure.bc.type.xhi = neumann
+pressure.bc.type.ylo = neumann
+pressure.bc.type.yhi = neumann
+
+# eta: symmetry on inner faces, neumann far-field
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = REFLECT_EVEN
+eta.bc.type.yhi = neumann
+
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = REFLECT_EVEN
+density.bc.type.yhi = neumann
+
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = REFLECT_EVEN
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT -- eta band + permanent refine_box (above) ###
+eta_refinement_criterion   = 1.0e-1
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS ###
+apply_surface_tension = 0
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+grav                  = 0.0
+
+### NUMERICS -- WENO5 + SSPRK3 (matches the 3D LowAmp) ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno5
+integration.type    = RungeKutta
+integration.rk.type = 3
+kappa_method        = 1
+
+apply_sharpening     = 0
+sharpening_frequency = 20
+reinit_max_iter      = 100
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+relax_diag           = 1
+
+# Put the per-phase IC pressures in the energy-conserving equilibrium Mix()
+# would produce (kills the step-1 pressure kick; same as Sch20 tests).
+equalize_ic_pressure = 1

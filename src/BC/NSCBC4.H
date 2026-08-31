@@ -67,6 +67,17 @@ public:
         // Outflow parameters
         Set::Scalar sigma = 0.25; ///< Outflow pressure relaxation coefficient (Motheau Eq. 38)
 
+        // Time-dependent pressure drive (acoustic forcing through the
+        // incoming characteristic -- the well-posed replacement for the
+        // primitive-Dirichlet drive, which rectified band acoustics into
+        // mass injection at any inflow-capable zero-gradient face):
+        //   p_target_eff(t) = target_p + drive_amp * sin(drive_omega*t + drive_phase)
+        // Outgoing waves still leave through the LODI outflow treatment, so
+        // the face drives WITHOUT acting as a resonator wall.
+        Set::Scalar drive_amp   = 0.0; ///< Drive amplitude [Pa] (0 = static target)
+        Set::Scalar drive_omega = 0.0; ///< Drive angular frequency [rad/s]
+        Set::Scalar drive_phase = 0.0; ///< Drive phase [rad]
+
         // Reference length scale
         Set::Scalar L_ref = 1.0; ///< Reference length [m] (domain size)
     };
@@ -138,9 +149,21 @@ public:
         BoundaryParams params_xhi_local = params_xhi;
         BoundaryParams params_ylo_local = params_ylo;
         BoundaryParams params_yhi_local = params_yhi;
+        // Apply the time-dependent pressure drive to the per-call effective
+        // targets (everything downstream -- faces, edges, corners -- reads
+        // these locals, so one application covers all use sites).
+        auto apply_drive = [time](BoundaryParams &prm) {
+            prm.target_p += prm.drive_amp * std::sin(prm.drive_omega * time + prm.drive_phase);
+        };
+        apply_drive(params_xlo_local);
+        apply_drive(params_xhi_local);
+        apply_drive(params_ylo_local);
+        apply_drive(params_yhi_local);
 #if AMREX_SPACEDIM == 3
         BoundaryParams params_zlo_local = params_zlo;
         BoundaryParams params_zhi_local = params_zhi;
+        apply_drive(params_zlo_local);
+        apply_drive(params_zhi_local);
 #endif
         // =========================================================================
         // LAMBDA 1: COMPUTE PRIMITIVES FROM CONSERVED VARIABLES
