@@ -84,16 +84,17 @@ Theoretical basis
 
 The diffuse-boundary framework FLAMES extends comes from two papers:
 
-* R. Schmidt, M. Quinlan, B. Runnels, *Self-similar diffuse boundary method for
-  phase boundary driven flow*, **Physics of Fluids** (2022). Inviscid Euler
-  formulation with arbitrary essential/natural flux boundary conditions imposed
-  on a diffuse interface; source terms distributed over the diffuse region
-  recover the sharp-interface boundary conditions as ε → 0.
+* Schmidt, E. M., Quinlan, J. M., and Runnels, B., *Self-similar Diffuse Boundary
+  Method for Phase Boundary Driven Flow*, **Physics of Fluids**, Vol. 34, No. 11,
+  2022. Inviscid Euler formulation with arbitrary essential/natural flux boundary
+  conditions imposed on a diffuse interface; source terms distributed over the
+  diffuse region recover the sharp-interface boundary conditions as ε → 0.
 
-* K. Boyd, S. Sandall, M. Meier, M. Quinlan, B. Runnels, *A diffuse boundary
-  method for phase boundaries in viscous compressible flow*, **Journal of
-  Computational Physics** (2026). Extends the above to Navier–Stokes, including
-  the angular momentum flux needed to impose no-slip on a diffuse boundary.
+* Boyd, E. (née Schmidt), Sandall, E., Meier, M., Quinlan, J. M., and Runnels, B.,
+  *A diffuse boundary method for phase boundaries in viscous compressible flow*,
+  **Journal of Computational Physics**, Vol. 559, No. 114898, 2026. Extends the
+  above to Navier–Stokes, including the angular momentum flux needed to impose
+  no-slip on a diffuse boundary.
 
 Both papers pose the method at a **solid–fluid** interface. FLAMES applies the
 same machinery to a **fluid–fluid** interface with full per-phase transport and
@@ -329,16 +330,20 @@ method papers:
 .. code-block::
 
     @article{schmidt2022selfsimilar,
-      title={Self-similar diffuse boundary method for phase boundary driven flow},
-      author={Schmidt, Robert and Quinlan, J. Matt and Runnels, Brandon},
+      title={Self-similar Diffuse Boundary Method for Phase Boundary Driven Flow},
+      author={Schmidt, E. M. and Quinlan, J. M. and Runnels, B.},
       journal={Physics of Fluids},
+      volume={34},
+      number={11},
       year={2022}
     }
 
     @article{boyd2026diffuse,
       title={A diffuse boundary method for phase boundaries in viscous compressible flow},
-      author={Boyd, Kelsey and Sandall, Scott and Meier, Maycon and Quinlan, J. Matt and Runnels, Brandon},
+      author={Boyd, E. and Sandall, E. and Meier, M. and Quinlan, J. M. and Runnels, B.},
       journal={Journal of Computational Physics},
+      volume={559},
+      number={114898},
       year={2026}
     }
 
