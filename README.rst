@@ -331,7 +331,7 @@ method papers:
 
     @article{schmidt2022selfsimilar,
       title={Self-similar Diffuse Boundary Method for Phase Boundary Driven Flow},
-      author={Schmidt, E. M. and Quinlan, J. M. and Runnels, B.},
+      author={Schmidt, Emma M. and Quinlan, J. Matt and Runnels, Brandon},
       journal={Physics of Fluids},
       volume={34},
       number={11},
@@ -340,7 +340,7 @@ method papers:
 
     @article{boyd2026diffuse,
       title={A diffuse boundary method for phase boundaries in viscous compressible flow},
-      author={Boyd, E. and Sandall, E. and Meier, M. and Quinlan, J. M. and Runnels, B.},
+      author={Boyd, Emma and Sandall, Eric and Meier, Maycon and Quinlan, J. Matt and Runnels, Brandon},
       journal={Journal of Computational Physics},
       volume={559},
       number={114898},
