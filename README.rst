@@ -9,8 +9,6 @@
        <a href="https://github.com/JMQuinlan/flames/pulls"><img src="https://img.shields.io/github/issues-pr/JMQuinlan/flames.svg"></a>
        <a href="https://github.com/JMQuinlan/flames/issues"><img src="https://img.shields.io/github/issues/JMQuinlan/flames.svg"></a>
        <a href="https://github.com/solidsgroup/alamo"><img src="https://img.shields.io/badge/fork%20of-solidsgroup%2Falamo-1f77b4"></a>
-       <a href="https://doi.org/10.5281/zenodo.15792528"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.15792528.svg?label=alamo%20DOI"></a>
-       <a href="https://joss.theoj.org/papers/43ba1a1a4b86a557f2c74b9f2296a0f4"><img src="https://joss.theoj.org/papers/43ba1a1a4b86a557f2c74b9f2296a0f4/status.svg"></a>
    </p>
 
 .. getting-started:
