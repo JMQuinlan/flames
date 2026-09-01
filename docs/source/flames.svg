@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!--
+   FLAMES logo.
+
+   Visual language follows Brandon Runnels' alamo mark (docs/source/alamo3-inv.svg):
+   a square "domain" outline holding an abstract block-structured-AMR glyph, set
+   next to a lowercase wordmark with a letter-spaced subtitle.
+
+   The FLAMES glyph tells the atomization-and-burn story: a block-structured
+   parent patch (cold liquid, alamo blue) sheds progressively smaller fragments
+   downstream, which ignite and burn out toward the lower right.  Two thin
+   outlined boxes are refinement patches tracking the fragments.
+-->
+<svg
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   width="344mm"
+   height="82mm"
+   viewBox="0 0 344 82"
+   version="1.1"
+   id="flames-logo">
+  <defs id="defs2" />
+  <g id="glyph">
+    <!-- domain outline -->
+    <rect style="fill:none;stroke:#1f77b4;stroke-width:1.659;stroke-linejoin:round"
+          x="0.83" y="0.83" width="78.597" height="78.597" id="domain" />
+
+    <!-- parent patch: block-structured decomposition of a single liquid body -->
+    <g style="fill:#1f77b4;stroke:none" id="parent">
+      <rect x="5"    y="5"    width="18"   height="18"   />
+      <rect x="24.2" y="5"    width="12.8" height="8.4"  />
+      <rect x="24.2" y="14.6" width="12.8" height="8.4"  />
+      <rect x="5"    y="24.2" width="18"   height="12.8" />
+      <rect x="24.2" y="24.2" width="12.8" height="12.8" />
+    </g>
+
+    <!-- refinement patches tracking the shed fragments -->
+    <rect style="fill:none;stroke:#1f77b4;stroke-width:0.55"
+          x="37.8" y="24.8" width="13.4" height="13.4" />
+    <rect style="fill:none;stroke:#ef7215;stroke-width:0.55"
+          x="48.0" y="44.5" width="13.5" height="13.0" />
+
+    <!-- shed fragments: cold ... ignition ... burnout -->
+    <g id="fragments" style="stroke:none">
+      <rect x="40.0" y="27.0" width="9.0" height="9.0" style="fill:#1f77b4" />
+      <rect x="51.0" y="33.0" width="7.2" height="7.2" style="fill:#3f92bd" />
+
+      <rect x="41.5" y="39.5" width="6.0" height="6.0" style="fill:#f7c948" />
+      <rect x="60.5" y="40.5" width="5.6" height="5.6" style="fill:#f59f0b" />
+
+      <rect x="50.0" y="46.5" width="4.8" height="4.8" style="fill:#ef7215" />
+      <rect x="66.5" y="48.5" width="4.2" height="4.2" style="fill:#ef7215" />
+
+      <rect x="43.5" y="51.5" width="3.8" height="3.8" style="fill:#e14b17" />
+      <rect x="57.0" y="53.0" width="3.4" height="3.4" style="fill:#e14b17" />
+
+      <rect x="68.5" y="56.5" width="3.0" height="3.0" style="fill:#cf2f1e" />
+      <rect x="49.0" y="58.5" width="2.7" height="2.7" style="fill:#cf2f1e" />
+
+      <rect x="60.0" y="61.0" width="2.4" height="2.4" style="fill:#b3211a" />
+      <rect x="71.0" y="63.5" width="2.1" height="2.1" style="fill:#b3211a" />
+      <rect x="44.5" y="63.0" width="2.0" height="2.0" style="fill:#cf2f1e" />
+
+      <rect x="53.5" y="66.0" width="1.8" height="1.8" style="fill:#b3211a" />
+      <rect x="63.5" y="68.0" width="1.5" height="1.5" style="fill:#b3211a" />
+      <rect x="72.0" y="70.0" width="1.3" height="1.3" style="fill:#b3211a" />
+      <rect x="48.0" y="70.5" width="1.2" height="1.2" style="fill:#b3211a" />
+      <rect x="57.5" y="72.0" width="1.0" height="1.0" style="fill:#b3211a" />
+      <rect x="66.0" y="73.5" width="0.9" height="0.9" style="fill:#b3211a" />
+      <rect x="73.5" y="75.0" width="0.8" height="0.8" style="fill:#b3211a" />
+    </g>
+  </g>
+
+  <text xml:space="preserve"
+     style="font-weight:bold;font-size:72.8243px;font-family:'Open Sans';-inkscape-font-specification:'Open Sans Bold';letter-spacing:0px;word-spacing:0px;fill:#1f77b4;fill-opacity:1;stroke:none"
+     x="92.38" y="55.36" id="wordmark"><tspan x="92.38" y="55.36">flames</tspan></text>
+
+  <text xml:space="preserve"
+     style="font-style:normal;font-weight:normal;font-size:13.5px;font-family:'Open Sans';-inkscape-font-specification:'Open Sans';letter-spacing:2px;word-spacing:0px;fill:#1f77b4;fill-opacity:1;stroke:none"
+     x="93.98" y="78.25" id="subtitle"><tspan x="93.98" y="78.25">MULTIPHASE REACTING FLOW</tspan></text>
+</svg>
