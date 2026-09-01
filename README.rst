@@ -340,7 +340,7 @@ method papers:
 
     @article{boyd2026diffuse,
       title={A diffuse boundary method for phase boundaries in viscous compressible flow},
-      author={Boyd, Emma and Sandall, Eric and Meier, Maycon and Quinlan, J. Matt and Runnels, Brandon},
+      author={Boyd, Emma M. and Sandall, Eric and Meier, Maycon and Quinlan, J. Matt and Runnels, Brandon},
       journal={Journal of Computational Physics},
       volume={559},
       number={114898},
