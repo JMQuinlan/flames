@@ -3235,6 +3235,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     Set::Scalar vz_max_local = 0.0;
     Set::Scalar F_max_local = 0.0;
     Set::Scalar rho_min_local = 1e10;
+    // Max LOCAL kinematic viscosity nu = mu(eta)/rho.  Reduced exactly rather
+    // than estimated as mu_max/rho_min: that pairing takes the liquid's mu with
+    // the gas's rho, two values that never occur in the same cell, and for the
+    // standard setup (mu 0.15/0.015, rho 10/1) it overestimates nu by 10x --
+    // costing a factor of ~6 in dt once the capillary limit takes over.
+    Set::Scalar nu_max_local = 0.0;
 
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
@@ -3300,8 +3306,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         // phase garbage is then weighted by the TRUE tiny alpha and cancels.
         // (Same lesson as the limiter ToPrimitive/ToState divide floor.)
         const Set::Scalar alpha_floor = 1.0e-30;
+        // Local copies: class members are not addressable inside a GPU lambda.
+        const Set::Scalar mu0_l = mu0, mu1_l = mu1, small_l = small;
 
-        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &vz_max_local, &F_max_local, &rho_min_local] AMREX_GPU_DEVICE(int i, int j, int k)
+        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &vz_max_local, &F_max_local, &rho_min_local, &nu_max_local] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
@@ -3450,6 +3458,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                                          Source(i,j,k,2) * Source(i,j,k,2));
                 F_max_local = std::max(F_max_local, F_mag);
                 rho_min_local = std::min(rho_min_local, rho(i,j,k));
+                {
+                    const Set::Scalar a1n = std::min(std::max(eta_new(i,j,k), 0.0), 1.0);
+                    const Set::Scalar mu_c = a1n * mu0_l + (1.0 - a1n) * mu1_l;
+                    nu_max_local = std::max(nu_max_local, mu_c / (rho(i,j,k) + small_l));
+                }
             }
         });
     } // end Mixed Fields loop
@@ -3461,6 +3474,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     amrex::ParallelDescriptor::ReduceRealMax(vz_max_local);
     amrex::ParallelDescriptor::ReduceRealMax(F_max_local);
     amrex::ParallelDescriptor::ReduceRealMin(rho_min_local);
+    amrex::ParallelDescriptor::ReduceRealMax(nu_max_local);
 
     c_max = c_max_local;
     vx_max = vx_max_local;
@@ -3468,6 +3482,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     vz_max = vz_max_local;
     F_max = F_max_local;
     rho_min = rho_min_local;
+    nu_max  = nu_max_local;
 
     // Computing dt for next time step on all levels
     Set::Scalar dx_min = std::min({AMREX_D_DECL(DX[0], DX[1], DX[2])});
@@ -3489,8 +3504,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // value nu_art = C a dx w <= C c_max dx_min, independent of rho, so it adds
     // directly to nu.  Without this the C > ~1 runs would blow up on a stale
     // timestep rather than on the physics under test.
-    Set::Scalar nu_total = mu_max / (rho_min + small)
-                         + art_visc_coeff * c_max * dx_min;
+    // nu_max is the exact max of mu(eta)/rho over the domain (reduced above).
+    // Fall back to the old conservative pairing if it was never set.
+    Set::Scalar nu_phys = (nu_max > 0.0) ? nu_max : (mu_max / (rho_min + small));
+    Set::Scalar nu_total = nu_phys + art_visc_coeff * c_max * dx_min;
     Set::Scalar dt_viscous = cfl_v * dx_min * dx_min
                            / (2.0 * AMREX_SPACEDIM * (nu_total + small));
 

@@ -429,6 +429,7 @@ protected:
     Set::Scalar vy_max = 0.0;
     Set::Scalar vz_max = 0.0;
     Set::Scalar F_max = 0.0;
+    Set::Scalar nu_max = 0.0;   // max local mu(eta)/rho, for dt_viscous
     Set::Scalar rho_min = 1e10;
 
     Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion=NAN;
