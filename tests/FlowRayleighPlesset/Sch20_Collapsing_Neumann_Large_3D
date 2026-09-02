@@ -53,7 +53,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Collapsing_Neumann_3D
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Collapsing_Large_3D
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Collapsing_Large_3D_Merge
 
 ### MESHING ###
 amr.plot_int       = -1
@@ -208,7 +208,7 @@ integration.type    = RungeKutta
 integration.rk.type = 3
 kappa_method        = 1
 
-apply_sharpening     = 1
+apply_sharpening     = 0
 sharpening_frequency = 50
 reinit_max_iter      = 100
 reinit_tolerance     = 1e-6
