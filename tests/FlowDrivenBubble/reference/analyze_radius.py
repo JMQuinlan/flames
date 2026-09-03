@@ -69,9 +69,12 @@ RUNS = [
 ]
 # OVERRIDE (uncomment + edit for INCLINE):
 RUNS = [
-     dict(label="LowAmp (A = 0.001 bar)",
-          out_dir="/mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_LowAmp_NSCBC",
+     dict(label="LowAmp NSCBC (local, post-fix)",
+          out_dir=_repo("tests", "FlowDrivenBubble", "output_LowAmp_NSCBC"),
           color="tab:blue")
+#     dict(label="LowAmp (A = 0.001 bar)",
+#          out_dir="/mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_LowAmp_NSCBC",
+#          color="tab:blue")
 #     dict(label="HighAmp (A = 5 MPa)",
 #          out_dir="/mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_HighAmp",
 #          color="tab:red"),
