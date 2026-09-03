@@ -53,7 +53,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Collapsing_Neumann_3D
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Collapsing_Large_3D_Merge
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Collapsing_Large_3D_MergeBaseHybrid
 
 ### MESHING ###
 amr.plot_int       = -1
@@ -214,3 +214,10 @@ reinit_max_iter      = 100
 reinit_tolerance     = 1e-6
 omega_relax          = 0.5
 relax_diag           = 0
+
+# Disable the trace-phase slaving of the relaxation Newton inputs for this
+# collapse-dominated run: full slaving freezes alpha for eta < slave_lo,
+# widening the no-relaxation zone 100x past `cutoff` and flooring the gas
+# volume early (R_min/R0 0.21 vs 0.03 with BASE relax semantics).  The
+# p_floored guard in RelaxAndReinit still protects the band tail.
+relax_slave_hi       = 0

@@ -279,6 +279,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("verbose", value.verbose, 0);    // 1 = per-call informational messages
         pp_query_default("relax_diag", value.relax_diag, 0); // 1 = print per-stage {max_iters, max_residual, count_unconverged}.
         pp_query_default("clip_ghost_only", value.clip_ghost_only, 0); // 1 = FillGhost STEP-9 positivity clip touches GHOST cells only (per-phase mass conservation)
+        // Trace-phase slaving window for the relaxation Newton inputs (see
+        // Hydro2.H / RelaxAndReinit).  relax_slave_hi <= 0 disables slaving;
+        // collapse-dominated runs should disable it.
+        pp_query_default("relax_slave_lo", value.relax_slave_lo, 1.0e-2);
+        pp_query_default("relax_slave_hi", value.relax_slave_hi, 1.0e-1);
 
         // Symmetry-face detection: a domain face whose normal-momentum BC is
         // REFLECT_ODD is a symmetry plane; its advective fluxes are enforced
@@ -1657,6 +1662,15 @@ Hydro2::RHS(int lev,
         Set::Patch<const Set::Scalar> s_E0   = embedded.energy0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> s_E1   = embedded.energy1_mf.Patch(lev, mfi);
 
+        // Device-safe copies of the symmetry-face flags: the [=] kernel lambda
+        // captures member arrays through `this`, which is a host pointer on a
+        // GPU build.
+        const bool symlo0 = sym_face_lo[0], symhi0 = sym_face_hi[0];
+        const bool symlo1 = sym_face_lo[1], symhi1 = sym_face_hi[1];
+#if AMREX_SPACEDIM == 3
+        const bool symlo2 = sym_face_lo[2], symhi2 = sym_face_hi[2];
+#endif
+
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
@@ -2138,14 +2152,22 @@ Hydro2::RHS(int lev,
                     f.energy_total = 0.0;
                     f.energy0 = 0.0;
                     f.energy1 = 0.0;
+                    // u* = 0 is exact at the symmetry plane, and u_interface is
+                    // the ONLY quantity the eta/E0/E1 non-conservative rows read
+                    // from this flux.  Leaving its roundoff residual while
+                    // zeroing the mass rows makes the alpha row discretely
+                    // inconsistent with the phase-mass rows at the same face --
+                    // a coherent same-sign alpha/mass mismatch at the collapse
+                    // focus (octant corner) every stage.
+                    f.u_interface = 0.0;
                 };
-                if (sym_face_lo[0] && i == domain.smallEnd(0)) symmetrize(flux_xlo);
-                if (sym_face_hi[0] && i == domain.bigEnd(0))   symmetrize(flux_xhi);
-                if (sym_face_lo[1] && j == domain.smallEnd(1)) symmetrize(flux_ylo);
-                if (sym_face_hi[1] && j == domain.bigEnd(1))   symmetrize(flux_yhi);
+                if (symlo0 && i == domain.smallEnd(0)) symmetrize(flux_xlo);
+                if (symhi0 && i == domain.bigEnd(0))   symmetrize(flux_xhi);
+                if (symlo1 && j == domain.smallEnd(1)) symmetrize(flux_ylo);
+                if (symhi1 && j == domain.bigEnd(1))   symmetrize(flux_yhi);
 #if AMREX_SPACEDIM == 3
-                if (sym_face_lo[2] && k == domain.smallEnd(2)) symmetrize(flux_zlo);
-                if (sym_face_hi[2] && k == domain.bigEnd(2))   symmetrize(flux_zhi);
+                if (symlo2 && k == domain.smallEnd(2)) symmetrize(flux_zlo);
+                if (symhi2 && k == domain.bigEnd(2))   symmetrize(flux_zhi);
 #endif
             }
             catch (...)
@@ -5330,6 +5352,23 @@ void Hydro2::RelaxAndReinit(int lev)
     // 1 part in 10^6).
     const Set::Scalar unconv_threshold = 1.0e-6;
 
+    // Trace-phase slaving window for the NEWTON INPUTS (runtime-parseable:
+    // relax_slave_lo / relax_slave_hi; relax_slave_hi <= 0 disables).  Inside
+    // the window the trace phase's p_pre is blended toward the dominant
+    // phase's, which makes the volume constraint exactly satisfied at the
+    // blended pressure -- i.e. FULL slaving FREEZES alpha in that cell.  With
+    // the default window [1e-2, 1e-1] that widens the no-relaxation zone from
+    // the guard's cutoff (1e-4) by 100x in volume fraction: during a violent
+    // collapse the band tail can then no longer be volumetrically squeezed by
+    // the relaxation, and the gas volume floors early (measured on
+    // Sch20_Collapsing_Large_3D: R_min/R0 0.21 vs 0.03).  Collapse-dominated
+    // runs should disable this (relax_slave_hi = 0) and rely on the
+    // p_floored guard below; drive-dominated runs may need it to suppress
+    // the band-tail erosion loop documented at the use site.
+    const Set::Scalar slave_lo_loc = relax_slave_lo;
+    const Set::Scalar slave_hi_loc = relax_slave_hi;
+    const bool        slave_on     = (relax_slave_hi > 0.0 && relax_slave_hi > relax_slave_lo);
+
     const Set::Scalar gam0 = eos0.Gamma();
     const Set::Scalar pi0_ = eos0.P0();
     const Set::Scalar gam1 = eos1.Gamma();
@@ -5462,14 +5501,17 @@ void Hydro2::RelaxAndReinit(int lev)
             // which is the correct physical outcome for a cell whose
             // trace phase has no independent pressure to relax against.
             // -----------------------------------------------------------
+            if (slave_on)
             {
                 // SMOOTH blend (see recovery blocks): hard switches leave a
-                // seam the dynamics lock onto.
-                const Set::Scalar SLAVE_LO = 1.0e-2, SLAVE_HI = 1.0e-1;
+                // seam the dynamics lock onto.  Window is runtime-parseable
+                // (relax_slave_lo/hi); relax_slave_hi <= 0 disables the block
+                // entirely -- see the note at the top of RelaxAndReinit for
+                // why collapse-dominated runs must disable it.
                 const Set::Scalar er = eta(i, j, k);
-                Set::Scalar w0 = std::min(std::max((er - SLAVE_LO) / (SLAVE_HI - SLAVE_LO), 0.0), 1.0);
+                Set::Scalar w0 = std::min(std::max((er - slave_lo_loc) / (slave_hi_loc - slave_lo_loc), 0.0), 1.0);
                 w0 = w0 * w0 * (3.0 - 2.0 * w0);
-                Set::Scalar w1 = std::min(std::max(((1.0 - er) - SLAVE_LO) / (SLAVE_HI - SLAVE_LO), 0.0), 1.0);
+                Set::Scalar w1 = std::min(std::max(((1.0 - er) - slave_lo_loc) / (slave_hi_loc - slave_lo_loc), 0.0), 1.0);
                 w1 = w1 * w1 * (3.0 - 2.0 * w1);
                 const Set::Scalar p0_raw = p0_pre, p1_raw = p1_pre;
                 p0_pre = w0 * p0_raw + (1.0 - w0) * p1_raw;
