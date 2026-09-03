@@ -66,7 +66,7 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_LowAmp_N
 
 ### MESHING ###
 amr.plot_int       = -1
-amr.plot_dt        = 2.5e-4         # ~49 frames per drive period (3D plotfiles are big)
+amr.plot_dt        = 1.0e-5 # 2.5e-4         # ~49 frames per drive period (3D plotfiles are big)
 # max_grid_size/blocking_factor 16: with 32 the level-0 domain was a SINGLE
 # 32^3 grid on ONE rank (and level 1 only 8 grids) -- most of a 128-rank node
 # sat idle while one rank serialized the coarse levels.  16^3 boxes give
