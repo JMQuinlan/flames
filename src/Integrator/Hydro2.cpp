@@ -143,13 +143,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // OPTIONAL SOURCE TERMS
         pp_query_default("apply_surface_tension", value.apply_surface_tension, false);  // Apply surface tension when solving, default: true --> "Apply Surface Tension"
-        pp_query_default("capillary_work", value.capillary_work, 1);  // include u.(div Omega) in the rho E source (diagnostic gate, see Hydro2.H)
-        pp_query_default("art_visc_coeff", value.art_visc_coeff, 0.0);  // interface-localised artificial viscosity C (diagnostic, see Hydro2.H)
         pp_query_default("capillary_closure", value.capillary_closure, 0);
-        pp_query_default("cfun_resync", value.cfun_resync, 0);  // rebuild c from eta each substep (see Hydro2.H)  // Schmidmayer 2017 capillary energy closure (see Hydro2.H)
-        // The u.(div Omega) source is implicit in the flux once the closure is
-        // on, so it must not also be applied as a source.
-        if (value.capillary_closure) value.capillary_work = 0;
         pp_query_default("apply_weight", value.apply_weight, false);                    // Apply weight when solving, default: false --> "No Weight"
         pp_query_default("apply_vaporization", value.apply_vaporization, false);        // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
@@ -281,6 +275,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("equalize_ic_pressure", value.equalize_ic_pressure, 0);
         
         // Newton diagnostic for stiff pressure relaxation.
+        pp_query_default("nan_check", value.nan_check, 0);  // 1 = per-cell NaN/Inf guard (slow; debugging only)
+        pp_query_default("verbose", value.verbose, 0);    // 1 = per-call informational messages
         pp_query_default("relax_diag", value.relax_diag, 0); // 1 = print per-stage {max_iters, max_residual, count_unconverged}.
         pp_query_default("clip_ghost_only", value.clip_ghost_only, 0); // 1 = FillGhost STEP-9 positivity clip touches GHOST cells only (per-phase mass conservation)
 
@@ -310,12 +306,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         }
 
         // INTERFACE COMPRESSION
-        pp_query_default("apply_sharpening", value.apply_sharpening, false);
-        pp_query_default("sharpening_frequency", value.sharpening_frequency, 10);
-        pp_query_default("reinit_max_iter", value.reinit_max_iter, 10);
-        pp_query_default("reinit_tolerance", value.reinit_tolerance, 1e-6);
-        pp_query_default("density_max_iter", value.density_max_iter, value.reinit_max_iter);// Density correction iterations (papers use 5-10 iterations)
-        pp_query_default("density_tolerance", value.density_tol, value.reinit_tolerance);   // Density correction tolerance
         pp_query_default("density_relax", value.omega_relax, 0.5);                          // Relaxation parameter (0.3-0.7 typical)
 
         // BOUNDRY CONDITITIONS
@@ -1083,7 +1073,7 @@ void Hydro2::Mix(int lev)
             // ------------------------------------------------------------
             // Error Checking
             // ------------------------------------------------------------
-            check4nans(0, lev, i, j, k, "ERROR IN Mix(): Primative Field Calculation", {
+            if (nan_check) check4nans(0, lev, i, j, k, "ERROR IN Mix(): Primative Field Calculation", {
                 { "rho_eta0", rho_eta0(i, j, k) }, 
                 { "rho_eta1", rho_eta1(i, j, k) }, 
                 { "rho", rho(i, j, k) }, 
@@ -1179,12 +1169,6 @@ Hydro2::RHS(int lev,
     amrex::MultiFab::Copy(*shell_mf[lev],          shell_mf_in,    0, 0, 1,              0);
     shell_mf[lev]->FillBoundary(geom[lev].periodicity());
     amrex::MultiFab::Copy(*cfun_mf[lev],           cfun_mf_in,     0, 0, 1,              0);
-    if (cfun_resync)
-    {
-        // c := eta at the start of every substep (see Hydro2.H).  c stops being
-        // an independent variable and becomes a slaved marker of the interface.
-        amrex::MultiFab::Copy(*cfun_mf[lev], *eta_mf[lev], 0, 0, 1, nghost);
-    }
     cfun_mf[lev]->FillBoundary(geom[lev].periodicity());
 
     // Eta Fields
@@ -1356,7 +1340,7 @@ Hydro2::RHS(int lev,
             // ------------------------------------------------------------
             // Error Checking
             // ------------------------------------------------------------
-            check4nans(time, lev, i, j, k, "ERROR IN RHS(): Primative Field Calculation", {
+            if (nan_check) check4nans(time, lev, i, j, k, "ERROR IN RHS(): Primative Field Calculation", {
                 { "rho_eta0", rho_eta0(i, j, k) }, 
                 { "rho_eta1", rho_eta1(i, j, k) }, 
                 { "rho", rho(i, j, k) }, 
@@ -1586,7 +1570,6 @@ Hydro2::RHS(int lev,
         Set::Patch<const Set::Scalar> shell = shell_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> cfun_rhs    = cfun_rhs_mf.array(mfi);
         Set::Patch<const Set::Scalar> cfun  = cfun_mf.Patch(lev, mfi);
-        const int cfun_resync_l = cfun_resync;
         Set::Patch<Set::Scalar> E0_rhs      = E0_rhs_mf.array(mfi);    // per-phase internal energy
         Set::Patch<Set::Scalar> E1_rhs      = E1_rhs_mf.array(mfi);
 
@@ -1740,16 +1723,6 @@ Hydro2::RHS(int lev,
 
             // DIAGNOSTIC interface-localised artificial viscosity (see Hydro2.H).
             // Body-force pair: momentum gets F_art, energy gets u.F_art below.
-            Set::Vector F_art = Set::Vector::Zero();
-            if (art_visc_coeff > 0.0)
-            {
-                const Set::Scalar w_i = 4.0 * eta(i, j, k) * (1.0 - eta(i, j, k));
-                const Set::Scalar mu_art = art_visc_coeff * rho(i, j, k) * a(i, j, k)
-                                         * DX[0] * std::max(w_i, 0.0);
-                for (int d = 0; d < AMREX_SPACEDIM; ++d)
-                    for (int p = 0; p < AMREX_SPACEDIM; ++p)
-                        F_art(d) += mu_art * hess_u(d, p, p);
-            }
 
             // EMBEDDED SOLID
             Set::Scalar phi_c = 1.0;
@@ -1797,14 +1770,14 @@ Hydro2::RHS(int lev,
                 Ldot_(i, j, k, d) = Ldot(d);
 
             // ERROR CHECKING
-            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Viscosity solving", {
+            if (nan_check) check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Viscosity solving", {
                 { "Ldot[0]", Ldot(0) },
                 { "Ldot[1]", Ldot(1) },
                 { "div_tau[0]", div_tau(0) },
                 { "div_tau[1]", div_tau(1) }
             }); // end check4nans
 #if AMREX_SPACEDIM == 3
-            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Surface Tension solving", {
+            if (nan_check) check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Surface Tension solving", {
                 { "Ldot[2]", Ldot(2) },
                 { "div_tau[2]", div_tau(2) },
             }); // end check4nans
@@ -1845,12 +1818,12 @@ Hydro2::RHS(int lev,
                 Fsv(i, j, k, d) = Fsv_vector(d);
 
             // ERROR CHECKING
-            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Surface Tension solving", {
+            if (nan_check) check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Surface Tension solving", {
                 { "Fsv_vector[0]", Fsv_vector(0) },
                 { "Fsv_vector[1]", Fsv_vector(1) }
             });
 #if AMREX_SPACEDIM == 3
-            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Surface Tension solving", {
+            if (nan_check) check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Surface Tension solving", {
                 { "Fsv_vector[2]", Fsv_vector(2) }
             }); // end check4nans
 #endif  
@@ -1869,12 +1842,12 @@ Hydro2::RHS(int lev,
                 Fw(i, j, k, d) = Fw_vector(d);
 
             // ERROR CHECKING
-            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Weight solving", {
+            if (nan_check) check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Weight solving", {
                 { "Fw_vector[0]", Fw_vector(0) },
                 { "Fw_vector[1]", Fw_vector(1) }
             });
 #if AMREX_SPACEDIM == 3
-            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Surface Tension solving", {
+            if (nan_check) check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Surface Tension solving", {
                 { "Fw_vector[2]", Fw_vector(2) }
             }); // end check4nans
 #endif
@@ -1912,7 +1885,7 @@ Hydro2::RHS(int lev,
             Set::Scalar eta_dot_CH = Mob * lap_mu_chem;
 
             // ERROR CHECKING
-            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Cahn-Hillard solving", {
+            if (nan_check) check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Cahn-Hillard solving", {
                 { "mu_chem",  mu_chem_(i, j, k) },
                 { "lap_mu_chem",  lap_mu_chem },
                 { "a",  a(i, j, k) },
@@ -1977,7 +1950,7 @@ Hydro2::RHS(int lev,
 
 
             // Total:
-            Set::Vector Total_Force = Fsv_vector + Fw_vector + F_art;
+            Set::Vector Total_Force = Fsv_vector + Fw_vector;
 
             // ------------------------------------------------------------
             // Energy work terms in conservative (divergence) form.
@@ -2018,12 +1991,12 @@ Hydro2::RHS(int lev,
             Source(i, j, k, 0) = mdot0;
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
                 Source(i, j, k, 1 + d) = Pdot0(d) + Ldot(d) + div_tau(d) + Total_Force(d);
-            // Capillary work is split out from Total_Force so it can be gated:
-            // rho E does not carry sigma|grad eta|, so this term is later
-            // re-read as internal energy by UE = rho E - KE.  See Hydro2.H.
-            const Set::Scalar cap_w = capillary_work ? u.dot(Fsv_vector) : 0.0;
+            // Capillary work for the LEGACY body-force path (capillary_closure=0).
+            // With the split closure on, Fsv_vector is zero here (the capillary
+            // terms belong to L_cap), so this contributes nothing.
+            const Set::Scalar cap_w = u.dot(Fsv_vector);
             Source(i, j, k, AMREX_SPACEDIM + 1) = qdot0 + u.dot(div_tau) + visc_diss + u.dot(Ldot)
-                                                + u.dot(Fw_vector) + u.dot(F_art) + cap_w + E_dot_Vap;
+                                                + u.dot(Fw_vector) + cap_w + E_dot_Vap;
 
             // Lagrange terms to enforce no-penetration
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
@@ -2032,7 +2005,7 @@ Hydro2::RHS(int lev,
             // ------------------------------------------------------------
             // Error Checking
             // ------------------------------------------------------------
-            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Source solving", { 
+            if (nan_check) check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Source solving", { 
                 { "Total_Force[0]",  Total_Force(0) },
                 { "Total_Force[1]",  Total_Force(1) },
                 { "Source[0]",  Source(i, j, k, 0) },
@@ -2077,7 +2050,7 @@ Hydro2::RHS(int lev,
             // ------------------------------------------------------------
             // Error Checking
             // ------------------------------------------------------------
-            check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Conservative Variable Check", {
+            if (nan_check) check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Conservative Variable Check", {
                 { "eta", eta(i, j, k) },
                 { "rho_eta0", rho_eta0(i, j, k) },
                 { "rho_eta1", rho_eta1(i, j, k) },
@@ -2499,10 +2472,8 @@ Hydro2::RHS(int lev,
             const Set::Scalar div_uC_z = (flux_zhi.u_interface * c_face_zhi
                                         - flux_zlo.u_interface * c_face_zlo) / DX[2];
 #endif
-            cfun_rhs(i, j, k) = cfun_resync_l
-                              ? 0.0     // slaved to eta; RK must not evolve it
-                              : -(AMREX_D_TERM(div_uC_x, + div_uC_y, + div_uC_z))
-                                + cfun(i, j, k) * div_u;
+            cfun_rhs(i, j, k) = -(AMREX_D_TERM(div_uC_x, + div_uC_y, + div_uC_z))
+                              + cfun(i, j, k) * div_u;
 
             // NOTE: a surface-diffusion term  + D_s grad_s^2(Gamma)  (Stone 1990)
             // was implemented and tested here, then removed.  It does not fix the
@@ -2965,8 +2936,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         // material (clamping to [0,1], per-phase ghost reconstruction, stiff
         // pressure relaxation inside FillGhost4BC).  Hold the shell's areal
         // density Gamma fixed across all of it; c is rescaled to the new |grad eta|.
-        std::unique_ptr<amrex::MultiFab> Gamma_stage;
-        ShellGammaSnapshot(lev, Gamma_stage);
 
         // Clamp eta in domain prior to ghost fill (state can drift slightly outside [0,1])
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
@@ -2989,7 +2958,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         amrex::MultiFab::Copy(stage_mf[4], *eta_mf[lev],            0, 0, 1,              nghost);
         amrex::MultiFab::Copy(stage_mf[5], *energy0_mf[lev],        0, 0, 1,              nghost);
         amrex::MultiFab::Copy(stage_mf[6], *energy1_mf[lev],        0, 0, 1,              nghost);
-        ShellGammaRestore(lev, Gamma_stage);
         amrex::MultiFab::Copy(stage_mf[7], *shell_mf[lev],          0, 0, 1,              nghost);
         amrex::MultiFab::Copy(stage_mf[8], *cfun_mf[lev],           0, 0, 1,              nghost);
 
@@ -3194,10 +3162,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // ------------------------------------------------------------
     // Interface Sharpenging
     // ------------------------------------------------------------
-    if (apply_sharpening && (step_counter[lev] > 10) && (step_counter[lev] % sharpening_frequency == 0))
-    {
-        InterfaceSharpening(lev, dt);
-    }
 
     // ------------------------------------------------------------
     // Mixed Fields
@@ -3217,7 +3181,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             rho(i, j, k) = std::max(rho_eta0(i, j, k) + rho_eta1(i, j, k), small);
             eta_new(i, j, k) = std::max(0.0, std::min(1.0, eta_new(i, j, k)));
 
-            check4nans(time, lev, i, j, k, "ERROR IN Advance(): Conservative Variable Check", {
+            if (nan_check) check4nans(time, lev, i, j, k, "ERROR IN Advance(): Conservative Variable Check", {
                 { "eta_new", eta_new(i, j, k) },
                 { "rho_eta0", rho_eta0(i, j, k) },
                 { "rho_eta1", rho_eta1(i, j, k) },
@@ -3413,7 +3377,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 n_hat_(i,j,k,1) = n_hat(1);
             }
         
-            check4nans(time, lev, i, j, k, "ERROR IN Advance(): Visualization", { 
+            if (nan_check) check4nans(time, lev, i, j, k, "ERROR IN Advance(): Visualization", { 
                 {"eta_new", eta_new(i,j,k)},
                 {"rho_eta0", rho_eta0(i,j,k)},
                 {"rho_eta1", rho_eta1(i,j,k)},
@@ -3507,7 +3471,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // nu_max is the exact max of mu(eta)/rho over the domain (reduced above).
     // Fall back to the old conservative pairing if it was never set.
     Set::Scalar nu_phys = (nu_max > 0.0) ? nu_max : (mu_max / (rho_min + small));
-    Set::Scalar nu_total = nu_phys + art_visc_coeff * c_max * dx_min;
+    Set::Scalar nu_total = nu_phys;
     Set::Scalar dt_viscous = cfl_v * dx_min * dx_min
                            / (2.0 * AMREX_SPACEDIM * (nu_total + small));
 
@@ -3787,529 +3751,6 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////// INTERFACE SHARPENING /////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
-{
-    BL_PROFILE("Integrator::Hydro2::InterfaceSharpening");
-
-    if (!apply_sharpening)
-        return;
-
-    const Set::Scalar *DX = geom[lev].CellSize();
-    amrex::Box domain = geom[lev].Domain();
-
-    Util::Message(INFO, "=== INTERFACE SHARPENING START ===");
-    Util::Message(INFO, "Level: ", lev);
-
-    // Check if interface exists
-    Set::Scalar eta_min = eta_mf[lev]->min(0);
-    Set::Scalar eta_max = eta_mf[lev]->max(0);
-
-    Util::Message(INFO, "eta range: [", eta_min, ", ", eta_max, "]");
-
-    if (eta_max - eta_min < 0.1)
-    {
-        Util::Message(INFO, "No significant interface detected, skipping sharpening");
-        return;
-    }
-
-    // Temporary MultiFabs for sharpening procedure
-    amrex::MultiFab psi_mf(rho_eta0_mf[lev]->boxArray(), rho_eta0_mf[lev]->DistributionMap(), 1, 2);
-    amrex::MultiFab psi_reinit_mf(rho_eta0_mf[lev]->boxArray(), rho_eta0_mf[lev]->DistributionMap(), 1, 2);
-    amrex::MultiFab phi_sharp_mf(rho_eta0_mf[lev]->boxArray(), rho_eta0_mf[lev]->DistributionMap(), 1, 2);
-
-    // ============================================================================
-    // STEP 1: Transform phi to psi (Equation 6)
-    // psi = epsilon * ln(phi / (1-phi))
-    // Only operate on INTERIOR cells (exclude boundaries)
-    // ============================================================================
-    for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
-    {
-        const amrex::Box &bx_full = mfi.validbox();
-
-        // Shrink box to exclude boundaries
-        amrex::Box bx = bx_full;
-        bx.grow(0); // Exclude 2 layers from all boundaries
-
-        if (bx.isEmpty())
-        {
-            Util::Message(INFO, "Box too small for sharpening, skipping");
-            continue;
-        }
-
-        Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf[lev]->array(mfi);
-        Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf[lev]->array(mfi);
-        Set::Patch<Set::Scalar> psi = psi_mf.array(mfi);
-
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            // Compute mixture density
-            Set::Scalar rho = rho_eta0(i, j, k) + rho_eta1(i, j, k);
-
-            // Compute volume fraction
-            Set::Scalar phi = rho_eta0(i, j, k) / (rho + small);
-
-            // Clamp to avoid log(0)
-            phi = std::max(1e-10, std::min(1.0 - 1e-10, phi));
-
-            // Equation (6): psi = epsilon * ln(phi/(1-phi))
-            psi(i, j, k) = epsilon * std::log(phi / (1.0 - phi));
-        });
-    }
-
-    // Fill boundaries for psi using custom BC function
-    FillBoundariesWithBC(lev, 0.0, energy_bc, { &psi_mf });
-
-    // ============================================================================
-    // STEP 2: Reinitialize psi to signed distance function (Equation 10)
-    // d(psi)/d(tau) = S(psi) * (1 - |grad(psi)|)
-    // ============================================================================
-    amrex::MFIter::allowMultipleMFIters(true);
-    ReinitializeSignedDistance(lev, psi_reinit_mf, psi_mf, reinit_max_iter);
-    amrex::MFIter::allowMultipleMFIters(false);
-
-    // Fill boundaries for reinitialized psi
-    FillBoundariesWithBC(lev, 0.0, energy_bc, { &psi_reinit_mf });
-
-    // ============================================================================
-    // STEP 3: Transform psi back to phi_sharp (Inverse of Equation 6)
-    // phi = 1 / (1 + exp(-psi/epsilon))
-    // Only operate on INTERIOR cells
-    // ============================================================================
-    for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
-    {
-        const amrex::Box &bx_full = mfi.validbox();
-
-        // Shrink box to exclude boundaries
-        amrex::Box bx = bx_full;
-        bx.grow(0);
-
-        if (bx.isEmpty())
-            continue;
-
-        Set::Patch<const Set::Scalar> psi_reinit = psi_reinit_mf.array(mfi);
-        Set::Patch<Set::Scalar> phi_sharp = phi_sharp_mf.array(mfi);
-
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            // Inverse of Eq. (6): phi = 1/(1 + exp(-psi/epsilon))
-            phi_sharp(i, j, k) = 1.0 / (1.0 + std::exp(-psi_reinit(i, j, k) / epsilon));
-
-            // Clamp to [0,1]
-            phi_sharp(i, j, k) = std::max(0.0, std::min(1.0, phi_sharp(i, j, k)));
-        });
-    }
-
-    // Fill boundaries for phi_sharp
-    Util::ParallelMessage(INFO, "Filling Shrp Interface");
-
-    FillBoundariesWithBC(lev, 0.0, energy_bc, { &phi_sharp_mf });
-
-    // ============================================================================
-    // STEP 4: Density Correction with Compression Operators (Equations 15-16)
-    // This is the key step that prevents density anomalies!
-    // ============================================================================
-
-    // Create working copies for iterative correction
-    amrex::MultiFab rho_eta0_work(rho_eta0_mf[lev]->boxArray(), rho_eta0_mf[lev]->DistributionMap(), 1, 2);
-    amrex::MultiFab rho_eta1_work(rho_eta1_mf[lev]->boxArray(), rho_eta1_mf[lev]->DistributionMap(), 1, 2);
-
-    // Initialize with current values
-    amrex::MultiFab::Copy(rho_eta0_work, *rho_eta0_mf[lev], 0, 0, 1, 2);
-    amrex::MultiFab::Copy(rho_eta1_work, *rho_eta1_mf[lev], 0, 0, 1, 2);
-
-    // Pseudo-timestep for density correction (Equation 20a)
-    // From knowledge: dt <= 2*h^2 for well-resolved interface (epsilon >= h/2)
-    Set::Scalar h = std::min(DX[0], DX[1]);
-    Set::Scalar dt_compression = 0.5 * h * h;
-
-    Set::Scalar omega_relax = 0.5;
-
-    
-
-    Util::Message(INFO, "Starting density correction iterations...");
-
-    for (int density_iter = 0; density_iter < density_max_iter; density_iter++)
-    {
-        // Store old values for convergence check
-        amrex::MultiFab rho_eta0_old(rho_eta0_work.boxArray(), rho_eta0_work.DistributionMap(), 1, 2);
-        amrex::MultiFab rho_eta1_old(rho_eta1_work.boxArray(), rho_eta1_work.DistributionMap(), 1, 2);
-
-        amrex::MultiFab::Copy(rho_eta0_old, rho_eta0_work, 0, 0, 1, 2);
-        amrex::MultiFab::Copy(rho_eta1_old, rho_eta1_work, 0, 0, 1, 2);
-
-        // Apply compression operators (INTERIOR CELLS ONLY)
-        for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
-        {
-            const amrex::Box &bx_full = mfi.validbox();
-
-            // Shrink box to exclude boundaries
-            amrex::Box bx = bx_full;
-            bx.grow(0);
-
-            if (bx.isEmpty())
-                continue;
-
-            Set::Patch<const Set::Scalar> phi_sharp = phi_sharp_mf.array(mfi);
-            Set::Patch<Set::Scalar> rho_eta0 = rho_eta0_work.array(mfi);
-            Set::Patch<Set::Scalar> rho_eta1 = rho_eta1_work.array(mfi);
-            Set::Patch<const Set::Scalar> rho_eta0_original = rho_eta0_mf[lev]->array(mfi);
-            Set::Patch<const Set::Scalar> rho_eta1_original = rho_eta1_mf[lev]->array(mfi);
-            Set::Patch<const Set::Scalar> phisol = embedded.phi_mf.Patch(lev, mfi);
-
-            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                // Embedded solid: never sharpen the frozen solid interior.
-                if (embedded.apply && embedded.isSolid(phisol(i, j, k))) return;
-                auto sten = Numeric::GetStencil(i, j, k, domain);
-
-                // ============================================================
-                // Compute geometric quantities from sharpened interface
-                // ============================================================
-
-                // Gradient of phi_sharp
-                Set::Vector grad_phi = Numeric::Gradient(phi_sharp, i, j, k, 0, DX);
-                Set::Scalar grad_phi_mag = grad_phi.lpNorm<2>();
-
-                // Narrow band check (papers use phi(1-phi) > 0.001)
-                Set::Scalar phi_val = phi_sharp(i, j, k);
-                Set::Scalar narrow_band_indicator = phi_val * (1.0 - phi_val);
-
-                if (narrow_band_indicator < 0.001)
-                {
-                    // Outside narrow band - don't modify density
-                    return;
-                }
-
-                if (grad_phi_mag < 1e-10)
-                {
-                    // No interface gradient - don't modify
-                    return;
-                }
-
-                // Normal vector
-                Set::Vector n_hat = grad_phi / grad_phi_mag;
-
-                // Laplacian of phi_sharp
-                Set::Scalar lap_phi = Numeric::Laplacian(phi_sharp, i, j, k, 0, DX);
-
-                // Curvature
-                Set::Scalar kappa = -lap_phi / (grad_phi_mag + small);
-
-                // ============================================================
-                // Maximum Principle Check (Equation 23)
-                // From knowledge: prevents spurious oscillations
-                // Condition: |kappa| + |(1-2*phi)|/epsilon <= sqrt(2)/h
-                // ============================================================
-
-                Set::Scalar max_principle_lhs = std::abs(kappa) + std::abs(1.0 - 2.0 * phi_val) / epsilon;
-                Set::Scalar max_principle_rhs = std::sqrt(2.0) / h;
-
-                if (max_principle_lhs > max_principle_rhs)
-                {
-                    // Maximum principle violated - DON'T modify density
-                    // This preserves thermodynamically consistent state from flow solver
-                    return;
-                }
-
-                // ============================================================
-                // Heaviside Function (from knowledge)
-                // Localizes density correction to interface region
-                // H = tanh(phi*(1-phi) / 0.01)
-                // ============================================================
-
-                Set::Scalar H = std::tanh(narrow_band_indicator / 0.01);
-
-                // ============================================================
-                // Compression Operator for Fluid 0 (Liquid) - Equation (15)
-                // R_l = H * n dot [grad(epsilon * n dot grad(rho_0*phi_0))
-                //                  - (1-2*phi)*grad(rho_0*phi_0)]
-                // ============================================================
-
-                // Gradient of rho_eta0
-                Set::Vector grad_rho_eta0 = Numeric::Gradient(rho_eta0, i, j, k, 0, DX);
-
-                // n dot grad(rho_0*phi_0)
-                Set::Scalar n_dot_grad_rho_eta0 = n_hat.dot(grad_rho_eta0);
-
-                // Compute grad(epsilon * n dot grad(rho_0*phi_0))
-                // Need n dot grad(rho_0*phi_0) at neighboring cells
-                Set::Scalar n_dot_grad_rho_eta0_ip = 0.0, n_dot_grad_rho_eta0_im = 0.0;
-                Set::Scalar n_dot_grad_rho_eta0_jp = 0.0, n_dot_grad_rho_eta0_jm = 0.0;
-
-                // At i+1,j
-                if (i + 1 <= domain.bigEnd(0))
-                {
-                    Set::Vector grad_phi_ip = Numeric::Gradient(phi_sharp, i + 1, j, k, 0, DX);
-                    Set::Scalar grad_phi_mag_ip = grad_phi_ip.lpNorm<2>();
-                    if (grad_phi_mag_ip > 1e-10)
-                    {
-                        Set::Vector n_hat_ip = grad_phi_ip / grad_phi_mag_ip;
-                        Set::Vector grad_rho_eta0_ip = Numeric::Gradient(rho_eta0, i + 1, j, k, 0, DX);
-                        n_dot_grad_rho_eta0_ip = n_hat_ip.dot(grad_rho_eta0_ip);
-                    }
-                }
-
-                // At i-1,j
-                if (i - 1 >= domain.smallEnd(0))
-                {
-                    Set::Vector grad_phi_im = Numeric::Gradient(phi_sharp, i - 1, j, k, 0, DX);
-                    Set::Scalar grad_phi_mag_im = grad_phi_im.lpNorm<2>();
-                    if (grad_phi_mag_im > 1e-10)
-                    {
-                        Set::Vector n_hat_im = grad_phi_im / grad_phi_mag_im;
-                        Set::Vector grad_rho_eta0_im = Numeric::Gradient(rho_eta0, i - 1, j, k, 0, DX);
-                        n_dot_grad_rho_eta0_im = n_hat_im.dot(grad_rho_eta0_im);
-                    }
-                }
-
-                // At i,j+1
-                if (j + 1 <= domain.bigEnd(1))
-                {
-                    Set::Vector grad_phi_jp = Numeric::Gradient(phi_sharp, i, j + 1, k, 0, DX);
-                    Set::Scalar grad_phi_mag_jp = grad_phi_jp.lpNorm<2>();
-                    if (grad_phi_mag_jp > 1e-10)
-                    {
-                        Set::Vector n_hat_jp = grad_phi_jp / grad_phi_mag_jp;
-                        Set::Vector grad_rho_eta0_jp = Numeric::Gradient(rho_eta0, i, j + 1, k, 0, DX);
-                        n_dot_grad_rho_eta0_jp = n_hat_jp.dot(grad_rho_eta0_jp);
-                    }
-                }
-
-                // At i,j-1
-                if (j - 1 >= domain.smallEnd(1))
-                {
-                    Set::Vector grad_phi_jm = Numeric::Gradient(phi_sharp, i, j - 1, k, 0, DX);
-                    Set::Scalar grad_phi_mag_jm = grad_phi_jm.lpNorm<2>();
-                    if (grad_phi_mag_jm > 1e-10)
-                    {
-                        Set::Vector n_hat_jm = grad_phi_jm / grad_phi_mag_jm;
-                        Set::Vector grad_rho_eta0_jm = Numeric::Gradient(rho_eta0, i, j - 1, k, 0, DX);
-                        n_dot_grad_rho_eta0_jm = n_hat_jm.dot(grad_rho_eta0_jm);
-                    }
-                }
-
-                // grad(epsilon * n dot grad(rho_0*phi_0))
-                Set::Scalar grad_term0_x = epsilon * (n_dot_grad_rho_eta0_ip - n_dot_grad_rho_eta0_im) / (2.0 * DX[0]);
-                Set::Scalar grad_term0_y = epsilon * (n_dot_grad_rho_eta0_jp - n_dot_grad_rho_eta0_jm) / (2.0 * DX[1]);
-
-                Set::Scalar term1_0 = n_hat(0) * grad_term0_x + n_hat(1) * grad_term0_y;
-
-                // (1-2*phi) * grad(rho_0*phi_0)
-                Set::Scalar term2_0 = (1.0 - 2.0 * phi_val) * n_dot_grad_rho_eta0;
-
-                // Compression operator R_l (Equation 15)
-                Set::Scalar R_l = H * (term1_0 - term2_0);
-
-                // ============================================================
-                // Compression Operator for Fluid 1 (Gas) - Equation (16)
-                // R_g = H * n dot [grad(epsilon * n dot grad(rho_1*phi_1))
-                //                  - (1-2*phi)*grad(rho_1*phi_1)]
-                // ============================================================
-
-                // Gradient of rho_eta1
-                Set::Vector grad_rho_eta1 = Numeric::Gradient(rho_eta1, i, j, k, 0, DX);
-
-                // n dot grad(rho_1*phi_1)
-                Set::Scalar n_dot_grad_rho_eta1 = n_hat.dot(grad_rho_eta1);
-
-                // Compute grad(epsilon * n dot grad(rho_1*phi_1)) at neighbors
-                Set::Scalar n_dot_grad_rho_eta1_ip = 0.0, n_dot_grad_rho_eta1_im = 0.0;
-                Set::Scalar n_dot_grad_rho_eta1_jp = 0.0, n_dot_grad_rho_eta1_jm = 0.0;
-
-                // At i+1,j
-                if (i + 1 <= domain.bigEnd(0))
-                {
-                    Set::Vector grad_phi_ip = Numeric::Gradient(phi_sharp, i + 1, j, k, 0, DX);
-                    Set::Scalar grad_phi_mag_ip = grad_phi_ip.lpNorm<2>();
-                    if (grad_phi_mag_ip > 1e-10)
-                    {
-                        Set::Vector n_hat_ip = grad_phi_ip / grad_phi_mag_ip;
-                        Set::Vector grad_rho_eta1_ip = Numeric::Gradient(rho_eta1, i + 1, j, k, 0, DX);
-                        n_dot_grad_rho_eta1_ip = n_hat_ip.dot(grad_rho_eta1_ip);
-                    }
-                }
-
-                // At i-1,j
-                if (i - 1 >= domain.smallEnd(0))
-                {
-                    Set::Vector grad_phi_im = Numeric::Gradient(phi_sharp, i - 1, j, k, 0, DX);
-                    Set::Scalar grad_phi_mag_im = grad_phi_im.lpNorm<2>();
-                    if (grad_phi_mag_im > 1e-10)
-                    {
-                        Set::Vector n_hat_im = grad_phi_im / grad_phi_mag_im;
-                        Set::Vector grad_rho_eta1_im = Numeric::Gradient(rho_eta1, i - 1, j, k, 0, DX);
-                        n_dot_grad_rho_eta1_im = n_hat_im.dot(grad_rho_eta1_im);
-                    }
-                }
-
-                // At i,j+1
-                if (j + 1 <= domain.bigEnd(1))
-                {
-                    Set::Vector grad_phi_jp = Numeric::Gradient(phi_sharp, i, j + 1, k, 0, DX);
-                    Set::Scalar grad_phi_mag_jp = grad_phi_jp.lpNorm<2>();
-                    if (grad_phi_mag_jp > 1e-10)
-                    {
-                        Set::Vector n_hat_jp = grad_phi_jp / grad_phi_mag_jp;
-                        Set::Vector grad_rho_eta1_jp = Numeric::Gradient(rho_eta1, i, j + 1, k, 0, DX);
-                        n_dot_grad_rho_eta1_jp = n_hat_jp.dot(grad_rho_eta1_jp);
-                    }
-                }
-
-                // At i,j-1
-                if (j - 1 >= domain.smallEnd(1))
-                {
-                    Set::Vector grad_phi_jm = Numeric::Gradient(phi_sharp, i, j - 1, k, 0, DX);
-                    Set::Scalar grad_phi_mag_jm = grad_phi_jm.lpNorm<2>();
-                    if (grad_phi_mag_jm > 1e-10)
-                    {
-                        Set::Vector n_hat_jm = grad_phi_jm / grad_phi_mag_jm;
-                        Set::Vector grad_rho_eta1_jm = Numeric::Gradient(rho_eta1, i, j - 1, k, 0, DX);
-                        n_dot_grad_rho_eta1_jm = n_hat_jm.dot(grad_rho_eta1_jm);
-                    }
-                }
-
-                // grad(epsilon * n dot grad(rho_1*phi_1))
-                Set::Scalar grad_term1_x = epsilon * (n_dot_grad_rho_eta1_ip - n_dot_grad_rho_eta1_im) / (2.0 * DX[0]);
-                Set::Scalar grad_term1_y = epsilon * (n_dot_grad_rho_eta1_jp - n_dot_grad_rho_eta1_jm) / (2.0 * DX[1]);
-
-                Set::Scalar term1_1 = n_hat(0) * grad_term1_x + n_hat(1) * grad_term1_y;
-
-                // (1-2*phi) * grad(rho_1*phi_1)
-                Set::Scalar term2_1 = (1.0 - 2.0 * phi_val) * n_dot_grad_rho_eta1;
-
-                // Compression operator R_g (Equation 16)
-                Set::Scalar R_g = H * (term1_1 - term2_1);
-
-                // ============================================================
-                // Update with relaxation (pseudo-time stepping)
-                // ============================================================
-
-                // [SIGN EXPERIMENT 2026-06] Tiwari Eq 30a/30b put R-hat on the RHS as a
-                // SOURCE (d(rho alpha)/dt = +R-hat), so a forward update ADDS it.  The
-                // original code subtracted -> anti-sharpening.  Flipped to += to test.
-                rho_eta0(i, j, k) = rho_eta0(i, j, k) + omega_relax * dt_compression * R_l;
-                rho_eta1(i, j, k) = rho_eta1(i, j, k) + omega_relax * dt_compression * R_g;
-
-                // Ensure positivity
-                rho_eta0(i, j, k) = std::max(small, rho_eta0(i, j, k));
-                rho_eta1(i, j, k) = std::max(small, rho_eta1(i, j, k));
-
-                // ============================================================
-                // Enforce exact mass conservation
-                // Total mass must equal original total mass
-                // ============================================================
-
-                Set::Scalar rho_total_original = rho_eta0_original(i, j, k) + rho_eta1_original(i, j, k);
-                Set::Scalar rho_total_new = rho_eta0(i, j, k) + rho_eta1(i, j, k);
-
-                Set::Scalar mass_error = std::abs(rho_total_new - rho_total_original);
-
-                if (mass_error > 1e-12)
-                {
-                    // Renormalize to ensure exact mass conservation
-                    Set::Scalar scale = rho_total_original / (rho_total_new + small);
-                    rho_eta0(i, j, k) *= scale;
-                    rho_eta1(i, j, k) *= scale;
-                }
-            });
-        }
-
-        // Fill boundaries after each iteration using custom BC function
-        Util::ParallelMessage(INFO, "Filling Shrp Interface: Density Correction");
-
-        FillBoundariesWithBC(lev, 0.0, density_bc, { &rho_eta0_work, &rho_eta1_work });
-
-        // ========================================================================
-        // Check convergence of density correction
-        // ========================================================================
-
-        amrex::MultiFab residual0(rho_eta0_work.boxArray(), rho_eta0_work.DistributionMap(), 1, 0);
-        amrex::MultiFab residual1(rho_eta1_work.boxArray(), rho_eta1_work.DistributionMap(), 1, 0);
-
-        amrex::MultiFab::Copy(residual0, rho_eta0_work, 0, 0, 1, 0);
-        amrex::MultiFab::Copy(residual1, rho_eta1_work, 0, 0, 1, 0);
-        amrex::MultiFab::Subtract(residual0, rho_eta0_old, 0, 0, 1, 0);
-        amrex::MultiFab::Subtract(residual1, rho_eta1_old, 0, 0, 1, 0);
-
-        Set::Scalar max_residual = std::max(residual0.norm0(), residual1.norm0());
-
-        if (max_residual < density_tol)
-        {
-            Util::Message(INFO, "  Density correction converged in ", density_iter + 1, " iterations");
-            break;
-        }
-
-        if (density_iter == density_max_iter - 1)
-        {
-            Util::Message(INFO, "  Density correction reached max iterations (", density_max_iter, ")");
-            Util::Message(INFO, "  Final residual: ", max_residual);
-        }
-    }
-
-    // ============================================================================
-    // STEP 5: Copy corrected densities back to main arrays
-    // ============================================================================
-
-    amrex::MultiFab::Copy(*rho_eta0_mf[lev], rho_eta0_work, 0, 0, 1, 0);
-    amrex::MultiFab::Copy(*rho_eta1_mf[lev], rho_eta1_work, 0, 0, 1, 0);
-
-    // ============================================================================
-    // STEP 6: Update eta from corrected densities
-    // ============================================================================
-    // WARNING: This recovery (eta = rho_eta0 / rho_total) is the legacy
-    // mass-fraction form that the new state model deliberately abandons.
-    // It is dead code while apply_sharpening=0. If sharpening is re-enabled,
-    // the sharpening algorithm needs to be reworked to operate on the
-    // independent volume-fraction state (eta_mf) directly rather than via
-    // the conservative phase masses; otherwise it will silently overwrite
-    // the volume fraction with the mass fraction every sharpening pass.
-    // ============================================================================
-
-    for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
-    {
-        const amrex::Box &bx = mfi.validbox();
-
-        Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf[lev]->array(mfi);
-        Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf[lev]->array(mfi);
-        Set::Patch<Set::Scalar> eta = eta_mf.Patch(lev, mfi);
-        Set::Patch<const Set::Scalar> phisol = embedded.phi_mf.Patch(lev, mfi);
-
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            // Embedded solid: preserve the prescribed alpha inside the solid.
-            if (embedded.apply && embedded.isSolid(phisol(i, j, k))) return;
-            Set::Scalar rho_total = rho_eta0(i, j, k) + rho_eta1(i, j, k);
-            eta(i, j, k) = rho_eta0(i, j, k) / (rho_total + small);
-
-            // Simple clamping (NO cutoff transformation)
-            eta(i, j, k) = std::max(0.0, std::min(1.0, eta(i, j, k)));
-        });
-    }
-
-    // ============================================================================
-    // FILL BOUNDARIES WITH CUSTOM BC (FINAL - ONLY ONCE)
-    // ============================================================================
-    Util::ParallelMessage(INFO, "Filling Shrp Interface: Density Correction, COMPELTE");
-
-    // Eta: use eta_bc (not energy_bc or density_bc, which have wrong dirichlet values)
-    FillBoundariesWithBC(lev, 0.0, eta_bc, { eta_mf[lev].get() });
-    // Per-phase density ghosts via their own BC.  Do NOT re-partition the mixture by
-    // eta (rho_eta_k = rho_mix*(eta|1-eta) injects alpha_g*alpha_l*(rho_l-rho_g) of
-    // liquid mass into the gas at mixed cells, and growntilebox clobbers the VALID
-    // conserved cells -- the same gas-mass-injection bug fixed in FillGhost4BC).
-    FillBoundariesWithBC(lev, 0.0, density_bc, {
-        rho_eta0_mf[lev].get(), rho_eta1_mf[lev].get()
-    });
-    // Mixture density is the consistent sum of the partial densities.
-    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
-    {
-        const amrex::Box &ghostbox = mfi.growntilebox(nghost);
-        auto rho  = density_mf[lev]->array(mfi);
-        auto rho0 = rho_eta0_mf[lev]->array(mfi);
-        auto rho1 = rho_eta1_mf[lev]->array(mfi);
-        amrex::ParallelFor(ghostbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            rho(i, j, k) = rho0(i, j, k) + rho1(i, j, k);
-        });
-    }
-
-    Util::Message(INFO, "=== INTERFACE SHARPENING COMPLETE ===");
-}
 
 
 
@@ -4317,103 +3758,6 @@ void Hydro2::InterfaceSharpening(int lev, Set::Scalar dt_physical)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////// REINITIALIZE SIGNED DISTANCE ///////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-void Hydro2::ReinitializeSignedDistance(int lev,
-                                        amrex::MultiFab &psi_mf,
-                                        const amrex::MultiFab &psi_init_mf,
-                                        int max_iter)
-{
-    BL_PROFILE("Integrator::Hydro2::ReinitializeSignedDistance");
-
-    const Set::Scalar *DX = geom[lev].CellSize();
-    amrex::Box domain = geom[lev].Domain();
-
-    // Copy initial condition
-    amrex::MultiFab::Copy(psi_mf, psi_init_mf, 0, 0, 1, 2);
-
-    // Pseudo-time step (CFL condition for Equation 10)
-    Set::Scalar dt_reinit = 0.5 * std::min(DX[0], DX[1]);
-
-    // Temporary storage for iteration
-    amrex::MultiFab psi_old(psi_mf.boxArray(), psi_mf.DistributionMap(), 1, 2);
-
-    // Iterative reinitialization (Equation 10)
-    for (int iter = 0; iter < max_iter; iter++)
-    {
-        // Copy current state
-        amrex::MultiFab::Copy(psi_old, psi_mf, 0, 0, 1, 2);
-
-        // Update
-        for (amrex::MFIter mfi(psi_mf, false); mfi.isValid(); ++mfi)
-        {
-            const amrex::Box &bx = mfi.validbox();
-
-            Set::Patch<const Set::Scalar> psi_init = psi_init_mf.array(mfi);
-            Set::Patch<const Set::Scalar> psi_o = psi_old.array(mfi);
-            Set::Patch<Set::Scalar> psi_n = psi_mf.array(mfi);
-
-            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                auto sten = Numeric::GetStencil(i, j, k, domain);
-
-                // Smoothed sign function (from Equation 9)
-                // S(psi) ~= tanh(psi/(2eps_h))
-                Set::Scalar sign_psi = std::tanh(psi_init(i, j, k) / (2.0 * epsilon));
-
-                // Godunov upwind gradient magnitude
-                Set::Scalar grad_mag = 0.0;
-
-                if (sign_psi > 0.0)
-                {
-                    // Backward differences
-                    Set::Scalar Dx_minus = (psi_o(i, j, k) - psi_o(i - 1, j, k)) / DX[0];
-                    Set::Scalar Dx_plus = (psi_o(i + 1, j, k) - psi_o(i, j, k)) / DX[0];
-                    Set::Scalar Dy_minus = (psi_o(i, j, k) - psi_o(i, j - 1, k)) / DX[1];
-                    Set::Scalar Dy_plus = (psi_o(i, j + 1, k) - psi_o(i, j, k)) / DX[1];
-
-                    Set::Scalar grad_x = std::max(Dx_minus, 0.0) * std::max(Dx_minus, 0.0)
-                                         + std::min(Dx_plus, 0.0) * std::min(Dx_plus, 0.0);
-                    Set::Scalar grad_y = std::max(Dy_minus, 0.0) * std::max(Dy_minus, 0.0)
-                                         + std::min(Dy_plus, 0.0) * std::min(Dy_plus, 0.0);
-
-                    grad_mag = std::sqrt(grad_x + grad_y);
-                }
-                else
-                {
-                    // Forward differences
-                    Set::Scalar Dx_minus = (psi_o(i, j, k) - psi_o(i - 1, j, k)) / DX[0];
-                    Set::Scalar Dx_plus = (psi_o(i + 1, j, k) - psi_o(i, j, k)) / DX[0];
-                    Set::Scalar Dy_minus = (psi_o(i, j, k) - psi_o(i, j - 1, k)) / DX[1];
-                    Set::Scalar Dy_plus = (psi_o(i, j + 1, k) - psi_o(i, j, k)) / DX[1];
-
-                    Set::Scalar grad_x = std::min(Dx_minus, 0.0) * std::min(Dx_minus, 0.0)
-                                         + std::max(Dx_plus, 0.0) * std::max(Dx_plus, 0.0);
-                    Set::Scalar grad_y = std::min(Dy_minus, 0.0) * std::min(Dy_minus, 0.0)
-                                         + std::max(Dy_plus, 0.0) * std::max(Dy_plus, 0.0);
-
-                    grad_mag = std::sqrt(grad_x + grad_y);
-                }
-
-                // Update using Equation (10): dpsi/dtau_ = S(psi)(1 - |grad_psi|)
-                psi_n(i, j, k) = psi_o(i, j, k) + dt_reinit * sign_psi * (1.0 - grad_mag);
-            });
-        }
-
-        // Fill boundaries
-        psi_mf.FillBoundary(geom[lev].periodicity());
-
-        // Check convergence
-        amrex::MultiFab residual(psi_mf.boxArray(), psi_mf.DistributionMap(), 1, 0);
-        amrex::MultiFab::Copy(residual, psi_mf, 0, 0, 1, 0);
-        amrex::MultiFab::Subtract(residual, psi_old, 0, 0, 1, 0);
-
-        Set::Scalar max_residual = residual.norm0();
-
-        if (max_residual < reinit_tolerance)
-        {
-            Util::Message(INFO, "  Reinitialization converged in ", iter + 1, " iterations");
-            break;
-        }
-    }
-}
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -4624,11 +3968,11 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
 
         if (nghost == 2)
         {
-            Util::Message(INFO, "FillGhost4BC: Using NSCBC with 2 ghost cells");
+            if (verbose) Util::Message(INFO, "FillGhost4BC: Using NSCBC with 2 ghost cells");
         }
         else if (nghost == 4)
         {
-            Util::Message(INFO, "FillGhost4BC: Using NSCBC4 with 4 ghost cells");
+            if (verbose) Util::Message(INFO, "FillGhost4BC: Using NSCBC4 with 4 ghost cells");
         }
     }
     else
@@ -5871,51 +5215,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
 // already immune to non-material changes in eta and needs no snapshot/restore.
 // Kept as no-ops so the call sites document where eta is rewritten without any
 // material motion, should a future formulation need them again.
-void Hydro2::ShellGammaSnapshot(int lev, std::unique_ptr<amrex::MultiFab> &snap)
-{
-    amrex::ignore_unused(lev);
-    snap.reset();
-    return;
-    if (!marmottant) { snap.reset(); return; }
-    const Set::Scalar *DXr = geom[lev].CellSize();
-    snap = std::make_unique<amrex::MultiFab>(
-        eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, 0);
-    snap->setVal(-1.0);
-    eta_mf[lev]->FillBoundary(geom[lev].periodicity());
-    for (amrex::MFIter mfi(*snap, false); mfi.isValid(); ++mfi)
-    {
-        const amrex::Box &bx = mfi.validbox();
-        amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
-        amrex::Array4<const Set::Scalar> const &cs = shell_mf[lev]->const_array(mfi);
-        amrex::Array4<Set::Scalar> const &Gs = snap->array(mfi);
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            Set::Scalar gm = Numeric::Gradient(et, i, j, k, 0, DXr).lpNorm<2>();
-            Gs(i, j, k) = (gm > 1.0e-10) ? cs(i, j, k) / gm : -1.0;
-        });
-    }
-}
 
-void Hydro2::ShellGammaRestore(int lev, const std::unique_ptr<amrex::MultiFab> &snap)
-{
-    amrex::ignore_unused(lev);
-    if (true) return;
-    if (!marmottant || !snap) return;
-    const Set::Scalar *DXr = geom[lev].CellSize();
-    eta_mf[lev]->FillBoundary(geom[lev].periodicity());
-    for (amrex::MFIter mfi(*snap, false); mfi.isValid(); ++mfi)
-    {
-        const amrex::Box &bx = mfi.validbox();
-        amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
-        amrex::Array4<const Set::Scalar> const &Gs = snap->const_array(mfi);
-        amrex::Array4<Set::Scalar> const &cs = shell_mf[lev]->array(mfi);
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            if (Gs(i, j, k) < 0.0) return;          // no band before the change
-            Set::Scalar gm = Numeric::Gradient(et, i, j, k, 0, DXr).lpNorm<2>();
-            if (gm > 1.0e-10) cs(i, j, k) = Gs(i, j, k) * gm;
-        });
-    }
-    shell_mf[lev]->FillBoundary(geom[lev].periodicity());
-}
 
 
 // ======================================================================
@@ -5928,10 +5228,6 @@ void Hydro2::CapillaryOperator(int lev, Set::Scalar dt)
     const Set::Scalar *DX = geom[lev].CellSize();
     const Set::Scalar sig_const = sigma;
     const int marm = marmottant;
-    // L_cap runs after L_hyper and before L_relax, so eta here is the
-    // post-advection / pre-relaxation interface -- the right thing to mark.
-    if (cfun_resync)
-        amrex::MultiFab::Copy(*cfun_mf[lev], *eta_mf[lev], 0, 0, 1, nghost);
     const Set::Scalar chi_ = marmottant_chi, Gb = marmottant_Gamma_buck;
     const Set::Scalar sbrk = marmottant_sigma_break, sigw = sigma;
 
@@ -6044,8 +5340,6 @@ void Hydro2::RelaxAndReinit(int lev)
     // cell count} and print a one-line summary.
     // MERGE (Marmottant): preserve the shell's areal density across the
     // pressure relaxation below (it moves volume between phases, not lipid).
-    std::unique_ptr<amrex::MultiFab> Gamma_snapshot;
-    ShellGammaSnapshot(lev, Gamma_snapshot);
 
     // MERGE (AcousticBC): honour relax_diag instead of the hardcoded `true`
     // that was on the Marmottant side.  That leftover forced the Newton
@@ -6451,7 +5745,6 @@ void Hydro2::RelaxAndReinit(int lev)
         });
     }
 
-    ShellGammaRestore(lev, Gamma_snapshot);
 
     // ----------------------------------------------------------------
     // Diagnostic summary.

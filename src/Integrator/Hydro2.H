@@ -177,45 +177,18 @@ protected:
     // L_relax once per step, after L_cap -- not between RK stages.
     bool defer_relax = false;
 
-    // ------------------------------------------------------------------
-    // cfun_resync : rebuild c from eta instead of advecting it independently
-    // ------------------------------------------------------------------
-    // Schmidmayer advects c on its own (dc/dt + u.grad c = 0) SPECIFICALLY so
-    // it does not inherit the relaxation source mu(P1-P2) that alpha_1 carries.
-    // The cost is that pure advection is non-conservative and diffusive, so c
-    // wanders off the interface it is meant to mark: measured here, c and eta
-    // separated to 2.28% in R (and max|c-eta| = 0.26) over 15 ms at eps/dx=4,
-    // moving in OPPOSITE directions.  The capillary force was then acting on an
-    // interface 2.3% from the material one.
-    //
-    // With this on, c is a slaved diagnostic  c := eta, rebuilt every substep,
-    // so it tracks the interface exactly.  The relaxation contamination that
-    // originally motivated a separate c is now blocked by the operator
-    // splitting instead: L_cap runs BEFORE L_relax, so c is read at the
-    // post-advection / pre-relaxation state.
-    //
-    // 0 = Schmidmayer (independent transport), 1 = slaved to eta.
-    int cfun_resync = 0;
-
     // Marmottant advected shell: preserve the AREAL density Gamma = c/|grad eta|
     // across NON-MATERIAL changes to eta (stiff pressure relaxation, clamping to
     // [0,1], per-phase ghost reconstruction).  None of those move lipid, so Gamma
     // -- not c -- is the invariant.  Snapshot before, restore after:
     //     Gamma_old = c/|grad eta|_old   ->   c_new = Gamma_old |grad eta|_new
     // A negative snapshot value marks "no band here" and leaves c untouched.
-    void ShellGammaSnapshot(int lev, std::unique_ptr<amrex::MultiFab> &snap);
-    void ShellGammaRestore (int lev, const std::unique_ptr<amrex::MultiFab> &snap);
 
 
     void SetAdaptiveTimestepParams(Set::Scalar cfl_val, Set::Scalar min_dt, Set::Scalar max_dt, Set::Scalar growth_factor_val, bool enable_adaptive);
     void check4nans(int time, int lev, int i, int j, int k, const std::string &message, std::initializer_list<std::pair<std::string, double> > vars);
     //void InterfaceCompression(int lev, Set::Scalar dt_physical);
-    void InterfaceSharpening(int lev, Set::Scalar dt_physical);
 private:
-    void ReinitializeSignedDistance(int lev,
-                                    amrex::MultiFab &psi_mf,
-                                    const amrex::MultiFab &psi_init_mf,
-                                    int max_iter = 50);
     // BOUNDRY CONDITION FUNCTIONS
     // For MultiFabs that only need periodic/processor boundaries
     void FillBoundaries(int lev, std::initializer_list<amrex::MultiFab *> mfs);
@@ -509,7 +482,6 @@ protected:
     // breaks that loop; it is a DIAGNOSTIC, not a physically complete choice
     // -- the complete fix is the Schmidmayer 2017 closure that puts
     // sigma|grad eta| into the conserved state.
-    int capillary_work = 1;
     // DIAGNOSTIC: interface-localised artificial viscosity.
     //   mu_art = C * rho * a * dx * 4 eta (1-eta),   F_art = mu_art * lap(u)
     // applied as a body-force pair (momentum gets F_art, energy gets u.F_art),
@@ -519,7 +491,6 @@ protected:
     // instability needs in units of what upwinding could actually provide.
     // C = O(1) => putting Omega in the flux (Schmidmayer 2017) would suffice;
     // C >> 10 => it would not.  Default 0 = off, nothing changes.
-    Set::Scalar art_visc_coeff = 0.0;
 
     // ------------------------------------------------------------------
     // CAPILLARY ENERGY CLOSURE  (Schmidmayer et al. 2017)
@@ -540,8 +511,8 @@ protected:
     //
     // Expanding that reproduces d(rho E_f)/dt = -div[(rho E_f + p)u] + u.F
     // exactly, so the u.F SOURCE must be dropped when this is on (it is now
-    // implicit in the flux) -- which is why capillary_work=0 on its own blew
-    // up: the source was removed without adding the flux or the state term.
+    // implicit in the flux) (the legacy body-force path is
+    // used only when capillary_closure = 0).
     //
     // The momentum side is left as the existing source +div(Omega): putting
     // Omega in the momentum flux was shown to be algebraically identical
@@ -638,13 +609,7 @@ protected:
     Solver::EOS::Tammann eos1; // Fluid 1 
 
     // Interface Compression Stuff
-    bool apply_sharpening = false;
-    int sharpening_frequency = 1;
-    int reinit_max_iter = 50;
-    Set::Scalar reinit_tolerance = 1e-6;
     std::vector<int> step_counter; // Track steps per level
-    int density_max_iter = 10;
-    Set::Scalar density_tol = 1e-8;
     Set::Scalar omega_relax = 0.5;
 
     // IC pressure equalization (Mix() formula switch).
@@ -687,6 +652,15 @@ protected:
     //   relax_diag = 0  : off (default; no diagnostic overhead)
     //   relax_diag = 1  : every stage print {max_iters, max_residual}
     //                     plus AUTO-warn if any cell hits max_iter without converging.
+    // Per-call chatter (FillGhost4BC mode banner etc.).  These fire on EVERY
+    // ghost fill -- millions of lines in a long run, and log I/O is not free
+    // under MPI.  Errors/warnings are NOT gated by this.
+    // Per-cell NaN/Inf guard.  Each call builds an initializer_list of
+    // {std::string, double} pairs -- heap allocations per cell per stage -- so
+    // it must be gated at the CALL SITE, not inside the function.  Default off
+    // for production; set nan_check=1 in the input when debugging a blow-up.
+    int nan_check = 0;
+    int verbose = 0;
     int relax_diag = 0;
     int clip_ghost_only = 0;
     bool sym_face_lo[3] = {false, false, false};
