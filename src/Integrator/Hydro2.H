@@ -663,12 +663,13 @@ protected:
     int verbose = 0;
     int relax_diag = 0;
     // Trace-phase slaving window for the relaxation Newton INPUTS (see
-    // RelaxAndReinit).  Full slaving freezes alpha, so this widens the
-    // no-relaxation zone from `cutoff` to relax_slave_lo -- fine for driven
-    // runs (suppresses the band-tail erosion loop), fatal for violent
-    // collapses (gas volume floors early).  relax_slave_hi <= 0 disables.
+    // RelaxAndReinit).  Full slaving freezes alpha, widening the
+    // no-relaxation zone from `cutoff` to relax_slave_lo -- measured fatal
+    // for BOTH violent collapses (gas volume floors early) and driven runs
+    // (exponential band-tail mass pile, dead at 2.03 ms).  DEFAULT OFF
+    // (relax_slave_hi = 0); opt in per-input if a case needs it.
     Set::Scalar relax_slave_lo = 1.0e-2;
-    Set::Scalar relax_slave_hi = 1.0e-1;
+    Set::Scalar relax_slave_hi = 0.0;
     int clip_ghost_only = 0;
     bool sym_face_lo[3] = {false, false, false};
     bool sym_face_hi[3] = {false, false, false};

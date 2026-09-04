@@ -67,14 +67,18 @@ RUNS = [
          out_dir=_repo("tests", "FlowDrivenBubble", "output_HighAmp"),
          color="tab:red"),
 ]
-# OVERRIDE (uncomment + edit for INCLINE):
+# OVERRIDE — active: INCLINE / HPC runs.
 RUNS = [
-     dict(label="LowAmp NSCBC (local, post-fix)",
-          out_dir=_repo("tests", "FlowDrivenBubble", "output_LowAmp_NSCBC"),
-          color="tab:blue")
-#     dict(label="LowAmp (A = 0.001 bar)",
-#          out_dir="/mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_LowAmp_NSCBC",
-#          color="tab:blue")
+     dict(label="LowAmp NSCBC (A = 0.001 bar)",
+          out_dir="/mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_LowAmp_NSCBC",
+          color="tab:blue"),
+# Local WSL diagnostic runs (2026-09-03 slaving A/B) — uncomment to re-analyze:
+#     dict(label="LowAmp NSCBC (slaved; died 2.03 ms)",
+#          out_dir=_repo("tests", "FlowDrivenBubble", "output_LowAmp_NSCBC"),
+#          color="tab:red"),
+#     dict(label="LowAmp NSCBC (no slaving)",
+#          out_dir=_repo("tests", "FlowDrivenBubble", "output_LowAmp_NSCBC_noslave"),
+#          color="tab:blue"),
 #     dict(label="HighAmp (A = 5 MPa)",
 #          out_dir="/mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_HighAmp",
 #          color="tab:red"),

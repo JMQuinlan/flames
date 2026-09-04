@@ -122,8 +122,8 @@ ToPrimitive(const Solver::Local::FluidRiemann::State &s, Set::Scalar /*small*/)
 {
     constexpr Set::Scalar alpha_floor = 1.0e-12;
     constexpr Set::Scalar DIV_FLOOR   = 1.0e-30;
-    // Mass-channel divide clamp; MUST match ToState (see comment below).
-    constexpr Set::Scalar ALPHA_DIV_MASS = 1.0e-6;
+    // Cap on the reconstructed pure densities (see comment below).
+    constexpr Set::Scalar RHO_PURE_CAP = 1.0e4;
     Primitive p;
     p.alpha       = std::min(std::max(s.alpha, alpha_floor), 1.0 - alpha_floor);
     Set::Scalar a2 = 1.0 - p.alpha;
@@ -142,26 +142,24 @@ ToPrimitive(const Solver::Local::FluidRiemann::State &s, Set::Scalar /*small*/)
     // the SAME clamped alpha, making the Godunov (cell-center) roundtrip an
     // exact identity.
     //
-    // ALPHA_DIV_MASS: the mass-channel divide must be bounded.  eta is
-    // clamped to exactly [0,1] while the positivity clip only zeroes
-    // negative (alpha rho)_k, so a residual advected mass (say 1e-6) can
-    // coexist with alpha at the 1e-12 clamp -- an unbounded fake pure
-    // density (1e6 kg/m^3) that WENO reconstructs into neighbouring faces
-    // as a spurious phase-mass flux (e.g. liquid INTO a collapsing bubble
-    // interior).  Dividing by max(alpha, 1e-6) caps rho_pure at
-    // arh_residual/1e-6 (order unity for roundoff residuals) and keeps the
-    // field CONTINUOUS at the alpha = 1e-6 crossing (both sides give
-    // arh/1e-6 there).  ToState multiplies by the SAME clamp, so the
-    // cell-center roundtrip stays an exact identity for every alpha.  This
-    // is NOT the 1e-8 divide-floor pathology of the ENERGY channel (which
-    // mispriced p_k because the E_k inversion has no matching multiply):
-    // here the clamp appears symmetrically in both directions and cancels.
-    {
-        const Set::Scalar a1m = std::max(p.alpha, ALPHA_DIV_MASS);
-        const Set::Scalar a2m = std::max(a2,      ALPHA_DIV_MASS);
-        p.alpha_rho_0 = s.alpha_rho_0 / a1m;   // rho_0 pure (bounded)
-        p.alpha_rho_1 = s.alpha_rho_1 / a2m;   // rho_1 pure (bounded)
-    }
+    // RHO_PURE_CAP: bound the RESULT of the divide, never the divisor.
+    // For CONSISTENT tail cells arh_k = alpha_k rho_k with both -> 0, so
+    // the raw ratio arh/alpha stays smooth at ~rho_true all the way down --
+    // that smoothness IS the snowplow fix, and flooring the divisor
+    // destroys it: dividing by max(alpha, 1e-6) ramps the field from
+    // rho_true to ~0 across the outer tail, WENO overshoots the ramp, and
+    // the snowplow returns (measured: UT_ADV m1 drift +212%/period with a
+    // 1e-6 divisor floor vs 0.00% with the raw ratio).  The ONLY
+    // pathological case is an INCONSISTENT cell -- residual advected mass
+    // coexisting with alpha at the 1e-12 clamp (eta clamped to exactly 0/1
+    // while the positivity clip only zeroes NEGATIVE mass) -- whose fake
+    // rho_pure is 1e4..1e6 kg/m^3.  Cap the ratio at 1e4 (physical
+    // densities are <= ~1.5e3 even for shock-compressed Tammann water):
+    // consistent cells are never capped, so the cell-center roundtrip
+    // through ToState stays an exact identity everywhere it matters, and
+    // the capped cells' states were unphysical to begin with.
+    p.alpha_rho_0 = std::min(s.alpha_rho_0 / p.alpha, RHO_PURE_CAP);   // rho_0 pure
+    p.alpha_rho_1 = std::min(s.alpha_rho_1 / a2,      RHO_PURE_CAP);   // rho_1 pure
     // Mixture velocity (one velocity for all phases in the equilibrium-
     // velocity 6-eq model; Sch20 eq. 13).
     Set::Scalar rho = s.alpha_rho_0 + s.alpha_rho_1;
@@ -195,19 +193,18 @@ ToState(const Primitive &p, Set::Scalar /*small*/)
 {
     constexpr Set::Scalar alpha_floor = 1.0e-12;
     constexpr Set::Scalar DIV_FLOOR   = 1.0e-30;
-    // Mass-channel multiply clamp; MUST match ToPrimitive's divide clamp so
-    // the cell-center roundtrip is an exact identity for every alpha.
-    constexpr Set::Scalar ALPHA_DIV_MASS = 1.0e-6;
     Solver::Local::FluidRiemann::State s;
     Set::Scalar a1 = std::min(std::max(p.alpha, alpha_floor), 1.0 - alpha_floor);
     Set::Scalar a2 = 1.0 - a1;
     // Rebuild partial densities from the reconstructed PURE densities and
     // the clamped face alpha (see ToPrimitive): non-negative by
     // construction, and an exact roundtrip when the limiter returns the
-    // cell-center value (both directions use the same clamped alpha).
+    // cell-center value (both directions use the same clamped alpha; the
+    // ToPrimitive RHO_PURE_CAP only fires on unphysical residual-mass
+    // cells, so it never breaks the roundtrip of a physical state).
     s.alpha       = a1;
-    s.alpha_rho_0 = std::max(a1, ALPHA_DIV_MASS) * std::max(p.alpha_rho_0, 0.0);
-    s.alpha_rho_1 = std::max(a2, ALPHA_DIV_MASS) * std::max(p.alpha_rho_1, 0.0);
+    s.alpha_rho_0 = a1 * std::max(p.alpha_rho_0, 0.0);
+    s.alpha_rho_1 = a2 * std::max(p.alpha_rho_1, 0.0);
     Set::Scalar rho = s.alpha_rho_0 + s.alpha_rho_1;
     s.M_normal    = rho * p.u;
     s.M_tangent   = rho * p.v;

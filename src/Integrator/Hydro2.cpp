@@ -280,10 +280,18 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("relax_diag", value.relax_diag, 0); // 1 = print per-stage {max_iters, max_residual, count_unconverged}.
         pp_query_default("clip_ghost_only", value.clip_ghost_only, 0); // 1 = FillGhost STEP-9 positivity clip touches GHOST cells only (per-phase mass conservation)
         // Trace-phase slaving window for the relaxation Newton inputs (see
-        // Hydro2.H / RelaxAndReinit).  relax_slave_hi <= 0 disables slaving;
-        // collapse-dominated runs should disable it.
+        // Hydro2.H / RelaxAndReinit).  DEFAULT OFF (relax_slave_hi <= 0):
+        // slaving the Newton inputs freezes alpha over the whole window,
+        // which drove the exponential band-tail gas-mass pile that killed
+        // the driven LowAmp_NSCBC runs (local A/B 2026-09-03: slaved dies
+        // at 2.03 ms, disabled completes 3.5 ms with 1-5 Newton iters and
+        // 14-digit mass conservation).  The band-tail protection it once
+        // provided is covered by the p_floored guard + divide floors +
+        // bisection.  Opt back in per-input with e.g.
+        //   relax_slave_lo = 1e-2
+        //   relax_slave_hi = 1e-1
         pp_query_default("relax_slave_lo", value.relax_slave_lo, 1.0e-2);
-        pp_query_default("relax_slave_hi", value.relax_slave_hi, 1.0e-1);
+        pp_query_default("relax_slave_hi", value.relax_slave_hi, 0.0);
 
         // Symmetry-face detection: a domain face whose normal-momentum BC is
         // REFLECT_ODD is a symmetry plane; its advective fluxes are enforced
