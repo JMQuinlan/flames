@@ -1,66 +1,67 @@
-[blackbeauty][[64335,1],3][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],2][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],1][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],2][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],1][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],2][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],0][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],1][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],2][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],3][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],2][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],1][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],3][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],2][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],3][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],1][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],0][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],3][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],3][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],2][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],1][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],2][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],1][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],3][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],1][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],0][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],0][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],0][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],0][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],0][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],3][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],0][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],4][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],4][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],4][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],4][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],4][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],4][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],4][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
-[blackbeauty][[64335,1],4][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],3][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],4][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],1][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],4][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],3][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] [blackbeauty][[15937,1],4][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],0][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],4][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],1][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],3][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],3][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],4][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],4][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],4][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],2][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],3][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],2][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],4][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],3][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],0][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],3][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],3][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],2][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],1][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],0][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],0][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],2][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],1][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],0][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] [blackbeauty][[15937,1],2][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],2][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],0][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],1][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],1][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],1][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] [blackbeauty][[15937,1],0][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],2][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],1][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],2][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
+[blackbeauty][[15937,1],0][../../../../../../opal/mca/btl/tcp/btl_tcp_proc.c:266:mca_btl_tcp_proc_create_interface_graph] Unable to find reachable pairing between local and remote interfaces
 Initializing AMReX (26.02)...
 MPI initialized with 5 MPI processes
 MPI initialized with thread support level 0
 AMReX (26.02) initialized
+Util::CreateCleanDirectory():  /home/ttryon/Desktop/flames2/bin/tests/FlowMarmottant/redo10/R001064300 exists.  Renaming to:  /home/ttryon/Desktop/flames2/bin/tests/FlowMarmottant/redo10/R001064300.old.20260903190830
 [1m[34mMESSAGE[0m: [94m./src/Solver/EOS/EOS.H[0m:57 ([92mSetBackend[0m) EOS backend: native (Tammann + CPG)
 [1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:253 ([92mParse[0m) Marmottant ON (advected shell): R0=0.0010643 R_buckling=0.001 chi=0.55 Gamma_buck=1.13273 sigma(t=0)=0.073004 sigma_break=0.073 sigma_water=0.073
 [1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:350 ([92mParse[0m) uses_nscbc=1
 [1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:369 ([92mParse[0m) Parsing NSCBC4 (4-cell)
 [1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:381 ([92mParse[0m) nscbc_bc Pointer=0
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:382 ([92mParse[0m) nscbc4_bc Pointer=0x5f1dbcb795f0
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:382 ([92mParse[0m) nscbc4_bc Pointer=0x5b48336005f0
 [1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:628 ([92mParse[0m) Input file has Riemann_Solver.type = hllc
 [1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:640 ([92mParse[0m) Selected Riemann solver: N6Solver5Local12FluidRiemann4HLLCE
 [1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:649 ([92mParse[0m) Input file has Limiter.type = vanleer
 [1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:656 ([92mParse[0m) Selected Limiter: N6Solver5Local7Limiter7VanLeerE
+[1m[34mMESSAGE(1)[0m: [94msrc/Integrator/Hydro2.cpp[0m:839 ([92mInitialize[0m) Finished initialization, begginning time iteration
 [1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:839 ([92mInitialize[0m) Finished initialization, begginning time iteration
 [1m[34mMESSAGE(3)[0m: [94msrc/Integrator/Hydro2.cpp[0m:839 ([92mInitialize[0m) Finished initialization, begginning time iteration
-[1m[34mMESSAGE(1)[0m: [94msrc/Integrator/Hydro2.cpp[0m:839 ([92mInitialize[0m) Finished initialization, begginning time iteration
-[1m[34mMESSAGE(0)[0m: [94msrc/Integrator/Hydro2.cpp[0m:839 ([92mInitialize[0m) Finished initialization, begginning time iteration
-[1m[34mMESSAGE(2)[0m: [94msrc/Integrator/Hydro2.cpp[0m:839 ([92mInitialize[0m) Finished initialization, begginning time iteration
-[1m[34mMESSAGE(1)[0m: [94msrc/Integrator/Hydro2.cpp[0m:839 ([92mInitialize[0m) Finished initialization, begginning time iteration
 [1m[34mMESSAGE(2)[0m: [94msrc/Integrator/Hydro2.cpp[0m:839 ([92mInitialize[0m) Finished initialization, begginning time iteration
 [1m[34mMESSAGE(0)[0m: [94msrc/Integrator/Hydro2.cpp[0m:839 ([92mInitialize[0m) Finished initialization, begginning time iteration
+[1m[34mMESSAGE(1)[0m: [94msrc/Integrator/Hydro2.cpp[0m:839 ([92mInitialize[0m) Finished initialization, begginning time iteration
+[1m[34mMESSAGE(2)[0m: [94msrc/Integrator/Hydro2.cpp[0m:839 ([92mInitialize[0m) Finished initialization, begginning time iteration
 [1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:839 ([92mInitialize[0m) Finished initialization, begginning time iteration
+[1m[34mMESSAGE(0)[0m: [94msrc/Integrator/Hydro2.cpp[0m:839 ([92mInitialize[0m) Finished initialization, begginning time iteration
 [1m[34mMESSAGE(3)[0m: [94msrc/Integrator/Hydro2.cpp[0m:839 ([92mInitialize[0m) Finished initialization, begginning time iteration
 
 STEP 1 starts ...
@@ -1609,7 +1610,7 @@ STEP 221 starts ...
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.10075e-08
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 3.09818e-09 (2)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    6.19637e-09
-STEP 221 ends. TIME = 2.416833814e-06 DT = 6.196365632e-09
+STEP 221 ends. TIME = 2.416833814e-06 DT = 6.196365631e-09
 
 STEP 222 starts ...
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 7.73231e-09 (1)
@@ -1630,14 +1631,14 @@ STEP 224 starts ...
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    3.96999e-09
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 9.98924e-10 (2)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.99785e-09
-STEP 224 ends. TIME = 2.425539992e-06 DT = 1.997847942e-09
+STEP 224 ends. TIME = 2.425539991e-06 DT = 1.997847942e-09
 
 STEP 225 starts ...
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 3.03101e-09 (1)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    3.03101e-09
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 7.18375e-10 (2)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.43675e-09
-STEP 225 ends. TIME = 2.426976742e-06 DT = 1.436750316e-09
+STEP 225 ends. TIME = 2.426976742e-06 DT = 1.436750315e-09
 
 STEP 226 starts ...
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 2.34668e-09 (1)
@@ -1651,121 +1652,121 @@ STEP 227 starts ...
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.81106e-09
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 3.38507e-10 (2)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    6.77014e-10
-STEP 227 ends. TIME = 2.428661585e-06 DT = 6.770144664e-10
+STEP 227 ends. TIME = 2.428661585e-06 DT = 6.770144662e-10
 
 STEP 228 starts ...
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37578e-09 (1)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37578e-09
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 2.11583e-10 (2)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    4.23165e-10
-STEP 228 ends. TIME = 2.42908475e-06 DT = 4.231650462e-10
+STEP 228 ends. TIME = 2.42908475e-06 DT = 4.231650459e-10
 
 STEP 229 starts ...
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.01787e-09 (1)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.01787e-09
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 1.2311e-10 (2)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    2.46219e-10
-STEP 229 ends. TIME = 2.429330969e-06 DT = 2.462190869e-10
+STEP 229 ends. TIME = 2.429330969e-06 DT = 2.462190866e-10
 
 STEP 230 starts ...
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 7.11037e-10 (1)
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    7.11037e-10
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 7.11036e-10 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    7.11036e-10
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.6188e-11 (2)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.32376e-10
-STEP 230 ends. TIME = 2.429463345e-06 DT = 1.323760126e-10
+STEP 230 ends. TIME = 2.429463345e-06 DT = 1.323760124e-10
 
 STEP 231 starts ...
 [1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:3648 ([92mRegrid[0m) Regridding on level1
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 4.71017e-10 (1)
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    4.71017e-10
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 4.71016e-10 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    4.71016e-10
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 3.24201e-11 (2)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    6.48402e-11
-STEP 231 ends. TIME = 2.429528185e-06 DT = 6.484015953e-11
+STEP 231 ends. TIME = 2.429528185e-06 DT = 6.484015941e-11
 
 STEP 232 starts ...
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 2.95239e-10 (1)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    2.95239e-10
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 1.44446e-11 (2)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    2.88892e-11
-STEP 232 ends. TIME = 2.429557074e-06 DT = 2.888922667e-11
+STEP 232 ends. TIME = 2.429557074e-06 DT = 2.888922656e-11
 
 STEP 233 starts ...
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.75806e-10 (1)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.75806e-10
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 5.87151e-12 (2)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.1743e-11
-STEP 233 ends. TIME = 2.429568817e-06 DT = 1.174302962e-11
+STEP 233 ends. TIME = 2.429568817e-06 DT = 1.174302954e-11
 
 STEP 234 starts ...
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 9.65877e-11 (1)
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    9.65877e-11
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 9.65875e-11 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    9.65875e-11
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 2.1712e-12 (2)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    4.34241e-12
-STEP 234 ends. TIME = 2.42957316e-06 DT = 4.342405189e-12
+STEP 234 ends. TIME = 2.42957316e-06 DT = 4.342405124e-12
 
 STEP 235 starts ...
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 4.63984e-11 (1)
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    4.63984e-11
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 4.63983e-11 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    4.63983e-11
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 7.29005e-13 (2)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.45801e-12
-STEP 235 ends. TIME = 2.429574618e-06 DT = 1.458010097e-12
+STEP 235 ends. TIME = 2.429574618e-06 DT = 1.458010041e-12
 
 STEP 236 starts ...
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.87941e-11 (1)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.87941e-11
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 2.23238e-13 (2)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    4.46477e-13
-STEP 236 ends. TIME = 2.429575064e-06 DT = 4.464767394e-13
+STEP 236 ends. TIME = 2.429575064e-06 DT = 4.464766952e-13
 
 STEP 237 starts ...
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 6.53925e-12 (1)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    6.53925e-12
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.27162e-14 (2)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.25432e-13
-STEP 237 ends. TIME = 2.429575189e-06 DT = 1.254324e-13
+STEP 237 ends. TIME = 2.429575189e-06 DT = 1.25432382e-13
 
 STEP 238 starts ...
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 2.08038e-12 (1)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    2.08038e-12
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 1.56938e-14 (2)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    3.13876e-14
-STEP 238 ends. TIME = 2.429575221e-06 DT = 3.138760609e-14
+STEP 238 ends. TIME = 2.429575221e-06 DT = 3.138763816e-14
 
 STEP 239 starts ...
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 5.41068e-13 (1)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    5.41068e-13
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 4.36798e-15 (2)
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    8.73596e-15
-STEP 239 ends. TIME = 2.42957523e-06 DT = 8.735955798e-15
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    8.73595e-15
+STEP 239 ends. TIME = 2.42957523e-06 DT = 8.735952356e-15
 
 STEP 240 starts ...
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.40941e-13 (1)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.40941e-13
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 1.42358e-15 (2)
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    2.84717e-15
-STEP 240 ends. TIME = 2.429575232e-06 DT = 2.847165611e-15
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    2.84716e-15
+STEP 240 ends. TIME = 2.429575232e-06 DT = 2.847161157e-15
 
 STEP 241 starts ...
 [1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:3648 ([92mRegrid[0m) Regridding on level1
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 4.03383e-14 (1)
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    4.03383e-14
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 4.82345e-16 (2)
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    9.6469e-16
-STEP 241 ends. TIME = 2.429575233e-06 DT = 9.646900388e-16
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 4.03384e-14 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    4.03384e-14
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 4.82344e-16 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    9.64688e-16
+STEP 241 ends. TIME = 2.429575233e-06 DT = 9.646882798e-16
 
 STEP 242 starts ...
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.25457e-14 (1)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.25457e-14
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 1.69439e-16 (2)
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    3.38878e-16
-STEP 242 ends. TIME = 2.429575234e-06 DT = 3.38878029e-16
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    3.38877e-16
+STEP 242 ends. TIME = 2.429575234e-06 DT = 3.38877408e-16
 
 STEP 243 starts ...
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 4.45304e-15 (1)
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    4.45304e-15
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 4.45303e-15 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    4.45303e-15
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.1271e-17 (2)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.22542e-16
-STEP 243 ends. TIME = 2.429575234e-06 DT = 1.225420576e-16
+STEP 243 ends. TIME = 2.429575234e-06 DT = 1.225419255e-16
 
 STEP 244 starts ...
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.64504e-15 (1)
@@ -1775,86 +1776,79 @@ STEP 244 starts ...
 STEP 244 ends. TIME = 2.429575234e-06 DT = 1e-16
 
 STEP 245 starts ...
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 6.23429e-16 (1)
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    6.23429e-16
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 1.86309e-18 (2)
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    3.72618e-18
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 6.23428e-16 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    6.23428e-16
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 1.86313e-18 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    3.72626e-18
 STEP 245 ends. TIME = 2.429575234e-06 DT = 1e-16
 
 STEP 246 starts ...
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 8.34342e-17 (1)
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    8.34342e-17
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 8.34344e-17 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    8.34344e-17
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 1.08413e-26 (2)
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    2.16825e-26
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    2.16827e-26
 STEP 246 ends. TIME = 2.429575234e-06 DT = 1e-16
 
 STEP 247 starts ...
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.48113e-19 (1)
 [1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.48113e-19
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 1.5765e-37 (2)
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    3.153e-37
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 1.57654e-37 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    3.15309e-37
 STEP 247 ends. TIME = 2.429575234e-06 DT = 1e-16
 
 STEP 248 starts ...
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-4 j=20 valid=0 re0=9.208e+108 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-3 j=20 valid=0 re0=6.139e+108 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-2 j=20 valid=0 re0=1.535e+108 re1=1.704e+89 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-4 j=22 valid=0 re0=2.193e+131 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-3 j=22 valid=0 re0=2.193e+131 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-2 j=22 valid=0 re0=1.096e+131 re1=3.651e+112 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-1 j=22 valid=0 re0=3.654e+130 re1=8.926e+112 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-4 j=25 valid=0 re0=2.996e+111 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-3 j=25 valid=0 re0=1.997e+111 re1=4.435e+92 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-2 j=25 valid=0 re0=4.993e+110 re1=6.652e+92 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-4 j=22 valid=0 re0=2.193e+131 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-3 j=22 valid=0 re0=2.193e+131 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-2 j=22 valid=0 re0=1.096e+131 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-1 j=22 valid=0 re0=3.654e+130 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-4 j=25 valid=0 re0=2.996e+111 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-3 j=25 valid=0 re0=1.997e+111 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-2 j=25 valid=0 re0=4.993e+110 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 4.49281e-73 (1)
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    4.49281e-73
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 9.9772e-72 (2)
-[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.99544e-71
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-4 j=22 valid=0 re0=3.004e+130 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-3 j=22 valid=0 re0=3.004e+130 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-2 j=22 valid=0 re0=1.502e+130 re1=5.003e+111 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-1 j=22 valid=0 re0=5.007e+129 re1=1.223e+112 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-4 j=25 valid=0 re0=1.488e+111 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-3 j=25 valid=0 re0=9.923e+110 re1=2.203e+92 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-2 j=25 valid=0 re0=2.481e+110 re1=3.305e+92 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-4 j=22 valid=0 re0=3.004e+130 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-3 j=22 valid=0 re0=3.004e+130 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-2 j=22 valid=0 re0=1.502e+130 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-1 j=22 valid=0 re0=5.007e+129 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-4 j=25 valid=0 re0=1.488e+111 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-3 j=25 valid=0 re0=9.923e+110 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-2 j=25 valid=0 re0=2.481e+110 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+SIGABRT
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 6.03102e-73 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    6.03102e-73
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 5.12617e-72 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.02523e-71
 STEP 248 ends. TIME = 2.429575234e-06 DT = 1e-16
 
 STEP 249 starts ...
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-4 j=18 valid=0 re0=4.819e+126 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-3 j=18 valid=0 re0=3.213e+126 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-2 j=18 valid=0 re0=8.032e+125 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-4 j=23 valid=0 re0=6.963e+180 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=0 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-3 j=23 valid=0 re0=6.963e+180 re1=7.731e+161 finite[re0=1 re1=1 rho=1 p=1 v=0 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-2 j=23 valid=0 re0=3.482e+180 re1=2.319e+162 finite[re0=1 re1=1 rho=1 p=1 v=0 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-1 j=23 valid=0 re0=1.161e+180 re1=4.767e+162 finite[re0=1 re1=1 rho=1 p=1 v=0 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-4 j=25 valid=0 re0=5.585e+114 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-3 j=25 valid=0 re0=3.724e+114 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
-[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-2 j=25 valid=0 re0=9.309e+113 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-4 j=18 valid=0 re0=2.915e+125 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-3 j=18 valid=0 re0=1.943e+125 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-2 j=18 valid=0 re0=4.858e+124 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-4 j=25 valid=0 re0=5.980e+114 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-3 j=25 valid=0 re0=3.987e+114 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:4815 ([92moperator()[0m) STEP8REPAIR lev=0 i=-2 j=25 valid=0 re0=9.966e+113 re1=0.000e+00 finite[re0=1 re1=1 rho=1 p=1 v=1 T=1 a=1 gam=1]
 [1m[34mMESSAGE(0)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:367 ([92mSolve[0m) -------------------------------
 [1m[34mMESSAGE(0)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:368 ([92mSolve[0m) ERROR IN 6-eq HLLC SOLVER:
-[1m[34mMESSAGE(0)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:369 ([92mSolve[0m) lo:   alpha=1, arh0=10000, arh1=9.99978e-09, Mn=-1.95591e+77, Mt=5.19383e+77, Mt2=0, E0=7.40741e-31, E1=2.49994e-42, E=1.54007e+151, g0=2.35, pi0=1e+09, g1=1.4, pi1=0
-[1m[34mMESSAGE(0)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:370 ([92mSolve[0m) hi:   alpha=1, arh0=10000, arh1=9.99978e-09, Mn=-1.42426e+77, Mt=4.8091e+77, Mt2=0, E0=inf, E1=inf, E=inf, g0=2.35, pi0=1e+09, g1=1.4, pi1=0
+[1m[34mMESSAGE(0)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:369 ([92mSolve[0m) lo:   alpha=0.75, arh0=7500, arh1=2500, Mn=1.41285e+77, Mt=1.6181e+77, Mt2=0, E0=5.55556e-31, E1=6.25e-31, E=2.30719e+150, g0=2.35, pi0=1e+09, g1=1.4, pi1=0
+[1m[34mMESSAGE(0)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:370 ([92mSolve[0m) hi:   alpha=0.75, arh0=7500, arh1=2500, Mn=-2.46152e+76, Mt=1.49824e+77, Mt2=0, E0=inf, E1=inf, E=inf, g0=2.35, pi0=1e+09, g1=1.4, pi1=0
 [1m[34mMESSAGE(0)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:371 ([92mSolve[0m) flux: m0=-nan, m1=-nan, Mn=-nan, Mt=-nan, Mt2=-nan, E=-nan, E0=-nan, E1=-nan, u*=-nan
 [1m[34mMESSAGE(0)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:372 ([92mSolve[0m) rhoL=10000 rhoR=10000
-[1m[34mMESSAGE(0)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:373 ([92mSolve[0m) uL=-1.95591e+73 uR=-1.42426e+73
-[1m[34mMESSAGE(0)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:374 ([92mSolve[0m) pL=-1e+09 pR=inf
+[1m[34mMESSAGE(0)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:373 ([92mSolve[0m) uL=1.41285e+73 uR=-2.46152e+72
+[1m[34mMESSAGE(0)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:374 ([92mSolve[0m) pL=-7.5e+08 pR=inf
 [1m[34mMESSAGE(0)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:375 ([92mSolve[0m) p0L=-1e+09 p1L=1e-12
 [1m[34mMESSAGE(0)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:376 ([92mSolve[0m) p0R=inf p1R=inf
-[1m[34mMESSAGE(0)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:377 ([92mSolve[0m) cL=1.53297e-06 cR=inf
+[1m[34mMESSAGE(0)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:377 ([92mSolve[0m) cL=1.45344e-06 cR=inf
 [1m[34mMESSAGE(0)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:378 ([92mSolve[0m) S_L=-inf S_M=-nan S_R=inf
 [1m[31mEXCEPTION[0m: [37m./src/Solver/Local/FluidRiemann/HLLC.H:379 (Solve[0m) [31m[0m
 [1m[34mMESSAGE(0)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2183 ([92moperator()[0m) -------------------------------
 [1m[34mMESSAGE(0)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2184 ([92moperator()[0m) ERROR IN RIEMANN SOLVERS (6-eq)
 [1m[34mMESSAGE(0)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2185 ([92moperator()[0m) lev=0 i=0 j=19 k=0
 [1m[31mABORT[0m:   [31msrc/Integrator/Hydro2.cpp[0m:2186 ([92moperator()[0m) 
-SIGABRT
 [1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:367 ([92mSolve[0m) -------------------------------
 [1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:368 ([92mSolve[0m) ERROR IN 6-eq HLLC SOLVER:
-[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:369 ([92mSolve[0m) lo:   alpha=1, arh0=10000, arh1=9.99978e-09, Mn=4.3492e+76, Mt=2.64715e+77, Mt2=0, E0=inf, E1=inf, E=inf, g0=2.35, pi0=1e+09, g1=1.4, pi1=0
-[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:370 ([92mSolve[0m) hi:   alpha=1, arh0=10000, arh1=9.99978e-09, Mn=-4.02753e+77, Mt=2.85892e+77, Mt2=0, E0=7.40741e-31, E1=2.49994e-42, E=1.21972e+151, g0=2.35, pi0=1e+09, g1=1.4, pi1=0
+[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:369 ([92mSolve[0m) lo:   alpha=1, arh0=10000, arh1=9.99978e-09, Mn=4.19147e+72, Mt=1.27639e+73, Mt2=0, E0=inf, E1=inf, E=inf, g0=2.35, pi0=1e+09, g1=1.4, pi1=0
+[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:370 ([92mSolve[0m) hi:   alpha=1, arh0=10000, arh1=9.99978e-09, Mn=6.38132e+74, Mt=1.3785e+73, Mt2=0, E0=7.40741e-31, E1=2.49994e-42, E=2.03701e+145, g0=2.35, pi0=1e+09, g1=1.4, pi1=0
 [1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:371 ([92mSolve[0m) flux: m0=-nan, m1=-nan, Mn=-nan, Mt=-nan, Mt2=-nan, E=-nan, E0=-nan, E1=-nan, u*=-nan
 [1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:372 ([92mSolve[0m) rhoL=10000 rhoR=10000
-[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:373 ([92mSolve[0m) uL=4.3492e+72 uR=-4.02753e+73
+[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:373 ([92mSolve[0m) uL=4.19147e+68 uR=6.38132e+70
 [1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:374 ([92mSolve[0m) pL=inf pR=-1e+09
 [1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:375 ([92mSolve[0m) p0L=inf p1L=inf
 [1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:376 ([92mSolve[0m) p0R=-1e+09 p1R=1e-12
@@ -1862,36 +1856,36 @@ SIGABRT
 [1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:378 ([92mSolve[0m) S_L=-inf S_M=-nan S_R=inf
 [1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:367 ([92mSolve[0m) -------------------------------
 [1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:368 ([92mSolve[0m) ERROR IN 6-eq HLLC SOLVER:
-[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:369 ([92mSolve[0m) lo:   alpha=1, arh0=10000, arh1=9.99978e-09, Mn=3.13604e+77, Mt=8.61908e+76, Mt2=0, E0=inf, E1=inf, E=inf, g0=2.35, pi0=1e+09, g1=1.4, pi1=0
-[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:370 ([92mSolve[0m) hi:   alpha=0.25, arh0=2500, arh1=7500, Mn=6.223e+78, Mt=2.38463e+78, Mt2=0, E0=2.55529e+178, E1=2.58723e+179, E=2.84276e+179, g0=2.35, pi0=1e+09, g1=1.4, pi1=0
+[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:369 ([92mSolve[0m) lo:   alpha=1, arh0=10000, arh1=9.99978e-09, Mn=7.65833e+72, Mt=2.09688e+72, Mt2=0, E0=1.08903e+179, E1=3.67539e+167, E=1.08903e+179, g0=2.35, pi0=1e+09, g1=1.4, pi1=0
+[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:370 ([92mSolve[0m) hi:   alpha=1, arh0=10000, arh1=9.99978e-09, Mn=1.03979e+68, Mt=3.0959e+67, Mt2=0, E0=inf, E1=inf, E=inf, g0=2.35, pi0=1e+09, g1=1.4, pi1=0
 [1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:371 ([92mSolve[0m) flux: m0=-nan, m1=-nan, Mn=-nan, Mt=-nan, Mt2=-nan, E=-nan, E0=-nan, E1=-nan, u*=-nan
 [1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:372 ([92mSolve[0m) rhoL=10000 rhoR=10000
-[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:373 ([92mSolve[0m) uL=3.13604e+73 uR=6.223e+74
-[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:374 ([92mSolve[0m) pL=inf pR=1.37986e+179
-[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:375 ([92mSolve[0m) p0L=inf p1L=inf
-[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:376 ([92mSolve[0m) p0R=1.37986e+179 p1R=1.37986e+179
-[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:377 ([92mSolve[0m) cL=inf cR=4.75344e+87
+[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:373 ([92mSolve[0m) uL=7.65833e+68 uR=1.03979e+64
+[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:374 ([92mSolve[0m) pL=1.47019e+179 pR=inf
+[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:375 ([92mSolve[0m) p0L=1.47019e+179 p1L=1.47016e+179
+[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:376 ([92mSolve[0m) p0R=inf p1R=inf
+[1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:377 ([92mSolve[0m) cL=5.87787e+87 cR=inf
 [1m[34mMESSAGE(4)[0m: [94m./src/Solver/Local/FluidRiemann/HLLC.H[0m:378 ([92mSolve[0m) S_L=-inf S_M=-nan S_R=inf
 [1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2818 ([92moperator()[0m) -------------------------------
 [1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2819 ([92moperator()[0m) ERROR IN HYDRO2 (6-eq RHS)
 [1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2820 ([92moperator()[0m) time=2.42958e-06 lev=0 i=63 j=19
-[1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2821 ([92moperator()[0m) flux_xlo: m0=0, m1=0, Mn=-6.67649e+51, Mt=0, Mt2=0, E=0, E0=1.64647e+74, E1=9.82556e+74, u*=0
+[1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2821 ([92moperator()[0m) flux_xlo: m0=5.49756e+11, m1=0, Mn=-6.65239e+51, Mt=-1.23794e+27, Mt2=0, E=3.21388e+60, E0=1.63556e+74, E1=9.7732e+74, u*=0
+SIGABRT
 [1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2822 ([92moperator()[0m) flux_xhi: m0=-nan, m1=-nan, Mn=-nan, Mt=-nan, Mt2=-nan, E=-nan, E0=-nan, E1=-nan, u*=-nan
-[1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2823 ([92moperator()[0m) flux_ylo: m0=8.17977e+14, m1=9.42146e+08, Mn=1.50953e+58, Mt=-3.01257e+37, Mt2=0, E=1.17868e+70, E0=8.38e+79, E1=3.53373e+80, u*=0
+[1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2823 ([92moperator()[0m) flux_ylo: m0=-1.54662e+91, m1=-1.54658e+79, Mn=5.61107e+178, Mt=-3.24307e+159, Mt2=-0, E=-2.05007e+266, E0=-3.36115e+266, E1=-7.56063e+254, u*=-2.09888e+87
 [1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2824 ([92moperator()[0m) flux_yhi: m0=-nan, m1=-nan, Mn=-nan, Mt=-nan, Mt2=-nan, E=-nan, E0=-nan, E1=-nan, u*=-nan
-[1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2825 ([92moperator()[0m) Source=-0, 1.36857e+81, -1.77765e+80, 1.44844e+155
+[1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2825 ([92moperator()[0m) Source=-0, 1.2594e+83, 6.12641e+83, 7.45669e+152
 [1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2826 ([92moperator()[0m) drhoeta0/dt=-nan
 [1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2827 ([92moperator()[0m) drhoeta1/dt=-nan
 [1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2828 ([92moperator()[0m) dM/dt=-nan, -nan
 [1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2829 ([92moperator()[0m) dE/dt=-nan
 [1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2830 ([92moperator()[0m) dE0/dt=-nan dE1/dt=-nan
 [1m[34mMESSAGE(4)[0m: [94msrc/Integrator/Hydro2.cpp[0m:2831 ([92moperator()[0m) deta/dt=-nan
-SIGABRT
-See Backtrace.0 file for details
 See Backtrace.4 file for details
+See Backtrace.0 file for details
 --------------------------------------------------------------------------
-MPI_ABORT was invoked on rank 0 in communicator MPI_COMM_WORLD
-  Proc: [[64335,1],0]
+MPI_ABORT was invoked on rank 4 in communicator MPI_COMM_WORLD
+  Proc: [[15937,1],4]
   Errorcode: 6
 
 NOTE: invoking MPI_ABORT causes Open MPI to kill all MPI processes.
