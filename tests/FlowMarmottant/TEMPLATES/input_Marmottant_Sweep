@@ -1,0 +1,205 @@
+#@ [@NAMETAG@]
+#@ exe=hydro2
+#@ dim=2
+# =============================================================================
+# MARMOTTANT COATED-BUBBLE STATIC LAPLACE TEST  --  R0 = @R0@ m
+# =============================================================================
+# TEMPLATE.  RUN_MARMOTTANT_SWEEP.bash fills the @...@ placeholders per case.
+# Do not run this file directly.
+#
+# Shell (Marmottant 2005), sigma as a function of AREAL STRAIN carried by the
+# advected shell density Gamma (NOT re-derived from curvature):
+#
+#     sigma(Gamma) = 0                                Gamma >= Gamma_buck   (buckled)
+#                    chi (Gamma_buck/Gamma - 1)       ramp                  (elastic)
+#                    sigma_break                      Gamma <= Gamma_rupt   (ruptured)
+#
+#   chi        = @CHI@ N/m        shell elastic modulus
+#   R_buckling = @RBUCK@ m        sigma = 0 at and below this radius
+#   sigma_brk  = @SBREAK@ N/m     rupture tension (= clean-liquid sigma)
+#   R_rupture  = @RRUPT@ m        = R_buckling sqrt(1 + sigma_brk/chi)
+#
+# This case:  R0/R_buckling = @RRATIO@  ->  @REGIME@ branch,  sigma_eff = @SIGMA0@ N/m
+#
+# Laplace balance (2D cylindrical, single curvature):
+#     p_gas - p_liquid = sigma_eff / R0 = @DP@ Pa   ->   p_gas = @PGAS@ Pa
+# The bubble starts in mechanical equilibrium, so the CORRECT ANSWER IS THAT
+# NOTHING MOVES.  Any radius drift, tension spread, or interfacial velocity is
+# numerical.
+#
+# Mesh: 64x64 base + @MAXLEV@ AMR levels over a @BOX@ m box.
+#   dx_finest = @DXFINE@ m,  epsilon = @EPSILON@ m  (eps/dx = @EPSDX@)
+# Time: capillary time sqrt(rho R^3/sigma) = @TCAP@ s; stop_time = @STOP_TIME@ s.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = @OUTPUT_PATH@
+
+### MESHING ###
+amr.plot_dt         = @PLOT_DT@
+amr.plot_int        = -1
+amr.max_grid_size   = 32
+amr.blocking_factor = 8
+amr.regrid_int      = 10
+amr.grid_eff        = 0.8
+amr.max_level       = @MAXLEV@
+amr.n_cell          = 64 64
+
+nghost = 4
+
+### TIME STEPPING ###
+timestep                 = @DT_INIT@
+dynamictimestep.on       = 1
+dynamictimestep.verbose  = 0
+dynamictimestep.max      = 1e-0
+dynamictimestep.min      = @DT_MIN@
+cfl                      = 0.3
+
+### DIMENSIONS ###
+geometry.prob_lo     = @NEG_HALF@ @NEG_HALF@ 0.0
+geometry.prob_hi     = @HALF@ @HALF@ 0.0
+geometry.is_periodic = 0 0 0
+
+stop_time = @STOP_TIME@
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = @EPSILON@
+eta.ic.expression.constant.R0      = @R0@
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### EQUATIONS OF STATE ###
+# phase 0 = liquid (stiffened gas), phase 1 = gas (ideal)
+eos0.gamma = @GAM_L@
+eos0.p0    = @PINF_L@
+eos0.cp    = @CP_L@
+eos0.cv    = @CV_L@
+eos1.gamma = @GAM_G@
+eos1.p0    = 0.0
+eos1.cp    = @CP_G@
+eos1.cv    = @CV_G@
+
+### HYDRO INITIAL CONDITIONS ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "@RHO_L@"
+density1.ic.type = expression
+density1.ic.expression.region0 = "@RHO_G@"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "@PLIQ@"      # liquid (outside, eta=1)
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "@PGAS@"      # gas    (inside,  eta=0)
+
+### VISCOSITY ###
+mu0   = @MU_L@
+mu0_b = 0.0
+mu1   = @MU_G@
+mu1_b = 0.0
+
+pref = 0.0
+
+### SURFACE TENSION ###
+# `sigma` is the clean-liquid tension; with marmottant=1 it is also the value
+# the ruptured branch saturates at, and the one dt_capillary is sized on.
+sigma = @SBREAK@
+
+### MARMOTTANT COATED SHELL ###
+marmottant               = @MARMOTTANT@
+marmottant.R0            = @R0@        # reference radius: shell starts UNSTRAINED here
+marmottant.chi           = @CHI@
+marmottant.R_buckling    = @RBUCK@
+marmottant.sigma_break   = @SBREAK@
+
+### CAPILLARY FORMULATION ###
+# Schmidmayer 2017 operator split  U^{n+1} = L_relax L_cap L_hyper(U^n), with
+# the capillary energy sigma|grad c| carried in the conserved total energy and
+# Omega built from a separately-advected colour function c.
+capillary_closure = @CAP_CLOSURE@
+
+### NUMERICS ###
+Riemann_Solver.type = hllc
+Limiter.type        = @LIMITER@
+kappa_method        = 1
+
+### DEBUG (off for production; see Hydro2.H) ###
+nan_check  = 0
+verbose    = 0
+relax_diag = 0
+
+### BOUNDARY CONDITIONS - NSCBC4 outflow ###
+density.bc.type.xhi  = nscbc_outflow
+density.bc.type.xlo  = nscbc_outflow
+density.bc.type.ylo  = nscbc_outflow
+density.bc.type.yhi  = nscbc_outflow
+energy.bc.type.xhi   = nscbc_outflow
+energy.bc.type.xlo   = nscbc_outflow
+energy.bc.type.ylo   = nscbc_outflow
+energy.bc.type.yhi   = nscbc_outflow
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow
+momentum.bc.type.xlo = nscbc_outflow nscbc_outflow
+momentum.bc.type.ylo = nscbc_outflow nscbc_outflow
+momentum.bc.type.yhi = nscbc_outflow nscbc_outflow
+
+nscbc.xlo.type = outflow
+nscbc.xlo.target_p = @PLIQ@
+nscbc.xlo.sigma = 0.15
+nscbc.xlo.beta  = 0.5
+nscbc.xlo.L_ref = @LREF@
+nscbc.xlo.target_u = 0.0
+nscbc.xlo.target_v = 0.0
+
+nscbc.xhi.type = outflow
+nscbc.xhi.target_p = @PLIQ@
+nscbc.xhi.sigma = 0.15
+nscbc.xhi.beta  = 0.5
+nscbc.xhi.L_ref = @LREF@
+nscbc.xhi.target_u = 0.0
+nscbc.xhi.target_v = 0.0
+
+nscbc.ylo.type = outflow
+nscbc.ylo.target_p = @PLIQ@
+nscbc.ylo.sigma = 0.15
+nscbc.ylo.beta  = 0.5
+nscbc.ylo.L_ref = @LREF@
+nscbc.ylo.target_u = 0.0
+nscbc.ylo.target_v = 0.0
+
+nscbc.yhi.type = outflow
+nscbc.yhi.target_p = @PLIQ@
+nscbc.yhi.sigma = 0.15
+nscbc.yhi.beta  = 0.5
+nscbc.yhi.L_ref = @LREF@
+nscbc.yhi.target_u = 0.0
+nscbc.yhi.target_v = 0.0
+
+nscbc.small = 1.0e-10
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion   = 1e-1
+omega_refinement_criterion = 10.55
+p_refinement_criterion     = 1e+7
+rho_refinement_criterion   = 1e+6
+gradu_refinement_criterion = 1e+6
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 1
+apply_buoyancy = 0
+apply_weight   = 0
+Spec_Vol       = 1
+grav           = 0.0
