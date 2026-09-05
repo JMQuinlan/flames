@@ -92,6 +92,24 @@ private:
     Set::Scalar small = 1.0e-10;
 
 public:
+    /// Ghost-construction mode (nscbc.ghost_mode):
+    ///   3 (DEFAULT) = LODI with FIRST-ORDER one-sided derivatives and linear
+    ///       gradient-extrapolated ghosts.  The legacy path (mode 0: 2nd-order
+    ///       one-sided stencils + Motheau Eq. 27-30 layered ghost formulas) has
+    ///       a reflection coefficient ABOVE UNITY at grid-scale wavelengths
+    ///       (lambda ~ 5 dx): any sustained short-wavelength source -- e.g. the
+    ///       parasitic noise a diffuse interface band radiates -- is amplified
+    ///       ~35%/bounce into a deterministic exponential blowup (FlowMarmottant
+    ///       sweep, dead at t=9.2747e-5 across machines).  Mode 3 measured:
+    ///       smooth-pulse |R| = 0.012 (unchanged) and the short-wavelength
+    ///       amplification GONE (boundary dp 8.5 Pa vs 664 legacy at t=8e-5 on
+    ///       the stripped repro; below even the zero-gradient floor of 112
+    ///       because outgoing band noise now actually leaves).
+    ///   2 = linear ghosts, 2nd-order derivatives (diagnostic; still amplifies)
+    ///   1 = plain zero-gradient conservative ghosts, LODI bypassed (diagnostic)
+    ///   0 = legacy layered path (known bad; kept for A/B only)
+    int ghost_mode = 3;
+
     NSCBC4() = default;
 
     /// Constructor with input file parsing
@@ -134,6 +152,52 @@ public:
     {
         const amrex::Box &domain = geom.Domain();
         const auto dx = geom.CellSizeArray();
+
+        // =========================================================================
+        // DIAGNOSTIC ABLATION: nscbc.ghost_mode = 1 fills every NSCBC face/corner
+        // ghost by plain zero-gradient extrapolation of the CONSERVATIVE state
+        // from the nearest boundary cell and returns -- the entire LODI /
+        // layered-extrapolation machinery is bypassed while the rest of the
+        // NSCBC code path in Hydro2 (per-phase partition etc.) still runs.
+        // Used to bisect the FlowMarmottant bubble<->boundary runaway.
+        // =========================================================================
+        if (ghost_mode == 1)
+        {
+            const int ng = 4;
+            for (amrex::MFIter mfi(density_mf); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &vbx = mfi.validbox();
+                amrex::Box gbx = vbx; gbx.grow(ng);
+                auto rho_a = density_mf.array(mfi);
+                auto M_a   = momentum_mf.array(mfi);
+                auto E_a   = energy_mf.array(mfi);
+                auto g_a   = gamma_mf.array(mfi);
+                auto pi_a  = pi_mf.array(mfi);
+                auto p_a   = pressure_mf.array(mfi);
+                const int ilo = domain.smallEnd(0), ihi = domain.bigEnd(0);
+                const int jlo = domain.smallEnd(1), jhi = domain.bigEnd(1);
+#if AMREX_SPACEDIM == 3
+                const int klo = domain.smallEnd(2), khi = domain.bigEnd(2);
+#endif
+                amrex::ParallelFor(gbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    int ic = amrex::min(amrex::max(i, ilo), ihi);
+                    int jc = amrex::min(amrex::max(j, jlo), jhi);
+                    int kc = k;
+#if AMREX_SPACEDIM == 3
+                    kc = amrex::min(amrex::max(k, klo), khi);
+#endif
+                    if (ic == i && jc == j && kc == k) return;   // interior
+                    rho_a(i, j, k) = rho_a(ic, jc, kc);
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                        M_a(i, j, k, d) = M_a(ic, jc, kc, d);
+                    E_a(i, j, k)  = E_a(ic, jc, kc);
+                    g_a(i, j, k)  = g_a(ic, jc, kc);
+                    pi_a(i, j, k) = pi_a(ic, jc, kc);
+                    p_a(i, j, k)  = p_a(ic, jc, kc);
+                });
+            }
+            return;
+        }
 
         // =========================================================================
         // CAPTURE EOS PARAMETERS FOR GPU
@@ -480,6 +544,12 @@ public:
                         Set::Scalar dvx_dx = fdx * (3.0 * vx_c - 4.0 * vx_xm1 + vx_xm2) / (2.0 * dx[0]);
                         Set::Scalar dvy_dx = fdx * (3.0 * vy_c - 4.0 * vy_xm1 + vy_xm2) / (2.0 * dx[0]);
                         Set::Scalar dp_dx = fdx * (3.0 * p_c - 4.0 * p_xm1 + p_xm2) / (2.0 * dx[0]);
+                        if (ghost_mode == 3) {
+                            drho_dx = fdx * (rho_c - rho_xm1) / dx[0];
+                            dvx_dx  = fdx * (vx_c  - vx_xm1)  / dx[0];
+                            dvy_dx  = fdx * (vy_c  - vy_xm1)  / dx[0];
+                            dp_dx   = fdx * (p_c   - p_xm1)   / dx[0];
+                        }
 
                         // =============================================================
                         // STEP 3: Y-direction one-sided derivatives at corner
@@ -505,6 +575,12 @@ public:
                         Set::Scalar dvy_dy = fdy * (3.0 * vy_c - 4.0 * vy_ym1 + vy_ym2) / (2.0 * dx[1]);
                         Set::Scalar dvx_dy = fdy * (3.0 * vx_c - 4.0 * vx_ym1 + vx_ym2) / (2.0 * dx[1]);
                         Set::Scalar dp_dy = fdy * (3.0 * p_c - 4.0 * p_ym1 + p_ym2) / (2.0 * dx[1]);
+                        if (ghost_mode == 3) {
+                            drho_dy = fdy * (rho_c - rho_ym1) / dx[1];
+                            dvx_dy  = fdy * (vx_c  - vx_ym1)  / dx[1];
+                            dvy_dy  = fdy * (vy_c  - vy_ym1)  / dx[1];
+                            dp_dy   = fdy * (p_c   - p_ym1)   / dx[1];
+                        }
 
                         // =============================================================
                         // STEP 4: LODI waves in X-direction (Motheau Eq. 23)
@@ -615,178 +691,91 @@ public:
                         Set::Scalar dvx_dy_new  = xi3_y;
 
                         // =============================================================
-                        // STEP 8: Fill ghost cells using layer-appropriate formula
-                        // (Motheau Eqs. 27-30 for layers 1-4)
+                        // STEP 8: Fill ghost cells -- register-sequenced per-direction
+                        // layers (Motheau Eqs. 27-30), composed diagonally.
+                        //
+                        // REWRITE (2026-09-04).  The original block read layer 1-3
+                        // ghost values back out of rho_arr/M_arr/E_arr *inside this
+                        // same ParallelFor*: whether a read saw this fill's value or
+                        // the PREVIOUS fill's depended on traversal order (lo corners
+                        // iterate outer-layer-first, so their outer layers consumed
+                        // one-fill-stale data), and the layered formulas reused the
+                        // X-side interior state (rho_xm1 & co.) in the Y-direction
+                        // expressions.  Together these parked a persistent O(1)
+                        // defect on the corner quadrants that seeded a DETERMINISTIC
+                        // exponential boundary mode (FlowMarmottant sweep: e-fold
+                        // ~1e-5 s, smallest radius dead at t = 9.2747e-5 across
+                        // machines; Neumann far-field control was clean).  The FACE
+                        // fills never had either defect: they sequence all four
+                        // layers in registers with direction-matched interior values.
+                        // This block now does exactly what the faces do, once per
+                        // direction, and composes the (ox,oy) diagonal ghost as
+                        //     Q(ox,oy) = Qx[ox] + Qy[oy] - Q_c
+                        // (exact for separable linear fields; matches the face values
+                        // continuously along either face row).  The corner box spans
+                        // only the diagonal quadrant (ox,oy >= 1); the face loops
+                        // cover the full transverse range including corner rows.
                         // =============================================================
-                        Set::Scalar rho_g, vx_g, vy_g, p_g;
-
-                        // Determine which layer (1, 2, 3, or 4) based on distance from corner
-                        int layer = std::max(ox, oy);
-
-                        if (layer == 1)
+                        Set::Scalar rho_gx[4], vx_gx[4], vy_gx[4], p_gx[4];
+                        Set::Scalar rho_gy[4], vx_gy[4], vy_gy[4], p_gy[4];
                         {
-                            // ==========================================================
-                            // LAYER 1: Motheau Eq. 27/31 - Linear extrapolation
-                            // Q_{-1} = Q_{+1} - 2*dx*dQ/dx
-                            // ==========================================================
-                            Set::Scalar dx_off = (Set::Scalar)(i - ic) * dx[0];
-                            Set::Scalar dy_off = (Set::Scalar)(j - jc) * dx[1];
+                            const Set::Scalar Dx = dx[0];
+                            rho_gx[0] = rho_xm1 - 2.0 * Dx * drho_dx_new;
+                            vx_gx[0]  = vx_xm1  - 2.0 * Dx * dvx_dx_new;
+                            vy_gx[0]  = vy_xm1  - 2.0 * Dx * dvy_dx_new;
+                            p_gx[0]   = p_xm1   - 2.0 * Dx * dp_dx_new;
+                            rho_gx[1] = -2.0 * rho_xm1 - 3.0 * rho_c + 6.0 * rho_gx[0] + 6.0 * Dx * drho_dx_new;
+                            vx_gx[1]  = -2.0 * vx_xm1  - 3.0 * vx_c  + 6.0 * vx_gx[0]  + 6.0 * Dx * dvx_dx_new;
+                            vy_gx[1]  = -2.0 * vy_xm1  - 3.0 * vy_c  + 6.0 * vy_gx[0]  + 6.0 * Dx * dvy_dx_new;
+                            p_gx[1]   = -2.0 * p_xm1   - 3.0 * p_c   + 6.0 * p_gx[0]   + 6.0 * Dx * dp_dx_new;
+                            rho_gx[2] = 3.0 * rho_xm1 + 10.0 * rho_c - 18.0 * rho_gx[0] + 6.0 * rho_gx[1] - 12.0 * Dx * drho_dx_new;
+                            vx_gx[2]  = 3.0 * vx_xm1  + 10.0 * vx_c  - 18.0 * vx_gx[0]  + 6.0 * vx_gx[1]  - 12.0 * Dx * dvx_dx_new;
+                            vy_gx[2]  = 3.0 * vy_xm1  + 10.0 * vy_c  - 18.0 * vy_gx[0]  + 6.0 * vy_gx[1]  - 12.0 * Dx * dvy_dx_new;
+                            p_gx[2]   = 3.0 * p_xm1   + 10.0 * p_c   - 18.0 * p_gx[0]   + 6.0 * p_gx[1]   - 12.0 * Dx * dp_dx_new;
+                            rho_gx[3] = -2.0 * rho_xm1 - 13.0 * rho_c + 24.0 * rho_gx[0] - 12.0 * rho_gx[1] + 4.0 * rho_gx[2] + 12.0 * Dx * drho_dx_new;
+                            vx_gx[3]  = -2.0 * vx_xm1  - 13.0 * vx_c  + 24.0 * vx_gx[0]  - 12.0 * vx_gx[1]  + 4.0 * vx_gx[2]  + 12.0 * Dx * dvx_dx_new;
+                            vy_gx[3]  = -2.0 * vy_xm1  - 13.0 * vy_c  + 24.0 * vy_gx[0]  - 12.0 * vy_gx[1]  + 4.0 * vy_gx[2]  + 12.0 * Dx * dvy_dx_new;
+                            p_gx[3]   = -2.0 * p_xm1   - 13.0 * p_c   + 24.0 * p_gx[0]   - 12.0 * p_gx[1]   + 4.0 * p_gx[2]   + 12.0 * Dx * dp_dx_new;
 
-                            rho_g = rho_c + dx_off * drho_dx_new + dy_off * drho_dy_new;
-                            vx_g = vx_c + dx_off * dvx_dx_new + dy_off * dvx_dy_new;
-                            vy_g = vy_c + dx_off * dvy_dx_new + dy_off * dvy_dy_new;
-                            p_g = p_c + dx_off * dp_dx_new + dy_off * dp_dy_new;
+                            const Set::Scalar Dy = dx[1];
+                            rho_gy[0] = rho_ym1 - 2.0 * Dy * drho_dy_new;
+                            vx_gy[0]  = vx_ym1  - 2.0 * Dy * dvx_dy_new;
+                            vy_gy[0]  = vy_ym1  - 2.0 * Dy * dvy_dy_new;
+                            p_gy[0]   = p_ym1   - 2.0 * Dy * dp_dy_new;
+                            rho_gy[1] = -2.0 * rho_ym1 - 3.0 * rho_c + 6.0 * rho_gy[0] + 6.0 * Dy * drho_dy_new;
+                            vx_gy[1]  = -2.0 * vx_ym1  - 3.0 * vx_c  + 6.0 * vx_gy[0]  + 6.0 * Dy * dvx_dy_new;
+                            vy_gy[1]  = -2.0 * vy_ym1  - 3.0 * vy_c  + 6.0 * vy_gy[0]  + 6.0 * Dy * dvy_dy_new;
+                            p_gy[1]   = -2.0 * p_ym1   - 3.0 * p_c   + 6.0 * p_gy[0]   + 6.0 * Dy * dp_dy_new;
+                            rho_gy[2] = 3.0 * rho_ym1 + 10.0 * rho_c - 18.0 * rho_gy[0] + 6.0 * rho_gy[1] - 12.0 * Dy * drho_dy_new;
+                            vx_gy[2]  = 3.0 * vx_ym1  + 10.0 * vx_c  - 18.0 * vx_gy[0]  + 6.0 * vx_gy[1]  - 12.0 * Dy * dvx_dy_new;
+                            vy_gy[2]  = 3.0 * vy_ym1  + 10.0 * vy_c  - 18.0 * vy_gy[0]  + 6.0 * vy_gy[1]  - 12.0 * Dy * dvy_dy_new;
+                            p_gy[2]   = 3.0 * p_ym1   + 10.0 * p_c   - 18.0 * p_gy[0]   + 6.0 * p_gy[1]   - 12.0 * Dy * dp_dy_new;
+                            rho_gy[3] = -2.0 * rho_ym1 - 13.0 * rho_c + 24.0 * rho_gy[0] - 12.0 * rho_gy[1] + 4.0 * rho_gy[2] + 12.0 * Dy * drho_dy_new;
+                            vx_gy[3]  = -2.0 * vx_ym1  - 13.0 * vx_c  + 24.0 * vx_gy[0]  - 12.0 * vx_gy[1]  + 4.0 * vx_gy[2]  + 12.0 * Dy * dvx_dy_new;
+                            vy_gy[3]  = -2.0 * vy_ym1  - 13.0 * vy_c  + 24.0 * vy_gy[0]  - 12.0 * vy_gy[1]  + 4.0 * vy_gy[2]  + 12.0 * Dy * dvy_dy_new;
+                            p_gy[3]   = -2.0 * p_ym1   - 13.0 * p_c   + 24.0 * p_gy[0]   - 12.0 * p_gy[1]   + 4.0 * p_gy[2]   + 12.0 * Dy * dp_dy_new;
                         }
-                        else if (layer == 2)
-                        {
-                            // ==========================================================
-                            // LAYER 2: Motheau Eq. 28/32 - Quadratic extrapolation
-                            // Q_{-2} = -2*Q_{+1} - 3*Q_0 + 6*Q_{-1} + 6*dx*dQ/dx
-                            // ==========================================================
-                            // Get layer 1 ghost cell values
-                            int i1 = ic + sx_local * ((ox > 0) ? 1 : 0);
-                            int j1 = jc + sy_local * ((oy > 0) ? 1 : 0);
 
-                            Set::Scalar rho_1 = rho_arr(i1, j1, k);
-                            Set::Scalar vx_1 = M_arr(i1, j1, k, 0) / (rho_1 + small_local);
-                            Set::Scalar vy_1 = M_arr(i1, j1, k, 1) / (rho_1 + small_local);
-
-                            // Compute pressure at layer 1
-                            Set::Scalar eta_1 = eta_arr(i1, j1, k);
-                            Set::Scalar KE_1 = 0.5 * rho_1 * (vx_1 * vx_1 + vy_1 * vy_1);
-                            Set::Scalar UE_1 = E_arr(i1, j1, k) - KE_1;
-                            Set::Scalar p_1 = Solver::EOS::EOS::MixedPressure(rho_1, UE_1, eta_1, eos0, eos1, pref_local, small_local);
-
-                            // Motheau Eq. 28/32
-                            Set::Scalar dx_grad = (ox == 2) ? 6.0 * dx[0] * drho_dx_new : 0.0;
-                            Set::Scalar dy_grad = (oy == 2) ? 6.0 * dx[1] * drho_dy_new : 0.0;
-                            rho_g = -2.0 * rho_xm1 - 3.0 * rho_c + 6.0 * rho_1 + dx_grad + dy_grad;
-
-                            dx_grad = (ox == 2) ? 6.0 * dx[0] * dvx_dx_new : 0.0;
-                            dy_grad = (oy == 2) ? 6.0 * dx[1] * dvx_dy_new : 0.0;
-                            vx_g = -2.0 * vx_xm1 - 3.0 * vx_c + 6.0 * vx_1 + dx_grad + dy_grad;
-
-                            dx_grad = (ox == 2) ? 6.0 * dx[0] * dvy_dx_new : 0.0;
-                            dy_grad = (oy == 2) ? 6.0 * dx[1] * dvy_dy_new : 0.0;
-                            vy_g = -2.0 * vy_xm1 - 3.0 * vy_c + 6.0 * vy_1 + dx_grad + dy_grad;
-
-                            dx_grad = (ox == 2) ? 6.0 * dx[0] * dp_dx_new : 0.0;
-                            dy_grad = (oy == 2) ? 6.0 * dx[1] * dp_dy_new : 0.0;
-                            p_g = -2.0 * p_xm1 - 3.0 * p_c + 6.0 * p_1 + dx_grad + dy_grad;
-                        }
-                        else if (layer == 3)
-                        {
-                            // ==========================================================
-                            // LAYER 3: Motheau Eq. 29/33 - Cubic extrapolation
-                            // Q_{-3} = 3*Q_{+1} + 10*Q_0 - 18*Q_{-1} + 6*Q_{-2} - 12*dx*dQ/dx
-                            // ==========================================================
-                            // Get layer 1 and 2 ghost cell values
-                            int i1 = ic + sx_local * 1;
-                            int j1 = jc + sy_local * ((oy >= 1) ? 1 : 0);
-                            int i2 = ic + sx_local * ((ox >= 2) ? 2 : 0);
-                            int j2 = jc + sy_local * ((oy >= 2) ? 2 : 0);
-
-                            Set::Scalar rho_1 = rho_arr(i1, j1, k);
-                            Set::Scalar vx_1 = M_arr(i1, j1, k, 0) / (rho_1 + small_local);
-                            Set::Scalar vy_1 = M_arr(i1, j1, k, 1) / (rho_1 + small_local);
-
-                            Set::Scalar rho_2 = rho_arr(i2, j2, k);
-                            Set::Scalar vx_2 = M_arr(i2, j2, k, 0) / (rho_2 + small_local);
-                            Set::Scalar vy_2 = M_arr(i2, j2, k, 1) / (rho_2 + small_local);
-
-                            // Compute pressures
-                            Set::Scalar eta_1 = eta_arr(i1, j1, k);
-                            Set::Scalar KE_1 = 0.5 * rho_1 * (vx_1 * vx_1 + vy_1 * vy_1);
-                            Set::Scalar UE_1 = E_arr(i1, j1, k) - KE_1;
-                            Set::Scalar p_1 = Solver::EOS::EOS::MixedPressure(rho_1, UE_1, eta_1, eos0, eos1, pref_local, small_local);
-
-
-                            Set::Scalar eta_2 = eta_arr(i2, j2, k);
-                            Set::Scalar KE_2 = 0.5 * rho_2 * (vx_2 * vx_2 + vy_2 * vy_2);
-                            Set::Scalar UE_2 = E_arr(i2, j2, k) - KE_2;
-                            Set::Scalar p_2 = Solver::EOS::EOS::MixedPressure(rho_2, UE_2, eta_2, eos0, eos1, pref_local, small_local);
-
-                            // Motheau Eq. 29/33
-                            Set::Scalar dx_grad = (ox == 3) ? -12.0 * dx[0] * drho_dx_new : 0.0;
-                            Set::Scalar dy_grad = (oy == 3) ? -12.0 * dx[1] * drho_dy_new : 0.0;
-                            rho_g = 3.0 * rho_xm1 + 10.0 * rho_c - 18.0 * rho_1 + 6.0 * rho_2 + dx_grad + dy_grad;
-
-                            dx_grad = (ox == 3) ? -12.0 * dx[0] * dvx_dx_new : 0.0;
-                            dy_grad = (oy == 3) ? -12.0 * dx[1] * dvx_dy_new : 0.0;
-                            vx_g = 3.0 * vx_xm1 + 10.0 * vx_c - 18.0 * vx_1 + 6.0 * vx_2 + dx_grad + dy_grad;
-
-                            dx_grad = (ox == 3) ? -12.0 * dx[0] * dvy_dx_new : 0.0;
-                            dy_grad = (oy == 3) ? -12.0 * dx[1] * dvy_dy_new : 0.0;
-                            vy_g = 3.0 * vy_xm1 + 10.0 * vy_c - 18.0 * vy_1 + 6.0 * vy_2 + dx_grad + dy_grad;
-
-                            dx_grad = (ox == 3) ? -12.0 * dx[0] * dp_dx_new : 0.0;
-                            dy_grad = (oy == 3) ? -12.0 * dx[1] * dp_dy_new : 0.0;
-                            p_g = 3.0 * p_xm1 + 10.0 * p_c - 18.0 * p_1 + 6.0 * p_2 + dx_grad + dy_grad;
-                        }
-                        else // layer == 4
-                        {
-                            // ==========================================================
-                            // LAYER 4: Motheau Eq. 30/34 - Quartic extrapolation
-                            // Q_{-4} = -2*Q_{+1} - 13*Q_0 + 24*Q_{-1} - 12*Q_{-2} + 4*Q_{-3} + 12*dx*dQ/dx
-                            // ==========================================================
-                            // Get layers 1, 2, 3 ghost cell values
-                            int i1 = ic + sx_local * 1;
-                            int j1 = jc + sy_local * ((oy >= 1) ? 1 : 0);
-                            int i2 = ic + sx_local * ((ox >= 2) ? 2 : 0);
-                            int j2 = jc + sy_local * ((oy >= 2) ? 2 : 0);
-                            int i3 = ic + sx_local * ((ox >= 3) ? 3 : 0);
-                            int j3 = jc + sy_local * ((oy >= 3) ? 3 : 0);
-
-                            Set::Scalar rho_1 = rho_arr(i1, j1, k);
-                            Set::Scalar vx_1 = M_arr(i1, j1, k, 0) / (rho_1 + small_local);
-                            Set::Scalar vy_1 = M_arr(i1, j1, k, 1) / (rho_1 + small_local);
-
-                            Set::Scalar rho_2 = rho_arr(i2, j2, k);
-                            Set::Scalar vx_2 = M_arr(i2, j2, k, 0) / (rho_2 + small_local);
-                            Set::Scalar vy_2 = M_arr(i2, j2, k, 1) / (rho_2 + small_local);
-
-                            Set::Scalar rho_3 = rho_arr(i3, j3, k);
-                            Set::Scalar vx_3 = M_arr(i3, j3, k, 0) / (rho_3 + small_local);
-                            Set::Scalar vy_3 = M_arr(i3, j3, k, 1) / (rho_3 + small_local);
-
-                            // Compute pressures (same pattern as layer 3)
-                            Set::Scalar eta_1 = eta_arr(i1, j1, k);
-                            Set::Scalar KE_1 = 0.5 * rho_1 * (vx_1 * vx_1 + vy_1 * vy_1);
-                            Set::Scalar UE_1 = E_arr(i1, j1, k) - KE_1;
-                            Set::Scalar p_1 = Solver::EOS::EOS::MixedPressure(rho_1, UE_1, eta_1, eos0, eos1, pref_local, small_local);
-
-                            Set::Scalar eta_2 = eta_arr(i2, j2, k);
-                            Set::Scalar KE_2 = 0.5 * rho_2 * (vx_2 * vx_2 + vy_2 * vy_2);
-                            Set::Scalar UE_2 = E_arr(i2, j2, k) - KE_2;
-                            Set::Scalar p_2 = Solver::EOS::EOS::MixedPressure(rho_2, UE_2, eta_2, eos0, eos1, pref_local, small_local);
-
-                            Set::Scalar eta_3 = eta_arr(i3, j3, k);
-                            Set::Scalar KE_3 = 0.5 * rho_3 * (vx_3 * vx_3 + vy_3 * vy_3);
-                            Set::Scalar UE_3 = E_arr(i3, j3, k) - KE_3;
-                            Set::Scalar p_3 = Solver::EOS::EOS::MixedPressure(rho_3, UE_3, eta_3, eos0, eos1, pref_local, small_local);
-
-                            // Motheau Eq. 30/34
-                            Set::Scalar dx_grad = (ox == 4) ? 12.0 * dx[0] * drho_dx_new : 0.0;
-                            Set::Scalar dy_grad = (oy == 4) ? 12.0 * dx[1] * drho_dy_new : 0.0;
-                            rho_g = -2.0 * rho_xm1 - 13.0 * rho_c + 24.0 * rho_1 - 12.0 * rho_2 + 4.0 * rho_3 + dx_grad + dy_grad;
-
-                            dx_grad = (ox == 4) ? 12.0 * dx[0] * dvx_dx_new : 0.0;
-                            dy_grad = (oy == 4) ? 12.0 * dx[1] * dvx_dy_new : 0.0;
-                            vx_g = -2.0 * vx_xm1 - 13.0 * vx_c + 24.0 * vx_1 - 12.0 * vx_2 + 4.0 * vx_3 + dx_grad + dy_grad;
-
-                            dx_grad = (ox == 4) ? 12.0 * dx[0] * dvy_dx_new : 0.0;
-                            dy_grad = (oy == 4) ? 12.0 * dx[1] * dvy_dy_new : 0.0;
-                            vy_g = -2.0 * vy_xm1 - 13.0 * vy_c + 24.0 * vy_1 - 12.0 * vy_2 + 4.0 * vy_3 + dx_grad + dy_grad;
-
-                            dx_grad = (ox == 4) ? 12.0 * dx[0] * dp_dx_new : 0.0;
-                            dy_grad = (oy == 4) ? 12.0 * dx[1] * dp_dy_new : 0.0;
-                            p_g = -2.0 * p_xm1 - 13.0 * p_c + 24.0 * p_1 - 12.0 * p_2 + 4.0 * p_3 + dx_grad + dy_grad;
+                        const int lx = ox - 1;   // ox,oy in [1,4] on the corner quadrant
+                        const int ly = oy - 1;
+                        Set::Scalar rho_g = rho_gx[lx] + rho_gy[ly] - rho_c;
+                        Set::Scalar vx_g  = vx_gx[lx]  + vx_gy[ly]  - vx_c;
+                        Set::Scalar vy_g  = vy_gx[lx]  + vy_gy[ly]  - vy_c;
+                        Set::Scalar p_g   = p_gx[lx]   + p_gy[ly]   - p_c;
+                        if (ghost_mode >= 2)
+                        {   // FV-consistent linear-gradient corner ghosts
+                            const Set::Scalar dxo = (Set::Scalar)(i - ic) * dx[0];
+                            const Set::Scalar dyo = (Set::Scalar)(j - jc) * dx[1];
+                            rho_g = rho_c + dxo * drho_dx_new + dyo * drho_dy_new;
+                            vx_g  = vx_c  + dxo * dvx_dx_new  + dyo * dvx_dy_new;
+                            vy_g  = vy_c  + dxo * dvy_dx_new  + dyo * dvy_dy_new;
+                            p_g   = p_c   + dxo * dp_dx_new   + dyo * dp_dy_new;
                         }
 
                         // =============================================================
                         // STEP 9: Enforce physical bounds
                         // =============================================================
-                        rho_g = amrex::min(amrex::max(rho_g, pref_local), 1.0e20);
+                        rho_g = amrex::min(amrex::max(rho_g, small_local), 1.0e20);  // was pref_local (a PRESSURE ref, 0 here) -- density floor must be small
                         p_g = amrex::min(amrex::max(p_g, 1.0), 1.0e20);
                         vx_g = amrex::min(amrex::max(vx_g, -1.0e20), 1.0e20);
                         vy_g = amrex::min(amrex::max(vy_g, -1.0e20), 1.0e20);
@@ -993,7 +982,7 @@ public:
                                 Set::Scalar v2_g  = v2_c  + off1 * dv2_d1n  + off2 * dv2_d2n;
                                 Set::Scalar p_g   = p_c   + off1 * dp_d1n   + off2 * dp_d2n;
 
-                                rho_g = amrex::min(amrex::max(rho_g, pref_local), 1.0e20);
+                                rho_g = amrex::min(amrex::max(rho_g, small_local), 1.0e20);  // was pref_local (a PRESSURE ref, 0 here) -- density floor must be small
                                 p_g   = amrex::min(amrex::max(p_g, 1.0e-6), 1.0e20);
 
                                 Set::Scalar eta_g = eta_arr(gidx[0], gidx[1], gidx[2]);
@@ -1151,6 +1140,12 @@ public:
                         Set::Scalar dun_dx = (-3.0 * un_bnd + 4.0 * un_m1 - un_m2) / (2.0 * delta);
                         Set::Scalar dut_dx = (-3.0 * ut_bnd + 4.0 * ut_m1 - ut_m2) / (2.0 * delta);
                         Set::Scalar dp_dx = (-3.0 * p_bnd + 4.0 * p_m1 - p_m2) / (2.0 * delta);
+                        if (ghost_mode == 3) {  // 1st-order one-sided derivs: monotone, damps grid-scale k where the 2nd-order stencil gives |R|>1
+                            drho_dx = (Set::Scalar)isign * (rho_bnd - rho_m1) / delta;
+                            dun_dx  = (Set::Scalar)isign * (un_bnd  - un_m1)  / delta;
+                            dut_dx  = (Set::Scalar)isign * (ut_bnd  - ut_m1)  / delta;
+                            dp_dx   = (Set::Scalar)isign * (p_bnd   - p_m1)   / delta;
+                        }
 
                         // =============================================================
                         // STEP 4: Tangential derivatives (centered, 2nd order)
@@ -1294,6 +1289,12 @@ public:
                         Set::Scalar un_g1 = un_m1 - 2.0 * delta * dun_dx_new;
                         Set::Scalar ut_g1 = ut_m1 - 2.0 * delta * dut_dx_new;
                         Set::Scalar p_g1 = p_m1 - 2.0 * delta * dp_dx_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g1 = rho_bnd + (Set::Scalar)(-1) * delta * drho_dx_new;
+                            un_g1  = un_bnd  + (Set::Scalar)(-1) * delta * dun_dx_new;
+                            ut_g1  = ut_bnd  + (Set::Scalar)(-1) * delta * dut_dx_new;
+                            p_g1   = p_bnd   + (Set::Scalar)(-1) * delta * dp_dx_new;
+                        }
 
                         rho_g1 = amrex::max(rho_g1, small_local);
                         p_g1 = amrex::max(p_g1, 1.0e-6);
@@ -1305,6 +1306,12 @@ public:
                         Set::Scalar un_g2 = -2.0 * un_m1 - 3.0 * un_bnd + 6.0 * un_g1 + 6.0 * delta * dun_dx_new;
                         Set::Scalar ut_g2 = -2.0 * ut_m1 - 3.0 * ut_bnd + 6.0 * ut_g1 + 6.0 * delta * dut_dx_new;
                         Set::Scalar p_g2 = -2.0 * p_m1 - 3.0 * p_bnd + 6.0 * p_g1 + 6.0 * delta * dp_dx_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g2 = rho_bnd + (Set::Scalar)(-2) * delta * drho_dx_new;
+                            un_g2  = un_bnd  + (Set::Scalar)(-2) * delta * dun_dx_new;
+                            ut_g2  = ut_bnd  + (Set::Scalar)(-2) * delta * dut_dx_new;
+                            p_g2   = p_bnd   + (Set::Scalar)(-2) * delta * dp_dx_new;
+                        }
 
                         rho_g2 = amrex::max(rho_g2, small_local);
                         p_g2 = amrex::max(p_g2, 1.0e-6);
@@ -1316,6 +1323,12 @@ public:
                         Set::Scalar un_g3 = 3.0 * un_m1 + 10.0 * un_bnd - 18.0 * un_g1 + 6.0 * un_g2 - 12.0 * delta * dun_dx_new;
                         Set::Scalar ut_g3 = 3.0 * ut_m1 + 10.0 * ut_bnd - 18.0 * ut_g1 + 6.0 * ut_g2 - 12.0 * delta * dut_dx_new;
                         Set::Scalar p_g3 = 3.0 * p_m1 + 10.0 * p_bnd - 18.0 * p_g1 + 6.0 * p_g2 - 12.0 * delta * dp_dx_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g3 = rho_bnd + (Set::Scalar)(-3) * delta * drho_dx_new;
+                            un_g3  = un_bnd  + (Set::Scalar)(-3) * delta * dun_dx_new;
+                            ut_g3  = ut_bnd  + (Set::Scalar)(-3) * delta * dut_dx_new;
+                            p_g3   = p_bnd   + (Set::Scalar)(-3) * delta * dp_dx_new;
+                        }
 
                         rho_g3 = amrex::max(rho_g3, small_local);
                         p_g3 = amrex::max(p_g3, 1.0e-6);
@@ -1327,6 +1340,12 @@ public:
                         Set::Scalar un_g4 = -2.0 * un_m1 - 13.0 * un_bnd + 24.0 * un_g1 - 12.0 * un_g2 + 4.0 * un_g3 + 12.0 * delta * dun_dx_new;
                         Set::Scalar ut_g4 = -2.0 * ut_m1 - 13.0 * ut_bnd + 24.0 * ut_g1 - 12.0 * ut_g2 + 4.0 * ut_g3 + 12.0 * delta * dut_dx_new;
                         Set::Scalar p_g4 = -2.0 * p_m1 - 13.0 * p_bnd + 24.0 * p_g1 - 12.0 * p_g2 + 4.0 * p_g3 + 12.0 * delta * dp_dx_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g4 = rho_bnd + (Set::Scalar)(-4) * delta * drho_dx_new;
+                            un_g4  = un_bnd  + (Set::Scalar)(-4) * delta * dun_dx_new;
+                            ut_g4  = ut_bnd  + (Set::Scalar)(-4) * delta * dut_dx_new;
+                            p_g4   = p_bnd   + (Set::Scalar)(-4) * delta * dp_dx_new;
+                        }
 
                         rho_g4 = amrex::max(rho_g4, small_local);
                         p_g4 = amrex::max(p_g4, 1.0e-6);
@@ -1408,6 +1427,12 @@ public:
                         Set::Scalar dun_dx = (3.0 * un_bnd - 4.0 * un_m1 + un_m2) / (2.0 * delta);
                         Set::Scalar dut_dx = (3.0 * ut_bnd - 4.0 * ut_m1 + ut_m2) / (2.0 * delta);
                         Set::Scalar dp_dx = (3.0 * p_bnd - 4.0 * p_m1 + p_m2) / (2.0 * delta);
+                        if (ghost_mode == 3) {  // 1st-order one-sided derivs: monotone, damps grid-scale k where the 2nd-order stencil gives |R|>1
+                            drho_dx = (Set::Scalar)isign * (rho_bnd - rho_m1) / delta;
+                            dun_dx  = (Set::Scalar)isign * (un_bnd  - un_m1)  / delta;
+                            dut_dx  = (Set::Scalar)isign * (ut_bnd  - ut_m1)  / delta;
+                            dp_dx   = (Set::Scalar)isign * (p_bnd   - p_m1)   / delta;
+                        }
 
                         // =============================================================
                         // STEP 4: Tangential derivatives (centered, 2nd order)
@@ -1521,6 +1546,12 @@ public:
                         Set::Scalar un_g1 = un_m1 + 2.0 * delta * dun_dx_new;
                         Set::Scalar ut_g1 = ut_m1 + 2.0 * delta * dut_dx_new;
                         Set::Scalar p_g1 = p_m1 + 2.0 * delta * dp_dx_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g1 = rho_bnd + (Set::Scalar)(1) * delta * drho_dx_new;
+                            un_g1  = un_bnd  + (Set::Scalar)(1) * delta * dun_dx_new;
+                            ut_g1  = ut_bnd  + (Set::Scalar)(1) * delta * dut_dx_new;
+                            p_g1   = p_bnd   + (Set::Scalar)(1) * delta * dp_dx_new;
+                        }
 
                         rho_g1 = amrex::max(rho_g1, small_local);
                         p_g1 = amrex::max(p_g1, 1.0e-6);
@@ -1532,6 +1563,12 @@ public:
                         Set::Scalar un_g2 = -2.0 * un_m1 - 3.0 * un_bnd + 6.0 * un_g1 - 6.0 * delta * dun_dx_new;
                         Set::Scalar ut_g2 = -2.0 * ut_m1 - 3.0 * ut_bnd + 6.0 * ut_g1 - 6.0 * delta * dut_dx_new;
                         Set::Scalar p_g2 = -2.0 * p_m1 - 3.0 * p_bnd + 6.0 * p_g1 - 6.0 * delta * dp_dx_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g2 = rho_bnd + (Set::Scalar)(2) * delta * drho_dx_new;
+                            un_g2  = un_bnd  + (Set::Scalar)(2) * delta * dun_dx_new;
+                            ut_g2  = ut_bnd  + (Set::Scalar)(2) * delta * dut_dx_new;
+                            p_g2   = p_bnd   + (Set::Scalar)(2) * delta * dp_dx_new;
+                        }
 
                         rho_g2 = amrex::max(rho_g2, small_local);
                         p_g2 = amrex::max(p_g2, 1.0e-6);
@@ -1543,6 +1580,12 @@ public:
                         Set::Scalar un_g3 = 3.0 * un_m1 + 10.0 * un_bnd - 18.0 * un_g1 + 6.0 * un_g2 + 12.0 * delta * dun_dx_new;
                         Set::Scalar ut_g3 = 3.0 * ut_m1 + 10.0 * ut_bnd - 18.0 * ut_g1 + 6.0 * ut_g2 + 12.0 * delta * dut_dx_new;
                         Set::Scalar p_g3 = 3.0 * p_m1 + 10.0 * p_bnd - 18.0 * p_g1 + 6.0 * p_g2 + 12.0 * delta * dp_dx_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g3 = rho_bnd + (Set::Scalar)(3) * delta * drho_dx_new;
+                            un_g3  = un_bnd  + (Set::Scalar)(3) * delta * dun_dx_new;
+                            ut_g3  = ut_bnd  + (Set::Scalar)(3) * delta * dut_dx_new;
+                            p_g3   = p_bnd   + (Set::Scalar)(3) * delta * dp_dx_new;
+                        }
 
                         rho_g3 = amrex::max(rho_g3, small_local);
                         p_g3 = amrex::max(p_g3, 1.0e-6);
@@ -1554,6 +1597,12 @@ public:
                         Set::Scalar un_g4 = -2.0 * un_m1 - 13.0 * un_bnd + 24.0 * un_g1 - 12.0 * un_g2 + 4.0 * un_g3 - 12.0 * delta * dun_dx_new;
                         Set::Scalar ut_g4 = -2.0 * ut_m1 - 13.0 * ut_bnd + 24.0 * ut_g1 - 12.0 * ut_g2 + 4.0 * ut_g3 - 12.0 * delta * dut_dx_new;
                         Set::Scalar p_g4 = -2.0 * p_m1 - 13.0 * p_bnd + 24.0 * p_g1 - 12.0 * p_g2 + 4.0 * p_g3 - 12.0 * delta * dp_dx_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g4 = rho_bnd + (Set::Scalar)(4) * delta * drho_dx_new;
+                            un_g4  = un_bnd  + (Set::Scalar)(4) * delta * dun_dx_new;
+                            ut_g4  = ut_bnd  + (Set::Scalar)(4) * delta * dut_dx_new;
+                            p_g4   = p_bnd   + (Set::Scalar)(4) * delta * dp_dx_new;
+                        }
 
                         rho_g4 = amrex::max(rho_g4, small_local);
                         p_g4 = amrex::max(p_g4, 1.0e-6);
@@ -1643,6 +1692,12 @@ public:
                         Set::Scalar dun_dy = (-3.0 * un_bnd + 4.0 * un_m1 - un_m2) / (2.0 * delta);
                         Set::Scalar dut_dy = (-3.0 * ut_bnd + 4.0 * ut_m1 - ut_m2) / (2.0 * delta);
                         Set::Scalar dp_dy = (-3.0 * p_bnd + 4.0 * p_m1 - p_m2) / (2.0 * delta);
+                        if (ghost_mode == 3) {  // 1st-order one-sided derivs: monotone, damps grid-scale k where the 2nd-order stencil gives |R|>1
+                            drho_dy = (Set::Scalar)isign * (rho_bnd - rho_m1) / delta;
+                            dun_dy  = (Set::Scalar)isign * (un_bnd  - un_m1)  / delta;
+                            dut_dy  = (Set::Scalar)isign * (ut_bnd  - ut_m1)  / delta;
+                            dp_dy   = (Set::Scalar)isign * (p_bnd   - p_m1)   / delta;
+                        }
 
                         // =============================================================
                         // STEP 4: Tangential derivatives (centered, 2nd order)
@@ -1765,6 +1820,12 @@ public:
                         Set::Scalar un_g1 = un_m1 - 2.0 * delta * dun_dy_new;
                         Set::Scalar ut_g1 = ut_m1 - 2.0 * delta * dut_dy_new;
                         Set::Scalar p_g1 = p_m1 - 2.0 * delta * dp_dy_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g1 = rho_bnd + (Set::Scalar)(-1) * delta * drho_dy_new;
+                            un_g1  = un_bnd  + (Set::Scalar)(-1) * delta * dun_dy_new;
+                            ut_g1  = ut_bnd  + (Set::Scalar)(-1) * delta * dut_dy_new;
+                            p_g1   = p_bnd   + (Set::Scalar)(-1) * delta * dp_dy_new;
+                        }
 
                         rho_g1 = amrex::max(rho_g1, small_local);
                         p_g1 = amrex::max(p_g1, 1.0e-6);
@@ -1775,6 +1836,12 @@ public:
                         Set::Scalar un_g2 = -2.0 * un_m1 - 3.0 * un_bnd + 6.0 * un_g1 + 6.0 * delta * dun_dy_new;
                         Set::Scalar ut_g2 = -2.0 * ut_m1 - 3.0 * ut_bnd + 6.0 * ut_g1 + 6.0 * delta * dut_dy_new;
                         Set::Scalar p_g2 = -2.0 * p_m1 - 3.0 * p_bnd + 6.0 * p_g1 + 6.0 * delta * dp_dy_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g2 = rho_bnd + (Set::Scalar)(-2) * delta * drho_dy_new;
+                            un_g2  = un_bnd  + (Set::Scalar)(-2) * delta * dun_dy_new;
+                            ut_g2  = ut_bnd  + (Set::Scalar)(-2) * delta * dut_dy_new;
+                            p_g2   = p_bnd   + (Set::Scalar)(-2) * delta * dp_dy_new;
+                        }
 
                         rho_g2 = amrex::max(rho_g2, small_local);
                         p_g2 = amrex::max(p_g2, 1.0e-6);
@@ -1785,6 +1852,12 @@ public:
                         Set::Scalar un_g3 = 3.0 * un_m1 + 10.0 * un_bnd - 18.0 * un_g1 + 6.0 * un_g2 - 12.0 * delta * dun_dy_new;
                         Set::Scalar ut_g3 = 3.0 * ut_m1 + 10.0 * ut_bnd - 18.0 * ut_g1 + 6.0 * ut_g2 - 12.0 * delta * dut_dy_new;
                         Set::Scalar p_g3 = 3.0 * p_m1 + 10.0 * p_bnd - 18.0 * p_g1 + 6.0 * p_g2 - 12.0 * delta * dp_dy_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g3 = rho_bnd + (Set::Scalar)(-3) * delta * drho_dy_new;
+                            un_g3  = un_bnd  + (Set::Scalar)(-3) * delta * dun_dy_new;
+                            ut_g3  = ut_bnd  + (Set::Scalar)(-3) * delta * dut_dy_new;
+                            p_g3   = p_bnd   + (Set::Scalar)(-3) * delta * dp_dy_new;
+                        }
 
                         rho_g3 = amrex::max(rho_g3, small_local);
                         p_g3 = amrex::max(p_g3, 1.0e-6);
@@ -1795,6 +1868,12 @@ public:
                         Set::Scalar un_g4 = -2.0 * un_m1 - 13.0 * un_bnd + 24.0 * un_g1 - 12.0 * un_g2 + 4.0 * un_g3 + 12.0 * delta * dun_dy_new;
                         Set::Scalar ut_g4 = -2.0 * ut_m1 - 13.0 * ut_bnd + 24.0 * ut_g1 - 12.0 * ut_g2 + 4.0 * ut_g3 + 12.0 * delta * dun_dy_new;
                         Set::Scalar p_g4 = -2.0 * p_m1 - 13.0 * p_bnd + 24.0 * p_g1 - 12.0 * p_g2 + 4.0 * p_g3 + 12.0 * delta * dp_dy_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g4 = rho_bnd + (Set::Scalar)(-4) * delta * drho_dy_new;
+                            un_g4  = un_bnd  + (Set::Scalar)(-4) * delta * dun_dy_new;
+                            ut_g4  = ut_bnd  + (Set::Scalar)(-4) * delta * dut_dy_new;
+                            p_g4   = p_bnd   + (Set::Scalar)(-4) * delta * dp_dy_new;
+                        }
 
                         rho_g4 = amrex::max(rho_g4, small_local);
                         p_g4 = amrex::max(p_g4, 1.0e-6);
@@ -1884,6 +1963,12 @@ public:
                         Set::Scalar dun_dy = (3.0 * un_bnd - 4.0 * un_m1 + un_m2) / (2.0 * delta);
                         Set::Scalar dut_dy = (3.0 * ut_bnd - 4.0 * ut_m1 + ut_m2) / (2.0 * delta);
                         Set::Scalar dp_dy = (3.0 * p_bnd - 4.0 * p_m1 + p_m2) / (2.0 * delta);
+                        if (ghost_mode == 3) {  // 1st-order one-sided derivs: monotone, damps grid-scale k where the 2nd-order stencil gives |R|>1
+                            drho_dy = (Set::Scalar)isign * (rho_bnd - rho_m1) / delta;
+                            dun_dy  = (Set::Scalar)isign * (un_bnd  - un_m1)  / delta;
+                            dut_dy  = (Set::Scalar)isign * (ut_bnd  - ut_m1)  / delta;
+                            dp_dy   = (Set::Scalar)isign * (p_bnd   - p_m1)   / delta;
+                        }
 
                         // =============================================================
                         // STEP 4: Tangential derivatives (centered, 2nd order)
@@ -1998,6 +2083,12 @@ public:
                         Set::Scalar un_g1 = un_m1 + 2.0 * delta * dun_dy_new;
                         Set::Scalar ut_g1 = ut_m1 + 2.0 * delta * dut_dy_new;
                         Set::Scalar p_g1 = p_m1 + 2.0 * delta * dp_dy_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g1 = rho_bnd + (Set::Scalar)(1) * delta * drho_dy_new;
+                            un_g1  = un_bnd  + (Set::Scalar)(1) * delta * dun_dy_new;
+                            ut_g1  = ut_bnd  + (Set::Scalar)(1) * delta * dut_dy_new;
+                            p_g1   = p_bnd   + (Set::Scalar)(1) * delta * dp_dy_new;
+                        }
 
                         rho_g1 = amrex::max(rho_g1, small_local);
                         p_g1 = amrex::max(p_g1, 1.0e-6);
@@ -2008,6 +2099,12 @@ public:
                         Set::Scalar un_g2 = -2.0 * un_m1 - 3.0 * un_bnd + 6.0 * un_g1 - 6.0 * delta * dun_dy_new;
                         Set::Scalar ut_g2 = -2.0 * ut_m1 - 3.0 * ut_bnd + 6.0 * ut_g1 - 6.0 * delta * dut_dy_new;
                         Set::Scalar p_g2 = -2.0 * p_m1 - 3.0 * p_bnd + 6.0 * p_g1 - 6.0 * delta * dp_dy_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g2 = rho_bnd + (Set::Scalar)(2) * delta * drho_dy_new;
+                            un_g2  = un_bnd  + (Set::Scalar)(2) * delta * dun_dy_new;
+                            ut_g2  = ut_bnd  + (Set::Scalar)(2) * delta * dut_dy_new;
+                            p_g2   = p_bnd   + (Set::Scalar)(2) * delta * dp_dy_new;
+                        }
 
                         rho_g2 = amrex::max(rho_g2, small_local);
                         p_g2 = amrex::max(p_g2, 1.0e-6);
@@ -2018,6 +2115,12 @@ public:
                         Set::Scalar un_g3 = 3.0 * un_m1 + 10.0 * un_bnd - 18.0 * un_g1 + 6.0 * un_g2 + 12.0 * delta * dun_dy_new;
                         Set::Scalar ut_g3 = 3.0 * ut_m1 + 10.0 * ut_bnd - 18.0 * ut_g1 + 6.0 * ut_g2 + 12.0 * delta * dut_dy_new;
                         Set::Scalar p_g3 = 3.0 * p_m1 + 10.0 * p_bnd - 18.0 * p_g1 + 6.0 * p_g2 + 12.0 * delta * dp_dy_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g3 = rho_bnd + (Set::Scalar)(3) * delta * drho_dy_new;
+                            un_g3  = un_bnd  + (Set::Scalar)(3) * delta * dun_dy_new;
+                            ut_g3  = ut_bnd  + (Set::Scalar)(3) * delta * dut_dy_new;
+                            p_g3   = p_bnd   + (Set::Scalar)(3) * delta * dp_dy_new;
+                        }
 
                         rho_g3 = amrex::max(rho_g3, small_local);
                         p_g3 = amrex::max(p_g3, 1.0e-6);
@@ -2028,6 +2131,12 @@ public:
                         Set::Scalar un_g4 = -2.0 * un_m1 - 13.0 * un_bnd + 24.0 * un_g1 - 12.0 * un_g2 + 4.0 * un_g3 - 12.0 * delta * dun_dy_new;
                         Set::Scalar ut_g4 = -2.0 * ut_m1 - 13.0 * ut_bnd + 24.0 * ut_g1 - 12.0 * ut_g2 + 4.0 * ut_g3 - 12.0 * delta * dut_dy_new;
                         Set::Scalar p_g4 = -2.0 * p_m1 - 13.0 * p_bnd + 24.0 * p_g1 - 12.0 * p_g2 + 4.0 * p_g3 - 12.0 * delta * dp_dy_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g4 = rho_bnd + (Set::Scalar)(4) * delta * drho_dy_new;
+                            un_g4  = un_bnd  + (Set::Scalar)(4) * delta * dun_dy_new;
+                            ut_g4  = ut_bnd  + (Set::Scalar)(4) * delta * dut_dy_new;
+                            p_g4   = p_bnd   + (Set::Scalar)(4) * delta * dp_dy_new;
+                        }
 
                         rho_g4 = amrex::max(rho_g4, small_local);
                         p_g4 = amrex::max(p_g4, 1.0e-6);
@@ -2095,6 +2204,12 @@ public:
                         Set::Scalar dun_dx  = (-3.0 * un_bnd  + 4.0 * un_m1  - un_m2 ) / (2.0 * delta);
                         Set::Scalar dut_dx  = (-3.0 * ut_bnd  + 4.0 * ut_m1  - ut_m2 ) / (2.0 * delta);
                         Set::Scalar dp_dx   = (-3.0 * p_bnd   + 4.0 * p_m1   - p_m2  ) / (2.0 * delta);
+                        if (ghost_mode == 3) {  // 1st-order one-sided derivs: monotone, damps grid-scale k where the 2nd-order stencil gives |R|>1
+                            drho_dx = (Set::Scalar)(-1) * (rho_bnd - rho_m1) / delta;
+                            dun_dx  = (Set::Scalar)(-1) * (un_bnd  - un_m1)  / delta;
+                            dut_dx  = (Set::Scalar)(-1) * (ut_bnd  - ut_m1)  / delta;
+                            dp_dx   = (Set::Scalar)(-1) * (p_bnd   - p_m1)   / delta;
+                        }
 
                         // Transverse (x) centered FD.
                         Set::Scalar drho_dy = 0.0, dun_dy = 0.0, dut_dy = 0.0, dp_dy = 0.0;
@@ -2177,6 +2292,12 @@ public:
                         Set::Scalar un_g1  = un_m1  - 2.0 * delta * dun_dx_new;
                         Set::Scalar ut_g1  = ut_m1  - 2.0 * delta * dut_dx_new;
                         Set::Scalar p_g1   = p_m1   - 2.0 * delta * dp_dx_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g1 = rho_bnd + (Set::Scalar)(-1) * delta * drho_dx_new;
+                            un_g1  = un_bnd  + (Set::Scalar)(-1) * delta * dun_dx_new;
+                            ut_g1  = ut_bnd  + (Set::Scalar)(-1) * delta * dut_dx_new;
+                            p_g1   = p_bnd   + (Set::Scalar)(-1) * delta * dp_dx_new;
+                        }
                         rho_g1 = amrex::max(rho_g1, small_local); p_g1 = amrex::max(p_g1, 1.0e-6);
                         set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j, k_bnd - 1, idir, rho_g1, un_g1, ut_g1, p_g1);
 
@@ -2184,6 +2305,12 @@ public:
                         Set::Scalar un_g2  = -2.0 * un_m1  - 3.0 * un_bnd  + 6.0 * un_g1  + 6.0 * delta * dun_dx_new;
                         Set::Scalar ut_g2  = -2.0 * ut_m1  - 3.0 * ut_bnd  + 6.0 * ut_g1  + 6.0 * delta * dut_dx_new;
                         Set::Scalar p_g2   = -2.0 * p_m1   - 3.0 * p_bnd   + 6.0 * p_g1   + 6.0 * delta * dp_dx_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g2 = rho_bnd + (Set::Scalar)(-2) * delta * drho_dx_new;
+                            un_g2  = un_bnd  + (Set::Scalar)(-2) * delta * dun_dx_new;
+                            ut_g2  = ut_bnd  + (Set::Scalar)(-2) * delta * dut_dx_new;
+                            p_g2   = p_bnd   + (Set::Scalar)(-2) * delta * dp_dx_new;
+                        }
                         rho_g2 = amrex::max(rho_g2, small_local); p_g2 = amrex::max(p_g2, 1.0e-6);
                         set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j, k_bnd - 2, idir, rho_g2, un_g2, ut_g2, p_g2);
 
@@ -2191,6 +2318,12 @@ public:
                         Set::Scalar un_g3  = 3.0 * un_m1  + 10.0 * un_bnd  - 18.0 * un_g1  + 6.0 * un_g2  - 12.0 * delta * dun_dx_new;
                         Set::Scalar ut_g3  = 3.0 * ut_m1  + 10.0 * ut_bnd  - 18.0 * ut_g1  + 6.0 * ut_g2  - 12.0 * delta * dut_dx_new;
                         Set::Scalar p_g3   = 3.0 * p_m1   + 10.0 * p_bnd   - 18.0 * p_g1   + 6.0 * p_g2   - 12.0 * delta * dp_dx_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g3 = rho_bnd + (Set::Scalar)(-3) * delta * drho_dx_new;
+                            un_g3  = un_bnd  + (Set::Scalar)(-3) * delta * dun_dx_new;
+                            ut_g3  = ut_bnd  + (Set::Scalar)(-3) * delta * dut_dx_new;
+                            p_g3   = p_bnd   + (Set::Scalar)(-3) * delta * dp_dx_new;
+                        }
                         rho_g3 = amrex::max(rho_g3, small_local); p_g3 = amrex::max(p_g3, 1.0e-6);
                         set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j, k_bnd - 3, idir, rho_g3, un_g3, ut_g3, p_g3);
 
@@ -2198,6 +2331,12 @@ public:
                         Set::Scalar un_g4  = -2.0 * un_m1  - 13.0 * un_bnd  + 24.0 * un_g1  - 12.0 * un_g2  + 4.0 * un_g3  + 12.0 * delta * dun_dx_new;
                         Set::Scalar ut_g4  = -2.0 * ut_m1  - 13.0 * ut_bnd  + 24.0 * ut_g1  - 12.0 * ut_g2  + 4.0 * ut_g3  + 12.0 * delta * dut_dx_new;
                         Set::Scalar p_g4   = -2.0 * p_m1   - 13.0 * p_bnd   + 24.0 * p_g1   - 12.0 * p_g2   + 4.0 * p_g3   + 12.0 * delta * dp_dx_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g4 = rho_bnd + (Set::Scalar)(-4) * delta * drho_dx_new;
+                            un_g4  = un_bnd  + (Set::Scalar)(-4) * delta * dun_dx_new;
+                            ut_g4  = ut_bnd  + (Set::Scalar)(-4) * delta * dut_dx_new;
+                            p_g4   = p_bnd   + (Set::Scalar)(-4) * delta * dp_dx_new;
+                        }
                         rho_g4 = amrex::max(rho_g4, small_local); p_g4 = amrex::max(p_g4, 1.0e-6);
                         set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j, k_bnd - 4, idir, rho_g4, un_g4, ut_g4, p_g4);
 
@@ -2258,6 +2397,12 @@ public:
                         Set::Scalar dun_dx  = (3.0 * un_bnd  - 4.0 * un_m1  + un_m2 ) / (2.0 * delta);
                         Set::Scalar dut_dx  = (3.0 * ut_bnd  - 4.0 * ut_m1  + ut_m2 ) / (2.0 * delta);
                         Set::Scalar dp_dx   = (3.0 * p_bnd   - 4.0 * p_m1   + p_m2  ) / (2.0 * delta);
+                        if (ghost_mode == 3) {  // 1st-order one-sided derivs: monotone, damps grid-scale k where the 2nd-order stencil gives |R|>1
+                            drho_dx = (Set::Scalar)(+1) * (rho_bnd - rho_m1) / delta;
+                            dun_dx  = (Set::Scalar)(+1) * (un_bnd  - un_m1)  / delta;
+                            dut_dx  = (Set::Scalar)(+1) * (ut_bnd  - ut_m1)  / delta;
+                            dp_dx   = (Set::Scalar)(+1) * (p_bnd   - p_m1)   / delta;
+                        }
 
                         Set::Scalar drho_dy = 0.0, dun_dy = 0.0, dut_dy = 0.0, dp_dy = 0.0;
                         if (i > domain.smallEnd(0) && i < domain.bigEnd(0))
@@ -2339,6 +2484,12 @@ public:
                         Set::Scalar un_g1  = un_m1  + 2.0 * delta * dun_dx_new;
                         Set::Scalar ut_g1  = ut_m1  + 2.0 * delta * dut_dx_new;
                         Set::Scalar p_g1   = p_m1   + 2.0 * delta * dp_dx_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g1 = rho_bnd + (Set::Scalar)(1) * delta * drho_dx_new;
+                            un_g1  = un_bnd  + (Set::Scalar)(1) * delta * dun_dx_new;
+                            ut_g1  = ut_bnd  + (Set::Scalar)(1) * delta * dut_dx_new;
+                            p_g1   = p_bnd   + (Set::Scalar)(1) * delta * dp_dx_new;
+                        }
                         rho_g1 = amrex::max(rho_g1, small_local); p_g1 = amrex::max(p_g1, 1.0e-6);
                         set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j, k_bnd + 1, idir, rho_g1, un_g1, ut_g1, p_g1);
 
@@ -2346,6 +2497,12 @@ public:
                         Set::Scalar un_g2  = -2.0 * un_m1  - 3.0 * un_bnd  + 6.0 * un_g1  - 6.0 * delta * dun_dx_new;
                         Set::Scalar ut_g2  = -2.0 * ut_m1  - 3.0 * ut_bnd  + 6.0 * ut_g1  - 6.0 * delta * dut_dx_new;
                         Set::Scalar p_g2   = -2.0 * p_m1   - 3.0 * p_bnd   + 6.0 * p_g1   - 6.0 * delta * dp_dx_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g2 = rho_bnd + (Set::Scalar)(2) * delta * drho_dx_new;
+                            un_g2  = un_bnd  + (Set::Scalar)(2) * delta * dun_dx_new;
+                            ut_g2  = ut_bnd  + (Set::Scalar)(2) * delta * dut_dx_new;
+                            p_g2   = p_bnd   + (Set::Scalar)(2) * delta * dp_dx_new;
+                        }
                         rho_g2 = amrex::max(rho_g2, small_local); p_g2 = amrex::max(p_g2, 1.0e-6);
                         set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j, k_bnd + 2, idir, rho_g2, un_g2, ut_g2, p_g2);
 
@@ -2353,6 +2510,12 @@ public:
                         Set::Scalar un_g3  = 3.0 * un_m1  + 10.0 * un_bnd  - 18.0 * un_g1  + 6.0 * un_g2  + 12.0 * delta * dun_dx_new;
                         Set::Scalar ut_g3  = 3.0 * ut_m1  + 10.0 * ut_bnd  - 18.0 * ut_g1  + 6.0 * ut_g2  + 12.0 * delta * dut_dx_new;
                         Set::Scalar p_g3   = 3.0 * p_m1   + 10.0 * p_bnd   - 18.0 * p_g1   + 6.0 * p_g2   + 12.0 * delta * dp_dx_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g3 = rho_bnd + (Set::Scalar)(3) * delta * drho_dx_new;
+                            un_g3  = un_bnd  + (Set::Scalar)(3) * delta * dun_dx_new;
+                            ut_g3  = ut_bnd  + (Set::Scalar)(3) * delta * dut_dx_new;
+                            p_g3   = p_bnd   + (Set::Scalar)(3) * delta * dp_dx_new;
+                        }
                         rho_g3 = amrex::max(rho_g3, small_local); p_g3 = amrex::max(p_g3, 1.0e-6);
                         set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j, k_bnd + 3, idir, rho_g3, un_g3, ut_g3, p_g3);
 
@@ -2360,6 +2523,12 @@ public:
                         Set::Scalar un_g4  = -2.0 * un_m1  - 13.0 * un_bnd  + 24.0 * un_g1  - 12.0 * un_g2  + 4.0 * un_g3  - 12.0 * delta * dun_dx_new;
                         Set::Scalar ut_g4  = -2.0 * ut_m1  - 13.0 * ut_bnd  + 24.0 * ut_g1  - 12.0 * ut_g2  + 4.0 * ut_g3  - 12.0 * delta * dut_dx_new;
                         Set::Scalar p_g4   = -2.0 * p_m1   - 13.0 * p_bnd   + 24.0 * p_g1   - 12.0 * p_g2   + 4.0 * p_g3   - 12.0 * delta * dp_dx_new;
+                        if (ghost_mode >= 2) {  // FV-consistent linear-gradient ghosts (bypass Motheau FD-stencil layers)
+                            rho_g4 = rho_bnd + (Set::Scalar)(4) * delta * drho_dx_new;
+                            un_g4  = un_bnd  + (Set::Scalar)(4) * delta * dun_dx_new;
+                            ut_g4  = ut_bnd  + (Set::Scalar)(4) * delta * dut_dx_new;
+                            p_g4   = p_bnd   + (Set::Scalar)(4) * delta * dp_dx_new;
+                        }
                         rho_g4 = amrex::max(rho_g4, small_local); p_g4 = amrex::max(p_g4, 1.0e-6);
                         set_ghost_cons(eta_arr, rho_arr, M_arr, E_arr, gamma_arr, pi_arr, p_arr, i, j, k_bnd + 4, idir, rho_g4, un_g4, ut_g4, p_g4);
 

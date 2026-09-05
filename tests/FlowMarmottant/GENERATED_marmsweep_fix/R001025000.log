@@ -1,0 +1,1808 @@
+Initializing AMReX (26.02)...
+MPI initialized with 2 MPI processes
+MPI initialized with thread support level 0
+AMReX (26.02) initialized
+Util::CreateCleanDirectory():  /mnt/c/Users/tryon/Documents/flames2/bin/tests/FlowMarmottant/marmsweep_fix/R001025000 exists.  Renaming to:  /mnt/c/Users/tryon/Documents/flames2/bin/tests/FlowMarmottant/marmsweep_fix/R001025000.old.20260904182214
+[1m[34mMESSAGE[0m: [94m./src/Solver/EOS/EOS.H[0m:57 ([92mSetBackend[0m) EOS backend: native (Tammann + CPG)
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:253 ([92mParse[0m) Marmottant ON (advected shell): R0=0.001025 R_buckling=0.001 chi=0.55 Gamma_buck=1.05063 sigma(t=0)=0.0278438 sigma_break=0.073 sigma_water=0.073
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:387 ([92mParse[0m) uses_nscbc=1
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:406 ([92mParse[0m) Parsing NSCBC4 (4-cell)
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:431 ([92mParse[0m) nscbc_bc Pointer=0
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:432 ([92mParse[0m) nscbc4_bc Pointer=0x5dbeb7b789f0
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:678 ([92mParse[0m) Input file has Riemann_Solver.type = hllc
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:690 ([92mParse[0m) Selected Riemann solver: N6Solver5Local12FluidRiemann4HLLCE
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:699 ([92mParse[0m) Input file has Limiter.type = vanleer
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:706 ([92mParse[0m) Selected Limiter: N6Solver5Local7Limiter7VanLeerE
+[1m[34mMESSAGE(0)[0m: [94msrc/Integrator/Hydro2.cpp[0m:889 ([92mInitialize[0m) Finished initialization, begginning time iteration
+[1m[34mMESSAGE(1)[0m: [94msrc/Integrator/Hydro2.cpp[0m:889 ([92mInitialize[0m) Finished initialization, begginning time iteration
+[1m[34mMESSAGE(0)[0m: [94msrc/Integrator/Hydro2.cpp[0m:889 ([92mInitialize[0m) Finished initialization, begginning time iteration
+[1m[34mMESSAGE(1)[0m: [94msrc/Integrator/Hydro2.cpp[0m:889 ([92mInitialize[0m) Finished initialization, begginning time iteration
+[1m[34mMESSAGE(1)[0m: [94msrc/Integrator/Hydro2.cpp[0m:889 ([92mInitialize[0m) Finished initialization, begginning time iteration
+[1m[34mMESSAGE(0)[0m: [94msrc/Integrator/Hydro2.cpp[0m:889 ([92mInitialize[0m) Finished initialization, begginning time iteration
+[1m[34mMESSAGE(0)[0m: [94msrc/Integrator/Hydro2.cpp[0m:889 ([92mInitialize[0m) Finished initialization, begginning time iteration
+[1m[34mMESSAGE(1)[0m: [94msrc/Integrator/Hydro2.cpp[0m:889 ([92mInitialize[0m) Finished initialization, begginning time iteration
+[1m[34mMESSAGE(1)[0m: [94msrc/Integrator/Hydro2.cpp[0m:889 ([92mInitialize[0m) Finished initialization, begginning time iteration
+[1m[34mMESSAGE(0)[0m: [94msrc/Integrator/Hydro2.cpp[0m:889 ([92mInitialize[0m) Finished initialization, begginning time iteration
+
+STEP 1 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 1 ends. TIME = 1e-12 DT = 1e-12
+
+STEP 2 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 2 ends. TIME = 1.376034823e-08 DT = 1.375934823e-08
+
+STEP 3 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 3 ends. TIME = 2.751969547e-08 DT = 1.375934725e-08
+
+STEP 4 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 4 ends. TIME = 4.127904272e-08 DT = 1.375934725e-08
+
+STEP 5 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 5 ends. TIME = 5.503838999e-08 DT = 1.375934726e-08
+
+STEP 6 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 6 ends. TIME = 6.879773726e-08 DT = 1.375934728e-08
+
+STEP 7 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 7 ends. TIME = 8.255708455e-08 DT = 1.375934729e-08
+
+STEP 8 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 8 ends. TIME = 9.631643185e-08 DT = 1.37593473e-08
+
+STEP 9 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 9 ends. TIME = 1.100757792e-07 DT = 1.375934732e-08
+
+STEP 10 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 10 ends. TIME = 1.238351265e-07 DT = 1.375934734e-08
+
+STEP 11 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 11 ends. TIME = 1.375944739e-07 DT = 1.375934737e-08
+
+STEP 12 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 12 ends. TIME = 1.513538213e-07 DT = 1.375934739e-08
+
+STEP 13 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 13 ends. TIME = 1.651131687e-07 DT = 1.375934742e-08
+
+STEP 14 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 14 ends. TIME = 1.788725161e-07 DT = 1.375934745e-08
+
+STEP 15 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 15 ends. TIME = 1.926318636e-07 DT = 1.375934747e-08
+
+STEP 16 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 16 ends. TIME = 2.063912111e-07 DT = 1.375934746e-08
+
+STEP 17 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 17 ends. TIME = 2.201505585e-07 DT = 1.375934741e-08
+
+STEP 18 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 18 ends. TIME = 2.339099058e-07 DT = 1.375934737e-08
+
+STEP 19 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 19 ends. TIME = 2.476692532e-07 DT = 1.375934733e-08
+
+STEP 20 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 20 ends. TIME = 2.614286005e-07 DT = 1.375934728e-08
+
+STEP 21 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 21 ends. TIME = 2.751879477e-07 DT = 1.375934724e-08
+
+STEP 22 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 22 ends. TIME = 2.889472949e-07 DT = 1.37593472e-08
+
+STEP 23 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 23 ends. TIME = 3.027066421e-07 DT = 1.375934716e-08
+
+STEP 24 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 24 ends. TIME = 3.164659892e-07 DT = 1.375934713e-08
+
+STEP 25 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 25 ends. TIME = 3.302253363e-07 DT = 1.375934709e-08
+
+STEP 26 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 26 ends. TIME = 3.439846833e-07 DT = 1.375934705e-08
+
+STEP 27 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 27 ends. TIME = 3.577440303e-07 DT = 1.375934701e-08
+
+STEP 28 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 28 ends. TIME = 3.715033773e-07 DT = 1.375934698e-08
+
+STEP 29 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 29 ends. TIME = 3.852627243e-07 DT = 1.375934694e-08
+
+STEP 30 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 30 ends. TIME = 3.990220712e-07 DT = 1.375934691e-08
+
+STEP 31 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 31 ends. TIME = 4.127814181e-07 DT = 1.375934688e-08
+
+STEP 32 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 32 ends. TIME = 4.265407649e-07 DT = 1.375934685e-08
+
+STEP 33 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 33 ends. TIME = 4.403001117e-07 DT = 1.375934682e-08
+
+STEP 34 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 34 ends. TIME = 4.540594585e-07 DT = 1.375934679e-08
+
+STEP 35 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 35 ends. TIME = 4.678188053e-07 DT = 1.375934676e-08
+
+STEP 36 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 36 ends. TIME = 4.81578152e-07 DT = 1.375934673e-08
+
+STEP 37 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 37 ends. TIME = 4.953374987e-07 DT = 1.375934671e-08
+
+STEP 38 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 38 ends. TIME = 5.090968454e-07 DT = 1.375934668e-08
+
+STEP 39 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 39 ends. TIME = 5.228561921e-07 DT = 1.375934666e-08
+
+STEP 40 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 40 ends. TIME = 5.366155387e-07 DT = 1.375934663e-08
+
+STEP 41 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 41 ends. TIME = 5.503748853e-07 DT = 1.37593466e-08
+
+STEP 42 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 42 ends. TIME = 5.641342319e-07 DT = 1.375934658e-08
+
+STEP 43 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 43 ends. TIME = 5.778935784e-07 DT = 1.375934655e-08
+
+STEP 44 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 44 ends. TIME = 5.916529249e-07 DT = 1.375934652e-08
+
+STEP 45 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 45 ends. TIME = 6.054122714e-07 DT = 1.37593465e-08
+
+STEP 46 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 46 ends. TIME = 6.191716179e-07 DT = 1.375934647e-08
+
+STEP 47 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 47 ends. TIME = 6.329309644e-07 DT = 1.375934645e-08
+
+STEP 48 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 48 ends. TIME = 6.466903108e-07 DT = 1.375934643e-08
+
+STEP 49 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 49 ends. TIME = 6.604496572e-07 DT = 1.37593464e-08
+
+STEP 50 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 50 ends. TIME = 6.742090036e-07 DT = 1.375934638e-08
+
+STEP 51 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 51 ends. TIME = 6.879683499e-07 DT = 1.375934636e-08
+
+STEP 52 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 52 ends. TIME = 7.017276963e-07 DT = 1.375934633e-08
+
+STEP 53 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 53 ends. TIME = 7.154870426e-07 DT = 1.375934631e-08
+
+STEP 54 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 54 ends. TIME = 7.292463889e-07 DT = 1.375934629e-08
+
+STEP 55 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 55 ends. TIME = 7.430057351e-07 DT = 1.375934627e-08
+
+STEP 56 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 56 ends. TIME = 7.567650814e-07 DT = 1.375934625e-08
+
+STEP 57 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 57 ends. TIME = 7.705244276e-07 DT = 1.375934623e-08
+
+STEP 58 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 58 ends. TIME = 7.842837738e-07 DT = 1.375934621e-08
+
+STEP 59 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 59 ends. TIME = 7.9804312e-07 DT = 1.375934619e-08
+
+STEP 60 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 60 ends. TIME = 8.118024662e-07 DT = 1.375934616e-08
+
+STEP 61 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 61 ends. TIME = 8.255618123e-07 DT = 1.375934614e-08
+
+STEP 62 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 62 ends. TIME = 8.393211584e-07 DT = 1.375934612e-08
+
+STEP 63 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 63 ends. TIME = 8.530805045e-07 DT = 1.37593461e-08
+
+STEP 64 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 64 ends. TIME = 8.668398506e-07 DT = 1.375934608e-08
+
+STEP 65 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 65 ends. TIME = 8.805991967e-07 DT = 1.375934606e-08
+
+STEP 66 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 66 ends. TIME = 8.943585427e-07 DT = 1.375934604e-08
+
+STEP 67 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 67 ends. TIME = 9.081178887e-07 DT = 1.375934602e-08
+
+STEP 68 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 68 ends. TIME = 9.218772347e-07 DT = 1.3759346e-08
+
+STEP 69 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 69 ends. TIME = 9.356365807e-07 DT = 1.375934598e-08
+
+STEP 70 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 70 ends. TIME = 9.493959267e-07 DT = 1.375934596e-08
+
+STEP 71 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 71 ends. TIME = 9.631552726e-07 DT = 1.375934594e-08
+
+STEP 72 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 72 ends. TIME = 9.769146185e-07 DT = 1.375934591e-08
+
+STEP 73 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 73 ends. TIME = 9.906739644e-07 DT = 1.375934589e-08
+
+STEP 74 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 74 ends. TIME = 1.00443331e-06 DT = 1.375934587e-08
+
+STEP 75 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 75 ends. TIME = 1.018192656e-06 DT = 1.375934585e-08
+
+STEP 76 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 76 ends. TIME = 1.031952002e-06 DT = 1.375934583e-08
+
+STEP 77 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 77 ends. TIME = 1.045711348e-06 DT = 1.375934581e-08
+
+STEP 78 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 78 ends. TIME = 1.059470694e-06 DT = 1.375934579e-08
+
+STEP 79 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 79 ends. TIME = 1.073230039e-06 DT = 1.375934577e-08
+
+STEP 80 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 80 ends. TIME = 1.086989385e-06 DT = 1.375934575e-08
+
+STEP 81 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 81 ends. TIME = 1.100748731e-06 DT = 1.375934573e-08
+
+STEP 82 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 82 ends. TIME = 1.114508077e-06 DT = 1.375934571e-08
+
+STEP 83 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 83 ends. TIME = 1.128267422e-06 DT = 1.375934569e-08
+
+STEP 84 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 84 ends. TIME = 1.142026768e-06 DT = 1.375934567e-08
+
+STEP 85 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 85 ends. TIME = 1.155786114e-06 DT = 1.375934565e-08
+
+STEP 86 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 86 ends. TIME = 1.169545459e-06 DT = 1.375934563e-08
+
+STEP 87 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 87 ends. TIME = 1.183304805e-06 DT = 1.375934561e-08
+
+STEP 88 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 88 ends. TIME = 1.19706415e-06 DT = 1.375934559e-08
+
+STEP 89 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 89 ends. TIME = 1.210823496e-06 DT = 1.375934557e-08
+
+STEP 90 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 90 ends. TIME = 1.224582841e-06 DT = 1.375934556e-08
+
+STEP 91 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 91 ends. TIME = 1.238342187e-06 DT = 1.375934554e-08
+
+STEP 92 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 92 ends. TIME = 1.252101533e-06 DT = 1.375934552e-08
+
+STEP 93 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 93 ends. TIME = 1.265860878e-06 DT = 1.37593455e-08
+
+STEP 94 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 94 ends. TIME = 1.279620224e-06 DT = 1.375934549e-08
+
+STEP 95 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 95 ends. TIME = 1.293379569e-06 DT = 1.375934547e-08
+
+STEP 96 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 96 ends. TIME = 1.307138914e-06 DT = 1.375934546e-08
+
+STEP 97 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 97 ends. TIME = 1.32089826e-06 DT = 1.375934544e-08
+
+STEP 98 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 98 ends. TIME = 1.334657605e-06 DT = 1.375934542e-08
+
+STEP 99 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 99 ends. TIME = 1.348416951e-06 DT = 1.375934541e-08
+
+STEP 100 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 100 ends. TIME = 1.362176296e-06 DT = 1.375934539e-08
+
+STEP 101 starts ...
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:3732 ([92mRegrid[0m) Regridding on level2
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 101 ends. TIME = 1.375935641e-06 DT = 1.375934516e-08
+
+STEP 102 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 102 ends. TIME = 1.389694986e-06 DT = 1.375934512e-08
+
+STEP 103 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 103 ends. TIME = 1.403454331e-06 DT = 1.375934504e-08
+
+STEP 104 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 104 ends. TIME = 1.417213676e-06 DT = 1.375934496e-08
+
+STEP 105 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 105 ends. TIME = 1.430973021e-06 DT = 1.375934486e-08
+
+STEP 106 starts ...
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:3732 ([92mRegrid[0m) Regridding on level2
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 106 ends. TIME = 1.444732366e-06 DT = 1.375934486e-08
+
+STEP 107 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 107 ends. TIME = 1.458491711e-06 DT = 1.375934488e-08
+
+STEP 108 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 108 ends. TIME = 1.472251056e-06 DT = 1.375934482e-08
+
+STEP 109 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 109 ends. TIME = 1.486010401e-06 DT = 1.375934475e-08
+
+STEP 110 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 110 ends. TIME = 1.499769745e-06 DT = 1.375934468e-08
+
+STEP 111 starts ...
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:3732 ([92mRegrid[0m) Regridding on level1
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:3732 ([92mRegrid[0m) Regridding on level2
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 111 ends. TIME = 1.51352909e-06 DT = 1.375934461e-08
+
+STEP 112 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 112 ends. TIME = 1.527288434e-06 DT = 1.375934454e-08
+
+STEP 113 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 113 ends. TIME = 1.541047779e-06 DT = 1.375934448e-08
+
+STEP 114 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 114 ends. TIME = 1.554807123e-06 DT = 1.375934441e-08
+
+STEP 115 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 115 ends. TIME = 1.568566468e-06 DT = 1.375934433e-08
+
+STEP 116 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 116 ends. TIME = 1.582325812e-06 DT = 1.375934426e-08
+
+STEP 117 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 117 ends. TIME = 1.596085156e-06 DT = 1.375934419e-08
+
+STEP 118 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 118 ends. TIME = 1.6098445e-06 DT = 1.375934413e-08
+
+STEP 119 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 119 ends. TIME = 1.623603844e-06 DT = 1.375934407e-08
+
+STEP 120 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 120 ends. TIME = 1.637363188e-06 DT = 1.375934402e-08
+
+STEP 121 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 121 ends. TIME = 1.651122532e-06 DT = 1.375934397e-08
+
+STEP 122 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 122 ends. TIME = 1.664881876e-06 DT = 1.375934392e-08
+
+STEP 123 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 123 ends. TIME = 1.67864122e-06 DT = 1.375934387e-08
+
+STEP 124 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 124 ends. TIME = 1.692400564e-06 DT = 1.375934383e-08
+
+STEP 125 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 125 ends. TIME = 1.706159908e-06 DT = 1.375934379e-08
+
+STEP 126 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 126 ends. TIME = 1.719919251e-06 DT = 1.375934375e-08
+
+STEP 127 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 127 ends. TIME = 1.733678595e-06 DT = 1.37593437e-08
+
+STEP 128 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 128 ends. TIME = 1.747437939e-06 DT = 1.375934367e-08
+
+STEP 129 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 129 ends. TIME = 1.761197282e-06 DT = 1.375934363e-08
+
+STEP 130 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 130 ends. TIME = 1.774956626e-06 DT = 1.375934359e-08
+
+STEP 131 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 131 ends. TIME = 1.78871597e-06 DT = 1.375934355e-08
+
+STEP 132 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 132 ends. TIME = 1.802475313e-06 DT = 1.375934352e-08
+
+STEP 133 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 133 ends. TIME = 1.816234657e-06 DT = 1.375934348e-08
+
+STEP 134 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 134 ends. TIME = 1.829994e-06 DT = 1.375934344e-08
+
+STEP 135 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 135 ends. TIME = 1.843753343e-06 DT = 1.375934341e-08
+
+STEP 136 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 136 ends. TIME = 1.857512687e-06 DT = 1.375934337e-08
+
+STEP 137 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 137 ends. TIME = 1.87127203e-06 DT = 1.375934334e-08
+
+STEP 138 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 138 ends. TIME = 1.885031373e-06 DT = 1.375934331e-08
+
+STEP 139 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 139 ends. TIME = 1.898790717e-06 DT = 1.375934328e-08
+
+STEP 140 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 140 ends. TIME = 1.91255006e-06 DT = 1.375934324e-08
+
+STEP 141 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 141 ends. TIME = 1.926309403e-06 DT = 1.375934321e-08
+
+STEP 142 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 142 ends. TIME = 1.940068746e-06 DT = 1.375934318e-08
+
+STEP 143 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 143 ends. TIME = 1.95382809e-06 DT = 1.375934315e-08
+
+STEP 144 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 144 ends. TIME = 1.967587433e-06 DT = 1.375934313e-08
+
+STEP 145 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 145 ends. TIME = 1.981346776e-06 DT = 1.37593431e-08
+
+STEP 146 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 146 ends. TIME = 1.995106119e-06 DT = 1.375934307e-08
+
+STEP 147 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 147 ends. TIME = 2.008865462e-06 DT = 1.375934305e-08
+
+STEP 148 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 148 ends. TIME = 2.022624805e-06 DT = 1.375934302e-08
+
+STEP 149 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 149 ends. TIME = 2.036384148e-06 DT = 1.3759343e-08
+
+STEP 150 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 150 ends. TIME = 2.050143491e-06 DT = 1.375934298e-08
+
+STEP 151 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 151 ends. TIME = 2.063902834e-06 DT = 1.375934296e-08
+
+STEP 152 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 152 ends. TIME = 2.077662177e-06 DT = 1.375934294e-08
+
+STEP 153 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 153 ends. TIME = 2.09142152e-06 DT = 1.375934292e-08
+
+STEP 154 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 154 ends. TIME = 2.105180863e-06 DT = 1.37593429e-08
+
+STEP 155 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 155 ends. TIME = 2.118940205e-06 DT = 1.375934288e-08
+
+STEP 156 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 156 ends. TIME = 2.132699548e-06 DT = 1.375934287e-08
+
+STEP 157 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 157 ends. TIME = 2.146458891e-06 DT = 1.375934285e-08
+
+STEP 158 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 158 ends. TIME = 2.160218234e-06 DT = 1.375934284e-08
+
+STEP 159 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 159 ends. TIME = 2.173977577e-06 DT = 1.375934282e-08
+
+STEP 160 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 160 ends. TIME = 2.18773692e-06 DT = 1.375934281e-08
+
+STEP 161 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 161 ends. TIME = 2.201496262e-06 DT = 1.375934279e-08
+
+STEP 162 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 162 ends. TIME = 2.215255605e-06 DT = 1.375934278e-08
+
+STEP 163 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 163 ends. TIME = 2.229014948e-06 DT = 1.375934276e-08
+
+STEP 164 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 164 ends. TIME = 2.242774291e-06 DT = 1.375934275e-08
+
+STEP 165 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 165 ends. TIME = 2.256533633e-06 DT = 1.375934274e-08
+
+STEP 166 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 166 ends. TIME = 2.270292976e-06 DT = 1.375934272e-08
+
+STEP 167 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 167 ends. TIME = 2.284052319e-06 DT = 1.375934271e-08
+
+STEP 168 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 168 ends. TIME = 2.297811662e-06 DT = 1.375934269e-08
+
+STEP 169 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 169 ends. TIME = 2.311571004e-06 DT = 1.375934268e-08
+
+STEP 170 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 170 ends. TIME = 2.325330347e-06 DT = 1.375934266e-08
+
+STEP 171 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 171 ends. TIME = 2.33908969e-06 DT = 1.375934265e-08
+
+STEP 172 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 172 ends. TIME = 2.352849032e-06 DT = 1.375934263e-08
+
+STEP 173 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 173 ends. TIME = 2.366608375e-06 DT = 1.375934262e-08
+
+STEP 174 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 174 ends. TIME = 2.380367717e-06 DT = 1.37593426e-08
+
+STEP 175 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 175 ends. TIME = 2.39412706e-06 DT = 1.375934259e-08
+
+STEP 176 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 176 ends. TIME = 2.407886403e-06 DT = 1.375934257e-08
+
+STEP 177 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 177 ends. TIME = 2.421645745e-06 DT = 1.375934256e-08
+
+STEP 178 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 178 ends. TIME = 2.435405088e-06 DT = 1.375934254e-08
+
+STEP 179 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 179 ends. TIME = 2.44916443e-06 DT = 1.375934253e-08
+
+STEP 180 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 180 ends. TIME = 2.462923773e-06 DT = 1.375934251e-08
+
+STEP 181 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 181 ends. TIME = 2.476683115e-06 DT = 1.37593425e-08
+
+STEP 182 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 182 ends. TIME = 2.490442458e-06 DT = 1.375934249e-08
+
+STEP 183 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 183 ends. TIME = 2.5042018e-06 DT = 1.375934248e-08
+
+STEP 184 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 184 ends. TIME = 2.517961143e-06 DT = 1.375934246e-08
+
+STEP 185 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 185 ends. TIME = 2.531720485e-06 DT = 1.375934245e-08
+
+STEP 186 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 186 ends. TIME = 2.545479828e-06 DT = 1.375934244e-08
+
+STEP 187 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 187 ends. TIME = 2.55923917e-06 DT = 1.375934243e-08
+
+STEP 188 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 188 ends. TIME = 2.572998512e-06 DT = 1.375934242e-08
+
+STEP 189 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 189 ends. TIME = 2.586757855e-06 DT = 1.375934241e-08
+
+STEP 190 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 190 ends. TIME = 2.600517197e-06 DT = 1.37593424e-08
+
+STEP 191 starts ...
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:3732 ([92mRegrid[0m) Regridding on level1
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:3732 ([92mRegrid[0m) Regridding on level2
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:3732 ([92mRegrid[0m) Regridding on level2
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 191 ends. TIME = 2.61427654e-06 DT = 1.37593424e-08
+
+STEP 192 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 192 ends. TIME = 2.628035882e-06 DT = 1.375934243e-08
+
+STEP 193 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 193 ends. TIME = 2.641795224e-06 DT = 1.375934243e-08
+
+STEP 194 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 194 ends. TIME = 2.655554567e-06 DT = 1.375934243e-08
+
+STEP 195 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 195 ends. TIME = 2.669313909e-06 DT = 1.375934242e-08
+
+STEP 196 starts ...
+[1m[34mMESSAGE[0m: [94msrc/Integrator/Hydro2.cpp[0m:3732 ([92mRegrid[0m) Regridding on level2
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 196 ends. TIME = 2.683073252e-06 DT = 1.375934242e-08
+
+STEP 197 starts ...
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=0 1.37593e-08 (1)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=0       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=1 6.87967e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=1       -->    1.37593e-08
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:328 ([92mDynamicTimestep_Update[0m) lev=2 3.43984e-09 (2)
+[1m[34mMESSAGE[0m: [94m./src/Integrator/Integrator.H[0m:332 ([92mDynamicTimestep_Update[0m) lev=2       -->    1.37593e-08
+STEP 197 ends. TIME = 2.696832594e-06 DT = 1.375934241e-08
+
+STEP 198 starts ...

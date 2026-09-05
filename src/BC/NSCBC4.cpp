@@ -31,6 +31,7 @@ void NSCBC4::Parse(NSCBC4 &value, IO::ParmParse &pp)
 {
     // Parse global parameters
     pp.query_default("nscbc.small", value.small, 1.0e-10);
+    pp.query_default("nscbc.ghost_mode", value.ghost_mode, 3);  // 3=1st-order LODI+linear ghosts (default; see NSCBC4.H); 0=legacy layered (|R|>1 at grid scale)
 
     // Parse boundary parameters for each face
     value.params_xlo = ParseFace(pp, "nscbc.xlo");

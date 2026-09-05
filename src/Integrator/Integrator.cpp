@@ -436,6 +436,10 @@ Integrator::FillPatch(int lev, amrex::Real time,
             mapper = &amrex::cell_cons_interp;
 
         amrex::Vector<amrex::BCRec> bcs(destination_mf.nComp(), physbc.GetBCRec()); // todo
+        if (bcs[0].lo(0) == amrex::BCType::bogus)
+            Util::Warning(INFO, "FillPatch with BOGUS BCRec (ncomp=", destination_mf.nComp(),
+                          ", nghost=", destination_mf.nGrow(), "): slope stencils at physical "
+                          "boundaries will read unfilled cells");
         amrex::FillPatchTwoLevels(destination_mf, time, cmf, ctime, fmf, ftime,
             0, icomp, destination_mf.nComp(), geom[lev - 1], geom[lev],
             physbc, 0,

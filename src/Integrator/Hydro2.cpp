@@ -324,6 +324,43 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // BOUNDRY CONDITITIONS
         pp_query_default("nghost", value.nghost, 2); // Number of Ghost Cells (NOTE: NSCBC can only use 2 or 4 nghost) ### WIP ### Add nghost cabability for nghost
 
+        // GUARD: FillPatch of a fine level's ghost region interpolates from
+        // the PARENT level, and needs the parent's valid data to cover the
+        // fine box grown by nghost (coarsened by the ref ratio) PLUS one
+        // coarse cell for the conservative-interp slope stencil.  AMReX's
+        // proper nesting only guarantees coverage at blocking_factor
+        // granularity, so amr.blocking_factor < 2*nghost lets a fine box's
+        // ghost region poke past the parent's coverage -- and
+        // FillPatchTwoLevels then SILENTLY interpolates from UNFILLED
+        // memory into coarse-fine ghosts (measured 2026-09-03 on
+        // FlowMarmottant/input_Marmottant_Laplace_Static, nghost=4:
+        // blocking_factor 2 and 4 trap on snan-poisoned coarse cells inside
+        // amrex::mf_compute_slopes; 8 runs clean).  Whatever the heap held
+        // becomes ghost data: silent corruption at best, NaN blow-ups at
+        // worst, worse at small radii / deep refinement.  Fail loudly here
+        // instead.
+        {
+            // With amr.blocking_factor < 2*nghost the DEFAULT proper-nesting
+            // buffer would let coarse-fine FillPatch read unfilled parent
+            // cells (silent ghost corruption).  hydro2.cc auto-raises
+            // amr.n_proper before the mesh is constructed, so small blocking
+            // factors are safe without input edits; this is informational.
+            amrex::ParmParse pp_amr("amr");
+            int max_level_in = 0, nproper_in = 1;
+            pp_amr.query("max_level", max_level_in);
+            pp_amr.query("n_proper", nproper_in);
+            std::vector<int> bf;
+            pp_amr.queryarr("blocking_factor", bf);
+            if (max_level_in > 0)
+                for (int b : bf)
+                    if (b * nproper_in < 2 * value.nghost)
+                        Util::Warning(INFO, "amr.blocking_factor=", b, " with amr.n_proper=",
+                                      nproper_in, " gives a proper-nesting width below nghost=",
+                                      value.nghost, " + interp stencil: coarse-fine ghost fills "
+                                      "may read unfilled parent cells. Raise amr.n_proper "
+                                      "(hydro2.cc auto-sets it unless overridden).");
+        }
+
         bool uses_nscbc = false;
         std::vector<std::string> bc_faces = { "xlo", "xhi", "ylo", "yhi" };
 #if AMREX_SPACEDIM == 3
@@ -373,10 +410,23 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                 Util::Abort(INFO, "NSCBC requires nghost = 2 or 4");
             }
 
-            // Use BC::Nothing for standard BC pointers
-            value.density_bc = &value.bc_nothing;
-            value.energy_bc = &value.bc_nothing;
-            value.momentum_bc = &value.bc_nothing;
+            // ZERO-NEUMANN (not BC::Nothing) for the standard BC pointers.
+            // These objects are ALSO the physbc handed to FillPatch /
+            // RemakeLevel / InterpFromCoarseLevel for every registered fab.
+            // With BC::Nothing, any fine level that touches a PHYSICAL
+            // boundary interpolates its new cells from coarse slope stencils
+            // whose out-of-domain neighbors were NEVER FILLED (snan trap in
+            // amrex::mf_cell_cons_lin_interp the moment refinement reaches an
+            // NSCBC face; unpoisoned builds instead inherit heap garbage that
+            // the NSCBC face fill never repairs -- measured as a zero-pressure
+            // gas-like state in the last boundary cell breaching the Tammann
+            // floor at t~4.7e-4 on the FlowMarmottant sweep's smallest
+            // radius).  Zero-neumann gives the interpolation finite,
+            // smooth out-of-domain data; NSCBC4 still overwrites the real
+            // characteristic ghosts afterward in FillGhost4BC.
+            value.density_bc = new BC::Constant(BC::Constant::ZeroNeumann(1));
+            value.energy_bc = new BC::Constant(BC::Constant::ZeroNeumann(1));
+            value.momentum_bc = new BC::Constant(BC::Constant::ZeroNeumann(AMREX_SPACEDIM));
 
             Util::Message(INFO, "nscbc_bc Pointer=", value.nscbc_bc);
             Util::Message(INFO, "nscbc4_bc Pointer=", value.nscbc4_bc);
@@ -1670,6 +1720,17 @@ Hydro2::RHS(int lev,
         Set::Patch<const Set::Scalar> s_E0   = embedded.energy0_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> s_E1   = embedded.energy1_mf.Patch(lev, mfi);
 
+        // Gate the SHELL and COLOUR-FUNCTION rows on the physics that reads
+        // them.  With marmottant=0 the shell is a pure passenger, but its bulk
+        // evolution D(Gamma)/Dt = -Gamma div_s(u) integrates div(u)
+        // exponentially inside a compressing/expanding bubble (measured on the
+        // 3D driven bubble: shell_min 1.0 -> -4e-4 by t=3.5e-3, NaN by ~5e-3,
+        // at which point WritePlotFile's NaN check ABORTS an otherwise healthy
+        // run -- the cluster LowAmp_NSCBC death).  Gating also removes ~12-18
+        // wasted limiter reconstructions per cell per stage.
+        const int shell_row_on = marmottant;
+        const int cfun_row_on  = capillary_closure;
+
         // Device-safe copies of the symmetry-face flags: the [=] kernel lambda
         // captures member arrays through `this`, which is a host pointer on a
         // GPU build.
@@ -2417,6 +2478,21 @@ Hydro2::RHS(int lev,
             // ~2%/ms (sigma decayed to 0.54 at 10 ms while the bubble expanded --
             // the shell read as COMPRESSING while its surface grew).  Only the
             // Gamma INTERPOLATION is raised in order here, never the velocity.
+            if (!shell_row_on)
+            {
+                shell_rhs(i, j, k) = 0.0;   // frozen at init value; nothing reads it
+            }
+            else if (grad_eta.lpNorm<2>() * DX[0] < 1.0e-8)
+            {
+                // BULK ANCHOR: outside the band Gamma is unused ("in the bulk
+                // grad_eta -> 0 ... Gamma there is unused" below) but its
+                // -Gamma div(u) evolution still integrates the bulk dilatation
+                // and rots away from 1.0 without bound.  Freeze it; the hard
+                // reset to the unstrained value lives in RelaxAndReinit.
+                shell_rhs(i, j, k) = 0.0;
+            }
+            else
+            {
             auto shell_face = [&](int di, int dj, int dk,
                                   Set::Scalar &qL, Set::Scalar &qR)
             {
@@ -2485,6 +2561,7 @@ Hydro2::RHS(int lev,
             // simpler shared expression is kept.
             const Set::Scalar div_s_u = gradu.trace() - n_hat.dot(gradu * n_hat);
             shell_rhs(i, j, k) = -u_dot_gradG - shell(i, j, k) * div_s_u;
+            }   // end shell_row_on / band gate
 
             // ------------------------------------------------------------
             // COLOUR FUNCTION  dc/dt + u.grad(c) = 0   (Schmidmayer 2017 eq. 3)
@@ -2494,6 +2571,12 @@ Hydro2::RHS(int lev,
             // same truncation error -- so c and eta cannot drift apart for
             // numerical reasons, only through the physical difference between
             // them (alpha_1 carries the relaxation source mu(P1-P2); c does not).
+            if (!cfun_row_on)
+            {
+                cfun_rhs(i, j, k) = 0.0;    // colour function unused without the closure
+            }
+            else
+            {
             const Set::Scalar div_uC_x = (flux_xhi.u_interface * c_face_xhi
                                         - flux_xlo.u_interface * c_face_xlo) / DX[0];
             const Set::Scalar div_uC_y = (flux_yhi.u_interface * c_face_yhi
@@ -2504,6 +2587,7 @@ Hydro2::RHS(int lev,
 #endif
             cfun_rhs(i, j, k) = -(AMREX_D_TERM(div_uC_x, + div_uC_y, + div_uC_z))
                               + cfun(i, j, k) * div_u;
+            }
 
             // NOTE: a surface-diffusion term  + D_s grad_s^2(Gamma)  (Stone 1990)
             // was implemented and tested here, then removed.  It does not fix the
@@ -4112,8 +4196,14 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     // nonsensical values (clamped to 1.0 or 0.0). eta_bc defaults to
     // zero-neumann: the flow carries eta into the domain via advection;
     // ghost cells should mirror the interior gradient.
+    // shell and cfun ride along: they share eta's zero-gradient far-field
+    // behaviour, and nothing else fills their DOMAIN-face ghosts (RHS only
+    // does the periodic/same-level exchange), so without this the shell
+    // stencil read stale t=0 values at every physical boundary.
     FillBoundariesWithBC(lev, time, eta_bc, {
-            eta_mf[lev].get()
+            eta_mf[lev].get(),
+            shell_mf[lev].get(),
+            cfun_mf[lev].get()
      });
 
 
@@ -4421,6 +4511,10 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         const Set::Scalar g1_ns = eos1.Gamma();
         const Set::Scalar pi1_ns = eos1.P0();
         const Set::Scalar small_ns = small;
+        // DIAGNOSTIC (nscbc.ghost_mode=1): bypass the equilibrium partition and
+        // zero-gradient-copy the per-phase ghosts instead, making the NSCBC
+        // branch's ghost state functionally identical to the Neumann branch.
+        const int gm_copy = (nscbc4_bc != nullptr) ? nscbc4_bc->ghost_mode : 0;
 
         for (amrex::MFIter mfi(rho_total); mfi.isValid(); ++mfi)
         {
@@ -4447,6 +4541,21 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
 #if AMREX_SPACEDIM == 3
                 if (z_outside && z_periodic)  return;                // periodic — leave alone
 #endif
+
+                if (gm_copy == 1)
+                {
+                    const int ic = amrex::min(amrex::max(i, ib_lo), ib_hi);
+                    const int jc = amrex::min(amrex::max(j, jb_lo), jb_hi);
+                    int kc = k;
+#if AMREX_SPACEDIM == 3
+                    kc = amrex::min(amrex::max(k, kb_lo), kb_hi);
+#endif
+                    rho0(i, j, k) = rho0(ic, jc, kc);
+                    rho1(i, j, k) = rho1(ic, jc, kc);
+                    E0(i, j, k)   = E0(ic, jc, kc);
+                    E1(i, j, k)   = E1(ic, jc, kc);
+                    return;
+                }
 
                 const Set::Scalar a1 = std::min(std::max(eta(i, j, k), 0.0), 1.0);
                 const Set::Scalar a2 = 1.0 - a1;
@@ -5387,6 +5496,26 @@ void Hydro2::RelaxAndReinit(int lev)
     // cell count} and print a one-line summary.
     // MERGE (Marmottant): preserve the shell's areal density across the
     // pressure relaxation below (it moves volume between phases, not lipid).
+
+    // SHELL BULK RESET (marmottant only): outside the eta band the areal
+    // density Gamma is physically meaningless and its -Gamma div_s(u)
+    // evolution integrates the bulk dilatation without bound (measured: 1.0
+    // -> negative -> NaN by ~5e-3 on the driven bubble).  The RHS freezes it
+    // in the bulk (see the shell row gate); here it is pinned back to the
+    // unstrained value so re-entrained cells always start from Gamma = 1.
+    if (marmottant)
+    {
+        for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bxs = mfi.validbox();
+            auto shl  = shell_mf[lev]->array(mfi);
+            auto etas = eta_mf[lev]->const_array(mfi);
+            amrex::ParallelFor(bxs, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                const Set::Scalar e = etas(i, j, k);
+                if (e < 1.0e-6 || e > 1.0 - 1.0e-6) shl(i, j, k) = 1.0;
+            });
+        }
+    }
 
     // MERGE (AcousticBC): honour relax_diag instead of the hardcoded `true`
     // that was on the Marmottant side.  That leftover forced the Newton

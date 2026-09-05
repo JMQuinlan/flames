@@ -1,0 +1,139 @@
+#@ [ut_nscbc_reflect1d]
+# =============================================================================
+# NSCBC4 1D REFLECTION-COEFFICIENT UNIT TEST (Tammann water, ~seconds runtime)
+#
+# Pure liquid, quiescent, Gaussian pressure pulse (amp 1000 Pa) at the domain
+# center.  The pulse splits into two acoustic waves that hit the xlo/xhi
+# NSCBC4 outflow faces at t ~ 1.6e-6 s.  A correct non-reflecting outflow
+# returns |R| = |p_reflected|/|p_incident| << 1 (Rudy-Strikwerda residual
+# ~ sigma).  |R| > 1 = amplifying boundary (the FlowMarmottant sweep
+# runaway).  y is PERIODIC so ONLY the 1D x-face physics is exercised --
+# no corners, no edges, no transverse terms.
+#
+# Gate metric (reference/analyze after run): max|p - p_inf| over the domain
+#   at t=1.0e-6  (incident, before wall contact) ~ 500 Pa (split pulse)
+#   at t=4.0e-6  (after reflection)              = |R| * incident
+# =============================================================================
+alamo.program = hydro2
+plot_file = ./tests/FlowAcoustic/output_UT_NSCBC_Quiet2D
+
+amr.plot_dt         = 5.0e-6
+amr.plot_int        = -1
+amr.max_grid_size   = 500000
+amr.blocking_factor = 8
+amr.regrid_int      = 100000
+amr.max_level       = 0
+amr.n_cell          = 64 64
+nghost = 4
+
+timestep                 = 1.0e-10
+dynamictimestep.on       = 1
+dynamictimestep.verbose  = 0
+dynamictimestep.max      = 1e-0
+dynamictimestep.min      = 1e-16
+cfl                      = 0.3
+
+geometry.prob_lo     = -0.0025 -0.0025 0.0
+geometry.prob_hi     =  0.0025  0.0025 0.0
+geometry.is_periodic = 0 0 0
+stop_time = 6.0e-5
+
+### PURE LIQUID: eta = 1 everywhere (phase 0 = Tammann water) ###
+eta.ic.type = expression
+eta.ic.expression.region0 = "1.0"
+epsilon = 1.0e-4
+
+eos0.gamma = 2.35
+eos0.p0    = 1.0e9
+eos0.cp    = 4186.0
+eos0.cv    = 1781.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp    = 1000.0
+eos1.cv    = 714.286
+
+density0.ic.type = expression
+density0.ic.expression.region0 = "1000.0"
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+### GAUSSIAN PULSE, amp 1000 Pa, half-width 0.25 mm, centered ###
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.pamp = 0.0
+pressure0.ic.expression.constant.pw   = 0.00025
+pressure0.ic.expression.region0 = "101325.0 + pamp*exp(-(x*x)/(pw*pw))"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "101325.0"
+
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+sigma = 0.0
+pref  = 0.0
+apply_surface_tension = 0
+capillary_closure     = 0
+marmottant            = 0
+
+Riemann_Solver.type = hllc
+Limiter.type        = vanleer
+integration.type    = RungeKutta
+integration.rk.type = 3
+kappa_method        = 1
+cutoff              = 1e-16
+small               = 1e-8
+
+### NSCBC4 outflow on x faces only; y periodic ###
+density.bc.type.xlo  = nscbc_outflow
+density.bc.type.xhi  = nscbc_outflow
+energy.bc.type.xlo   = nscbc_outflow
+energy.bc.type.xhi   = nscbc_outflow
+momentum.bc.type.xlo = nscbc_outflow nscbc_outflow
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow
+
+nscbc.xlo.type = outflow
+nscbc.xlo.target_p = 101325.0
+nscbc.xlo.sigma = 0.15
+nscbc.xlo.beta  = 0.5
+nscbc.xlo.L_ref = 0.005
+nscbc.xhi.type = outflow
+nscbc.xhi.target_p = 101325.0
+nscbc.xhi.sigma = 0.15
+nscbc.xhi.beta  = 0.5
+nscbc.xhi.L_ref = 0.005
+
+### SOURCE TERMS (required keys, all zero) ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### REFINEMENT (off) ###
+eta_refinement_criterion   = 1e30
+omega_refinement_criterion = 1e30
+p_refinement_criterion     = 1e30
+rho_refinement_criterion   = 1e30
+gradu_refinement_criterion = 1e30
+
+### y faces NSCBC too (quiescent all-NSCBC box; corners active) ###
+density.bc.type.ylo  = nscbc_outflow
+density.bc.type.yhi  = nscbc_outflow
+energy.bc.type.ylo   = nscbc_outflow
+energy.bc.type.yhi   = nscbc_outflow
+momentum.bc.type.ylo = nscbc_outflow nscbc_outflow
+momentum.bc.type.yhi = nscbc_outflow nscbc_outflow
+nscbc.ylo.type = outflow
+nscbc.ylo.target_p = 101325.0
+nscbc.ylo.sigma = 0.15
+nscbc.ylo.beta  = 0.5
+nscbc.ylo.L_ref = 0.005
+nscbc.yhi.type = outflow
+nscbc.yhi.target_p = 101325.0
+nscbc.yhi.sigma = 0.15
+nscbc.yhi.beta  = 0.5
+nscbc.yhi.L_ref = 0.005
