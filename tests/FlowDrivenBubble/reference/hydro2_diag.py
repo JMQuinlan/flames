@@ -219,6 +219,10 @@ def analyze_drive(pfs, amp, omega, phase, pinf, every):
 
 def analyze_log(path):
     """dt history + decay onset + abort lines."""
+    if not os.path.isfile(path):
+        print(f"\n=== LOG: '{path}' not found (skipping log analysis; point --log at "
+              f"the run's console/slurm output) ===")
+        return
     dts, times, steps = [], [], []
     aborts = []
     step_re = re.compile(r"STEP (\d+) ends\. TIME = ([0-9.eE+-]+) DT = ([0-9.eE+-]+)")
