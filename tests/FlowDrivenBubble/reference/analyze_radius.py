@@ -70,7 +70,9 @@ RUNS = [
 # OVERRIDE — active: INCLINE / HPC runs.
 RUNS = [
      dict(label="LowAmp NSCBC (A = 0.001 bar)",
-          out_dir="/mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_LowAmp_NSCBC",
+          #out_dir="/mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_LowAmp_NSCBC",
+          #out_dir="/mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_LowerAmp_NSCBC",
+          out_dir="/mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_LowAmp_NSCBC_Large",
           color="tab:blue"),
 # Local WSL diagnostic runs (2026-09-03 slaving A/B) — uncomment to re-analyze:
 #     dict(label="LowAmp NSCBC (slaved; died 2.03 ms)",

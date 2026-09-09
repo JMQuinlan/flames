@@ -53,7 +53,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Collapsing_Neumann_3D
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Collapsing_Large_3D_MergeBaseHybrid
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Collapsing_Large_3D
 
 ### MESHING ###
 amr.plot_int       = -1
