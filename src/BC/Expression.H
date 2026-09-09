@@ -129,6 +129,17 @@ public:
         bcmap["inflow"] = (int)amrex::LinOpBCType::inflow;
         bcmap["Periodic"] = (int)amrex::LinOpBCType::Periodic;
         bcmap["periodic"] = (int)amrex::LinOpBCType::Periodic;
+        // NSCBC face types: handled by the characteristic BC (NSCBC/NSCBC4)
+        // downstream; here they clamp-copy in FillBoundary and read as
+        // foextrap in GetBCRec so Expression stays a safe FillPatch physbc.
+        bcmap["nscbc_inflow"]     = BCUtil::NSCBC_INFLOW;
+        bcmap["NSCBC_INFLOW"]     = BCUtil::NSCBC_INFLOW;
+        bcmap["nscbc_outflow"]    = BCUtil::NSCBC_OUTFLOW;
+        bcmap["NSCBC_OUTFLOW"]    = BCUtil::NSCBC_OUTFLOW;
+        bcmap["nscbc_slipwall"]   = BCUtil::NSCBC_SLIPWALL;
+        bcmap["NSCBC_SLIPWALL"]   = BCUtil::NSCBC_SLIPWALL;
+        bcmap["nscbc_noslipwall"] = BCUtil::NSCBC_NOSLIPWALL;
+        bcmap["NSCBC_NOSLIPWALL"] = BCUtil::NSCBC_NOSLIPWALL;
 
 
 

@@ -410,6 +410,26 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                 Util::Abort(INFO, "NSCBC requires nghost = 2 or 4");
             }
 
+            // PER-FACE EXPRESSION BCs (2026-09-08), not a global fill.  The
+            // previous global ZeroNeumann (and BC::Nothing before it) DISCARDED
+            // the input's per-face types in NSCBC mode -- in particular
+            // REFLECT_ODD on the normal momentum at symmetry planes.  NSCBC4
+            // skips faces typed 'none', so nothing ever wrote MIRRORED ghosts
+            // at the symmetry planes: the reconstruction stencils at the first
+            // interior faces read unreflected (+u instead of -u) ghosts, and
+            // the resulting 2-3-cell boundary layer error made cells on the
+            // symmetry AXES oscillate at ~2x the off-axis amplitude (~7x at
+            // the triple corner) -- driving rectified trace-liquid transport
+            // along the sealed axes into the origin trap (driven-bubble
+            // deaths at t~8-9e-3, amplitude-independent; the user spotted the
+            // axis pattern in the plotfiles).  BC::Expression honours
+            // REFLECT_* per face, clamp-fills nscbc_* faces (finite data for
+            // FillPatch; NSCBC4 overwrites the real characteristic ghosts),
+            // and its GetBCRec translates NSCBC types to foextrap.
+            value.density_bc = new BC::Expression(1, pp, "density.bc");
+            value.energy_bc = new BC::Expression(1, pp, "energy.bc");
+            value.momentum_bc = new BC::Expression(AMREX_SPACEDIM, pp, "momentum.bc");
+            /* superseded:
             // ZERO-NEUMANN (not BC::Nothing) for the standard BC pointers.
             // These objects are ALSO the physbc handed to FillPatch /
             // RemakeLevel / InterpFromCoarseLevel for every registered fab.
@@ -427,6 +447,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             value.density_bc = new BC::Constant(BC::Constant::ZeroNeumann(1));
             value.energy_bc = new BC::Constant(BC::Constant::ZeroNeumann(1));
             value.momentum_bc = new BC::Constant(BC::Constant::ZeroNeumann(AMREX_SPACEDIM));
+            */
 
             Util::Message(INFO, "nscbc_bc Pointer=", value.nscbc_bc);
             Util::Message(INFO, "nscbc4_bc Pointer=", value.nscbc4_bc);
