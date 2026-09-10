@@ -1,0 +1,136 @@
+#@ [sharpen_2d_moving]
+#@ exe=hydro2
+#@ dim=2
+# =============================================================================
+# INTERFACE-SHARPENING UNIT TEST -- 2D MOVING SLAB (advection x sharpening)
+# =============================================================================
+# A smeared phase-0 SLAB (eta=1 in 0.25<x<0.75) advecting at uniform u_x=1 in a
+# fully periodic, equal-density, uniform-pressure box.  Galilean: the slab just
+# translates; equilibrium (uniform u,p) must be preserved.  This is the real test
+# of a CONSERVATIVE sharpener under motion -- the band must hold at the target
+# thickness while advecting, and int(eta), momentum and energy must all be flat.
+# Run apply_sharpening 0 vs 1; checker: reference/check_sharpening_full.py
+# =============================================================================
+
+alamo.program = hydro2
+
+plot_file = ./tests/FlowSharpening/output_Sharpen_2D_Moving
+
+### MESHING (uniform, no AMR) ###
+amr.plot_int        = 4
+amr.max_grid_size   = 32
+amr.blocking_factor = 8
+amr.max_level       = 0
+amr.n_cell          = 128 128
+nghost = 4
+
+### TIME ###
+timestep                = 1.0e-5
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-2
+dynamictimestep.min     = 1.0e-12
+cfl                     = 0.4
+stop_time               = 0.5
+
+### DIMENSIONS -- fully periodic (slab advects through cleanly) ###
+geometry.prob_lo     = 0.0 0.0
+geometry.prob_hi     = 1.0 1.0
+geometry.is_periodic = 1 1
+
+### ETA IC -- smeared phase-0 SLAB in [0.25,0.75] (periodic-compatible) ###
+eta.ic.type = expression
+eta.ic.expression.constant.eps_ic = 0.05
+eta.ic.expression.region0 = "0.5*(tanh((x - 0.25)/eps_ic) - tanh((x - 0.75)/eps_ic))"
+
+### sharpening target thickness: 4.4*eps/dx cells; dx=0.0078 -> eps=0.012 ~ 6.6 cells ###
+epsilon = 0.012
+
+### EOS -- two identical ideal gases ###
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cv    = 720.0
+eos0.cp    = 1008.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 720.0
+eos1.cp    = 1008.0
+
+### HYDRO IC -- equal density, uniform pressure, UNIFORM u_x = 1 (advection) ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "1.0"
+velocity0.ic.expression.region1 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "1.0"
+velocity1.ic.expression.region1 = "0.0"
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "1.0"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "1.0"
+
+### NO viscosity / surface tension ###
+mu0 = 0.0
+mu0_b = 0.0
+mu1 = 0.0
+mu1_b = 0.0
+sigma = 0.0
+pref  = 0.0
+
+### BCs -- fully periodic ###
+eta.bc.type.xlo = periodic
+eta.bc.type.xhi = periodic
+eta.bc.type.ylo = periodic
+eta.bc.type.yhi = periodic
+density.bc.type.xlo = periodic
+density.bc.type.xhi = periodic
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+energy.bc.type.xlo = periodic
+energy.bc.type.xhi = periodic
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+momentum.bc.type.xlo = periodic periodic
+momentum.bc.type.xhi = periodic periodic
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+### REFINEMENT (off) ###
+eta_refinement_criterion   = 1.0e+10
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCE ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS ###
+apply_surface_tension = 0
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+grav                  = 0.0
+
+### NUMERICS ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3
+kappa_method        = 1
+
+### INTERFACE SHARPENING (override apply_sharpening on the CLI: 0 vs 1) ###
+apply_sharpening     = 0
+sharpening_frequency = 2
+reinit_max_iter      = 10
+density_max_iter     = 10
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+
+equalize_ic_pressure = 1
