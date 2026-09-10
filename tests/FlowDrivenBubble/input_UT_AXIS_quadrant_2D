@@ -154,12 +154,12 @@ pref  = 0.0
 
 ### BOUNDARY CONDITIONS - NSCBC4 non-reflecting outflow, target = p_inf ###
 density.bc.type.xhi  = nscbc_outflow
-density.bc.type.xlo  = nscbc_outflow
-density.bc.type.ylo  = nscbc_outflow
+density.bc.type.xlo  = REFLECT_EVEN
+density.bc.type.ylo  = REFLECT_EVEN
 density.bc.type.yhi  = nscbc_outflow
 energy.bc.type.xhi   = nscbc_outflow
-energy.bc.type.xlo   = nscbc_outflow
-energy.bc.type.ylo   = nscbc_outflow
+energy.bc.type.xlo   = REFLECT_EVEN
+energy.bc.type.ylo   = REFLECT_EVEN
 energy.bc.type.yhi   = nscbc_outflow
 momentum.bc.type.xhi = nscbc_outflow nscbc_outflow
 momentum.bc.type.xlo = REFLECT_ODD  REFLECT_EVEN

@@ -4393,6 +4393,24 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         const bool z_periodic = geom[lev].isPeriodic(2);
 #endif
 
+        // Faces with nscbc.<face>.type = none (e.g. REFLECT symmetry planes)
+        // are owned by the registered field BCs: their ghosts were mirror-
+        // filled by the Expression BCs above and must NOT be overwritten by
+        // the eta clamp-extrapolation or the post-NSCBC equilibrium
+        // partition below.  The partition at such a face used CLAMPED eta
+        // (killing the layer-2 mirror) and STALE pressure ghosts (STEP 4
+        // computes pressure in the valid box only; only NSCBC faces get
+        // ghost pressure), producing a one-cell overpressure dipole at the
+        // wall (+15% of the local signal, quadrant-vs-full-domain A/B).
+        const bool ns_xlo = (nscbc4_bc != nullptr) ? nscbc4_bc->FaceActive(0, 0) : true;
+        const bool ns_xhi = (nscbc4_bc != nullptr) ? nscbc4_bc->FaceActive(0, 1) : true;
+        const bool ns_ylo = (nscbc4_bc != nullptr) ? nscbc4_bc->FaceActive(1, 0) : true;
+        const bool ns_yhi = (nscbc4_bc != nullptr) ? nscbc4_bc->FaceActive(1, 1) : true;
+#if AMREX_SPACEDIM == 3
+        const bool ns_zlo = (nscbc4_bc != nullptr) ? nscbc4_bc->FaceActive(2, 0) : true;
+        const bool ns_zhi = (nscbc4_bc != nullptr) ? nscbc4_bc->FaceActive(2, 1) : true;
+#endif
+
         // --------------------------------------------------------------------
         // PRE-NSCBC: refresh periodic ghosts on ALL 6-eq conservative
         // primaries.  Without this, periodic ghosts of (alpha rho)_k,
@@ -4446,6 +4464,14 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
                 if (y_outside && y_periodic)  return;                // periodic — leave alone
 #if AMREX_SPACEDIM == 3
                 if (z_outside && z_periodic)  return;                // periodic — leave alone
+#endif
+                // Ghost touching a non-NSCBC (mirror) face: keep the STEP-3
+                // Expression fill (mirror in the reflect direction, clamp in
+                // any composed nscbc direction).
+                if ((i < ib_lo && !ns_xlo) || (i > ib_hi && !ns_xhi)) return;
+                if ((j < jb_lo && !ns_ylo) || (j > jb_hi && !ns_yhi)) return;
+#if AMREX_SPACEDIM == 3
+                if ((k < kb_lo && !ns_zlo) || (k > kb_hi && !ns_zhi)) return;
                 const int kb = std::min(std::max(k, kb_lo), kb_hi);
 #else
                 const int kb = k;
@@ -4561,6 +4587,15 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
                 if (y_outside && y_periodic)  return;                // periodic — leave alone
 #if AMREX_SPACEDIM == 3
                 if (z_outside && z_periodic)  return;                // periodic — leave alone
+#endif
+                // Ghost touching a non-NSCBC (mirror) face: the per-phase
+                // ghosts were mirror-filled by the pre-NSCBC Expression BCs;
+                // the partition would rebuild them from clamped eta and stale
+                // ghost pressure.  Keep the mirrors.
+                if ((i < ib_lo && !ns_xlo) || (i > ib_hi && !ns_xhi)) return;
+                if ((j < jb_lo && !ns_ylo) || (j > jb_hi && !ns_yhi)) return;
+#if AMREX_SPACEDIM == 3
+                if ((k < kb_lo && !ns_zlo) || (k > kb_hi && !ns_zhi)) return;
 #endif
 
                 if (gm_copy == 1)

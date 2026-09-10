@@ -92,6 +92,18 @@ private:
     Set::Scalar small = 1.0e-10;
 
 public:
+    /// Whether a face runs the NSCBC machinery (type != None).  A face left
+    /// as None (e.g. a REFLECT symmetry plane) is owned by the registered
+    /// field BCs; the integrator must not overwrite its ghosts with the
+    /// post-NSCBC equilibrium partition.
+    bool FaceActive(int dim, int side) const
+    {
+        const BoundaryParams *p[3][2] = { { &params_xlo, &params_xhi },
+                                          { &params_ylo, &params_yhi },
+                                          { &params_zlo, &params_zhi } };
+        return p[dim][side]->type != Type::None;
+    }
+
     /// Ghost-construction mode (nscbc.ghost_mode):
     ///   3 (DEFAULT) = LODI with FIRST-ORDER one-sided derivatives and linear
     ///       gradient-extrapolated ghosts.  The legacy path (mode 0: 2nd-order
