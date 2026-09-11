@@ -46,7 +46,7 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTryonFun/Planes/T38-Talon/ou
 amr.plot_dt          = 0.02
 amr.max_grid_size    = 32           # better load balance across 128 ranks
 amr.blocking_factor  = 16
-amr.regrid_int       = 10
+amr.regrid_int       = 25           # shock system is quasi-steady once formed; 10 re-tags (and re-inits STL phi) too often
 amr.grid_eff         = 0.8
 amr.max_level        = 3             # imaging: dx_finest=0.0625 m; use 4 for forces
 amr.n_cell           = 112 32 64     # dx=0.5; widened lateral (y 0..16, z +-16) so Ma-angle-65deg shocks clear the imaging window
@@ -176,8 +176,8 @@ energy.bc.type.zhi   = neumann
 eta_refinement_criterion   = 1e10
 omega_refinement_criterion = 1e10
 gradu_refinement_criterion = 1e10
-p_refinement_criterion     = 0.1
-rho_refinement_criterion   = 0.1
+p_refinement_criterion     = 8000.0     # Pa (abs jump across a cell x2): shock Dp~25kPa; tags bow/canopy/wing, drops <~2kPa noise
+rho_refinement_criterion   = 0.5        # kg/m^3 > shock Drho~0.2 -> density OFF; pressure (8000 Pa) drives AMR
 cutoff = 1e-16
 
 ### SOURCE TERMS ###

@@ -177,8 +177,8 @@ energy.bc.type.zhi   = neumann
 eta_refinement_criterion   = 1e10
 omega_refinement_criterion = 1e10
 gradu_refinement_criterion = 1e10
-p_refinement_criterion     = 0.1
-rho_refinement_criterion   = 0.1
+p_refinement_criterion     = 8000.0     # Pa (abs jump x2, NOT a fraction): shock Dp~25kPa; tags strong shocks, drops <~2kPa noise
+rho_refinement_criterion   = 0.5        # kg/m^3 > shock Drho~0.2 -> density OFF; pressure drives AMR
 cutoff = 1e-16
 
 ### SOURCE TERMS ###
