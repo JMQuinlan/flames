@@ -79,8 +79,8 @@ solid.phi.ic.type                 = stl
 solid.phi.ic.stl.filename         = ./tests/FlowTryonFun/Planes/T38-Talon/t38_xflow.STL
 solid.phi.ic.stl.scale            = 0.059503          # 14.14 m / 237.64 model-units -> real length
 solid.phi.ic.stl.center           = -4.035 0.0 -1.566        # -scale*bbox_center -> origin-centered (m)
-solid.phi.ic.stl.eps              = 0.1875            # 3 finest cells (3*0.0625)
-solid.phi.ic.stl.reverse_normal   = 0                # set 1 if the solid comes out inverted (fluid<->solid swapped)
+#solid.phi.ic.stl.eps              = 0.1875            # 3 finest cells (3*0.0625)
+solid.phi.ic.stl.eps              = 0.05            # 1 finest cells (3*0.0625)
 
 # Prescribed quiescent solid target (physical air at rest, p=p_inf):
 solid.density.ic.type = constant
@@ -177,7 +177,7 @@ eta_refinement_criterion   = 1e10
 omega_refinement_criterion = 1e10
 gradu_refinement_criterion = 1e10
 p_refinement_criterion     = 8000.0     # Pa (abs jump across a cell x2): shock Dp~25kPa; tags bow/canopy/wing, drops <~2kPa noise
-rho_refinement_criterion   = 0.5        # kg/m^3 > shock Drho~0.2 -> density OFF; pressure (8000 Pa) drives AMR
+rho_refinement_criterion   = 0.08       # kg/m^3 (abs jump x2): shock Drho~0.2; the schlieren variable, same shocks
 cutoff = 1e-16
 
 ### SOURCE TERMS ###
