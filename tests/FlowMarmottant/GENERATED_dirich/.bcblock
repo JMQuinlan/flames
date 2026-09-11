@@ -1,0 +1,33 @@
+bc.primitive = 1
+
+pressure.bc.constant.p_inf = 101325.0
+pressure.bc.type.xlo = dirichlet
+pressure.bc.val.xlo  = "p_inf"
+pressure.bc.type.xhi = dirichlet
+pressure.bc.val.xhi  = "p_inf"
+pressure.bc.type.ylo = dirichlet
+pressure.bc.val.ylo  = "p_inf"
+pressure.bc.type.yhi = dirichlet
+pressure.bc.val.yhi  = "p_inf"
+
+momentum.bc.type.xlo = dirichlet dirichlet
+momentum.bc.val.xlo  = "0.0" "0.0"
+momentum.bc.type.xhi = dirichlet dirichlet
+momentum.bc.val.xhi  = "0.0" "0.0"
+momentum.bc.type.ylo = dirichlet dirichlet
+momentum.bc.val.ylo  = "0.0" "0.0"
+momentum.bc.type.yhi = dirichlet dirichlet
+momentum.bc.val.yhi  = "0.0" "0.0"
+
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.xlo  = neumann
+energy.bc.type.xhi  = neumann
+energy.bc.type.ylo  = neumann
+energy.bc.type.yhi  = neumann
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = neumann
+eta.bc.type.yhi = neumann

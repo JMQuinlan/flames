@@ -1,8 +1,8 @@
-#@ [@NAMETAG@]
+#@ [r001064300]
 #@ exe=hydro2
 #@ dim=2
 # =============================================================================
-# MARMOTTANT COATED-BUBBLE STATIC LAPLACE TEST  --  R0 = @R0@ m
+# MARMOTTANT COATED-BUBBLE STATIC LAPLACE TEST  --  R0 = 1.06430000e-03 m
 # =============================================================================
 # TEMPLATE.  RUN_MARMOTTANT_SWEEP.bash fills the @...@ placeholders per case.
 # Do not run this file directly.
@@ -14,79 +14,79 @@
 #                    chi (Gamma_buck/Gamma - 1)       ramp                  (elastic)
 #                    sigma_break                      Gamma <= Gamma_rupt   (ruptured)
 #
-#   chi        = @CHI@ N/m        shell elastic modulus
-#   R_buckling = @RBUCK@ m        sigma = 0 at and below this radius
-#   sigma_brk  = @SBREAK@ N/m     rupture tension (= clean-liquid sigma)
-#   R_rupture  = @RRUPT@ m        = R_buckling sqrt(1 + sigma_brk/chi)
+#   chi        = 0.55 N/m        shell elastic modulus
+#   R_buckling = 1.0e-3 m        sigma = 0 at and below this radius
+#   sigma_brk  = 0.073 N/m     rupture tension (= clean-liquid sigma)
+#   R_rupture  = 1.06429661e-03 m        = R_buckling sqrt(1 + sigma_brk/chi)
 #
-# This case:  R0/R_buckling = @RRATIO@  ->  @REGIME@ branch,  sigma_eff = @SIGMA0@ N/m
+# This case:  R0/R_buckling = 1.06430  ->  ruptured branch,  sigma_eff = 7.30000000e-02 N/m
 #
 # Laplace balance (2D cylindrical, single curvature):
-#     p_gas - p_liquid = sigma_eff / R0 = @DP@ Pa   ->   p_gas = @PGAS@ Pa
+#     p_gas - p_liquid = sigma_eff / R0 = 68.589683 Pa   ->   p_gas = 101393.589683 Pa
 # The bubble starts in mechanical equilibrium, so the CORRECT ANSWER IS THAT
 # NOTHING MOVES.  Any radius drift, tension spread, or interfacial velocity is
 # numerical.
 #
-# Mesh: 64x64 base + @MAXLEV@ AMR levels over a @BOX@ m box.
-#   dx_finest = @DXFINE@ m,  epsilon = @EPSILON@ m  (eps/dx = @EPSDX@)
-# Time: capillary time sqrt(rho R^3/sigma) = @TCAP@ s; stop_time = @STOP_TIME@ s.
+# Mesh: 64x64 base + 1 AMR levels over a 4.000000e-03 m box.
+#   dx_finest = 3.12500000e-05 m,  epsilon = 6.25000000e-05 m  (eps/dx = 2)
+# Time: capillary time sqrt(rho R^3/sigma) = 3.701166e-03 s; stop_time = 1.0e-2 s.
 # =============================================================================
 
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = @OUTPUT_PATH@
+plot_file = /home/ttryon/Desktop/flames2/bin/tests/FlowMarmottant/final/R001064300
 
 ### MESHING ###
-amr.plot_dt         = @PLOT_DT@
+amr.plot_dt         = 5.000000e-04
 amr.plot_int        = -1
 amr.max_grid_size   = 500000
 amr.blocking_factor = 8
 amr.regrid_int      = 10
 amr.grid_eff        = 0.8
-amr.max_level       = @MAXLEV@
+amr.max_level       = 1
 amr.n_cell          = 64 64
 
 nghost = 4
 
 ### TIME STEPPING ###
-timestep                 = @DT_INIT@
+timestep                 = 1.0e-12
 dynamictimestep.on       = 1
 dynamictimestep.verbose  = 0
 dynamictimestep.max      = 1e-0
-dynamictimestep.min      = @DT_MIN@
+dynamictimestep.min      = 1.0e-16
 cfl                      = 0.3
 
 ### DIMENSIONS ###
-geometry.prob_lo     = @NEG_HALF@ @NEG_HALF@ 0.0
-geometry.prob_hi     = @HALF@ @HALF@ 0.0
+geometry.prob_lo     = -2.00000000e-03 -2.00000000e-03 0.0
+geometry.prob_hi     = 2.00000000e-03 2.00000000e-03 0.0
 geometry.is_periodic = 0 0 0
 
-stop_time = @STOP_TIME@
+stop_time = 1.0e-2
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = @EPSILON@
-eta.ic.expression.constant.R0      = @R0@
+eta.ic.expression.constant.epsilon = 6.25000000e-05
+eta.ic.expression.constant.R0      = 1.06430000e-03
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt((x)**2 + (y)**2) - R0)/(epsilon)))"
 epsilon = eta.ic.expression.constant.epsilon
 
 ### EQUATIONS OF STATE ###
 # phase 0 = liquid (stiffened gas), phase 1 = gas (ideal)
-eos0.gamma = @GAM_L@
-eos0.p0    = @PINF_L@
-eos0.cp    = @CP_L@
-eos0.cv    = @CV_L@
-eos1.gamma = @GAM_G@
+eos0.gamma = 2.35
+eos0.p0    = 1.0e9
+eos0.cp    = 4186.0
+eos0.cv    = 1781.0
+eos1.gamma = 1.4
 eos1.p0    = 0.0
-eos1.cp    = @CP_G@
-eos1.cv    = @CV_G@
+eos1.cp    = 1000.0
+eos1.cv    = 714.286
 
 ### HYDRO INITIAL CONDITIONS ###
 density0.ic.type = expression
-density0.ic.expression.region0 = "@RHO_L@"
+density0.ic.expression.region0 = "1000.0"
 density1.ic.type = expression
-density1.ic.expression.region0 = "@RHO_G@"
+density1.ic.expression.region0 = "1.0"
 
 velocity0.ic.type = expression
 velocity0.ic.expression.region0 = "0.0"
@@ -96,14 +96,14 @@ velocity1.ic.expression.region0 = "0.0"
 velocity1.ic.expression.region1 = "0.0"
 
 pressure0.ic.type = expression
-pressure0.ic.expression.region0 = "@PLIQ@"      # liquid (outside, eta=1)
+pressure0.ic.expression.region0 = "101325.0"      # liquid (outside, eta=1)
 pressure1.ic.type = expression
-pressure1.ic.expression.region0 = "@PGAS@"      # gas    (inside,  eta=0)
+pressure1.ic.expression.region0 = "101393.589683"      # gas    (inside,  eta=0)
 
 ### VISCOSITY ###
-mu0   = @MU_L@
+mu0   = 1.0e-3
 mu0_b = 0.0
-mu1   = @MU_G@
+mu1   = 1.8e-5
 mu1_b = 0.0
 
 pref = 0.0
@@ -111,24 +111,24 @@ pref = 0.0
 ### SURFACE TENSION ###
 # `sigma` is the clean-liquid tension; with marmottant=1 it is also the value
 # the ruptured branch saturates at, and the one dt_capillary is sized on.
-sigma = @SBREAK@
+sigma = 0.073
 
 ### MARMOTTANT COATED SHELL ###
-marmottant               = @MARMOTTANT@
-marmottant.R0            = @R0@        # reference radius: shell starts UNSTRAINED here
-marmottant.chi           = @CHI@
-marmottant.R_buckling    = @RBUCK@
-marmottant.sigma_break   = @SBREAK@
+marmottant               = 1
+marmottant.R0            = 1.06430000e-03        # reference radius: shell starts UNSTRAINED here
+marmottant.chi           = 0.55
+marmottant.R_buckling    = 1.0e-3
+marmottant.sigma_break   = 0.073
 
 ### CAPILLARY FORMULATION ###
 # Schmidmayer 2017 operator split  U^{n+1} = L_relax L_cap L_hyper(U^n), with
 # the capillary energy sigma|grad c| carried in the conserved total energy and
 # Omega built from a separately-advected colour function c.
-capillary_closure = @CAP_CLOSURE@
+capillary_closure = 1
 
 ### NUMERICS ###
 Riemann_Solver.type = hllc
-Limiter.type        = @LIMITER@
+Limiter.type        = vanleer
 kappa_method        = 1
 
 ### DEBUG (off for production; see Hydro2.H) ###
@@ -136,8 +136,22 @@ nan_check  = 0
 verbose    = 0
 relax_diag = 0
 
-### BOUNDARY CONDITIONS - @BCMODE@
-@BCBLOCK@
+### BOUNDARY CONDITIONS - Neumann (zero-gradient)
+# The NSCBC4 outflow path was measured to abort this static case at t=5.38e-4;
+# Neumann ran past 8.6e-4.  A static Laplace bubble has no outgoing waves to
+# absorb, so Neumann is both sufficient and what the FlowLaplace unit test uses.
+density.bc.type.xhi  = neumann
+density.bc.type.xlo  = neumann
+density.bc.type.ylo  = neumann
+density.bc.type.yhi  = neumann
+energy.bc.type.xhi   = neumann
+energy.bc.type.xlo   = neumann
+energy.bc.type.ylo   = neumann
+energy.bc.type.yhi   = neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
 
 ### REFINEMENT CRITERIA ###
 # ETA-ONLY refinement.  The other criteria are set to 1e10 so they never fire,
