@@ -62,7 +62,7 @@ geometry.is_periodic = 0 0 0
 timestep            = 1e-7
 dynamictimestep.on  = 1
 dynamictimestep.verbose = 0
-dynamictimestep.max = 6.5e-6         # ~ cfl*dx_finest/(U+c) = 0.3*0.03125/1346
+dynamictimestep.max = 1.0e-4         # LEVEL-0 cap: cfl*dx_finest/(U+c) * 2^max_level = 6.5e-6*16 (subcycled AMR); per-level CFL limiter governs below this
 dynamictimestep.min = 1e-10
 cfl                 = 0.3
 cfl_v               = 0.3
@@ -178,8 +178,8 @@ energy.bc.type.zhi   = neumann
 eta_refinement_criterion   = 1e10
 omega_refinement_criterion = 1e10
 gradu_refinement_criterion = 1e10
-p_refinement_criterion     = 0.1
-rho_refinement_criterion   = 0.1
+p_refinement_criterion     = 6000.0     # Pa (abs jump x2): shock Dp~29kPa (13x ambient); tags bow+moderate obliques
+rho_refinement_criterion   = 0.5        # kg/m^3 >> shock Drho~0.11 -> density OFF; pressure drives AMR
 cutoff = 1e-16
 
 ### SOURCE TERMS ###

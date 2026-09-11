@@ -149,8 +149,8 @@ energy.bc.type.yhi   = neumann
 eta_refinement_criterion   = 1e10
 omega_refinement_criterion = 1e10
 gradu_refinement_criterion = 1e10
-p_refinement_criterion     = 0.5
-rho_refinement_criterion   = 0.2
+p_refinement_criterion     = 20.0       # CODE units: Ma10 shock Dp~82; ~24%, tags bow shock
+rho_refinement_criterion   = 6.0        # CODE units > max Drho(5.0) -> density OFF; pressure drives
 cutoff = 1e-16
 
 ### SOURCE TERMS ###
