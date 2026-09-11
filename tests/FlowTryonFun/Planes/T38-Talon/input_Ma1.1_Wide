@@ -80,7 +80,7 @@ solid.phi.ic.stl.filename         = ./tests/FlowTryonFun/Planes/T38-Talon/t38_xf
 solid.phi.ic.stl.scale            = 0.059503          # 14.14 m / 237.64 model-units -> real length
 solid.phi.ic.stl.center           = -4.035 0.0 -1.566        # -scale*bbox_center -> origin-centered (m)
 #solid.phi.ic.stl.eps              = 0.1875            # 3 finest cells (3*0.0625)
-solid.phi.ic.stl.eps              = 0.05            # 1 finest cells (3*0.0625)
+solid.phi.ic.stl.eps              = 0.001            # Very refine - might break?
 
 # Prescribed quiescent solid target (physical air at rest, p=p_inf):
 solid.density.ic.type = constant
