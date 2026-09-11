@@ -26,6 +26,7 @@ RBUCK=${RBUCK:-}                  # R_buckling [m]; default set per UNITS
 MARMOTTANT=${MARMOTTANT:-1}       # 0 = constant sigma control
 CAP_CLOSURE=${CAP_CLOSURE:-1}     # 1 = Schmidmayer split closure
 LIMITER=${LIMITER:-vanleer}
+BCMODE=${BCMODE:-nscbc}        # nscbc | neumann | dirichlet
 MAXLEV=${MAXLEV:-2}
 EPSDX=${EPSDX:-4}                 # diffuse half-width in finest cells
 BOXR=${BOXR:-2.5}                 # half-domain = BOXR * R_buckling
@@ -85,6 +86,119 @@ echo "   capillary time = $TCAP s   stop_time=$STOP  ($NP ranks x $NPAR cases)"
 echo "   inputs -> $GEN_DIR"
 echo "=============================================================="
 
+# ---- boundary-condition block -------------------------------------------
+# nscbc  : characteristic outflow, holds far-field pressure (conservative)
+# neumann: zero-gradient.  Runs, but is NOT conservative -- measured to leak
+#          liquid mass into the domain (+0.42%/8.5ms), pressurising a closed box
+#          and compressing every bubble uniformly regardless of sigma.
+if [ "$BCMODE" = "dirichlet" ]; then
+  # Full domain, walls held at ambient pressure with zero momentum.
+  # Primitive BC path (bc.primitive=1): pressure is imposed directly, so the
+  # walls are a fixed-pressure reservoir; momentum Dirichlet 0 makes them
+  # non-permeable.  No characteristic decomposition, no NSCBC feedback path,
+  # and no opposing-outflow pair -- the configuration the centreline wave
+  # pattern was traced to.  Density/energy stay zero-gradient.
+  BCBLOCK=$(cat <<BCEOF
+bc.primitive = 1
+
+pressure.bc.constant.p_inf = $PLIQ
+pressure.bc.type.xlo = dirichlet
+pressure.bc.val.xlo  = "p_inf"
+pressure.bc.type.xhi = dirichlet
+pressure.bc.val.xhi  = "p_inf"
+pressure.bc.type.ylo = dirichlet
+pressure.bc.val.ylo  = "p_inf"
+pressure.bc.type.yhi = dirichlet
+pressure.bc.val.yhi  = "p_inf"
+
+momentum.bc.type.xlo = dirichlet dirichlet
+momentum.bc.val.xlo  = "0.0" "0.0"
+momentum.bc.type.xhi = dirichlet dirichlet
+momentum.bc.val.xhi  = "0.0" "0.0"
+momentum.bc.type.ylo = dirichlet dirichlet
+momentum.bc.val.ylo  = "0.0" "0.0"
+momentum.bc.type.yhi = dirichlet dirichlet
+momentum.bc.val.yhi  = "0.0" "0.0"
+
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.xlo  = neumann
+energy.bc.type.xhi  = neumann
+energy.bc.type.ylo  = neumann
+energy.bc.type.yhi  = neumann
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = neumann
+eta.bc.type.yhi = neumann
+BCEOF
+)
+elif [ "$BCMODE" = "neumann" ]; then
+  BCBLOCK=$(cat <<'BCEOF'
+density.bc.type.xhi  = neumann
+density.bc.type.xlo  = neumann
+density.bc.type.ylo  = neumann
+density.bc.type.yhi  = neumann
+energy.bc.type.xhi   = neumann
+energy.bc.type.xlo   = neumann
+energy.bc.type.ylo   = neumann
+energy.bc.type.yhi   = neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+BCEOF
+)
+else
+  BCBLOCK=$(cat <<BCEOF
+density.bc.type.xhi  = nscbc_outflow
+density.bc.type.xlo  = nscbc_outflow
+density.bc.type.ylo  = nscbc_outflow
+density.bc.type.yhi  = nscbc_outflow
+energy.bc.type.xhi   = nscbc_outflow
+energy.bc.type.xlo   = nscbc_outflow
+energy.bc.type.ylo   = nscbc_outflow
+energy.bc.type.yhi   = nscbc_outflow
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow
+momentum.bc.type.xlo = nscbc_outflow nscbc_outflow
+momentum.bc.type.ylo = nscbc_outflow nscbc_outflow
+momentum.bc.type.yhi = nscbc_outflow nscbc_outflow
+
+nscbc.xlo.type = outflow
+nscbc.xlo.target_p = $PLIQ
+nscbc.xlo.sigma = 0.15
+nscbc.xlo.beta  = 0.5
+nscbc.xlo.L_ref = $LREF
+nscbc.xlo.target_u = 0.0
+nscbc.xlo.target_v = 0.0
+nscbc.xhi.type = outflow
+nscbc.xhi.target_p = $PLIQ
+nscbc.xhi.sigma = 0.15
+nscbc.xhi.beta  = 0.5
+nscbc.xhi.L_ref = $LREF
+nscbc.xhi.target_u = 0.0
+nscbc.xhi.target_v = 0.0
+nscbc.ylo.type = outflow
+nscbc.ylo.target_p = $PLIQ
+nscbc.ylo.sigma = 0.15
+nscbc.ylo.beta  = 0.5
+nscbc.ylo.L_ref = $LREF
+nscbc.ylo.target_u = 0.0
+nscbc.ylo.target_v = 0.0
+nscbc.yhi.type = outflow
+nscbc.yhi.target_p = $PLIQ
+nscbc.yhi.sigma = 0.15
+nscbc.yhi.beta  = 0.5
+nscbc.yhi.L_ref = $LREF
+nscbc.yhi.target_u = 0.0
+nscbc.yhi.target_v = 0.0
+nscbc.small = 1.0e-10
+BCEOF
+)
+fi
+export BCBLOCK BCMODE
+
 JOBS="$GEN_DIR/.jobs"; : > "$JOBS"
 for RATIO in $RATIOS; do
     read -r R0 SIGMA0 DP PGAS REGIME NAME <<<"$(python3 -c "
@@ -117,7 +231,11 @@ print('%.8e %.8e %.6f %.6f %s R%09d'%(R,s,dp,$PLIQ+dp,reg,round(R*1e9)))
         -e "s|@CV_G@|$CV_G|g"               -e "s|@MU_L@|$MU_L|g" \
         -e "s|@MU_G@|$MU_G|g"               -e "s|@MARMOTTANT@|$MARMOTTANT|g" \
         -e "s|@CAP_CLOSURE@|$CAP_CLOSURE|g" -e "s|@LIMITER@|$LIMITER|g" \
-        "$TEMPLATE" > "$OUT"
+        -e "s|@BCMODE@|$BCMODE|g" \
+        "$TEMPLATE" > "$OUT.tmp"
+    printf '%s\n' "$BCBLOCK" > "$GEN_DIR/.bcblock"
+    awk '/@BCBLOCK@/{while((getline l < "'"$GEN_DIR"'/.bcblock")>0) print l; next} {print}' "$OUT.tmp" > "$OUT"
+    rm -f "$OUT.tmp"
     if grep -q '@[A-Z_]*@' "$OUT"; then
         echo "  ERROR unfilled tokens in $OUT:"; grep -o '@[A-Z_]*@' "$OUT" | sort -u | sed 's/^/    /'; exit 1
     fi
