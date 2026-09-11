@@ -62,7 +62,7 @@ geometry.is_periodic = 0 0 0
 timestep            = 1e-7
 dynamictimestep.on  = 1
 dynamictimestep.verbose = 0
-dynamictimestep.max = 1.2e-5         # ~ cfl*dx_finest/(U+c) = 0.3*0.03125/715
+dynamictimestep.max = 1.9e-4         # LEVEL-0 cap: cfl*dx_finest/(U+c) * 2^max_level = 1.2e-5*16 (subcycled AMR); per-level CFL limiter governs below this
 dynamictimestep.min = 1e-10
 cfl                 = 0.3
 cfl_v               = 0.3

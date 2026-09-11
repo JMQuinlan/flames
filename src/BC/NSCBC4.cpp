@@ -11,7 +11,7 @@
 //
 // STABILITY MODIFICATIONS (matching professor's working implementation):
 //   - Uses 1st-order FD instead of 2nd-order to eliminate amplification
-//   - Uses simple linear extrapolation for 2nd ghost cell (2× vs 6× amplification)
+//   - Uses simple linear extrapolation for 2nd ghost cell (2ï¿½ vs 6ï¿½ amplification)
 //   - Writes gamma, pi, pressure to ghost cells for Riemann solver
 //   - Extensive NaN guards and fallback to boundary state
 
@@ -93,8 +93,20 @@ NSCBC4::BoundaryParams NSCBC4::ParseFace(IO::ParmParse &pp, std::string face_nam
     // Parse transverse term weight
     pp.query((face_name + ".beta").c_str(), params.beta);
 
-    // Parse outflow parameters
+    // Parse outflow relaxation coefficient.  sigma is NON-DIMENSIONAL: the
+    // relaxation rate is K = sigma*(1-M^2)*a/L_ref, so the sound speed and
+    // domain size are already divided out and the well-damped value is a pure
+    // number.  Rudy-Strikwerda (1980) / Poinsot-Lele give an optimum
+    // sigma ~ 0.25-0.58; BELOW ~0.2 the outflow is under-damped and a lightly
+    // forced box behaves as an acoustic resonator -- parasitic interface noise
+    // (spurious currents from the discrete curvature balance) accumulates into
+    // a growing standing mode and blows up (the Marmottant static sweep died
+    // this way at sigma=0.15; sigma=0.6 holds perfect Laplace equilibrium).
     pp.query((face_name + ".sigma").c_str(), params.sigma);
+    if (params.type == Type::Outflow && params.sigma < 0.2)
+        Util::Warning(INFO, "NSCBC4 ", face_name, ".sigma=", params.sigma,
+                      " is under-damped (recommend 0.25-0.6); free-acoustic "
+                      "modes can grow in a lightly-forced domain");
 
     // Parse the time-dependent pressure drive (acoustic forcing through the
     // incoming characteristic; see BoundaryParams for semantics).
@@ -102,8 +114,33 @@ NSCBC4::BoundaryParams NSCBC4::ParseFace(IO::ParmParse &pp, std::string face_nam
     pp.query((face_name + ".drive_omega").c_str(), params.drive_omega);
     pp.query((face_name + ".drive_phase").c_str(), params.drive_phase);
 
-    // Parse reference length
-    pp.query((face_name + ".L_ref").c_str(), params.L_ref);
+    // Parse reference length.  L_ref carries the domain scale in K =
+    // sigma*(1-M^2)*a/L_ref, so leaving it at the sentinel 1.0 on a non-unit
+    // domain mis-scales the damping by the domain-size ratio (a mm-scale water
+    // box left at L_ref=1.0 is ~250x under-damped regardless of sigma -- the
+    // silent half of the sweep failure).  When the user does not set it, auto-
+    // default to the largest domain extent from geometry so the damping is
+    // scale-correct by construction.
+    if (!pp.contains((face_name + ".L_ref").c_str()))
+    {
+        amrex::ParmParse pp_geom("geometry");
+        std::vector<Set::Scalar> plo, phi;
+        pp_geom.queryarr("prob_lo", plo);
+        pp_geom.queryarr("prob_hi", phi);
+        Set::Scalar Lmax = 0.0;
+        for (std::size_t d = 0; d < plo.size() && d < phi.size(); ++d)
+            Lmax = (phi[d] - plo[d] > Lmax) ? (phi[d] - plo[d]) : Lmax;
+        if (Lmax > 0.0)
+        {
+            params.L_ref = Lmax;
+            Util::Message(INFO, "NSCBC4 ", face_name,
+                          ".L_ref unset -> auto = domain size ", Lmax);
+        }
+    }
+    else
+    {
+        pp.query((face_name + ".L_ref").c_str(), params.L_ref);
+    }
 
     return params;
 }

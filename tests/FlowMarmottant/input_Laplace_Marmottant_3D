@@ -1,4 +1,4 @@
-#@ [laplace_marmottant_2d]
+#@ [laplace_marmottant_3d]
 #@ exe=hydro2
 #@ dim=3
 # =============================================================================
@@ -100,6 +100,7 @@ pref  = 0.0
 kappa_method = 1                 # mean curvature -> kappas(...,0) used by the R reduction
 
 marmottant            = 1
+marmottant.R0         = 0.2      # reference radius: shell UNSTRAINED here (= bubble R0)
 marmottant.R_buckling = 0.1      # R_buckling
 marmottant.chi        = 0.1      # shell elastic modulus
 marmottant.sigma_break= 100.0    # huge -> never ruptures in this test
