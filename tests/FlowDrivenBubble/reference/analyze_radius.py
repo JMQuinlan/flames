@@ -161,6 +161,31 @@ SHAPE_SMOOTH_CELLS = 0.75     # gaussian smoothing of the raster, in units of
                               # FINEST-CELL widths (sub-cell -> kills the
                               # pixel staircase without moving the contours)
 
+# ===== FREQUENCY SPECTRUM (FFT of the radius history) =====
+# Transform R(t) to show which frequencies the bubble oscillates at.  The
+# bottom axis is f / f0 (f0 = the Minnaert natural frequency of a spherical
+# bubble), the top axis is the same frequency in Hz, and the vertical axis is
+# spectral intensity -- so the tallest peaks are the dominant modes.
+SPECTRUM        = True        # write the R(t) spectrum figure
+SPECTRUM_SIGNAL = "both"      # "vol" | "eta" | "both" -- which radius to transform
+SPECTRUM_DETREND = "linear"   # "linear" (remove slow settling + mean) | "mean" | "none"
+SPECTRUM_WINDOW  = "hann"     # "hann" (reduce spectral leakage) | "none"
+SPECTRUM_POWER   = False      # False -> amplitude |R^(f)|/R0 ; True -> power (amplitude^2)
+SPECTRUM_FMAX_OVER_F0 = 4.0   # x-axis (f/f0) upper limit; None -> Nyquist
+SPECTRUM_LOG_Y   = False      # log-scale the intensity axis (reveals weak harmonics)
+SPECTRUM_PAD_POW2 = True      # zero-pad to next power of 2 for a smoother curve
+SPECTRUM_MARK    = [0.5, 1.0, 2.0]   # f/f0 reference lines (drive f0/2, natural, 2nd harmonic)
+SPECTRUM_SAVE    = "FlowDrivenBubble_spectrum"
+
+# Natural (Minnaert) frequency of a spherical bubble:
+#     f0 = 1/(2 pi R0) * sqrt(3 gamma p_inf / rho_liquid)
+# (with R0=0.02, gamma=1.4, p_inf=1e5, rho=1000 -> f0 = 163.09 Hz, and the
+# runs drive at f0/2 = 81.54 Hz).  Set F_NATURAL to a number to override the
+# formula; None -> compute it from the parameters below.
+GAMMA_GAS   = 1.4             # gas polytropic exponent (Minnaert uses 3*gamma)
+RHO_LIQUID  = 1000.0          # surrounding liquid density [kg/m^3]
+F_NATURAL   = None            # [Hz] override, or None to compute from Minnaert
+
 # ============================================================================
 # ==========================  END CONFIGURATION  =============================
 # ============================================================================
@@ -462,6 +487,150 @@ def render_shape_frames(out_dir, label, color):
 
 
 # ============================================================================
+# FREQUENCY SPECTRUM
+# ============================================================================
+
+def minnaert_f0():
+    """Natural frequency of a spherical bubble [Hz].  F_NATURAL overrides;
+    otherwise the Minnaert formula f0 = 1/(2 pi R0) sqrt(3 gamma p_inf/rho)."""
+    if F_NATURAL is not None:
+        return float(F_NATURAL)
+    return 1.0 / (2.0 * np.pi * R0) * np.sqrt(3.0 * GAMMA_GAS * P_INF / RHO_LIQUID)
+
+
+def compute_spectrum(t, R):
+    """Single-sided spectrum of the radius history.
+
+    R(t) is resampled onto a uniform time grid (plotfiles are ~uniform, but
+    skipped/corrupt frames leave gaps that would corrupt the FFT), detrended
+    (remove the slow settling drift + mean so only the oscillation remains),
+    Hann-windowed (suppress spectral leakage of a short finite record), and
+    optionally zero-padded to the next power of two for a smoother curve.
+
+    Returns (freq_hz, intensity) with intensity = the amplitude of R/R0 at
+    each frequency (its square if SPECTRUM_POWER), calibrated so a pure
+    sinusoid of relative amplitude a produces a peak of height a.  Returns
+    (None, None) if there are fewer than 8 finite samples.
+    """
+    t = np.asarray(t, dtype=float)
+    R = np.asarray(R, dtype=float) / R0
+    good = np.isfinite(t) & np.isfinite(R)
+    t, R = t[good], R[good]
+    if len(t) < 8:
+        return None, None
+
+    N = len(t)
+    tu = np.linspace(t[0], t[-1], N)          # uniform grid over the record
+    Ru = np.interp(tu, t, R)
+    dt = tu[1] - tu[0]
+
+    if SPECTRUM_DETREND == "linear":
+        Ru = Ru - np.polyval(np.polyfit(tu, Ru, 1), tu)
+    elif SPECTRUM_DETREND == "mean":
+        Ru = Ru - Ru.mean()
+
+    w = np.hanning(N) if SPECTRUM_WINDOW == "hann" else np.ones(N)
+    Rw = Ru * w
+
+    Nfft = (1 << int(np.ceil(np.log2(N)))) if SPECTRUM_PAD_POW2 else N
+    if Nfft > N:
+        Rw = np.concatenate([Rw, np.zeros(Nfft - N)])
+
+    X = np.fft.rfft(Rw)
+    freq = np.fft.rfftfreq(Nfft, d=dt)
+    amp = np.abs(X) * 2.0 / np.sum(w)         # window-coherent-gain calibration
+    inten = amp ** 2 if SPECTRUM_POWER else amp
+    return freq, inten
+
+
+def _report_peaks(label, freq, inten, f0):
+    """Print the dominant spectral peaks (f/f0, Hz, intensity) for one series."""
+    if freq is None or len(freq) < 3:
+        return
+    fr = freq / f0
+    m = fr > 1e-9                              # drop the DC bin
+    fr, it, hz = fr[m], inten[m], freq[m]
+    if not len(it):
+        return
+    # local maxima, strongest first, top 3
+    pk = np.where((it[1:-1] > it[:-2]) & (it[1:-1] >= it[2:]))[0] + 1
+    if not len(pk):
+        pk = np.array([int(np.argmax(it))])
+    pk = pk[np.argsort(it[pk])[::-1][:3]]
+    peaks = "  ".join(f"f/f0={fr[i]:.3f} ({hz[i]:.1f} Hz, I={it[i]:.3e})"
+                      for i in pk)
+    print(f"    {label:<28s}: dominant  {peaks}")
+
+
+def plot_spectrum(data, f0):
+    """Overlay the R(t) spectra of every run: f/f0 (bottom) + Hz (top) x-axes,
+    intensity on the left.  `data` is a list of dicts with keys label, color,
+    t, R_v, R_e (as collected in main())."""
+    fig, ax = plt.subplots(figsize=(FIG_WIDTH, FIG_HEIGHT))
+    series = []
+    if SPECTRUM_SIGNAL in ("vol", "both"):
+        series.append(("R_v", "-",  LINE_WIDTH_VOL, 0.9,  LABEL_VOL))
+    if SPECTRUM_SIGNAL in ("eta", "both"):
+        series.append(("R_e", "--", LINE_WIDTH_ETA, 0.75, "eta=0.5"))
+
+    plotted = False
+    for d in data:
+        for key, ls, lw, al, tag in series:
+            freq, inten = compute_spectrum(d["t"], d[key])
+            if freq is None:
+                continue
+            ax.plot(freq / f0, inten, ls, color=d["color"], lw=lw, alpha=al,
+                    label=f"{d['label']} -- {tag}")
+            _report_peaks(f"{d['label']} ({tag})", freq, inten, f0)
+            plotted = True
+
+    if not plotted:
+        print("  [spectrum] no series with >=8 frames -- figure skipped.")
+        plt.close(fig)
+        return
+
+    if SPECTRUM_FMAX_OVER_F0:
+        ax.set_xlim(0.0, SPECTRUM_FMAX_OVER_F0)
+    if SPECTRUM_LOG_Y:
+        ax.set_yscale("log")
+
+    # reference lines: drive (f0/2), natural (f0), harmonics
+    ymax = ax.get_ylim()[1]
+    for mk in SPECTRUM_MARK:
+        ax.axvline(mk, color="0.6", ls=":", lw=1.0)
+        tag = ("drive (f0/2)" if abs(mk - 0.5) < 1e-9 else
+               "natural f0"   if abs(mk - 1.0) < 1e-9 else f"{mk:g} f0")
+        ax.text(mk, ymax, " " + tag, rotation=90, va="top", ha="right",
+                fontsize=8, color="0.4")
+
+    ax.set_xlabel(r"$f / f_0$   (Minnaert natural frequency)",
+                  fontsize=FONT_SIZE_LABEL)
+    ax.set_ylabel((r"Power of $R/R_0$" if SPECTRUM_POWER
+                   else r"Amplitude of $R/R_0$") + "   (intensity)",
+                  fontsize=FONT_SIZE_LABEL)
+    # top axis: the same frequency in Hz (f = (f/f0) * f0)
+    secax = ax.secondary_xaxis("top", functions=(lambda x: x * f0,
+                                                  lambda x: x / f0))
+    secax.set_xlabel("Frequency [Hz]", fontsize=FONT_SIZE_LABEL)
+    secax.tick_params(labelsize=FONT_SIZE_TICK)
+    ax.set_title(f"Flow-Driven Bubble: radius spectrum   "
+                 f"($f_0$ = {f0:.2f} Hz)",
+                 fontsize=FONT_SIZE_TITLE, fontweight="bold")
+    ax.grid(True, alpha=0.3)
+    ax.tick_params(labelsize=FONT_SIZE_TICK)
+    ax.legend(fontsize=FONT_SIZE_LEGEND, loc="upper right")
+
+    plt.tight_layout()
+    out_png = os.path.join(IMG_DIR, f"{SPECTRUM_SAVE}.png")
+    out_eps = os.path.join(IMG_DIR, f"{SPECTRUM_SAVE}.eps")
+    fig.savefig(out_png, dpi=DPI, bbox_inches="tight")
+    fig.savefig(out_eps, dpi=DPI, bbox_inches="tight")
+    print(f"  wrote {out_png}")
+    print(f"  wrote {out_eps}")
+    plt.close(fig)
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
@@ -476,8 +645,12 @@ def main():
           f"({'R = sqrt(V/pi)' if DIM == 2 else 'R = (3V/4pi)^(1/3)'})")
     print(f"  R0        = {R0}")
     print(f"  f_drive   = {F_DRIVE} Hz   (T_drive = {T_DRIVE*1e3:.3f} ms)")
+    print(f"  f_natural = {minnaert_f0():.2f} Hz   (Minnaert f0; drive is at "
+          f"f/f0 = {F_DRIVE/minnaert_f0():.3f})")
     print(f"  sym       = {'auto-detect' if SYM_FACTOR is None else SYM_FACTOR}")
     print()
+
+    spectra = []   # per-run radius series, transformed after the R(t) plot
 
     plt.rcParams.update({
         "axes.titlesize":  FONT_SIZE_TITLE,
@@ -537,6 +710,9 @@ def main():
                 lw=LINE_WIDTH_ETA, alpha=0.8,
                 label=f"{run['label']} -- {LABEL_ETA}")
 
+        spectra.append(dict(label=run["label"], color=run["color"],
+                            t=t, R_v=R_v, R_e=R_e))
+
         if SHAPE_GIF:
             render_shape_frames(out_dir, run["label"], run["color"])
 
@@ -561,6 +737,11 @@ def main():
     print(f"\n  wrote {out_png}")
     print(f"  wrote {out_eps}")
     plt.close(fig)
+
+    # ---- frequency spectrum (which modes the bubble oscillates in) ----------
+    if SPECTRUM and spectra:
+        print("\n  radius spectrum (dominant frequencies):")
+        plot_spectrum(spectra, minnaert_f0())
 
 
 if __name__ == "__main__":
