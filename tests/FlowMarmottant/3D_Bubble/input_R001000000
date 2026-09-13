@@ -1,0 +1,221 @@
+#@ [marm3d_r001000000]
+#@ exe=hydro2
+#@ dim=3
+# =============================================================================
+# 3D MARMOTTANT COATED-BUBBLE STATIC LAPLACE TEST (OCTANT)  --  R0 = 1.00000000e-03 m
+# =============================================================================
+# TEMPLATE.  GENERATE_3D_INPUTS.bash fills the @...@ placeholders per radius.
+#
+# 3D twin of tests/FlowMarmottant/TEMPLATES/input_Marmottant_Sweep.  Physics,
+# EOS, capillary closure, limiter, NSCBC damping (sigma=0.6, L_ref=domain/20)
+# and eta-only refinement are identical; the differences are only what 3D
+# requires:
+#
+#   * Laplace jump has TWO principal curvatures:  p_gas - p_liq = 2 sigma/R0
+#     (2D was sigma/R0).
+#   * Marmottant's A/A_buck = (R/R_buck)^2 is EXACT for a sphere -- the 2D
+#     runs borrowed this 3D exponent; here it is the physical law.
+#   * OCTANT domain [0,L]^3, bubble centred on the origin.  xlo/ylo/zlo are
+#     exact symmetry planes (REFLECT, same pattern as
+#     tests/FlowDrivenBubble/input_LowAmp_NSCBC); NSCBC outflow on xhi/yhi/zhi.
+#     8x cheaper than the full sphere, and no opposing outflow faces -- the
+#     pairing that drove the 2D centreline resonance.
+#
+# Shell (Marmottant 2005):  sigma(R) = chi ((R/R_buck)^2 - 1), clamped [0, sigma_break]
+#   chi = 0.55 N/m   R_buck = 1.0e-3 m   sigma_break = 0.073 N/m   R_rupt = 1.06429661e-03 m
+#
+# This case: R0/R_buck = 1.00 -> buckled, sigma_eff = 0.00000000e+00 N/m
+#            p_gas = p_liq + 2 sigma_eff/R0 = 101325.0 + 0.000000 = 101325.000000 Pa
+# The correct answer is that NOTHING MOVES.
+#
+# Resolution matches the 2D sweep exactly: dx_finest = 1.95312500e-05 m
+# (R0/dx = 51.2), epsilon = 7.81250000e-05 m (eps/dx = 4).
+#
+# Outputs:
+#   plotfiles  every 1.0e-3 s   (radius / sigma / Gamma snapshots)
+#   thermo.dat every 50 coarse steps: gas_volume, gas_pressure_int,
+#              kinetic_energy, interface_area  (OCTANT values -- x8 for the
+#              whole bubble).  This is the dense series the frequency analysis
+#              uses; 3D plotfiles at kHz sampling would be hundreds of GB.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/3D_Bubble/output_R001000000
+amr.thermo.int      = 50
+amr.thermo.plot_int = 50
+
+### MESHING ###
+amr.plot_dt         = 1.0e-3
+amr.plot_int        = -1
+amr.max_grid_size   = 32      # 2D used 500000 (one box); 3D needs decomposition to scale
+amr.blocking_factor = 8
+amr.regrid_int      = 10
+amr.grid_eff        = 0.8
+amr.max_level       = 2
+amr.n_cell          = 32 32 32
+
+nghost = 4
+
+### TIME STEPPING ###
+timestep                 = 1.0e-12
+dynamictimestep.on       = 1
+dynamictimestep.verbose  = 0
+dynamictimestep.max      = 1e-0
+dynamictimestep.min      = 1.0e-16
+cfl                      = 0.3
+
+### DIMENSIONS -- octant ###
+geometry.prob_lo     = 0.0 0.0 0.0
+geometry.prob_hi     = 2.50000000e-03 2.50000000e-03 2.50000000e-03
+geometry.is_periodic = 0 0 0
+
+stop_time = 2.0e-2
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 7.81250000e-05
+eta.ic.expression.constant.R0      = 1.00000000e-03
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/(epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### EQUATIONS OF STATE ###
+# phase 0 = liquid (stiffened gas), phase 1 = gas (ideal)
+eos0.gamma = 2.35
+eos0.p0    = 1.0e9
+eos0.cp    = 4186.0
+eos0.cv    = 1781.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp    = 1000.0
+eos1.cv    = 714.286
+
+### HYDRO INITIAL CONDITIONS ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1000.0"
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+velocity0.ic.expression.region2 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+velocity1.ic.expression.region2 = "0.0"
+
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "101325.0"      # liquid (outside, eta=1)
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "101325.000000"      # gas    (inside,  eta=0)
+
+### VISCOSITY ###
+mu0   = 1.0e-3
+mu0_b = 0.0
+mu1   = 1.8e-5
+mu1_b = 0.0
+
+pref = 0.0
+
+### SURFACE TENSION ###
+sigma = 0.073
+
+### MARMOTTANT COATED SHELL ###
+marmottant               = 1
+marmottant.R0            = 1.00000000e-03        # reference radius: shell starts UNSTRAINED here
+marmottant.chi           = 0.55
+marmottant.R_buckling    = 1.0e-3
+marmottant.sigma_break   = 0.073
+
+### CAPILLARY FORMULATION ###
+capillary_closure = 1
+
+### NUMERICS ###
+Riemann_Solver.type = hllc
+Limiter.type        = vanleer
+kappa_method        = 1
+
+### DEBUG ###
+nan_check  = 0
+verbose    = 0
+relax_diag = 0
+
+### BOUNDARY CONDITIONS -- octant: REFLECT on lo faces, NSCBC4 outflow on hi faces ###
+eta.bc.type.xlo = REFLECT_EVEN
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = REFLECT_EVEN
+eta.bc.type.yhi = neumann
+eta.bc.type.zlo = REFLECT_EVEN
+eta.bc.type.zhi = neumann
+
+density.bc.type.xlo = REFLECT_EVEN
+density.bc.type.xhi = nscbc_outflow
+density.bc.type.ylo = REFLECT_EVEN
+density.bc.type.yhi = nscbc_outflow
+density.bc.type.zlo = REFLECT_EVEN
+density.bc.type.zhi = nscbc_outflow
+
+energy.bc.type.xlo = REFLECT_EVEN
+energy.bc.type.xhi = nscbc_outflow
+energy.bc.type.ylo = REFLECT_EVEN
+energy.bc.type.yhi = nscbc_outflow
+energy.bc.type.zlo = REFLECT_EVEN
+energy.bc.type.zhi = nscbc_outflow
+
+momentum.bc.type.xlo = REFLECT_ODD  REFLECT_EVEN REFLECT_EVEN
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow nscbc_outflow
+momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD  REFLECT_EVEN
+momentum.bc.type.yhi = nscbc_outflow nscbc_outflow nscbc_outflow
+momentum.bc.type.zlo = REFLECT_EVEN REFLECT_EVEN REFLECT_ODD
+momentum.bc.type.zhi = nscbc_outflow nscbc_outflow nscbc_outflow
+
+# NSCBC damping: sigma = 0.6, L_ref = 2.5e-4 = (FULL physical width 2L)/20 --
+# the value measured best in the 2D L_ref ladder.  Set explicitly: the Hydro2
+# auto-default would use the OCTANT extent L/20 = 1.25e-4 (twice the damping).
+nscbc.xhi.type     = outflow
+nscbc.xhi.target_p = 101325.0
+nscbc.xhi.sigma    = 0.6
+nscbc.xhi.beta     = 0.5
+nscbc.xhi.L_ref    = 2.500000e-04
+nscbc.xhi.target_u = 0.0
+nscbc.xhi.target_v = 0.0
+nscbc.xhi.target_w = 0.0
+nscbc.yhi.type     = outflow
+nscbc.yhi.target_p = 101325.0
+nscbc.yhi.sigma    = 0.6
+nscbc.yhi.beta     = 0.5
+nscbc.yhi.L_ref    = 2.500000e-04
+nscbc.yhi.target_u = 0.0
+nscbc.yhi.target_v = 0.0
+nscbc.yhi.target_w = 0.0
+nscbc.zhi.type     = outflow
+nscbc.zhi.target_p = 101325.0
+nscbc.zhi.sigma    = 0.6
+nscbc.zhi.beta     = 0.5
+nscbc.zhi.L_ref    = 2.500000e-04
+nscbc.zhi.target_u = 0.0
+nscbc.zhi.target_v = 0.0
+nscbc.zhi.target_w = 0.0
+nscbc.small = 1.0e-10
+
+### REFINEMENT CRITERIA -- eta only (see 2D template for why) ###
+eta_refinement_criterion   = 1e-1
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0      # u0_mf is 2-component in Hydro2 even in 3D
+q.ic.constant.value  = 0.0 0.0      # q_mf  is 2-component in Hydro2 even in 3D
+
+### ADDITIONAL SOURCES ###
+apply_surface_tension = 1
+apply_buoyancy = 0
+apply_weight   = 0
+Spec_Vol       = 1
+grav           = 0.0

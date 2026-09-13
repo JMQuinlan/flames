@@ -110,6 +110,8 @@ protected:
     void Regrid(int lev, Set::Scalar time) override;
     void PostSubcycleReflux(int lev, Set::Scalar time, Set::Scalar dt_coarse) override;
     void PostAverageDown(int coarse_lev) override;
+    void Integrate(int amrlev, Set::Scalar time, int step,
+                   const amrex::MFIter& mfi, const amrex::Box& box) override;
     // Allocate flux_reg[lev] (only for lev > 0) and cc_fluxes[lev].
     // Called from BOTH Initialize() and Regrid() so level 0 and refined
     // levels both get their reflux scratch (level 0 only goes through
@@ -310,6 +312,16 @@ protected:
     // Advected shell density  c = Gamma |grad eta|  (Marmottant, see below).
     // An 8th RK primary; conserved by  d(c)/dt + div(c u) = 0.
     Set::Field<Set::Scalar> shell_mf;
+
+    // Integrated time series written to <plot_file>/thermo.dat.  Registered
+    // ONLY when the input sets amr.thermo.plot_int or amr.thermo.plot_dt > 0,
+    // so ordinary runs pay nothing (IntegrateVariables returns immediately
+    // when no variable is registered).  Values cover the COMPUTATIONAL domain:
+    // an octant run reports 1/8 of the physical bubble.
+    Set::Scalar thermo_gas_volume     = 0.0;  ///< int (1-eta) dV
+    Set::Scalar thermo_gas_pressure   = 0.0;  ///< int (1-eta) p dV   (/gas_volume = mean p_gas)
+    Set::Scalar thermo_kinetic_energy = 0.0;  ///< int 0.5 rho |u|^2 dV
+    Set::Scalar thermo_interface_area = 0.0;  ///< int |grad eta| dV
     Set::Field<Set::Scalar> shell_old_mf;
     Set::Field<Set::Scalar> Gamma_mf;      // diagnostic: c/|grad eta| (plottable)
 

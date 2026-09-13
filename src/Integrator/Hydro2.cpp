@@ -277,6 +277,25 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // Newton diagnostic for stiff pressure relaxation.
         pp_query_default("nan_check", value.nan_check, 0);  // 1 = per-cell NaN/Inf guard (slow; debugging only)
         pp_query_default("verbose", value.verbose, 0);    // 1 = per-call informational messages
+
+        // Opt-in bubble time series in thermo.dat (see Hydro2.H).  Sampling a
+        // kHz bubble oscillation from 3D plotfiles would need hundreds of GB per
+        // run; these scalars cost one masked pass over the grid per sample.
+        {
+            amrex::ParmParse pp_amr("amr");
+            int tp_int = -1;
+            Set::Scalar tp_dt = -1.0;
+            pp_amr.query("thermo.plot_int", tp_int);
+            pp_amr.query("thermo.plot_dt", tp_dt);
+            if (tp_int > 0 || tp_dt > 0.0)
+            {
+                value.RegisterIntegratedVariable(&value.thermo_gas_volume,     "gas_volume");
+                value.RegisterIntegratedVariable(&value.thermo_gas_pressure,   "gas_pressure_int");
+                value.RegisterIntegratedVariable(&value.thermo_kinetic_energy, "kinetic_energy");
+                value.RegisterIntegratedVariable(&value.thermo_interface_area, "interface_area");
+                Util::Message(INFO, "thermo.dat: gas_volume, gas_pressure_int, kinetic_energy, interface_area");
+            }
+        }
         pp_query_default("relax_diag", value.relax_diag, 0); // 1 = print per-stage {max_iters, max_residual, count_unconverged}.
         pp_query_default("clip_ghost_only", value.clip_ghost_only, 0); // 1 = FillGhost STEP-9 positivity clip touches GHOST cells only (per-phase mass conservation)
         // Trace-phase slaving window for the relaxation Newton inputs (see
@@ -6252,6 +6271,47 @@ void Hydro2::PostAverageDown(int coarse_lev)
     }
 }
 
+
+void Hydro2::Integrate(int amrlev, Set::Scalar /*time*/, int /*step*/,
+                       const amrex::MFIter& mfi, const amrex::Box& box)
+{
+    BL_PROFILE("Hydro2::Integrate");
+    const Set::Scalar* DX = geom[amrlev].CellSize();
+    const Set::Scalar dv = AMREX_D_TERM(DX[0], *DX[1], *DX[2]);
+
+    const amrex::Array4<const Set::Scalar> eta = eta_mf[amrlev]->const_array(mfi);
+    const amrex::Array4<const Set::Scalar> p   = pressure_mf[amrlev]->const_array(mfi);
+    const amrex::Array4<const Set::Scalar> rho = density_mf[amrlev]->const_array(mfi);
+    const amrex::Array4<const Set::Scalar> vel = velocity_mf[amrlev]->const_array(mfi);
+
+    // Host loop into locals (no member access inside a device lambda).
+    Set::Scalar vol = 0.0, pint = 0.0, ke = 0.0, area = 0.0;
+    amrex::Loop(box, [&](int i, int j, int k)
+    {
+        const Set::Scalar g = 1.0 - eta(i, j, k);
+        vol  += g * dv;
+        pint += g * p(i, j, k) * dv;
+
+        Set::Scalar u2 = AMREX_D_TERM(vel(i, j, k, 0) * vel(i, j, k, 0),
+                                      + vel(i, j, k, 1) * vel(i, j, k, 1),
+                                      + vel(i, j, k, 2) * vel(i, j, k, 2));
+        ke += 0.5 * rho(i, j, k) * u2 * dv;
+
+        Set::Scalar gx = (eta(i + 1, j, k) - eta(i - 1, j, k)) / (2.0 * DX[0]);
+        Set::Scalar gy = (eta(i, j + 1, k) - eta(i, j - 1, k)) / (2.0 * DX[1]);
+#if AMREX_SPACEDIM == 3
+        Set::Scalar gz = (eta(i, j, k + 1) - eta(i, j, k - 1)) / (2.0 * DX[2]);
+#else
+        Set::Scalar gz = 0.0;
+#endif
+        area += std::sqrt(gx * gx + gy * gy + gz * gz) * dv;
+    });
+
+    thermo_gas_volume     += vol;
+    thermo_gas_pressure   += pint;
+    thermo_kinetic_energy += ke;
+    thermo_interface_area += area;
+}
 
 } // end of Integrator namespace
 
