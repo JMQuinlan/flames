@@ -34,7 +34,11 @@ plt.rcParams.update({
 
 def series(d):
     rows = []
-    for f in sorted(glob.glob(d + "/*cell"))[1:]:
+    # NUMERIC sort: plotfiles are step-numbered, so a lexicographic sort puts
+    # "72682cell" after "726786cell" and r[-1] is NOT the final time.
+    _fs = sorted(glob.glob(d + "/*cell"),
+                 key=lambda q: int(os.path.basename(q).replace("cell", "")))
+    for f in _fs[1:]:
         ds = yt.load(f); ad = ds.all_data()
         vol = np.asarray(ad["index", "cell_volume"]); eta = np.asarray(ad["boxlib", "eta"])
         ux = np.asarray(ad["boxlib", "velocityx"]); uy = np.asarray(ad["boxlib", "velocityy"])

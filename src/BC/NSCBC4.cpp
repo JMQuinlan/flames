@@ -44,6 +44,10 @@ void NSCBC4::Parse(NSCBC4 &value, IO::ParmParse &pp)
 #endif
 }
 
+// Fraction of the domain extent used for L_ref when a face does not set it.
+// See the measurement table in ParseFace below.
+static constexpr Set::Scalar L_REF_DOMAIN_FRACTION = 20.0;
+
 NSCBC4::BoundaryParams NSCBC4::ParseFace(IO::ParmParse &pp, std::string face_name)
 {
     BoundaryParams params;
@@ -119,8 +123,21 @@ NSCBC4::BoundaryParams NSCBC4::ParseFace(IO::ParmParse &pp, std::string face_nam
     // domain mis-scales the damping by the domain-size ratio (a mm-scale water
     // box left at L_ref=1.0 is ~250x under-damped regardless of sigma -- the
     // silent half of the sweep failure).  When the user does not set it, auto-
-    // default to the largest domain extent from geometry so the damping is
-    // scale-correct by construction.
+    // default from geometry so the damping is scale-correct by construction.
+    //
+    // The divisor L_REF_DOMAIN_FRACTION was set by measurement, not taste.
+    // Marmottant static-Laplace sweep, R0 = 0.85 mm in a 5 mm box, sigma = 0.6,
+    // everything else held fixed -- peak parasitic |u| on the interface band:
+    //
+    //     L_ref = domain      (5.0e-3)   |u|max = 2.547   ABORTS at t=8.98e-3
+    //     L_ref = domain/2    (2.5e-3)   |u|max = 0.314   completes 10 ms
+    //     L_ref = domain/5    (1.0e-3)   |u|max = 0.040   completes 10 ms
+    //     L_ref = domain/20   (2.5e-4)   |u|max = 0.020   completes 10 ms
+    //
+    // 128x reduction in peak |u| and 84x in the time-mean, monotonic across the
+    // ladder with no over-damping penalty (no reflectivity rise, no dt loss).
+    // domain/20 is therefore the default; set <face>.L_ref explicitly to
+    // override.
     if (!pp.contains((face_name + ".L_ref").c_str()))
     {
         amrex::ParmParse pp_geom("geometry");
@@ -132,9 +149,10 @@ NSCBC4::BoundaryParams NSCBC4::ParseFace(IO::ParmParse &pp, std::string face_nam
             Lmax = (phi[d] - plo[d] > Lmax) ? (phi[d] - plo[d]) : Lmax;
         if (Lmax > 0.0)
         {
-            params.L_ref = Lmax;
+            params.L_ref = Lmax / L_REF_DOMAIN_FRACTION;
             Util::Message(INFO, "NSCBC4 ", face_name,
-                          ".L_ref unset -> auto = domain size ", Lmax);
+                          ".L_ref unset -> auto = domain/", L_REF_DOMAIN_FRACTION,
+                          " = ", params.L_ref, " (domain ", Lmax, ")");
         }
     }
     else

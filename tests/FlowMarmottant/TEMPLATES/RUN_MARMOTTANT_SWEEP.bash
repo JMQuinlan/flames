@@ -75,7 +75,11 @@ Rb=$RBUCK; box=$BOXR; lev=$MAXLEV; epsdx=$EPSDX
 half=box*Rb; dx=2*half/(64*2**lev); eps=epsdx*dx
 rr=Rb*math.sqrt(1+$SBREAK/$CHI)
 tcap=math.sqrt($RHO_L*Rb**3/max($SBREAK,1e-30))
-print('%.8e %.8e %.8e %.8e %.8e %.6e %.6e'%(half,-half,dx,eps,rr,tcap,2*half))
+# L_ref = domain/20: measured best of a 1/2/5/20 ladder on the R0=0.85mm
+# case (peak parasitic |u| 2.547 -> 0.020, and it is the difference
+# between aborting at t=8.98e-3 and completing 10 ms).  Matches the
+# Hydro2 auto-default in src/BC/NSCBC4.cpp (L_REF_DOMAIN_FRACTION).
+print('%.8e %.8e %.8e %.8e %.8e %.6e %.6e'%(half,-half,dx,eps,rr,tcap,2*half/20.0))
 ")"
 
 echo "=============================================================="
