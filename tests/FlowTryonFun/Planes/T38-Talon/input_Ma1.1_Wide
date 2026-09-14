@@ -62,10 +62,10 @@ geometry.is_periodic = 0 0 0
 timestep            = 1e-7
 dynamictimestep.on  = 1
 dynamictimestep.verbose = 0
-dynamictimestep.max = 1e-3
+dynamictimestep.max = 1e-0
 dynamictimestep.min = 1e-10
-cfl                 = 0.4
-stop_time           = 0.45           # ~3 flow-through times (L=52 m, U=374 -> 0.139 s each)
+cfl                 = 0.2
+stop_time           = 0.5
 
 # ----------------------------------------------------------------------------
 # EMBEDDED SOLID -- the T-38, from STL.  Yang full-flux porous wall.
