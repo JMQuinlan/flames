@@ -95,8 +95,8 @@ SWEEP_LIMITS = {
 # ----- what to render per slice -----
 # name: (field or derived key, colormap, log?, symmetric?)
 QUANTITIES = [
-    ("Schlieren",    "schlieren",   "gray_r",  False, False),
-    ("SchlierenP",   "schlieren_p", "gray_r",  False, False),
+    ("Schlieren",    "schlieren",   "gray",    False, False),
+    ("SchlierenP",   "schlieren_p", "gray",    False, False),
     ("Pressure",     "pressure",    "inferno", False, False),
     ("Mach",         "mach",        "turbo",   False, False),
     ("Density",      "density",     "viridis", False, False),
@@ -106,9 +106,26 @@ QUANTITIES = [
 ENABLE = {q[0]: 1 for q in QUANTITIES}   # flip to 0 to skip one
 
 # ----- schlieren -----
-SCHLIEREN_BETA      = 10.0
-SCHLIEREN_LOG_SCALE = True     # log10(1+100|grad|) -- same form as FlowShockDroplet
-SCHLIEREN_CLIP_PCT  = (1.0, 99.5)   # percentile clip for display range
+# Two things made AMR boxes visible; both are handled:
+#  1. SAMPLER.  yt's slice pixelizer (to_frb) mis-fills pixels on AMR grid
+#     boundaries (O(1) value errors -> gradient spikes up to 600x true).  Slices
+#     are now uniform covering_grids -- see slice_frb.  This is the real fix.
+#  2. SCALING.  Shocks are thin lines (<1% of pixels), so the reference
+#     gradient must be a very high percentile, and a small floor removes the
+#     remaining coarse-level stair-steps (<=4x the local smooth gradient).
+SCHLIEREN_MODE       = "exp"     # exp: exp(-beta g/g_ref), white bg / dark shocks
+                                 # log: log(1 + g/g_floor) normalised to [0,1]
+SCHLIEREN_BETA       = 6.0
+SCHLIEREN_REF_PCT    = 99.9      # percentile of FLUID |grad| used as g_ref (thin shocks)
+SCHLIEREN_FLOOR_FRAC = 0.03      # |grad| < FLOOR_FRAC*g_ref -> 0
+SCHLIEREN_SMOOTH_PX  = 0.0       # optional gaussian pre-smoothing (off: not needed)
+SLICE_LEVEL          = (int(os.environ["SLICE_LEVEL"]) if "SLICE_LEVEL" in os.environ
+                        else None)   # None -> auto from RESOLUTION; set to cap memory
+SCHLIEREN_CLIP_PCT   = (1.0, 99.5)   # percentile clip for the NON-schlieren fields
+# Log-scaled fields (VorticityMag): never show more than this many decades below
+# the peak.  A 1st-percentile floor let ~1e-10 roundoff vorticity at AMR
+# coarse/fine faces render as a clear outline of every box.
+LOG_DECADES_FLOOR    = 1.0e-4
 
 # ----- output -----
 DPI            = 140
@@ -143,72 +160,125 @@ def find_plotfiles(out_dir, exclude_substrings=(".old.",)):
     return sorted(keep, key=_step)
 
 
-def compute_schlieren(field2d, dx, dy, beta=10.0, log_scale=True):
-    """Numerical schlieren from a 2D scalar field (classically density).
+def gradient_magnitude_2d(field2d, dx, dy, smooth_px=0.0):
+    """|grad| of a rasterised 2D field.  Gaussian pre-smoothing (in pixels)
+    suppresses the stair-steps a coarse AMR level leaves in a fine raster."""
+    f = np.asarray(field2d, dtype=float)
+    if smooth_px and smooth_px > 0:
+        try:
+            from scipy.ndimage import gaussian_filter
+            f = gaussian_filter(f, smooth_px, mode="nearest")
+        except ImportError:
+            pass
+    d0 = np.gradient(f, dy, axis=0)
+    d1 = np.gradient(f, dx, axis=1)
+    return np.sqrt(d0 ** 2 + d1 ** 2)
 
-    log_scale : log10(1 + 100|grad|)  -- wide dynamic range, shows weak waves
-    else      : exp(-beta |grad|/max) -- classic dark-on-light shadowgraph
-    Same formulation as tests/FlowShockDroplet/refrence/shock_droplet_analysisPlay.py
+
+def schlieren_reference(grads, masks=None, pct=99.0):
+    """g_ref = pct-th percentile of |grad| over the (masked) pixels of one or
+    more frames.  Pass fluid-only masks so solid walls don't set the scale."""
+    vals = []
+    for i, g in enumerate(grads):
+        g = np.asarray(g, dtype=float)
+        m = np.isfinite(g) & (g > 0)
+        if masks is not None and masks[i] is not None:
+            m &= masks[i]
+        if m.any():
+            vals.append(g[m])
+    if not vals:
+        return 0.0
+    return float(np.percentile(np.concatenate(vals), pct))
+
+
+def compute_schlieren(grad, g_ref, mode="exp", beta=6.0, floor_frac=0.03):
+    """Map a gradient-magnitude field to a [0,1] schlieren image.
+
+    grad       : |grad(rho)| (or any scalar) -- native AMR or rasterised
+    g_ref      : reference gradient (see schlieren_reference)
+    mode "exp" : exp(-beta g/g_ref)  -> 1 = undisturbed (white), 0 = shock (black)
+    mode "log" : 1 - log(1+g/g_floor)/log(1+g_ref/g_floor), clipped to [0,1]
+    floor_frac : gradients below floor_frac*g_ref are treated as zero; this is
+                 what removes AMR seams and roundoff, which sit orders of
+                 magnitude below real shock gradients.
+    Generalises tests/FlowShockDroplet/refrence/shock_droplet_analysisPlay.py.
     """
-    d0 = np.gradient(field2d, dx, axis=0)
-    d1 = np.gradient(field2d, dy, axis=1)
-    g = np.sqrt(d0 ** 2 + d1 ** 2)
-    if log_scale:
-        return np.log10(1.0 + 100.0 * g)
-    gmax = np.nanmax(g)
-    return np.exp(-beta * g / gmax) if gmax > 0 else np.ones_like(g)
+    g = np.nan_to_num(np.asarray(grad, dtype=float), nan=0.0, posinf=0.0)
+    if not np.isfinite(g_ref) or g_ref <= 0:
+        return np.ones_like(g)
+    floor = floor_frac * g_ref
+    g = np.maximum(g - floor, 0.0)
+    ref = max(g_ref - floor, 1e-300)
+    if mode == "log":
+        gf = max(floor, 1e-3 * g_ref)
+        return 1.0 - np.clip(np.log1p(g / gf) / np.log1p(ref / gf), 0.0, 1.0)
+    return np.exp(-beta * g / ref)
 
 
-def slice_frb(ds, axis, coord, fields, resolution=900):
-    """Axis-aligned slice of a 3D (AMR) dataset rasterized to a uniform array.
+def slice_frb(ds, axis, coord, fields, resolution=900, level=None):
+    """Axis-aligned slice of a 3D AMR dataset on a uniform grid.
 
-    Returns (data_dict, extent, hlabel, vlabel) with data[field] shaped
-    (nv, nh) and extent = [h0, h1, v0, v1] suitable for imshow(origin='lower').
-    Resolution is the pixel count on the LONGER image axis; the other is scaled
-    to keep square pixels.
+    Extracted as a ONE-CELL-THICK yt covering_grid at a single AMR level --
+    NOT with slice().to_frb().  yt's slice pixelizer mis-fills pixels at AMR
+    grid boundaries: on an exactly linear test field it left ~1% of pixels
+    with O(1) value errors, and differencing them gave gradient spikes up to
+    600x the true gradient -- the "every AMR box is outlined" schlieren
+    artefact.  covering_grid injects coarse data piecewise-constant under the
+    chosen level (worst case a 4x stair-step in coarse regions, i.e. the true
+    local resolution) and has no boundary defects.
+
+    level      : AMR level to sample at; None -> the coarsest level whose long
+                 image axis has >= 0.9*resolution cells, capped at max_level.
+    Returns (data_dict, extent, hlabel, vlabel); data[f] is (nv, nh) for
+    imshow(origin='lower').  data["_dx"] = (dh, dv) cell sizes.
     """
     ai = {"x": 0, "y": 1, "z": 2}[axis]
     names = ["x", "y", "z"]
-    # yt's own image axes (x_axis={0:1,1:2,2:0}) put the y-normal view on its
-    # side: z horizontal, x vertical.  For a vehicle flying along +x the
-    # readable convention is nose-to-tail HORIZONTAL, so use a fixed natural
-    # mapping and transpose whenever it disagrees with yt.
     NATURAL = {0: (1, 2),   # x-normal cross-section: y horizontal, z vertical
                1: (0, 2),   # y-normal side view    : x horizontal, z vertical
                2: (0, 1)}   # z-normal top view     : x horizontal, y vertical
     hi_ax, vi_ax = NATURAL[ai]
-    yt_h = ds.coordinates.x_axis[ai]
-    yt_v = ds.coordinates.y_axis[ai]
-    need_T = (yt_h, yt_v) != (hi_ax, vi_ax)
 
     le = np.array(ds.domain_left_edge.to_value(), dtype=float)
     re = np.array(ds.domain_right_edge.to_value(), dtype=float)
-    w = float(re[hi_ax] - le[hi_ax])
-    h = float(re[vi_ax] - le[vi_ax])
+    base = np.array(ds.domain_dimensions, dtype=int)
+    rr = int(getattr(ds, "refine_by", 2))
 
-    yw = float(re[yt_h] - le[yt_h])
-    yh = float(re[yt_v] - le[yt_v])
-    if yw >= yh:
-        nh = int(resolution); nv = max(8, int(round(resolution * yh / yw)))
-    else:
-        nv = int(resolution); nh = max(8, int(round(resolution * yw / yh)))
+    if level is None:
+        level = int(ds.max_level)
+        for L in range(int(ds.max_level) + 1):
+            if base[[hi_ax, vi_ax]].max() * rr ** L >= 0.9 * resolution:
+                level = L
+                break
+    level = int(min(max(level, 0), ds.max_level))
 
-    center = (le + re) / 2.0
-    center[ai] = float(coord)
+    dims = base * rr ** level
+    dx = (re - le) / dims
+    k = int(np.clip(np.floor((float(coord) - le[ai]) / dx[ai]), 0, dims[ai] - 1))
+    # THREE cells thick, middle layer kept.  A one-cell-thick covering_grid is
+    # silently wrong in yt 4.4: it ignores left_edge along the thin axis and
+    # returns the domain's FIRST cell layer for every requested coordinate
+    # (measured: x=+0.5, z=-8 and z=+9 all came back at -15.75).
+    nthk = int(min(3, dims[ai]))
+    lo = int(np.clip(k - 1, 0, dims[ai] - nthk))
+    left = le.copy(); left[ai] = le[ai] + lo * dx[ai]
+    cdims = dims.copy(); cdims[ai] = nthk
 
-    slc = ds.slice(ai, float(coord), center=ds.arr(center, "code_length"))
-    frb = slc.to_frb(width=(yw, "code_length"), resolution=(nh, nv),
-                     height=(yh, "code_length"),
-                     center=ds.arr(center, "code_length"))
+    keys = [f if isinstance(f, tuple) else ("boxlib", f) for f in fields]
+    cg = ds.covering_grid(level, left_edge=left, dims=cdims, fields=keys)
 
     out = {}
-    for f in fields:
-        a2 = np.array(frb[("boxlib", f)], dtype=float)
-        out[f] = a2.T if need_T else a2
+    for key in keys:
+        a = np.asarray(cg[key], dtype=float)            # (nx, ny, nz)
+        a2 = np.take(a, k - lo, axis=ai)                 # requested layer, ascending axis order
+        # remaining axes are (min(hi,vi), max(hi,vi)); want (vi, hi)
+        out[key[1]] = a2.T if hi_ax < vi_ax else a2
+    out["_dx"] = (float(dx[hi_ax]), float(dx[vi_ax]))
+    out["_level"] = level
+    out["_coord"] = float(le[ai] + (k + 0.5) * dx[ai])   # actual sampled plane
 
     extent = [le[hi_ax], re[hi_ax], le[vi_ax], re[vi_ax]]
     return out, extent, names[hi_ax], names[vi_ax]
-
 
 def write_gif(png_paths, gif_path, duration_ms=90):
     """Assemble PNG frames into an animated GIF (PIL; imageio not required)."""
@@ -252,12 +322,10 @@ BASE_FIELDS = ["density", "pressure", "phi", "T", "gamma", "p0",
 
 def derive(key, d, dh, dv):
     """Build a display field from the raw slice dict."""
-    if key == "schlieren":
-        return compute_schlieren(d["density"], dh, dv,
-                                 SCHLIEREN_BETA, SCHLIEREN_LOG_SCALE)
-    if key == "schlieren_p":
-        return compute_schlieren(d["pressure"], dh, dv,
-                                 SCHLIEREN_BETA, SCHLIEREN_LOG_SCALE)
+    if key in ("schlieren", "schlieren_p"):
+        # returns |grad| on the uniform slice; caller maps it with a sweep-wide g_ref
+        src = "density" if key == "schlieren" else "pressure"
+        return gradient_magnitude_2d(d[src], dh, dv, SCHLIEREN_SMOOTH_PX)
     if key == "mach":
         u = np.sqrt(d["velocityx"] ** 2 + d["velocityy"] ** 2 + d["velocityz"] ** 2)
         # The plotfile 'a' field is zero in ~half the cells at t=0 (it is a
@@ -283,21 +351,37 @@ def derive(key, d, dh, dv):
 # =============================  RENDERING  ==================================
 # ============================================================================
 
-def draw_solid(ax, phi, extent, level=PHI_LEVEL, low_is_solid=SOLID_IS_LOW):
-    """Airframe, completely black: filled interior + stroked phi=0.5 isoline."""
-    if phi is None or not np.any(np.isfinite(phi)):
-        return
-    # contourf needs an increasing-level list; mask the solid side.
-    solid = (phi < level) if low_is_solid else (phi > level)
-    if solid.any():
-        ax.contourf(solid.astype(float), levels=[0.5, 1.5],
-                    colors=[SOLID_COLOR], extent=extent, origin="lower")
-    try:
-        ax.contour(phi, levels=[level], colors=[SOLID_COLOR],
-                   linewidths=SOLID_EDGE_LW, extent=extent, origin="lower")
-    except Exception:
-        pass
+def draw_solid(ax, phi, extent, level=PHI_LEVEL, low_is_solid=SOLID_IS_LOW,
+               stroke=True):
+    """Airframe, completely black: EVERY pixel with phi <= level is painted.
 
+    The solid is rasterised directly as an opaque RGBA layer rather than
+    filled with contourf.  contourf interpolates a binary mask, and a solid
+    only 1-2 pixels thick (a wing or fin cut edge-on in an x- or z-slice)
+    yields no closed contour -- the body silently vanished from those slices.
+    Direct painting cannot lose a solid pixel.  The phi = level isoline is
+    stroked on top only as a cosmetic edge; the fill does not depend on it.
+    """
+    if phi is None:
+        return
+    phi = np.asarray(phi, dtype=float)
+    solid = (phi <= level) if low_is_solid else (phi >= level)
+    solid &= np.isfinite(phi)
+    if not solid.any():
+        return
+    from matplotlib.colors import to_rgb
+    rgba = np.zeros(phi.shape + (4,), dtype=float)
+    rgba[..., :3] = to_rgb(SOLID_COLOR)
+    rgba[..., 3] = solid.astype(float)
+    ax.imshow(rgba, origin="lower", extent=extent, interpolation="nearest",
+              aspect=ax.get_aspect(), zorder=5)
+    if stroke:
+        try:
+            ax.contour(phi, levels=[level], colors=[SOLID_COLOR],
+                       linewidths=SOLID_EDGE_LW, extent=extent, origin="lower",
+                       zorder=6)
+        except Exception:
+            pass
 
 def render_frame(field, phi, extent, hlabel, vlabel, title, cmap, out_png,
                  vmin=None, vmax=None, log=False, cbar_label=""):
@@ -305,7 +389,8 @@ def render_frame(field, phi, extent, hlabel, vlabel, title, cmap, out_png,
     arr = np.array(field, dtype=float)
     if log:
         pos = arr[np.isfinite(arr) & (arr > 0)]
-        floor = np.percentile(pos, 1.0) if pos.size else 1e-12
+        floor = (max(np.percentile(pos, 1.0), LOG_DECADES_FLOOR * np.percentile(pos, 99.9))
+                     if pos.size else 1e-12)
         arr = np.log10(np.maximum(arr, floor))
         if vmin is not None:
             vmin = math.log10(max(vmin, floor))
@@ -362,6 +447,7 @@ def main():
     have = {str(f[1]) for f in ds.field_list}
     fields = [f for f in BASE_FIELDS if f in have]
     missing = [f for f in BASE_FIELDS if f not in have]
+    print("  slices       = uniform covering_grid (no yt pixelizer: AMR-seam free)")
     if missing:
         print(f"  [note] absent fields skipped: {', '.join(missing)}")
     print(f"  frames/axis  = {N_FRAMES},  resolution = {RESOLUTION}px")
@@ -388,7 +474,7 @@ def main():
         slices = []
         for ci, c in enumerate(coords):
             try:
-                d, extent, hl, vl = slice_frb(ds, axis, c, fields, RESOLUTION)
+                d, extent, hl, vl = slice_frb(ds, axis, c, fields, RESOLUTION, SLICE_LEVEL)
             except Exception as e:
                 print(f"      [warn] slice {axis}={c:.3f} failed: {e}")
                 continue
@@ -397,8 +483,10 @@ def main():
             print("      [warn] no slices extracted -- skipping this axis.")
             continue
         extent = slices[0][2]; hl = slices[0][3]; vl = slices[0][4]
-        dh = (extent[1] - extent[0]) / slices[0][1]["density"].shape[1]
-        dv = (extent[3] - extent[2]) / slices[0][1]["density"].shape[0]
+        dh, dv = slices[0][1]["_dx"]
+        print(f"      sampled at AMR level {slices[0][1]['_level']}  "
+              f"({slices[0][1]['density'].shape[1]} x {slices[0][1]['density'].shape[0]} cells, "
+              f"dx = {dh:.4g} m)")
 
         for qname, qkey, cmap, qlog, _sym in active:
             qdir = os.path.join(sweep_dir, f"{sweep_name}-{qname}")
@@ -414,13 +502,24 @@ def main():
             if not samp:
                 print(f"      [warn] {qname}: cannot derive -- skipped")
                 continue
-            vmin, vmax = robust_range(np.concatenate([s.ravel() for s in samp]),
-                                      SCHLIEREN_CLIP_PCT)
+            is_sch = qkey in ("schlieren", "schlieren_p")
+            if is_sch:
+                sub = slices[:: max(1, len(slices) // 8)]
+                masks = [(d.get(PHI_FIELD) > PHI_LEVEL) if (SOLID_IS_LOW and d.get(PHI_FIELD) is not None)
+                         else None for _c, d, _e, _h, _v in sub]
+                g_ref = schlieren_reference(samp, masks, SCHLIEREN_REF_PCT)
+                vmin, vmax = 0.0, 1.0
+            else:
+                vmin, vmax = robust_range(np.concatenate([s.ravel() for s in samp]),
+                                          SCHLIEREN_CLIP_PCT)
 
             pngs = []
             for fi, (c, d, ext, _h, _v) in enumerate(slices):
                 try:
                     fld = derive(qkey, d, dh, dv)
+                    if is_sch:
+                        fld = compute_schlieren(fld, g_ref, SCHLIEREN_MODE,
+                                                SCHLIEREN_BETA, SCHLIEREN_FLOOR_FRAC)
                 except Exception as e:
                     print(f"      [warn] {qname} frame {fi}: {e}")
                     continue
@@ -458,13 +557,12 @@ def make_overview(ds, fields):
              ("x", 0.50, "cross-section (x=0.5)")]
     for axis, c, desc in picks:
         try:
-            d, extent, hl, vl = slice_frb(ds, axis, c, fields, RESOLUTION)
+            d, extent, hl, vl = slice_frb(ds, axis, c, fields, RESOLUTION, SLICE_LEVEL)
         except Exception as e:
             print(f"      [warn] overview {axis}={c}: {e}")
             continue
-        dh = (extent[1] - extent[0]) / d["density"].shape[1]
-        dv = (extent[3] - extent[2]) / d["density"].shape[0]
-        panels = [("Schlieren", "schlieren", "gray_r", False),
+        dh, dv = d["_dx"]
+        panels = [("Schlieren", "schlieren", "gray", False),
                   ("Pressure", "pressure", "inferno", False),
                   ("Mach", "mach", "turbo", False),
                   ("VorticityMag", "vortmag", "magma", True)]
@@ -475,11 +573,20 @@ def make_overview(ds, fields):
             except Exception:
                 ax.set_visible(False); continue
             arr = np.array(fld, dtype=float)
-            if lg:
-                pos = arr[np.isfinite(arr) & (arr > 0)]
-                floor = np.percentile(pos, 1.0) if pos.size else 1e-12
-                arr = np.log10(np.maximum(arr, floor))
-            vmin, vmax = robust_range(arr, SCHLIEREN_CLIP_PCT)
+            if key in ("schlieren", "schlieren_p"):
+                ph = d.get(PHI_FIELD)
+                m = (ph > PHI_LEVEL) if (SOLID_IS_LOW and ph is not None) else None
+                g_ref = schlieren_reference([arr], [m], SCHLIEREN_REF_PCT)
+                arr = compute_schlieren(arr, g_ref, SCHLIEREN_MODE,
+                                        SCHLIEREN_BETA, SCHLIEREN_FLOOR_FRAC)
+                vmin, vmax = 0.0, 1.0
+            else:
+                if lg:
+                    pos = arr[np.isfinite(arr) & (arr > 0)]
+                    floor = (max(np.percentile(pos, 1.0), LOG_DECADES_FLOOR * np.percentile(pos, 99.9))
+                     if pos.size else 1e-12)
+                    arr = np.log10(np.maximum(arr, floor))
+                vmin, vmax = robust_range(arr, SCHLIEREN_CLIP_PCT)
             im = ax.imshow(arr, origin="lower", extent=extent, cmap=cm,
                            norm=Normalize(vmin, vmax), aspect="equal",
                            interpolation="bilinear")
