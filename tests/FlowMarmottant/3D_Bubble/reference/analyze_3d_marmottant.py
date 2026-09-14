@@ -140,9 +140,17 @@ def read_thermo(out_dir):
             cols[h] = data[:, i]
     if "time" not in cols:
         cols["time"] = data[:, 0]
-    # AMReX restarts can repeat rows: keep strictly increasing time
+    # A restart from plotfile NNNNN appends rows starting at that plotfile's
+    # time, so rows written between it and the killed job's last step appear
+    # twice.  Keep the NEWEST segment: scan backwards, keep a row only if it
+    # is earlier than everything already kept.
     t = cols["time"]
-    keep = np.concatenate([[True], np.diff(t) > 0])
+    keep = np.zeros(t.size, dtype=bool)
+    tmin = np.inf
+    for i in range(t.size - 1, -1, -1):
+        if t[i] < tmin:
+            keep[i] = True
+            tmin = t[i]
     return {k: v[keep] for k, v in cols.items()}
 
 
