@@ -50,7 +50,9 @@ import analyze_radius as ar          # reuse the extraction verbatim
 # ============================================================================
 
 def _repo(*p):
-    return os.path.normpath(os.path.join(_HERE, "..", "..", "..", "bin", *p))
+    return "/mmfs1/home/ttryon/flames/bin"
+    #return os.path.normpath(os.path.join(_HERE, "..", "..", "..", "bin", *p))
+
 
 def _tests(*p):
     return os.path.normpath(os.path.join(_HERE, "..", *p))
