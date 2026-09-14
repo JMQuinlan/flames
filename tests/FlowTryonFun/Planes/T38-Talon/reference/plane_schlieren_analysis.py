@@ -66,6 +66,9 @@ OUT_DIR = os.environ.get(
         _HERE, "..", "..", "..", "..", "..", "bin", "tests", "FlowTryonFun",
         "Planes", "T38-Talon", "output_Ma1.1_Wide")))
 
+          
+OUT_DIR = "/mmfs1/home/ttryon/flames/bin/tests/FlowTryonFun/Planes/T38-Talon/output_Ma1.1_Wide"
+
 IMG_ROOT = os.path.join(_HERE, "Images")
 
 # ----- solid / airframe -----
