@@ -49,25 +49,34 @@ import analyze_radius as ar          # reuse the extraction verbatim
 # ============================  CONFIGURATION  ===============================
 # ============================================================================
 
+# Root of the bin tree holding the plotfiles.  INCLINE by default; override
+# with DRIVEN_BIN_ROOT (e.g. the local repo's bin) without editing the script.
+BIN_ROOT = os.environ.get("DRIVEN_BIN_ROOT", "/mmfs1/home/ttryon/flames/bin")
+#BIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "..", "..", "bin"))
+
 def _repo(*p):
-    return "/mmfs1/home/ttryon/flames/bin"
-    #return os.path.normpath(os.path.join(_HERE, "..", "..", "..", "bin", *p))
+    # NOTE: must join *p.  Returning BIN_ROOT alone points every run at the bin
+    # root, finds no plotfiles, and silently plots the models only.
+    return os.path.normpath(os.path.join(BIN_ROOT, *p))
 
 
 def _tests(*p):
     return os.path.normpath(os.path.join(_HERE, "..", *p))
 
-# Each run: label, plotfile dir, the input file that produced it, colour.
-# Runs whose output dir is missing are skipped with a note.
+# Each run: label, the input file that produced it, colour, and optionally
+# out_dir.  When out_dir is omitted it is read from the input's own
+# `plot_file =` line -- the same single source of truth as the drive -- so the
+# plotfile path cannot drift from what the solver actually wrote.
 RUNS = [
     dict(label="LowAmp NSCBC (A = 1.0e4 Pa)",
-         out_dir=_repo("tests", "FlowDrivenBubble", "output_LowAmp_NSCBC"),
          input=_tests("input_LowAmp_NSCBC"),
          color="tab:blue"),
     dict(label="LowerAmp NSCBC (A = 1.36e3 Pa)",
-         out_dir=_repo("tests", "FlowDrivenBubble", "output_LowerAmp_NSCBC"),
          input=_tests("input_LowerAmp_NSCBC"),
          color="tab:green"),
+    # explicit override example:
+    # dict(label="...", input=_tests("input_LowAmp_NSCBC"), color="tab:red",
+    #      out_dir=_repo("tests", "FlowDrivenBubble", "output_LowAmp_NSCBC")),
 ]
 
 # ===== MODEL KNOBS =====
@@ -222,6 +231,19 @@ def integrate(model, P, t_end, n_steps):
     return t, R
 
 
+def dim_from_input(path, cfg):
+    """Spatial dimension: the '#@ dim=N' header, else inferred from prob_hi."""
+    with open(path) as fh:
+        for line in fh:
+            if line.startswith("#@") and "dim=" in line:
+                try:
+                    return int(line.split("dim=", 1)[1].split()[0])
+                except ValueError:
+                    pass
+    hi = cfg.get("geometry.prob_hi", "").split()
+    return 2 if len(hi) >= 3 and float(hi[2]) == 0.0 else 3
+
+
 def build_params(cfg, path):
     A, w, p_inf, how = drive_from_input(cfg, path)
     F = fluids_from_input(cfg)
@@ -230,7 +252,8 @@ def build_params(cfg, path):
     # Laplace-equilibrium gas pressure at R0
     p_g0 = p_inf + 2.0 * F["sigma"] / F["R0"]
     P = dict(F); P.update(A=A, omega=w, p_inf=p_inf, kappa=kappa, c=c,
-                          p_g0=p_g0, how=how)
+                          p_g0=p_g0, how=how, dim=dim_from_input(path, cfg),
+                          plot_file=cfg.get("plot_file", ""))
     P["f_drive"] = w / (2.0 * math.pi) if w else 0.0
     P["T_drive"] = 1.0 / P["f_drive"] if P["f_drive"] else np.nan
     # Minnaert natural frequency (unbounded liquid, no tension correction)
@@ -249,7 +272,7 @@ def describe(P, label, path):
     print(f"      liquid     : rho = {P['rho_l']:.1f}, c = {P['c']:.2f} m/s "
           f"(gamma={P['gamma_l']}, p_inf_EOS={P['pinf_l']:.3g})")
     print(f"      gas        : kappa = {P['kappa']}, p_g0 = {P['p_g0']:.6g} Pa")
-    print(f"      R0 = {P['R0']:.6g} m, sigma = {P['sigma']:.4g}, mu = {P['mu']:.4g}")
+    print(f"      R0 = {P['R0']:.6g} m, sigma = {P['sigma']:.4g}, mu = {P['mu']:.4g}, dim = {P['dim']}")
     lin = P["A"] / (3.0 * P["kappa"] * P["p_inf"]
                     * abs(1.0 - (P["f_drive"] / P["f0"]) ** 2))
     print(f"      linear dR/R0 (unbounded) = {lin:.4e}")
@@ -257,6 +280,10 @@ def describe(P, label, path):
 # ============================================================================
 # MAIN
 # ============================================================================
+
+def _tscale(P):
+    """Time normaliser: T_drive for driven runs, milliseconds otherwise."""
+    return P["T_drive"] if np.isfinite(P["T_drive"]) else 1.0e-3
 
 def main():
     os.makedirs(IMG_DIR, exist_ok=True)
@@ -272,6 +299,9 @@ def main():
         cfg = parse_input(run["input"])
         P = build_params(cfg, run["input"])
         describe(P, run["label"], run["input"])
+        if not run.get("out_dir"):
+            run["out_dir"] = P["plot_file"]
+        print(f"      plotfiles  : {run['out_dir']}")
         if P["omega"] == 0.0:
             print("      [WARN] no drive found in this input -- models will be static.")
         run["P"] = P
@@ -300,14 +330,21 @@ def main():
     for run in loaded:
         P = run["P"]
         # ---- simulation curves (identical extraction to analyze_radius.py)
-        if os.path.isdir(run["out_dir"]):
+        n_pf = (len([q for q in os.listdir(run["out_dir"]) if q.endswith("cell")])
+                if run["out_dir"] and os.path.isdir(run["out_dir"]) else 0)
+        if n_pf >= 2:
             ar.R0 = P["R0"]
-            ar.T_DRIVE = P["T_drive"]
-            ar.F_DRIVE = P["f_drive"]
-            print(f"  loading {run['out_dir']} ...")
+            ar.DIM = P["dim"]
+            ar.R_BIN_MAX = 2.0 * P["R0"]      # eta(r) profile out to 2 R0
+            if np.isfinite(P["T_drive"]):
+                ar.T_DRIVE = P["T_drive"]
+                ar.F_DRIVE = P["f_drive"]
+            print(f"  loading {run['out_dir']}  ({n_pf} plotfiles, dim={P['dim']}) ...")
             t, R_v, R_e, n_skip = ar.extract_radius_history(run["out_dir"])
             if n_skip:
                 print(f"  [warn] skipped {n_skip} corrupt/partial plotfile(s).")
+            if len(t) < 2:
+                print(f"  [WARN] {run['label']}: plotfiles present but no usable radius extracted.")
             if len(t) >= 2:
                 any_sim = True
                 t_end_seen = max(t_end_seen, float(t[-1]))
@@ -316,53 +353,69 @@ def main():
                 base = (float(R_v[ar.BASELINE_FRAME])
                         if ar.R_VOL_BASELINE == "frame" and len(R_v) > ar.BASELINE_FRAME
                         else P["R0"])
-                ax.plot(t / P["T_drive"], R_v / base, "-", color=run["color"],
-                        lw=2.0, label=f"{run['label']} -- volume")
-                ax.plot(t / P["T_drive"], R_e / P["R0"], "--", color=run["color"],
-                        lw=1.4, alpha=0.8, label=f"{run['label']} -- $\\eta=0.5$")
+                ts = _tscale(P)
+                ax.plot(t / ts, R_v / base, "-", color=run["color"], lw=2.2,
+                        marker="o", ms=2.5, label=f"{run['label']} -- sim volume radius")
+                ax.plot(t / ts, R_e / P["R0"], "--", color=run["color"], lw=1.6,
+                        alpha=0.9, label=f"{run['label']} -- sim $\\eta=0.5$ radius")
         else:
-            print(f"  [info] no output yet at {run['out_dir']} -- models only.")
+            why = ("no out_dir" if not run["out_dir"] else
+                   "directory does not exist" if not os.path.isdir(run["out_dir"]) else
+                   f"only {n_pf} plotfile(s)")
+            print(f"  [WARN] {run['label']}: NO SIMULATION CURVES -- {why}: {run['out_dir']}")
 
     # ---- models: integrate over the span the simulations actually cover
     #      (fall back to 2 drive periods when nothing has been run yet)
     P0 = loaded[0]["P"]
-    t_end = t_end_seen if t_end_seen > 0 else 2.0 * P0["T_drive"]
-    n_per = max(1.0, t_end / P0["T_drive"])
+    Tref = P0["T_drive"] if np.isfinite(P0["T_drive"]) else 1.0e-2
+    t_end = t_end_seen if t_end_seen > 0 else 2.0 * Tref
+    n_per = max(1.0, t_end / Tref)
     n_steps = int(N_SUBSTEP * n_per)
     print(f"\n  integrating models to t = {t_end*1e3:.4f} ms "
           f"({n_per:.2f} drive periods, {n_steps} RK4 steps)")
 
     for run in loaded:
         P = run["P"]
-        ls_rpe, ls_km = ":", "-."
+        short = run['label'].split('(')[0].strip()
+        ts = _tscale(P)
         if SHOW_RPE:
             tm, Rm = integrate("rpe", P, t_end, n_steps)
-            ax.plot(tm / P["T_drive"], Rm / P["R0"], ls_rpe, color=COLOR_RPE,
-                    lw=1.8, label=f"RPE  ({run['label'].split('(')[0].strip()})")
+            ax.plot(tm / ts, Rm / P["R0"], ":", color=run["color"], lw=1.9,
+                    label=f"{short} -- driven RPE")
             ar.print_extrema(f"RPE {run['label']}", tm, Rm)
         if SHOW_KM:
             tm, Rm = integrate("km", P, t_end, n_steps)
-            ax.plot(tm / P["T_drive"], Rm / P["R0"], ls_km, color=COLOR_KM,
-                    lw=1.8, label=f"KM   ({run['label'].split('(')[0].strip()})")
+            ax.plot(tm / ts, Rm / P["R0"], "-.", color=run["color"], lw=1.6, alpha=0.85,
+                    label=f"{short} -- Keller-Miksis")
             ar.print_extrema(f"KM  {run['label']}", tm, Rm)
 
     ax.set_ylabel(r"$R / R_0$", fontsize=14)
     ax.set_title(TITLE_STR, fontsize=15, fontweight="bold")
     ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=9, loc="upper left", ncol=2)
+    from matplotlib.lines import Line2D
+    style_key = [Line2D([], [], color="0.2", ls="-", marker="o", ms=2.5, lw=2.2, label="sim: volume radius"),
+                 Line2D([], [], color="0.2", ls="--", lw=1.6, label=r"sim: $\eta=0.5$ radius"),
+                 Line2D([], [], color="0.2", ls=":", lw=1.9, label="driven RPE"),
+                 Line2D([], [], color="0.2", ls="-.", lw=1.6, label="Keller-Miksis")]
+    leg2 = ax.legend(handles=style_key, fontsize=8.5, loc="lower right", title="line style",
+                     title_fontsize=8.5, framealpha=0.9)
+    ax.add_artist(leg2)
+    ax.legend(fontsize=8.5, loc="upper left", ncol=2, framealpha=0.9)
 
     if axd is not None:
         tt = np.linspace(0.0, t_end, 2000)
         for run in loaded:
             P = run["P"]
-            axd.plot(tt / P["T_drive"],
+            axd.plot(tt / _tscale(P),
                      (P["p_inf"] + P["A"] * np.sin(P["omega"] * tt)) / P["p_inf"],
                      "-", color=run["color"], lw=1.4, label=run["label"])
         axd.axhline(1.0, color="0.6", lw=0.8, ls="--")
         axd.set_ylabel(r"$p_\infty(t)\,/\,p_\infty$", fontsize=12)
         axd.grid(True, alpha=0.3)
         axd.legend(fontsize=8, loc="upper right")
-    (axd if axd is not None else ax).set_xlabel(r"$t / T_{drive}$", fontsize=14)
+    undriven = any(not np.isfinite(r["P"]["T_drive"]) for r in loaded)
+    (axd if axd is not None else ax).set_xlabel(
+        r"$t$ [ms]" if undriven else r"$t / T_{drive}$", fontsize=14)
 
     plt.tight_layout()
     png = os.path.join(IMG_DIR, f"{SAVE_NAME}.png")
