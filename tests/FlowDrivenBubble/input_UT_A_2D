@@ -54,7 +54,7 @@ amr.blocking_factor = 8
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
 amr.max_level      = 0
-amr.n_cell         = 64 8           # uniform dx 6.25e-4 (matches quadrant finest); no AMR
+amr.n_cell         = 128 16           # uniform dx 6.25e-4 (matches quadrant finest); no AMR
 amr.n_error_buf    = 16
 
 # Permanently refined box over the bubble (quadrant: center = origin).
@@ -71,7 +71,8 @@ cfl                     = 0.5
 
 ### DIMENSIONS -- +x+y quadrant, full domain 4 R0 across ###
 geometry.prob_lo     = 0.0 0.0
-geometry.prob_hi     = 0.04 0.005
+geometry.prob_hi     = 0.08 0.01
+# DOMAIN DOUBLED 2026-09-13 (prob_hi was 0.04 0.005): n_cell x2 so dx is unchanged; NSCBC L_ref x2 so L_ref/domain (boundary damping) is unchanged; refine_box unchanged.
 geometry.is_periodic = 0 1
 stop_time            = 3.1e-2       # ~150k steps / 2.5 drive periods (INCLINE died at 122.6k steps)
 

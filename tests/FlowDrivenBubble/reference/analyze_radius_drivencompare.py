@@ -84,11 +84,10 @@ POLYTROPIC   = None    # gas exponent kappa; None -> use eos1.gamma (adiabatic)
 N_SUBSTEP    = 4000    # RK4 substeps per drive period (models only)
 SHOW_RPE     = True
 SHOW_KM      = True
-SHOW_DRIVE   = True    # lower panel: p_inf(t) actually applied
 SHAPE_GIF    = False   # the GIF is analyze_radius.py's job; off by default
 
 # ===== PLOT =====
-DPI, FIG_W, FIG_H = 180, 11.5, 7.8
+DPI, FIG_W, FIG_H = 180, 11.5, 6.2
 SAVE_NAME  = "FlowDrivenBubble_radius_drivencompare"   # one figure per run: <SAVE_NAME>_<tag>.png
 TITLE_STR  = "Flow-Driven Bubble: simulation vs driven RPE / Keller-Miksis"
 # Analytical models are drawn in FIXED colours, never the run colour, so they
@@ -127,7 +126,7 @@ def _f(cfg, key, default=None):
 def drive_from_input(cfg, path):
     """Return (amp, omega, p_inf, how).  Scans every driven face; all faces
     that specify a drive must agree."""
-    amps, omegas, pinfs, faces = [], [], [], []
+    amps, omegas, pinfs, faces, phases = [], [], [], [], []
     for face in ("xlo", "xhi", "ylo", "yhi", "zlo", "zhi"):
         a = _f(cfg, f"nscbc.{face}.drive_amp")
         w = _f(cfg, f"nscbc.{face}.drive_omega")
@@ -137,6 +136,7 @@ def drive_from_input(cfg, path):
             continue
         faces.append(face)
         amps.append(a or 0.0); omegas.append(w or 0.0)
+        phases.append(_f(cfg, f"nscbc.{face}.drive_phase", 0.0) or 0.0)
         p = _f(cfg, f"nscbc.{face}.target_p")
         if p is not None:
             pinfs.append(p)
@@ -146,7 +146,7 @@ def drive_from_input(cfg, path):
             for f_, a_, w_ in zip(faces, amps, omegas):
                 print(f"           {f_}: amp={a_:g} omega={w_:g}")
         p_inf = pinfs[0] if pinfs else _f(cfg, "pressure0.ic.expression.constant.p_inf", 1.0e5)
-        return amps[0], omegas[0], p_inf, f"nscbc drive on {','.join(faces)}"
+        return amps[0], omegas[0], p_inf, f"nscbc drive on {','.join(faces)}", phases[0]
 
     # primitive-BC path (bc.primitive = 1): pressure.bc.constant.{amp,w}
     a = _f(cfg, "pressure.bc.constant.amp", 0.0)
@@ -154,7 +154,7 @@ def drive_from_input(cfg, path):
     p_inf = (_f(cfg, "pressure.bc.constant.p_inf")
              or _f(cfg, "pressure.bc.constant.p_amb")
              or _f(cfg, "pressure0.ic.expression.constant.p_inf", 1.0e5))
-    return a or 0.0, w or 0.0, p_inf, "primitive pressure BC"
+    return a or 0.0, w or 0.0, p_inf, "primitive pressure BC", 0.0
 
 
 def fluids_from_input(cfg):
@@ -190,8 +190,9 @@ def _rhs(t, R, Rd, P, model):
 
     pg   = _p_gas(R, p_g0, R0, kap)
     pw   = pg - 2.0 * sig / R - 4.0 * mu * Rd / R      # liquid-side wall pressure
-    pdr  = p_inf + A * math.sin(w * t)
-    dpdr = A * w * math.cos(w * t)
+    ph   = P.get("phase", 0.0)          # solver: target_p + A sin(w t + phase)
+    pdr  = p_inf + A * math.sin(w * t + ph)
+    dpdr = A * w * math.cos(w * t + ph)
 
     if model == "rpe":
         return ((pw - pdr) / rho - 1.5 * Rd * Rd) / R
@@ -247,14 +248,14 @@ def dim_from_input(path, cfg):
 
 
 def build_params(cfg, path):
-    A, w, p_inf, how = drive_from_input(cfg, path)
+    A, w, p_inf, how, phase = drive_from_input(cfg, path)
     F = fluids_from_input(cfg)
     kappa = POLYTROPIC if POLYTROPIC is not None else F["gamma_g"]
     c = sound_speed(F["rho_l"], F["gamma_l"], F["pinf_l"], p_inf)
     # Laplace-equilibrium gas pressure at R0
     p_g0 = p_inf + 2.0 * F["sigma"] / F["R0"]
     P = dict(F); P.update(A=A, omega=w, p_inf=p_inf, kappa=kappa, c=c,
-                          p_g0=p_g0, how=how, dim=dim_from_input(path, cfg),
+                          p_g0=p_g0, how=how, phase=phase, dim=dim_from_input(path, cfg),
                           plot_file=cfg.get("plot_file", ""))
     P["f_drive"] = w / (2.0 * math.pi) if w else 0.0
     P["T_drive"] = 1.0 / P["f_drive"] if P["f_drive"] else np.nan
@@ -331,11 +332,7 @@ def plot_run(run):
     from matplotlib.lines import Line2D
     P = run["P"]
     ts = _tscale(P)
-    nrow = 2 if SHOW_DRIVE else 1
-    fig, axes = plt.subplots(nrow, 1, figsize=(FIG_W, FIG_H), sharex=True,
-                             gridspec_kw=dict(height_ratios=[3, 1][:nrow]))
-    ax = axes[0] if nrow > 1 else axes
-    axd = axes[1] if nrow > 1 else None
+    fig, ax = plt.subplots(figsize=(FIG_W, FIG_H))
 
     # ---- simulation (identical extraction to analyze_radius.py)
     t_end = 0.0
@@ -394,18 +391,10 @@ def plot_run(run):
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=10, loc="upper left", framealpha=0.9)
 
-    if axd is not None:
-        tt = np.linspace(0.0, t_end, 2000)
-        axd.plot(tt / ts, (P["p_inf"] + P["A"] * np.sin(P["omega"] * tt)) / P["p_inf"],
-                 "-", color="0.3", lw=1.4, label=f"applied drive  A = {P['A']:.4g} Pa, "
-                 f"f = {P['f_drive']:.4g} Hz")
-        axd.axhline(1.0, color="0.6", lw=0.8, ls="--")
-        axd.set_ylabel(r"$p_\infty(t)\,/\,p_\infty$", fontsize=12)
-        axd.grid(True, alpha=0.3)
-        axd.legend(fontsize=9, loc="upper right")
-    (axd if axd is not None else ax).set_xlabel(
-        r"$t$ [ms]" if undriven else r"$t / T_{drive}$", fontsize=14)
-
+    ax.set_xlabel(r"$t$ [ms]" if undriven else r"$t / T_{drive}$", fontsize=14)
+    ax.text(0.99, 0.02, f"drive: A = {P['A']:.4g} Pa,  f = {P['f_drive']:.4g} Hz,  "
+            f"f/f0 = {P['f_drive']/P['f0']:.3f}", transform=ax.transAxes,
+            ha="right", va="bottom", fontsize=9, color="0.3")
     plt.tight_layout()
     tag = run.get("tag") or "".join(ch for ch in run["label"] if ch.isalnum())[:24]
     for ext, dpi in (("png", DPI), ("eps", DPI)):

@@ -56,7 +56,7 @@ amr.blocking_factor = 2
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
 amr.max_level      = 0
-amr.n_cell         = 512 512       # dx = 7.8e-4 m -> R0/dx ~ 25.6 (Sch20 NR0~25)
+amr.n_cell         = 1024 1024       # dx = 7.8e-4 m -> R0/dx ~ 25.6 (Sch20 NR0~25)
 
 nghost = 4
 
@@ -69,8 +69,9 @@ dynamictimestep.min     = 1.0e-13
 cfl                     = 0.5
 
 ### DIMENSIONS ###
-geometry.prob_lo     = -0.20 -0.20 0.0
-geometry.prob_hi     =  0.20  0.20 0.0
+geometry.prob_lo     = -0.4 -0.4 0.0
+geometry.prob_hi     =  0.4 0.4 0.0
+# DOMAIN DOUBLED 2026-09-13 (prob_hi was 0.20  0.20 0.0): n_cell x2 so dx is unchanged; NSCBC L_ref x2 so L_ref/domain (boundary damping) is unchanged; refine_box unchanged.
 geometry.is_periodic = 0 0 0
 stop_time            = 3.1e-2      # 2.5 drive periods (T = 12.26 ms)
 
@@ -166,7 +167,7 @@ nscbc.xlo.drive_amp   = 1.0e4
 nscbc.xlo.drive_omega = 512.35
 nscbc.xlo.sigma = 0.15
 nscbc.xlo.beta  = 0.5
-nscbc.xlo.L_ref = 0.40
+nscbc.xlo.L_ref = 0.8
 nscbc.xlo.target_u = 0.0
 nscbc.xlo.target_v = 0.0
 
@@ -176,7 +177,7 @@ nscbc.xhi.drive_amp   = 1.0e4
 nscbc.xhi.drive_omega = 512.35
 nscbc.xhi.sigma = 0.15
 nscbc.xhi.beta  = 0.5
-nscbc.xhi.L_ref = 0.40
+nscbc.xhi.L_ref = 0.8
 nscbc.xhi.target_u = 0.0
 nscbc.xhi.target_v = 0.0
 
@@ -186,7 +187,7 @@ nscbc.ylo.drive_amp   = 1.0e4
 nscbc.ylo.drive_omega = 512.35
 nscbc.ylo.sigma = 0.15
 nscbc.ylo.beta  = 0.5
-nscbc.ylo.L_ref = 0.40
+nscbc.ylo.L_ref = 0.8
 nscbc.ylo.target_u = 0.0
 nscbc.ylo.target_v = 0.0
 
@@ -196,7 +197,7 @@ nscbc.yhi.drive_amp   = 1.0e4
 nscbc.yhi.drive_omega = 512.35
 nscbc.yhi.sigma = 0.15
 nscbc.yhi.beta  = 0.5
-nscbc.yhi.L_ref = 0.40
+nscbc.yhi.L_ref = 0.8
 nscbc.yhi.target_u = 0.0
 nscbc.yhi.target_v = 0.0
 

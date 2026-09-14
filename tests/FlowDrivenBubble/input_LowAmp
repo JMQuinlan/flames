@@ -80,7 +80,7 @@ amr.grid_eff       = 0.8
 # it does not need R0/dx = 64, and dropping level 2 cuts cells ~10x and
 # doubles dt (observed cost at max_level 2: 24 s/step, ~11 days/period).
 amr.max_level      = 1
-amr.n_cell         = 32 32 32       # base dx 1.25e-3; finest dx 6.25e-4 -> R0/dx = 32
+amr.n_cell         = 64 64 64       # base dx 1.25e-3; finest dx 6.25e-4 -> R0/dx = 32
 
 # n_error_buf pushes the fine patches past the interface band so the
 # coarse-fine boundary sits in pure water (Q-Fix density partition is exact
@@ -104,8 +104,9 @@ dynamictimestep.min     = 1.0e-13
 cfl                     = 0.5
 
 ### DIMENSIONS -- +x+y+z octant, full domain 4 R0 across ###
-geometry.prob_lo     = 0.0  0.0  0.0
-geometry.prob_hi     = 0.04 0.04 0.04
+geometry.prob_lo     = 0.0 0.0 0.0
+geometry.prob_hi     = 0.08 0.08 0.08
+# DOMAIN DOUBLED 2026-09-13 (prob_hi was 0.04 0.04 0.04): n_cell x2 so dx is unchanged; NSCBC L_ref x2 so L_ref/domain (boundary damping) is unchanged; refine_box unchanged.
 geometry.is_periodic = 0 0 0
 stop_time            = 0.1
 

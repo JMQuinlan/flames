@@ -51,7 +51,7 @@ amr.blocking_factor = 16
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
 amr.max_level      = 1
-amr.n_cell         = 32 32          # base dx 3.125e-2; finest dx 1.5625e-2 -> R0/dx = 32
+amr.n_cell         = 64 64          # base dx 3.125e-2; finest dx 1.5625e-2 -> R0/dx = 32
 amr.n_error_buf    = 16
 
 # Permanently refined box over the bubble (quadrant: center = origin).
@@ -70,7 +70,8 @@ cfl                     = 0.5
 
 ### DIMENSIONS -- +x+y quadrant, full domain 4 R0 across ###
 geometry.prob_lo     = 0.0 0.0
-geometry.prob_hi     = 1.0 1.0
+geometry.prob_hi     = 2.0 2.0
+# DOMAIN DOUBLED 2026-09-13 (prob_hi was 1.0 1.0): n_cell x2 so dx is unchanged; NSCBC L_ref x2 so L_ref/domain (boundary damping) is unchanged; refine_box unchanged.
 geometry.is_periodic = 0 0
 stop_time            = 3.05         # 1 drive period (T = 3.052)
 
