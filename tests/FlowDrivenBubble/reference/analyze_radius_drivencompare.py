@@ -68,10 +68,10 @@ def _tests(*p):
 # `plot_file =` line -- the same single source of truth as the drive -- so the
 # plotfile path cannot drift from what the solver actually wrote.
 RUNS = [
-    dict(label="LowAmp NSCBC (A = 1.0e4 Pa)",
+    dict(label="LowAmp NSCBC (A = 1.0e4 Pa)", tag="LowAmp",
          input=_tests("input_LowAmp_NSCBC"),
          color="tab:blue"),
-    dict(label="LowerAmp NSCBC (A = 1.36e3 Pa)",
+    dict(label="LowerAmp NSCBC (A = 1.36e3 Pa)", tag="LowerAmp",
          input=_tests("input_LowerAmp_NSCBC"),
          color="tab:green"),
     # explicit override example:
@@ -89,9 +89,11 @@ SHAPE_GIF    = False   # the GIF is analyze_radius.py's job; off by default
 
 # ===== PLOT =====
 DPI, FIG_W, FIG_H = 180, 11.5, 7.8
-SAVE_NAME  = "FlowDrivenBubble_radius_drivencompare"
+SAVE_NAME  = "FlowDrivenBubble_radius_drivencompare"   # one figure per run: <SAVE_NAME>_<tag>.png
 TITLE_STR  = "Flow-Driven Bubble: simulation vs driven RPE / Keller-Miksis"
-COLOR_RPE, COLOR_KM = "0.35", "tab:orange"
+# Analytical models are drawn in FIXED colours, never the run colour, so they
+# cannot be mistaken for simulation output (run colours: blue / green).
+COLOR_RPE, COLOR_KM = "black", "tab:red"
 
 IMG_DIR = os.path.join(_HERE, "Images")
 
@@ -319,114 +321,101 @@ def main():
         print(f"  [WARN] runs differ in drive frequency: {fs} Hz. "
               f"t/T uses each run's own T_drive.\n")
 
+    for run in loaded:
+        plot_run(run)
+
+
+def plot_run(run):
+    """One figure per run: simulation (volume + eta=0.5 radius) against the
+    driven RPE and Keller-Miksis solutions, with the applied drive below."""
+    from matplotlib.lines import Line2D
+    P = run["P"]
+    ts = _tscale(P)
     nrow = 2 if SHOW_DRIVE else 1
     fig, axes = plt.subplots(nrow, 1, figsize=(FIG_W, FIG_H), sharex=True,
                              gridspec_kw=dict(height_ratios=[3, 1][:nrow]))
     ax = axes[0] if nrow > 1 else axes
     axd = axes[1] if nrow > 1 else None
 
-    any_sim = False
-    t_end_seen = 0.0
-    for run in loaded:
-        P = run["P"]
-        # ---- simulation curves (identical extraction to analyze_radius.py)
-        n_pf = (len([q for q in os.listdir(run["out_dir"]) if q.endswith("cell")])
-                if run["out_dir"] and os.path.isdir(run["out_dir"]) else 0)
-        if n_pf >= 2:
-            ar.R0 = P["R0"]
-            ar.DIM = P["dim"]
-            ar.R_BIN_MAX = 2.0 * P["R0"]      # eta(r) profile out to 2 R0
-            if np.isfinite(P["T_drive"]):
-                ar.T_DRIVE = P["T_drive"]
-                ar.F_DRIVE = P["f_drive"]
-            print(f"  loading {run['out_dir']}  ({n_pf} plotfiles, dim={P['dim']}) ...")
-            t, R_v, R_e, n_skip = ar.extract_radius_history(run["out_dir"])
-            if n_skip:
-                print(f"  [warn] skipped {n_skip} corrupt/partial plotfile(s).")
-            if len(t) < 2:
-                print(f"  [WARN] {run['label']}: plotfiles present but no usable radius extracted.")
-            if len(t) >= 2:
-                any_sim = True
-                t_end_seen = max(t_end_seen, float(t[-1]))
-                ar.print_extrema(f"{run['label']} (volume)", t, R_v)
-                ar.print_extrema(f"{run['label']} (eta=0.5)", t, R_e)
-                base = (float(R_v[ar.BASELINE_FRAME])
-                        if ar.R_VOL_BASELINE == "frame" and len(R_v) > ar.BASELINE_FRAME
-                        else P["R0"])
-                ts = _tscale(P)
-                ax.plot(t / ts, R_v / base, "-", color=run["color"], lw=2.2,
-                        marker="o", ms=2.5, label=f"{run['label']} -- sim volume radius")
-                ax.plot(t / ts, R_e / P["R0"], "--", color=run["color"], lw=1.6,
-                        alpha=0.9, label=f"{run['label']} -- sim $\\eta=0.5$ radius")
+    # ---- simulation (identical extraction to analyze_radius.py)
+    t_end = 0.0
+    n_pf = (len([q for q in os.listdir(run["out_dir"]) if q.endswith("cell")])
+            if run["out_dir"] and os.path.isdir(run["out_dir"]) else 0)
+    have_sim = False
+    if n_pf >= 2:
+        ar.R0 = P["R0"]; ar.DIM = P["dim"]; ar.R_BIN_MAX = 2.0 * P["R0"]
+        if np.isfinite(P["T_drive"]):
+            ar.T_DRIVE = P["T_drive"]; ar.F_DRIVE = P["f_drive"]
+        print(f"  loading {run['out_dir']}  ({n_pf} plotfiles, dim={P['dim']}) ...")
+        t, R_v, R_e, n_skip = ar.extract_radius_history(run["out_dir"])
+        if n_skip:
+            print(f"  [warn] skipped {n_skip} corrupt/partial plotfile(s).")
+        if len(t) >= 2:
+            have_sim = True
+            t_end = float(t[-1])
+            ar.print_extrema(f"{run['label']} (volume)", t, R_v)
+            ar.print_extrema(f"{run['label']} (eta=0.5)", t, R_e)
+            base = (float(R_v[ar.BASELINE_FRAME])
+                    if ar.R_VOL_BASELINE == "frame" and len(R_v) > ar.BASELINE_FRAME
+                    else P["R0"])
+            ax.plot(t / ts, R_v / base, "-", color=run["color"], lw=2.4, marker="o",
+                    ms=3, zorder=3, label="simulation: volume radius")
+            ax.plot(t / ts, R_e / P["R0"], "--", color=run["color"], lw=1.8,
+                    zorder=4, label=r"simulation: $\eta=0.5$ radius")
         else:
-            why = ("no out_dir" if not run["out_dir"] else
-                   "directory does not exist" if not os.path.isdir(run["out_dir"]) else
-                   f"only {n_pf} plotfile(s)")
-            print(f"  [WARN] {run['label']}: NO SIMULATION CURVES -- {why}: {run['out_dir']}")
+            print(f"  [WARN] {run['label']}: plotfiles present but no usable radius extracted.")
+    else:
+        why = ("no out_dir" if not run["out_dir"] else
+               "directory does not exist" if not os.path.isdir(run["out_dir"]) else
+               f"only {n_pf} plotfile(s)")
+        print(f"  [WARN] {run['label']}: NO SIMULATION CURVES -- {why}: {run['out_dir']}")
 
-    # ---- models: integrate over the span the simulations actually cover
-    #      (fall back to 2 drive periods when nothing has been run yet)
-    P0 = loaded[0]["P"]
-    Tref = P0["T_drive"] if np.isfinite(P0["T_drive"]) else 1.0e-2
-    t_end = t_end_seen if t_end_seen > 0 else 2.0 * Tref
-    n_per = max(1.0, t_end / Tref)
-    n_steps = int(N_SUBSTEP * n_per)
-    print(f"\n  integrating models to t = {t_end*1e3:.4f} ms "
-          f"({n_per:.2f} drive periods, {n_steps} RK4 steps)")
+    # ---- analytical models over the span this run covers
+    Tref = P["T_drive"] if np.isfinite(P["T_drive"]) else 1.0e-2
+    if t_end <= 0:
+        t_end = 2.0 * Tref
+    n_steps = int(N_SUBSTEP * max(1.0, t_end / Tref))
+    print(f"  integrating models to t = {t_end*1e3:.4f} ms ({n_steps} RK4 steps)")
+    if SHOW_RPE:
+        tm, Rm = integrate("rpe", P, t_end, n_steps)
+        ax.plot(tm / ts, Rm / P["R0"], ":", color=COLOR_RPE, lw=2.0, zorder=5,
+                label="analytical: driven Rayleigh-Plesset")
+        ar.print_extrema(f"RPE {run['label']}", tm, Rm)
+    if SHOW_KM:
+        tm, Rm = integrate("km", P, t_end, n_steps)
+        ax.plot(tm / ts, Rm / P["R0"], "-.", color=COLOR_KM, lw=1.8, zorder=5,
+                label="analytical: Keller-Miksis")
+        ar.print_extrema(f"KM  {run['label']}", tm, Rm)
 
-    for run in loaded:
-        P = run["P"]
-        short = run['label'].split('(')[0].strip()
-        ts = _tscale(P)
-        if SHOW_RPE:
-            tm, Rm = integrate("rpe", P, t_end, n_steps)
-            ax.plot(tm / ts, Rm / P["R0"], ":", color=run["color"], lw=1.9,
-                    label=f"{short} -- driven RPE")
-            ar.print_extrema(f"RPE {run['label']}", tm, Rm)
-        if SHOW_KM:
-            tm, Rm = integrate("km", P, t_end, n_steps)
-            ax.plot(tm / ts, Rm / P["R0"], "-.", color=run["color"], lw=1.6, alpha=0.85,
-                    label=f"{short} -- Keller-Miksis")
-            ar.print_extrema(f"KM  {run['label']}", tm, Rm)
-
+    undriven = not np.isfinite(P["T_drive"])
     ax.set_ylabel(r"$R / R_0$", fontsize=14)
-    ax.set_title(TITLE_STR, fontsize=15, fontweight="bold")
+    ax.set_title(f"{run['label']}:  simulation vs driven RPE / Keller-Miksis",
+                 fontsize=14, fontweight="bold")
     ax.grid(True, alpha=0.3)
-    from matplotlib.lines import Line2D
-    style_key = [Line2D([], [], color="0.2", ls="-", marker="o", ms=2.5, lw=2.2, label="sim: volume radius"),
-                 Line2D([], [], color="0.2", ls="--", lw=1.6, label=r"sim: $\eta=0.5$ radius"),
-                 Line2D([], [], color="0.2", ls=":", lw=1.9, label="driven RPE"),
-                 Line2D([], [], color="0.2", ls="-.", lw=1.6, label="Keller-Miksis")]
-    leg2 = ax.legend(handles=style_key, fontsize=8.5, loc="lower right", title="line style",
-                     title_fontsize=8.5, framealpha=0.9)
-    ax.add_artist(leg2)
-    ax.legend(fontsize=8.5, loc="upper left", ncol=2, framealpha=0.9)
+    ax.legend(fontsize=10, loc="upper left", framealpha=0.9)
 
     if axd is not None:
         tt = np.linspace(0.0, t_end, 2000)
-        for run in loaded:
-            P = run["P"]
-            axd.plot(tt / _tscale(P),
-                     (P["p_inf"] + P["A"] * np.sin(P["omega"] * tt)) / P["p_inf"],
-                     "-", color=run["color"], lw=1.4, label=run["label"])
+        axd.plot(tt / ts, (P["p_inf"] + P["A"] * np.sin(P["omega"] * tt)) / P["p_inf"],
+                 "-", color="0.3", lw=1.4, label=f"applied drive  A = {P['A']:.4g} Pa, "
+                 f"f = {P['f_drive']:.4g} Hz")
         axd.axhline(1.0, color="0.6", lw=0.8, ls="--")
         axd.set_ylabel(r"$p_\infty(t)\,/\,p_\infty$", fontsize=12)
         axd.grid(True, alpha=0.3)
-        axd.legend(fontsize=8, loc="upper right")
-    undriven = any(not np.isfinite(r["P"]["T_drive"]) for r in loaded)
+        axd.legend(fontsize=9, loc="upper right")
     (axd if axd is not None else ax).set_xlabel(
         r"$t$ [ms]" if undriven else r"$t / T_{drive}$", fontsize=14)
 
     plt.tight_layout()
-    png = os.path.join(IMG_DIR, f"{SAVE_NAME}.png")
-    eps = os.path.join(IMG_DIR, f"{SAVE_NAME}.eps")
-    fig.savefig(png, dpi=DPI, bbox_inches="tight")
-    fig.savefig(eps, dpi=DPI, bbox_inches="tight")
-    print(f"\n  wrote {png}")
-    print(f"  wrote {eps}")
-    if not any_sim:
-        print("  [note] no simulation output found -- plot shows models only.")
+    tag = run.get("tag") or "".join(ch for ch in run["label"] if ch.isalnum())[:24]
+    for ext, dpi in (("png", DPI), ("eps", DPI)):
+        out = os.path.join(IMG_DIR, f"{SAVE_NAME}_{tag}.{ext}")
+        fig.savefig(out, dpi=dpi, bbox_inches="tight")
+        print(f"  wrote {out}")
+    if not have_sim:
+        print("  [note] no simulation output for this run -- figure shows models only.")
     plt.close(fig)
+    print()
 
 
 if __name__ == "__main__":
