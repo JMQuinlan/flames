@@ -204,23 +204,23 @@ bc.primitive = 0
 # achieved drive into the RP reference.
 nscbc.xhi.type        = outflow
 nscbc.xhi.target_p    = 1.0e5
-nscbc.xhi.sigma       = 0.25
+nscbc.xhi.sigma       = 0.6
 nscbc.xhi.beta        = 0.5
-nscbc.xhi.L_ref       = 0.08
+nscbc.xhi.L_ref       = 2.5e-4
 nscbc.xhi.drive_amp   = 1.36e3   # = 1e4 / 7.36 (measured box amplification)
 nscbc.xhi.drive_omega = 512.35
 nscbc.yhi.type        = outflow
 nscbc.yhi.target_p    = 1.0e5
-nscbc.yhi.sigma       = 0.25
+nscbc.yhi.sigma       = 0.6
 nscbc.yhi.beta        = 0.5
-nscbc.yhi.L_ref       = 0.08
+nscbc.yhi.L_ref       = 2.5e-4
 nscbc.yhi.drive_amp   = 1.36e3   # = 1e4 / 7.36 (measured box amplification)
 nscbc.yhi.drive_omega = 512.35
 nscbc.zhi.type        = outflow
 nscbc.zhi.target_p    = 1.0e5
-nscbc.zhi.sigma       = 0.25
+nscbc.zhi.sigma       = 0.6
 nscbc.zhi.beta        = 0.5
-nscbc.zhi.L_ref       = 0.08
+nscbc.zhi.L_ref       = 2.5e-4
 nscbc.zhi.drive_amp   = 1.36e3   # = 1e4 / 7.36 (measured box amplification)
 nscbc.zhi.drive_omega = 512.35
 
