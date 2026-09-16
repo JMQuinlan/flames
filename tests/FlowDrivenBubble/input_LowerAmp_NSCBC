@@ -97,8 +97,8 @@ amr.grid_eff       = 0.8
 # VOLUME oscillation read by the gas-volume integral (sub-cell sensitive);
 # it does not need R0/dx = 64, and dropping level 2 cuts cells ~10x and
 # doubles dt (observed cost at max_level 2: 24 s/step, ~11 days/period).
-amr.max_level      = 2
-amr.n_cell         = 64 64 64       # base dx 1.25e-3; finest dx 6.25e-4 -> R0/dx = 32
+amr.max_level      = 1
+amr.n_cell         = 128 128 128       # base dx 1.25e-3; finest dx 6.25e-4 -> R0/dx = 32
 
 # n_error_buf pushes the fine patches past the interface band so the
 # coarse-fine boundary sits in pure water (Q-Fix density partition is exact
