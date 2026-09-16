@@ -292,8 +292,10 @@ def render(s, meas, mach, out_png):
 
     # measured shock points + fit
     if SHOW_MEASURED and len(meas["pts_x"]):
+        meas_lbl = ("Measured Shock" if meas["beta_deg"] is None
+                    else rf"Measured Shock ($\beta$={meas['beta_deg']:.2f}$^\circ$)")
         ax.scatter(meas["pts_x"], meas["pts_y"], s=MEAS_MS, c=MEASURED_COLOR,
-                   marker="o", zorder=6, label="Measured Shock")
+                   marker="o", zorder=6, label=meas_lbl)
         # mirror to lower half for visual symmetry
         ax.scatter(meas["pts_x"], -meas["pts_y"], s=MEAS_MS, c=MEASURED_COLOR,
                    marker="o", zorder=6)

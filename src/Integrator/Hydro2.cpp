@@ -298,19 +298,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         }
         pp_query_default("relax_diag", value.relax_diag, 0); // 1 = print per-stage {max_iters, max_residual, count_unconverged}.
         pp_query_default("clip_ghost_only", value.clip_ghost_only, 0); // 1 = FillGhost STEP-9 positivity clip touches GHOST cells only (per-phase mass conservation)
-        // Trace-phase slaving window for the relaxation Newton inputs (see
-        // Hydro2.H / RelaxAndReinit).  DEFAULT OFF (relax_slave_hi <= 0):
-        // slaving the Newton inputs freezes alpha over the whole window,
-        // which drove the exponential band-tail gas-mass pile that killed
-        // the driven LowAmp_NSCBC runs (local A/B 2026-09-03: slaved dies
-        // at 2.03 ms, disabled completes 3.5 ms with 1-5 Newton iters and
-        // 14-digit mass conservation).  The band-tail protection it once
-        // provided is covered by the p_floored guard + divide floors +
-        // bisection.  Opt back in per-input with e.g.
-        //   relax_slave_lo = 1e-2
-        //   relax_slave_hi = 1e-1
-        pp_query_default("relax_slave_lo", value.relax_slave_lo, 1.0e-2);
-        pp_query_default("relax_slave_hi", value.relax_slave_hi, 0.0);
 
         // Symmetry-face detection: a domain face whose normal-momentum BC is
         // REFLECT_ODD is a symmetry plane; its advective fluxes are enforced
@@ -490,6 +477,40 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             Util::Message(INFO, "nscbc_bc Pointer=", value.nscbc_bc);
         }
 
+        // ------------------------------------------------------------------
+        // PER-PHASE density BCs for the conserved partial densities.
+        // ------------------------------------------------------------------
+        // rho_eta0/1 are filled directly from their own BC (FillGhost4BC no longer
+        // partitions the mixture density by eta).  A DIRICHLET "density.bc" value is
+        // therefore written into BOTH phases and the mixture ghost becomes their SUM --
+        // 2x the intended density for a 50/50 mixture, or the whole liquid density
+        // injected into the gas phase for a pure-phase far field.  Declaring
+        // "density0.bc" / "density1.bc" gives each phase its own (alpha rho)_k value.
+        // Unset => the shared mixture BC, i.e. unchanged behaviour (exact for
+        // neumann / reflect / periodic faces, where the sum of the per-phase
+        // extrapolations equals the extrapolated mixture).
+        const bool has_rho0_bc = pp.contains("density0.bc.type.xlo") || pp.contains("density0.bc.type.ylo");
+        const bool has_rho1_bc = pp.contains("density1.bc.type.xlo") || pp.contains("density1.bc.type.ylo");
+        value.density0_bc = has_rho0_bc ? new BC::Expression(1, pp, "density0.bc") : value.density_bc;
+        value.density1_bc = has_rho1_bc ? new BC::Expression(1, pp, "density1.bc") : value.density_bc;
+        if (has_rho0_bc || has_rho1_bc)
+            Util::Message(INFO, "Per-phase density BCs: density0.bc=", has_rho0_bc,
+                          " density1.bc=", has_rho1_bc);
+        else
+        {
+            // Warn if any face prescribes a DIRICHLET mixture density without per-phase
+            // values: that face will apply the same value to both partial densities.
+            for (const auto &face : bc_faces)
+            {
+                std::string t;
+                pp.query(("density.bc.type." + face).c_str(), t);
+                if (t.find("dirichlet") != std::string::npos || t.find("DIRICHLET") != std::string::npos)
+                    Util::Warning(INFO, "density.bc.type.", face, " is dirichlet but no density0.bc/",
+                                  "density1.bc given: the mixture value is applied to BOTH partial ",
+                                  "densities (ghost rho = sum).  Declare per-phase density BCs.");
+            }
+        }
+
         // Eta BC: parse from "eta.bc" if user provides it, otherwise zero neumann.
         // Eta is a volume fraction transported by advection + Cahn-Hilliard;
         if (pp.contains("eta.bc.type.xlo") || pp.contains("eta.bc.type.ylo"))
@@ -529,10 +550,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // DIFFUSE PARAMETERS
         value.RegisterNewFab(value.eta_mf,           value.eta_bc,      1, nghost,  "eta",          true, true);
         value.RegisterNewFab(value.eta_old_mf,       value.eta_bc,      1, nghost,  "eta_old",      false,true);
-        value.RegisterNewFab(value.rho_eta0_mf,      value.density_bc,  1, nghost,  "rho_eta0",     true, true);
-        value.RegisterNewFab(value.rho_eta1_mf,      value.density_bc,  1, nghost,  "rho_eta1",     true, true);
-        value.RegisterNewFab(value.rho_eta0_old_mf,  value.density_bc,  1, nghost,  "rho_eta0_old", false,true);
-        value.RegisterNewFab(value.rho_eta1_old_mf,  value.density_bc,  1, nghost,  "rho_eta1_old", false,true);
+        value.RegisterNewFab(value.rho_eta0_mf,      value.density0_bc,  1, nghost,  "rho_eta0",     true, true);
+        value.RegisterNewFab(value.rho_eta1_mf,      value.density1_bc,  1, nghost,  "rho_eta1",     true, true);
+        value.RegisterNewFab(value.rho_eta0_old_mf,  value.density0_bc,  1, nghost,  "rho_eta0_old", false,true);
+        value.RegisterNewFab(value.rho_eta1_old_mf,  value.density1_bc,  1, nghost,  "rho_eta1_old", false,true);
 
         // Advected shell density c = Gamma|grad eta| (8th RK primary) + its
         // diagnostic areal density Gamma = c/|grad eta|.  Shares eta's BC: c is a
@@ -4673,9 +4694,8 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         // was a per-step gas-mass SOURCE at the interface that destroyed bubble collapse
         // (gas mass blew up ~119x; see tests/FlowRayleighPlesset mass-conservation check).
         // rho_eta0/1 are conserved -- fill only their ghosts, directly, per phase.
-        FillBoundariesWithBC(lev, time, density_bc, {
-            rho_eta0_mf[lev].get(), rho_eta1_mf[lev].get()
-        });
+        FillBoundariesWithBC(lev, time, density0_bc, { rho_eta0_mf[lev].get() });
+        FillBoundariesWithBC(lev, time, density1_bc, { rho_eta1_mf[lev].get() });
         // Mixture density is the consistent sum of the partial densities.
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
@@ -5544,22 +5564,6 @@ void Hydro2::RelaxAndReinit(int lev)
     // 1 part in 10^6).
     const Set::Scalar unconv_threshold = 1.0e-6;
 
-    // Trace-phase slaving window for the NEWTON INPUTS (runtime-parseable:
-    // relax_slave_lo / relax_slave_hi; relax_slave_hi <= 0 disables).  Inside
-    // the window the trace phase's p_pre is blended toward the dominant
-    // phase's, which makes the volume constraint exactly satisfied at the
-    // blended pressure -- i.e. FULL slaving FREEZES alpha in that cell.  With
-    // the default window [1e-2, 1e-1] that widens the no-relaxation zone from
-    // the guard's cutoff (1e-4) by 100x in volume fraction: during a violent
-    // collapse the band tail can then no longer be volumetrically squeezed by
-    // the relaxation, and the gas volume floors early (measured on
-    // Sch20_Collapsing_Large_3D: R_min/R0 0.21 vs 0.03).  Collapse-dominated
-    // runs should disable this (relax_slave_hi = 0) and rely on the
-    // p_floored guard below; drive-dominated runs may need it to suppress
-    // the band-tail erosion loop documented at the use site.
-    const Set::Scalar slave_lo_loc = relax_slave_lo;
-    const Set::Scalar slave_hi_loc = relax_slave_hi;
-    const bool        slave_on     = (relax_slave_hi > 0.0 && relax_slave_hi > relax_slave_lo);
 
     const Set::Scalar gam0 = eos0.Gamma();
     const Set::Scalar pi0_ = eos0.P0();
@@ -5713,22 +5717,6 @@ void Hydro2::RelaxAndReinit(int lev)
             // which is the correct physical outcome for a cell whose
             // trace phase has no independent pressure to relax against.
             // -----------------------------------------------------------
-            if (slave_on)
-            {
-                // SMOOTH blend (see recovery blocks): hard switches leave a
-                // seam the dynamics lock onto.  Window is runtime-parseable
-                // (relax_slave_lo/hi); relax_slave_hi <= 0 disables the block
-                // entirely -- see the note at the top of RelaxAndReinit for
-                // why collapse-dominated runs must disable it.
-                const Set::Scalar er = eta(i, j, k);
-                Set::Scalar w0 = std::min(std::max((er - slave_lo_loc) / (slave_hi_loc - slave_lo_loc), 0.0), 1.0);
-                w0 = w0 * w0 * (3.0 - 2.0 * w0);
-                Set::Scalar w1 = std::min(std::max(((1.0 - er) - slave_lo_loc) / (slave_hi_loc - slave_lo_loc), 0.0), 1.0);
-                w1 = w1 * w1 * (3.0 - 2.0 * w1);
-                const Set::Scalar p0_raw = p0_pre, p1_raw = p1_pre;
-                p0_pre = w0 * p0_raw + (1.0 - w0) * p1_raw;
-                p1_pre = w1 * p1_raw + (1.0 - w1) * p0_raw;
-            }
 
             // -----------------------------------------------------------
             // PURE-CELL GUARD: relaxation is an interface operation

@@ -145,3 +145,14 @@ omega_relax = 0.5;
 #Sch20 stiff-limit (no shock correction; matches Sch20 paper exactly):
 apply_ahe   = 1
 ahe.method  = 0
+
+# PURE-CELL GUARD.  The relaxation Newton must not run on band-tail cells whose
+# trace-phase pressure is alpha-amplified roundoff (p_k = (gamma-1)E_k/alpha -
+# gamma*pi turns a 1e-5 inconsistency into a 100% error at gamma*pi/p ~ 2.4e4).
+# With the default cutoff = 1e-8 this shock tube reconstructs an inadmissible
+# face state and the HLLC returns NaN at t ~ 0.155; cutoff = 1e-4 keeps the
+# guard active over the tail and the run completes.  (This replaces the former
+# relax_slave trace-phase slaving, removed 2026-09-16: slaving froze alpha over
+# its whole window and degraded Laplace mass/energy conservation by 5 orders of
+# magnitude while shrinking the bubble 2% in 0.5 ms.)
+cutoff = 1e-4

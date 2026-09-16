@@ -64,6 +64,11 @@ public:
                 delete p;
         };
         safe_delete_bc(density_bc);
+        // density0/1_bc alias density_bc unless the input declared them; guard so the
+        // shared object is not deleted twice.
+        if (density0_bc != density_bc) safe_delete_bc(density0_bc);
+        if (density1_bc != density_bc && density1_bc != density0_bc) safe_delete_bc(density1_bc);
+        density0_bc = density1_bc = nullptr;
         safe_delete_bc(momentum_bc);
         safe_delete_bc(energy_bc);
         safe_delete_bc(pressure_bc);
@@ -364,6 +369,16 @@ protected:
     int n_step = 0;
 
     BC::BC<Set::Scalar>* density_bc = nullptr;
+    // PER-PHASE density BCs for the conserved partial densities (alpha rho)_k.
+    // rho_eta0/1 are filled DIRECTLY from their BC (no eta partition of the mixture
+    // value -- see FillGhost4BC), so a DIRICHLET density.bc value would be applied to
+    // BOTH phases and the mixture would come out as the SUM (2x the intended rho for a
+    // 50/50 mixture; the full liquid density injected into the gas for a pure-phase far
+    // field).  When the input declares density0.bc / density1.bc these are used instead,
+    // so each phase gets its own (alpha rho)_k boundary value.  Unset => density_bc,
+    // which is exactly the previous behaviour for neumann/reflect/periodic faces.
+    BC::BC<Set::Scalar>* density0_bc = nullptr;
+    BC::BC<Set::Scalar>* density1_bc = nullptr;
     BC::BC<Set::Scalar>* momentum_bc = nullptr;
     BC::BC<Set::Scalar>* energy_bc = nullptr;
     BC::BC<Set::Scalar>* pressure_bc = nullptr;   // primitive pressure BC (bc.primitive=1)
@@ -674,14 +689,6 @@ protected:
     int nan_check = 0;
     int verbose = 0;
     int relax_diag = 0;
-    // Trace-phase slaving window for the relaxation Newton INPUTS (see
-    // RelaxAndReinit).  Full slaving freezes alpha, widening the
-    // no-relaxation zone from `cutoff` to relax_slave_lo -- measured fatal
-    // for BOTH violent collapses (gas volume floors early) and driven runs
-    // (exponential band-tail mass pile, dead at 2.03 ms).  DEFAULT OFF
-    // (relax_slave_hi = 0); opt in per-input if a case needs it.
-    Set::Scalar relax_slave_lo = 1.0e-2;
-    Set::Scalar relax_slave_hi = 0.0;
     int clip_ghost_only = 0;
     bool sym_face_lo[3] = {false, false, false};
     bool sym_face_hi[3] = {false, false, false};

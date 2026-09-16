@@ -150,6 +150,23 @@ density.bc.type.ylo = neumann
 density.bc.type.yhi = neumann
 density.bc.val.xlo = 2.99
 
+
+# PER-PHASE partial densities (alpha rho)_k.  rho_eta0/1 are filled directly from
+# their own BC, so a DIRICHLET mixture value would be written into BOTH phases
+# (ghost rho = sum).  Give each phase its own (alpha rho)_k = alpha_k * rho_k.
+density0.bc.type.xhi = neumann
+density0.bc.type.xlo = dirichlet
+density0.bc.val.xlo  = 2.99
+density0.bc.type.ylo = neumann
+density0.bc.type.yhi = neumann
+
+density1.bc.type.xhi = neumann
+density1.bc.type.xlo = dirichlet
+density1.bc.val.xlo  = 0.0
+density1.bc.type.ylo = neumann
+density1.bc.type.yhi = neumann
+
+
 energy.bc.type.xhi = neumann
 energy.bc.type.xlo = dirichlet
 energy.bc.type.ylo = neumann
