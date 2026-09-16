@@ -97,7 +97,7 @@ amr.grid_eff       = 0.8
 # VOLUME oscillation read by the gas-volume integral (sub-cell sensitive);
 # it does not need R0/dx = 64, and dropping level 2 cuts cells ~10x and
 # doubles dt (observed cost at max_level 2: 24 s/step, ~11 days/period).
-amr.max_level      = 1
+amr.max_level      = 2
 amr.n_cell         = 64 64 64       # base dx 1.25e-3; finest dx 6.25e-4 -> R0/dx = 32
 
 # n_error_buf pushes the fine patches past the interface band so the
@@ -109,7 +109,7 @@ amr.n_error_buf    = 16
 # bubble (interior included), not just the eta band, through the full drive
 # cycle.  Octant: bubble center is the origin, so the box is [0, 1.5 R0]^3.
 refine_box.lo = 0.0  0.0  0.0
-refine_box.hi = 0.03 0.03 0.03
+refine_box.hi = 0.06 0.06 0.06
 
 nghost = 4
 
