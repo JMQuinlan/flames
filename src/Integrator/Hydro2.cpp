@@ -144,6 +144,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // OPTIONAL SOURCE TERMS
         pp_query_default("apply_surface_tension", value.apply_surface_tension, false);  // Apply surface tension when solving, default: true --> "Apply Surface Tension"
         pp_query_default("capillary_closure", value.capillary_closure, 0);
+        // 1 (default) = capillary tensor/energy built on eta; 0 = advected colour function c
+        pp_query_default("capillary_use_eta", value.capillary_use_eta, 1);
         pp_query_default("apply_weight", value.apply_weight, false);                    // Apply weight when solving, default: false --> "No Weight"
         pp_query_default("apply_vaporization", value.apply_vaporization, false);        // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
@@ -988,7 +990,9 @@ void Hydro2::Mix(int lev)
         const Set::Scalar Gb_ic = marmottant_Gamma_buck;
         const Set::Scalar sbrk_ic = marmottant_sigma_break, sigw_ic = sigma;
         amrex::Array4<const Set::Scalar> const &shell_ic = shell_mf[lev]->const_array(mfi);
-        amrex::Array4<const Set::Scalar> const &cfun_ic  = cfun_mf[lev]->const_array(mfi);
+        amrex::Array4<const Set::Scalar> const cfun_ic  = capillary_use_eta
+                                               ? eta_mf[lev]->const_array(mfi)
+                                               : cfun_mf[lev]->const_array(mfi);
 
         // DIFFUSIVE BOUNDRY
         Set::Patch<const Set::Scalar> eta = eta_mf.Patch(lev, mfi);
@@ -1558,7 +1562,7 @@ Hydro2::RHS(int lev,
             // The interface gate must use the SAME field the capillary tensor
             // is built from, or the shell tension and Omega end up gated on
             // two different interfaces once c and eta separate.
-            amrex::Array4<const Set::Scalar> const &et = capillary_closure
+            amrex::Array4<const Set::Scalar> const &et = (capillary_closure && !capillary_use_eta)
                                                        ? cfun_mf[lev]->const_array(mfi)
                                                        : eta_mf[lev]->const_array(mfi);
             amrex::Array4<const Set::Scalar> const &cs = shell_mf[lev]->const_array(mfi);
@@ -3422,7 +3426,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         const Set::Scalar Gb_p = marmottant_Gamma_buck;
         const Set::Scalar sbrk_p = marmottant_sigma_break, sigw_p = sigma;
         amrex::Array4<const Set::Scalar> const &shell_p = shell_mf[lev]->const_array(mfi);
-        amrex::Array4<const Set::Scalar> const &cfun_p  = cfun_mf[lev]->const_array(mfi);
+        amrex::Array4<const Set::Scalar> const cfun_p  = capillary_use_eta
+                                              ? eta_mf[lev]->const_array(mfi)
+                                              : cfun_mf[lev]->const_array(mfi);
 
         // EMBEDDED SOLID indicator (empty Array4 when feature is off).
         Set::Patch<const Set::Scalar> phisol = embedded.phi_mf.Patch(lev, mfi);
@@ -4871,7 +4877,8 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         const Set::Scalar Gb_g = marmottant_Gamma_buck;
         const Set::Scalar sbrk_g = marmottant_sigma_break, sigw_g = sigma;
         auto shell_g   = shell_mf[lev]->const_array(mfi);
-        auto cfun_g    = cfun_mf[lev]->const_array(mfi);
+        auto cfun_g    = capillary_use_eta ? eta_mf[lev]->const_array(mfi)
+                                   : cfun_mf[lev]->const_array(mfi);
 
         auto rho       = density_mf[lev]->array(mfi);
         auto eta       = eta_mf[lev]->array(mfi);
@@ -5475,7 +5482,8 @@ void Hydro2::CapillaryOperator(int lev, Set::Scalar dt)
     {
         const amrex::Box bx = mfi.growntilebox(1);
         auto q  = Q.array(mfi);
-        auto cf = cfun_mf[lev]->const_array(mfi);
+        auto cf = capillary_use_eta ? eta_mf[lev]->const_array(mfi)
+                                    : cfun_mf[lev]->const_array(mfi);
         auto sh = shell_mf[lev]->const_array(mfi);
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             if (!cf.contains(i - 1, j, k) || !cf.contains(i + 1, j, k)) return;
@@ -5642,7 +5650,8 @@ void Hydro2::RelaxAndReinit(int lev)
         {
             const amrex::Box &bx = mfi.validbox();
             auto ec = ecap_snap->array(mfi);
-            auto cf = cfun_mf[lev]->const_array(mfi);
+            auto cf = capillary_use_eta ? eta_mf[lev]->const_array(mfi)
+                                    : cfun_mf[lev]->const_array(mfi);
             auto sh = shell_mf[lev]->const_array(mfi);
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 ec(i, j, k) = CapEnergyAt(cf, sh, i, j, k, DXs, marm_s, sig_s,
@@ -6217,7 +6226,8 @@ void Hydro2::PostAverageDown(int coarse_lev)
         const Set::Scalar Gb_r = marmottant_Gamma_buck;
         const Set::Scalar sbrk_r = marmottant_sigma_break, sigw_r = sigma;
         auto shell_r = shell_mf[coarse_lev]->const_array(mfi);
-        auto cfun_r  = cfun_mf[coarse_lev]->const_array(mfi);
+        auto cfun_r  = capillary_use_eta ? eta_mf[coarse_lev]->const_array(mfi)
+                                        : cfun_mf[coarse_lev]->const_array(mfi);
         const Set::Scalar *DXr = geom[coarse_lev].CellSize();
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)

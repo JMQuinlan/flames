@@ -547,6 +547,30 @@ protected:
     //
     // Default 0 = unchanged behaviour.
     int capillary_closure = 0;
+    // CAPILLARY FIELD SELECT.  1 (default) = build Omega, eps_sigma and the
+    // sigma_eff/Gamma diagnostics from eta = alpha_1 directly, so the capillary
+    // closure is interface-centric and no second field has to stay in lockstep
+    // with eta; 0 = build them from the advected colour function c.
+    //
+    // The colour function was introduced because the stiff pressure relaxation
+    // and the [0,1] clamp rewrite eta WITHOUT moving material, so an eps_sigma
+    // built on eta could jump for reasons the conservative energy flux cannot
+    // account for (measured at the time: 22x worse |u|max at 0.75 ms).  With the
+    // trace-phase slaving removed and the pure-cell guard in place, that coupling
+    // is no longer measurable: on the static Laplace case (R0 = 1.025 mm, 0.3 ms)
+    // the two fields agree to within 0.5% of the drift itself --
+    //   liquid mass 9.06e-8 vs 9.11e-8, energy 1.022e-7 vs 1.027e-7,
+    //   |u|max 9.47e-4 vs 9.45e-4 m/s, radius -3.34e-5 vs -3.36e-5 %.
+    // eta is therefore the default; set capillary_use_eta = 0 to recover c.
+    //
+    // CANDIDATE FOR REMOVAL: if the eta path also matches on the driven and
+    // collapsing cases -- where the relaxation is actually active every step and
+    // the original 22x discrepancy was measured -- then the colour function has
+    // no remaining purpose and cfun_mf, its RHS row, its RK stage slot and its
+    // ghost fills can all be deleted.  Until those cases are compared, keep both
+    // paths: the static Laplace agreement alone does not exercise the mechanism
+    // that motivated c.
+    int capillary_use_eta = 1;
     int apply_weight = 0;
     int apply_vaporization = 0;
 
