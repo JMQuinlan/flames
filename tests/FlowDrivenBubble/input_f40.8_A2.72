@@ -1,4 +1,28 @@
-#@ [flowdrivenbubble_lowamp]
+#@ [flowdrivenbubble_f40p8_a2p72]
+# =============================================================================
+# FLOW-DRIVEN BUBBLE -- LINEAR OFF-RESONANCE CASE (3D OCTANT)
+#
+# Uncoated air bubble in water (sigma = 0), driven below resonance so the
+# response is linear: the bubble follows the drive quasi-statically instead of
+# being pumped by a resonance.
+#
+#   Minnaert frequency (sigma = 0):
+#     omega_0 = sqrt(3 gamma p_0 / rho) / R_0 = 1024.7 rad/s  (f_0 = 163.1 Hz)
+#
+#   This case:  drive_omega = 256.20 rad/s = omega_0 / 4  (f = 40.77 Hz)
+#     amplification 1/|1 - (w/w_0)^2| = 1.07, i.e. essentially quasi-static.
+#     It also sits clear of the 2:1 superharmonic at omega_0/2 = 512.35 rad/s
+#     used by the input_f81.5_* cases, and of omega_0 and 2 omega_0.
+#
+#   Amplitude: the small box amplifies the wall drive at the gas by ~7.36x
+#   (geometric volume pumping; see input_f81.5_A1.36 header).  drive_amp =
+#   2.0e4 / 7.36 = 2.72e3 Pa at the wall, so the gas sees ~+-0.2 bar and the
+#   predicted linear response is
+#     dR/R_0 = (A / 3 gamma p_0) / |1 - (w/w_0)^2| = 5.1%  (~1.6 finest cells)
+#   which is resolvable while remaining well inside the linear regime.
+#   Verify the delivered amplitude with:
+#     python reference/hydro2_diag.py <out> --drive 2.72e3 256.20
+# =============================================================================
 #@ exe=hydro2
 #@ dim=3
 
@@ -6,7 +30,7 @@
 # FLOW-DRIVEN BUBBLE -- Case 1: LOW-AMPLITUDE (LINEAR) BENCHMARK -- 3D OCTANT
 # =============================================================================
 # Air bubble in water, driven by a sinusoidal far-field pressure imposed at
-# the domain walls through the PRIMITIVE BC path (bc.primitive = 1, pressure
+# the domain walls through the PRIMITIVE BC path (bc.primitive = 0, pressure
 # Dirichlet expression; see tests/FlowAcoustic/input_AcousticBC for the
 # canonical primitive-BC example).  The domain is deliberately SMALL (4 R0
 # across the full domain) so the walls act as the acoustic forcing -- the
@@ -61,12 +85,12 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-# plot_file = ./tests/FlowDrivenBubble/output_LowAmp
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_LowAmp
+# plot_file = ./tests/FlowDrivenBubble/output_f40.8_A2.72
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_f40.8_A2.72
 
 ### MESHING ###
 amr.plot_int       = -1
-amr.plot_dt        = 2.5e-4         # ~49 frames per drive period (3D plotfiles are big)
+amr.plot_dt        = 1.0e-4 # 2.5e-4         # ~49 frames per drive period (3D plotfiles are big)
 # max_grid_size/blocking_factor 16: with 32 the level-0 domain was a SINGLE
 # 32^3 grid on ONE rank (and level 1 only 8 grids) -- most of a 128-rank node
 # sat idle while one rank serialized the coarse levels.  16^3 boxes give
@@ -173,20 +197,38 @@ pref  = 0.0
 # f = 81.54 Hz = f0/2.  Density/momentum/energy are zero-gradient there: the
 # outer walls behave as a pressure reservoir, free to exchange mass/momentum
 # as the drive demands.
-bc.primitive = 1
+bc.primitive = 0
 
-pressure.bc.constant.p_inf = 1.0e5
-pressure.bc.constant.amp   = 1.0e4          # 0.1 bar -- dR/R0 = 3.2e-2, ~2 finest cells
-pressure.bc.constant.w     = 512.35         # 2*pi*81.54 Hz
-pressure.bc.type.xlo = REFLECT_EVEN
-pressure.bc.type.xhi = dirichlet
-pressure.bc.val.xhi  = "p_inf + amp*sin(w*t)"
-pressure.bc.type.ylo = REFLECT_EVEN
-pressure.bc.type.yhi = dirichlet
-pressure.bc.val.yhi  = "p_inf + amp*sin(w*t)"
-pressure.bc.type.zlo = REFLECT_EVEN
-pressure.bc.type.zhi = dirichlet
-pressure.bc.val.zhi  = "p_inf + amp*sin(w*t)"
+# NSCBC4 characteristic drive on the three outer faces: the acoustic
+# forcing enters via the INCOMING characteristic (relaxation toward
+# p_target(t) = target_p + drive_amp*sin(drive_omega*t)); outgoing waves
+# leave freely.  This replaces the primitive-Dirichlet drive, which
+# rectified band acoustics into +-6%/cycle gas-mass injection (validated
+# 2D: NSCBC drive cuts the cyclic mass swing 15x with zero secular drift).
+# NOTE: the DELIVERED wall pressure = target + the bubble's own radiation;
+# for benchmarking, measure p_wall(t) from the plotfiles and feed the
+# achieved drive into the RP reference.
+nscbc.xhi.type        = outflow
+nscbc.xhi.target_p    = 1.0e5
+nscbc.xhi.sigma       = 0.6
+nscbc.xhi.beta        = 0.5
+nscbc.xhi.L_ref       = 2.5e-4
+nscbc.xhi.drive_amp   = 2.72e3   # = 2.0e4 / 7.36 (box amplification); gas sees ~+-0.2 bar
+nscbc.xhi.drive_omega = 256.20
+nscbc.yhi.type        = outflow
+nscbc.yhi.target_p    = 1.0e5
+nscbc.yhi.sigma       = 0.6
+nscbc.yhi.beta        = 0.5
+nscbc.yhi.L_ref       = 2.5e-4
+nscbc.yhi.drive_amp   = 2.72e3   # = 2.0e4 / 7.36 (box amplification); gas sees ~+-0.2 bar
+nscbc.yhi.drive_omega = 256.20
+nscbc.zhi.type        = outflow
+nscbc.zhi.target_p    = 1.0e5
+nscbc.zhi.sigma       = 0.6
+nscbc.zhi.beta        = 0.5
+nscbc.zhi.L_ref       = 2.5e-4
+nscbc.zhi.drive_amp   = 2.72e3   # = 2.0e4 / 7.36 (box amplification); gas sees ~+-0.2 bar
+nscbc.zhi.drive_omega = 256.20
 
 # eta: symmetry (reflect_even) on inner faces, neumann far-field
 eta.bc.type.xlo = REFLECT_EVEN
@@ -197,25 +239,25 @@ eta.bc.type.zlo = REFLECT_EVEN
 eta.bc.type.zhi = neumann
 
 density.bc.type.xlo = REFLECT_EVEN
-density.bc.type.xhi = neumann
+density.bc.type.xhi = nscbc_outflow
 density.bc.type.ylo = REFLECT_EVEN
-density.bc.type.yhi = neumann
+density.bc.type.yhi = nscbc_outflow
 density.bc.type.zlo = REFLECT_EVEN
-density.bc.type.zhi = neumann
+density.bc.type.zhi = nscbc_outflow
 
 energy.bc.type.xlo = REFLECT_EVEN
-energy.bc.type.xhi = neumann
+energy.bc.type.xhi = nscbc_outflow
 energy.bc.type.ylo = REFLECT_EVEN
-energy.bc.type.yhi = neumann
+energy.bc.type.yhi = nscbc_outflow
 energy.bc.type.zlo = REFLECT_EVEN
-energy.bc.type.zhi = neumann
+energy.bc.type.zhi = nscbc_outflow
 
 momentum.bc.type.xlo = REFLECT_ODD  REFLECT_EVEN REFLECT_EVEN
-momentum.bc.type.xhi = neumann neumann neumann
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow nscbc_outflow
 momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD  REFLECT_EVEN
-momentum.bc.type.yhi = neumann neumann neumann
+momentum.bc.type.yhi = nscbc_outflow nscbc_outflow nscbc_outflow
 momentum.bc.type.zlo = REFLECT_EVEN REFLECT_EVEN REFLECT_ODD
-momentum.bc.type.zhi = neumann neumann neumann
+momentum.bc.type.zhi = nscbc_outflow nscbc_outflow nscbc_outflow
 
 ### REFINEMENT -- eta band + permanent refine_box (above) ###
 eta_refinement_criterion   = 1.0e-1

@@ -34,6 +34,8 @@
 # ============================================================================
 
 import os
+import re
+import glob
 import sys
 import math
 import numpy as np
@@ -67,17 +69,37 @@ def _tests(*p):
 # out_dir.  When out_dir is omitted it is read from the input's own
 # `plot_file =` line -- the same single source of truth as the drive -- so the
 # plotfile path cannot drift from what the solver actually wrote.
-RUNS = [
-    dict(label="LowAmp NSCBC (A = 1.0e4 Pa)", tag="LowAmp",
-         input=_tests("input_LowAmp_NSCBC"),
-         color="tab:blue"),
-    dict(label="LowerAmp NSCBC (A = 1.36e3 Pa)", tag="LowerAmp",
-         input=_tests("input_LowerAmp_NSCBC"),
-         color="tab:green"),
-    # explicit override example:
-    # dict(label="...", input=_tests("input_LowAmp_NSCBC"), color="tab:red",
-    #      out_dir=_repo("tests", "FlowDrivenBubble", "output_LowAmp_NSCBC")),
-]
+# Runs are DISCOVERED from the input filenames, which carry the drive in their
+# name as input_f<freq in Hz>_A<wall amplitude in kPa> (all cases use NSCBC, so
+# the tag is no longer part of the name).  The frequency and amplitude parsed
+# from the name label the figure; the values actually used by the models are
+# still read from the input file itself, so a mislabelled file cannot silently
+# change a plotted model curve.
+_RUN_COLORS = ["tab:blue", "tab:green", "tab:purple", "tab:orange", "tab:brown"]
+
+
+def _parse_drive_name(fname):
+    """input_f40.8_A2.72 -> (40.8, 2.72); returns (None, None) if not matching."""
+    m = re.match(r"input_f([0-9.]+)_A([0-9.]+)$", os.path.basename(fname))
+    return (float(m.group(1)), float(m.group(2))) if m else (None, None)
+
+
+def _discover_runs():
+    runs = []
+    for path in sorted(glob.glob(_tests("input_f*_A*"))):
+        f_hz, a_kpa = _parse_drive_name(path)
+        if f_hz is None:
+            continue
+        runs.append(dict(
+            label=f"$f$ = {f_hz:g} Hz, $A$ = {a_kpa:g} kPa (wall)",
+            tag=f"f{f_hz:g}_A{a_kpa:g}",
+            input=path,
+            color=_RUN_COLORS[len(runs) % len(_RUN_COLORS)],
+        ))
+    return runs
+
+
+RUNS = _discover_runs()
 
 # ===== MODEL KNOBS =====
 POLYTROPIC   = None    # gas exponent kappa; None -> use eos1.gamma (adiabatic)
