@@ -5493,9 +5493,19 @@ void Hydro2::CapillaryOperator(int lev, Set::Scalar dt)
     const int visc_shell = (kap_s != 0.0);
 
     // Cell-centred capillary primitives, one ghost so the face averages below
-    // have both neighbours.  Layout: [0]=||w||, [1]=w1^2/||w||,
-    // [2]=w2^2/||w||, [3]=w1w2/||w||, [4]=sigma_eff.
-    const int NQ = 5;
+    // have both neighbours.  Layout:
+    //   [0]    = ||w||
+    //   [1]    = w1^2/||w||   [2] = w2^2/||w||   [3] = w1 w2/||w||
+    //   3D adds:
+    //   [4]    = w3^2/||w||   [5] = w1 w3/||w||  [6] = w2 w3/||w||
+    //   [QSIG] = sigma_eff    (always the LAST component)
+    // The 2D indices are deliberately unchanged from the original 2D-only
+    // implementation, so the 2D path is arithmetically identical to before.
+#if AMREX_SPACEDIM == 2
+    const int NQ = 5, QSIG = 4;
+#else
+    const int NQ = 8, QSIG = 7;
+#endif
     amrex::MultiFab Q(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), NQ, 1);
     Q.setVal(0.0);
     for (amrex::MFIter mfi(Q, false); mfi.isValid(); ++mfi)
@@ -5509,6 +5519,9 @@ void Hydro2::CapillaryOperator(int lev, Set::Scalar dt)
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             if (!cf.contains(i - 1, j, k) || !cf.contains(i + 1, j, k)) return;
             if (!cf.contains(i, j - 1, k) || !cf.contains(i, j + 1, k)) return;
+#if AMREX_SPACEDIM > 2
+            if (!cf.contains(i, j, k - 1) || !cf.contains(i, j, k + 1)) return;
+#endif
             Set::Vector w = Numeric::Gradient(cf, i, j, k, 0, DX);
             const Set::Scalar wn = w.lpNorm<2>();
             if (wn < 1.0e-10) return;
@@ -5516,7 +5529,11 @@ void Hydro2::CapillaryOperator(int lev, Set::Scalar dt)
                                                marm, sig_const, chi_, Gb, sbrk, sigw);
             // --- dilatational shell viscosity -------------------------------
             if (visc_shell && vel.contains(i - 1, j, k) && vel.contains(i + 1, j, k)
-                           && vel.contains(i, j - 1, k) && vel.contains(i, j + 1, k))
+                           && vel.contains(i, j - 1, k) && vel.contains(i, j + 1, k)
+#if AMREX_SPACEDIM > 2
+                           && vel.contains(i, j, k - 1) && vel.contains(i, j, k + 1)
+#endif
+               )
             {
                 const Set::Vector nh = w / wn;
                 Set::Matrix gu = Set::Matrix::Zero();
@@ -5533,7 +5550,12 @@ void Hydro2::CapillaryOperator(int lev, Set::Scalar dt)
             q(i, j, k, 1) = w(0) * w(0) / wn;
             q(i, j, k, 2) = w(1) * w(1) / wn;
             q(i, j, k, 3) = w(0) * w(1) / wn;
-            q(i, j, k, 4) = se;
+#if AMREX_SPACEDIM > 2
+            q(i, j, k, 4) = w(2) * w(2) / wn;
+            q(i, j, k, 5) = w(0) * w(2) / wn;
+            q(i, j, k, 6) = w(1) * w(2) / wn;
+#endif
+            q(i, j, k, QSIG) = se;
         });
     }
     Q.FillBoundary(geom[lev].periodicity());
@@ -5546,19 +5568,27 @@ void Hydro2::CapillaryOperator(int lev, Set::Scalar dt)
         auto E  = energy_per_vol_mf[lev]->array(mfi);
         auto v  = velocity_mf[lev]->const_array(mfi);
         const Set::Scalar dtl = dt, dxl = DX[0], dyl = DX[1];
+#if AMREX_SPACEDIM > 2
+        const Set::Scalar dzl = DX[2];
+#endif
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             // Face value = arithmetic average of the two neighbouring cells
             // (Schmidmayer sec. 4.2.2).  Shared between neighbours, so the
             // sum telescopes and the update is discretely conservative.
             auto fx = [&](int c, int s) { return 0.5 * (q(i, j, k, c) + q(i + s, j, k, c)); };
             auto fy = [&](int c, int s) { return 0.5 * (q(i, j, k, c) + q(i, j + s, k, c)); };
+#if AMREX_SPACEDIM > 2
+            auto fz = [&](int c, int s) { return 0.5 * (q(i, j, k, c) + q(i, j, k + s, c)); };
+#endif
             // sigma_eff at faces, so a spatially varying (Marmottant) tension
             // carries the Marangoni contribution through the same averaging.
-            const Set::Scalar sxp = 0.5 * (q(i, j, k, 4) + q(i + 1, j, k, 4));
-            const Set::Scalar sxm = 0.5 * (q(i, j, k, 4) + q(i - 1, j, k, 4));
-            const Set::Scalar syp = 0.5 * (q(i, j, k, 4) + q(i, j + 1, k, 4));
-            const Set::Scalar sym = 0.5 * (q(i, j, k, 4) + q(i, j - 1, k, 4));
+            const Set::Scalar sxp = fx(QSIG, 1), sxm = fx(QSIG, -1);
+            const Set::Scalar syp = fy(QSIG, 1), sym = fy(QSIG, -1);
+#if AMREX_SPACEDIM > 2
+            const Set::Scalar szp = fz(QSIG, 1), szm = fz(QSIG, -1);
+#endif
 
+            // (div.Omega)_a = d_a(sigma ||w||) - sum_b d_b(sigma w_a w_b/||w||)
             const Set::Scalar dNx = (sxp * fx(0, 1) - sxm * fx(0, -1)) / dxl;
             const Set::Scalar dNy = (syp * fy(0, 1) - sym * fy(0, -1)) / dyl;
             const Set::Scalar d11x = (sxp * fx(1, 1) - sxm * fx(1, -1)) / dxl;
@@ -5566,22 +5596,51 @@ void Hydro2::CapillaryOperator(int lev, Set::Scalar dt)
             const Set::Scalar d12y = (syp * fy(3, 1) - sym * fy(3, -1)) / dyl;
             const Set::Scalar d22y = (syp * fy(2, 1) - sym * fy(2, -1)) / dyl;
 
+#if AMREX_SPACEDIM == 2
             M(i, j, k, 0) -= dtl * (-dNx + d11x + d12y);
             M(i, j, k, 1) -= dtl * (-dNy + d12x + d22y);
+#else
+            const Set::Scalar dNz  = (szp * fz(0, 1) - szm * fz(0, -1)) / dzl;
+            const Set::Scalar d13x = (sxp * fx(5, 1) - sxm * fx(5, -1)) / dxl;  // d_x(w1 w3)
+            const Set::Scalar d13z = (szp * fz(5, 1) - szm * fz(5, -1)) / dzl;  // d_z(w1 w3)
+            const Set::Scalar d23y = (syp * fy(6, 1) - sym * fy(6, -1)) / dyl;  // d_y(w2 w3)
+            const Set::Scalar d23z = (szp * fz(6, 1) - szm * fz(6, -1)) / dzl;  // d_z(w2 w3)
+            const Set::Scalar d33z = (szp * fz(4, 1) - szm * fz(4, -1)) / dzl;  // d_z(w3^2)
 
-            // Energy: d_x[(w1^2 u + w1 w2 v)/||w||] + d_y[(w1 w2 u + w2^2 v)/||w||],
-            // with u,v also face-averaged so the flux is single-valued.
-            auto uf = [&](int d, int s) {
-                return (d == 0) ? 0.5 * (v(i, j, k, 0) + v(i + s, j, k, 0))
-                                : 0.5 * (v(i, j, k, 0) + v(i, j + s, k, 0)); };
-            auto vf = [&](int d, int s) {
-                return (d == 0) ? 0.5 * (v(i, j, k, 1) + v(i + s, j, k, 1))
-                                : 0.5 * (v(i, j, k, 1) + v(i, j + s, k, 1)); };
-            const Set::Scalar Ex = (sxp * (fx(1, 1) * uf(0, 1) + fx(3, 1) * vf(0, 1))
-                                  - sxm * (fx(1, -1) * uf(0, -1) + fx(3, -1) * vf(0, -1))) / dxl;
-            const Set::Scalar Ey = (syp * (fy(3, 1) * uf(1, 1) + fy(2, 1) * vf(1, 1))
-                                  - sym * (fy(3, -1) * uf(1, -1) + fy(2, -1) * vf(1, -1))) / dyl;
+            M(i, j, k, 0) -= dtl * (-dNx + d11x + d12y + d13z);
+            M(i, j, k, 1) -= dtl * (-dNy + d12x + d22y + d23z);
+            M(i, j, k, 2) -= dtl * (-dNz + d13x + d23y + d33z);
+#endif
+
+            // Energy: div[ sigma w (w.u) / ||w|| ], the ANISOTROPIC leg of
+            // div(Omega.u).  Velocities are face-averaged on the same stencil
+            // as q, so every flux is single-valued and the sum telescopes.
+            //
+            // KNOWN GAP (unchanged by the 3D extension): the ISOTROPIC leg
+            // +div(sigma ||w|| u) of div(Omega.u) is still absent here.  That
+            // is a physics fix, not a dimensional one -- adding it changes the
+            // 2D answers too, so it is deliberately NOT bundled with this
+            // change.  See Hydro2.H and the capillary-energy discussion.
+            auto uc = [&](int c, int d, int s) {
+                return 0.5 * (v(i, j, k, c)
+                            + v(i + (d == 0 ? s : 0),
+                                j + (d == 1 ? s : 0),
+                                k + (d == 2 ? s : 0), c)); };
+#if AMREX_SPACEDIM == 2
+            const Set::Scalar Ex = (sxp * (fx(1, 1) * uc(0, 0, 1) + fx(3, 1) * uc(1, 0, 1))
+                                  - sxm * (fx(1, -1) * uc(0, 0, -1) + fx(3, -1) * uc(1, 0, -1))) / dxl;
+            const Set::Scalar Ey = (syp * (fy(3, 1) * uc(0, 1, 1) + fy(2, 1) * uc(1, 1, 1))
+                                  - sym * (fy(3, -1) * uc(0, 1, -1) + fy(2, -1) * uc(1, 1, -1))) / dyl;
             E(i, j, k) -= dtl * (Ex + Ey);
+#else
+            const Set::Scalar Ex = (sxp * (fx(1, 1) * uc(0, 0, 1) + fx(3, 1) * uc(1, 0, 1) + fx(5, 1) * uc(2, 0, 1))
+                                  - sxm * (fx(1, -1) * uc(0, 0, -1) + fx(3, -1) * uc(1, 0, -1) + fx(5, -1) * uc(2, 0, -1))) / dxl;
+            const Set::Scalar Ey = (syp * (fy(3, 1) * uc(0, 1, 1) + fy(2, 1) * uc(1, 1, 1) + fy(6, 1) * uc(2, 1, 1))
+                                  - sym * (fy(3, -1) * uc(0, 1, -1) + fy(2, -1) * uc(1, 1, -1) + fy(6, -1) * uc(2, 1, -1))) / dyl;
+            const Set::Scalar Ez = (szp * (fz(5, 1) * uc(0, 2, 1) + fz(6, 1) * uc(1, 2, 1) + fz(4, 1) * uc(2, 2, 1))
+                                  - szm * (fz(5, -1) * uc(0, 2, -1) + fz(6, -1) * uc(1, 2, -1) + fz(4, -1) * uc(2, 2, -1))) / dzl;
+            E(i, j, k) -= dtl * (Ex + Ey + Ez);
+#endif
         });
     }
 }

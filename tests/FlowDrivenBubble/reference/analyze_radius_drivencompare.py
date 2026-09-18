@@ -79,30 +79,84 @@ _RUN_COLORS = ["tab:blue", "tab:green", "tab:purple", "tab:orange", "tab:brown"]
 
 
 def _parse_drive_name(fname):
-    """input_f40.8_A2.72 -> (40.8, 2.72); returns (None, None) if not matching."""
+    """input_f40.8_A2.72 -> (40.8, 2.72); returns (None, None) if not matching.
+    Kept only as a fallback tag for inputs that carry no parsable drive."""
     m = re.match(r"input_f([0-9.]+)_A([0-9.]+)$", os.path.basename(fname))
     return (float(m.group(1)), float(m.group(2))) if m else (None, None)
 
 
-def _discover_runs():
-    runs = []
-    for path in sorted(glob.glob(_tests("input_f*_A*"))):
-        f_hz, a_kpa = _parse_drive_name(path)
-        if f_hz is None:
+def _slug(text):
+    """Filesystem-safe tag fragment."""
+    return re.sub(r"[^A-Za-z0-9.+-]+", "-", text).strip("-")
+
+
+def _discover_runs(pattern=None):
+    """Every driven input under tests/FlowDrivenBubble, with the drive read from
+    the FILE rather than from its name.
+
+    The old behaviour required inputs to be named input_f<Hz>_A<kPa>; anything
+    else was silently skipped.  Now any input_* is picked up and its frequency
+    and amplitude come from nscbc.<face>.drive_{amp,omega} (or the primitive-BC
+    keys), so a new run needs no naming convention and no edit here.  Inputs
+    with no drive at all (ringdowns) are reported and skipped.
+
+    pattern: optional glob, absolute or relative to tests/FlowDrivenBubble.
+    """
+    pattern = pattern or os.environ.get("DRIVE_GLOB") or "input_*"
+    paths = sorted(glob.glob(pattern if os.path.isabs(pattern) else _tests(pattern)))
+    runs, skipped = [], []
+    for path in paths:
+        if os.path.isdir(path) or path.endswith((".py", ".md", "~")):
             continue
+        try:
+            cfg = parse_input(path)
+            A, w, _p, _how, _ph = drive_from_input(cfg, path)
+        except Exception as exc:
+            skipped.append((os.path.basename(path), f"unreadable ({exc})"))
+            continue
+        if not w or not A:
+            skipped.append((os.path.basename(path), "no drive (amp or omega = 0)"))
+            continue
+        f_hz = w / (2.0 * math.pi)
+        a_kpa = A / 1.0e3
         runs.append(dict(
-            label=f"$f$ = {f_hz:g} Hz, $A$ = {a_kpa:g} kPa (wall)",
-            tag=f"f{f_hz:g}_A{a_kpa:g}",
+            label=f"$f$ = {f_hz:.4g} Hz, $A$ = {a_kpa:.4g} kPa (wall)",
+            tag=f"f{f_hz:.4g}_A{a_kpa:.4g}_{_slug(os.path.basename(path))}",
             input=path,
             color=_RUN_COLORS[len(runs) % len(_RUN_COLORS)],
         ))
+    if skipped:
+        print("  [discover] skipped:")
+        for n, why in skipped:
+            print(f"      {n:42s} {why}")
     return runs
 
 
-RUNS = _discover_runs()
+RUNS = []   # populated in main(), once parse_input/drive_from_input exist
 
 # ===== MODEL KNOBS =====
 POLYTROPIC   = None    # gas exponent kappa; None -> use eos1.gamma (adiabatic)
+
+# ---- FINITE-DOMAIN (CONFINEMENT) CORRECTION -------------------------------
+# Rayleigh-Plesset and Keller-Miksis both assume an UNBOUNDED liquid.  These
+# runs put the bubble in a box only a few R0 across, which removes most of the
+# liquid inertia and stiffens the bubble.  Integrating the radial kinetic
+# energy out to a finite outer radius L instead of infinity,
+#     KE = 2 pi rho Rdot^2 R^3 (1 - R/L),
+# and applying Lagrange's equation gives
+#     rho[(1 - R/L) R Rddot + (3/2 - 2R/L) Rdot^2] = p_B - p_inf ,
+# which reduces to the textbook RPE as L -> infinity and linearises to
+#     f0_confined = f0_unbounded / sqrt(1 - R0/L).
+#
+# CONFINE  "off"  (default) unbounded, exactly as before
+#          "auto"           L = radius of the sphere with the same volume as
+#                           the simulation domain (symmetry planes unfolded)
+# F0_OVERRIDE  <Hz>         measured natural frequency; the confinement ratio
+#                           R0/L is back-solved so the model rings at exactly
+#                           this frequency.  Overrides CONFINE.
+# Both are read from the environment so no edit is needed per run.
+CONFINE     = os.environ.get("CONFINE", "off").lower()
+F0_OVERRIDE = float(os.environ["F0_OVERRIDE"]) if os.environ.get("F0_OVERRIDE") else None
 N_SUBSTEP    = 4000    # RK4 substeps per drive period (models only)
 SHOW_RPE     = True
 SHOW_KM      = True
@@ -216,8 +270,12 @@ def _rhs(t, R, Rd, P, model):
     pdr  = p_inf + A * math.sin(w * t + ph)
     dpdr = A * w * math.cos(w * t + ph)
 
+    # R/L for the finite-domain correction; 0 recovers the unbounded models.
+    bl = P.get("beta", 0.0) * R / R0
+    bl = min(bl, 0.95)                  # guard: L is an outer radius, not a wall
+
     if model == "rpe":
-        return ((pw - pdr) / rho - 1.5 * Rd * Rd) / R
+        return ((pw - pdr) / rho - (1.5 - 2.0 * bl) * Rd * Rd) / (R * (1.0 - bl))
 
     # Keller-Miksis.  d(pw)/dt carries a -4 mu Rddot / R term, which is moved
     # to the LHS so Rddot stays explicit.
@@ -226,7 +284,12 @@ def _rhs(t, R, Rd, P, model):
     num = ((1.0 + Rd / c) * (pw - pdr) / rho
            + R / (rho * c) * (dpw_expl - dpdr)
            - 1.5 * (1.0 - Rd / (3.0 * c)) * Rd * Rd)
-    den = (1.0 - Rd / c) * R + 4.0 * mu / (rho * c)
+    # Confinement enters the inertia the same way it does in the RPE limit.
+    # The compressible (Keller-Miksis) and finite-domain corrections are both
+    # first order and are combined multiplicatively on the Rddot coefficient;
+    # that is exact in each limit and leading-order when both act together.
+    num = num - (1.5 - 2.0 * bl) * Rd * Rd + 1.5 * (1.0 - Rd / (3.0 * c)) * Rd * Rd
+    den = (1.0 - Rd / c) * (1.0 - bl) * R + 4.0 * mu / (rho * c)
     return num / den
 
 
@@ -256,6 +319,33 @@ def integrate(model, P, t_end, n_steps):
     return t, R
 
 
+def _domain_outer_radius(cfg):
+    """Radius of the sphere with the same volume as the simulation domain.
+
+    The driven cases are octants with symmetry planes through the bubble
+    centre, so a lo edge sitting at 0 means that axis is only half represented;
+    the volume is unfolded by 2 per such axis before converting to a radius.
+    A cube has no single outer radius, so the volume-equivalent sphere is the
+    natural isotropic stand-in for L in the radial-inertia integral.
+    """
+    try:
+        lo = [float(v) for v in cfg.get("geometry.prob_lo", "").split()]
+        hi = [float(v) for v in cfg.get("geometry.prob_hi", "").split()]
+    except ValueError:
+        return None
+    if len(lo) < 3 or len(hi) < 3:
+        return None
+    vol, sym = 1.0, 1
+    for d in range(3):
+        ext = hi[d] - lo[d]
+        if ext <= 0.0:
+            return None
+        vol *= ext
+        if abs(lo[d]) < 1e-12:       # symmetry plane through the bubble centre
+            sym *= 2
+    return (3.0 * vol * sym / (4.0 * math.pi)) ** (1.0 / 3.0)
+
+
 def dim_from_input(path, cfg):
     """Spatial dimension: the '#@ dim=N' header, else inferred from prob_hi."""
     with open(path) as fh:
@@ -279,10 +369,29 @@ def build_params(cfg, path):
     P = dict(F); P.update(A=A, omega=w, p_inf=p_inf, kappa=kappa, c=c,
                           p_g0=p_g0, how=how, phase=phase, dim=dim_from_input(path, cfg),
                           plot_file=cfg.get("plot_file", ""))
+    # --- finite-domain confinement ratio beta = R0/L -----------------------
+    f0_unb = (1.0 / (2.0 * math.pi * F["R0"])) * math.sqrt(
+        3.0 * kappa * p_inf / F["rho_l"])
+    beta, how_c = 0.0, "off (unbounded)"
+    if F0_OVERRIDE:
+        r = f0_unb / F0_OVERRIDE
+        beta = max(0.0, min(0.95, 1.0 - r * r))
+        how_c = f"F0_OVERRIDE = {F0_OVERRIDE:g} Hz -> R0/L = {beta:.4f}"
+    elif CONFINE == "auto":
+        L = _domain_outer_radius(cfg)
+        if L and L > F["R0"]:
+            beta = min(0.95, F["R0"] / L)
+            how_c = f"auto: L_eq = {L:.5g} m -> R0/L = {beta:.4f}"
+        else:
+            how_c = "auto requested but domain unreadable -- using unbounded"
+    P["beta"] = beta
+    P["confine"] = how_c
+    P["f0_unbounded"] = f0_unb
     P["f_drive"] = w / (2.0 * math.pi) if w else 0.0
     P["T_drive"] = 1.0 / P["f_drive"] if P["f_drive"] else np.nan
     # Minnaert natural frequency (unbounded liquid, no tension correction)
-    P["f0"] = (1.0 / (2.0 * math.pi * F["R0"])) * math.sqrt(
+    P["f0"] = (f0_unb / math.sqrt(1.0 - beta)) if beta else (
+        1.0 / (2.0 * math.pi * F["R0"])) * math.sqrt(
         3.0 * kappa * p_inf / F["rho_l"])
     return P
 
@@ -294,6 +403,9 @@ def describe(P, label, path):
           f"  -> f = {P['f_drive']:.4f} Hz, T = {P['T_drive']*1e3:.4f} ms")
     print(f"      Minnaert f0= {P['f0']:.4f} Hz   (f_drive/f0 = "
           f"{P['f_drive']/P['f0']:.4f})")
+    print(f"      confinement: {P.get('confine', 'off')}"
+          + (f"   [unbounded f0 = {P['f0_unbounded']:.4f} Hz]"
+             if P.get("beta") else ""))
     print(f"      liquid     : rho = {P['rho_l']:.1f}, c = {P['c']:.2f} m/s "
           f"(gamma={P['gamma_l']}, p_inf_EOS={P['pinf_l']:.3g})")
     print(f"      gas        : kappa = {P['kappa']}, p_g0 = {P['p_g0']:.6g} Pa")
@@ -310,8 +422,43 @@ def _tscale(P):
     """Time normaliser: T_drive for driven runs, milliseconds otherwise."""
     return P["T_drive"] if np.isfinite(P["T_drive"]) else 1.0e-3
 
+def _resolve_out_dir(plot_file):
+    """Locate the plotfiles for a run.
+
+    The inputs carry the INCLINE path they were run with, e.g.
+        plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_X
+    That path is used as-is when it exists (i.e. on INCLINE).  Off-cluster the
+    same basename is looked for under the local bin/ tree, so the identical
+    input works in both places without editing.  DRIVE_OUT_ROOT overrides the
+    search root; an explicit run["out_dir"] still wins over all of this.
+    """
+    if not plot_file:
+        return ""
+    if os.path.isdir(plot_file):
+        return plot_file
+    base = os.path.basename(plot_file.rstrip("/"))
+    roots = []
+    if os.environ.get("DRIVE_OUT_ROOT"):
+        roots.append(os.environ["DRIVE_OUT_ROOT"])
+    roots += [_repo("bin", "tests", "FlowDrivenBubble"),
+              _repo("bin", "tests", "FlowDrivenBubble", "domaintest"),
+              _repo("bin", "tests")]
+    for r in roots:
+        cand = os.path.join(r, base)
+        if os.path.isdir(cand):
+            return cand
+    for r in roots:                      # one level down, for grouped runs
+        for cand in sorted(glob.glob(os.path.join(r, "*", base))):
+            if os.path.isdir(cand):
+                return cand
+    return plot_file                     # report the original path in the warning
+
+
 def main():
     os.makedirs(IMG_DIR, exist_ok=True)
+    global RUNS
+    if not RUNS:
+        RUNS = _discover_runs()
     print("=" * 74)
     print("FLOW-DRIVEN BUBBLE -- SIMULATION vs DRIVEN RPE / KELLER-MIKSIS")
     print("=" * 74)
@@ -325,7 +472,7 @@ def main():
         P = build_params(cfg, run["input"])
         describe(P, run["label"], run["input"])
         if not run.get("out_dir"):
-            run["out_dir"] = P["plot_file"]
+            run["out_dir"] = _resolve_out_dir(P["plot_file"])
         print(f"      plotfiles  : {run['out_dir']}")
         if P["omega"] == 0.0:
             print("      [WARN] no drive found in this input -- models will be static.")
