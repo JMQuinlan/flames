@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=LowerAmp
+#SBATCH --job-name=f40.8_A2.72
 #SBATCH -o /mmfs1/home/ttryon/FLAMES_out/flame_%j_stdout
 #SBATCH -e /mmfs1/home/ttryon/FLAMES_out/err_flame_%j_stdout
 #SBATCH -N 1
@@ -12,4 +12,4 @@ module purge
 module load gnu9 mpich
 
 ## 3D Varients ##
-srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowDrivenBubble/input_LowerAmp_NSCBC
+srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowDrivenBubble/input_f40.8_A2.72
