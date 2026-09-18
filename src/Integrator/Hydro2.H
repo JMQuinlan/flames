@@ -563,14 +563,74 @@ protected:
     //   |u|max 9.47e-4 vs 9.45e-4 m/s, radius -3.34e-5 vs -3.36e-5 %.
     // eta is therefore the default; set capillary_use_eta = 0 to recover c.
     //
-    // CANDIDATE FOR REMOVAL: if the eta path also matches on the driven and
-    // collapsing cases -- where the relaxation is actually active every step and
-    // the original 22x discrepancy was measured -- then the colour function has
-    // no remaining purpose and cfun_mf, its RHS row, its RK stage slot and its
-    // ghost fills can all be deleted.  Until those cases are compared, keep both
-    // paths: the static Laplace agreement alone does not exercise the mechanism
-    // that motivated c.
+    // TODO(DELETE THE COLOUR FUNCTION): c is no longer needed and should be
+    // removed.  The decision is made; what is left is the mechanical work of
+    // deleting cfun_mf, cfun_old_mf, their RHS row, their RK stage slots, their
+    // ghost fills and registrations, the capillary_use_eta flag itself, and the
+    // now-dead capillary_closure==0 branch of the Omega/energy path.
+    //
+    // WHY IT IS SAFE.  c existed only because the stiff relaxation and the [0,1]
+    // clamp rewrite eta without moving material, so a capillary energy built on
+    // eta could drift against the conservative flux.  Measured, that drift is
+    // not resolvable:
+    //   - static Laplace (R0 = 1.025 mm, 0.3 ms): the two fields agree to within
+    //     0.5% OF THE DRIFT ITSELF (numbers above);
+    //   - driven bubble: agrees as well (unit test, reported clean by TT).  This
+    //     is the case the original 22x |u|max discrepancy was measured on, i.e.
+    //     the one that motivated c in the first place.
+    //
+    // REMAINING CONFIRMATION (not blockers -- do these before deleting, not
+    // before deciding):
+    //   1. the COLLAPSING case -- tests/FlowMarmottant/
+    //      input_Sch20-Collapsing_Marmottant loads the relaxation harder than
+    //      anything else in the suite;
+    //   2. the ten-case Laplace sweep rerun with capillary_use_eta=1
+    //      (bin/tests/FlowMarmottant/lref20_eta vs lref20_new).
+    //
+    // Note the c path is ALREADY unreachable for most inputs: it needs
+    // capillary_closure=1, and at the default capillary_closure=0 the colour
+    // function is inert (its RHS row is zeroed in Advance) and eta is used
+    // regardless of this flag.
     int capillary_use_eta = 1;
+
+    // ------------------------------------------------------------------
+    // BOUSSINESQ--SCRIVEN INTERFACIAL (SHELL) VISCOSITY
+    // ------------------------------------------------------------------
+    // The full surface stress of a Newtonian interface is
+    //
+    //   T_s = sigma(Gamma) P + (kappa_s - mu_s)(div_s u) P + 2 mu_s D_s,
+    //   P = I - n(x)n,  div_s u = tr(P.grad u),  D_s = 0.5 P(grad_s u + grad_s u^T)P
+    //
+    // and the interfacial force is div(T_s delta_s) with the SAME delta_s
+    // normalisation the capillary tensor already uses, so the two add.
+    //
+    // DILATATIONAL PART (implemented).  The first two terms share the projector
+    // P, so they collapse into a single scalar prefactor
+    //
+    //   sigma_tot = sigma_eff(Gamma) + (kappa_s - mu_s) (div_s u)
+    //
+    // which is exactly what CapillaryOperator already multiplies -- no new
+    // tensor components, no change to the stencil.  For a sphere with
+    // u = Rdot (R/r)^2 rhat one has div_s u = 2 Rdot/R and D_s = (Rdot/R) P, so
+    //
+    //   T_s = [sigma + (kappa_s - mu_s)(2Rdot/R) + 2 mu_s (Rdot/R)] P
+    //       = [sigma + 2 kappa_s Rdot/R] P,
+    //
+    // i.e. the shear viscosity cancels identically (sphere dilatation carries no
+    // in-plane shear) and the normal balance gives
+    //   dp = 2 sigma/R + 4 kappa_s Rdot/R^2,
+    // the Marmottant (2005) shell-damping term.  kappa_s is therefore the whole
+    // of the shell viscosity for spherical dynamics.
+    //
+    // SHEAR PART (deliberately NOT implemented).  2 mu_s D_s is genuine new
+    // tensor structure: it needs D_s carried through the face averages, which
+    // means three more Q components in 2D (six in 3D) and the same extension of
+    // the energy flux.  It contributes nothing to spherically symmetric motion
+    // (see the cancellation above) and only matters for shape modes, wall
+    // interaction, and bubble--bubble coupling.  mu_s is parsed and validated so
+    // an input cannot silently request a term the solver does not apply.
+    Set::Scalar shell_kappa_s = 0.0;   // surface dilatational viscosity [kg/s]
+    Set::Scalar shell_mu_s    = 0.0;   // surface shear viscosity [kg/s] -- NOT APPLIED
     int apply_weight = 0;
     int apply_vaporization = 0;
 

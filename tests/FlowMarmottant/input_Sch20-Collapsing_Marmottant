@@ -1,0 +1,244 @@
+#@ [sch20_collapsing_marmottant]
+#@ exe=hydro2
+#@ dim=3
+
+# =============================================================================
+# COATED-BUBBLE TWIN OF Sch20_Collapsing_Neumann_Large_3D
+# Case 2: HIGH-PRESSURE-RATIO (p_inf / p_b = 1408) -- "COLLAPSING" bubble,
+#         Marmottant (2005) lipid shell + Boussinesq-Scriven dilatational
+#         shell viscosity.
+# =============================================================================
+# Schmidmayer-Bryngelson-Colonius (JCP 402, 2020) Case 2 with a coated
+# interface.  Structure is inherited from
+# tests/FlowRayleighPlesset/Sch20_Collapsing_Neumann_Large_3D: +x+y+z octant
+# with symmetry (reflect) inner BCs and neumann far field, 3D, HLLC + WENO3 +
+# SSPRK3, Sch20 Eq. (27) pressure field, and a permanently refined box holding
+# the whole bubble at dx_finest through collapse and rebound.
+#
+# The bubble is 2 um rather than Sch20's 20 mm for the reason given in full in
+# input_Sch20-Oscillating_Marmottant: the shell terms scale as 1/R and 1/R^2,
+# so a physical lipid shell is dynamically invisible at 20 mm.  The whole setup
+# is rescaled by 1e-4 in length; tau_c = 0.915 R0 sqrt(rho/p_inf) is linear in
+# R0 at fixed pressure, so time rescales identically and every dimensionless
+# group is preserved exactly.
+#
+#     Sch20 (uncoated)             this file (coated)
+#     R0        = 2.0e-2 m         R0        = 2.0e-6 m
+#     prob_hi   = 2.0 m (100 R0)   prob_hi   = 2.0e-4 m (100 R0)
+#     epsilon   = 2.0e-4           epsilon   = 2.0e-8
+#     stop_time = 4.0e-4 s         stop_time = 4.0e-8 s
+#     p_inf     = 5.0e6 Pa         p_inf     = 5.0e6 Pa   (unchanged)
+#     p_b       = 3550  Pa         p_b       = 3550  Pa   (unchanged)
+#
+#   tau_c = 0.915 * 2.0e-6 * sqrt(1000/5.0e6) = 2.588e-8 s   (Sch20 Eq. 30)
+#   stop_time / tau_c = 1.55  -- collapse + first rebound
+#   c_l   = sqrt(2.35*(5e6 + 1e9)/1000) = 1539 m/s
+#
+#   base dx = 1.25e-6 m; max_level 6 -> dx_finest = 1.953e-8 m (R0/dx = 102.4)
+#
+# -----------------------------------------------------------------------------
+# SHELL PARAMETERS -- Marmottant et al., JASA 118(6):3499, 2005
+# -----------------------------------------------------------------------------
+# Identical to the oscillating twin: chi = 1.0 N/m, kappa_s = 7.2e-9 kg/s,
+# sigma_break = 0.073 N/m, sigma_water = 0.0728 N/m, R_buckling = 0.98 R0.
+#
+# -----------------------------------------------------------------------------
+# WHAT THIS TEST DISCRIMINATES (reference ODE, R_min/R0)
+# -----------------------------------------------------------------------------
+#   model      uncoated   elastic only   viscous only   full shell
+#   RPE         0.0163       0.0185         0.0512        0.0521
+#   KM          0.0321         --             --          0.0719
+#
+# Two things are being measured at once, and they are separable:
+#   (1) The SHELL: at this collapse violence the dilatational viscosity
+#       dominates the elasticity (kappa_s triples R_min; chi alone moves it
+#       ~13%), the reverse of the oscillating case -- because 4 kappa_s Rdot/R^2
+#       grows with the collapse speed while sigma(R) saturates at zero once
+#       buckled.
+#   (2) RPE vs KM: liquid compressibility matters here (|Rdot| reaches
+#       ~800 m/s, O(0.5 c_l)), so the incompressible RPE and the
+#       Keller-Miksis form separate by a factor of ~1.4 in R_min.  The
+#       uncoated pair separates by a factor of 2.  This is the case that
+#       justifies reporting KM alongside RPE.
+#
+# R_min is mesh-limited in a near-singular collapse; refine amr.max_level for a
+# convergence study of R_min/tau_c.  Compare against
+# reference/marmottant_rpe_km.py via
+#     reference/analyze_Sch20_Oscillating_Marmottant.py --input <this file>
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+# plot_file = ./tests/FlowMarmottant/output_Sch20_Collapsing_Marmottant
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Collapsing_Marmottant
+
+### MESHING ###
+amr.plot_int        = -1
+amr.plot_dt         = 1.0e-10         # Sch20 1.0e-6 x 1e-4
+amr.max_grid_size   = 32
+amr.blocking_factor = 32
+amr.regrid_int      = 10
+amr.grid_eff        = 0.8
+amr.max_level       = 6
+amr.n_cell          = 160 160 160     # base dx 1.25e-6; L6 -> dx_finest 1.953e-8 (R0/dx = 102.4)
+
+amr.n_error_buf     = 16
+
+# Permanently refined box around the bubble: force max_level everywhere inside
+# [lo,hi], not just the eta interface band, so the ENTIRE bubble (interior gas
+# included) stays at dx_finest through collapse and rebound.  Octant, so the
+# box is [0, 1.5 R0]^3.
+refine_box.lo = 0.0    0.0    0.0
+refine_box.hi = 3.0e-6 3.0e-6 3.0e-6
+
+nghost = 4
+
+### TIME STEPPING (Sch20 values x 1e-4) ###
+timestep                = 1.0e-12
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-10
+dynamictimestep.min     = 1.0e-18
+cfl                     = 0.4
+
+### DIMENSIONS -- octant, 100 R0 ###
+geometry.prob_lo     =  0.0     0.0     0.0
+geometry.prob_hi     =  2.0e-4  2.0e-4  2.0e-4
+geometry.is_periodic = 0 0 0
+stop_time            = 4.0e-8         # ~1.55 tau_c -- collapse + first rebound
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 2.0e-8     # ~1 cell across the band at finest
+eta.ic.expression.constant.R0      = 2.0e-6
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### EQUATION OF STATE -- Sch20 water (Tammann) + air (ideal gas) ###
+eos0.gamma = 2.35
+eos0.p0    = 1.0e9
+eos0.cv    = 1781.0
+eos0.cp    = 4186.0
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 714.286
+eos1.cp    = 1000.0
+
+### HYDRO INITIAL CONDITIONS ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1000.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Liquid exterior: Sch20 Eq. (27).  max(r, R0) regularizes the 1/r singularity.
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_inf = 5.0e6
+pressure0.ic.expression.constant.p_b   = 3550.0
+pressure0.ic.expression.constant.R0    = 2.0e-6
+pressure0.ic.expression.region0 = "p_inf + (R0/max(sqrt(x*x + y*y + z*z), R0))*(p_b - p_inf)"
+
+# Gas interior: uniform bubble pressure p_b.
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_b = 3550.0
+pressure1.ic.expression.region0 = "p_b"
+
+### VISCOSITY ###
+# Water viscosity retained (see the oscillating twin): at R0 = 2 um the liquid
+# viscous term is the same order as the shell terms under test.  Gas viscosity
+# is negligible and is zeroed so the sim and the reference ODE share physics.
+mu0   = 1.0e-3
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION -- Marmottant coated shell ###
+apply_surface_tension = 1
+sigma = 0.0728                   # post-rupture / bare interface tension [N/m]
+pref  = 0.0
+kappa_method = 1                 # REQUIRED for Marmottant
+
+marmottant             = 1
+marmottant.R0          = 2.0e-6  # reference radius (shell strain measured from here)
+marmottant.R_buckling  = 1.96e-6 # 0.98 R0 -> Gamma_buck = 1.0412, sigma(R0) = 0.0412 N/m
+marmottant.chi         = 1.0     # shell elastic modulus [N/m]
+marmottant.sigma_break = 0.073   # rupture tension [N/m]
+
+# Boussinesq-Scriven interfacial viscosity: for spherical motion div_s u =
+# 2 Rdot/R and the shear viscosity mu_s cancels identically, so kappa_s alone
+# sets the shell damping (4 kappa_s Rdot/R^2 in the normal stress balance).
+shell.kappa_s = 7.2e-9           # surface dilatational viscosity [kg/s]
+shell.mu_s    = 0.0
+
+### BOUNDARY CONDITIONS -- octant symmetry + neumann far field ###
+eta.bc.type.xlo = REFLECT_EVEN
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = REFLECT_EVEN
+eta.bc.type.yhi = neumann
+eta.bc.type.zlo = REFLECT_EVEN
+eta.bc.type.zhi = neumann
+
+density.bc.type.xlo = REFLECT_EVEN
+density.bc.type.xhi = neumann
+density.bc.type.ylo = REFLECT_EVEN
+density.bc.type.yhi = neumann
+density.bc.type.zlo = REFLECT_EVEN
+density.bc.type.zhi = neumann
+
+energy.bc.type.xlo = REFLECT_EVEN
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = REFLECT_EVEN
+energy.bc.type.yhi = neumann
+energy.bc.type.zlo = REFLECT_EVEN
+energy.bc.type.zhi = neumann
+
+momentum.bc.type.xlo = REFLECT_ODD  REFLECT_EVEN REFLECT_EVEN
+momentum.bc.type.xhi = neumann neumann neumann
+momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD  REFLECT_EVEN
+momentum.bc.type.yhi = neumann neumann neumann
+momentum.bc.type.zlo = REFLECT_EVEN REFLECT_EVEN REFLECT_ODD
+momentum.bc.type.zhi = neumann neumann neumann
+
+### REFINEMENT -- eta-only at the interface band (plus refine_box above) ###
+eta_refinement_criterion   = 1.0e-1
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS ###
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+grav                  = 0.0
+
+### NUMERICS -- WENO3 + SSPRK3 (project standard for Sch20 tests) ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+apply_sharpening     = 0
+sharpening_frequency = 50
+reinit_max_iter      = 100
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+relax_diag           = 0
+
+equalize_ic_pressure = 1

@@ -146,6 +146,18 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("capillary_closure", value.capillary_closure, 0);
         // 1 (default) = capillary tensor/energy built on eta; 0 = advected colour function c
         pp_query_default("capillary_use_eta", value.capillary_use_eta, 1);
+        // Boussinesq--Scriven interfacial viscosity (see Hydro2.H).  kappa_s is
+        // applied through sigma_tot; mu_s is parsed only so a request for the
+        // unimplemented shear term is caught here rather than silently ignored.
+        pp_query_default("shell.kappa_s", value.shell_kappa_s, 0.0);
+        pp_query_default("shell.mu_s",    value.shell_mu_s,    0.0);
+        if (value.shell_mu_s != 0.0)
+            Util::Abort(INFO, "shell.mu_s = ", value.shell_mu_s, ": the Boussinesq-Scriven SHEAR "
+                        "term 2 mu_s D_s is not implemented (see Hydro2.H).  It cancels for "
+                        "spherical motion; set shell.mu_s = 0 or implement D_s in CapillaryOperator.");
+        if (value.shell_kappa_s != 0.0)
+            Util::Message(INFO, "Shell dilatational viscosity ON: kappa_s = ", value.shell_kappa_s,
+                          " kg/s (sigma_tot = sigma_eff + kappa_s div_s u)");
         pp_query_default("apply_weight", value.apply_weight, false);                    // Apply weight when solving, default: false --> "No Weight"
         pp_query_default("apply_vaporization", value.apply_vaporization, false);        // Enforces Eta boundry to be prescribed constant: false --> "moveable boundry"
 
@@ -5471,6 +5483,14 @@ void Hydro2::CapillaryOperator(int lev, Set::Scalar dt)
     const int marm = marmottant;
     const Set::Scalar chi_ = marmottant_chi, Gb = marmottant_Gamma_buck;
     const Set::Scalar sbrk = marmottant_sigma_break, sigw = sigma;
+    // Boussinesq--Scriven dilatational viscosity: sigma_tot = sigma_eff +
+    // (kappa_s - mu_s) div_s u.  mu_s is zero (the shear term is not
+    // implemented; Parse aborts if an input sets it), so the coefficient is
+    // kappa_s alone.  div_s u is evaluated from the SAME post-hyperbolic
+    // velocity and the SAME interface field the tensor is built from, so the
+    // geometry entering the viscous term matches the geometry entering sigma.
+    const Set::Scalar kap_s = shell_kappa_s - shell_mu_s;
+    const int visc_shell = (kap_s != 0.0);
 
     // Cell-centred capillary primitives, one ghost so the face averages below
     // have both neighbours.  Layout: [0]=||w||, [1]=w1^2/||w||,
@@ -5485,14 +5505,30 @@ void Hydro2::CapillaryOperator(int lev, Set::Scalar dt)
         auto cf = capillary_use_eta ? eta_mf[lev]->const_array(mfi)
                                     : cfun_mf[lev]->const_array(mfi);
         auto sh = shell_mf[lev]->const_array(mfi);
+        auto vel = velocity_mf[lev]->const_array(mfi);
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             if (!cf.contains(i - 1, j, k) || !cf.contains(i + 1, j, k)) return;
             if (!cf.contains(i, j - 1, k) || !cf.contains(i, j + 1, k)) return;
             Set::Vector w = Numeric::Gradient(cf, i, j, k, 0, DX);
             const Set::Scalar wn = w.lpNorm<2>();
             if (wn < 1.0e-10) return;
-            const Set::Scalar se = SigmaEffFromGamma(marm ? sh(i, j, k) : 0.0, wn,
-                                                     marm, sig_const, chi_, Gb, sbrk, sigw);
+            Set::Scalar se = SigmaEffFromGamma(marm ? sh(i, j, k) : 0.0, wn,
+                                               marm, sig_const, chi_, Gb, sbrk, sigw);
+            // --- dilatational shell viscosity -------------------------------
+            if (visc_shell && vel.contains(i - 1, j, k) && vel.contains(i + 1, j, k)
+                           && vel.contains(i, j - 1, k) && vel.contains(i, j + 1, k))
+            {
+                const Set::Vector nh = w / wn;
+                Set::Matrix gu = Set::Matrix::Zero();
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
+                // div_s u = tr(P . grad u) = tr(grad u) - n . grad u . n
+                const Set::Scalar div_s_u = gu.trace() - nh.dot(gu * nh);
+                se += kap_s * div_s_u;
+                // NOTE: the shear term 2 mu_s D_s would enter here as extra Q
+                // components, NOT as a scalar -- D_s is not proportional to P.
+                // See Hydro2.H before adding it.
+            }
             q(i, j, k, 0) = wn;
             q(i, j, k, 1) = w(0) * w(0) / wn;
             q(i, j, k, 2) = w(1) * w(1) / wn;
