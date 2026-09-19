@@ -148,14 +148,24 @@ POLYTROPIC   = None    # gas exponent kappa; None -> use eos1.gamma (adiabatic)
 # which reduces to the textbook RPE as L -> infinity and linearises to
 #     f0_confined = f0_unbounded / sqrt(1 - R0/L).
 #
-# CONFINE  "off"  (default) unbounded, exactly as before
-#          "auto"           L = radius of the sphere with the same volume as
+# CONFINE  "off"            unbounded, the textbook models
+#          "auto" (default)  L = radius of the sphere with the same volume as
 #                           the simulation domain (symmetry planes unfolded)
+#
+# "auto" is the default because the confinement is REAL and measurable in
+# these runs.  Switching the drive on abruptly at t = 0 rings the bubble at
+# its natural frequency in BOTH the solver and the models, so f0 is directly
+# observable: fitting a second tone to the f40.8_A2.72 record (516 frames,
+# after removing the drive tone and the eta-smearing drift) puts the solver's
+# free mode at 186 Hz +/- 10.  "auto" predicts 182.5 Hz; "off" predicts 163.1
+# Hz and its ring walks out of phase with the solver's over the record.  KM
+# rms against that run: 0.219% (off) -> 0.177% (auto) -> 0.171% (F0_OVERRIDE
+# = 186).  Use "off" only to recover the textbook unbounded models.
 # F0_OVERRIDE  <Hz>         measured natural frequency; the confinement ratio
 #                           R0/L is back-solved so the model rings at exactly
 #                           this frequency.  Overrides CONFINE.
 # Both are read from the environment so no edit is needed per run.
-CONFINE     = os.environ.get("CONFINE", "off").lower()
+CONFINE     = os.environ.get("CONFINE", "auto").lower()
 F0_OVERRIDE = float(os.environ["F0_OVERRIDE"]) if os.environ.get("F0_OVERRIDE") else None
 N_SUBSTEP    = 4000    # RK4 substeps per drive period (models only)
 SHOW_RPE     = True
@@ -288,7 +298,14 @@ def _rhs(t, R, Rd, P, model):
     # The compressible (Keller-Miksis) and finite-domain corrections are both
     # first order and are combined multiplicatively on the Rddot coefficient;
     # that is exact in each limit and leading-order when both act together.
-    num = num - (1.5 - 2.0 * bl) * Rd * Rd + 1.5 * (1.0 - Rd / (3.0 * c)) * Rd * Rd
+    # Confinement changes ONLY the Rdot^2 coefficient, from the Keller-Miksis
+    # 1.5(1 - Rd/3c) to [1.5(1 - Rd/3c) - 2 bl]: the finite-domain and
+    # compressibility corrections are both first order and act on different
+    # terms, so they superpose.  Adding 2 bl Rd^2 to the numerator is exactly
+    # that substitution, and it leaves the Rdot^3/(2c) compressibility term
+    # intact at bl = 0 (an earlier form overwrote the whole coefficient with
+    # (1.5 - 2 bl) and silently dropped it).
+    num = num + 2.0 * bl * Rd * Rd
     den = (1.0 - Rd / c) * (1.0 - bl) * R + 4.0 * mu / (rho * c)
     return num / den
 
@@ -521,13 +538,31 @@ def plot_run(run):
             t_end = float(t[-1])
             ar.print_extrema(f"{run['label']} (volume)", t, R_v)
             ar.print_extrema(f"{run['label']} (eta=0.5)", t, R_e)
-            base = (float(R_v[ar.BASELINE_FRAME])
-                    if ar.R_VOL_BASELINE == "frame" and len(R_v) > ar.BASELINE_FRAME
-                    else P["R0"])
-            ax.plot(t / ts, R_v / base, "-", color=run["color"], lw=2.4, marker="o",
-                    ms=3, zorder=3, label="simulation: volume radius")
-            ax.plot(t / ts, R_e / P["R0"], "--", color=run["color"], lw=1.8,
-                    zorder=4, label=r"simulation: $\eta=0.5$ radius")
+            # ONE baseline convention for BOTH simulation curves.  Dividing
+            # the volume curve by its own baseline while dividing the eta=0.5
+            # curve by nominal R0 mixes conventions: the volume curve is then
+            # pinned to 1 at the baseline frame while the eta=0.5 curve starts
+            # wherever its contour happens to sit relative to R0.  On the
+            # NONINT04 record that is a 0.022% offset (5% of the oscillation
+            # amplitude) -- small, but it is pure convention, and it grows
+            # with any IC whose eta=0.5 contour is not exactly at R0.
+            # NOTE: this is NOT the diffuse-band bias.  The band inflates the
+            # volume integral by ~0.34% of R0, but normalising the volume
+            # curve by its own baseline already cancels that at the baseline
+            # frame (it does not cancel the band's growth in time).
+            if ar.R_VOL_BASELINE == "frame" and len(R_v) > ar.BASELINE_FRAME:
+                base_v = float(R_v[ar.BASELINE_FRAME])
+                base_e = float(R_e[ar.BASELINE_FRAME])
+                if not np.isfinite(base_e) or base_e <= 0.0:
+                    base_e = P["R0"]
+                bnote = f" (baseline: frame {ar.BASELINE_FRAME})"
+            else:
+                base_v = base_e = P["R0"]
+                bnote = " (baseline: nominal $R_0$)"
+            ax.plot(t / ts, R_v / base_v, "-", color=run["color"], lw=2.4, marker="o",
+                    ms=3, zorder=3, label="simulation: volume radius" + bnote)
+            ax.plot(t / ts, R_e / base_e, "--", color=run["color"], lw=1.8,
+                    zorder=4, label=r"simulation: $\eta=0.5$ radius" + bnote)
         else:
             print(f"  [WARN] {run['label']}: plotfiles present but no usable radius extracted.")
     else:

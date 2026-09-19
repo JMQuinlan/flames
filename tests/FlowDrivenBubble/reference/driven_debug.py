@@ -130,7 +130,7 @@ def extract(pfdir, R0, every=1, nbins=400):
     pfs = sorted(glob.glob(os.path.join(pfdir, "*cell")),
                  key=lambda s: int(re.search(r"(\d+)cell", s).group(1)))[::every]
     S = {k: [] for k in ("t", "R_V", "R_05", "m_gas", "m_liq", "m_tot",
-                         "E_tot", "KE", "UE", "band", "p_probe", "src", "sym")}
+                         "E_tot", "KE", "UE", "band", "p_probe", "src", "R_m", "rho_c", "sym")}
     for pf in pfs:
         try:
             ds = yt.load(pf); ad = ds.all_data()
@@ -195,6 +195,20 @@ def extract(pfdir, R0, every=1, nbins=400):
             ok = w > 0
             rr, ee = rc[ok], e[ok]/w[ok]
             R_05 = _cross(rr, ee, 0.5)
+            # Mass-moment radius: gas mass is conserved EXACTLY, and a smearing
+            # band moves mass symmetrically about the interface, so the second
+            # moment of the gas mass is far less biased than int(1-eta)dV.
+            # For a uniform sphere <r^2> = (3/5) R^2.
+            R_m = np.nan
+            if r1 is not None:
+                mw = r1*vol; msum = float(np.sum(mw))
+                if msum > 0:
+                    R_m = math.sqrt(5.0/3.0*float(np.sum(mw*r*r))/msum)
+            # core gas density (eta < 0.1 -> essentially pure gas)
+            core = eta < 0.1
+            rho_c = (float(np.sum((r1[core]/np.maximum(1.0-eta[core], 1e-12))*vol[core])
+                           / np.sum(vol[core]))
+                     if (r1 is not None and core.any()) else np.nan)
             # band width: radial distance between eta=0.1 and eta=0.9
             band = _cross(rr, ee, 0.9) - _cross(rr, ee, 0.1)
 
@@ -214,7 +228,7 @@ def extract(pfdir, R0, every=1, nbins=400):
             S["R_05"].append(R_05); S["m_gas"].append(m_gas); S["m_liq"].append(m_liq)
             S["m_tot"].append(m_tot); S["E_tot"].append(E_tot); S["KE"].append(KE)
             S["UE"].append(UE); S["band"].append(band); S["p_probe"].append(probes)
-            S["src"].append(src)
+            S["src"].append(src); S["R_m"].append(R_m); S["rho_c"].append(rho_c)
             S["sym"].append(sym)
         except Exception as exc:
             say(f"  [warn] skipped {os.path.basename(pf)}: {exc}")
@@ -265,9 +279,11 @@ def radius_table(S, R0):
     say("2. RADIUS MEASURES + 3. BAND WIDTH")
     say("="*78)
     if not len(S["t"]): return
-    say(f"{'t':>11} {'R_V/R0':>10} {'R_0.5/R0':>10} {'(R_V-R_0.5)/R0 %':>17} {'band/R0':>10}")
+    say(f"{'t':>11} {'R_V/R0':>10} {'R_0.5/R0':>10} {'R_m/R0':>10} "
+        f"{'(R_V-R_0.5)/R0 %':>17} {'band/R0':>10}")
     for i in range(0, len(S["t"]), max(1, len(S["t"])//12)):
         say(f"{S['t'][i]:11.4e} {S['R_V'][i]/R0:10.6f} {S['R_05'][i]/R0:10.6f} "
+            f"{S['R_m'][i]/R0:10.6f} "
             f"{100*(S['R_V'][i]-S['R_05'][i])/R0:17.5f} {S['band'][i]/R0:10.5f}")
     d = (S["R_V"]-S["R_05"])/R0
     b = S["band"]/R0
@@ -276,6 +292,16 @@ def radius_table(S, R0):
     if np.isfinite(b).any():
         say(f"   band width / R0  : start {b[0]:.5f}      end {b[-1]:.5f}      "
             f"change {100*(b[-1]/b[0]-1):+.3f} %")
+    if np.isfinite(S["R_m"]).any():
+        say(f"   R_m/R0 (mass moment): start {S['R_m'][0]/R0:.6f}   "
+            f"end {S['R_m'][-1]/R0:.6f}   drift {100*(S['R_m'][-1]/S['R_m'][0]-1):+.5f} %")
+        say("   >> R_m is built from the EXACTLY conserved gas mass.  If R_m is")
+        say("      flat while R_V and R_0.5 fall, the drift is an eta-field")
+        say("      smearing artifact, not a shrinking bubble.")
+    if np.isfinite(S["rho_c"]).any():
+        say(f"   core gas density   : start {S['rho_c'][0]:.6f}   "
+            f"end {S['rho_c'][-1]:.6f}   drift {100*(S['rho_c'][-1]/S['rho_c'][0]-1):+.5f} %")
+        say("   >> gas mass is constant, so REAL shrinkage must raise this.")
     say("   >> DIVERGING  -> the offset is a band/measurement artifact.")
     say("   >> TOGETHER   -> the bubble is genuinely shrinking (see table 1).")
 
