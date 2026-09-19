@@ -535,6 +535,16 @@ def plot_run(run):
                "directory does not exist" if not os.path.isdir(run["out_dir"]) else
                f"only {n_pf} plotfile(s)")
         print(f"  [WARN] {run['label']}: NO SIMULATION CURVES -- {why}: {run['out_dir']}")
+        # Stamp it on the FIGURE too.  A models-only plot is a valid-looking
+        # RPE/KM comparison with nothing to compare against, and the console
+        # warning is easy to miss once a directory fills up with output.
+        ax.text(0.5, 0.5, "MODELS ONLY\nno simulation data",
+                transform=ax.transAxes, ha="center", va="center",
+                fontsize=26, color="0.55", alpha=0.30, rotation=18,
+                zorder=10, fontweight="bold")
+        ax.text(0.01, 0.015, f"expected plotfiles: {run['out_dir']}  ({why})",
+                transform=ax.transAxes, ha="left", va="bottom",
+                fontsize=7, color="0.45", zorder=10)
 
     # ---- analytical models over the span this run covers
     Tref = P["T_drive"] if np.isfinite(P["T_drive"]) else 1.0e-2
