@@ -3,7 +3,7 @@
 #SBATCH --job-name=f25.0_A0.10_LG
 #SBATCH -o /mmfs1/home/ttryon/FLAMES_out/flame_%j_stdout
 #SBATCH -e /mmfs1/home/ttryon/FLAMES_out/err_flame_%j_stdout
-#SBATCH -N 1
+#SBATCH -N 2
 #SBATCH --ntasks-per-node=128
 #SBATCH --partition=compute-long
 #SBATCH -t 100:00:00
