@@ -103,83 +103,41 @@ pressure1.ic.type = expression
 pressure1.ic.expression.region0 = "1.0"
 
 # =============================================================================
-# PRIMITIVE / PHASE-SPECIFIC BOUNDARY CONDITIONS
+# NSCBC BOUNDARY CONDITIONS -- the drive enters through the incoming
+# characteristic instead of a primitive Dirichlet value.
 # =============================================================================
-bc.primitive = 1
+# This file is input_AcousticBC with ONLY the boundary block swapped, so any
+# difference against that test is attributable to the BC and nothing else.
+nghost = 4                      # selects NSCBC4, which carries the drive
 
-# ---- PRESSURE: sinusoidal source on xlo, neumann (outflow) on xhi ----
-pressure.bc.constant.p_base = 1.0
-pressure.bc.constant.amp    = 0.01
-pressure.bc.constant.omega  = 31.415926536      # 2*pi*f,  f = 5
-pressure.bc.type.xlo = dirichlet
-pressure.bc.val.xlo  = "p_base + amp*sin(omega*t)"
-pressure.bc.type.xhi = neumann
-pressure.bc.val.xhi  = "0.0"
-pressure.bc.type.ylo = periodic
-pressure.bc.type.yhi = periodic
+density.bc.type.xlo  = nscbc_outflow
+density.bc.type.xhi  = nscbc_outflow
+energy.bc.type.xlo   = nscbc_outflow
+energy.bc.type.xhi   = nscbc_outflow
+momentum.bc.type.xlo = nscbc_outflow nscbc_outflow
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
 
-# ---- DENSITY: rho0 + p'/c0^2 on xlo (consistent acoustic perturbation) ----
-density.bc.constant.rho_base = 1.0
-density.bc.constant.amp      = 0.01
-density.bc.constant.c0sq     = 1.4              # c0^2 = gamma*p0/rho0
-density.bc.constant.omega    = 31.415926536
-density.bc.type.xlo = dirichlet
-density.bc.val.xlo  = "rho_base + (amp/c0sq)*sin(omega*t)"
-density.bc.type.xhi = neumann
-density.bc.val.xhi  = "0.0"
-density.bc.type.ylo = periodic
-density.bc.type.yhi = periodic
+nscbc.small = 1.0e-10
 
+nscbc.xlo.type     = outflow
+nscbc.xlo.target_p = 1.0
+nscbc.xlo.sigma    = 0.6
+nscbc.xlo.beta     = 0.5
+nscbc.xlo.L_ref    = 0.05
+nscbc.xlo.target_u = 0.0
+nscbc.xlo.target_v = 0.0
+nscbc.xlo.drive_amp   = 0.01
+nscbc.xlo.drive_omega = 31.415926536
 
-# PER-PHASE partial densities (alpha rho)_k.  rho_eta0/1 are filled directly from
-# their own BC, so a DIRICHLET mixture value would be written into BOTH phases
-# (ghost rho = sum).  Give each phase its own (alpha rho)_k = alpha_k * rho_k.
-density0.bc.constant.rho_base = 1.0
-density0.bc.constant.amp = 0.01
-density0.bc.constant.c0sq = 1.4
-density0.bc.constant.omega = 31.415926536
-density0.bc.type.xlo = dirichlet
-density0.bc.val.xlo  = "0.0"
-density0.bc.type.xhi = neumann
-density0.bc.val.xhi  = "0.0"
-density0.bc.type.ylo = periodic
-density0.bc.type.yhi = periodic
-
-density1.bc.constant.rho_base = 1.0
-density1.bc.constant.amp = 0.01
-density1.bc.constant.c0sq = 1.4
-density1.bc.constant.omega = 31.415926536
-density1.bc.type.xlo = dirichlet
-density1.bc.val.xlo  = "rho_base + (amp/c0sq)*sin(omega*t)"
-density1.bc.type.xhi = neumann
-density1.bc.val.xhi  = "0.0"
-density1.bc.type.ylo = periodic
-density1.bc.type.yhi = periodic
-
-
-# ---- MOMENTUM: M_x = p'/c0 on xlo (impedance-matched right-traveling wave) ----
-momentum.bc.constant.amp   = 0.01
-momentum.bc.constant.c0    = 1.1832159566
-momentum.bc.constant.omega = 31.415926536
-momentum.bc.type.xlo = dirichlet dirichlet
-momentum.bc.val.xlo  = "(amp/c0)*sin(omega*t)" "0.0"
-momentum.bc.type.xhi = neumann neumann
-momentum.bc.val.xhi  = "0.0" "0.0"
-momentum.bc.type.ylo = periodic periodic
-momentum.bc.type.yhi = periodic periodic
-
-# ---- ENERGY BC: unused for the physical fill in primitive mode (pressure
-#      drives the reconstruction), but energy_bc still fills mu_chem ghosts.
-#      Keep it zero-gradient. ----
-energy.bc.type.xlo = neumann
-energy.bc.val.xlo  = "0.0"
-energy.bc.type.xhi = neumann
-energy.bc.val.xhi  = "0.0"
-energy.bc.type.ylo = periodic
-energy.bc.type.yhi = periodic
-
-# eta BC: omitted -> defaults to ZeroNeumann (eta stays 0).
-
+nscbc.xhi.type     = outflow
+nscbc.xhi.target_p = 1.0
+nscbc.xhi.sigma    = 0.6
+nscbc.xhi.beta     = 0.5
+nscbc.xhi.L_ref    = 0.05
+nscbc.xhi.target_u = 0.0
+nscbc.xhi.target_v = 0.0
 ### REFINEMENT CRITERIA (DISABLED) ###
 eta_refinement_criterion   = 1000.0
 omega_refinement_criterion = 1000.0

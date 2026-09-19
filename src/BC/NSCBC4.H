@@ -71,12 +71,23 @@ public:
         // incoming characteristic -- the well-posed replacement for the
         // primitive-Dirichlet drive, which rectified band acoustics into
         // mass injection at any inflow-capable zero-gradient face):
-        //   p_target_eff(t) = target_p + drive_amp * sin(drive_omega*t + drive_phase)
+        //   p_target_eff(t) = target_p + SUM_k A_k sin(w_k t + phi_k)
         // Outgoing waves still leave through the LODI outflow treatment, so
         // the face drives WITHOUT acting as a resonator wall.
-        Set::Scalar drive_amp   = 0.0; ///< Drive amplitude [Pa] (0 = static target)
-        Set::Scalar drive_omega = 0.0; ///< Drive angular frequency [rad/s]
-        Set::Scalar drive_phase = 0.0; ///< Drive phase [rad]
+        //
+        // The drive is a FOURIER SERIES, not a single tone: drive_amp,
+        // drive_omega and drive_phase are arrays read with queryarr, so
+        //     nscbc.xlo.drive_amp   = 1.0 0.3333 0.2
+        //     nscbc.xlo.drive_omega = 25.0 75.0 125.0
+        // injects a three-term partial sum.  A single scalar still works and
+        // is simply a one-term series, so every existing input is unchanged.
+        // Arrays shorter than drive_amp are zero-padded (phase) or an error
+        // (omega), and n_drive records how many terms were actually given.
+        static constexpr int NDRIVE = 8; ///< Max Fourier terms per face
+        Set::Scalar drive_amp[NDRIVE]   = {0.0};  ///< Term amplitudes [Pa]
+        Set::Scalar drive_omega[NDRIVE] = {0.0};  ///< Term frequencies [rad/s]
+        Set::Scalar drive_phase[NDRIVE] = {0.0};  ///< Term phases [rad]
+        int         n_drive             = 0;      ///< Terms in use (0 = static)
 
         // Reference length scale
         Set::Scalar L_ref = 1.0; ///< Reference length [m] (domain size)
@@ -229,7 +240,9 @@ public:
         // targets (everything downstream -- faces, edges, corners -- reads
         // these locals, so one application covers all use sites).
         auto apply_drive = [time](BoundaryParams &prm) {
-            prm.target_p += prm.drive_amp * std::sin(prm.drive_omega * time + prm.drive_phase);
+            for (int k = 0; k < prm.n_drive; ++k)
+                prm.target_p += prm.drive_amp[k]
+                              * std::sin(prm.drive_omega[k] * time + prm.drive_phase[k]);
         };
         apply_drive(params_xlo_local);
         apply_drive(params_xhi_local);

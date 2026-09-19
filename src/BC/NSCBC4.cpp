@@ -114,9 +114,37 @@ NSCBC4::BoundaryParams NSCBC4::ParseFace(IO::ParmParse &pp, std::string face_nam
 
     // Parse the time-dependent pressure drive (acoustic forcing through the
     // incoming characteristic; see BoundaryParams for semantics).
-    pp.query((face_name + ".drive_amp").c_str(),   params.drive_amp);
-    pp.query((face_name + ".drive_omega").c_str(), params.drive_omega);
-    pp.query((face_name + ".drive_phase").c_str(), params.drive_phase);
+    // Accepts either a single value (one tone, the historical form) or an
+    // array (a Fourier partial sum).  amp and omega must have the same length;
+    // phase may be omitted entirely or given for every term.
+    {
+        std::vector<Set::Scalar> amp, om, ph;
+        pp.queryarr((face_name + ".drive_amp").c_str(),   amp);
+        pp.queryarr((face_name + ".drive_omega").c_str(), om);
+        pp.queryarr((face_name + ".drive_phase").c_str(), ph);
+        if (!amp.empty() || !om.empty())
+        {
+            if (amp.size() != om.size())
+                Util::Abort(INFO, "NSCBC4 ", face_name, ": drive_amp has ", amp.size(),
+                            " term(s) but drive_omega has ", om.size(),
+                            " -- they must match (one entry per Fourier term).");
+            if (!ph.empty() && ph.size() != amp.size())
+                Util::Abort(INFO, "NSCBC4 ", face_name, ": drive_phase has ", ph.size(),
+                            " term(s) but drive_amp has ", amp.size(),
+                            " -- give a phase for every term or none at all.");
+            if ((int)amp.size() > BoundaryParams::NDRIVE)
+                Util::Abort(INFO, "NSCBC4 ", face_name, ": ", amp.size(),
+                            " Fourier terms exceeds NDRIVE = ", BoundaryParams::NDRIVE,
+                            " (raise NDRIVE in NSCBC4.H).");
+            params.n_drive = (int)amp.size();
+            for (int k = 0; k < params.n_drive; ++k)
+            {
+                params.drive_amp[k]   = amp[k];
+                params.drive_omega[k] = om[k];
+                params.drive_phase[k] = ph.empty() ? 0.0 : ph[k];
+            }
+        }
+    }
 
     // Parse reference length.  L_ref carries the domain scale in K =
     // sigma*(1-M^2)*a/L_ref, so leaving it at the sentinel 1.0 on a non-unit
