@@ -67,8 +67,27 @@ from marmottant_rpe_km import (                                   # noqa: E402
     Shell, Liquid, Gas, solve_rpe, solve_km, natural_frequency, gas_pressure)
 
 IMG_DIR = os.path.join(_HERE, "Images")
-DEFAULT_INPUT = os.path.normpath(os.path.join(_HERE, "..",
-                                              "input_Sch20-Oscillating_Marmottant"))
+
+# =========================================================================== #
+#  CASES
+# =========================================================================== #
+# Both coated Sch20 cases are listed here with the INCLINE plotfile directory
+# they write to.  Uncomment a case to include it; the collapsing run is
+# commented out for now because the oscillating one finishes first.
+#
+# Each entry is (input file, plotfile directory).  The plotfile directory is
+# only a hint -- if it does not exist the input's own plot_file is used, and
+# failing that the same basename under the local bin/ tree, so the identical
+# script works on INCLINE and off it.  --input / --output still override.
+CASES = [
+    (os.path.normpath(os.path.join(_HERE, "..", "input_Sch20-Oscillating_Marmottant")),
+     "/mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant"),
+
+    # (os.path.normpath(os.path.join(_HERE, "..", "input_Sch20-Collapsing_Marmottant")),
+    #  "/mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Collapsing_Marmottant"),
+]
+
+DEFAULT_INPUT = CASES[0][0]
 
 
 # =========================================================================== #
@@ -573,9 +592,9 @@ def summarize(models, sim, shell, meta):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--input", default=DEFAULT_INPUT,
-                    help="Sch20 Marmottant input file to read (default: the "
-                         "oscillating case)")
+    ap.add_argument("--input", default=None,
+                    help="a single Sch20 Marmottant input to read; default is "
+                         "every case enabled in CASES at the top of this file")
     ap.add_argument("--output", default=None,
                     help="plotfile directory; default is the input's plot_file, "
                          "falling back to a local ./output_<name> path")
@@ -584,11 +603,19 @@ def main():
     ap.add_argument("--stem", default=None, help="output image basename")
     args = ap.parse_args()
 
-    if not os.path.isfile(args.input):
-        ap.error("input file not found: %s" % args.input)
+    cases = [(args.input, args.output)] if args.input else list(CASES)
+    if not cases:
+        ap.error("no cases enabled -- uncomment one in CASES at the top of this file")
+    for inp, out_hint in cases:
+        if not os.path.isfile(inp):
+            print("  [skip] input file not found: %s" % inp)
+            continue
+        run_case(inp, out_hint, args)
 
-    kv = parse_input(args.input)
-    shell, liq, gas, meta = build_case(kv, os.path.abspath(args.input))
+
+def run_case(inp, out_hint, args):
+    kv = parse_input(inp)
+    shell, liq, gas, meta = build_case(kv, os.path.abspath(inp))
     report_case(shell, liq, gas, meta)
 
     print("\nIntegrating reference models ...")
@@ -596,7 +623,7 @@ def main():
 
     sim = (np.array([]),) * 4
     if not args.models_only:
-        out = args.output or meta["plot_file"]
+        out = args.output or out_hint or meta["plot_file"]
         cands = [out]
         if out:
             # fall back to the same basename under the local bin/ tree
