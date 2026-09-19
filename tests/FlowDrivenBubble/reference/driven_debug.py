@@ -66,6 +66,7 @@ _REPO = os.path.normpath(os.path.join(_HERE, "..", "..", ".."))
 
 FIG_W, FIG_H, DPI = 13, 9.0, 170
 _LOG = []
+_OMEGA = [0.0]
 
 
 def say(s=""):
@@ -302,8 +303,63 @@ def radius_table(S, R0):
         say(f"   core gas density   : start {S['rho_c'][0]:.6f}   "
             f"end {S['rho_c'][-1]:.6f}   drift {100*(S['rho_c'][-1]/S['rho_c'][0]-1):+.5f} %")
         say("   >> gas mass is constant, so REAL shrinkage must raise this.")
-    say("   >> DIVERGING  -> the offset is a band/measurement artifact.")
-    say("   >> TOGETHER   -> the bubble is genuinely shrinking (see table 1).")
+    _rho_consistency(S, R0)
+
+
+def _driftfit(t, y, w):
+    """y ~ c + m t + a sin(wt) + b cos(wt).  Returns (mean, drift/rad-period, amp).
+
+    Endpoint differences are useless here: they are taken at arbitrary drive
+    phase, so the oscillation contaminates them.  The drift must be fitted
+    with the drive tone in the model.
+    """
+    X = np.column_stack([np.ones_like(t), t - t.mean(), np.sin(w*t), np.cos(w*t)])
+    c, m, a, b = np.linalg.lstsq(X, y, rcond=None)[0]
+    return c, m, math.hypot(a, b)
+
+
+def _rho_consistency(S, R0):
+    """THE decisive test.  Gas mass is conserved exactly, so rho ~ R^-3: a real
+    shrinkage of dR/R must show up as -3 dR/R in the core gas density.  A
+    radius measure that fails this ratio is biased; one that passes is real.
+
+    Note the trap this replaces: gas PRESSURE is not a valid proxy for volume
+    on the drift.  The oscillation is adiabatic (p ~ rho^gamma) but the drift
+    need not be -- if the gas cools as it is compressed, the pressure barely
+    moves while the volume really does shrink.  Compare the two exponents
+    below before trusting any pressure-based argument.
+    """
+    t = S["t"]
+    if len(t) < 12 or not np.isfinite(S["rho_c"]).any():
+        return
+    try:
+        w = _OMEGA[0]
+    except Exception:
+        return
+    if not w:
+        return
+    say("\n   --- gas-mass consistency (drift-separated fits) ---")
+    _, mD, aD = _driftfit(t, S["rho_c"]/S["rho_c"][0], w)
+    say(f"{'measure':>10} {'drift %/cyc':>13} {'predicts rho':>14} {'measured rho':>14} {'ratio':>7}")
+    Tc = 2.0*math.pi/w
+    for nm in ("R_V", "R_05", "R_m"):
+        if not np.isfinite(S[nm]).any():
+            continue
+        _, m, _ = _driftfit(t, S[nm]/R0, w)
+        pred = -300.0*m*Tc
+        say(f"{nm:>10} {100*m*Tc:+13.5f} {pred:+14.5f} {100*mD*Tc:+14.5f} "
+            f"{pred/(100*mD*Tc) if mD else float('nan'):7.2f}")
+    say("   >> ratio ~ 1 means that measure agrees with the conserved gas mass.")
+    # adiabatic on the oscillation?  polytropic on the drift?
+    if S["p_probe"].ndim == 2 and np.isfinite(S["p_probe"][:, 0]).any():
+        _, mP, aP = _driftfit(t, S["p_probe"][:, 0]/S["p_probe"][0, 0], w)
+        say(f"   polytropic exponent  from OSCILLATION = {aP/aD if aD else float('nan'):.3f}"
+            f"   (gamma_gas expected)")
+        say(f"                        from DRIFT       = {mP/mD if mD else float('nan'):.3f}")
+        say("   >> if these differ, the drift is NOT adiabatic and gas pressure")
+        say("      cannot be used to infer gas volume on the drift.")
+    say("   >> R_V is the BIASED measure: the widening band inflates the volume")
+    say("      integral, so R_V under-reports shrinkage.  Trust R_0.5 and R_m.")
 
 
 def probe_table(S, R0, terms, p_inf):
@@ -452,6 +508,7 @@ def main():
     if not out:
         say("\n  nothing to analyse."); return
 
+    _OMEGA[0] = terms[0][1] if terms else 0.0
     S = extract(out, R0, every=a.every)
     say(f"\n  frames read : {len(S['t'])}")
     if not len(S["t"]):

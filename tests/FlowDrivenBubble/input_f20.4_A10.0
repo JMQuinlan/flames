@@ -1,0 +1,279 @@
+#@ [flowdrivenbubble_f20p4_a10p0]
+# =============================================================================
+# FLOW-DRIVEN BUBBLE -- f0/8, 10 kPa, Sch20-SIZED DOMAIN (3D OCTANT)
+#
+# The clean-room version of the driven-bubble benchmark.  Every earlier case
+# left one of three excuses open; this one closes all three at once.
+#
+#   Minnaert frequency (sigma = 0):
+#     omega_0 = sqrt(3 gamma p_0 / rho) / R_0 = 1024.7 rad/s  (f_0 = 163.085 Hz)
+#
+#   This case:  drive_omega = 128.0869 rad/s = omega_0 / 8   (f = 20.3857 Hz)
+#               drive_amp   = 1.0e4 Pa (10 kPa) at the wall
+#
+# WHY f0/8 AND WHY THIS DOMAIN
+#
+# 1. CONFINEMENT BECOMES IRRELEVANT.  The finite-domain correction shifts the
+#    natural frequency (f0_eff = f0/sqrt(1 - R0/L)) and so changes the model
+#    amplitude.  On the f40.8 case (domain 0.08, R0/L = 0.2015) that shift was
+#    worth ~7% and had to be argued about.  Here the domain is 0.2 (R0/L =
+#    0.0806, f0_eff = 170.08 Hz) AND the drive sits far below resonance, so the
+#    resonant denominator 1/(1 - (f/f0)^2) is 1.0146 either way:
+#        linear dR/R0 with UNBOUNDED f0 = 2.4187 %
+#        linear dR/R0 with CONFINED  f0 = 2.4157 %
+#    a 0.128% difference.  CONFINE=auto vs off can no longer explain a
+#    discrepancy, so the comparison is unambiguous.
+#
+# 2. THE SIGNAL SWAMPS THE DRIFT.  The solver loses gas volume at ~0.23% of R0
+#    per drive cycle (measured on f40.8: R_0.5 -0.239, R_m -0.232 %/cycle,
+#    confirmed against the exactly conserved gas mass via rho ~ R^-3).  Against
+#    f40.8's 0.68% oscillation that drift is 34% of the signal -- big enough to
+#    dominate any residual.  At 10 kPa the oscillation is 2.42%, so the same
+#    drift is 9.5% per cycle.  Signal-to-drift improves 3.6x.
+#
+# 3. THE BAND AND THE GRID MATCH THE Sch20 3D TESTS.  Same epsilon (0.0016),
+#    same finest dx (7.8125e-4 -> R0/dx = 25.6, eps/dx = 2.05) and the same
+#    outer extent (0.2 m = 10 R0) as Sch20_Oscillating_NSCBC_3D, so the
+#    interface is resolved exactly as it is there.  If the driven case drifts
+#    and the Sch20 case does not, the difference is the drive, not the mesh.
+#
+# DRIVE AMPLITUDE IS SET DIRECTLY -- NO 7.36 FACTOR
+#
+# The earlier inputs divided the requested amplitude by 7.36 for an assumed
+# "box amplification".  That factor is not real.  Probing the f40.8 run in pure
+# liquid gives amp/A = 1.0001 at the wall, 1.035 at 3 R0, 1.089 at 2 R0; the
+# rise to 1.27 at the origin is the bubble's own near field, which is why the
+# origin probe (inside the bubble) appeared to show a large gain.  So 10 kPa
+# requested = 1.0e4 Pa at the wall, and the bubble sees ~10 kPa.
+#
+# EXPECTED RESULT
+#
+#   T_drive  = 0.0490541 s;  stop_time = 0.147162 s = 3 drive periods
+#   dR/R0    = 2.42 % (linear theory, and RPE/KM agree with it to 0.04%)
+#   R_max/R0 ~ 1.0242,  R_min/R0 ~ 0.9758
+#
+# Analyse with reference/driven_debug.py (gas-mass consistency table) and
+# reference/analyze_radius_drivencompare.py.  Read R_0.5 or R_m, NOT R_V: the
+# widening band inflates the volume integral and R_V under-reports the drift
+# by a third (ratio 0.67 against the conserved gas mass, vs 1.00 for R_m).
+#
+# GEOMETRY: +x+y+z OCTANT [0, 0.2]^3 (full domain 20 R0 across) with SYMMETRY
+# on xlo/ylo/zlo and driven NSCBC on xhi/yhi/zhi.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+# plot_file = ./tests/FlowDrivenBubble/output_f20.4_A10.0
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_f20.4_A10.0
+
+### MESHING ###
+amr.plot_int       = -1
+amr.plot_dt        = 1.0e-3         # ~49 frames per drive period, 147 total (3D plotfiles are big)
+# blocking_factor 8 (not 16): the refine_box is 8 base cells across here, and
+# a blocking factor of 16 would round the forced-refinement region up to 16
+# cells (0.05 m), quadrupling the finest-level cell count for no benefit.
+# max_grid_size stays 16 -> 64 grids on level 0.
+amr.max_grid_size  = 16
+amr.blocking_factor = 8
+amr.regrid_int     = 10
+amr.grid_eff       = 0.8
+# max_level 2 here reaches dx 7.8125e-4 from a COARSER base (the domain is
+# 2.5x wider than the f25/f40/f81 cases at the same n_cell), so the finest dx
+# is 1.25x LARGER than those runs, not smaller -- dt goes up, not down.  With
+# refine_box at 8 base cells the finest level holds ~32k cells against the
+# f40.8 run's ~110k, so this is cheaper per step despite the extra level.
+amr.max_level      = 2
+amr.n_cell         = 64 64 64       # base dx 3.125e-3; finest dx 7.8125e-4 -> R0/dx = 25.6
+
+# n_error_buf pushes the fine patches past the interface band so the
+# coarse-fine boundary sits in pure water (Q-Fix density partition is exact
+# there).  Same rationale as the Sch20 tests.
+amr.n_error_buf    = 8
+
+# Permanently refined box over the bubble: forces max_level over the whole
+# bubble (interior included), not just the eta band, through the full drive
+# cycle.  Octant: bubble center is the origin, so the box is [0, 1.5 R0]^3.
+refine_box.lo = 0.0  0.0  0.0
+refine_box.hi = 0.025 0.025 0.025
+
+nghost = 4
+
+### TIME STEPPING ###
+timestep                = 1.0e-7
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-5
+dynamictimestep.min     = 1.0e-13
+cfl                     = 0.5
+
+### DIMENSIONS -- +x+y+z octant, full domain 20 R0 across ###
+geometry.prob_lo     = 0.0 0.0 0.0
+geometry.prob_hi     = 0.2 0.2 0.2
+# Outer extent 0.2 m = 10 R0, matching Sch20_Oscillating_NSCBC_3D.  L_ref is
+# scaled with the domain (2.5e-4 * 0.2/0.08) so L_ref/domain is unchanged.
+geometry.is_periodic = 0 0 0
+stop_time            = 0.147162   # 3 drive periods (T = 0.0490541 s)
+
+### ETA INITIAL CONDITIONS ###
+# eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.0016      # eps/dx = 2.05 at finest (dx 7.8125e-4) -- same as Sch20 3D
+eta.ic.expression.constant.R0      = 0.02
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### EQUATION OF STATE -- Sch20 water (Tammann) + air (ideal gas) ###
+eos0.gamma = 2.35
+eos0.p0    = 1.0e9
+eos0.cv    = 1781.0
+eos0.cp    = 4186.0
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 714.286
+eos1.cp    = 1000.0
+
+### HYDRO INITIAL CONDITIONS ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1000.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Liquid starts at uniform ambient pressure -- the drive comes entirely from
+# the walls, so there is no initial RPE field.
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_inf = 1.0e5
+pressure0.ic.expression.region0 = "p_inf"
+
+# Gas interior: sigma = 0 here, so Laplace equilibrium is just p_b = p_inf.
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_b = 1.0e5
+pressure1.ic.expression.region0 = "p_b"
+
+### VISCOSITY (inviscid) ###
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION -- OFF (negligible correction; undamped parasitic
+### currents would swamp the 2-cell linear signal -- see header) ###
+sigma = 0.0
+pref  = 0.0
+
+### BOUNDARY CONDITIONS -- PRIMITIVE MODE, octant symmetry + driven outer walls ###
+# Inner faces (xlo/ylo/zlo): symmetry, same reflect pattern as the
+# Sch20_*_Large_3D octant variants.
+# Outer faces (xhi/yhi/zhi): p_wall(t) = p_inf + amp*sin(w*t); w = 2 pi f,
+# f = 81.54 Hz = f0/2.  Density/momentum/energy are zero-gradient there: the
+# outer walls behave as a pressure reservoir, free to exchange mass/momentum
+# as the drive demands.
+bc.primitive = 0
+
+# NSCBC4 characteristic drive on the three outer faces: the acoustic
+# forcing enters via the INCOMING characteristic (relaxation toward
+# p_target(t) = target_p + drive_amp*sin(drive_omega*t)); outgoing waves
+# leave freely.  This replaces the primitive-Dirichlet drive, which
+# rectified band acoustics into +-6%/cycle gas-mass injection (validated
+# 2D: NSCBC drive cuts the cyclic mass swing 15x with zero secular drift).
+# NOTE: the DELIVERED wall pressure = target + the bubble's own radiation;
+# for benchmarking, measure p_wall(t) from the plotfiles and feed the
+# achieved drive into the RP reference.
+nscbc.xhi.type        = outflow
+nscbc.xhi.target_p    = 1.0e5
+nscbc.xhi.sigma       = 0.6
+nscbc.xhi.beta        = 0.5
+nscbc.xhi.L_ref       = 6.25e-4
+nscbc.xhi.drive_amp   = 1.0e4    # 10 kPa AT THE WALL (no 7.36 factor -- measured gain is 1.000)
+nscbc.xhi.drive_omega = 128.0869
+nscbc.yhi.type        = outflow
+nscbc.yhi.target_p    = 1.0e5
+nscbc.yhi.sigma       = 0.6
+nscbc.yhi.beta        = 0.5
+nscbc.yhi.L_ref       = 6.25e-4
+nscbc.yhi.drive_amp   = 1.0e4    # 10 kPa AT THE WALL (no 7.36 factor -- measured gain is 1.000)
+nscbc.yhi.drive_omega = 128.0869
+nscbc.zhi.type        = outflow
+nscbc.zhi.target_p    = 1.0e5
+nscbc.zhi.sigma       = 0.6
+nscbc.zhi.beta        = 0.5
+nscbc.zhi.L_ref       = 6.25e-4
+nscbc.zhi.drive_amp   = 1.0e4    # 10 kPa AT THE WALL (no 7.36 factor -- measured gain is 1.000)
+nscbc.zhi.drive_omega = 128.0869
+
+# eta: symmetry (reflect_even) on inner faces, neumann far-field
+eta.bc.type.xlo = REFLECT_EVEN
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = REFLECT_EVEN
+eta.bc.type.yhi = neumann
+eta.bc.type.zlo = REFLECT_EVEN
+eta.bc.type.zhi = neumann
+
+density.bc.type.xlo = REFLECT_EVEN
+density.bc.type.xhi = nscbc_outflow
+density.bc.type.ylo = REFLECT_EVEN
+density.bc.type.yhi = nscbc_outflow
+density.bc.type.zlo = REFLECT_EVEN
+density.bc.type.zhi = nscbc_outflow
+
+energy.bc.type.xlo = REFLECT_EVEN
+energy.bc.type.xhi = nscbc_outflow
+energy.bc.type.ylo = REFLECT_EVEN
+energy.bc.type.yhi = nscbc_outflow
+energy.bc.type.zlo = REFLECT_EVEN
+energy.bc.type.zhi = nscbc_outflow
+
+momentum.bc.type.xlo = REFLECT_ODD  REFLECT_EVEN REFLECT_EVEN
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow nscbc_outflow
+momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD  REFLECT_EVEN
+momentum.bc.type.yhi = nscbc_outflow nscbc_outflow nscbc_outflow
+momentum.bc.type.zlo = REFLECT_EVEN REFLECT_EVEN REFLECT_ODD
+momentum.bc.type.zhi = nscbc_outflow nscbc_outflow nscbc_outflow
+
+### REFINEMENT -- eta band + permanent refine_box (above) ###
+eta_refinement_criterion   = 1.0e-1
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS ###
+apply_surface_tension = 0
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+grav                  = 0.0
+
+### NUMERICS -- WENO5 + SSPRK3 (project-standard for the 3D Sch20 tests) ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno5
+integration.type    = RungeKutta
+integration.rk.type = 3
+kappa_method        = 1
+
+apply_sharpening     = 0
+sharpening_frequency = 20
+reinit_max_iter      = 100
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+relax_diag           = 0    # off for production: 3 domain-wide reductions + log spam per step
+
+# Put the per-phase IC pressures in the energy-conserving equilibrium Mix()
+# would produce (kills the step-1 pressure kick; same as Sch20 tests).
+equalize_ic_pressure = 1
