@@ -151,9 +151,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("shell.kappa_s", value.shell_kappa_s, 0.0);
         pp_query_default("shell.mu_s",    value.shell_mu_s,    0.0);
         if (value.shell_mu_s != 0.0)
-            Util::Abort(INFO, "shell.mu_s = ", value.shell_mu_s, ": the Boussinesq-Scriven SHEAR "
-                        "term 2 mu_s D_s is not implemented (see Hydro2.H).  It cancels for "
-                        "spherical motion; set shell.mu_s = 0 or implement D_s in CapillaryOperator.");
+            Util::Message(INFO, "Shell SHEAR viscosity ON: mu_s = ", value.shell_mu_s,
+                          " kg/s (2 mu_s D_s, D_s = P sym(grad u) P).  Note this term "
+                          "cancels identically for spherical motion -- it only acts on "
+                          "shape change at constant area.");
         if (value.shell_kappa_s != 0.0)
             Util::Message(INFO, "Shell dilatational viscosity ON: kappa_s = ", value.shell_kappa_s,
                           " kg/s (sigma_tot = sigma_eff + kappa_s div_s u)");
@@ -1632,8 +1633,11 @@ Hydro2::RHS(int lev,
         // not implemented and Parse aborts on a nonzero value), so kappa_s is
         // the whole of it.  This is the ONE place sigma enters Omega, so adding
         // it here covers the momentum source and the capillary work together.
+        // sigma_tot = sigma_eff + (kappa_s - mu_s)(div_s u)  multiplies the
+        // projector P; 2 mu_s D_s is a genuine tensor and is added on top.
         const Set::Scalar kap_s = shell_kappa_s - shell_mu_s;
-        const int visc_shell = (kap_s != 0.0);
+        const Set::Scalar mu_s  = shell_mu_s;
+        const int visc_shell = (kap_s != 0.0) || (mu_s != 0.0);
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box bx = mfi.growntilebox(1);
@@ -1651,7 +1655,10 @@ Hydro2::RHS(int lev,
                 Set::Scalar gem = ge.lpNorm<2>();
                 if (gem < 1.0e-10) return; // Omega = 0 off the interface
                 Set::Scalar se = marm ? sg(i, j, k) : sig0;
-                // --- dilatational shell viscosity: sigma_tot = sigma_eff + kappa_s div_s u
+                // Shear part of the Boussinesq--Scriven stress.  Unlike the
+                // dilatational part it is NOT proportional to P, so it cannot be
+                // folded into the scalar tension and is accumulated separately.
+                Set::Matrix Ds = Set::Matrix::Zero();
                 if (visc_shell
                     && vel.contains(i - 1, j, k) && vel.contains(i + 1, j, k)
                     && vel.contains(i, j - 1, k) && vel.contains(i, j + 1, k)
@@ -1666,16 +1673,28 @@ Hydro2::RHS(int lev,
                         gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
                     // div_s u = tr(P.grad u) = tr(grad u) - n.grad u.n
                     se += kap_s * (gu.trace() - nh.dot(gu * nh));
+                    if (mu_s != 0.0)
+                    {
+                        // D_s = P sym(grad u) P.  P is symmetric and idempotent,
+                        // so the double projection of the symmetric part is the
+                        // full surface rate-of-deformation tensor.
+                        const Set::Matrix P =
+                            Set::Matrix::Identity() - nh * nh.transpose();
+                        Ds = P * (0.5 * (gu + gu.transpose())) * P;
+                    }
                 }
-                om(i, j, k, 0) = se * (gem - ge(0) * ge(0) / gem); // xx
-                om(i, j, k, 1) = se * (gem - ge(1) * ge(1) / gem); // yy
+                // Omega = ||grad eta|| * T_s,  T_s = se * P + 2 mu_s D_s.
+                // ||grad eta|| * P_ab = (gem d_ab - ge_a ge_b / gem).
+                const Set::Scalar tw = 2.0 * mu_s * gem;
+                om(i, j, k, 0) = se * (gem - ge(0) * ge(0) / gem) + tw * Ds(0, 0); // xx
+                om(i, j, k, 1) = se * (gem - ge(1) * ge(1) / gem) + tw * Ds(1, 1); // yy
 #if AMREX_SPACEDIM == 2
-                om(i, j, k, 2) = se * (-ge(0) * ge(1) / gem);      // xy
+                om(i, j, k, 2) = se * (-ge(0) * ge(1) / gem)      + tw * Ds(0, 1); // xy
 #else
-                om(i, j, k, 2) = se * (gem - ge(2) * ge(2) / gem); // zz
-                om(i, j, k, 3) = se * (-ge(0) * ge(1) / gem);      // xy
-                om(i, j, k, 4) = se * (-ge(0) * ge(2) / gem);      // xz
-                om(i, j, k, 5) = se * (-ge(1) * ge(2) / gem);      // yz
+                om(i, j, k, 2) = se * (gem - ge(2) * ge(2) / gem) + tw * Ds(2, 2); // zz
+                om(i, j, k, 3) = se * (-ge(0) * ge(1) / gem)      + tw * Ds(0, 1); // xy
+                om(i, j, k, 4) = se * (-ge(0) * ge(2) / gem)      + tw * Ds(0, 2); // xz
+                om(i, j, k, 5) = se * (-ge(1) * ge(2) / gem)      + tw * Ds(1, 2); // yz
 #endif
             });
         }
