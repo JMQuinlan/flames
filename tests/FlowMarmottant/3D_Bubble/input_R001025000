@@ -130,7 +130,6 @@ marmottant.R_buckling    = 1.0e-3
 marmottant.sigma_break   = 0.073
 
 ### CAPILLARY FORMULATION ###
-capillary_closure = 1
 
 ### NUMERICS ###
 Riemann_Solver.type = hllc

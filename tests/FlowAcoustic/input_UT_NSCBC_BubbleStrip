@@ -80,7 +80,6 @@ mu1_b = 0.0
 sigma = 0.0
 pref  = 0.0
 apply_surface_tension = 0
-capillary_closure     = 0
 marmottant            = 0
 
 Riemann_Solver.type = hllc

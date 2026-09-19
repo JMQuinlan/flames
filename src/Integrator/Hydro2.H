@@ -177,7 +177,6 @@ protected:
     // accounted for there and L_cap supplies only the w (x) w / ||w||
     // contraction.  Double-counting it would re-create the energy source this
     // whole exercise exists to remove.
-    void CapillaryOperator(int lev, Set::Scalar dt);
 
     // Set while the SSPRK3 stages are running under the split scheme, so the
     // per-stage FillGhost4BC does NOT fire the relaxation.  Schmidmayer applies
@@ -348,7 +347,12 @@ protected:
     // the recovered internal energy as a spurious interface pressure.  c moves
     // ONLY by advection, so its evolution is exactly what the flux accounts
     // for and the energy budget can close.  Measured before this was added:
-    // capillary_closure=1 made |u|max 22x WORSE at 0.75 ms.
+    // the conservative energy closure made |u|max 22x WORSE at 0.75 ms.
+    //
+    // RETIRED.  That closure (capillary_closure=1, CapillaryOperator / L_cap,
+    // e_cap carried in rho E) has been removed: surface tension is now always
+    // the body-force path, Omega built on grad(eta) with the capillary work
+    // entering as u.Fsv.  c is therefore unreachable -- see the TODO below.
     Set::Field<Set::Scalar> cfun_mf;
     Set::Field<Set::Scalar> cfun_old_mf;
     Set::Field<Set::Scalar> hess_eta_mf;
@@ -500,53 +504,6 @@ protected:
 
     // Booleans
     int apply_surface_tension = 1;
-    // Gate on the capillary work term u.(div Omega) in the rho E source.
-    // rho E here does NOT carry the surface energy sigma|grad eta| (see the
-    // note above the energy sources in RHS), yet it is inverted as
-    // UE = rho E - KE to recover the internal energy and hence the pressure.
-    // Capillary work therefore accumulates in rho E and is read back as
-    // thermodynamic internal energy at the interface.  Setting this to 0
-    // breaks that loop; it is a DIAGNOSTIC, not a physically complete choice
-    // -- the complete fix is the Schmidmayer 2017 closure that puts
-    // sigma|grad eta| into the conserved state.
-    // DIAGNOSTIC: interface-localised artificial viscosity.
-    //   mu_art = C * rho * a * dx * 4 eta (1-eta),   F_art = mu_art * lap(u)
-    // applied as a body-force pair (momentum gets F_art, energy gets u.F_art),
-    // which is the self-consistent pattern.  mu_art is O(dx), i.e. exactly the
-    // SCALE of dissipation an upwind Riemann solver supplies, so it vanishes
-    // under refinement.  Purpose: measure how much dissipation the capillary
-    // instability needs in units of what upwinding could actually provide.
-    // C = O(1) => putting Omega in the flux (Schmidmayer 2017) would suffice;
-    // C >> 10 => it would not.  Default 0 = off, nothing changes.
-
-    // ------------------------------------------------------------------
-    // CAPILLARY ENERGY CLOSURE  (Schmidmayer et al. 2017)
-    // ------------------------------------------------------------------
-    // Capillarity is an INTERNAL force: the work it does on the fluid has to
-    // be paid out of the surface energy.  In the body-force treatment the
-    // fluid is credited u.(div Omega) and the surface energy is never
-    // debited, because sigma|grad eta| is only a diagnostic.  Measured on the
-    // constant-sigma Laplace case: gas mass exactly conserved, no gas leaves
-    // the domain, yet gas internal energy grows +19.85% by 13 ms while
-    // int(u.Fsv)dV runs +0.53 -> +245.  That is the drift's energy source.
-    //
-    // With this flag on, the conserved total becomes the full Schmidmayer
-    // energy and the capillary work moves from the source into the flux:
-    //
-    //   rho E_t = UE + KE + e_cap,      e_cap = sigma_eff |grad eta|
-    //   d(rho E_t)/dt + div[(rho E_t + p) u - Omega.u] = 0
-    //
-    // Expanding that reproduces d(rho E_f)/dt = -div[(rho E_f + p)u] + u.F
-    // exactly, so the u.F SOURCE must be dropped when this is on (it is now
-    // implicit in the flux) (the legacy body-force path is
-    // used only when capillary_closure = 0).
-    //
-    // The momentum side is left as the existing source +div(Omega): putting
-    // Omega in the momentum flux was shown to be algebraically identical
-    // (M_flux_new = M_flux_old + sum_d (Omega_hi - Omega_lo)/dx_d).
-    //
-    // Default 0 = unchanged behaviour.
-    int capillary_closure = 0;
     // CAPILLARY FIELD SELECT.  1 (default) = build Omega, eps_sigma and the
     // sigma_eff/Gamma diagnostics from eta = alpha_1 directly, so the capillary
     // closure is interface-centric and no second field has to stay in lockstep
@@ -566,8 +523,10 @@ protected:
     // TODO(DELETE THE COLOUR FUNCTION): c is no longer needed and should be
     // removed.  The decision is made; what is left is the mechanical work of
     // deleting cfun_mf, cfun_old_mf, their RHS row, their RK stage slots, their
-    // ghost fills and registrations, the capillary_use_eta flag itself, and the
-    // now-dead capillary_closure==0 branch of the Omega/energy path.
+    // ghost fills and registrations, and the capillary_use_eta flag itself.
+    // Since the conservative energy closure was removed, c is now DEAD CODE
+    // outright: nothing reads it, its RHS row is hard-zeroed, and Omega is
+    // built on grad(eta) unconditionally.
     //
     // WHY IT IS SAFE.  c existed only because the stiff relaxation and the [0,1]
     // clamp rewrite eta without moving material, so a capillary energy built on
@@ -587,10 +546,9 @@ protected:
     //   2. the ten-case Laplace sweep rerun with capillary_use_eta=1
     //      (bin/tests/FlowMarmottant/lref20_eta vs lref20_new).
     //
-    // Note the c path is ALREADY unreachable for most inputs: it needs
-    // capillary_closure=1, and at the default capillary_closure=0 the colour
-    // function is inert (its RHS row is zeroed in Advance) and eta is used
-    // regardless of this flag.
+    // The two confirmations above are no longer gates on correctness -- with
+    // the closure gone there is only one capillary path -- but they are still
+    // worth having before the fields are deleted, as a regression baseline.
     int capillary_use_eta = 1;
 
     // ------------------------------------------------------------------
@@ -609,8 +567,9 @@ protected:
     //
     //   sigma_tot = sigma_eff(Gamma) + (kappa_s - mu_s) (div_s u)
     //
-    // which is exactly what CapillaryOperator already multiplies -- no new
-    // tensor components, no change to the stencil.  For a sphere with
+    // which is exactly the scalar the Omega build already multiplies (see the
+    // sigma_tot term in Advance) -- no new tensor components, no change to the
+    // stencil.  For a sphere with
     // u = Rdot (R/r)^2 rhat one has div_s u = 2 Rdot/R and D_s = (Rdot/R) P, so
     //
     //   T_s = [sigma + (kappa_s - mu_s)(2Rdot/R) + 2 mu_s (Rdot/R)] P

@@ -124,7 +124,6 @@ marmottant.sigma_break   = 0.073
 # Schmidmayer 2017 operator split  U^{n+1} = L_relax L_cap L_hyper(U^n), with
 # the capillary energy sigma|grad c| carried in the conserved total energy and
 # Omega built from a separately-advected colour function c.
-capillary_closure = 1
 
 ### NUMERICS ###
 Riemann_Solver.type = hllc

@@ -47,7 +47,7 @@ namespace Integrator
 {
 
 // ----------------------------------------------------------------------
-// CAPILLARY ENERGY CLOSURE helpers (see Hydro2.H, capillary_closure).
+// CAPILLARY ENERGY helper (retained for diagnostics only).
 //
 // e_cap = sigma_eff |grad eta| is a STATE FUNCTION of (eta, Gamma), never an
 // independently transported field -- so it can be recomputed identically at
@@ -143,7 +143,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // OPTIONAL SOURCE TERMS
         pp_query_default("apply_surface_tension", value.apply_surface_tension, false);  // Apply surface tension when solving, default: true --> "Apply Surface Tension"
-        pp_query_default("capillary_closure", value.capillary_closure, 0);
         // 1 (default) = capillary tensor/energy built on eta; 0 = advected colour function c
         pp_query_default("capillary_use_eta", value.capillary_use_eta, 1);
         // Boussinesq--Scriven interfacial viscosity (see Hydro2.H).  kappa_s is
@@ -997,7 +996,7 @@ void Hydro2::Mix(int lev)
         const amrex::Box &bx = mfi.growntilebox();
 
         // Capillary-energy closure inputs (see Hydro2.H).
-        const int cap_close = capillary_closure, marm_ic = marmottant;
+        const int marm_ic = marmottant;
         const Set::Scalar sig_ic = sigma, chi_ic = marmottant_chi;
         const Set::Scalar Gb_ic = marmottant_Gamma_buck;
         const Set::Scalar sbrk_ic = marmottant_sigma_break, sigw_ic = sigma;
@@ -1161,10 +1160,7 @@ void Hydro2::Mix(int lev)
 
             // Redundant total energy rho E (Schmidmayer 2020 eq. 16), plus the
             // capillary energy when the closure is on (Schmidmayer 2017).
-            E_vol(i, j, k)     = KE_vol(i, j, k) + UE_vol(i, j, k)
-                               + (cap_close ? CapEnergyAt(cfun_ic, shell_ic, i, j, k, DX,
-                                                          marm_ic, sig_ic, chi_ic, Gb_ic,
-                                                          sbrk_ic, sigw_ic) : 0.0);
+            E_vol(i, j, k)     = KE_vol(i, j, k) + UE_vol(i, j, k);
             E_vol_old(i, j, k) = E_vol(i, j, k);
             E_mas(i, j, k)     = KE_mas(i, j, k) + UE_mas(i, j, k);
             E_mas_old(i, j, k) = E_mas(i, j, k);
@@ -1574,9 +1570,7 @@ Hydro2::RHS(int lev,
             // The interface gate must use the SAME field the capillary tensor
             // is built from, or the shell tension and Omega end up gated on
             // two different interfaces once c and eta separate.
-            amrex::Array4<const Set::Scalar> const &et = (capillary_closure && !capillary_use_eta)
-                                                       ? cfun_mf[lev]->const_array(mfi)
-                                                       : eta_mf[lev]->const_array(mfi);
+            amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
             amrex::Array4<const Set::Scalar> const &cs = shell_mf[lev]->const_array(mfi);
             amrex::Array4<Set::Scalar> const &sg  = sig_eff_mf.array(mfi);
             amrex::Array4<Set::Scalar> const &Gm  = Gamma_mf[lev]->array(mfi);
@@ -1633,26 +1627,46 @@ Hydro2::RHS(int lev,
         Omega.define(baO, dmO, nO, 1);
         Omega.setVal(0.0);
         const Set::Scalar sig0 = sigma; const int marm = marmottant;
+        // Boussinesq--Scriven dilatational shell viscosity.  sigma_tot =
+        // sigma_eff + (kappa_s - mu_s) div_s u; mu_s is zero (the shear term is
+        // not implemented and Parse aborts on a nonzero value), so kappa_s is
+        // the whole of it.  This is the ONE place sigma enters Omega, so adding
+        // it here covers the momentum source and the capillary work together.
+        const Set::Scalar kap_s = shell_kappa_s - shell_mu_s;
+        const int visc_shell = (kap_s != 0.0);
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box bx = mfi.growntilebox(1);
             amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
             amrex::Array4<const Set::Scalar> const &sg = marm ? sig_eff_mf.const_array(mfi)
                                                               : amrex::Array4<const Set::Scalar>{};
+            amrex::Array4<const Set::Scalar> const &vel = velocity_mf[lev]->const_array(mfi);
             amrex::Array4<Set::Scalar> const &om = Omega.array(mfi);
-            // Schmidmayer 2017 builds Omega from the COLOUR FUNCTION gradient.
-            // eta is rewritten by relaxation/clamping without moving material,
-            // so grad(eta) makes the capillary force respond to thermodynamic
-            // adjustment; grad(c) does not.  Gated so cap_c=0 keeps the old
-            // behaviour exactly.
-            amrex::Array4<const Set::Scalar> const &cf = cfun_mf[lev]->const_array(mfi);
-            const int use_c = capillary_closure;
+            // Omega is built on the VOLUME FRACTION.  Schmidmayer 2017 uses the
+            // colour function instead, to keep the capillary energy consistent
+            // with a conservative energy flux; that closure has been removed, so
+            // grad(eta) is the only path and c is no longer read here.
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                Set::Vector ge = use_c ? Numeric::Gradient(cf, i, j, k, 0, DX)
-                                       : Numeric::Gradient(et, i, j, k, 0, DX);
+                Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
                 Set::Scalar gem = ge.lpNorm<2>();
                 if (gem < 1.0e-10) return; // Omega = 0 off the interface
                 Set::Scalar se = marm ? sg(i, j, k) : sig0;
+                // --- dilatational shell viscosity: sigma_tot = sigma_eff + kappa_s div_s u
+                if (visc_shell
+                    && vel.contains(i - 1, j, k) && vel.contains(i + 1, j, k)
+                    && vel.contains(i, j - 1, k) && vel.contains(i, j + 1, k)
+#if AMREX_SPACEDIM > 2
+                    && vel.contains(i, j, k - 1) && vel.contains(i, j, k + 1)
+#endif
+                   )
+                {
+                    const Set::Vector nh = ge / gem;
+                    Set::Matrix gu = Set::Matrix::Zero();
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                        gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
+                    // div_s u = tr(P.grad u) = tr(grad u) - n.grad u.n
+                    se += kap_s * (gu.trace() - nh.dot(gu * nh));
+                }
                 om(i, j, k, 0) = se * (gem - ge(0) * ge(0) / gem); // xx
                 om(i, j, k, 1) = se * (gem - ge(1) * ge(1) / gem); // yy
 #if AMREX_SPACEDIM == 2
@@ -1806,7 +1820,7 @@ Hydro2::RHS(int lev,
         // run -- the cluster LowAmp_NSCBC death).  Gating also removes ~12-18
         // wasted limiter reconstructions per cell per stage.
         const int shell_row_on = marmottant;
-        const int cfun_row_on  = capillary_closure;
+        const int cfun_row_on  = 0;   // colour function retired with the closure
 
         // Device-safe copies of the symmetry-face flags: the [=] kernel lambda
         // captures member arrays through `this`, which is a host pointer on a
@@ -1950,7 +1964,7 @@ Hydro2::RHS(int lev,
             Set::Vector Fsv_vector = Set::Vector::Zero();
             // Under the split scheme the capillary terms belong to L_cap
             // (Schmidmayer eq. 17); applying them here too would double-count.
-            if (apply_surface_tension && !capillary_closure)
+            if (apply_surface_tension)
             {
                 // Conservative continuum-surface-stress force  F = div(Omega)
                 // (Schmidmayer 2017).  Centered divergence of the capillary stress
@@ -2151,7 +2165,7 @@ Hydro2::RHS(int lev,
             Source(i, j, k, 0) = mdot0;
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
                 Source(i, j, k, 1 + d) = Pdot0(d) + Ldot(d) + div_tau(d) + Total_Force(d);
-            // Capillary work for the LEGACY body-force path (capillary_closure=0).
+            // Capillary work: u.Fsv for the body-force surface-tension path.
             // With the split closure on, Fsv_vector is zero here (the capillary
             // terms belong to L_cap), so this contributes nothing.
             const Set::Scalar cap_w = u.dot(Fsv_vector);
@@ -3174,18 +3188,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // capillary terms are gated out of RHS above.  L_cap and L_relax then run
     // ONCE per step, in that order.
     // ------------------------------------------------------------------
-    defer_relax = (capillary_closure != 0);
+    defer_relax = false;
     timeintegrator.advance(solution_old, solution_new, time, dt);
-    if (capillary_closure)
-    {
-        defer_relax = false;
-        CapillaryOperator(lev, dt);          // L_cap
-        RelaxAndReinit(lev);                 // L_relax
-        FillGhost4BC(lev, time + dt);        // ghosts consistent with the relaxed state
-        // No copy-back: solution_new aliases momentum_mf / energy_per_vol_mf /
-        // eta_mf / energy{0,1}_mf (MakeType::make_alias above), so the in-place
-        // updates from L_cap and L_relax are already visible in the state.
-    }
 
     // ------------------------------------------------------------------
     // Feed FluxRegister for reflux at coarse-fine boundaries.
@@ -3433,7 +3437,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         // Capillary-energy closure inputs (see Hydro2.H).  NOTE: this loop
         // aliases `eta` to eta_OLD; rho E here is current, so e_cap must be
         // built from eta_new.
-        const int cap_close_p = capillary_closure, marm_p = marmottant;
+        const int marm_p = marmottant;
         const Set::Scalar sig_p = sigma, chi_p = marmottant_chi;
         const Set::Scalar Gb_p = marmottant_Gamma_buck;
         const Set::Scalar sbrk_p = marmottant_sigma_break, sigw_p = sigma;
@@ -3492,10 +3496,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
             // Debit the capillary energy: with the closure on, rho E carries
             // e_cap, so the internal energy is rho E - KE - e_cap.
-            UE_vol(i,j,k) = E_vol(i,j,k) - KE_vol(i,j,k)
-                          - (cap_close_p ? CapEnergyAt(cfun_p, shell_p, i, j, k, DX,
-                                                       marm_p, sig_p, chi_p, Gb_p,
-                                                       sbrk_p, sigw_p) : 0.0);
+            UE_vol(i,j,k) = E_vol(i,j,k) - KE_vol(i,j,k);
             UE_vol(i, j, k) = (UE_vol(i, j, k) < 0.0) ? small : UE_vol(i, j, k);
             E_mas(i,j,k) = E_vol(i,j,k) / (rho(i,j,k) + small);
             UE_mas(i,j,k) = E_mas(i,j,k) - KE_mas(i,j,k);
@@ -4884,7 +4885,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         const amrex::Box &ghostbox = mfi.growntilebox(nghost);
 
         // Capillary-energy closure inputs (see Hydro2.H).
-        const int cap_close_g = capillary_closure, marm_g = marmottant;
+        const int marm_g = marmottant;
         const Set::Scalar sig_g = sigma, chi_g = marmottant_chi;
         const Set::Scalar Gb_g = marmottant_Gamma_buck;
         const Set::Scalar sbrk_g = marmottant_sigma_break, sigw_g = sigma;
@@ -4976,10 +4977,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             // rho E = sum_k (alpha rho e)_k + 0.5 rho |u|^2  (Sch20 eq. 16).
             // This overwrite is the BC-consistency guarantee for the 6-eq model.
             UE(i, j, k) = E0_arr(i, j, k) + E1_arr(i, j, k);
-            E(i, j, k)  = UE(i, j, k) + KE(i, j, k)
-                        + (cap_close_g ? CapEnergyAt(cfun_g, shell_g, i, j, k, DX,
-                                                     marm_g, sig_g, chi_g, Gb_g,
-                                                     sbrk_g, sigw_g) : 0.0);
+            E(i, j, k)  = UE(i, j, k) + KE(i, j, k);
 
             // Diagnostic per-phase primitives.
             rho0_arr(i, j, k) = rho0_pure;
@@ -5474,177 +5472,6 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
 // ======================================================================
 // L_cap : Schmidmayer 2017 eq. (17) / sec. 4.2.2.  See Hydro2.H.
 // ======================================================================
-void Hydro2::CapillaryOperator(int lev, Set::Scalar dt)
-{
-    if (!apply_surface_tension) return;
-
-    const Set::Scalar *DX = geom[lev].CellSize();
-    const Set::Scalar sig_const = sigma;
-    const int marm = marmottant;
-    const Set::Scalar chi_ = marmottant_chi, Gb = marmottant_Gamma_buck;
-    const Set::Scalar sbrk = marmottant_sigma_break, sigw = sigma;
-    // Boussinesq--Scriven dilatational viscosity: sigma_tot = sigma_eff +
-    // (kappa_s - mu_s) div_s u.  mu_s is zero (the shear term is not
-    // implemented; Parse aborts if an input sets it), so the coefficient is
-    // kappa_s alone.  div_s u is evaluated from the SAME post-hyperbolic
-    // velocity and the SAME interface field the tensor is built from, so the
-    // geometry entering the viscous term matches the geometry entering sigma.
-    const Set::Scalar kap_s = shell_kappa_s - shell_mu_s;
-    const int visc_shell = (kap_s != 0.0);
-
-    // Cell-centred capillary primitives, one ghost so the face averages below
-    // have both neighbours.  Layout:
-    //   [0]    = ||w||
-    //   [1]    = w1^2/||w||   [2] = w2^2/||w||   [3] = w1 w2/||w||
-    //   3D adds:
-    //   [4]    = w3^2/||w||   [5] = w1 w3/||w||  [6] = w2 w3/||w||
-    //   [QSIG] = sigma_eff    (always the LAST component)
-    // The 2D indices are deliberately unchanged from the original 2D-only
-    // implementation, so the 2D path is arithmetically identical to before.
-#if AMREX_SPACEDIM == 2
-    const int NQ = 5, QSIG = 4;
-#else
-    const int NQ = 8, QSIG = 7;
-#endif
-    amrex::MultiFab Q(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), NQ, 1);
-    Q.setVal(0.0);
-    for (amrex::MFIter mfi(Q, false); mfi.isValid(); ++mfi)
-    {
-        const amrex::Box bx = mfi.growntilebox(1);
-        auto q  = Q.array(mfi);
-        auto cf = capillary_use_eta ? eta_mf[lev]->const_array(mfi)
-                                    : cfun_mf[lev]->const_array(mfi);
-        auto sh = shell_mf[lev]->const_array(mfi);
-        auto vel = velocity_mf[lev]->const_array(mfi);
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            if (!cf.contains(i - 1, j, k) || !cf.contains(i + 1, j, k)) return;
-            if (!cf.contains(i, j - 1, k) || !cf.contains(i, j + 1, k)) return;
-#if AMREX_SPACEDIM > 2
-            if (!cf.contains(i, j, k - 1) || !cf.contains(i, j, k + 1)) return;
-#endif
-            Set::Vector w = Numeric::Gradient(cf, i, j, k, 0, DX);
-            const Set::Scalar wn = w.lpNorm<2>();
-            if (wn < 1.0e-10) return;
-            Set::Scalar se = SigmaEffFromGamma(marm ? sh(i, j, k) : 0.0, wn,
-                                               marm, sig_const, chi_, Gb, sbrk, sigw);
-            // --- dilatational shell viscosity -------------------------------
-            if (visc_shell && vel.contains(i - 1, j, k) && vel.contains(i + 1, j, k)
-                           && vel.contains(i, j - 1, k) && vel.contains(i, j + 1, k)
-#if AMREX_SPACEDIM > 2
-                           && vel.contains(i, j, k - 1) && vel.contains(i, j, k + 1)
-#endif
-               )
-            {
-                const Set::Vector nh = w / wn;
-                Set::Matrix gu = Set::Matrix::Zero();
-                for (int d = 0; d < AMREX_SPACEDIM; ++d)
-                    gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
-                // div_s u = tr(P . grad u) = tr(grad u) - n . grad u . n
-                const Set::Scalar div_s_u = gu.trace() - nh.dot(gu * nh);
-                se += kap_s * div_s_u;
-                // NOTE: the shear term 2 mu_s D_s would enter here as extra Q
-                // components, NOT as a scalar -- D_s is not proportional to P.
-                // See Hydro2.H before adding it.
-            }
-            q(i, j, k, 0) = wn;
-            q(i, j, k, 1) = w(0) * w(0) / wn;
-            q(i, j, k, 2) = w(1) * w(1) / wn;
-            q(i, j, k, 3) = w(0) * w(1) / wn;
-#if AMREX_SPACEDIM > 2
-            q(i, j, k, 4) = w(2) * w(2) / wn;
-            q(i, j, k, 5) = w(0) * w(2) / wn;
-            q(i, j, k, 6) = w(1) * w(2) / wn;
-#endif
-            q(i, j, k, QSIG) = se;
-        });
-    }
-    Q.FillBoundary(geom[lev].periodicity());
-
-    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
-    {
-        const amrex::Box &bx = mfi.validbox();
-        auto q  = Q.const_array(mfi);
-        auto M  = momentum_mf[lev]->array(mfi);
-        auto E  = energy_per_vol_mf[lev]->array(mfi);
-        auto v  = velocity_mf[lev]->const_array(mfi);
-        const Set::Scalar dtl = dt, dxl = DX[0], dyl = DX[1];
-#if AMREX_SPACEDIM > 2
-        const Set::Scalar dzl = DX[2];
-#endif
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-            // Face value = arithmetic average of the two neighbouring cells
-            // (Schmidmayer sec. 4.2.2).  Shared between neighbours, so the
-            // sum telescopes and the update is discretely conservative.
-            auto fx = [&](int c, int s) { return 0.5 * (q(i, j, k, c) + q(i + s, j, k, c)); };
-            auto fy = [&](int c, int s) { return 0.5 * (q(i, j, k, c) + q(i, j + s, k, c)); };
-#if AMREX_SPACEDIM > 2
-            auto fz = [&](int c, int s) { return 0.5 * (q(i, j, k, c) + q(i, j, k + s, c)); };
-#endif
-            // sigma_eff at faces, so a spatially varying (Marmottant) tension
-            // carries the Marangoni contribution through the same averaging.
-            const Set::Scalar sxp = fx(QSIG, 1), sxm = fx(QSIG, -1);
-            const Set::Scalar syp = fy(QSIG, 1), sym = fy(QSIG, -1);
-#if AMREX_SPACEDIM > 2
-            const Set::Scalar szp = fz(QSIG, 1), szm = fz(QSIG, -1);
-#endif
-
-            // (div.Omega)_a = d_a(sigma ||w||) - sum_b d_b(sigma w_a w_b/||w||)
-            const Set::Scalar dNx = (sxp * fx(0, 1) - sxm * fx(0, -1)) / dxl;
-            const Set::Scalar dNy = (syp * fy(0, 1) - sym * fy(0, -1)) / dyl;
-            const Set::Scalar d11x = (sxp * fx(1, 1) - sxm * fx(1, -1)) / dxl;
-            const Set::Scalar d12x = (sxp * fx(3, 1) - sxm * fx(3, -1)) / dxl;
-            const Set::Scalar d12y = (syp * fy(3, 1) - sym * fy(3, -1)) / dyl;
-            const Set::Scalar d22y = (syp * fy(2, 1) - sym * fy(2, -1)) / dyl;
-
-#if AMREX_SPACEDIM == 2
-            M(i, j, k, 0) -= dtl * (-dNx + d11x + d12y);
-            M(i, j, k, 1) -= dtl * (-dNy + d12x + d22y);
-#else
-            const Set::Scalar dNz  = (szp * fz(0, 1) - szm * fz(0, -1)) / dzl;
-            const Set::Scalar d13x = (sxp * fx(5, 1) - sxm * fx(5, -1)) / dxl;  // d_x(w1 w3)
-            const Set::Scalar d13z = (szp * fz(5, 1) - szm * fz(5, -1)) / dzl;  // d_z(w1 w3)
-            const Set::Scalar d23y = (syp * fy(6, 1) - sym * fy(6, -1)) / dyl;  // d_y(w2 w3)
-            const Set::Scalar d23z = (szp * fz(6, 1) - szm * fz(6, -1)) / dzl;  // d_z(w2 w3)
-            const Set::Scalar d33z = (szp * fz(4, 1) - szm * fz(4, -1)) / dzl;  // d_z(w3^2)
-
-            M(i, j, k, 0) -= dtl * (-dNx + d11x + d12y + d13z);
-            M(i, j, k, 1) -= dtl * (-dNy + d12x + d22y + d23z);
-            M(i, j, k, 2) -= dtl * (-dNz + d13x + d23y + d33z);
-#endif
-
-            // Energy: div[ sigma w (w.u) / ||w|| ], the ANISOTROPIC leg of
-            // div(Omega.u).  Velocities are face-averaged on the same stencil
-            // as q, so every flux is single-valued and the sum telescopes.
-            //
-            // KNOWN GAP (unchanged by the 3D extension): the ISOTROPIC leg
-            // +div(sigma ||w|| u) of div(Omega.u) is still absent here.  That
-            // is a physics fix, not a dimensional one -- adding it changes the
-            // 2D answers too, so it is deliberately NOT bundled with this
-            // change.  See Hydro2.H and the capillary-energy discussion.
-            auto uc = [&](int c, int d, int s) {
-                return 0.5 * (v(i, j, k, c)
-                            + v(i + (d == 0 ? s : 0),
-                                j + (d == 1 ? s : 0),
-                                k + (d == 2 ? s : 0), c)); };
-#if AMREX_SPACEDIM == 2
-            const Set::Scalar Ex = (sxp * (fx(1, 1) * uc(0, 0, 1) + fx(3, 1) * uc(1, 0, 1))
-                                  - sxm * (fx(1, -1) * uc(0, 0, -1) + fx(3, -1) * uc(1, 0, -1))) / dxl;
-            const Set::Scalar Ey = (syp * (fy(3, 1) * uc(0, 1, 1) + fy(2, 1) * uc(1, 1, 1))
-                                  - sym * (fy(3, -1) * uc(0, 1, -1) + fy(2, -1) * uc(1, 1, -1))) / dyl;
-            E(i, j, k) -= dtl * (Ex + Ey);
-#else
-            const Set::Scalar Ex = (sxp * (fx(1, 1) * uc(0, 0, 1) + fx(3, 1) * uc(1, 0, 1) + fx(5, 1) * uc(2, 0, 1))
-                                  - sxm * (fx(1, -1) * uc(0, 0, -1) + fx(3, -1) * uc(1, 0, -1) + fx(5, -1) * uc(2, 0, -1))) / dxl;
-            const Set::Scalar Ey = (syp * (fy(3, 1) * uc(0, 1, 1) + fy(2, 1) * uc(1, 1, 1) + fy(6, 1) * uc(2, 1, 1))
-                                  - sym * (fy(3, -1) * uc(0, 1, -1) + fy(2, -1) * uc(1, 1, -1) + fy(6, -1) * uc(2, 1, -1))) / dyl;
-            const Set::Scalar Ez = (szp * (fz(5, 1) * uc(0, 2, 1) + fz(6, 1) * uc(1, 2, 1) + fz(4, 1) * uc(2, 2, 1))
-                                  - szm * (fz(5, -1) * uc(0, 2, -1) + fz(6, -1) * uc(1, 2, -1) + fz(4, -1) * uc(2, 2, -1))) / dzl;
-            E(i, j, k) -= dtl * (Ex + Ey + Ez);
-#endif
-        });
-    }
-}
-
 void Hydro2::RelaxAndReinit(int lev)
 {
     BL_PROFILE("Integrator::Hydro2::RelaxAndReinit");
@@ -5720,40 +5547,6 @@ void Hydro2::RelaxAndReinit(int lev)
     }
 
     // ------------------------------------------------------------------
-    // CAPILLARY ENERGY SNAPSHOT (see Hydro2.H, capillary_closure).
-    //
-    // Schmidmayer 2017 splits the operators as L_relax(L_cap(L_hyper(U))),
-    // so the capillary energy entering the relaxation is already fixed; and
-    // their eps_sigma = sigma|grad c| is built from a colour function the
-    // relaxation never touches.  Here eps_sigma is built from eta = alpha_1,
-    // which the relaxation DOES rewrite (eta = a1_new below).  Evaluating it
-    // inside the kernel is then a race: e_cap at cell i reads eta at i+-1,
-    // which may or may not already have been relaxed depending on traversal
-    // order.  Freeze it here, from the pre-relaxation eta, to reproduce the
-    // same invariant deterministically.
-    std::unique_ptr<amrex::MultiFab> ecap_snap;
-    if (capillary_closure)
-    {
-        ecap_snap = std::make_unique<amrex::MultiFab>(
-            eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, 0);
-        const int marm_s = marmottant;
-        const Set::Scalar sig_s = sigma, chi_s = marmottant_chi;
-        const Set::Scalar Gb_s = marmottant_Gamma_buck;
-        const Set::Scalar sbrk_s = marmottant_sigma_break, sigw_s = sigma;
-        const Set::Scalar *DXs = geom[lev].CellSize();
-        for (amrex::MFIter mfi(*ecap_snap, false); mfi.isValid(); ++mfi)
-        {
-            const amrex::Box &bx = mfi.validbox();
-            auto ec = ecap_snap->array(mfi);
-            auto cf = capillary_use_eta ? eta_mf[lev]->const_array(mfi)
-                                    : cfun_mf[lev]->const_array(mfi);
-            auto sh = shell_mf[lev]->const_array(mfi);
-            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                ec(i, j, k) = CapEnergyAt(cf, sh, i, j, k, DXs, marm_s, sig_s,
-                                          chi_s, Gb_s, sbrk_s, sigw_s);
-            });
-        }
-    }
 
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
@@ -5766,11 +5559,6 @@ void Hydro2::RelaxAndReinit(int lev)
         auto E_    = energy_per_vol_mf[lev]->array(mfi);
         auto E0_   = energy0_mf[lev]->array(mfi);
         auto E1_   = energy1_mf[lev]->array(mfi);
-        // Capillary-energy closure: read the frozen pre-relaxation snapshot
-        // built above, never eta directly (the kernel rewrites eta).
-        const int cap_close_x = capillary_closure;
-        amrex::Array4<const Set::Scalar> ecap_s;
-        if (capillary_closure) ecap_s = ecap_snap->const_array(mfi);
 
         // EMBEDDED SOLID indicator (empty Array4 when feature is off).
         Set::Patch<const Set::Scalar> phisol = embedded.phi_mf.Patch(lev, mfi);
@@ -6058,8 +5846,7 @@ void Hydro2::RelaxAndReinit(int lev)
             // energy inflates p at the interface (dt collapse).  This is the
             // THIRD rho E inversion site -- it names its local `rho_e`, which
             // is why the E_vol - KE grep did not surface it.
-            Set::Scalar rho_e   = std::max(E_(i, j, k) - ke
-                                  - (cap_close_x ? ecap_s(i, j, k) : 0.0), small_loc);
+            Set::Scalar rho_e   = std::max(E_(i, j, k) - ke, small_loc);
 
             Set::Scalar p_reinit = Solver::EOS::EOS::ReinitMixturePressure(rho_e, a1_new, a2_new,
                                                                           gam0, pi0_, gam1, pi1_, small_loc);
@@ -6316,7 +6103,7 @@ void Hydro2::PostAverageDown(int coarse_lev)
         auto v     = velocity_mf[coarse_lev]   ->array(mfi);
         auto mask  = fine_cover_mask.const_array(mfi);
         // Capillary-energy closure inputs (see Hydro2.H).
-        const int cap_close_r = capillary_closure, marm_r = marmottant;
+        const int marm_r = marmottant;
         const Set::Scalar sig_r = sigma, chi_r = marmottant_chi;
         const Set::Scalar Gb_r = marmottant_Gamma_buck;
         const Set::Scalar sbrk_r = marmottant_sigma_break, sigw_r = sigma;
@@ -6343,10 +6130,7 @@ void Hydro2::PostAverageDown(int coarse_lev)
             const Set::Scalar KE = 0.5 * rho_safe * (AMREX_D_TERM(v(i, j, k, 0) * v(i, j, k, 0),
                                                                + v(i, j, k, 1) * v(i, j, k, 1),
                                                                + v(i, j, k, 2) * v(i, j, k, 2)));
-            const Set::Scalar e_int = E_vol(i, j, k) - KE
-                                    - (cap_close_r ? CapEnergyAt(cfun_r, shell_r, i, j, k, DXr,
-                                                                 marm_r, sig_r, chi_r, Gb_r,
-                                                                 sbrk_r, sigw_r) : 0.0);
+            const Set::Scalar e_int = E_vol(i, j, k) - KE;
 
             // Sau09 III.5:  e_int = sum_k alpha_k * (p + gamma_k * pi_k) / (gamma_k - 1)
             //   p_mix * [a0/(g0-1) + a1/(g1-1)] = e_int - [a0*g0*pi0/(g0-1) + a1*g1*pi1/(g1-1)]

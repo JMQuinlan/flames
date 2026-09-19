@@ -173,6 +173,7 @@ mu1_b = 0.0
 apply_surface_tension = 1
 sigma = 0.0728                   # post-rupture / bare interface tension [N/m]
 pref  = 0.0
+
 kappa_method = 1                 # REQUIRED for Marmottant
 
 marmottant             = 1

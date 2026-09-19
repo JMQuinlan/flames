@@ -119,6 +119,22 @@ momentum.bc.type.xhi = nscbc_outflow nscbc_outflow
 eta.bc.type.xlo = neumann
 eta.bc.type.xhi = neumann
 
+
+# y faces are PERIODIC via geometry.is_periodic, but the BC objects must be told
+# so explicitly: an undeclared face does NOT inherit periodicity from geometry,
+# it takes the default fill.  With only 4 cells in y and nghost = 4 the y-ghost
+# region spans the whole domain, so a wrong y ghost corrupts EVERY cell -- which
+# looks exactly like a uniform volumetric mass sink and is easily mistaken for a
+# solver bug.  (Cost me a long debug; see input_AcousticBC, which gets this right.)
+density.bc.type.ylo  = periodic
+density.bc.type.yhi  = periodic
+energy.bc.type.ylo   = periodic
+energy.bc.type.yhi   = periodic
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+eta.bc.type.ylo = periodic
+eta.bc.type.yhi = periodic
+
 nscbc.small = 1.0e-10
 
 nscbc.xlo.type     = outflow
