@@ -62,7 +62,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = ./tests/FlowDrivenBubble/output_LowAmp
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_LowAmp_NSCBC
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowDrivenBubble/output_f81.5_A10.0
 
 ### MESHING ###
 amr.plot_int       = -1
