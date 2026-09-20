@@ -79,11 +79,15 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = ./tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant
+plot_file = ./bin/tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant
+# Relative on purpose: the absolute /mmfs1/... path made every LOCAL run
+# abort at startup (UtilCreateDirectory: /mmfs1 :: Permission denied,
+# exit 6).  The slurm file now cd's to /home/ttryon/flames first, so this
+# same line resolves correctly on INCLINE too.
 
 ### MESHING ###
 amr.plot_int        = -1
-amr.plot_dt         = 5.0e-9          # Sch20 5.0e-5 x 1e-4
+amr.plot_dt         = 1.25e-8         # 80 frames over stop_time (was 5.0e-9 = 200)
 amr.max_grid_size   = 32
 amr.blocking_factor = 16
 amr.regrid_int      = 10
@@ -249,7 +253,14 @@ sharpening_frequency = 20
 reinit_max_iter      = 100
 reinit_tolerance     = 1e-6
 omega_relax          = 0.5
-relax_diag           = 1
+# Drop the ~50 pure-diagnostic components from the plotfiles: level 0 here
+# is 160^3 for an R0 = 2e-6 bubble, so a full plotfile is 2.5 GB.  With
+# plot_minimal the file is 681 MB (19 fields), and this run writes
+# 80 of them (~54 GB) instead of ~200 at 2.5 GB (~500 GB).
+# eta, rho_eta0/1, shell, Gamma, pressure, velocity, density, momentum,
+# energy0/1, energy_per_vol, T, UE_per_vol and KE_per_vol are all kept.
+plot_minimal         = 1
+relax_diag           = 0    # off for production: 3 domain-wide reductions + log spam per step
 
 # Switch Mix() to the gamma-weighted form so the per-phase IC pressures sit in
 # the energy-conserving equilibrium RelaxAndReinit would produce, killing the

@@ -310,6 +310,33 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                 Util::Message(INFO, "thermo.dat: gas_volume, gas_pressure_int, kinetic_energy, interface_area");
             }
         }
+        pp_query_default("shell.sigma_floor", value.shell_sigma_floor, 1);  // 1 = clamp sigma_eff + kappa_s div_s(u) at 0 (see Advance)
+        pp_query_default("relax_consistent_alpha", value.relax_consistent_alpha, 1);
+        // relax_consistent_alpha (default 1 = FIXED behaviour; 0 = legacy).
+        //
+        // THE BUG.  In the pure-cell guard of RelaxAndReinit, p_pure was
+        // solved from the alpha_floor-CLAMPED a1 (>= 1e-12) while the two
+        // per-phase energies were written with the RAW a1g (= eta clamped
+        // only to [0,1]).  ReinitMixturePressure inverts
+        //     rho_e = p*A(alpha) + B(alpha),
+        // so writing E_k back with a different alpha breaks E0+E1 = rho_e by
+        //     dE = (a1g - a1) * [ (p + gam0*pi0)/(gam0-1) - (p + gam1*pi1)/(gam1-1) ].
+        // Inside a gas bubble eta ~ 1e-13 < alpha_floor, so a1g - a1 < 0 and,
+        // because the liquid is stiff (pi0 = 1e9), the bracket is ~1.7e9:
+        // dE ~ -1.5e-3 J/m^3 of internal energy REMOVED from every core cell
+        // on every relaxation call.  One-signed, so it accumulates.  The gas
+        // cools; its pressure is pinned to the liquid by the stiff
+        // relaxation, so the bubble shrinks at constant pressure -- which is
+        // exactly the measured drift (gas mass conserved to 3.4e-14, volume
+        // -0.69 %/cycle, polytropic exponent 0.077 on the drift against 1.402
+        // on the oscillation).  The sink scales with pi0, so it is ~100x
+        // weaker at eos0.p0 = 1e7 than at 1e9 -- the drift_unit/stiffc pair.
+        //
+        // THE FIX.  Use the SAME alpha for the pressure solve and the energy
+        // write.  a1g is the right one: the comment below explains that E_k
+        // must be built with the frozen raw eta so the later E_k/eta recovery
+        // divide cancels exactly.  Making p_pure agree restores
+        // E0 + E1 = rho_e identically without reintroducing that mispricing.
         pp_query_default("relax_diag", value.relax_diag, 0); // 1 = print per-stage {max_iters, max_residual, count_unconverged}.
         pp_query_default("clip_ghost_only", value.clip_ghost_only, 0); // 1 = FillGhost STEP-9 positivity clip touches GHOST cells only (per-phase mass conservation)
 
@@ -554,6 +581,34 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     {
         int nghost = value.nghost;
 
+        // plot_minimal (default 0 = OFF, nothing changes): drop the pure
+        // diagnostic fields from the plotfiles and keep only what the bubble
+        // analyses actually read.  A 3D plotfile carries ~69 components; the
+        // set kept here is ~19, so the files shrink by roughly 70%.
+        //
+        // This exists because the Sch20 microbubble inputs are 160^3 at level
+        // 0 for an R0 = 2e-6 bubble in a 2e-4 box: level 0 alone is 2.2 GB per
+        // plotfile (2.5 GB with the refined levels), and at their plot_dt that
+        // is ~500 GB for the oscillating case and ~1 TB for the collapsing
+        // one -- more than the filesystem will take.
+        //
+        // KEPT: eta, rho_eta0/1, shell, Gamma, pressure, velocity, density,
+        //       momentum, energy0/1, energy_per_vol, T, UE_per_vol, KE_per_vol
+        // DROPPED: cfun, etadot, vorticity, energy_per_mass, Source, Fsv, Fw,
+        //       Ldot, gamma, p0, mu_chem, a, Ma, UE/KE_per_mass, Spalding,
+        //       Mass_Fraction, grad_eta, rho/M/E_flux, div_tau, Vap_dot
+        //
+        // kappa (surface curvature) is KEPT: reference/amr_analyze.py reads
+        // kappa2 for the Marmottant sigma(R), and its except-branch silently
+        // substitutes zeros -- a dropped field would look like sigma = 0.
+        //
+        // T, UE_per_vol and KE_per_vol are deliberately KEPT: they are what a
+        // thermal or energy-budget diagnosis needs.
+        int plot_minimal = 0;
+        pp.query("plot_minimal", plot_minimal);
+        const bool diag = (plot_minimal == 0);
+        if (plot_minimal) Util::Message(INFO, "plot_minimal = 1: diagnostic fields omitted from plotfiles");
+
         // BC carried by the (derived) pressure fields for AMR coarse-fine
         // FillPatch. In the primitive path this is the user pressure BC; else
         // fall back to energy_bc (pressure fields are non-evolving, so this is
@@ -575,11 +630,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.shell_mf,         value.eta_bc,      1, nghost,  "shell",        true, true);
         value.RegisterNewFab(value.shell_old_mf,     value.eta_bc,      1, nghost,  "shell_old",    false,true);
         // Colour function c (Schmidmayer 2017 eq. 3): 9th RK primary, pure advection.
-        value.RegisterNewFab(value.cfun_mf,          value.eta_bc,      1, nghost,  "cfun",         true, true);
+        value.RegisterNewFab(value.cfun_mf,          value.eta_bc,      1, nghost,  "cfun",         diag, true);
         value.RegisterNewFab(value.cfun_old_mf,      value.eta_bc,      1, nghost,  "cfun_old",     false,true);
         value.RegisterNewFab(value.Gamma_mf,        &value.bc_nothing,  1, 0,       "Gamma",        true, false);
 
-        value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing,  1, 0,       "etadot",       true, false);
+        value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing,  1, 0,       "etadot",       diag, false);
         value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing,  4, 0,       "hess_eta",     false,false, { "00", "01", "10", "11" });
         value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing,  AMREX_SPACEDIM, 0,       "n_hat",        false,false, { AMREX_D_DECL("x", "y", "z") });
 
@@ -643,14 +698,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // Vorticity is the curl of velocity: a scalar (omega_z) in 2D, a full
         // 3-vector (omega_x, omega_y, omega_z) in 3D.
 #if AMREX_SPACEDIM == 2
-        value.RegisterNewFab(value.vorticity_mf,           &value.bc_nothing,   1, 0,       "vorticity",        true, false);
+        value.RegisterNewFab(value.vorticity_mf,           &value.bc_nothing,   1, 0,       "vorticity",        diag, false);
 #else
-        value.RegisterNewFab(value.vorticity_mf,           &value.bc_nothing,   3, 0,       "vorticity",        true, false, { "x", "y", "z" });
+        value.RegisterNewFab(value.vorticity_mf,           &value.bc_nothing,   3, 0,       "vorticity",        diag, false, { "x", "y", "z" });
 #endif
         value.RegisterNewFab(value.density_mf,              value.density_bc,   1, nghost,  "density",          true, false);
         value.RegisterNewFab(value.density_old_mf,          value.density_bc,   1, nghost,  "density_old",      false,false);
         value.RegisterNewFab(value.energy_per_vol_mf,       value.energy_bc,    1, nghost,  "energy_per_vol",   true, true);
-        value.RegisterNewFab(value.energy_per_mas_mf,       value.energy_bc,    1, nghost,  "energy_per_mass",  true, true);
+        value.RegisterNewFab(value.energy_per_mas_mf,       value.energy_bc,    1, nghost,  "energy_per_mass",  diag, true);
         value.RegisterNewFab(value.energy_per_vol_old_mf,   value.energy_bc,    1, nghost,  "energy_vol_old",   false,true);
         value.RegisterNewFab(value.energy_per_mas_old_mf,   value.energy_bc,    1, nghost,  "energy_mas_old",   false,true);
         value.RegisterNewFab(value.momentum_mf,             value.momentum_bc,  AMREX_SPACEDIM, nghost,  "momentum",         true, true, { AMREX_D_DECL("x", "y", "z") });
@@ -660,40 +715,40 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.m0_mf,          &value.bc_nothing,   1, 0,       "m0",               false,false);
         value.RegisterNewFab(value.u0_mf,          &value.bc_nothing,   2, 0,       "u0",               false,false, { "x", "y" });
         value.RegisterNewFab(value.q_mf,           &value.bc_nothing,   2, 0,       "q0",               false,false, { "x", "y" });
-        value.RegisterNewFab(value.Source_mf,      &value.bc_nothing,   AMREX_SPACEDIM + 2, 0,  "Source",true, false, { "_rho", AMREX_D_DECL("_Mx", "_My", "_Mz"), "_E" });
-        value.RegisterNewFab(value.Fsv_mf,         &value.bc_nothing,   AMREX_SPACEDIM, 0,      "Fsv",  true, false, { AMREX_D_DECL("x", "y", "z") }); // Surface Tension
-        value.RegisterNewFab(value.Fw_mf,          &value.bc_nothing,   AMREX_SPACEDIM, 0,      "Fw",   true, false, { AMREX_D_DECL("x", "y", "z") }); // Weight
-        value.RegisterNewFab(value.Ldot_mf,        &value.bc_nothing,   AMREX_SPACEDIM, 0, "Ldot",      true, false, { AMREX_D_DECL("x", "y", "z") }); // Ldot (3-comp: z-momentum source develops dynamically)
+        value.RegisterNewFab(value.Source_mf,      &value.bc_nothing,   AMREX_SPACEDIM + 2, 0,  "Source",diag, false, { "_rho", AMREX_D_DECL("_Mx", "_My", "_Mz"), "_E" });
+        value.RegisterNewFab(value.Fsv_mf,         &value.bc_nothing,   AMREX_SPACEDIM, 0,      "Fsv",  diag, false, { AMREX_D_DECL("x", "y", "z") }); // Surface Tension
+        value.RegisterNewFab(value.Fw_mf,          &value.bc_nothing,   AMREX_SPACEDIM, 0,      "Fw",   diag, false, { AMREX_D_DECL("x", "y", "z") }); // Weight
+        value.RegisterNewFab(value.Ldot_mf,        &value.bc_nothing,   AMREX_SPACEDIM, 0, "Ldot",      diag, false, { AMREX_D_DECL("x", "y", "z") }); // Ldot (3-comp: z-momentum source develops dynamically)
         value.RegisterNewFab(value.T_mf,            value.energy_bc,    1, nghost, "T",                 true, false);               // Temperature
         value.RegisterNewFab(value.cp_mf,          &value.bc_nothing,   1, nghost, "cp",                false,true);                // Constant Pressure Specific Heat
         value.RegisterNewFab(value.cv_mf,          &value.bc_nothing,   1, nghost, "cv",                false,true);                // Constant Volume Specific Heat
         //value.RegisterNewFab(value.k_thermal_mf,    &value.bc_nothing,  1, nghost, "k_thermal", false, true);         // Thermal Conductivity
         //value.RegisterNewFab(value.h_thermal_mf,    &value.bc_nothing,  1, nghost, "h_thermal", false, true);         // Thermal Convectivity
-        value.RegisterNewFab(value.gamma_mf,        value.energy_bc,    1, nghost, "gamma",             true, false);               // Specific Heat Ratio
-        value.RegisterNewFab(value.p0_mf,           value.energy_bc,    1, nghost, "p0",                true, true);                // Tamman Pressure
-        value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc,    1, nghost, "mu_chem",           true, false);               // Chemical Potential
-        value.RegisterNewFab(value.a_mf,           &value.bc_nothing,   1, nghost, "a",                 true, false);               // Speed of sound
-        value.RegisterNewFab(value.Ma_mf,          &value.bc_nothing,   2, nghost, "Ma",                true, false, { "x", "y" }); // Mach
+        value.RegisterNewFab(value.gamma_mf,        value.energy_bc,    1, nghost, "gamma",             diag, false);               // Specific Heat Ratio
+        value.RegisterNewFab(value.p0_mf,           value.energy_bc,    1, nghost, "p0",                diag, true);                // Tamman Pressure
+        value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc,    1, nghost, "mu_chem",           diag, false);               // Chemical Potential
+        value.RegisterNewFab(value.a_mf,           &value.bc_nothing,   1, nghost, "a",                 diag, false);               // Speed of sound
+        value.RegisterNewFab(value.Ma_mf,          &value.bc_nothing,   2, nghost, "Ma",                diag, false, { "x", "y" }); // Mach
         value.RegisterNewFab(value.UE_per_vol_mf,   value.energy_bc,    1, nghost, "UE_per_vol",        true, false);               // Internal Energy (per unit volume)
-        value.RegisterNewFab(value.UE_per_mas_mf,   value.energy_bc,    1, nghost, "UE_per_mass",       true, false);               // Internal Energy (per unit mass)
+        value.RegisterNewFab(value.UE_per_mas_mf,   value.energy_bc,    1, nghost, "UE_per_mass",       diag, false);               // Internal Energy (per unit mass)
         value.RegisterNewFab(value.KE_per_vol_mf,   value.energy_bc,    1, nghost, "KE_per_vol",        true, false);               // Kinetic Energy (per unit volume)
-        value.RegisterNewFab(value.KE_per_mas_mf,   value.energy_bc,    1, nghost, "KE_per_mass",       true, false);               // Kinetic Energy (per unit mass)
-        value.RegisterNewFab(value.Bm_mf,          &value.bc_nothing,   1, nghost, "Spadling_Number",   true, false);               // Spalding Number
-        value.RegisterNewFab(value.Y_mf,           &value.bc_nothing,   1, nghost, "Mass_Fraction",     true, false);               // Mass Fraction
+        value.RegisterNewFab(value.KE_per_mas_mf,   value.energy_bc,    1, nghost, "KE_per_mass",       diag, false);               // Kinetic Energy (per unit mass)
+        value.RegisterNewFab(value.Bm_mf,          &value.bc_nothing,   1, nghost, "Spadling_Number",   diag, false);               // Spalding Number
+        value.RegisterNewFab(value.Y_mf,           &value.bc_nothing,   1, nghost, "Mass_Fraction",     diag, false);               // Mass Fraction
 
         // EXTRAS & DEBUGGING
-        value.RegisterNewFab(value.grad_eta_mf,         &value.bc_nothing,  AMREX_SPACEDIM, 0, "grad_eta",           true, false, { AMREX_D_DECL("x", "y", "z") }); // grad(eta)
+        value.RegisterNewFab(value.grad_eta_mf,         &value.bc_nothing,  AMREX_SPACEDIM, 0, "grad_eta",           diag, false, { AMREX_D_DECL("x", "y", "z") }); // grad(eta)
         value.RegisterNewFab(value.kappas_mf,           &value.bc_nothing,  3,              0, "kappa",              true, false, { "Avg", "1", "2" });             // Surface curvature
         value.RegisterNewFab(value.grad_mag_grad_eta_mf,&value.bc_nothing,  AMREX_SPACEDIM, 0, "grad_mag_grad_eta",  false,false, { AMREX_D_DECL("x", "y", "z") }); // grad( | grad(eta) | )
-        value.RegisterNewFab(value.rho_flux_mf,         &value.bc_nothing,  1,              0, "rho_flux",           true, false);                                  // Density Flux
-        value.RegisterNewFab(value.M_flux_mf,           &value.bc_nothing,  AMREX_SPACEDIM, 0, "M_flux",             true, false, { AMREX_D_DECL("x", "y", "z") }); // Momentum Flux
-        value.RegisterNewFab(value.E_flux_mf,           &value.bc_nothing,  1,              0, "E_flux",             true, false);                                  // Energy Flux
-        value.RegisterNewFab(value.div_tau_mf,          &value.bc_nothing,  AMREX_SPACEDIM, 0, "div_tau",            true, false, { AMREX_D_DECL("x", "y", "z") }); // Energy Flux
+        value.RegisterNewFab(value.rho_flux_mf,         &value.bc_nothing,  1,              0, "rho_flux",           diag, false);                                  // Density Flux
+        value.RegisterNewFab(value.M_flux_mf,           &value.bc_nothing,  AMREX_SPACEDIM, 0, "M_flux",             diag, false, { AMREX_D_DECL("x", "y", "z") }); // Momentum Flux
+        value.RegisterNewFab(value.E_flux_mf,           &value.bc_nothing,  1,              0, "E_flux",             diag, false);                                  // Energy Flux
+        value.RegisterNewFab(value.div_tau_mf,          &value.bc_nothing,  AMREX_SPACEDIM, 0, "div_tau",            diag, false, { AMREX_D_DECL("x", "y", "z") }); // Energy Flux
         value.RegisterNewFab(value.hess_u_mf,           &value.bc_nothing,  8,              0, "hess_u",             false,false, {"000","001",
                                                                                                                                    "010","011",
                                                                                                                                    "100","101",
                                                                                                                                    "110","111"});                   // hess_u Flux
-        value.RegisterNewFab(value.Vap_dot_mf, &value.bc_nothing, AMREX_SPACEDIM + 3, 0, "Vap_dot", true, false, { "_eta", "_rho", AMREX_D_DECL("_Mx", "_My", "_Mz"), "_E" });    // Momentum Flux
+        value.RegisterNewFab(value.Vap_dot_mf, &value.bc_nothing, AMREX_SPACEDIM + 3, 0, "Vap_dot", diag, false, { "_eta", "_rho", AMREX_D_DECL("_Mx", "_My", "_Mz"), "_E" });    // Momentum Flux
         
     }
 
@@ -1635,6 +1690,7 @@ Hydro2::RHS(int lev,
         // it here covers the momentum source and the capillary work together.
         // sigma_tot = sigma_eff + (kappa_s - mu_s)(div_s u)  multiplies the
         // projector P; 2 mu_s D_s is a genuine tensor and is added on top.
+        const int shell_sigma_floor_l = shell_sigma_floor;
         const Set::Scalar kap_s = shell_kappa_s - shell_mu_s;
         const Set::Scalar mu_s  = shell_mu_s;
         const int visc_shell = (kap_s != 0.0) || (mu_s != 0.0);
@@ -1646,6 +1702,14 @@ Hydro2::RHS(int lev,
                                                               : amrex::Array4<const Set::Scalar>{};
             amrex::Array4<const Set::Scalar> const &vel = velocity_mf[lev]->const_array(mfi);
             amrex::Array4<Set::Scalar> const &om = Omega.array(mfi);
+            // Diagnostic: kappa1 carries the TOTAL surface tension actually
+            // used in Omega, sigma(Gamma) + kappa_s div_s(u), BEFORE the
+            // sigma_floor clamp.  kappa2 is written in the Marmottant block
+            // above and is the BARE sigma(Gamma) only, so it cannot show the
+            // viscous contribution -- which is the whole question for the
+            // coated collapse.
+            amrex::Array4<Set::Scalar> const &kapd = kappas_mf[lev]->array(mfi);
+            const amrex::Box vbx_om = mfi.validbox();
             // Omega is built on the VOLUME FRACTION.  Schmidmayer 2017 uses the
             // colour function instead, to keep the capillary energy consistent
             // with a conservative energy flux; that closure has been removed, so
@@ -1673,6 +1737,29 @@ Hydro2::RHS(int lev,
                         gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
                     // div_s u = tr(P.grad u) = tr(grad u) - n.grad u.n
                     se += kap_s * (gu.trace() - nh.dot(gu * nh));
+                    // A fluid interface cannot support COMPRESSION: the total
+                    // Boussinesq-Scriven surface tension sigma(Gamma) +
+                    // kappa_s div_s(u) must stay >= 0.  Without this floor a
+                    // collapsing coated bubble goes unstable and collapses to
+                    // nothing: with kappa_s = 7.2e-9 and the Sch20 collapse
+                    // (Rdot ~ -58 m/s), div_s u = 2 Rdot / R reaches -5.8e8,
+                    // so kappa_s div_s u = -4.2 N/m -- already -0.34 N/m at
+                    // R = R0, i.e. NEGATIVE surface tension 57x the magnitude
+                    // of water's.  Negative tension makes the interface gain
+                    // energy by growing area, which is a runaway.
+                    //
+                    // This is also what Marmottant's own buckled branch means:
+                    // the shell buckles OUT OF PLANE rather than supporting
+                    // compression, which is why sigma = 0 there instead of
+                    // going negative.  The dilatational viscous stress has to
+                    // obey the same constraint.
+                    //
+                    // Only reachable when a shell viscosity is on, which is
+                    // why the UNCOATED tests were unaffected (no shell.kappa_s
+                    // at all, so se = sigma = const >= 0).
+                    if (vbx_om.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
+                        kapd(i, j, k, 1) = se;      // total sigma, pre-floor
+                    if (shell_sigma_floor_l && se < 0.0) se = 0.0;
                     if (mu_s != 0.0)
                     {
                         // D_s = P sym(grad u) P.  P is symmetric and idempotent,
@@ -5514,6 +5601,7 @@ void Hydro2::RelaxAndReinit(int lev)
     const Set::Scalar unconv_threshold = 1.0e-6;
 
 
+    const int consistent_alpha = relax_consistent_alpha;
     const Set::Scalar gam0 = eos0.Gamma();
     const Set::Scalar pi0_ = eos0.P0();
     const Set::Scalar gam1 = eos1.Gamma();
@@ -5662,7 +5750,12 @@ void Hydro2::RelaxAndReinit(int lev)
                                                        + M_(i, j, k, 1) * M_(i, j, k, 1),
                                                        + M_(i, j, k, 2) * M_(i, j, k, 2))) / std::max(rho_p, small_loc);
                 Set::Scalar rhoe_p = std::max(E_(i, j, k) - ke_p, small_loc);
-                Set::Scalar p_pure = Solver::EOS::EOS::ReinitMixturePressure(rhoe_p, a1, a2,
+                // Solve for p with the SAME alpha the energies are written
+                // with (see relax_consistent_alpha).  Legacy path used a1/a2.
+                const Set::Scalar a1p = consistent_alpha
+                                      ? std::min(std::max(eta(i, j, k), 0.0), 1.0) : a1;
+                const Set::Scalar a2p = consistent_alpha ? (1.0 - a1p) : a2;
+                Set::Scalar p_pure = Solver::EOS::EOS::ReinitMixturePressure(rhoe_p, a1p, a2p,
                                                                             gam0, pi0_, gam1, pi1_, small_loc);
                 p_pure = std::max(p_pure, -std::min(pi0_, pi1_) + small_loc);
                 // Write E_k with the FROZEN raw eta (clamped only to [0,1]),

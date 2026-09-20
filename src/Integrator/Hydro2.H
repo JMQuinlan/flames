@@ -731,6 +731,12 @@ protected:
     // for production; set nan_check=1 in the input when debugging a blow-up.
     int nan_check = 0;
     int verbose = 0;
+    // See Parse(): 1 = energy-consistent alpha in the pure-cell guard
+    // (fixes E0+E1 != rho_e inside bubbles); 0 = legacy.
+    // 1 = clamp the total surface tension sigma + kappa_s div_s(u) at 0.
+    // A fluid interface cannot support compression; see Advance().
+    int shell_sigma_floor = 1;
+    int relax_consistent_alpha = 1;
     int relax_diag = 0;
     int clip_ghost_only = 0;
     bool sym_face_lo[3] = {false, false, false};
