@@ -735,6 +735,10 @@ protected:
     // (fixes E0+E1 != rho_e inside bubbles); 0 = legacy.
     // 1 = clamp the total surface tension sigma + kappa_s div_s(u) at 0.
     // A fluid interface cannot support compression; see Advance().
+    // 1 = advect the alpha row with the limiter-reconstructed face volume
+    // fraction (same truncation error as the mass rows); 0 = legacy donor
+    // cell, which makes the bubble lose volume while conserving gas mass.
+    int eta_consistent_advect = 1;
     int shell_sigma_floor = 1;
     int relax_consistent_alpha = 1;
     int relax_diag = 0;

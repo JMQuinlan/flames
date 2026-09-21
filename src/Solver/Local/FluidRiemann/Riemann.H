@@ -124,6 +124,13 @@ struct Flux
     Set::Scalar energy0          = 0.0;  // (alpha_1 rho_1 e_1) u_n
     Set::Scalar energy1          = 0.0;  // (alpha_2 rho_2 e_2) u_n
     Set::Scalar u_interface      = 0.0;  // HLLC contact speed S_M
+    // Limiter-RECONSTRUCTED volume fraction at this face, upwinded on
+    // u_interface.  Filled by Hydro2's compute_face (not by the Riemann
+    // solvers).  The alpha row is advected non-conservatively at u*, and if
+    // it uses a donor-cell face value while the MASS rows use the limiter's
+    // reconstructed states, the two rows carry different truncation error and
+    // rho_gas = rho_eta1/(1-eta) drifts.  See eta_consistent_advect.
+    Set::Scalar alpha_face       = 0.0;
 
     Flux() = default;
 

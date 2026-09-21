@@ -310,6 +310,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                 Util::Message(INFO, "thermo.dat: gas_volume, gas_pressure_int, kinetic_energy, interface_area");
             }
         }
+        pp_query_default("eta_consistent_advect", value.eta_consistent_advect, 1);  // 1 = alpha row uses the limiter-reconstructed face value (see Advance)
         pp_query_default("shell.sigma_floor", value.shell_sigma_floor, 1);  // 1 = clamp sigma_eff + kappa_s div_s(u) at 0 (see Advance)
         pp_query_default("relax_consistent_alpha", value.relax_consistent_alpha, 1);
         // relax_consistent_alpha (default 1 = FIXED behaviour; 0 = legacy).
@@ -2378,7 +2379,12 @@ Hydro2::RHS(int lev,
                 Solver::Local::FluidRiemann::State sL_face = Solver::Local::Limiter::ToState(pL, small);
                 Solver::Local::FluidRiemann::State sR_face = Solver::Local::Limiter::ToState(pR, small);
 
-                return riemannsolver->Solve(sL_face, sR_face, pref, small);
+                Solver::Local::FluidRiemann::Flux fl_ = riemannsolver->Solve(sL_face, sR_face, pref, small);
+                // Carry the RECONSTRUCTED alpha out, upwinded on the contact
+                // speed, so the alpha row can be advected at the same order as
+                // the mass rows (see eta_consistent_advect).
+                fl_.alpha_face = (fl_.u_interface > 0.0) ? pL.alpha : pR.alpha;
+                return fl_;
             };
 
             Solver::Local::FluidRiemann::Flux flux_xlo, flux_ylo, flux_xhi, flux_yhi;
@@ -2484,10 +2490,39 @@ Hydro2::RHS(int lev,
             const Set::Scalar p1_C   = Solver::EOS::EOS::PhasicPressureFromEnergy(E1_arr(i, j, k), a2_C, eos1.Gamma(), eos1.P0(), small);
 
             // Face-upwind alpha (constant across acoustic; advected at S_M).
-            Set::Scalar a_face_xlo = (flux_xlo.u_interface > 0.0) ? eta(i - 1, j, k) : eta(i,     j, k);
-            Set::Scalar a_face_xhi = (flux_xhi.u_interface > 0.0) ? eta(i,     j, k) : eta(i + 1, j, k);
-            Set::Scalar a_face_ylo = (flux_ylo.u_interface > 0.0) ? eta(i, j - 1, k) : eta(i, j,     k);
-            Set::Scalar a_face_yhi = (flux_yhi.u_interface > 0.0) ? eta(i, j,     k) : eta(i, j + 1, k);
+            // eta_consistent_advect (default 1):  take the face volume fraction
+            // from the LIMITER-RECONSTRUCTED state instead of the donor cell.
+            //
+            // THE BUG IT FIXES.  The mass rows are built from limiter-
+            // reconstructed states (Limiter.type = godunov|minmod|vanleer|
+            // weno3|weno5), but the alpha row used a plain donor-cell upwind
+            // value -- first order, no limiter -- so eta carried much more
+            // numerical diffusion than (alpha rho)_k.  Gas MASS is then
+            // conserved exactly while the gas VOLUME int(1-eta)dV decays, and
+            // rho_gas = rho_eta1/(1-eta) drifts upward: the bubble shrinks.
+            // Measured on the driven benchmark: -0.23 %/cycle in radius with
+            // gas mass conserved to 3.4e-14, zero drift when the bubble is at
+            // rest (donor-cell diffusion ~ dx|u|/2 vanishes with u), and drift
+            // ~ (eps/dx)^-0.91 -- all three are signatures of this mismatch.
+            //
+            // This is the same failure the colour function c hit (see the note
+            // below): two rows advected by operators of different truncation
+            // error separate over time.
+            Set::Scalar a_face_xlo, a_face_xhi, a_face_ylo, a_face_yhi;
+            if (eta_consistent_advect)
+            {
+                a_face_xlo = flux_xlo.alpha_face;
+                a_face_xhi = flux_xhi.alpha_face;
+                a_face_ylo = flux_ylo.alpha_face;
+                a_face_yhi = flux_yhi.alpha_face;
+            }
+            else
+            {
+                a_face_xlo = (flux_xlo.u_interface > 0.0) ? eta(i - 1, j, k) : eta(i,     j, k);
+                a_face_xhi = (flux_xhi.u_interface > 0.0) ? eta(i,     j, k) : eta(i + 1, j, k);
+                a_face_ylo = (flux_ylo.u_interface > 0.0) ? eta(i, j - 1, k) : eta(i, j,     k);
+                a_face_yhi = (flux_yhi.u_interface > 0.0) ? eta(i, j,     k) : eta(i, j + 1, k);
+            }
             a_face_xlo = std::min(std::max(a_face_xlo, 0.0), 1.0);
             a_face_xhi = std::min(std::max(a_face_xhi, 0.0), 1.0);
             a_face_ylo = std::min(std::max(a_face_ylo, 0.0), 1.0);
@@ -2508,8 +2543,17 @@ Hydro2::RHS(int lev,
 #if AMREX_SPACEDIM == 3
             const Set::Scalar c_face_zlo = (flux_zlo.u_interface > 0.0) ? cfun(i, j, k - 1) : cfun(i, j, k);
             const Set::Scalar c_face_zhi = (flux_zhi.u_interface > 0.0) ? cfun(i, j, k)     : cfun(i, j, k + 1);
-            Set::Scalar a_face_zlo = (flux_zlo.u_interface > 0.0) ? eta(i, j, k - 1) : eta(i, j, k);
-            Set::Scalar a_face_zhi = (flux_zhi.u_interface > 0.0) ? eta(i, j, k)     : eta(i, j, k + 1);
+            Set::Scalar a_face_zlo, a_face_zhi;   // see eta_consistent_advect above
+            if (eta_consistent_advect)
+            {
+                a_face_zlo = flux_zlo.alpha_face;
+                a_face_zhi = flux_zhi.alpha_face;
+            }
+            else
+            {
+                a_face_zlo = (flux_zlo.u_interface > 0.0) ? eta(i, j, k - 1) : eta(i, j, k);
+                a_face_zhi = (flux_zhi.u_interface > 0.0) ? eta(i, j, k)     : eta(i, j, k + 1);
+            }
             a_face_zlo = std::min(std::max(a_face_zlo, 0.0), 1.0);
             a_face_zhi = std::min(std::max(a_face_zhi, 0.0), 1.0);
 #endif
