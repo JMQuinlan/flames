@@ -222,25 +222,18 @@ shell.mu_s    = 0.0
 #
 # eta stays neumann on the hi faces (the interface never reaches them); only
 # density / energy / momentum take the characteristic treatment.
-# target_p is the IC pressure AT THE BOUNDARY, not p_inf.  The initial field is
-# the 1/r far field  p(r) = p_inf - (p_inf - p_b) R0/r, which at r = 4.0e-05 gives
-# 95500 Pa, NOT p_inf = 100000 Pa.  Setting target_p = p_inf makes the outflow
-# condition drive the boundary toward a state 4500 Pa away from the initial
-# data, and the resulting transient is launched inward at t=0.
-# At the old 1:100 domain that mismatch was only 9.91e+04 Pa; shrinking to 1:20 put
-# the boundary 5x closer to the bubble and multiplied it by 5.
 nscbc.xhi.type     = outflow
-nscbc.xhi.target_p = 95500
+nscbc.xhi.target_p = 1.0e5
 nscbc.xhi.sigma    = 0.6
 nscbc.xhi.beta     = 0.5
 nscbc.xhi.L_ref    = 1.25e-7
 nscbc.yhi.type     = outflow
-nscbc.yhi.target_p = 95500
+nscbc.yhi.target_p = 1.0e5
 nscbc.yhi.sigma    = 0.6
 nscbc.yhi.beta     = 0.5
 nscbc.yhi.L_ref    = 1.25e-7
 nscbc.zhi.type     = outflow
-nscbc.zhi.target_p = 95500
+nscbc.zhi.target_p = 1.0e5
 nscbc.zhi.sigma    = 0.6
 nscbc.zhi.beta     = 0.5
 nscbc.zhi.L_ref    = 1.25e-7
