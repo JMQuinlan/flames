@@ -81,7 +81,14 @@ plot_file = ./bin/tests/FlowMarmottant/output_Sch20_Collapsing_Marmottant
 amr.plot_int        = -1
 amr.plot_dt         = 5.0e-10         # 80 frames over stop_time (was 1.0e-10 = 400)
 amr.max_grid_size   = 32
-amr.blocking_factor = 8
+amr.blocking_factor = 2
+# blocking_factor 2 (NOT 8).  refine_box.hi = 3.0e-6 spans only 4.8 base cells
+# now that n_cell is 64 over a 4.0e-5 domain (base dx 6.25e-7).  AMReX rounds a
+# tagged region UP to a multiple of blocking_factor, so bf=8 silently inflated
+# the forced-refinement box from the intended 3.0e-6 (1.5 R0) to 5.0e-6
+# (2.5 R0) -- 4.6x the volume at max_level, i.e. 16.8M cells instead of 7.1M,
+# which is what pushed this case out of memory.  bf=2 rounds to 6 base cells
+# = 3.75e-6 (1.88 R0), close to the intended box.
 amr.regrid_int      = 10
 amr.grid_eff        = 0.8
 amr.max_level       = 5
