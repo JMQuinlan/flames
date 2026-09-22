@@ -738,9 +738,9 @@ protected:
     // 1 = advect the alpha row with the limiter-reconstructed face volume
     // fraction (same truncation error as the mass rows); 0 = legacy donor
     // cell, which makes the bubble lose volume while conserving gas mass.
-    int eta_consistent_advect = 1;
+    // 1 = advect Gamma with the alpha row's operator (limiter face value
+    // upwinded on the Riemann contact speed u*), so the two stay locked.
     int shell_sigma_floor = 1;
-    int relax_consistent_alpha = 1;
     int relax_diag = 0;
     int clip_ghost_only = 0;
     bool sym_face_lo[3] = {false, false, false};

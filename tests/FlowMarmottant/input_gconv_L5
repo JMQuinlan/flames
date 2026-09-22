@@ -1,0 +1,221 @@
+#@ [marm_collapse_unit]
+# =============================================================================
+# GAMMA CONVERGENCE STUDY -- max_level 5: dx = 4.883e-08 m, eps/dx = 4.10
+#
+# epsilon is held FIXED at 2.0e-7 for the whole study; only dx is refined,
+# so the interface gains CELLS without becoming physically thicker.  That
+# isolates cells-per-band as the convergence parameter.
+# Exact reference: D(Gamma)/Dt = -Gamma div_s(u) integrates to
+# Gamma = (R0/R)^2 for spherical motion, so the error is measured against
+# an analytic value -- no fitting and no free constant anywhere.
+#
+# WHY: input_Sch20-Collapsing_Marmottant is 160^3 at level 0 with max_level 6.
+# On a 30 GB desktop that needs ~26 GB at only 6 ranks (measured) and took the
+# machine down twice with an OOM.  This cuts the mesh so the SAME failure can
+# be reproduced and debugged locally.
+#
+# WHAT IS PRESERVED EXACTLY (this is the bug being chased):
+#   marmottant = 1, R0, R_buckling, chi, sigma_break, shell.kappa_s
+#   eos0/eos1, sigma, p_inf = 5.0e6, p_b = 3550 (pressure ratio 1408)
+#   the 1/r far-field pressure IC and stop_time
+#
+# WHAT IS REDUCED:
+#   domain   2.0e-4 (100 R0) -> 1.0e-4 (50 R0).  At the outer edge the 1/r IC
+#            gives 4.90e6 Pa instead of 4.95e6 -- a 1% weaker drive, not enough
+#            to change the collapse character.
+#   n_cell   160^3 -> 64^3      (16x fewer level-0 cells)
+#   level    max_level 6 -> 4   (finest dx 9.77e-8, R0/dx = 20.5, vs 102.4)
+#
+# The liquid sound speed is UNCHANGED here on purpose: at p0 = 1e9 the collapse
+# is Ma ~ 0.04 (nearly incompressible, as Sch20 intends).  Dropping p0 to 1e7
+# for speed would put it at Ma ~ 0.31 and change the collapse dynamics, so that
+# variant lives in input_marm_collapse_unit_softc instead.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+# plot_file = ./tests/FlowMarmottant/output_Sch20_Collapsing_Marmottant
+plot_file = ./bin/tests/FlowMarmottant/gconv_L5
+# Relative on purpose: the absolute /mmfs1/... path made every LOCAL run
+# abort at startup (UtilCreateDirectory: /mmfs1 :: Permission denied,
+# exit 6).  The slurm file now cd's to /home/ttryon/flames first, so this
+# same line resolves correctly on INCLINE too.
+
+### MESHING ###
+amr.plot_int        = -1
+amr.plot_dt         = -1
+amr.max_grid_size   = 32
+amr.blocking_factor = 8
+amr.regrid_int      = 10
+amr.grid_eff        = 0.8
+amr.max_level       = 5
+amr.n_cell          = 64 64 64        # base dx 1.5625e-6; L5 -> dx_finest 4.883e-8 (R0/dx = 41.0)
+
+amr.n_error_buf     = 8
+
+# Permanently refined box around the bubble: force max_level everywhere inside
+# [lo,hi], not just the eta interface band, so the ENTIRE bubble (interior gas
+# included) stays at dx_finest through collapse and rebound.  Octant, so the
+# box is [0, 1.5 R0]^3.
+refine_box.lo = 0.0    0.0    0.0
+refine_box.hi = 3.0e-6 3.0e-6 3.0e-6
+
+nghost = 4
+
+### TIME STEPPING (Sch20 values x 1e-4) ###
+timestep                = 1.0e-12
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-10
+dynamictimestep.min     = 1.0e-18
+cfl                     = 0.4
+
+### DIMENSIONS -- octant, 100 R0 ###
+geometry.prob_lo     =  0.0     0.0     0.0
+geometry.prob_hi     =  1.0e-4  1.0e-4  1.0e-4
+geometry.is_periodic = 0 0 0
+stop_time            = 4.0e-8         # ~1.55 tau_c -- collapse + first rebound
+
+### ETA INITIAL CONDITIONS ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 2.0e-7     # eps/dx = 1.02 at L3 finest (dx 1.953e-7); scaled WITH dx
+eta.ic.expression.constant.R0      = 2.0e-6
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### EQUATION OF STATE -- Sch20 water (Tammann) + air (ideal gas) ###
+eos0.gamma = 2.35
+eos0.p0    = 1.0e9
+eos0.cv    = 1781.0
+eos0.cp    = 4186.0
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 714.286
+eos1.cp    = 1000.0
+
+### HYDRO INITIAL CONDITIONS ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1000.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Liquid exterior: Sch20 Eq. (27).  max(r, R0) regularizes the 1/r singularity.
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_inf = 5.0e6
+pressure0.ic.expression.constant.p_b   = 3550.0
+pressure0.ic.expression.constant.R0    = 2.0e-6
+pressure0.ic.expression.region0 = "p_inf + (R0/max(sqrt(x*x + y*y + z*z), R0))*(p_b - p_inf)"
+
+# Gas interior: uniform bubble pressure p_b.
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_b = 3550.0
+pressure1.ic.expression.region0 = "p_b"
+
+### VISCOSITY ###
+# Water viscosity retained (see the oscillating twin): at R0 = 2 um the liquid
+# viscous term is the same order as the shell terms under test.  Gas viscosity
+# is negligible and is zeroed so the sim and the reference ODE share physics.
+mu0   = 1.0e-3
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION -- Marmottant coated shell ###
+apply_surface_tension = 1
+sigma = 0.0728                   # post-rupture / bare interface tension [N/m]
+pref  = 0.0
+
+kappa_method = 1                 # REQUIRED for Marmottant
+
+marmottant             = 1
+marmottant.R0          = 2.0e-6  # reference radius (shell strain measured from here)
+marmottant.R_buckling  = 1.96e-6 # 0.98 R0 -> Gamma_buck = 1.0412, sigma(R0) = 0.0412 N/m
+marmottant.chi         = 1.0     # shell elastic modulus [N/m]
+marmottant.sigma_break = 0.073   # rupture tension [N/m]
+
+# Boussinesq-Scriven interfacial viscosity: for spherical motion div_s u =
+# 2 Rdot/R and the shear viscosity mu_s cancels identically, so kappa_s alone
+# sets the shell damping (4 kappa_s Rdot/R^2 in the normal stress balance).
+shell.kappa_s = 7.2e-9           # surface dilatational viscosity [kg/s]
+shell.mu_s    = 0.0
+
+### BOUNDARY CONDITIONS -- octant symmetry + neumann far field ###
+eta.bc.type.xlo = REFLECT_EVEN
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = REFLECT_EVEN
+eta.bc.type.yhi = neumann
+eta.bc.type.zlo = REFLECT_EVEN
+eta.bc.type.zhi = neumann
+
+density.bc.type.xlo = REFLECT_EVEN
+density.bc.type.xhi = neumann
+density.bc.type.ylo = REFLECT_EVEN
+density.bc.type.yhi = neumann
+density.bc.type.zlo = REFLECT_EVEN
+density.bc.type.zhi = neumann
+
+energy.bc.type.xlo = REFLECT_EVEN
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = REFLECT_EVEN
+energy.bc.type.yhi = neumann
+energy.bc.type.zlo = REFLECT_EVEN
+energy.bc.type.zhi = neumann
+
+momentum.bc.type.xlo = REFLECT_ODD  REFLECT_EVEN REFLECT_EVEN
+momentum.bc.type.xhi = neumann neumann neumann
+momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD  REFLECT_EVEN
+momentum.bc.type.yhi = neumann neumann neumann
+momentum.bc.type.zlo = REFLECT_EVEN REFLECT_EVEN REFLECT_ODD
+momentum.bc.type.zhi = neumann neumann neumann
+
+### REFINEMENT -- eta-only at the interface band (plus refine_box above) ###
+eta_refinement_criterion   = 1.0e-1
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS ###
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+grav                  = 0.0
+
+### NUMERICS -- WENO3 + SSPRK3 (project standard for Sch20 tests) ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+apply_sharpening     = 0
+sharpening_frequency = 50
+reinit_max_iter      = 100
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+# Drop the ~50 pure-diagnostic components from the plotfiles: level 0 here
+# is 160^3 for an R0 = 2e-6 bubble, so a full plotfile is 2.5 GB.  With
+# plot_minimal the file is 681 MB (19 fields), and this run writes
+# 80 of them (~54 GB) instead of ~400 at 2.5 GB (~1000 GB).
+# eta, rho_eta0/1, shell, Gamma, pressure, velocity, density, momentum,
+# energy0/1, energy_per_vol, T, UE_per_vol and KE_per_vol are all kept.
+plot_minimal         = 1
+relax_diag           = 0    # off for production: 3 domain-wide reductions + log spam per step
+
+equalize_ic_pressure = 1

@@ -310,10 +310,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                 Util::Message(INFO, "thermo.dat: gas_volume, gas_pressure_int, kinetic_energy, interface_area");
             }
         }
-        pp_query_default("eta_consistent_advect", value.eta_consistent_advect, 1);  // 1 = alpha row uses the limiter-reconstructed face value (see Advance)
         pp_query_default("shell.sigma_floor", value.shell_sigma_floor, 1);  // 1 = clamp sigma_eff + kappa_s div_s(u) at 0 (see Advance)
-        pp_query_default("relax_consistent_alpha", value.relax_consistent_alpha, 1);
-        // relax_consistent_alpha (default 1 = FIXED behaviour; 0 = legacy).
+        // ENERGY-CONSISTENT ALPHA in the pure-cell relaxation guard.
         //
         // THE BUG.  In the pure-cell guard of RelaxAndReinit, p_pure was
         // solved from the alpha_floor-CLAMPED a1 (>= 1e-12) while the two
@@ -597,7 +595,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //       momentum, energy0/1, energy_per_vol, T, UE_per_vol, KE_per_vol
         // DROPPED: cfun, etadot, vorticity, energy_per_mass, Source, Fsv, Fw,
         //       Ldot, gamma, p0, mu_chem, a, Ma, UE/KE_per_mass, Spalding,
-        //       Mass_Fraction, grad_eta, rho/M/E_flux, div_tau, Vap_dot
+        //       Mass_Fraction, rho/M/E_flux, div_tau, Vap_dot
         //
         // kappa (surface curvature) is KEPT: reference/amr_analyze.py reads
         // kappa2 for the Marmottant sigma(R), and its except-branch silently
@@ -738,7 +736,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.Y_mf,           &value.bc_nothing,   1, nghost, "Mass_Fraction",     diag, false);               // Mass Fraction
 
         // EXTRAS & DEBUGGING
-        value.RegisterNewFab(value.grad_eta_mf,         &value.bc_nothing,  AMREX_SPACEDIM, 0, "grad_eta",           diag, false, { AMREX_D_DECL("x", "y", "z") }); // grad(eta)
+        value.RegisterNewFab(value.grad_eta_mf,         &value.bc_nothing,  AMREX_SPACEDIM, 0, "grad_eta",           true, false, { AMREX_D_DECL("x", "y", "z") }); // grad(eta) -- KEPT by plot_minimal: it is the surface measure dA = |grad eta| dV, without which an areal density like Gamma cannot be averaged correctly
         value.RegisterNewFab(value.kappas_mf,           &value.bc_nothing,  3,              0, "kappa",              true, false, { "Avg", "1", "2" });             // Surface curvature
         value.RegisterNewFab(value.grad_mag_grad_eta_mf,&value.bc_nothing,  AMREX_SPACEDIM, 0, "grad_mag_grad_eta",  false,false, { AMREX_D_DECL("x", "y", "z") }); // grad( | grad(eta) | )
         value.RegisterNewFab(value.rho_flux_mf,         &value.bc_nothing,  1,              0, "rho_flux",           diag, false);                                  // Density Flux
@@ -2382,7 +2380,7 @@ Hydro2::RHS(int lev,
                 Solver::Local::FluidRiemann::Flux fl_ = riemannsolver->Solve(sL_face, sR_face, pref, small);
                 // Carry the RECONSTRUCTED alpha out, upwinded on the contact
                 // speed, so the alpha row can be advected at the same order as
-                // the mass rows (see eta_consistent_advect).
+                // the mass rows (see the alpha-row note in Advance).
                 fl_.alpha_face = (fl_.u_interface > 0.0) ? pL.alpha : pR.alpha;
                 return fl_;
             };
@@ -2489,9 +2487,8 @@ Hydro2::RHS(int lev,
             const Set::Scalar p0_C   = Solver::EOS::EOS::PhasicPressureFromEnergy(E0_arr(i, j, k), a1_C, eos0.Gamma(), eos0.P0(), small);
             const Set::Scalar p1_C   = Solver::EOS::EOS::PhasicPressureFromEnergy(E1_arr(i, j, k), a2_C, eos1.Gamma(), eos1.P0(), small);
 
-            // Face-upwind alpha (constant across acoustic; advected at S_M).
-            // eta_consistent_advect (default 1):  take the face volume fraction
-            // from the LIMITER-RECONSTRUCTED state instead of the donor cell.
+            // ALPHA ROW.  The face volume fraction is the LIMITER-
+            // RECONSTRUCTED state, upwinded on the contact speed S_M.
             //
             // THE BUG IT FIXES.  The mass rows are built from limiter-
             // reconstructed states (Limiter.type = godunov|minmod|vanleer|
@@ -2508,21 +2505,10 @@ Hydro2::RHS(int lev,
             // This is the same failure the colour function c hit (see the note
             // below): two rows advected by operators of different truncation
             // error separate over time.
-            Set::Scalar a_face_xlo, a_face_xhi, a_face_ylo, a_face_yhi;
-            if (eta_consistent_advect)
-            {
-                a_face_xlo = flux_xlo.alpha_face;
-                a_face_xhi = flux_xhi.alpha_face;
-                a_face_ylo = flux_ylo.alpha_face;
-                a_face_yhi = flux_yhi.alpha_face;
-            }
-            else
-            {
-                a_face_xlo = (flux_xlo.u_interface > 0.0) ? eta(i - 1, j, k) : eta(i,     j, k);
-                a_face_xhi = (flux_xhi.u_interface > 0.0) ? eta(i,     j, k) : eta(i + 1, j, k);
-                a_face_ylo = (flux_ylo.u_interface > 0.0) ? eta(i, j - 1, k) : eta(i, j,     k);
-                a_face_yhi = (flux_yhi.u_interface > 0.0) ? eta(i, j,     k) : eta(i, j + 1, k);
-            }
+            Set::Scalar a_face_xlo = flux_xlo.alpha_face;
+            Set::Scalar a_face_xhi = flux_xhi.alpha_face;
+            Set::Scalar a_face_ylo = flux_ylo.alpha_face;
+            Set::Scalar a_face_yhi = flux_yhi.alpha_face;
             a_face_xlo = std::min(std::max(a_face_xlo, 0.0), 1.0);
             a_face_xhi = std::min(std::max(a_face_xhi, 0.0), 1.0);
             a_face_ylo = std::min(std::max(a_face_ylo, 0.0), 1.0);
@@ -2543,17 +2529,8 @@ Hydro2::RHS(int lev,
 #if AMREX_SPACEDIM == 3
             const Set::Scalar c_face_zlo = (flux_zlo.u_interface > 0.0) ? cfun(i, j, k - 1) : cfun(i, j, k);
             const Set::Scalar c_face_zhi = (flux_zhi.u_interface > 0.0) ? cfun(i, j, k)     : cfun(i, j, k + 1);
-            Set::Scalar a_face_zlo, a_face_zhi;   // see eta_consistent_advect above
-            if (eta_consistent_advect)
-            {
-                a_face_zlo = flux_zlo.alpha_face;
-                a_face_zhi = flux_zhi.alpha_face;
-            }
-            else
-            {
-                a_face_zlo = (flux_zlo.u_interface > 0.0) ? eta(i, j, k - 1) : eta(i, j, k);
-                a_face_zhi = (flux_zhi.u_interface > 0.0) ? eta(i, j, k)     : eta(i, j, k + 1);
-            }
+            Set::Scalar a_face_zlo = flux_zlo.alpha_face;
+            Set::Scalar a_face_zhi = flux_zhi.alpha_face;
             a_face_zlo = std::min(std::max(a_face_zlo, 0.0), 1.0);
             a_face_zhi = std::min(std::max(a_face_zhi, 0.0), 1.0);
 #endif
@@ -2749,9 +2726,31 @@ Hydro2::RHS(int lev,
             };
 
             //   D(Gamma)/Dt = -Gamma (div u - n.grad(u).n)
-            // Upwind-biased high-order gradient: for u > 0 difference the two
-            // left-reconstructed faces, for u < 0 the two right-reconstructed ones.
-            const Set::Scalar ux = u(0), uy = u(1);
+            //
+            // GAMMA ROW.  Advected with EXACTLY the operator the alpha row
+            // uses -- limiter-reconstructed face value
+            // upwinded on the RIEMANN CONTACT SPEED u* (flux.u_interface), in
+            // flux-divergence form  -div(u* G_face) + Gamma div(u*).
+            //
+            // Gamma was already limiter-reconstructed, but it upwound on the
+            // CELL-CENTRED velocity u and differenced a gradient, while alpha
+            // uses u* at the faces.  Two rows that must stay locked together
+            // then carry different truncation error and separate -- the exact
+            // failure the colour function c hit (see the note by a_face above:
+            // "Advecting c with the cell-centred u instead ... gives it a
+            // different truncation error from eta, and the two separate --
+            // measured at 2.28% in R over 15 ms").  c was fixed; Gamma was not.
+            //
+            // Measured cost of the mismatch on the coated Sch20 collapse, where
+            // the exact solution is Gamma = (R0/R)^2:
+            //     R/R0 0.939 -> Gamma  -1.5 %
+            //     R/R0 0.707 -> Gamma  -3.1 %
+            //     R/R0 0.430 -> Gamma -23.7 %
+            //     R/R0 0.270 -> Gamma -26.7 %
+            //     R/R0 0.360 (rebound) -> -18.0 %   <-- does NOT recover
+            // Since sigma(Gamma) = chi (Gamma_buck/Gamma - 1), a Gamma 27% low
+            // makes sigma too high AND crosses the buckling threshold at the
+            // wrong radius, so the whole Marmottant law is fed a biased input.
             Set::Scalar aL, aR, bL, bR;
             shell_face(1, 0, 0, aL, aR);            // face i+1/2 (lo = i)
             Set::Scalar cL, cR;
@@ -2763,7 +2762,6 @@ Hydro2::RHS(int lev,
                 cL = limiter->Reconstruct(stL).alpha;
                 cR = limiter->Reconstruct(stR).alpha;
             }
-            const Set::Scalar dGx = (ux > 0.0) ? (aL - cL) / DX[0] : (aR - cR) / DX[0];
 
             shell_face(0, 1, 0, bL, bR);            // face j+1/2 (lo = j)
             Set::Scalar dL, dR;
@@ -2775,10 +2773,8 @@ Hydro2::RHS(int lev,
                 dL = limiter->Reconstruct(stL).alpha;
                 dR = limiter->Reconstruct(stR).alpha;
             }
-            const Set::Scalar dGy = (uy > 0.0) ? (bL - dL) / DX[1] : (bR - dR) / DX[1];
 
 #if AMREX_SPACEDIM == 3
-            const Set::Scalar uz = u(2);
             Set::Scalar eL, eR, fL, fR;
             shell_face(0, 0, 1, eL, eR);            // face k+1/2 (lo = k)
             {   // face k-1/2 (lo = k-1)
@@ -2789,9 +2785,28 @@ Hydro2::RHS(int lev,
                 fL = limiter->Reconstruct(stL).alpha;
                 fR = limiter->Reconstruct(stR).alpha;
             }
-            const Set::Scalar dGz = (uz > 0.0) ? (eL - fL) / DX[2] : (eR - fR) / DX[2];
 #endif
-            const Set::Scalar u_dot_gradG = AMREX_D_TERM(ux * dGx, + uy * dGy, + uz * dGz);
+            // G_face upwinded on u* at each face, mirroring a_face exactly.
+            Set::Scalar u_dot_gradG;
+            {
+                const Set::Scalar G_xhi = (flux_xhi.u_interface > 0.0) ? aL : aR;
+                const Set::Scalar G_xlo = (flux_xlo.u_interface > 0.0) ? cL : cR;
+                const Set::Scalar G_yhi = (flux_yhi.u_interface > 0.0) ? bL : bR;
+                const Set::Scalar G_ylo = (flux_ylo.u_interface > 0.0) ? dL : dR;
+                Set::Scalar div_uG = (flux_xhi.u_interface * G_xhi
+                                    - flux_xlo.u_interface * G_xlo) / DX[0]
+                                   + (flux_yhi.u_interface * G_yhi
+                                    - flux_ylo.u_interface * G_ylo) / DX[1];
+#if AMREX_SPACEDIM == 3
+                const Set::Scalar G_zhi = (flux_zhi.u_interface > 0.0) ? eL : eR;
+                const Set::Scalar G_zlo = (flux_zlo.u_interface > 0.0) ? fL : fR;
+                div_uG += (flux_zhi.u_interface * G_zhi
+                         - flux_zlo.u_interface * G_zlo) / DX[2];
+#endif
+                // -div(u* G) + G div(u*)  ==  -u*.grad(G), the same discrete
+                // operator the alpha row uses.
+                u_dot_gradG = div_uG - shell(i, j, k) * div_u;
+            }
             // Surface divergence.  In the bulk grad_eta -> 0 so n_hat -> 0 and this
             // reduces to div(u); Gamma there is unused.
             // NOTE: differencing the ratio u = M/rho directly, instead of the
@@ -5645,7 +5660,6 @@ void Hydro2::RelaxAndReinit(int lev)
     const Set::Scalar unconv_threshold = 1.0e-6;
 
 
-    const int consistent_alpha = relax_consistent_alpha;
     const Set::Scalar gam0 = eos0.Gamma();
     const Set::Scalar pi0_ = eos0.P0();
     const Set::Scalar gam1 = eos1.Gamma();
@@ -5795,10 +5809,9 @@ void Hydro2::RelaxAndReinit(int lev)
                                                        + M_(i, j, k, 2) * M_(i, j, k, 2))) / std::max(rho_p, small_loc);
                 Set::Scalar rhoe_p = std::max(E_(i, j, k) - ke_p, small_loc);
                 // Solve for p with the SAME alpha the energies are written
-                // with (see relax_consistent_alpha).  Legacy path used a1/a2.
-                const Set::Scalar a1p = consistent_alpha
-                                      ? std::min(std::max(eta(i, j, k), 0.0), 1.0) : a1;
-                const Set::Scalar a2p = consistent_alpha ? (1.0 - a1p) : a2;
+                // with, so E0 + E1 = rho_e holds identically.
+                const Set::Scalar a1p = std::min(std::max(eta(i, j, k), 0.0), 1.0);
+                const Set::Scalar a2p = 1.0 - a1p;
                 Set::Scalar p_pure = Solver::EOS::EOS::ReinitMixturePressure(rhoe_p, a1p, a2p,
                                                                             gam0, pi0_, gam1, pi1_, small_loc);
                 p_pure = std::max(p_pure, -std::min(pi0_, pi1_) + small_loc);
