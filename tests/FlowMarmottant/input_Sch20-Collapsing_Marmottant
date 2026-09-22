@@ -81,11 +81,11 @@ plot_file = ./bin/tests/FlowMarmottant/output_Sch20_Collapsing_Marmottant
 amr.plot_int        = -1
 amr.plot_dt         = 5.0e-10         # 80 frames over stop_time (was 1.0e-10 = 400)
 amr.max_grid_size   = 32
-amr.blocking_factor = 32
+amr.blocking_factor = 8
 amr.regrid_int      = 10
 amr.grid_eff        = 0.8
-amr.max_level       = 6
-amr.n_cell          = 160 160 160     # base dx 1.25e-6; L6 -> dx_finest 1.953e-8 (R0/dx = 102.4)
+amr.max_level       = 5
+amr.n_cell          = 64 64 64        # base dx 6.25e-7; L5 -> dx_finest 1.953e-8 (R0/dx = 102.4)
 
 amr.n_error_buf     = 16
 
@@ -106,9 +106,26 @@ dynamictimestep.max     = 1.0e-10
 dynamictimestep.min     = 1.0e-18
 cfl                     = 0.4
 
+
+### DOMAIN 1:20 (was 1:100) ###
+# prob_hi 2.0e-4 -> 4.0e-5, so R0:domain is 1:20 instead of 1:100.
+#
+# CONSEQUENCES, all accounted for below:
+#  * base dx improves 5x (1.25e-6 -> 2.5e-7), so max_level is REDUCED to keep
+#    the finest dx at least as fine as before while dropping 2 AMR levels.
+#    Fewer levels = far less subcycling = much cheaper per unit physical time.
+#  * far-field pressure at the outer (neumann) boundary:
+#      p(edge) = p_inf - (p_inf - p_b) * R0/r_edge
+#    r_edge 2.0e-4 -> 4.0e-5 moves that from p_inf - 0.01(p_inf-p_b) to
+#    p_inf - 0.05(p_inf-p_b), i.e. the held far-field is 5% of the way toward
+#    p_b instead of 1%.  A slightly weaker drive; not a change of character.
+#  * confinement: the volume-equivalent outer radius of the unfolded octant
+#    drops 2.48e-4 -> 4.96e-5, so R0/L goes 0.008 -> 0.040.  Still small, but
+#    it stiffens the bubble slightly (f0_eff = f0/sqrt(1-R0/L), ~2% higher).
+
 ### DIMENSIONS -- octant, 100 R0 ###
 geometry.prob_lo     =  0.0     0.0     0.0
-geometry.prob_hi     =  2.0e-4  2.0e-4  2.0e-4
+geometry.prob_hi     =  4.0e-5  4.0e-5  4.0e-5
 geometry.is_periodic = 0 0 0
 stop_time            = 4.0e-8         # ~1.55 tau_c -- collapse + first rebound
 
@@ -185,7 +202,36 @@ marmottant.sigma_break = 0.073   # rupture tension [N/m]
 shell.kappa_s = 7.2e-9           # surface dilatational viscosity [kg/s]
 shell.mu_s    = 0.0
 
-### BOUNDARY CONDITIONS -- octant symmetry + neumann far field ###
+### BOUNDARY CONDITIONS -- octant symmetry (lo) + NSCBC outflow (hi) ###
+# Switched from neumann to NSCBC on the far faces.  Neumann pins the outer
+# state and reflects outgoing acoustics back onto the bubble; with the domain
+# now only 20 R0 across (was 100) those reflections return ~5x sooner, so a
+# non-reflecting condition matters much more than it used to.
+#
+# L_ref is scaled with the domain exactly as the driven-bubble inputs do
+# (L_ref/domain = 3.125e-3), giving a NSCBC corner frequency
+# K = sigma (1-M^2) a / L_ref ~ 7e9 rad/s against physical rates ~1/tau_c
+# ~ 5e6 rad/s, i.e. omega/K ~ 1e-3, so the boundary is fully transmitting at
+# every frequency this problem contains.
+#
+# eta stays neumann on the hi faces (the interface never reaches them); only
+# density / energy / momentum take the characteristic treatment.
+nscbc.xhi.type     = outflow
+nscbc.xhi.target_p = 5.0e6
+nscbc.xhi.sigma    = 0.6
+nscbc.xhi.beta     = 0.5
+nscbc.xhi.L_ref    = 1.25e-7
+nscbc.yhi.type     = outflow
+nscbc.yhi.target_p = 5.0e6
+nscbc.yhi.sigma    = 0.6
+nscbc.yhi.beta     = 0.5
+nscbc.yhi.L_ref    = 1.25e-7
+nscbc.zhi.type     = outflow
+nscbc.zhi.target_p = 5.0e6
+nscbc.zhi.sigma    = 0.6
+nscbc.zhi.beta     = 0.5
+nscbc.zhi.L_ref    = 1.25e-7
+
 eta.bc.type.xlo = REFLECT_EVEN
 eta.bc.type.xhi = neumann
 eta.bc.type.ylo = REFLECT_EVEN
@@ -194,25 +240,25 @@ eta.bc.type.zlo = REFLECT_EVEN
 eta.bc.type.zhi = neumann
 
 density.bc.type.xlo = REFLECT_EVEN
-density.bc.type.xhi = neumann
+density.bc.type.xhi = nscbc_outflow
 density.bc.type.ylo = REFLECT_EVEN
-density.bc.type.yhi = neumann
+density.bc.type.yhi = nscbc_outflow
 density.bc.type.zlo = REFLECT_EVEN
-density.bc.type.zhi = neumann
+density.bc.type.zhi = nscbc_outflow
 
 energy.bc.type.xlo = REFLECT_EVEN
-energy.bc.type.xhi = neumann
+energy.bc.type.xhi = nscbc_outflow
 energy.bc.type.ylo = REFLECT_EVEN
-energy.bc.type.yhi = neumann
+energy.bc.type.yhi = nscbc_outflow
 energy.bc.type.zlo = REFLECT_EVEN
-energy.bc.type.zhi = neumann
+energy.bc.type.zhi = nscbc_outflow
 
 momentum.bc.type.xlo = REFLECT_ODD  REFLECT_EVEN REFLECT_EVEN
-momentum.bc.type.xhi = neumann neumann neumann
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow nscbc_outflow
 momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD  REFLECT_EVEN
-momentum.bc.type.yhi = neumann neumann neumann
+momentum.bc.type.yhi = nscbc_outflow nscbc_outflow nscbc_outflow
 momentum.bc.type.zlo = REFLECT_EVEN REFLECT_EVEN REFLECT_ODD
-momentum.bc.type.zhi = neumann neumann neumann
+momentum.bc.type.zhi = nscbc_outflow nscbc_outflow nscbc_outflow
 
 ### REFINEMENT -- eta-only at the interface band (plus refine_box above) ###
 eta_refinement_criterion   = 1.0e-1
