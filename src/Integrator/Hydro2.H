@@ -588,6 +588,15 @@ protected:
     // (see the cancellation above) and only matters for shape modes, wall
     // interaction, and bubble--bubble coupling.  mu_s is parsed and validated so
     // an input cannot silently request a term the solver does not apply.
+    // 1 = bulk cells adjacent to the band inherit the band Gamma instead of
+    // being pinned to 1.0 (stops a moving interface eating unstrained shell).
+    // 1 = drop the DX-scaled Gamma freeze and use P = |n|^2 I - n n so the
+    // surface-divergence source vanishes in the bulk by construction.
+    // Sweeps of the Gamma normal-extension relaxation per step (0 = off).
+    // Enforces n.grad(Gamma) = 0 so every band cell carries one surface value.
+    int shell_extend_iters = 4;
+    int shell_gate_free = 1;
+    int shell_bulk_extend = 1;
     Set::Scalar shell_kappa_s = 0.0;   // surface dilatational viscosity [kg/s]
     Set::Scalar shell_mu_s    = 0.0;   // surface shear viscosity [kg/s] -- NOT APPLIED
     int apply_weight = 0;

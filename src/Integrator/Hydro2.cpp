@@ -148,6 +148,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // Boussinesq--Scriven interfacial viscosity (see Hydro2.H).  kappa_s is
         // applied through sigma_tot; mu_s is parsed only so a request for the
         // unimplemented shear term is caught here rather than silently ignored.
+        pp_query_default("shell_extend_iters", value.shell_extend_iters, 4);  // normal-extension sweeps for Gamma (0 = off); see RelaxAndReinit
+        pp_query_default("shell_gate_free", value.shell_gate_free, 1);  // 1 = no DX-scaled freeze; consistent projector kills the bulk source (see Advance)
+        pp_query_default("shell_bulk_extend", value.shell_bulk_extend, 1);  // 1 = extend Gamma from the band into adjacent bulk (see RelaxAndReinit)
         pp_query_default("shell.kappa_s", value.shell_kappa_s, 0.0);
         pp_query_default("shell.mu_s",    value.shell_mu_s,    0.0);
         if (value.shell_mu_s != 0.0)
@@ -2700,13 +2703,20 @@ Hydro2::RHS(int lev,
             {
                 shell_rhs(i, j, k) = 0.0;   // frozen at init value; nothing reads it
             }
-            else if (grad_eta.lpNorm<2>() * DX[0] < 1.0e-8)
+            else if (!shell_gate_free && grad_eta.lpNorm<2>() * DX[0] < 1.0e-8)
             {
-                // BULK ANCHOR: outside the band Gamma is unused ("in the bulk
-                // grad_eta -> 0 ... Gamma there is unused" below) but its
-                // -Gamma div(u) evolution still integrates the bulk dilatation
-                // and rots away from 1.0 without bound.  Freeze it; the hard
-                // reset to the unstrained value lives in RelaxAndReinit.
+                // LEGACY BULK ANCHOR (shell_gate_free = 0 only).
+                //
+                // This froze Gamma wherever |grad eta| * DX fell below 1e-8,
+                // to stop the -Gamma div(u) term integrating bulk dilatation
+                // without bound.  It works, but the threshold is scaled by DX,
+                // so WHICH cells freeze depends on the mesh rather than the
+                // physics: refining L2 -> L4 raises the |grad eta| cutoff 4x
+                // (2.6e-2 -> 1.0e-1) and freezes more of the band tail.  That
+                // is a consistency violation, and it is why the Gamma error
+                // measured against the exact (R0/R)^2 got WORSE with
+                // refinement (1.7% -> 15.7% at R/R0 ~ 0.7 from L2 to L4)
+                // instead of converging.  Superseded by shell_gate_free.
                 shell_rhs(i, j, k) = 0.0;
             }
             else
@@ -2787,26 +2797,21 @@ Hydro2::RHS(int lev,
             }
 #endif
             // G_face upwinded on u* at each face, mirroring a_face exactly.
-            Set::Scalar u_dot_gradG;
-            {
-                const Set::Scalar G_xhi = (flux_xhi.u_interface > 0.0) ? aL : aR;
-                const Set::Scalar G_xlo = (flux_xlo.u_interface > 0.0) ? cL : cR;
-                const Set::Scalar G_yhi = (flux_yhi.u_interface > 0.0) ? bL : bR;
-                const Set::Scalar G_ylo = (flux_ylo.u_interface > 0.0) ? dL : dR;
-                Set::Scalar div_uG = (flux_xhi.u_interface * G_xhi
-                                    - flux_xlo.u_interface * G_xlo) / DX[0]
-                                   + (flux_yhi.u_interface * G_yhi
-                                    - flux_ylo.u_interface * G_ylo) / DX[1];
+            // REVERTED to the cell-centred velocity (see the note above).  Pairing
+            // the face interface velocity S_M with the cell-centred `gradu` used
+            // by the stretch term below is an O(dx) inconsistency that was
+            // already tried and rejected: it biased Gamma upward ~2%/ms, so the
+            // shell read as COMPRESSING while its surface grew.  Only the Gamma
+            // INTERPOLATION is limiter-raised here; the velocity stays cell
+            // centred so advection and stretch share one velocity.
+            const Set::Scalar ux = u(0), uy = u(1);
+            const Set::Scalar dGx = (ux > 0.0) ? (aL - cL) / DX[0] : (aR - cR) / DX[0];
+            const Set::Scalar dGy = (uy > 0.0) ? (bL - dL) / DX[1] : (bR - dR) / DX[1];
 #if AMREX_SPACEDIM == 3
-                const Set::Scalar G_zhi = (flux_zhi.u_interface > 0.0) ? eL : eR;
-                const Set::Scalar G_zlo = (flux_zlo.u_interface > 0.0) ? fL : fR;
-                div_uG += (flux_zhi.u_interface * G_zhi
-                         - flux_zlo.u_interface * G_zlo) / DX[2];
+            const Set::Scalar uz = u(2);
+            const Set::Scalar dGz = (uz > 0.0) ? (eL - fL) / DX[2] : (eR - fR) / DX[2];
 #endif
-                // -div(u* G) + G div(u*)  ==  -u*.grad(G), the same discrete
-                // operator the alpha row uses.
-                u_dot_gradG = div_uG - shell(i, j, k) * div_u;
-            }
+            const Set::Scalar u_dot_gradG = AMREX_D_TERM(ux * dGx, + uy * dGy, + uz * dGz);
             // Surface divergence.  In the bulk grad_eta -> 0 so n_hat -> 0 and this
             // reduces to div(u); Gamma there is unused.
             // NOTE: differencing the ratio u = M/rho directly, instead of the
@@ -2815,7 +2820,20 @@ Hydro2::RHS(int lev,
             // spoils the reconstruction.  It changed nothing measurable (Gamma
             // response 82.4% / 83.1% vs 83.0%), so gradu is not the issue and the
             // simpler shared expression is kept.
-            const Set::Scalar div_s_u = gradu.trace() - n_hat.dot(gradu * n_hat);
+            // SURFACE DIVERGENCE, gate-free (shell_gate_free, default 1).
+            //
+            // div_s u = P : grad u  with  P = I - n n.  That identity assumes
+            // |n| = 1.  Here n_hat = grad_eta/(|grad_eta| + small), so |n_hat|
+            // is ~1 on the band and -> 0 in the bulk.  Using the consistent
+            // projector
+            //        P = |n|^2 I - n n        (tr P = 2|n|^2)
+            // reproduces div_s u EXACTLY where |n| = 1, and makes the whole
+            // source vanish smoothly where there is no interface -- instead of
+            // degenerating to div(u), which is what forced the old DX-scaled
+            // freeze.  No threshold, no new constant: |n_hat|^2 is built from
+            // quantities already in scope, and it is mesh-independent.
+            const Set::Scalar nn = shell_gate_free ? n_hat.squaredNorm() : 1.0;
+            const Set::Scalar div_s_u = nn * gradu.trace() - n_hat.dot(gradu * n_hat);
             shell_rhs(i, j, k) = -u_dot_gradG - shell(i, j, k) * div_s_u;
             }   // end shell_row_on / band gate
 
@@ -5684,10 +5702,118 @@ void Hydro2::RelaxAndReinit(int lev)
             const amrex::Box &bxs = mfi.validbox();
             auto shl  = shell_mf[lev]->array(mfi);
             auto etas = eta_mf[lev]->const_array(mfi);
+            const int extend = shell_bulk_extend;
             amrex::ParallelFor(bxs, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 const Set::Scalar e = etas(i, j, k);
-                if (e < 1.0e-6 || e > 1.0 - 1.0e-6) shl(i, j, k) = 1.0;
+                const bool bulk = (e < 1.0e-6 || e > 1.0 - 1.0e-6);
+                if (!bulk) return;
+                if (!extend) { shl(i, j, k) = 1.0; return; }   // legacy behaviour
+
+                // CONSTANT NORMAL EXTENSION (shell_bulk_extend, default 1).
+                //
+                // The legacy line pinned every bulk cell to Gamma = 1.0 so that
+                // "re-entrained cells always start from Gamma = 1".  That is
+                // wrong the moment the interface MOVES: a collapsing bubble
+                // sweeps inward into gas-side bulk cells, and each one hands
+                // the band Gamma = 1 instead of the correct (R0/R)^2 > 1.  The
+                // band is therefore continuously fed unstrained shell from the
+                // region it is moving into, and Gamma is dragged toward 1.
+                //
+                // Measured against the exact spherical solution Gamma=(R0/R)^2
+                // on the coated collapse: -1.5% at R/R0=0.94, -8.4% at 0.72,
+                // -23.7% at 0.43, and it does NOT recover on rebound.  In the
+                // DRIVEN case, where the interface barely moves, the same
+                // measurement gives only -0.3% -- exactly the signature of a
+                // sweeping error rather than a transport error.
+                //
+                // Fix: a bulk cell adjacent to the band inherits the band value
+                // (constant extension along the normal), so a cell entrained by
+                // interface motion starts from the shell state actually there.
+                // Cells with no band neighbour are still anchored at 1.0, which
+                // keeps the far field from integrating bulk dilatation without
+                // bound -- the reason the anchor exists at all.
+                //
+                // Race-free: only BULK cells are written and only BAND cells
+                // are read, and the two sets are disjoint.
+                Set::Scalar acc = 0.0; int n = 0;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    for (int sgn = -1; sgn <= 1; sgn += 2)
+                    {
+                        const int ii = i + (d == 0 ? sgn : 0);
+                        const int jj = j + (d == 1 ? sgn : 0);
+                        const int kk = k + (d == 2 ? sgn : 0);
+                        if (!etas.contains(ii, jj, kk)) continue;
+                        const Set::Scalar en = etas(ii, jj, kk);
+                        if (en > 1.0e-6 && en < 1.0 - 1.0e-6) { acc += shl(ii, jj, kk); ++n; }
+                    }
+                shl(i, j, k) = n ? acc / Set::Scalar(n) : 1.0;
             });
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // NORMAL EXTENSION OF GAMMA  (shell_extend_iters, default 4; 0 = off)
+    //
+    // Gamma is an AREAL density living on a surface.  In a diffuse
+    // representation every cell of the band represents the SAME surface, so
+    // Gamma must be constant along the normal:   n . grad(Gamma) = 0.
+    // Nothing enforced that, and the field stratifies badly.  Measured on the
+    // coated collapse at R/R0 = 0.713 (exact Gamma = 1.967):
+    //     r/R05 0.87 (eta 0.15, gas side)  Gamma 1.879   ratio 0.955
+    //     r/R05 1.01 (eta 0.59, interface) Gamma 1.711   ratio 0.870
+    //     r/R05 1.14 (eta 0.92, liquid)    Gamma 1.570   ratio 0.798
+    //     r/R05 1.86 (eta 0.9996, outer)   Gamma 1.179   ratio 0.599
+    // a 37% spread along the normal across cells that are all the same
+    // surface.  Once that gradient exists the advective term u.grad(Gamma) is
+    // large and spurious, and a moving interface samples cells holding
+    // different values -- so the eta=0.5 value is dragged toward the low outer
+    // layers.  That is why the error grows with interface DISPLACEMENT, is
+    // irreversible, and is nearly absent in the driven case.
+    //
+    // Fix: relax  dGamma/dtau + s (n . grad Gamma) = 0,  s = sign(eta - 1/2),
+    // which propagates the eta=0.5 value outward along the normal in both
+    // directions.  Upwinded on s*n, dtau = dx/2.  This is the standard
+    // extension step for surfactant transport on level-set / phase-field
+    // interfaces.  No fitted constant -- only an iteration count, and a few
+    // sweeps per step suffice because the band is a handful of cells wide.
+    // ------------------------------------------------------------------
+    if (marmottant && shell_extend_iters > 0)
+    {
+        const Set::Scalar *DXe = geom[lev].CellSize();
+        const Set::Scalar dtau = 0.5 * DXe[0];
+        for (int it = 0; it < shell_extend_iters; ++it)
+        {
+            shell_mf[lev]->FillBoundary(geom[lev].periodicity());
+            amrex::MultiFab prev(shell_mf[lev]->boxArray(),
+                                 shell_mf[lev]->DistributionMap(), 1, shell_mf[lev]->nGrow());
+            amrex::MultiFab::Copy(prev, *shell_mf[lev], 0, 0, 1, shell_mf[lev]->nGrow());
+            for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &bxe = mfi.validbox();
+                auto shl = shell_mf[lev]->array(mfi);
+                auto old = prev.const_array(mfi);
+                auto etae = eta_mf[lev]->const_array(mfi);
+                amrex::ParallelFor(bxe, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    const Set::Scalar e = etae(i, j, k);
+                    if (e <= 1.0e-6 || e >= 1.0 - 1.0e-6) return;   // bulk: anchored elsewhere
+                    Set::Vector ge = Numeric::Gradient(etae, i, j, k, 0, DXe);
+                    const Set::Scalar gem = ge.lpNorm<2>();
+                    if (gem <= 0.0) return;
+                    const Set::Scalar sgn = (e > 0.5) ? 1.0 : -1.0;
+                    Set::Vector w = (sgn / gem) * ge;               // propagation direction
+                    Set::Scalar adv = 0.0;
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    {
+                        const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                        // upwind w.r.t. w: take the difference from behind
+                        const Set::Scalar back = (w(d) > 0.0)
+                            ? (old(i, j, k) - old(i - di, j - dj, k - dk))
+                            : (old(i + di, j + dj, k + dk) - old(i, j, k));
+                        adv += w(d) * back / DXe[d];
+                    }
+                    shl(i, j, k) = old(i, j, k) - dtau * adv;
+                });
+            }
         }
     }
 
