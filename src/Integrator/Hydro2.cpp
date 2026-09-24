@@ -56,6 +56,16 @@ namespace Integrator
 // exactly; keep them in sync if the Marmottant branch structure changes.
 // ----------------------------------------------------------------------
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+// [OPT 2026-09-24] Tiling policy for the Hydro2 MFIter loops.  Tiles are only
+// useful when OpenMP threads share a box; with one thread (flat-MPI build, or
+// OMP_NUM_THREADS=1) the loops run untiled exactly as before, so results and
+// cost are unchanged.  NOTE: TagCellsForRefinement keeps its original
+// MFIter(mf, true) because its gradient stencils are tile-bounded.
+static bool HydroTiling()
+{
+    return amrex::TilingIfNotGPU() && (amrex::OpenMP::get_max_threads() > 1);
+}
+
 static Set::Scalar SigmaEffFromGamma(Set::Scalar Gamma, Set::Scalar grad_eta_mag,
                                      int marm, Set::Scalar sig_const,
                                      Set::Scalar chi_, Set::Scalar Gb,
@@ -868,6 +878,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         std::string limiter_name;
         pp.query("Limiter.type", limiter_name);
         Util::Message(INFO, "Input file has Limiter.type = ", limiter_name);
+        // [OPT/FIX 2026-09-24] Each face stencil spans 3 cells beyond the box;
+        // WENO5 is the only limiter that uses the outermost two, so it needs
+        // nghost >= 3 (use 4).  With fewer ghosts those points used to be
+        // out-of-bounds reads; they are now clamped to the last ghost cell.
+        if ((limiter_name == "weno5" || limiter_name == "WENO5") && value.nghost < 3)
+            Util::Warning(INFO, "Limiter.type = weno5 with nghost = ", value.nghost,
+                          ": the 5-point stencil needs nghost >= 3 (set nghost = 4). "
+                          "Box-edge faces will use clamped (zero-gradient) ghost values.");
         pp.select_default<Solver::Local::Limiter::Godunov,  // 1st Order (i.e. no limiter)
                           Solver::Local::Limiter::Minmod,
                           Solver::Local::Limiter::VanLeer,
@@ -1175,10 +1193,24 @@ void Hydro2::Mix(int lev)
         const Set::Scalar gam1 = eos1_local.Gamma();
         const Set::Scalar pi1_ = eos1_local.P0();
 
+        // [FIX 2026-09-24] bx is the FULL ghost-grown box, so on the outermost
+        // ghost ring the +-1 Laplacian stencil read past the end of eta's
+        // allocation -- undefined values there, and an intermittent SEGFAULT
+        // at initialization when the fab sits at the end of its memory block
+        // (reproduced: UNIT_TEST_3D_Garrick on 1 rank crashed 2 of 4 runs, old
+        // and new binaries alike).  Only that ring is affected, and mu_chem
+        // ghosts are refilled by FillBoundariesWithBC before any use.
+        amrex::Array4<const Set::Scalar> const eta_c = eta_mf[lev]->const_array(mfi);
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
 
             // Eta laplacian (used below for the chemical-potential diagnostic).
-            Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
+            const bool lap_fits = eta_c.contains(i - 1, j, k) && eta_c.contains(i + 1, j, k)
+                               && eta_c.contains(i, j - 1, k) && eta_c.contains(i, j + 1, k)
+#if AMREX_SPACEDIM > 2
+                               && eta_c.contains(i, j, k - 1) && eta_c.contains(i, j, k + 1)
+#endif
+                               ;
+            Set::Scalar lap_eta = lap_fits ? Numeric::Laplacian(eta, i, j, k, 0, DX) : 0.0;
 
             // --- 6-equation canonical state at IC (Schmidmayer 2020 Sec2.3) ---
             // Volume fractions:
@@ -1406,9 +1438,12 @@ Hydro2::RHS(int lev,
 
     // Eta Fields
 
-    for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    for (amrex::MFIter mfi(*(velocity_mf)[lev], HydroTiling()); mfi.isValid(); ++mfi)
     {
-        const amrex::Box &bx = mfi.validbox();
+        const amrex::Box &bx = mfi.tilebox();
 
         auto rho_eta0 = rho_eta0_mf[lev]->array(mfi);
         auto rho_eta1 = rho_eta1_mf[lev]->array(mfi);
@@ -1425,9 +1460,12 @@ Hydro2::RHS(int lev,
     FillGhost4BC(lev, time);
 
     // Pre-Source Terms
-    for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    for (amrex::MFIter mfi(*(velocity_mf)[lev], HydroTiling()); mfi.isValid(); ++mfi)
     {
-        const amrex::Box &bx = mfi.validbox();
+        const amrex::Box &bx = mfi.tilebox();
 
         // CONSERVATIVE
         Set::Patch<const Set::Scalar> eta = eta_mf.Patch(lev, mfi);
@@ -1660,7 +1698,10 @@ Hydro2::RHS(int lev,
 
         const Set::Scalar chi_ = marmottant_chi, Gb = marmottant_Gamma_buck;
         const Set::Scalar sbrk = marmottant_sigma_break, sigw = sigma;
-        for (amrex::MFIter mfi(sig_eff_mf, false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+        for (amrex::MFIter mfi(sig_eff_mf, HydroTiling()); mfi.isValid(); ++mfi)
         {
             const amrex::Box &vbx = mfi.validbox();
             const amrex::Box gbx  = mfi.growntilebox(1);
@@ -1736,7 +1777,10 @@ Hydro2::RHS(int lev,
         const int subcyc_visc = shell_visc_subcycle && (shell_kappa_s != 0.0);
         const Set::Scalar mu_s  = shell_mu_s;
         const int visc_shell = (kap_s != 0.0) || (mu_s != 0.0);
-        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+        for (amrex::MFIter mfi(*eta_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
         {
             const amrex::Box bx = mfi.growntilebox(1);
             amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
@@ -1836,16 +1880,33 @@ Hydro2::RHS(int lev,
 
     // Main time integration loop
     // [DIAG RHSDECOMP] per-cell boundary-flux + source stash
-    amrex::MultiFab rhsp_fxlo_mf(rho_eta1_rhs_mf.boxArray(), rho_eta1_rhs_mf.DistributionMap(), 1, 0);
-    amrex::MultiFab rhsp_fxhi_mf(rho_eta1_rhs_mf.boxArray(), rho_eta1_rhs_mf.DistributionMap(), 1, 0);
-    amrex::MultiFab rhsp_fylo_mf(rho_eta1_rhs_mf.boxArray(), rho_eta1_rhs_mf.DistributionMap(), 1, 0);
-    amrex::MultiFab rhsp_fyhi_mf(rho_eta1_rhs_mf.boxArray(), rho_eta1_rhs_mf.DistributionMap(), 1, 0);
-    amrex::MultiFab rhsp_src_mf (rho_eta1_rhs_mf.boxArray(), rho_eta1_rhs_mf.DistributionMap(), 1, 0);
-    rhsp_fxlo_mf.setVal(0.0); rhsp_fxhi_mf.setVal(0.0); rhsp_fylo_mf.setVal(0.0);
-    rhsp_fyhi_mf.setVal(0.0); rhsp_src_mf.setVal(0.0);
-    for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
+    // [OPT] These five scratch MultiFabs feed only the relax_diag RHSDECOMP
+    // printout; they were allocated + zeroed on every RHS call regardless.
+    // With relax_diag off they stay undefined and the kernel never touches
+    // them (empty Array4 -> contains() is false).
+    amrex::MultiFab rhsp_fxlo_mf, rhsp_fxhi_mf, rhsp_fylo_mf, rhsp_fyhi_mf, rhsp_src_mf;
+    if (relax_diag)
     {
-        const amrex::Box &bx = mfi.validbox();
+        for (amrex::MultiFab *m : {&rhsp_fxlo_mf, &rhsp_fxhi_mf, &rhsp_fylo_mf, &rhsp_fyhi_mf, &rhsp_src_mf})
+        {
+            m->define(rho_eta1_rhs_mf.boxArray(), rho_eta1_rhs_mf.DistributionMap(), 1, 0);
+            m->setVal(0.0);
+        }
+    }
+    // Per-box face caches (see FACE-FLUX CACHE below).  resize() only
+    // reallocates when a box is larger than any seen before.
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    {
+    // Face/primitive caches are per-thread scratch (declared inside the
+    // parallel region so each thread owns its own).
+    amrex::BaseFab<Solver::Local::FluidRiemann::Flux> face_flux_fab[AMREX_SPACEDIM];
+    amrex::FArrayBox shell_face_fab[AMREX_SPACEDIM];
+    amrex::FArrayBox prim_cache_fab;
+    for (amrex::MFIter mfi(*(velocity_mf)[lev], HydroTiling()); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.tilebox();
         // PRIMARY FLUIDS
         // FLUID 0
         Set::Patch<const Set::Scalar> rho0 = density0_mf.Patch(lev, mfi);
@@ -1864,11 +1925,15 @@ Hydro2::RHS(int lev,
         // OUTPUTS
         Set::Patch<Set::Scalar> rho_eta0_rhs = rho_eta0_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> rho_eta1_rhs = rho_eta1_rhs_mf.array(mfi);
-        auto rhsp_fxlo = rhsp_fxlo_mf.array(mfi);
-        auto rhsp_fxhi = rhsp_fxhi_mf.array(mfi);
-        auto rhsp_fylo = rhsp_fylo_mf.array(mfi);
-        auto rhsp_fyhi = rhsp_fyhi_mf.array(mfi);
-        auto rhsp_src  = rhsp_src_mf.array(mfi);
+        amrex::Array4<Set::Scalar> rhsp_fxlo, rhsp_fxhi, rhsp_fylo, rhsp_fyhi, rhsp_src;
+        if (relax_diag)
+        {
+            rhsp_fxlo = rhsp_fxlo_mf.array(mfi);
+            rhsp_fxhi = rhsp_fxhi_mf.array(mfi);
+            rhsp_fylo = rhsp_fylo_mf.array(mfi);
+            rhsp_fyhi = rhsp_fyhi_mf.array(mfi);
+            rhsp_src  = rhsp_src_mf.array(mfi);
+        }
         Set::Patch<Set::Scalar> M_rhs       = M_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> E_rhs       = E_rhs_mf.array(mfi);
         Set::Patch<Set::Scalar> eta_rhs     = eta_rhs_mf.array(mfi);
@@ -1952,7 +2017,6 @@ Hydro2::RHS(int lev,
             ff_ene_k_z = cc_fluxes[lev].ene_k [2]->array(mfi);
 #endif
         }
-        const auto bx_lo = amrex::lbound(bx);
 
         // EMBEDDED SOLID BOUNDARY patches (empty Array4 when the feature is
         // off; never dereferenced unless apply_embedded_solid is set).
@@ -1983,6 +2047,256 @@ Hydro2::RHS(int lev,
         const bool symlo2 = sym_face_lo[2], symhi2 = sym_face_hi[2];
 #endif
 
+        // ============================================================
+        // [OPT 2026-09-24] FACE-FLUX CACHE.  Every face used to be
+        // reconstructed + Riemann-solved TWICE: once as the hi face of the
+        // cell below it and once as the lo face of the cell above it.  Each
+        // face is now solved exactly once, into a per-box face array, and the
+        // cell loop below reads flux_lo = F(i), flux_hi = F(i+1).  The face
+        // kernel is the same code the cell loop ran (compute_face moved out
+        // verbatim; the per-cell State->Primitive conversion that make_state +
+        // ToPrimitive did is now the PRIMITIVE CACHE below), so results are
+        // bit-identical.
+        // ============================================================
+        using FluxT = Solver::Local::FluidRiemann::Flux;
+        // [OPT] PRIMITIVE CACHE.  ToPrimitive(make_state(cell, dir)) -- the old
+        // per-cell lambda that packed (eta, rho_eta0/1, M permuted to
+        // normal/tangent, E0, E1, E, eos constants) into a State -- was
+        // evaluated 6x per cell per direction (each cell sits in 6 face
+        // stencils).  Its only direction dependence is which momentum
+        // component is called normal/tangent, so the direction-invariant
+        // parts are computed once per cell here and permuted on lookup --
+        // the same arithmetic as Limiter::ToPrimitive, bit for bit.  Cells
+        // outside the cached box (only possible when nghost < 3) are clamped
+        // (see get_prim).
+        //   comps: 0 alpha, 1 rho0_pure, 2 rho1_pure, 3 p_mix, 4.. u_d (d<SD),
+        //          [2D only] 4+SD = 0/max(rho,DIV_FLOOR)  (ToPrimitive's p.w)
+        constexpr int NPC = 4 + AMREX_SPACEDIM + ((AMREX_SPACEDIM == 2) ? 1 : 0);
+        const int ng_pc = std::min({3, eta_mf[lev]->nGrow(), rho_eta0_mf[lev]->nGrow(), rho_eta1_mf[lev]->nGrow(),
+                                    momentum_mf[lev]->nGrow(), energy0_mf[lev]->nGrow(), energy1_mf[lev]->nGrow()});
+        const amrex::Box pbx = amrex::grow(bx, ng_pc);
+        prim_cache_fab.resize(pbx, NPC);
+        amrex::Array4<Set::Scalar> const &PCw = prim_cache_fab.array();
+        {
+            const Set::Scalar g0c = eos0.Gamma(), p0c = eos0.P0();
+            const Set::Scalar g1c = eos1.Gamma(), p1c = eos1.P0();
+            amrex::ParallelFor(pbx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+            {
+                // Mirrors Limiter::ToPrimitive exactly (keep in sync).
+                constexpr Set::Scalar alpha_floor = 1.0e-12;
+                constexpr Set::Scalar DIV_FLOOR   = 1.0e-30;
+                constexpr Set::Scalar RHO_PURE_CAP = 1.0e4;
+                const Set::Scalar s_alpha = std::min(std::max(eta(i, j, k), 0.0), 1.0);
+                const Set::Scalar s_ar0 = rho_eta0(i, j, k), s_ar1 = rho_eta1(i, j, k);
+                const Set::Scalar pa = std::min(std::max(s_alpha, alpha_floor), 1.0 - alpha_floor);
+                const Set::Scalar a2 = 1.0 - pa;
+                PCw(i, j, k, 0) = pa;
+                PCw(i, j, k, 1) = std::min(s_ar0 / pa, RHO_PURE_CAP);
+                PCw(i, j, k, 2) = std::min(s_ar1 / a2, RHO_PURE_CAP);
+                const Set::Scalar rho_ = s_ar0 + s_ar1;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    PCw(i, j, k, 4 + d) = M(i, j, k, d) / std::max(rho_, DIV_FLOOR);
+#if AMREX_SPACEDIM == 2
+                PCw(i, j, k, 4 + AMREX_SPACEDIM) = 0.0 / std::max(rho_, DIV_FLOOR);
+#endif
+                Set::Scalar pp0 = (g0c - 1.0) * E0_arr(i, j, k) / std::max(pa, DIV_FLOOR) - g0c * p0c;
+                Set::Scalar pp1 = (g1c - 1.0) * E1_arr(i, j, k) / std::max(a2, DIV_FLOOR) - g1c * p1c;
+                pp0 = std::max(pp0, -p0c + DIV_FLOOR);
+                pp1 = std::max(pp1, -p1c + DIV_FLOOR);
+                PCw(i, j, k, 3) = pa * pp0 + a2 * pp1;
+            });
+        }
+        amrex::Array4<const Set::Scalar> const PC = prim_cache_fab.const_array();
+        auto get_prim = [=](int ii, int jj, int kk, int dir) -> Solver::Local::Limiter::Primitive
+        {
+            // Outside the cache means outside the allocated ghost region
+            // (only when nghost < 3).  The old code read that memory out of
+            // bounds; clamp to the nearest cached cell instead.  Only WENO5
+            // ever uses these points (see the Parse warning), so every other
+            // limiter is bit-identical.
+            if (!PC.contains(ii, jj, kk))
+            {
+                const auto plo = amrex::lbound(pbx), phi = amrex::ubound(pbx);
+                ii = amrex::min(amrex::max(ii, plo.x), phi.x);
+                jj = amrex::min(amrex::max(jj, plo.y), phi.y);
+                kk = amrex::min(amrex::max(kk, plo.z), phi.z);
+            }
+            Solver::Local::Limiter::Primitive q;
+            q.alpha       = PC(ii, jj, kk, 0);
+            q.alpha_rho_0 = PC(ii, jj, kk, 1);
+            q.alpha_rho_1 = PC(ii, jj, kk, 2);
+            q.u           = PC(ii, jj, kk, 4 + dir);
+            q.v           = PC(ii, jj, kk, 4 + (dir + 1) % AMREX_SPACEDIM);
+#if AMREX_SPACEDIM == 3
+            q.w           = PC(ii, jj, kk, 4 + (dir + 2) % AMREX_SPACEDIM);
+#else
+            q.w           = PC(ii, jj, kk, 4 + AMREX_SPACEDIM);
+#endif
+            q.p_mix  = PC(ii, jj, kk, 3);
+            q.gamma0 = eos0.Gamma();  q.pi0 = eos0.P0();
+            q.gamma1 = eos1.Gamma();  q.pi1 = eos1.P0();
+            return q;
+        };
+
+        // ------------------------------------------------------------
+        // Reconstruct face states using the selected limiter (Sch20
+        // Sec 3.2: PRIMITIVE-variable reconstruction; never conservatives).
+        // For face between cell `lo` and cell `hi` in normal direction
+        // `dir`, gather 6-cell window {lo-2, lo-1, lo, hi, hi+1, hi+2},
+        // convert to primitives, and reconstruct Q_L (right edge of
+        // `lo`) and Q_R (left edge of `hi`, via reversed-stencil trick).
+        // Default Limiter=Godunov returns the cell-center value
+        // unchanged -- equivalent to the original first-order flux.
+        // ------------------------------------------------------------
+        auto compute_face = [=](int lo_i, int lo_j, int lo_k, int hi_i, int hi_j, int hi_k, int dir)
+            -> FluxT
+        {
+            const int di = hi_i - lo_i;
+            const int dj = hi_j - lo_j;
+            const int dk = hi_k - lo_k;
+            Solver::Local::Limiter::Primitive prim[6];
+            for (int s = -2; s <= 3; ++s)
+                prim[s + 2] = get_prim(lo_i + s * di, lo_j + s * dj, lo_k + s * dk, dir);
+            // Q_L: right-edge of cell `lo` (stencil centered on prim[2]).
+            Solver::Local::Limiter::Primitive stencil_L[5] =
+                { prim[0], prim[1], prim[2], prim[3], prim[4] };
+            // Q_R: left-edge of cell `hi` (stencil centered on prim[3],
+            //      reversed so right-edge reconstruction returns left-edge).
+            Solver::Local::Limiter::Primitive stencil_R[5] =
+                { prim[5], prim[4], prim[3], prim[2], prim[1] };
+            Solver::Local::Limiter::Primitive pL = limiter->Reconstruct(stencil_L);
+            Solver::Local::Limiter::Primitive pR = limiter->Reconstruct(stencil_R);
+            Solver::Local::FluidRiemann::State sL_face = Solver::Local::Limiter::ToState(pL, small);
+            Solver::Local::FluidRiemann::State sR_face = Solver::Local::Limiter::ToState(pR, small);
+
+            FluxT fl_ = riemannsolver->Solve(sL_face, sR_face, pref, small);
+            // Carry the RECONSTRUCTED alpha out, upwinded on the contact
+            // speed, so the alpha row can be advected at the same order as
+            // the mass rows (see the alpha-row note in Advance).
+            fl_.alpha_face = (fl_.u_interface > 0.0) ? pL.alpha : pR.alpha;
+            return fl_;
+        };
+
+        // ------------------------------------------------------
+        // SYMMETRY-FACE FLUX ENFORCEMENT.  At a REFLECT domain
+        // face the exact Riemann solution has u* = 0: the only
+        // nonzero flux component is the normal-momentum (pressure)
+        // term.  Computing it numerically instead leaves a
+        // roundoff residual of order eps*|S_L|*rho_eta (the stiff
+        // sound speed amplifies machine eps ~1e-16 to ~1e-13),
+        // applied with the SAME SIGN at the SAME cells every step
+        // -- a coherent mass/energy pump through the symmetry
+        // plane that feeds back exponentially in driven octant/
+        // quadrant runs (measured: 100%% of the gas-mass
+        // instability enters via the reflect faces; RHSDECOMP
+        // budget closes to 1e-25 with them zeroed analytically).
+        // ------------------------------------------------------
+        auto symmetrize = [](FluxT &f) {
+            f.mass0 = 0.0;
+            f.mass1 = 0.0;
+            f.momentum_tangent  = 0.0;
+            f.momentum_tangent2 = 0.0;
+            f.energy_total = 0.0;
+            f.energy0 = 0.0;
+            f.energy1 = 0.0;
+            // u* = 0 is exact at the symmetry plane, and u_interface is
+            // the ONLY quantity the eta/E0/E1 non-conservative rows read
+            // from this flux.  Leaving its roundoff residual while
+            // zeroing the mass rows makes the alpha row discretely
+            // inconsistent with the phase-mass rows at the same face --
+            // a coherent same-sign alpha/mass mismatch at the collapse
+            // focus (octant corner) every stage.
+            f.u_interface = 0.0;
+        };
+
+        // Face node f in direction d separates cells f-1 (lo) and f (hi).
+        // The domain lo face is node smallEnd(d); the domain hi face is node
+        // bigEnd(d)+1 -- the same faces the per-cell code symmetrized as
+        // flux_*lo of cell smallEnd and flux_*hi of cell bigEnd.
+        BL_PROFILE_VAR("Hydro2::RHS::face_fluxes", prof_faces);
+        for (int d = 0; d < AMREX_SPACEDIM; ++d)
+        {
+            const amrex::Box fbx = amrex::surroundingNodes(bx, d);
+            face_flux_fab[d].resize(fbx, 1);
+            amrex::Array4<FluxT> const &Ff = face_flux_fab[d].array();
+            const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+            const int dom_lo = domain.smallEnd(d), dom_hi_face = domain.bigEnd(d) + 1;
+            bool sl = false, sh = false;
+            if (d == 0) { sl = symlo0; sh = symhi0; }
+            if (d == 1) { sl = symlo1; sh = symhi1; }
+#if AMREX_SPACEDIM == 3
+            if (d == 2) { sl = symlo2; sh = symhi2; }
+#endif
+            amrex::ParallelFor(fbx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+            {
+                const int f = (d == 0) ? i : ((d == 1) ? j : k);
+                try
+                {
+                    FluxT fl = compute_face(i - di, j - dj, k - dk, i, j, k, d);
+                    if (sl && f == dom_lo)      symmetrize(fl);
+                    if (sh && f == dom_hi_face) symmetrize(fl);
+                    Ff(i, j, k) = fl;
+                }
+                catch (...)
+                {
+                    Util::ParallelMessage(INFO, "-------------------------------");
+                    Util::ParallelMessage(INFO, "ERROR IN RIEMANN SOLVERS (6-eq)");
+                    Util::ParallelMessage(INFO, "lev=", lev, " face dir=", d, " i=", i, " j=", j, " k=", k);
+                    Util::Abort(INFO);
+                }
+            });
+        }
+        BL_PROFILE_VAR_STOP(prof_faces);
+        amrex::Array4<const FluxT> const Fx = face_flux_fab[0].const_array();
+        amrex::Array4<const FluxT> const Fy = face_flux_fab[1].const_array();
+#if AMREX_SPACEDIM == 3
+        amrex::Array4<const FluxT> const Fz = face_flux_fab[2].const_array();
+#endif
+
+        // Shell (Gamma) face reconstruction, cached the same way: comp 0 =
+        // right edge of the lo cell (qL), comp 1 = left edge of the hi cell
+        // (qR).  Only built when the shell row is live.
+        const bool shell_faces = shell_row_on;
+        amrex::Array4<const Set::Scalar> Sx, Sy;
+#if AMREX_SPACEDIM == 3
+        amrex::Array4<const Set::Scalar> Sz;
+#endif
+        if (shell_faces)
+        {
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                const amrex::Box fbx = amrex::surroundingNodes(bx, d);
+                shell_face_fab[d].resize(fbx, 2);
+                amrex::Array4<Set::Scalar> const &Sf = shell_face_fab[d].array();
+                const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                amrex::ParallelFor(fbx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+                {
+                    // lo cell = (i,j,k) - e_d ; window lo-2 .. lo+3
+                    Solver::Local::Limiter::Primitive prim[6];
+                    for (int sft = -2; sft <= 3; ++sft)
+                        prim[sft + 2].alpha = shell(i + (sft - 1) * di, j + (sft - 1) * dj, k + (sft - 1) * dk);
+                    Solver::Local::Limiter::Primitive stL[5] = { prim[0], prim[1], prim[2], prim[3], prim[4] };
+                    Solver::Local::Limiter::Primitive stR[5] = { prim[5], prim[4], prim[3], prim[2], prim[1] };
+                    Sf(i, j, k, 0) = limiter->Reconstruct(stL).alpha;
+                    Sf(i, j, k, 1) = limiter->Reconstruct(stR).alpha;
+                });
+            }
+            Sx = shell_face_fab[0].const_array();
+            Sy = shell_face_fab[1].const_array();
+#if AMREX_SPACEDIM == 3
+            Sz = shell_face_fab[2].const_array();
+#endif
+        }
+
+        // [OPT] Viscous stress needs the momentum Hessian (the widest, most
+        // expensive stencil in this kernel).  With every viscosity zero,
+        // div_tau and visc_diss are identically 0 whatever the Hessian is, so
+        // skip it.  hess_u_ is a non-plotted debug field and is zeroed.
+        const bool viscous = (mu0 != 0.0) || (mu1 != 0.0) || (mu0_b != 0.0) || (mu1_b != 0.0);
+        BL_PROFILE_VAR("Hydro2::RHS::cell_update", prof_cells);
+        const amrex::Box vbx_cc = mfi.validbox();
+        const auto vbx_lo = amrex::lbound(vbx_cc);
+
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
@@ -2003,7 +2317,6 @@ Hydro2::RHS(int lev,
 
             Set::Matrix gradM = Numeric::Gradient(M, i, j, k, DX);
             Set::Vector gradrho = Numeric::Gradient(rho, i, j, k, 0, DX);
-            Set::Matrix hess_rho = Numeric::Hessian(rho, i, j, k, 0, DX, sten);
             Set::Matrix gradu = (gradM - u * gradrho.transpose()) / (rho(i, j, k));
 
             Set::Vector q0_ = Set::Vector(AMREX_D_DECL(q0(i, j, k, 0), q0(i, j, k, 1), 0.0));  // q0 IC field stays 2-component
@@ -2014,17 +2327,20 @@ Hydro2::RHS(int lev,
             Set::Vector Pdot0 = Set::Vector::Zero();
             Set::Scalar qdot0 = q0_.dot(grad_eta);
 
-            Set::Matrix3 hess_M = Numeric::Hessian(M, i, j, k, DX);
             Set::Matrix3 hess_u = Set::Matrix3::Zero();
+            if (viscous)
+            {
+                Set::Matrix hess_rho = Numeric::Hessian(rho, i, j, k, 0, DX, sten);
+                Set::Matrix3 hess_M = Numeric::Hessian(M, i, j, k, DX);
+                for (int p = 0; p < AMREX_SPACEDIM; p++)
+                    for (int q = 0; q < AMREX_SPACEDIM; q++)
+                        for (int r = 0; r < AMREX_SPACEDIM; r++)
+                        {
+                            hess_u(r, p, q) = (hess_M(r, p, q) - gradu(r, q) * gradrho(p) - gradu(r, p) * gradrho(q) - u(r) * hess_rho(p, q))
+                                              / (rho(i, j, k));
+                        }
+            }
 
-            for (int p = 0; p < AMREX_SPACEDIM; p++)
-                for (int q = 0; q < AMREX_SPACEDIM; q++)
-                    for (int r = 0; r < AMREX_SPACEDIM; r++)
-                    {
-                        hess_u(r, p, q) = (hess_M(r, p, q) - gradu(r, q) * gradrho(p) - gradu(r, p) * gradrho(q) - u(r) * hess_rho(p, q))
-                                          / (rho(i, j, k));
-                    }
-            
             // WIP: Debugging feild for hess_u
             hess_u_(i, j, k, 0) = hess_u(0, 0, 0);
             hess_u_(i, j, k, 1) = hess_u(0, 0, 1);
@@ -2057,7 +2373,8 @@ Hydro2::RHS(int lev,
                 phi_c = embedded.clampPhi(phisol(i, j, k));
             }
 
-            // Solving
+            // Solving (every term is proportional to a viscosity -> skip when inviscid)
+            if (viscous)
             for (int p = 0; p < AMREX_SPACEDIM; p++)             // i
                 for (int q = 0; q < AMREX_SPACEDIM; q++)         // j
                     for (int r = 0; r < AMREX_SPACEDIM; r++)     // k
@@ -2342,40 +2659,9 @@ Hydro2::RHS(int lev,
 
             // ============================================================
             // 6-equation HLLC face fluxes (Saurel 2009 Sec 3.1.2 / Schmidmayer 2020 Sec 3).
+            // [OPT] Read from the per-box face cache built above (each face
+            // solved once; symmetry faces already enforced there).
             // ============================================================
-            const int X_dir = 0, Y_dir = 1, Z_dir = 2;
-
-            // Build per-face State (6-eq).  EOS constants are per-phase and identical L/R per cell (same eos0/eos1).
-            auto make_state = [&](int ii, int jj, int kk, int dir)
-                -> Solver::Local::FluidRiemann::State
-            {
-                Solver::Local::FluidRiemann::State s;
-                s.alpha       = std::min(std::max(eta(ii, jj, kk), 0.0), 1.0);
-                s.alpha_rho_0 = rho_eta0(ii, jj, kk);
-                s.alpha_rho_1 = rho_eta1(ii, jj, kk);
-                // `dir` is the face-normal direction (0=x, 1=y, 2=z).  The tangents
-                // are the cyclically-next momentum components -- the SAME convention
-                // used when the Riemann momentum fluxes are scattered back into
-                // M_flux below, so the round-trip is self-consistent in any dim.
-                // In 2D this reduces exactly to the old normal/tangent swap.
-                s.M_normal   = M(ii, jj, kk, dir);
-                s.M_tangent  = M(ii, jj, kk, (dir + 1) % AMREX_SPACEDIM);
-#if AMREX_SPACEDIM == 3
-                s.M_tangent2 = M(ii, jj, kk, (dir + 2) % AMREX_SPACEDIM);
-#endif
-                s.E0      = E0_arr(ii, jj, kk);
-                s.E1      = E1_arr(ii, jj, kk);
-                s.E_total = E(ii, jj, kk);
-                s.gamma0  = eos0.Gamma();
-                s.pi0     = eos0.P0();
-                s.gamma1  = eos1.Gamma();
-                s.pi1     = eos1.P0();
-                return s;
-            };
-
-            // ------------------------------------------------------------
-            // Error Checking
-            // ------------------------------------------------------------
             if (nan_check) check4nans(time, lev, i, j, k, "ERROR IN Hydro2()::RHS(): Conservative Variable Check", {
                 { "eta", eta(i, j, k) },
                 { "rho_eta0", rho_eta0(i, j, k) },
@@ -2389,113 +2675,14 @@ Hydro2::RHS(int lev,
                 { "press", press(i, j, k) },
             }); // end check4nans
 
-            // ------------------------------------------------------------
-            // Reconstruct face states using the selected limiter (Sch20
-            // Sec 3.2: PRIMITIVE-variable reconstruction; never conservatives).
-            // For face between cell `lo` and cell `hi` in normal direction
-            // `dir`, gather 6-cell window {lo-2, lo-1, lo, hi, hi+1, hi+2},
-            // convert to primitives, and reconstruct Q_L (right edge of
-            // `lo`) and Q_R (left edge of `hi`, via reversed-stencil trick).
-            // Default Limiter=Godunov returns the cell-center value
-            // unchanged -- equivalent to the original first-order flux.
-            // ------------------------------------------------------------
-            auto compute_face = [&](int lo_i, int lo_j, int lo_k, int hi_i, int hi_j, int hi_k, int dir)
-                -> Solver::Local::FluidRiemann::Flux
-            {
-                const int di = hi_i - lo_i;
-                const int dj = hi_j - lo_j;
-                const int dk = hi_k - lo_k;
-                Solver::Local::Limiter::Primitive prim[6];
-                for (int s = -2; s <= 3; ++s)
-                {
-                    Solver::Local::FluidRiemann::State raw =
-                        make_state(lo_i + s * di, lo_j + s * dj, lo_k + s * dk, dir);
-                    prim[s + 2] = Solver::Local::Limiter::ToPrimitive(raw, small);
-                }
-                // Q_L: right-edge of cell `lo` (stencil centered on prim[2]).
-                Solver::Local::Limiter::Primitive stencil_L[5] =
-                    { prim[0], prim[1], prim[2], prim[3], prim[4] };
-                // Q_R: left-edge of cell `hi` (stencil centered on prim[3],
-                //      reversed so right-edge reconstruction returns left-edge).
-                Solver::Local::Limiter::Primitive stencil_R[5] =
-                    { prim[5], prim[4], prim[3], prim[2], prim[1] };
-                Solver::Local::Limiter::Primitive pL = limiter->Reconstruct(stencil_L);
-                Solver::Local::Limiter::Primitive pR = limiter->Reconstruct(stencil_R);
-                Solver::Local::FluidRiemann::State sL_face = Solver::Local::Limiter::ToState(pL, small);
-                Solver::Local::FluidRiemann::State sR_face = Solver::Local::Limiter::ToState(pR, small);
-
-                Solver::Local::FluidRiemann::Flux fl_ = riemannsolver->Solve(sL_face, sR_face, pref, small);
-                // Carry the RECONSTRUCTED alpha out, upwinded on the contact
-                // speed, so the alpha row can be advected at the same order as
-                // the mass rows (see the alpha-row note in Advance).
-                fl_.alpha_face = (fl_.u_interface > 0.0) ? pL.alpha : pR.alpha;
-                return fl_;
-            };
-
-            Solver::Local::FluidRiemann::Flux flux_xlo, flux_ylo, flux_xhi, flux_yhi;
+            const FluxT &flux_xlo = Fx(i,     j,     k);
+            const FluxT &flux_xhi = Fx(i + 1, j,     k);
+            const FluxT &flux_ylo = Fy(i,     j,     k);
+            const FluxT &flux_yhi = Fy(i,     j + 1, k);
 #if AMREX_SPACEDIM == 3
-            Solver::Local::FluidRiemann::Flux flux_zlo, flux_zhi;
+            const FluxT &flux_zlo = Fz(i,     j,     k);
+            const FluxT &flux_zhi = Fz(i,     j,     k + 1);
 #endif
-            try
-            {
-                flux_xlo = compute_face(i - 1, j,     k,     i,     j,     k,     X_dir);
-                flux_xhi = compute_face(i,     j,     k,     i + 1, j,     k,     X_dir);
-                flux_ylo = compute_face(i,     j - 1, k,     i,     j,     k,     Y_dir);
-                flux_yhi = compute_face(i,     j,     k,     i,     j + 1, k,     Y_dir);
-#if AMREX_SPACEDIM == 3
-                flux_zlo = compute_face(i,     j,     k - 1, i,     j,     k,     Z_dir);
-                flux_zhi = compute_face(i,     j,     k,     i,     j,     k + 1, Z_dir);
-#endif
-
-                // ------------------------------------------------------
-                // SYMMETRY-FACE FLUX ENFORCEMENT.  At a REFLECT domain
-                // face the exact Riemann solution has u* = 0: the only
-                // nonzero flux component is the normal-momentum (pressure)
-                // term.  Computing it numerically instead leaves a
-                // roundoff residual of order eps*|S_L|*rho_eta (the stiff
-                // sound speed amplifies machine eps ~1e-16 to ~1e-13),
-                // applied with the SAME SIGN at the SAME cells every step
-                // -- a coherent mass/energy pump through the symmetry
-                // plane that feeds back exponentially in driven octant/
-                // quadrant runs (measured: 100%% of the gas-mass
-                // instability enters via the reflect faces; RHSDECOMP
-                // budget closes to 1e-25 with them zeroed analytically).
-                // ------------------------------------------------------
-                auto symmetrize = [](Solver::Local::FluidRiemann::Flux &f) {
-                    f.mass0 = 0.0;
-                    f.mass1 = 0.0;
-                    f.momentum_tangent  = 0.0;
-                    f.momentum_tangent2 = 0.0;
-                    f.energy_total = 0.0;
-                    f.energy0 = 0.0;
-                    f.energy1 = 0.0;
-                    // u* = 0 is exact at the symmetry plane, and u_interface is
-                    // the ONLY quantity the eta/E0/E1 non-conservative rows read
-                    // from this flux.  Leaving its roundoff residual while
-                    // zeroing the mass rows makes the alpha row discretely
-                    // inconsistent with the phase-mass rows at the same face --
-                    // a coherent same-sign alpha/mass mismatch at the collapse
-                    // focus (octant corner) every stage.
-                    f.u_interface = 0.0;
-                };
-                if (symlo0 && i == domain.smallEnd(0)) symmetrize(flux_xlo);
-                if (symhi0 && i == domain.bigEnd(0))   symmetrize(flux_xhi);
-                if (symlo1 && j == domain.smallEnd(1)) symmetrize(flux_ylo);
-                if (symhi1 && j == domain.bigEnd(1))   symmetrize(flux_yhi);
-#if AMREX_SPACEDIM == 3
-                if (symlo2 && k == domain.smallEnd(2)) symmetrize(flux_zlo);
-                if (symhi2 && k == domain.bigEnd(2))   symmetrize(flux_zhi);
-#endif
-            }
-            catch (...)
-            {
-                Util::ParallelMessage(INFO, "-------------------------------");
-                Util::ParallelMessage(INFO, "ERROR IN RIEMANN SOLVERS (6-eq)");
-                Util::ParallelMessage(INFO, "lev=", lev, " i=", i, " j=", j, " k=", k);
-                Util::Abort(INFO);
-            }
-
-
             // NOTE: two rearrangements of the capillary force were implemented and
             // REMOVED.  (1) div(Omega) from face-evaluated Omega; (2) Omega carried
             // in the momentum flux, F = rho u u + p I - Omega, subtracted from the
@@ -2636,7 +2823,7 @@ Hydro2::RHS(int lev,
                 ff_ene_k_z (i, j, k, 1) = flux_zhi.energy1;
 #endif
 
-                if (i == bx_lo.x) {
+                if (i == vbx_lo.x) {
                     ff_mass_x  (i - 1, j, k, 0) = flux_xlo.mass0;
                     ff_mass_x  (i - 1, j, k, 1) = flux_xlo.mass1;
                     ff_mom_x   (i - 1, j, k, 0) = flux_xlo.momentum_normal;
@@ -2648,7 +2835,7 @@ Hydro2::RHS(int lev,
                     ff_mom_x   (i - 1, j, k, 2) = flux_xlo.momentum_tangent2;
 #endif
                 }
-                if (j == bx_lo.y) {
+                if (j == vbx_lo.y) {
                     ff_mass_y  (i, j - 1, k, 0) = flux_ylo.mass0;
                     ff_mass_y  (i, j - 1, k, 1) = flux_ylo.mass1;
                     ff_mom_y   (i, j - 1, k, 1)                  = flux_ylo.momentum_normal;
@@ -2661,7 +2848,7 @@ Hydro2::RHS(int lev,
 #endif
                 }
 #if AMREX_SPACEDIM == 3
-                if (k == bx_lo.z) {
+                if (k == vbx_lo.z) {
                     ff_mass_z  (i, j, k - 1, 0) = flux_zlo.mass0;
                     ff_mass_z  (i, j, k - 1, 1) = flux_zlo.mass1;
                     ff_mom_z   (i, j, k - 1, 2) = flux_zlo.momentum_normal;
@@ -2765,20 +2952,6 @@ Hydro2::RHS(int lev,
             }
             else
             {
-            auto shell_face = [&](int di, int dj, int dk,
-                                  Set::Scalar &qL, Set::Scalar &qR)
-            {
-                Solver::Local::Limiter::Primitive prim[6];
-                for (int sft = -2; sft <= 3; ++sft)
-                    prim[sft + 2].alpha = shell(i + sft * di, j + sft * dj, k + sft * dk);
-                Solver::Local::Limiter::Primitive stL[5] =
-                    { prim[0], prim[1], prim[2], prim[3], prim[4] };
-                Solver::Local::Limiter::Primitive stR[5] =
-                    { prim[5], prim[4], prim[3], prim[2], prim[1] };
-                qL = limiter->Reconstruct(stL).alpha;   // right edge of the `lo` cell
-                qR = limiter->Reconstruct(stR).alpha;   // left  edge of the `hi` cell
-            };
-
             //   D(Gamma)/Dt = -Gamma (div u - n.grad(u).n)
             //
             // GAMMA ROW.  Advected with EXACTLY the operator the alpha row
@@ -2805,40 +2978,16 @@ Hydro2::RHS(int lev,
             // Since sigma(Gamma) = chi (Gamma_buck/Gamma - 1), a Gamma 27% low
             // makes sigma too high AND crosses the buckling threshold at the
             // wrong radius, so the whole Marmottant law is fed a biased input.
-            Set::Scalar aL, aR, bL, bR;
-            shell_face(1, 0, 0, aL, aR);            // face i+1/2 (lo = i)
-            Set::Scalar cL, cR;
-            {   // face i-1/2 (lo = i-1): shift the stencil one cell down
-                Solver::Local::Limiter::Primitive prim[6];
-                for (int sft = -2; sft <= 3; ++sft) prim[sft + 2].alpha = shell(i - 1 + sft, j, k);
-                Solver::Local::Limiter::Primitive stL[5] = { prim[0], prim[1], prim[2], prim[3], prim[4] };
-                Solver::Local::Limiter::Primitive stR[5] = { prim[5], prim[4], prim[3], prim[2], prim[1] };
-                cL = limiter->Reconstruct(stL).alpha;
-                cR = limiter->Reconstruct(stR).alpha;
-            }
-
-            shell_face(0, 1, 0, bL, bR);            // face j+1/2 (lo = j)
-            Set::Scalar dL, dR;
-            {   // face j-1/2 (lo = j-1)
-                Solver::Local::Limiter::Primitive prim[6];
-                for (int sft = -2; sft <= 3; ++sft) prim[sft + 2].alpha = shell(i, j - 1 + sft, k);
-                Solver::Local::Limiter::Primitive stL[5] = { prim[0], prim[1], prim[2], prim[3], prim[4] };
-                Solver::Local::Limiter::Primitive stR[5] = { prim[5], prim[4], prim[3], prim[2], prim[1] };
-                dL = limiter->Reconstruct(stL).alpha;
-                dR = limiter->Reconstruct(stR).alpha;
-            }
-
+            // [OPT] Face values come from the per-box shell face cache (comp 0
+            // = qL, right edge of the lo cell; comp 1 = qR, left edge of the hi
+            // cell) -- the identical reconstruction, done once per face.
+            const Set::Scalar aL = Sx(i + 1, j, k, 0), aR = Sx(i + 1, j, k, 1);   // face i+1/2
+            const Set::Scalar cL = Sx(i,     j, k, 0), cR = Sx(i,     j, k, 1);   // face i-1/2
+            const Set::Scalar bL = Sy(i, j + 1, k, 0), bR = Sy(i, j + 1, k, 1);   // face j+1/2
+            const Set::Scalar dL = Sy(i, j,     k, 0), dR = Sy(i, j,     k, 1);   // face j-1/2
 #if AMREX_SPACEDIM == 3
-            Set::Scalar eL, eR, fL, fR;
-            shell_face(0, 0, 1, eL, eR);            // face k+1/2 (lo = k)
-            {   // face k-1/2 (lo = k-1)
-                Solver::Local::Limiter::Primitive prim[6];
-                for (int sft = -2; sft <= 3; ++sft) prim[sft + 2].alpha = shell(i, j, k - 1 + sft);
-                Solver::Local::Limiter::Primitive stL[5] = { prim[0], prim[1], prim[2], prim[3], prim[4] };
-                Solver::Local::Limiter::Primitive stR[5] = { prim[5], prim[4], prim[3], prim[2], prim[1] };
-                fL = limiter->Reconstruct(stL).alpha;
-                fR = limiter->Reconstruct(stR).alpha;
-            }
+            const Set::Scalar eL = Sz(i, j, k + 1, 0), eR = Sz(i, j, k + 1, 1);   // face k+1/2
+            const Set::Scalar fL = Sz(i, j, k,     0), fR = Sz(i, j, k,     1);   // face k-1/2
 #endif
             // G_face upwinded on u* at each face, mirroring a_face exactly.
             // REVERTED to the cell-centred velocity (see the note above).  Pairing
@@ -3243,7 +3392,9 @@ Hydro2::RHS(int lev,
             omega(i, j, k, 2) = gradu(1, 0) - gradu(0, 1);          // omega_z = du_y/dx - du_x/dy
 #endif
         });
+        BL_PROFILE_VAR_STOP(prof_cells);
     }
+    } // end omp parallel (RHS main loop)
     // [DIAG RHSDECOMP] mass1 RHS budget: sum(rhs)*dV must equal
     // net boundary influx + interior sources.  Printed every 300 calls.
     if (relax_diag)
@@ -3370,9 +3521,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         // density Gamma fixed across all of it; c is rescaled to the new |grad eta|.
 
         // Clamp eta in domain prior to ghost fill (state can drift slightly outside [0,1])
-        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+        for (amrex::MFIter mfi(*eta_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
         {
-            const amrex::Box &bx = mfi.validbox();
+            const amrex::Box &bx = mfi.tilebox();
             auto eta = eta_mf[lev]->array(mfi);
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 eta(i, j, k) = std::max(0.0, std::min(1.0, eta(i, j, k)));
@@ -3535,9 +3689,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // ENFORCE POSITIVITY after time advance
     // [DIAG] measure clip-created mass (CLIPLEDGER, gated on relax_diag)
     Set::Scalar _clip0 = 0.0, _clip1 = 0.0;
-    for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion() && !relax_diag)
+#endif
+    for (amrex::MFIter mfi(*rho_eta0_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
     {
-        const amrex::Box &bx = mfi.validbox();
+        const amrex::Box &bx = mfi.tilebox();
         auto rho_eta0 = rho_eta0_mf[lev]->array(mfi);
         auto rho_eta1 = rho_eta1_mf[lev]->array(mfi);
         if (relax_diag)
@@ -3588,9 +3745,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // ------------------------------------------------------------
     // Mixed Fields
     // ------------------------------------------------------------
-    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    for (amrex::MFIter mfi(*eta_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
     {
-        const amrex::Box &bx = mfi.validbox();
+        const amrex::Box &bx = mfi.tilebox();
 
         Set::Patch<Set::Scalar> eta_new = eta_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> rho_eta0 = rho_eta0_mf.Patch(lev, mfi);
@@ -3639,9 +3799,18 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     const Set::Scalar kap_eff_l = std::abs(shell_kappa_s - shell_mu_s)
                                 + 2.0 * std::abs(shell_mu_s);
 
-    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+    amrex::ReduceOps<amrex::ReduceOpMax, amrex::ReduceOpMax, amrex::ReduceOpMax, amrex::ReduceOpMax,
+                     amrex::ReduceOpMax, amrex::ReduceOpMax, amrex::ReduceOpMax, amrex::ReduceOpMin> cfl_reduce_op;
+    amrex::ReduceData<Set::Scalar, Set::Scalar, Set::Scalar, Set::Scalar,
+                      Set::Scalar, Set::Scalar, Set::Scalar, Set::Scalar> cfl_reduce_data(cfl_reduce_op);
+    using CFLTuple = typename decltype(cfl_reduce_data)::Type;
+
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    for (amrex::MFIter mfi(*eta_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
     {
-        const amrex::Box &bx = mfi.validbox();
+        const amrex::Box &bx = mfi.tilebox();
     
         Set::Patch<const Set::Scalar> eta_new = eta_mf.Patch(lev, mfi);
         Set::Patch<const Set::Scalar> eta = eta_old_mf.Patch(lev, mfi);
@@ -3708,7 +3877,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         // Local copies: class members are not addressable inside a GPU lambda.
         const Set::Scalar mu0_l = mu0, mu1_l = mu1, small_l = small;
 
-        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &vz_max_local, &F_max_local, &rho_min_local, &nu_max_local, &nus_max_local] AMREX_GPU_DEVICE(int i, int j, int k)
+        cfl_reduce_op.eval(bx, cfl_reduce_data, [=] AMREX_GPU_DEVICE(int i, int j, int k) -> CFLTuple
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
@@ -3840,41 +4009,61 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         
             // Track CFL quantities.  Skip solid cells (their frozen state must
             // not drive the global timestep).
+            // [OPT] Returned as a ReduceOps tuple instead of accumulated into
+            // by-reference captures (thread-safe; same max/min result).  NaN
+            // entries are mapped to the identity to reproduce std::max's old
+            // behaviour of silently skipping them.
             const bool is_fluid = (!embedded.apply) || (phisol(i, j, k) > embedded.relax_skip);
+            Set::Scalar t_c = 0.0, t_vx = 0.0, t_vy = 0.0, t_vz = 0.0, t_F = 0.0, t_nu = 0.0, t_nus = 0.0;
+            Set::Scalar t_rho = 1e10;
             if (is_fluid)
             {
-                c_max_local = std::max(c_max_local, a(i,j,k));
-                vx_max_local = std::max(vx_max_local, std::abs(v(i,j,k,0)));
-                vy_max_local = std::max(vy_max_local, std::abs(v(i,j,k,1)));
+                t_c  = a(i,j,k);
+                t_vx = std::abs(v(i,j,k,0));
+                t_vy = std::abs(v(i,j,k,1));
 #if AMREX_SPACEDIM == 3
-                vz_max_local = std::max(vz_max_local, std::abs(v(i,j,k,2)));
+                t_vz = std::abs(v(i,j,k,2));
 #endif
-
-                Set::Scalar F_mag = sqrt(Source(i,j,k,1) * Source(i,j,k,1) +
-                                         Source(i,j,k,2) * Source(i,j,k,2));
-                F_max_local = std::max(F_max_local, F_mag);
-                rho_min_local = std::min(rho_min_local, rho(i,j,k));
+                t_F = sqrt(Source(i,j,k,1) * Source(i,j,k,1) +
+                           Source(i,j,k,2) * Source(i,j,k,2));
+                t_rho = rho(i,j,k);
                 {
                     const Set::Scalar a1n = std::min(std::max(eta_new(i,j,k), 0.0), 1.0);
                     const Set::Scalar mu_c = a1n * mu0_l + (1.0 - a1n) * mu1_l;
-                    nu_max_local = std::max(nu_max_local, mu_c / (rho(i,j,k) + small_l));
+                    t_nu = mu_c / (rho(i,j,k) + small_l);
                     if (kap_eff_l > 0.0)
-                        nus_max_local = std::max(nus_max_local,
-                                                 kap_eff_l * grad_eta_mag / (rho(i,j,k) + small_l));
+                        t_nus = kap_eff_l * grad_eta_mag / (rho(i,j,k) + small_l);
                 }
             }
+            auto mx = [](Set::Scalar x) { return (x == x) ? x : 0.0; };
+            return { mx(t_c), mx(t_vx), mx(t_vy), mx(t_vz), mx(t_F), mx(t_nu), mx(t_nus),
+                     (t_rho == t_rho) ? t_rho : 1e10 };
         });
     } // end Mixed Fields loop
 
-    // Parallel Reduction
-    amrex::ParallelDescriptor::ReduceRealMax(c_max_local);
-    amrex::ParallelDescriptor::ReduceRealMax(vx_max_local);
-    amrex::ParallelDescriptor::ReduceRealMax(vy_max_local);
-    amrex::ParallelDescriptor::ReduceRealMax(vz_max_local);
-    amrex::ParallelDescriptor::ReduceRealMax(F_max_local);
-    amrex::ParallelDescriptor::ReduceRealMin(rho_min_local);
-    amrex::ParallelDescriptor::ReduceRealMax(nu_max_local);
-    amrex::ParallelDescriptor::ReduceRealMax(nus_max_local);
+    // Parallel Reduction.  [OPT] One packed Allreduce instead of eight
+    // (the min is folded in as the max of -rho; negation is exact).
+    {
+        CFLTuple hv = cfl_reduce_data.value(cfl_reduce_op);
+        Set::Scalar red[8] = {
+            std::max(c_max_local,   amrex::get<0>(hv)),
+            std::max(vx_max_local,  amrex::get<1>(hv)),
+            std::max(vy_max_local,  amrex::get<2>(hv)),
+            std::max(vz_max_local,  amrex::get<3>(hv)),
+            std::max(F_max_local,   amrex::get<4>(hv)),
+            std::max(nu_max_local,  amrex::get<5>(hv)),
+            std::max(nus_max_local, amrex::get<6>(hv)),
+            -std::min(rho_min_local, amrex::get<7>(hv)) };
+        amrex::ParallelDescriptor::ReduceRealMax(red, 8);
+        c_max_local   = red[0];
+        vx_max_local  = red[1];
+        vy_max_local  = red[2];
+        vz_max_local  = red[3];
+        F_max_local   = red[4];
+        nu_max_local  = red[5];
+        nus_max_local = red[6];
+        rho_min_local = -red[7];
+    }
 
     c_max = c_max_local;
     vx_max = vx_max_local;
@@ -4089,6 +4278,9 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
     Set::Scalar dr = sqrt(AMREX_D_TERM(DX[0] * DX[0], +DX[1] * DX[1], +DX[2] * DX[2]));
 
     // Eta criterion for refinement
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
     for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.tilebox();
         amrex::Array4<char> const& tags = a_tags.array(mfi);
@@ -4110,6 +4302,9 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
 #if AMREX_SPACEDIM == 3
         const Set::Scalar bl2 = refine_box_lo[2], bh2 = refine_box_hi[2];
 #endif
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
         for (amrex::MFIter mfi(*eta_mf[lev], true); mfi.isValid(); ++mfi) {
             const amrex::Box& bx = mfi.tilebox();
             amrex::Array4<char> const& tags = a_tags.array(mfi);
@@ -4129,6 +4324,9 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
     // EMBEDDED SOLID: refine the diffuse solid boundary
     if (embedded.apply)
     {
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
         for (amrex::MFIter mfi(*embedded.phi_mf[lev], true); mfi.isValid(); ++mfi) {
             const amrex::Box& bx = mfi.tilebox();
             amrex::Array4<char> const& tags = a_tags.array(mfi);
@@ -4142,6 +4340,9 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
     }
 
     // Vorticity criterion for refinement
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
     for (amrex::MFIter mfi(*vorticity_mf[lev], true); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.tilebox();
         amrex::Array4<char> const& tags = a_tags.array(mfi);
@@ -4168,6 +4369,9 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
     }
     
     // Gradu criterion for refinement
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
     for (amrex::MFIter mfi(*velocity_mf[lev], true); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.tilebox();
         amrex::Array4<char> const& tags = a_tags.array(mfi);
@@ -4181,6 +4385,9 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
     }
 
     // Pressure criterion for refinement
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
     for (amrex::MFIter mfi(*pressure_mf[lev], true); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.tilebox();
         amrex::Array4<char> const& tags = a_tags.array(mfi);
@@ -4194,6 +4401,9 @@ void Hydro2::TagCellsForRefinement(int lev, amrex::TagBoxArray& a_tags, Set::Sca
     }
 
     // Density criterion for refinement
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
     for (amrex::MFIter mfi(*density_mf[lev], true); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.tilebox();
         amrex::Array4<char> const& tags = a_tags.array(mfi);
@@ -4465,9 +4675,12 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     // ------------------------------------------------------------
     // STEP 2: Compute total density in DOMAIN; clamp eta.
     // ------------------------------------------------------------
-    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    for (amrex::MFIter mfi(*eta_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
     {
-        const amrex::Box &bx = mfi.validbox(); // DOMAIN ONLY
+        const amrex::Box &bx = mfi.tilebox(); // DOMAIN ONLY
 
         auto rho_eta0 = rho_eta0_mf[lev]->array(mfi);
         auto rho_eta1 = rho_eta1_mf[lev]->array(mfi);
@@ -4496,9 +4709,12 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         embedded.phi_bc->define(geom[lev]);
         FillBoundariesWithBC(lev, time, embedded.phi_bc, { embedded.phi_mf[lev].get() });
 
-        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+        for (amrex::MFIter mfi(*eta_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
         {
-            const amrex::Box &bx = mfi.validbox(); // DOMAIN ONLY
+            const amrex::Box &bx = mfi.tilebox(); // DOMAIN ONLY
             auto phi      = embedded.phi_mf[lev]->array(mfi);
             auto M        = momentum_mf[lev]->array(mfi);
             auto E        = energy_per_vol_mf[lev]->array(mfi);
@@ -4564,9 +4780,12 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     //   - p   uses Schmidmayer 2020 eq. (8): p = alpha_1 p_1 + alpha_2 p_2.
     //   - c   uses Schmidmayer 2020 eq. (17): c^2 = Y_1 c_1^2 + Y_2 c_2^2.
     // ------------------------------------------------------------
-    for (amrex::MFIter mfi(*velocity_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    for (amrex::MFIter mfi(*velocity_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
     {
-        const amrex::Box &bx = mfi.validbox(); // DOMAIN ONLY
+        const amrex::Box &bx = mfi.tilebox(); // DOMAIN ONLY
 
         auto rho       = density_mf[lev]->array(mfi);
         auto eta       = eta_mf[lev]->array(mfi);
@@ -4778,7 +4997,10 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         // skipped because they are already filled by FillBoundary's
         // periodic copy in STEP 3 above.
         // --------------------------------------------------------------------
-        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+        for (amrex::MFIter mfi(*eta_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
         {
             const amrex::Box &ghostbox = mfi.growntilebox(nghost);
             auto eta = eta_mf[lev]->array(mfi);
@@ -4823,7 +5045,10 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
                                   1,
                                   nghost);
 
-        for (amrex::MFIter mfi(rho_total); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+        for (amrex::MFIter mfi(rho_total, HydroTiling()); mfi.isValid(); ++mfi)
         {
             const amrex::Box &bx = mfi.growntilebox(nghost);
             auto rho  = rho_total.array(mfi);
@@ -4895,7 +5120,10 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         // branch's ghost state functionally identical to the Neumann branch.
         const int gm_copy = (nscbc4_bc != nullptr) ? nscbc4_bc->ghost_mode : 0;
 
-        for (amrex::MFIter mfi(rho_total); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+        for (amrex::MFIter mfi(rho_total, HydroTiling()); mfi.isValid(); ++mfi)
         {
             const amrex::Box &ghostbox = mfi.growntilebox(nghost);
             auto rho   = rho_total.array(mfi);
@@ -4989,7 +5217,10 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         FillBoundariesWithBC(lev, time, density0_bc, { rho_eta0_mf[lev].get() });
         FillBoundariesWithBC(lev, time, density1_bc, { rho_eta1_mf[lev].get() });
         // Mixture density is the consistent sum of the partial densities.
-        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+        for (amrex::MFIter mfi(*eta_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
         {
             const amrex::Box &ghostbox = mfi.growntilebox(nghost);
             auto rho  = density_mf[lev]->array(mfi);
@@ -5027,7 +5258,10 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             const Set::Scalar g0p = eos0.Gamma(), pi0p = eos0.P0();
             const Set::Scalar g1p = eos1.Gamma(), pi1p = eos1.P0();
             const Set::Scalar smp = small;
-            for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+            for (amrex::MFIter mfi(*eta_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
             {
                 const amrex::Box &ghostbox = mfi.growntilebox(nghost);
                 auto eta   = eta_mf[lev]->array(mfi);
@@ -5047,7 +5281,10 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         // Zero Gradient Fill
         if (nghost > effective_nghost)
         {
-            for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+            for (amrex::MFIter mfi(*rho_eta0_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
             {
                 const amrex::Box &validbox = mfi.validbox();
                 const amrex::Box &ghostEffbox = mfi.growntilebox(effective_nghost);
@@ -5118,7 +5355,10 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     // ------------------------------------------------------------
     // STEP 6: Update total density in GHOST CELLS; clamp eta.
     // ------------------------------------------------------------
-    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    for (amrex::MFIter mfi(*eta_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
     {
         const amrex::Box &ghostbox = mfi.growntilebox(nghost);
 
@@ -5153,7 +5393,10 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     // user-supplied rho E in ghosts disagrees with the per-phase
     // energies, leading the reinit step to overwrite p with garbage.
     // ------------------------------------------------------------
-    for (amrex::MFIter mfi(*velocity_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    for (amrex::MFIter mfi(*velocity_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
     {
         const amrex::Box &ghostbox = mfi.growntilebox(nghost);
 
@@ -5268,7 +5511,10 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     // ------------------------------------------------------------
     // STEP 8: Repair any remaining NaN in ALL cells (domain + ghosts)
     // ------------------------------------------------------------
-    for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    for (amrex::MFIter mfi(*density_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
     {
         const amrex::Box &ghostbox = mfi.growntilebox(nghost);
 
@@ -5415,7 +5661,10 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             }
         });
     }
-    for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    for (amrex::MFIter mfi(*density_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
     {
         const amrex::Box &ghostbox = mfi.growntilebox(nghost);
 
@@ -5431,7 +5680,10 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     // ------------------------------------------------------------
     // STEP 9: Enforce consistency and positivity in ALL cells
     // ------------------------------------------------------------
-    for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion() && !relax_diag)
+#endif
+    for (amrex::MFIter mfi(*density_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
     {
         const amrex::Box &ghostbox = mfi.growntilebox(nghost);
 
@@ -5447,7 +5699,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         // growntilebox INCLUDES the valid region).  Gated on relax_diag.
         if (relax_diag)
         {
-            const amrex::Box &vbx9 = mfi.validbox();
+            const amrex::Box &vbx9 = mfi.tilebox();   // tile (== validbox when untiled)
             Set::Scalar c0 = 0.0, c1 = 0.0;
             amrex::LoopOnCpu(vbx9, [&](int i, int j, int k) {
                 if (rho_eta0(i, j, k) < 0.0) c0 -= rho_eta0(i, j, k);
@@ -5586,7 +5838,41 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         return ss.str();
     };
 
+    // [OPT] Cheap parallel pre-check.  The detailed serial scan below used
+    // to run over every grown box on every call (7x per step); it now runs
+    // only when this rank actually holds a non-finite value in one of the
+    // same fields, so the report and the abort are unchanged.
+    bool any_nonfinite = false;
+    {
+        amrex::ReduceOps<amrex::ReduceOpMax> nf_op;
+        amrex::ReduceData<int> nf_data(nf_op);
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+        for (amrex::MFIter mfi(*density_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &ghostbox = mfi.growntilebox(nghost);
+            auto rho = density_mf[lev]->const_array(mfi);
+            auto M = momentum_mf[lev]->const_array(mfi);
+            auto E = energy_per_vol_mf[lev]->const_array(mfi);
+            auto p = pressure_mf[lev]->const_array(mfi);
+            auto v = velocity_mf[lev]->const_array(mfi);
+            auto eta = eta_mf[lev]->const_array(mfi);
+            nf_op.eval(ghostbox, nf_data, [=] AMREX_GPU_DEVICE (int i, int j, int k) -> amrex::GpuTuple<int> {
+                const bool bad = !std::isfinite(rho(i, j, k))
+                              || !std::isfinite(M(i, j, k, 0)) || !std::isfinite(M(i, j, k, 1))
+                              || !std::isfinite(E(i, j, k))
+                              || !std::isfinite(p(i, j, k))
+                              || !std::isfinite(v(i, j, k, 0)) || !std::isfinite(v(i, j, k, 1))
+                              || !std::isfinite(eta(i, j, k));
+                return { bad ? 1 : 0 };
+            });
+        }
+        any_nonfinite = (amrex::get<0>(nf_data.value(nf_op)) > 0);
+    }
+
     // Check each field and report first NaN location
+    if (any_nonfinite)
     for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &validbox = mfi.validbox();
@@ -5795,25 +6081,34 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar dt)
     // ---- N from the SAME stability measure the dt limiter uses -------------
     // nu_s = kap_eff |grad eta| / rho, reduced over the band, then
     // N = ceil( dt / (cfl_v dx^2 / (2 d nu_s)) ).
+    // [OPT] ReduceOps instead of a serial LoopOnCpu accumulation (thread-safe,
+    // same max).
     Set::Scalar nus_max = 0.0;
-    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+    amrex::ReduceOps<amrex::ReduceOpMax> nus_op;
+    amrex::ReduceData<Set::Scalar> nus_data(nus_op);
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    for (amrex::MFIter mfi(*eta_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
     {
-        const amrex::Box &bx = mfi.validbox();
+        const amrex::Box &bx = mfi.tilebox();
         auto et  = eta_mf[lev]->const_array(mfi);
         auto rho = density_mf[lev]->const_array(mfi);
-        amrex::LoopOnCpu(bx, [&] (int i, int j, int k) {
+        nus_op.eval(bx, nus_data, [=] AMREX_GPU_DEVICE (int i, int j, int k) -> amrex::GpuTuple<Set::Scalar> {
             Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
             const Set::Scalar gem = ge.lpNorm<2>();
-            if (gem < 1.0e-10) return;
+            if (gem < 1.0e-10) return { 0.0 };
             // FLOOR rho at the gas reference density.  `small` (1e-8) is far
             // below any physical density here, so without this floor a single
             // near-vacuum band cell dominates the reduction: at max_level 5 one
             // cell with rho ~ 3e-8 drove nu_s to 1.06e7 (1e10 x the healthy
             // 1.085e-3), which is what crashed the sub-cycled run.
             const Set::Scalar rho_f = std::max(rho(i,j,k), rho_floor_l);
-            nus_max = std::max(nus_max, kap_eff * gem / rho_f);
+            const Set::Scalar nus = kap_eff * gem / rho_f;
+            return { (nus == nus) ? nus : 0.0 };   // std::max skipped NaN
         });
     }
+    nus_max = std::max(nus_max, amrex::get<0>(nus_data.value(nus_op)));
     amrex::ParallelDescriptor::ReduceRealMax(nus_max);
     if (nus_max <= 0.0) return;
 
@@ -5867,7 +6162,10 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar dt)
         Omv.setVal(0.0);
 
         // ---- build Omega_visc on a grown box (band cells only) -------------
-        for (amrex::MFIter mfi(Omv, false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+        for (amrex::MFIter mfi(Omv, HydroTiling()); mfi.isValid(); ++mfi)
         {
             const amrex::Box &gbx = mfi.growntilebox(1);
             auto et  = eta_mf[lev]->const_array(mfi);
@@ -5899,9 +6197,12 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar dt)
         Omv.FillBoundary(geom[lev].periodicity());
 
         // ---- apply div(Omega_visc) to momentum, dissipation to energy ------
-        for (amrex::MFIter mfi(*momentum_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+        for (amrex::MFIter mfi(*momentum_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
         {
-            const amrex::Box &bx = mfi.validbox();
+            const amrex::Box &bx = mfi.tilebox();
             auto et  = eta_mf[lev]->const_array(mfi);
             auto vel = velocity_mf[lev]->const_array(mfi);
             auto om  = Omv.const_array(mfi);
@@ -5971,9 +6272,12 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar dt)
         }
 
         // Refresh the velocity the next sub-step differentiates (band only).
-        for (amrex::MFIter mfi(*momentum_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+        for (amrex::MFIter mfi(*momentum_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
         {
-            const amrex::Box &bx = mfi.validbox();
+            const amrex::Box &bx = mfi.tilebox();
             auto et  = eta_mf[lev]->const_array(mfi);
             auto M   = momentum_mf[lev]->const_array(mfi);
             auto rho = density_mf[lev]->const_array(mfi);
@@ -6030,9 +6334,12 @@ void Hydro2::RelaxAndReinit(int lev)
     // unstrained value so re-entrained cells always start from Gamma = 1.
     if (marmottant)
     {
-        for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+        for (amrex::MFIter mfi(*shell_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
         {
-            const amrex::Box &bxs = mfi.validbox();
+            const amrex::Box &bxs = mfi.tilebox();
             auto shl  = shell_mf[lev]->array(mfi);
             auto etas = eta_mf[lev]->const_array(mfi);
             const int extend = shell_bulk_extend;
@@ -6120,9 +6427,12 @@ void Hydro2::RelaxAndReinit(int lev)
             amrex::MultiFab prev(shell_mf[lev]->boxArray(),
                                  shell_mf[lev]->DistributionMap(), 1, shell_mf[lev]->nGrow());
             amrex::MultiFab::Copy(prev, *shell_mf[lev], 0, 0, 1, shell_mf[lev]->nGrow());
-            for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+            for (amrex::MFIter mfi(*shell_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
             {
-                const amrex::Box &bxe = mfi.validbox();
+                const amrex::Box &bxe = mfi.tilebox();
                 auto shl = shell_mf[lev]->array(mfi);
                 auto old = prev.const_array(mfi);
                 auto etae = eta_mf[lev]->const_array(mfi);
@@ -6172,9 +6482,12 @@ void Hydro2::RelaxAndReinit(int lev)
 
     // ------------------------------------------------------------------
 
-    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    for (amrex::MFIter mfi(*eta_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
     {
-        const amrex::Box &bx = mfi.validbox();
+        const amrex::Box &bx = mfi.tilebox();
 
         auto eta   = eta_mf[lev]->array(mfi);
         auto arh0  = rho_eta0_mf[lev]->array(mfi);
@@ -6653,9 +6966,12 @@ void Hydro2::PostSubcycleReflux(int lev, Set::Scalar /*time*/, Set::Scalar /*dt_
 
     // Recompute derived fields from the refluxed conserved state.
     // density and velocity are not refluxed directly -- they're derived.
-    for (amrex::MFIter mfi(*density_mf[lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    for (amrex::MFIter mfi(*density_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
     {
-        const amrex::Box& bx = mfi.validbox();
+        const amrex::Box& bx = mfi.tilebox();
         auto rho  = density_mf[lev]->array(mfi);
         auto rho0 = rho_eta0_mf[lev]->array(mfi);
         auto rho1 = rho_eta1_mf[lev]->array(mfi);
@@ -6717,9 +7033,12 @@ void Hydro2::PostAverageDown(int coarse_lev)
     const Set::Scalar pi1_ = eos1.P0();
     const Set::Scalar small_local = small;
 
-    for (amrex::MFIter mfi(*eta_mf[coarse_lev], false); mfi.isValid(); ++mfi)
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    for (amrex::MFIter mfi(*eta_mf[coarse_lev], HydroTiling()); mfi.isValid(); ++mfi)
     {
-        const amrex::Box& bx = mfi.validbox();
+        const amrex::Box& bx = mfi.tilebox();
         auto eta   = eta_mf[coarse_lev]        ->array(mfi);
         auto rho0  = rho_eta0_mf[coarse_lev]   ->array(mfi);
         auto rho1  = rho_eta1_mf[coarse_lev]   ->array(mfi);
