@@ -87,7 +87,16 @@ amr.blocking_factor = 2
 # = 3.75e-6 (1.88 R0), close to the intended box.
 amr.regrid_int      = 10
 amr.grid_eff        = 0.8
-amr.max_level       = 5
+# max_level 5 -> 3 (2026-09-22).  kappa_s is a SURFACE momentum diffusion with
+# nu_s = kappa_s |grad eta| / rho; since eps/dx is held ~1, nu_s ~ 1/dx and its
+# explicit stability limit dt <= dx^2/(2 d nu_s) scales as dx^3, while the
+# acoustic limit scales as dx.  Measured violation of that limit: 2.6x at L3,
+# 7.3x at L4, 20.6x at L5 -- L5 NaN'd at step 3 (HLLC saw rho=10000 and
+# alpha=1e-12).  With the limit now enforced (shell.dt_limit=1) the honest
+# dt[0] at L5 is 3.2e-13 -> ~124,000 base steps, infeasible; L4 ~21,000; L3
+# ~5,200.  L3 gives R0/dx = 25.6, the same resolution the Oscillating deck uses.
+# To go back to L5, kappa_s needs an implicit or sub-cycled treatment.
+amr.max_level       = 3
 amr.n_cell          = 64 64 64        # base dx 6.25e-7; L5 -> dx_finest 1.953e-8 (R0/dx = 102.4)
 
 amr.n_error_buf     = 16
@@ -134,7 +143,7 @@ stop_time            = 4.0e-8         # ~1.55 tau_c -- collapse + first rebound
 
 ### ETA INITIAL CONDITIONS ###
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 2.0e-8     # ~1 cell across the band at finest
+eta.ic.expression.constant.epsilon = 8.0e-8     # eps/dx = 1.02 at L3 (dx 7.8125e-8); MUST scale with max_level
 eta.ic.expression.constant.R0      = 2.0e-6
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon

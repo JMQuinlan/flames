@@ -154,6 +154,10 @@ protected:
     // 2009 §3.5 / Schmidmayer 2020 §3.3).  Runs in-place on the working
     // MultiFabs after each RK stage and before the ghost-cell fill.
     void RelaxAndReinit(int lev);
+    // Sub-cycled SHELL DILATATIONAL VISCOUS update (see Hydro2.cpp).  Advances
+    // only div(Omega_visc) on the interface band, in N sub-steps of dt/N, so the
+    // stiff kappa_s term no longer sets the global timestep.
+    void SubcycleShellViscous(int lev, Set::Scalar dt);
 
     // ------------------------------------------------------------------
     // CAPILLARY OPERATOR  L_cap   (Schmidmayer 2017 eq. 17, sec. 4.2.2)
@@ -749,7 +753,12 @@ protected:
     // cell, which makes the bubble lose volume while conserving gas mass.
     // 1 = advect Gamma with the alpha row's operator (limiter face value
     // upwinded on the Riemann contact speed u*), so the two stay locked.
-    int shell_sigma_floor = 1;
+    int shell_sigma_floor = 0;   // see Parse(): floor deletes the dilatational viscous stress
+    int shell_dt_limit = 1;    // include kappa_s in the explicit-diffusion dt limit
+    int shell_visc_subcycle = 0;      // sub-cycle kappa_s (0 = dt-limited path; see Parse)
+    int shell_visc_subcycle_max = 512; // hard cap on sub-steps (runaway guard)
+    int shell_visc_verbose = 0;        // print N and nu_s each sub-cycle
+    Set::Scalar shell_nus_rho_floor = 1.0;  // density floor for the nu_s estimate
     int relax_diag = 0;
     int clip_ghost_only = 0;
     bool sym_face_lo[3] = {false, false, false};

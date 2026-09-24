@@ -313,7 +313,46 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                 Util::Message(INFO, "thermo.dat: gas_volume, gas_pressure_int, kinetic_energy, interface_area");
             }
         }
-        pp_query_default("shell.sigma_floor", value.shell_sigma_floor, 1);  // 1 = clamp sigma_eff + kappa_s div_s(u) at 0 (see Advance)
+        // DEFAULT 0 as of 2026-09-23.  The floor clamps sigma(Gamma) + kappa_s
+        // div_s(u) at 0.  div_s u = 2 Rdot/R is negative throughout a collapse,
+        // and the Marmottant BUCKLED branch drives sigma(Gamma) to exactly 0, so
+        // past buckling the total is ENTIRELY viscous and negative -- the floor
+        // then zeroes the whole surface stress, not part of it.  Measured duty
+        // cycle on Sch20-Oscillating: 0% early, 100% from t = 3.6e-8 on.
+        // Measured R_min/R0 (ml=2, 1.2 tau_c, reference ODE full shell 0.5172):
+        //     sigma_floor=1 -> 0.4051  ==  elastic_only 0.4058  (viscous GONE)
+        //     sigma_floor=0 -> 0.5358  vs  reference     0.5172  (3.6%)
+        // The floor only ever compensated for the missing kappa_s timestep limit;
+        // with shell.dt_limit=1 it is unnecessary -- floor=0 ran 1977 steps on the
+        // oscillating case and 4855 on the violent collapse with zero NaN.
+        pp_query_default("shell.sigma_floor", value.shell_sigma_floor, 0);
+        // 1 = include the shell dilatational viscosity in the explicit-diffusion
+        // timestep limit (see the nu_s block in the dt computation).  Set to 0 to
+        // reproduce the pre-2026-09 behaviour, which silently violated that limit
+        // by 20x at max_level=5 and produced a NaN at step 3 of Sch20-Collapsing.
+        // Only for A/B work: turning it off does not make the term stable.
+        pp_query_default("shell.dt_limit", value.shell_dt_limit, 1);
+        // 1 = advance the kappa_s surface-viscous stress in its own sub-cycle
+        // (N = dt/dt_visc sub-steps on the band) instead of letting its dx^3
+        // stability limit throttle the GLOBAL timestep.  Modelled on the
+        // shell_extend_iters sweep loop: nearest-neighbour FillBoundary per
+        // sub-step, no global reductions, band cells only.  When on, the
+        // viscous term is removed from Omega and from the dt limiter.
+        // DEFAULT 0 as of 2026-09-23.  Sub-cycling is VALIDATED at max_level 3
+        // (trajectory matches the dt-limited path to 0.05%, 10.7x faster) but
+        // FAILS at max_level 5: the required sub-step count climbs past the cap
+        // (N = 1022 -> 1245 and rising) because nu_s grows during the run, and
+        // once clamped the sub-step is no longer stability-bounded.  Until that
+        // is understood, the dt-limited path (subcycle=0) is the supported one.
+        pp_query_default("shell.kappa_s_subcycle", value.shell_visc_subcycle, 0);
+        // Guard: if nu_s ever blows up, cap the sub-step count rather than
+        // spinning forever inside one hydro step.  512 is ~6 refinement levels
+        // past the measured L5 value of 21 (N ~ 1/dx^2, so it quadruples/level).
+        pp_query_default("shell.kappa_s_subcycle_max", value.shell_visc_subcycle_max, 512);
+        pp_query_default("shell.kappa_s_verbose", value.shell_visc_verbose, 0);
+        // Density floor for the nu_s stability estimate (NOT for the physics).
+        // Defaults to 1.0 kg/m^3, the gas reference density of the Sch20 decks.
+        pp_query_default("shell.nus_rho_floor", value.shell_nus_rho_floor, 1.0);
         // ENERGY-CONSISTENT ALPHA in the pure-cell relaxation guard.
         //
         // THE BUG.  In the pure-cell guard of RelaxAndReinit, p_pure was
@@ -1694,6 +1733,7 @@ Hydro2::RHS(int lev,
         // projector P; 2 mu_s D_s is a genuine tensor and is added on top.
         const int shell_sigma_floor_l = shell_sigma_floor;
         const Set::Scalar kap_s = shell_kappa_s - shell_mu_s;
+        const int subcyc_visc = shell_visc_subcycle && (shell_kappa_s != 0.0);
         const Set::Scalar mu_s  = shell_mu_s;
         const int visc_shell = (kap_s != 0.0) || (mu_s != 0.0);
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
@@ -1738,7 +1778,11 @@ Hydro2::RHS(int lev,
                     for (int d = 0; d < AMREX_SPACEDIM; ++d)
                         gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
                     // div_s u = tr(P.grad u) = tr(grad u) - n.grad u.n
-                    se += kap_s * (gu.trace() - nh.dot(gu * nh));
+                    // When shell.kappa_s_subcycle is on, SubcycleShellViscous
+                    // owns this term and Omega carries the ELASTIC branch only,
+                    // so it must not be added twice.
+                    const Set::Scalar divs_u = gu.trace() - nh.dot(gu * nh);
+                    if (!subcyc_visc) se += kap_s * divs_u;
                     // A fluid interface cannot support COMPRESSION: the total
                     // Boussinesq-Scriven surface tension sigma(Gamma) +
                     // kappa_s div_s(u) must stay >= 0.  Without this floor a
@@ -3583,6 +3627,17 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // standard setup (mu 0.15/0.015, rho 10/1) it overestimates nu by 10x --
     // costing a factor of ~6 in dt once the capillary limit takes over.
     Set::Scalar nu_max_local = 0.0;
+    // Max LOCAL kinematic diffusivity of the SHELL DILATATIONAL stress,
+    //     nu_s = kappa_eff * |grad eta| / rho.
+    // Reduced exactly, for the same reason nu_max is: the surface stress is
+    // identically zero where |grad eta| = 0, i.e. throughout the gas interior
+    // that supplies rho_min, so pairing kappa_s with the global rho_min takes
+    // a density and a gradient that never occur in the same cell.  Measured on
+    // Sch20-Collapsing that pairing was 1000x too conservative -- it drove
+    // dt[0] to 2.0e-15 instead of ~2.2e-12.
+    Set::Scalar nus_max_local = 0.0;
+    const Set::Scalar kap_eff_l = std::abs(shell_kappa_s - shell_mu_s)
+                                + 2.0 * std::abs(shell_mu_s);
 
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
@@ -3653,7 +3708,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         // Local copies: class members are not addressable inside a GPU lambda.
         const Set::Scalar mu0_l = mu0, mu1_l = mu1, small_l = small;
 
-        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &vz_max_local, &F_max_local, &rho_min_local, &nu_max_local] AMREX_GPU_DEVICE(int i, int j, int k)
+        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &vz_max_local, &F_max_local, &rho_min_local, &nu_max_local, &nus_max_local] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
@@ -3803,6 +3858,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     const Set::Scalar a1n = std::min(std::max(eta_new(i,j,k), 0.0), 1.0);
                     const Set::Scalar mu_c = a1n * mu0_l + (1.0 - a1n) * mu1_l;
                     nu_max_local = std::max(nu_max_local, mu_c / (rho(i,j,k) + small_l));
+                    if (kap_eff_l > 0.0)
+                        nus_max_local = std::max(nus_max_local,
+                                                 kap_eff_l * grad_eta_mag / (rho(i,j,k) + small_l));
                 }
             }
         });
@@ -3816,6 +3874,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     amrex::ParallelDescriptor::ReduceRealMax(F_max_local);
     amrex::ParallelDescriptor::ReduceRealMin(rho_min_local);
     amrex::ParallelDescriptor::ReduceRealMax(nu_max_local);
+    amrex::ParallelDescriptor::ReduceRealMax(nus_max_local);
 
     c_max = c_max_local;
     vx_max = vx_max_local;
@@ -3849,6 +3908,32 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // Fall back to the old conservative pairing if it was never set.
     Set::Scalar nu_phys = (nu_max > 0.0) ? nu_max : (mu_max / (rho_min + small));
     Set::Scalar nu_total = nu_phys;
+    // SHELL DILATATIONAL VISCOSITY.  kappa_s enters the momentum equation as
+    //     div( |grad eta| * kappa_s * (div_s u) * P ),
+    // i.e. a SURFACE momentum diffusion whose kinematic diffusivity is
+    //     nu_s = kappa_s * |grad eta| / rho  ~  kappa_s / (rho * eps),
+    // eps being the interface width.  Because eps is held at ~1 cell
+    // (eps/dx = 1.02 on the Sch20 decks), |grad eta| ~ 1/dx_min and nu_s
+    // therefore GROWS as the mesh is refined:
+    //     nu_s ~ 1/dx   =>   dt_visc ~ dx^2 / nu_s ~ dx^3,
+    // while the acoustic limit only scales as dx.  Refinement makes this the
+    // binding constraint even though it is invisible at coarse resolution.
+    //
+    // Measured on Sch20-Collapsing (kappa_s = 7.2e-9, rho = 1000):
+    //   level  dx         nu_s       dt_limit   substep    violation
+    //   L3     7.81e-8    9.0e-5     4.52e-12   1.16e-11     2.6x
+    //   L4     3.91e-8    1.80e-4    5.65e-13   4.11e-12     7.3x
+    //   L5     1.95e-8    3.60e-4    7.06e-14   1.45e-12    20.6x  -> NaN at step 3
+    // nu_s at L5 is 360x the bulk mu0/rho, so omitting it from nu_total made
+    // dt_viscous meaningless for any coated run.  1/dx_min is used as the
+    // bound on |grad eta| because the band cannot be thinner than a cell.
+    // nus_max_local is the exact max of kappa_eff*|grad eta|/rho, reduced over
+    // the whole level and taken only where the surface stress actually lives.
+    // When the viscous stress is sub-cycled it no longer constrains the GLOBAL
+    // step -- SubcycleShellViscous takes N = dt/dt_visc sub-steps internally --
+    // so the constraint is dropped here and enforced there instead.
+    if (kap_eff_l > 0.0 && shell_dt_limit && !(shell_visc_subcycle && shell_kappa_s != 0.0))
+        nu_total += nus_max_local;
     Set::Scalar dt_viscous = cfl_v * dx_min * dx_min
                            / (2.0 * AMREX_SPACEDIM * (nu_total + small));
 
@@ -4612,6 +4697,11 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     // L_hyper(U^n), so relaxation runs ONCE per step after the capillary
     // operator, not between RK stages.  defer_relax is false unless the split
     // scheme is active, so the AcousticBC behaviour is unchanged by default.
+    // Operator splitting: L_relax o L_visc o L_cap o L_hyper.  The shell
+    // viscous stress is advanced here, immediately before relaxation, on the
+    // level's own timestep (dt is the per-level Vector in this scope).
+    SubcycleShellViscous(lev, dt[lev]);
+
     if (!defer_relax) RelaxAndReinit(lev);
 
     // ------------------------------------------------------------
@@ -5655,6 +5745,249 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
 // ======================================================================
 // L_cap : Schmidmayer 2017 eq. (17) / sec. 4.2.2.  See Hydro2.H.
 // ======================================================================
+//
+// SUB-CYCLED SHELL DILATATIONAL VISCOUS UPDATE
+// ---------------------------------------------------------------------------
+// kappa_s enters momentum as div(Omega_visc), Omega_visc = |grad eta| kappa_s
+// (div_s u) P.  That is a SURFACE momentum diffusion with kinematic diffusivity
+// nu_s = kappa_s |grad eta| / rho.  Because the decks hold eps/dx ~ 1,
+// |grad eta| ~ 1/dx, so nu_s ~ 1/dx and its explicit stability limit
+// dt <= dx^2/(2 d nu_s) scales as dx^3 while the acoustic limit scales as dx.
+// Letting it set the global step made max_level 5 cost ~83,000 base steps.
+//
+// Instead this advances ONLY that term, on the band, in N sub-steps of dt/N
+// with N from the local stability limit.  Structure copied from the
+// shell_extend_iters sweep: nearest-neighbour FillBoundary per sub-step, no
+// global reductions, band cells only -- so the extra work is <1% of a hydro
+// step (the band is ~5e4 cells against 6.4M at L5) and it adds no collective.
+//
+// ENERGY.  The bulk Omega is treated as a REVERSIBLE capillary stress whose
+// Omega:grad(u) exchange feeds the surface reservoir sigma_eff|grad eta|.  The
+// viscous part is NOT reversible and has no reservoir: its work rate is
+//     Omega_visc : grad u = kappa_s |grad eta| (div_s u)^2  >= 0,
+// positive-definite, so it is deposited as HEAT in the internal energy.  This
+// is why splitting it out is more correct than folding it into the scalar
+// tension, where it could drive sigma_tot negative and had to be clamped.
+//
+// COARSE-FINE.  The coarse level does not advance during the sub-cycle, so its
+// contribution to the band ghost velocity is held fixed across the N sub-steps
+// -- first order over an interval of one hydro dt, which is consistent with the
+// subcycled-AMR treatment of the other source terms.
+//
+void Hydro2::SubcycleShellViscous(int lev, Set::Scalar dt)
+{
+    BL_PROFILE("Integrator::Hydro2::SubcycleShellViscous");
+    if (!shell_visc_subcycle) return;
+    if (shell_kappa_s == 0.0 && shell_mu_s == 0.0) return;
+    if (!apply_surface_tension) return;
+
+    const Set::Scalar *DX = geom[lev].CellSize();
+    const Set::Scalar kap_s = shell_kappa_s - shell_mu_s;
+    const Set::Scalar dxm = std::min({AMREX_D_DECL(DX[0], DX[1], DX[2])});
+    const Set::Scalar kap_eff = std::abs(kap_s) + 2.0 * std::abs(shell_mu_s);
+    const Set::Scalar sm = small;
+
+    // Gas reference density: the smallest density the stability estimate is
+    // allowed to see.  Taken from the phase-1 (gas) IC scale rather than
+    // `small`, which is a numerical regulariser, not a physical density.
+    const Set::Scalar rho_floor_l = std::max(shell_nus_rho_floor, 1.0e-12);
+
+    // ---- N from the SAME stability measure the dt limiter uses -------------
+    // nu_s = kap_eff |grad eta| / rho, reduced over the band, then
+    // N = ceil( dt / (cfl_v dx^2 / (2 d nu_s)) ).
+    Set::Scalar nus_max = 0.0;
+    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
+        auto et  = eta_mf[lev]->const_array(mfi);
+        auto rho = density_mf[lev]->const_array(mfi);
+        amrex::LoopOnCpu(bx, [&] (int i, int j, int k) {
+            Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
+            const Set::Scalar gem = ge.lpNorm<2>();
+            if (gem < 1.0e-10) return;
+            // FLOOR rho at the gas reference density.  `small` (1e-8) is far
+            // below any physical density here, so without this floor a single
+            // near-vacuum band cell dominates the reduction: at max_level 5 one
+            // cell with rho ~ 3e-8 drove nu_s to 1.06e7 (1e10 x the healthy
+            // 1.085e-3), which is what crashed the sub-cycled run.
+            const Set::Scalar rho_f = std::max(rho(i,j,k), rho_floor_l);
+            nus_max = std::max(nus_max, kap_eff * gem / rho_f);
+        });
+    }
+    amrex::ParallelDescriptor::ReduceRealMax(nus_max);
+    if (nus_max <= 0.0) return;
+
+    const Set::Scalar cflv   = (cfl_v == cfl_v) ? cfl_v : 0.4;   // NaN-safe
+    // NOTE: `small` (1e-8) is a DENSITY/PRESSURE regulariser and must never be
+    // added to a time.  dt_sub here is ~1e-12, so `dt_sub + small` is dominated
+    // by small and drives N to 1 -- i.e. one explicit step at the UNTHROTTLED
+    // dt, precisely the instability this routine exists to avoid.  nus_max > 0
+    // is already guaranteed by the early return above, so no guard is needed.
+    const Set::Scalar dt_sub = cflv * dxm * dxm
+                             / (2.0 * AMREX_SPACEDIM * nus_max);
+    // 64-bit: ceil(dt/dt_sub) reached ~6e11 when nu_s blew up, and the cast to
+    // int overflowed to a negative value, which the `N < 1` clamp then turned
+    // into N = 1 -- the sub-cycle silently disabled itself exactly when it was
+    // most needed, taking one explicit step at the unthrottled dt (89 NaNs at
+    // max_level 5).  Compute in long long, clamp, THEN narrow.
+    long long Nll = (dt_sub > 0.0)
+                  ? (long long)std::ceil((long double)dt / (long double)dt_sub)
+                  : 1LL;
+    if (Nll < 1LL) Nll = 1LL;
+    if (Nll > (long long)shell_visc_subcycle_max)
+    {
+        if (amrex::ParallelDescriptor::IOProcessor())
+            Util::Warning(INFO, "SubcycleShellViscous lev=", lev, ": required N=", Nll,
+                          " exceeds shell.kappa_s_subcycle_max=", shell_visc_subcycle_max,
+                          " (nu_s=", nus_max, ").  Clamping -- the sub-step is NO LONGER "
+                          "stability-bounded; raise the cap or check for vacuum cells.");
+        Nll = (long long)shell_visc_subcycle_max;
+    }
+    const int N = (int)Nll;
+    const Set::Scalar dtau = dt / (Set::Scalar)N;
+
+    if (shell_visc_verbose && amrex::ParallelDescriptor::IOProcessor())
+        Util::Message(INFO, "SubcycleShellViscous lev=", lev, " N=", N,
+                      " dtau=", dtau, " nu_s=", nus_max);
+
+    // ---- N explicit sub-steps on the band ---------------------------------
+    // Omega_visc is built ONCE PER CELL into scratch, then differenced.  The
+    // first version rebuilt it at all six neighbours inside the divergence,
+    // which recomputed an eta-gradient AND the full 3x3 velocity Jacobian seven
+    // times per cell (~168 stencil reads) instead of once (~30).  The scratch is
+    // allocated outside the sub-step loop so the saving is not paid back in
+    // allocation churn.
+    const int nOm = (AMREX_SPACEDIM == 2) ? 3 : 6;
+    amrex::MultiFab Omv(momentum_mf[lev]->boxArray(),
+                        momentum_mf[lev]->DistributionMap(), nOm, 1);
+
+    for (int it = 0; it < N; ++it)
+    {
+        velocity_mf[lev]->FillBoundary(geom[lev].periodicity());
+        Omv.setVal(0.0);
+
+        // ---- build Omega_visc on a grown box (band cells only) -------------
+        for (amrex::MFIter mfi(Omv, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &gbx = mfi.growntilebox(1);
+            auto et  = eta_mf[lev]->const_array(mfi);
+            auto vel = velocity_mf[lev]->const_array(mfi);
+            auto om  = Omv.array(mfi);
+            amrex::ParallelFor(gbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
+                const Set::Scalar gem = ge.lpNorm<2>();
+                if (gem < 1.0e-10) return;          // off-band: Omega_visc = 0
+                const Set::Vector nh = ge / gem;
+                Set::Matrix gu = Set::Matrix::Zero();
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
+                const Set::Scalar ds = gu.trace() - nh.dot(gu * nh);
+                const Set::Scalar se = kap_s * ds;              // viscous ONLY
+                // |grad eta| P_ab = gem d_ab - ge_a ge_b / gem
+                om(i,j,k,0) = se * (gem - ge(0)*ge(0)/gem);     // xx
+                om(i,j,k,1) = se * (gem - ge(1)*ge(1)/gem);     // yy
+#if AMREX_SPACEDIM == 2
+                om(i,j,k,2) = se * (-ge(0)*ge(1)/gem);          // xy
+#else
+                om(i,j,k,2) = se * (gem - ge(2)*ge(2)/gem);     // zz
+                om(i,j,k,3) = se * (-ge(0)*ge(1)/gem);          // xy
+                om(i,j,k,4) = se * (-ge(0)*ge(2)/gem);          // xz
+                om(i,j,k,5) = se * (-ge(1)*ge(2)/gem);          // yz
+#endif
+            });
+        }
+        Omv.FillBoundary(geom[lev].periodicity());
+
+        // ---- apply div(Omega_visc) to momentum, dissipation to energy ------
+        for (amrex::MFIter mfi(*momentum_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto et  = eta_mf[lev]->const_array(mfi);
+            auto vel = velocity_mf[lev]->const_array(mfi);
+            auto om  = Omv.const_array(mfi);
+            auto M   = momentum_mf[lev]->array(mfi);
+            auto E   = energy_per_vol_mf[lev]->array(mfi);
+            // The RK state carries BOTH the total energy and the phasic
+            // internal energies (solution vector entries [3], [5], [6]).  The
+            // dissipation must go into E0/E1 as well, or the invariant
+            //     E_vol = KE + E0 + E1
+            // is broken and RelaxAndReinit -- which enforces p0 = p1 from
+            // (eta, E0, E1) immediately after this routine -- never sees the
+            // deposited heat.  Writing E_vol alone was why max_level 5 diverged
+            // while max_level 3 (64x fewer sub-steps) stayed within 0.05%.
+            auto E0  = energy0_mf[lev]->array(mfi);
+            auto E1  = energy1_mf[lev]->array(mfi);
+            const Set::Scalar idx = 0.5 / DX[0], idy = 0.5 / DX[1];
+#if AMREX_SPACEDIM == 3
+            const Set::Scalar idz = 0.5 / DX[2];
+#endif
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
+                const Set::Scalar gem = ge.lpNorm<2>();
+                if (gem < 1.0e-10) return;          // off-band: nothing to do
+
+                Set::Vector F = Set::Vector::Zero();
+#if AMREX_SPACEDIM == 2
+                F(0) = (om(i+1,j,k,0) - om(i-1,j,k,0)) * idx
+                     + (om(i,j+1,k,2) - om(i,j-1,k,2)) * idy;
+                F(1) = (om(i+1,j,k,2) - om(i-1,j,k,2)) * idx
+                     + (om(i,j+1,k,1) - om(i,j-1,k,1)) * idy;
+#else
+                F(0) = (om(i+1,j,k,0) - om(i-1,j,k,0)) * idx
+                     + (om(i,j+1,k,3) - om(i,j-1,k,3)) * idy
+                     + (om(i,j,k+1,4) - om(i,j,k-1,4)) * idz;
+                F(1) = (om(i+1,j,k,3) - om(i-1,j,k,3)) * idx
+                     + (om(i,j+1,k,1) - om(i,j-1,k,1)) * idy
+                     + (om(i,j,k+1,5) - om(i,j,k-1,5)) * idz;
+                F(2) = (om(i+1,j,k,4) - om(i-1,j,k,4)) * idx
+                     + (om(i,j+1,k,5) - om(i,j-1,k,5)) * idy
+                     + (om(i,j,k+1,2) - om(i,j,k-1,2)) * idz;
+#endif
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    M(i,j,k,d) += dtau * F(d);
+
+                // Dissipation -> heat.  Omega_visc:grad u = kap_s |grad eta| (div_s u)^2
+                // is positive-definite, so the kinetic energy removed by F is
+                // returned as internal energy rather than stored in a reservoir.
+                const Set::Vector nh = ge / gem;
+                Set::Matrix gu = Set::Matrix::Zero();
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
+                const Set::Scalar ds = gu.trace() - nh.dot(gu * nh);
+                Set::Scalar udotF = 0.0;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) udotF += vel(i,j,k,d) * F(d);
+                // Total energy gains the work done on the fluid (u.F, which
+                // shows up as kinetic) plus the dissipation (internal).
+                const Set::Scalar diss = kap_s * gem * ds * ds;   // >= 0
+                E(i,j,k) += dtau * (udotF + diss);
+                // The dissipation is INTERNAL energy, so it must also be split
+                // into the phasic reservoirs, by volume fraction as elsewhere
+                // in this file (eta weights phase 0).  u.F is kinetic and does
+                // NOT enter E0/E1.
+                const Set::Scalar a0 = std::min(std::max(et(i,j,k), 0.0), 1.0);
+                E0(i,j,k) += dtau * diss * a0;
+                E1(i,j,k) += dtau * diss * (1.0 - a0);
+            });
+        }
+
+        // Refresh the velocity the next sub-step differentiates (band only).
+        for (amrex::MFIter mfi(*momentum_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto et  = eta_mf[lev]->const_array(mfi);
+            auto M   = momentum_mf[lev]->const_array(mfi);
+            auto rho = density_mf[lev]->const_array(mfi);
+            auto v   = velocity_mf[lev]->array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
+                if (ge.lpNorm<2>() < 1.0e-10) return;
+                const Set::Scalar r = rho(i,j,k) + sm;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) v(i,j,k,d) = M(i,j,k,d) / r;
+            });
+        }
+    }
+}
+
 void Hydro2::RelaxAndReinit(int lev)
 {
     BL_PROFILE("Integrator::Hydro2::RelaxAndReinit");
