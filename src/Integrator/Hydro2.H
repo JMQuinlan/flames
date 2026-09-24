@@ -154,6 +154,10 @@ protected:
     // 2009 §3.5 / Schmidmayer 2020 §3.3).  Runs in-place on the working
     // MultiFabs after each RK stage and before the ghost-cell fill.
     void RelaxAndReinit(int lev);
+    // Sub-cycled SHELL DILATATIONAL VISCOUS update (see Hydro2.cpp).  Advances
+    // only div(Omega_visc) on the interface band, in N sub-steps of dt/N, so the
+    // stiff kappa_s term no longer sets the global timestep.
+    void SubcycleShellViscous(int lev, Set::Scalar dt);
 
     // ------------------------------------------------------------------
     // CAPILLARY OPERATOR  L_cap   (Schmidmayer 2017 eq. 17, sec. 4.2.2)
@@ -588,6 +592,15 @@ protected:
     // (see the cancellation above) and only matters for shape modes, wall
     // interaction, and bubble--bubble coupling.  mu_s is parsed and validated so
     // an input cannot silently request a term the solver does not apply.
+    // 1 = bulk cells adjacent to the band inherit the band Gamma instead of
+    // being pinned to 1.0 (stops a moving interface eating unstrained shell).
+    // 1 = drop the DX-scaled Gamma freeze and use P = |n|^2 I - n n so the
+    // surface-divergence source vanishes in the bulk by construction.
+    // Sweeps of the Gamma normal-extension relaxation per step (0 = off).
+    // Enforces n.grad(Gamma) = 0 so every band cell carries one surface value.
+    int shell_extend_iters = 4;
+    int shell_gate_free = 1;
+    int shell_bulk_extend = 1;
     Set::Scalar shell_kappa_s = 0.0;   // surface dilatational viscosity [kg/s]
     Set::Scalar shell_mu_s    = 0.0;   // surface shear viscosity [kg/s] -- NOT APPLIED
     int apply_weight = 0;
@@ -731,6 +744,21 @@ protected:
     // for production; set nan_check=1 in the input when debugging a blow-up.
     int nan_check = 0;
     int verbose = 0;
+    // See Parse(): 1 = energy-consistent alpha in the pure-cell guard
+    // (fixes E0+E1 != rho_e inside bubbles); 0 = legacy.
+    // 1 = clamp the total surface tension sigma + kappa_s div_s(u) at 0.
+    // A fluid interface cannot support compression; see Advance().
+    // 1 = advect the alpha row with the limiter-reconstructed face volume
+    // fraction (same truncation error as the mass rows); 0 = legacy donor
+    // cell, which makes the bubble lose volume while conserving gas mass.
+    // 1 = advect Gamma with the alpha row's operator (limiter face value
+    // upwinded on the Riemann contact speed u*), so the two stay locked.
+    int shell_sigma_floor = 0;   // see Parse(): floor deletes the dilatational viscous stress
+    int shell_dt_limit = 1;    // include kappa_s in the explicit-diffusion dt limit
+    int shell_visc_subcycle = 0;      // sub-cycle kappa_s (0 = dt-limited path; see Parse)
+    int shell_visc_subcycle_max = 512; // hard cap on sub-steps (runaway guard)
+    int shell_visc_verbose = 0;        // print N and nu_s each sub-cycle
+    Set::Scalar shell_nus_rho_floor = 1.0;  // density floor for the nu_s estimate
     int relax_diag = 0;
     int clip_ghost_only = 0;
     bool sym_face_lo[3] = {false, false, false};

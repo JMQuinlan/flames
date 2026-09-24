@@ -12,4 +12,6 @@ module purge
 module load gnu9 mpich
 
 ## 3D Varients ##
+cd /home/ttryon/flames
+
 srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowMarmottant/input_Sch20-Oscillating_Marmottant

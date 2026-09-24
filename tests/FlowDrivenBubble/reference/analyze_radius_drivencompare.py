@@ -91,20 +91,29 @@ def _slug(text):
 
 
 def _discover_runs(pattern=None):
-    """Every driven input under tests/FlowDrivenBubble, with the drive read from
-    the FILE rather than from its name.
+    """OUTPUT-DRIVEN discovery: enumerate the output directories that actually
+    hold plotfiles, then open each one's input to read the drive.
 
-    The old behaviour required inputs to be named input_f<Hz>_A<kPa>; anything
-    else was silently skipped.  Now any input_* is picked up and its frequency
-    and amplitude come from nscbc.<face>.drive_{amp,omega} (or the primitive-BC
-    keys), so a new run needs no naming convention and no edit here.  Inputs
-    with no drive at all (ringdowns) are reported and skipped.
+    This is the reverse of the old behaviour, which walked every input_* under
+    tests/FlowDrivenBubble and produced a figure for each -- ~20 plots when only
+    one case had been run, most of them models-only with nothing to compare
+    against.  Now a run appears only if its plotfiles exist.
 
-    pattern: optional glob, absolute or relative to tests/FlowDrivenBubble.
+    Matching is by the BASENAME of the input's plot_file, so the inputs keep
+    their absolute INCLINE paths and nothing needs renaming:
+        plot_file = /mmfs1/.../output_f40.8_A2.72   ->  output_f40.8_A2.72
+
+    Search roots, in order: DRIVE_OUT_ROOT, the local bin/ tree, and the
+    INCLINE path recorded in the input itself.
+
+    Frequency and amplitude always come from the input file (drive_omega and
+    drive_amp), never from the directory name -- see the note on omega in
+    build_params() about why the rounded value in the input is the one that
+    must be used.
     """
     pattern = pattern or os.environ.get("DRIVE_GLOB") or "input_*"
     paths = sorted(glob.glob(pattern if os.path.isabs(pattern) else _tests(pattern)))
-    runs, skipped = [], []
+    runs, no_data, skipped = [], [], []
     for path in paths:
         if os.path.isdir(path) or path.endswith((".py", ".md", "~")):
             continue
@@ -117,18 +126,39 @@ def _discover_runs(pattern=None):
         if not w or not A:
             skipped.append((os.path.basename(path), "no drive (amp or omega = 0)"))
             continue
+
+        out = _resolve_out_dir(cfg.get("plot_file", ""))
+        n_pf = (len([q for q in os.listdir(out) if q.endswith("cell")])
+                if out and os.path.isdir(out) else 0)
+        if n_pf < 2:
+            no_data.append((os.path.basename(path), out or "(no plot_file)", n_pf))
+            continue
+
         f_hz = w / (2.0 * math.pi)
         a_kpa = A / 1.0e3
         runs.append(dict(
             label=f"$f$ = {f_hz:.4g} Hz, $A$ = {a_kpa:.4g} kPa (wall)",
             tag=f"f{f_hz:.4g}_A{a_kpa:.4g}_{_slug(os.path.basename(path))}",
             input=path,
+            out_dir=out,
+            n_pf=n_pf,
             color=_RUN_COLORS[len(runs) % len(_RUN_COLORS)],
         ))
+    if runs:
+        print(f"  [discover] {len(runs)} run(s) WITH output data:")
+        for r in runs:
+            print(f"      {os.path.basename(r['input']):38s} {r['n_pf']:4d} plotfiles  {r['out_dir']}")
+    if no_data:
+        print(f"  [discover] {len(no_data)} input(s) skipped -- no output data:")
+        for n, o, c in no_data:
+            print(f"      {n:38s} {c:4d} plotfiles  {o}")
     if skipped:
-        print("  [discover] skipped:")
+        print("  [discover] skipped (no drive / unreadable):")
         for n, why in skipped:
             print(f"      {n:42s} {why}")
+    if not runs:
+        print("\n  Nothing to plot: no input has plotfiles.  Set DRIVE_OUT_ROOT to the\n"
+              "  directory holding the output_* folders if they are not in bin/tests.")
     return runs
 
 
@@ -243,13 +273,40 @@ def drive_from_input(cfg, path):
     return a or 0.0, w or 0.0, p_inf, "primitive pressure BC", 0.0
 
 
+def _R0_from_input(cfg):
+    """Initial bubble radius, searched across the keys inputs actually use.
+
+    This used to be a single lookup with a 0.02 default.  That is a silent
+    failure waiting to happen: an input that names its radius anything else --
+    a microbubble at R0 = 2e-6, say -- would quietly analyse as a 2 cm bubble,
+    and EVERY derived quantity (Minnaert f0, the linear amplitude, the
+    confinement ratio R0/L) would be wrong by four orders of magnitude while
+    the plot still looked plausible.  Now the keys are searched in order and a
+    miss is a hard error, not a default.
+    """
+    keys = ("eta.ic.expression.constant.R0",
+            "marmottant.R0",
+            "pressure0.ic.expression.constant.R0",
+            "pressure1.ic.expression.constant.R0",
+            "R0")
+    for k in keys:
+        v = _f(cfg, k, None)
+        if v is not None and v > 0.0:
+            return v
+    raise KeyError(
+        "R0 not found in the input.  Looked for: " + ", ".join(keys) +
+        ".  Add one of these (e.g. eta.ic.expression.constant.R0 = <metres>) "
+        "rather than relying on a default -- every derived quantity scales "
+        "with R0.")
+
+
 def fluids_from_input(cfg):
     """Liquid/gas properties + R0, all straight from the input file."""
     rho_l = _f(cfg, "density0.ic.expression.region0", 1000.0)
     g_l   = _f(cfg, "eos0.gamma", 2.35)
     p0_l  = _f(cfg, "eos0.p0", 1.0e9)
     g_g   = _f(cfg, "eos1.gamma", 1.4)
-    R0    = _f(cfg, "eta.ic.expression.constant.R0", 0.02)
+    R0    = _R0_from_input(cfg)
     sigma = _f(cfg, "sigma", 0.0)
     mu    = _f(cfg, "mu0", 0.0)
     return dict(rho_l=rho_l, gamma_l=g_l, pinf_l=p0_l,
@@ -416,8 +473,23 @@ def build_params(cfg, path):
 def describe(P, label, path):
     print(f"  --- {label}")
     print(f"      input      : {os.path.basename(path)}   [{P['how']}]")
-    print(f"      drive      : A = {P['A']:.4g} Pa, omega = {P['omega']:.4f} rad/s"
-          f"  -> f = {P['f_drive']:.4f} Hz, T = {P['T_drive']*1e3:.4f} ms")
+    # Full precision on purpose.  The drive is taken VERBATIM from the input's
+    # drive_omega / drive_amp -- the same numbers the solver read -- and never
+    # reconstructed from the filename or from a nominal f0/N.  Printing all the
+    # digits makes it checkable that both sides used the identical omega.
+    #
+    # On phase lag: a rounded omega in the input CANNOT put the analytic out of
+    # step with the simulation, because the solver reads that same rounded
+    # value.  For f40.8 the input's 256.20 differs from an exact f0/4 by 0.010%,
+    # which is 0.15 deg of phase after 0.1 s -- far below anything visible.  A
+    # lag that grows through the run is a PHYSICS difference (natural frequency
+    # / confinement), not input precision: the measured free mode of the solver
+    # on f40.8_A2.72 was 186 Hz against 163.1 unbounded and 182.5 with
+    # CONFINE=auto, and it is that mismatch which walks the two curves apart.
+    print(f"      drive      : A = {P['A']!r} Pa, omega = {P['omega']!r} rad/s"
+          f"  (verbatim from input)")
+    print(f"                   -> f = {P['f_drive']:.10f} Hz, "
+          f"T = {P['T_drive']*1e3:.10f} ms")
     print(f"      Minnaert f0= {P['f0']:.4f} Hz   (f_drive/f0 = "
           f"{P['f_drive']/P['f0']:.4f})")
     print(f"      confinement: {P.get('confine', 'off')}"
@@ -521,11 +593,12 @@ def plot_run(run):
     fig, ax = plt.subplots(figsize=(FIG_W, FIG_H))
 
     # ---- simulation (identical extraction to analyze_radius.py)
+    # out_dir and plotfile count were validated in _discover_runs(); a run with
+    # no data never reaches here, so there is no models-only path any more.
     t_end = 0.0
-    n_pf = (len([q for q in os.listdir(run["out_dir"]) if q.endswith("cell")])
-            if run["out_dir"] and os.path.isdir(run["out_dir"]) else 0)
+    n_pf = run["n_pf"]
     have_sim = False
-    if n_pf >= 2:
+    if True:
         ar.R0 = P["R0"]; ar.DIM = P["dim"]; ar.R_BIN_MAX = 2.0 * P["R0"]
         if np.isfinite(P["T_drive"]):
             ar.T_DRIVE = P["T_drive"]; ar.F_DRIVE = P["f_drive"]
@@ -550,6 +623,17 @@ def plot_run(run):
             # volume integral by ~0.34% of R0, but normalising the volume
             # curve by its own baseline already cancels that at the baseline
             # frame (it does not cancel the band's growth in time).
+            # CROSS-CHECK the parsed R0 against the data (see _R0_from_input).
+            if len(R_e) and np.isfinite(R_e[0]) and P["R0"] > 0:
+                rel = abs(R_e[0] - P["R0"]) / P["R0"]
+                if rel > 0.15:
+                    print(f"  [WARN] parsed R0 = {P['R0']:.6g} m but frame 0 has "
+                          f"R(eta=0.5) = {R_e[0]:.6g} m ({100*rel:.1f}% off) -- "
+                          f"check which key the input sets the radius under.")
+                else:
+                    print(f"  R0 check  : input {P['R0']:.6g} m vs frame-0 "
+                          f"eta=0.5 radius {R_e[0]:.6g} m ({100*rel:.2f}% -- ok)")
+
             if ar.R_VOL_BASELINE == "frame" and len(R_v) > ar.BASELINE_FRAME:
                 base_v = float(R_v[ar.BASELINE_FRAME])
                 base_e = float(R_e[ar.BASELINE_FRAME])
@@ -565,21 +649,6 @@ def plot_run(run):
                     zorder=4, label=r"simulation: $\eta=0.5$ radius" + bnote)
         else:
             print(f"  [WARN] {run['label']}: plotfiles present but no usable radius extracted.")
-    else:
-        why = ("no out_dir" if not run["out_dir"] else
-               "directory does not exist" if not os.path.isdir(run["out_dir"]) else
-               f"only {n_pf} plotfile(s)")
-        print(f"  [WARN] {run['label']}: NO SIMULATION CURVES -- {why}: {run['out_dir']}")
-        # Stamp it on the FIGURE too.  A models-only plot is a valid-looking
-        # RPE/KM comparison with nothing to compare against, and the console
-        # warning is easy to miss once a directory fills up with output.
-        ax.text(0.5, 0.5, "MODELS ONLY\nno simulation data",
-                transform=ax.transAxes, ha="center", va="center",
-                fontsize=26, color="0.55", alpha=0.30, rotation=18,
-                zorder=10, fontweight="bold")
-        ax.text(0.01, 0.015, f"expected plotfiles: {run['out_dir']}  ({why})",
-                transform=ax.transAxes, ha="left", va="bottom",
-                fontsize=7, color="0.45", zorder=10)
 
     # ---- analytical models over the span this run covers
     Tref = P["T_drive"] if np.isfinite(P["T_drive"]) else 1.0e-2
@@ -615,8 +684,6 @@ def plot_run(run):
         out = os.path.join(IMG_DIR, f"{SAVE_NAME}_{tag}.{ext}")
         fig.savefig(out, dpi=dpi, bbox_inches="tight")
         print(f"  wrote {out}")
-    if not have_sim:
-        print("  [note] no simulation output for this run -- figure shows models only.")
     plt.close(fig)
     print()
 

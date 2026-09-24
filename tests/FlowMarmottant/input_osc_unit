@@ -79,7 +79,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = ./tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant
+plot_file = ./bin/tests/FlowMarmottant/oscu
 
 
 ### MESHING ###
@@ -89,7 +89,7 @@ amr.max_grid_size   = 32
 amr.blocking_factor = 8
 amr.regrid_int      = 10
 amr.grid_eff        = 0.8
-amr.max_level       = 3
+amr.max_level       = 2
 amr.n_cell          = 64 64 64        # base dx 6.25e-7; L3 -> dx_finest 7.8125e-8 (R0/dx = 25.6)
 
 # n_error_buf pushes the fine patches ~16 dx_finest past the interface band so
@@ -126,7 +126,7 @@ cfl                     = 0.5
 
 ### DIMENSIONS -- octant, 100 R0 ###
 geometry.prob_lo     =  0.0     0.0     0.0
-geometry.prob_hi     =  4.0e-5  4.0e-5  4.0e-5
+geometry.prob_hi     =  2.0e-5  2.0e-5  2.0e-5
 geometry.is_periodic = 0 0 0
 stop_time            = 1.0e-6         # 5.46 tau_c (tau_c = 1.830e-7 s)
 

@@ -1,6 +1,36 @@
-#@ [sch20_oscillating_marmottant]
+#@ [sch20_oscillating_marmottant_small]
 #@ exe=hydro2
 #@ dim=3
+#
+# ============================ SMALL VARIANT ============================
+# Unit-test sibling of input_Sch20-Oscillating_Marmottant.  Same physics,
+# same domain, same IC -- only the mesh and horizon are reduced so the run
+# finishes in ~1 h instead of ~1 day:
+#
+#   amr.max_level  3 -> 2      dx_finest 7.8125e-8 -> 1.5625e-7 (R0/dx 25.6 -> 12.8)
+#   epsilon   1.6e-7 -> 3.2e-7 scaled WITH dx to hold eps/dx = 2.05.  These two
+#                              MUST move together: dropping max_level alone puts
+#                              the band below one cell and NaNs for an unrelated
+#                              reason.
+#   stop_time 1.0e-6 -> 2.2e-7 1.2 tau_c, through R_min and into the rebound --
+#                              enough for the R_min/R0 discriminator below.
+#   plot_int  -1     -> 40     step-based; plot_dt only fires when it lands
+#                              within 0.5*dt of a multiple, which is fragile
+#                              once the shell-viscous dt limit shrinks dt.
+#
+# PURPOSE: resolve whether shell.sigma_floor destroys the dilatational-viscous
+# physics.  sigma_floor clamps sigma(Gamma) + kappa_s*div_s(u) at 0; since
+# div_s u = 2 Rdot/R is NEGATIVE throughout a collapse, the clamp deletes the
+# viscous contribution exactly when it should matter.  Run this file with
+# shell.sigma_floor=0 and =1 and compare R_min/R0 against the reference ODE
+# table below: if the clamp is the culprit, floor=1 lands near ELASTIC ONLY
+# (0.3156) and floor=0 near FULL SHELL (0.5172).
+#
+# Requires the shell-viscous timestep limit (shell.dt_limit=1, the default);
+# without it this case runs over its own stability limit.
+# =======================================================================
+#
+
 
 # =============================================================================
 # COATED-BUBBLE TWIN OF Sch20_Oscillating_Neumann_Large_3D
@@ -79,17 +109,17 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = ./tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant
+plot_file = ./bin/tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant_SMALL
 
 
 ### MESHING ###
-amr.plot_int        = -1
-amr.plot_dt         = 1.25e-8         # 80 frames over stop_time (was 5.0e-9 = 200)
+amr.plot_int        = 40               # SMALL: step-based, avoids plot_dt/dt mismatch
+amr.plot_dt         = -1
 amr.max_grid_size   = 32
 amr.blocking_factor = 8
 amr.regrid_int      = 10
 amr.grid_eff        = 0.8
-amr.max_level       = 3
+amr.max_level       = 2                # SMALL: L2 -> dx_finest 1.5625e-7 (R0/dx = 12.8)
 amr.n_cell          = 64 64 64        # base dx 6.25e-7; L3 -> dx_finest 7.8125e-8 (R0/dx = 25.6)
 
 # n_error_buf pushes the fine patches ~16 dx_finest past the interface band so
@@ -128,12 +158,12 @@ cfl                     = 0.5
 geometry.prob_lo     =  0.0     0.0     0.0
 geometry.prob_hi     =  4.0e-5  4.0e-5  4.0e-5
 geometry.is_periodic = 0 0 0
-stop_time            = 1.0e-6         # 5.46 tau_c (tau_c = 1.830e-7 s)
+stop_time            = 2.2e-7        # SMALL: 1.2 tau_c -- through R_min and into rebound
 
 ### ETA INITIAL CONDITIONS ###
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 1.6e-7     # ~2 cells across the band at finest
+eta.ic.expression.constant.epsilon = 3.2e-7     # SMALL: scaled WITH dx to hold eps/dx = 2.05
 eta.ic.expression.constant.R0      = 2.0e-6
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon

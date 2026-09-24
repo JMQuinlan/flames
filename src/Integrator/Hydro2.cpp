@@ -148,6 +148,9 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // Boussinesq--Scriven interfacial viscosity (see Hydro2.H).  kappa_s is
         // applied through sigma_tot; mu_s is parsed only so a request for the
         // unimplemented shear term is caught here rather than silently ignored.
+        pp_query_default("shell_extend_iters", value.shell_extend_iters, 4);  // normal-extension sweeps for Gamma (0 = off); see RelaxAndReinit
+        pp_query_default("shell_gate_free", value.shell_gate_free, 1);  // 1 = no DX-scaled freeze; consistent projector kills the bulk source (see Advance)
+        pp_query_default("shell_bulk_extend", value.shell_bulk_extend, 1);  // 1 = extend Gamma from the band into adjacent bulk (see RelaxAndReinit)
         pp_query_default("shell.kappa_s", value.shell_kappa_s, 0.0);
         pp_query_default("shell.mu_s",    value.shell_mu_s,    0.0);
         if (value.shell_mu_s != 0.0)
@@ -310,6 +313,71 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                 Util::Message(INFO, "thermo.dat: gas_volume, gas_pressure_int, kinetic_energy, interface_area");
             }
         }
+        // DEFAULT 0 as of 2026-09-23.  The floor clamps sigma(Gamma) + kappa_s
+        // div_s(u) at 0.  div_s u = 2 Rdot/R is negative throughout a collapse,
+        // and the Marmottant BUCKLED branch drives sigma(Gamma) to exactly 0, so
+        // past buckling the total is ENTIRELY viscous and negative -- the floor
+        // then zeroes the whole surface stress, not part of it.  Measured duty
+        // cycle on Sch20-Oscillating: 0% early, 100% from t = 3.6e-8 on.
+        // Measured R_min/R0 (ml=2, 1.2 tau_c, reference ODE full shell 0.5172):
+        //     sigma_floor=1 -> 0.4051  ==  elastic_only 0.4058  (viscous GONE)
+        //     sigma_floor=0 -> 0.5358  vs  reference     0.5172  (3.6%)
+        // The floor only ever compensated for the missing kappa_s timestep limit;
+        // with shell.dt_limit=1 it is unnecessary -- floor=0 ran 1977 steps on the
+        // oscillating case and 4855 on the violent collapse with zero NaN.
+        pp_query_default("shell.sigma_floor", value.shell_sigma_floor, 0);
+        // 1 = include the shell dilatational viscosity in the explicit-diffusion
+        // timestep limit (see the nu_s block in the dt computation).  Set to 0 to
+        // reproduce the pre-2026-09 behaviour, which silently violated that limit
+        // by 20x at max_level=5 and produced a NaN at step 3 of Sch20-Collapsing.
+        // Only for A/B work: turning it off does not make the term stable.
+        pp_query_default("shell.dt_limit", value.shell_dt_limit, 1);
+        // 1 = advance the kappa_s surface-viscous stress in its own sub-cycle
+        // (N = dt/dt_visc sub-steps on the band) instead of letting its dx^3
+        // stability limit throttle the GLOBAL timestep.  Modelled on the
+        // shell_extend_iters sweep loop: nearest-neighbour FillBoundary per
+        // sub-step, no global reductions, band cells only.  When on, the
+        // viscous term is removed from Omega and from the dt limiter.
+        // DEFAULT 0 as of 2026-09-23.  Sub-cycling is VALIDATED at max_level 3
+        // (trajectory matches the dt-limited path to 0.05%, 10.7x faster) but
+        // FAILS at max_level 5: the required sub-step count climbs past the cap
+        // (N = 1022 -> 1245 and rising) because nu_s grows during the run, and
+        // once clamped the sub-step is no longer stability-bounded.  Until that
+        // is understood, the dt-limited path (subcycle=0) is the supported one.
+        pp_query_default("shell.kappa_s_subcycle", value.shell_visc_subcycle, 0);
+        // Guard: if nu_s ever blows up, cap the sub-step count rather than
+        // spinning forever inside one hydro step.  512 is ~6 refinement levels
+        // past the measured L5 value of 21 (N ~ 1/dx^2, so it quadruples/level).
+        pp_query_default("shell.kappa_s_subcycle_max", value.shell_visc_subcycle_max, 512);
+        pp_query_default("shell.kappa_s_verbose", value.shell_visc_verbose, 0);
+        // Density floor for the nu_s stability estimate (NOT for the physics).
+        // Defaults to 1.0 kg/m^3, the gas reference density of the Sch20 decks.
+        pp_query_default("shell.nus_rho_floor", value.shell_nus_rho_floor, 1.0);
+        // ENERGY-CONSISTENT ALPHA in the pure-cell relaxation guard.
+        //
+        // THE BUG.  In the pure-cell guard of RelaxAndReinit, p_pure was
+        // solved from the alpha_floor-CLAMPED a1 (>= 1e-12) while the two
+        // per-phase energies were written with the RAW a1g (= eta clamped
+        // only to [0,1]).  ReinitMixturePressure inverts
+        //     rho_e = p*A(alpha) + B(alpha),
+        // so writing E_k back with a different alpha breaks E0+E1 = rho_e by
+        //     dE = (a1g - a1) * [ (p + gam0*pi0)/(gam0-1) - (p + gam1*pi1)/(gam1-1) ].
+        // Inside a gas bubble eta ~ 1e-13 < alpha_floor, so a1g - a1 < 0 and,
+        // because the liquid is stiff (pi0 = 1e9), the bracket is ~1.7e9:
+        // dE ~ -1.5e-3 J/m^3 of internal energy REMOVED from every core cell
+        // on every relaxation call.  One-signed, so it accumulates.  The gas
+        // cools; its pressure is pinned to the liquid by the stiff
+        // relaxation, so the bubble shrinks at constant pressure -- which is
+        // exactly the measured drift (gas mass conserved to 3.4e-14, volume
+        // -0.69 %/cycle, polytropic exponent 0.077 on the drift against 1.402
+        // on the oscillation).  The sink scales with pi0, so it is ~100x
+        // weaker at eos0.p0 = 1e7 than at 1e9 -- the drift_unit/stiffc pair.
+        //
+        // THE FIX.  Use the SAME alpha for the pressure solve and the energy
+        // write.  a1g is the right one: the comment below explains that E_k
+        // must be built with the frozen raw eta so the later E_k/eta recovery
+        // divide cancels exactly.  Making p_pure agree restores
+        // E0 + E1 = rho_e identically without reintroducing that mispricing.
         pp_query_default("relax_diag", value.relax_diag, 0); // 1 = print per-stage {max_iters, max_residual, count_unconverged}.
         pp_query_default("clip_ghost_only", value.clip_ghost_only, 0); // 1 = FillGhost STEP-9 positivity clip touches GHOST cells only (per-phase mass conservation)
 
@@ -554,6 +622,34 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
     {
         int nghost = value.nghost;
 
+        // plot_minimal (default 0 = OFF, nothing changes): drop the pure
+        // diagnostic fields from the plotfiles and keep only what the bubble
+        // analyses actually read.  A 3D plotfile carries ~69 components; the
+        // set kept here is ~19, so the files shrink by roughly 70%.
+        //
+        // This exists because the Sch20 microbubble inputs are 160^3 at level
+        // 0 for an R0 = 2e-6 bubble in a 2e-4 box: level 0 alone is 2.2 GB per
+        // plotfile (2.5 GB with the refined levels), and at their plot_dt that
+        // is ~500 GB for the oscillating case and ~1 TB for the collapsing
+        // one -- more than the filesystem will take.
+        //
+        // KEPT: eta, rho_eta0/1, shell, Gamma, pressure, velocity, density,
+        //       momentum, energy0/1, energy_per_vol, T, UE_per_vol, KE_per_vol
+        // DROPPED: cfun, etadot, vorticity, energy_per_mass, Source, Fsv, Fw,
+        //       Ldot, gamma, p0, mu_chem, a, Ma, UE/KE_per_mass, Spalding,
+        //       Mass_Fraction, rho/M/E_flux, div_tau, Vap_dot
+        //
+        // kappa (surface curvature) is KEPT: reference/amr_analyze.py reads
+        // kappa2 for the Marmottant sigma(R), and its except-branch silently
+        // substitutes zeros -- a dropped field would look like sigma = 0.
+        //
+        // T, UE_per_vol and KE_per_vol are deliberately KEPT: they are what a
+        // thermal or energy-budget diagnosis needs.
+        int plot_minimal = 0;
+        pp.query("plot_minimal", plot_minimal);
+        const bool diag = (plot_minimal == 0);
+        if (plot_minimal) Util::Message(INFO, "plot_minimal = 1: diagnostic fields omitted from plotfiles");
+
         // BC carried by the (derived) pressure fields for AMR coarse-fine
         // FillPatch. In the primitive path this is the user pressure BC; else
         // fall back to energy_bc (pressure fields are non-evolving, so this is
@@ -575,11 +671,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.shell_mf,         value.eta_bc,      1, nghost,  "shell",        true, true);
         value.RegisterNewFab(value.shell_old_mf,     value.eta_bc,      1, nghost,  "shell_old",    false,true);
         // Colour function c (Schmidmayer 2017 eq. 3): 9th RK primary, pure advection.
-        value.RegisterNewFab(value.cfun_mf,          value.eta_bc,      1, nghost,  "cfun",         true, true);
+        value.RegisterNewFab(value.cfun_mf,          value.eta_bc,      1, nghost,  "cfun",         diag, true);
         value.RegisterNewFab(value.cfun_old_mf,      value.eta_bc,      1, nghost,  "cfun_old",     false,true);
         value.RegisterNewFab(value.Gamma_mf,        &value.bc_nothing,  1, 0,       "Gamma",        true, false);
 
-        value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing,  1, 0,       "etadot",       true, false);
+        value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing,  1, 0,       "etadot",       diag, false);
         value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing,  4, 0,       "hess_eta",     false,false, { "00", "01", "10", "11" });
         value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing,  AMREX_SPACEDIM, 0,       "n_hat",        false,false, { AMREX_D_DECL("x", "y", "z") });
 
@@ -643,14 +739,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // Vorticity is the curl of velocity: a scalar (omega_z) in 2D, a full
         // 3-vector (omega_x, omega_y, omega_z) in 3D.
 #if AMREX_SPACEDIM == 2
-        value.RegisterNewFab(value.vorticity_mf,           &value.bc_nothing,   1, 0,       "vorticity",        true, false);
+        value.RegisterNewFab(value.vorticity_mf,           &value.bc_nothing,   1, 0,       "vorticity",        diag, false);
 #else
-        value.RegisterNewFab(value.vorticity_mf,           &value.bc_nothing,   3, 0,       "vorticity",        true, false, { "x", "y", "z" });
+        value.RegisterNewFab(value.vorticity_mf,           &value.bc_nothing,   3, 0,       "vorticity",        diag, false, { "x", "y", "z" });
 #endif
         value.RegisterNewFab(value.density_mf,              value.density_bc,   1, nghost,  "density",          true, false);
         value.RegisterNewFab(value.density_old_mf,          value.density_bc,   1, nghost,  "density_old",      false,false);
         value.RegisterNewFab(value.energy_per_vol_mf,       value.energy_bc,    1, nghost,  "energy_per_vol",   true, true);
-        value.RegisterNewFab(value.energy_per_mas_mf,       value.energy_bc,    1, nghost,  "energy_per_mass",  true, true);
+        value.RegisterNewFab(value.energy_per_mas_mf,       value.energy_bc,    1, nghost,  "energy_per_mass",  diag, true);
         value.RegisterNewFab(value.energy_per_vol_old_mf,   value.energy_bc,    1, nghost,  "energy_vol_old",   false,true);
         value.RegisterNewFab(value.energy_per_mas_old_mf,   value.energy_bc,    1, nghost,  "energy_mas_old",   false,true);
         value.RegisterNewFab(value.momentum_mf,             value.momentum_bc,  AMREX_SPACEDIM, nghost,  "momentum",         true, true, { AMREX_D_DECL("x", "y", "z") });
@@ -660,40 +756,40 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.m0_mf,          &value.bc_nothing,   1, 0,       "m0",               false,false);
         value.RegisterNewFab(value.u0_mf,          &value.bc_nothing,   2, 0,       "u0",               false,false, { "x", "y" });
         value.RegisterNewFab(value.q_mf,           &value.bc_nothing,   2, 0,       "q0",               false,false, { "x", "y" });
-        value.RegisterNewFab(value.Source_mf,      &value.bc_nothing,   AMREX_SPACEDIM + 2, 0,  "Source",true, false, { "_rho", AMREX_D_DECL("_Mx", "_My", "_Mz"), "_E" });
-        value.RegisterNewFab(value.Fsv_mf,         &value.bc_nothing,   AMREX_SPACEDIM, 0,      "Fsv",  true, false, { AMREX_D_DECL("x", "y", "z") }); // Surface Tension
-        value.RegisterNewFab(value.Fw_mf,          &value.bc_nothing,   AMREX_SPACEDIM, 0,      "Fw",   true, false, { AMREX_D_DECL("x", "y", "z") }); // Weight
-        value.RegisterNewFab(value.Ldot_mf,        &value.bc_nothing,   AMREX_SPACEDIM, 0, "Ldot",      true, false, { AMREX_D_DECL("x", "y", "z") }); // Ldot (3-comp: z-momentum source develops dynamically)
+        value.RegisterNewFab(value.Source_mf,      &value.bc_nothing,   AMREX_SPACEDIM + 2, 0,  "Source",diag, false, { "_rho", AMREX_D_DECL("_Mx", "_My", "_Mz"), "_E" });
+        value.RegisterNewFab(value.Fsv_mf,         &value.bc_nothing,   AMREX_SPACEDIM, 0,      "Fsv",  diag, false, { AMREX_D_DECL("x", "y", "z") }); // Surface Tension
+        value.RegisterNewFab(value.Fw_mf,          &value.bc_nothing,   AMREX_SPACEDIM, 0,      "Fw",   diag, false, { AMREX_D_DECL("x", "y", "z") }); // Weight
+        value.RegisterNewFab(value.Ldot_mf,        &value.bc_nothing,   AMREX_SPACEDIM, 0, "Ldot",      diag, false, { AMREX_D_DECL("x", "y", "z") }); // Ldot (3-comp: z-momentum source develops dynamically)
         value.RegisterNewFab(value.T_mf,            value.energy_bc,    1, nghost, "T",                 true, false);               // Temperature
         value.RegisterNewFab(value.cp_mf,          &value.bc_nothing,   1, nghost, "cp",                false,true);                // Constant Pressure Specific Heat
         value.RegisterNewFab(value.cv_mf,          &value.bc_nothing,   1, nghost, "cv",                false,true);                // Constant Volume Specific Heat
         //value.RegisterNewFab(value.k_thermal_mf,    &value.bc_nothing,  1, nghost, "k_thermal", false, true);         // Thermal Conductivity
         //value.RegisterNewFab(value.h_thermal_mf,    &value.bc_nothing,  1, nghost, "h_thermal", false, true);         // Thermal Convectivity
-        value.RegisterNewFab(value.gamma_mf,        value.energy_bc,    1, nghost, "gamma",             true, false);               // Specific Heat Ratio
-        value.RegisterNewFab(value.p0_mf,           value.energy_bc,    1, nghost, "p0",                true, true);                // Tamman Pressure
-        value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc,    1, nghost, "mu_chem",           true, false);               // Chemical Potential
-        value.RegisterNewFab(value.a_mf,           &value.bc_nothing,   1, nghost, "a",                 true, false);               // Speed of sound
-        value.RegisterNewFab(value.Ma_mf,          &value.bc_nothing,   2, nghost, "Ma",                true, false, { "x", "y" }); // Mach
+        value.RegisterNewFab(value.gamma_mf,        value.energy_bc,    1, nghost, "gamma",             diag, false);               // Specific Heat Ratio
+        value.RegisterNewFab(value.p0_mf,           value.energy_bc,    1, nghost, "p0",                diag, true);                // Tamman Pressure
+        value.RegisterNewFab(value.mu_chem_mf,      value.energy_bc,    1, nghost, "mu_chem",           diag, false);               // Chemical Potential
+        value.RegisterNewFab(value.a_mf,           &value.bc_nothing,   1, nghost, "a",                 diag, false);               // Speed of sound
+        value.RegisterNewFab(value.Ma_mf,          &value.bc_nothing,   2, nghost, "Ma",                diag, false, { "x", "y" }); // Mach
         value.RegisterNewFab(value.UE_per_vol_mf,   value.energy_bc,    1, nghost, "UE_per_vol",        true, false);               // Internal Energy (per unit volume)
-        value.RegisterNewFab(value.UE_per_mas_mf,   value.energy_bc,    1, nghost, "UE_per_mass",       true, false);               // Internal Energy (per unit mass)
+        value.RegisterNewFab(value.UE_per_mas_mf,   value.energy_bc,    1, nghost, "UE_per_mass",       diag, false);               // Internal Energy (per unit mass)
         value.RegisterNewFab(value.KE_per_vol_mf,   value.energy_bc,    1, nghost, "KE_per_vol",        true, false);               // Kinetic Energy (per unit volume)
-        value.RegisterNewFab(value.KE_per_mas_mf,   value.energy_bc,    1, nghost, "KE_per_mass",       true, false);               // Kinetic Energy (per unit mass)
-        value.RegisterNewFab(value.Bm_mf,          &value.bc_nothing,   1, nghost, "Spadling_Number",   true, false);               // Spalding Number
-        value.RegisterNewFab(value.Y_mf,           &value.bc_nothing,   1, nghost, "Mass_Fraction",     true, false);               // Mass Fraction
+        value.RegisterNewFab(value.KE_per_mas_mf,   value.energy_bc,    1, nghost, "KE_per_mass",       diag, false);               // Kinetic Energy (per unit mass)
+        value.RegisterNewFab(value.Bm_mf,          &value.bc_nothing,   1, nghost, "Spadling_Number",   diag, false);               // Spalding Number
+        value.RegisterNewFab(value.Y_mf,           &value.bc_nothing,   1, nghost, "Mass_Fraction",     diag, false);               // Mass Fraction
 
         // EXTRAS & DEBUGGING
-        value.RegisterNewFab(value.grad_eta_mf,         &value.bc_nothing,  AMREX_SPACEDIM, 0, "grad_eta",           true, false, { AMREX_D_DECL("x", "y", "z") }); // grad(eta)
+        value.RegisterNewFab(value.grad_eta_mf,         &value.bc_nothing,  AMREX_SPACEDIM, 0, "grad_eta",           true, false, { AMREX_D_DECL("x", "y", "z") }); // grad(eta) -- KEPT by plot_minimal: it is the surface measure dA = |grad eta| dV, without which an areal density like Gamma cannot be averaged correctly
         value.RegisterNewFab(value.kappas_mf,           &value.bc_nothing,  3,              0, "kappa",              true, false, { "Avg", "1", "2" });             // Surface curvature
         value.RegisterNewFab(value.grad_mag_grad_eta_mf,&value.bc_nothing,  AMREX_SPACEDIM, 0, "grad_mag_grad_eta",  false,false, { AMREX_D_DECL("x", "y", "z") }); // grad( | grad(eta) | )
-        value.RegisterNewFab(value.rho_flux_mf,         &value.bc_nothing,  1,              0, "rho_flux",           true, false);                                  // Density Flux
-        value.RegisterNewFab(value.M_flux_mf,           &value.bc_nothing,  AMREX_SPACEDIM, 0, "M_flux",             true, false, { AMREX_D_DECL("x", "y", "z") }); // Momentum Flux
-        value.RegisterNewFab(value.E_flux_mf,           &value.bc_nothing,  1,              0, "E_flux",             true, false);                                  // Energy Flux
-        value.RegisterNewFab(value.div_tau_mf,          &value.bc_nothing,  AMREX_SPACEDIM, 0, "div_tau",            true, false, { AMREX_D_DECL("x", "y", "z") }); // Energy Flux
+        value.RegisterNewFab(value.rho_flux_mf,         &value.bc_nothing,  1,              0, "rho_flux",           diag, false);                                  // Density Flux
+        value.RegisterNewFab(value.M_flux_mf,           &value.bc_nothing,  AMREX_SPACEDIM, 0, "M_flux",             diag, false, { AMREX_D_DECL("x", "y", "z") }); // Momentum Flux
+        value.RegisterNewFab(value.E_flux_mf,           &value.bc_nothing,  1,              0, "E_flux",             diag, false);                                  // Energy Flux
+        value.RegisterNewFab(value.div_tau_mf,          &value.bc_nothing,  AMREX_SPACEDIM, 0, "div_tau",            diag, false, { AMREX_D_DECL("x", "y", "z") }); // Energy Flux
         value.RegisterNewFab(value.hess_u_mf,           &value.bc_nothing,  8,              0, "hess_u",             false,false, {"000","001",
                                                                                                                                    "010","011",
                                                                                                                                    "100","101",
                                                                                                                                    "110","111"});                   // hess_u Flux
-        value.RegisterNewFab(value.Vap_dot_mf, &value.bc_nothing, AMREX_SPACEDIM + 3, 0, "Vap_dot", true, false, { "_eta", "_rho", AMREX_D_DECL("_Mx", "_My", "_Mz"), "_E" });    // Momentum Flux
+        value.RegisterNewFab(value.Vap_dot_mf, &value.bc_nothing, AMREX_SPACEDIM + 3, 0, "Vap_dot", diag, false, { "_eta", "_rho", AMREX_D_DECL("_Mx", "_My", "_Mz"), "_E" });    // Momentum Flux
         
     }
 
@@ -1635,7 +1731,9 @@ Hydro2::RHS(int lev,
         // it here covers the momentum source and the capillary work together.
         // sigma_tot = sigma_eff + (kappa_s - mu_s)(div_s u)  multiplies the
         // projector P; 2 mu_s D_s is a genuine tensor and is added on top.
+        const int shell_sigma_floor_l = shell_sigma_floor;
         const Set::Scalar kap_s = shell_kappa_s - shell_mu_s;
+        const int subcyc_visc = shell_visc_subcycle && (shell_kappa_s != 0.0);
         const Set::Scalar mu_s  = shell_mu_s;
         const int visc_shell = (kap_s != 0.0) || (mu_s != 0.0);
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
@@ -1646,6 +1744,14 @@ Hydro2::RHS(int lev,
                                                               : amrex::Array4<const Set::Scalar>{};
             amrex::Array4<const Set::Scalar> const &vel = velocity_mf[lev]->const_array(mfi);
             amrex::Array4<Set::Scalar> const &om = Omega.array(mfi);
+            // Diagnostic: kappa1 carries the TOTAL surface tension actually
+            // used in Omega, sigma(Gamma) + kappa_s div_s(u), BEFORE the
+            // sigma_floor clamp.  kappa2 is written in the Marmottant block
+            // above and is the BARE sigma(Gamma) only, so it cannot show the
+            // viscous contribution -- which is the whole question for the
+            // coated collapse.
+            amrex::Array4<Set::Scalar> const &kapd = kappas_mf[lev]->array(mfi);
+            const amrex::Box vbx_om = mfi.validbox();
             // Omega is built on the VOLUME FRACTION.  Schmidmayer 2017 uses the
             // colour function instead, to keep the capillary energy consistent
             // with a conservative energy flux; that closure has been removed, so
@@ -1672,7 +1778,34 @@ Hydro2::RHS(int lev,
                     for (int d = 0; d < AMREX_SPACEDIM; ++d)
                         gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
                     // div_s u = tr(P.grad u) = tr(grad u) - n.grad u.n
-                    se += kap_s * (gu.trace() - nh.dot(gu * nh));
+                    // When shell.kappa_s_subcycle is on, SubcycleShellViscous
+                    // owns this term and Omega carries the ELASTIC branch only,
+                    // so it must not be added twice.
+                    const Set::Scalar divs_u = gu.trace() - nh.dot(gu * nh);
+                    if (!subcyc_visc) se += kap_s * divs_u;
+                    // A fluid interface cannot support COMPRESSION: the total
+                    // Boussinesq-Scriven surface tension sigma(Gamma) +
+                    // kappa_s div_s(u) must stay >= 0.  Without this floor a
+                    // collapsing coated bubble goes unstable and collapses to
+                    // nothing: with kappa_s = 7.2e-9 and the Sch20 collapse
+                    // (Rdot ~ -58 m/s), div_s u = 2 Rdot / R reaches -5.8e8,
+                    // so kappa_s div_s u = -4.2 N/m -- already -0.34 N/m at
+                    // R = R0, i.e. NEGATIVE surface tension 57x the magnitude
+                    // of water's.  Negative tension makes the interface gain
+                    // energy by growing area, which is a runaway.
+                    //
+                    // This is also what Marmottant's own buckled branch means:
+                    // the shell buckles OUT OF PLANE rather than supporting
+                    // compression, which is why sigma = 0 there instead of
+                    // going negative.  The dilatational viscous stress has to
+                    // obey the same constraint.
+                    //
+                    // Only reachable when a shell viscosity is on, which is
+                    // why the UNCOATED tests were unaffected (no shell.kappa_s
+                    // at all, so se = sigma = const >= 0).
+                    if (vbx_om.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
+                        kapd(i, j, k, 1) = se;      // total sigma, pre-floor
+                    if (shell_sigma_floor_l && se < 0.0) se = 0.0;
                     if (mu_s != 0.0)
                     {
                         // D_s = P sym(grad u) P.  P is symmetric and idempotent,
@@ -2291,7 +2424,12 @@ Hydro2::RHS(int lev,
                 Solver::Local::FluidRiemann::State sL_face = Solver::Local::Limiter::ToState(pL, small);
                 Solver::Local::FluidRiemann::State sR_face = Solver::Local::Limiter::ToState(pR, small);
 
-                return riemannsolver->Solve(sL_face, sR_face, pref, small);
+                Solver::Local::FluidRiemann::Flux fl_ = riemannsolver->Solve(sL_face, sR_face, pref, small);
+                // Carry the RECONSTRUCTED alpha out, upwinded on the contact
+                // speed, so the alpha row can be advected at the same order as
+                // the mass rows (see the alpha-row note in Advance).
+                fl_.alpha_face = (fl_.u_interface > 0.0) ? pL.alpha : pR.alpha;
+                return fl_;
             };
 
             Solver::Local::FluidRiemann::Flux flux_xlo, flux_ylo, flux_xhi, flux_yhi;
@@ -2396,11 +2534,28 @@ Hydro2::RHS(int lev,
             const Set::Scalar p0_C   = Solver::EOS::EOS::PhasicPressureFromEnergy(E0_arr(i, j, k), a1_C, eos0.Gamma(), eos0.P0(), small);
             const Set::Scalar p1_C   = Solver::EOS::EOS::PhasicPressureFromEnergy(E1_arr(i, j, k), a2_C, eos1.Gamma(), eos1.P0(), small);
 
-            // Face-upwind alpha (constant across acoustic; advected at S_M).
-            Set::Scalar a_face_xlo = (flux_xlo.u_interface > 0.0) ? eta(i - 1, j, k) : eta(i,     j, k);
-            Set::Scalar a_face_xhi = (flux_xhi.u_interface > 0.0) ? eta(i,     j, k) : eta(i + 1, j, k);
-            Set::Scalar a_face_ylo = (flux_ylo.u_interface > 0.0) ? eta(i, j - 1, k) : eta(i, j,     k);
-            Set::Scalar a_face_yhi = (flux_yhi.u_interface > 0.0) ? eta(i, j,     k) : eta(i, j + 1, k);
+            // ALPHA ROW.  The face volume fraction is the LIMITER-
+            // RECONSTRUCTED state, upwinded on the contact speed S_M.
+            //
+            // THE BUG IT FIXES.  The mass rows are built from limiter-
+            // reconstructed states (Limiter.type = godunov|minmod|vanleer|
+            // weno3|weno5), but the alpha row used a plain donor-cell upwind
+            // value -- first order, no limiter -- so eta carried much more
+            // numerical diffusion than (alpha rho)_k.  Gas MASS is then
+            // conserved exactly while the gas VOLUME int(1-eta)dV decays, and
+            // rho_gas = rho_eta1/(1-eta) drifts upward: the bubble shrinks.
+            // Measured on the driven benchmark: -0.23 %/cycle in radius with
+            // gas mass conserved to 3.4e-14, zero drift when the bubble is at
+            // rest (donor-cell diffusion ~ dx|u|/2 vanishes with u), and drift
+            // ~ (eps/dx)^-0.91 -- all three are signatures of this mismatch.
+            //
+            // This is the same failure the colour function c hit (see the note
+            // below): two rows advected by operators of different truncation
+            // error separate over time.
+            Set::Scalar a_face_xlo = flux_xlo.alpha_face;
+            Set::Scalar a_face_xhi = flux_xhi.alpha_face;
+            Set::Scalar a_face_ylo = flux_ylo.alpha_face;
+            Set::Scalar a_face_yhi = flux_yhi.alpha_face;
             a_face_xlo = std::min(std::max(a_face_xlo, 0.0), 1.0);
             a_face_xhi = std::min(std::max(a_face_xhi, 0.0), 1.0);
             a_face_ylo = std::min(std::max(a_face_ylo, 0.0), 1.0);
@@ -2421,8 +2576,8 @@ Hydro2::RHS(int lev,
 #if AMREX_SPACEDIM == 3
             const Set::Scalar c_face_zlo = (flux_zlo.u_interface > 0.0) ? cfun(i, j, k - 1) : cfun(i, j, k);
             const Set::Scalar c_face_zhi = (flux_zhi.u_interface > 0.0) ? cfun(i, j, k)     : cfun(i, j, k + 1);
-            Set::Scalar a_face_zlo = (flux_zlo.u_interface > 0.0) ? eta(i, j, k - 1) : eta(i, j, k);
-            Set::Scalar a_face_zhi = (flux_zhi.u_interface > 0.0) ? eta(i, j, k)     : eta(i, j, k + 1);
+            Set::Scalar a_face_zlo = flux_zlo.alpha_face;
+            Set::Scalar a_face_zhi = flux_zhi.alpha_face;
             a_face_zlo = std::min(std::max(a_face_zlo, 0.0), 1.0);
             a_face_zhi = std::min(std::max(a_face_zhi, 0.0), 1.0);
 #endif
@@ -2592,13 +2747,20 @@ Hydro2::RHS(int lev,
             {
                 shell_rhs(i, j, k) = 0.0;   // frozen at init value; nothing reads it
             }
-            else if (grad_eta.lpNorm<2>() * DX[0] < 1.0e-8)
+            else if (!shell_gate_free && grad_eta.lpNorm<2>() * DX[0] < 1.0e-8)
             {
-                // BULK ANCHOR: outside the band Gamma is unused ("in the bulk
-                // grad_eta -> 0 ... Gamma there is unused" below) but its
-                // -Gamma div(u) evolution still integrates the bulk dilatation
-                // and rots away from 1.0 without bound.  Freeze it; the hard
-                // reset to the unstrained value lives in RelaxAndReinit.
+                // LEGACY BULK ANCHOR (shell_gate_free = 0 only).
+                //
+                // This froze Gamma wherever |grad eta| * DX fell below 1e-8,
+                // to stop the -Gamma div(u) term integrating bulk dilatation
+                // without bound.  It works, but the threshold is scaled by DX,
+                // so WHICH cells freeze depends on the mesh rather than the
+                // physics: refining L2 -> L4 raises the |grad eta| cutoff 4x
+                // (2.6e-2 -> 1.0e-1) and freezes more of the band tail.  That
+                // is a consistency violation, and it is why the Gamma error
+                // measured against the exact (R0/R)^2 got WORSE with
+                // refinement (1.7% -> 15.7% at R/R0 ~ 0.7 from L2 to L4)
+                // instead of converging.  Superseded by shell_gate_free.
                 shell_rhs(i, j, k) = 0.0;
             }
             else
@@ -2618,9 +2780,31 @@ Hydro2::RHS(int lev,
             };
 
             //   D(Gamma)/Dt = -Gamma (div u - n.grad(u).n)
-            // Upwind-biased high-order gradient: for u > 0 difference the two
-            // left-reconstructed faces, for u < 0 the two right-reconstructed ones.
-            const Set::Scalar ux = u(0), uy = u(1);
+            //
+            // GAMMA ROW.  Advected with EXACTLY the operator the alpha row
+            // uses -- limiter-reconstructed face value
+            // upwinded on the RIEMANN CONTACT SPEED u* (flux.u_interface), in
+            // flux-divergence form  -div(u* G_face) + Gamma div(u*).
+            //
+            // Gamma was already limiter-reconstructed, but it upwound on the
+            // CELL-CENTRED velocity u and differenced a gradient, while alpha
+            // uses u* at the faces.  Two rows that must stay locked together
+            // then carry different truncation error and separate -- the exact
+            // failure the colour function c hit (see the note by a_face above:
+            // "Advecting c with the cell-centred u instead ... gives it a
+            // different truncation error from eta, and the two separate --
+            // measured at 2.28% in R over 15 ms").  c was fixed; Gamma was not.
+            //
+            // Measured cost of the mismatch on the coated Sch20 collapse, where
+            // the exact solution is Gamma = (R0/R)^2:
+            //     R/R0 0.939 -> Gamma  -1.5 %
+            //     R/R0 0.707 -> Gamma  -3.1 %
+            //     R/R0 0.430 -> Gamma -23.7 %
+            //     R/R0 0.270 -> Gamma -26.7 %
+            //     R/R0 0.360 (rebound) -> -18.0 %   <-- does NOT recover
+            // Since sigma(Gamma) = chi (Gamma_buck/Gamma - 1), a Gamma 27% low
+            // makes sigma too high AND crosses the buckling threshold at the
+            // wrong radius, so the whole Marmottant law is fed a biased input.
             Set::Scalar aL, aR, bL, bR;
             shell_face(1, 0, 0, aL, aR);            // face i+1/2 (lo = i)
             Set::Scalar cL, cR;
@@ -2632,7 +2816,6 @@ Hydro2::RHS(int lev,
                 cL = limiter->Reconstruct(stL).alpha;
                 cR = limiter->Reconstruct(stR).alpha;
             }
-            const Set::Scalar dGx = (ux > 0.0) ? (aL - cL) / DX[0] : (aR - cR) / DX[0];
 
             shell_face(0, 1, 0, bL, bR);            // face j+1/2 (lo = j)
             Set::Scalar dL, dR;
@@ -2644,10 +2827,8 @@ Hydro2::RHS(int lev,
                 dL = limiter->Reconstruct(stL).alpha;
                 dR = limiter->Reconstruct(stR).alpha;
             }
-            const Set::Scalar dGy = (uy > 0.0) ? (bL - dL) / DX[1] : (bR - dR) / DX[1];
 
 #if AMREX_SPACEDIM == 3
-            const Set::Scalar uz = u(2);
             Set::Scalar eL, eR, fL, fR;
             shell_face(0, 0, 1, eL, eR);            // face k+1/2 (lo = k)
             {   // face k-1/2 (lo = k-1)
@@ -2658,6 +2839,20 @@ Hydro2::RHS(int lev,
                 fL = limiter->Reconstruct(stL).alpha;
                 fR = limiter->Reconstruct(stR).alpha;
             }
+#endif
+            // G_face upwinded on u* at each face, mirroring a_face exactly.
+            // REVERTED to the cell-centred velocity (see the note above).  Pairing
+            // the face interface velocity S_M with the cell-centred `gradu` used
+            // by the stretch term below is an O(dx) inconsistency that was
+            // already tried and rejected: it biased Gamma upward ~2%/ms, so the
+            // shell read as COMPRESSING while its surface grew.  Only the Gamma
+            // INTERPOLATION is limiter-raised here; the velocity stays cell
+            // centred so advection and stretch share one velocity.
+            const Set::Scalar ux = u(0), uy = u(1);
+            const Set::Scalar dGx = (ux > 0.0) ? (aL - cL) / DX[0] : (aR - cR) / DX[0];
+            const Set::Scalar dGy = (uy > 0.0) ? (bL - dL) / DX[1] : (bR - dR) / DX[1];
+#if AMREX_SPACEDIM == 3
+            const Set::Scalar uz = u(2);
             const Set::Scalar dGz = (uz > 0.0) ? (eL - fL) / DX[2] : (eR - fR) / DX[2];
 #endif
             const Set::Scalar u_dot_gradG = AMREX_D_TERM(ux * dGx, + uy * dGy, + uz * dGz);
@@ -2669,7 +2864,20 @@ Hydro2::RHS(int lev,
             // spoils the reconstruction.  It changed nothing measurable (Gamma
             // response 82.4% / 83.1% vs 83.0%), so gradu is not the issue and the
             // simpler shared expression is kept.
-            const Set::Scalar div_s_u = gradu.trace() - n_hat.dot(gradu * n_hat);
+            // SURFACE DIVERGENCE, gate-free (shell_gate_free, default 1).
+            //
+            // div_s u = P : grad u  with  P = I - n n.  That identity assumes
+            // |n| = 1.  Here n_hat = grad_eta/(|grad_eta| + small), so |n_hat|
+            // is ~1 on the band and -> 0 in the bulk.  Using the consistent
+            // projector
+            //        P = |n|^2 I - n n        (tr P = 2|n|^2)
+            // reproduces div_s u EXACTLY where |n| = 1, and makes the whole
+            // source vanish smoothly where there is no interface -- instead of
+            // degenerating to div(u), which is what forced the old DX-scaled
+            // freeze.  No threshold, no new constant: |n_hat|^2 is built from
+            // quantities already in scope, and it is mesh-independent.
+            const Set::Scalar nn = shell_gate_free ? n_hat.squaredNorm() : 1.0;
+            const Set::Scalar div_s_u = nn * gradu.trace() - n_hat.dot(gradu * n_hat);
             shell_rhs(i, j, k) = -u_dot_gradG - shell(i, j, k) * div_s_u;
             }   // end shell_row_on / band gate
 
@@ -3419,6 +3627,17 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // standard setup (mu 0.15/0.015, rho 10/1) it overestimates nu by 10x --
     // costing a factor of ~6 in dt once the capillary limit takes over.
     Set::Scalar nu_max_local = 0.0;
+    // Max LOCAL kinematic diffusivity of the SHELL DILATATIONAL stress,
+    //     nu_s = kappa_eff * |grad eta| / rho.
+    // Reduced exactly, for the same reason nu_max is: the surface stress is
+    // identically zero where |grad eta| = 0, i.e. throughout the gas interior
+    // that supplies rho_min, so pairing kappa_s with the global rho_min takes
+    // a density and a gradient that never occur in the same cell.  Measured on
+    // Sch20-Collapsing that pairing was 1000x too conservative -- it drove
+    // dt[0] to 2.0e-15 instead of ~2.2e-12.
+    Set::Scalar nus_max_local = 0.0;
+    const Set::Scalar kap_eff_l = std::abs(shell_kappa_s - shell_mu_s)
+                                + 2.0 * std::abs(shell_mu_s);
 
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
@@ -3489,7 +3708,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         // Local copies: class members are not addressable inside a GPU lambda.
         const Set::Scalar mu0_l = mu0, mu1_l = mu1, small_l = small;
 
-        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &vz_max_local, &F_max_local, &rho_min_local, &nu_max_local] AMREX_GPU_DEVICE(int i, int j, int k)
+        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &vz_max_local, &F_max_local, &rho_min_local, &nu_max_local, &nus_max_local] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
 
@@ -3639,6 +3858,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     const Set::Scalar a1n = std::min(std::max(eta_new(i,j,k), 0.0), 1.0);
                     const Set::Scalar mu_c = a1n * mu0_l + (1.0 - a1n) * mu1_l;
                     nu_max_local = std::max(nu_max_local, mu_c / (rho(i,j,k) + small_l));
+                    if (kap_eff_l > 0.0)
+                        nus_max_local = std::max(nus_max_local,
+                                                 kap_eff_l * grad_eta_mag / (rho(i,j,k) + small_l));
                 }
             }
         });
@@ -3652,6 +3874,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     amrex::ParallelDescriptor::ReduceRealMax(F_max_local);
     amrex::ParallelDescriptor::ReduceRealMin(rho_min_local);
     amrex::ParallelDescriptor::ReduceRealMax(nu_max_local);
+    amrex::ParallelDescriptor::ReduceRealMax(nus_max_local);
 
     c_max = c_max_local;
     vx_max = vx_max_local;
@@ -3685,6 +3908,32 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // Fall back to the old conservative pairing if it was never set.
     Set::Scalar nu_phys = (nu_max > 0.0) ? nu_max : (mu_max / (rho_min + small));
     Set::Scalar nu_total = nu_phys;
+    // SHELL DILATATIONAL VISCOSITY.  kappa_s enters the momentum equation as
+    //     div( |grad eta| * kappa_s * (div_s u) * P ),
+    // i.e. a SURFACE momentum diffusion whose kinematic diffusivity is
+    //     nu_s = kappa_s * |grad eta| / rho  ~  kappa_s / (rho * eps),
+    // eps being the interface width.  Because eps is held at ~1 cell
+    // (eps/dx = 1.02 on the Sch20 decks), |grad eta| ~ 1/dx_min and nu_s
+    // therefore GROWS as the mesh is refined:
+    //     nu_s ~ 1/dx   =>   dt_visc ~ dx^2 / nu_s ~ dx^3,
+    // while the acoustic limit only scales as dx.  Refinement makes this the
+    // binding constraint even though it is invisible at coarse resolution.
+    //
+    // Measured on Sch20-Collapsing (kappa_s = 7.2e-9, rho = 1000):
+    //   level  dx         nu_s       dt_limit   substep    violation
+    //   L3     7.81e-8    9.0e-5     4.52e-12   1.16e-11     2.6x
+    //   L4     3.91e-8    1.80e-4    5.65e-13   4.11e-12     7.3x
+    //   L5     1.95e-8    3.60e-4    7.06e-14   1.45e-12    20.6x  -> NaN at step 3
+    // nu_s at L5 is 360x the bulk mu0/rho, so omitting it from nu_total made
+    // dt_viscous meaningless for any coated run.  1/dx_min is used as the
+    // bound on |grad eta| because the band cannot be thinner than a cell.
+    // nus_max_local is the exact max of kappa_eff*|grad eta|/rho, reduced over
+    // the whole level and taken only where the surface stress actually lives.
+    // When the viscous stress is sub-cycled it no longer constrains the GLOBAL
+    // step -- SubcycleShellViscous takes N = dt/dt_visc sub-steps internally --
+    // so the constraint is dropped here and enforced there instead.
+    if (kap_eff_l > 0.0 && shell_dt_limit && !(shell_visc_subcycle && shell_kappa_s != 0.0))
+        nu_total += nus_max_local;
     Set::Scalar dt_viscous = cfl_v * dx_min * dx_min
                            / (2.0 * AMREX_SPACEDIM * (nu_total + small));
 
@@ -4448,6 +4697,11 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     // L_hyper(U^n), so relaxation runs ONCE per step after the capillary
     // operator, not between RK stages.  defer_relax is false unless the split
     // scheme is active, so the AcousticBC behaviour is unchanged by default.
+    // Operator splitting: L_relax o L_visc o L_cap o L_hyper.  The shell
+    // viscous stress is advanced here, immediately before relaxation, on the
+    // level's own timestep (dt is the per-level Vector in this scope).
+    SubcycleShellViscous(lev, dt[lev]);
+
     if (!defer_relax) RelaxAndReinit(lev);
 
     // ------------------------------------------------------------
@@ -5491,6 +5745,249 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
 // ======================================================================
 // L_cap : Schmidmayer 2017 eq. (17) / sec. 4.2.2.  See Hydro2.H.
 // ======================================================================
+//
+// SUB-CYCLED SHELL DILATATIONAL VISCOUS UPDATE
+// ---------------------------------------------------------------------------
+// kappa_s enters momentum as div(Omega_visc), Omega_visc = |grad eta| kappa_s
+// (div_s u) P.  That is a SURFACE momentum diffusion with kinematic diffusivity
+// nu_s = kappa_s |grad eta| / rho.  Because the decks hold eps/dx ~ 1,
+// |grad eta| ~ 1/dx, so nu_s ~ 1/dx and its explicit stability limit
+// dt <= dx^2/(2 d nu_s) scales as dx^3 while the acoustic limit scales as dx.
+// Letting it set the global step made max_level 5 cost ~83,000 base steps.
+//
+// Instead this advances ONLY that term, on the band, in N sub-steps of dt/N
+// with N from the local stability limit.  Structure copied from the
+// shell_extend_iters sweep: nearest-neighbour FillBoundary per sub-step, no
+// global reductions, band cells only -- so the extra work is <1% of a hydro
+// step (the band is ~5e4 cells against 6.4M at L5) and it adds no collective.
+//
+// ENERGY.  The bulk Omega is treated as a REVERSIBLE capillary stress whose
+// Omega:grad(u) exchange feeds the surface reservoir sigma_eff|grad eta|.  The
+// viscous part is NOT reversible and has no reservoir: its work rate is
+//     Omega_visc : grad u = kappa_s |grad eta| (div_s u)^2  >= 0,
+// positive-definite, so it is deposited as HEAT in the internal energy.  This
+// is why splitting it out is more correct than folding it into the scalar
+// tension, where it could drive sigma_tot negative and had to be clamped.
+//
+// COARSE-FINE.  The coarse level does not advance during the sub-cycle, so its
+// contribution to the band ghost velocity is held fixed across the N sub-steps
+// -- first order over an interval of one hydro dt, which is consistent with the
+// subcycled-AMR treatment of the other source terms.
+//
+void Hydro2::SubcycleShellViscous(int lev, Set::Scalar dt)
+{
+    BL_PROFILE("Integrator::Hydro2::SubcycleShellViscous");
+    if (!shell_visc_subcycle) return;
+    if (shell_kappa_s == 0.0 && shell_mu_s == 0.0) return;
+    if (!apply_surface_tension) return;
+
+    const Set::Scalar *DX = geom[lev].CellSize();
+    const Set::Scalar kap_s = shell_kappa_s - shell_mu_s;
+    const Set::Scalar dxm = std::min({AMREX_D_DECL(DX[0], DX[1], DX[2])});
+    const Set::Scalar kap_eff = std::abs(kap_s) + 2.0 * std::abs(shell_mu_s);
+    const Set::Scalar sm = small;
+
+    // Gas reference density: the smallest density the stability estimate is
+    // allowed to see.  Taken from the phase-1 (gas) IC scale rather than
+    // `small`, which is a numerical regulariser, not a physical density.
+    const Set::Scalar rho_floor_l = std::max(shell_nus_rho_floor, 1.0e-12);
+
+    // ---- N from the SAME stability measure the dt limiter uses -------------
+    // nu_s = kap_eff |grad eta| / rho, reduced over the band, then
+    // N = ceil( dt / (cfl_v dx^2 / (2 d nu_s)) ).
+    Set::Scalar nus_max = 0.0;
+    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
+        auto et  = eta_mf[lev]->const_array(mfi);
+        auto rho = density_mf[lev]->const_array(mfi);
+        amrex::LoopOnCpu(bx, [&] (int i, int j, int k) {
+            Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
+            const Set::Scalar gem = ge.lpNorm<2>();
+            if (gem < 1.0e-10) return;
+            // FLOOR rho at the gas reference density.  `small` (1e-8) is far
+            // below any physical density here, so without this floor a single
+            // near-vacuum band cell dominates the reduction: at max_level 5 one
+            // cell with rho ~ 3e-8 drove nu_s to 1.06e7 (1e10 x the healthy
+            // 1.085e-3), which is what crashed the sub-cycled run.
+            const Set::Scalar rho_f = std::max(rho(i,j,k), rho_floor_l);
+            nus_max = std::max(nus_max, kap_eff * gem / rho_f);
+        });
+    }
+    amrex::ParallelDescriptor::ReduceRealMax(nus_max);
+    if (nus_max <= 0.0) return;
+
+    const Set::Scalar cflv   = (cfl_v == cfl_v) ? cfl_v : 0.4;   // NaN-safe
+    // NOTE: `small` (1e-8) is a DENSITY/PRESSURE regulariser and must never be
+    // added to a time.  dt_sub here is ~1e-12, so `dt_sub + small` is dominated
+    // by small and drives N to 1 -- i.e. one explicit step at the UNTHROTTLED
+    // dt, precisely the instability this routine exists to avoid.  nus_max > 0
+    // is already guaranteed by the early return above, so no guard is needed.
+    const Set::Scalar dt_sub = cflv * dxm * dxm
+                             / (2.0 * AMREX_SPACEDIM * nus_max);
+    // 64-bit: ceil(dt/dt_sub) reached ~6e11 when nu_s blew up, and the cast to
+    // int overflowed to a negative value, which the `N < 1` clamp then turned
+    // into N = 1 -- the sub-cycle silently disabled itself exactly when it was
+    // most needed, taking one explicit step at the unthrottled dt (89 NaNs at
+    // max_level 5).  Compute in long long, clamp, THEN narrow.
+    long long Nll = (dt_sub > 0.0)
+                  ? (long long)std::ceil((long double)dt / (long double)dt_sub)
+                  : 1LL;
+    if (Nll < 1LL) Nll = 1LL;
+    if (Nll > (long long)shell_visc_subcycle_max)
+    {
+        if (amrex::ParallelDescriptor::IOProcessor())
+            Util::Warning(INFO, "SubcycleShellViscous lev=", lev, ": required N=", Nll,
+                          " exceeds shell.kappa_s_subcycle_max=", shell_visc_subcycle_max,
+                          " (nu_s=", nus_max, ").  Clamping -- the sub-step is NO LONGER "
+                          "stability-bounded; raise the cap or check for vacuum cells.");
+        Nll = (long long)shell_visc_subcycle_max;
+    }
+    const int N = (int)Nll;
+    const Set::Scalar dtau = dt / (Set::Scalar)N;
+
+    if (shell_visc_verbose && amrex::ParallelDescriptor::IOProcessor())
+        Util::Message(INFO, "SubcycleShellViscous lev=", lev, " N=", N,
+                      " dtau=", dtau, " nu_s=", nus_max);
+
+    // ---- N explicit sub-steps on the band ---------------------------------
+    // Omega_visc is built ONCE PER CELL into scratch, then differenced.  The
+    // first version rebuilt it at all six neighbours inside the divergence,
+    // which recomputed an eta-gradient AND the full 3x3 velocity Jacobian seven
+    // times per cell (~168 stencil reads) instead of once (~30).  The scratch is
+    // allocated outside the sub-step loop so the saving is not paid back in
+    // allocation churn.
+    const int nOm = (AMREX_SPACEDIM == 2) ? 3 : 6;
+    amrex::MultiFab Omv(momentum_mf[lev]->boxArray(),
+                        momentum_mf[lev]->DistributionMap(), nOm, 1);
+
+    for (int it = 0; it < N; ++it)
+    {
+        velocity_mf[lev]->FillBoundary(geom[lev].periodicity());
+        Omv.setVal(0.0);
+
+        // ---- build Omega_visc on a grown box (band cells only) -------------
+        for (amrex::MFIter mfi(Omv, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &gbx = mfi.growntilebox(1);
+            auto et  = eta_mf[lev]->const_array(mfi);
+            auto vel = velocity_mf[lev]->const_array(mfi);
+            auto om  = Omv.array(mfi);
+            amrex::ParallelFor(gbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
+                const Set::Scalar gem = ge.lpNorm<2>();
+                if (gem < 1.0e-10) return;          // off-band: Omega_visc = 0
+                const Set::Vector nh = ge / gem;
+                Set::Matrix gu = Set::Matrix::Zero();
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
+                const Set::Scalar ds = gu.trace() - nh.dot(gu * nh);
+                const Set::Scalar se = kap_s * ds;              // viscous ONLY
+                // |grad eta| P_ab = gem d_ab - ge_a ge_b / gem
+                om(i,j,k,0) = se * (gem - ge(0)*ge(0)/gem);     // xx
+                om(i,j,k,1) = se * (gem - ge(1)*ge(1)/gem);     // yy
+#if AMREX_SPACEDIM == 2
+                om(i,j,k,2) = se * (-ge(0)*ge(1)/gem);          // xy
+#else
+                om(i,j,k,2) = se * (gem - ge(2)*ge(2)/gem);     // zz
+                om(i,j,k,3) = se * (-ge(0)*ge(1)/gem);          // xy
+                om(i,j,k,4) = se * (-ge(0)*ge(2)/gem);          // xz
+                om(i,j,k,5) = se * (-ge(1)*ge(2)/gem);          // yz
+#endif
+            });
+        }
+        Omv.FillBoundary(geom[lev].periodicity());
+
+        // ---- apply div(Omega_visc) to momentum, dissipation to energy ------
+        for (amrex::MFIter mfi(*momentum_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto et  = eta_mf[lev]->const_array(mfi);
+            auto vel = velocity_mf[lev]->const_array(mfi);
+            auto om  = Omv.const_array(mfi);
+            auto M   = momentum_mf[lev]->array(mfi);
+            auto E   = energy_per_vol_mf[lev]->array(mfi);
+            // The RK state carries BOTH the total energy and the phasic
+            // internal energies (solution vector entries [3], [5], [6]).  The
+            // dissipation must go into E0/E1 as well, or the invariant
+            //     E_vol = KE + E0 + E1
+            // is broken and RelaxAndReinit -- which enforces p0 = p1 from
+            // (eta, E0, E1) immediately after this routine -- never sees the
+            // deposited heat.  Writing E_vol alone was why max_level 5 diverged
+            // while max_level 3 (64x fewer sub-steps) stayed within 0.05%.
+            auto E0  = energy0_mf[lev]->array(mfi);
+            auto E1  = energy1_mf[lev]->array(mfi);
+            const Set::Scalar idx = 0.5 / DX[0], idy = 0.5 / DX[1];
+#if AMREX_SPACEDIM == 3
+            const Set::Scalar idz = 0.5 / DX[2];
+#endif
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
+                const Set::Scalar gem = ge.lpNorm<2>();
+                if (gem < 1.0e-10) return;          // off-band: nothing to do
+
+                Set::Vector F = Set::Vector::Zero();
+#if AMREX_SPACEDIM == 2
+                F(0) = (om(i+1,j,k,0) - om(i-1,j,k,0)) * idx
+                     + (om(i,j+1,k,2) - om(i,j-1,k,2)) * idy;
+                F(1) = (om(i+1,j,k,2) - om(i-1,j,k,2)) * idx
+                     + (om(i,j+1,k,1) - om(i,j-1,k,1)) * idy;
+#else
+                F(0) = (om(i+1,j,k,0) - om(i-1,j,k,0)) * idx
+                     + (om(i,j+1,k,3) - om(i,j-1,k,3)) * idy
+                     + (om(i,j,k+1,4) - om(i,j,k-1,4)) * idz;
+                F(1) = (om(i+1,j,k,3) - om(i-1,j,k,3)) * idx
+                     + (om(i,j+1,k,1) - om(i,j-1,k,1)) * idy
+                     + (om(i,j,k+1,5) - om(i,j,k-1,5)) * idz;
+                F(2) = (om(i+1,j,k,4) - om(i-1,j,k,4)) * idx
+                     + (om(i,j+1,k,5) - om(i,j-1,k,5)) * idy
+                     + (om(i,j,k+1,2) - om(i,j,k-1,2)) * idz;
+#endif
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    M(i,j,k,d) += dtau * F(d);
+
+                // Dissipation -> heat.  Omega_visc:grad u = kap_s |grad eta| (div_s u)^2
+                // is positive-definite, so the kinetic energy removed by F is
+                // returned as internal energy rather than stored in a reservoir.
+                const Set::Vector nh = ge / gem;
+                Set::Matrix gu = Set::Matrix::Zero();
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
+                const Set::Scalar ds = gu.trace() - nh.dot(gu * nh);
+                Set::Scalar udotF = 0.0;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) udotF += vel(i,j,k,d) * F(d);
+                // Total energy gains the work done on the fluid (u.F, which
+                // shows up as kinetic) plus the dissipation (internal).
+                const Set::Scalar diss = kap_s * gem * ds * ds;   // >= 0
+                E(i,j,k) += dtau * (udotF + diss);
+                // The dissipation is INTERNAL energy, so it must also be split
+                // into the phasic reservoirs, by volume fraction as elsewhere
+                // in this file (eta weights phase 0).  u.F is kinetic and does
+                // NOT enter E0/E1.
+                const Set::Scalar a0 = std::min(std::max(et(i,j,k), 0.0), 1.0);
+                E0(i,j,k) += dtau * diss * a0;
+                E1(i,j,k) += dtau * diss * (1.0 - a0);
+            });
+        }
+
+        // Refresh the velocity the next sub-step differentiates (band only).
+        for (amrex::MFIter mfi(*momentum_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto et  = eta_mf[lev]->const_array(mfi);
+            auto M   = momentum_mf[lev]->const_array(mfi);
+            auto rho = density_mf[lev]->const_array(mfi);
+            auto v   = velocity_mf[lev]->array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
+                if (ge.lpNorm<2>() < 1.0e-10) return;
+                const Set::Scalar r = rho(i,j,k) + sm;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) v(i,j,k,d) = M(i,j,k,d) / r;
+            });
+        }
+    }
+}
+
 void Hydro2::RelaxAndReinit(int lev)
 {
     BL_PROFILE("Integrator::Hydro2::RelaxAndReinit");
@@ -5538,10 +6035,118 @@ void Hydro2::RelaxAndReinit(int lev)
             const amrex::Box &bxs = mfi.validbox();
             auto shl  = shell_mf[lev]->array(mfi);
             auto etas = eta_mf[lev]->const_array(mfi);
+            const int extend = shell_bulk_extend;
             amrex::ParallelFor(bxs, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 const Set::Scalar e = etas(i, j, k);
-                if (e < 1.0e-6 || e > 1.0 - 1.0e-6) shl(i, j, k) = 1.0;
+                const bool bulk = (e < 1.0e-6 || e > 1.0 - 1.0e-6);
+                if (!bulk) return;
+                if (!extend) { shl(i, j, k) = 1.0; return; }   // legacy behaviour
+
+                // CONSTANT NORMAL EXTENSION (shell_bulk_extend, default 1).
+                //
+                // The legacy line pinned every bulk cell to Gamma = 1.0 so that
+                // "re-entrained cells always start from Gamma = 1".  That is
+                // wrong the moment the interface MOVES: a collapsing bubble
+                // sweeps inward into gas-side bulk cells, and each one hands
+                // the band Gamma = 1 instead of the correct (R0/R)^2 > 1.  The
+                // band is therefore continuously fed unstrained shell from the
+                // region it is moving into, and Gamma is dragged toward 1.
+                //
+                // Measured against the exact spherical solution Gamma=(R0/R)^2
+                // on the coated collapse: -1.5% at R/R0=0.94, -8.4% at 0.72,
+                // -23.7% at 0.43, and it does NOT recover on rebound.  In the
+                // DRIVEN case, where the interface barely moves, the same
+                // measurement gives only -0.3% -- exactly the signature of a
+                // sweeping error rather than a transport error.
+                //
+                // Fix: a bulk cell adjacent to the band inherits the band value
+                // (constant extension along the normal), so a cell entrained by
+                // interface motion starts from the shell state actually there.
+                // Cells with no band neighbour are still anchored at 1.0, which
+                // keeps the far field from integrating bulk dilatation without
+                // bound -- the reason the anchor exists at all.
+                //
+                // Race-free: only BULK cells are written and only BAND cells
+                // are read, and the two sets are disjoint.
+                Set::Scalar acc = 0.0; int n = 0;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    for (int sgn = -1; sgn <= 1; sgn += 2)
+                    {
+                        const int ii = i + (d == 0 ? sgn : 0);
+                        const int jj = j + (d == 1 ? sgn : 0);
+                        const int kk = k + (d == 2 ? sgn : 0);
+                        if (!etas.contains(ii, jj, kk)) continue;
+                        const Set::Scalar en = etas(ii, jj, kk);
+                        if (en > 1.0e-6 && en < 1.0 - 1.0e-6) { acc += shl(ii, jj, kk); ++n; }
+                    }
+                shl(i, j, k) = n ? acc / Set::Scalar(n) : 1.0;
             });
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // NORMAL EXTENSION OF GAMMA  (shell_extend_iters, default 4; 0 = off)
+    //
+    // Gamma is an AREAL density living on a surface.  In a diffuse
+    // representation every cell of the band represents the SAME surface, so
+    // Gamma must be constant along the normal:   n . grad(Gamma) = 0.
+    // Nothing enforced that, and the field stratifies badly.  Measured on the
+    // coated collapse at R/R0 = 0.713 (exact Gamma = 1.967):
+    //     r/R05 0.87 (eta 0.15, gas side)  Gamma 1.879   ratio 0.955
+    //     r/R05 1.01 (eta 0.59, interface) Gamma 1.711   ratio 0.870
+    //     r/R05 1.14 (eta 0.92, liquid)    Gamma 1.570   ratio 0.798
+    //     r/R05 1.86 (eta 0.9996, outer)   Gamma 1.179   ratio 0.599
+    // a 37% spread along the normal across cells that are all the same
+    // surface.  Once that gradient exists the advective term u.grad(Gamma) is
+    // large and spurious, and a moving interface samples cells holding
+    // different values -- so the eta=0.5 value is dragged toward the low outer
+    // layers.  That is why the error grows with interface DISPLACEMENT, is
+    // irreversible, and is nearly absent in the driven case.
+    //
+    // Fix: relax  dGamma/dtau + s (n . grad Gamma) = 0,  s = sign(eta - 1/2),
+    // which propagates the eta=0.5 value outward along the normal in both
+    // directions.  Upwinded on s*n, dtau = dx/2.  This is the standard
+    // extension step for surfactant transport on level-set / phase-field
+    // interfaces.  No fitted constant -- only an iteration count, and a few
+    // sweeps per step suffice because the band is a handful of cells wide.
+    // ------------------------------------------------------------------
+    if (marmottant && shell_extend_iters > 0)
+    {
+        const Set::Scalar *DXe = geom[lev].CellSize();
+        const Set::Scalar dtau = 0.5 * DXe[0];
+        for (int it = 0; it < shell_extend_iters; ++it)
+        {
+            shell_mf[lev]->FillBoundary(geom[lev].periodicity());
+            amrex::MultiFab prev(shell_mf[lev]->boxArray(),
+                                 shell_mf[lev]->DistributionMap(), 1, shell_mf[lev]->nGrow());
+            amrex::MultiFab::Copy(prev, *shell_mf[lev], 0, 0, 1, shell_mf[lev]->nGrow());
+            for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &bxe = mfi.validbox();
+                auto shl = shell_mf[lev]->array(mfi);
+                auto old = prev.const_array(mfi);
+                auto etae = eta_mf[lev]->const_array(mfi);
+                amrex::ParallelFor(bxe, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    const Set::Scalar e = etae(i, j, k);
+                    if (e <= 1.0e-6 || e >= 1.0 - 1.0e-6) return;   // bulk: anchored elsewhere
+                    Set::Vector ge = Numeric::Gradient(etae, i, j, k, 0, DXe);
+                    const Set::Scalar gem = ge.lpNorm<2>();
+                    if (gem <= 0.0) return;
+                    const Set::Scalar sgn = (e > 0.5) ? 1.0 : -1.0;
+                    Set::Vector w = (sgn / gem) * ge;               // propagation direction
+                    Set::Scalar adv = 0.0;
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    {
+                        const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                        // upwind w.r.t. w: take the difference from behind
+                        const Set::Scalar back = (w(d) > 0.0)
+                            ? (old(i, j, k) - old(i - di, j - dj, k - dk))
+                            : (old(i + di, j + dj, k + dk) - old(i, j, k));
+                        adv += w(d) * back / DXe[d];
+                    }
+                    shl(i, j, k) = old(i, j, k) - dtau * adv;
+                });
+            }
         }
     }
 
@@ -5662,7 +6267,11 @@ void Hydro2::RelaxAndReinit(int lev)
                                                        + M_(i, j, k, 1) * M_(i, j, k, 1),
                                                        + M_(i, j, k, 2) * M_(i, j, k, 2))) / std::max(rho_p, small_loc);
                 Set::Scalar rhoe_p = std::max(E_(i, j, k) - ke_p, small_loc);
-                Set::Scalar p_pure = Solver::EOS::EOS::ReinitMixturePressure(rhoe_p, a1, a2,
+                // Solve for p with the SAME alpha the energies are written
+                // with, so E0 + E1 = rho_e holds identically.
+                const Set::Scalar a1p = std::min(std::max(eta(i, j, k), 0.0), 1.0);
+                const Set::Scalar a2p = 1.0 - a1p;
+                Set::Scalar p_pure = Solver::EOS::EOS::ReinitMixturePressure(rhoe_p, a1p, a2p,
                                                                             gam0, pi0_, gam1, pi1_, small_loc);
                 p_pure = std::max(p_pure, -std::min(pi0_, pi1_) + small_loc);
                 // Write E_k with the FROZEN raw eta (clamped only to [0,1]),
