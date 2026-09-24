@@ -89,7 +89,7 @@ amr.blocking_factor = 16
 amr.regrid_int      = 10
 amr.grid_eff        = 0.8
 amr.max_level       = 4
-amr.n_cell          = 160 160 160     # base dx 1.25e-6; L4 -> dx_finest 7.8125e-8 (R0/dx = 25.6)
+amr.n_cell          = 60 60 60     # base dx 1.25e-6; L4 -> dx_finest 7.8125e-8 (R0/dx = 25.6)
 
 # n_error_buf pushes the fine patches ~16 dx_finest past the interface band so
 # the coarse-fine boundary sits in pure water, where the Q-Fix density
@@ -108,7 +108,7 @@ cfl                     = 0.5
 
 ### DIMENSIONS -- octant, 100 R0 ###
 geometry.prob_lo     =  0.0     0.0     0.0
-geometry.prob_hi     =  2.0e-4  2.0e-4  2.0e-4
+geometry.prob_hi     =  5.0e-5  5.0e-5  5.0e-5
 geometry.is_periodic = 0 0 0
 stop_time            = 1.0e-6         # 5.46 tau_c (tau_c = 1.830e-7 s)
 
