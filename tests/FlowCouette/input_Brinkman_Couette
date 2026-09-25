@@ -1,0 +1,143 @@
+#@ [brinkman_couette]
+#@ exe=hydro2
+#@ dim=2
+# =============================================================================
+# BRINKMAN (EMBEDDED-SOLID) COUETTE -- unit test of the sharp no-slip wall.
+#   Channel of height h = 1 between two SOLID slabs defined by phi (not by the
+#   domain BCs): bottom slab y < 0.125 at rest, top slab y > 1.125 moving at
+#   U = 0.1 (solid target momentum rho*U).  Periodic in x.
+#   Steady exact solution in the fluid:  u(y) = U (y - 0.125) / h,  v = 0.
+#   Re = U h / nu = 10, diffusion time h^2/nu = 100 -> run to t = 60.
+# Walls sit exactly on cell faces (dy = 1.25/80 = 1/64).  Override
+# solid.phi.ic.expression.constant.ylo/yhi (e.g. 0.1328125 / 1.1328125) to put them mid-cell.
+# Compare explicit vs implicit penalty:
+#   solid.implicit = 0 solid.brinkman = 100      (explicit; stable brinkman*dt < ~2.5)
+#   solid.implicit = 1 solid.brinkman = 1e2..1e8 (exact exponential update)
+# Post-process: tests/FlowCouette/reference/brinkman_couette.py
+# =============================================================================
+alamo.program = hydro2
+plot_file     = ./tests/FlowCouette/Brinkman/output
+amr.plot_dt   = 20.0
+amr.plot_int  = -1
+
+amr.max_grid_size    = 64
+amr.blocking_factor  = 8
+amr.max_level        = 0
+amr.n_cell           = 16 80
+geometry.prob_lo     = 0.0 0.0 0.0
+geometry.prob_hi     = 0.25 1.25 0.0
+geometry.is_periodic = 1 0 0
+
+timestep            = 1e-6
+dynamictimestep.on  = 1
+dynamictimestep.max = 1e-2
+dynamictimestep.min = 1e-10
+cfl                 = 0.3
+cfl_v               = 0.3
+stop_time           = 60.0
+nghost              = 4
+relax_diag          = 0
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+apply_embedded_solid = 1
+solid.brinkman       = 1.0e6
+solid.implicit       = 1
+solid.slip           = 0
+phi_refinement_criterion = 1e10
+solid.phi.ic.type                    = expression
+solid.phi.ic.expression.constant.ylo = 0.125
+solid.phi.ic.expression.constant.yhi = 1.125
+solid.phi.ic.expression.region0      = "(y > ylo) * (y < yhi)"
+solid.density.ic.type            = constant
+solid.density.ic.constant.value  = 1.0
+solid.momentum.ic.type                  = expression
+solid.momentum.ic.expression.constant.U = 0.1
+solid.momentum.ic.expression.region0    = "U * (y > 0.625)"
+solid.momentum.ic.expression.region1    = "0.0"
+solid.pressure.ic.type           = constant
+solid.pressure.ic.constant.value = 0.714286
+
+# single-phase air (eta = 1), a = 1
+eta.ic.type           = constant
+eta.ic.constant.value = 1.0
+eta.bc.type.ylo = neumann
+eta.bc.type.yhi = neumann
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cp    = 1005.0
+eos0.cv    = 717.86
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp    = 1005.0
+eos1.cv    = 717.86
+mu0   = 0.01
+mu1   = 0.01
+mu0_b = 0.0
+mu1_b = 0.0
+
+density0.ic.type = constant
+density0.ic.constant.value = 1.0
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 0.714286
+density1.ic.type = constant
+density1.ic.constant.value = 1.0
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 0.714286
+
+epsilon = 0.1
+sigma   = 0.0
+Dv      = 0.0
+pref    = 0.0
+small   = 1e-6
+grav    = 0.0
+cutoff  = 0.01
+
+# x is periodic: EVERY field BC must say so explicitly -- geometry.is_periodic
+# alone is not enough (an unspecified face falls back to a default that
+# overwrites the periodic ghosts; measured here: rho 1 -> 0.73 in 120 steps).
+eta.bc.type.xlo      = periodic
+eta.bc.type.xhi      = periodic
+density.bc.type.xlo  = periodic
+density.bc.type.xhi  = periodic
+density0.bc.type.xlo = periodic
+density0.bc.type.xhi = periodic
+density1.bc.type.xlo = periodic
+density1.bc.type.xhi = periodic
+momentum.bc.type.xlo = periodic periodic
+momentum.bc.type.xhi = periodic periodic
+energy.bc.type.xlo   = periodic
+energy.bc.type.xhi   = periodic
+# domain faces in y lie inside the solid slabs -> simple zero-gradient
+density.bc.type.ylo  = neumann
+density.bc.type.yhi  = neumann
+density0.bc.type.ylo = neumann
+density0.bc.type.yhi = neumann
+density1.bc.type.ylo = neumann
+density1.bc.type.yhi = neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+energy.bc.type.ylo   = neumann
+energy.bc.type.yhi   = neumann
+
+eta_refinement_criterion   = 1e10
+omega_refinement_criterion = 1e10
+gradu_refinement_criterion = 1e10
+p_refinement_criterion     = 1e10
+rho_refinement_criterion   = 1e10
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+Riemann_Solver.type = hllc
+Limiter.type        = vanleer
+kappa_method        = 1
+apply_sharpening    = 0

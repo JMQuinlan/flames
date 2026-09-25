@@ -35,14 +35,30 @@ import wedge_analysis as wa
 # ============================================================================
 # ==============================  CONFIG  ====================================
 # ============================================================================
-MACH_LIST   = [1.2, 2.0, 3.0, 5.0]      # cases to compare
+# cases to compare (one deck per Mach: tests/FlowWedge/input_Ma<M>).  Analytical weak-shock
+# angles for theta = 15 deg, gamma = 1.4 (oblique_shock_theory.beta_deg):
+#   Ma  1.2 : DETACHED
+#   Ma  1.7 : beta =  55.98 deg
+#   Ma  1.8 : beta =  51.34 deg
+#   Ma  2.0 : beta =  45.34 deg
+#   Ma  2.5 : beta =  36.94 deg
+#   Ma  3.0 : beta =  32.24 deg
+#   Ma  3.5 : beta =  29.19 deg
+#   Ma  4.0 : beta =  27.06 deg
+#   Ma  4.5 : beta =  25.50 deg
+#   Ma  5.0 : beta =  24.32 deg
+#   Ma  6.0 : beta =  22.67 deg
+#   Ma  7.0 : beta =  21.60 deg
+#   Ma  8.0 : beta =  20.86 deg
+#   Ma 10.0 : beta =  19.94 deg
+MACH_LIST   = [1.2, 1.7, 1.8, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0, 7.0, 8.0, 10.0]
 THETA_DEG   = wa.WEDGE_THETA_DEG         # wedge half-angle (from wedge_analysis)
 GAMMA       = wa.GAMMA
 OUTPUT_DIR  = "./Images"
 ALSO_RENDER_EACH = True                  # also write the per-case wedge_Ma*.png overlays
 
 # beta-vs-Ma plot style
-MA_CURVE_LO, MA_CURVE_HI = 1.02, 5.6     # analytical curve x-range
+MA_CURVE_LO, MA_CURVE_HI = 1.02, 10.5    # analytical curve x-range
 ANALYTIC_COLOR = "#1f5fd1"               # analytical weak-shock curve (BLUE)
 STRONG_COLOR   = "#9aa0a8"               # analytical strong-shock curve (grey, dashed)
 MEASURED_COLOR = "#d11f1f"               # measured points (RED)

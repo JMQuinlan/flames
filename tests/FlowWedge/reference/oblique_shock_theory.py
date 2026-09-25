@@ -123,7 +123,7 @@ if __name__ == "__main__":
     theta = 15.0
     print(f"theta = {theta} deg,  gamma = {GAMMA_DEFAULT}")
     print(f"{'Ma':>5} {'theta_max':>10} {'attached':>9} {'beta_weak':>10} {'beta_strong':>11}")
-    for M in (1.2, 2.0, 3.0, 5.0):
+    for M in (1.2, 1.7, 1.8, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0, 7.0, 8.0, 10.0):
         tm = theta_max_deg(M)
         att = is_attached(theta, M)
         bw = beta_deg(theta, M, weak=True)

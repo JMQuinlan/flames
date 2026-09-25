@@ -1,6 +1,7 @@
 // Base
 #include "Hydro2.H"
 #include <memory>
+#include <fstream>
 // Parsing and Input Handeling
 #include "AMReX_MultiFab.H"
 #include "IO/ParmParse.H"
@@ -176,14 +177,56 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // EMBEDDED SOLID BOUNDARY (see FlowWedge for examples)
         pp_query_default("apply_embedded_solid", value.embedded.apply, 0);  // Apply Solid Boundry 1 --> "Domain has solid boundry"
-        pp_query_default("solid.brinkman", value.embedded.brinkman, 0.0);   // Yang(2023) momentum-only Brinkman no-penetration (0=off)
+        // [2026-09-25] default 1e6 (stiff sharp wall, used with solid.implicit = 1).
+        // <= 0 selects the old auto momentum-projection wall.
+        pp_query_default("solid.brinkman", value.embedded.brinkman, 1.0e6); // Yang(2023) momentum-only Brinkman no-penetration
         pp_query_default("solid.slip", value.embedded.slip, 0);             // 1 = slip wall (penalize only wall-normal momentum); 0 = no-slip
+        // [2026-09-24] 1 = apply the Brinkman penalty IMPLICITLY (exact exponential
+        // decay, once per level step after the RK advance) instead of as an
+        // explicit RHS source.  The explicit source is only stable for
+        // brinkman*dt < ~2.5 on EVERY level, which caps brinkman at O(1/dt_coarse)
+        // (~150 on a 0.06-cell base grid) -- far too weak for a sharp no-slip
+        // wall (penalization layer sqrt(nu/brinkman) must be << dx).  The exact
+        // update M <- Ms + (M-Ms) exp(-brinkman (1-phi) dt) is unconditionally
+        // stable, so brinkman can be 1e4-1e8.  [2026-09-25] 1 is the default;
+        // 0 restores the old explicit RHS source.
+        pp_query_default("solid.implicit", value.embedded.implicit, 1);
+        // [2026-09-24] 1 = SHARP-WALL face flux.  The embedded solid is "full-flux
+        // porous": every face, including fluid/solid ones, gets the ordinary
+        // Riemann flux, and only momentum is penalized.  With a sharp wall
+        // (phi a step) and a stiff penalty that is a mass trap: at a
+        // stagnation point the fluid->solid face carries mass INTO the first
+        // solid cell (u* > 0), the penalty zeroes its momentum, and nothing
+        // carries it out -- measured on the viscous NACA 0012 (M 0.5, Re 5000,
+        // max_level 4): LE solid cell rho 1.0 -> 1.35 (t=2) -> 1.74 (t=4) ->
+        // singular at t = 5.6.  With wall_flux = 1, a face whose two cells lie
+        // on opposite sides of phi = 0.5 is solved as a wall: fluid cell vs its
+        // mirror (normal velocity reflected about the solid's), so u* = 0, no
+        // mass/energy crosses and only pressure acts; faces with both cells in
+        // the solid carry zero flux.  Tangential no-slip still comes from the
+        // Brinkman term + viscous stress.  [2026-09-25] 1 is the default;
+        // 0 = old porous (full-flux) behaviour.
+        pp_query_default("solid.wall_flux", value.embedded.wall_flux, 1);
+        if (value.embedded.wall_flux != 0 && value.embedded.wall_flux != 1)
+            Util::Abort(INFO, "solid.wall_flux must be 0 or 1");
+        // [2026-09-24] force / pressure-probe time history, see Hydro2.H.
+        pp_query_default("solid.force_int", value.solid_force_int, 0);
+        pp.queryarr("solid.probe.x", value.probe_x);
+        pp.queryarr("solid.probe.y", value.probe_y);
+        if (value.probe_x.size() != value.probe_y.size())
+            Util::Abort(INFO, "solid.probe.x and solid.probe.y must have the same length");
+#if AMREX_SPACEDIM == 3
+        pp.queryarr("solid.probe.z", value.probe_z);
+        if (value.probe_z.size() != value.probe_x.size())
+            Util::Abort(INFO, "in 3D solid.probe.z must be given, with the same length as solid.probe.x");
+#endif
         if (value.embedded.apply)
         {
             if (value.embedded.brinkman <= 0.0)
-                Util::Message(INFO, "embedded solid: Yang full-flux wall, auto momentum projection (solid.brinkman not set)");
+                Util::Message(INFO, "embedded solid: auto momentum-projection wall (solid.brinkman <= 0)");
             else
-                Util::Message(INFO, "embedded solid: Yang full-flux porous wall, solid.brinkman=", value.embedded.brinkman);
+                Util::Message(INFO, "embedded solid: solid.brinkman=", value.embedded.brinkman,
+                              " implicit=", value.embedded.implicit, " wall_flux=", value.embedded.wall_flux);
             // Skips pressure relaxation within the solid (acts likes Hydro do-not-solve type solid)
             value.embedded.relax_skip = 0.5;
         }
@@ -240,6 +283,15 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // FLUID 1
         pp_query_required("mu1", value.mu1);            // linear viscosity coefficient
         pp_query_default("mu1_b", value.mu1_b, 0.0);    // bulk viscosity coefficient
+        // [2026-09-24] Fourier heat conduction.  Without it a viscous no-slip wall
+        // has nowhere to put its dissipation heat (Pr -> infinity: the adiabatic-
+        // wall recovery temperature grows without bound): NACA 0012 at M 0.8,
+        // Re 500 reached T_wall/T_inf = 2.6 (physical ~1.1) by t = 0.5 and
+        // crashed; at M 0.5, Re 5000 it crept to 1.30 by t = 14 (physical 1.04).
+        // k = mu(eta) cp(eta) / Pr.  At embedded-solid faces (phi < 0.5 side)
+        // the heat flux is zero (adiabatic wall).
+        pp_query_default("thermal.conduction", value.thermal_conduction, 0);
+        pp_query_default("thermal.Pr", value.thermal_Pr, 0.72);
 
         // EOS
         Solver::EOS::Tammann::Parse(value.eos0, pp, "eos0.");
@@ -2148,6 +2200,8 @@ Hydro2::RHS(int lev,
         // Default Limiter=Godunov returns the cell-center value
         // unchanged -- equivalent to the original first-order flux.
         // ------------------------------------------------------------
+        const bool sharp_wall = embedded.apply && embedded.wall_flux;
+        const bool noslip_wall = sharp_wall && !embedded.slip;
         auto compute_face = [=](int lo_i, int lo_j, int lo_k, int hi_i, int hi_j, int hi_k, int dir)
             -> FluxT
         {
@@ -2157,6 +2211,44 @@ Hydro2::RHS(int lev,
             Solver::Local::Limiter::Primitive prim[6];
             for (int s = -2; s <= 3; ++s)
                 prim[s + 2] = get_prim(lo_i + s * di, lo_j + s * dj, lo_k + s * dk, dir);
+            // [2026-09-24] GHOST-MIRROR RECONSTRUCTION (sharp wall, solid.wall_flux).
+            // compute_face is only called for fluid|fluid faces in that mode, but
+            // its 6-cell window can reach into the solid.  Using the solid cells'
+            // OWN state there (u = 0, p = p_solid, frozen rho) puts an artificial
+            // jump inside the limiter stencil that is inconsistent with the mirror
+            // state the wall face itself uses.  Measured on the AoA = 0 NACA 0012:
+            // a CFL-dependent instability (cfl 0.3: mirror asymmetry 1e-14 -> 2e-3
+            // in 5 steps, growing x3-40 per fine step; cfl 0.1: 1e-6) that drove a
+            // spurious, slowly growing lift.  Replace each solid cell in the window
+            // by the mirror image of the fluid cell across the wall (normal velocity
+            // reflected about the solid's), the standard ghost-cell treatment.
+            if (sharp_wall)
+            {
+                bool sol[6];
+                for (int s = -2; s <= 3; ++s)
+                    sol[s + 2] = phisol(lo_i + s * di, lo_j + s * dj, lo_k + s * dk) < 0.5;
+                auto mirror = [&](int ghost, int src) {
+                    const int gi = lo_i + (ghost - 2) * di, gj = lo_j + (ghost - 2) * dj, gk = lo_k + (ghost - 2) * dk;
+                    const Set::Scalar rs = std::max(s_re0(gi, gj, gk) + s_re1(gi, gj, gk), small);
+                    const Set::Scalar us_n = s_M(gi, gj, gk, dir) / rs;
+                    Solver::Local::Limiter::Primitive q = prim[src];
+                    q.u = 2.0 * us_n - prim[src].u;
+                    if (noslip_wall)   // no-slip: reflect the tangential velocity about the solid's too
+                    {
+                        q.v = 2.0 * s_M(gi, gj, gk, (dir + 1) % AMREX_SPACEDIM) / rs - prim[src].v;
+#if AMREX_SPACEDIM == 3
+                        q.w = 2.0 * s_M(gi, gj, gk, (dir + 2) % AMREX_SPACEDIM) / rs - prim[src].w;
+#endif
+                    }
+                    prim[ghost] = q;
+                };
+                // lo side: window cells 1 (lo-1) and 0 (lo-2); lo = 2 and hi = 3 are fluid
+                if (sol[1])      { mirror(1, 2); mirror(0, 3); }
+                else if (sol[0]) { mirror(0, 1); }
+                // hi side: window cells 4 (hi+1) and 5 (hi+2)
+                if (sol[4])      { mirror(4, 3); mirror(5, 2); }
+                else if (sol[5]) { mirror(5, 4); }
+            }
             // Q_L: right-edge of cell `lo` (stencil centered on prim[2]).
             Solver::Local::Limiter::Primitive stencil_L[5] =
                 { prim[0], prim[1], prim[2], prim[3], prim[4] };
@@ -2227,12 +2319,51 @@ Hydro2::RHS(int lev,
 #if AMREX_SPACEDIM == 3
             if (d == 2) { sl = symlo2; sh = symhi2; }
 #endif
+            // [2026-09-24] sharp-wall flux (solid.wall_flux, see Parse).
+            const bool wallflux = embedded.apply && embedded.wall_flux;
             amrex::ParallelFor(fbx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
             {
                 const int f = (d == 0) ? i : ((d == 1) ? j : k);
                 try
                 {
-                    FluxT fl = compute_face(i - di, j - dj, k - dk, i, j, k, d);
+                    FluxT fl;
+                    const bool fl_lo = !wallflux || phisol(i - di, j - dj, k - dk) >= 0.5;
+                    const bool fl_hi = !wallflux || phisol(i, j, k) >= 0.5;
+                    if (fl_lo && fl_hi)
+                    {
+                        fl = compute_face(i - di, j - dj, k - dk, i, j, k, d);
+                    }
+                    else if (!fl_lo && !fl_hi)
+                    {
+                        fl = FluxT{};                                  // inside the solid: no flux
+                        fl.alpha_face = get_prim(i, j, k, d).alpha;
+                    }
+                    else
+                    {
+                        // Wall face: first-order Riemann problem between the fluid
+                        // cell and its mirror.  Normal velocity reflected about the
+                        // solid's normal velocity (u_g = 2 u_s - u_f), tangential kept
+                        // (the no-slip part is the Brinkman term + viscous stress).
+                        const int fi = fl_lo ? i - di : i, fj = fl_lo ? j - dj : j, fk = fl_lo ? k - dk : k;
+                        const int si = fl_lo ? i : i - di, sj = fl_lo ? j : j - dj, sk = fl_lo ? k : k - dk;
+                        const Solver::Local::Limiter::Primitive pf = get_prim(fi, fj, fk, d);
+                        const Set::Scalar rs = std::max(s_re0(si, sj, sk) + s_re1(si, sj, sk), small);
+                        const Set::Scalar us_n = s_M(si, sj, sk, d) / rs;
+                        Solver::Local::Limiter::Primitive pg = pf;
+                        pg.u = 2.0 * us_n - pf.u;
+                        if (noslip_wall)
+                        {
+                            pg.v = 2.0 * s_M(si, sj, sk, (d + 1) % AMREX_SPACEDIM) / rs - pf.v;
+#if AMREX_SPACEDIM == 3
+                            pg.w = 2.0 * s_M(si, sj, sk, (d + 2) % AMREX_SPACEDIM) / rs - pf.w;
+#endif
+                        }
+                        const Solver::Local::FluidRiemann::State sf = Solver::Local::Limiter::ToState(pf, small);
+                        const Solver::Local::FluidRiemann::State sg = Solver::Local::Limiter::ToState(pg, small);
+                        fl = fl_lo ? riemannsolver->Solve(sf, sg, pref, small)
+                                   : riemannsolver->Solve(sg, sf, pref, small);
+                        fl.alpha_face = pf.alpha;
+                    }
                     if (sl && f == dom_lo)      symmetrize(fl);
                     if (sh && f == dom_hi_face) symmetrize(fl);
                     Ff(i, j, k) = fl;
@@ -2293,6 +2424,8 @@ Hydro2::RHS(int lev,
         // div_tau and visc_diss are identically 0 whatever the Hessian is, so
         // skip it.  hess_u_ is a non-plotted debug field and is zeroed.
         const bool viscous = (mu0 != 0.0) || (mu1 != 0.0) || (mu0_b != 0.0) || (mu1_b != 0.0);
+        const int conduct_l = thermal_conduction;
+        const Set::Scalar Pr_l = thermal_Pr;
         BL_PROFILE_VAR("Hydro2::RHS::cell_update", prof_cells);
         const amrex::Box vbx_cc = mfi.validbox();
         const auto vbx_lo = amrex::lbound(vbx_cc);
@@ -3196,6 +3329,33 @@ Hydro2::RHS(int lev,
             E0_rhs(i, j, k) = (E0_flux_div - a1_C * p0_C * div_u);
             E1_rhs(i, j, k) = (E1_flux_div - a2_C * p1_C * div_u);
 
+            // [2026-09-24] FOURIER HEAT CONDUCTION (thermal.conduction = 1).
+            // div(k grad T) with face conductivity = mean of the two cell values;
+            // each face term appears with opposite sign in its two cells, so the
+            // level is conservative.  Faces to an embedded-solid cell carry no
+            // heat (adiabatic wall); solid cells get nothing.  Deposited in rho E
+            // and split into E0/E1 by volume fraction, like the shell dissipation.
+            if (conduct_l && !(embedded.apply && phisol(i, j, k) < 0.5))
+            {
+                auto kcell = [&](int ii, int jj, int kk) -> Set::Scalar {
+                    const Set::Scalar e = std::min(std::max(eta(ii, jj, kk), 0.0), 1.0);
+                    return (e * mu0 + (1.0 - e) * mu1) * Solver::EOS::EOS::MixedCp(e, eos0, eos1) / Pr_l;
+                };
+                const Set::Scalar kc = kcell(i, j, k);
+                const Set::Scalar Tc = T(i, j, k);
+                Set::Scalar qcond = 0.0;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    for (int sg = -1; sg <= 1; sg += 2)
+                    {
+                        const int ii = i + (d == 0 ? sg : 0), jj = j + (d == 1 ? sg : 0), kk = k + (d == 2 ? sg : 0);
+                        if (embedded.apply && phisol(ii, jj, kk) < 0.5) continue;      // adiabatic wall
+                        qcond += 0.5 * (kc + kcell(ii, jj, kk)) * (T(ii, jj, kk) - Tc) / (DX[d] * DX[d]);
+                    }
+                E_rhs(i, j, k)  += qcond;
+                E0_rhs(i, j, k) += a1_C * qcond;
+                E1_rhs(i, j, k) += a2_C * qcond;
+            }
+
             // ------------------------------------------------------------
             // Artificial heat exchange (AHE) -- Schmidmayer 2020 eq. 13
             // r-source on per-phase internal energies:
@@ -3322,7 +3482,7 @@ Hydro2::RHS(int lev,
             // term phi0/kappa (u_S - u); orig. Angot 1999 / Liu & Vasilyev
             // 2007)
             // ============================================================
-            if (embedded.apply && embedded.brinkman > 0.0)
+            if (embedded.apply && embedded.brinkman > 0.0 && !embedded.implicit)
             {
                 const Set::Scalar chi = 1.0 - phi_c;
                 if (chi > 0.0)
@@ -3686,6 +3846,121 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         }
     }
 
+    // ------------------------------------------------------------------
+    // [2026-09-24] IMPLICIT BRINKMAN PENALIZATION (solid.implicit = 1).
+    // Exact solution of dM/dt = -lam (M - Ms), lam = brinkman (1 - phi),
+    // over this level's dt, applied once per level step (first-order
+    // operator split; exact and unconditionally stable in the stiff part).
+    // No-slip: every momentum component relaxes to the solid momentum.
+    // Slip:    only the wall-normal component (n = grad phi / |grad phi|),
+    //          same n and same no-slip fallback as the explicit RHS form.
+    // Energy is left untouched, exactly as in the explicit form: the kinetic
+    // energy removed is returned as internal energy (energy-conserving), and
+    // the post-step FillGhost4BC -> RelaxAndReinit re-derives p, E0, E1.
+    // ------------------------------------------------------------------
+    if (embedded.apply && embedded.implicit && embedded.brinkman > 0.0)
+    {
+        // Target the solid VELOCITY u_s = M_s / rho_s (M -> rho u_s), not the
+        // solid momentum: the solid is porous to mass, so its density drifts
+        // and a fixed-momentum target makes a moving solid run at M_s/rho != u_s
+        // (Brinkman Couette unit test: top slab 1-4% fast).  And add the work
+        // done BY the solid, dE = u_s . dM: dM/dt = F with the solid moving at
+        // u_s puts u_s.F into the fluid's total energy (kinetic u.F plus
+        // dissipation (u_s-u).F >= 0).  For a STATIC solid u_s = 0 and both
+        // reduce exactly to the previous form (M -> 0, E unchanged: the
+        // arrested KE becomes heat).
+        const Set::Scalar lam0 = embedded.brinkman;
+        const int slip_l = embedded.slip;
+        const int sharp_l = embedded.wall_flux;
+        const Set::Scalar small_l = small;
+        embedded.phi_mf[lev]->FillBoundary(geom[lev].periodicity());
+        // Force on the body = - (momentum the penalty adds to the fluid) / dt.
+        amrex::ReduceOps<amrex::ReduceOpSum, amrex::ReduceOpSum, amrex::ReduceOpSum> pf_op;
+        amrex::ReduceData<Set::Scalar, Set::Scalar, Set::Scalar> pf_data(pf_op);
+        Set::Scalar vol = 1.0;
+        for (int d = 0; d < AMREX_SPACEDIM; ++d) vol *= DX[d];
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+        for (amrex::MFIter mfi(*momentum_mf[lev], HydroTiling()); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.tilebox();
+            auto M    = momentum_mf[lev]->array(mfi);
+            auto E    = energy_per_vol_mf[lev]->array(mfi);
+            auto r0   = rho_eta0_mf[lev]->const_array(mfi);
+            auto r1   = rho_eta1_mf[lev]->const_array(mfi);
+            auto phi  = embedded.phi_mf[lev]->const_array(mfi);
+            auto s_M  = embedded.momentum_mf[lev]->const_array(mfi);
+            auto s_r0 = embedded.density0_mf[lev]->const_array(mfi);
+            auto s_r1 = embedded.density1_mf[lev]->const_array(mfi);
+            auto s_E0 = embedded.energy0_mf[lev]->const_array(mfi);
+            auto s_E1 = embedded.energy1_mf[lev]->const_array(mfi);
+            auto E0s  = energy0_mf[lev]->array(mfi);
+            auto E1s  = energy1_mf[lev]->array(mfi);
+            pf_op.eval(bx, pf_data, [=] AMREX_GPU_DEVICE(int i, int j, int k) -> amrex::GpuTuple<Set::Scalar, Set::Scalar, Set::Scalar> {
+                // With the sharp-wall flux on, a cell is fluid (phi >= 0.5) or solid,
+                // and the penalty must use the SAME binary classification.  Bilinear
+                // sampling of a sharp bitmap leaves 0.5 < phi < 1 in cells within a
+                // pixel of the surface; with chi = 1 - phi and a stiff brinkman
+                // (f = 1 - exp(-lam chi dt) ~ 1 even for chi ~ 1e-3) those FLUID
+                // cells were fully arrested every step and their kinetic energy
+                // dumped as heat -- 2.25x freestream temperature at the M 0.8
+                // leading edge, then a crash at t = 0.55 (NACA 0012, M 0.8, Re 500).
+                const Set::Scalar phic = EmbeddedSolid::clampPhi(phi(i, j, k));
+                const Set::Scalar chi = sharp_l ? ((phic < 0.5) ? 1.0 : 0.0) : 1.0 - phic;
+                if (chi <= 0.0) return {0.0, 0.0, 0.0};
+                const Set::Scalar f = 1.0 - std::exp(-lam0 * chi * dt);   // fraction removed
+                const Set::Scalar rho_c = std::max(r0(i, j, k) + r1(i, j, k), small_l);
+                const Set::Scalar rho_s = std::max(s_r0(i, j, k) + s_r1(i, j, k), small_l);
+                Set::Scalar us[AMREX_SPACEDIM], dM[AMREX_SPACEDIM];
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                {
+                    us[d] = s_M(i, j, k, d) / rho_s;
+                    dM[d] = -f * (M(i, j, k, d) - rho_c * us[d]);        // no-slip: all components
+                }
+                if (slip_l)
+                {
+                    const Set::Vector nrm = Numeric::Gradient(phi, i, j, k, 0, DX);
+                    const Set::Scalar nmag = nrm.norm();
+                    if (nmag > 1e-8)
+                    {
+                        const Set::Vector nhat = nrm / nmag;
+                        Set::Scalar dMn = 0.0;
+                        for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                            dMn += (M(i, j, k, d) - rho_c * us[d]) * nhat(d);
+                        for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                            dM[d] = -f * dMn * nhat(d);                  // slip: normal only
+                    }
+                }
+                Set::Scalar work = 0.0;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                {
+                    M(i, j, k, d) += dM[d];
+                    work += us[d] * dM[d];
+                }
+                E(i, j, k) += work;
+                // [2026-09-24] Sharp-wall mode: hold the SOLID cell's internal energy at
+                // its reference state.  Otherwise the momentum that pressure and
+                // viscous stress push into the solid is turned into heat there every
+                // step (static solid: dE = 0 while KE is removed) and never leaves --
+                // measured T_solid/T_inf = 10 after 4 convective times on the NACA
+                // 0012, sound speed 3x the fluid's, in cells the CFL does not see.
+                if (sharp_l && phic < 0.5)
+                {
+                    E0s(i, j, k) = s_E0(i, j, k);
+                    E1s(i, j, k) = s_E1(i, j, k);
+                    Set::Scalar ke = 0.0;
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d) ke += M(i, j, k, d) * M(i, j, k, d);
+                    E(i, j, k) = s_E0(i, j, k) + s_E1(i, j, k) + 0.5 * ke / rho_c;
+                }
+                const Set::Scalar w = -vol / dt;
+                return { w * dM[0], w * dM[1], (AMREX_SPACEDIM == 3) ? w * dM[AMREX_SPACEDIM - 1] : 0.0 };
+            });
+        }
+        auto pfv = pf_data.value(pf_op);
+        pen_force[0] = amrex::get<0>(pfv); pen_force[1] = amrex::get<1>(pfv); pen_force[2] = amrex::get<2>(pfv);
+    }
+
     // ENFORCE POSITIVITY after time advance
     // [DIAG] measure clip-created mass (CLIPLEDGER, gated on relax_diag)
     Set::Scalar _clip0 = 0.0, _clip1 = 0.0;
@@ -3735,7 +4010,85 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // POST-INTEGRATION PRIMITIVE REFRESH.
     // ============================================================
     FillGhost4BC(lev, time + dt);
-    
+
+    // ------------------------------------------------------------------
+    // [2026-09-24] FORCE / PROBE TIME HISTORY (solid.force_int > 0), finest
+    // level only (it must cover the body -- use a refine_box).  Columns:
+    //   step lev time  F_total[d]  F_pressure[d]  p(probe_n)...
+    // F_total  = momentum removed by the implicit Brinkman penalty / dt
+    //            (pressure + viscous: both reach the solid cells and are taken
+    //            out by the penalty; exact for a static solid in steady state).
+    // F_press  = sum over fluid/solid faces of -p n_out dA (n_out solid->fluid).
+    // ------------------------------------------------------------------
+    if (embedded.apply && solid_force_int > 0 && lev == finest_level
+        && (step_counter[lev] % solid_force_int) == 0)
+    {
+        const int np = (int)probe_x.size();
+        std::vector<Set::Scalar> red(2 * AMREX_SPACEDIM + 2 * np, 0.0);
+        const Set::Scalar *plo = geom[lev].ProbLo();
+        Set::Scalar area[AMREX_SPACEDIM];
+        for (int d = 0; d < AMREX_SPACEDIM; ++d) { area[d] = 1.0; for (int e = 0; e < AMREX_SPACEDIM; ++e) if (e != d) area[d] *= DX[e]; }
+        for (amrex::MFIter mfi(*pressure_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto phi = embedded.phi_mf[lev]->const_array(mfi);
+            auto p   = pressure_mf[lev]->const_array(mfi);
+            amrex::LoopOnCpu(bx, [&](int i, int j, int k) {
+                if (phi(i, j, k) < 0.5) return;                    // fluid cells only
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    for (int sg = -1; sg <= 1; sg += 2)
+                    {
+                        const int ii = i + (d == 0 ? sg : 0), jj = j + (d == 1 ? sg : 0), kk = k + (d == 2 ? sg : 0);
+                        if (phi(ii, jj, kk) >= 0.5) continue;
+                        // solid neighbour on side sg: n_out (solid -> fluid) = -sg e_d
+                        red[AMREX_SPACEDIM + d] += p(i, j, k) * sg * area[d];   // -p n_out dA
+                    }
+            });
+            for (int n = 0; n < np; ++n)
+            {
+                amrex::IntVect iv(AMREX_D_DECL((int)std::floor((probe_x[n] - plo[0]) / DX[0]),
+                                               (int)std::floor((probe_y[n] - plo[1]) / DX[1]),
+                                               (int)std::floor((probe_z[n] - plo[2]) / DX[2])));
+                if (bx.contains(iv)) { red[2 * AMREX_SPACEDIM + 2 * n] += p(iv); red[2 * AMREX_SPACEDIM + 2 * n + 1] += 1.0; }
+            }
+        }
+        for (int d = 0; d < AMREX_SPACEDIM; ++d) red[d] = pen_force[d];
+        amrex::ParallelDescriptor::ReduceRealSum(red.data() + AMREX_SPACEDIM, (int)red.size() - AMREX_SPACEDIM);
+        amrex::ParallelDescriptor::ReduceRealSum(red.data(), AMREX_SPACEDIM);
+        if (amrex::ParallelDescriptor::IOProcessor())
+        {
+            const std::string fn = plot_file + "_forces.dat";
+            static bool header = false;
+            std::ofstream fo(fn, std::ios::app);
+            if (!header)
+            {
+                fo << "# step lev time";
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) fo << " Ftot_" << d;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) fo << " Fpres_" << d;
+                for (int n = 0; n < np; ++n)
+                {
+                    fo << " p_probe" << n << "(" << probe_x[n] << "," << probe_y[n];
+#if AMREX_SPACEDIM == 3
+                    fo << "," << probe_z[n];
+#endif
+                    fo << ")";
+                }
+                fo << "\n"; header = true;
+            }
+            char b[64];
+            fo << step_counter[lev] << " " << lev;
+            snprintf(b, 64, " %.10e", time + dt); fo << b;
+            for (int d = 0; d < 2 * AMREX_SPACEDIM; ++d) { snprintf(b, 64, " %.10e", red[d]); fo << b; }
+            for (int n = 0; n < np; ++n)
+            {
+                const Set::Scalar c = red[2 * AMREX_SPACEDIM + 2 * n + 1];
+                snprintf(b, 64, " %.10e", c > 0.0 ? red[2 * AMREX_SPACEDIM + 2 * n] / c : std::nan(""));
+                fo << b;
+            }
+            fo << "\n";
+        }
+    }
+
 
 
     // ------------------------------------------------------------
@@ -4097,6 +4450,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // Fall back to the old conservative pairing if it was never set.
     Set::Scalar nu_phys = (nu_max > 0.0) ? nu_max : (mu_max / (rho_min + small));
     Set::Scalar nu_total = nu_phys;
+    // Heat conduction: the internal-energy diffusivity is k/(rho cv) = gamma nu / Pr.
+    if (thermal_conduction)
+        nu_total *= std::max(1.0, std::max(eos0.Gamma(), eos1.Gamma()) / thermal_Pr);
     // SHELL DILATATIONAL VISCOSITY.  kappa_s enters the momentum equation as
     //     div( |grad eta| * kappa_s * (div_s u) * P ),
     // i.e. a SURFACE momentum diffusion whose kinematic diffusivity is

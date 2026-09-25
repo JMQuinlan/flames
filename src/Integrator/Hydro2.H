@@ -453,6 +453,17 @@ protected:
 
     // FLUID 1
     Set::Scalar gamma1 = NAN, p0_1 = NAN, mu1 = NAN, mu1_b = NAN, MW1 = NAN;
+    // [2026-09-24] Fourier heat conduction (thermal.conduction, thermal.Pr):
+    // k = mu(eta) cp(eta) / Pr, energy source div(k grad T).  Off by default.
+    int thermal_conduction = 0;
+    Set::Scalar thermal_Pr = 0.72;
+    // [2026-09-24] embedded-solid force / probe time history (solid.force_int):
+    // every force_int finest-level steps, append t, total force (momentum removed
+    // by the implicit penalty / dt), wall-face pressure force and probe pressures
+    // to <plot_file>_forces.dat.
+    int solid_force_int = 0;
+    std::vector<Set::Scalar> probe_x, probe_y, probe_z;   // probe_z read in 3D only
+    Set::Scalar pen_force[3] = {0.0, 0.0, 0.0};
     Set::Scalar b1 = NAN, q1EOS = NAN;
     Set::Scalar cp1 = NAN, cv1 = NAN;
 
