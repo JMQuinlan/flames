@@ -148,7 +148,6 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // Boussinesq--Scriven interfacial viscosity (see Hydro2.H).  kappa_s is
         // applied through sigma_tot; mu_s is parsed only so a request for the
         // unimplemented shear term is caught here rather than silently ignored.
-        pp_query_default("shell_extend_iters", value.shell_extend_iters, 4);  // normal-extension sweeps for Gamma (0 = off); see RelaxAndReinit
         pp_query_default("shell_gate_free", value.shell_gate_free, 1);  // 1 = no DX-scaled freeze; consistent projector kills the bulk source (see Advance)
         pp_query_default("shell_bulk_extend", value.shell_bulk_extend, 1);  // 1 = extend Gamma from the band into adjacent bulk (see RelaxAndReinit)
         pp_query_default("shell.kappa_s", value.shell_kappa_s, 0.0);
@@ -313,29 +312,22 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                 Util::Message(INFO, "thermo.dat: gas_volume, gas_pressure_int, kinetic_energy, interface_area");
             }
         }
-        // DEFAULT 0 as of 2026-09-23.  The floor clamps sigma(Gamma) + kappa_s
-        // div_s(u) at 0.  div_s u = 2 Rdot/R is negative throughout a collapse,
-        // and the Marmottant BUCKLED branch drives sigma(Gamma) to exactly 0, so
-        // past buckling the total is ENTIRELY viscous and negative -- the floor
-        // then zeroes the whole surface stress, not part of it.  Measured duty
-        // cycle on Sch20-Oscillating: 0% early, 100% from t = 3.6e-8 on.
-        // Measured R_min/R0 (ml=2, 1.2 tau_c, reference ODE full shell 0.5172):
-        //     sigma_floor=1 -> 0.4051  ==  elastic_only 0.4058  (viscous GONE)
-        //     sigma_floor=0 -> 0.5358  vs  reference     0.5172  (3.6%)
-        // The floor only ever compensated for the missing kappa_s timestep limit;
-        // with shell.dt_limit=1 it is unnecessary -- floor=0 ran 1977 steps on the
-        // oscillating case and 4855 on the violent collapse with zero NaN.
-        pp_query_default("shell.sigma_floor", value.shell_sigma_floor, 0);
-        // 1 = include the shell dilatational viscosity in the explicit-diffusion
-        // timestep limit (see the nu_s block in the dt computation).  Set to 0 to
-        // reproduce the pre-2026-09 behaviour, which silently violated that limit
-        // by 20x at max_level=5 and produced a NaN at step 3 of Sch20-Collapsing.
-        // Only for A/B work: turning it off does not make the term stable.
-        pp_query_default("shell.dt_limit", value.shell_dt_limit, 1);
+        // 1 = take the NORMAL part of the surface dilatation from the interface's
+        // own kinematics (see the kappa_s term in the Omega build and the Gamma
+        // row in RHS).  0 = legacy, from the band's mixture velocity.
+        //
+        // DEFAULT 1 (2026-09-25).  Linear shell-damping unit test
+        // (input_Linear_ShellDamping_UNIT), kappa_s damping measured/analytic:
+        //     legacy:      0.52 (R0/dx=8)   ~0.68 (R0/dx=16)
+        //     kinematic:   0.76 (R0/dx=8)   0.95-1.07 (R0/dx=16, fit rms 0.6%)
+        // Coated Laplace 1.68% (pass); uncoated statics untouched (no kappa_s,
+        // no Gamma).  Full-shell Sch20-Oscillating (ml=2): over-collapse and
+        // rebound ringing removed; residual equilibrium offset is gas heating.
+        pp_query_default("shell.divs_kinematic", value.shell_divs_kinematic, 1);
         // 1 = advance the kappa_s surface-viscous stress in its own sub-cycle
         // (N = dt/dt_visc sub-steps on the band) instead of letting its dx^3
         // stability limit throttle the GLOBAL timestep.  Modelled on the
-        // shell_extend_iters sweep loop: nearest-neighbour FillBoundary per
+        // band-sweep pattern: nearest-neighbour FillBoundary per
         // sub-step, no global reductions, band cells only.  When on, the
         // viscous term is removed from Omega and from the dt limiter.
         // DEFAULT 0 as of 2026-09-23.  Sub-cycling is VALIDATED at max_level 3
@@ -1731,11 +1723,11 @@ Hydro2::RHS(int lev,
         // it here covers the momentum source and the capillary work together.
         // sigma_tot = sigma_eff + (kappa_s - mu_s)(div_s u)  multiplies the
         // projector P; 2 mu_s D_s is a genuine tensor and is added on top.
-        const int shell_sigma_floor_l = shell_sigma_floor;
         const Set::Scalar kap_s = shell_kappa_s - shell_mu_s;
         const int subcyc_visc = shell_visc_subcycle && (shell_kappa_s != 0.0);
         const Set::Scalar mu_s  = shell_mu_s;
         const int visc_shell = (kap_s != 0.0) || (mu_s != 0.0);
+        const int divs_kin = shell_divs_kinematic;
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box bx = mfi.growntilebox(1);
@@ -1744,9 +1736,9 @@ Hydro2::RHS(int lev,
                                                               : amrex::Array4<const Set::Scalar>{};
             amrex::Array4<const Set::Scalar> const &vel = velocity_mf[lev]->const_array(mfi);
             amrex::Array4<Set::Scalar> const &om = Omega.array(mfi);
+            amrex::Array4<const Set::Scalar> const &etd = etadot_mf[lev]->const_array(mfi);
             // Diagnostic: kappa1 carries the TOTAL surface tension actually
-            // used in Omega, sigma(Gamma) + kappa_s div_s(u), BEFORE the
-            // sigma_floor clamp.  kappa2 is written in the Marmottant block
+            // used in Omega, sigma(Gamma) + kappa_s div_s(u).  kappa2 is written in the Marmottant block
             // above and is the BARE sigma(Gamma) only, so it cannot show the
             // viscous contribution -- which is the whole question for the
             // coated collapse.
@@ -1781,31 +1773,39 @@ Hydro2::RHS(int lev,
                     // When shell.kappa_s_subcycle is on, SubcycleShellViscous
                     // owns this term and Omega carries the ELASTIC branch only,
                     // so it must not be added twice.
-                    const Set::Scalar divs_u = gu.trace() - nh.dot(gu * nh);
+                    Set::Scalar divs_u = gu.trace() - nh.dot(gu * nh);
+                    // KINEMATIC SURFACE DILATATION (shell.divs_kinematic = 1).
+                    // div_s u = div_s(u_t) + u_n (div n).  Inside a diffuse band
+                    // the mixture velocity lags the interface, because part of
+                    // the bubble's volume change happens by pressure relaxation
+                    // (compaction of the gas fraction) rather than by flow.
+                    // Measured on input_Linear_ShellDamping_UNIT: band u_r is
+                    // 0.53-0.70 of the true wall speed, while the interface's
+                    // own normal speed  V_n = -(d eta/dt)/|grad eta|  matches it
+                    // at 0.97-1.01.  So replace u_n by V_n:
+                    //     div_s u_I = div_s u + (V_n - u_n) div(n).
+                    // Exact identity, no constant; V_n, u_n -> 0 at rest, so
+                    // statics are untouched.  etadot is the previous step's
+                    // post-relaxation d eta/dt.  Valid cells only: etadot has no
+                    // ghosts, and Omega.FillBoundary below overwrites the ghost
+                    // layer from the owning box.  Restricted to the band, where
+                    // div(n) = (lap eta - n.H.n)/|grad eta| is well defined.
+                    if (divs_kin && vbx_om.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
+                    {
+                        const Set::Scalar e = et(i, j, k);
+                        if (e > 0.02 && e < 0.98)
+                        {
+                            const Set::Matrix He = Numeric::Hessian(et, i, j, k, 0, DX);
+                            const Set::Scalar divn = (He.trace() - nh.dot(He * nh)) / gem;
+                            Set::Scalar un = 0.0;
+                            for (int d = 0; d < AMREX_SPACEDIM; ++d) un += vel(i, j, k, d) * nh(d);
+                            const Set::Scalar Vn = -etd(i, j, k) / gem;
+                            divs_u += (Vn - un) * divn;
+                        }
+                    }
                     if (!subcyc_visc) se += kap_s * divs_u;
-                    // A fluid interface cannot support COMPRESSION: the total
-                    // Boussinesq-Scriven surface tension sigma(Gamma) +
-                    // kappa_s div_s(u) must stay >= 0.  Without this floor a
-                    // collapsing coated bubble goes unstable and collapses to
-                    // nothing: with kappa_s = 7.2e-9 and the Sch20 collapse
-                    // (Rdot ~ -58 m/s), div_s u = 2 Rdot / R reaches -5.8e8,
-                    // so kappa_s div_s u = -4.2 N/m -- already -0.34 N/m at
-                    // R = R0, i.e. NEGATIVE surface tension 57x the magnitude
-                    // of water's.  Negative tension makes the interface gain
-                    // energy by growing area, which is a runaway.
-                    //
-                    // This is also what Marmottant's own buckled branch means:
-                    // the shell buckles OUT OF PLANE rather than supporting
-                    // compression, which is why sigma = 0 there instead of
-                    // going negative.  The dilatational viscous stress has to
-                    // obey the same constraint.
-                    //
-                    // Only reachable when a shell viscosity is on, which is
-                    // why the UNCOATED tests were unaffected (no shell.kappa_s
-                    // at all, so se = sigma = const >= 0).
                     if (vbx_om.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
-                        kapd(i, j, k, 1) = se;      // total sigma, pre-floor
-                    if (shell_sigma_floor_l && se < 0.0) se = 0.0;
+                        kapd(i, j, k, 1) = se;      // total sigma
                     if (mu_s != 0.0)
                     {
                         // D_s = P sym(grad u) P.  P is symmetric and idempotent,
@@ -1843,6 +1843,7 @@ Hydro2::RHS(int lev,
     amrex::MultiFab rhsp_src_mf (rho_eta1_rhs_mf.boxArray(), rho_eta1_rhs_mf.DistributionMap(), 1, 0);
     rhsp_fxlo_mf.setVal(0.0); rhsp_fxhi_mf.setVal(0.0); rhsp_fylo_mf.setVal(0.0);
     rhsp_fyhi_mf.setVal(0.0); rhsp_src_mf.setVal(0.0);
+
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
@@ -1860,6 +1861,8 @@ Hydro2::RHS(int lev,
         Set::Patch<const Set::Scalar> rho = density_mf.Patch(lev, mfi);
         auto const M = momentum_mf[lev]->array(mfi);
         auto const E = energy_per_vol_mf[lev]->array(mfi);
+        amrex::Array4<const Set::Scalar> const etd_g = etadot_mf[lev]->const_array(mfi);
+        const int divs_kin_g = shell_divs_kinematic;
 
         // OUTPUTS
         Set::Patch<Set::Scalar> rho_eta0_rhs = rho_eta0_rhs_mf.array(mfi);
@@ -2877,7 +2880,21 @@ Hydro2::RHS(int lev,
             // freeze.  No threshold, no new constant: |n_hat|^2 is built from
             // quantities already in scope, and it is mesh-independent.
             const Set::Scalar nn = shell_gate_free ? n_hat.squaredNorm() : 1.0;
-            const Set::Scalar div_s_u = nn * gradu.trace() - n_hat.dot(gradu * n_hat);
+            Set::Scalar div_s_u = nn * gradu.trace() - n_hat.dot(gradu * n_hat);
+            // Same kinematic correction as the kappa_s stress (see the Omega
+            // build): the band velocity lags the interface, which is why Gamma
+            // has historically responded at ~83% of (R0/R)^2.
+            if (divs_kin_g)
+            {
+                const Set::Scalar e = eta(i, j, k);
+                if (e > 0.02 && e < 0.98 && grad_eta_mag > 0.0)
+                {
+                    const Set::Vector ng = grad_eta / grad_eta_mag;
+                    const Set::Scalar divn = (lap_eta - ng.dot(hess_eta * ng)) / grad_eta_mag;
+                    const Set::Scalar Vn = -etd_g(i, j, k) / grad_eta_mag;
+                    div_s_u += (Vn - u.dot(ng)) * divn;
+                }
+            }
             shell_rhs(i, j, k) = -u_dot_gradG - shell(i, j, k) * div_s_u;
             }   // end shell_row_on / band gate
 
@@ -3859,8 +3876,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     const Set::Scalar mu_c = a1n * mu0_l + (1.0 - a1n) * mu1_l;
                     nu_max_local = std::max(nu_max_local, mu_c / (rho(i,j,k) + small_l));
                     if (kap_eff_l > 0.0)
+                    {
                         nus_max_local = std::max(nus_max_local,
                                                  kap_eff_l * grad_eta_mag / (rho(i,j,k) + small_l));
+                    }
                 }
             }
         });
@@ -3932,7 +3951,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // When the viscous stress is sub-cycled it no longer constrains the GLOBAL
     // step -- SubcycleShellViscous takes N = dt/dt_visc sub-steps internally --
     // so the constraint is dropped here and enforced there instead.
-    if (kap_eff_l > 0.0 && shell_dt_limit && !(shell_visc_subcycle && shell_kappa_s != 0.0))
+    if (kap_eff_l > 0.0 && !(shell_visc_subcycle && shell_kappa_s != 0.0))
         nu_total += nus_max_local;
     Set::Scalar dt_viscous = cfl_v * dx_min * dx_min
                            / (2.0 * AMREX_SPACEDIM * (nu_total + small));
@@ -5756,8 +5775,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
 // Letting it set the global step made max_level 5 cost ~83,000 base steps.
 //
 // Instead this advances ONLY that term, on the band, in N sub-steps of dt/N
-// with N from the local stability limit.  Structure copied from the
-// shell_extend_iters sweep: nearest-neighbour FillBoundary per sub-step, no
+// with N from the local stability limit.  Structure: nearest-neighbour FillBoundary per sub-step, no
 // global reductions, band cells only -- so the extra work is <1% of a hydro
 // step (the band is ~5e4 cells against 6.4M at L5) and it adds no collective.
 //
@@ -6081,72 +6099,6 @@ void Hydro2::RelaxAndReinit(int lev)
                     }
                 shl(i, j, k) = n ? acc / Set::Scalar(n) : 1.0;
             });
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // NORMAL EXTENSION OF GAMMA  (shell_extend_iters, default 4; 0 = off)
-    //
-    // Gamma is an AREAL density living on a surface.  In a diffuse
-    // representation every cell of the band represents the SAME surface, so
-    // Gamma must be constant along the normal:   n . grad(Gamma) = 0.
-    // Nothing enforced that, and the field stratifies badly.  Measured on the
-    // coated collapse at R/R0 = 0.713 (exact Gamma = 1.967):
-    //     r/R05 0.87 (eta 0.15, gas side)  Gamma 1.879   ratio 0.955
-    //     r/R05 1.01 (eta 0.59, interface) Gamma 1.711   ratio 0.870
-    //     r/R05 1.14 (eta 0.92, liquid)    Gamma 1.570   ratio 0.798
-    //     r/R05 1.86 (eta 0.9996, outer)   Gamma 1.179   ratio 0.599
-    // a 37% spread along the normal across cells that are all the same
-    // surface.  Once that gradient exists the advective term u.grad(Gamma) is
-    // large and spurious, and a moving interface samples cells holding
-    // different values -- so the eta=0.5 value is dragged toward the low outer
-    // layers.  That is why the error grows with interface DISPLACEMENT, is
-    // irreversible, and is nearly absent in the driven case.
-    //
-    // Fix: relax  dGamma/dtau + s (n . grad Gamma) = 0,  s = sign(eta - 1/2),
-    // which propagates the eta=0.5 value outward along the normal in both
-    // directions.  Upwinded on s*n, dtau = dx/2.  This is the standard
-    // extension step for surfactant transport on level-set / phase-field
-    // interfaces.  No fitted constant -- only an iteration count, and a few
-    // sweeps per step suffice because the band is a handful of cells wide.
-    // ------------------------------------------------------------------
-    if (marmottant && shell_extend_iters > 0)
-    {
-        const Set::Scalar *DXe = geom[lev].CellSize();
-        const Set::Scalar dtau = 0.5 * DXe[0];
-        for (int it = 0; it < shell_extend_iters; ++it)
-        {
-            shell_mf[lev]->FillBoundary(geom[lev].periodicity());
-            amrex::MultiFab prev(shell_mf[lev]->boxArray(),
-                                 shell_mf[lev]->DistributionMap(), 1, shell_mf[lev]->nGrow());
-            amrex::MultiFab::Copy(prev, *shell_mf[lev], 0, 0, 1, shell_mf[lev]->nGrow());
-            for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
-            {
-                const amrex::Box &bxe = mfi.validbox();
-                auto shl = shell_mf[lev]->array(mfi);
-                auto old = prev.const_array(mfi);
-                auto etae = eta_mf[lev]->const_array(mfi);
-                amrex::ParallelFor(bxe, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                    const Set::Scalar e = etae(i, j, k);
-                    if (e <= 1.0e-6 || e >= 1.0 - 1.0e-6) return;   // bulk: anchored elsewhere
-                    Set::Vector ge = Numeric::Gradient(etae, i, j, k, 0, DXe);
-                    const Set::Scalar gem = ge.lpNorm<2>();
-                    if (gem <= 0.0) return;
-                    const Set::Scalar sgn = (e > 0.5) ? 1.0 : -1.0;
-                    Set::Vector w = (sgn / gem) * ge;               // propagation direction
-                    Set::Scalar adv = 0.0;
-                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
-                    {
-                        const int di = (d == 0), dj = (d == 1), dk = (d == 2);
-                        // upwind w.r.t. w: take the difference from behind
-                        const Set::Scalar back = (w(d) > 0.0)
-                            ? (old(i, j, k) - old(i - di, j - dj, k - dk))
-                            : (old(i + di, j + dj, k + dk) - old(i, j, k));
-                        adv += w(d) * back / DXe[d];
-                    }
-                    shl(i, j, k) = old(i, j, k) - dtau * adv;
-                });
-            }
         }
     }
 
