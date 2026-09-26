@@ -148,6 +148,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // Boussinesq--Scriven interfacial viscosity (see Hydro2.H).  kappa_s is
         // applied through sigma_tot; mu_s is parsed only so a request for the
         // unimplemented shear term is caught here rather than silently ignored.
+        // 1 (default) = alpha row uses the WENO3/limiter-reconstructed face value
+        // (73f9c38c8, Sep 21).  0 = pre-Sep-21 first-order donor cell, kept to
+        // A/B the uncoated Sch20 collapse, where the two differ only near R_min.
+        pp_query_default("eta_consistent_advect", value.eta_consistent_advect, 1);
         pp_query_default("shell_gate_free", value.shell_gate_free, 1);  // 1 = no DX-scaled freeze; consistent projector kills the bulk source (see Advance)
         pp_query_default("shell_bulk_extend", value.shell_bulk_extend, 1);  // 1 = extend Gamma from the band into adjacent bulk (see RelaxAndReinit)
         pp_query_default("shell.kappa_s", value.shell_kappa_s, 0.0);
@@ -2559,6 +2563,13 @@ Hydro2::RHS(int lev,
             Set::Scalar a_face_xhi = flux_xhi.alpha_face;
             Set::Scalar a_face_ylo = flux_ylo.alpha_face;
             Set::Scalar a_face_yhi = flux_yhi.alpha_face;
+            if (!eta_consistent_advect)   // 0 = pre-Sep-21 first-order donor-cell alpha row
+            {
+                a_face_xlo = (flux_xlo.u_interface > 0.0) ? eta(i - 1, j, k) : eta(i,     j, k);
+                a_face_xhi = (flux_xhi.u_interface > 0.0) ? eta(i,     j, k) : eta(i + 1, j, k);
+                a_face_ylo = (flux_ylo.u_interface > 0.0) ? eta(i, j - 1, k) : eta(i, j,     k);
+                a_face_yhi = (flux_yhi.u_interface > 0.0) ? eta(i, j,     k) : eta(i, j + 1, k);
+            }
             a_face_xlo = std::min(std::max(a_face_xlo, 0.0), 1.0);
             a_face_xhi = std::min(std::max(a_face_xhi, 0.0), 1.0);
             a_face_ylo = std::min(std::max(a_face_ylo, 0.0), 1.0);
@@ -2581,6 +2592,11 @@ Hydro2::RHS(int lev,
             const Set::Scalar c_face_zhi = (flux_zhi.u_interface > 0.0) ? cfun(i, j, k)     : cfun(i, j, k + 1);
             Set::Scalar a_face_zlo = flux_zlo.alpha_face;
             Set::Scalar a_face_zhi = flux_zhi.alpha_face;
+            if (!eta_consistent_advect)
+            {
+                a_face_zlo = (flux_zlo.u_interface > 0.0) ? eta(i, j, k - 1) : eta(i, j, k);
+                a_face_zhi = (flux_zhi.u_interface > 0.0) ? eta(i, j, k)     : eta(i, j, k + 1);
+            }
             a_face_zlo = std::min(std::max(a_face_zlo, 0.0), 1.0);
             a_face_zhi = std::min(std::max(a_face_zhi, 0.0), 1.0);
 #endif

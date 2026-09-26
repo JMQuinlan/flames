@@ -10,6 +10,12 @@
 #@ exe=hydro2
 #@ dim=3
 
+# REGRESSION A/B (2026-09-25): 0 = pre-Sep-21 first-order donor-cell eta
+# advection (last known passing behaviour); 1 (code default) = WENO3 face value
+# from 73f9c38c8, the only post-Sep-9 change active in this uncoated case.
+# Remove this line (or set 1) to run the current scheme.
+eta_consistent_advect = 0
+
 # =============================================================================
 # Schmidmayer-Bryngelson-Colonius (JCP 402, 2020) -- SPHERICAL BUBBLE
 # Case 2: HIGH-PRESSURE-RATIO  (p_inf / p_b = 1427)  -- "COLLAPSING" bubble
