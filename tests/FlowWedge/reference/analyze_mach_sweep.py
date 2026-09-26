@@ -140,19 +140,19 @@ def plot_beta_vs_mach(rows, out_png):
 
     if M_detach is not None:
         ax.axvspan(MA_CURVE_LO, M_detach, color=DETACH_SHADE, zorder=0,
-                   label=f"detached ($\\theta>\\theta_{{max}}$), $M<{M_detach:.2f}$")
+                   label=f"Detached, $M<{M_detach:.2f}$")
 
     ax.plot(Ms, beta_weak, "-", color=ANALYTIC_COLOR, lw=LINE_WIDTH,
-            label=rf"analytical $\beta$ (weak), $\theta={THETA_DEG:g}^\circ$")
+            label=rf"Analytical $\beta$ (weak), $\theta={THETA_DEG:g}^\circ$")
     ax.plot(Ms, beta_strong, "--", color=STRONG_COLOR, lw=1.6,
-            label=r"analytical $\beta$ (strong)")
+            label=r"Analytical $\beta$ (strong)")
 
     # measured points
     mx = [r["M"] for r in rows if r["beta_measured"] is not None and r["attached"]]
     my = [r["beta_measured"] for r in rows if r["beta_measured"] is not None and r["attached"]]
     if mx:
         ax.plot(mx, my, "o", color=MEASURED_COLOR, ms=MARKER_SIZE, zorder=6,
-                label="measured (Hydro2)")
+                label="Numerical")
         if LABEL_POINTS:
             for r in rows:
                 if r["beta_measured"] is not None and r["attached"]:
@@ -162,8 +162,8 @@ def plot_beta_vs_mach(rows, out_png):
     dx = [r["M"] for r in rows if r["beta_measured"] is not None and not r["attached"]]
     dy = [r["beta_measured"] for r in rows if r["beta_measured"] is not None and not r["attached"]]
     if dx:
-        ax.plot(dx, dy, "x", color="#7a1f1f", ms=MARKER_SIZE, zorder=6,
-                label="measured (detached/bow)")
+        ax.plot(dx, dy, "o", color="#7a1f1f", ms=MARKER_SIZE, zorder=6,
+                label="Numerical (detached/bow)")
 
     ax.set_title(TITLE, fontsize=FONT_TITLE)
     ax.set_xlabel(XLABEL, fontsize=FONT_LABEL)

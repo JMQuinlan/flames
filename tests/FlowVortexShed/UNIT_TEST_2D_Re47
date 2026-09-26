@@ -1,0 +1,225 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# ============================================================================
+# FlowVortex -- TWO-PHASE (Integrator::Hydro2, 6-equation) flow past an
+# EMBEDDED SOLID cylinder at Re = 47.  Two-phase analogue of input_hydro.
+#
+#   phi  = SOLID indicator (1 = fluid, 0 = solid)   [NEW field, != eta]
+#   eta  = alpha_1 = 1 everywhere (pure phase 0, single-phase limit: no
+#          pressure relaxation is triggered)
+#
+#   Re = rho * U * D / mu = 100 * 1 * 1.0 / 2.12766 = 47,   D = 2*R0 = 1.0
+#   [2026-09-26] Copied from UNIT_TEST_2D_Re40 (large domain, mirrored wall);
+#   only mu0/mu1 (and names) changed.  Re 47 is just above the onset of
+#   vortex shedding (Re_c ~ 46-47): a perfectly symmetric start may stay
+#   steady for a long time before any shedding grows.
+#   Ma = U / c = 1 / 5 = 0.2   (c = sqrt(gamma p / rho) = sqrt(1.4*1785.71/100))
+#
+# No-slip AND no-penetration at the cylinder are enforced entirely by the YANG
+# (1-phi)/kappa momentum Brinkman penalty (solid.brinkman): it drives the full
+# velocity vector to zero in the solid, so it provides no-slip by itself.  The
+# fluid viscosity (mu0/mu1) gives the boundary layer.  Do NOT add a solid
+# viscosity blend -- under the full-flux Yang wall it destabilizes the low-Mach
+# case (dt collapse ~t=0.15).
+#
+# [2026-09-25] Deck updated for the current Hydro2 (the old deck failed at t ~ 1.94
+# with an HLLC error on every binary, incl. the pre-2026-09-24 one):
+#   * eta = 1 uniform (was a 0 -> 1 tanh across y = 0), so relaxation is not triggered
+#   * NSCBC4 far field + nghost 4 (was Dirichlet/Neumann everywhere: the mixture-only
+#     density Dirichlet put rho = 200 in the inflow ghosts, and nothing held the
+#     subsonic outflow pressure, which drifted 1785 -> 1550)
+#   * [2026-09-26] domain [-10,30] x [-15,15] (was [-3,12] x [-3,3]: 17% blockage and
+#     the inlet 2.5 D ahead of the body stretched the bubble to L/D 3.8).  This
+#     deck gives L/D 2.31, Cd 1.607 (p 1.087, f 0.520), steady by t = 60, 34 min on
+#     4 ranks (bin/tests/FlowVortexShed/Re40_bigdomain_mirror).
+#   * thermal.conduction = 0 (was tried at 1: no-slip wall heating T_wall 1.077 T_inf
+#     without it, 1.011 with; turned back off at the user's request)
+#   * phi eps = 0.001 (near-sharp; was 0.06).  solid.wall_flux is not set: the
+#     auto selection measures the interface at ~1 cell (< 2), so the MIRRORED
+#     sharp-wall flux is used (solid.wall_flux = 1).  With eps = 0.06 it measured
+#     ~3.9 cells and kept the diffuse wall.
+# ============================================================================
+
+# alamo.program = hydro2   # only for the unified 'alamo' exe; the standalone
+#                           # hydro2 exe (this test, #@ exe=hydro2) just warns.
+
+### OUTPUT ###
+# plot_file = ./tests/FlowVortexShed/UNIT_TEST_2D_Re47/output_hydro2                                  # DESKTOP (run from bin/)
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowVortexShed/UNIT_TEST_2D_Re47/output_hydro2   # INCLINE /mmfs1 (default)
+
+### MESHING ###
+amr.plot_dt          = 0.25
+amr.max_grid_size    = 500000
+amr.blocking_factor  = 4
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level        = 2
+amr.n_cell           = 384 240        # dx = 40/384 = 0.104, dy = 30/240 = 0.125 (same spacing as the old 144 48)
+amr.n_error_buf      = 16
+
+### DIMENSIONS ###
+geometry.prob_lo     = -10.0 -15.0 0.0   # 10 D upstream, +-15 D laterally (blockage D/H = 3.3%)
+geometry.prob_hi     =  30.0  15.0 0.0   # 30 D downstream
+geometry.is_periodic = 0 0 0
+
+### TIME STEPPING ###
+timestep            = 1e-5
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 5e-3
+dynamictimestep.min = 1e-9
+cfl                 = 0.4
+nghost              = 4            # NSCBC4 needs 4 ghost cells
+stop_time           = 60.0
+
+# ----------------------------------------------------------------------------
+# EMBEDDED SOLID BOUNDARY
+# ----------------------------------------------------------------------------
+apply_embedded_solid = 1
+solid.brinkman       = 70             # YANG penalty ~4*U/eps (U=1, eps=0.06): gives BOTH no-penetration AND no-slip (drives u->0 in the solid)
+phi_refinement_criterion = 0.1
+
+# Cylinder of radius R0 at the origin: r>R0 -> phi=1 (fluid), r<R0 -> phi=0 (solid)
+solid.phi.ic.type = expression
+solid.phi.ic.expression.constant.R0  = 0.5
+solid.phi.ic.expression.constant.eps = 0.001   # [2026-09-26] near-sharp (was 0.06): auto-selects the mirrored wall
+solid.phi.ic.expression.region0 = "0.5*(1.0 + tanh((sqrt(x*x + y*y) - R0)/eps))"
+
+# Prescribed quiescent solid target, split by the local alpha_1 = eta = 1
+# (physical solid state rho=100, p=1785.71, u=0):
+#   rho_eta0 = 100, rho_eta1 = 0,    E0 = 4464.28, E1 = 0
+solid.density.ic.type = constant
+solid.density.ic.constant.value = 100.0
+solid.momentum.ic.type = constant
+solid.momentum.ic.constant.value = 0.0 0.0
+solid.pressure.ic.type = constant
+solid.pressure.ic.constant.value = 1785.712
+
+### ETA (alpha_1) IC -- uniform alpha_1 = 1 (pure phase 0) ###
+eta.ic.type = constant
+eta.ic.constant.value = 1.0
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = neumann
+eta.bc.type.yhi = neumann
+
+### EOS ###
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cp    = 1005.0
+eos0.cv    = 717.86
+mu0   = 2.127659574      # Re 47 (Re40 deck: 2.5)
+mu0_b = 0.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp    = 1005.0
+eos1.cv    = 717.86
+mu1   = 2.127659574      # Re 47 (Re40 deck: 2.5)
+mu1_b = 0.0
+# Fourier heat conduction (k = mu cp / Pr).  Without it the no-slip wall has nowhere
+# to put its dissipation heat: T_wall reached 1.077 T_inf by t = 6 (physical ~1.007).
+thermal.conduction = 0      # [2026-09-25] off (user request; was 1)
+thermal.Pr         = 0.72
+
+### FLUID 0 IC (uniform inflow in +x) ###
+density0.ic.type = constant
+density0.ic.constant.value = 100.0
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "1.0"
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 1785.71
+
+### FLUID 1 IC (negligible) ###
+density1.ic.type = constant
+density1.ic.constant.value = 100.0
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "1.0"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 1785.71
+
+### INTERACTIONS ###
+epsilon = 0.1
+sigma   = 0.0
+Dv      = 0.0
+pref    = 0.0
+small   = 1e-6
+grav    = 0.0
+
+### BOUNDARY CONDITIONS ###
+# Subsonic (Ma 0.2) far field: NSCBC4 non-reflecting boundaries (same set-up as the
+# viscous NACA 0012 decks).  Inflow xlo fixes u, v, T; outflow xhi and the lateral
+# boundaries relax toward the free-stream pressure, so start-up acoustics leave the
+# domain instead of ringing (all-Dirichlet/Neumann walls trapped a +-200 pressure wave).
+#   target_T = p/(rho cv (gamma-1)) = 1785.71/(100*717.86*0.4) = 6.2188658e-02
+density.bc.type.xlo  = nscbc_inflow
+momentum.bc.type.xlo = nscbc_inflow nscbc_inflow
+energy.bc.type.xlo   = nscbc_inflow
+density.bc.type.xhi  = nscbc_outflow
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow
+energy.bc.type.xhi   = nscbc_outflow
+density.bc.type.ylo  = nscbc_outflow
+momentum.bc.type.ylo = nscbc_outflow nscbc_outflow
+energy.bc.type.ylo   = nscbc_outflow
+density.bc.type.yhi  = nscbc_outflow
+momentum.bc.type.yhi = nscbc_outflow nscbc_outflow
+energy.bc.type.yhi   = nscbc_outflow
+density0.bc.type.xlo = neumann
+density0.bc.type.xhi = neumann
+density0.bc.type.ylo = neumann
+density0.bc.type.yhi = neumann
+density1.bc.type.xlo = neumann
+density1.bc.type.xhi = neumann
+density1.bc.type.ylo = neumann
+density1.bc.type.yhi = neumann
+
+nscbc.xlo.type     = inflow
+nscbc.xlo.target_u = 1.0
+nscbc.xlo.target_v = 0.0
+nscbc.xlo.target_T = 6.2188658e-02
+nscbc.xhi.type     = outflow
+nscbc.xhi.target_p = 1785.71
+nscbc.xhi.target_u = 1.0
+nscbc.xhi.target_v = 0.0
+nscbc.xhi.sigma    = 0.5
+nscbc.xhi.beta     = 0.5
+nscbc.ylo.type     = outflow
+nscbc.ylo.target_p = 1785.71
+nscbc.ylo.target_u = 1.0
+nscbc.ylo.target_v = 0.0
+nscbc.ylo.sigma    = 0.5
+nscbc.ylo.beta     = 0.5
+nscbc.yhi.type     = outflow
+nscbc.yhi.target_p = 1785.71
+nscbc.yhi.target_u = 1.0
+nscbc.yhi.target_v = 0.0
+nscbc.yhi.sigma    = 0.5
+nscbc.yhi.beta     = 0.5
+nscbc.small = 1.0e-10
+
+### REFINEMENT CRITERIA ###
+eta_refinement_criterion   = 1e10
+omega_refinement_criterion = 0.5
+gradu_refinement_criterion = 1.0e8
+p_refinement_criterion     = 1e10
+rho_refinement_criterion   = 1e10
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+
+### SOLVER ###
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+kappa_method        = 1
+apply_sharpening    = 0

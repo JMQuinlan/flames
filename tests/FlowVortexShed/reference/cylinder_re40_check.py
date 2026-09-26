@@ -18,7 +18,12 @@ output_forces.dat.  Metrics (per plotfile):
   * Cd, Cd_pressure, Cd_friction (= Cd - Cd_p), Cl from the force history at that
     time (q = 0.5 rho U^2 D, rho=100, U=1, D=1); blank for Hydro (no force file)
 --csv writes <run_dir>/cylinder_metrics.csv (time series, every N-th plotfile,
-default N = 4) and <run_dir>/cylinder_summary.csv (last plotfile + literature).
+default N = 4; first line is a '#' provenance comment) and
+<run_dir>/cylinder_summary.csv (last plotfile + literature).  Both record the
+run's git hash (output/metadata), the repo HEAD at analysis time, and the
+domain extents / D from the cylinder centre (upstream, downstream, lateral),
+the blockage D/H and the finest dx/D.
+Re is read from <run_dir> (e.g. Re47_...); the literature column is filled for Re 40 only.
 Literature, unbounded steady Re 40 (verify): Cd 1.50-1.60 (Tritton 1959 ~1.59,
 Dennis & Chang 1970 1.52 = ~1.00 pressure + ~0.52 friction, Fornberg 1980 1.50),
 L/D 2.13-2.35 (Coutanceau & Bouard 1977 2.13, Dennis & Chang 2.35),
@@ -92,6 +97,37 @@ def wake_metrics(pf):
     return out
 
 
+def run_info(d, pf):
+    """Provenance + domain extents (in D, measured from the cylinder centre at the origin)."""
+    import subprocess
+    import yt
+    info = {}
+    m_re = re.search(r"Re[_=]?(\d+(?:\.\d+)?)", os.path.abspath(d))
+    info["Re"] = float(m_re.group(1)) if m_re else None
+    meta = os.path.join(d, "output", "metadata")
+    info["run_commit"] = ""
+    if os.path.exists(meta):
+        for line in open(meta, errors="ignore"):
+            if line.strip().startswith("Git_commit_hash"):
+                info["run_commit"] = line.split("=", 1)[1].strip()
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        info["analysis_commit"] = subprocess.run(["git", "-C", here, "describe", "--always", "--dirty"],
+                                                 capture_output=True, text=True).stdout.strip()
+    except Exception:
+        info["analysis_commit"] = ""
+    ds = yt.load(pf)
+    lo = ds.domain_left_edge.d; hi = ds.domain_right_edge.d
+    info["upstream_over_D"] = float(-lo[0] / D)
+    info["downstream_over_D"] = float(hi[0] / D)
+    info["lateral_lo_over_D"] = float(-lo[1] / D)
+    info["lateral_hi_over_D"] = float(hi[1] / D)
+    info["blockage_D_over_H"] = float(D / (hi[1] - lo[1]))
+    L = ds.index.max_level
+    info["finest_dx_over_D"] = float((hi[0] - lo[0]) / (ds.domain_dimensions[0] * ds.refine_by**L) / D)
+    return info
+
+
 def fmt(v, nd=6):
     return "" if v is None else (f"{v:.{nd}g}" if isinstance(v, float) else str(v))
 
@@ -135,18 +171,24 @@ def main():
         r = dict(last) if pf == pfs[-1] else wake_metrics(pf)
         r.update(forces_at(F, r["time"], q)); rows.append(r)
     ts = os.path.join(d, "cylinder_metrics.csv")
+    info0 = run_info(d, pfs[-1])
     with open(ts, "w") as f:
+        f.write("# " + "  ".join(f"{k}={fmt(v)}" for k, v in info0.items()) + "\n")
         f.write(",".join(cols) + "\n")
         for r in rows:
             f.write(",".join(fmt(r[c]) for c in cols) + "\n")
     print(f"  wrote {ts}  ({len(rows)} rows, every {stride} plotfiles)")
     fin = rows[-1]
     sm = os.path.join(d, "cylinder_summary.csv")
+    info = run_info(d, pfs[-1])
     with open(sm, "w") as f:
         f.write("metric,value,literature\n")
+        for k, v in info.items():
+            f.write(f"{k},{fmt(v)},\n")
+        lit = LIT if info.get("Re") in (None, 40.0) else {}     # literature ranges are for Re 40 only
         for c in ["time", "L_over_D", "x_closure", "wake_width", "wake_area", "sep_angle_deg",
                   "Cd", "Cd_pressure", "Cd_friction", "Cl"]:
-            f.write(f"{c},{fmt(fin[c])},{LIT.get(c, '')}\n")
+            f.write(f"{c},{fmt(fin[c])},{lit.get(c, '')}\n")
         if F is not None:
             f.write(f"Cd_mean_last5,{Cd[m].mean():.6g},\nCd_drift_per_time,{np.polyfit(t[m], Cd[m], 1)[0]:.3e},\n")
     print(f"  wrote {sm}")
