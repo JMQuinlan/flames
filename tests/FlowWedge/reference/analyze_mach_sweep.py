@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ============================================================================
-#  compare_wedge_angles.py
+#  analyze_mach_sweep.py   (was compare_wedge_angles.py)
 #  ---------------------------------------------------------------------------
 #  Cross-Mach summary for the FlowWedge tests: measure the oblique-shock angle
 #  beta from each run and compare to the analytical theta-beta-Mach relation.
@@ -15,7 +15,10 @@
 #  Reuses wedge_analysis.sample()/detect_shock() and oblique_shock_theory.
 #  Robust to runs that have not been generated yet (skips with a note).
 #
-#  Usage:  python3 compare_wedge_angles.py
+#  Usage:  python3 analyze_mach_sweep.py                       # INCLINE outputs -> ./Images
+#          python3 analyze_mach_sweep.py <tmpl_with_{ma}> [img_dir]
+#     e.g. python3 analyze_mach_sweep.py "../../../bin/tests/FlowWedge/sweep14/Ma{ma}/output"
+#  Cases are auto-detected from the output dirs that contain plotfiles (see MACH_LIST).
 # ============================================================================
 
 import os
@@ -35,30 +38,22 @@ import wedge_analysis as wa
 # ============================================================================
 # ==============================  CONFIG  ====================================
 # ============================================================================
-# cases to compare (one deck per Mach: tests/FlowWedge/input_Ma<M>).  Analytical weak-shock
-# angles for theta = 15 deg, gamma = 1.4 (oblique_shock_theory.beta_deg):
-#   Ma  1.2 : DETACHED
-#   Ma  1.7 : beta =  55.98 deg
-#   Ma  1.8 : beta =  51.34 deg
-#   Ma  2.0 : beta =  45.34 deg
-#   Ma  2.5 : beta =  36.94 deg
-#   Ma  3.0 : beta =  32.24 deg
-#   Ma  3.5 : beta =  29.19 deg
-#   Ma  4.0 : beta =  27.06 deg
-#   Ma  4.5 : beta =  25.50 deg
-#   Ma  5.0 : beta =  24.32 deg
-#   Ma  6.0 : beta =  22.67 deg
-#   Ma  7.0 : beta =  21.60 deg
-#   Ma  8.0 : beta =  20.86 deg
-#   Ma 10.0 : beta =  19.94 deg
-MACH_LIST   = [1.2, 1.7, 1.8, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0, 7.0, 8.0, 10.0]
+# Cases to compare.  None = AUTO-DETECT (default): exactly the output directories
+# that exist and match wedge_analysis.OUTPUT_TMPL with {ma} as a wildcard (e.g.
+# .../output_Ma*; the Mach number is parsed from the name) and contain at least one
+# plotfile past the initial condition (a run with only step 0 is skipped).
+# Nothing else is listed.  Adding a case = adding input_Ma<M> and running it with
+# the usual plot_file name.  Or give an explicit list, e.g. [2.0, 3.0].
+# Analytical beta table: python3 oblique_shock_theory.py
+MACH_LIST   = None
 THETA_DEG   = wa.WEDGE_THETA_DEG         # wedge half-angle (from wedge_analysis)
 GAMMA       = wa.GAMMA
 OUTPUT_DIR  = "./Images"
 ALSO_RENDER_EACH = True                  # also write the per-case wedge_Ma*.png overlays
+LABEL_POINTS     = False                 # "Ma <M>" text next to each measured point
 
 # beta-vs-Ma plot style
-MA_CURVE_LO, MA_CURVE_HI = 1.02, 10.5    # analytical curve x-range
+MA_CURVE_LO, MA_CURVE_HI = 1.02, None    # analytical curve x-range (None = 5% past the largest Mach)
 ANALYTIC_COLOR = "#1f5fd1"               # analytical weak-shock curve (BLUE)
 STRONG_COLOR   = "#9aa0a8"               # analytical strong-shock curve (grey, dashed)
 MEASURED_COLOR = "#d11f1f"               # measured points (RED)
@@ -71,19 +66,39 @@ MARKER_SIZE = 9
 FONT_TITLE = 15
 FONT_LABEL = 12.5
 FONT_TICK  = 10.5
-TITLE   = "FlowWedge: oblique-shock angle vs Mach"
-XLABEL  = "freestream Mach number  $M_1$"
-YLABEL  = r"shock angle  $\beta$  (deg)"
+TITLE   = "Oblique-shock Angle vs Mach"
+XLABEL  = "Mach,  $M_1$"
+YLABEL  = r"Shock Angle, $\beta$ ($^\circ$)"
 # ============================================================================
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
+def detect_cases():
+    """{Mach: output dir}.  Auto-detected from wa.OUTPUT_TMPL (existing dirs with
+    plotfiles only) unless MACH_LIST is given."""
+    import glob, re
+    tmpl = wa._abs(wa.OUTPUT_TMPL)
+    if MACH_LIST is not None:
+        return {float(M): tmpl.format(ma=f"{M:.1f}") for M in MACH_LIST}
+    cases = {}
+    rx = re.compile("^" + re.escape(tmpl).replace(re.escape("{ma}"), r"([0-9]+(?:\.[0-9]+)?)") + "$")
+    for path in glob.glob(tmpl.replace("{ma}", "*")):
+        if any(t in path for t in wa.IGNORE_TOKENS):      # e.g. alamo's renamed '*.old.*' dirs
+            continue
+        m = rx.match(os.path.normpath(path))
+        # need at least one plotfile past the initial condition (step 0 = IC, no shock yet)
+        if m and os.path.isdir(path) and any(wa.step_number(p) > 0 for p in wa.discover_plotfiles(path)):
+            cases[float(m.group(1))] = path
+    return dict(sorted(cases.items()))
+
+
 def collect():
     """Measure beta for each available case; return a list of result dicts."""
     rows = []
-    for M in MACH_LIST:
-        out_dir = wa._abs(wa.OUTPUT_TMPL.format(ma=f"{M:.1f}"))
+    cases = detect_cases()
+    print(f"  cases found: {', '.join(f'{M:g}' for M in cases)}")
+    for M, out_dir in cases.items():
         beta_a = ost.beta_deg(THETA_DEG, M, GAMMA, weak=True)
         attached = beta_a is not None
         row = dict(M=M, beta_analytic=beta_a, attached=attached,
@@ -100,10 +115,10 @@ def collect():
             row["time"] = s["time"]
             print(f"  Ma {M:g}: beta_analytic="
                   f"{('%.2f' % beta_a) if attached else 'DETACHED':>8}  "
-                  f"beta_measured={('%.2f' % meas['beta_deg']) if meas['beta_deg'] else 'n/a':>8}  "
-                  f"(t={s['time']:.2f})")
+                  f"beta_measured={('%.2f' % meas['beta_deg']) if meas['beta_deg'] else 'n/a':>8}  ")
+                  #f"(t={s['time']:.2f})")
             if ALSO_RENDER_EACH:
-                wa.analyze(M)
+                wa.analyze(M, out_dir)
         except Exception as exc:
             print(f"  Ma {M:g}: analysis failed: {exc}")
         rows.append(row)
@@ -111,7 +126,8 @@ def collect():
 
 
 def plot_beta_vs_mach(rows, out_png):
-    Ms = np.linspace(MA_CURVE_LO, MA_CURVE_HI, 400)
+    hi = MA_CURVE_HI or 1.05 * max([r["M"] for r in rows] + [2.0])
+    Ms = np.linspace(MA_CURVE_LO, hi, 400)
     beta_weak = np.array([ost.beta_deg(THETA_DEG, M, GAMMA, weak=True) or np.nan for M in Ms])
     beta_strong = np.array([ost.beta_deg(THETA_DEG, M, GAMMA, weak=False) or np.nan for M in Ms])
     tmax = np.array([ost.theta_max_deg(M, GAMMA) or np.nan for M in Ms])
@@ -137,10 +153,11 @@ def plot_beta_vs_mach(rows, out_png):
     if mx:
         ax.plot(mx, my, "o", color=MEASURED_COLOR, ms=MARKER_SIZE, zorder=6,
                 label="measured (Hydro2)")
-        for r in rows:
-            if r["beta_measured"] is not None and r["attached"]:
-                ax.annotate(f"  Ma {r['M']:g}", (r["M"], r["beta_measured"]),
-                            fontsize=9, color=MEASURED_COLOR, va="center")
+        if LABEL_POINTS:
+            for r in rows:
+                if r["beta_measured"] is not None and r["attached"]:
+                    ax.annotate(f"  Ma {r['M']:g}", (r["M"], r["beta_measured"]),
+                                fontsize=9, color=MEASURED_COLOR, va="center")
     # detached cases: mark measured points (if any) with an x
     dx = [r["M"] for r in rows if r["beta_measured"] is not None and not r["attached"]]
     dy = [r["beta_measured"] for r in rows if r["beta_measured"] is not None and not r["attached"]]
@@ -153,7 +170,7 @@ def plot_beta_vs_mach(rows, out_png):
     ax.set_ylabel(YLABEL, fontsize=FONT_LABEL)
     ax.tick_params(labelsize=FONT_TICK)
     ax.grid(True, alpha=0.3)
-    ax.set_xlim(MA_CURVE_LO, MA_CURVE_HI)
+    ax.set_xlim(MA_CURVE_LO, hi)
     ax.set_ylim(0, 90)
     ax.legend(fontsize=9.5, framealpha=0.9, loc="upper right")
     fig.tight_layout()
@@ -190,10 +207,24 @@ def print_table(rows):
 
 
 def main():
-    print("compare_wedge_angles")
+    # Optional overrides:  argv[1] = plotfile-dir template with {ma}
+    #                      argv[2] = image/CSV output dir
+    # Defaults: wedge_analysis.OUTPUT_TMPL (INCLINE /mmfs1) and OUTPUT_DIR (./Images).
+    global OUTPUT_DIR
+    if len(sys.argv) > 1:
+        wa.OUTPUT_TMPL = os.path.normpath(os.path.abspath(sys.argv[1]))
+    if len(sys.argv) > 2:
+        OUTPUT_DIR = os.path.abspath(sys.argv[2])
+    wa.OUTPUT_DIR = OUTPUT_DIR                  # per-case wedge_Ma*.png go to the same place
+    print("analyze_mach_sweep")
+    print(f"  plotfiles: {wa._abs(wa.OUTPUT_TMPL)}")
+    print(f"  images   : {wa._abs(OUTPUT_DIR)}")
     out_dir = wa._abs(OUTPUT_DIR)
     wa.ensure_dir(out_dir)
     rows = collect()
+    if not rows:
+        print("  no output dirs with plotfiles match the template -- nothing written.")
+        return
     plot_beta_vs_mach(rows, os.path.join(out_dir, "wedge_angle_comparison.png"))
     write_csv(rows, os.path.join(out_dir, "wedge_angles.csv"))
     print_table(rows)

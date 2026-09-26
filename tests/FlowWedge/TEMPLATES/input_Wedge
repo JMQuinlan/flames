@@ -4,17 +4,22 @@
 #@
 
 # ============================================================================
+# TEMPLATE -- filled in by TEMPLATES/sweep_mach.bash (do not run directly).
+# Placeholders (written @NAME@ below): MACH ENERGY OUTPUT_PATH PLOT_DT DT_MAX
+#   STOP_TIME STOP_NOTE BRINKMAN   (all derived per Mach in sweep_mach.bash)
+# ============================================================================
+# ============================================================================
 # FlowWedge -- TWO-PHASE (Integrator::Hydro2, 6-equation) SUPERSONIC flow over an
 # embedded 15-degree half-angle WEDGE.  Tests whether the phi embedded solid
 # resolves the attached OBLIQUE SHOCK and reproduces the theta-beta-Mach
 # relation.
 #
-#   Ma = 8.0   (freestream).  Reference state: rho=1, p=1/gamma=0.714286 so that
-#   c = sqrt(gamma p / rho) = 1  ->  U = Ma = 8.0,  M_x = rho*U = 8.0.
-#   Total energy/vol  E = p/(gamma-1) + 0.5*rho*U^2 = 1.785714 + 0.5*8.0*8.0 = 33.785714.
+#   Ma = @MACH@   (freestream).  Reference state: rho=1, p=1/gamma=0.714286 so that
+#   c = sqrt(gamma p / rho) = 1  ->  U = Ma = @MACH@,  M_x = rho*U = @MACH@.
+#   Total energy/vol  E = p/(gamma-1) + 0.5*rho*U^2 = 1.785714 + 0.5*@MACH@^2 = @ENERGY@.
 #
 #   Wedge: half-angle theta = 15deg, apex at (x0,0) = (-0.5, 0), base at xb = 1.5.
-#   Analytical (weak) oblique shock angle for theta=15deg, Ma=8.0:  beta ~ 20.9deg (weak attached oblique).
+#   Analytical (weak) oblique shock angle for theta=15deg: python3 reference/oblique_shock_theory.py
 #
 # Single-phase limit: eta = alpha_1 = 0.5 everywhere with TWO IDENTICAL fluids
 # (phase 0 == phase 1), so the mixture behaves as one ideal gas while both phasic
@@ -24,11 +29,10 @@
 # ============================================================================
 
 ### OUTPUT ###
-#plot_file = ./tests/FlowWedge/output_Ma8.0
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowWedge/output_Ma8.0
+plot_file = @OUTPUT_PATH@
 
 ### MESHING ###
-amr.plot_dt          = 0.5
+amr.plot_dt          = @PLOT_DT@
 amr.max_grid_size    = 500000
 amr.blocking_factor  = 4
 amr.regrid_int       = 10
@@ -46,11 +50,11 @@ geometry.is_periodic = 0 0 0
 timestep            = 1e-6
 dynamictimestep.on  = 1
 dynamictimestep.verbose = 0
-dynamictimestep.max = 3.8e-4
+dynamictimestep.max = @DT_MAX@
 dynamictimestep.min = 1e-9
 cfl                 = 0.3
 cfl_v               = 0.3
-stop_time           = 6.0             # L/U = 6/8 = 0.75
+stop_time           = @STOP_TIME@        # @STOP_NOTE@
 
 # ----------------------------------------------------------------------------
 # EMBEDDED SOLID -- the 15deg wedge.  phi = 1 fluid, phi = 0 solid.
@@ -62,7 +66,7 @@ stop_time           = 6.0             # L/U = 6/8 = 0.75
 # so the shock sits ~eps off the phi=0.5 surface and converges as eps -> 0.
 # Explicit-penalty stability: solid.brinkman * dt < 2 (see dynamictimestep.max).
 apply_embedded_solid = 1
-solid.brinkman       = 3200          # ~4*U/eps, U=8.0, eps=0.01  (kappa = 1/3200)
+solid.brinkman       = @BRINKMAN@        # ~4*U/eps = 400*U  (kappa = 1/brinkman)
 phi_refinement_criterion = 0.1        # refine the wedge boundary
 
 # Wedge as the intersection of three half-planes (upper ramp, lower ramp, base),
@@ -117,7 +121,7 @@ mu1_b = 0.0
 density0.ic.type = constant
 density0.ic.constant.value = 1.0
 velocity0.ic.type = expression
-velocity0.ic.expression.region0 = "8.0"
+velocity0.ic.expression.region0 = "@MACH@"
 velocity0.ic.expression.region1 = "0.0"
 pressure0.ic.type = constant
 pressure0.ic.constant.value = 0.714286
@@ -126,7 +130,7 @@ pressure0.ic.constant.value = 0.714286
 density1.ic.type = constant
 density1.ic.constant.value = 1.0
 velocity1.ic.type = expression
-velocity1.ic.expression.region0 = "8.0"
+velocity1.ic.expression.region0 = "@MACH@"
 velocity1.ic.expression.region1 = "0.0"
 pressure1.ic.type = constant
 pressure1.ic.constant.value = 0.714286
@@ -166,7 +170,7 @@ density1.bc.type.yhi = neumann
 
 
 momentum.bc.type.xlo = dirichlet dirichlet
-momentum.bc.val.xlo  = 8.0 0.0
+momentum.bc.val.xlo  = @MACH@ 0.0
 momentum.bc.type.xhi = neumann neumann
 momentum.bc.type.ylo = neumann neumann
 momentum.bc.type.yhi = neumann neumann

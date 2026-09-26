@@ -464,6 +464,9 @@ protected:
     int solid_force_int = 0;
     std::vector<Set::Scalar> probe_x, probe_y, probe_z;   // probe_z read in 3D only
     Set::Scalar pen_force[3] = {0.0, 0.0, 0.0};
+    std::vector<Set::Scalar> phi_thickness_cells;   // [2026-09-25] phi interface thickness per level (cells), measured at init
+    bool wall_flux_decided = false;                  // [2026-09-25] solid.wall_flux auto selection done
+    Set::Scalar rhs_force[3] = {0.0, 0.0, 0.0};   // [2026-09-25] sharp wall: sum of solid-cell momentum RHS * dV
     Set::Scalar b1 = NAN, q1EOS = NAN;
     Set::Scalar cp1 = NAN, cv1 = NAN;
 

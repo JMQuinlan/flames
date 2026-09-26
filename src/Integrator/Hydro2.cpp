@@ -181,6 +181,12 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // <= 0 selects the old auto momentum-projection wall.
         pp_query_default("solid.brinkman", value.embedded.brinkman, 1.0e6); // Yang(2023) momentum-only Brinkman no-penetration
         pp_query_default("solid.slip", value.embedded.slip, 0);             // 1 = slip wall (penalize only wall-normal momentum); 0 = no-slip
+        // [2026-09-25] solid viscosity = solid.mu_factor * fluid viscosity, blended by
+        // (1 - phi) into the Cauchy stress (single-phase Hydro uses 100).
+        // 1 = off (default).  Only acts where the fluid is viscous.
+        pp_query_default("solid.mu_factor", value.embedded.mu_factor, 1.0);
+        if (value.embedded.mu_factor < 1.0)
+            Util::Abort(INFO, "solid.mu_factor must be >= 1 (1 = no solid viscosity)");
         // [2026-09-24] 1 = apply the Brinkman penalty IMPLICITLY (exact exponential
         // decay, once per level step after the RK advance) instead of as an
         // explicit RHS source.  The explicit source is only stable for
@@ -204,11 +210,27 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // mirror (normal velocity reflected about the solid's), so u* = 0, no
         // mass/energy crosses and only pressure acts; faces with both cells in
         // the solid carry zero flux.  Tangential no-slip still comes from the
-        // Brinkman term + viscous stress.  [2026-09-25] 1 is the default;
-        // 0 = old porous (full-flux) behaviour.
-        pp_query_default("solid.wall_flux", value.embedded.wall_flux, 1);
+        // Brinkman term + viscous stress.  0 = diffuse (porous full-flux) wall.
+        // [2026-09-25] AUTO SELECTION when solid.wall_flux is NOT given: the wall
+        // stays diffuse (0) unless the phi interface is thinner than
+        // solid.wall_flux_cells (default 2) cells on the finest level built at
+        // initialization (thickness ~ 1 / max |phi(i+1) - phi(i)|; a step is
+        // ~1 cell, a tanh profile ~2 eps/dx), in which case the mirrored sharp-wall
+        // flux (1) is switched on -- see TimeStepBegin.  An explicit
+        // solid.wall_flux = 0 or 1 always wins.
+        if (pp.contains("solid.wall_flux"))
+        {
+            pp_query_default("solid.wall_flux", value.embedded.wall_flux, 0);
+            value.embedded.wall_flux_auto = 0;
+        }
+        else
+        {
+            value.embedded.wall_flux = 0;
+            value.embedded.wall_flux_auto = 1;
+        }
         if (value.embedded.wall_flux != 0 && value.embedded.wall_flux != 1)
             Util::Abort(INFO, "solid.wall_flux must be 0 or 1");
+        pp_query_default("solid.wall_flux_cells", value.embedded.wall_flux_cells, 2.0);
         // [2026-09-24] force / pressure-probe time history, see Hydro2.H.
         pp_query_default("solid.force_int", value.solid_force_int, 0);
         pp.queryarr("solid.probe.x", value.probe_x);
@@ -226,7 +248,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                 Util::Message(INFO, "embedded solid: auto momentum-projection wall (solid.brinkman <= 0)");
             else
                 Util::Message(INFO, "embedded solid: solid.brinkman=", value.embedded.brinkman,
-                              " implicit=", value.embedded.implicit, " wall_flux=", value.embedded.wall_flux);
+                              " implicit=", value.embedded.implicit, " wall_flux=",
+                              value.embedded.wall_flux_auto ? std::string("auto") : std::to_string(value.embedded.wall_flux));
             // Skips pressure relaxation within the solid (acts likes Hydro do-not-solve type solid)
             value.embedded.relax_skip = 0.5;
         }
@@ -1083,6 +1106,30 @@ void Hydro2::Initialize(int lev)
                 grad_phi(i, j, k, 1) = g(1);
             });
         }
+
+        // [2026-09-25] phi interface thickness on this level, in cells:
+        // ~ 1 / (largest jump of the clamped phi between face neighbours).
+        // Used by the solid.wall_flux auto selection (TimeStepBegin).
+        {
+            Set::Scalar jmax = 0.0;
+            for (amrex::MFIter mfi(*embedded.phi_mf[lev], false); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &bx = mfi.validbox();
+                auto phi = embedded.phi_mf[lev]->const_array(mfi);
+                amrex::LoopOnCpu(bx, [&](int i, int j, int k) {
+                    const Set::Scalar pc = EmbeddedSolid::clampPhi(phi(i, j, k));
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    {
+                        const int ii = i + (d == 0), jj = j + (d == 1), kk = k + (d == 2);
+                        if (!bx.contains(amrex::IntVect(AMREX_D_DECL(ii, jj, kk)))) continue;
+                        jmax = std::max(jmax, std::abs(EmbeddedSolid::clampPhi(phi(ii, jj, kk)) - pc));
+                    }
+                });
+            }
+            amrex::ParallelDescriptor::ReduceRealMax(jmax);
+            if ((int)phi_thickness_cells.size() <= lev) phi_thickness_cells.resize(lev + 1, NAN);
+            phi_thickness_cells[lev] = (jmax > 0.0) ? 1.0 / jmax : std::numeric_limits<Set::Scalar>::infinity();
+        }
     }
 
     // FILLING GHOST CELLS
@@ -1431,7 +1478,35 @@ void Hydro2::Mix(int lev)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 void Hydro2::TimeStepBegin(Set::Scalar, int /*iter*/)
 {
-
+    // [2026-09-25] solid.wall_flux AUTO selection (see Parse), decided once,
+    // before the first step, from the finest level measured at initialization.
+    if (embedded.apply && embedded.wall_flux_auto && !wall_flux_decided)
+    {
+        wall_flux_decided = true;
+        int L = -1;
+        for (int l = (int)phi_thickness_cells.size() - 1; l >= 0; --l)
+            if (phi_thickness_cells[l] == phi_thickness_cells[l]) { L = l; break; }
+        if (L < 0)
+        {
+            Util::Warning(INFO, "embedded solid: phi interface thickness not measured (restart?) -- "
+                                "keeping the diffuse wall (solid.wall_flux = 0); set solid.wall_flux explicitly if needed");
+            return;
+        }
+        const Set::Scalar th = phi_thickness_cells[L];
+        if (th < embedded.wall_flux_cells)
+        {
+            embedded.wall_flux = 1;
+            Util::Message(INFO, "embedded solid: phi interface thickness = ", th, " cells on level ", L,
+                          " (< solid.wall_flux_cells = ", embedded.wall_flux_cells, "): the solid is too thin to be "
+                          "resolved as a diffuse wall -- switching to the MIRRORED sharp-wall flux (solid.wall_flux = 1)");
+        }
+        else
+        {
+            embedded.wall_flux = 0;
+            Util::Message(INFO, "embedded solid: phi interface thickness = ", th, " cells on level ", L,
+                          " (>= solid.wall_flux_cells = ", embedded.wall_flux_cells, "): keeping the diffuse wall (solid.wall_flux = 0)");
+        }
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2504,6 +2579,23 @@ Hydro2::RHS(int lev,
             if (embedded.apply)
             {
                 phi_c = embedded.clampPhi(phisol(i, j, k));
+                // [2026-09-25] SOLID VISCOSITY (solid.mu_factor, as in single-phase
+                // Hydro): mu_solid = mu_factor * mu_f(eta), blended by the solid
+                // fraction, mu_eff = phi mu_f + (1 - phi) mu_solid = w mu_f with
+                // w = phi + (1 - phi) mu_factor.  Enforces no-slip through the
+                // viscous stress across the diffuse wall band.  The gradient
+                // term picks up mu_f dw = mu_f (1 - mu_factor) grad(phi).  Same
+                // factor on the bulk viscosity.  Inviscid (mu_f = 0): no effect.
+                const Set::Scalar fac = embedded.mu_factor;
+                if (fac != 1.0)
+                {
+                    const Set::Scalar w = phi_c + (1.0 - phi_c) * fac;
+                    const Set::Vector gphi = Numeric::Gradient(phisol, i, j, k, 0, DX);
+                    grad_mu     = w * grad_mu     + (1.0 - fac) * mu_eff     * gphi;
+                    grad_lambda = w * grad_lambda + (1.0 - fac) * lambda_eff * gphi;
+                    mu_eff     *= w;
+                    lambda_eff *= w;
+                }
             }
 
             // Solving (every term is proportional to a viscosity -> skip when inviscid)
@@ -3482,7 +3574,7 @@ Hydro2::RHS(int lev,
             // term phi0/kappa (u_S - u); orig. Angot 1999 / Liu & Vasilyev
             // 2007)
             // ============================================================
-            if (embedded.apply && embedded.brinkman > 0.0 && !embedded.implicit)
+            if (embedded.apply && embedded.brinkman > 0.0 && !embedded.implicit && !embedded.wall_flux)
             {
                 const Set::Scalar chi = 1.0 - phi_c;
                 if (chi > 0.0)
@@ -3555,6 +3647,50 @@ Hydro2::RHS(int lev,
         BL_PROFILE_VAR_STOP(prof_cells);
     }
     } // end omp parallel (RHS main loop)
+    // [2026-09-25] SHARP-WALL SOLID CELLS ARE INERT (solid.wall_flux = 1).
+    // The wall-face flux (fluid vs mirror) is added to BOTH cells of the face, so
+    // the solid cell next to the wall received the wall pressure (plus viscous
+    // stress) on one face and zero flux on its solid-solid faces: a large one-sided
+    // push every stage.  A stiff penalty (brinkman 1e6, the airfoil decks) wiped it
+    // out each step, but a soft one (Re40 cylinder, brinkman 70) let those cells
+    // accelerate (|u| 4 -> 20 -> 1e8 in 15 steps at phi = 0.49) and the viscous
+    // stress fed that motion back into the fluid -> blow-up.  The solid is not part
+    // of the fluid domain here: record the momentum it would have received (the
+    // pressure + viscous force ON THE BODY, used by solid.force_int) and zero its
+    // right-hand side.  The solid state is held by the implicit update in Advance.
+    if (embedded.apply && embedded.wall_flux)
+    {
+        const bool want_force = (solid_force_int > 0 && lev == finest_level);
+        Set::Scalar vol = 1.0;
+        for (int d = 0; d < AMREX_SPACEDIM; ++d) vol *= DX[d];
+        amrex::ReduceOps<amrex::ReduceOpSum, amrex::ReduceOpSum, amrex::ReduceOpSum> rf_op;
+        amrex::ReduceData<Set::Scalar, Set::Scalar, Set::Scalar> rf_data(rf_op);
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+        for (amrex::MFIter mfi(M_rhs_mf, HydroTiling()); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.tilebox();
+            auto phi = embedded.phi_mf[lev]->const_array(mfi);
+            auto r0  = rho_eta0_rhs_mf.array(mfi);
+            auto r1  = rho_eta1_rhs_mf.array(mfi);
+            auto Mr  = M_rhs_mf.array(mfi);
+            auto Er  = E_rhs_mf.array(mfi);
+            auto er  = eta_rhs_mf.array(mfi);
+            auto E0r = E0_rhs_mf.array(mfi);
+            auto E1r = E1_rhs_mf.array(mfi);
+            rf_op.eval(bx, rf_data, [=] AMREX_GPU_DEVICE(int i, int j, int k) -> amrex::GpuTuple<Set::Scalar, Set::Scalar, Set::Scalar> {
+                if (phi(i, j, k) >= 0.5) return {0.0, 0.0, 0.0};
+                Set::Scalar f[3] = {0.0, 0.0, 0.0};
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) { f[d] = Mr(i, j, k, d) * vol; Mr(i, j, k, d) = 0.0; }
+                r0(i, j, k) = 0.0; r1(i, j, k) = 0.0; Er(i, j, k) = 0.0;
+                er(i, j, k) = 0.0; E0r(i, j, k) = 0.0; E1r(i, j, k) = 0.0;
+                return {f[0], f[1], f[2]};
+            });
+        }
+        auto rfv = rf_data.value(rf_op);
+        if (want_force) { rhs_force[0] = amrex::get<0>(rfv); rhs_force[1] = amrex::get<1>(rfv); rhs_force[2] = amrex::get<2>(rfv); }
+    }
     // [DIAG RHSDECOMP] mass1 RHS budget: sum(rhs)*dV must equal
     // net boundary influx + interior sources.  Printed every 300 calls.
     if (relax_diag)
@@ -3858,7 +3994,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // energy removed is returned as internal energy (energy-conserving), and
     // the post-step FillGhost4BC -> RelaxAndReinit re-derives p, E0, E1.
     // ------------------------------------------------------------------
-    if (embedded.apply && embedded.implicit && embedded.brinkman > 0.0)
+    // [2026-09-25] sharp-wall mode always takes this path (the solid RHS is zeroed
+    // in RHS(); here the solid cells are set exactly to the solid state).
+    if (embedded.apply && ((embedded.implicit && embedded.brinkman > 0.0) || embedded.wall_flux))
     {
         // Target the solid VELOCITY u_s = M_s / rho_s (M -> rho u_s), not the
         // solid momentum: the solid is porous to mass, so its density drifts
@@ -3909,7 +4047,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 const Set::Scalar phic = EmbeddedSolid::clampPhi(phi(i, j, k));
                 const Set::Scalar chi = sharp_l ? ((phic < 0.5) ? 1.0 : 0.0) : 1.0 - phic;
                 if (chi <= 0.0) return {0.0, 0.0, 0.0};
-                const Set::Scalar f = 1.0 - std::exp(-lam0 * chi * dt);   // fraction removed
+                // [2026-09-25] sharp wall: solid cells projected exactly (f = 1), so the
+                // wall no longer depends on solid.brinkman.
+                const Set::Scalar f = sharp_l ? 1.0 : 1.0 - std::exp(-lam0 * chi * dt);   // fraction removed
                 const Set::Scalar rho_c = std::max(r0(i, j, k) + r1(i, j, k), small_l);
                 const Set::Scalar rho_s = std::max(s_r0(i, j, k) + s_r1(i, j, k), small_l);
                 Set::Scalar us[AMREX_SPACEDIM], dM[AMREX_SPACEDIM];
@@ -4052,7 +4192,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 if (bx.contains(iv)) { red[2 * AMREX_SPACEDIM + 2 * n] += p(iv); red[2 * AMREX_SPACEDIM + 2 * n + 1] += 1.0; }
             }
         }
-        for (int d = 0; d < AMREX_SPACEDIM; ++d) red[d] = pen_force[d];
+        // [2026-09-25] sharp wall: force = momentum the fluid pushes into the (inert)
+        // solid cells, from the last RHS evaluation of this step; porous: the
+        // momentum removed by the implicit penalty / dt.
+        for (int d = 0; d < AMREX_SPACEDIM; ++d) red[d] = embedded.wall_flux ? rhs_force[d] : pen_force[d];
         amrex::ParallelDescriptor::ReduceRealSum(red.data() + AMREX_SPACEDIM, (int)red.size() - AMREX_SPACEDIM);
         amrex::ParallelDescriptor::ReduceRealSum(red.data(), AMREX_SPACEDIM);
         if (amrex::ParallelDescriptor::IOProcessor())
@@ -4382,6 +4525,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 t_rho = rho(i,j,k);
                 {
                     const Set::Scalar a1n = std::min(std::max(eta_new(i,j,k), 0.0), 1.0);
+                    // [2026-09-25] the solid.mu_factor viscosity is deliberately NOT
+                    // included here (user request): the timestep follows the fluid
+                    // viscosity only, as in single-phase Hydro.
                     const Set::Scalar mu_c = a1n * mu0_l + (1.0 - a1n) * mu1_l;
                     t_nu = mu_c / (rho(i,j,k) + small_l);
                     if (kap_eff_l > 0.0)

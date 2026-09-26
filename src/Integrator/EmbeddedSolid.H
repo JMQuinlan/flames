@@ -16,7 +16,10 @@ public:
     int          slip = 0;                   // 1 = slip wall: penalize only wall-NORMAL momentum
                                              // (no-penetration); 0 = no-slip (all components, default)
     int          implicit = 1;               // 1 = exact implicit Brinkman update after each level step (see Hydro2 Parse)
-    int          wall_flux = 1;              // 1 = sharp-wall Riemann flux: mirror state at fluid/solid faces, zero flux inside the solid
+    int          wall_flux = 0;              // 1 = sharp-wall Riemann flux: mirror state at fluid/solid faces, zero flux inside the solid
+    int          wall_flux_auto = 1;         // [2026-09-25] 1 = solid.wall_flux not given: chosen from the phi thickness at init
+    Set::Scalar  wall_flux_cells = 2.0;      // [2026-09-25] auto threshold: sharp wall if the phi interface is thinner than this (cells)
+    Set::Scalar  mu_factor = 1.0;            // [2026-09-25] solid viscosity = mu_factor * fluid viscosity (1 = off)
     Set::Scalar  brinkman = 1.0e6;           // was solid_brinkman (kappa=1/brinkman; <=0 -> auto wall)
     Set::Scalar  relax_skip = 0.0;           // was solid_relax_skip (skip relax/sharpen/CFL where phi<this; =0.5)
     Set::Scalar  refinement_criterion = NAN; // was phi_refinement_criterion
