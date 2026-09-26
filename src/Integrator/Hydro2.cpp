@@ -148,10 +148,21 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // Boussinesq--Scriven interfacial viscosity (see Hydro2.H).  kappa_s is
         // applied through sigma_tot; mu_s is parsed only so a request for the
         // unimplemented shear term is caught here rather than silently ignored.
-        // 1 (default) = alpha row uses the WENO3/limiter-reconstructed face value
-        // (73f9c38c8, Sep 21).  0 = pre-Sep-21 first-order donor cell, kept to
-        // A/B the uncoated Sch20 collapse, where the two differ only near R_min.
-        pp_query_default("eta_consistent_advect", value.eta_consistent_advect, 1);
+        // eta_consistent_advect (default 0 = donor-cell alpha row, VALIDATED).
+        // 1 = take the alpha face value from the WENO3/limiter-reconstructed
+        // state instead (73f9c38c8).  It matches the alpha row's truncation error
+        // to the mass rows and cut the driven-bubble radius drift, but on outflow
+        // faces it adds (a_face - eta_i) u*/dx terms that break the upwind
+        // maximum principle.  At a near-singular collapse (gas core a few cells
+        // wide, large div u) that decouples gas volume from gas mass and broke
+        // the uncoated Sch20 collapse.  Kept for future multiphase work, where a
+        // consistent higher-order alpha row may be needed together with extra
+        // source terms to control the rebound.  NOT validated -- do not use.
+        pp_query_default("eta_consistent_advect", value.eta_consistent_advect, 0);
+        if (value.eta_consistent_advect)
+            Util::Warning(INFO, "eta_consistent_advect = 1: WENO3 face-alpha advection is NOT "
+                          "validated (breaks the uncoated Sch20 collapse near R_min; needs "
+                          "additional rebound source terms).  Use the default 0 for production.");
         pp_query_default("shell_gate_free", value.shell_gate_free, 1);  // 1 = no DX-scaled freeze; consistent projector kills the bulk source (see Advance)
         pp_query_default("shell_bulk_extend", value.shell_bulk_extend, 1);  // 1 = extend Gamma from the band into adjacent bulk (see RelaxAndReinit)
         pp_query_default("shell.kappa_s", value.shell_kappa_s, 0.0);
@@ -2432,9 +2443,8 @@ Hydro2::RHS(int lev,
                 Solver::Local::FluidRiemann::State sR_face = Solver::Local::Limiter::ToState(pR, small);
 
                 Solver::Local::FluidRiemann::Flux fl_ = riemannsolver->Solve(sL_face, sR_face, pref, small);
-                // Carry the RECONSTRUCTED alpha out, upwinded on the contact
-                // speed, so the alpha row can be advected at the same order as
-                // the mass rows (see the alpha-row note in Advance).
+                // Reconstructed alpha upwinded on the contact speed; read by the
+                // alpha row only when eta_consistent_advect = 1 (not validated).
                 fl_.alpha_face = (fl_.u_interface > 0.0) ? pL.alpha : pR.alpha;
                 return fl_;
             };
@@ -2541,34 +2551,25 @@ Hydro2::RHS(int lev,
             const Set::Scalar p0_C   = Solver::EOS::EOS::PhasicPressureFromEnergy(E0_arr(i, j, k), a1_C, eos0.Gamma(), eos0.P0(), small);
             const Set::Scalar p1_C   = Solver::EOS::EOS::PhasicPressureFromEnergy(E1_arr(i, j, k), a2_C, eos1.Gamma(), eos1.P0(), small);
 
-            // ALPHA ROW.  The face volume fraction is the LIMITER-
-            // RECONSTRUCTED state, upwinded on the contact speed S_M.
-            //
-            // THE BUG IT FIXES.  The mass rows are built from limiter-
-            // reconstructed states (Limiter.type = godunov|minmod|vanleer|
-            // weno3|weno5), but the alpha row used a plain donor-cell upwind
-            // value -- first order, no limiter -- so eta carried much more
-            // numerical diffusion than (alpha rho)_k.  Gas MASS is then
-            // conserved exactly while the gas VOLUME int(1-eta)dV decays, and
-            // rho_gas = rho_eta1/(1-eta) drifts upward: the bubble shrinks.
-            // Measured on the driven benchmark: -0.23 %/cycle in radius with
-            // gas mass conserved to 3.4e-14, zero drift when the bubble is at
-            // rest (donor-cell diffusion ~ dx|u|/2 vanishes with u), and drift
-            // ~ (eps/dx)^-0.91 -- all three are signatures of this mismatch.
-            //
-            // This is the same failure the colour function c hit (see the note
-            // below): two rows advected by operators of different truncation
-            // error separate over time.
-            Set::Scalar a_face_xlo = flux_xlo.alpha_face;
-            Set::Scalar a_face_xhi = flux_xhi.alpha_face;
-            Set::Scalar a_face_ylo = flux_ylo.alpha_face;
-            Set::Scalar a_face_yhi = flux_yhi.alpha_face;
-            if (!eta_consistent_advect)   // 0 = pre-Sep-21 first-order donor-cell alpha row
+            // ALPHA ROW: first-order donor-cell face value, upwinded on the
+            // contact speed S_M.  A WENO3/limiter-reconstructed face value was
+            // tried (73f9c38c8, Sep 21) to cut the driven-bubble radius drift,
+            // but on outflow faces it adds (a_face - eta_i) u*/dx terms that
+            // break the upwind maximum principle; at a near-singular collapse,
+            // where the gas core is a few cells wide and div(u) is large, that
+            // decouples gas volume from gas mass and broke the uncoated Sch20
+            // collapse.  Donor cell is the validated scheme; the reconstructed
+            // path is kept behind eta_consistent_advect = 1 (see Parse).
+            Set::Scalar a_face_xlo = (flux_xlo.u_interface > 0.0) ? eta(i - 1, j, k) : eta(i,     j, k);
+            Set::Scalar a_face_xhi = (flux_xhi.u_interface > 0.0) ? eta(i,     j, k) : eta(i + 1, j, k);
+            Set::Scalar a_face_ylo = (flux_ylo.u_interface > 0.0) ? eta(i, j - 1, k) : eta(i, j,     k);
+            Set::Scalar a_face_yhi = (flux_yhi.u_interface > 0.0) ? eta(i, j,     k) : eta(i, j + 1, k);
+            if (eta_consistent_advect)   // NOT validated (see Parse)
             {
-                a_face_xlo = (flux_xlo.u_interface > 0.0) ? eta(i - 1, j, k) : eta(i,     j, k);
-                a_face_xhi = (flux_xhi.u_interface > 0.0) ? eta(i,     j, k) : eta(i + 1, j, k);
-                a_face_ylo = (flux_ylo.u_interface > 0.0) ? eta(i, j - 1, k) : eta(i, j,     k);
-                a_face_yhi = (flux_yhi.u_interface > 0.0) ? eta(i, j,     k) : eta(i, j + 1, k);
+                a_face_xlo = flux_xlo.alpha_face;
+                a_face_xhi = flux_xhi.alpha_face;
+                a_face_ylo = flux_ylo.alpha_face;
+                a_face_yhi = flux_yhi.alpha_face;
             }
             a_face_xlo = std::min(std::max(a_face_xlo, 0.0), 1.0);
             a_face_xhi = std::min(std::max(a_face_xhi, 0.0), 1.0);
@@ -2590,12 +2591,12 @@ Hydro2::RHS(int lev,
 #if AMREX_SPACEDIM == 3
             const Set::Scalar c_face_zlo = (flux_zlo.u_interface > 0.0) ? cfun(i, j, k - 1) : cfun(i, j, k);
             const Set::Scalar c_face_zhi = (flux_zhi.u_interface > 0.0) ? cfun(i, j, k)     : cfun(i, j, k + 1);
-            Set::Scalar a_face_zlo = flux_zlo.alpha_face;
-            Set::Scalar a_face_zhi = flux_zhi.alpha_face;
-            if (!eta_consistent_advect)
+            Set::Scalar a_face_zlo = (flux_zlo.u_interface > 0.0) ? eta(i, j, k - 1) : eta(i, j, k);
+            Set::Scalar a_face_zhi = (flux_zhi.u_interface > 0.0) ? eta(i, j, k)     : eta(i, j, k + 1);
+            if (eta_consistent_advect)
             {
-                a_face_zlo = (flux_zlo.u_interface > 0.0) ? eta(i, j, k - 1) : eta(i, j, k);
-                a_face_zhi = (flux_zhi.u_interface > 0.0) ? eta(i, j, k)     : eta(i, j, k + 1);
+                a_face_zlo = flux_zlo.alpha_face;
+                a_face_zhi = flux_zhi.alpha_face;
             }
             a_face_zlo = std::min(std::max(a_face_zlo, 0.0), 1.0);
             a_face_zhi = std::min(std::max(a_face_zhi, 0.0), 1.0);
