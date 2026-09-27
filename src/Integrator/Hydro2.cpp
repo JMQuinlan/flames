@@ -331,14 +331,20 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // own kinematics (see the kappa_s term in the Omega build and the Gamma
         // row in RHS).  0 = legacy, from the band's mixture velocity.
         //
-        // DEFAULT 1 (2026-09-25).  Linear shell-damping unit test
-        // (input_Linear_ShellDamping_UNIT), kappa_s damping measured/analytic:
+        // Linear shell-damping unit test (input_Linear_ShellDamping_UNIT),
+        // kappa_s damping measured/analytic:
         //     legacy:      0.52 (R0/dx=8)   ~0.68 (R0/dx=16)
         //     kinematic:   0.76 (R0/dx=8)   0.95-1.07 (R0/dx=16, fit rms 0.6%)
-        // Coated Laplace 1.68% (pass); uncoated statics untouched (no kappa_s,
-        // no Gamma).  Full-shell Sch20-Oscillating (ml=2): over-collapse and
-        // rebound ringing removed; residual equilibrium offset is gas heating.
-        pp_query_default("shell.divs_kinematic", value.shell_divs_kinematic, 1);
+        //
+        // DEFAULT 0 (2026-09-27).  The kinematic path is UNSTABLE at max_level 3:
+        // it divides by |grad eta| twice (V_n = -etadot/|grad eta| and
+        // div n = (lap eta - n.H.n)/|grad eta|), and the 0.02 < eta < 0.98 gate
+        // admits band-edge cells where |grad eta| is ~5% of its peak.  On the
+        // full Sch20-Oscillating deck it put +22 N/m of viscous tension on one
+        // liquid-edge cell (eta 0.979; velocity-only part -0.27 N/m) and NaN'd at
+        // t = 3.355e-8; with 0 the same deck runs to 4e-8 cleanly.  Needs an
+        // interface-evaluated V_n and div n before it can be re-enabled.
+        pp_query_default("shell.divs_kinematic", value.shell_divs_kinematic, 0);
         // 1 = advance the kappa_s surface-viscous stress in its own sub-cycle
         // (N = dt/dt_visc sub-steps on the band) instead of letting its dx^3
         // stability limit throttle the GLOBAL timestep.  Modelled on the
@@ -1789,7 +1795,7 @@ Hydro2::RHS(int lev,
                     // owns this term and Omega carries the ELASTIC branch only,
                     // so it must not be added twice.
                     Set::Scalar divs_u = gu.trace() - nh.dot(gu * nh);
-                    // KINEMATIC SURFACE DILATATION (shell.divs_kinematic = 1).
+                    // KINEMATIC SURFACE DILATATION (shell.divs_kinematic = 1, off by default: unstable, see Parse).
                     // div_s u = div_s(u_t) + u_n (div n).  Inside a diffuse band
                     // the mixture velocity lags the interface, because part of
                     // the bubble's volume change happens by pressure relaxation

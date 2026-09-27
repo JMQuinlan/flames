@@ -744,7 +744,7 @@ protected:
     int nan_check = 0;
     int verbose = 0;
     int eta_consistent_advect = 0;  // 1 = WENO3 face-alpha row, NOT validated (see Parse)
-    int shell_divs_kinematic = 1;   // 1 = interface-kinematic div_s u (see Parse); 0 = legacy, for regression
+    int shell_divs_kinematic = 0;   // 0 = band-velocity div_s u (default); 1 = kinematic, UNSTABLE at ml3 (see Parse)
     int shell_visc_subcycle = 0;      // sub-cycle kappa_s (0 = dt-limited path; see Parse)
     int shell_visc_subcycle_max = 512; // hard cap on sub-steps (runaway guard)
     int shell_visc_verbose = 0;        // print N and nu_s each sub-cycle
