@@ -81,8 +81,6 @@ alamo.program = hydro2
 # plot_file = ./tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant
 plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant
 
-divs_kinematic = 0
-
 ### MESHING ###
 amr.plot_int        = -1
 amr.plot_dt         = 1.25e-8         # 80 frames over stop_time (was 5.0e-9 = 200)
