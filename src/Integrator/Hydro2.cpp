@@ -258,6 +258,42 @@ static Set::Scalar TaylorLimit(Set::Scalar corr, Set::Scalar base, int upper = 1
     return (std::abs(corr) > std::abs(base)) ? std::copysign(std::abs(base), corr) : corr;
 }
 
+// INTERFACE VALUE of the shell concentration (shell.gamma_interface = 1).
+// Gamma_I = Gamma - d (n . grad Gamma): the same one-term Taylor step along n to
+// the eta = 1/2 surface as InterfaceDivSCorrection, with d = psi/|grad psi| and
+// n from grad psi.  Limited to Gamma_I in [0, 2 Gamma] (TaylorLimit with the
+// cell's Gamma as the base): the lower bound keeps the concentration physical,
+// the upper is the same Taylor-validity cap.  Band gate 1e-6 < eta < 1 - 1e-6;
+// outside it, or where a stencil point is missing, returns the cell's Gamma.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+static Set::Scalar InterfaceGamma(const amrex::Array4<const Set::Scalar> &eta,
+                                  const amrex::Array4<const Set::Scalar> &shell,
+                                  int i, int j, int k, const Set::Scalar *DX)
+{
+    const Set::Scalar G = shell(i, j, k);
+    const Set::Scalar e0 = eta(i, j, k);
+    if (!(e0 > 1.0e-6 && e0 < 1.0 - 1.0e-6)) return G;
+    auto lg = [&](int a, int b, int c) -> Set::Scalar {
+        const Set::Scalar e = std::min(std::max(eta(i + a, j + b, k + c), 1.0e-12), 1.0 - 1.0e-12);
+        return std::log(e / (1.0 - e));
+    };
+    Set::Vector gp = Set::Vector::Zero(), gG = Set::Vector::Zero();
+    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+    {
+        const int a = (d == 0), b = (d == 1), c = (d == 2);
+        if (!eta.contains(i + a, j + b, k + c) || !eta.contains(i - a, j - b, k - c)) return G;
+        if (!shell.contains(i + a, j + b, k + c) || !shell.contains(i - a, j - b, k - c)) return G;
+        gp(d) = (lg(a, b, c) - lg(-a, -b, -c)) / (2.0 * DX[d]);
+        gG(d) = (shell(i + a, j + b, k + c) - shell(i - a, j - b, k - c)) / (2.0 * DX[d]);
+    }
+    const Set::Scalar gpm = gp.lpNorm<2>();
+    if (!(gpm > 0.0)) return G;
+    const Set::Vector n = gp / gpm;
+    const Set::Scalar ec = std::min(std::max(e0, 1.0e-12), 1.0 - 1.0e-12);
+    const Set::Scalar dist = std::log(ec / (1.0 - ec)) / gpm;
+    return G + TaylorLimit(-dist * n.dot(gG), G);
+}
+
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 static Set::Scalar CapEnergyAt(const amrex::Array4<const Set::Scalar> &eta,
                                const amrex::Array4<const Set::Scalar> &shell,
@@ -527,7 +563,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //     legacy:      0.52 (R0/dx=8)   ~0.68 (R0/dx=16)
         //     kinematic:   0.76 (R0/dx=8)   0.95-1.07 (R0/dx=16, fit rms 0.6%)
         //
-        // DEFAULT 0 (2026-09-27).  The kinematic path is UNSTABLE at max_level 3:
+        // (Default was 0 from 2026-09-27; 5 since 2026-09-30.)  Mode 1 is UNSTABLE at max_level 3:
         // it divides by |grad eta| twice (V_n = -etadot/|grad eta| and
         // div n = (lap eta - n.H.n)/|grad eta|), and the 0.02 < eta < 0.98 gate
         // admits band-edge cells where |grad eta| is ~5% of its peak.  On the
@@ -554,13 +590,40 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // velocity -- see the note there.
         // 5 = mode 4 + mode 3's compaction drift, the sum under the same Taylor
         // validity limiter (EXPERIMENTAL).  Stress only, like mode 4.
-        pp_query_default("shell.divs_kinematic", value.shell_divs_kinematic, 0);
-        if (value.shell_divs_kinematic == 4 || value.shell_divs_kinematic == 5)
-            Util::Warning(INFO, "shell.divs_kinematic = ", value.shell_divs_kinematic, " (interface-evaluated div_s u) is EXPERIMENTAL and not yet validated");
+        pp_query_default("shell.divs_kinematic", value.shell_divs_kinematic, 5);
+        // DEFAULT 5 (2026-09-30).  Linear damping unit test, kappa_s measured/analytic
+        // (fit from t=0 / 1e-7 s), R0/dx = 8:  eps/R0 = 0.125: 0 -> 0.75/0.89,
+        // 5 -> 0.96/1.10;  eps/R0 = 0.25: 0 -> 0.57/0.53, 5 -> 0.88/0.81.  Collapse
+        // unit: viscous tension at the true wall speed 0.56-0.66 (mode 0) -> 0.93-0.99.
+        // Stable on the collapse unit (eps/dx 1, 2) and on the full Sch20-Oscillating
+        // deck to 4e-8 s; coated Laplace unchanged (1.319%).  Write-up:
+        // bin/ShellRework/divs_interface.pdf.  Set 0 to recover the legacy behaviour.
+        if (value.shell_divs_kinematic == 4)
+            Util::Warning(INFO, "shell.divs_kinematic = 4 (geometric part only) -- the validated default is 5");
         // Limiter for modes 4/5 (see TaylorLimit).  1 (default) = two-sided,
         // div_s u_I in [0, 2 div_s u]; 0 = keep only the lower (dissipation-sign)
         // bound, to test whether the upper Taylor-validity cap is needed.
         pp_query_default("shell.divs_limit_upper", value.shell_divs_limit_upper, 1);
+        // 1 = evaluate the Marmottant tension in Omega at the INTERFACE value of
+        // Gamma, Gamma_I = Gamma - d (n . grad Gamma), d = psi/|grad psi| (see
+        // InterfaceGamma).  D(Gamma)/Dt = -Gamma div_s u is integrated with each
+        // cell's local div_s u, so each level set's Gamma follows that level set's
+        // own area: gas-side level sets (u ~ r) contract more than liquid-side ones
+        // (u ~ r^-2) and the band stores a spread of Gamma.  Measured: up to 6%
+        // across the band in Sch20-Oscillating, which near buckling puts the
+        // |grad eta|-weighted tension at 2.6x the core (0.4 < eta < 0.6) value;
+        // 37-44% in the collapse unit.  Only the EVALUATION changes; Gamma's
+        // transport does not (correcting the transport was tried, m4/m4b, and is
+        // unstable).
+        // UNSTABLE as implemented (2026-09-30): on the static coated Laplace test
+        // (input_Laplace_Marmottant_3D) spurious currents grow from 0.03 to 7.8 m/s
+        // and sigma reaches 89 N/m by t = 0.36 -- extrapolating Gamma along n
+        // amplifies any normal gradient of Gamma, the steep Marmottant law turns it
+        // into a stress imbalance, and the flow steepens the gradient.  Mode 5
+        // alone on the same deck stays at |u| ~ 0.008.  Kept for development only.
+        pp_query_default("shell.gamma_interface", value.shell_gamma_interface, 0);
+        if (value.shell_gamma_interface)
+            Util::Warning(INFO, "shell.gamma_interface = 1 is UNSTABLE on the static coated Laplace test; development only");
         // 1 = advance the kappa_s surface-viscous stress in its own sub-cycle
         // (N = dt/dt_visc sub-steps on the band) instead of letting its dx^3
         // stability limit throttle the GLOBAL timestep.  Modelled on the
@@ -575,7 +638,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // is understood, the dt-limited path (subcycle=0) is the supported one.
         pp_query_default("shell.kappa_s_subcycle", value.shell_visc_subcycle, 0);
         if ((value.shell_divs_kinematic == 4 || value.shell_divs_kinematic == 5) && value.shell_visc_subcycle)
-            Util::Abort(INFO, "shell.divs_kinematic = 4/5 is not implemented in the kappa_s sub-cycle; set shell.kappa_s_subcycle = 0");
+            Util::Abort(INFO, "shell.divs_kinematic = 4/5 (5 is the default) is not implemented in the kappa_s sub-cycle; set shell.kappa_s_subcycle = 0 or shell.divs_kinematic = 0");
         // Guard: if nu_s ever blows up, cap the sub-step count rather than
         // spinning forever inside one hydro step.  512 is ~6 refinement levels
         // past the measured L5 value of 21 (N ~ 1/dx^2, so it quadruples/level).
@@ -1904,6 +1967,7 @@ Hydro2::RHS(int lev,
 
         const Set::Scalar chi_ = marmottant_chi, Gb = marmottant_Gamma_buck;
         const Set::Scalar sbrk = marmottant_sigma_break, sigw = sigma;
+        const int gam_I = shell_gamma_interface;
         for (amrex::MFIter mfi(sig_eff_mf, false); mfi.isValid(); ++mfi)
         {
             const amrex::Box &vbx = mfi.validbox();
@@ -1927,7 +1991,7 @@ Hydro2::RHS(int lev,
                     // Gamma is a PRIMARY -- read straight off the advected field.
                     // No division by |grad eta|, which is what made the previous
                     // c/|grad eta| reconstruction blow up in the band tails.
-                    G = cs(i, j, k);
+                    G = gam_I ? InterfaceGamma(et, cs, i, j, k, DX) : cs(i, j, k);
                     if (G > 0.0 && G < Gb)             // stretched -> elastic branch
                     {
                         Set::Scalar el = chi_ * (Gb / G - 1.0);

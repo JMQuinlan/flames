@@ -750,8 +750,9 @@ protected:
     int verbose = 0;
     int eta_consistent_advect = 0;  // 1 = WENO3 face-alpha row, NOT validated (see Parse)
     int capillary_jump_scheme = 0;  // 1 = experimental Laplace-jump scheme (see Parse); 0 = existing tensor only
-    int shell_divs_kinematic = 0;   // 0 = band-velocity div_s u (default); 1 = kinematic, UNSTABLE at ml3 (see Parse)
+    int shell_divs_kinematic = 5;   // 5 = interface-evaluated div_s u (default, see Parse); 0 = legacy band velocity
     int shell_divs_limit_upper = 1; // modes 4/5: 1 = |corr| <= |div_s u| (two-sided); 0 = sign bound only
+    int shell_gamma_interface = 0;  // 1 = sigma(Gamma) in Omega evaluated at the interface value Gamma_I (see Parse)
     int shell_visc_subcycle = 0;      // sub-cycle kappa_s (0 = dt-limited path; see Parse)
     int shell_visc_subcycle_max = 512; // hard cap on sub-steps (runaway guard)
     int shell_visc_verbose = 0;        // print N and nu_s each sub-cycle
