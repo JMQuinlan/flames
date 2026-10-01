@@ -168,6 +168,13 @@ public:
         Set::Scalar num_SM = (rhoL * uL * uL + pL) - (rhoR * uR * uR + pR)
                            - S_L * rhoL * uL + S_R * rhoR * uR;
         Set::Scalar den_SM = rhoL * uL - rhoR * uR - S_L * rhoL + S_R * rhoR;
+        // Capillary jump (capillary.jump_scheme = 1; cf. arXiv:2609.10727
+        // eq. 17): the mixture pressure carries the equilibrium jump
+        // Dlt (alpha_liq,R - alpha_liq,L) across an interface face, which the
+        // capillary force balances.  Remove it from the contact-speed estimate
+        // so a static interface gives S_M = 0.  Zero when capjump = 0.
+        if (lo.capjump != 0.0 || hi.capjump != 0.0)
+            num_SM -= 0.5 * (lo.capjump + hi.capjump) * (aR - aL);
         Set::Scalar S_M = num_SM / (den_SM + (den_SM >= 0.0 ? small : -small));
 
         // ====================================================================

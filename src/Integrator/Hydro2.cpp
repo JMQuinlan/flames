@@ -36,6 +36,7 @@
 #include "Solver/Local/Limiter/WENO5.H"
 //EOS
 #include "Solver/EOS/EOS.H"
+#include <eigen3/Eigen/Eigenvalues>   // SelfAdjointEigenSolver (InterfaceCurvature)
 #include "Solver/EOS/Tammann.H"
 #include "Solver/EOS/CPG.H"
 // Generic
@@ -70,6 +71,191 @@ static Set::Scalar SigmaEffFromGamma(Set::Scalar Gamma, Set::Scalar grad_eta_mag
         se = (el >= sbrk) ? sigw : el;
     }
     return se;                                 // Gamma >= Gb: buckled, sigma = 0
+}
+
+
+// ----------------------------------------------------------------------
+// Interface curvature and |grad psi| from the LOGIT psi = ln(eta/(1-eta)).
+// For a tanh profile psi = 2 phi/eps (phi the signed distance), so |grad psi|
+// ~ 2/eps across the WHOLE band and div(n) computed from psi never divides by
+// a small number -- unlike the same quantity from eta, where |grad eta| -> 0 in
+// the band tails.  psi is a monotone map of eta, so n and div(n) are the same
+// field analytically.  eta is clamped to the solver's alpha floor (1e-12)
+// only to keep the log finite.  Central differences on the 3^3 stencil.
+// Returns false where psi has no gradient.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+static bool LogitCurvature(const amrex::Array4<const Set::Scalar> &eta,
+                           int i, int j, int k, const Set::Scalar *DX,
+                           Set::Scalar &divn, Set::Scalar &gpsi)
+{
+    auto psi = [&](int a, int b, int c) -> Set::Scalar {
+        const Set::Scalar e = std::min(std::max(eta(i + a, j + b, k + c), 1.0e-12), 1.0 - 1.0e-12);
+        return std::log(e / (1.0 - e));
+    };
+    Set::Vector g = Set::Vector::Zero();
+    Set::Matrix H = Set::Matrix::Zero();
+    const Set::Scalar p0 = psi(0, 0, 0);
+    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+    {
+        const int a = (d == 0), b = (d == 1), c = (d == 2);
+        g(d) = (psi(a, b, c) - psi(-a, -b, -c)) / (2.0 * DX[d]);
+        H(d, d) = (psi(a, b, c) - 2.0 * p0 + psi(-a, -b, -c)) / (DX[d] * DX[d]);
+    }
+    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+        for (int e = d + 1; e < AMREX_SPACEDIM; ++e)
+        {
+            const int ad = (d == 0), bd = (d == 1), cd = (d == 2);
+            const int ae = (e == 0), be = (e == 1), ce = (e == 2);
+            H(d, e) = H(e, d) = (psi(ad + ae, bd + be, cd + ce) - psi(ad - ae, bd - be, cd - ce)
+                               - psi(-ad + ae, -bd + be, -cd + ce) + psi(-ad - ae, -bd - be, -cd - ce))
+                              / (4.0 * DX[d] * DX[e]);
+        }
+    gpsi = g.lpNorm<2>();
+    if (!(gpsi > 0.0)) return false;
+    const Set::Vector n = g / gpsi;
+    divn = (H.trace() - n.dot(H * n)) / gpsi;
+    return true;
+}
+
+// ----------------------------------------------------------------------
+// INTERFACE mean curvature (sum of principal curvatures) seen from any band
+// cell.  The cell's own level set lies a signed distance d = psi/|grad psi|
+// from the eta = 1/2 surface (exact for a tanh profile, psi = logit(eta),
+// whatever the band width), and a level set at distance d from a surface has
+// principal curvatures k/(1 + ... ) -- inverted: k_I = k/(1 - d k).  The
+// level-set principal curvatures k are the tangential eigenvalues of
+// P H P/|grad psi|.  For a sphere this returns 2/R in every band cell, where
+// the raw level-set curvature 2/r does not.  Returns false where psi has no
+// gradient or a level set has passed its focal point (1 - d k <= 0).
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+static bool InterfaceCurvature(const amrex::Array4<const Set::Scalar> &eta,
+                               int i, int j, int k, const Set::Scalar *DX,
+                               Set::Scalar &kappa_I)
+{
+    auto psi = [&](int a, int b, int c) -> Set::Scalar {
+        const Set::Scalar e = std::min(std::max(eta(i + a, j + b, k + c), 1.0e-12), 1.0 - 1.0e-12);
+        return std::log(e / (1.0 - e));
+    };
+    Set::Vector g = Set::Vector::Zero();
+    Set::Matrix H = Set::Matrix::Zero();
+    const Set::Scalar p0 = psi(0, 0, 0);
+    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+    {
+        const int a = (d == 0), b = (d == 1), c = (d == 2);
+        g(d) = (psi(a, b, c) - psi(-a, -b, -c)) / (2.0 * DX[d]);
+        H(d, d) = (psi(a, b, c) - 2.0 * p0 + psi(-a, -b, -c)) / (DX[d] * DX[d]);
+    }
+    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+        for (int e = d + 1; e < AMREX_SPACEDIM; ++e)
+        {
+            const int ad = (d == 0), bd = (d == 1), cd = (d == 2);
+            const int ae = (e == 0), be = (e == 1), ce = (e == 2);
+            H(d, e) = H(e, d) = (psi(ad + ae, bd + be, cd + ce) - psi(ad - ae, bd - be, cd - ce)
+                               - psi(-ad + ae, -bd + be, -cd + ce) + psi(-ad - ae, -bd - be, -cd - ce))
+                              / (4.0 * DX[d] * DX[e]);
+        }
+    const Set::Scalar gn = g.lpNorm<2>();
+    if (!(gn > 0.0)) return false;
+    const Set::Vector n = g / gn;
+    const Set::Matrix P = Set::Matrix::Identity() - n * n.transpose();
+    const Set::Matrix K = P * H * P / gn;              // level-set curvature tensor
+    const Set::Scalar dist = p0 / gn;                   // signed distance to eta = 1/2
+    Eigen::SelfAdjointEigenSolver<Set::Matrix> es(K);
+    // The eigenvector most aligned with n carries the zero normal eigenvalue.
+    int inormal = 0; Set::Scalar best = -1.0;
+    for (int q = 0; q < AMREX_SPACEDIM; ++q)
+    {
+        const Set::Scalar al = std::abs(es.eigenvectors().col(q).dot(n));
+        if (al > best) { best = al; inormal = q; }
+    }
+    kappa_I = 0.0;
+    for (int q = 0; q < AMREX_SPACEDIM; ++q)
+    {
+        if (q == inormal) continue;
+        const Set::Scalar kq = es.eigenvalues()(q);
+        const Set::Scalar den = 1.0 - dist * kq;
+        if (den <= 0.0) return false;
+        kappa_I += kq / den;
+    }
+    return true;
+}
+
+// ----------------------------------------------------------------------
+// INTERFACE-EVALUATED normal velocity for div_s u (shell.divs_kinematic = 4).
+//
+// div_s u = div_s(u_t) + u_n div(n).  Across a diffuse band the normal
+// velocity PEAKS at the interface -- a collapsing sphere has u_r ~ R^2 Rdot/r^2
+// on the liquid side and ~ Rdot r/R on the gas side -- so band cells read a
+// smaller u_n than the eta = 1/2 surface does.  Each cell Taylor-extends its
+// own normal velocity to the interface along n, a signed distance
+// d = psi/|grad psi| away (exact for a tanh profile), with its own side's
+// normal gradient:
+//     u_n,I = u_n - d (n . grad u . n),     div_s u -> div_s u + (u_n,I - u_n) k_x
+// k_x = div(n) is the cell's OWN level-set curvature, deliberately.  For a
+// sphere the band error of div_s u is then -2d/R (liquid) and +2|d|/R (gas),
+// which cancel to first order across a symmetric band; legacy is -3d/R and 0,
+// a net -(3/2) ln2 eps/R ~ -1.04 eps/R under the |grad eta| = sech^2 weight.
+// The thickness sweep measured kappa_s damping ~ 1 - 1.5 eps/R0 at any
+// R0/dx; the balance is the compaction drift (mode 5).  Pairing u_n,I with the interface curvature
+// k/(1 - d k) instead was tried first: its denominator crosses zero on the
+// distorted liquid tail in collapse (eps/dx 1) and Gamma ran away.
+// No constant; u_n -> 0 at rest, so statics are untouched.  Geometric part
+// only: the interface's compaction drift relative to the fluid (mode 3's
+// target) is not included.  Band gate 1e-6 < eta < 1 - 1e-6 (the shell
+// reset's cut), where psi is resolved.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+static bool InterfaceDivSCorrection(const amrex::Array4<const Set::Scalar> &eta,
+                                    const Set::Matrix &gu,
+                                    int i, int j, int k, const Set::Scalar *DX,
+                                    Set::Scalar &corr)
+{
+    corr = 0.0;
+    const Set::Scalar e0 = eta(i, j, k);
+    if (!(e0 > 1.0e-6 && e0 < 1.0 - 1.0e-6)) return false;
+    Set::Scalar divn = 0.0, gpsi = 0.0;
+    if (!LogitCurvature(eta, i, j, k, DX, divn, gpsi)) return false;
+    const Set::Scalar ec = std::min(std::max(e0, 1.0e-12), 1.0 - 1.0e-12);
+    const Set::Scalar dist = std::log(ec / (1.0 - ec)) / gpsi;
+    // n from grad psi, parallel to grad eta; recomputed here so the helper is
+    // self-contained (the caller's n may be built from a different stencil).
+    Set::Vector g = Set::Vector::Zero();
+    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+    {
+        const int a = (d == 0), b = (d == 1), c = (d == 2);
+        const Set::Scalar ep = std::min(std::max(eta(i + a, j + b, k + c), 1.0e-12), 1.0 - 1.0e-12);
+        const Set::Scalar em = std::min(std::max(eta(i - a, j - b, k - c), 1.0e-12), 1.0 - 1.0e-12);
+        g(d) = std::log(ep / (1.0 - ep)) - std::log(em / (1.0 - em));
+    }
+    const Set::Scalar gn = g.lpNorm<2>();
+    if (!(gn > 0.0)) return false;
+    const Set::Vector n = g / gn;
+    corr = -dist * n.dot(gu * n) * divn;
+    return true;
+}
+
+// LIMITER for the interface-evaluated div_s u (modes 4, 5):
+//     |corr| <= |div_s u|   =>   div_s u_I in [0, 2 div_s u].
+// Lower bound = DISSIPATION SIGN.  The fluid gives up Omega:grad u, whose
+// viscous part is kappa_s |grad eta| (div_s u_I)(div_s u); a correction that
+// flips the sign of div_s u_I would make kappa_s anti-dissipative (energy INTO
+// the flow).  The bound keeps that product >= 0 in every cell.
+// Upper bound = TAYLOR VALIDITY.  corr is a first-order term about the cell;
+// where it exceeds the zeroth-order term (|d| ~ R: band-tail cells many dx
+// from the interface) the expansion is invalid.  The unlimited form put
+// +-4 N/m on low-density gas-tail cells and drove them to 200 m/s in the
+// eps/dx = 1 collapse.
+// Measured activity (|grad eta|-weighted band fraction clipped): mode 4 <= 7%
+// and ~0 in 0.1 < eta < 0.9 at eps/R0 <= 0.5; mode 5 3% / 13% / 90% at
+// eps/R0 = 0.125 / 0.25 / 0.5 -- for thick bands mode 5 sits on the 2x cap.
+// No tuned constant.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+static Set::Scalar TaylorLimit(Set::Scalar corr, Set::Scalar base, int upper = 1)
+{
+    // upper = 0 (shell.divs_limit_upper = 0): keep only the dissipation-sign
+    // bound, i.e. clip only a correction that would flip div_s u_I past zero.
+    if (!upper)
+        return (corr * base < 0.0 && std::abs(corr) > std::abs(base)) ? -base : corr;
+    return (std::abs(corr) > std::abs(base)) ? std::copysign(std::abs(base), corr) : corr;
 }
 
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
@@ -159,7 +345,12 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // consistent higher-order alpha row may be needed together with extra
         // source terms to control the rebound.  NOT validated -- do not use.
         pp_query_default("eta_consistent_advect", value.eta_consistent_advect, 0);
-        if (value.eta_consistent_advect)
+        // 2 = minmod-limited MUSCL face value (EXPERIMENTAL): TVD like donor
+        // cell, second order like WENO3 -- aimed at the driven radius drift.
+        if (value.eta_consistent_advect == 2)
+            Util::Warning(INFO, "eta_consistent_advect = 2: minmod face-alpha advection is "
+                          "EXPERIMENTAL (not yet validated on the uncoated Sch20 collapse).");
+        if (value.eta_consistent_advect == 1)
             Util::Warning(INFO, "eta_consistent_advect = 1: WENO3 face-alpha advection is NOT "
                           "validated (breaks the uncoated Sch20 collapse near R_min; needs "
                           "additional rebound source terms).  Use the default 0 for production.");
@@ -344,7 +535,32 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // liquid-edge cell (eta 0.979; velocity-only part -0.27 N/m) and NaN'd at
         // t = 3.355e-8; with 0 the same deck runs to 4e-8 cleanly.  Needs an
         // interface-evaluated V_n and div n before it can be re-enabled.
+        // 3 = LOCAL compaction-drift correction (EXPERIMENTAL).  With
+        // instantaneous pressure relaxation the 6-eq model reduces to Kapila's
+        // 5-eq model, D(eta)/Dt = K div(u), K = a0 a1 (Z1 - Z0)/(a0 Z1 + a1 Z0),
+        // Z_k = gamma_k (p + pi_k) = rho_k c_k^2.  That compaction is what moves
+        // the interface relative to the fluid, so its drift is
+        //     w = V_n - u_n = -K div(u) / |grad eta|
+        // -- local, from the cell's own state and EOS, no etadot differencing,
+        // and K ~ a0 a1 ~ |grad eta| makes w vanish smoothly in the band tails.
+        // 4 = INTERFACE-EVALUATED normal velocity in div_s u (EXPERIMENTAL,
+        // 2026-09-30).  Each band cell Taylor-extends its normal velocity to the
+        // eta = 1/2 surface (see InterfaceDivSCorrection).  Removes the first-order
+        // GEOMETRIC band bias: the thickness sweep measured kappa_s damping
+        // ~ 1 - 1.5 eps/R0 at any R0/dx, and ~40% of the band velocity lag is
+        // band-averaging a velocity that peaks at the interface.  The other ~60%
+        // is compaction drift (mode 3's target), not included here.  Stress only
+        // (Omega and the capillary-jump sigma); the Gamma row keeps the band
+        // velocity -- see the note there.
+        // 5 = mode 4 + mode 3's compaction drift, the sum under the same Taylor
+        // validity limiter (EXPERIMENTAL).  Stress only, like mode 4.
         pp_query_default("shell.divs_kinematic", value.shell_divs_kinematic, 0);
+        if (value.shell_divs_kinematic == 4 || value.shell_divs_kinematic == 5)
+            Util::Warning(INFO, "shell.divs_kinematic = ", value.shell_divs_kinematic, " (interface-evaluated div_s u) is EXPERIMENTAL and not yet validated");
+        // Limiter for modes 4/5 (see TaylorLimit).  1 (default) = two-sided,
+        // div_s u_I in [0, 2 div_s u]; 0 = keep only the lower (dissipation-sign)
+        // bound, to test whether the upper Taylor-validity cap is needed.
+        pp_query_default("shell.divs_limit_upper", value.shell_divs_limit_upper, 1);
         // 1 = advance the kappa_s surface-viscous stress in its own sub-cycle
         // (N = dt/dt_visc sub-steps on the band) instead of letting its dx^3
         // stability limit throttle the GLOBAL timestep.  Modelled on the
@@ -358,6 +574,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // once clamped the sub-step is no longer stability-bounded.  Until that
         // is understood, the dt-limited path (subcycle=0) is the supported one.
         pp_query_default("shell.kappa_s_subcycle", value.shell_visc_subcycle, 0);
+        if ((value.shell_divs_kinematic == 4 || value.shell_divs_kinematic == 5) && value.shell_visc_subcycle)
+            Util::Abort(INFO, "shell.divs_kinematic = 4/5 is not implemented in the kappa_s sub-cycle; set shell.kappa_s_subcycle = 0");
         // Guard: if nu_s ever blows up, cap the sub-step count rather than
         // spinning forever inside one hydro step.  512 is ~6 refinement levels
         // past the measured L5 value of 21 (N ~ 1/dx^2, so it quadruples/level).
@@ -391,6 +609,18 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // must be built with the frozen raw eta so the later E_k/eta recovery
         // divide cancels exactly.  Making p_pure agree restores
         // E0 + E1 = rho_e identically without reintroducing that mispricing.
+        // capillary.jump_scheme (default 0 = the existing capillary stress tensor
+        // with equal phase pressures in mixed cells -- unchanged).
+        // 1 = EXPERIMENTAL capillary-jump scheme after arXiv:2609.10727: the
+        // phase pressures in a mixed cell carry the Laplace jump
+        //     Dlt = p_gas - p_liq = sigma_tot div(n),
+        // sigma_tot = sigma(Gamma) + kappa_s div_s(u), in (a) the pressure
+        // relaxation, (b) the reconstructed face states (ToState), and (c) the
+        // HLLC contact speed.  The capillary stress tensor Omega is still the
+        // momentum source.  2 = the same, but the momentum source is the paper's
+        // CSF force -Dlt grad(eta) built from the SAME curvature as the
+        // relaxation (Omega not used).  Set 0 to revert.
+        pp_query_default("capillary.jump_scheme", value.capillary_jump_scheme, 0);
         pp_query_default("relax_diag", value.relax_diag, 0); // 1 = print per-stage {max_iters, max_residual, count_unconverged}.
         pp_query_default("clip_ghost_only", value.clip_ghost_only, 0); // 1 = FillGhost STEP-9 positivity clip touches GHOST cells only (per-phase mass conservation)
 
@@ -1053,6 +1283,7 @@ void Hydro2::Initialize(int lev)
 
     // Calculate mixed variables based on individual fluid variables
     Mix(lev);
+    if (capillary_jump_scheme && apply_surface_tension) ApplyCapJumpIC(lev);
 
     // Zero Common Fields
     ZeroDerivedScratchFields(lev);
@@ -1749,6 +1980,7 @@ Hydro2::RHS(int lev,
         const Set::Scalar mu_s  = shell_mu_s;
         const int visc_shell = (kap_s != 0.0) || (mu_s != 0.0);
         const int divs_kin = shell_divs_kinematic;
+        const int divs_lim_up = shell_divs_limit_upper;
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box bx = mfi.growntilebox(1);
@@ -1758,6 +1990,8 @@ Hydro2::RHS(int lev,
             amrex::Array4<const Set::Scalar> const &vel = velocity_mf[lev]->const_array(mfi);
             amrex::Array4<Set::Scalar> const &om = Omega.array(mfi);
             amrex::Array4<const Set::Scalar> const &etd = etadot_mf[lev]->const_array(mfi);
+            amrex::Array4<const Set::Scalar> const &prs = pressure_mf[lev]->const_array(mfi);
+            const Set::Scalar kg0 = eos0.Gamma(), kp0 = eos0.P0(), kg1 = eos1.Gamma(), kp1 = eos1.P0();
             // Diagnostic: kappa1 carries the TOTAL surface tension actually
             // used in Omega, sigma(Gamma) + kappa_s div_s(u).  kappa2 is written in the Marmottant block
             // above and is the BARE sigma(Gamma) only, so it cannot show the
@@ -1811,7 +2045,44 @@ Hydro2::RHS(int lev,
                     // ghosts, and Omega.FillBoundary below overwrites the ghost
                     // layer from the owning box.  Restricted to the band, where
                     // div(n) = (lap eta - n.H.n)/|grad eta| is well defined.
-                    if (divs_kin && vbx_om.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
+                    // MODE 3: Kapila compaction drift (see Parse).  Local, no
+                    // time differencing: w = -K div(u)/|grad eta|.
+                    if (divs_kin == 3 && vbx_om.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
+                    {
+                        const Set::Scalar a0 = std::min(std::max(et(i, j, k), 0.0), 1.0), a1 = 1.0 - a0;
+                        const Set::Scalar pc = prs(i, j, k);
+                        const Set::Scalar Z0 = kg0 * std::max(pc + kp0, 0.0), Z1 = kg1 * std::max(pc + kp1, 0.0);
+                        const Set::Scalar den = a0 * Z1 + a1 * Z0;
+                        // |grad eta| = eta(1-eta)|grad psi| exactly, so K/|grad eta|
+                        // = (Z1 - Z0)/(den |grad psi|): the a0 a1 cancels analytically.
+                        Set::Scalar divn = 0.0, gpsi = 0.0;
+                        if (den > 0.0 && LogitCurvature(et, i, j, k, DX, divn, gpsi))
+                            divs_u += (-(Z1 - Z0) / den * gu.trace() / gpsi) * divn;
+                    }
+                    if ((divs_kin == 4 || divs_kin == 5) && vbx_om.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
+                    {   // interface-evaluated, see InterfaceDivSCorrection; valid cells (3^3 psi stencil)
+                        Set::Scalar corr = 0.0;
+                        InterfaceDivSCorrection(et, gu, i, j, k, DX, corr);
+                        if (divs_kin == 5)
+                        {
+                            // + compaction drift (mode 3's term): the interface moves
+                            // relative to the fluid at w = -K div(u)/|grad eta|, so
+                            // u_n,I gains w and div_s u gains w div(n).
+                            const Set::Scalar e5 = et(i, j, k);
+                            if (e5 > 1.0e-6 && e5 < 1.0 - 1.0e-6)
+                            {
+                                const Set::Scalar a0 = std::min(std::max(e5, 0.0), 1.0), a1 = 1.0 - a0;
+                                const Set::Scalar pc = prs(i, j, k);
+                                const Set::Scalar Z0 = kg0 * std::max(pc + kp0, 0.0), Z1 = kg1 * std::max(pc + kp1, 0.0);
+                                const Set::Scalar den = a0 * Z1 + a1 * Z0;
+                                Set::Scalar divn = 0.0, gpsi = 0.0;
+                                if (den > 0.0 && LogitCurvature(et, i, j, k, DX, divn, gpsi))
+                                    corr += (-(Z1 - Z0) / den * gu.trace() / gpsi) * divn;
+                            }
+                        }
+                        divs_u += TaylorLimit(corr, divs_u, divs_lim_up);
+                    }
+                    if (divs_kin == 1 && vbx_om.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
                     {
                         const Set::Scalar e = et(i, j, k);
                         if (e > 0.02 && e < 0.98)
@@ -1864,6 +2135,8 @@ Hydro2::RHS(int lev,
     amrex::MultiFab rhsp_src_mf (rho_eta1_rhs_mf.boxArray(), rho_eta1_rhs_mf.DistributionMap(), 1, 0);
     rhsp_fxlo_mf.setVal(0.0); rhsp_fxhi_mf.setVal(0.0); rhsp_fylo_mf.setVal(0.0);
     rhsp_fyhi_mf.setVal(0.0); rhsp_src_mf.setVal(0.0);
+    const int capj_rhs = capillary_jump_scheme;   // capillary jump per cell (see CapJumpCached)
+    const amrex::MultiFab *capjf = capj_rhs ? &CapJumpCached(lev) : nullptr;
 
     for (amrex::MFIter mfi(*(velocity_mf)[lev], false); mfi.isValid(); ++mfi)
     {
@@ -1884,6 +2157,9 @@ Hydro2::RHS(int lev,
         auto const E = energy_per_vol_mf[lev]->array(mfi);
         amrex::Array4<const Set::Scalar> const etd_g = etadot_mf[lev]->const_array(mfi);
         const int divs_kin_g = shell_divs_kinematic;
+        amrex::Array4<const Set::Scalar> const cjA = capj_rhs ? capjf->const_array(mfi)
+                                                              : amrex::Array4<const Set::Scalar>{};
+
 
         // OUTPUTS
         Set::Patch<Set::Scalar> rho_eta0_rhs = rho_eta0_rhs_mf.array(mfi);
@@ -2140,7 +2416,16 @@ Hydro2::RHS(int lev,
             Set::Vector Fsv_vector = Set::Vector::Zero();
             // Under the split scheme the capillary terms belong to L_cap
             // (Schmidmayer eq. 17); applying them here too would double-count.
-            if (apply_surface_tension)
+            if (apply_surface_tension && capj_rhs == 2)
+            {
+                // capillary.jump_scheme = 2: the paper's CSF force built from the
+                // SAME curvature the relaxation uses, F = -Dlt grad(eta)
+                // (= sigma_tot kappa pointing into the bubble), so the mechanical
+                // and thermodynamic Laplace jumps agree by construction.  The
+                // capillary stress tensor Omega is NOT used in this mode.
+                Fsv_vector = -cjA(i, j, k) * grad_eta;
+            }
+            else if (apply_surface_tension)
             {
                 // Conservative continuum-surface-stress force  F = div(Omega)
                 // (Schmidmayer 2017).  Centered divergence of the capillary stress
@@ -2445,6 +2730,8 @@ Hydro2::RHS(int lev,
                     { prim[5], prim[4], prim[3], prim[2], prim[1] };
                 Solver::Local::Limiter::Primitive pL = limiter->Reconstruct(stencil_L);
                 Solver::Local::Limiter::Primitive pR = limiter->Reconstruct(stencil_R);
+                if (capj_rhs)   // face jump = mean of the two cells (arXiv:2609.10727)
+                    pL.capjump = pR.capjump = 0.5 * (cjA(lo_i, lo_j, lo_k) + cjA(hi_i, hi_j, hi_k));
                 Solver::Local::FluidRiemann::State sL_face = Solver::Local::Limiter::ToState(pL, small);
                 Solver::Local::FluidRiemann::State sR_face = Solver::Local::Limiter::ToState(pR, small);
 
@@ -2570,12 +2857,33 @@ Hydro2::RHS(int lev,
             Set::Scalar a_face_xhi = (flux_xhi.u_interface > 0.0) ? eta(i,     j, k) : eta(i + 1, j, k);
             Set::Scalar a_face_ylo = (flux_ylo.u_interface > 0.0) ? eta(i, j - 1, k) : eta(i, j,     k);
             Set::Scalar a_face_yhi = (flux_yhi.u_interface > 0.0) ? eta(i, j,     k) : eta(i, j + 1, k);
-            if (eta_consistent_advect)   // NOT validated (see Parse)
+            if (eta_consistent_advect == 1)   // NOT validated (see Parse)
             {
                 a_face_xlo = flux_xlo.alpha_face;
                 a_face_xhi = flux_xhi.alpha_face;
                 a_face_ylo = flux_ylo.alpha_face;
                 a_face_yhi = flux_yhi.alpha_face;
+            }
+            // eta_consistent_advect = 2 (EXPERIMENTAL): minmod-limited MUSCL face
+            // value, upwinded on u*.  Second order in smooth regions like the
+            // WENO3 path, but TVD: the face value never leaves the range of its
+            // two neighbours, which is the property donor cell has and WENO3
+            // lacks at a few-cell gas core.
+            auto mm_face = [&](int il, int jl, int kl, int d, Set::Scalar us) -> Set::Scalar {
+                const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                const Set::Scalar aLL = eta(il - di, jl - dj, kl - dk), aL = eta(il, jl, kl);
+                const Set::Scalar aR  = eta(il + di, jl + dj, kl + dk), aRR = eta(il + 2 * di, jl + 2 * dj, kl + 2 * dk);
+                auto mm = [](Set::Scalar a, Set::Scalar b) -> Set::Scalar {
+                    return (a * b <= 0.0) ? 0.0 : ((std::abs(a) < std::abs(b)) ? a : b); };
+                return (us > 0.0) ? aL + 0.5 * mm(aL - aLL, aR - aL)
+                                  : aR - 0.5 * mm(aR - aL, aRR - aR);
+            };
+            if (eta_consistent_advect == 2)
+            {
+                a_face_xlo = mm_face(i - 1, j, k, 0, flux_xlo.u_interface);
+                a_face_xhi = mm_face(i,     j, k, 0, flux_xhi.u_interface);
+                a_face_ylo = mm_face(i, j - 1, k, 1, flux_ylo.u_interface);
+                a_face_yhi = mm_face(i, j,     k, 1, flux_yhi.u_interface);
             }
             a_face_xlo = std::min(std::max(a_face_xlo, 0.0), 1.0);
             a_face_xhi = std::min(std::max(a_face_xhi, 0.0), 1.0);
@@ -2599,10 +2907,15 @@ Hydro2::RHS(int lev,
             const Set::Scalar c_face_zhi = (flux_zhi.u_interface > 0.0) ? cfun(i, j, k)     : cfun(i, j, k + 1);
             Set::Scalar a_face_zlo = (flux_zlo.u_interface > 0.0) ? eta(i, j, k - 1) : eta(i, j, k);
             Set::Scalar a_face_zhi = (flux_zhi.u_interface > 0.0) ? eta(i, j, k)     : eta(i, j, k + 1);
-            if (eta_consistent_advect)
+            if (eta_consistent_advect == 1)
             {
                 a_face_zlo = flux_zlo.alpha_face;
                 a_face_zhi = flux_zhi.alpha_face;
+            }
+            if (eta_consistent_advect == 2)
+            {
+                a_face_zlo = mm_face(i, j, k - 1, 2, flux_zlo.u_interface);
+                a_face_zhi = mm_face(i, j, k,     2, flux_zhi.u_interface);
             }
             a_face_zlo = std::min(std::max(a_face_zlo, 0.0), 1.0);
             a_face_zhi = std::min(std::max(a_face_zhi, 0.0), 1.0);
@@ -2907,7 +3220,23 @@ Hydro2::RHS(int lev,
             // Same kinematic correction as the kappa_s stress (see the Omega
             // build): the band velocity lags the interface, which is why Gamma
             // has historically responded at ~83% of (R0/R)^2.
-            if (divs_kin_g)
+            if (divs_kin_g == 3 && grad_eta_mag > 0.0)   // Kapila compaction drift
+            {
+                const Set::Scalar a0 = std::min(std::max(eta(i, j, k), 0.0), 1.0), a1 = 1.0 - a0;
+                const Set::Scalar pc = press(i, j, k);
+                const Set::Scalar Z0 = eos0.Gamma() * std::max(pc + eos0.P0(), 0.0);
+                const Set::Scalar Z1 = eos1.Gamma() * std::max(pc + eos1.P0(), 0.0);
+                const Set::Scalar den = a0 * Z1 + a1 * Z0;
+                Set::Scalar divn = 0.0, gpsi = 0.0;   // logit form, see LogitCurvature
+                if (den > 0.0 && LogitCurvature(eta, i, j, k, DX, divn, gpsi))
+                    div_s_u += (-(Z1 - Z0) / den * gradu.trace() / gpsi) * divn;
+            }
+            // shell.divs_kinematic = 4 is NOT applied here, on purpose: this row is
+            // not |grad eta|-weighted, so band-tail cells (large |d|, where the
+            // Taylor step to the interface is unsupported) drove Gamma to 1e12 on
+            // the gas tail in the eps/dx = 1 collapse.  Mode 4 acts in the stress
+            // (Omega), which carries the |grad eta| weight.
+            if (divs_kin_g == 1)
             {
                 const Set::Scalar e = eta(i, j, k);
                 if (e > 0.02 && e < 0.98 && grad_eta_mag > 0.0)
@@ -6029,6 +6358,237 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar dt)
     }
 }
 
+// Per-cell capillary jump Dlt = p_gas - p_liq = sigma_tot div(n) for
+// capillary.jump_scheme = 1.  n = grad(eta)/|grad eta| points from gas into
+// liquid, so div(n) = +2/R for a bubble.  div(n) from the logit of eta (see
+// LogitCurvature).  sigma_tot uses the same Marmottant law and kappa_s term as
+// the capillary stress.  One ghost cell, filled on the level.
+// Per-level cache: the jump is rebuilt once per level step (or after a regrid)
+// instead of in every RK stage and relaxation call.  The curvature changes
+// little within one explicit step; the kappa_s div_s(u) part lags one step.
+const amrex::MultiFab &Hydro2::CapJumpCached(int lev)
+{
+    if (capj_cache.size() <= (size_t)lev) { capj_cache.resize(lev + 1); capj_step.resize(lev + 1, -1); }
+    const int st = (step_counter.size() > (size_t)lev) ? step_counter[lev] : -1;
+    auto &c = capj_cache[lev];
+    const bool stale = !c || capj_step[lev] != st
+                       || c->boxArray() != eta_mf[lev]->boxArray()
+                       || c->DistributionMap() != eta_mf[lev]->DistributionMap();
+    if (stale)
+    {
+        if (!c) c = std::make_unique<amrex::MultiFab>();
+        BuildCapJump(lev, *c);
+        capj_step[lev] = st;
+    }
+    return *c;
+}
+
+void Hydro2::BuildCapJump(int lev, amrex::MultiFab &cj)
+{
+    cj.clear();
+    cj.define(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, 1);
+    cj.setVal(0.0);
+    if (!apply_surface_tension) return;
+    eta_mf[lev]->FillBoundary(geom[lev].periodicity());
+    const Set::Scalar *DXc = geom[lev].CellSize();
+    const Set::Scalar kap_c = shell_kappa_s - shell_mu_s;
+    const int marm_c = marmottant;
+    const Set::Scalar sig_c = sigma, chi_c = marmottant_chi, Gb_c = marmottant_Gamma_buck;
+    const Set::Scalar sbrk_c = marmottant_sigma_break;
+    const int kin3_c = (shell_divs_kinematic == 3);
+    const int kin4_c = (shell_divs_kinematic == 4);
+    const int lim_up_c = shell_divs_limit_upper;
+    const Set::Scalar g0c = eos0.Gamma(), p0c = eos0.P0(), g1c = eos1.Gamma(), p1c = eos1.P0();
+    // work: [0] interface curvature, [1] valid flag, [2] sigma_tot
+    amrex::MultiFab work(cj.boxArray(), cj.DistributionMap(), 3, 1);
+    work.setVal(0.0);
+    // SMOOTHED VOLUME FRACTION psi_s (arXiv:2609.10727 eq. 25-26): eta
+    // convolved with the cubic-spline kernel K(r, delta), delta = 3 dx,
+    // normalised on the discrete stencil.  Built on the valid box grown by
+    // one cell (eta carries 4 ghosts) so the curvature stencil can use it.
+    amrex::MultiFab psis(cj.boxArray(), cj.DistributionMap(), 1, 1);
+    psis.setVal(0.0);
+    {
+        const Set::Scalar hx = DXc[0];
+        auto Kc = [](Set::Scalar q) -> Set::Scalar {      // q = r/delta
+            if (q < 0.5) return 1.0 - 6.0 * q * q + 6.0 * q * q * q;
+            if (q < 1.0) return 2.0 * (1.0 - q) * (1.0 - q) * (1.0 - q);
+            return 0.0; };
+        for (amrex::MFIter mfi(psis, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box gb = amrex::grow(mfi.validbox(), 1);
+            auto et = eta_mf[lev]->const_array(mfi);
+            auto ps = psis.array(mfi);
+            amrex::LoopOnCpu(gb, [&](int i, int j, int k) {
+                const Set::Scalar e0 = et(i, j, k);
+                if (e0 <= 1.0e-6 || e0 >= 1.0 - 1.0e-6) { ps(i, j, k) = e0; return; }   // bulk: no jump
+                Set::Scalar num = 0.0, den = 0.0;
+                for (int a = -3; a <= 3; ++a)
+                for (int b = -3; b <= 3; ++b)
+#if AMREX_SPACEDIM == 3
+                for (int c = -3; c <= 3; ++c)
+#else
+                for (int c = 0; c <= 0; ++c)
+#endif
+                {
+                    const Set::Scalar r = std::sqrt(Set::Scalar(a * a + b * b + c * c)) * hx;
+                    const Set::Scalar w = Kc(r / (3.0 * hx));
+                    if (w <= 0.0) continue;
+                    num += w * std::min(std::max(et(i + a, j + b, k + c), 0.0), 1.0);
+                    den += w;
+                }
+                ps(i, j, k) = (den > 0.0) ? num / den : et(i, j, k);
+            });
+        }
+    }
+    for (amrex::MFIter mfi(cj, false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bxc = mfi.validbox();
+        auto et  = eta_mf[lev]->const_array(mfi);
+        auto sh  = shell_mf[lev]->const_array(mfi);
+        auto vel = velocity_mf[lev]->const_array(mfi);
+        auto prs = pressure_mf[lev]->const_array(mfi);
+        auto pss = psis.const_array(mfi);
+        auto wk  = work.array(mfi);
+        amrex::LoopOnCpu(bxc, [&](int i, int j, int k) {
+            const Set::Scalar e = et(i, j, k);
+            if (e <= 1.0e-6 || e >= 1.0 - 1.0e-6) return;   // bulk (same cut as the shell reset)
+            const Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DXc);
+            const Set::Scalar gem = ge.lpNorm<2>();
+            if (gem < 1.0e-10) return;
+            Set::Scalar divn = 0.0, gpsi = 0.0;
+            if (!LogitCurvature(et, i, j, k, DXc, divn, gpsi)) return;
+            // Curvature of the SMOOTHED field (paper eq. 24): kappa = div(n),
+            // n = grad psi_s/|grad psi_s| (+2/R for a bubble with n into the
+            // liquid); the iterative redistribution below carries the
+            // interface value into the band tails.
+            const Set::Vector gs = Numeric::Gradient(pss, i, j, k, 0, DXc);
+            const Set::Scalar gsm = gs.lpNorm<2>();
+            if (gsm < 1.0e-10) return;
+            const Set::Vector ns = gs / gsm;
+            const Set::Matrix Hs = Numeric::Hessian(pss, i, j, k, 0, DXc);
+            const Set::Scalar kapI = (Hs.trace() - ns.dot(Hs * ns)) / gsm;
+            const Set::Vector nh = ge / gem;
+            Set::Scalar st = SigmaEffFromGamma(marm_c ? sh(i, j, k) : 0.0, gem, marm_c,
+                                               sig_c, chi_c, Gb_c, sbrk_c, sig_c);
+            if (kap_c != 0.0)
+            {
+                Set::Matrix gu = Set::Matrix::Zero();
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DXc);
+                Set::Scalar divs_u = gu.trace() - nh.dot(gu * nh);
+                if (kin3_c)
+                {
+                    const Set::Scalar a0 = std::min(std::max(e, 0.0), 1.0), a1 = 1.0 - a0;
+                    const Set::Scalar Z0 = g0c * std::max(prs(i, j, k) + p0c, 0.0);
+                    const Set::Scalar Z1 = g1c * std::max(prs(i, j, k) + p1c, 0.0);
+                    const Set::Scalar den = a0 * Z1 + a1 * Z0;
+                    if (den > 0.0) divs_u += (-(Z1 - Z0) / den * gu.trace() / gpsi) * divn;
+                }
+                if (kin4_c)
+                {
+                    Set::Scalar corr = 0.0;
+                    if (InterfaceDivSCorrection(et, gu, i, j, k, DXc, corr)) divs_u += TaylorLimit(corr, divs_u, lim_up_c);
+                }
+                st += kap_c * divs_u;
+            }
+            wk(i, j, k, 0) = kapI;
+            wk(i, j, k, 1) = 1.0;
+            wk(i, j, k, 2) = st;
+        });
+    }
+    // CURVATURE REDISTRIBUTION (arXiv:2609.10727 eq. 30): kappa is replaced by
+    // the psi_s(1 - psi_s)-weighted mean of the valid 3^3 neighbourhood, 10
+    // times (the paper's static-droplet setting), so band-tail cells take the
+    // interface value carried by the cells nearer psi_s = 1/2.
+    psis.FillBoundary(geom[lev].periodicity());
+    for (int pass = 0; pass < 10; ++pass)   // paper: 10 iterations (static droplet)
+    {
+        work.FillBoundary(geom[lev].periodicity());
+        amrex::MultiFab wold(work.boxArray(), work.DistributionMap(), 3, 1);
+        amrex::MultiFab::Copy(wold, work, 0, 0, 3, 1);
+        for (amrex::MFIter mfi(work, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bxc = mfi.validbox();
+            auto et = psis.const_array(mfi);   // weight psi_s(1 - psi_s)
+            auto wo = wold.const_array(mfi);
+            auto wk = work.array(mfi);
+            amrex::LoopOnCpu(bxc, [&](int i, int j, int k) {
+                if (wo(i, j, k, 1) < 0.5) return;
+                Set::Scalar num = 0.0, den = 0.0, nums = 0.0;
+                for (int a = -1; a <= 1; ++a)
+                for (int b = -1; b <= 1; ++b)
+#if AMREX_SPACEDIM == 3
+                for (int c = -1; c <= 1; ++c)
+#else
+                for (int c = 0; c <= 0; ++c)
+#endif
+                {
+                    if (wo(i + a, j + b, k + c, 1) < 0.5) continue;
+                    const Set::Scalar e = std::min(std::max(et(i + a, j + b, k + c), 0.0), 1.0);
+                    const Set::Scalar w = e * (1.0 - e);
+                    num  += w * wo(i + a, j + b, k + c, 0);
+                    nums += w * wo(i + a, j + b, k + c, 2);
+                    den  += w;
+                }
+                // Both the curvature AND sigma_tot are interface quantities: a
+                // Laplace jump that varied across the band (sigma(Gamma) and
+                // kappa_s div_s u change from cell to cell) put the band gas at
+                // pressures from 0.4x to 3.6x the core and trapped the bubble's
+                // compression in the band.
+                if (den > 0.0) { wk(i, j, k, 0) = num / den; wk(i, j, k, 2) = nums / den; }
+            });
+        }
+    }
+    for (amrex::MFIter mfi(cj, false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bxc = mfi.validbox();
+        auto wk  = work.const_array(mfi);
+        auto dlt = cj.array(mfi);
+        amrex::LoopOnCpu(bxc, [&](int i, int j, int k) {
+            if (wk(i, j, k, 1) > 0.5) dlt(i, j, k) = wk(i, j, k, 2) * wk(i, j, k, 0);
+        });
+    }
+    cj.FillBoundary(geom[lev].periodicity());
+}
+
+// capillary.jump_scheme: make the INITIAL phase pressures consistent with the
+// Laplace jump.  Input decks set one (blended) pressure for both phases in the
+// band; the first jump relaxation would then compress the band gas to reach
+// p_gas = p_liq + Dlt, changing alpha and kicking the bubble into a slow
+// breathing transient (uncoated Laplace: dp overshot +33%).  Here alpha and the
+// mixture pressure are kept and only the phase energies are re-split:
+//     p_liq = p_mix - alpha_g Dlt,  p_gas = p_mix + alpha_l Dlt,
+// with the total energy updated to match.  Runs once, at initialization.
+void Hydro2::ApplyCapJumpIC(int lev)
+{
+    amrex::MultiFab cj;
+    BuildCapJump(lev, cj);
+    const Set::Scalar g0 = eos0.Gamma(), pi0 = eos0.P0(), g1 = eos1.Gamma(), pi1 = eos1.P0();
+    const Set::Scalar sm = small;
+    for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
+        auto et  = eta_mf[lev]->const_array(mfi);
+        auto dl  = cj.const_array(mfi);
+        auto prs = pressure_mf[lev]->const_array(mfi);
+        auto E0  = energy0_mf[lev]->array(mfi);
+        auto E1  = energy1_mf[lev]->array(mfi);
+        auto Ev  = energy_per_vol_mf[lev]->array(mfi);
+        auto Evo = energy_per_vol_old_mf[lev]->array(mfi);
+        amrex::LoopOnCpu(bx, [&](int i, int j, int k) {
+            const Set::Scalar a1 = et(i, j, k), D = dl(i, j, k);
+            if (a1 <= 1.0e-6 || a1 >= 1.0 - 1.0e-6 || D == 0.0) return;
+            const Set::Scalar a2 = 1.0 - a1, p = prs(i, j, k);
+            const Set::Scalar e0 = Solver::EOS::EOS::PhasicEnergyFromPressure(p - a2 * D, a1, g0, pi0, sm);
+            const Set::Scalar e1 = Solver::EOS::EOS::PhasicEnergyFromPressure(p + a1 * D, a2, g1, pi1, sm);
+            const Set::Scalar dE = (e0 + e1) - (E0(i, j, k) + E1(i, j, k));
+            E0(i, j, k) = e0;  E1(i, j, k) = e1;
+            Ev(i, j, k) += dE; Evo(i, j, k) += dE;
+        });
+    }
+}
+
 void Hydro2::RelaxAndReinit(int lev)
 {
     BL_PROFILE("Integrator::Hydro2::RelaxAndReinit");
@@ -6147,6 +6707,10 @@ void Hydro2::RelaxAndReinit(int lev)
 
     // ------------------------------------------------------------------
 
+    // Capillary jump per cell from the PRE-relaxation state (capillary.jump_scheme).
+    const int capj_on = capillary_jump_scheme;
+    const amrex::MultiFab *capj = capj_on ? &CapJumpCached(lev) : nullptr;
+
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
@@ -6166,6 +6730,8 @@ void Hydro2::RelaxAndReinit(int lev)
         amrex::Array4<Set::Scalar> diag_arr = diag_on
             ? (*diag_mf)[mfi].array()
             : amrex::Array4<Set::Scalar>{};
+        amrex::Array4<const Set::Scalar> capj_a = capj_on ? capj->const_array(mfi)
+                                                          : amrex::Array4<const Set::Scalar>{};
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             // Skip solid cells: pressure relaxation must not touch the
@@ -6286,27 +6852,30 @@ void Hydro2::RelaxAndReinit(int lev)
             // dwarfs the convergence test scale (problematic for
             // interface cells with conflicting per-phase pressures).
             // -----------------------------------------------------------
-            const Set::Scalar p_min = -std::min(pi0_, pi1_) + DIV_FLOOR;
+            // Capillary jump (capillary.jump_scheme): the Newton unknown p is the
+            // LIQUID pressure and the gas sits at p + Dlt.  Dlt = 0 otherwise.
+            const Set::Scalar Dlt = capj_on ? capj_a(i, j, k) : 0.0;
+            const Set::Scalar p_min = std::max(-pi0_, -pi1_ - Dlt) + DIV_FLOOR;
 
             // Sch20 eq. 8 mixture pressure as the initial guess --
             // exact for the mechanical-equilibrium IC (p0_pre == p1_pre
             // -> p_init == p_mix == root), and a sensible interpolation
             // for general states.  Bounded away from p=0 by virtue of
             // SG positivity on both pre-relax phases.
-            Set::Scalar p_init = a1 * p0_pre + a2 * p1_pre;
+            Set::Scalar p_init = a1 * p0_pre + a2 * (p1_pre - Dlt);
             // Lower bracket: a hair above p_min (avoid the gas v -> inf
             // pole at p -> -pi_gas).  For typical gas/liquid: p_min ~ 0,
             // p_lo ~ small positive.  For all-liquid pair: p_min ~ -pi,
             // p_lo > p_min.
             Set::Scalar p_lo = std::max(p_min, 1.0e-3 * std::max(std::abs(p_init), 1.0));
             // Upper bracket: generously above the maximum pre-relax p.
-            Set::Scalar p_hi = 1.0e4 * std::max(std::max(std::abs(p0_pre), std::abs(p1_pre)), 1.0);
+            Set::Scalar p_hi = 1.0e4 * std::max(std::max(std::abs(p0_pre), std::abs(p1_pre)), std::max(std::abs(Dlt), 1.0));
 
             // Local evaluator (captures pre-relax state from this cell).
             auto eval_f = [&](Set::Scalar p) -> Set::Scalar
             {
                 Set::Scalar v0 = Solver::EOS::EOS::RelaxationVolume_SG_SC(p, p0_pre, rho0_pre, gam0, pi0_, DIV_FLOOR);
-                Set::Scalar v1 = Solver::EOS::EOS::RelaxationVolume_SG_SC(p, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
+                Set::Scalar v1 = Solver::EOS::EOS::RelaxationVolume_SG_SC(p + Dlt, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
                 return arh0_loc * v0 + arh1_loc * v1 - 1.0;
             };
 
@@ -6319,12 +6888,12 @@ void Hydro2::RelaxAndReinit(int lev)
             for (int it = 0; it < max_iter; ++it)
             {
                 Set::Scalar v0_p = Solver::EOS::EOS::RelaxationVolume_SG_SC(p, p0_pre, rho0_pre, gam0, pi0_, DIV_FLOOR);
-                Set::Scalar v1_p = Solver::EOS::EOS::RelaxationVolume_SG_SC(p, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
+                Set::Scalar v1_p = Solver::EOS::EOS::RelaxationVolume_SG_SC(p + Dlt, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
                 Set::Scalar f    = arh0_loc * v0_p + arh1_loc * v1_p - 1.0;
                 f_final = f;
 
                 Set::Scalar dv0 = Solver::EOS::EOS::RelaxationVolume_SG_SC_dvdp(p, p0_pre, rho0_pre, gam0, pi0_, DIV_FLOOR);
-                Set::Scalar dv1 = Solver::EOS::EOS::RelaxationVolume_SG_SC_dvdp(p, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
+                Set::Scalar dv1 = Solver::EOS::EOS::RelaxationVolume_SG_SC_dvdp(p + Dlt, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
                 Set::Scalar df  = arh0_loc * dv0 + arh1_loc * dv1;
 
                 if (std::abs(df) < DIV_FLOOR) break;       // bail to bisection
@@ -6426,7 +6995,7 @@ void Hydro2::RelaxAndReinit(int lev)
             else
             {
                 Set::Scalar v0_r = Solver::EOS::EOS::RelaxationVolume_SG_SC(p_relaxed, p0_pre, rho0_pre, gam0, pi0_, DIV_FLOOR);
-                Set::Scalar v1_r = Solver::EOS::EOS::RelaxationVolume_SG_SC(p_relaxed, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
+                Set::Scalar v1_r = Solver::EOS::EOS::RelaxationVolume_SG_SC(p_relaxed + Dlt, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
                 a1_new = arh0_loc * v0_r;
                 a2_new = arh1_loc * v1_r;
                 Set::Scalar asum = a1_new + a2_new;
@@ -6451,11 +7020,14 @@ void Hydro2::RelaxAndReinit(int lev)
             // is why the E_vol - KE grep did not surface it.
             Set::Scalar rho_e   = std::max(E_(i, j, k) - ke, small_loc);
 
-            Set::Scalar p_reinit = Solver::EOS::EOS::ReinitMixturePressure(rho_e, a1_new, a2_new,
+            // With the jump the gas holds alpha_g Dlt/(gam_g - 1) more internal
+            // energy than at the liquid pressure: invert for the LIQUID pressure
+            // and put the gas at p + Dlt (rho E conserved).  Dlt = 0: unchanged.
+            Set::Scalar p_reinit = Solver::EOS::EOS::ReinitMixturePressure(rho_e - a2_new * Dlt / (gam1 - 1.0), a1_new, a2_new,
                                                                           gam0, pi0_, gam1, pi1_, small_loc);
 
             // Floor: keep p + gam_k pi_k > 0 for both phases (SG positivity).
-            const Set::Scalar p_min_ph = -std::min(pi0_, pi1_) + small_loc;
+            const Set::Scalar p_min_ph = std::max(-pi0_, -pi1_ - Dlt) + small_loc;
             p_reinit = std::max(p_reinit, p_min_ph);
 
             // Diagnostic: gap between Newton's converged p and reinit p.
@@ -6474,7 +7046,7 @@ void Hydro2::RelaxAndReinit(int lev)
             // -----------------------------------------------------------
             eta(i, j, k) = a1_new;
             E0_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_reinit, a1_new, gam0, pi0_, small_loc);
-            E1_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_reinit, a2_new, gam1, pi1_, small_loc);
+            E1_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_reinit + Dlt, a2_new, gam1, pi1_, small_loc);
 
             // rho_eta{0,1}, momentum, energy_per_vol are NOT touched
             // (they are conserved through relaxation by construction).

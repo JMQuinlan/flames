@@ -71,6 +71,9 @@ struct Primitive
     Set::Scalar v           = 0.0;  // mixture velocity, tangent component
     Set::Scalar w           = 0.0;  // mixture velocity, 2nd tangent (3D; 0 in 2D)
     Set::Scalar p_mix       = 0.0;  // mixture pressure (Sch20 eq. 8)
+    // Capillary jump p_gas - p_liq (0 unless capillary.jump_scheme = 1).
+    // Not reconstructed: Hydro2 sets the face value after Reconstruct.
+    Set::Scalar capjump     = 0.0;
     // Metadata (NOT reconstructed; carried for back-conversion):
     Set::Scalar gamma0      = 0.0;
     Set::Scalar pi0         = 0.0;
@@ -210,13 +213,16 @@ ToState(const Primitive &p, Set::Scalar /*small*/)
     s.M_tangent   = rho * p.v;
     s.M_tangent2  = rho * p.w;   // 2nd tangent (3D; 0 in 2D)
     // E_k = alpha_k (p_mix + gamma_k pi_k) / (gamma_k - 1).
-    Set::Scalar num0 = std::max(p.p_mix + p.gamma0 * p.pi0, DIV_FLOOR);
-    Set::Scalar num1 = std::max(p.p_mix + p.gamma1 * p.pi1, DIV_FLOOR);
+    // With a capillary jump Dlt = p_gas - p_liq and p_mix = a1 p_liq + a2 p_gas,
+    // p_liq = p_mix - a2 Dlt and p_gas = p_mix + a1 Dlt (Dlt = 0: unchanged).
+    Set::Scalar num0 = std::max(p.p_mix - a2 * p.capjump + p.gamma0 * p.pi0, DIV_FLOOR);
+    Set::Scalar num1 = std::max(p.p_mix + a1 * p.capjump + p.gamma1 * p.pi1, DIV_FLOOR);
     s.E0          = a1 * num0 / (p.gamma0 - 1.0);
     s.E1          = a2 * num1 / (p.gamma1 - 1.0);
     s.E_total     = s.E0 + s.E1 + 0.5 * rho * (p.u*p.u + p.v*p.v + p.w*p.w);
     s.gamma0 = p.gamma0;  s.pi0 = p.pi0;
     s.gamma1 = p.gamma1;  s.pi1 = p.pi1;
+    s.capjump = p.capjump;
     return s;
 }
 

@@ -153,6 +153,11 @@ protected:
     // Post-stage pressure relaxation + reinitialization (Saurel-Petitpas-Berry
     // 2009 §3.5 / Schmidmayer 2020 §3.3).  Runs in-place on the working
     // MultiFabs after each RK stage and before the ghost-cell fill.
+    void BuildCapJump(int lev, amrex::MultiFab &cj);   // capillary.jump_scheme = 1
+    void ApplyCapJumpIC(int lev);                      // consistent initial phase pressures
+    const amrex::MultiFab &CapJumpCached(int lev);      // once per level step
+    std::vector<std::unique_ptr<amrex::MultiFab>> capj_cache;
+    std::vector<int> capj_step;
     void RelaxAndReinit(int lev);
     // Sub-cycled SHELL DILATATIONAL VISCOUS update (see Hydro2.cpp).  Advances
     // only div(Omega_visc) on the interface band, in N sub-steps of dt/N, so the
@@ -744,7 +749,9 @@ protected:
     int nan_check = 0;
     int verbose = 0;
     int eta_consistent_advect = 0;  // 1 = WENO3 face-alpha row, NOT validated (see Parse)
+    int capillary_jump_scheme = 0;  // 1 = experimental Laplace-jump scheme (see Parse); 0 = existing tensor only
     int shell_divs_kinematic = 0;   // 0 = band-velocity div_s u (default); 1 = kinematic, UNSTABLE at ml3 (see Parse)
+    int shell_divs_limit_upper = 1; // modes 4/5: 1 = |corr| <= |div_s u| (two-sided); 0 = sign bound only
     int shell_visc_subcycle = 0;      // sub-cycle kappa_s (0 = dt-limited path; see Parse)
     int shell_visc_subcycle_max = 512; // hard cap on sub-steps (runaway guard)
     int shell_visc_verbose = 0;        // print N and nu_s each sub-cycle
