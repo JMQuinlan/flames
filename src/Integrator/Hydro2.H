@@ -753,6 +753,8 @@ protected:
     int clip_ghost_only = 0;
     bool sym_face_lo[3] = {false, false, false};
     bool sym_face_hi[3] = {false, false, false};
+    int omega_sym_mirror = 1;       // 1 = ghost Omega at symmetry faces = mirror of the first valid cell (see Parse)
+    int sym_face_central = 1;       // 1 = central (not one-sided) Hessian stencils in cells on a symmetry face (see Parse)
 
 };
 }
