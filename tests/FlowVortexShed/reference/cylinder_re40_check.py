@@ -4,7 +4,7 @@ Steady Re = 40 cylinder check for tests/FlowVortexShed/UNIT_TEST_2D_Re40 (Hydro2
 and Re40_input_hydro (Hydro).
 
   python3 cylinder_re40_check.py <run_dir>                       # summary of the last plotfile
-  python3 cylinder_re40_check.py <run_dir> --csv [--stride N]    # + metric CSVs
+  python3 cylinder_re40_check.py <run_dir> --csv [--stride N] [--outdir DIR]   # + metric CSVs
 
 <run_dir> holds output/ (plotfiles) and, for Hydro2 run with solid.force_int=1,
 output_forces.dat.  Metrics (per plotfile):
@@ -17,9 +17,10 @@ output_forces.dat.  Metrics (per plotfile):
     tangential velocity on a ring 1.5 finest cells outside the wall, upper half)
   * Cd, Cd_pressure, Cd_friction (= Cd - Cd_p), Cl from the force history at that
     time (q = 0.5 rho U^2 D, rho=100, U=1, D=1); blank for Hydro (no force file)
---csv writes <run_dir>/cylinder_metrics.csv (time series, every N-th plotfile,
+--csv writes <outdir>/cylinder_metrics.csv (time series, every N-th plotfile,
 default N = 4; first line is a '#' provenance comment) and
-<run_dir>/cylinder_summary.csv (last plotfile + literature).  Both record the
+<outdir>/cylinder_summary.csv (last plotfile + literature); <outdir> defaults to
+Images/<run_dir name>/ next to this script (with the wake images).  Both record the
 run's git hash (output/metadata), the repo HEAD at analysis time, and the
 domain extents / D from the cylinder centre (upstream, downstream, lateral),
 the blockage D/H and the finest dx/D.
@@ -137,6 +138,9 @@ def main():
     d = args[0]
     want_csv = "--csv" in args
     stride = int(args[args.index("--stride") + 1]) if "--stride" in args else 4
+    here = os.path.dirname(os.path.abspath(__file__))
+    outdir = (args[args.index("--outdir") + 1] if "--outdir" in args
+              else os.path.join(here, "Images", os.path.basename(os.path.normpath(d))))
     q = 0.5 * RHO * U * U * D
     F = load_forces(d)
     if F is not None:
@@ -170,7 +174,8 @@ def main():
     for pf in sel:
         r = dict(last) if pf == pfs[-1] else wake_metrics(pf)
         r.update(forces_at(F, r["time"], q)); rows.append(r)
-    ts = os.path.join(d, "cylinder_metrics.csv")
+    os.makedirs(outdir, exist_ok=True)
+    ts = os.path.join(outdir, "cylinder_metrics.csv")
     info0 = run_info(d, pfs[-1])
     with open(ts, "w") as f:
         f.write("# " + "  ".join(f"{k}={fmt(v)}" for k, v in info0.items()) + "\n")
@@ -179,7 +184,7 @@ def main():
             f.write(",".join(fmt(r[c]) for c in cols) + "\n")
     print(f"  wrote {ts}  ({len(rows)} rows, every {stride} plotfiles)")
     fin = rows[-1]
-    sm = os.path.join(d, "cylinder_summary.csv")
+    sm = os.path.join(outdir, "cylinder_summary.csv")
     info = run_info(d, pfs[-1])
     with open(sm, "w") as f:
         f.write("metric,value,literature\n")

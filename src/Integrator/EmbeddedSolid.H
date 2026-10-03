@@ -19,6 +19,12 @@ public:
     int          wall_flux = 0;              // 1 = sharp-wall Riemann flux: mirror state at fluid/solid faces, zero flux inside the solid
     int          wall_flux_auto = 1;         // [2026-09-25] 1 = solid.wall_flux not given: chosen from the phi thickness at init
     Set::Scalar  wall_flux_cells = 2.0;      // [2026-09-25] auto threshold: sharp wall if the phi interface is thinner than this (cells)
+    int          wall_normal = 1;            // [2026-09-29] 1 = slip sharp wall mirrors about the TRUE surface normal (grad phi); 0 = face normal (old)
+    int          wall_redistribute = 0;      // [2026-09-29] slip + wall_normal: return mass/energy entering solid cells to fluid neighbours (off: breaks the Kutta condition at thin TEs)
+    int          wall_thin_cells = 2;        // [2026-09-29] wall_normal: plate thinner than this (along the face axis) -> face normal
+    int          wall_image = 1;             // [2026-09-29] wall_normal slip: slip plane at phi = 0.5 (ratio r), not at the face
+    int          wall_image_noslip = 1;      // [2026-09-30] no-slip walls: ghost at the true surface (phi = 0.5), ratio r
+    int          visc_mirror = 0;            // [2026-09-27] 1 = sharp-wall viscous stencil mirrors u across the wall face (wall_flux = 1 only)
     Set::Scalar  mu_factor = 1.0;            // [2026-09-25] solid viscosity = mu_factor * fluid viscosity (1 = off)
     Set::Scalar  brinkman = 1.0e6;           // was solid_brinkman (kappa=1/brinkman; <=0 -> auto wall)
     Set::Scalar  relax_skip = 0.0;           // was solid_relax_skip (skip relax/sharpen/CFL where phi<this; =0.5)

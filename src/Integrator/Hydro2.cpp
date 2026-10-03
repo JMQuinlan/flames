@@ -42,6 +42,7 @@
 // Generic
 #include <AMReX_Math.H>
 #include "AMReX_TimeIntegrator.H"
+#include <eigen3/Eigen/Eigenvalues>
 
 
 namespace Integrator
@@ -231,6 +232,40 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         if (value.embedded.wall_flux != 0 && value.embedded.wall_flux != 1)
             Util::Abort(INFO, "solid.wall_flux must be 0 or 1");
         pp_query_default("solid.wall_flux_cells", value.embedded.wall_flux_cells, 2.0);
+        // [2026-09-27] Sharp-wall viscous stencil (see RHS): 1 = viscous terms see the
+        // no-slip wall on the fluid|solid FACE (mirrored velocity), consistent with the
+        // mirrored Riemann flux; 0 = solid cells' own velocity one cell away (validated
+        // default -- on a staircase body the full mirrored shear acts on every step
+        // face, i.e. on up to 4/pi of the true area: Re40 cylinder friction 0.576 vs
+        // 0.520 with 0).  Only read when solid.wall_flux = 1.
+        pp_query_default("solid.visc_mirror", value.embedded.visc_mirror, 0);
+        // [2026-09-29] Sharp-wall geometry (see RHS): 1 = SLIP walls reflect the ghost
+        // (wall-face Riemann problem and reconstruction window) about the TRUE surface
+        // normal n = grad(phi)/|grad(phi)| (Gaussian-smoothed, radius 3) -- ghost-cell
+        // immersed boundary; 0 = the old face-normal mirror (staircase: every step riser
+        // of an inclined wall stagnates the along-surface flow).  No-slip walls are
+        // unaffected (their mirror 2 u_s - u does not depend on n).
+        // Only read when solid.wall_flux = 1.  Needs nghost >= 4 for the full kernel
+        // (indices are clamped to the fab otherwise).
+        pp_query_default("solid.wall_normal", value.embedded.wall_normal, 1);
+        // [2026-09-29] with wall_normal + slip: hand the mass/energy that crosses riser
+        // faces into solid cells back to their fluid neighbours (exact conservation).
+        // OFF by default: at a one-cell-thick trailing edge it moves mass between the
+        // pressure and suction sides (trailing-edge "blowing"): Euler NACA 0008 a4 Cl
+        // 1.16 (v4) / -0.26 (v7) / -0.34 (v8) vs 0.22 (v8b, off) at 2 c/U.
+        pp_query_default("solid.wall_redistribute", value.embedded.wall_redistribute, 0);
+        // [2026-09-29] wall_normal: a fluid|solid face whose solid is <= this many cells
+        // thick along the face axis (a plate: sharp trailing edges, wedge tips) uses the
+        // face normal -- the smoothed normal is unreliable there.  0 = never.
+        pp_query_default("solid.wall_thin_cells", value.embedded.wall_thin_cells, 2);
+        // [2026-09-29] wall_normal slip: place the slip plane at the true surface (phi = 0.5
+        // interpolated between the fluid and solid cell) instead of the staircase face.
+        pp_query_default("solid.wall_image", value.embedded.wall_image, 1);
+        // [2026-09-30] same for NO-SLIP walls (ghost velocity -r (u - u_s), linear to zero at
+        // phi = 0.5).  Identical to the plain mirror for a 0/1 phi.
+        pp_query_default("solid.wall_image_noslip", value.embedded.wall_image_noslip, 1);
+        if (value.embedded.wall_normal != 0 && value.embedded.wall_normal != 1)
+            Util::Abort(INFO, "solid.wall_normal must be 0 or 1");
         // [2026-09-24] force / pressure-probe time history, see Hydro2.H.
         pp_query_default("solid.force_int", value.solid_force_int, 0);
         pp.queryarr("solid.probe.x", value.probe_x);
@@ -2276,7 +2311,234 @@ Hydro2::RHS(int lev,
         // unchanged -- equivalent to the original first-order flux.
         // ------------------------------------------------------------
         const bool sharp_wall = embedded.apply && embedded.wall_flux;
+        const bool visc_mirror = embedded.visc_mirror != 0;
         const bool noslip_wall = sharp_wall && !embedded.slip;
+        // [2026-09-29] SURFACE-NORMAL WALL (solid.wall_normal = 1, sharp wall only).
+        // The staircase faces are x/y(/z) faces, but the body surface is not: the
+        // old ghost-mirror reflected the velocity about the FACE normal, so every
+        // step riser of an inclined wall stagnated the along-surface flow (Euler
+        // NACA 0008 a4: spurious separation, Cl 0.34 vs potential 0.477, Cd 0.025).
+        // Here the wall normal is the TRUE surface normal n = grad(phi)/|grad(phi)|
+        // (pointing into the fluid) from a Gaussian-smoothed gradient of phi, radius
+        // WN_R cells, sigma WN_R/2 -- wide enough to average over the steps.
+        const bool wall_normal = sharp_wall && embedded.wall_normal;
+        const int wall_thin_cells = embedded.wall_thin_cells;
+        const Set::Scalar wall_ratio_max = embedded.wall_image ? 4.0 : 1.0;   // 1 = plain mirror (r = 1 cap -> exactly the old reflection when phi is 0/1)
+        // [2026-09-30] no-slip walls: same true-surface ghost (solid.wall_image_noslip)
+        const bool noslip_image = noslip_wall && embedded.wall_image_noslip;
+        const Set::Scalar noslip_ratio_max = 4.0;
+        // raw smoothed gradient of phi at cell (i,j,k) (indices clamped to the fab)
+        // Unit wall normal at the fluid|solid face between fluid cell f and solid
+        // cell s, pointing into the fluid: Gaussian-smoothed gradient of phi (radius
+        // WN_R, sigma 1.5 cells) summed over kernels centred on f and on s.  The
+        // kernel is ONE-SIDED: a fluid cell counts as fluid only if it is connected
+        // to f through fluid inside the local window (flood fill), so across a thin
+        // section (trailing edge, wedge apex) the far surface does not cancel the
+        // normal (v3: n -> +x on both faces of the NACA 0008 TE, the downwash
+        // leaked into the solid), while cells along the SAME surface stay connected
+        // (a line-of-sight test fails there: it grazes the step corners, v6).
+        // Falls back to the face normal where the gradient is degenerate or points
+        // back into the solid through this face.
+        auto face_wall_normal = [=](int fi, int fj, int fk, int si, int sj, int sk, int dir, Set::Scalar n[3])
+        {
+            constexpr int WN_R = 3, W = WN_R + 1, N = 2 * W + 1;
+#if AMREX_SPACEDIM == 3
+            constexpr int WZ = W, NZ = N;
+#else
+            constexpr int WZ = 0, NZ = 1;
+#endif
+            constexpr Set::Scalar inv2s2 = 1.0 / (2.0 * 1.5 * 1.5);
+            const auto blo = amrex::lbound(phisol); const auto bhi = amrex::ubound(phisol);   // inclusive
+            auto ph_at = [&](int a, int b, int c) -> Set::Scalar {
+                const int ii = std::min(std::max(fi + a, blo.x), bhi.x);
+                const int jj = std::min(std::max(fj + b, blo.y), bhi.y);
+                const int kk = std::min(std::max(fk + c, blo.z), bhi.z);
+                return phisol(ii, jj, kk);
+            };
+            auto id = [&](int a, int b, int c) { return ((c + WZ) * N + (b + W)) * N + (a + W); };
+            unsigned char mark[N * N * NZ];
+            for (int q = 0; q < N * N * NZ; ++q) mark[q] = 0;
+            mark[id(0, 0, 0)] = 1;
+            for (int pass = 0; pass < 2 * N; ++pass)
+            {
+                bool changed = false;
+                for (int c = -WZ; c <= WZ; ++c)
+                for (int b = -W; b <= W; ++b)
+                for (int a = -W; a <= W; ++a)
+                {
+                    if (mark[id(a, b, c)] || ph_at(a, b, c) < 0.5) continue;
+                    const bool nb = (a > -W && mark[id(a - 1, b, c)]) || (a < W && mark[id(a + 1, b, c)])
+                                 || (b > -W && mark[id(a, b - 1, c)]) || (b < W && mark[id(a, b + 1, c)])
+                                 || (c > -WZ && mark[id(a, b, c - 1)]) || (c < WZ && mark[id(a, b, c + 1)]);
+                    if (nb) { mark[id(a, b, c)] = 1; changed = true; }
+                }
+                if (!changed) break;
+            }
+            Set::Scalar g[3] = {0.0, 0.0, 0.0};
+            const int ctr[2][3] = {{0, 0, 0}, {si - fi, sj - fj, sk - fk}};
+            for (int m = 0; m < 2; ++m)
+                for (int c = -(WZ ? WN_R : 0); c <= (WZ ? WN_R : 0); ++c)
+                for (int b = -WN_R; b <= WN_R; ++b)
+                for (int a = -WN_R; a <= WN_R; ++a)
+                {
+                    const int oa = ctr[m][0] + a, ob = ctr[m][1] + b, oc = ctr[m][2] + c;
+                    Set::Scalar ph = ph_at(oa, ob, oc);
+                    if (ph >= 0.5 && !mark[id(oa, ob, oc)]) ph = 0.0;          // fluid on the far side
+                    const Set::Scalar w = std::exp(-(Set::Scalar)(a * a + b * b + c * c) * inv2s2);
+                    g[0] += w * a * ph / DX[0];
+                    g[1] += w * b * ph / DX[1];
+#if AMREX_SPACEDIM == 3
+                    g[2] += w * c * ph / DX[2];
+#endif
+                }
+            // [2026-09-29] CROSSING-POINT FIT (replaces the kernel direction when possible).
+            // The Gaussian-weighted gradient is exact only for a LINEAR phi; across the
+            // steep, saturating wall profile (tanh / volume fraction) the square lattice's
+            // anisotropy tilts it: 15 deg wedge, median +0.69 deg -> the flow turned
+            // 14.23 deg, beta -0.78 deg.  Instead collect the phi = 0.5 crossings on every
+            // grid edge of the window whose fluid end is connected to f (same side), and
+            // take the normal of the least-squares line/plane through them: wedge bias
+            // +0.01 deg (p90 0.11), NACA 0008 mid-chord bias +0.01 deg.
+            {
+                Set::Scalar S1[3] = {0.0, 0.0, 0.0}, S2[3][3] = {{0,0,0},{0,0,0},{0,0,0}};
+                int np = 0;
+                for (int c = -WZ; c <= WZ; ++c)
+                for (int b = -W; b <= W; ++b)
+                for (int a = -W; a <= W; ++a)
+                {
+                    const Set::Scalar p0 = ph_at(a, b, c);
+                    for (int ed = 0; ed < AMREX_SPACEDIM; ++ed)
+                    {
+                        const int a2 = a + (ed == 0), b2 = b + (ed == 1), c2 = c + (ed == 2);
+                        if (a2 > W || b2 > W || c2 > WZ) continue;
+                        const Set::Scalar p1 = ph_at(a2, b2, c2);
+                        if ((p0 >= 0.5) == (p1 >= 0.5)) continue;
+                        const bool f0 = p0 >= 0.5;
+                        if (!mark[f0 ? id(a, b, c) : id(a2, b2, c2)]) continue;   // crossing on the far side
+                        const Set::Scalar t = (p0 - 0.5) / (p0 - p1);
+                        const Set::Scalar q[3] = {(a + t * (ed == 0)) * DX[0], (b + t * (ed == 1)) * DX[1],
+                                                  (AMREX_SPACEDIM == 3 ? (c + t * (ed == 2)) * DX[AMREX_SPACEDIM - 1] : 0.0)};
+                        for (int d1 = 0; d1 < 3; ++d1) { S1[d1] += q[d1]; for (int d2 = 0; d2 < 3; ++d2) S2[d1][d2] += q[d1] * q[d2]; }
+                        ++np;
+                    }
+                }
+                if (np >= AMREX_SPACEDIM + 1)
+                {
+                    Set::Scalar C[3][3];
+                    for (int d1 = 0; d1 < 3; ++d1) for (int d2 = 0; d2 < 3; ++d2) C[d1][d2] = S2[d1][d2] - S1[d1] * S1[d2] / np;
+                    Set::Scalar m[3];
+#if AMREX_SPACEDIM == 2
+                    const Set::Scalar thm = 0.5 * std::atan2(2.0 * C[0][1], C[0][0] - C[1][1]);   // line direction
+                    m[0] = -std::sin(thm); m[1] = std::cos(thm); m[2] = 0.0;
+#else
+                    Eigen::Matrix3d Cm;
+                    for (int d1 = 0; d1 < 3; ++d1) for (int d2 = 0; d2 < 3; ++d2) Cm(d1, d2) = C[d1][d2];
+                    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> es(Cm);
+                    const Eigen::Vector3d v = es.eigenvectors().col(0);
+                    m[0] = v(0); m[1] = v(1); m[2] = v(2);
+#endif
+                    const Set::Scalar gmag = std::sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
+                    const Set::Scalar sgn = (m[0] * g[0] + m[1] * g[1] + m[2] * g[2]) >= 0.0 ? 1.0 : -1.0;
+                    if (gmag > 0.0) for (int d = 0; d < 3; ++d) g[d] = sgn * m[d] * gmag;       // keep |g| for the degeneracy test
+                }
+            }
+            Set::Scalar e[3] = {0.0, 0.0, 0.0};
+            e[dir] = (dir == 0 ? (Set::Scalar)(fi - si) : dir == 1 ? (Set::Scalar)(fj - sj) : (Set::Scalar)(fk - sk));
+            // PLATE-THIN FACE: if the solid through s is <= wall_thin_cells thick ALONG
+            // THIS FACE'S AXIS (fluid on both sides), s is part of a plate one or two
+            // cells thick and the face normal IS the plate normal.  The kernel cannot
+            // resolve it there: within ~5 cells of a sharp trailing edge it sees the
+            // fluid beyond the tip (connected to both sides) and tilts 30-50 deg toward
+            // the tip (NACA 0008 L4), and the ghost then leaked the downwash into the
+            // solid: a trailing-edge sink that pumps up the circulation (v3: Cl 0.58 at
+            // 8 c/U vs potential 0.477).  Only the face's own axis: testing every axis
+            // (v10) also switched the RISER faces of the last 7 % chord back to the
+            // staircase mirror and cost 27 % of the circulation.
+            {
+                const int TL = wall_thin_cells;
+                const int ax = dir;
+                // solid thickness along ax through cell c (0 if c is fluid); > TL if not bounded by fluid within TL
+                auto thick = [&](int ci, int cj, int ck) -> int {
+                    ci = std::min(std::max(ci, blo.x), bhi.x); cj = std::min(std::max(cj, blo.y), bhi.y); ck = std::min(std::max(ck, blo.z), bhi.z);
+                    if (phisol(ci, cj, ck) >= 0.5) return 0;
+                    int run = 1; bool hit_p = false, hit_m = false;
+                    for (int sgn = -1; sgn <= 1; sgn += 2)
+                        for (int m = 1; m <= TL; ++m)
+                        {
+                            const int ii = ci + (ax == 0 ? sgn * m : 0), jj = cj + (ax == 1 ? sgn * m : 0), kk = ck + (ax == 2 ? sgn * m : 0);
+                            if (ii < blo.x || ii > bhi.x || jj < blo.y || jj > bhi.y || kk < blo.z || kk > bhi.z) break;
+                            if (phisol(ii, jj, kk) >= 0.5) { (sgn > 0 ? hit_p : hit_m) = true; break; }
+                            ++run;
+                        }
+                    return (hit_p && hit_m) ? run : TL + 1;
+                };
+                // a PLATE stays thin (or ends) 2 cells away along every tangential axis; a
+                // rounded NOSE (whose tip is also 1-2 cells thick) thickens right away --
+                // there the smoothed normal is accurate and the plate axis is not (it lies
+                // along the chord: v12 created 2.3e-3 of mass at the NACA 0008 nose).
+                bool plate = TL > 0 && thick(si, sj, sk) <= TL;
+                for (int tax = 0; tax < AMREX_SPACEDIM && plate; ++tax)
+                {
+                    if (tax == ax) continue;
+                    for (int sgn = -2; sgn <= 2 && plate; sgn += 4)
+                        if (thick(si + (tax == 0 ? sgn : 0), sj + (tax == 1 ? sgn : 0), sk + (tax == 2 ? sgn : 0)) > TL) plate = false;
+                }
+                if (plate)
+                {
+                    // The plate's normal = the direction of LEAST spread of its solid
+                    // cells (principal axis of the solid-fraction-weighted positions in
+                    // the window around s): the midline normal, so the flow leaves a
+                    // sharp trailing edge along its bisector.  The face normal instead
+                    // makes the last cells horizontal -- a small flap deflected by the
+                    // local midline angle (-4 deg at a4: ~ -0.1 Cl, v11 at 0.70 x Wagner).
+                    Set::Scalar wsum = 0.0, c[3] = {0.0, 0.0, 0.0}, C[3][3] = {{0,0,0},{0,0,0},{0,0,0}};
+                    const int sa = si - fi, sb = sj - fj, sc = sk - fk;
+                    for (int pass = 0; pass < 2; ++pass)
+                    {
+                        for (int cc = -WZ; cc <= WZ; ++cc)
+                        for (int bb = -W; bb <= W; ++bb)
+                        for (int aa = -W; aa <= W; ++aa)
+                        {
+                            const Set::Scalar ws = 1.0 - std::min(std::max(ph_at(sa + aa, sb + bb, sc + cc), 0.0), 1.0);
+                            if (ws <= 0.0) continue;
+                            const Set::Scalar q[3] = {(Set::Scalar)aa * DX[0], (Set::Scalar)bb * DX[1], (Set::Scalar)cc * (AMREX_SPACEDIM == 3 ? DX[AMREX_SPACEDIM - 1] : 0.0)};
+                            if (pass == 0) { wsum += ws; for (int d = 0; d < 3; ++d) c[d] += ws * q[d]; }
+                            else for (int d1 = 0; d1 < 3; ++d1) for (int d2 = 0; d2 < 3; ++d2)
+                                C[d1][d2] += ws * (q[d1] - c[d1]) * (q[d2] - c[d2]);
+                        }
+                        if (pass == 0 && wsum > 0.0) for (int d = 0; d < 3; ++d) c[d] /= wsum;
+                    }
+                    Set::Scalar m[3] = {e[0], e[1], e[2]};
+#if AMREX_SPACEDIM == 2
+                    {   // smallest eigenvector of the 2x2 covariance
+                        const Set::Scalar th = 0.5 * std::atan2(2.0 * C[0][1], C[0][0] - C[1][1]);   // major axis
+                        m[0] = -std::sin(th); m[1] = std::cos(th); m[2] = 0.0;
+                    }
+#else
+                    {
+                        Eigen::Matrix3d Cm;
+                        for (int d1 = 0; d1 < 3; ++d1) for (int d2 = 0; d2 < 3; ++d2) Cm(d1, d2) = C[d1][d2];
+                        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> es(Cm);
+                        const Eigen::Vector3d v = es.eigenvectors().col(0);          // ascending eigenvalues
+                        m[0] = v(0); m[1] = v(1); m[2] = v(2);
+                    }
+#endif
+                    Set::Scalar mn = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+                    Set::Scalar me = m[0] * e[0] + m[1] * e[1] + m[2] * e[2];
+                    if (wsum <= 0.0 || mn < 1e-12 || std::abs(me) < 1e-12) { for (int d = 0; d < 3; ++d) n[d] = e[d]; return; }
+                    for (int d = 0; d < 3; ++d) n[d] = (me > 0.0 ? 1.0 : -1.0) * m[d] / mn;
+                    return;
+                }
+            }
+            const Set::Scalar gm = std::sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
+            const Set::Scalar ref = 0.1 / DX[dir];          // |grad phi| of a unit jump spread over ~10 cells
+            if (gm > ref)
+            {
+                for (int d = 0; d < 3; ++d) n[d] = g[d] / gm;
+                if (n[0] * e[0] + n[1] * e[1] + n[2] * e[2] > 0.0) return;
+            }
+            for (int d = 0; d < 3; ++d) n[d] = e[d];
+        };
         auto compute_face = [=](int lo_i, int lo_j, int lo_k, int hi_i, int hi_j, int hi_k, int dir)
             -> FluxT
         {
@@ -2308,12 +2570,62 @@ Hydro2::RHS(int lev,
                     const Set::Scalar us_n = s_M(gi, gj, gk, dir) / rs;
                     Solver::Local::Limiter::Primitive q = prim[src];
                     q.u = 2.0 * us_n - prim[src].u;
+                    if (wall_normal && !noslip_wall)
+                    {
+                        // [2026-09-29] slip: reflect about the TRUE surface normal,
+                        // u_g = u - 2 ((u - u_s).n) n, not about the face normal.
+                        // The wall is the first solid cell of the window (1 or 4).
+                        // first solid cell (ws) and its fluid neighbour (wf) on this side
+                        const int ws = (ghost <= 1) ? (sol[1] ? 1 : 0) : (sol[4] ? 4 : 5);
+                        const int wf = (ghost <= 1) ? ws + 1 : ws - 1;
+                        Set::Scalar n[3];
+                        face_wall_normal(lo_i + (wf - 2) * di, lo_j + (wf - 2) * dj, lo_k + (wf - 2) * dk,
+                                         lo_i + (ws - 2) * di, lo_j + (ws - 2) * dj, lo_k + (ws - 2) * dk, dir, n);
+                        const int c1 = (dir + 1) % AMREX_SPACEDIM, c2 = (dir + 2) % AMREX_SPACEDIM;
+                        Set::Scalar U[3] = {0.0, 0.0, 0.0}, Us[3] = {0.0, 0.0, 0.0};
+                        U[dir] = prim[src].u; U[c1] = prim[src].v;
+                        for (int d = 0; d < AMREX_SPACEDIM; ++d) Us[d] = s_M(gi, gj, gk, d) / rs;
+#if AMREX_SPACEDIM == 3
+                        U[c2] = prim[src].w;
+#endif
+                        Set::Scalar un = 0.0;
+                        for (int d = 0; d < 3; ++d) un += (U[d] - Us[d]) * n[d];
+                        q.u = U[dir] - 2.0 * un * n[dir];
+                        q.v = U[c1]  - 2.0 * un * n[c1];
+#if AMREX_SPACEDIM == 3
+                        q.w = U[c2]  - 2.0 * un * n[c2];
+#endif
+                        (void)c2;
+                    }
                     if (noslip_wall)   // no-slip: reflect the tangential velocity about the solid's too
                     {
                         q.v = 2.0 * s_M(gi, gj, gk, (dir + 1) % AMREX_SPACEDIM) / rs - prim[src].v;
 #if AMREX_SPACEDIM == 3
                         q.w = 2.0 * s_M(gi, gj, gk, (dir + 2) % AMREX_SPACEDIM) / rs - prim[src].w;
 #endif
+                        if (noslip_image)
+                        {
+                            // [2026-09-30] NO-SLIP WALL AT THE TRUE SURFACE: velocity (relative to
+                            // the solid) linear and zero at phi = 0.5, which sits a fraction t of
+                            // the f -> s spacing from the wall fluid cell.  A ghost mg cells deep
+                            // mirrors a source ms cells out: u_g - u_s = -(mg - t)/(t + ms - 1)
+                            // (u_src - u_s).  Plain mirror (ratio 1) for a 0/1 phi (t = 1/2).
+                            const int ws = (ghost <= 1) ? (sol[1] ? 1 : 0) : (sol[4] ? 4 : 5);
+                            const int wf = (ghost <= 1) ? ws + 1 : ws - 1;
+                            const Set::Scalar phf = phisol(lo_i + (wf - 2) * di, lo_j + (wf - 2) * dj, lo_k + (wf - 2) * dk);
+                            const Set::Scalar phs = phisol(lo_i + (ws - 2) * di, lo_j + (ws - 2) * dj, lo_k + (ws - 2) * dk);
+                            const Set::Scalar t = std::min(std::max((phf - 0.5) / std::max(phf - phs, 1e-12), 0.05), 0.95);
+                            const int mg = std::abs(ghost - ws) + 1, ms = std::abs(src - wf) + 1;
+                            const Set::Scalar ratio = std::min((mg - t) / (t + ms - 1), noslip_ratio_max);
+                            const Set::Scalar usn = s_M(gi, gj, gk, dir) / rs;
+                            const Set::Scalar ust = s_M(gi, gj, gk, (dir + 1) % AMREX_SPACEDIM) / rs;
+                            q.u = usn - ratio * (prim[src].u - usn);
+                            q.v = ust - ratio * (prim[src].v - ust);
+#if AMREX_SPACEDIM == 3
+                            const Set::Scalar ust2 = s_M(gi, gj, gk, (dir + 2) % AMREX_SPACEDIM) / rs;
+                            q.w = ust2 - ratio * (prim[src].w - ust2);
+#endif
+                        }
                     }
                     prim[ghost] = q;
                 };
@@ -2432,12 +2744,74 @@ Hydro2::RHS(int lev,
 #if AMREX_SPACEDIM == 3
                             pg.w = 2.0 * s_M(si, sj, sk, (d + 2) % AMREX_SPACEDIM) / rs - pf.w;
 #endif
+                            if (noslip_image)
+                            {
+                                // [2026-09-30] no-slip wall at phi = 0.5 (see compute_face): ghost
+                                // velocity relative to the solid = -r (u_f - u_s),
+                                // r = (0.5 - phi_s)/(phi_f - 0.5); r = 1 for a 0/1 phi.
+                                const Set::Scalar phf = phisol(fi, fj, fk), phs = phisol(si, sj, sk);
+                                Set::Scalar r = (0.5 - phs) / std::max(phf - 0.5, 1e-3);
+                                r = std::min(std::max(r, 0.0), noslip_ratio_max);
+                                const Set::Scalar ust = s_M(si, sj, sk, (d + 1) % AMREX_SPACEDIM) / rs;
+                                pg.u = us_n - r * (pf.u - us_n);
+                                pg.v = ust  - r * (pf.v - ust);
+#if AMREX_SPACEDIM == 3
+                                const Set::Scalar ust2 = s_M(si, sj, sk, (d + 2) % AMREX_SPACEDIM) / rs;
+                                pg.w = ust2 - r * (pf.w - ust2);
+#endif
+                            }
                         }
+                        if (wall_normal && !noslip_wall)
+                        {
+                            // [2026-09-29] GHOST-CELL MIRROR ABOUT THE TRUE NORMAL (slip).
+                            // The ghost is the fluid state reflected about the surface
+                            // normal n (relative to the solid): u_g = u - 2 ((u - u_s).n) n,
+                            // and the face flux is the ordinary Riemann flux fluid|ghost.
+                            // Flow tangent to the TRUE surface therefore passes a riser
+                            // face of the staircase as if the wall were smooth (ghost-cell
+                            // immersed boundary).  A pressure-only flux with p* along n was
+                            // tried first and is WRONG at low Mach: the staircase still
+                            // forces the cell velocity parallel to the steps, so u.n ~ U
+                            // sin(theta) and p* picks up rho c U sin(theta) (~0.7 q at
+                            // M 0.2, alpha 4): Euler Cl 1.05, Cd -0.05.  No-slip needs no
+                            // normal: its mirror 2 u_s - u is frame independent.
+                            Set::Scalar n[3];
+                            face_wall_normal(fi, fj, fk, si, sj, sk, d, n);
+                            const int c1 = (d + 1) % AMREX_SPACEDIM, c2 = (d + 2) % AMREX_SPACEDIM;
+                            Set::Scalar U[3] = {0.0, 0.0, 0.0}, Us[3] = {0.0, 0.0, 0.0};
+                            U[d] = pf.u; U[c1] = pf.v;
+#if AMREX_SPACEDIM == 3
+                            U[c2] = pf.w;
+#endif
+                            (void)c2;
+                            for (int dd = 0; dd < AMREX_SPACEDIM; ++dd) Us[dd] = s_M(si, sj, sk, dd) / rs;
+                            Set::Scalar un = 0.0;
+                            for (int dd = 0; dd < 3; ++dd) un += (U[dd] - Us[dd]) * n[dd];
+                            // [2026-09-29] WALL AT THE TRUE SURFACE, not at the face.  Along
+                            // the face axis the surface (phi = 0.5) sits a fraction
+                            // t = (phi_f - 0.5)/(phi_f - phi_s) from f toward s, so the normal
+                            // velocity, linear and zero at the surface, is -r u_n at the ghost
+                            // with r = |d_s|/d_f = (0.5 - phi_s)/(phi_f - 0.5).  The plain mirror
+                            // (r = 1) puts the slip plane on the staircase face: the 15 deg wedge
+                            // turned the flow only 14.23 deg (beta -0.78 deg at M 3 and 5).
+                            // r = 1 exactly for a 0/1 phi; needs phi carrying sub-cell geometry
+                            // (volume fraction / smooth signed-distance profile).
+                            const Set::Scalar phf = phisol(fi, fj, fk), phs = phisol(si, sj, sk);
+                            Set::Scalar r = (0.5 - phs) / std::max(phf - 0.5, 1e-3);
+                            r = std::min(std::max(r, 0.0), wall_ratio_max);
+                            pg.u = U[d]  - (1.0 + r) * un * n[d];
+                            pg.v = U[c1] - (1.0 + r) * un * n[c1];
+#if AMREX_SPACEDIM == 3
+                            pg.w = U[c2] - (1.0 + r) * un * n[c2];
+#endif
+                        }
+                        {
                         const Solver::Local::FluidRiemann::State sf = Solver::Local::Limiter::ToState(pf, small);
                         const Solver::Local::FluidRiemann::State sg = Solver::Local::Limiter::ToState(pg, small);
                         fl = fl_lo ? riemannsolver->Solve(sf, sg, pref, small)
                                    : riemannsolver->Solve(sg, sf, pref, small);
                         fl.alpha_face = pf.alpha;
+                        }
                     }
                     if (sl && f == dom_lo)      symmetrize(fl);
                     if (sh && f == dom_hi_face) symmetrize(fl);
@@ -2504,6 +2878,8 @@ Hydro2::RHS(int lev,
         BL_PROFILE_VAR("Hydro2::RHS::cell_update", prof_cells);
         const amrex::Box vbx_cc = mfi.validbox();
         const auto vbx_lo = amrex::lbound(vbx_cc);
+        // RK stage weight b_i for the reflux flux accumulation (see Advance).
+        const Set::Scalar rw = reflux_stage_weight;
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
@@ -2547,6 +2923,88 @@ Hydro2::RHS(int lev,
                             hess_u(r, p, q) = (hess_M(r, p, q) - gradu(r, q) * gradrho(p) - gradu(r, p) * gradrho(q) - u(r) * hess_rho(p, q))
                                               / (rho(i, j, k));
                         }
+            }
+
+            // [2026-09-27] SHARP-WALL VISCOUS STENCIL (solid.wall_flux = 1, solid.visc_mirror = 1).
+            // The mirrored Riemann flux puts the wall on the fluid|solid FACE, but
+            // the stencils above read the solid cells' own velocity (u_s ~ 0) one
+            // full cell away: the viscous terms saw the no-slip wall dx/2 inside
+            // the solid, half the wall shear, and a spurious face slip velocity
+            // -- inconsistent with the inviscid wall (first order in dx; measured
+            // as a lift deficit growing with Re on the NACA 0008).  Use the same
+            // ghost-mirror as compute_face: every stencil cell across the wall
+            // takes u_g = 2 u_wall - u_c, so u = u_wall exactly on the face.
+            //   fluid cell: gradu / hess_u from central differences of that
+            //     mirrored local field (only cells with a solid neighbour).
+            //   solid cell (inert; its div_tau only feeds rhs_force): per fluid
+            //     neighbour n the face shear is mu (u_n - u_g)/dx with
+            //     u_g = 2 u_s - u_n, i.e. exactly what the fluid cell loses, so
+            //     the reported viscous force is the one the fluid feels.
+            if (viscous && sharp_wall && visc_mirror)
+            {
+                const bool self_solid = phisol(i, j, k) < 0.5;
+                bool near_wall = false;
+                for (int a = -1; a <= 1; ++a)
+                for (int b = -1; b <= 1; ++b)
+#if AMREX_SPACEDIM == 3
+                for (int c = -1; c <= 1; ++c)
+#else
+                for (int c = 0; c <= 0; ++c)
+#endif
+                    if ((phisol(i + a, j + b, k + c) < 0.5) != self_solid) near_wall = true;
+
+                if (near_wall)
+                {
+                    auto uraw = [&](int a, int b, int c, int r) {
+                        return M(i + a, j + b, k + c, r) / std::max(rho(i + a, j + b, k + c), small);
+                    };
+                    // wall velocity = the solid's prescribed velocity (as compute_face)
+                    auto uwall = [&](int a, int b, int c, int r) {
+                        return s_M(i + a, j + b, k + c, r)
+                               / std::max(s_re0(i + a, j + b, k + c) + s_re1(i + a, j + b, k + c), small);
+                    };
+                    Set::Scalar uc[AMREX_SPACEDIM];
+                    for (int r = 0; r < AMREX_SPACEDIM; r++) uc[r] = uraw(0, 0, 0, r);
+                    int e[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+                    gradu = Set::Matrix::Zero();
+                    hess_u = Set::Matrix3::Zero();
+                    if (!self_solid)
+                    {
+                        // mirrored velocity at offset (a,b,c)
+                        auto um = [&](int a, int b, int c, int r) {
+                            return (phisol(i + a, j + b, k + c) < 0.5) ? 2.0 * uwall(a, b, c, r) - uc[r] : uraw(a, b, c, r);
+                        };
+                        for (int r = 0; r < AMREX_SPACEDIM; r++)
+                            for (int p = 0; p < AMREX_SPACEDIM; p++)
+                            {
+                                const int* ep = e[p];
+                                gradu(r, p) = (um(ep[0], ep[1], ep[2], r) - um(-ep[0], -ep[1], -ep[2], r)) / (2.0 * DX[p]);
+                                for (int q = 0; q < AMREX_SPACEDIM; q++)
+                                {
+                                    const int* eq = e[q];
+                                    if (p == q)
+                                        hess_u(r, p, p) = (um(ep[0], ep[1], ep[2], r) - 2.0 * uc[r] + um(-ep[0], -ep[1], -ep[2], r)) / (DX[p] * DX[p]);
+                                    else
+                                        hess_u(r, p, q) = (um( ep[0] + eq[0],  ep[1] + eq[1],  ep[2] + eq[2], r)
+                                                         - um( ep[0] - eq[0],  ep[1] - eq[1],  ep[2] - eq[2], r)
+                                                         - um(-ep[0] + eq[0], -ep[1] + eq[1], -ep[2] + eq[2], r)
+                                                         + um(-ep[0] - eq[0], -ep[1] - eq[1], -ep[2] - eq[2], r)) / (4.0 * DX[p] * DX[q]);
+                                }
+                            }
+                    }
+                    else
+                    {
+                        // wall-shear exchange only: (u_n - u_g)/dx^2 = 2 (u_n - u_s)/dx^2 per fluid neighbour
+                        for (int r = 0; r < AMREX_SPACEDIM; r++)
+                            for (int p = 0; p < AMREX_SPACEDIM; p++)
+                                for (int sgn = -1; sgn <= 1; sgn += 2)
+                                {
+                                    const int a = sgn * e[p][0], b = sgn * e[p][1], c = sgn * e[p][2];
+                                    if (phisol(i + a, j + b, k + c) >= 0.5)
+                                        hess_u(r, p, p) += 2.0 * (uraw(a, b, c, r) - uwall(0, 0, 0, r)) / (DX[p] * DX[p]);
+                                }
+                    }
+                }
             }
 
             // WIP: Debugging feild for hess_u
@@ -3017,71 +3475,71 @@ Hydro2::RHS(int lev,
             if (have_cc_fluxes)
             {
                 // x-direction hi-face (normal->0, tangent->1, tangent2->2)
-                ff_mass_x  (i, j, k, 0) = flux_xhi.mass0;
-                ff_mass_x  (i, j, k, 1) = flux_xhi.mass1;
-                ff_mom_x   (i, j, k, 0) = flux_xhi.momentum_normal;
-                ff_mom_x   (i, j, k, 1) = flux_xhi.momentum_tangent;
-                ff_ene_x   (i, j, k)    = flux_xhi.energy_total;
-                ff_ene_k_x (i, j, k, 0) = flux_xhi.energy0;
-                ff_ene_k_x (i, j, k, 1) = flux_xhi.energy1;
+                ff_mass_x  (i, j, k, 0) += rw * flux_xhi.mass0;
+                ff_mass_x  (i, j, k, 1) += rw * flux_xhi.mass1;
+                ff_mom_x   (i, j, k, 0) += rw * flux_xhi.momentum_normal;
+                ff_mom_x   (i, j, k, 1) += rw * flux_xhi.momentum_tangent;
+                ff_ene_x   (i, j, k)    += rw * flux_xhi.energy_total;
+                ff_ene_k_x (i, j, k, 0) += rw * flux_xhi.energy0;
+                ff_ene_k_x (i, j, k, 1) += rw * flux_xhi.energy1;
 
                 // y-direction hi-face (normal->1, tangent->2%SD, tangent2->0)
-                ff_mass_y  (i, j, k, 0) = flux_yhi.mass0;
-                ff_mass_y  (i, j, k, 1) = flux_yhi.mass1;
-                ff_mom_y   (i, j, k, 1)                  = flux_yhi.momentum_normal;
-                ff_mom_y   (i, j, k, 2 % AMREX_SPACEDIM) = flux_yhi.momentum_tangent;
-                ff_ene_y   (i, j, k)    = flux_yhi.energy_total;
-                ff_ene_k_y (i, j, k, 0) = flux_yhi.energy0;
-                ff_ene_k_y (i, j, k, 1) = flux_yhi.energy1;
+                ff_mass_y  (i, j, k, 0) += rw * flux_yhi.mass0;
+                ff_mass_y  (i, j, k, 1) += rw * flux_yhi.mass1;
+                ff_mom_y   (i, j, k, 1)                  += rw * flux_yhi.momentum_normal;
+                ff_mom_y   (i, j, k, 2 % AMREX_SPACEDIM) += rw * flux_yhi.momentum_tangent;
+                ff_ene_y   (i, j, k)    += rw * flux_yhi.energy_total;
+                ff_ene_k_y (i, j, k, 0) += rw * flux_yhi.energy0;
+                ff_ene_k_y (i, j, k, 1) += rw * flux_yhi.energy1;
 #if AMREX_SPACEDIM == 3
-                ff_mom_x   (i, j, k, 2) = flux_xhi.momentum_tangent2;  // x tangent2 -> 2
-                ff_mom_y   (i, j, k, 0) = flux_yhi.momentum_tangent2;  // y tangent2 -> 0
+                ff_mom_x   (i, j, k, 2) += rw * flux_xhi.momentum_tangent2;  // x tangent2 -> 2
+                ff_mom_y   (i, j, k, 0) += rw * flux_yhi.momentum_tangent2;  // y tangent2 -> 0
 
                 // z-direction hi-face (normal->2, tangent->0, tangent2->1)
-                ff_mass_z  (i, j, k, 0) = flux_zhi.mass0;
-                ff_mass_z  (i, j, k, 1) = flux_zhi.mass1;
-                ff_mom_z   (i, j, k, 2) = flux_zhi.momentum_normal;
-                ff_mom_z   (i, j, k, 0) = flux_zhi.momentum_tangent;
-                ff_mom_z   (i, j, k, 1) = flux_zhi.momentum_tangent2;
-                ff_ene_z   (i, j, k)    = flux_zhi.energy_total;
-                ff_ene_k_z (i, j, k, 0) = flux_zhi.energy0;
-                ff_ene_k_z (i, j, k, 1) = flux_zhi.energy1;
+                ff_mass_z  (i, j, k, 0) += rw * flux_zhi.mass0;
+                ff_mass_z  (i, j, k, 1) += rw * flux_zhi.mass1;
+                ff_mom_z   (i, j, k, 2) += rw * flux_zhi.momentum_normal;
+                ff_mom_z   (i, j, k, 0) += rw * flux_zhi.momentum_tangent;
+                ff_mom_z   (i, j, k, 1) += rw * flux_zhi.momentum_tangent2;
+                ff_ene_z   (i, j, k)    += rw * flux_zhi.energy_total;
+                ff_ene_k_z (i, j, k, 0) += rw * flux_zhi.energy0;
+                ff_ene_k_z (i, j, k, 1) += rw * flux_zhi.energy1;
 #endif
 
                 if (i == vbx_lo.x) {
-                    ff_mass_x  (i - 1, j, k, 0) = flux_xlo.mass0;
-                    ff_mass_x  (i - 1, j, k, 1) = flux_xlo.mass1;
-                    ff_mom_x   (i - 1, j, k, 0) = flux_xlo.momentum_normal;
-                    ff_mom_x   (i - 1, j, k, 1) = flux_xlo.momentum_tangent;
-                    ff_ene_x   (i - 1, j, k)    = flux_xlo.energy_total;
-                    ff_ene_k_x (i - 1, j, k, 0) = flux_xlo.energy0;
-                    ff_ene_k_x (i - 1, j, k, 1) = flux_xlo.energy1;
+                    ff_mass_x  (i - 1, j, k, 0) += rw * flux_xlo.mass0;
+                    ff_mass_x  (i - 1, j, k, 1) += rw * flux_xlo.mass1;
+                    ff_mom_x   (i - 1, j, k, 0) += rw * flux_xlo.momentum_normal;
+                    ff_mom_x   (i - 1, j, k, 1) += rw * flux_xlo.momentum_tangent;
+                    ff_ene_x   (i - 1, j, k)    += rw * flux_xlo.energy_total;
+                    ff_ene_k_x (i - 1, j, k, 0) += rw * flux_xlo.energy0;
+                    ff_ene_k_x (i - 1, j, k, 1) += rw * flux_xlo.energy1;
 #if AMREX_SPACEDIM == 3
-                    ff_mom_x   (i - 1, j, k, 2) = flux_xlo.momentum_tangent2;
+                    ff_mom_x   (i - 1, j, k, 2) += rw * flux_xlo.momentum_tangent2;
 #endif
                 }
                 if (j == vbx_lo.y) {
-                    ff_mass_y  (i, j - 1, k, 0) = flux_ylo.mass0;
-                    ff_mass_y  (i, j - 1, k, 1) = flux_ylo.mass1;
-                    ff_mom_y   (i, j - 1, k, 1)                  = flux_ylo.momentum_normal;
-                    ff_mom_y   (i, j - 1, k, 2 % AMREX_SPACEDIM) = flux_ylo.momentum_tangent;
-                    ff_ene_y   (i, j - 1, k)    = flux_ylo.energy_total;
-                    ff_ene_k_y (i, j - 1, k, 0) = flux_ylo.energy0;
-                    ff_ene_k_y (i, j - 1, k, 1) = flux_ylo.energy1;
+                    ff_mass_y  (i, j - 1, k, 0) += rw * flux_ylo.mass0;
+                    ff_mass_y  (i, j - 1, k, 1) += rw * flux_ylo.mass1;
+                    ff_mom_y   (i, j - 1, k, 1)                  += rw * flux_ylo.momentum_normal;
+                    ff_mom_y   (i, j - 1, k, 2 % AMREX_SPACEDIM) += rw * flux_ylo.momentum_tangent;
+                    ff_ene_y   (i, j - 1, k)    += rw * flux_ylo.energy_total;
+                    ff_ene_k_y (i, j - 1, k, 0) += rw * flux_ylo.energy0;
+                    ff_ene_k_y (i, j - 1, k, 1) += rw * flux_ylo.energy1;
 #if AMREX_SPACEDIM == 3
-                    ff_mom_y   (i, j - 1, k, 0) = flux_ylo.momentum_tangent2;
+                    ff_mom_y   (i, j - 1, k, 0) += rw * flux_ylo.momentum_tangent2;
 #endif
                 }
 #if AMREX_SPACEDIM == 3
                 if (k == vbx_lo.z) {
-                    ff_mass_z  (i, j, k - 1, 0) = flux_zlo.mass0;
-                    ff_mass_z  (i, j, k - 1, 1) = flux_zlo.mass1;
-                    ff_mom_z   (i, j, k - 1, 2) = flux_zlo.momentum_normal;
-                    ff_mom_z   (i, j, k - 1, 0) = flux_zlo.momentum_tangent;
-                    ff_mom_z   (i, j, k - 1, 1) = flux_zlo.momentum_tangent2;
-                    ff_ene_z   (i, j, k - 1)    = flux_zlo.energy_total;
-                    ff_ene_k_z (i, j, k - 1, 0) = flux_zlo.energy0;
-                    ff_ene_k_z (i, j, k - 1, 1) = flux_zlo.energy1;
+                    ff_mass_z  (i, j, k - 1, 0) += rw * flux_zlo.mass0;
+                    ff_mass_z  (i, j, k - 1, 1) += rw * flux_zlo.mass1;
+                    ff_mom_z   (i, j, k - 1, 2) += rw * flux_zlo.momentum_normal;
+                    ff_mom_z   (i, j, k - 1, 0) += rw * flux_zlo.momentum_tangent;
+                    ff_mom_z   (i, j, k - 1, 1) += rw * flux_zlo.momentum_tangent2;
+                    ff_ene_z   (i, j, k - 1)    += rw * flux_zlo.energy_total;
+                    ff_ene_k_z (i, j, k - 1, 0) += rw * flux_zlo.energy0;
+                    ff_ene_k_z (i, j, k - 1, 1) += rw * flux_zlo.energy1;
                 }
 #endif
             }
@@ -3661,8 +4119,81 @@ Hydro2::RHS(int lev,
     if (embedded.apply && embedded.wall_flux)
     {
         const bool want_force = (solid_force_int > 0 && lev == finest_level);
+        const bool force_carry_corr = embedded.wall_normal && embedded.slip && !embedded.wall_redistribute;
         Set::Scalar vol = 1.0;
         for (int d = 0; d < AMREX_SPACEDIM; ++d) vol *= DX[d];
+        // [2026-09-29] CONSERVATIVE REDISTRIBUTION (slip wall + solid.wall_normal).
+        // With the ghost reflected about the TRUE normal, flow crosses riser faces of
+        // the staircase: mass/energy entering a solid cell would be deleted when its
+        // RHS is zeroed (Euler NACA 0008: 2.4 % of the chord mass flux lost, and its
+        // momentum read as +0.049 Cd by the force diagnostic).  Hand each solid cell's
+        // net mass / energy RHS to its face-neighbour fluid cells in equal shares, with
+        // the carried momentum (mass share x receiving-cell velocity).  Exactly
+        // conservative for mass and energy; the carried momentum is taken off the force.
+        Set::Scalar redis_force[3] = {0.0, 0.0, 0.0};
+        if (embedded.wall_normal && embedded.slip && embedded.wall_redistribute)
+        {
+            constexpr int NR = 5;                          // rho_eta0, rho_eta1, E, E0, E1
+            amrex::MultiFab rs(M_rhs_mf.boxArray(), M_rhs_mf.DistributionMap(), NR, 1);
+            rs.setVal(0.0);
+            amrex::MultiFab::Copy(rs, rho_eta0_rhs_mf, 0, 0, 1, 0);
+            amrex::MultiFab::Copy(rs, rho_eta1_rhs_mf, 0, 1, 1, 0);
+            amrex::MultiFab::Copy(rs, E_rhs_mf,        0, 2, 1, 0);
+            amrex::MultiFab::Copy(rs, E0_rhs_mf,       0, 3, 1, 0);
+            amrex::MultiFab::Copy(rs, E1_rhs_mf,       0, 4, 1, 0);
+            rs.FillBoundary(geom[lev].periodicity());
+            embedded.phi_mf[lev]->FillBoundary(geom[lev].periodicity());
+            amrex::ReduceOps<amrex::ReduceOpSum, amrex::ReduceOpSum, amrex::ReduceOpSum> rd_op;
+            amrex::ReduceData<Set::Scalar, Set::Scalar, Set::Scalar> rd_data(rd_op);
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+            for (amrex::MFIter mfi(M_rhs_mf, HydroTiling()); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &bx = mfi.tilebox();
+                auto phi = embedded.phi_mf[lev]->const_array(mfi);
+                auto R   = rs.const_array(mfi);
+                auto r0  = rho_eta0_rhs_mf.array(mfi);
+                auto r1  = rho_eta1_rhs_mf.array(mfi);
+                auto Mr  = M_rhs_mf.array(mfi);
+                auto Er  = E_rhs_mf.array(mfi);
+                auto E0r = E0_rhs_mf.array(mfi);
+                auto E1r = E1_rhs_mf.array(mfi);
+                auto Ms  = M_mf_in.const_array(mfi);
+                auto q0  = rho_eta0_mf_in.const_array(mfi);
+                auto q1  = rho_eta1_mf_in.const_array(mfi);
+                rd_op.eval(bx, rd_data, [=] AMREX_GPU_DEVICE(int i, int j, int k) -> amrex::GpuTuple<Set::Scalar, Set::Scalar, Set::Scalar> {
+                    if (phi(i, j, k) < 0.5) return {0.0, 0.0, 0.0};          // receivers are fluid cells
+                    Set::Scalar add[NR] = {0.0, 0.0, 0.0, 0.0, 0.0};
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                        for (int sg = -1; sg <= 1; sg += 2)
+                        {
+                            const int si = i + (d == 0 ? sg : 0), sj = j + (d == 1 ? sg : 0), sk = k + (d == 2 ? sg : 0);
+                            if (phi(si, sj, sk) >= 0.5) continue;              // neighbour is fluid
+                            int nf = 0;                                         // fluid face-neighbours of that solid cell
+                            for (int e = 0; e < AMREX_SPACEDIM; ++e)
+                                for (int tg = -1; tg <= 1; tg += 2)
+                                    if (phi(si + (e == 0 ? tg : 0), sj + (e == 1 ? tg : 0), sk + (e == 2 ? tg : 0)) >= 0.5) ++nf;
+                            if (nf == 0) continue;
+                            for (int c = 0; c < NR; ++c) add[c] += R(si, sj, sk, c) / nf;
+                        }
+                    r0(i, j, k) += add[0]; r1(i, j, k) += add[1]; Er(i, j, k) += add[2];
+                    E0r(i, j, k) += add[3]; E1r(i, j, k) += add[4];
+                    const Set::Scalar rho = std::max(q0(i, j, k) + q1(i, j, k), 1e-30);
+                    const Set::Scalar dm = add[0] + add[1];
+                    Set::Scalar f[3] = {0.0, 0.0, 0.0};
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    {
+                        const Set::Scalar dM = dm * Ms(i, j, k, d) / rho;
+                        Mr(i, j, k, d) += dM;
+                        f[d] = dM * vol;
+                    }
+                    return {f[0], f[1], f[2]};
+                });
+            }
+            auto rdv = rd_data.value(rd_op);
+            redis_force[0] = amrex::get<0>(rdv); redis_force[1] = amrex::get<1>(rdv); redis_force[2] = amrex::get<2>(rdv);
+        }
         amrex::ReduceOps<amrex::ReduceOpSum, amrex::ReduceOpSum, amrex::ReduceOpSum> rf_op;
         amrex::ReduceData<Set::Scalar, Set::Scalar, Set::Scalar> rf_data(rf_op);
 #ifdef AMREX_USE_OMP
@@ -3679,17 +4210,44 @@ Hydro2::RHS(int lev,
             auto er  = eta_rhs_mf.array(mfi);
             auto E0r = E0_rhs_mf.array(mfi);
             auto E1r = E1_rhs_mf.array(mfi);
+            auto Ms  = M_mf_in.const_array(mfi);
+            auto q0  = rho_eta0_mf_in.const_array(mfi);
+            auto q1  = rho_eta1_mf_in.const_array(mfi);
             rf_op.eval(bx, rf_data, [=] AMREX_GPU_DEVICE(int i, int j, int k) -> amrex::GpuTuple<Set::Scalar, Set::Scalar, Set::Scalar> {
                 if (phi(i, j, k) >= 0.5) return {0.0, 0.0, 0.0};
                 Set::Scalar f[3] = {0.0, 0.0, 0.0};
-                for (int d = 0; d < AMREX_SPACEDIM; ++d) { f[d] = Mr(i, j, k, d) * vol; Mr(i, j, k, d) = 0.0; }
+                // [2026-09-30] slip + wall_normal (ghost-cell wall, no redistribution): mass
+                // crosses riser faces, and the solid cell's momentum RHS then also holds the
+                // momentum that mass carries -- not a force on the body.  (Euler NACA 0008:
+                // ~2.3e-3 of mass created at the nose read as thrust, diagnostic Cd -0.0085
+                // vs +0.0135 from a control-volume momentum balance.)  Remove it: mass RHS
+                // times the mean velocity of the cell's fluid face-neighbours.
+                Set::Scalar ucar[3] = {0.0, 0.0, 0.0};
+                if (force_carry_corr)
+                {
+                    int nf = 0;
+                    for (int dd = 0; dd < AMREX_SPACEDIM; ++dd)
+                        for (int sg = -1; sg <= 1; sg += 2)
+                        {
+                            const int ii = i + (dd == 0 ? sg : 0), jj = j + (dd == 1 ? sg : 0), kk = k + (dd == 2 ? sg : 0);
+                            if (phi(ii, jj, kk) < 0.5) continue;
+                            const Set::Scalar rn = std::max(q0(ii, jj, kk) + q1(ii, jj, kk), 1e-30);
+                            for (int d = 0; d < AMREX_SPACEDIM; ++d) ucar[d] += Ms(ii, jj, kk, d) / rn;
+                            ++nf;
+                        }
+                    if (nf > 0) for (int d = 0; d < AMREX_SPACEDIM; ++d) ucar[d] /= nf;
+                }
+                const Set::Scalar dm = force_carry_corr ? (r0(i, j, k) + r1(i, j, k)) : 0.0;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) { f[d] = (Mr(i, j, k, d) - dm * ucar[d]) * vol; Mr(i, j, k, d) = 0.0; }
                 r0(i, j, k) = 0.0; r1(i, j, k) = 0.0; Er(i, j, k) = 0.0;
                 er(i, j, k) = 0.0; E0r(i, j, k) = 0.0; E1r(i, j, k) = 0.0;
                 return {f[0], f[1], f[2]};
             });
         }
         auto rfv = rf_data.value(rf_op);
-        if (want_force) { rhs_force[0] = amrex::get<0>(rfv); rhs_force[1] = amrex::get<1>(rfv); rhs_force[2] = amrex::get<2>(rfv); }
+        // body force = momentum pushed into the solid - momentum handed back with the
+        // redistributed mass (0 unless the slip + wall_normal redistribution ran)
+        if (want_force) { rhs_force[0] = amrex::get<0>(rfv) - redis_force[0]; rhs_force[1] = amrex::get<1>(rfv) - redis_force[1]; rhs_force[2] = amrex::get<2>(rfv) - redis_force[2]; }
     }
     // [DIAG RHSDECOMP] mass1 RHS budget: sum(rhs)*dV must equal
     // net boundary influx + interior sources.  Printed every 300 calls.
@@ -3788,10 +4346,36 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
     amrex::TimeIntegrator timeintegrator(solution_new, time);
 
+    // Butcher weights b_i of the explicit integrator AMReX will run (same
+    // integration.type / integration.rk.type it parses).  User tableaus read
+    // integration.rk.weights.  See reflux_stage_weight in Hydro2.H.
+    if (reflux_rk_weights.empty())
+    {
+        amrex::ParmParse pp("integration");
+        std::string itype = "ForwardEuler";
+        pp.query("type", itype);
+        if (itype == "RungeKutta")
+        {
+            int rktype = 3;
+            pp.query("rk.type", rktype);
+            if      (rktype == 1) reflux_rk_weights = {1.0};
+            else if (rktype == 2) reflux_rk_weights = {0.5, 0.5};
+            else if (rktype == 3) reflux_rk_weights = {1./6., 1./6., 2./3.};
+            else if (rktype == 4) reflux_rk_weights = {1./6., 1./3., 1./3., 1./6.};
+            else { amrex::Vector<Set::Scalar> w; pp.getarr("rk.weights", w); reflux_rk_weights.assign(w.begin(), w.end()); }
+        }
+        else reflux_rk_weights = {1.0};
+    }
+    int reflux_rk_stage = 0;
+
     timeintegrator.set_rhs([&](
                                amrex::Vector<amrex::MultiFab> &rhs_mf,
                                amrex::Vector<amrex::MultiFab> &solution_mf,
                                const Set::Scalar time) {
+        // AMReX's explicit RK evaluates the RHS exactly once per stage, in
+        // stage order (AMReX_RKIntegrator.H advance()).
+        reflux_stage_weight = reflux_rk_weights[std::min<int>(reflux_rk_stage, (int)reflux_rk_weights.size() - 1)];
+        reflux_rk_stage++;
         // rhs_mf:      [0]=rho_eta0_rhs, [1]=rho_eta1_rhs, [2]=M_rhs, [3]=E_rhs, [4]=eta_rhs, [5]=E0_rhs, [6]=E1_rhs, [7]=shell_rhs
         // solution_mf: [0]=rho_eta0,     [1]=rho_eta1,     [2]=M,     [3]=E,     [4]=eta,     [5]=E0,     [6]=E1,     [7]=shell
         RHS(lev, time,
@@ -3867,6 +4451,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // ------------------------------------------------------------------
     defer_relax = false;
     timeintegrator.advance(solution_old, solution_new, time, dt);
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(reflux_rk_stage == (int)reflux_rk_weights.size(),
+        "Hydro2 reflux: RHS evaluations per step != number of RK weights");
+    reflux_stage_weight = 1.0;
 
     // ------------------------------------------------------------------
     // Feed FluxRegister for reflux at coarse-fine boundaries.

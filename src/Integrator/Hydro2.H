@@ -187,6 +187,16 @@ protected:
     // L_relax once per step, after L_cap -- not between RK stages.
     bool defer_relax = false;
 
+    // [2026-09-27] Stage-weighted reflux.  RHS() ACCUMULATES rw * (face flux)
+    // into cc_fluxes on every RK stage, with rw = the Butcher weight b_i of the
+    // stage being evaluated, so after advance() cc_fluxes hold the flux the RK
+    // update actually applied, sum_i b_i F_i.  Previously each stage overwrote
+    // cc_fluxes and only the LAST stage's flux reached the FluxRegister, which
+    // is not conservative for SSPRK3/RK4 (exact only for ForwardEuler, b = {1},
+    // which stays bit-identical: 0 + 1*F = F).
+    Set::Scalar reflux_stage_weight = 1.0;
+    std::vector<Set::Scalar> reflux_rk_weights;   // b_i, filled once from integration.*
+
     // Marmottant advected shell: preserve the AREAL density Gamma = c/|grad eta|
     // across NON-MATERIAL changes to eta (stiff pressure relaxation, clamping to
     // [0,1], per-phase ghost reconstruction).  None of those move lipid, so Gamma

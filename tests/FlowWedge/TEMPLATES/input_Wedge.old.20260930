@@ -68,10 +68,6 @@ stop_time           = @STOP_TIME@        # @STOP_NOTE@
 apply_embedded_solid = 1
 solid.brinkman       = @BRINKMAN@        # ~4*U/eps = 400*U  (kappa = 1/brinkman)
 phi_refinement_criterion = 0.1        # refine the wedge boundary
-# [2026-09-30] inviscid test -> SLIP sharp wall with the surface-normal ghost (solid.wall_normal,
-# default 1): beta error -0.09 deg at M 3 and 5 (was +0.50 / +0.40 with the face-normal no-slip mirror).
-solid.slip      = 1
-solid.wall_flux = 1
 
 # Wedge as the intersection of three half-planes (upper ramp, lower ramp, base),
 # signed distance D = max(g_upper, g_lower, g_base):  D>0 fluid, D<0 solid.
@@ -84,7 +80,7 @@ solid.phi.ic.expression.constant.cth = 0.9659258
 solid.phi.ic.expression.constant.sth = 0.2588190
 solid.phi.ic.expression.constant.x0  = -0.5
 solid.phi.ic.expression.constant.xb  = 1.5
-solid.phi.ic.expression.constant.eps = 0.002   # [2026-09-30] ~half a finest cell (L3 dx = 0.0039): phi carries the exact wall position for the surface-normal wall
+solid.phi.ic.expression.constant.eps = 0.001
 solid.phi.ic.expression.region0 = "0.5*(1.0 + tanh( max(max( y*cth - (x-x0)*sth, -y*cth - (x-x0)*sth ), x - xb ) / eps ))"
 
 # Prescribed quiescent solid target, eta-consistent (alpha_1 = 0.5):
