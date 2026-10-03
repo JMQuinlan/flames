@@ -760,6 +760,31 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // tails and the mixture is compacting.  Test of whether the gas side
         // drives the loss of viscous tension; not a model.
         pp_query_default("shell.visc_liquid_side", value.shell_visc_liquid_side, 0);
+        // omega_sym_mirror (default 1, 2026-10-02).  The capillary/shell force at
+        // the first cell next to a symmetry (REFLECT) face is a central
+        // difference that reads Omega in the ghost cell across the face.  That
+        // ghost Omega is recomputed from ghost data, but the interface
+        // corrections to div_s u (shell.divs_kinematic 1/3/4/5/6) are applied in
+        // VALID cells only, so on a symmetry face the ghost carries a different
+        // tension from its mirror image and div(Omega) gets a spurious jump
+        // there.  (Interior box edges are fine: Omega.FillBoundary copies the
+        // neighbour's valid values.)  1 = after Omega is built, set the ghost
+        // layer at every symmetry face to the mirror of the first valid cell:
+        // components without the face-normal index once (diagonal, and the
+        // shear pair not involving it) even, the two shear components that
+        // involve it odd.
+        pp_query_default("omega_sym_mirror", value.omega_sym_mirror, 1);
+        // sym_face_central (default 1, 2026-10-02).  Numeric::GetStencil switches
+        // the eta and rho Hessians to ONE-SIDED differences in every cell on the
+        // domain edge.  On a symmetry (REFLECT) face the ghost cells are exact
+        // mirrors and every other derivative in that cell is central, so the
+        // one-sided Hessian makes the first row inconsistent with its mirror
+        // image (hess_rho feeds the viscous stress, hess_eta the curvatures).
+        // Measured, 2D quarter vs full domain, no surface tension and no shell:
+        // eta differs by 7.4e-3 in the row next to the plane and 1e-4 four rows
+        // in.  1 = central stencils on symmetry faces; non-symmetry faces keep
+        // the one-sided form.
+        pp_query_default("sym_face_central", value.sym_face_central, 1);
         if (value.shell_visc_true_area || value.shell_visc_layer)
             Util::Warning(INFO, "shell.visc_true_area / shell.visc_layer are PROTOTYPES (not validated)");
         pp_query_default("shell.kappa_s_subcycle", value.shell_visc_subcycle, 0);
@@ -1924,8 +1949,19 @@ Hydro2::RHS(int lev,
         const Solver::EOS::Tammann eos0_local = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
 
+        const int symc = sym_face_central;
+        const bool symlo_c[3] = {sym_face_lo[0], sym_face_lo[1], sym_face_lo[2]};
+        const bool symhi_c[3] = {sym_face_hi[0], sym_face_hi[1], sym_face_hi[2]};
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
+            if (symc)        // sym_face_central: mirrored ghosts -> central is exact (see Parse)
+            {
+                const amrex::Dim3 dlo = amrex::lbound(domain), dhi = amrex::ubound(domain);
+                const int ijk[3] = {i, j, k}, lo3[3] = {dlo.x, dlo.y, dlo.z}, hi3[3] = {dhi.x, dhi.y, dhi.z};
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    if ((symlo_c[d] && ijk[d] == lo3[d]) || (symhi_c[d] && ijk[d] == hi3[d]))
+                        sten[d] = Numeric::StencilType::Central;
+            }
 
             // Derivative Function Calls
             // Normal Compute
@@ -2376,6 +2412,42 @@ Hydro2::RHS(int lev,
             });
         }
         Omega.FillBoundary(geom[lev].periodicity());
+        if (omega_sym_mirror)
+        {
+            // Symmetric-tensor storage: 2D [xx,yy,xy]; 3D [xx,yy,zz,xy,xz,yz].
+            // sign[d][c] = parity of component c under reflection across a face normal to d.
+#if AMREX_SPACEDIM == 2
+            const Set::Scalar sgn[2][3] = {{1, 1, -1}, {1, 1, -1}};
+            const int nO = 3;
+#else
+            const Set::Scalar sgn[3][6] = {{1, 1, 1, -1, -1, 1}, {1, 1, 1, -1, 1, -1}, {1, 1, 1, 1, -1, -1}};
+            const int nO = 6;
+#endif
+            const amrex::Box dom = geom[lev].Domain();
+            for (amrex::MFIter mfi(Omega, false); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box vb = mfi.validbox();
+                amrex::Array4<Set::Scalar> const &om = Omega.array(mfi);
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    for (int side = 0; side < 2; ++side)
+                    {
+                        const bool sym = side ? sym_face_hi[d] : sym_face_lo[d];
+                        const int edge = side ? dom.bigEnd(d) : dom.smallEnd(d);
+                        if (!sym || (side ? vb.bigEnd(d) : vb.smallEnd(d)) != edge) continue;
+                        amrex::Box gb = amrex::grow(vb, 1);          // ghost slab of width 1 on this face
+                        if (side) { gb.setSmall(d, edge + 1); gb.setBig(d, edge + 1); }
+                        else      { gb.setSmall(d, edge - 1); gb.setBig(d, edge - 1); }
+                        const int sh = side ? -1 : 1;                  // ghost (edge -+ 1) mirrors valid cell edge
+                        amrex::LoopOnCpu(gb, [&](int i, int j, int k) {
+                            amrex::IntVect g(AMREX_D_DECL(i, j, k)), v = g;
+                            v[d] += sh;
+                            if (!om.contains(v[0], v[1], AMREX_SPACEDIM > 2 ? v[2] : 0)) return;
+                            for (int c = 0; c < nO; ++c)
+                                om(i, j, k, c) = sgn[d][c] * om(v[0], v[1], AMREX_SPACEDIM > 2 ? v[2] : 0, c);
+                        });
+                    }
+            }
+        }
     }
 
     // Main time integration loop
@@ -2535,9 +2607,20 @@ Hydro2::RHS(int lev,
         const bool symlo2 = sym_face_lo[2], symhi2 = sym_face_hi[2];
 #endif
 
+        const int symc = sym_face_central;
+        const bool symlo_c[3] = {sym_face_lo[0], sym_face_lo[1], sym_face_lo[2]};
+        const bool symhi_c[3] = {sym_face_hi[0], sym_face_hi[1], sym_face_hi[2]};
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
+            if (symc)        // sym_face_central: mirrored ghosts -> central is exact (see Parse)
+            {
+                const amrex::Dim3 dlo = amrex::lbound(domain), dhi = amrex::ubound(domain);
+                const int ijk[3] = {i, j, k}, lo3[3] = {dlo.x, dlo.y, dlo.z}, hi3[3] = {dhi.x, dhi.y, dhi.z};
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    if ((symlo_c[d] && ijk[d] == lo3[d]) || (symhi_c[d] && ijk[d] == hi3[d]))
+                        sten[d] = Numeric::StencilType::Central;
+            }
 
             // Diffuse Sources
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
@@ -4323,8 +4406,19 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> rho = density_mf.Patch(lev, mfi);
 
+        const int symc = sym_face_central;
+        const bool symlo_c[3] = {sym_face_lo[0], sym_face_lo[1], sym_face_lo[2]};
+        const bool symhi_c[3] = {sym_face_hi[0], sym_face_hi[1], sym_face_hi[2]};
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
+            if (symc)        // sym_face_central: mirrored ghosts -> central is exact (see Parse)
+            {
+                const amrex::Dim3 dlo = amrex::lbound(domain), dhi = amrex::ubound(domain);
+                const int ijk[3] = {i, j, k}, lo3[3] = {dlo.x, dlo.y, dlo.z}, hi3[3] = {dhi.x, dhi.y, dhi.z};
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    if ((symlo_c[d] && ijk[d] == lo3[d]) || (symhi_c[d] && ijk[d] == hi3[d]))
+                        sten[d] = Numeric::StencilType::Central;
+            }
 
             rho(i, j, k) = std::max(rho_eta0(i, j, k) + rho_eta1(i, j, k), small);
             eta_new(i, j, k) = std::max(0.0, std::min(1.0, eta_new(i, j, k)));
@@ -4433,10 +4527,21 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         const Set::Scalar alpha_floor = 1.0e-30;
         // Local copies: class members are not addressable inside a GPU lambda.
         const Set::Scalar mu0_l = mu0, mu1_l = mu1, small_l = small;
+        const int symc = sym_face_central;
+        const bool symlo_c[3] = {sym_face_lo[0], sym_face_lo[1], sym_face_lo[2]};
+        const bool symhi_c[3] = {sym_face_hi[0], sym_face_hi[1], sym_face_hi[2]};
 
         amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &vz_max_local, &F_max_local, &rho_min_local, &nu_max_local, &nus_max_local] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
+            if (symc)        // sym_face_central: mirrored ghosts -> central is exact (see Parse)
+            {
+                const amrex::Dim3 dlo = amrex::lbound(domain), dhi = amrex::ubound(domain);
+                const int ijk[3] = {i, j, k}, lo3[3] = {dlo.x, dlo.y, dlo.z}, hi3[3] = {dhi.x, dhi.y, dhi.z};
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    if ((symlo_c[d] && ijk[d] == lo3[d]) || (symhi_c[d] && ijk[d] == hi3[d]))
+                        sten[d] = Numeric::StencilType::Central;
+            }
 
             Set::Vector grad_eta = Numeric::Gradient(eta_new, i, j, k, 0, DX);
             Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
