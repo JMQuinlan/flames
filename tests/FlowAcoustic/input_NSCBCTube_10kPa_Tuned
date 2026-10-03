@@ -1,0 +1,142 @@
+#@ [nscbc_tube_10kpa_tuned]
+#@ exe=hydro2
+#@ dim=2
+# =============================================================================
+# NSCBC TUBE UNIT TEST -- 10 kPa pulse, well-tuned NSCBC
+#
+# A right-travelling acoustic pulse of amplitude 10 kPa in quiescent water
+# (Tammann EOS, p0 = 101325 Pa, rho0 = 1000 kg/m^3, c = 1533.0 m/s) runs down
+# a 10 mm tube and hits the NSCBC4 outflow face at xhi.  The IC is a pure
+# right-going simple wave (p' = A G(x), u' = p'/(rho0 c), rho' = p'/c^2), so
+# nothing reaches xlo and ONLY the xhi face is tested.  y is periodic: a 1D
+# problem on a 400 x 4 strip, a few seconds on one core.
+#
+#   pulse centre x = 3 mm, Gaussian half-width 0.5 mm (20 cells)
+#   arrival at xhi   t = 4.57e-6 s
+#   stop_time        1.0e-5 s  (a reflection, if any, is back at x ~ 1.7 mm)
+#
+# Single fluid: both phases carry the water EOS and eta = 0, as in the
+# input_NSCBCDrive_* decks, so no interface or trace-phase physics is involved.
+#
+# WELL-TUNED NSCBC: sigma left at the code default (0.25), L_ref = 10 mm on xhi
+#   (the tube length, the Rudy-Strikwerda / Poinsot-Lele choice), so the
+#   relaxation rate is K = sigma c / L_ref = 3.8e4 1/s, 20x gentler than the
+#   code default L_ref = domain/20.  Expected: |R| ~ 0.01 for this pulse.
+#
+# Analysis: tests/FlowAcoustic/reference/AnalyzeNSCBCTube.py
+#   reflection coefficient R = (peak of the returning wave)/(incident peak)
+# =============================================================================
+alamo.program = hydro2
+plot_file   = ./tests/FlowAcoustic/output_NSCBCTube_10kPa_Tuned
+amr.plot_dt = 2.5e-7
+
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 4
+amr.grid_eff = 0.8
+amr.n_cell = 400 4
+nghost = 4                     # selects BC::NSCBC4
+
+geometry.prob_lo = 0.0   -0.00005  0.0
+geometry.prob_hi = 0.01   0.00005  0.0
+geometry.is_periodic = 0 1 0
+
+timestep  = 5.0e-9             # CFL 0.31 at c = 1533 m/s, dx = 25 um
+cfl       = 0.4
+stop_time = 1.0e-5
+
+eta.ic.type = constant
+eta.ic.constant.value = 0.0
+epsilon = 0.005
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+Riemann_Solver.type = hllc
+Limiter.type        = weno3
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+### EOS -- Tammann water in both phases (single fluid) ###
+eos0.gamma = 2.35
+eos0.p0    = 1.0e9
+eos0.cp    = 4186.0
+eos0.cv    = 1781.0
+eos1.gamma = 2.35
+eos1.p0    = 1.0e9
+eos1.cp    = 4186.0
+eos1.cv    = 1781.0
+mu0 = 0.0
+mu1 = 0.0
+sigma = 0.0
+pref  = 0.0
+apply_surface_tension = 0
+
+### RIGHT-TRAVELLING GAUSSIAN PULSE, amplitude pamp ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1000.0"
+density1.ic.type = expression
+density1.ic.expression.constant.pamp = 10000.0
+density1.ic.expression.constant.xc   = 0.003
+density1.ic.expression.constant.pw   = 0.0005
+density1.ic.expression.constant.csq  = 2.350238e+06
+density1.ic.expression.region0 = "1000.0 + pamp*exp(-((x-xc)*(x-xc))/(pw*pw))/csq"
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.pamp = 10000.0
+velocity1.ic.expression.constant.xc   = 0.003
+velocity1.ic.expression.constant.pw   = 0.0005
+velocity1.ic.expression.constant.zac  = 1.533049e+06
+velocity1.ic.expression.region0 = "pamp*exp(-((x-xc)*(x-xc))/(pw*pw))/zac"
+velocity1.ic.expression.region1 = "0.0"
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "101325.0"
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.pamp = 10000.0
+pressure1.ic.expression.constant.xc   = 0.003
+pressure1.ic.expression.constant.pw   = 0.0005
+pressure1.ic.expression.region0 = "101325.0 + pamp*exp(-((x-xc)*(x-xc))/(pw*pw))"
+
+### BOUNDARY CONDITIONS: NSCBC4 outflow on x, periodic in y ###
+density.bc.type.xlo  = nscbc_outflow
+density.bc.type.xhi  = nscbc_outflow
+energy.bc.type.xlo   = nscbc_outflow
+energy.bc.type.xhi   = nscbc_outflow
+momentum.bc.type.xlo = nscbc_outflow nscbc_outflow
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+density.bc.type.ylo  = periodic
+density.bc.type.yhi  = periodic
+energy.bc.type.ylo   = periodic
+energy.bc.type.yhi   = periodic
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+eta.bc.type.ylo = periodic
+eta.bc.type.yhi = periodic
+
+nscbc.small = 1.0e-10
+nscbc.xlo.type     = outflow
+nscbc.xlo.target_p = 101325.0
+nscbc.xlo.target_u = 0.0
+nscbc.xlo.target_v = 0.0
+nscbc.xhi.type     = outflow
+nscbc.xhi.target_p = 101325.0
+nscbc.xhi.target_u = 0.0
+nscbc.xhi.target_v = 0.0
+nscbc.xhi.L_ref    = 0.01
+
+eta_refinement_criterion   = 1.0e+10
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+apply_buoyancy     = 0
+apply_weight       = 0
+apply_vaporization = 0
+grav               = 0.0
+apply_sharpening   = 0

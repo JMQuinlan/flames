@@ -749,10 +749,19 @@ protected:
     int nan_check = 0;
     int verbose = 0;
     int eta_consistent_advect = 0;  // 1 = WENO3 face-alpha row, NOT validated (see Parse)
+    int eta_trace_kapila = 0;       // 1 = Kapila K div(u) source in the alpha row for trace-liquid cells (see Parse)
+    int eta_regularize = 0;         // 1 = conservative interface regularization keeps the band at thickness epsilon (see Parse)
+    Set::Scalar eta_regularize_speed = 1.0;   // regularization speed / max band |u| (Jain 2022 uses 1)
+    Set::Scalar eta_reg_dt = 0.0;   // current level dt, for the explicit-diffusion bound on the regularization speed
     int capillary_jump_scheme = 0;  // 1 = experimental Laplace-jump scheme (see Parse); 0 = existing tensor only
     int shell_divs_kinematic = 5;   // 5 = interface-evaluated div_s u (default, see Parse); 0 = legacy band velocity
     int shell_divs_limit_upper = 1; // modes 4/5: 1 = |corr| <= |div_s u| (two-sided); 0 = sign bound only
     int shell_gamma_interface = 0;  // 1 = sigma(Gamma) in Omega evaluated at the interface value Gamma_I (see Parse)
+    int shell_no_compression = 0;   // 1 = the shell carries no net compression: sigma_tot = max(sigma(Gamma) + kappa_s div_s u, 0) (see Parse)
+    int shell_visc_true_area = 0;   // 1 = kappa_s acts on the monolayer's TRUE area rate: off while buckled (Gamma >= Gamma_buck) (see Parse)
+    int shell_visc_layer = 0;       // 1 = kappa_s applied as a thin viscous LAYER (band-localised shear viscosity) instead of a membrane tension (see Parse)
+    int shell_band_weight = 0;      // 1 = shell stress weighted by 6 eta (1-eta) |grad eta| instead of |grad eta| (see Parse)
+    int shell_visc_liquid_side = 0; // 1 = viscous tension weighted 2 eta (liquid side of the band only) (see Parse)
     int shell_visc_subcycle = 0;      // sub-cycle kappa_s (0 = dt-limited path; see Parse)
     int shell_visc_subcycle_max = 512; // hard cap on sub-steps (runaway guard)
     int shell_visc_verbose = 0;        // print N and nu_s each sub-cycle
