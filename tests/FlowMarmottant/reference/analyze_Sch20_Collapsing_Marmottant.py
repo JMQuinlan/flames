@@ -41,6 +41,34 @@ INPUT = os.path.normpath(os.path.join(
 PLOTFILES = "/mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Collapsing_Marmottant"
 MODEL = "KM"            # reference the plots compare against: "KM" or "RPE"
 
+# --------------------------------------------------------------------------- #
+#  Sch20 Fig. 12 (pressure in the R-t plane) and Fig. 14 (bubble shapes)
+#  Rendering and look-and-feel live in ../../FlowRayleighPlesset/reference/sch20_figs.py
+# --------------------------------------------------------------------------- #
+MAKE_FIG12 = True
+MAKE_FIG14 = True
+FIG14_TIMES = (0.7, "Rmin", 2.0)       # t/tau_c values and/or "Rmin"
+
+
+def sch20_figures(input_path, out_hint, stem):
+    if not (MAKE_FIG12 or MAKE_FIG14):
+        return
+    here = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, os.path.normpath(os.path.join(here, "..", "..", "FlowRayleighPlesset", "reference")))
+    import sch20_figs
+    kv = M.parse_input(input_path)
+    shell, liq, gas, meta = M.build_case(kv, input_path)
+    plotdir = next((d for d in (out_hint, meta["plot_file"]) if d and os.path.isdir(d)), None)
+    if plotdir is None:
+        print("[sch20_figures] no plotfile directory found; skipped")
+        return
+    img = os.path.join(here, "Images"); os.makedirs(img, exist_ok=True)
+    if MAKE_FIG12:
+        sch20_figs.fig12_pressure_tR(plotdir, meta["R0"], meta["tau_c"], os.path.join(img, stem + "_fig12_pressure_tR"))
+    if MAKE_FIG14:
+        sch20_figs.fig14_shapes({"Hydro2": plotdir}, meta["R0"], meta["tau_c"],
+                                os.path.join(img, stem + "_fig14_shapes"), FIG14_TIMES)
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
@@ -58,6 +86,8 @@ def main():
     M.run_case(a.input, out_hint=a.output,
                shell_only=(SHELL_ONLY and not a.all_variants),
                models_only=a.models_only, stem=a.stem, model=a.model)
+    if not a.models_only:
+        sch20_figures(a.input, a.output, a.stem)
 
 
 if __name__ == "__main__":

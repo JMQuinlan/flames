@@ -70,6 +70,8 @@ for _cand in _SOLVER_CANDIDATES:
 else:
     # No candidate found -- fall back to the historical path so the resulting
     # ImportError at least names a concrete directory.
+    sys.path.insert(0, os.path.abspath(_SOLVER_CANDIDATES[0]))
+
 from rayleigh_plesset_solver import (                                  # noqa: E402
     Params, solve,
     rayleigh_collapse_time,
@@ -1231,5 +1233,29 @@ def main():
         print("  [info] no simulation data loaded -- CSV export skipped.")
 
 
+# --------------------------------------------------------------------------- #
+#  Sch20 Fig. 12 (pressure in the R-t plane) and Fig. 14 (bubble shapes)
+#  Rendering and look-and-feel live in sch20_figs.py (edit its STYLE dict).
+# --------------------------------------------------------------------------- #
+MAKE_FIG12 = True                      # pressure along a radial ray vs time, log colour
+MAKE_FIG14 = True                      # eta = 0.5 shape at FIG14_TIMES
+FIG14_TIMES = (0.7, "Rmin", 2.0)       # t/tau_c values and/or "Rmin"
+
+
+def sch20_figures():
+    """Sch20 Fig. 12 / Fig. 14 style plots of OUTPUT_DIR into Images/."""
+    if not (MAKE_FIG12 or MAKE_FIG14) or not os.path.isdir(OUTPUT_DIR):
+        return
+    sys.path.insert(0, _HERE)
+    import sch20_figs
+    tc = rayleigh_collapse_time(P)
+    if MAKE_FIG12:
+        sch20_figs.fig12_pressure_tR(OUTPUT_DIR, P.R0, tc, os.path.join(IMG_DIR, f"{SAVE_NAME}_fig12_pressure_tR"))
+    if MAKE_FIG14:
+        sch20_figs.fig14_shapes({"Hydro2": OUTPUT_DIR}, P.R0, tc,
+                                os.path.join(IMG_DIR, f"{SAVE_NAME}_fig14_shapes"), FIG14_TIMES)
+
+
 if __name__ == "__main__":
     main()
+    sch20_figures()

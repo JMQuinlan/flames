@@ -39,6 +39,9 @@
 #include "Solver/Local/Limiter/VanLeer.H"
 #include "Solver/Local/Limiter/WENO3.H"
 #include "Solver/Local/Limiter/WENO5.H"
+#include "Solver/Local/Limiter/MUSCL.H"
+#include "Solver/Local/Limiter/MUSCL2.H"
+#include "Solver/Local/Limiter/THINC.H"
 
 
 

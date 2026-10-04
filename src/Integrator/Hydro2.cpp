@@ -34,6 +34,9 @@
 #include "Solver/Local/Limiter/VanLeer.H"
 #include "Solver/Local/Limiter/WENO3.H"
 #include "Solver/Local/Limiter/WENO5.H"
+#include "Solver/Local/Limiter/MUSCL.H"
+#include "Solver/Local/Limiter/MUSCL2.H"
+#include "Solver/Local/Limiter/THINC.H"
 //EOS
 #include "Solver/EOS/EOS.H"
 #include "Solver/EOS/Tammann.H"
@@ -899,7 +902,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
 
     // LIMITER / primitive-variable reconstruction.
-    // Selected by name: Limiter.type = godunov | minmod | vanleer | weno3 | weno5
+    // Selected by name: Limiter.type = godunov | minmod | vanleer | weno3 | weno5 | muscl | muscl2 | thinc
     // Default = godunov (no reconstruction; first-order behavior preserved).
     {
         std::string limiter_name;
@@ -909,7 +912,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                           Solver::Local::Limiter::Minmod,
                           Solver::Local::Limiter::VanLeer,
                           Solver::Local::Limiter::WENO3,    // 3rd Order
-                          Solver::Local::Limiter::WENO5     // 5th Order
+                          Solver::Local::Limiter::WENO5,    // 5th Order
+                          Solver::Local::Limiter::MUSCL,    // 2nd order, Limiter.slope = minmod|mc|vanleer|superbee
+                          Solver::Local::Limiter::MUSCL2,   // Sch20 MUSCL2: MC slope (pair with the midpoint RK tableau)
+                          Solver::Local::Limiter::THINC     // THINC alpha sharpening around Limiter.thinc_base
         >("Limiter", value.limiter);
         Util::Message(INFO, "Selected Limiter: ", typeid(*value.limiter).name());
     }
@@ -2883,8 +2889,8 @@ Hydro2::RHS(int lev,
                     { prim[0], prim[1], prim[2], prim[3], prim[4] };
                 Solver::Local::Limiter::Primitive stR[5] =
                     { prim[5], prim[4], prim[3], prim[2], prim[1] };
-                qL = limiter->Reconstruct(stL).alpha;   // right edge of the `lo` cell
-                qR = limiter->Reconstruct(stR).alpha;   // left  edge of the `hi` cell
+                qL = limiter->ReconstructPassive(stL).alpha;   // right edge of the `lo` cell
+                qR = limiter->ReconstructPassive(stR).alpha;   // left  edge of the `hi` cell
             };
 
             //   D(Gamma)/Dt = -Gamma (div u - n.grad(u).n)
@@ -2921,8 +2927,8 @@ Hydro2::RHS(int lev,
                 for (int sft = -2; sft <= 3; ++sft) prim[sft + 2].alpha = shell(i - 1 + sft, j, k);
                 Solver::Local::Limiter::Primitive stL[5] = { prim[0], prim[1], prim[2], prim[3], prim[4] };
                 Solver::Local::Limiter::Primitive stR[5] = { prim[5], prim[4], prim[3], prim[2], prim[1] };
-                cL = limiter->Reconstruct(stL).alpha;
-                cR = limiter->Reconstruct(stR).alpha;
+                cL = limiter->ReconstructPassive(stL).alpha;
+                cR = limiter->ReconstructPassive(stR).alpha;
             }
 
             shell_face(0, 1, 0, bL, bR);            // face j+1/2 (lo = j)
@@ -2932,8 +2938,8 @@ Hydro2::RHS(int lev,
                 for (int sft = -2; sft <= 3; ++sft) prim[sft + 2].alpha = shell(i, j - 1 + sft, k);
                 Solver::Local::Limiter::Primitive stL[5] = { prim[0], prim[1], prim[2], prim[3], prim[4] };
                 Solver::Local::Limiter::Primitive stR[5] = { prim[5], prim[4], prim[3], prim[2], prim[1] };
-                dL = limiter->Reconstruct(stL).alpha;
-                dR = limiter->Reconstruct(stR).alpha;
+                dL = limiter->ReconstructPassive(stL).alpha;
+                dR = limiter->ReconstructPassive(stR).alpha;
             }
 
 #if AMREX_SPACEDIM == 3
@@ -2944,8 +2950,8 @@ Hydro2::RHS(int lev,
                 for (int sft = -2; sft <= 3; ++sft) prim[sft + 2].alpha = shell(i, j, k - 1 + sft);
                 Solver::Local::Limiter::Primitive stL[5] = { prim[0], prim[1], prim[2], prim[3], prim[4] };
                 Solver::Local::Limiter::Primitive stR[5] = { prim[5], prim[4], prim[3], prim[2], prim[1] };
-                fL = limiter->Reconstruct(stL).alpha;
-                fR = limiter->Reconstruct(stR).alpha;
+                fL = limiter->ReconstructPassive(stL).alpha;
+                fR = limiter->ReconstructPassive(stR).alpha;
             }
 #endif
             // G_face upwinded on u* at each face, mirroring a_face exactly.
