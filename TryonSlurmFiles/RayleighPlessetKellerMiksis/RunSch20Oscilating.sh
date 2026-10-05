@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=ShockDroplet
+#SBATCH --job-name=Sch20OscRPEKM
 #SBATCH -o /mmfs1/home/ttryon/FLAMES_out/flame_%j_stdout
 #SBATCH -e /mmfs1/home/ttryon/FLAMES_out/err_flame_%j_stdout
 #SBATCH -N 1
@@ -11,5 +11,6 @@
 module purge
 module load gnu9 mpich
 
-# Shock Droplet Interaction #
-srun  --mpi=pmi2 /home/ttryon/flames/bin/hydro2-2d-g++ /home/ttryon/flames/tests/FlowShockDroplet/1mm_Droplet_moreAMR
+## 3D Varients ##
+srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Sch20_Oscillating_Neumann_Large_3D
+
