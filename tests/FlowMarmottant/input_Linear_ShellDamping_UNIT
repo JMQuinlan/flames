@@ -1,6 +1,59 @@
-#@ [sch20_oscillating_marmottant]
+#@ [linear_shell_damping_unit]
 #@ exe=hydro2
 #@ dim=3
+#
+# ===================== LINEAR SHELL-DAMPING UNIT TEST =====================
+# Isolates the surface dilatational viscosity (kappa_s) force path with a
+# clean, analytic target.  A bubble whose gas starts 10% over-pressured
+# oscillates freely with ~2.4% amplitude (linear), with NO surface tension,
+# NO elastic shell and NO buckling -- a pure gas spring plus ONE damper.
+#
+# Linearised Rayleigh-Plesset: the amplitude decays as exp(-beta t) with
+#     beta = 2 mu / (rho R0^2)  +  2 kappa_s / (rho R0^3)  (+ radiation, numerics)
+# Run three ways (same mesh):
+#     base :  mu0 = 0,      shell.kappa_s = 0        -> numerical + radiation
+#     mu   :  mu0 = 2.0e-3, shell.kappa_s = 0        -> analytic beta_mu = 1.0e6 /s
+#     kap  :  mu0 = 0,      shell.kappa_s = 4.0e-9   -> analytic beta_k  = 1.0e6 /s
+# The two viscous runs have the SAME analytic damping, so geometry (finite
+# domain, octant) cancels in their ratio.  mu goes through the bulk viscous
+# stress; kappa_s goes through the capillary tensor Omega.  Compare
+# (beta_run - beta_base) against 1.0e6 /s for each.
+#
+# Speed: 8 R0 domain, 32^3 base, max_level 1 (R0/dx = 8), and a softened
+# liquid (stiffened-gas p0 = 1e8, c ~ 485 m/s) -- allowed for unit tests;
+# radiation damping stays small (omega R0/c ~ 0.04) and is common to all three.
+# Analysis: reference/analyze_linear_shell_damping.py
+# ==========================================================================
+#
+# ============================ SMALL VARIANT ============================
+# Unit-test sibling of input_Sch20-Oscillating_Marmottant.  Same physics,
+# same domain, same IC -- only the mesh and horizon are reduced so the run
+# finishes in ~1 h instead of ~1 day:
+#
+#   amr.max_level  3 -> 2      dx_finest 7.8125e-8 -> 1.5625e-7 (R0/dx 25.6 -> 12.8)
+#   epsilon   1.6e-7 -> 3.2e-7 scaled WITH dx to hold eps/dx = 2.05.  These two
+#                              MUST move together: dropping max_level alone puts
+#                              the band below one cell and NaNs for an unrelated
+#                              reason.
+#   stop_time 1.0e-6 -> 2.2e-7 1.2 tau_c, through R_min and into the rebound --
+#                              enough for the R_min/R0 discriminator below.
+#   plot_int  -1     -> 40     step-based; plot_dt only fires when it lands
+#                              within 0.5*dt of a multiple, which is fragile
+#                              once the shell-viscous dt limit shrinks dt.
+#
+# PURPOSE: resolve whether shell.sigma_floor destroys the dilatational-viscous
+# physics.  sigma_floor clamps sigma(Gamma) + kappa_s*div_s(u) at 0; since
+# div_s u = 2 Rdot/R is NEGATIVE throughout a collapse, the clamp deletes the
+# viscous contribution exactly when it should matter.  Run this file with
+# shell.sigma_floor=0 and =1 and compare R_min/R0 against the reference ODE
+# table below: if the clamp is the culprit, floor=1 lands near ELASTIC ONLY
+# (0.3156) and floor=0 near FULL SHELL (0.5172).
+#
+# Requires the shell-viscous timestep limit (shell.dt_limit=1, the default);
+# without it this case runs over its own stability limit.
+# =======================================================================
+#
+
 
 # =============================================================================
 # COATED-BUBBLE TWIN OF Sch20_Oscillating_Neumann_Large_3D
@@ -79,22 +132,23 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = ./tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant
+plot_file = ./bin/tests/FlowMarmottant/output_Linear_ShellDamping_UNIT
+
 
 ### MESHING ###
 amr.plot_int        = -1
-amr.plot_dt         = 1.25e-8         # 80 frames over stop_time (was 5.0e-9 = 200)
+amr.plot_dt         = 2.0e-8           # ~30 frames per period
 amr.max_grid_size   = 32
 amr.blocking_factor = 8
 amr.regrid_int      = 10
 amr.grid_eff        = 0.8
-amr.max_level       = 3
-amr.n_cell          = 64 64 64        # base dx 6.25e-7; L3 -> dx_finest 7.8125e-8 (R0/dx = 25.6)
+amr.max_level       = 1                # FAST: L1 dx 2.5e-7 (R0/dx = 8); use amr.max_level=2 + epsilon=2.5e-7 for convergence
+amr.n_cell          = 32 32 32         # base dx 5e-7
 
 # n_error_buf pushes the fine patches ~16 dx_finest past the interface band so
 # the coarse-fine boundary sits in pure water, where the Q-Fix density
 # partition is exact.
-amr.n_error_buf     = 16
+amr.n_error_buf     = 4                # refinement buffer only; the band stays fully resolved
 
 nghost = 4
 
@@ -125,21 +179,21 @@ cfl                     = 0.5
 
 ### DIMENSIONS -- octant, 100 R0 ###
 geometry.prob_lo     =  0.0     0.0     0.0
-geometry.prob_hi     =  4.0e-5  4.0e-5  4.0e-5
+geometry.prob_hi     =  1.6e-5  1.6e-5  1.6e-5   # 8 R0
 geometry.is_periodic = 0 0 0
-stop_time            = 1.0e-6         # 5.46 tau_c (tau_c = 1.830e-7 s)
+stop_time            = 1.0e-6          # ~1.6 periods (omega0 ~ 1.0e7 rad/s)
 
 ### ETA INITIAL CONDITIONS ###
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 1.6e-7     # ~2 cells across the band at finest
+eta.ic.expression.constant.epsilon = 5.0e-7     # eps/dx = 2 at L1
 eta.ic.expression.constant.R0      = 2.0e-6
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
 
 ### EQUATION OF STATE -- Sch20 water (Tammann) + air (ideal gas) ###
 eos0.gamma = 2.35
-eos0.p0    = 1.0e9
+eos0.p0    = 1.0e8                # SOFTENED liquid: c ~ 485 m/s (3x fewer steps); omega R0/c ~ 0.04
 eos0.cv    = 1781.0
 eos0.cp    = 4186.0
 
@@ -166,14 +220,14 @@ velocity1.ic.expression.region1 = "0.0"
 # Liquid exterior: Sch20 Eq. (27) equilibrium field, rescaled.
 pressure0.ic.type = expression
 pressure0.ic.expression.constant.p_inf = 1.0e5
-pressure0.ic.expression.constant.p_b   = 1.0e4
+pressure0.ic.expression.constant.p_b   = 1.1e5
 pressure0.ic.expression.constant.R0    = 2.0e-6
 pressure0.ic.expression.constant.r_inf = 2.0e-5
 pressure0.ic.expression.region0 = "p_inf - (p_inf - p_b)*R0/max(sqrt(x*x + y*y + z*z), R0)"
 
 # Gas interior: uniform bubble pressure p_b.
 pressure1.ic.type = expression
-pressure1.ic.expression.constant.p_b = 1.0e4
+pressure1.ic.expression.constant.p_b = 1.1e5
 pressure1.ic.expression.region0 = "p_b"
 
 ### VISCOSITY ###
@@ -181,19 +235,19 @@ pressure1.ic.expression.region0 = "p_b"
 # O(1e4 Pa) -- the same order as the shell terms under test -- so water
 # viscosity is retained here and in the reference ODE.  Gas viscosity is
 # negligible and is set to zero so the sim and the ODE use the same physics.
-mu0   = 1.0e-3
+mu0   = 0.0                    # set per run
 mu0_b = 0.0
 mu1   = 0.0
 mu1_b = 0.0
 
 ### SURFACE TENSION -- Marmottant coated shell ###
 apply_surface_tension = 1
-sigma = 0.0728                   # post-rupture / bare interface tension [N/m]
+sigma = 0.0                    # no Laplace term: pure gas spring
 pref  = 0.0
 
 kappa_method = 1                 # REQUIRED for Marmottant
 
-marmottant             = 1
+marmottant             = 0     # no elastic shell / buckling
 marmottant.R0          = 2.0e-6  # reference radius (shell strain measured from here)
 marmottant.R_buckling  = 1.96e-6 # 0.98 R0 -> Gamma_buck = 1.0412, sigma(R0) = 0.0412 N/m
 marmottant.chi         = 1.0     # shell elastic modulus [N/m]
@@ -204,7 +258,7 @@ marmottant.sigma_break = 0.073   # rupture tension [N/m]
 # sets the shell damping: it contributes 4 kappa_s Rdot/R^2 to the normal
 # stress balance.  mu_s is left at 0 (the solver aborts on a nonzero value
 # until D_s is implemented in CapillaryOperator).
-shell.kappa_s = 7.2e-9           # surface dilatational viscosity [kg/s]
+shell.kappa_s = 0.0              # set per run
 shell.mu_s    = 0.0
 
 ### BOUNDARY CONDITIONS -- octant symmetry (lo) + NSCBC outflow (hi) ###
@@ -225,17 +279,17 @@ nscbc.xhi.type     = outflow
 nscbc.xhi.target_p = 1.0e5
 nscbc.xhi.sigma    = 0.6
 nscbc.xhi.beta     = 0.5
-nscbc.xhi.L_ref    = 1.25e-7
+nscbc.xhi.L_ref    = 5.0e-8
 nscbc.yhi.type     = outflow
 nscbc.yhi.target_p = 1.0e5
 nscbc.yhi.sigma    = 0.6
 nscbc.yhi.beta     = 0.5
-nscbc.yhi.L_ref    = 1.25e-7
+nscbc.yhi.L_ref    = 5.0e-8
 nscbc.zhi.type     = outflow
 nscbc.zhi.target_p = 1.0e5
 nscbc.zhi.sigma    = 0.6
 nscbc.zhi.beta     = 0.5
-nscbc.zhi.L_ref    = 1.25e-7
+nscbc.zhi.L_ref    = 5.0e-8
 
 eta.bc.type.xlo = REFLECT_EVEN
 eta.bc.type.xhi = neumann
@@ -286,10 +340,7 @@ grav                  = 0.0
 
 ### NUMERICS -- WENO3 + SSPRK3 (project standard for Sch20 tests) ###
 Riemann_Solver.type = hllc
-Limiter.type        = thinc
-Limiter.thinc_base    = muscl2      # default, so this line is optional
-eta_consistent_advect = 1
-
+Limiter.type        = weno3
 integration.type    = RungeKutta
 integration.rk.type = 3
 

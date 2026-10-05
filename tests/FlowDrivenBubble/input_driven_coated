@@ -12,7 +12,7 @@
 #   - nscbc driven outflow on xhi/yhi/zhi (p_target + A sin(wt))
 #   - marmottant sigma(Gamma), elastic branch at t=0
 #   - the advected shell row Gamma  (shell_consistent_advect)
-#   - the alpha row                  (eta_consistent_advect)
+#   - the alpha row
 #   - shell.kappa_s -> the Boussinesq-Scriven viscous term and sigma_floor
 #
 # Shell parameters are scaled to this macroscopic R0 = 0.02 m bubble so that

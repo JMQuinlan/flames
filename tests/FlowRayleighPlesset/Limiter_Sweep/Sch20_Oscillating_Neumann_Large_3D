@@ -1,0 +1,205 @@
+#@ [sch20_oscillating_minmod_neumann]
+# >>> LARGE-DOMAIN OCTANT 3D VARIANT <<<
+# +x+y+z octant [0,2.0]^3 (100 R0) with SYMMETRY (reflect) BCs on the inner
+# faces (xlo/ylo/zlo -- the planes through the bubble center at the origin) and
+# neumann far-field on the outer faces.  base 160^3, max_level 4 -> dx_finest =
+# 7.81e-4 (R0/dx = 25.6).  This is 1/8 the cells of the +/-2.0 full domain
+# (160^3 vs 320^3) for identical physics -- the octant reproduces the full
+# bubble to round-off (verified, _OctVerify pair).  The RPE analysis auto-detects
+# the octant (prob_lo=0) and scales the gas volume by 8.
+#@ exe=hydro2
+#@ dim=3
+
+# =============================================================================
+# Schmidmayer-Bryngelson-Colonius (JCP 402, 2020) -- SPHERICAL BUBBLE
+# Case 1: LOW-PRESSURE-RATIO  (p_inf / p_b = 10)  -- "OSCILLATING" bubble
+# SMALL-DOMAIN UNIT-TEST TWIN of Sch20_Oscillating_Neumann_Large
+# =============================================================================
+# Identical physics + ICs to Sch20_Oscillating_Neumann_Large, but on a small
+# +/- 0.2 m domain so it runs fast as a unit test.  The Large variant exists to
+# push the radiated pressure wave out far enough that it doesn't return during
+# the first oscillation cycle; this twin keeps the SAME bubble (R0 = 0.02 m) and
+# the SAME finest dx (7.8e-4 m -> R0/dx_finest = 25.6, Sch20 nominal NR0), so it
+# reproduces the Large run's early-time bubble-wall dynamics at a fraction of the
+# cost.  Reflections off the near boundaries arrive at
+#     t_arrive ~ tau_c + L_half/c_l = 1.83e-3 + 0.2/1533 ~ 1.96e-3 s
+# so only the first ~2 ms (first collapse + rebound) are reflection-free here.
+#
+# AMR resolution (matched to _Large finest dx):
+#   base 64x64 over 0.4 m -> dx_coarse = 6.25e-3 m
+#   max_level = 4 (refRatio 2 each) -> dx_finest = 7.81e-4 m
+#   R0 / dx_finest = 25.6  -- matches Sch20 nominal NR0 and the _Large variant.
+#
+# Refinement is ETA-ONLY at the interface band (same rationale as _Large): keeps
+# the coarse-fine boundary out of the mixed-eta interface region where the
+# Q-Fix density-partition writes wrong c/f ghost values.
+# See memory note feedback_density_partition_breaks_cf_ghosts.md.
+# =============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+# plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Oscillating_Neumann_3D
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large_3D
+# plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Oscillating_Large_3D_Sharp
+
+### MESHING ###
+amr.plot_int       = -1
+amr.plot_dt        = 5.0e-5
+amr.max_grid_size  = 32
+amr.blocking_factor = 16
+amr.regrid_int     = 10
+amr.grid_eff       = 0.8
+amr.max_level      = 4
+amr.n_cell         = 160 160 160       # base; eta-only AMR -> effective finest 2560^3 (octant)
+
+# n_error_buf pushes the fine patches ~16 dx_finest past the interface band on
+# each side, sitting the coarse-fine boundary in pure water (where the Q-Fix
+# density partition is exact).  See feedback_density_partition_breaks_cf_ghosts.md
+amr.n_error_buf    = 16
+
+nghost = 4
+
+### TIME STEPPING ###
+timestep                = 1.0e-7
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-5
+dynamictimestep.min     = 1.0e-13
+cfl                     = 0.5
+
+### DIMENSIONS ###
+geometry.prob_lo     =  0.0  0.0  0.0
+geometry.prob_hi     =  2.0  2.0  2.0
+geometry.is_periodic = 0 0 0
+stop_time            = 1e-2
+
+### ETA INITIAL CONDITIONS (identical to _Large) ###
+# eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.0016     # ~ 2 cells across the band at finest
+#eta.ic.expression.constant.epsilon = 0.0008     # ~ 2 cells across the band at finest
+eta.ic.expression.constant.R0      = 0.02
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### EQUATION OF STATE -- Sch20 water (Tammann) + air (ideal gas) ###
+eos0.gamma = 2.35
+eos0.p0    = 1.0e9
+eos0.cv    = 1781.0
+eos0.cp    = 4186.0
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 714.286
+eos1.cp    = 1000.0
+
+### HYDRO INITIAL CONDITIONS (identical to _Large) ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1000.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Pressure field IDENTICAL to Sch20_Oscillating_Neumann_Large (the variant that
+# gives the closest match to the Chen-2D RPE reference).  See the _Large file
+# header for the full derivation.
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_inf = 1.0e5
+pressure0.ic.expression.constant.p_b   = 1.0e4
+pressure0.ic.expression.constant.R0    = 0.02
+pressure0.ic.expression.constant.r_inf = 0.20
+pressure0.ic.expression.region0 = "p_inf - (p_inf - p_b)*R0/max(sqrt(x*x + y*y + z*z), R0)"
+#pressure0.ic.expression.region0 = "p_inf - (p_inf - p_b)*log(r_inf/max(sqrt(x*x + y*y + z*z), R0))/log(r_inf/R0)"
+
+# Gas interior: uniform bubble pressure p_b.
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_b = 1.0e4
+pressure1.ic.expression.region0 = "p_b"
+
+### VISCOSITY (inviscid -- Sch20 nominal) ###
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION (none in Sch20 nominal collapse cases) ###
+sigma = 72.8e-3
+pref  = 0.0
+
+### BOUNDARY CONDITIONS - Neumann on all 6 faces (Sch20 non-NSCBC variant) ###
+# eta: symmetry (reflect_even) on inner faces, neumann far-field
+eta.bc.type.xlo = REFLECT_EVEN
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = REFLECT_EVEN
+eta.bc.type.yhi = neumann
+eta.bc.type.zlo = REFLECT_EVEN
+eta.bc.type.zhi = neumann
+
+density.bc.type.xlo = REFLECT_EVEN
+density.bc.type.xhi = neumann
+density.bc.type.ylo = REFLECT_EVEN
+density.bc.type.yhi = neumann
+density.bc.type.zlo = REFLECT_EVEN
+density.bc.type.zhi = neumann
+
+energy.bc.type.xlo = REFLECT_EVEN
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = REFLECT_EVEN
+energy.bc.type.yhi = neumann
+energy.bc.type.zlo = REFLECT_EVEN
+energy.bc.type.zhi = neumann
+
+momentum.bc.type.xlo = REFLECT_ODD  REFLECT_EVEN REFLECT_EVEN
+momentum.bc.type.xhi = neumann neumann neumann
+momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD  REFLECT_EVEN
+momentum.bc.type.yhi = neumann neumann neumann
+momentum.bc.type.zlo = REFLECT_EVEN REFLECT_EVEN REFLECT_ODD
+momentum.bc.type.zhi = neumann neumann neumann
+
+### REFINEMENT -- eta-only, conservative threshold (identical to _Large) ###
+eta_refinement_criterion   = 1.0e-1
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS (identical to _Large) ###
+apply_surface_tension = 0
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+grav                  = 0.0
+
+### NUMERICS -- WENO5 + SSPRK3 ###
+Riemann_Solver.type = hllc
+Limiter.type        = weno5
+integration.type    = RungeKutta
+integration.rk.type = 3
+kappa_method        = 1
+
+apply_sharpening     = 0
+sharpening_frequency = 20
+reinit_max_iter      = 100
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+relax_diag           = 1
+
+# IC pressure equalization (see _Large header): switch Mix() to the
+# gamma-weighted form so the per-phase IC pressures sit in the energy-conserving
+# equilibrium RelaxAndReinit would produce, killing the step-1 pressure kick.
+equalize_ic_pressure = 1

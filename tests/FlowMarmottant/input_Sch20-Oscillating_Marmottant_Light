@@ -1,89 +1,61 @@
-#@ [sch20_oscillating_marmottant]
+#@ [sch20_oscillating_marmottant_light]
 #@ exe=hydro2
 #@ dim=3
-
-# =============================================================================
-# COATED-BUBBLE TWIN OF Sch20_Oscillating_Neumann_Large_3D
-# Case 1: LOW-PRESSURE-RATIO (p_inf / p_b = 10) -- "OSCILLATING" bubble,
-#         Marmottant (2005) lipid shell + Boussinesq-Scriven dilatational
-#         shell viscosity.
-# =============================================================================
-# This is the Schmidmayer-Bryngelson-Colonius (JCP 402, 2020) Case 1 setup with
-# a coated interface.  Everything structural is inherited from
-# tests/FlowRayleighPlesset/Sch20_Oscillating_Neumann_Large_3D: +x+y+z octant
-# with symmetry (reflect) BCs on the inner faces and neumann far field, 3D,
-# HLLC + WENO3 + SSPRK3, eta-only AMR at the interface band, and the Sch20
-# Eq. (27) equilibrium pressure field.
+#
+# ============================ LIGHT VARIANT ============================
+# Low-amplitude sibling of input_Sch20-Oscillating_Marmottant.  Same shell,
+# same liquid, same domain, same mesh (R0/dx = 25.6), same numerics -- only
+# the initial under-pressure is reduced to 1/5 of the base case:
+#
+#   p_inf - p_b   9.0e4 -> 1.8e4 Pa    p_b 1.0e4 -> 8.2e4 Pa, p_inf unchanged
+#                                      (1.0e5 Pa, so the NSCBC target_p and the
+#                                      far-field state are identical)
+#   p_inf / p_b   10    -> 1.22
+#   stop_time     1.0e-6 -> 1.5e-6     8.20 tau_c; the full-shell response has
+#                                      settled by ~6 tau_c
+#   plot_dt       1.25e-8 -> 2.5e-8    60 frames
+#
+# PURPOSE: isolate wrinkling in the dilatational-viscous shell response.
+# The base case drives the coated bubble to R_min/R0 = 0.52, deep into the
+# negative-total-tension regime, where buckling-type wrinkles and large
+# interface distortion are mixed together.  Here the full-shell bubble only
+# reaches R_min/R0 = 0.92: it buckles almost immediately (R < R_buckling =
+# 0.98 R0, so sigma(Gamma) = 0) and STAYS buckled for the whole run, which
+# means the shell stress is carried by the kappa_s div_s(u) term alone.  Any
+# wrinkle that grows here is therefore a viscous-dilatation effect, at a
+# compression small enough that the interface stays well resolved
+# (R_min ~ 23.6 cells).
 #
 # -----------------------------------------------------------------------------
-# WHY THE BUBBLE IS 2 um AND NOT Sch20's 20 mm
+# REFERENCE MODELS, R_min/R0 (reference/marmottant_rpe_km.py)
 # -----------------------------------------------------------------------------
-# The Marmottant shell enters the normal stress balance as 2 sigma(R)/R and
-# 4 kappa_s Rdot/R^2.  Both scale as 1/R (and 1/R^2), so at Sch20's R0 = 20 mm a
-# PHYSICAL shell is dynamically invisible:
+#   variant                      RPE      KM       settled R/R0 (KM)
+#   uncoated (sigma const)       0.6792   0.6829   still ringing at 8 tau_c
+#   elastic only (kappa_s = 0)   0.8988   0.9006   still ringing at 8 tau_c
+#   viscous only (chi = 0)       0.7432   0.7450   0.82 by ~5 tau_c
+#   full shell (chi + kappa_s)   0.9213   0.9224   0.954 by ~6 tau_c
 #
-#     R0        2 sigma/R0      / p_inf     f0 shift vs uncoated
-#     2.0e-6 m   7.30e+4 Pa      0.73          -18.4 %
-#     1.0e-5 m   1.46e+4 Pa      0.15           -4.7 %
-#     1.0e-4 m   1.46e+3 Pa      0.015          -0.5 %
-#     2.0e-2 m   7.30e+0 Pa      0.0001         -0.0 %   <- Sch20 radius
+# Compare against the references with
+#     python3 reference/analyze_Sch20_Oscillating_Marmottant.py \
+#         --input input_Sch20-Oscillating_Marmottant_Light \
+#         --output <plot_file> --stem Sch20_Oscillating_Marmottant_Light
+# and inspect the interface shape with reference/wrinkle_planes.py.
 #
-# Reaching a measurable coating effect at 20 mm would require chi ~ 1e3 N/m,
-# which is not a lipid shell.  Instead the ENTIRE Sch20 setup is rescaled by
-# 1e-4 in length; because the Rayleigh time tau_c = 0.915 R0 sqrt(rho/p_inf) is
-# linear in R0 at fixed pressure, time rescales by the same 1e-4 and every
-# dimensionless group (R0/dx, epsilon/dx, L/R0, stop_time/tau_c, p_inf/p_b) is
-# preserved EXACTLY.  The result is a 2 um microbubble -- the size Marmottant
-# (2005) actually characterizes -- run at Sch20's nominal resolution.
-#
-#     Sch20 (uncoated)            this file (coated)
-#     R0        = 2.0e-2 m        R0        = 2.0e-6 m
-#     prob_hi   = 2.0 m (100 R0)  prob_hi   = 2.0e-4 m (100 R0)
-#     epsilon   = 1.6e-3          epsilon   = 1.6e-7
-#     stop_time = 1.0e-2 s        stop_time = 1.0e-6 s  (5.46 tau_c)
-#     p_inf/p_b = 10              p_inf/p_b = 10        (unchanged)
-#
-# -----------------------------------------------------------------------------
-# SHELL PARAMETERS -- Marmottant et al., JASA 118(6):3499, 2005
-# -----------------------------------------------------------------------------
-#   chi         = 1.0    N/m    shell elastic modulus
-#   kappa_s     = 7.2e-9 kg/s   surface DILATATIONAL viscosity
-#   sigma_break = 0.073  N/m    rupture tension
-#   sigma       = 0.0728 N/m    post-rupture (bare water/air) tension
-#   R_buckling  = 0.98 R0       -> Gamma_buck = 1.0412, sigma(R0) = 0.0412 N/m
-#
-# The bubble therefore STARTS mid-elastic and buckles on the inward stroke.
-# The elastic window is intrinsically narrow for a real shell,
-#     R_rupture / R_buckling = sqrt(1 + sigma_break/chi) = 1.0359,
-# so a large-amplitude free collapse spends most of its time buckled
-# (sigma = 0).  That is the physical Marmottant "compression-only" behaviour,
-# not a defect of the setup.  The RUPTURED branch is NOT exercised here: this
-# IC only under-pressures the bubble, so R never exceeds R0.  Rupture is
-# reached in the DRIVEN coated case, not in this free-response test.
-#
-# -----------------------------------------------------------------------------
-# WHAT THIS TEST DISCRIMINATES (reference ODE, R_min/R0)
-# -----------------------------------------------------------------------------
-#   uncoated  (sigma const, kappa_s = 0)   0.1908
-#   elastic only (chi on, kappa_s = 0)     0.3156
-#   viscous only (chi = 0, kappa_s on)     0.3906
-#   full shell (chi + kappa_s)             0.5172
-#
-# Both shell terms carry comparable weight, so the measured R_min separates
-# them -- the test is diagnostic, not merely pass/fail.  Compare against
-# reference/marmottant_rpe_km.py via
-#     reference/analyze_Sch20_Oscillating_Marmottant.py
-# =============================================================================
+# Everything below this header is copied unchanged from the base case except
+# the five lines listed above.  The derivation of the 1e-4 Sch20 rescaling
+# (R0 = 2 um) and the Marmottant shell parameters is in the header of
+# input_Sch20-Oscillating_Marmottant.
+# =======================================================================
 
 alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = ./tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant_Light
 
 ### MESHING ###
 amr.plot_int        = -1
-amr.plot_dt         = 1.25e-8         # 80 frames over stop_time (was 5.0e-9 = 200)
+amr.plot_dt         = 2.5e-8          # 60 frames over stop_time
 amr.max_grid_size   = 32
 amr.blocking_factor = 8
 amr.regrid_int      = 10
@@ -127,7 +99,7 @@ cfl                     = 0.5
 geometry.prob_lo     =  0.0     0.0     0.0
 geometry.prob_hi     =  4.0e-5  4.0e-5  4.0e-5
 geometry.is_periodic = 0 0 0
-stop_time            = 1.0e-6         # 5.46 tau_c (tau_c = 1.830e-7 s)
+stop_time            = 1.5e-6         # 8.20 tau_c (tau_c = 0.915 R0 sqrt(rho/p_inf) = 1.830e-7 s)
 
 ### ETA INITIAL CONDITIONS ###
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
@@ -166,14 +138,14 @@ velocity1.ic.expression.region1 = "0.0"
 # Liquid exterior: Sch20 Eq. (27) equilibrium field, rescaled.
 pressure0.ic.type = expression
 pressure0.ic.expression.constant.p_inf = 1.0e5
-pressure0.ic.expression.constant.p_b   = 1.0e4
+pressure0.ic.expression.constant.p_b   = 8.2e4           # p_inf - p_b = 1.8e4 Pa = 1/5 of the base case
 pressure0.ic.expression.constant.R0    = 2.0e-6
 pressure0.ic.expression.constant.r_inf = 2.0e-5
 pressure0.ic.expression.region0 = "p_inf - (p_inf - p_b)*R0/max(sqrt(x*x + y*y + z*z), R0)"
 
 # Gas interior: uniform bubble pressure p_b.
 pressure1.ic.type = expression
-pressure1.ic.expression.constant.p_b = 1.0e4
+pressure1.ic.expression.constant.p_b = 8.2e4
 pressure1.ic.expression.region0 = "p_b"
 
 ### VISCOSITY ###

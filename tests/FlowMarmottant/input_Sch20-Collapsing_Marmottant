@@ -77,7 +77,7 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Coll
 amr.plot_int        = -1
 amr.plot_dt         = 5.0e-10         # 80 frames over stop_time (was 1.0e-10 = 400)
 amr.max_grid_size   = 32
-amr.blocking_factor = 2
+amr.blocking_factor = 8
 # blocking_factor 2 (NOT 8).  refine_box.hi = 3.0e-6 spans only 4.8 base cells
 # now that n_cell is 64 over a 4.0e-5 domain (base dx 6.25e-7).  AMReX rounds a
 # tagged region UP to a multiple of blocking_factor, so bf=8 silently inflated
@@ -97,7 +97,7 @@ amr.grid_eff        = 0.8
 # ~5,200.  L3 gives R0/dx = 25.6, the same resolution the Oscillating deck uses.
 # To go back to L5, kappa_s needs an implicit or sub-cycled treatment.
 amr.max_level       = 3
-amr.n_cell          = 64 64 64        # base dx 6.25e-7; L5 -> dx_finest 1.953e-8 (R0/dx = 102.4)
+amr.n_cell          = 64 64 64        # base dx 6.25e-7; L3 -> dx_finest 7.8125e-8 (R0/dx = 25.6)
 
 amr.n_error_buf     = 16
 

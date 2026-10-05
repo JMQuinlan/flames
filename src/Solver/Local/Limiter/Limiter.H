@@ -229,6 +229,10 @@ public:
     static constexpr int RADIUS       = 2;
 
     virtual Primitive Reconstruct(const Primitive stencil[STENCIL_SIZE]) const = 0;
+    /// Reconstruction of a PASSIVE scalar routed through the alpha slot (Gamma
+    /// and the like).  Identical to Reconstruct except for wrappers that act on
+    /// the volume fraction only (THINC), which must not sharpen passive fields.
+    virtual Primitive ReconstructPassive(const Primitive stencil[STENCIL_SIZE]) const { return Reconstruct(stencil); }
     virtual ~Limiter() = default;
 };
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=f81.5_A1.36
+#SBATCH --job-name=LimSch20CollRPEKM
 #SBATCH -o /mmfs1/home/ttryon/FLAMES_out/flame_%j_stdout
 #SBATCH -e /mmfs1/home/ttryon/FLAMES_out/err_flame_%j_stdout
 #SBATCH -N 1
@@ -12,4 +12,5 @@ module purge
 module load gnu9 mpich
 
 ## 3D Varients ##
-srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowDrivenBubble/input_f81.5_A10.0
+srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowRayleighPlesset/Limiter_Sweep/Sch20_Collapsing_Neumann_Large_3D_MUSCL2_THINC_ETA
+

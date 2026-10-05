@@ -39,6 +39,9 @@
 #include "Solver/Local/Limiter/VanLeer.H"
 #include "Solver/Local/Limiter/WENO3.H"
 #include "Solver/Local/Limiter/WENO5.H"
+#include "Solver/Local/Limiter/MUSCL.H"
+#include "Solver/Local/Limiter/MUSCL2.H"
+#include "Solver/Local/Limiter/THINC.H"
 
 
 
@@ -622,7 +625,6 @@ protected:
     // surface-divergence source vanishes in the bulk by construction.
     // Sweeps of the Gamma normal-extension relaxation per step (0 = off).
     // Enforces n.grad(Gamma) = 0 so every band cell carries one surface value.
-    int shell_extend_iters = 4;
     int shell_gate_free = 1;
     int shell_bulk_extend = 1;
     Set::Scalar shell_kappa_s = 0.0;   // surface dilatational viscosity [kg/s]
@@ -768,17 +770,8 @@ protected:
     // for production; set nan_check=1 in the input when debugging a blow-up.
     int nan_check = 0;
     int verbose = 0;
-    // See Parse(): 1 = energy-consistent alpha in the pure-cell guard
-    // (fixes E0+E1 != rho_e inside bubbles); 0 = legacy.
-    // 1 = clamp the total surface tension sigma + kappa_s div_s(u) at 0.
-    // A fluid interface cannot support compression; see Advance().
-    // 1 = advect the alpha row with the limiter-reconstructed face volume
-    // fraction (same truncation error as the mass rows); 0 = legacy donor
-    // cell, which makes the bubble lose volume while conserving gas mass.
-    // 1 = advect Gamma with the alpha row's operator (limiter face value
-    // upwinded on the Riemann contact speed u*), so the two stay locked.
-    int shell_sigma_floor = 0;   // see Parse(): floor deletes the dilatational viscous stress
-    int shell_dt_limit = 1;    // include kappa_s in the explicit-diffusion dt limit
+    int eta_consistent_advect = 0;  // 1 = WENO3 face-alpha row, NOT validated (see Parse)
+    int shell_divs_kinematic = 0;   // 0 = band-velocity div_s u (default); 1 = kinematic, UNSTABLE at ml3 (see Parse)
     int shell_visc_subcycle = 0;      // sub-cycle kappa_s (0 = dt-limited path; see Parse)
     int shell_visc_subcycle_max = 512; // hard cap on sub-steps (runaway guard)
     int shell_visc_verbose = 0;        // print N and nu_s each sub-cycle
@@ -787,6 +780,8 @@ protected:
     int clip_ghost_only = 0;
     bool sym_face_lo[3] = {false, false, false};
     bool sym_face_hi[3] = {false, false, false};
+    int omega_sym_mirror = 1;       // 1 = ghost Omega at symmetry faces = mirror of the first valid cell (see Parse)
+    int sym_face_central = 1;       // 1 = central (not one-sided) Hessian stencils in cells on a symmetry face (see Parse)
 
 };
 }
