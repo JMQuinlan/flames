@@ -138,9 +138,6 @@ integration.type    = RungeKutta
 integration.rk.type = 3
 kappa_method        = 1
 
-apply_sharpening     = 0
-sharpening_frequency = 50
 reinit_max_iter      = 100
 reinit_tolerance     = 1e-6
-omega_relax          = 0.5
 relax_diag           = 1

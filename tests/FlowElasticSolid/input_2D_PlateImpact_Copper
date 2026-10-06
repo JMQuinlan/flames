@@ -1,0 +1,129 @@
+# ============================================================================
+# FlowElasticSolid / copper projectile on a copper plate in air -- Favrie, Gavrilyuk &
+# Saurel, JCP 228 (2009), Sec. 7.1, Figs. 15-16, in the paper's own parameters:
+#   copper rho = 8900 kg/m3, gamma = 4.22, p_inf = 342e8 Pa, mu = 9.2e10 Pa; air rho = 1 kg/m3,
+#   p = 1e5 Pa; projectile 0.1 m square at 800 m/s on a 0.1 x 0.5 m plate; 1 m x 1 m domain;
+#   volume-fraction traces 1e-4 as in the paper.  Paper: 1000 x 1000 cells, 2nd order; here
+#   400 x 400 and FIRST ORDER (Limiter.type = godunov): the higher-order limiters of this
+#   solver are unstable at a copper | air interface (see OPTIMIZATION_CHANGELOG II.18).
+# UNITS: length m, density 1e3 kg/m3, pressure 1e9 Pa -> velocity km/s, time ms.
+#   paper times 3.6e-5 .. 6.09e-4 s  =  0.036 .. 0.609 here.
+#
+# Run (from bin/): mpirun -np 16 ./hydro2-2d-g++ ../tests/FlowElasticSolid/input_2D_PlateImpact_Copper plot_file=<dir>/output
+# Paper resolution (2026-10-06, run bin/tests/FlowElasticSolid/Copper1000_minmod_b, 2 h 51 min on 12 ranks of a shared machine;
+# images reference/Images/Copper1000_minmod_b): add
+#   'amr.n_cell=1000 1000' amr.max_grid_size=128 eta.ic.expression.constant.w=0.001 Limiter.type=minmod eta_consistent_advect=1
+#   stop_time=0.612 amr.plot_dt=0.012          (plot files at 0.036, 0.108, 0.324, 0.612 ms; paper 0.036, 0.106, 0.32, 0.609)
+# minmod at a metal|gas interface NEEDS eta_consistent_advect = 1 (limiter face value in the alpha row; see changelog II.25);
+# amr.max_grid_size is per direction: the 500000 below puts the whole level in ONE box (one MPI rank does all the work).
+# Check:           python3 ../tests/FlowElasticSolid/reference/deforming_solid_2d_check.py <dir> --unit GPa --title "Copper Plate Impact" --solid-color copper \
+#                      --literature ../tests/FlowElasticSolid/reference/literature/favrie2009_fig16.png \
+#                      --lit-times 0.036,0.106,0.32,0.609 --lit-shift -0.2 --lit-label "Favrie et al. (2009)"
+#                  (elastic body only: stresses in the solid, and its outline drawn on Favrie's Fig. 16; the plate
+#                   starts at x = 0.4 m here, 0.2 m in the paper, hence the shift)
+# ============================================================================
+plot_file = ./tests/FlowElasticSolid/output_2D_PlateImpact_Copper
+
+Riemann_Solver.type = hllc_elastic
+Limiter.type        = godunov      # higher-order limiters leave a few-% residual stress at solid|gas interfaces; godunov is clean but diffusive
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+elastic.on      = 1
+elastic.mu0     = 92.0     # phase 0 (eta = 1): the solid;  phase 1 is the gas (mu1 = 0)
+elastic.rhoref0 = 8.9
+
+eta.ic.type = expression
+# projectile: square 0.1 x 0.1, x in [0.30, 0.40]; plate: 0.1 x 0.5, x in [0.40, 0.50] (in contact at t = 0)
+eta.ic.expression.constant.w = 0.003       # interface half-width (~1 cell)
+eta.ic.expression.region0 = "1.0e-4 + (1.0 - 2.0e-4)*max(0.25*(1.0 + tanh((x - 0.30)/w))*(1.0 - tanh((x - 0.40)/w))*0.25*(1.0 + tanh((y - 0.45)/w))*(1.0 - tanh((y - 0.55)/w)), 0.25*(1.0 + tanh((x - 0.40)/w))*(1.0 - tanh((x - 0.50)/w))*0.25*(1.0 + tanh((y - 0.25)/w))*(1.0 - tanh((y - 0.75)/w)))"
+epsilon = 0.001
+
+amr.plot_dt = 0.02
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.n_cell = 400 400
+geometry.prob_lo = 0.0  0.0   0.0
+geometry.prob_hi = 1.0  1.0   0.0
+geometry.is_periodic = 0 0 0
+
+timestep  = 1.0e-5
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1e-2
+dynamictimestep.min = 1e-10
+stop_time = 0.6
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+cfl   = 0.4
+
+eos0.gamma = 4.22
+eos1.gamma = 1.4
+eos0.p0 = 34.2
+eos1.p0 = 0.0
+eos0.cp = 1004.5
+eos1.cp = 1004.5
+eos0.cv = 717.5
+eos1.cv = 717.5
+
+mu0   = 0.0
+mu1   = 0.0
+sigma = 0.0
+pref = 0.0
+
+# copper (phase 0): the projectile moves at Up = 0.8 km/s, the plate is at rest
+density0.ic.type = constant
+density0.ic.constant.value = 8.9
+velocity0.ic.type = expression
+velocity0.ic.expression.constant.Up = 0.8
+velocity0.ic.expression.region0 = "Up*(x > 0.29)*(x < 0.40)*(y > 0.44)*(y < 0.56)"
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 1.0e-4
+
+# gas (phase 1), at rest except inside the projectile footprint
+density1.ic.type = constant
+density1.ic.constant.value = 0.001
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.Up = 0.8
+velocity1.ic.expression.region0 = "Up*(x > 0.29)*(x < 0.40)*(y > 0.44)*(y < 0.56)"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 1.0e-4
+
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+kappa_method = 1
+Dv = 0
+g = 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+apply_ahe   = 1
+ahe.method  = 0
+cutoff = 1e-4

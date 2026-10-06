@@ -171,4 +171,3 @@ apply_buoyancy     = 0
 apply_weight       = 0
 apply_vaporization = 0
 grav               = 0.0
-apply_sharpening   = 0

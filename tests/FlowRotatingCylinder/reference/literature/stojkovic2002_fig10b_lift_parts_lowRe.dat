@@ -1,0 +1,16 @@
+# Stojkovic, Breuer & Durst, Phys. Fluids 14, 3160 (2002), FIG. 10(b): pressure (p) and friction (f) parts of the
+# lift coefficient, steady flow, Re = 0.01, 0.1, 1, 10, 20, 30, alpha = 1 .. 6 (alpha = 0: both zero).
+# Digitized (legend-template matching); lift negated to the Kang / Hydro2 sign convention.
+# Each value is followed by its template score q: q >= 0.78 clean, +-0.1 (1 pixel = 0.044);
+# q < 0.78: the marker is partly hidden by neighbours, +-0.3 (all of alpha = 1 and 2, and the friction parts of
+# Re = 10, 20, 30, which lie within 1 of each other);
+# q = 0: not readable, value DERIVED as (total of FIG. 10(a)) - (pressure part) or interpolated (Re = 20 friction).
+# Check: p + f at alpha = 6 gives 33.72 / 31.67 / 28.53 / 19.95 / 18.30 for Re = 30 / 20 / 10 / 1 / 0.1 against
+# 33.75 / 31.69 / 28.51 / 19.93 / 18.3 read independently from FIG. 10(a).
+# columns: alpha  Clp_Re0.01  q  Clf_Re0.01  q  Clp_Re0.1  q  Clf_Re0.1  q  Clp_Re1  q  Clf_Re1  q  Clp_Re10  q  Clf_Re10  q  Clp_Re20  q  Clf_Re20  q  Clp_Re30  q  Clf_Re30  q
+         1       -2.33        0.62       -1.26        0.58       -2.07        0.59       -1.12        0.68       -2.28        0.65       -1.23         0.6       -2.33        0.65        -0.3        0.62       -2.39        0.64       -0.35        0.63       -2.34        0.72       -0.14        0.59
+         2       -3.82        0.76       -2.42        0.64       -3.76        0.71       -2.31        0.81       -3.97        0.71          -2        0.61          -5        0.67       -0.85        0.64       -5.06        0.65        -0.8        0.61       -5.16        0.71       -0.73         0.6
+         3       -5.66        0.93        -3.6        0.62       -5.63        0.83       -3.44         0.8       -6.42        0.89       -2.73        0.72        -8.1        0.79        -1.5        0.73       -8.66        0.74        -1.2           0        -8.9         0.8       -0.95        0.61
+         4       -7.52        0.86       -4.73        0.64       -7.54        0.78       -4.66        0.87       -8.76        0.87       -3.72        0.84      -12.31        0.84       -2.13        0.74      -13.62        0.89       -1.67           0      -14.32        0.81       -1.44        0.65
+         5       -9.35        0.74       -5.88        0.64       -9.47        0.74       -5.81        0.87       -11.3        0.89       -4.79        0.85       -17.8        0.86       -2.87        0.78      -20.28        0.93       -2.26           0      -21.58        0.88       -1.91        0.69
+         6      -11.22        0.64       -7.15         0.6      -11.34        0.67       -6.96        0.83      -14.07         0.6       -5.88        0.78      -24.83         0.7        -3.7        0.77       -28.8        0.73       -2.87        0.68      -31.22        0.59        -2.5        0.65

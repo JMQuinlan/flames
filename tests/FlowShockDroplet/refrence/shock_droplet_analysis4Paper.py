@@ -32,6 +32,8 @@ USAGE:
 
 import yt
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from mpl_toolkits.mplot3d import Axes3D
@@ -63,8 +65,8 @@ PLOT_SCHLIEREN_VELOCITY_GIF = 1         # GIF from Schlieren-Velocity/
 PLOT_SCHLIEREN_VAPDOTRHO_SPLIT = 1      # Individual frames in Schlieren-VapDotRho/
 PLOT_SCHLIEREN_VAPDOTRHO_GIF = 1        # GIF from Schlieren-VapDotRho/
 
-PLOT_VELOCITY_VORTICITY_SPLIT = 1       # Individual frames in Velocity-Vorticity/
-PLOT_VELOCITY_VORTICITY_GIF = 1         # GIF from Velocity-Vorticity/
+PLOT_VELOCITY_VORTICITY_SPLIT = 0       # Individual frames in Velocity-Vorticity/
+PLOT_VELOCITY_VORTICITY_GIF = 0         # GIF from Velocity-Vorticity/
 
 PLOT_SCHLIEREN_TEMPERATURE_SPLIT = 1    # Individual frames in Schlieren-Temperature/
 PLOT_SCHLIEREN_TEMPERATURE_GIF = 1      # GIF from Schlieren-Temperature/
@@ -75,10 +77,10 @@ PLOT_ENERGY_EVOLUTION = 1              # Max pressure, KE, surface energy vs tim
 PLOT_SHOCK_TRACKING = 1                # x-t diagram
 
 # Flow field visualizations
-PLOT_VELOCITY_FIELD = 1                # Individual frames in Velocity-Streamline/
-PLOT_VELOCITY_FIELD_GIF = 1            # GIF from Velocity-Streamline/
-PLOT_VORTICITY_FIELD = 1               # Individual frames in Vorticity/
-PLOT_VORTICITY_FIELD_GIF = 1           # GIF from Vorticity/
+PLOT_VELOCITY_FIELD = 0                # Individual frames in Velocity-Streamline/
+PLOT_VELOCITY_FIELD_GIF = 0            # GIF from Velocity-Streamline/
+PLOT_VORTICITY_FIELD = 0               # Individual frames in Vorticity/
+PLOT_VORTICITY_FIELD_GIF = 0           # GIF from Vorticity/
 
 # Profile and cross-section plots
 PLOT_CENTERLINE_PROFILES = 1           # Pressure and density along y=0
@@ -109,6 +111,16 @@ PLOT_AREA_VS_VAP          = 1          # Surface area (left) vs integrated Vap_d
 # Time sampling
 TIME_STEP = 4  # Sample every Nth timestep (1=all, 2=every other, 5=every 5th, etc.)
 
+# Speed-up settings (same approach as tests/FlowRayleighPlesset/reference/sch20_analysis.py):
+N_PROC = 8                  # worker processes for the data pass and for drawing frames (1 = serial); --nproc N
+USE_FRAME_CACHE = 1         # reuse <output_folder>/_cache/<plotfile>.npz when it is newer than the plot file
+SKIP_EXISTING_FRAMES = 1    # do not redraw a frame PNG that is newer than its plot file AND than this script
+FRB_RESOLUTION = 512        # resampling resolution of every field (was hard-coded in the data loop)
+import sys as _sys_np
+if '--nproc' in _sys_np.argv: N_PROC = int(_sys_np.argv[_sys_np.argv.index('--nproc') + 1])
+if '--redo' in _sys_np.argv: USE_FRAME_CACHE = 0; SKIP_EXISTING_FRAMES = 0
+
+
 # File paths
 #amrex_output_dir = r'../../../bin/tests/FlowShockDroplet/output_ShockDroplet'
 #amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet'
@@ -120,6 +132,11 @@ amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output
 #amrex_output_dir = r'/mmfs1/home/ttryon/flames/bin/tests/FlowShockDroplet/output_Shock1mmDroplet_5Ma_n-Pentane'
 
 output_folder = './ShockDroplet_Analysis'
+import sys as _sys
+_pos = [a for i, a in enumerate(_sys.argv[1:]) if not a.startswith('--') and _sys.argv[i] != '--nproc']
+if len(_pos) > 0: amrex_output_dir = _pos[0]
+if len(_pos) > 1: output_folder = _pos[1]
+
 #output_folder = './ShockDroplet_Analysis_5Ma_H2O'
 #output_folder = './ShockDroplet_Analysis_5Ma_n-Pentane'
 
@@ -388,7 +405,13 @@ def create_gif_from_folder(subfolder_name, output_gif_name):
     
     # Sort by frame number
     image_files = sorted(image_files, key=get_frame_number)
-    
+
+    # Up to date already?  (GIF newer than every frame: nothing to do)
+    _gif = os.path.join(output_folder, output_gif_name)
+    if SKIP_EXISTING_FRAMES and os.path.isfile(_gif) and os.path.getmtime(_gif) > max(os.path.getmtime(os.path.join(subfolder_path, f)) for f in image_files):
+        print(f"  GIF up to date: {output_gif_name}")
+        return
+
     # Load images
     frames = [Image.open(os.path.join(subfolder_path, f)) for f in image_files]
     
@@ -661,38 +684,70 @@ eta_fields = []
 x_grids = []
 y_grids = []
 
+# ----------------------------------------------------------------------------
+# One parallel, cached data pass: every analysed plot file is resampled once (fixed-resolution buffer) by a
+# worker process and stored as float32 in <output_folder>/_cache/.  A later run re-reads only plot files that
+# changed.  Fields missing from a plot file are returned as zeros (with a note).
+# ----------------------------------------------------------------------------
+_FRAME_FIELDS = ['density', 'pressure', 'eta', 'velocityx', 'velocityy', 'T', 'Vap_dot_rho', 'vorticity']
+_CACHE_DIR = os.path.join(output_folder, '_cache')
+os.makedirs(_CACHE_DIR, exist_ok=True)
+
+
+def _pool_map(fn, jobs, nproc):
+    if nproc > 1 and len(jobs) > 1:
+        import multiprocessing as mp
+        with mp.get_context('fork').Pool(min(nproc, len(jobs))) as pool:
+            return pool.map(fn, jobs, chunksize=1)
+    return [fn(j) for j in jobs]
+
+
+def _extract_frame(pf):
+    key = '%g_%g_%g_%g_%d' % (X_MIN, X_MAX, Y_MIN, Y_MAX, FRB_RESOLUTION)
+    cf = os.path.join(_CACHE_DIR, os.path.basename(os.path.normpath(pf)) + '.npz')
+    if USE_FRAME_CACHE and os.path.isfile(cf) and os.path.getmtime(cf) > os.path.getmtime(os.path.join(pf, 'Header')):
+        try:
+            z = np.load(cf)
+            if str(z['key']) == key and all(f in z.files for f in _FRAME_FIELDS):
+                return {f: z[f].astype(np.float64) for f in _FRAME_FIELDS}
+        except Exception:
+            pass
+    ds = yt.load(pf); slc = ds.slice('z', 0.0)
+    frb = slc.to_frb((X_MAX - X_MIN, 'code_length'), FRB_RESOLUTION, center=[0.5*(X_MIN+X_MAX), 0.5*(Y_MIN+Y_MAX), 0.0],
+                     height=(Y_MAX - Y_MIN, 'code_length'))
+    names = {f[1] for f in ds.field_list}; out = {}
+    for f in _FRAME_FIELDS:
+        if f in names: out[f] = np.array(frb[f], dtype=np.float64)
+    if 'vorticity' not in out:
+        dx = (X_MAX - X_MIN) / FRB_RESOLUTION; dy = (Y_MAX - Y_MIN) / FRB_RESOLUTION
+        out['vorticity'] = np.gradient(out['velocityy'], dx, axis=1) - np.gradient(out['velocityx'], dy, axis=0)
+    for f in _FRAME_FIELDS:
+        if f not in out:
+            print(f"  [note] field '{f}' is not in {os.path.basename(pf)}: zeros used"); out[f] = np.zeros_like(out['density'])
+    np.savez_compressed(cf, key=key, **{f: out[f].astype(np.float32) for f in _FRAME_FIELDS})
+    return out
+
+
+import time as _time
+_t0 = _time.time()
+_FRAMES = _pool_map(_extract_frame, [plot_files[idx] for idx in analysis_indices], N_PROC)
+print(f"  data pass: {len(_FRAMES)} plot files on {N_PROC} process(es) in {_time.time() - _t0:.1f} s (cache: {_CACHE_DIR})")
+
 for i, idx in enumerate(analysis_indices):
-    ds = all_data[idx]
     t = times[idx]
-    
-    slc = ds.slice('z', 0.0)
+    fr = _FRAMES[i]
     domain_width = X_MAX - X_MIN
     domain_height = Y_MAX - Y_MIN
-    resolution = 512
-    
-    frb = slc.to_frb((domain_width, 'code_length'), resolution, 
-                     center=[0.5*(X_MIN+X_MAX), 0.5*(Y_MIN+Y_MAX), 0.0],
-                     height=(domain_height, 'code_length'))
-    
-    rho = np.array(frb['density'])   # mixture density (schlieren source)
-    
-    pressure = np.array(frb['pressure'])
-    eta_field = np.array(frb['eta'])
-    vx = np.array(frb['velocityx'])
-    vy = np.array(frb['velocityy'])
-    temperature = np.array(frb['T'])
-    vap_dot_rho = np.array(frb['Vap_dot_rho'])
+    resolution = FRB_RESOLUTION
+    rho = fr['density']   # mixture density (schlieren source)
+    pressure = fr['pressure']
+    eta_field = fr['eta']
+    vx = fr['velocityx']
+    vy = fr['velocityy']
+    temperature = fr['T']
+    vap_dot_rho = fr['Vap_dot_rho']
+    vorticity = fr['vorticity']
 
-    
-    try:
-        vorticity = np.array(frb['vorticity'])
-    except:
-        dx = domain_width / resolution
-        dy = domain_height / resolution
-        dvx_dy = np.gradient(vx, dy, axis=0)
-        dvy_dx = np.gradient(vy, dx, axis=1)
-        vorticity = dvy_dx - dvx_dy
-    
     x_1d = np.linspace(X_MIN, X_MAX, resolution)
     y_1d = np.linspace(Y_MIN, Y_MAX, resolution)
     x_grid, y_grid = np.meshgrid(x_1d, y_1d)
@@ -869,7 +924,7 @@ def plot_schlieren_pressure_split_single(idx, frame_num, save_folder):
     ax_bot.spines['top'].set_visible(False)
     
     # TIMESTAMP OVERLAY (bottom left) - NO SPECIAL CHARACTERS
-    ax_bot.text(0.02, 0.02, f't = {t*1e6:.2f} us', transform=ax_bot.transAxes,
+    ax_bot.text(0.02, 0.06, f't = {t*1e6:.2f} us', transform=ax_bot.transAxes,
                fontsize=FONT_SIZE_TIMESTAMP, color='white', fontweight='bold',
                bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
     
@@ -1005,7 +1060,7 @@ def plot_velocity_field_single(idx, frame_num, save_folder):
     ax.set_title(f'Velocity Field - t = {t:.6e} s', fontsize=FONT_SIZE_TITLE, fontweight='bold')
     
     # Timestamp overlay - NO SPECIAL CHARACTERS
-    ax.text(0.02, 0.02, f't = {t*1e6:.2f} us', transform=ax.transAxes,
+    ax.text(0.02, 0.06, f't = {t*1e6:.2f} us', transform=ax.transAxes,
            fontsize=FONT_SIZE_TIMESTAMP, color='white', fontweight='bold',
            bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
     
@@ -1054,7 +1109,7 @@ def plot_vorticity_field_single(idx, frame_num, save_folder):
     ax.set_title(f'Vorticity Field - t = {t:.6e} s', fontsize=FONT_SIZE_TITLE, fontweight='bold')
     
     # Timestamp overlay - NO SPECIAL CHARACTERS
-    ax.text(0.02, 0.02, f't = {t*1e6:.2f} us', transform=ax.transAxes,
+    ax.text(0.02, 0.06, f't = {t*1e6:.2f} us', transform=ax.transAxes,
            fontsize=FONT_SIZE_TIMESTAMP, color='white', fontweight='bold',
            bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
     
@@ -1155,7 +1210,7 @@ def plot_schlieren_velocity_split_single(idx, frame_num, save_folder):
     ax_bot.spines['top'].set_visible(False)
     
     # TIMESTAMP OVERLAY
-    ax_bot.text(0.02, 0.02, f't = {t*1e6:.2f} us', transform=ax_bot.transAxes,
+    ax_bot.text(0.02, 0.06, f't = {t*1e6:.2f} us', transform=ax_bot.transAxes,
                fontsize=FONT_SIZE_TIMESTAMP, color='white', fontweight='bold',
                bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
     
@@ -1238,7 +1293,7 @@ def plot_schlieren_vapdotrho_split_single(idx, frame_num, save_folder):
                         interpolation='bilinear', aspect='auto')
     
     for eta_val in ETA_CONTOURS:
-        ax_bot.contour(x_vals, y_bottom, eta_bottom, levels=[eta_val], colors='black',
+        ax_bot.contour(x_vals, y_bottom, eta_bottom, levels=[eta_val], colors='red',
                       linewidths=CONTOUR_LINE_WIDTH, linestyles='--' if eta_val != 0.5 else '-')
     
     ax_bot.set_xlim(x_min_zoom, x_max_zoom)
@@ -1249,13 +1304,13 @@ def plot_schlieren_vapdotrho_split_single(idx, frame_num, save_folder):
     ax_bot.spines['top'].set_visible(False)
     
     # TIMESTAMP OVERLAY
-    ax_bot.text(0.02, 0.02, f't = {t*1e6:.2f} us', transform=ax_bot.transAxes,
+    ax_bot.text(0.02, 0.06, f't = {t*1e6:.2f} us', transform=ax_bot.transAxes,
                fontsize=FONT_SIZE_TIMESTAMP, color='white', fontweight='bold',
                bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
     
     cax2 = inset_axes(ax_bot, width="3%", height="80%", loc='right')
     cbar2 = fig.colorbar(im2, cax=cax2)
-    cbar2.set_label('Vap_dot_rho (kg/m^3/s)', fontsize=FONT_SIZE_LABEL)
+    cbar2.set_label(r'Vaporization Rate (kg/m$^3$/s)', fontsize=FONT_SIZE_LABEL)
     
     plt.subplots_adjust(left=0.08, right=0.92, top=0.95, bottom=0.08, hspace=0.0)
     ax_top.set_position([ax_top.get_position().x0, ax_bot.get_position().y1,
@@ -1352,7 +1407,7 @@ def plot_velocity_vorticity_split_single(idx, frame_num, save_folder):
     ax_bot.spines['top'].set_visible(False)
     
     # TIMESTAMP OVERLAY
-    ax_bot.text(0.02, 0.02, f't = {t*1e6:.2f} us', transform=ax_bot.transAxes,
+    ax_bot.text(0.02, 0.06, f't = {t*1e6:.2f} us', transform=ax_bot.transAxes,
                fontsize=FONT_SIZE_TIMESTAMP, color='white', fontweight='bold',
                bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
     
@@ -1446,7 +1501,7 @@ def plot_schlieren_temperature_split_single(idx, frame_num, save_folder):
     ax_bot.spines['top'].set_visible(False)
     
     # TIMESTAMP OVERLAY
-    ax_bot.text(0.02, 0.02, f't = {t*1e6:.2f} us', transform=ax_bot.transAxes,
+    ax_bot.text(0.02, 0.06, f't = {t*1e6:.2f} us', transform=ax_bot.transAxes,
                fontsize=FONT_SIZE_TIMESTAMP, color='white', fontweight='bold',
                bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
     
@@ -1695,7 +1750,7 @@ def plot_shape_evolution_composite():
     ax.set_aspect('equal', adjustable='box')
     ax.set_xlabel(r"$x$ [m]", fontsize=FONT_SIZE_LABEL)
     ax.set_ylabel(r"$y$ [m]", fontsize=FONT_SIZE_LABEL)
-    ax.set_title(r"Droplet shape evolution ($\eta = 0.5$ contour)",
+    ax.set_title(r"Droplet Shape Evolution ($\eta = 0.5$ Contour)",
                  fontsize=FONT_SIZE_TITLE)
     ax.grid(True, alpha=0.3)
     ax.tick_params(labelsize=FONT_SIZE_TICK)
@@ -1815,7 +1870,7 @@ def plot_schlieren_mach_split_single(idx, frame_num, save_folder):
     ax_bot.set_xlabel('X [m]', fontsize=FONT_SIZE_LABEL)
     ax_bot.set_ylabel('Y [m]', fontsize=FONT_SIZE_LABEL)
     ax_bot.spines['top'].set_visible(False)
-    ax_bot.text(0.02, 0.02, f't = {t*1e6:.2f} us', transform=ax_bot.transAxes,
+    ax_bot.text(0.02, 0.06, f't = {t*1e6:.2f} us', transform=ax_bot.transAxes,
                 fontsize=FONT_SIZE_TIMESTAMP, color='white', fontweight='bold',
                 bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
     cax2 = inset_axes(ax_bot, width="3%", height="80%", loc='right')
@@ -1911,6 +1966,26 @@ def plot_mass_conservation():
     plt.close(fig)
 
 
+def _render_one(job):
+    fname, i, folder = job
+    globals()[fname](i, i + 1, folder); plt.close('all')
+    return i
+
+
+def _render_frames(fn, folder):
+    """draw fn(i, i+1, folder) for every analysed frame on N_PROC forked workers; a frame whose PNG is newer
+    than its plot file and than this script is left alone (SKIP_EXISTING_FRAMES)"""
+    t0 = _time.time(); jobs = []
+    for i, idx in enumerate(analysis_indices):
+        if SKIP_EXISTING_FRAMES:
+            old = glob.glob(os.path.join(folder, f'{i + 1:04d}_*.{SAVE_FORMAT_RASTER}'))
+            ref = max(os.path.getmtime(os.path.join(plot_files[idx], 'Header')), os.path.getmtime(os.path.abspath(__file__)))
+            if old and min(os.path.getmtime(o) for o in old) > ref: continue
+        jobs.append((fn.__name__, i, folder))
+    _pool_map(_render_one, jobs, N_PROC)
+    print(f"  {len(jobs)} frame(s) drawn, {len(analysis_indices) - len(jobs)} up to date, {_time.time() - t0:.1f} s")
+
+
 # ============================================================================
 # EXECUTE PLOTS
 # ============================================================================
@@ -1923,10 +1998,7 @@ plot_count = 0
 
 if PLOT_SCHLIEREN_PRESSURE_SPLIT:
     print("\nGenerating Schlieren/Pressure Split Views (individual frames)...")
-    for i, idx in enumerate(analysis_indices):
-        plot_schlieren_pressure_split_single(i, i+1, subfolder_schlieren)
-        if (i + 1) % 10 == 0:
-            print(f"  Saved {i + 1}/{len(analysis_indices)} frames")
+    _render_frames(plot_schlieren_pressure_split_single, subfolder_schlieren)
     plot_count += 1
 
 if PLOT_SCHLIEREN_PRESSURE_GRID:
@@ -1937,18 +2009,12 @@ if PLOT_SCHLIEREN_PRESSURE_GRID:
 
 if PLOT_VELOCITY_FIELD:
     print("\nGenerating Velocity Field (individual frames)...")
-    for i, idx in enumerate(analysis_indices):
-        plot_velocity_field_single(i, i+1, subfolder_velocity)
-        if (i + 1) % 10 == 0:
-            print(f"  Saved {i + 1}/{len(analysis_indices)} frames")
+    _render_frames(plot_velocity_field_single, subfolder_velocity)
     plot_count += 1
 
 if PLOT_VORTICITY_FIELD:
     print("\nGenerating Vorticity Field (individual frames)...")
-    for i, idx in enumerate(analysis_indices):
-        plot_vorticity_field_single(i, i+1, subfolder_vorticity)
-        if (i + 1) % 10 == 0:
-            print(f"  Saved {i + 1}/{len(analysis_indices)} frames")
+    _render_frames(plot_vorticity_field_single, subfolder_vorticity)
     plot_count += 1
 
 if PLOT_DEFORMATION_METRICS:
@@ -1971,34 +2037,22 @@ if PLOT_AREA_VS_VAP:
 
 if PLOT_SCHLIEREN_VELOCITY_SPLIT:
     print("\nGenerating Schlieren/Velocity Split Views (individual frames)...")
-    for i, idx in enumerate(analysis_indices):
-        plot_schlieren_velocity_split_single(i, i+1, subfolder_schlieren_velocity)
-        if (i + 1) % 10 == 0:
-            print(f"  Saved {i + 1}/{len(analysis_indices)} frames")
+    _render_frames(plot_schlieren_velocity_split_single, subfolder_schlieren_velocity)
     plot_count += 1
 
 if PLOT_SCHLIEREN_VAPDOTRHO_SPLIT:
     print("\nGenerating Schlieren/VapDotRho Split Views (individual frames)...")
-    for i, idx in enumerate(analysis_indices):
-        plot_schlieren_vapdotrho_split_single(i, i+1, subfolder_schlieren_vapdotrho)
-        if (i + 1) % 10 == 0:
-            print(f"  Saved {i + 1}/{len(analysis_indices)} frames")
+    _render_frames(plot_schlieren_vapdotrho_split_single, subfolder_schlieren_vapdotrho)
     plot_count += 1
 
 if PLOT_VELOCITY_VORTICITY_SPLIT:
     print("\nGenerating Velocity/Vorticity Split Views (individual frames)...")
-    for i, idx in enumerate(analysis_indices):
-        plot_velocity_vorticity_split_single(i, i+1, subfolder_velocity_vorticity)
-        if (i + 1) % 10 == 0:
-            print(f"  Saved {i + 1}/{len(analysis_indices)} frames")
+    _render_frames(plot_velocity_vorticity_split_single, subfolder_velocity_vorticity)
     plot_count += 1
 
 if PLOT_SCHLIEREN_TEMPERATURE_SPLIT:
     print("\nGenerating Schlieren/Temperature Split Views (individual frames)...")
-    for i, idx in enumerate(analysis_indices):
-        plot_schlieren_temperature_split_single(i, i+1, subfolder_schlieren_temperature)
-        if (i + 1) % 10 == 0:
-            print(f"  Saved {i + 1}/{len(analysis_indices)} frames")
+    _render_frames(plot_schlieren_temperature_split_single, subfolder_schlieren_temperature)
     plot_count += 1
 
 
@@ -2049,10 +2103,7 @@ if PLOT_SHAPE_EVOLUTION:
 
 if PLOT_SCHLIEREN_MACH_SPLIT:
     print("\nGenerating Schlieren/Mach split (individual frames)...")
-    for i, idx in enumerate(analysis_indices):
-        plot_schlieren_mach_split_single(i, i+1, subfolder_schlieren_mach)
-        if (i + 1) % 10 == 0:
-            print(f"  Saved {i + 1}/{len(analysis_indices)} frames")
+    _render_frames(plot_schlieren_mach_split_single, subfolder_schlieren_mach)
     plot_count += 1
 
 if PLOT_SCHLIEREN_MACH_GIF:

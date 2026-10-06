@@ -126,8 +126,5 @@ Dv = 1e-2
 Y_infinity = 0.0      # Pure vapor far-field
 
 ### INTERFACE SHARPENING ###
-apply_sharpening = 0       # Disable for Stefan (interface should diffuse naturally)
-sharpening_frequency = 100
 reinit_max_iter = 50
 reinit_tolerance = 1e-6
-omega_relax = 0.5

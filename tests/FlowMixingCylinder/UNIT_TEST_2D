@@ -1,0 +1,200 @@
+# =============================================================================
+# FlowMixingCylinder -- a rigid cylinder translating through two stratified gases
+# (moving non-deforming solid, solid.moving = 1).  2D, Hydro2 6-equation model.
+#
+#   channel   x in [-6, 6] PERIODIC,  y in [-4, 4] with no-slip / no-penetration walls
+#   fluids    y > 0: light gas (phase 0, rho = 25),  y < 0: heavy gas (phase 1, rho = 100)
+#             both ideal gases (gamma 1.4, p = 1785.71) -> c = 10 / 5;  no gravity,
+#             no surface tension; diffuse interface eta = 0.5 (1 + tanh(y/eps))
+#   cylinder  D = 1, centred on the interface (y = 0), moving LEFT -> RIGHT:
+#             x_c(t) = x0 + Uc (t - tau (1 - exp(-t/tau))),  Uc = 1 (smooth start),
+#             re-entering through the periodic boundary (fmod in solid.phi.ic)
+#   Re = rho Uc D / mu = 50 (light) / 200 (heavy);  Mach 0.1 / 0.2
+#
+# The geometry is prescribed: solid.phi.ic and solid.momentum.ic are expressions of
+# (x, y, t) that the solver re-evaluates at the start of every step; cells the body
+# vacates are filled from the neighbouring fluid (Hydro2::UpdateMovingSolid).  The
+# wall is the sharp no-slip ghost-cell wall (solid.wall_flux = 1) with wall velocity
+# u_s = dx_c/dt.  Not conservative (see UpdateMovingSolid) -- the analysis script
+# reports the mass drift of each gas.
+#
+# Run (from bin/):  mpirun -np 16 ./hydro2-2d-g++ ../tests/FlowMixingCylinder/UNIT_TEST_2D plot_file=<dir>/output
+# Analyse:          python3 ../tests/FlowMixingCylinder/reference/mixing_cylinder_check.py <run_dir>
+# Verification of the moving wall alone: input_Galilean_Re40 in this folder.
+# =============================================================================
+
+plot_file = ./tests/FlowMixingCylinder/output_hydro2     # (run from bin/; override on the command line)
+
+### MESHING ###
+amr.plot_dt          = 0.25
+amr.max_grid_size    = 64
+amr.blocking_factor  = 8
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level        = 0              # single level: dx = dy = 1/32 everywhere (the body sweeps the whole channel)
+amr.n_cell           = 384 256        # dx = 12/384 = dy = 8/256 = 0.03125  (D/dx = 32)
+amr.n_error_buf      = 16
+
+### DIMENSIONS ###
+geometry.prob_lo     = -6.0 -4.0 0.0    # channel 12 D long (periodic), 8 D high (walls)
+geometry.prob_hi     =  6.0  4.0 0.0
+geometry.is_periodic = 1 0 0
+
+### TIME STEPPING ###
+timestep            = 1e-5
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 5e-3
+dynamictimestep.min = 1e-9
+cfl                 = 0.4
+nghost              = 4            # NSCBC4 needs 4 ghost cells
+stop_time           = 36.0         # three laps of the channel (L/U = 12)
+
+# ----------------------------------------------------------------------------
+# EMBEDDED SOLID BOUNDARY
+# ----------------------------------------------------------------------------
+apply_embedded_solid = 1
+solid.brinkman       = 70             # YANG penalty ~4*U/eps (U=1, eps=0.06): gives BOTH no-penetration AND no-slip (drives u->0 in the solid)
+phi_refinement_criterion = 0.1
+
+# Cylinder of radius R0 at the origin: r>R0 -> phi=1 (fluid), r<R0 -> phi=0 (solid)
+solid.phi.ic.type = expression
+solid.phi.ic.expression.constant.R0  = 0.5
+solid.phi.ic.expression.constant.eps = 0.016   # ~dx/2: phi carries the sub-cell surface position
+solid.phi.ic.expression.constant.x0  = -3.0      # start position of the centre
+solid.phi.ic.expression.constant.Uc  = 1.0       # cruise speed (left -> right)
+solid.phi.ic.expression.constant.tau = 0.5       # smooth start: speed Uc (1 - exp(-t/tau))
+solid.phi.ic.expression.constant.Lx  = 12.0      # channel length (periodic image)
+# centre x_c(t) = x0 + Uc (t - tau (1 - exp(-t/tau)));  xr = periodic distance to it in (-Lx/2, Lx/2]
+solid.phi.ic.expression.region0 = "0.5*(1.0 + tanh((sqrt((fmod(x - x0 - Uc*(t - tau*(1.0 - exp(-t/tau))) + 1000.5*Lx, Lx) - 0.5*Lx)^2 + y*y) - R0)/eps))"
+
+# Prescribed quiescent solid target, split by the local alpha_1 = eta = 1
+# (physical solid state rho=100, p=1785.71, u=0):
+#   rho_eta0 = 100, rho_eta1 = 0,    E0 = 4464.28, E1 = 0
+solid.density.ic.type = constant
+solid.density.ic.constant.value = 100.0
+# Wall velocity u_s = d x_c/dt (uniform over the body):  M_s = rho_s u_s
+solid.momentum.ic.type = expression
+solid.momentum.ic.expression.constant.rho_s = 100.0
+solid.momentum.ic.expression.constant.Uc    = 1.0
+solid.momentum.ic.expression.constant.tau   = 0.5
+solid.momentum.ic.expression.region0 = "rho_s*Uc*(1.0 - exp(-t/tau))"
+solid.momentum.ic.expression.region1 = "0.0"
+solid.pressure.ic.type = constant
+solid.pressure.ic.constant.value = 1785.712
+
+### ETA (alpha_1) IC -- uniform alpha_1 = 1 (pure phase 0) ###
+# Two gases: eta = 1 (phase 0, LIGHT) for y > 0, eta = 0 (phase 1, HEAVY) for y < 0
+eta.ic.type = expression
+eta.ic.expression.constant.eps = 0.06
+eta.ic.expression.region0 = "0.5*(1.0 + tanh(y/eps))"
+eta.bc.type.xlo = periodic
+eta.bc.type.xhi = periodic
+eta.bc.type.ylo = neumann
+eta.bc.type.yhi = neumann
+
+### EOS ###
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cp    = 1005.0
+eos0.cv    = 717.86
+mu0   = 0.5      # light gas (top):    Re = rho U D / mu = 25 * 1 * 1 / 0.5 = 50
+mu0_b = 0.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp    = 1005.0
+eos1.cv    = 717.86
+mu1   = 0.5      # heavy gas (bottom): Re = 100 * 1 * 1 / 0.5 = 200
+mu1_b = 0.0
+# Fourier heat conduction (k = mu cp / Pr).  Without it the no-slip wall has nowhere
+# to put its dissipation heat: T_wall reached 1.077 T_inf by t = 6 (physical ~1.007).
+thermal.conduction = 0      # [2026-09-25] off (user request; was 1)
+thermal.Pr         = 0.72
+
+### FLUID 0 IC (uniform inflow in +x) ###
+density0.ic.type = constant
+density0.ic.constant.value = 25.0     # light gas, c = sqrt(1.4*1785.71/25) = 10  (M = 0.1)
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"     # fluid initially at rest
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 1785.71
+
+### FLUID 1 IC (negligible) ###
+density1.ic.type = constant
+density1.ic.constant.value = 100.0    # heavy gas, c = 5  (M = 0.2)
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 1785.71
+
+### INTERACTIONS ###
+epsilon = 0.06     # diffuse fluid-fluid interface half-width (~2 cells)
+sigma   = 0.0
+Dv      = 0.0
+pref    = 0.0
+small   = 1e-6
+grav    = 0.0
+
+### BOUNDARY CONDITIONS ###
+# Subsonic (Ma 0.2) far field: NSCBC4 non-reflecting boundaries (same set-up as the
+# viscous NACA 0012 decks).  Inflow xlo fixes u, v, T; outflow xhi and the lateral
+# boundaries relax toward the free-stream pressure, so start-up acoustics leave the
+# domain instead of ringing (all-Dirichlet/Neumann walls trapped a +-200 pressure wave).
+#   target_T = p/(rho cv (gamma-1)) = 1785.71/(100*717.86*0.4) = 6.2188658e-02
+
+
+### REFINEMENT CRITERIA ###
+# ---- boundaries: periodic in x; top/bottom = no-slip, no-penetration walls ----
+density.bc.type.xlo  = periodic
+density.bc.type.xhi  = periodic
+density.bc.type.ylo  = neumann
+density.bc.type.yhi  = neumann
+density.bc.val.ylo   = 0.0
+density.bc.val.yhi   = 0.0
+energy.bc.type.xlo   = periodic
+energy.bc.type.xhi   = periodic
+energy.bc.type.ylo   = neumann
+energy.bc.type.yhi   = neumann
+energy.bc.val.ylo    = 0.0
+energy.bc.val.yhi    = 0.0
+momentum.bc.type.xlo = periodic periodic
+momentum.bc.type.xhi = periodic periodic
+momentum.bc.type.ylo = dirichlet dirichlet
+momentum.bc.type.yhi = dirichlet dirichlet
+momentum.bc.val.ylo  = 0.0 0.0
+momentum.bc.val.yhi  = 0.0 0.0
+density0.bc.type.xlo = periodic
+density0.bc.type.xhi = periodic
+density0.bc.type.ylo = neumann
+density0.bc.type.yhi = neumann
+density1.bc.type.xlo = periodic
+density1.bc.type.xhi = periodic
+density1.bc.type.ylo = neumann
+density1.bc.type.yhi = neumann
+
+eta_refinement_criterion   = 1e10
+omega_refinement_criterion = 1e10
+gradu_refinement_criterion = 1.0e8
+p_refinement_criterion     = 1e10
+rho_refinement_criterion   = 1e10
+cutoff = 1e-16
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+
+### SOLVER ###
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+kappa_method        = 1
+
+solid.force_int = 1
+solid.wall_flux = 1   # [2026-09-30] explicit mirror wall (phi no longer thin enough for the auto test)
+solid.moving    = 1   # [2026-10-05] moving rigid solid: phi(x,t) + wall velocity re-evaluated every step, fresh cells filled

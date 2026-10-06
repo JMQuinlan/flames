@@ -213,8 +213,5 @@ Riemann_Solver.type = hllc
 kappa_method = 1                # REQUIRED for Marmottant (clean mean curvature)
 
 ### INTERFACE COMPRESSION ###
-apply_sharpening = 0
-sharpening_frequency = 50
 reinit_max_iter = 100
 reinit_tolerance = 1e-6
-omega_relax = 0.5

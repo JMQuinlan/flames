@@ -191,7 +191,6 @@ Limiter.type        = weno3
 integration.type    = RungeKutta
 integration.rk.type = 3
 
-apply_sharpening = 0
 equalize_ic_pressure = 1
 amr.plot_dt = 0.02342
 shell.kappa_s = 0.0

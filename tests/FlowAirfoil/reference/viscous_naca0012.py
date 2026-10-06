@@ -267,7 +267,6 @@ integration.rk.type = 3
 Riemann_Solver.type = hllc
 Limiter.type        = vanleer
 kappa_method        = 1
-apply_sharpening    = 0
 """
     open(os.path.join(d, "input"), "w").write(txt)
 

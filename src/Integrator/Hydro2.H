@@ -3,6 +3,9 @@
 
 #include "Integrator/Integrator.H"
 #include "Integrator/EmbeddedSolid.H"
+#include "Integrator/Hydro2_Solid.H"
+#include "Integrator/Ablation.H"
+#include "Integrator/Hydro2_PhaseChange.H"
 #include "IO/ParmParse.H"
 
 // Boundry Conditions
@@ -151,7 +154,11 @@ protected:
         const amrex::MultiFab &E0_mf_in,
         const amrex::MultiFab &E1_mf_in,
         const amrex::MultiFab &shell_mf_in,
-        const amrex::MultiFab &cfun_mf_in);
+        const amrex::MultiFab &cfun_mf_in,
+        amrex::MultiFab *ebasis_rhs_mf = nullptr,          // elastic.on only
+        const amrex::MultiFab *ebasis_mf_in = nullptr,
+        amrex::MultiFab *vapor_rhs_mf = nullptr,           // phasechange.on only
+        const amrex::MultiFab *vapor_mf_in = nullptr);
 
     // Post-stage pressure relaxation + reinitialization (Saurel-Petitpas-Berry
     // 2009 §3.5 / Schmidmayer 2020 §3.3).  Runs in-place on the working
@@ -226,6 +233,7 @@ private:
     // Derive the per-phase embedded-solid target from the single solid
     // density/pressure, split by local eta (option 3a).
     void InitEmbeddedSolidTarget(int lev, Set::Scalar time);
+    void UpdateMovingSolid(int lev, Set::Scalar time, Set::Scalar dt);   // [2026-10-05] solid.moving: move phi/target, fill fresh cells
 
 protected:
     // FLUID 0
@@ -385,6 +393,16 @@ protected:
     // implementation: phi is set from its IC and never evolved.
     // All embedded-solid state + per-cell wall physics is consolidated here.
     EmbeddedSolid embedded;
+    // DEFORMING (hyperelastic) SOLID PHASE, Favrie-Gavrilyuk-Saurel 2009.  Default
+    // off (elastic.on = 0); all of it lives in Hydro2_Solid.H.
+    ElasticSolid elastic;
+    // LIQUID <-> VAPOUR PHASE CHANGE (default off; phasechange.on).  See Hydro2_PhaseChange.H.
+    PhaseChange phasechange;
+    void RelaxPhaseChange(int lev);
+    // SURFACE ABLATION (default off; ablation.on).  See Ablation.H.
+    Ablation ablation;
+    void RecedeAblatingSurface(int lev, Set::Scalar time, Set::Scalar dt);
+    void AdvanceSolidTemperature(int lev, Set::Scalar time, Set::Scalar dt);   // [2026-10-06] ablation.conduction
 protected:
 
     int n_step = 0;
@@ -456,6 +474,7 @@ protected:
     Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion=NAN;
     // optional geometric refinement box (force max_level inside): refine_box.lo/hi
     int refine_box_on=0;
+    int refine_box_max_level=-1;   // [2026-10-02] refine_box.max_level: box forces levels <= this (-1 = all)
     Set::Scalar refine_box_lo[AMREX_SPACEDIM] = {AMREX_D_DECL(0,0,0)};
     Set::Scalar refine_box_hi[AMREX_SPACEDIM] = {AMREX_D_DECL(0,0,0)};
     // grad(phi) solid-boundary refinement is now embedded.refinement_criterion

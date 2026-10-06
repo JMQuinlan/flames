@@ -180,4 +180,3 @@ integration.rk.type = 3
 Riemann_Solver.type = hllc
 Limiter.type        = @LIMITER@
 kappa_method        = 1
-apply_sharpening    = 0

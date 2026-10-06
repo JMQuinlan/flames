@@ -43,6 +43,19 @@ Documentation for alamo
         :bdg-warning-line:`Optional but useful for regular users` 
         
         
+    .. grid-item-card::
+        :link: hydro2
+        :link-type: ref
+
+        :fas:`fire;fa-fw` Hydro2 (6-equation) Solver
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+        The compressible two-phase solver: embedded, moving, deforming and ablating solids,
+        boundary conditions, polymer / lipid shells, phase change, and how-tos.
+
+        ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        :bdg-success-line:`For anyone running a Hydro2 deck`
+
     .. grid-item-card:: 
         :link: inputs
         :link-type: ref
@@ -166,6 +179,7 @@ The development team gratefully acknowledges the funding sources that enable the
         Simba
         AutoDocAutoTest
         Units
+        Hydro2
         Tests
         Inputs
         InputsSearch

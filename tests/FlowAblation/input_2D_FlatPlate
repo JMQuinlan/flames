@@ -1,0 +1,146 @@
+# ============================================================================
+# FlowAblation / laminar boundary-layer heat flux on a flat plate, Mach 2  (Hydro2, ablation.on = 1)
+#
+# The heat flux that drives ablation in a stream.  Gas (rho 1, p 1, T_inf 1; gamma 1.4, cp 3.5,
+# R = 1, mu 2e-4, Pr 0.72) enters at Mach 2 (U = 2.3664) over a flat no-slip wall along y = 0
+# (the embedded solid fills y < 0), isothermal at T_w = T_inf; the leading edge is the inflow
+# boundary.  Re_L = rho U L/mu = 11832.  Q* is set huge (1e9) so the wall does not move: the test
+# is the wall heat flux, against the compressible laminar flat-plate solution
+#     q_w(x) = St rho U cp (T_aw - T_w),   St = 0.332 sqrt(C*) Pr^(-2/3) / sqrt(Re_x),
+#     T_aw = T_inf (1 + sqrt(Pr) (gamma - 1)/2 M^2) = 1.679,
+#     C* = rho* mu*/(rho_e mu_e) at Eckert's reference temperature T* = T_e + 0.5 (T_w - T_e) + 0.22 (T_aw - T_e)
+# (constant mu here, so C* = T_e/T* = 0.870).  The reference-temperature method is good to a few
+# per cent; near the inlet the weak leading-edge shock and the coarse resolution of the thin
+# layer are not covered by it.  400 x 200 cells (dx = 0.0025; the layer is ~18 cells thick at x = 1).
+#
+# Run (from bin/): mpirun -np 8 ./hydro2-2d-g++ ../tests/FlowAblation/input_2D_FlatPlate plot_file=<dir>/output
+# Check:           python3 ../tests/FlowAblation/reference/flat_plate_check.py <dir>
+# ============================================================================
+plot_file = ./tests/FlowAblation/output_2D_FlatPlate
+amr.plot_dt = 0.25
+amr.max_grid_size = 100
+amr.blocking_factor = 4
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level = 0
+amr.n_cell = 400 200
+amr.n_error_buf      = 8
+geometry.prob_lo = 0.0 -0.05 0.0
+geometry.prob_hi = 1.0 0.45 0.0
+geometry.is_periodic = 0 0 0
+timestep = 1e-5
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1e-2
+dynamictimestep.min = 1e-9
+cfl                 = 0.3
+cfl_v               = 0.3
+stop_time = 3.0
+apply_embedded_solid = 1
+solid.wall_flux = 1
+solid.visc_mirror = 1                # no-slip on the fluid|solid face (default 0 puts it dx/2 inside the solid: q_w -7..-20 %, near-wall u 2x too high)
+solid.phi.ic.type = expression
+solid.phi.ic.expression.constant.xw = 0.3
+solid.phi.ic.expression.region0 = "1.0*(y > 0.0)"
+phi_refinement_criterion = 1e10
+solid.density.ic.type = constant
+solid.density.ic.constant.value = 1.0
+solid.momentum.ic.type = constant
+solid.momentum.ic.constant.value = 0.0 0.0
+solid.pressure.ic.type = constant
+solid.pressure.ic.constant.value = 1.0
+eta.ic.type = constant
+eta.ic.constant.value = 0.5
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cp = 3.5
+eos0.cv = 2.5
+mu0 = 2.0e-4
+mu0_b = 0.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp = 3.5
+eos1.cv = 2.5
+mu1 = 2.0e-4
+mu1_b = 0.0
+density0.ic.type = constant
+density0.ic.constant.value = 1.0
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "2.3664319132398464"
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 1.0
+density1.ic.type = constant
+density1.ic.constant.value = 1.0
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "2.3664319132398464"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 1.0
+epsilon = 0.1
+sigma   = 0.0
+Dv      = 0.0
+pref    = 0.0
+small   = 1e-6
+grav    = 0.0
+eta_refinement_criterion   = 1e10
+omega_refinement_criterion = 1e10
+gradu_refinement_criterion = 1e10
+p_refinement_criterion = 1e10
+rho_refinement_criterion = 1e10
+cutoff = 1e-16
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+kappa_method        = 1
+
+
+
+
+eta.bc.type.xlo = dirichlet
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = neumann
+eta.bc.type.yhi = neumann
+
+density.bc.type.xlo = dirichlet
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+density0.bc.type.xlo = dirichlet
+density0.bc.type.xhi = neumann
+density0.bc.type.ylo = neumann
+density0.bc.type.yhi = neumann
+
+density1.bc.type.xlo = dirichlet
+density1.bc.type.xhi = neumann
+density1.bc.type.ylo = neumann
+density1.bc.type.yhi = neumann
+
+energy.bc.type.xlo = dirichlet
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xlo = dirichlet dirichlet
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+nghost = 4
+thermal.conduction = 1
+thermal.Pr = 0.72
+ablation.on     = 1
+ablation.T_wall = 1.0
+ablation.rho_s  = 1.0
+ablation.Qstar = 1.0e9
+eta.bc.val.xlo = 0.5
+density.bc.val.xlo = 1.0
+density0.bc.val.xlo = 0.5
+density1.bc.val.xlo = 0.5
+energy.bc.val.xlo = 1.25
+momentum.bc.val.xlo = 2.3664319132398464 0.0

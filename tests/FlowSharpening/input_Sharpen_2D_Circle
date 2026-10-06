@@ -128,11 +128,8 @@ integration.rk.type = 3
 kappa_method        = 1
 
 ### INTERFACE SHARPENING (override apply_sharpening on the CLI: 0 vs 1) ###
-apply_sharpening     = 0
-sharpening_frequency = 2
 reinit_max_iter      = 10
 density_max_iter     = 10
 reinit_tolerance     = 1e-6
-omega_relax          = 0.5
 
 equalize_ic_pressure = 1

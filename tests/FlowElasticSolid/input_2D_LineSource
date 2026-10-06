@@ -1,0 +1,127 @@
+# ============================================================================
+# FlowElasticSolid / cylindrical wave from a line source in an unbounded solid  (Hydro2, elastic.on = 1)
+#
+# A radial velocity pulse  v_r = A (r/r0) exp(-r^2/r0^2)  in a uniform solid (rho 1, gamma 3.4,
+# p_inf 10, p 0.1, mu 12; c_l = 7.095, c_t = 3.464) launches an outgoing cylindrical
+# longitudinal wave.  In plane strain with axial symmetry the linear problem is 1D in r:
+#   rho v_t = d(s_rr)/dr + (s_rr - s_tt)/r,
+#   (s_rr)_t = (lam + 2 mu) v_r + lam v/r,   (s_tt)_t = lam v_r + (lam + 2 mu) v/r,
+# which reference/line_source_check.py integrates on a fine radial grid (a numerical
+# reference of a 1D problem, not a closed form).  Checks, on a Cartesian grid: the radial
+# profiles along 0, 26.6 and 45 deg (isotropy), the hoop stress (S_xx != S_yy off the pulse),
+# and that no azimuthal velocity (shear wave) is generated.
+# Box 2 x 2 (periodic; stop before the wave wraps), 400 x 400 cells, t = 0.08.
+#
+# Run (from bin/): mpirun -np 16 ./hydro2-2d-g++ ../tests/FlowElasticSolid/input_2D_LineSource plot_file=<dir>/output
+# Check:           python3 ../tests/FlowElasticSolid/reference/line_source_check.py <dir>
+# ============================================================================
+plot_file = ./tests/FlowElasticSolid/output_2D_LineSource
+
+Riemann_Solver.type = hllc_elastic
+Limiter.type        = minmod
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+elastic.on      = 1
+elastic.mu0     = 12.0     # phase 0 (eta = 1) is the solid; phase 1 (mu1 = 0) is a gas
+elastic.rhoref0 = 1.0
+
+eta.ic.type = constant
+eta.ic.constant.value = 0.999999
+epsilon = 0.01
+
+amr.plot_dt = 0.02
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.n_cell = 400 400
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 2.0 2.0 0.0
+geometry.is_periodic = 1 1 0
+
+timestep  = 1.0e-4
+stop_time = 0.08
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+cfl   = 0.4
+
+eos0.gamma = 3.4
+eos1.gamma = 1.4
+eos0.p0 = 10.0
+eos1.p0 = 0.0
+eos0.cp = 1004.5
+eos1.cp = 1004.5
+eos0.cv = 717.5
+eos1.cv = 717.5
+
+mu0   = 0.0
+mu1   = 0.0
+sigma = 0.0
+pref = 0.0
+
+# solid (phase 0)
+density0.ic.type = constant
+density0.ic.constant.value = 1.0
+velocity0.ic.type = expression
+velocity0.ic.expression.constant.A  = 1.0e-3
+velocity0.ic.expression.constant.r0 = 0.1
+velocity0.ic.expression.region0 = "A*(x - 1.0)/r0*exp(-((x - 1.0)^2 + (y - 1.0)^2)/(r0*r0))"
+velocity0.ic.expression.region1 = "A*(y - 1.0)/r0*exp(-((x - 1.0)^2 + (y - 1.0)^2)/(r0*r0))"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 0.1
+cp0 = 1.4
+cv0 = 1.0
+
+# gas (phase 1, trace)
+density1.ic.type = constant
+density1.ic.constant.value = 0.001
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.A  = 1.0e-3
+velocity1.ic.expression.constant.r0 = 0.1
+velocity1.ic.expression.region0 = "A*(x - 1.0)/r0*exp(-((x - 1.0)^2 + (y - 1.0)^2)/(r0*r0))"
+velocity1.ic.expression.region1 = "A*(y - 1.0)/r0*exp(-((x - 1.0)^2 + (y - 1.0)^2)/(r0*r0))"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 0.1
+cp1 = 1.4
+cv1 = 1.0
+
+density.bc.type.xhi = periodic
+density.bc.type.xlo = periodic
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+energy.bc.type.xhi = periodic
+energy.bc.type.xlo = periodic
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+momentum.bc.type.xhi = periodic periodic
+momentum.bc.type.xlo = periodic periodic
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+kappa_method = 1
+Dv = 0
+g = 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+apply_ahe   = 1
+ahe.method  = 0
+cutoff = 1e-4
+
+eta.bc.type.xlo = periodic
+eta.bc.type.xhi = periodic
+eta.bc.type.ylo = periodic
+eta.bc.type.yhi = periodic

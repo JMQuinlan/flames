@@ -151,14 +151,11 @@ apply_surface_tension = 0
 apply_buoyancy        = 0
 apply_weight          = 0
 apply_vaporization    = 0
-apply_sharpening      = 0
 apply_ahe             = 0
 grav                  = 0.0
 
 ### NUMERICS ###
 kappa_method        = 1
-sharpening_frequency = 100
 reinit_max_iter      = 50
 reinit_tolerance     = 1e-6
-omega_relax          = 0.5
 relax_diag           = 0

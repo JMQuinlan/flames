@@ -297,11 +297,8 @@ Limiter.type        = weno3
 integration.type    = RungeKutta
 integration.rk.type = 3
 
-apply_sharpening     = 0
-sharpening_frequency = 50
 reinit_max_iter      = 100
 reinit_tolerance     = 1e-6
-omega_relax          = 0.5
 # Drop the ~50 pure-diagnostic components from the plotfiles: level 0 here
 # is 160^3 for an R0 = 2e-6 bubble, so a full plotfile is 2.5 GB.  With
 # plot_minimal the file is 681 MB (19 fields), and this run writes

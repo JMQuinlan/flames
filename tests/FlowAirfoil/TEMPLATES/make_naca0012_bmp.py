@@ -31,6 +31,8 @@ import math, sys
 import numpy as np
 
 BMP_DX = 0.0005
+import os as _os
+BMP_DX = float(_os.environ.get("BMP_DX", BMP_DX))   # [2026-10-02] override, e.g. BMP_DX=1e-4 for L6 + supersample 8
 MARGIN = 0.02
 
 

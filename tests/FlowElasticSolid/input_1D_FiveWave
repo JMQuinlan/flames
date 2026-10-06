@@ -1,0 +1,115 @@
+# ============================================================================
+# FlowElasticSolid / five-wave Riemann problem in a solid  (Hydro2, elastic.on = 1)
+#
+# After Favrie, Gavrilyuk & Saurel, JCP 228 (2009), Sec. 5.5: copper (rho 8900, gamma 4.22,
+# p_inf 342e8 Pa, mu 9.2e10 Pa, with a 1e-6 trace of gas) at rest, p = 1e8 Pa for x < 0.5 m
+# and 1e5 Pa for x > 0.5 m, plus a jump of the TRANSVERSE velocity (0 | V).  Five waves:
+# two longitudinal (c_l = 5.477 km/s), two shear (c_t = 3.215 km/s) and the contact.
+# The paper uses V = 100 m/s (3 % shear strain); V = 10 m/s here keeps the problem
+# linear, where the solution is exact:
+#   between the longitudinal fronts   u = (pL - pR)/(2 rho c_l),  sigma_11 = -(pL + pR)/2
+#   between the shear fronts          v = V/2,                    S_12 = rho c_t V/2
+# UNITS: length m, density 1e3 kg/m3, pressure 1e9 Pa -> velocity km/s, time ms.
+#
+# Run (from bin/): mpirun -np 4 ./hydro2-2d-g++ ../tests/FlowElasticSolid/input_1D_FiveWave plot_file=<dir>/output
+# Check:           python3 ../tests/FlowElasticSolid/reference/five_wave_check.py <dir>
+# ============================================================================
+plot_file = ./tests/FlowElasticSolid/output_1D_FiveWave
+
+Riemann_Solver.type = hllc_elastic
+Limiter.type        = minmod
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+elastic.on      = 1
+elastic.mu0     = 92.0     # phase 0 (eta = 1): copper;  phase 1: trace of gas
+elastic.rhoref0 = 8.9
+
+eta.ic.type = constant
+eta.ic.constant.value = 0.999999
+epsilon = 0.001
+
+amr.plot_dt = 0.07
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.n_cell = 1000 4
+geometry.prob_lo = 0.0  -0.002   0.0
+geometry.prob_hi = 1.0   0.002   0.0
+geometry.is_periodic = 0 1 0
+
+timestep  = 1.0e-5
+stop_time = 0.07
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+cfl   = 0.4
+
+eos0.gamma = 4.22
+eos1.gamma = 1.4
+eos0.p0 = 34.2
+eos1.p0 = 0.0
+eos0.cp = 1004.5
+eos1.cp = 1004.5
+eos0.cv = 717.5
+eos1.cv = 717.5
+
+mu0   = 0.0
+mu1   = 0.0
+sigma = 0.0
+pref = 0.0
+
+# copper (phase 0): pressure jump and TANGENTIAL velocity jump at x = 0.5
+density0.ic.type = constant
+density0.ic.constant.value = 8.9
+velocity0.ic.type = expression
+velocity0.ic.expression.constant.V = 0.01
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "V*(x >= 0.5)"
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "0.1*(x < 0.5) + 1.0e-4*(x >= 0.5)"
+
+# gas trace (phase 1)
+density1.ic.type = constant
+density1.ic.constant.value = 0.001
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.V = 0.01
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "V*(x >= 0.5)"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "0.1*(x < 0.5) + 1.0e-4*(x >= 0.5)"
+
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+kappa_method = 1
+Dv = 0
+g = 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+apply_ahe   = 1
+ahe.method  = 0
+cutoff = 1e-4

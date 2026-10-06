@@ -189,8 +189,5 @@ Riemann_Solver.type = hllc
 kappa_method = 1
 
 ### INTERFACE SHARPENING ###
-apply_sharpening = 0
-sharpening_frequency = 10
 reinit_max_iter = 5
 reinit_tolerance = 1e-5
-omega_relax = 0.5; 

@@ -24,7 +24,10 @@ public:
     int          wall_thin_cells = 2;        // [2026-09-29] wall_normal: plate thinner than this (along the face axis) -> face normal
     int          wall_image = 1;             // [2026-09-29] wall_normal slip: slip plane at phi = 0.5 (ratio r), not at the face
     int          wall_image_noslip = 1;      // [2026-09-30] no-slip walls: ghost at the true surface (phi = 0.5), ratio r
-    int          visc_mirror = 0;            // [2026-09-27] 1 = sharp-wall viscous stencil mirrors u across the wall face (wall_flux = 1 only)
+    int          wall_vel_surface = 1;       // [2026-10-05] wall velocity at the true surface point (rigid rotation exact); 0 = solid cell's own
+    Set::Scalar  T_wall = -1.0;              // [2026-10-05] > 0: isothermal sharp wall for the gas heat conduction (thermal.conduction); <= 0 adiabatic
+    int          moving = 0;                 // [2026-10-05] 1 = moving rigid solid: phi + solid target re-evaluated at each step's time, fresh cells filled
+    int          visc_mirror = 0;            // [2026-09-27] 1 = sharp-wall viscous stencil mirrors u across the wall face (wall_flux = 1 only); [2026-10-02] 2 = ghost at the true surface (phi = 0.5, ratio r)
     Set::Scalar  mu_factor = 1.0;            // [2026-09-25] solid viscosity = mu_factor * fluid viscosity (1 = off)
     Set::Scalar  brinkman = 1.0e6;           // was solid_brinkman (kappa=1/brinkman; <=0 -> auto wall)
     Set::Scalar  relax_skip = 0.0;           // was solid_relax_skip (skip relax/sharpen/CFL where phi<this; =0.5)

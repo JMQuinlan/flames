@@ -1,0 +1,128 @@
+# ============================================================================
+# FlowPhaseChange / 1D cavitation tube  (Hydro2, phasechange.on = 1)
+#
+# Saurel, Petitpas & Abgrall, JFM 607 (2008) Sec. 7 / Pelanti & Shyue, JCP 259 (2014) Sec. 5.2:
+# a 1 m tube of liquid water (rho 1150 kg/m3, p 1e5 Pa -> T = 354.73 K) with 1 % of vapour by
+# volume, pulled apart at -2 m/s | +2 m/s.  Two rarefactions leave a low-pressure zone at the
+# centre.  Without mass transfer the pressure there falls far below saturation (the liquid is
+# metastable); with the thermodynamic relaxation the liquid evaporates and the pressure sits at
+# the SATURATION pressure of the local temperature, p = p_sat(T) (about 0.51 bar), while the
+# vapour volume fraction grows.
+#   liquid (phase 1): gamma 2.35, pi 1e9, cv 1816, q -1167e3;  vapour (phase 0): gamma 1.43, cv 1040, q 2030e3, q' -23.4e3
+# 1000 cells, t = 3.2 ms.  Compare with phasechange.on = 0.
+#
+# Run (from bin/): mpirun -np 4 ./hydro2-2d-g++ ../tests/FlowPhaseChange/input_1D_CavitationTube plot_file=<dir>/output
+# Check:           python3 ../tests/FlowPhaseChange/reference/cavitation_tube_check.py <dir> [<dir without phase change>]
+# ============================================================================
+plot_file = ./tests/FlowPhaseChange/output_1D_CavitationTube
+
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+
+eta.ic.type = constant
+eta.ic.constant.value = 0.01
+epsilon = 0.01
+
+amr.plot_dt = 3.2e-4
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.n_cell = 1000 4
+geometry.prob_lo = -0.5 -0.002 0.0
+geometry.prob_hi = 0.5 0.002 0.0
+geometry.is_periodic = 0 1 0
+
+timestep = 1.0e-8
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1e-5
+dynamictimestep.min = 1e-12
+stop_time = 3.2e-3
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+cfl   = 0.4
+
+eos0.gamma = 1.43
+eos1.gamma = 2.35
+eos0.p0 = 0.0
+eos1.p0 = 1.0e9
+eos0.cp = 1487.2
+eos1.cp = 4267.6
+eos0.cv = 1040.0
+eos1.cv = 1816.0
+
+mu0   = 0.0
+mu1   = 0.0
+sigma = 0.0
+pref = 0.0
+
+# solid (phase 0)
+density0.ic.type = constant
+density0.ic.constant.value = 0.63037
+velocity0.ic.type = expression
+velocity0.ic.expression.constant.U = 2.0
+velocity0.ic.expression.region0 = "U*((x > 0) - (x < 0))"
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 1.0e5
+cp0 = 1.4
+cv0 = 1.0
+
+# gas (phase 1, trace)
+density1.ic.type = constant
+density1.ic.constant.value = 1150.0
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.U = 2.0
+velocity1.ic.expression.region0 = "U*((x > 0) - (x < 0))"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 1.0e5
+cp1 = 1.4
+cv1 = 1.0
+
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+kappa_method = 1
+Dv = 0
+g = 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+apply_ahe   = 1
+ahe.method  = 0
+cutoff = 1e-12
+
+
+phasechange.on = 1
+phasechange.liquid = 1                       # phase 1 (eta = 0) is the liquid; phase 0 the gas
+phasechange.liquid_material = water_liquid
+phasechange.vapor_material  = water_vapor
+phasechange.material_file   = ../data/hydro2_materials.dat
+phasechange.Yv0 = 1.0                        # the gas is pure vapour

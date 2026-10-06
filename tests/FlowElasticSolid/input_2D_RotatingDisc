@@ -1,0 +1,121 @@
+# ============================================================================
+# FlowElasticSolid / rigid rotation of an elastic disc  (Hydro2, elastic.on = 1)
+#
+# A stress-free solid disc (R = 0.25, rho_s 10, gamma 4.4, p_inf 100, mu 50) spins at
+# Omega = 0.5 in a gas at rest.  For a rigid rotation by theta = Omega t the cobasis is
+# exactly  e^1 = (cos theta, sin theta),  e^2 = (-sin theta, cos theta),  G = I: the
+# components change by O(1) while the stress stays zero.  This exercises the cross
+# terms E_k d_i v_k of the cobasis transport, which no 1D test reaches.
+# The only physical stress is centrifugal, of order rho_s Omega^2 R^2 = 0.16
+# (strain 0.16/mu = 0.3 %); the disc is started impulsively, so it also rings.
+# Run to theta = 90 deg (t = pi); 200 x 200 cells (D/dx = 100).
+#
+# Run (from bin/): mpirun -np 16 ./hydro2-2d-g++ ../tests/FlowElasticSolid/input_2D_RotatingDisc plot_file=<dir>/output
+# Check:           python3 ../tests/FlowElasticSolid/reference/rotating_disc_check.py <dir>
+# ============================================================================
+plot_file = ./tests/FlowElasticSolid/output_2D_RotatingDisc
+
+Riemann_Solver.type = hllc_elastic
+Limiter.type        = minmod      # higher-order limiters leave a few-% residual stress at solid|gas interfaces; godunov is clean but diffusive
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+elastic.on      = 1
+elastic.mu0     = 50.0     # phase 0 (eta = 1): the solid;  phase 1 is the gas (mu1 = 0)
+elastic.rhoref0 = 10.0
+
+eta.ic.type = expression
+eta.ic.expression.constant.xc = 0.5
+eta.ic.expression.constant.yc = 0.5
+eta.ic.expression.constant.R0 = 0.25
+eta.ic.expression.constant.w  = 0.005      # interface half-width (~1 cell)
+eta.ic.expression.region0 = "1.0e-6 + (1.0 - 2.0e-6)*0.5*(1.0 - tanh((sqrt((x - xc)^2 + (y - yc)^2) - R0)/w))"
+epsilon = 0.001
+
+amr.plot_dt = 0.1308996938995747
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.n_cell = 200 200
+geometry.prob_lo = 0.0  0.0   0.0
+geometry.prob_hi = 1.0  1.0   0.0
+geometry.is_periodic = 0 0 0
+
+timestep  = 1.0e-5
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1e-2
+dynamictimestep.min = 1e-10
+stop_time = 3.141592653589793
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+cfl   = 0.4
+
+eos0.gamma = 4.4
+eos1.gamma = 1.4
+eos0.p0 = 100.0
+eos1.p0 = 0.0
+eos0.cp = 1004.5
+eos1.cp = 1004.5
+eos0.cv = 717.5
+eos1.cv = 717.5
+
+mu0   = 0.0
+mu1   = 0.0
+sigma = 0.0
+pref = 0.0
+
+# solid disc (phase 0) in rigid rotation; gas (phase 1) at rest outside
+density0.ic.type = constant
+density0.ic.constant.value = 10.0
+velocity0.ic.type = expression
+velocity0.ic.expression.constant.Om = 0.5
+velocity0.ic.expression.region0 = "-Om*(y - 0.5)*(sqrt((x - 0.5)^2 + (y - 0.5)^2) < 0.26)"
+velocity0.ic.expression.region1 = "Om*(x - 0.5)*(sqrt((x - 0.5)^2 + (y - 0.5)^2) < 0.26)"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 1.0
+
+density1.ic.type = constant
+density1.ic.constant.value = 1.0
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.Om = 0.5
+velocity1.ic.expression.region0 = "-Om*(y - 0.5)*(sqrt((x - 0.5)^2 + (y - 0.5)^2) < 0.26)"
+velocity1.ic.expression.region1 = "Om*(x - 0.5)*(sqrt((x - 0.5)^2 + (y - 0.5)^2) < 0.26)"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 1.0
+
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+kappa_method = 1
+Dv = 0
+g = 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+apply_ahe   = 1
+ahe.method  = 0
+cutoff = 1e-4

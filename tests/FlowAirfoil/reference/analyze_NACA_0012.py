@@ -277,7 +277,6 @@ apply_vaporization    = 0
 Riemann_Solver.type = hllc
 Limiter.type        = minmod
 kappa_method        = 1
-apply_sharpening    = 0
 """
     open(inp, "w").write(txt)
 

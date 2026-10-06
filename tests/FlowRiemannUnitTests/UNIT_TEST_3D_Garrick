@@ -136,11 +136,8 @@ apply_surface_tension = 0
 apply_weight = 0
 apply_vaporization = 0
 
-apply_sharpening = 0
-sharpening_frequency = 100
 reinit_max_iter = 50
 reinit_tolerance = 1e-6
-omega_relax = 0.5;
 
 #Sch20 stiff-limit (no shock correction; matches Sch20 paper exactly):
 apply_ahe   = 1

@@ -57,6 +57,20 @@ struct State
     Set::Scalar gamma1      = NAN;
     Set::Scalar pi1         = NAN;
 
+    // Elastic solid phase (Hydro2 elastic.on; Favrie-Gavrilyuk-Saurel JCP 228,
+    // 2009).  All zero for fluids; only the hllc_elastic solver reads them.
+    // The mixture stress is sigma = -p I + S with S = alpha_s * dev(sigma_s).
+    Set::Scalar S_nn        = 0.0;    // S normal-normal
+    Set::Scalar S_nt        = 0.0;    // S normal-tangent
+    Set::Scalar S_nt2       = 0.0;    // S normal-tangent2 (3D)
+    Set::Scalar c2_el       = 0.0;    // elastic part of c^2:  Y_s (4/3) mu_s / rho_s
+    int         solid       = 0;      // 1 = this side is solid (alpha_s > 1/2)
+    // Objective shear dissipation (hllc_elastic): dx_n * d(u_n)/d(x_t) at the face, added to the
+    // tangential velocity jump so that the upwind dissipation acts on the SYMMETRIC velocity
+    // gradient and vanishes for a rigid rotation.  Same value on both states; 0 = off.
+    Set::Scalar dvt         = 0.0;    // for tangent  (dir+1)
+    Set::Scalar dvt2        = 0.0;    // for tangent2 (dir+2, 3D)
+
     State() = default;
 
     State(Set::Scalar a_alpha,
@@ -128,6 +142,10 @@ struct Flux
     // u_interface.  Filled by Hydro2's compute_face; read only when
     // eta_consistent_advect = 1 (not validated -- see Hydro2::Parse).
     Set::Scalar alpha_face       = 0.0;
+    // Tangential velocities on the lo (L) and hi (R) side of the contact at
+    // this face.  Filled by hllc_elastic only; read by the cobasis rows.
+    Set::Scalar vt_L = 0.0, vt_R = 0.0;     // tangent  (dir+1)
+    Set::Scalar wt_L = 0.0, wt_R = 0.0;     // tangent2 (dir+2, 3D)
 
     Flux() = default;
 

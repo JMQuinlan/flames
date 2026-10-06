@@ -140,4 +140,3 @@ apply_vaporization    = 0
 Riemann_Solver.type = hllc
 Limiter.type        = vanleer
 kappa_method        = 1
-apply_sharpening    = 0

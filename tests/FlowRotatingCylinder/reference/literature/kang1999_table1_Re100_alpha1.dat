@@ -1,0 +1,7 @@
+# Kang, Choi & Lee, Phys. Fluids 11, 3312 (1999), TABLE I (copied; exact): parametric study at Re = 100, alpha = 1.
+# R_D = domain radius / d, M x N = grid, dt = time step.  First row is the parameter set used in the paper.
+# columns: R_D  M  N  dt  St  Cl_mean  Cd_mean  Cl_amp  Cd_amp
+        50         241         241        0.02      0.1655     -2.4881       1.104      0.3631      0.0993
+       100         285         241        0.02       0.165     -2.4833      1.0979      0.3603      0.0988
+        50         301         301        0.02      0.1656     -2.5027      1.0993      0.3576       0.098
+        50         241         241        0.01      0.1656     -2.4881      1.1039       0.363      0.0991

@@ -1,0 +1,126 @@
+# ============================================================================
+# FlowElasticSolid / 1D elastic waves in a solid  (Hydro2, elastic.on = 1)
+#
+# A slab of solid at rest, uniform pressure, with a small velocity perturbation
+# in a band |x| < w:   u = du (longitudinal),  v = dv (transverse).
+# Small-amplitude theory (Favrie, Gavrilyuk & Saurel, JCP 228, 2009, Sec. 3.5):
+#   longitudinal waves  c_l = sqrt(c_s^2 + (4/3) mu/rho_s)
+#   shear waves         c_t = sqrt(mu/rho_s)
+# Each band edge emits a pair of waves of half amplitude travelling at +-c.
+#
+# Non-dimensional "aluminium-like" solid:
+#   rho_s = 1, stiffened gas gamma = 3.4, p_inf = 10, p = 0.1  -> c_s = sqrt(3.4*10.1) = 5.860
+#   mu = 12                                                     -> c_t = 3.464
+#   c_l = sqrt(34.34 + 16) = 7.095
+# A trace (1e-6) of gas is present everywhere (the model needs both phases).
+#
+# Run (from bin/): mpirun -np 4 ./hydro2-2d-g++ ../tests/FlowElasticSolid/input_1D_ElasticWaves plot_file=<dir>/output
+# Check:           python3 ../tests/FlowElasticSolid/reference/elastic_waves_check.py <dir>
+# ============================================================================
+plot_file = ./tests/FlowElasticSolid/output_1D_ElasticWaves
+
+Riemann_Solver.type = hllc_elastic
+Limiter.type        = minmod
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+elastic.on      = 1
+elastic.mu0     = 12.0     # phase 0 (eta = 1) is the solid; phase 1 (mu1 = 0) is a gas
+elastic.rhoref0 = 1.0
+
+eta.ic.type = constant
+eta.ic.constant.value = 0.999999
+epsilon = 0.01
+
+amr.plot_dt = 0.01
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.n_cell = 800 4
+geometry.prob_lo = -1.0  -0.005   0.0
+geometry.prob_hi =  1.0   0.005   0.0
+geometry.is_periodic = 0 1 0
+
+timestep  = 1.0e-5
+stop_time = 0.08
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+cfl   = 0.4
+
+eos0.gamma = 3.4
+eos1.gamma = 1.4
+eos0.p0 = 10.0
+eos1.p0 = 0.0
+eos0.cp = 1004.5
+eos1.cp = 1004.5
+eos0.cv = 717.5
+eos1.cv = 717.5
+
+mu0   = 0.0
+mu1   = 0.0
+sigma = 0.0
+pref = 0.0
+
+# solid (phase 0)
+density0.ic.type = constant
+density0.ic.constant.value = 1.0
+velocity0.ic.type = expression
+velocity0.ic.expression.constant.w  = 0.1
+velocity0.ic.expression.constant.du = 1.0e-3
+velocity0.ic.expression.constant.dv = 1.0e-3
+velocity0.ic.expression.region0 = "du*(abs(x) < w)"
+velocity0.ic.expression.region1 = "dv*(abs(x) < w)"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 0.1
+cp0 = 1.4
+cv0 = 1.0
+
+# gas (phase 1, trace)
+density1.ic.type = constant
+density1.ic.constant.value = 0.001
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.w  = 0.1
+velocity1.ic.expression.constant.du = 1.0e-3
+velocity1.ic.expression.constant.dv = 1.0e-3
+velocity1.ic.expression.region0 = "du*(abs(x) < w)"
+velocity1.ic.expression.region1 = "dv*(abs(x) < w)"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 0.1
+cp1 = 1.4
+cv1 = 1.0
+
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+kappa_method = 1
+Dv = 0
+g = 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+apply_ahe   = 1
+ahe.method  = 0
+cutoff = 1e-4

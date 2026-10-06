@@ -1,0 +1,24 @@
+# Hydro2 material data for phase change (phasechange.material_file).
+# Stiffened-gas phases with energy and entropy constants (Le Metayer, Massoni & Saurel,
+# Int. J. Therm. Sci. 43 (2004) 265):
+#   e = (p + gamma pi)/((gamma - 1) rho) + q,   T = (p + pi)/((gamma - 1) cv rho),
+#   g = (gamma cv - q') T - cv T ln(T^gamma / (p + pi)^(gamma - 1)) + q
+# One material per line; '#' starts a comment.  SI units.
+#
+# name            phase    gamma   pi [Pa]   cv [J/kg/K]   q [J/kg]        q' [J/kg/K]
+#
+# Water, Le Metayer et al. (2004) fit to the saturation curve 298-473 K.  As recalled from the
+# paper (to be checked against it); self-check: T_sat(1 atm) = 373.3 K, latent heat 2.16e6 J/kg.
+water_liquid      liquid   2.35    1.0e9     1816.0        -1167.0e3       0.0
+water_vapor       vapor    1.43    0.0       1040.0        2030.0e3        -23.4e3
+#
+# "Steam with the properties of air" (gamma 1.4, cv 717.86): q and q' are FITTED here so that,
+# against water_liquid, T_sat(101325 Pa) = 373.15 K and the latent heat there is 2.257e6 J/kg.
+steam_as_air      vapor    1.4     0.0       717.86        2.307438e+06   -2.212622e+04
+#
+# Water as the Tammann liquid of the shock-droplet decks (gamma 7.15, pi 3e8): cv chosen so that
+# rho = 1000 kg/m3 at 300 K and 1 atm in the T = (p + pi)/((gamma - 1) cv rho) convention (the heat
+# capacity is then 3.6x too small -- a limit of this EOS), q = q' = 0.  Its "steam with the
+# properties of air" partner is fitted to T_sat(101325 Pa) = 373.15 K, latent heat 2.257e6 J/kg.
+water_tammann           liquid   7.15    3.0e8     162.656545    0.0             0.0
+steam_as_air_tammann    vapor    1.4     0.0       717.86        2.315954e+06   -9.232455e+03

@@ -1,0 +1,122 @@
+# ============================================================================
+# FlowElasticSolid / free vibration of an elastic slab  (Hydro2, elastic.on = 1)
+#
+# A slab of thickness L = 0.4 (rho_s 10, gamma 4.4, p_inf 100, mu 50) between two layers
+# of gas (rho 0.1, p 1) is given the velocity of its fundamental thickness modes,
+#   u = U sin(pi (x - x0)/L)   (thickness-stretch),   v = V sin(pi (x - x0)/L)   (thickness-shear).
+# The shear traction at a solid | gas face is zero, and the normal traction nearly so: the
+# gas impedance Z_g = 0.374 against Z_s = 71.5 reflects R = (Z_s - Z_g)/(Z_s + Z_g) = 0.9896
+# of the amplitude, so the stretch mode loses 1 - R^2 = 2.1 % per period by radiating sound
+# into the gas (physical); the shear mode loses nothing.  Standing waves with
+#   f_l = c_l/(2 L) = 8.936   (c_l = 7.149),      f_t = c_t/(2 L) = 2.795   (c_t = 2.236).
+# Runs for ~10 stretch periods / ~3.4 shear periods; the decay of the amplitude measures
+# the numerical dissipation.  Exercises the free surface and tension every half period.
+# (A lighter gas, rho 0.01, is unstable in the BASE solver -- also with elastic.on = 0:
+#  tangential velocity grows in the gas cells next to the interface at a 1000:1 density ratio.)
+#
+# Run (from bin/): mpirun -np 4 ./hydro2-2d-g++ ../tests/FlowElasticSolid/input_1D_SlabVibration plot_file=<dir>/output
+# Check:           python3 ../tests/FlowElasticSolid/reference/slab_vibration_check.py <dir>
+# ============================================================================
+plot_file = ./tests/FlowElasticSolid/output_1D_SlabVibration
+
+Riemann_Solver.type = hllc_elastic
+Limiter.type        = minmod
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+elastic.on      = 1
+elastic.mu0     = 50.0     # phase 0 (eta = 1): the solid;  phase 1 is the gas (mu1 = 0)
+elastic.rhoref0 = 10.0
+
+eta.ic.type = expression
+eta.ic.expression.constant.h = 0.2          # half thickness: slab is |x - 0.5| < h
+eta.ic.expression.region0 = "1.0e-6 + (1.0 - 2.0e-6)*(abs(x - 0.5) < h)"
+epsilon = 0.001
+
+amr.plot_dt = 0.004
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.n_cell = 500 4
+geometry.prob_lo = 0.0  -0.002   0.0
+geometry.prob_hi = 1.0   0.002   0.0
+geometry.is_periodic = 0 1 0
+
+timestep  = 2.0e-5
+stop_time = 1.2
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+cfl   = 0.4
+
+eos0.gamma = 4.4
+eos1.gamma = 1.4
+eos0.p0 = 100.0
+eos1.p0 = 0.0
+eos0.cp = 1004.5
+eos1.cp = 1004.5
+eos0.cv = 717.5
+eos1.cv = 717.5
+
+mu0   = 0.0
+mu1   = 0.0
+sigma = 0.0
+pref = 0.0
+
+# slab (phase 0) set ringing in its fundamental thickness modes; light gas (phase 1) outside
+density0.ic.type = constant
+density0.ic.constant.value = 10.0
+velocity0.ic.type = expression
+velocity0.ic.expression.constant.U = 1.0e-3
+velocity0.ic.expression.constant.V = 1.0e-3
+velocity0.ic.expression.constant.L = 0.4
+velocity0.ic.expression.region0 = "U*sin(3.141592653589793*(x - 0.5)/L)*(abs(x - 0.5) < 0.2)"
+velocity0.ic.expression.region1 = "V*sin(3.141592653589793*(x - 0.5)/L)*(abs(x - 0.5) < 0.2)"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 1.0
+
+density1.ic.type = constant
+density1.ic.constant.value = 0.1
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.U = 1.0e-3
+velocity1.ic.expression.constant.V = 1.0e-3
+velocity1.ic.expression.constant.L = 0.4
+velocity1.ic.expression.region0 = "U*sin(3.141592653589793*(x - 0.5)/L)*(abs(x - 0.5) < 0.2)"
+velocity1.ic.expression.region1 = "V*sin(3.141592653589793*(x - 0.5)/L)*(abs(x - 0.5) < 0.2)"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 1.0
+
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+kappa_method = 1
+Dv = 0
+g = 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+apply_ahe   = 1
+ahe.method  = 0
+cutoff = 1e-4
