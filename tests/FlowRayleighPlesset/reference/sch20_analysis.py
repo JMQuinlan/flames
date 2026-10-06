@@ -77,7 +77,7 @@ STYLE = dict(
     contours=True, contours_per_decade=3, contour_color="0.25", contour_lw=0.4,
     contour_upsample=(4, 2), contour_smooth=(2.0, 8.0),
     radius_line=True, radius_lw=1.4,
-    c_line=True, c_origin="tc", c_line_style="--", c_line_lw=1.5, c_label=r"$c_l$",
+    c_line=True, c_origin="tc", c_line_style="--", c_line_lw=1.5, c_label=r"$\propto 1/c_l$",
     tri_at=0.45, tri_size=0.35, tri_min=0.02, tri_ls=":", tri_lw=0.6,
     waves_cmap="jet", waves_linthresh=1e-3, waves_rmax_R0=None,
     # ---- shapes / planes / gif / modes --------------------------------------------------- #
