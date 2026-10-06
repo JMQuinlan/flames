@@ -410,11 +410,19 @@ class Sch20Analysis:
     def col(self, k):
         return np.array([f.get(k, np.nan) for f in self.frames], float)
 
+    def r_vol_norm(self):
+        """Gas-volume radius rescaled so it starts at exactly R0: R0 * R_vol(t) / R_vol(0).
+        (The diffuse tanh interface holds a little extra gas, so the raw R_vol(0) is ~0.5% above R0;
+        plotting R_vol/R0 would show that offset as a spurious error for the whole run.)"""
+        Rv = self.col("R_vol")
+        r0 = Rv[np.isfinite(Rv)][0] if np.isfinite(Rv).any() else np.nan
+        return Rv * self.R0 / r0
+
     def radius(self, measure=None):
         """(t, R, label) of the radius compared to the models."""
         m = measure or self.S["radius_measure"]
         if m == "volume":
-            return self.col("t"), self.col("R_vol"), r"$R_\mathrm{volume}$"
+            return self.col("t"), self.r_vol_norm(), r"$R_\mathrm{volume}$"
         return self.col("t"), self.col("R_ray"), r"$\eta = 0.5$"
 
     def _models_on(self, ax, rp=True, vel=False):
@@ -447,7 +455,7 @@ class Sch20Analysis:
         self._models_on(ax)
         ax.plot(t / self.tc, R / self.R0, "-o", color=self.S["c_sim"], ms=2.5, label=lab)
         if self.S["show_volume_on_radius"] and self.S["radius_measure"] != "volume":
-            ax.plot(t / self.tc, self.col("R_vol") / self.R0, "-", color=self.S["c_vol"], label=r"$R_\mathrm{volume}$")
+            ax.plot(t / self.tc, self.r_vol_norm() / self.R0, "-", color=self.S["c_vol"], label=r"$R_\mathrm{volume}$")
         if self.coated and self.shell.R_buck:
             rb, rr = self.shell.R_buck / self.R0, self.shell.R_rupture / self.R0
             y0, y1 = ax.get_ylim()
@@ -755,7 +763,7 @@ class Sch20Analysis:
         fig, ax = plt.subplots(figsize=(self.S["width"], self.S["height"]))
         self._models_on(ax)
         ax.plot(t / self.tc, self.col("R_ray") / self.R0, ":", color=self.S["c_ray"], lw=1.2, label=r"$\eta = 0.5$")
-        ax.plot(t / self.tc, self.col("R_vol") / self.R0, "-o", color=self.S["c_vol"], ms=2.5, label=r"$R_\mathrm{volume}$")
+        ax.plot(t / self.tc, self.r_vol_norm() / self.R0, "-o", color=self.S["c_vol"], ms=2.5, label=r"$R_\mathrm{volume}$")
         ax.plot(t / self.tc, self.col("R_shell") / self.R0, "-s", color=self.S["c_shell"], ms=2.5,
                 label=r"$\langle\eta\rangle = 0.5$")
         ax.set_xlabel(self.tlabel); ax.set_ylabel(r"$R/R_0$"); self._xlim(ax, t); ax.legend(loc="lower left")
@@ -803,7 +811,7 @@ class Sch20Analysis:
 
     def plot_driven(self):
         from scipy.signal import argrelextrema
-        t = self.col("t"); R = self.col("R_vol"); pe = np.array([f["line_p"][-1] for f in self.frames])
+        t = self.col("t"); R = self.r_vol_norm(); pe = np.array([f["line_p"][-1] for f in self.frames])
         fig, axs = plt.subplots(1, 3, figsize=(self.S["width"] * 1.5, self.S["height"] * 0.8))
         imx = argrelextrema(R, np.greater)[0]; imn = argrelextrema(R, np.less)[0]
         axs[0].plot(t / self.tc, R / self.R0, "-", color="0.7", lw=0.8)
@@ -820,7 +828,7 @@ class Sch20Analysis:
         self._suptitle(fig, axs, "driven"); self._save(fig, "driven")
 
     def plot_gamma(self):
-        t = self.col("t"); R = self.col("R_vol")
+        t = self.col("t"); R = self.r_vol_norm()
         fig, ax = plt.subplots(figsize=(self.S["width"], self.S["height"]))
         ax.plot(t / self.tc, self.col("gamma_band"), "-o", color=self.S["c_sim"], ms=2.5, label=r"$\Gamma$ (band average)")
         ax.plot(t / self.tc, (self.R0 / R) ** 2, "--", color="k", label=r"$(R_0/R_\mathrm{volume})^2$")
@@ -832,8 +840,8 @@ class Sch20Analysis:
         t, R, _ = self.radius("ray")
         Rk = np.interp(t, self.km[0], self.km[1]); Rr = np.interp(t, self.rp[0], self.rp[1])
         with open(self.stem + ".csv", "w") as fh:
-            fh.write("time_s,t_over_tc,R_ray_m,R_volume_m,R_shell_m,R_km_m,R_rp_m,err_km_pct\n")
-            for row in zip(t, t / self.tc, R, self.col("R_vol"), self.col("R_shell"), Rk, Rr, 100 * (R - Rk) / Rk):
+            fh.write("time_s,t_over_tc,R_ray_m,R_volume_m(R0*Rvol/Rvol0),R_shell_m,R_km_m,R_rp_m,err_km_pct\n")
+            for row in zip(t, t / self.tc, R, self.r_vol_norm(), self.col("R_shell"), Rk, Rr, 100 * (R - Rk) / Rk):
                 fh.write(",".join("%.9e" % v for v in row) + "\n")
         if self.verbose:
             print("  wrote", self.stem + ".csv")
