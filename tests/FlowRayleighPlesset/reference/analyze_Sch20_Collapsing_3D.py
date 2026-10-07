@@ -26,6 +26,7 @@ CFG = dict(
     # ---- plots (remove a name to skip it) ------------------------------------------------- #
     PLOTS=[
         "radius",        # R(t) vs (Coated) KM / RPE
+        "r_volume",      # gas-volume / shell-averaged / ray radii
         "residual",      # R(t) + percent error vs KM
         "velocity",      # wall velocity
         "probes",        # R(t) over the liquid pressure at fixed radii
@@ -34,8 +35,7 @@ CFG = dict(
         "shapes",        # 3D shapes at STYLE["shapes_times"]
         "planes",        # eta = 0.5 contours on four planes over time
         "modes",         # shape modes + spectrum at R_min
-        "gif",           # shape for every frame (GIF + PNG frames)
-        "r_volume",      # gas-volume / shell-averaged / ray radii
+        #"gif",           # shape for every frame (GIF + PNG frames)
         # "eta_band", "ic_pressure", "driven", "csv",
     ],
     DEBUG=["thermo", "health"],   # "conservation", "thermo", "wall_balance", "reflection", "health"
