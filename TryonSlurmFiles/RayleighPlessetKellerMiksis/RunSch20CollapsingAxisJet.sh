@@ -7,6 +7,8 @@
 #                jets only on +-z -> the two-plane symmetry corner.  2x the octant cost.
 #   CASE=nothinc MUSCL2 + consistent eta, THINC off         -> is THINC the amplifier?
 #   CASE=thincdonor THINC + MUSCL2, donor-cell eta          -> is consistent eta the amplifier?
+#   CASE=beta08 / beta05  Lim with Limiter.thinc_beta 0.8 / 0.5 (band ~2.9 / ~4.6 cells, 0.01..0.99)
+#                -> do the symmetry-plane sheets need THINC's sharpness to survive?
 # Submit:  sbatch --export=CASE=halfz RunSch20CollapsingAxisJet.sh   (repeat for the other two)
 # Analyse: python tests/FlowRayleighPlesset/reference/diagnose_axis_jets.py <out dirs> --labels ...
 
@@ -35,7 +37,11 @@ case "${CASE}" in
     EXTRA=(Limiter.type=muscl2 eta_consistent_advect=1) ;;
   thincdonor)
     EXTRA=(Limiter.type=thinc Limiter.thinc_base=muscl2 eta_consistent_advect=0) ;;
-  *) echo "set CASE=halfz|nothinc|thincdonor"; exit 1 ;;
+  beta08)
+    EXTRA=(Limiter.type=thinc Limiter.thinc_base=muscl2 eta_consistent_advect=1 Limiter.thinc_beta=0.8) ;;
+  beta05)
+    EXTRA=(Limiter.type=thinc Limiter.thinc_base=muscl2 eta_consistent_advect=1 Limiter.thinc_beta=0.5) ;;
+  *) echo "set CASE=halfz|nothinc|thincdonor|beta08|beta05"; exit 1 ;;
 esac
 
 srun --mpi=pmi2 ${EXE} ${DECK} "${COMMON[@]}" "${EXTRA[@]}"

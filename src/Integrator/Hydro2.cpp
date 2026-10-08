@@ -5197,12 +5197,28 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         }
 
         // Zero Gradient Fill
+        // Layers 3..nghost of an OUT-OF-DOMAIN ghost on a non-mirror, non-periodic
+        // face get a copy of layer 2 (the validated far-field behaviour).  Every
+        // other ghost is left as FillBoundariesWithBC wrote it.  The first version
+        // clamped every ghost outside growntilebox(2): that overwrote the exact
+        // MIRROR in layers 3-4 at REFLECT faces (ghost -3 got cell 1 instead of
+        // cell 2, and lost the REFLECT_ODD sign change) and the same-level exchange
+        // data in layers 3-4 between neighbouring boxes.  Radius-1 limiters
+        // (MUSCL/MUSCL2/THINC/WENO3) never read layer 3; WENO5 does.
         if (nghost > effective_nghost)
         {
+            const amrex::Box dom = geom[lev].Domain();
+            const int eff = effective_nghost;
+            int clamp_lo[3] = {0, 0, 0}, clamp_hi[3] = {0, 0, 0};
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                clamp_lo[d] = !geom[lev].isPeriodic(d) && !sym_face_lo[d];
+                clamp_hi[d] = !geom[lev].isPeriodic(d) && !sym_face_hi[d];
+            }
+            const int cxl = clamp_lo[0], cxh = clamp_hi[0], cyl = clamp_lo[1], cyh = clamp_hi[1];
+            const int czl = clamp_lo[2], czh = clamp_hi[2];
             for (amrex::MFIter mfi(*rho_eta0_mf[lev], false); mfi.isValid(); ++mfi)
             {
-                const amrex::Box &validbox = mfi.validbox();
-                const amrex::Box &ghostEffbox = mfi.growntilebox(effective_nghost);
                 const amrex::Box &ghostNbox = mfi.growntilebox(nghost);
 
                 auto rho0 = rho_eta0_mf[lev]->array(mfi);
@@ -5214,29 +5230,21 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
                 auto E1_zg = energy1_mf[lev]->array(mfi);
 
                 amrex::ParallelFor(ghostNbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
-                    // If in outer ghost layers (beyond layer 2)
-                    if (!ghostEffbox.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
-                    {
-                        // Find nearest layer-2 ghost cell and copy its value
-                        int i_copy = i;
-                        int j_copy = j;
-                        int k_copy = k;
-
-                        // Clamp to layer-2 boundary
-                        if (i < ghostEffbox.smallEnd(0))
-                            i_copy = ghostEffbox.smallEnd(0);
-                        if (i > ghostEffbox.bigEnd(0))
-                            i_copy = ghostEffbox.bigEnd(0);
-                        if (j < ghostEffbox.smallEnd(1))
-                            j_copy = ghostEffbox.smallEnd(1);
-                        if (j > ghostEffbox.bigEnd(1))
-                            j_copy = ghostEffbox.bigEnd(1);
+                    // Clamp only the directions in which this ghost lies more than
+                    // `eff` cells outside the DOMAIN through a clampable face.
+                    int i_copy = i;
+                    int j_copy = j;
+                    int k_copy = k;
+                    if (cxl && i < dom.smallEnd(0) - eff) i_copy = dom.smallEnd(0) - eff;
+                    if (cxh && i > dom.bigEnd(0) + eff)   i_copy = dom.bigEnd(0) + eff;
+                    if (cyl && j < dom.smallEnd(1) - eff) j_copy = dom.smallEnd(1) - eff;
+                    if (cyh && j > dom.bigEnd(1) + eff)   j_copy = dom.bigEnd(1) + eff;
 #if AMREX_SPACEDIM == 3
-                        if (k < ghostEffbox.smallEnd(2))
-                            k_copy = ghostEffbox.smallEnd(2);
-                        if (k > ghostEffbox.bigEnd(2))
-                            k_copy = ghostEffbox.bigEnd(2);
+                    if (czl && k < dom.smallEnd(2) - eff) k_copy = dom.smallEnd(2) - eff;
+                    if (czh && k > dom.bigEnd(2) + eff)   k_copy = dom.bigEnd(2) + eff;
 #endif
+                    if (i_copy != i || j_copy != j || k_copy != k)
+                    {
 
                         // Zero-gradient extrapolation (copy from layer 2).
                         // MUST cover the FULL 6-eq state: this block originally
