@@ -9,7 +9,11 @@
 #   CASE=thincdonor THINC + MUSCL2, donor-cell eta          -> is consistent eta the amplifier?
 #   CASE=beta08 / beta05  Lim with Limiter.thinc_beta 0.8 / 0.5 (band ~2.9 / ~4.6 cells, 0.01..0.99)
 #                -> do the symmetry-plane sheets need THINC's sharpness to survive?
-# Submit:  sbatch --export=CASE=halfz RunSch20CollapsingAxisJet.sh   (repeat for the other two)
+# Submit all five back to back on ONE node (cheapest first, the 2x-cost halfz last):
+#            sbatch RunSch20CollapsingAxisJet.sh
+#          a subset / another order:   sbatch --export=ALL,CASES="beta05 halfz" RunSch20CollapsingAxisJet.sh
+#          A case that finished cleanly leaves <OUT>.done and is skipped on a resubmit, so a job that
+#          hits the time limit can just be resubmitted.  A failed case is logged and the next one runs.
 # Analyse: python tests/FlowRayleighPlesset/reference/diagnose_axis_jets.py <out dirs> --labels ...
 
 #SBATCH --job-name=AxisJetSch20
@@ -25,23 +29,30 @@ module load gnu9 mpich
 
 EXE=/home/ttryon/flames/bin/hydro2-3d-g++
 DECK=/home/ttryon/flames/tests/FlowRayleighPlesset/Limiter_Sweep/Sch20_Collapsing_Neumann_Large_3D_MUSCL2_THINC_ETA
-OUT=/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Collapsing_Large_3D_AXISJET_${CASE}
-COMMON=(stop_time=3.2e-4 plot_file=${OUT})
+BASE=/mmfs1/home/ttryon/flames/bin/tests/FlowRayleighPlesset/output_Sch20_Collapsing_Large_3D_AXISJET
+CASES=${CASES:-${CASE:-"beta08 beta05 nothinc thincdonor halfz"}}
 
-case "${CASE}" in
-  halfz)
-    EXTRA=("geometry.prob_lo=0.0 0.0 -2.0" "amr.n_cell=160 160 320" "refine_box.lo=0.0 0.0 -0.03"
-           "eta.bc.type.zlo=neumann" "density.bc.type.zlo=neumann" "energy.bc.type.zlo=neumann"
-           "momentum.bc.type.zlo=neumann neumann neumann") ;;
-  nothinc)
-    EXTRA=(Limiter.type=muscl2 eta_consistent_advect=1) ;;
-  thincdonor)
-    EXTRA=(Limiter.type=thinc Limiter.thinc_base=muscl2 eta_consistent_advect=0) ;;
-  beta08)
-    EXTRA=(Limiter.type=thinc Limiter.thinc_base=muscl2 eta_consistent_advect=1 Limiter.thinc_beta=0.8) ;;
-  beta05)
-    EXTRA=(Limiter.type=thinc Limiter.thinc_base=muscl2 eta_consistent_advect=1 Limiter.thinc_beta=0.5) ;;
-  *) echo "set CASE=halfz|nothinc|thincdonor|beta08|beta05"; exit 1 ;;
-esac
-
-srun --mpi=pmi2 ${EXE} ${DECK} "${COMMON[@]}" "${EXTRA[@]}"
+for CASE in ${CASES}; do
+  OUT=${BASE}_${CASE}
+  if [ -f "${OUT}.done" ]; then echo "[$(date)] ${CASE}: already done, skipping"; continue; fi
+  case "${CASE}" in
+    halfz)
+      EXTRA=("geometry.prob_lo=0.0 0.0 -2.0" "amr.n_cell=160 160 320" "refine_box.lo=0.0 0.0 -0.03"
+             "eta.bc.type.zlo=neumann" "density.bc.type.zlo=neumann" "energy.bc.type.zlo=neumann"
+             "momentum.bc.type.zlo=neumann neumann neumann") ;;
+    nothinc)
+      EXTRA=(Limiter.type=muscl2 eta_consistent_advect=1) ;;
+    thincdonor)
+      EXTRA=(Limiter.type=thinc Limiter.thinc_base=muscl2 eta_consistent_advect=0) ;;
+    beta08)
+      EXTRA=(Limiter.type=thinc Limiter.thinc_base=muscl2 eta_consistent_advect=1 Limiter.thinc_beta=0.8) ;;
+    beta05)
+      EXTRA=(Limiter.type=thinc Limiter.thinc_base=muscl2 eta_consistent_advect=1 Limiter.thinc_beta=0.5) ;;
+    *) echo "unknown case ${CASE} (halfz|nothinc|thincdonor|beta08|beta05)"; continue ;;
+  esac
+  echo "[$(date)] ${CASE}: start -> ${OUT}"
+  srun --mpi=pmi2 ${EXE} ${DECK} stop_time=3.2e-4 plot_file=${OUT} "${EXTRA[@]}"
+  rc=$?
+  echo "[$(date)] ${CASE}: exit ${rc}"
+  [ ${rc} -eq 0 ] && touch "${OUT}.done"
+done
