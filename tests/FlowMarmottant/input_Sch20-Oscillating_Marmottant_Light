@@ -263,7 +263,6 @@ Riemann_Solver.type = hllc
 #Limiter.thinc_base    = muscl2      # default, so this line is optional
 Limiter.type        = muscl2
 eta_consistent_advect = 1
-#shell.divs_kinematic = 5
 
 integration.type    = RungeKutta
 integration.rk.type = 3
