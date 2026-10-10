@@ -85,11 +85,11 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Osci
 amr.plot_int        = -1
 amr.plot_dt         = 1.25e-8         # 80 frames over stop_time (was 5.0e-9 = 200)
 amr.max_grid_size   = 32
-amr.blocking_factor = 8
+amr.blocking_factor = 16
 amr.regrid_int      = 10
 amr.grid_eff        = 0.8
-amr.max_level       = 3
-amr.n_cell          = 64 64 64        # base dx 6.25e-7; L3 -> dx_finest 7.8125e-8 (R0/dx = 25.6)
+amr.max_level       = 4
+amr.n_cell          = 160 160 160     # base dx 1.25e-6; L4 -> dx_finest 7.8125e-8 (R0/dx = 25.6)
 
 # n_error_buf pushes the fine patches ~16 dx_finest past the interface band so
 # the coarse-fine boundary sits in pure water, where the Q-Fix density
@@ -107,25 +107,13 @@ dynamictimestep.min     = 1.0e-17
 cfl                     = 0.5
 
 
-### DOMAIN 1:20 (was 1:100) ###
-# prob_hi 2.0e-4 -> 4.0e-5, so R0:domain is 1:20 instead of 1:100.
-#
-# CONSEQUENCES, all accounted for below:
-#  * base dx improves 5x (1.25e-6 -> 2.5e-7), so max_level is REDUCED to keep
-#    the finest dx at least as fine as before while dropping 2 AMR levels.
-#    Fewer levels = far less subcycling = much cheaper per unit physical time.
-#  * far-field pressure at the outer (neumann) boundary:
-#      p(edge) = p_inf - (p_inf - p_b) * R0/r_edge
-#    r_edge 2.0e-4 -> 4.0e-5 moves that from p_inf - 0.01(p_inf-p_b) to
-#    p_inf - 0.05(p_inf-p_b), i.e. the held far-field is 5% of the way toward
-#    p_b instead of 1%.  A slightly weaker drive; not a change of character.
-#  * confinement: the volume-equivalent outer radius of the unfolded octant
-#    drops 2.48e-4 -> 4.96e-5, so R0/L goes 0.008 -> 0.040.  Still small, but
-#    it stiffens the bubble slightly (f0_eff = f0/sqrt(1-R0/L), ~2% higher).
-
 ### DIMENSIONS -- octant, 100 R0 ###
+# Domain and mesh match Sch20_Oscillating_Neumann_Large_3D x 1e-4 exactly
+# (2026-10-10; was a 1:20 domain, 64^3 base, max_level 3): prob_hi = 100 R0,
+# base 160^3, max_level 4, blocking_factor 16 -> same R0/dx = 25.6 and the same
+# far-field pressure and confinement as the uncoated run.
 geometry.prob_lo     =  0.0     0.0     0.0
-geometry.prob_hi     =  4.0e-5  4.0e-5  4.0e-5
+geometry.prob_hi     =  2.0e-4  2.0e-4  2.0e-4
 geometry.is_periodic = 0 0 0
 stop_time            = 1.0e-6         # 5.46 tau_c (tau_c = 1.830e-7 s)
 
@@ -208,15 +196,13 @@ shell.kappa_s = 7.2e-9           # surface dilatational viscosity [kg/s]
 shell.mu_s    = 0.0
 
 ### BOUNDARY CONDITIONS -- octant symmetry (lo) + NSCBC outflow (hi) ###
-# Switched from neumann to NSCBC on the far faces.  Neumann pins the outer
-# state and reflects outgoing acoustics back onto the bubble; with the domain
-# now only 20 R0 across (was 100) those reflections return ~5x sooner, so a
-# non-reflecting condition matters much more than it used to.
+# NSCBC on the far faces (the uncoated twin uses neumann).  Neumann pins the
+# outer state and reflects outgoing acoustics back onto the bubble.
 #
 # L_ref is scaled with the domain exactly as the driven-bubble inputs do
 # (L_ref/domain = 3.125e-3), giving a NSCBC corner frequency
-# K = sigma (1-M^2) a / L_ref ~ 7e9 rad/s against physical rates ~1/tau_c
-# ~ 5e6 rad/s, i.e. omega/K ~ 1e-3, so the boundary is fully transmitting at
+# K = sigma (1-M^2) a / L_ref ~ 1.5e9 rad/s against physical rates ~1/tau_c
+# ~ 5e6 rad/s, i.e. omega/K ~ 3e-3, so the boundary is fully transmitting at
 # every frequency this problem contains.
 #
 # eta stays neumann on the hi faces (the interface never reaches them); only
@@ -225,17 +211,17 @@ nscbc.xhi.type     = outflow
 nscbc.xhi.target_p = 1.0e5
 nscbc.xhi.sigma    = 0.6
 nscbc.xhi.beta     = 0.5
-nscbc.xhi.L_ref    = 1.25e-7
+nscbc.xhi.L_ref    = 6.25e-7
 nscbc.yhi.type     = outflow
 nscbc.yhi.target_p = 1.0e5
 nscbc.yhi.sigma    = 0.6
 nscbc.yhi.beta     = 0.5
-nscbc.yhi.L_ref    = 1.25e-7
+nscbc.yhi.L_ref    = 6.25e-7
 nscbc.zhi.type     = outflow
 nscbc.zhi.target_p = 1.0e5
 nscbc.zhi.sigma    = 0.6
 nscbc.zhi.beta     = 0.5
-nscbc.zhi.L_ref    = 1.25e-7
+nscbc.zhi.L_ref    = 6.25e-7
 
 eta.bc.type.xlo = REFLECT_EVEN
 eta.bc.type.xhi = neumann

@@ -126,7 +126,7 @@ struct Flux
     Set::Scalar u_interface      = 0.0;  // HLLC contact speed S_M
     // Limiter-reconstructed volume fraction at this face, upwinded on
     // u_interface.  Filled by Hydro2's compute_face; read only when
-    // eta_consistent_advect = 1 (not validated -- see Hydro2::Parse).
+    // eta_consistent_advect = 1 (the default -- see Hydro2::Parse).
     Set::Scalar alpha_face       = 0.0;
 
     Flux() = default;

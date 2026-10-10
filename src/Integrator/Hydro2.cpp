@@ -151,26 +151,21 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // Boussinesq--Scriven interfacial viscosity (see Hydro2.H).  kappa_s is
         // applied through sigma_tot; mu_s is parsed only so a request for the
         // unimplemented shear term is caught here rather than silently ignored.
-        // eta_consistent_advect (default 0 = donor-cell alpha row, VALIDATED).
-        // 1 = take the alpha face value from the WENO3/limiter-reconstructed
-        // state instead (73f9c38c8).  It matches the alpha row's truncation error
-        // to the mass rows and cut the driven-bubble radius drift, but on outflow
-        // faces it adds (a_face - eta_i) u*/dx terms that break the upwind
-        // maximum principle.  At a near-singular collapse (gas core a few cells
-        // wide, large div u) that decouples gas volume from gas mass and broke
-        // the uncoated Sch20 collapse.  Kept for future multiphase work, where a
-        // consistent higher-order alpha row may be needed together with extra
-        // source terms to control the rebound.  NOT validated -- do not use.
-        pp_query_default("eta_consistent_advect", value.eta_consistent_advect, 0);
-        if (value.eta_consistent_advect)
-            Util::Warning(INFO, "eta_consistent_advect = 1: WENO3 face-alpha advection is NOT "
-                          "validated (breaks the uncoated Sch20 collapse near R_min; needs "
-                          "additional rebound source terms).  Use the default 0 for production.");
+        // eta_consistent_advect (DEFAULT 1 as of 2026-10-10).
+        // 1 = take the alpha face value from the limiter-reconstructed state
+        // (73f9c38c8), upwinded on S_M, so the alpha row has the same truncation
+        // error as the mass rows.  Cuts the driven-bubble radius drift and, with
+        // THINC + MUSCL2, keeps the uncoated Sch20 collapse round to R_min.
+        // On outflow faces it adds (a_face - eta_i) u*/dx terms that are not
+        // bound by the upwind maximum principle; the face value is clamped to
+        // [0,1] below.
+        // 0 = first-order donor-cell face value (the pre-2026-10-10 default).
+        pp_query_default("eta_consistent_advect", value.eta_consistent_advect, 1);
         // omega_sym_mirror (default 1, 2026-10-02).  The capillary/shell force at
         // the first cell next to a symmetry (REFLECT) face is a central
         // difference that reads Omega in the ghost cell across the face.  That
         // ghost Omega is recomputed from ghost data, but terms evaluated in VALID
-        // cells only (e.g. the divs_kinematic correction) are missing there, so on
+        // cells only are missing there, so on
         // a symmetry face the ghost can carry a different tension from its mirror
         // image and div(Omega) gets a spurious jump.  (Interior box edges are
         // fine: Omega.FillBoundary copies the neighbour's valid values.)
@@ -354,24 +349,21 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                 Util::Message(INFO, "thermo.dat: gas_volume, gas_pressure_int, kinetic_energy, interface_area");
             }
         }
-        // 1 = take the NORMAL part of the surface dilatation from the interface's
-        // own kinematics (see the kappa_s term in the Omega build and the Gamma
-        // row in RHS).  0 = legacy, from the band's mixture velocity.
-        //
-        // Linear shell-damping unit test (input_Linear_ShellDamping_UNIT),
-        // kappa_s damping measured/analytic:
-        //     legacy:      0.52 (R0/dx=8)   ~0.68 (R0/dx=16)
-        //     kinematic:   0.76 (R0/dx=8)   0.95-1.07 (R0/dx=16, fit rms 0.6%)
-        //
-        // DEFAULT 0 (2026-09-27).  The kinematic path is UNSTABLE at max_level 3:
-        // it divides by |grad eta| twice (V_n = -etadot/|grad eta| and
-        // div n = (lap eta - n.H.n)/|grad eta|), and the 0.02 < eta < 0.98 gate
-        // admits band-edge cells where |grad eta| is ~5% of its peak.  On the
-        // full Sch20-Oscillating deck it put +22 N/m of viscous tension on one
-        // liquid-edge cell (eta 0.979; velocity-only part -0.27 N/m) and NaN'd at
-        // t = 3.355e-8; with 0 the same deck runs to 4e-8 cleanly.  Needs an
-        // interface-evaluated V_n and div n before it can be re-enabled.
-        pp_query_default("shell.divs_kinematic", value.shell_divs_kinematic, 0);
+        // shell.divs_kinematic was REMOVED 2026-10-10.  It replaced u_n by the
+        // interface speed V_n = -etadot/|grad eta| in div_s u, dividing by
+        // |grad eta| twice; band-edge cells made it unstable (NaN on the full
+        // Sch20-Oscillating deck).  Any nonzero value, including 5, ran that
+        // path in both the kappa_s stress and the Gamma row.  div_s u now always
+        // comes from the band's mixture velocity.  The key is still read so an
+        // old deck is told it no longer does anything.
+        {
+            int divs_kinematic_removed = 0;
+            pp_query("shell.divs_kinematic", divs_kinematic_removed);
+            if (divs_kinematic_removed)
+                Util::Warning(INFO, "shell.divs_kinematic = ", divs_kinematic_removed,
+                              " is IGNORED: the kinematic surface-dilatation option was removed "
+                              "(2026-10-10).  Delete it from the input file.");
+        }
         // 1 = advance the kappa_s surface-viscous stress in its own sub-cycle
         // (N = dt/dt_visc sub-steps on the band) instead of letting its dx^3
         // stability limit throttle the GLOBAL timestep.  Modelled on the
@@ -1789,7 +1781,6 @@ Hydro2::RHS(int lev,
         const int subcyc_visc = shell_visc_subcycle && (shell_kappa_s != 0.0);
         const Set::Scalar mu_s  = shell_mu_s;
         const int visc_shell = (kap_s != 0.0) || (mu_s != 0.0);
-        const int divs_kin = shell_divs_kinematic;
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box bx = mfi.growntilebox(1);
@@ -1798,7 +1789,6 @@ Hydro2::RHS(int lev,
                                                               : amrex::Array4<const Set::Scalar>{};
             amrex::Array4<const Set::Scalar> const &vel = velocity_mf[lev]->const_array(mfi);
             amrex::Array4<Set::Scalar> const &om = Omega.array(mfi);
-            amrex::Array4<const Set::Scalar> const &etd = etadot_mf[lev]->const_array(mfi);
             // Diagnostic: kappa1 carries the TOTAL surface tension actually
             // used in Omega, sigma(Gamma) + kappa_s div_s(u).  kappa2 is written in the Marmottant block
             // above and is the BARE sigma(Gamma) only, so it cannot show the
@@ -1835,36 +1825,7 @@ Hydro2::RHS(int lev,
                     // When shell.kappa_s_subcycle is on, SubcycleShellViscous
                     // owns this term and Omega carries the ELASTIC branch only,
                     // so it must not be added twice.
-                    Set::Scalar divs_u = gu.trace() - nh.dot(gu * nh);
-                    // KINEMATIC SURFACE DILATATION (shell.divs_kinematic = 1, off by default: unstable, see Parse).
-                    // div_s u = div_s(u_t) + u_n (div n).  Inside a diffuse band
-                    // the mixture velocity lags the interface, because part of
-                    // the bubble's volume change happens by pressure relaxation
-                    // (compaction of the gas fraction) rather than by flow.
-                    // Measured on input_Linear_ShellDamping_UNIT: band u_r is
-                    // 0.53-0.70 of the true wall speed, while the interface's
-                    // own normal speed  V_n = -(d eta/dt)/|grad eta|  matches it
-                    // at 0.97-1.01.  So replace u_n by V_n:
-                    //     div_s u_I = div_s u + (V_n - u_n) div(n).
-                    // Exact identity, no constant; V_n, u_n -> 0 at rest, so
-                    // statics are untouched.  etadot is the previous step's
-                    // post-relaxation d eta/dt.  Valid cells only: etadot has no
-                    // ghosts, and Omega.FillBoundary below overwrites the ghost
-                    // layer from the owning box.  Restricted to the band, where
-                    // div(n) = (lap eta - n.H.n)/|grad eta| is well defined.
-                    if (divs_kin && vbx_om.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
-                    {
-                        const Set::Scalar e = et(i, j, k);
-                        if (e > 0.02 && e < 0.98)
-                        {
-                            const Set::Matrix He = Numeric::Hessian(et, i, j, k, 0, DX);
-                            const Set::Scalar divn = (He.trace() - nh.dot(He * nh)) / gem;
-                            Set::Scalar un = 0.0;
-                            for (int d = 0; d < AMREX_SPACEDIM; ++d) un += vel(i, j, k, d) * nh(d);
-                            const Set::Scalar Vn = -etd(i, j, k) / gem;
-                            divs_u += (Vn - un) * divn;
-                        }
-                    }
+                    const Set::Scalar divs_u = gu.trace() - nh.dot(gu * nh);
                     if (!subcyc_visc) se += kap_s * divs_u;
                     if (vbx_om.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
                         kapd(i, j, k, 1) = se;      // total sigma
@@ -1959,8 +1920,6 @@ Hydro2::RHS(int lev,
         Set::Patch<const Set::Scalar> rho = density_mf.Patch(lev, mfi);
         auto const M = momentum_mf[lev]->array(mfi);
         auto const E = energy_per_vol_mf[lev]->array(mfi);
-        amrex::Array4<const Set::Scalar> const etd_g = etadot_mf[lev]->const_array(mfi);
-        const int divs_kin_g = shell_divs_kinematic;
 
         // OUTPUTS
         Set::Patch<Set::Scalar> rho_eta0_rhs = rho_eta0_rhs_mf.array(mfi);
@@ -2102,9 +2061,6 @@ Hydro2::RHS(int lev,
             // Diffuse Sources
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
             Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
-            Set::Matrix hess_eta = Numeric::Hessian(eta, i, j, k, 0, DX, sten);
-
-            Set::Scalar lap_eta = Numeric::Laplacian(eta, i, j, k, 0, DX);
             Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
 
             // Extract velocity from momentum and density.  The mixture velocity u
@@ -2538,7 +2494,7 @@ Hydro2::RHS(int lev,
 
                 Solver::Local::FluidRiemann::Flux fl_ = riemannsolver->Solve(sL_face, sR_face, pref, small);
                 // Reconstructed alpha upwinded on the contact speed; read by the
-                // alpha row only when eta_consistent_advect = 1 (not validated).
+                // alpha row when eta_consistent_advect = 1 (default).
                 fl_.alpha_face = (fl_.u_interface > 0.0) ? pL.alpha : pR.alpha;
                 return fl_;
             };
@@ -2645,20 +2601,15 @@ Hydro2::RHS(int lev,
             const Set::Scalar p0_C   = Solver::EOS::EOS::PhasicPressureFromEnergy(E0_arr(i, j, k), a1_C, eos0.Gamma(), eos0.P0(), small);
             const Set::Scalar p1_C   = Solver::EOS::EOS::PhasicPressureFromEnergy(E1_arr(i, j, k), a2_C, eos1.Gamma(), eos1.P0(), small);
 
-            // ALPHA ROW: first-order donor-cell face value, upwinded on the
-            // contact speed S_M.  A WENO3/limiter-reconstructed face value was
-            // tried (73f9c38c8, Sep 21) to cut the driven-bubble radius drift,
-            // but on outflow faces it adds (a_face - eta_i) u*/dx terms that
-            // break the upwind maximum principle; at a near-singular collapse,
-            // where the gas core is a few cells wide and div(u) is large, that
-            // decouples gas volume from gas mass and broke the uncoated Sch20
-            // collapse.  Donor cell is the validated scheme; the reconstructed
-            // path is kept behind eta_consistent_advect = 1 (see Parse).
+            // ALPHA ROW: face value upwinded on the contact speed S_M.
+            // eta_consistent_advect = 1 (default): the limiter-reconstructed
+            // face alpha, consistent with the mass rows (see Parse).
+            // eta_consistent_advect = 0: first-order donor-cell value.
             Set::Scalar a_face_xlo = (flux_xlo.u_interface > 0.0) ? eta(i - 1, j, k) : eta(i,     j, k);
             Set::Scalar a_face_xhi = (flux_xhi.u_interface > 0.0) ? eta(i,     j, k) : eta(i + 1, j, k);
             Set::Scalar a_face_ylo = (flux_ylo.u_interface > 0.0) ? eta(i, j - 1, k) : eta(i, j,     k);
             Set::Scalar a_face_yhi = (flux_yhi.u_interface > 0.0) ? eta(i, j,     k) : eta(i, j + 1, k);
-            if (eta_consistent_advect)   // NOT validated (see Parse)
+            if (eta_consistent_advect)
             {
                 a_face_xlo = flux_xlo.alpha_face;
                 a_face_xhi = flux_xhi.alpha_face;
@@ -2991,21 +2942,7 @@ Hydro2::RHS(int lev,
             // freeze.  No threshold, no new constant: |n_hat|^2 is built from
             // quantities already in scope, and it is mesh-independent.
             const Set::Scalar nn = shell_gate_free ? n_hat.squaredNorm() : 1.0;
-            Set::Scalar div_s_u = nn * gradu.trace() - n_hat.dot(gradu * n_hat);
-            // Same kinematic correction as the kappa_s stress (see the Omega
-            // build): the band velocity lags the interface, which is why Gamma
-            // has historically responded at ~83% of (R0/R)^2.
-            if (divs_kin_g)
-            {
-                const Set::Scalar e = eta(i, j, k);
-                if (e > 0.02 && e < 0.98 && grad_eta_mag > 0.0)
-                {
-                    const Set::Vector ng = grad_eta / grad_eta_mag;
-                    const Set::Scalar divn = (lap_eta - ng.dot(hess_eta * ng)) / grad_eta_mag;
-                    const Set::Scalar Vn = -etd_g(i, j, k) / grad_eta_mag;
-                    div_s_u += (Vn - u.dot(ng)) * divn;
-                }
-            }
+            const Set::Scalar div_s_u = nn * gradu.trace() - n_hat.dot(gradu * n_hat);
             shell_rhs(i, j, k) = -u_dot_gradG - shell(i, j, k) * div_s_u;
             }   // end shell_row_on / band gate
 
