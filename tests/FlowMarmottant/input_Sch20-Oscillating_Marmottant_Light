@@ -244,11 +244,11 @@ grav                  = 0.0
 
 ### NUMERICS -- WENO3 + SSPRK3 (project standard for Sch20 tests) ###
 Riemann_Solver.type = hllc
-Limiter.type        = weno3
+#Limiter.type        = weno3
 #Limiter.type        = thinc
 #Limiter.thinc_base    = muscl2      # default, so this line is optional
-eta_consistent_advect = 0
-#shell.divs_kinematic = 5
+Limiter.type        = muscl2
+eta_consistent_advect = 1
 
 integration.type    = RungeKutta
 integration.rk.type = 3
