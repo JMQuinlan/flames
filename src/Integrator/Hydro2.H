@@ -751,6 +751,8 @@ protected:
     int shell_visc_subcycle_max = 512; // hard cap on sub-steps (runaway guard)
     int shell_visc_verbose = 0;        // print N and nu_s each sub-cycle
     Set::Scalar shell_nus_rho_floor = 1.0;  // density floor for the nu_s estimate
+    int shell_kappa_s_area_rate = 1;   // 1 = add kappa_s n.grad(S) to Omega_visc (default; see Parse)
+    int shell_kappa_s_heat = 1;        // 1 = return Omega_visc:grad(u) to rho E as heat
     int relax_diag = 0;
     int clip_ghost_only = 0;
     bool sym_face_lo[3] = {false, false, false};

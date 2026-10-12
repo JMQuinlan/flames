@@ -385,6 +385,35 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // Density floor for the nu_s stability estimate (NOT for the physics).
         // Defaults to 1.0 kg/m^3, the gas reference density of the Sch20 decks.
         pp_query_default("shell.nus_rho_floor", value.shell_nus_rho_floor, 1.0);
+        // AREA-RATE form of the dilatational viscous stress.  The interface
+        // area density |grad eta| obeys, for D(eta)/Dt = S (S = the part of
+        // the eta evolution that is NOT advection),
+        //     d|grad eta|/dt + div(|grad eta| u) = |grad eta| div_s u + n.grad(S).
+        // Omega_visc = kappa_s |grad eta| div_s(u) P keeps only the first term.
+        // In a diffuse band the second one is not small: the gas inside the
+        // band compresses with the core, the mixture velocity falls off inward
+        // across the band, and the band-integrated viscous jump comes out
+        // ~(1 - 1.5 eps/R) of the sharp 4 kappa_s Rdot/R^2 (measured 0.85-0.88
+        // on the coated Sch20 Light run, eps/R0 = 0.08).  With the term,
+        //     Omega_visc = kappa_s ( |grad eta| div_s u + n.grad(S) ) P,
+        // which integrates to the exact area rate and has no 1/|grad eta|.
+        // S is the Kapila closure S = K div(u), the stiff-relaxation limit the
+        // 6-eq relaxation step reproduces.  Main (non-subcycled) path only.
+        // DEFAULT 1 (2026-10-11).  Linear shell-damping unit test, kappa_s
+        // damping measured/analytic: R0/dx 8  0.48 -> 0.58, R0/dx 16  0.78 -> 0.85.
+        // Area budget at R0/dx 8: old term 0.70 of the true d(area)/dt, n.grad(S)
+        // 0.31, sum 1.01.  The remaining deficit is the band velocity lag, which
+        // hits the bulk viscosity equally and is not in this term.
+        pp_query_default("shell.kappa_s_area_rate", value.shell_kappa_s_area_rate, 1);
+        // Viscous shell dissipation -> heat.  Omega_visc:grad(u) is removed
+        // from kinetic energy by u.div(Omega) and, unlike the elastic part,
+        // has no surface reservoir, so it is returned to rho E here.  The
+        // sub-cycled path already does this (SubcycleShellViscous).
+        pp_query_default("shell.kappa_s_heat", value.shell_kappa_s_heat, 1);
+        if (value.shell_kappa_s_area_rate && value.shell_visc_subcycle)
+            Util::Warning(INFO, "shell.kappa_s_area_rate is applied on the main path only; "
+                          "with shell.kappa_s_subcycle = 1 the sub-cycled viscous stress "
+                          "does NOT include the n.grad(S) term.");
         // ENERGY-CONSISTENT ALPHA in the pure-cell relaxation guard.
         //
         // THE BUG.  In the pure-cell guard of RelaxAndReinit, p_pure was
@@ -1762,6 +1791,9 @@ Hydro2::RHS(int lev,
     // discrete conservation; it does not change the static momentum/Laplace balance.]
     // Symmetric-tensor storage:  2D [xx,yy,xy] ; 3D [xx,yy,zz,xy,xz,yz].
     amrex::MultiFab Omega;
+    // Omega_visc:grad(u), the viscous-shell dissipation returned to rho E
+    // (shell.kappa_s_heat).  Valid cells only; zero off the band.
+    amrex::MultiFab shell_heat;
     if (apply_surface_tension)
     {
         const amrex::BoxArray &baO = eta_mf[lev]->boxArray();
@@ -1769,6 +1801,57 @@ Hydro2::RHS(int lev,
         const int nO = (AMREX_SPACEDIM == 2) ? 3 : 6;
         Omega.define(baO, dmO, nO, 1);
         Omega.setVal(0.0);
+        shell_heat.define(baO, dmO, 1, 0);
+        shell_heat.setVal(0.0);
+
+        // Non-advective eta source S = K div(u) (Kapila closure) for the
+        // area-rate term; see shell.kappa_s_area_rate in Parse.  With phase 0
+        // at volume fraction a0 = eta,
+        //     K = a0 a1 (rho1 c1^2 - rho0 c0^2) / (a0 rho1 c1^2 + a1 rho0 c0^2).
+        // Built on two ghost layers so n.grad(S) is available on the grown box
+        // Omega is built on; cells whose stencil leaves the fab keep S = 0.
+        const int area_rate = shell_kappa_s_area_rate && (shell_kappa_s != 0.0)
+                            && !(shell_visc_subcycle && shell_kappa_s != 0.0);
+        amrex::MultiFab Smf;
+        if (area_rate)
+        {
+            Smf.define(baO, dmO, 1, 2);
+            Smf.setVal(0.0);
+            const Set::Scalar g0 = eos0.Gamma(), P00 = eos0.P0();
+            const Set::Scalar g1 = eos1.Gamma(), P01 = eos1.P0();
+            const Set::Scalar sm = small;
+            for (amrex::MFIter mfi(Smf, false); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box gbx = mfi.growntilebox(2);
+                amrex::Array4<const Set::Scalar> const &et  = eta_mf[lev]->const_array(mfi);
+                amrex::Array4<const Set::Scalar> const &vel = velocity_mf[lev]->const_array(mfi);
+                amrex::Array4<const Set::Scalar> const &p0  = pressure0_mf[lev]->const_array(mfi);
+                amrex::Array4<const Set::Scalar> const &p1  = pressure1_mf[lev]->const_array(mfi);
+                amrex::Array4<Set::Scalar> const &S = Smf.array(mfi);
+                amrex::ParallelFor(gbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    if (!(vel.contains(i - 1, j, k) && vel.contains(i + 1, j, k)
+                          && vel.contains(i, j - 1, k) && vel.contains(i, j + 1, k)
+#if AMREX_SPACEDIM > 2
+                          && vel.contains(i, j, k - 1) && vel.contains(i, j, k + 1)
+#endif
+                          && p0.contains(i, j, k) && p1.contains(i, j, k)))
+                        return;
+                    const Set::Scalar a0 = std::min(std::max(et(i, j, k), 0.0), 1.0);
+                    const Set::Scalar a1 = 1.0 - a0;
+                    if (a0 * a1 <= 0.0) return;   // pure phase: S = 0
+                    // rho_k c_k^2 = gamma_k (p_k + pi_k) for the stiffened gas.
+                    const Set::Scalar Z0 = g0 * std::max(p0(i, j, k) + P00, sm);
+                    const Set::Scalar Z1 = g1 * std::max(p1(i, j, k) + P01, sm);
+                    const Set::Scalar den = a0 * Z1 + a1 * Z0;
+                    if (!(den > 0.0)) return;
+                    const Set::Scalar K = a0 * a1 * (Z1 - Z0) / den;
+                    Set::Scalar divu = 0.0;
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                        divu += Numeric::Gradient(vel, i, j, k, d, DX)(d);
+                    S(i, j, k) = K * divu;
+                });
+            }
+        }
         const Set::Scalar sig0 = sigma; const int marm = marmottant;
         // Boussinesq--Scriven dilatational shell viscosity.  sigma_tot =
         // sigma_eff + (kappa_s - mu_s) div_s u; mu_s is zero (the shear term is
@@ -1781,9 +1864,13 @@ Hydro2::RHS(int lev,
         const int subcyc_visc = shell_visc_subcycle && (shell_kappa_s != 0.0);
         const Set::Scalar mu_s  = shell_mu_s;
         const int visc_shell = (kap_s != 0.0) || (mu_s != 0.0);
+        const int heat_shell = shell_kappa_s_heat && !subcyc_visc && (kap_s != 0.0);
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box bx = mfi.growntilebox(1);
+            amrex::Array4<const Set::Scalar> const &Sar = area_rate ? Smf.const_array(mfi)
+                                                                    : amrex::Array4<const Set::Scalar>{};
+            amrex::Array4<Set::Scalar> const &hs = shell_heat.array(mfi);
             amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
             amrex::Array4<const Set::Scalar> const &sg = marm ? sig_eff_mf.const_array(mfi)
                                                               : amrex::Array4<const Set::Scalar>{};
@@ -1809,6 +1896,14 @@ Hydro2::RHS(int lev,
                 // dilatational part it is NOT proportional to P, so it cannot be
                 // folded into the scalar tension and is accumulated separately.
                 Set::Matrix Ds = Set::Matrix::Zero();
+                // Area-rate part kappa_s n.grad(S), multiplying the UNIT
+                // projector (it already carries the |grad eta| weight).
+                Set::Scalar sa = 0.0;
+                if (area_rate && Sar.contains(i - 1, j, k) && Sar.contains(i + 1, j, k))
+                {
+                    const Set::Vector gS = Numeric::Gradient(Sar, i, j, k, 0, DX);
+                    sa = kap_s * gS.dot(ge) / gem;
+                }
                 if (visc_shell
                     && vel.contains(i - 1, j, k) && vel.contains(i + 1, j, k)
                     && vel.contains(i, j - 1, k) && vel.contains(i, j + 1, k)
@@ -1828,7 +1923,16 @@ Hydro2::RHS(int lev,
                     const Set::Scalar divs_u = gu.trace() - nh.dot(gu * nh);
                     if (!subcyc_visc) se += kap_s * divs_u;
                     if (vbx_om.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
-                        kapd(i, j, k, 1) = se;      // total sigma
+                    {
+                        // total sigma; the area-rate part is per unit |grad eta|
+                        kapd(i, j, k, 1) = se + sa / gem;
+                        // Omega_visc : grad u = (kap_s |grad eta| div_s u + sa) div_s u
+                        // (P : grad u = div_s u).  Not sign-definite cell by cell
+                        // once sa is on, but it is exactly the work the viscous
+                        // stress removes from the fluid, so energy is conserved.
+                        if (heat_shell)
+                            hs(i, j, k) = (kap_s * gem * divs_u + sa) * divs_u;
+                    }
                     if (mu_s != 0.0)
                     {
                         // D_s = P sym(grad u) P.  P is symmetric and idempotent,
@@ -1841,16 +1945,20 @@ Hydro2::RHS(int lev,
                 }
                 // Omega = ||grad eta|| * T_s,  T_s = se * P + 2 mu_s D_s.
                 // ||grad eta|| * P_ab = (gem d_ab - ge_a ge_b / gem).
+                // The area-rate part sa multiplies the unit P = I - n n,
+                // i.e. (|grad eta| P)/|grad eta|: same tensor, written so that
+                // no 1/|grad eta| multiplies a scalar.
                 const Set::Scalar tw = 2.0 * mu_s * gem;
-                om(i, j, k, 0) = se * (gem - ge(0) * ge(0) / gem) + tw * Ds(0, 0); // xx
-                om(i, j, k, 1) = se * (gem - ge(1) * ge(1) / gem) + tw * Ds(1, 1); // yy
+                const Set::Scalar g2 = gem * gem;
+                om(i, j, k, 0) = se * (gem - ge(0) * ge(0) / gem) + sa * (1.0 - ge(0) * ge(0) / g2) + tw * Ds(0, 0); // xx
+                om(i, j, k, 1) = se * (gem - ge(1) * ge(1) / gem) + sa * (1.0 - ge(1) * ge(1) / g2) + tw * Ds(1, 1); // yy
 #if AMREX_SPACEDIM == 2
-                om(i, j, k, 2) = se * (-ge(0) * ge(1) / gem)      + tw * Ds(0, 1); // xy
+                om(i, j, k, 2) = se * (-ge(0) * ge(1) / gem)      + sa * (-ge(0) * ge(1) / g2)      + tw * Ds(0, 1); // xy
 #else
-                om(i, j, k, 2) = se * (gem - ge(2) * ge(2) / gem) + tw * Ds(2, 2); // zz
-                om(i, j, k, 3) = se * (-ge(0) * ge(1) / gem)      + tw * Ds(0, 1); // xy
-                om(i, j, k, 4) = se * (-ge(0) * ge(2) / gem)      + tw * Ds(0, 2); // xz
-                om(i, j, k, 5) = se * (-ge(1) * ge(2) / gem)      + tw * Ds(1, 2); // yz
+                om(i, j, k, 2) = se * (gem - ge(2) * ge(2) / gem) + sa * (1.0 - ge(2) * ge(2) / g2) + tw * Ds(2, 2); // zz
+                om(i, j, k, 3) = se * (-ge(0) * ge(1) / gem)      + sa * (-ge(0) * ge(1) / g2)      + tw * Ds(0, 1); // xy
+                om(i, j, k, 4) = se * (-ge(0) * ge(2) / gem)      + sa * (-ge(0) * ge(2) / g2)      + tw * Ds(0, 2); // xz
+                om(i, j, k, 5) = se * (-ge(1) * ge(2) / gem)      + sa * (-ge(1) * ge(2) / g2)      + tw * Ds(1, 2); // yz
 #endif
             });
         }
@@ -1977,6 +2085,8 @@ Hydro2::RHS(int lev,
         Set::Patch<const Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
         amrex::Array4<const Set::Scalar> om_cap; // capillary stress tensor (if surface tension on)
         if (apply_surface_tension) om_cap = Omega.const_array(mfi);
+        amrex::Array4<const Set::Scalar> shell_q; // viscous-shell dissipation (if surface tension on)
+        if (apply_surface_tension) shell_q = shell_heat.const_array(mfi);
         Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
 
@@ -2389,8 +2499,12 @@ Hydro2::RHS(int lev,
             // With the split closure on, Fsv_vector is zero here (the capillary
             // terms belong to L_cap), so this contributes nothing.
             const Set::Scalar cap_w = u.dot(Fsv_vector);
+            // Viscous-shell heat Omega_visc:grad(u) (shell.kappa_s_heat).  u.Fsv
+            // above already removes it from the kinetic energy; without this the
+            // kappa_s dissipation left the system instead of becoming heat.
+            const Set::Scalar shell_diss = shell_q ? shell_q(i, j, k) : 0.0;
             Source(i, j, k, AMREX_SPACEDIM + 1) = qdot0 + u.dot(div_tau) + visc_diss + u.dot(Ldot)
-                                                + u.dot(Fw_vector) + cap_w + E_dot_Vap;
+                                                + u.dot(Fw_vector) + cap_w + shell_diss + E_dot_Vap;
 
             // Lagrange terms to enforce no-penetration
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
