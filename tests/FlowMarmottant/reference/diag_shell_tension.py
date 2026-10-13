@@ -181,7 +181,7 @@ def main():
     ap.add_argument("--kappa-s", type=float, default=None, help="override shell.kappa_s")
     ap.add_argument("--mu", type=float, default=None, help="override mu0")
     ap.add_argument("--area-rate", type=int, default=None,
-                    help="override shell.kappa_s_area_rate (solver default 1)")
+                    help="override shell.kappa_s_area_rate (solver default 0)")
     ap.add_argument("--tmin-frac", type=float, default=0.3,
                     help="averages use t > tmin-frac * tau_c (skips the elastic start)")
     a = ap.parse_args()
@@ -199,7 +199,7 @@ def main():
         sigw=_num(kv, "sigma", 0.0), sig0=_num(kv, "sigma", 0.0),
         kappa_s=a.kappa_s if a.kappa_s is not None else _num(kv, "shell.kappa_s", 0.0),
         mu=a.mu if a.mu is not None else _num(kv, "mu0", 0.0),
-        area_rate=a.area_rate if a.area_rate is not None else int(_num(kv, "shell.kappa_s_area_rate", 1)),
+        area_rate=a.area_rate if a.area_rate is not None else int(_num(kv, "shell.kappa_s_area_rate", 0)),
         g0=_num(kv, "eos0.gamma", 2.35), pi0=_num(kv, "eos0.p0", 0.0),
         g1=_num(kv, "eos1.gamma", 1.4), pi1=_num(kv, "eos1.p0", 0.0),
         rho_l=1000.0, p_inf=_expr_const(kv, "pressure0.ic", "p_inf", 1e5),

@@ -399,12 +399,19 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // which integrates to the exact area rate and has no 1/|grad eta|.
         // S is the Kapila closure S = K div(u), the stiff-relaxation limit the
         // 6-eq relaxation step reproduces.  Main (non-subcycled) path only.
-        // DEFAULT 1 (2026-10-11).  Linear shell-damping unit test, kappa_s
-        // damping measured/analytic: R0/dx 8  0.48 -> 0.58, R0/dx 16  0.78 -> 0.85.
-        // Area budget at R0/dx 8: old term 0.70 of the true d(area)/dt, n.grad(S)
-        // 0.31, sum 1.01.  The remaining deficit is the band velocity lag, which
-        // hits the bulk viscosity equally and is not in this term.
-        pp_query_default("shell.kappa_s_area_rate", value.shell_kappa_s_area_rate, 1);
+        // DEFAULT 0 (2026-10-12; briefly 1).  The term closes the AREA budget
+        // (R0/dx 8: old term 0.70 of the true d(area)/dt, n.grad(S) 0.31, sum
+        // 1.01) and raises the energy-based damping in the linear unit test
+        // (R0/dx 8 0.48 -> 0.58, R0/dx 16 0.78 -> 0.85), but its NORMAL FORCE
+        // has the wrong sign.  n.grad(S) is a dipole across the band; on a
+        // sphere the pressure jump weights it by 1/r (int 2 tau/r dr) while the
+        // area rate weights it by r^2, so the jump it adds is ~2 kappa_s
+        // int S/r^2 dr with the sign of S -- opposite to the sharp
+        // 4 kappa_s Rdot/R^2.  Measured with diag_shell_tension.py: the delivered
+        // kappa_s jump falls from 0.86 to 0.77 of sharp on the coated Sch20 Light
+        // run and by 0.085 of sharp in the unit test.  A correct form must spread
+        // the missing area rate over the band with the |grad eta| profile.
+        pp_query_default("shell.kappa_s_area_rate", value.shell_kappa_s_area_rate, 0);
         // Viscous shell dissipation -> heat.  Omega_visc:grad(u) is removed
         // from kinetic energy by u.div(Omega) and, unlike the elastic part,
         // has no surface reservoir, so it is returned to rho E here.  The
