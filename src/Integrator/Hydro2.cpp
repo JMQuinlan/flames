@@ -141,6 +141,21 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("pref", value.pref, 0.0);          // reference pressure for Roe solver
         pp_query_default("small", value.small, 1.0E-8);     // small regularization value
         pp_query_default("cutoff", value.cutoff, 1.0E-8);   // eta cutoff value
+        // TRACE-PHASE VOLUME TRACKING in the RelaxAndReinit pure-cell guard
+        // (eta < cutoff or eta > 1 - cutoff).  The guard skips the Newton and
+        // freezes alpha, but the 6-eq hyperbolic step compresses both phases
+        // by the same strain, so a frozen trace LIQUID is squeezed with the gas.
+        // The reinit then reads the liquid's stiffened offset
+        // alpha_l gam pi/(gam-1) as unchanged and hands the compression work
+        // that should have gone to it, (alpha_l gam pi/(gam-1)) dV/V, to the
+        // gas.  With pi = 1e9 and cutoff = 1e-4 that is ~5% of the gas
+        // energy at alpha_l ~ 3e-5 (Sch20 Light core: s = p/rho^gam +5% in
+        // the [1e-5,1e-4) eta bin, 0 in pure gas; gamma_eff 1.447 instead
+        // of 1.4 -- reversible extra stiffness that drives the rebound).
+        // 1 = move the trace phase alone to the dominant phase's pressure
+        // along its own isentrope (closed form, Sch20 eq. 25), the stiff-
+        // relaxation limit; no solve, so the guard's robustness is kept.
+        pp_query_default("trace_volume_relax", value.trace_volume_relax, 0);   // UNSTABLE as written (TV1 diverged 10-13); rework pending
         pp_query_default("lagrange", value.lagrange, 0.0);  // lagrange no-penetration factor
         pp_query_default("grav", value.g, 9.81);            // Gravitational Acceletation
 
@@ -416,7 +431,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // from kinetic energy by u.div(Omega) and, unlike the elastic part,
         // has no surface reservoir, so it is returned to rho E here.  The
         // sub-cycled path already does this (SubcycleShellViscous).
-        pp_query_default("shell.kappa_s_heat", value.shell_kappa_s_heat, 1);
+        //   1 = mixture rho E only: the reinit splits it ~alpha_k/(gam_k-1),
+        //       so ~3/4 heats the GAS in a mid-band cell (Sch20 Light: band-
+        //       gas entropy +1.6%, mean radius drifts up, rebound +0.0014 R0).
+        //   2 = also booked to the LIQUID phase energy E0 (default): the
+        //       relaxation then stores it as liquid thermal expansion, the
+        //       physical sink (liquid rho cv is ~5000x the gas's).
+        pp_query_default("shell.kappa_s_heat", value.shell_kappa_s_heat, 2);
         if (value.shell_kappa_s_area_rate && value.shell_visc_subcycle)
             Util::Warning(INFO, "shell.kappa_s_area_rate is applied on the main path only; "
                           "with shell.kappa_s_subcycle = 1 the sub-cycled viscous stress "
@@ -2094,6 +2115,7 @@ Hydro2::RHS(int lev,
         if (apply_surface_tension) om_cap = Omega.const_array(mfi);
         amrex::Array4<const Set::Scalar> shell_q; // viscous-shell dissipation (if surface tension on)
         if (apply_surface_tension) shell_q = shell_heat.const_array(mfi);
+        const int shell_heat_liq = (shell_kappa_s_heat == 2);
         Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
 
@@ -3232,6 +3254,11 @@ Hydro2::RHS(int lev,
 
             E0_rhs(i, j, k) = (E0_flux_div - a1_C * p0_C * div_u);
             E1_rhs(i, j, k) = (E1_flux_div - a2_C * p1_C * div_u);
+            // shell.kappa_s_heat = 2: the shell heat (already in the rho E
+            // source) is booked to the LIQUID phase energy, so the relaxation
+            // stores it as liquid thermal expansion instead of the reinit
+            // splitting it ~alpha_k/(gam_k-1), i.e. mostly into the gas.
+            if (shell_heat_liq && shell_q) E0_rhs(i, j, k) += shell_q(i, j, k);
 
             // ------------------------------------------------------------
             // Artificial heat exchange (AHE) -- Schmidmayer 2020 eq. 13
@@ -6232,6 +6259,7 @@ void Hydro2::RelaxAndReinit(int lev)
     const Set::Scalar pi0_ = eos0.P0();
     const Set::Scalar gam1 = eos1.Gamma();
     const Set::Scalar pi1_ = eos1.P0();
+    const int trace_vol = trace_volume_relax;
 
     // Optional Newton diagnostic.  Per cell write {iter_count, |f(p_final)|};
     // after the ParallelFor reduce to {max iters, max residual, unconverged
@@ -6418,6 +6446,29 @@ void Hydro2::RelaxAndReinit(int lev)
                                                        + M_(i, j, k, 1) * M_(i, j, k, 1),
                                                        + M_(i, j, k, 2) * M_(i, j, k, 2))) / std::max(rho_p, small_loc);
                 Set::Scalar rhoe_p = std::max(E_(i, j, k) - ke_p, small_loc);
+                // TRACE-PHASE VOLUME TRACKING (trace_volume_relax, see Parse):
+                // relax the trace phase alone to the dominant phase's p_pre
+                // along its own isentrope.  v_t is well conditioned even though
+                // p_t is not (a relative error e in E_t/alpha_t moves v_t by e,
+                // and alpha_t is tiny), so this is safe where the Newton is not.
+                // Skipped when either phase is floored (no EOS meaning) and for
+                // alpha_t < 1e-10 (roundoff).  The ratio clamp only catches
+                // garbage: the physical per-step change is ~ dt div u.
+                if (trace_vol && !p0_floored && !p1_floored)
+                {
+                    const Set::Scalar e_raw = std::min(std::max(eta(i, j, k), 0.0), 1.0);
+                    const bool liq_trace = (e_raw < 0.5);
+                    const Set::Scalar at = liq_trace ? e_raw : 1.0 - e_raw;
+                    if (at > 1.0e-10)
+                    {
+                        const Set::Scalar vt = liq_trace
+                            ? Solver::EOS::EOS::RelaxationVolume_SG_SC(p1_pre, p0_pre, rho0_pre, gam0, pi0_, DIV_FLOOR)
+                            : Solver::EOS::EOS::RelaxationVolume_SG_SC(p0_pre, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
+                        const Set::Scalar at_new = std::min(std::max((liq_trace ? arh0_loc : arh1_loc) * vt,
+                                                                     0.5 * at), 2.0 * at);
+                        eta(i, j, k) = liq_trace ? at_new : 1.0 - at_new;
+                    }
+                }
                 // Solve for p with the SAME alpha the energies are written
                 // with, so E0 + E1 = rho_e holds identically.
                 const Set::Scalar a1p = std::min(std::max(eta(i, j, k), 0.0), 1.0);
