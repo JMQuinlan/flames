@@ -248,7 +248,7 @@ Riemann_Solver.type = hllc
 #Limiter.type        = thinc
 #Limiter.thinc_base    = muscl2      # default, so this line is optional
 Limiter.type        = muscl2
-eta_consistent_advect = 0
+# eta_consistent_advect: not set, solver default (1 = limiter-reconstructed face alpha)
 
 integration.type    = RungeKutta
 integration.rk.type = 3
