@@ -49,7 +49,7 @@
 #     studies of R_min / tau_c.
 # =============================================================================
 
-alamo.program = hydro2
+alamo.program = hydro2 
 
 ### OUTPUT ###
 # plot_file = ./tests/FlowRayleighPlesset/output_Sch20_Collapsing_Neumann_3D
