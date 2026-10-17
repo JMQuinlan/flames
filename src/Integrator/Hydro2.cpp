@@ -427,17 +427,16 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // run and by 0.085 of sharp in the unit test.  A correct form must spread
         // the missing area rate over the band with the |grad eta| profile.
         pp_query_default("shell.kappa_s_area_rate", value.shell_kappa_s_area_rate, 0);
-        // Viscous shell dissipation -> heat.  Omega_visc:grad(u) is removed
-        // from kinetic energy by u.div(Omega) and, unlike the elastic part,
-        // has no surface reservoir, so it is returned to rho E here.  The
-        // sub-cycled path already does this (SubcycleShellViscous).
-        //   1 = mixture rho E only: the reinit splits it ~alpha_k/(gam_k-1),
-        //       so ~3/4 heats the GAS in a mid-band cell (Sch20 Light: band-
-        //       gas entropy +1.6%, mean radius drifts up, rebound +0.0014 R0).
-        //   2 = also booked to the LIQUID phase energy E0 (default): the
-        //       relaxation then stores it as liquid thermal expansion, the
-        //       physical sink (liquid rho cv is ~5000x the gas's).
-        pp_query_default("shell.kappa_s_heat", value.shell_kappa_s_heat, 2);
+        // shell.kappa_s_heat was REMOVED (2026-10-16): the capillary energy
+        // source is now the full div(Omega.u) (dissertation S_E^Omega), which
+        // already contains the viscous-shell dissipation Omega_visc:grad(u).
+        {
+            int kappa_s_heat_removed = -1;
+            pp_query("shell.kappa_s_heat", kappa_s_heat_removed);
+            if (kappa_s_heat_removed != -1)
+                Util::Warning(INFO, "shell.kappa_s_heat is IGNORED: the shell heat is part of the "
+                              "div(Omega.u) energy source (2026-10-16).  Delete it from the input file.");
+        }
         if (value.shell_kappa_s_area_rate && value.shell_visc_subcycle)
             Util::Warning(INFO, "shell.kappa_s_area_rate is applied on the main path only; "
                           "with shell.kappa_s_subcycle = 1 the sub-cycled viscous stress "
@@ -1819,9 +1818,6 @@ Hydro2::RHS(int lev,
     // discrete conservation; it does not change the static momentum/Laplace balance.]
     // Symmetric-tensor storage:  2D [xx,yy,xy] ; 3D [xx,yy,zz,xy,xz,yz].
     amrex::MultiFab Omega;
-    // Omega_visc:grad(u), the viscous-shell dissipation returned to rho E
-    // (shell.kappa_s_heat).  Valid cells only; zero off the band.
-    amrex::MultiFab shell_heat;
     if (apply_surface_tension)
     {
         const amrex::BoxArray &baO = eta_mf[lev]->boxArray();
@@ -1829,8 +1825,6 @@ Hydro2::RHS(int lev,
         const int nO = (AMREX_SPACEDIM == 2) ? 3 : 6;
         Omega.define(baO, dmO, nO, 1);
         Omega.setVal(0.0);
-        shell_heat.define(baO, dmO, 1, 0);
-        shell_heat.setVal(0.0);
 
         // Non-advective eta source S = K div(u) (Kapila closure) for the
         // area-rate term; see shell.kappa_s_area_rate in Parse.  With phase 0
@@ -1892,13 +1886,11 @@ Hydro2::RHS(int lev,
         const int subcyc_visc = shell_visc_subcycle && (shell_kappa_s != 0.0);
         const Set::Scalar mu_s  = shell_mu_s;
         const int visc_shell = (kap_s != 0.0) || (mu_s != 0.0);
-        const int heat_shell = shell_kappa_s_heat && !subcyc_visc && (kap_s != 0.0);
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box bx = mfi.growntilebox(1);
             amrex::Array4<const Set::Scalar> const &Sar = area_rate ? Smf.const_array(mfi)
                                                                     : amrex::Array4<const Set::Scalar>{};
-            amrex::Array4<Set::Scalar> const &hs = shell_heat.array(mfi);
             amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
             amrex::Array4<const Set::Scalar> const &sg = marm ? sig_eff_mf.const_array(mfi)
                                                               : amrex::Array4<const Set::Scalar>{};
@@ -1954,12 +1946,6 @@ Hydro2::RHS(int lev,
                     {
                         // total sigma; the area-rate part is per unit |grad eta|
                         kapd(i, j, k, 1) = se + sa / gem;
-                        // Omega_visc : grad u = (kap_s |grad eta| div_s u + sa) div_s u
-                        // (P : grad u = div_s u).  Not sign-definite cell by cell
-                        // once sa is on, but it is exactly the work the viscous
-                        // stress removes from the fluid, so energy is conserved.
-                        if (heat_shell)
-                            hs(i, j, k) = (kap_s * gem * divs_u + sa) * divs_u;
                     }
                     if (mu_s != 0.0)
                     {
@@ -2113,9 +2099,6 @@ Hydro2::RHS(int lev,
         Set::Patch<const Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
         amrex::Array4<const Set::Scalar> om_cap; // capillary stress tensor (if surface tension on)
         if (apply_surface_tension) om_cap = Omega.const_array(mfi);
-        amrex::Array4<const Set::Scalar> shell_q; // viscous-shell dissipation (if surface tension on)
-        if (apply_surface_tension) shell_q = shell_heat.const_array(mfi);
-        const int shell_heat_liq = (shell_kappa_s_heat == 2);
         Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
 
@@ -2494,26 +2477,13 @@ Hydro2::RHS(int lev,
             //   Phi = 2 mu_eff S:S + (lambda_eff - 2/3 mu_eff) (div u)^2,
             //   S = sym(grad u).
             //
-            // Capillary: the FLUID energy (rho E = internal + kinetic, which
-            // does NOT contain the surface energy sigma|grad eta|) receives
-            // exactly the capillary-force work u.div(Omega) -- already inside
-            // u.dot(Total_Force) below.  The identity
-            //   u.div(Omega) = div(Omega.u) - Omega:grad(u)
-            // says the fluid absorbs the transported capillary work MINUS the
-            // Omega:grad(u) exchange, which is the rate the SURFACE reservoir
-            // gains:  d(sigma|grad eta|)/dt + div(sigma|grad eta| u)
-            //       = Omega:grad(u)   (exact for advected eta).
-            // A previous revision added cap_work = Omega:grad(u) ON TOP of
-            // u.dot(Total_Force), handing the fluid div(Omega.u) total -- i.e.
-            // the surface-exchange leg was double-counted into rho E, CREATING
-            // energy whenever the interface stretched and destroying it on
-            // shrink (measured on the oscillating-bubble test as a per-cycle
-            // amplitude pump).  The reservoir itself needs no PDE here: it is
-            // the state function sigma_eff |grad eta| (auditable offline from
-            // the plotted kappa[2] and grad_eta fields).  Folding it INTO the
-            // conserved state (full Schmidmayer 2017 E_t) remains the deeper
-            // upgrade -- it touches the Riemann state, EOS inversions, and
-            // relaxation, and is deferred deliberately.
+            // Capillary/shell energy source (dissertation S_E^Omega):
+            //   S_E = div(Omega . u) = u . div(Omega) + Omega : grad(u),
+            // with Omega = |grad eta| T_s carrying both the Marmottant tension
+            // and the Boussinesq--Scriven viscous shell.  The Omega:grad(u)
+            // leg is the viscous-shell dissipation (heat) plus the elastic
+            // exchange, so no separate shell-heat source exists.  Evaluated
+            // with the same central stencil as div(Omega) in Fsv_vector.
             // ------------------------------------------------------------
             Set::Matrix Ssym = 0.5 * (gradu + gradu.transpose());
             Set::Scalar divu_cell = gradu.trace();
@@ -2524,16 +2494,34 @@ Hydro2::RHS(int lev,
             Source(i, j, k, 0) = mdot0;
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
                 Source(i, j, k, 1 + d) = Pdot0(d) + Ldot(d) + div_tau(d) + Total_Force(d);
-            // Capillary work: u.Fsv for the body-force surface-tension path.
-            // With the split closure on, Fsv_vector is zero here (the capillary
-            // terms belong to L_cap), so this contributes nothing.
-            const Set::Scalar cap_w = u.dot(Fsv_vector);
-            // Viscous-shell heat Omega_visc:grad(u) (shell.kappa_s_heat).  u.Fsv
-            // above already removes it from the kinetic energy; without this the
-            // kappa_s dissipation left the system instead of becoming heat.
-            const Set::Scalar shell_diss = shell_q ? shell_q(i, j, k) : 0.0;
+            // Capillary/shell energy: div(Omega . u), see above.
+            Set::Scalar cap_w = 0.0;
+            if (apply_surface_tension)
+            {
+#if AMREX_SPACEDIM == 2
+                // (Omega.u)_q = sum_p Omega_qp u_p ; storage [xx,yy,xy]
+                auto Wq = [&](int ii, int jj, int kk, int q) -> Set::Scalar {
+                    const Set::Scalar ux_ = v(ii, jj, kk, 0), uy_ = v(ii, jj, kk, 1);
+                    return (q == 0) ? om_cap(ii, jj, kk, 0) * ux_ + om_cap(ii, jj, kk, 2) * uy_
+                                    : om_cap(ii, jj, kk, 2) * ux_ + om_cap(ii, jj, kk, 1) * uy_;
+                };
+                cap_w = (Wq(i + 1, j, k, 0) - Wq(i - 1, j, k, 0)) * (0.5 / DX[0])
+                      + (Wq(i, j + 1, k, 1) - Wq(i, j - 1, k, 1)) * (0.5 / DX[1]);
+#else
+                // storage [xx,yy,zz,xy,xz,yz]
+                auto Wq = [&](int ii, int jj, int kk, int q) -> Set::Scalar {
+                    const Set::Scalar ux_ = v(ii, jj, kk, 0), uy_ = v(ii, jj, kk, 1), uz_ = v(ii, jj, kk, 2);
+                    if (q == 0) return om_cap(ii, jj, kk, 0) * ux_ + om_cap(ii, jj, kk, 3) * uy_ + om_cap(ii, jj, kk, 4) * uz_;
+                    if (q == 1) return om_cap(ii, jj, kk, 3) * ux_ + om_cap(ii, jj, kk, 1) * uy_ + om_cap(ii, jj, kk, 5) * uz_;
+                    return             om_cap(ii, jj, kk, 4) * ux_ + om_cap(ii, jj, kk, 5) * uy_ + om_cap(ii, jj, kk, 2) * uz_;
+                };
+                cap_w = (Wq(i + 1, j, k, 0) - Wq(i - 1, j, k, 0)) * (0.5 / DX[0])
+                      + (Wq(i, j + 1, k, 1) - Wq(i, j - 1, k, 1)) * (0.5 / DX[1])
+                      + (Wq(i, j, k + 1, 2) - Wq(i, j, k - 1, 2)) * (0.5 / DX[2]);
+#endif
+            }
             Source(i, j, k, AMREX_SPACEDIM + 1) = qdot0 + u.dot(div_tau) + visc_diss + u.dot(Ldot)
-                                                + u.dot(Fw_vector) + cap_w + shell_diss + E_dot_Vap;
+                                                + u.dot(Fw_vector) + cap_w + E_dot_Vap;
 
             // Lagrange terms to enforce no-penetration
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
@@ -3254,11 +3242,6 @@ Hydro2::RHS(int lev,
 
             E0_rhs(i, j, k) = (E0_flux_div - a1_C * p0_C * div_u);
             E1_rhs(i, j, k) = (E1_flux_div - a2_C * p1_C * div_u);
-            // shell.kappa_s_heat = 2: the shell heat (already in the rho E
-            // source) is booked to the LIQUID phase energy, so the relaxation
-            // stores it as liquid thermal expansion instead of the reinit
-            // splitting it ~alpha_k/(gam_k-1), i.e. mostly into the gas.
-            if (shell_heat_liq && shell_q) E0_rhs(i, j, k) += shell_q(i, j, k);
 
             // ------------------------------------------------------------
             // Artificial heat exchange (AHE) -- Schmidmayer 2020 eq. 13
