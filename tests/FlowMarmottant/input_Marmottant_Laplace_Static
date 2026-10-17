@@ -36,7 +36,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowMarmottant/output_Marmottant_Laplace_Static
+# plot_file = ./tests/FlowMarmottant/output_Marmottant_Laplace_Static   (local path, pre 2026-10-17)
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Marmottant_Laplace_Static
 
 ### MESHING ###
 amr.plot_dt = 5e-4

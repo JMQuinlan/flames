@@ -29,7 +29,8 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = ./tests/FlowMarmottant/output_Sch20_Collapsing_Marmottant
-plot_file = ./bin/tests/FlowMarmottant/output_marm_collapse_unit
+# plot_file = ./bin/tests/FlowMarmottant/output_marm_collapse_unit   (local path, pre 2026-10-17)
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_marm_collapse_unit
 # Relative on purpose: the absolute /mmfs1/... path made every LOCAL run
 # abort at startup (UtilCreateDirectory: /mmfs1 :: Permission denied,
 # exit 6).  The slurm file now cd's to /home/ttryon/flames first, so this

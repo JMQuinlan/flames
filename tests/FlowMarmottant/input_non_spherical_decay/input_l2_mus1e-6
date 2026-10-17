@@ -52,7 +52,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowMarmottant/output_l2_decay_mus1e-6
+# plot_file = ./tests/FlowMarmottant/output_l2_decay_mus1e-6   (local path, pre 2026-10-17)
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_l2_decay_mus1e-6
 
 ### MESHING (uniform) ###
 amr.plot_int        = -1

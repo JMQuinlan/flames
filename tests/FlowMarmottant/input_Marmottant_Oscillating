@@ -36,7 +36,8 @@
 alamo.program = hydro2
 
 ### OUTPUT ###
-plot_file = ./tests/FlowMarmottant/output_Marmottant_Oscillating
+# plot_file = ./tests/FlowMarmottant/output_Marmottant_Oscillating   (local path, pre 2026-10-17)
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Marmottant_Oscillating
 
 ### MESHING ###
 amr.plot_int        = -1

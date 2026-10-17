@@ -16,7 +16,8 @@
 # =============================================================================
 
 alamo.program = hydro2
-plot_file = ./tests/FlowMarmottant/output_TwoBubble_Marmottant_2D
+# plot_file = ./tests/FlowMarmottant/output_TwoBubble_Marmottant_2D   (local path, pre 2026-10-17)
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_TwoBubble_Marmottant_2D
 
 ### MESHING ###
 amr.plot_int        = 20

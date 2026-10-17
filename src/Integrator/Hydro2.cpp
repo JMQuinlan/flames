@@ -281,6 +281,21 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // FLUID 1
         pp_query_required("mu1", value.mu1);            // linear viscosity coefficient
         pp_query_default("mu1_b", value.mu1_b, 0.0);    // bulk viscosity coefficient
+        // Band mixing rule for the SHEAR viscosity (2026-10-16).
+        //   0 = arithmetic  mu = eta mu0 + (1-eta) mu1        (default)
+        //   1 = harmonic    1/mu = eta/mu0 + (1-eta)/mu1
+        // For shear ACROSS layers (planar Couette) stress continuity makes
+        // the harmonic mean the exact effective viscosity of the band; the
+        // arithmetic mean over-predicts it.  Bulk viscosity stays arithmetic.
+        // Harmonic needs mu0, mu1 > 0 (a zero phase viscosity zeroes the band).
+        //   2 = liquid-side power law  mu = mu1 + (mu0 - mu1) eta^p  (p = mu_mix_p)
+        //       Puts the band's viscous stress gradient toward eta -> 1, where
+        //       the fluid moves with the liquid (same idea as
+        //       shell.kappa_s_liqweight).  p = 1 is the arithmetic mean.
+        pp_query_default("mu_mix", value.mu_mix, 0);
+        pp_query_default("mu_mix_p", value.mu_mix_p, 2.0);
+        if (value.mu_mix == 1 && !(value.mu0 > 0.0 && value.mu1 > 0.0))
+            Util::Abort(INFO, "mu_mix = 1 (harmonic) requires mu0 > 0 and mu1 > 0");
 
         // EOS
         Solver::EOS::Tammann::Parse(value.eos0, pp, "eos0.");
@@ -427,6 +442,49 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // run and by 0.085 of sharp in the unit test.  A correct form must spread
         // the missing area rate over the band with the |grad eta| profile.
         pp_query_default("shell.kappa_s_area_rate", value.shell_kappa_s_area_rate, 0);
+        // CONTOUR-RATE form of the dilatational viscous stress (2026-10-16).
+        // The shell lives on the eta contours, not on the band fluid.  This is NOT a
+        // level-set method: only eta and the Kapila source are used.  With
+        // D(eta)/Dt = S (S = non-advective eta rate, Kapila S = K div u), the
+        // contours move with normal speed V = u.n - S/|grad eta|, i.e. with
+        // the velocity w = u - (S/|grad eta|) n.  Its surface divergence is
+        //     div_s w = div_s u - (S/|grad eta|) div n ,
+        // and the diffuse stress |grad eta| kappa_s div_s w P becomes
+        //     Omega_visc = kappa_s ( |grad eta| div_s u - S div n ) P
+        // -- no 1/|grad eta|, and S itself (single-signed across the band,
+        // profile ~ eta(1-eta) ~ |grad eta|), not its gradient, so no dipole
+        // (contrast shell.kappa_s_area_rate).  On a sphere div n = 2/r and the
+        // band integral of S is |grad eta|-weighted (u_n - V), so the term adds
+        // back exactly the band-gas lag: u(eta=.5) = 0.88 Rdot on Light.
+        // S = 0 at rest, so static Laplace balances are untouched.
+        // div n is built from compact face normals (3x3x3 stencil).
+        // Main (non-subcycled) path only.  DEFAULT 0 (experimental).
+        pp_query_default("shell.kappa_s_contour_rate", value.shell_kappa_s_contour_rate, 0);
+        // |div n| is clipped to cap/epsilon.  div n is built from eta, and where
+        // |grad eta| is tiny (trace gas core, far liquid) the normal is noise
+        // and div n reaches ~4/dx; the term then acts as a bulk viscosity
+        // ~kappa_s K/(dx rho) that the dt limit never sees (2D collapse NaN,
+        // 2026-10-17).  Physical (D-1)/R stays far below 1/(2 epsilon).
+        pp_query_default("shell.kappa_s_contour_rate_cap", value.shell_kappa_s_contour_rate_cap, 0.5);
+        // LIQUID-SIDE placement of the VISCOUS shell stress (2026-10-16).
+        // Omega_visc = w(eta) |grad eta| kappa_s div_s(u) P with
+        //     w = (n+1) eta^n ,   int_0^1 w d(eta) = 1,
+        // so the band integral (the sharp jump 4 kappa_s Rdot/R^2) is
+        // unchanged for any n; n = 0 is the original uniform placement.
+        // Why: the viscous jump spread over gas-bearing band cells compresses
+        // the band gas (a reversible spring) and the band fluid then strains
+        // at only ~u(eta=.5)/Rdot of the interface rate, so both the stress
+        // and the work it does fall short.  Weighting toward eta -> 1 puts the
+        // stress gradient where there is little gas and samples div_s u where
+        // the fluid moves with the liquid.  The ELASTIC part sigma(Gamma) is
+        // NOT weighted, so static Laplace balances are untouched.
+        // Applies to the contour-rate term too.  DEFAULT 0 (experimental).
+        pp_query_default("shell.kappa_s_liqweight", value.shell_kappa_s_liqweight, 0);
+        if (value.shell_kappa_s_contour_rate && value.shell_kappa_s_area_rate)
+            Util::Abort(INFO, "shell.kappa_s_contour_rate and shell.kappa_s_area_rate are alternatives; set only one.");
+        if (value.shell_kappa_s_contour_rate && value.shell_visc_subcycle)
+            Util::Warning(INFO, "shell.kappa_s_contour_rate is applied on the main path only; "
+                          "the sub-cycled viscous stress does NOT include the -S div n term.");
         // shell.kappa_s_heat was REMOVED (2026-10-16): the capillary energy
         // source is now the full div(Omega.u) (dissertation S_E^Omega), which
         // already contains the viscous-shell dissipation Omega_visc:grad(u).
@@ -466,6 +524,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // must be built with the frozen raw eta so the later E_k/eta recovery
         // divide cancels exactly.  Making p_pure agree restores
         // E0 + E1 = rho_e identically without reintroducing that mispricing.
+        // pressure_relax = 0 SKIPS the per-cell pressure relaxation and energy
+        // reinit in RelaxAndReinit (the Marmottant shell bulk extension still
+        // runs).  In the 6-eq model eta is purely advected in the RHS, so with
+        // this off no volume moves between phases and the phase pressures
+        // drift apart.  Rule-out test only (2026-10-17); expected to fail.
+        pp_query_default("pressure_relax", value.pressure_relax, 1);
+        if (!value.pressure_relax)
+            Util::Warning(INFO, "pressure_relax = 0: pressure relaxation DISABLED (rule-out test).");
         pp_query_default("relax_diag", value.relax_diag, 0); // 1 = print per-stage {max_iters, max_residual, count_unconverged}.
         pp_query_default("clip_ghost_only", value.clip_ghost_only, 0); // 1 = FillGhost STEP-9 positivity clip touches GHOST cells only (per-phase mass conservation)
 
@@ -1834,8 +1900,10 @@ Hydro2::RHS(int lev,
         // Omega is built on; cells whose stencil leaves the fab keep S = 0.
         const int area_rate = shell_kappa_s_area_rate && (shell_kappa_s != 0.0)
                             && !(shell_visc_subcycle && shell_kappa_s != 0.0);
+        const int cr_rate = shell_kappa_s_contour_rate && (shell_kappa_s != 0.0)
+                          && !(shell_visc_subcycle && shell_kappa_s != 0.0);
         amrex::MultiFab Smf;
-        if (area_rate)
+        if (area_rate || cr_rate)
         {
             Smf.define(baO, dmO, 1, 2);
             Smf.setVal(0.0);
@@ -1886,10 +1954,12 @@ Hydro2::RHS(int lev,
         const int subcyc_visc = shell_visc_subcycle && (shell_kappa_s != 0.0);
         const Set::Scalar mu_s  = shell_mu_s;
         const int visc_shell = (kap_s != 0.0) || (mu_s != 0.0);
+        const int lw_n = shell_kappa_s_liqweight;
+        const Set::Scalar divn_max = shell_kappa_s_contour_rate_cap / epsilon;
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box bx = mfi.growntilebox(1);
-            amrex::Array4<const Set::Scalar> const &Sar = area_rate ? Smf.const_array(mfi)
+            amrex::Array4<const Set::Scalar> const &Sar = (area_rate || cr_rate) ? Smf.const_array(mfi)
                                                                     : amrex::Array4<const Set::Scalar>{};
             amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
             amrex::Array4<const Set::Scalar> const &sg = marm ? sig_eff_mf.const_array(mfi)
@@ -1912,6 +1982,13 @@ Hydro2::RHS(int lev,
                 Set::Scalar gem = ge.lpNorm<2>();
                 if (gem < 1.0e-10) return; // Omega = 0 off the interface
                 Set::Scalar se = marm ? sg(i, j, k) : sig0;
+                // liquid-side weight of the viscous part (shell.kappa_s_liqweight)
+                Set::Scalar wl = 1.0;
+                if (lw_n > 0)
+                {
+                    const Set::Scalar ec = std::min(std::max(et(i, j, k), 0.0), 1.0);
+                    wl = (lw_n + 1.0) * std::pow(ec, (Set::Scalar)lw_n);
+                }
                 // Shear part of the Boussinesq--Scriven stress.  Unlike the
                 // dilatational part it is NOT proportional to P, so it cannot be
                 // folded into the scalar tension and is accumulated separately.
@@ -1923,6 +2000,48 @@ Hydro2::RHS(int lev,
                 {
                     const Set::Vector gS = Numeric::Gradient(Sar, i, j, k, 0, DX);
                     sa = kap_s * gS.dot(ge) / gem;
+                }
+                // Contour-rate part -kappa_s S div(n) (shell.kappa_s_contour_rate),
+                // also multiplying the unit projector.  div n from compact
+                // face normals: n_d on face c+-e_d/2 uses the face-normal
+                // difference and the tangential central differences averaged
+                // over the two adjacent cells.  A face with |grad eta| ~ 0
+                // contributes n = 0 (S ~ 0 there anyway).
+                if (cr_rate && Sar.contains(i, j, k)
+                    && et.contains(i - 1, j - 1, AMREX_SPACEDIM > 2 ? k - 1 : k)
+                    && et.contains(i + 1, j + 1, AMREX_SPACEDIM > 2 ? k + 1 : k))
+                {
+                    const Set::Scalar Sc = Sar(i, j, k);
+                    if (Sc != 0.0)
+                    {
+                        auto E = [&](int a, int b, int cc) { return et(i + a, j + b, k + cc); };
+                        Set::Scalar divn = 0.0;
+                        for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                        {
+                            for (int side = 0; side < 2; ++side)
+                            {
+                                // lo cell L and hi cell H of this face, as offsets
+                                int L[3] = {0, 0, 0}, H[3] = {0, 0, 0};
+                                if (side) H[d] = 1; else L[d] = -1;
+                                Set::Scalar g[3] = {0.0, 0.0, 0.0};
+                                g[d] = (E(H[0], H[1], H[2]) - E(L[0], L[1], L[2])) / DX[d];
+                                for (int t = 0; t < AMREX_SPACEDIM; ++t)
+                                {
+                                    if (t == d) continue;
+                                    int Lp[3] = {L[0], L[1], L[2]}, Lm[3] = {L[0], L[1], L[2]};
+                                    int Hp[3] = {H[0], H[1], H[2]}, Hm[3] = {H[0], H[1], H[2]};
+                                    Lp[t] += 1; Lm[t] -= 1; Hp[t] += 1; Hm[t] -= 1;
+                                    g[t] = 0.25 * (E(Lp[0], Lp[1], Lp[2]) - E(Lm[0], Lm[1], Lm[2])
+                                                 + E(Hp[0], Hp[1], Hp[2]) - E(Hm[0], Hm[1], Hm[2])) / DX[t];
+                                }
+                                const Set::Scalar gm = std::sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
+                                const Set::Scalar nd = (gm > 1.0e-10) ? g[d] / gm : 0.0;
+                                divn += (side ? nd : -nd) / DX[d];
+                            }
+                        }
+                        divn = std::min(std::max(divn, -divn_max), divn_max);
+                        sa += -kap_s * Sc * divn * wl;
+                    }
                 }
                 if (visc_shell
                     && vel.contains(i - 1, j, k) && vel.contains(i + 1, j, k)
@@ -1941,7 +2060,7 @@ Hydro2::RHS(int lev,
                     // owns this term and Omega carries the ELASTIC branch only,
                     // so it must not be added twice.
                     const Set::Scalar divs_u = gu.trace() - nh.dot(gu * nh);
-                    if (!subcyc_visc) se += kap_s * divs_u;
+                    if (!subcyc_visc) se += kap_s * divs_u * wl;
                     if (vbx_om.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))))
                     {
                         // total sigma; the area-rate part is per unit |grad eta|
@@ -2235,6 +2354,19 @@ Hydro2::RHS(int lev,
             Set::Scalar mu_eff = eta(i, j, k) * mu0 + (1.0 - eta(i, j, k)) * mu1;
             Set::Scalar lambda_eff = eta(i, j, k) * mu0_b + (1.0 - eta(i, j, k)) * mu1_b;
             Set::Vector grad_mu = (mu0 - mu1) * grad_eta;
+            if (mu_mix == 1)
+            {
+                // 1/mu = e/mu0 + (1-e)/mu1 ;  dmu/de = mu^2 (1/mu1 - 1/mu0)
+                const Set::Scalar e = std::min(std::max(eta(i, j, k), 0.0), 1.0);
+                mu_eff = 1.0 / (e / mu0 + (1.0 - e) / mu1);
+                grad_mu = mu_eff * mu_eff * (1.0 / mu1 - 1.0 / mu0) * grad_eta;
+            }
+            else if (mu_mix == 2)
+            {
+                const Set::Scalar e = std::min(std::max(eta(i, j, k), 0.0), 1.0);
+                mu_eff = mu1 + (mu0 - mu1) * std::pow(e, mu_mix_p);
+                grad_mu = (mu0 - mu1) * mu_mix_p * std::pow(e, mu_mix_p - 1.0) * grad_eta;
+            }
             Set::Vector grad_lambda = (mu0_b - mu1_b) * grad_eta;
 
             // DIAGNOSTIC interface-localised artificial viscosity (see Hydro2.H).
@@ -3845,6 +3977,14 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     Set::Scalar nus_max_local = 0.0;
     const Set::Scalar kap_eff_l = std::abs(shell_kappa_s - shell_mu_s)
                                 + 2.0 * std::abs(shell_mu_s);
+    // shell.kappa_s_liqweight multiplies the viscous stress by w = (n+1) eta^n
+    const int lw_nn = std::max(shell_kappa_s_liqweight, 0);
+    const Set::Scalar cr_nu = shell_kappa_s_contour_rate ? std::abs(shell_kappa_s) * shell_kappa_s_contour_rate_cap / epsilon : 0.0;
+    auto lw_loc = [lw_nn](Set::Scalar e) -> Set::Scalar {
+        if (lw_nn == 0) return 1.0;
+        e = std::min(std::max(e, 0.0), 1.0);
+        return (lw_nn + 1.0) * std::pow(e, (Set::Scalar)lw_nn);
+    };
 
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
@@ -4079,7 +4219,13 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     if (kap_eff_l > 0.0)
                     {
                         nus_max_local = std::max(nus_max_local,
-                                                 kap_eff_l * grad_eta_mag / (rho(i,j,k) + small_l));
+                                                 kap_eff_l * grad_eta_mag * lw_loc(eta(i,j,k)) / (rho(i,j,k) + small_l));
+                        // contour-rate term: |S div n| <= |K| |div u| cap/eps with
+                        // |K| <~ eta (stiff liquid), i.e. a bulk viscosity
+                        // kappa_s eta cap/(eps rho)
+                        if (cr_nu > 0.0)
+                            nus_max_local = std::max(nus_max_local,
+                                                     cr_nu * a1n * lw_loc(eta(i,j,k)) / (rho(i,j,k) + small_l));
                     }
                 }
             }
@@ -6312,6 +6458,12 @@ void Hydro2::RelaxAndReinit(int lev)
         }
     }
 
+    // pressure_relax = 0: stop after the shell bulk extension (see Parse).
+    if (!pressure_relax)
+    {
+        if (relax_diag) { char _mt[128]; snprintf(_mt, 128, "MASSTRACK relax_exit    lev=%d sum1=%.14e (relax off)", lev, rho_eta1_mf[lev]->sum(0)); Util::Message(INFO, _mt); }
+        return;
+    }
     // MERGE (AcousticBC): honour relax_diag instead of the hardcoded `true`
     // that was on the Marmottant side.  That leftover forced the Newton
     // diagnostic on for every run and is why the logs were full of

@@ -189,6 +189,7 @@ protected:
     // per-stage FillGhost4BC does NOT fire the relaxation.  Schmidmayer applies
     // L_relax once per step, after L_cap -- not between RK stages.
     bool defer_relax = false;
+    int pressure_relax = 1;   // 0 = skip pressure relaxation + reinit in RelaxAndReinit (rule-out test)
 
     // Marmottant advected shell: preserve the AREAL density Gamma = c/|grad eta|
     // across NON-MATERIAL changes to eta (stiff pressure relaxation, clamping to
@@ -753,6 +754,11 @@ protected:
     int shell_visc_verbose = 0;        // print N and nu_s each sub-cycle
     Set::Scalar shell_nus_rho_floor = 1.0;  // density floor for the nu_s estimate
     int shell_kappa_s_area_rate = 0;   // 1 = add kappa_s n.grad(S) to Omega_visc (wrong-sign jump; see Parse)
+    Set::Scalar mu_mix_p = 2.0;        // exponent for mu_mix = 2
+    int mu_mix = 0;                    // 0 arithmetic, 1 harmonic shear-viscosity mixing (see Parse)
+    int shell_kappa_s_liqweight = 0;   // n: viscous shell stress weighted by (n+1) eta^n (0 = uniform; see Parse)
+    Set::Scalar shell_kappa_s_contour_rate_cap = 0.5; // |div n| <= cap/epsilon in the contour-rate term
+    int shell_kappa_s_contour_rate = 0;    // 1 = div_s of the eta-CONTOUR velocity (adds -kappa_s S div n; see Parse)
     int relax_diag = 0;
     int clip_ghost_only = 0;
     bool sym_face_lo[3] = {false, false, false};
