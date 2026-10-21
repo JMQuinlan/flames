@@ -466,6 +466,29 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // ~kappa_s K/(dx rho) that the dt limit never sees (2D collapse NaN,
         // 2026-10-17).  Physical (D-1)/R stays far below 1/(2 epsilon).
         pp_query_default("shell.kappa_s_contour_rate_cap", value.shell_kappa_s_contour_rate_cap, 0.5);
+        // shell.kappa_s_contour_rate = 2: WORK-MATCHED form (2026-10-20).  With
+        // mode 1 the tension is kappa_s div_s w but it does work on the band
+        // fluid, which moves at u, so the shell dissipates kappa_s div_s w div_s u
+        // = u5 x sharp (u5 = u(eta=.5)/Rdot; measured kappa_eff .747 -> .842 on
+        // Light vs .747/u5 = .851 predicted).  Dissipating kappa_s (div_s w)^2
+        // needs T = kappa_s (div_s w)^2/div_s u, singular where div_s u -> 0; its
+        // first-order form about w = u is
+        //     T = kappa_s (div_s u + 2 D),   D = div_s w - div_s u = -(S/|grad eta|) div n,
+        // i.e. the contour term with weight 2.  Dissipation = sharp - kappa_s D^2
+        // (0.986 sharp at u5 = .88).  Trade-off: the pressure jump is (2 - u5)
+        // of sharp, ~12% high at u5 = .88.  Experimental.
+        if (value.shell_kappa_s_contour_rate < 0 || value.shell_kappa_s_contour_rate > 2)
+            Util::Abort(INFO, "shell.kappa_s_contour_rate must be 0, 1 or 2; got ", value.shell_kappa_s_contour_rate);
+        // shell.contour_rate_gamma = 1: the Gamma row uses the CONTOUR area rate,
+        //     D(Gamma)/Dt = -Gamma div_s w = -Gamma (div_s u + D),
+        // the same w as the contour-rate tension (2026-10-20).  With div_s u the
+        // shell strain lags the interface by u5, so sigma(Gamma) lags too (a Gamma
+        // lag of 0.87 moves R_min -0.0016 / peak +0.0007, the size of the uniform
+        // +0.002 offset on Light).  D is formed with the same capped div n and a
+        // regularised 1/|grad eta| (|grad eta|/(|grad eta|^2 + g0^2), g0 = 0.02/eps)
+        // so the band tails, where S ~ 0 anyway, stay finite.  S = 0 at rest, so
+        // static Laplace balances are untouched.  Independent of kappa_s.
+        pp_query_default("shell.contour_rate_gamma", value.shell_contour_rate_gamma, 0);
         // LIQUID-SIDE placement of the VISCOUS shell stress (2026-10-16).
         // Omega_visc = w(eta) |grad eta| kappa_s div_s(u) P with
         //     w = (n+1) eta^n ,   int_0^1 w d(eta) = 1,
@@ -1884,6 +1907,10 @@ Hydro2::RHS(int lev,
     // discrete conservation; it does not change the static momentum/Laplace balance.]
     // Symmetric-tensor storage:  2D [xx,yy,xy] ; 3D [xx,yy,zz,xy,xz,yz].
     amrex::MultiFab Omega;
+    // Contour-rate correction D = div_s w - div_s u per cell, for the Gamma row
+    // (shell.contour_rate_gamma); filled in the Omega build below.
+    amrex::MultiFab CRmf;
+    const int cr_gam = shell_contour_rate_gamma && marmottant && apply_surface_tension;
     if (apply_surface_tension)
     {
         const amrex::BoxArray &baO = eta_mf[lev]->boxArray();
@@ -1903,7 +1930,8 @@ Hydro2::RHS(int lev,
         const int cr_rate = shell_kappa_s_contour_rate && (shell_kappa_s != 0.0)
                           && !(shell_visc_subcycle && shell_kappa_s != 0.0);
         amrex::MultiFab Smf;
-        if (area_rate || cr_rate)
+        if (cr_gam) { CRmf.define(baO, dmO, 1, 1); CRmf.setVal(0.0); }
+        if (area_rate || cr_rate || cr_gam)
         {
             Smf.define(baO, dmO, 1, 2);
             Smf.setVal(0.0);
@@ -1956,11 +1984,14 @@ Hydro2::RHS(int lev,
         const int visc_shell = (kap_s != 0.0) || (mu_s != 0.0);
         const int lw_n = shell_kappa_s_liqweight;
         const Set::Scalar divn_max = shell_kappa_s_contour_rate_cap / epsilon;
+        const Set::Scalar cr_w = (shell_kappa_s_contour_rate == 2) ? 2.0 : 1.0;
+        const Set::Scalar cr_g0 = 0.02 / epsilon;
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box bx = mfi.growntilebox(1);
-            amrex::Array4<const Set::Scalar> const &Sar = (area_rate || cr_rate) ? Smf.const_array(mfi)
+            amrex::Array4<const Set::Scalar> const &Sar = (area_rate || cr_rate || cr_gam) ? Smf.const_array(mfi)
                                                                     : amrex::Array4<const Set::Scalar>{};
+            amrex::Array4<Set::Scalar> const &crd = cr_gam ? CRmf.array(mfi) : amrex::Array4<Set::Scalar>{};
             amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
             amrex::Array4<const Set::Scalar> const &sg = marm ? sig_eff_mf.const_array(mfi)
                                                               : amrex::Array4<const Set::Scalar>{};
@@ -2007,7 +2038,7 @@ Hydro2::RHS(int lev,
                 // difference and the tangential central differences averaged
                 // over the two adjacent cells.  A face with |grad eta| ~ 0
                 // contributes n = 0 (S ~ 0 there anyway).
-                if (cr_rate && Sar.contains(i, j, k)
+                if ((cr_rate || cr_gam) && Sar.contains(i, j, k)
                     && et.contains(i - 1, j - 1, AMREX_SPACEDIM > 2 ? k - 1 : k)
                     && et.contains(i + 1, j + 1, AMREX_SPACEDIM > 2 ? k + 1 : k))
                 {
@@ -2040,7 +2071,9 @@ Hydro2::RHS(int lev,
                             }
                         }
                         divn = std::min(std::max(divn, -divn_max), divn_max);
-                        sa += -kap_s * Sc * divn * wl;
+                        if (cr_rate) sa += -cr_w * kap_s * Sc * divn * wl;
+                        if (cr_gam && crd.contains(i, j, k))
+                            crd(i, j, k) = -Sc * divn * gem / (gem * gem + cr_g0 * cr_g0);
                     }
                 }
                 if (visc_shell
@@ -2218,6 +2251,8 @@ Hydro2::RHS(int lev,
         Set::Patch<const Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
         amrex::Array4<const Set::Scalar> om_cap; // capillary stress tensor (if surface tension on)
         if (apply_surface_tension) om_cap = Omega.const_array(mfi);
+        amrex::Array4<const Set::Scalar> crd_g; // contour-rate D for the Gamma row
+        if (cr_gam) crd_g = CRmf.const_array(mfi);
         Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
 
@@ -3206,7 +3241,9 @@ Hydro2::RHS(int lev,
             // quantities already in scope, and it is mesh-independent.
             const Set::Scalar nn = shell_gate_free ? n_hat.squaredNorm() : 1.0;
             const Set::Scalar div_s_u = nn * gradu.trace() - n_hat.dot(gradu * n_hat);
-            shell_rhs(i, j, k) = -u_dot_gradG - shell(i, j, k) * div_s_u;
+            // shell.contour_rate_gamma: area rate on the eta contours, div_s w = div_s u + D
+            const Set::Scalar D_cr = cr_gam ? nn * crd_g(i, j, k) : 0.0;
+            shell_rhs(i, j, k) = -u_dot_gradG - shell(i, j, k) * (div_s_u + D_cr);
             }   // end shell_row_on / band gate
 
             // ------------------------------------------------------------
@@ -3979,7 +4016,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                                 + 2.0 * std::abs(shell_mu_s);
     // shell.kappa_s_liqweight multiplies the viscous stress by w = (n+1) eta^n
     const int lw_nn = std::max(shell_kappa_s_liqweight, 0);
-    const Set::Scalar cr_nu = shell_kappa_s_contour_rate ? std::abs(shell_kappa_s) * shell_kappa_s_contour_rate_cap / epsilon : 0.0;
+    const Set::Scalar cr_nu = shell_kappa_s_contour_rate
+        ? ((shell_kappa_s_contour_rate == 2) ? 2.0 : 1.0) * std::abs(shell_kappa_s) * shell_kappa_s_contour_rate_cap / epsilon : 0.0;
     auto lw_loc = [lw_nn](Set::Scalar e) -> Set::Scalar {
         if (lw_nn == 0) return 1.0;
         e = std::min(std::max(e, 0.0), 1.0);

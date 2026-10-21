@@ -758,6 +758,7 @@ protected:
     int mu_mix = 0;                    // 0 arithmetic, 1 harmonic shear-viscosity mixing (see Parse)
     int shell_kappa_s_liqweight = 0;   // n: viscous shell stress weighted by (n+1) eta^n (0 = uniform; see Parse)
     Set::Scalar shell_kappa_s_contour_rate_cap = 0.5; // |div n| <= cap/epsilon in the contour-rate term
+    int shell_contour_rate_gamma = 0;  // 1 = Gamma row uses the contour area rate div_s w (see Parse)
     int shell_kappa_s_contour_rate = 0;    // 1 = div_s of the eta-CONTOUR velocity (adds -kappa_s S div n; see Parse)
     int relax_diag = 0;
     int clip_ghost_only = 0;
