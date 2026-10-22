@@ -71,7 +71,7 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Osci
 
 ### MESHING ###
 amr.plot_int        = -1
-amr.plot_dt         = 2.5e-8          # 60 frames over stop_time
+amr.plot_dt         = 2.5e-6          # 60 frames over stop_time
 amr.max_grid_size   = 32
 amr.blocking_factor = 16
 amr.regrid_int      = 10
@@ -87,11 +87,11 @@ amr.n_error_buf     = 16
 nghost = 4
 
 ### TIME STEPPING (Sch20 values x 1e-4) ###
-timestep                = 1.0e-11
+timestep                = 1.0e-8
 dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
-dynamictimestep.max     = 1.0e-9
-dynamictimestep.min     = 1.0e-17
+dynamictimestep.max     = 1.0e-3
+dynamictimestep.min     = 1.0e-11
 cfl                     = 0.5
 
 
