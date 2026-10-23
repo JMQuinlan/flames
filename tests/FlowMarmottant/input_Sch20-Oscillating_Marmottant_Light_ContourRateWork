@@ -4,7 +4,7 @@
 #
 # ================ TEST G: CONTOUR-RATE WORK + CONTOUR-RATE GAMMA ================
 # Identical to input_Sch20-Oscillating_Marmottant_Light except
-#     shell.kappa_s_contour_rate     = 2     (WORK-MATCHED contour-rate tension)
+#     shell.kappa_s_contour_rate     = 1     (mode 2 work-matched tension REMOVED 2026-10-21: did worse on INCLINE)
 #     shell.kappa_s_contour_rate_cap = 0.5   (code default, written out here)
 #     shell.contour_rate_gamma       = 1     (Gamma row on the contour area rate)
 # Builds on TEST E (ContourRate, mode 1).  E fixed the TENSION, but the shell
@@ -184,7 +184,7 @@ marmottant.sigma_break = 0.073   # rupture tension [N/m]
 # stress balance.  mu_s is left at 0 (the solver aborts on a nonzero value
 # until D_s is implemented in CapillaryOperator).
 shell.kappa_s = 7.2e-9           # surface dilatational viscosity [kg/s]
-shell.kappa_s_contour_rate = 2         # TEST G: work-matched contour-rate tension (see header)
+shell.kappa_s_contour_rate = 1         # was 2 (work-matched, removed 2026-10-21); now mode 1 + Gamma
 shell.kappa_s_contour_rate_cap = 0.5   # |div n| <= cap/epsilon
 shell.contour_rate_gamma = 1           # TEST G: Gamma row on the contour area rate
 shell.mu_s    = 0.0

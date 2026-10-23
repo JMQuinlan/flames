@@ -161,6 +161,7 @@ protected:
     // only div(Omega_visc) on the interface band, in N sub-steps of dt/N, so the
     // stiff kappa_s term no longer sets the global timestep.
     void SubcycleShellViscous(int lev, Set::Scalar dt);
+    void SubcycleBulkViscous(int lev, Set::Scalar time, Set::Scalar dt);
 
     // ------------------------------------------------------------------
     // CAPILLARY OPERATOR  L_cap   (Schmidmayer 2017 eq. 17, sec. 4.2.2)
@@ -442,6 +443,11 @@ protected:
     Set::Scalar vz_max = 0.0;
     Set::Scalar F_max = 0.0;
     Set::Scalar nu_max = 0.0;   // max local mu(eta)/rho, for dt_viscous
+    int visc_subcycle = 0;             // 1 = bulk viscosity sub-cycled after the hyperbolic step (see Parse)
+    Set::Scalar visc_subcycle_cfl = 0.9; // fraction of the forward-Euler stability limit per sub-step
+    int visc_subcycle_max = 1000;      // cap on sub-steps per step
+    int visc_subcycle_verbose = 0;
+    int dt_diag = 0;                   // print dt limits every N steps (0 = off)
     Set::Scalar rho_min = 1e10;
 
     Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion=NAN;

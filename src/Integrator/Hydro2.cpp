@@ -138,6 +138,22 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // SOLVER AND REFRENCE CONDITIONS
         pp_query_required("cfl", value.cfl);                // cfl condition
         pp_query_default("cfl_v", value.cfl_v, value.cfl);  // cfl condition (viscous specific)
+        // visc_subcycle = 1: BULK viscosity (mu0, mu1, mu0_b, mu1_b) is taken out
+        // of the RK stages and advanced once per step as its own operator with
+        // N explicit (forward-Euler) sub-steps, N = ceil(dt / dtau),
+        //     dtau = visc_subcycle_cfl * dx^2 / (2 nu_L),
+        //     nu_L = max over cells of (|lambda| + 4/3 mu + (D-1) mu) / rho,
+        // the forward-Euler bound of the discrete stress operator (longitudinal
+        // + transverse modes).  The global dt is then set by acoustics alone, so
+        // the dx^2 viscous limit stops binding at high refinement.  Same
+        // discrete stress and dissipation as the RHS path (momentum + total
+        // energy only; RelaxAndReinit re-partitions E).  First order in time
+        // (Lie split).  DEFAULT 0.
+        pp_query_default("visc_subcycle", value.visc_subcycle, 0);
+        pp_query_default("visc_subcycle_cfl", value.visc_subcycle_cfl, 0.9);
+        pp_query_default("visc_subcycle_max", value.visc_subcycle_max, 1000);
+        pp_query_default("visc_subcycle_verbose", value.visc_subcycle_verbose, 0);
+        pp_query_default("dt_diag", value.dt_diag, 0);   // >0: print the dt limits every dt_diag steps
         pp_query_default("pref", value.pref, 0.0);          // reference pressure for Roe solver
         pp_query_default("small", value.small, 1.0E-8);     // small regularization value
         pp_query_default("cutoff", value.cutoff, 1.0E-8);   // eta cutoff value
@@ -217,6 +233,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
 
         // EMBEDDED SOLID BOUNDARY (see FlowWedge for examples)
         pp_query_default("apply_embedded_solid", value.embedded.apply, 0);  // Apply Solid Boundry 1 --> "Domain has solid boundry"
+        if (value.visc_subcycle && value.embedded.apply)
+            Util::Abort(INFO, "visc_subcycle does not support apply_embedded_solid yet");
         pp_query_default("solid.brinkman", value.embedded.brinkman, 0.0);   // Yang(2023) momentum-only Brinkman no-penetration (0=off)
         pp_query_default("solid.slip", value.embedded.slip, 0);             // 1 = slip wall (penalize only wall-normal momentum); 0 = no-slip
         if (value.embedded.apply)
@@ -466,22 +484,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // ~kappa_s K/(dx rho) that the dt limit never sees (2D collapse NaN,
         // 2026-10-17).  Physical (D-1)/R stays far below 1/(2 epsilon).
         pp_query_default("shell.kappa_s_contour_rate_cap", value.shell_kappa_s_contour_rate_cap, 0.5);
-        // shell.kappa_s_contour_rate = 2: WORK-MATCHED form (2026-10-20).  With
-        // mode 1 the tension is kappa_s div_s w but it does work on the band
-        // fluid, which moves at u, so the shell dissipates kappa_s div_s w div_s u
-        // = u5 x sharp (u5 = u(eta=.5)/Rdot; measured kappa_eff .747 -> .842 on
-        // Light vs .747/u5 = .851 predicted).  Dissipating kappa_s (div_s w)^2
-        // needs T = kappa_s (div_s w)^2/div_s u, singular where div_s u -> 0; its
-        // first-order form about w = u is
-        //     T = kappa_s (div_s u + 2 D),   D = div_s w - div_s u = -(S/|grad eta|) div n,
-        // i.e. the contour term with weight 2.  Dissipation = sharp - kappa_s D^2
-        // (0.986 sharp at u5 = .88).  Trade-off: the pressure jump is (2 - u5)
-        // of sharp, ~12% high at u5 = .88.  Experimental.
-        if (value.shell_kappa_s_contour_rate < 0 || value.shell_kappa_s_contour_rate > 2)
-            Util::Abort(INFO, "shell.kappa_s_contour_rate must be 0, 1 or 2; got ", value.shell_kappa_s_contour_rate);
+        if (value.shell_kappa_s_contour_rate < 0 || value.shell_kappa_s_contour_rate > 1)
+            Util::Abort(INFO, "shell.kappa_s_contour_rate must be 0 or 1 (work-matched mode 2 removed 2026-10-21); got ", value.shell_kappa_s_contour_rate);
         // shell.contour_rate_gamma = 1: the Gamma row uses the CONTOUR area rate,
         //     D(Gamma)/Dt = -Gamma div_s w = -Gamma (div_s u + D),
-        // the same w as the contour-rate tension (2026-10-20).  With div_s u the
+        // the same w as the contour-rate tension (2026-10-20; independent of it).  With div_s u the
         // shell strain lags the interface by u5, so sigma(Gamma) lags too (a Gamma
         // lag of 0.87 moves R_min -0.0016 / peak +0.0007, the size of the uniform
         // +0.002 offset on Light).  D is formed with the same capped div n and a
@@ -1984,7 +1991,6 @@ Hydro2::RHS(int lev,
         const int visc_shell = (kap_s != 0.0) || (mu_s != 0.0);
         const int lw_n = shell_kappa_s_liqweight;
         const Set::Scalar divn_max = shell_kappa_s_contour_rate_cap / epsilon;
-        const Set::Scalar cr_w = (shell_kappa_s_contour_rate == 2) ? 2.0 : 1.0;
         const Set::Scalar cr_g0 = 0.02 / epsilon;
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
@@ -2071,7 +2077,7 @@ Hydro2::RHS(int lev,
                             }
                         }
                         divn = std::min(std::max(divn, -divn_max), divn_max);
-                        if (cr_rate) sa += -cr_w * kap_s * Sc * divn * wl;
+                        if (cr_rate) sa += -kap_s * Sc * divn * wl;
                         if (cr_gam && crd.contains(i, j, k))
                             crd(i, j, k) = -Sc * divn * gem / (gem * gem + cr_g0 * cr_g0);
                     }
@@ -2414,7 +2420,9 @@ Hydro2::RHS(int lev,
                 phi_c = embedded.clampPhi(phisol(i, j, k));
             }
 
-            // Solving
+            // Solving.  visc_subcycle: the bulk stress is advanced by
+            // SubcycleBulkViscous after the hyperbolic step instead.
+            if (!visc_subcycle)
             for (int p = 0; p < AMREX_SPACEDIM; p++)             // i
                 for (int q = 0; q < AMREX_SPACEDIM; q++)         // j
                     for (int r = 0; r < AMREX_SPACEDIM; r++)     // k
@@ -2654,8 +2662,8 @@ Hydro2::RHS(int lev,
             // ------------------------------------------------------------
             Set::Matrix Ssym = 0.5 * (gradu + gradu.transpose());
             Set::Scalar divu_cell = gradu.trace();
-            Set::Scalar visc_diss = 2.0 * mu_eff * Ssym.squaredNorm()
-                                  + (lambda_eff - (2.0 / 3.0) * mu_eff) * divu_cell * divu_cell;
+            Set::Scalar visc_diss = visc_subcycle ? 0.0 : (2.0 * mu_eff * Ssym.squaredNorm()
+                                  + (lambda_eff - (2.0 / 3.0) * mu_eff) * divu_cell * divu_cell);
 
             // SOURCES.  Layout: [0]=mdot, [1..SD]=momentum, [SD+1]=energy.
             Source(i, j, k, 0) = mdot0;
@@ -3939,6 +3947,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         }
     }
     if (relax_diag) { char _mt[128]; snprintf(_mt, 128, "MASSTRACK advance_exit  lev=%d sum1=%.14e", lev, rho_eta1_mf[lev]->sum(0)); Util::Message(INFO, _mt); }
+    // Bulk viscosity as a separate, sub-cycled operator (visc_subcycle; Lie
+    // split U^{n+1} = L_relax L_visc,bulk L_hyper U^n).  Primitives (v, rho) and
+    // ghosts are current from the last RK post-stage hook; the refresh below
+    // rebuilds them from the updated M, E.
+    SubcycleBulkViscous(lev, time, dt);
+
     // ============================================================
     // POST-INTEGRATION PRIMITIVE REFRESH.
     // ============================================================
@@ -4017,7 +4031,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // shell.kappa_s_liqweight multiplies the viscous stress by w = (n+1) eta^n
     const int lw_nn = std::max(shell_kappa_s_liqweight, 0);
     const Set::Scalar cr_nu = shell_kappa_s_contour_rate
-        ? ((shell_kappa_s_contour_rate == 2) ? 2.0 : 1.0) * std::abs(shell_kappa_s) * shell_kappa_s_contour_rate_cap / epsilon : 0.0;
+        ? std::abs(shell_kappa_s) * shell_kappa_s_contour_rate_cap / epsilon : 0.0;
     auto lw_loc = [lw_nn](Set::Scalar e) -> Set::Scalar {
         if (lw_nn == 0) return 1.0;
         e = std::min(std::max(e, 0.0), 1.0);
@@ -4311,7 +4325,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // nu_max is the exact max of mu(eta)/rho over the domain (reduced above).
     // Fall back to the old conservative pairing if it was never set.
     Set::Scalar nu_phys = (nu_max > 0.0) ? nu_max : (mu_max / (rho_min + small));
-    Set::Scalar nu_total = nu_phys;
+    // visc_subcycle: bulk viscosity is sub-cycled in SubcycleBulkViscous and no
+    // longer limits the global step.
+    Set::Scalar nu_total = visc_subcycle ? 0.0 : nu_phys;
     // SHELL DILATATIONAL VISCOSITY.  kappa_s enters the momentum equation as
     //     div( |grad eta| * kappa_s * (div_s u) * P ),
     // i.e. a SURFACE momentum diffusion whose kinematic diffusivity is
@@ -4371,7 +4387,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     dt_max = dt_max * 0.9;
 
     // Debugging to report cfl constants used. Change bool to show
-    if ((step_counter[lev] % 10 == 0) && false)
+    if (dt_diag && (step_counter[lev] % dt_diag == 0))
     {
         Util::Message(INFO, "=== CFL DIAGNOSTICS Level ", lev, " ===");
         Util::Message(INFO, "  c_max = ", c_max, " m/s");
@@ -4381,6 +4397,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Util::Message(INFO, "  dt_acoustic  = ", dt_acoustic,  " s");
         Util::Message(INFO, "  dt_viscous   = ", dt_viscous,   " s");
         Util::Message(INFO, "  dt_capillary = ", dt_capillary, " s");
+        Util::Message(INFO, "  dt_force     = ", dt_force, " s   nu_phys = ", nu_phys, (visc_subcycle ? "  (visc_subcycle: viscous limit off)" : ""));
         Util::Message(INFO, "  dt_max = ", dt_max, " s");
     }
 
@@ -6394,6 +6411,198 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar dt)
                 if (ge.lpNorm<2>() < 1.0e-10) return;
                 const Set::Scalar r = rho(i,j,k) + sm;
                 for (int d = 0; d < AMREX_SPACEDIM; ++d) v(i,j,k,d) = M(i,j,k,d) / r;
+            });
+        }
+    }
+}
+
+// ============================================================================
+// SubcycleBulkViscous(): bulk (mu, lambda) viscosity as its own operator
+// (visc_subcycle = 1).  Called ONCE per step from Advance, after the RK
+// advance of the hyperbolic + capillary system and before the primitive
+// refresh, i.e. the Lie split  U^{n+1} = L_relax L_visc L_hyper U^n.
+//
+// N forward-Euler sub-steps of
+//     dM/dt = div(tau),      dE/dt = u.div(tau) + Phi,
+// with the SAME discrete stress as the RHS path (Mpqrs/dMpqrs contraction of
+// hess_u and grad_u built from M and rho; Phi = 2 mu S:S + (lambda-2/3 mu)
+// (div u)^2).  rho, eta, E0, E1 are untouched (as in RHS: the dissipation
+// enters only the total-energy row; RelaxAndReinit re-partitions it).
+//
+// Sub-step size from the forward-Euler bound of that operator: the stiffest
+// discrete mode has eigenvalue 4 [ (|lambda| + 4/3 mu) + (D-1) mu ] / (rho dx^2),
+//     dtau = visc_subcycle_cfl * dx^2 / (2 nu_L),
+//     nu_L = max_cells (|lambda| + 4/3 mu + (D-1) mu) / rho.
+// Momentum ghosts are refilled every sub-step from momentum_bc (moving walls,
+// no-slip) -- FillPatch on fine levels -- so the wall shear is exact; with
+// NSCBC only the interior/periodic ghosts are refreshed.
+// ============================================================================
+void Hydro2::SubcycleBulkViscous(int lev, Set::Scalar time, Set::Scalar dt)
+{
+    BL_PROFILE("Integrator::Hydro2::SubcycleBulkViscous");
+    if (!visc_subcycle) return;
+    if (mu0 == 0.0 && mu1 == 0.0 && mu0_b == 0.0 && mu1_b == 0.0) return;
+    if (!(dt > 0.0)) return;
+
+    const Set::Scalar *DX = geom[lev].CellSize();
+    const amrex::Box domain = geom[lev].Domain();
+    const Set::Scalar dxm = std::min({AMREX_D_DECL(DX[0], DX[1], DX[2])});
+    const Set::Scalar sm = small;
+    const int mmix = mu_mix;
+    const Set::Scalar mmp = mu_mix_p;
+    const Set::Scalar m0 = mu0, m1 = mu1, l0 = mu0_b, l1 = mu1_b;
+    const bool use_nscbc = (nscbc_bc != nullptr) || (nscbc4_bc != nullptr);
+
+    // mixture viscosity, same closures as RHS
+    auto mu_of = [=] AMREX_GPU_DEVICE(Set::Scalar e_raw, Set::Scalar &dmu_de) -> Set::Scalar {
+        const Set::Scalar e = std::min(std::max(e_raw, 0.0), 1.0);
+        if (mmix == 1)
+        {
+            const Set::Scalar m = 1.0 / (e / m0 + (1.0 - e) / m1);
+            dmu_de = m * m * (1.0 / m1 - 1.0 / m0);
+            return m;
+        }
+        if (mmix == 2)
+        {
+            dmu_de = (m0 - m1) * mmp * std::pow(e, mmp - 1.0);
+            return m1 + (m0 - m1) * std::pow(e, mmp);
+        }
+        dmu_de = (m0 - m1);
+        return e_raw * m0 + (1.0 - e_raw) * m1;
+    };
+
+    // ---- stability bound -> number of sub-steps ----------------------------
+    Set::Scalar nuL = 0.0;
+    {
+        amrex::ReduceOps<amrex::ReduceOpMax> rop;
+        amrex::ReduceData<Set::Scalar> rdat(rop);
+        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto eta = eta_mf[lev]->const_array(mfi);
+            auto rho = density_mf[lev]->const_array(mfi);
+            rop.eval(bx, rdat, [=] AMREX_GPU_DEVICE(int i, int j, int k) -> amrex::GpuTuple<Set::Scalar> {
+                Set::Scalar dm;
+                const Set::Scalar mu = mu_of(eta(i, j, k), dm);
+                const Set::Scalar lam = eta(i, j, k) * l0 + (1.0 - eta(i, j, k)) * l1;
+                const Set::Scalar nu = (std::abs(lam) + (4.0 / 3.0) * std::abs(mu) + (AMREX_SPACEDIM - 1) * std::abs(mu))
+                                       / std::max(rho(i, j, k), sm);
+                return {nu};
+            });
+        }
+        nuL = amrex::get<0>(rdat.value());
+        amrex::ParallelDescriptor::ReduceRealMax(nuL);
+    }
+    if (!(nuL > 0.0)) return;
+    const Set::Scalar dtau_max = visc_subcycle_cfl * dxm * dxm / (2.0 * nuL);
+    long long Nll = (long long)std::ceil((long double)dt / (long double)dtau_max);
+    if (Nll < 1LL) Nll = 1LL;
+    if (Nll > (long long)visc_subcycle_max)
+    {
+        Util::Warning(INFO, "SubcycleBulkViscous lev=", lev, ": required N=", Nll,
+                      " > visc_subcycle_max=", visc_subcycle_max, "; clamping (UNSTABLE -- raise the cap or lower dt)");
+        Nll = visc_subcycle_max;
+    }
+    const int N = (int)Nll;
+    const Set::Scalar dtau = dt / (Set::Scalar)N;
+    if (visc_subcycle_verbose)
+        Util::Message(INFO, "SubcycleBulkViscous lev=", lev, " N=", N, " dtau=", dtau,
+                      " (dt=", dt, ", dtau_max=", dtau_max, ", nu_L=", nuL, ")");
+
+    const int symc = sym_face_central;
+    const bool symlo_c[3] = {sym_face_lo[0], sym_face_lo[1], sym_face_lo[2]};
+    const bool symhi_c[3] = {sym_face_hi[0], sym_face_hi[1], sym_face_hi[2]};
+
+    for (int it = 0; it < N; ++it)
+    {
+        // momentum ghosts (rho ghosts are fixed during the viscous operator)
+        if (lev > 0 && !use_nscbc)
+            FillPatch(lev, time + dt, momentum_mf, *momentum_mf[lev], *momentum_bc, 0);
+        else if (!use_nscbc)
+            FillBoundariesWithBC(lev, time + dt, momentum_bc, { momentum_mf[lev].get() });
+        else
+            momentum_mf[lev]->FillBoundary(geom[lev].periodicity());
+
+        // div(tau) and Phi from the start-of-sub-step momentum (scratch), then update
+        amrex::MultiFab Fv(momentum_mf[lev]->boxArray(), momentum_mf[lev]->DistributionMap(), AMREX_SPACEDIM + 1, 0);
+        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto eta = eta_mf[lev]->const_array(mfi);
+            auto rho = density_mf[lev]->const_array(mfi);
+            auto M   = momentum_mf[lev]->const_array(mfi);
+            auto F   = Fv.array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+            {
+                auto sten = Numeric::GetStencil(i, j, k, domain);
+                if (symc)
+                {
+                    const amrex::Dim3 dlo = amrex::lbound(domain), dhi = amrex::ubound(domain);
+                    const int ijk[3] = {i, j, k}, lo3[3] = {dlo.x, dlo.y, dlo.z}, hi3[3] = {dhi.x, dhi.y, dhi.z};
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                        if ((symlo_c[d] && ijk[d] == lo3[d]) || (symhi_c[d] && ijk[d] == hi3[d]))
+                            sten[d] = Numeric::StencilType::Central;
+                }
+                const Set::Scalar rc = std::max(rho(i, j, k), sm);
+                Set::Vector u;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) u(d) = M(i, j, k, d) / rc;
+                Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
+                Set::Matrix gradM = Numeric::Gradient(M, i, j, k, DX);
+                Set::Vector gradrho = Numeric::Gradient(rho, i, j, k, 0, DX);
+                Set::Matrix hess_rho = Numeric::Hessian(rho, i, j, k, 0, DX, sten);
+                Set::Matrix gradu = (gradM - u * gradrho.transpose()) / rc;
+                Set::Matrix3 hess_M = Numeric::Hessian(M, i, j, k, DX);
+                Set::Matrix3 hess_u = Set::Matrix3::Zero();
+                for (int p = 0; p < AMREX_SPACEDIM; p++)
+                    for (int q = 0; q < AMREX_SPACEDIM; q++)
+                        for (int r = 0; r < AMREX_SPACEDIM; r++)
+                            hess_u(r, p, q) = (hess_M(r, p, q) - gradu(r, q) * gradrho(p) - gradu(r, p) * gradrho(q)
+                                               - u(r) * hess_rho(p, q)) / rc;
+                Set::Scalar dmu;
+                const Set::Scalar mu_eff = mu_of(eta(i, j, k), dmu);
+                const Set::Scalar lambda_eff = eta(i, j, k) * l0 + (1.0 - eta(i, j, k)) * l1;
+                const Set::Vector grad_mu = dmu * grad_eta;
+                const Set::Vector grad_lambda = (l0 - l1) * grad_eta;
+                Set::Vector div_tau = Set::Vector::Zero();
+                for (int p = 0; p < AMREX_SPACEDIM; p++)
+                    for (int q = 0; q < AMREX_SPACEDIM; q++)
+                        for (int r = 0; r < AMREX_SPACEDIM; r++)
+                            for (int s = 0; s < AMREX_SPACEDIM; s++)
+                            {
+                                Set::Scalar Mpqrs = 0.0, dMpqrs = 0.0;
+                                if ((p == r) && (q == s)) { Mpqrs += mu_eff; dMpqrs += grad_mu(q); }
+                                if ((p == s) && (q == r)) { Mpqrs += mu_eff; dMpqrs += grad_mu(q); }
+                                if ((p == q) && (r == s))
+                                {
+                                    Mpqrs += lambda_eff - (2.0 / 3.0) * mu_eff;
+                                    dMpqrs += grad_lambda(q) - (2.0 / 3.0) * grad_mu(q);
+                                }
+                                div_tau(p) += Mpqrs * hess_u(r, s, q) + dMpqrs * gradu(r, s);
+                            }
+                const Set::Matrix Ssym = 0.5 * (gradu + gradu.transpose());
+                const Set::Scalar divu = gradu.trace();
+                const Set::Scalar diss = 2.0 * mu_eff * Ssym.squaredNorm()
+                                       + (lambda_eff - (2.0 / 3.0) * mu_eff) * divu * divu;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) F(i, j, k, d) = div_tau(d);
+                F(i, j, k, AMREX_SPACEDIM) = u.dot(div_tau) + diss;
+            });
+        }
+        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto M = momentum_mf[lev]->array(mfi);
+            auto E = energy_per_vol_mf[lev]->array(mfi);
+            auto v = velocity_mf[lev]->array(mfi);
+            auto rho = density_mf[lev]->const_array(mfi);
+            auto F = Fv.const_array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+            {
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                {
+                    M(i, j, k, d) += dtau * F(i, j, k, d);
+                    v(i, j, k, d) = M(i, j, k, d) / std::max(rho(i, j, k), sm);
+                }
+                E(i, j, k) += dtau * F(i, j, k, AMREX_SPACEDIM);
             });
         }
     }

@@ -12,7 +12,8 @@ module purge
 module load gnu9 mpich
 
 ## 3D Variants ##
-# Test deck ContourRate: see the header of the input file for what it changes and
+# Coated 1-on-1 twin of FlowRayleighPlesset/Sch20_Oscillating_Neumann_Large_3D (same mesh,
+# same resources as RayleighPlessetKellerMiksis/RunSch20Oscilating.sh); see the deck header for
 # the Keller-Miksis numbers it should be compared against.
 cd /home/ttryon/flames
 

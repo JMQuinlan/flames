@@ -1,115 +1,87 @@
-#@ [sch20_oscillating_marmottant_light_contourrate]
+#@ [sch20_oscillating_marmottant_light_contourratemili]
 #@ exe=hydro2
 #@ dim=3
 #
-# ===================== TEST E: CONTOUR-RATE SHELL RATE ======================
-# Identical to input_Sch20-Oscillating_Marmottant_Light except
-#     shell.kappa_s_contour_rate     = 1
-#     shell.kappa_s_contour_rate_cap = 0.5   (code default, written out here)
-# which evaluates the dilatational shell rate on the eta CONTOURS instead of
-# the band fluid:  Omega_visc = kappa_s ( |grad eta| div_s u - S div n ) P,
-# S = Kapila K div u (see Hydro2.cpp Parse).  Not a level-set method: only eta
-# and the Kapila source are used.  |div n| is clipped to cap/epsilon so the
-# noisy normal in the trace gas core / far liquid cannot act as an unresolved
-# bulk viscosity (uncapped, a 2D collapse NaN'd).
-# 10-16 diagnosis: the band fluid at eta=0.5 moves at 0.88 Rdot (band-gas
-# compression), so the applied shell jump was 0.86 of 4 kappa_s Rdot/R^2.
-# Unit test (input_Linear_ShellDamping_UNIT, eps/R 0.125): kappa_s damping
-# 0.79 -> 0.96 of analytic.  Compare with the baseline Light + ThinBand using
-# reference/diag_applied_jump.py and analyze_Sch20_Oscillating_Marmottant_Light.py.
+# ============ COATED 1-ON-1 TWIN OF Sch20_Oscillating_Neumann_Large_3D ============
+# (2026-10-22)  Every line below "alamo.program" is copied from
+#     tests/FlowRayleighPlesset/Sch20_Oscillating_Neumann_Large_3D
+# (same domain, R0, epsilon, pressures, EOS, BCs, AMR, blocking factor, plot_dt,
+# cfl, dt bounds, limiter, inviscid liquid) EXCEPT:
+#     plot_file                 -> FlowMarmottant/output_..._ContourRateMili
+#     apply_surface_tension 0->1, kappa_method 1, marmottant block, shell.* block
+#     plot_minimal = 1, relax_diag = 0   (output/diagnostics only, no physics change)
 #
-# ============================ LIGHT VARIANT ============================
-# Low-amplitude sibling of input_Sch20-Oscillating_Marmottant.  Same shell,
-# same liquid, same domain, same mesh (R0/dx = 25.6), same numerics -- only
-# the initial under-pressure is reduced to 1/5 of the base case:
+# PURPOSE.  On the 2 um Light deck the band is ~8 cells, R0 ~ 26 cells and the
+# oscillation is only ~2 cells, so kappa_s acts on a small, poorly resolved
+# motion.  Here p_inf/p_b = 10 (full Sch20 amplitude): R goes 1 -> ~0.5 R0,
+# i.e. ~13 cells of travel, and the run sits next to the validated uncoated
+# twin for a direct coated-vs-uncoated comparison.
 #
-#   p_inf - p_b   9.0e4 -> 1.8e4 Pa    p_b 1.0e4 -> 8.2e4 Pa, p_inf unchanged
-#                                      (1.0e5 Pa, so the NSCBC target_p and the
-#                                      far-field state are identical)
-#   p_inf / p_b   10    -> 1.22
-#   stop_time     1.0e-6 -> 1.5e-6     8.20 tau_c; the full-shell response has
-#                                      settled by ~6 tau_c
-#   plot_dt       1.25e-8 -> 2.5e-8    60 frames
+# SHELL SCALING.  The elastic shell (chi, R_buckling, sigma_break) is kept as
+# on Light; at R0 = 2 cm 2 sigma/R <= 7 Pa, so it is inert (KM confirms: elastic
+# only = uncoated to 4 digits).  kappa_s is scaled to keep the SAME dimensionless
+# shell viscosity as the 2 um Light deck,
+#     K* = kappa_s / (R0^2 sqrt(rho p_inf)) = 7.2e-9/(4e-12 * 1e4) = 0.18
+#     -> kappa_s = 0.18 * (0.02)^2 * 1e4 = 0.72 kg/s.
+# The shell term 4 kappa_s Rdot/R^2 then sits at the same fraction of p_inf
+# as on Light, and the kappa_s dx^3 timestep limit has the same ratio to the
+# acoustic dt (both scale with R0).
 #
-# PURPOSE: isolate wrinkling in the dilatational-viscous shell response.
-# The base case drives the coated bubble to R_min/R0 = 0.52, deep into the
-# negative-total-tension regime, where buckling-type wrinkles and large
-# interface distortion are mixed together.  Here the full-shell bubble only
-# reaches R_min/R0 = 0.92: it buckles almost immediately (R < R_buckling =
-# 0.98 R0, so sigma(Gamma) = 0) and STAYS buckled for the whole run, which
-# means the shell stress is carried by the kappa_s div_s(u) term alone.  Any
-# wrinkle that grows here is therefore a viscous-dilatation effect, at a
-# compression small enough that the interface stays well resolved
-# (R_min ~ 23.6 cells).
+# REFERENCE MODELS (reference/marmottant_rpe_km.py, mu = 0):
+#   variant            RPE R_min   KM R_min (t/tc)   KM rebound
+#   uncoated           0.2648      0.2727 (1.12)     0.9695
+#   elastic only       0.2648      0.2727 (1.12)     0.9695
+#   full shell         0.4945      0.4960 (1.44)     0.5886   <- target
+# (kappa_s = 0.36 would give KM 0.4109 / rebound 0.6497 if a lighter shell is wanted.)
+# Shell rate: contour-rate mode 1 (best Light result so far, INCLINE 10-20).
 #
-# -----------------------------------------------------------------------------
-# REFERENCE MODELS, R_min/R0 (reference/marmottant_rpe_km.py)
-# -----------------------------------------------------------------------------
-#   variant                      RPE      KM       settled R/R0 (KM)
-#   uncoated (sigma const)       0.6792   0.6829   still ringing at 8 tau_c
-#   elastic only (kappa_s = 0)   0.8988   0.9006   still ringing at 8 tau_c
-#   viscous only (chi = 0)       0.7432   0.7450   0.82 by ~5 tau_c
-#   full shell (chi + kappa_s)   0.9213   0.9224   0.954 by ~6 tau_c
-#
-# Compare against the references with
-#     python3 reference/analyze_Sch20_Oscillating_Marmottant.py \
-#         --input input_Sch20-Oscillating_Marmottant_Light \
-#         --output <plot_file> --stem Sch20_Oscillating_Marmottant_Light
-# and inspect the interface shape with reference/wrinkle_planes.py.
-#
-# Everything below this header is copied unchanged from the base case except
-# the five lines listed above.  The derivation of the 1e-4 Sch20 rescaling
-# (R0 = 2 um) and the Marmottant shell parameters is in the header of
-# input_Sch20-Oscillating_Marmottant.
-# =======================================================================
+# Analyse with reference/analyze_Sch20_Oscillating_Marmottant_Mili.py
+# (coated run vs KM, plus overlay on the uncoated twin's output).
+# =================================================================================
 
 alamo.program = hydro2
 
 ### OUTPUT ###
-# plot_file = ./tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant
+# plot_file = ./tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant_Light_ContourRateMili
 plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant_Light_ContourRateMili
 
 ### MESHING ###
-amr.plot_int        = -1
-amr.plot_dt         = 2.5e-6          # 60 frames over stop_time
-amr.max_grid_size   = 32
+amr.plot_int       = -1
+amr.plot_dt        = 5.0e-5
+amr.max_grid_size  = 32
 amr.blocking_factor = 16
-amr.regrid_int      = 10
-amr.grid_eff        = 0.8
-amr.max_level       = 4
-amr.n_cell          = 160 160 160     # base dx 1.25e-6; L4 -> dx_finest 7.8125e-8 (R0/dx = 25.6)
+amr.regrid_int     = 10
+amr.grid_eff       = 0.8
+amr.max_level      = 4
+amr.n_cell         = 160 160 160       # base; eta-only AMR -> effective finest 2560^3 (octant)
 
-# n_error_buf pushes the fine patches ~16 dx_finest past the interface band so
-# the coarse-fine boundary sits in pure water, where the Q-Fix density
-# partition is exact.
-amr.n_error_buf     = 16
+# n_error_buf pushes the fine patches ~16 dx_finest past the interface band on
+# each side, sitting the coarse-fine boundary in pure water (where the Q-Fix
+# density partition is exact).  See feedback_density_partition_breaks_cf_ghosts.md
+amr.n_error_buf    = 16
 
 nghost = 4
 
-### TIME STEPPING (Sch20 values x 1e-4) ###
-timestep                = 1.0e-8
+### TIME STEPPING ###
+timestep                = 1.0e-7
 dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
-dynamictimestep.max     = 1.0e-3
-dynamictimestep.min     = 1.0e-11
+dynamictimestep.max     = 1.0e-5
+dynamictimestep.min     = 1.0e-13
 cfl                     = 0.5
 
-
-### DIMENSIONS -- octant, 100 R0 ###
-# Domain and mesh match Sch20_Oscillating_Neumann_Large_3D x 1e-4 exactly
-# (2026-10-10; was a 1:20 domain, 64^3 base, max_level 3): prob_hi = 100 R0,
-# base 160^3, max_level 4, blocking_factor 16 -> same R0/dx = 25.6 and the same
-# far-field pressure and confinement as the uncoated run.
-geometry.prob_lo     =  0.0     0.0     0.0
-geometry.prob_hi     =  2.0e-1  2.0e-1  2.0e-1
+### DIMENSIONS ###
+geometry.prob_lo     =  0.0  0.0  0.0
+geometry.prob_hi     =  2.0  2.0  2.0
 geometry.is_periodic = 0 0 0
-stop_time            = 1.5e-3         # 8.20 tau_c (tau_c = 0.915 R0 sqrt(rho/p_inf) = 1.830e-7 s)
+stop_time            = 1e-2
 
-### ETA INITIAL CONDITIONS ###
+### ETA INITIAL CONDITIONS (identical to _Large) ###
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 1.6e-4     # ~2 cells across the band at finest
-eta.ic.expression.constant.R0      = 2.0e-3
+eta.ic.expression.constant.epsilon = 0.0016     # ~ 2 cells across the band at finest
+#eta.ic.expression.constant.epsilon = 0.0008     # ~ 2 cells across the band at finest
+eta.ic.expression.constant.R0      = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
 
@@ -124,7 +96,7 @@ eos1.p0    = 0.0
 eos1.cv    = 714.286
 eos1.cp    = 1000.0
 
-### HYDRO INITIAL CONDITIONS ###
+### HYDRO INITIAL CONDITIONS (identical to _Large) ###
 density0.ic.type = expression
 density0.ic.expression.region0 = "1000.0"
 
@@ -139,80 +111,46 @@ velocity1.ic.type = expression
 velocity1.ic.expression.region0 = "0.0"
 velocity1.ic.expression.region1 = "0.0"
 
-# Liquid exterior: Sch20 Eq. (27) equilibrium field, rescaled.
+# Pressure field IDENTICAL to Sch20_Oscillating_Neumann_Large (the variant that
+# gives the closest match to the Chen-2D RPE reference).  See the _Large file
+# header for the full derivation.
 pressure0.ic.type = expression
 pressure0.ic.expression.constant.p_inf = 1.0e5
-pressure0.ic.expression.constant.p_b   = 8.2e4           # p_inf - p_b = 1.8e4 Pa = 1/5 of the base case
-pressure0.ic.expression.constant.R0    = 2.0e-3
-pressure0.ic.expression.constant.r_inf = 2.0e-2
+pressure0.ic.expression.constant.p_b   = 1.0e4
+pressure0.ic.expression.constant.R0    = 0.02
+pressure0.ic.expression.constant.r_inf = 0.20
 pressure0.ic.expression.region0 = "p_inf - (p_inf - p_b)*R0/max(sqrt(x*x + y*y + z*z), R0)"
+#pressure0.ic.expression.region0 = "p_inf - (p_inf - p_b)*log(r_inf/max(sqrt(x*x + y*y + z*z), R0))/log(r_inf/R0)"
 
 # Gas interior: uniform bubble pressure p_b.
 pressure1.ic.type = expression
-pressure1.ic.expression.constant.p_b = 8.2e4
+pressure1.ic.expression.constant.p_b = 1.0e4
 pressure1.ic.expression.region0 = "p_b"
 
-### VISCOSITY ###
-# Sch20 runs inviscid, but at R0 = 2 um the liquid viscous term 4 mu Rdot/R is
-# O(1e4 Pa) -- the same order as the shell terms under test -- so water
-# viscosity is retained here and in the reference ODE.  Gas viscosity is
-# negligible and is set to zero so the sim and the ODE use the same physics.
-mu0   = 1.0e-3
+### VISCOSITY (inviscid -- Sch20 nominal) ###
+mu0   = 0.0
 mu0_b = 0.0
 mu1   = 0.0
 mu1_b = 0.0
 
-### SURFACE TENSION -- Marmottant coated shell ###
-apply_surface_tension = 1
-sigma = 0.0728                   # post-rupture / bare interface tension [N/m]
+### SURFACE TENSION -- Marmottant coated shell (the only physics change) ###
+sigma = 72.8e-3                  # same value as the uncoated twin (post-rupture / bare tension)
 pref  = 0.0
 
-kappa_method = 1                 # REQUIRED for Marmottant
-
 marmottant             = 1
-marmottant.R0          = 2.0e-3  # reference radius (shell strain measured from here)
-marmottant.R_buckling  = 1.96e-3 # 0.98 R0 -> Gamma_buck = 1.0412, sigma(R0) = 0.0412 N/m
-marmottant.chi         = 1.0     # shell elastic modulus [N/m]
+marmottant.R0          = 0.02    # reference radius (shell strain measured from here)
+marmottant.R_buckling  = 0.0196  # 0.98 R0, as on Light
+marmottant.chi         = 1.0     # shell elastic modulus [N/m] (inert at this scale)
 marmottant.sigma_break = 0.073   # rupture tension [N/m]
 
-# Boussinesq-Scriven interfacial viscosity.  For spherical motion div_s u =
-# 2 Rdot/R and the SHEAR viscosity mu_s cancels identically, so kappa_s alone
-# sets the shell damping: it contributes 4 kappa_s Rdot/R^2 to the normal
-# stress balance.  mu_s is left at 0 (the solver aborts on a nonzero value
-# until D_s is implemented in CapillaryOperator).
-shell.kappa_s = 7.2e-9           # surface dilatational viscosity [kg/s]
-shell.kappa_s_contour_rate = 1         # TEST E: shell rate on the eta contours (see header)
+# Dilatational shell viscosity, scaled from Light at fixed K* = 0.18 (header).
+shell.kappa_s = 0.72             # [kg/s]
+shell.kappa_s_contour_rate = 1         # contour-rate shell rate (mode 1)
 shell.kappa_s_contour_rate_cap = 0.5   # |div n| <= cap/epsilon
 shell.mu_s    = 0.0
 
-### BOUNDARY CONDITIONS -- octant symmetry (lo) + NSCBC outflow (hi) ###
-# NSCBC on the far faces (the uncoated twin uses neumann).  Neumann pins the
-# outer state and reflects outgoing acoustics back onto the bubble.
-#
-# L_ref is scaled with the domain exactly as the driven-bubble inputs do
-# (L_ref/domain = 3.125e-3), giving a NSCBC corner frequency
-# K = sigma (1-M^2) a / L_ref ~ 1.5e9 rad/s against physical rates ~1/tau_c
-# ~ 5e6 rad/s, i.e. omega/K ~ 3e-3, so the boundary is fully transmitting at
-# every frequency this problem contains.
-#
-# eta stays neumann on the hi faces (the interface never reaches them); only
-# density / energy / momentum take the characteristic treatment.
-nscbc.xhi.type     = outflow
-nscbc.xhi.target_p = 1.0e5
-nscbc.xhi.sigma    = 0.6
-nscbc.xhi.beta     = 0.5
-nscbc.xhi.L_ref    = 6.25e-4
-nscbc.yhi.type     = outflow
-nscbc.yhi.target_p = 1.0e5
-nscbc.yhi.sigma    = 0.6
-nscbc.yhi.beta     = 0.5
-nscbc.yhi.L_ref    = 6.25e-4
-nscbc.zhi.type     = outflow
-nscbc.zhi.target_p = 1.0e5
-nscbc.zhi.sigma    = 0.6
-nscbc.zhi.beta     = 0.5
-nscbc.zhi.L_ref    = 6.25e-4
-
+### BOUNDARY CONDITIONS - Neumann on all 6 faces (Sch20 non-NSCBC variant) ###
+# eta: symmetry (reflect_even) on inner faces, neumann far-field
 eta.bc.type.xlo = REFLECT_EVEN
 eta.bc.type.xhi = neumann
 eta.bc.type.ylo = REFLECT_EVEN
@@ -221,27 +159,27 @@ eta.bc.type.zlo = REFLECT_EVEN
 eta.bc.type.zhi = neumann
 
 density.bc.type.xlo = REFLECT_EVEN
-density.bc.type.xhi = nscbc_outflow
+density.bc.type.xhi = neumann
 density.bc.type.ylo = REFLECT_EVEN
-density.bc.type.yhi = nscbc_outflow
+density.bc.type.yhi = neumann
 density.bc.type.zlo = REFLECT_EVEN
-density.bc.type.zhi = nscbc_outflow
+density.bc.type.zhi = neumann
 
 energy.bc.type.xlo = REFLECT_EVEN
-energy.bc.type.xhi = nscbc_outflow
+energy.bc.type.xhi = neumann
 energy.bc.type.ylo = REFLECT_EVEN
-energy.bc.type.yhi = nscbc_outflow
+energy.bc.type.yhi = neumann
 energy.bc.type.zlo = REFLECT_EVEN
-energy.bc.type.zhi = nscbc_outflow
+energy.bc.type.zhi = neumann
 
 momentum.bc.type.xlo = REFLECT_ODD  REFLECT_EVEN REFLECT_EVEN
-momentum.bc.type.xhi = nscbc_outflow nscbc_outflow nscbc_outflow
+momentum.bc.type.xhi = neumann neumann neumann
 momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD  REFLECT_EVEN
-momentum.bc.type.yhi = nscbc_outflow nscbc_outflow nscbc_outflow
+momentum.bc.type.yhi = neumann neumann neumann
 momentum.bc.type.zlo = REFLECT_EVEN REFLECT_EVEN REFLECT_ODD
-momentum.bc.type.zhi = nscbc_outflow nscbc_outflow nscbc_outflow
+momentum.bc.type.zhi = neumann neumann neumann
 
-### REFINEMENT -- eta-only at the interface band ###
+### REFINEMENT -- eta-only, conservative threshold (identical to _Large) ###
 eta_refinement_criterion   = 1.0e-1
 omega_refinement_criterion = 1.0e+10
 p_refinement_criterion     = 1.0e+10
@@ -254,38 +192,29 @@ m0.ic.constant.value = 0.0
 u0.ic.constant.value = 0.0 0.0
 q.ic.constant.value  = 0.0 0.0
 
-### PHYSICS FLAGS ###
+### PHYSICS FLAGS (identical to _Large) ###
+apply_surface_tension = 1   # coated (uncoated twin: 0)
 apply_buoyancy        = 0
 apply_weight          = 0
 apply_vaporization    = 0
 grav                  = 0.0
 
-### NUMERICS -- WENO3 + SSPRK3 (project standard for Sch20 tests) ###
+### NUMERICS -- WENO5 + SSPRK3 ###
 Riemann_Solver.type = hllc
-#Limiter.type        = weno3
-#Limiter.type        = thinc
-#Limiter.thinc_base    = muscl2      # default, so this line is optional
-Limiter.type        = muscl2
-# eta_consistent_advect: not set, solver default (1 = limiter-reconstructed face alpha)
-
+Limiter.type        = weno5
 integration.type    = RungeKutta
 integration.rk.type = 3
+kappa_method        = 1     # REQUIRED for Marmottant (same as uncoated twin)
 
 apply_sharpening     = 0
 sharpening_frequency = 20
 reinit_max_iter      = 100
 reinit_tolerance     = 1e-6
 omega_relax          = 0.5
-# Drop the ~50 pure-diagnostic components from the plotfiles: level 0 here
-# is 160^3 for an R0 = 2e-6 bubble, so a full plotfile is 2.5 GB.  With
-# plot_minimal the file is 681 MB (19 fields), and this run writes
-# 80 of them (~54 GB) instead of ~200 at 2.5 GB (~500 GB).
-# eta, rho_eta0/1, shell, Gamma, pressure, velocity, density, momentum,
-# energy0/1, energy_per_vol, T, UE_per_vol and KE_per_vol are all kept.
-plot_minimal         = 1
-relax_diag           = 0    # off for production: 3 domain-wide reductions + log spam per step
+relax_diag           = 0    # uncoated twin: 1 (log-only diagnostics)
+plot_minimal         = 1    # ~200 frames; keeps eta, shell, Gamma, p, u, rho, energies
 
-# Switch Mix() to the gamma-weighted form so the per-phase IC pressures sit in
-# the energy-conserving equilibrium RelaxAndReinit would produce, killing the
-# step-1 pressure kick.
+# IC pressure equalization (see _Large header): switch Mix() to the
+# gamma-weighted form so the per-phase IC pressures sit in the energy-conserving
+# equilibrium RelaxAndReinit would produce, killing the step-1 pressure kick.
 equalize_ic_pressure = 1
