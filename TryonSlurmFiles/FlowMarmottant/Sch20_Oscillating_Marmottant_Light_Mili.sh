@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=MarmLightCRMili
+#SBATCH --job-name=MarmLightMili
 #SBATCH -o /mmfs1/home/ttryon/FLAMES_out/flame_%j_stdout
 #SBATCH -e /mmfs1/home/ttryon/FLAMES_out/err_flame_%j_stdout
 #SBATCH -N 1
@@ -12,9 +12,9 @@ module purge
 module load gnu9 mpich
 
 ## 3D Variants ##
-# Coated 1-on-1 twin of FlowRayleighPlesset/Sch20_Oscillating_Neumann_Large_3D (same mesh,
+# Pre-tensioned (sigma = 500 N/m, p_inf/p_b = 1.715, ~8 finest cells of travel) kappa_s test built on the coated 1-on-1 twin of FlowRayleighPlesset/Sch20_Oscillating_Neumann_Large_3D (same mesh,
 # same resources as RayleighPlessetKellerMiksis/RunSch20Oscilating.sh); see the deck header for
 # the Keller-Miksis numbers it should be compared against.
 cd /home/ttryon/flames
 
-srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowMarmottant/input_Sch20-Oscillating_Marmottant_Light_ContourRateMili
+srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-3d-g++ /home/ttryon/flames/tests/FlowMarmottant/input_Sch20-Oscillating_Marmottant_Light_Mili

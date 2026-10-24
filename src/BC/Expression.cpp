@@ -64,7 +64,7 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
                 const int tt = (glevel[0] < 0) ? m_bc_type[Face::XLO][n] : m_bc_type[Face::XHI][n];
                 if (BCUtil::IsReflectEven(tt))      si = (glevel[0] < 0) ? 2*lo.x - 1 - i : 2*hi.x + 1 - i;
                 else if (BCUtil::IsReflectOdd(tt)) { si = (glevel[0] < 0) ? 2*lo.x - 1 - i : 2*hi.x + 1 - i; csign = -csign; }
-                else if (BCUtil::IsNeumann(tt) || BCUtil::IsNSCBC(tt)) si = i - glevel[0];
+                else if (BCUtil::IsNeumann(tt) || BCUtil::IsClampCopy(tt)) si = i - glevel[0];
                 else composable = false;
             }
 #if AMREX_SPACEDIM > 1
@@ -74,7 +74,7 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
                 const int tt = (glevel[1] < 0) ? m_bc_type[Face::YLO][n] : m_bc_type[Face::YHI][n];
                 if (BCUtil::IsReflectEven(tt))      sj = (glevel[1] < 0) ? 2*lo.y - 1 - j : 2*hi.y + 1 - j;
                 else if (BCUtil::IsReflectOdd(tt)) { sj = (glevel[1] < 0) ? 2*lo.y - 1 - j : 2*hi.y + 1 - j; csign = -csign; }
-                else if (BCUtil::IsNeumann(tt) || BCUtil::IsNSCBC(tt)) sj = j - glevel[1];
+                else if (BCUtil::IsNeumann(tt) || BCUtil::IsClampCopy(tt)) sj = j - glevel[1];
                 else composable = false;
             }
 #endif
@@ -85,7 +85,7 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
                 const int tt = (glevel[2] < 0) ? m_bc_type[Face::ZLO][n] : m_bc_type[Face::ZHI][n];
                 if (BCUtil::IsReflectEven(tt))      sk = (glevel[2] < 0) ? 2*lo.z - 1 - k : 2*hi.z + 1 - k;
                 else if (BCUtil::IsReflectOdd(tt)) { sk = (glevel[2] < 0) ? 2*lo.z - 1 - k : 2*hi.z + 1 - k; csign = -csign; }
-                else if (BCUtil::IsNeumann(tt) || BCUtil::IsNSCBC(tt)) sk = k - glevel[2];
+                else if (BCUtil::IsNeumann(tt) || BCUtil::IsClampCopy(tt)) sk = k - glevel[2];
                 else composable = false;
             }
 #endif
@@ -111,7 +111,7 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
             // NSCBC-typed faces: clamp-copy (zero-gradient) so this BC is a
             // SAFE physbc for FillPatch/interp (finite out-of-domain data);
             // the real characteristic ghosts are written by NSCBC4 afterwards.
-            else if (BCUtil::IsNSCBC(m_bc_type[Face::XLO][n]))
+            else if (BCUtil::IsClampCopy(m_bc_type[Face::XLO][n]))
                 in(i,j,k,n) = in(i-glevel[0],j,k,n);
             else
                 Util::Abort(INFO, "Incorrect boundary conditions");
@@ -131,7 +131,7 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
             // NSCBC-typed faces: clamp-copy (zero-gradient) so this BC is a
             // SAFE physbc for FillPatch/interp (finite out-of-domain data);
             // the real characteristic ghosts are written by NSCBC4 afterwards.
-            else if (BCUtil::IsNSCBC(m_bc_type[Face::XHI][n]))
+            else if (BCUtil::IsClampCopy(m_bc_type[Face::XHI][n]))
                 in(i,j,k,n) = in(i-glevel[0],j,k,n);
             else
                 Util::Abort(INFO, "Incorrect boundary conditions");
@@ -151,7 +151,7 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
             // NSCBC-typed faces: clamp-copy (zero-gradient) so this BC is a
             // SAFE physbc for FillPatch/interp (finite out-of-domain data);
             // the real characteristic ghosts are written by NSCBC4 afterwards.
-            else if (BCUtil::IsNSCBC(m_bc_type[Face::YLO][n]))
+            else if (BCUtil::IsClampCopy(m_bc_type[Face::YLO][n]))
                 in(i,j,k,n) = in(i,j-glevel[1],k,n);
             else
                 Util::Abort(INFO, "Incorrect boundary conditions");
@@ -170,7 +170,7 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
             // NSCBC-typed faces: clamp-copy (zero-gradient) so this BC is a
             // SAFE physbc for FillPatch/interp (finite out-of-domain data);
             // the real characteristic ghosts are written by NSCBC4 afterwards.
-            else if (BCUtil::IsNSCBC(m_bc_type[Face::YHI][n]))
+            else if (BCUtil::IsClampCopy(m_bc_type[Face::YHI][n]))
                 in(i,j,k,n) = in(i,j-glevel[1],k,n);
             else
                 Util::Abort(INFO, "Incorrect boundary conditions");
@@ -191,7 +191,7 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
             // NSCBC-typed faces: clamp-copy (zero-gradient) so this BC is a
             // SAFE physbc for FillPatch/interp (finite out-of-domain data);
             // the real characteristic ghosts are written by NSCBC4 afterwards.
-            else if (BCUtil::IsNSCBC(m_bc_type[Face::ZLO][n]))
+            else if (BCUtil::IsClampCopy(m_bc_type[Face::ZLO][n]))
                 in(i,j,k,n) = in(i,j,k-glevel[2],n);
             else Util::Abort(INFO, "Incorrect boundary conditions");
         }
@@ -209,7 +209,7 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
             // NSCBC-typed faces: clamp-copy (zero-gradient) so this BC is a
             // SAFE physbc for FillPatch/interp (finite out-of-domain data);
             // the real characteristic ghosts are written by NSCBC4 afterwards.
-            else if (BCUtil::IsNSCBC(m_bc_type[Face::ZHI][n]))
+            else if (BCUtil::IsClampCopy(m_bc_type[Face::ZHI][n]))
                 in(i,j,k,n) = in(i,j,k-glevel[2],n);
             else Util::Abort(INFO, "Incorrect boundary conditions");
         }
@@ -228,7 +228,7 @@ Expression::GetBCRec()
     // description for slope/stencil purposes.  (Also fixes the z slots,
     // which previously reused the XLO/XHI types.)
     auto xlate = [](int t) -> int {
-        if (BCUtil::IsNSCBC(t)) return (int)amrex::BCType::foextrap;
+        if (BCUtil::IsClampCopy(t)) return (int)amrex::BCType::foextrap;
         return t;
     };
     int bc_lo[BL_SPACEDIM] = {AMREX_D_DECL(xlate(m_bc_type[Face::XLO][0]),

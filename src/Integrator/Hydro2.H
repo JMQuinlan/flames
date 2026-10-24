@@ -160,8 +160,9 @@ protected:
     // Sub-cycled SHELL DILATATIONAL VISCOUS update (see Hydro2.cpp).  Advances
     // only div(Omega_visc) on the interface band, in N sub-steps of dt/N, so the
     // stiff kappa_s term no longer sets the global timestep.
-    void SubcycleShellViscous(int lev, Set::Scalar dt);
+    void SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt);
     void SubcycleBulkViscous(int lev, Set::Scalar time, Set::Scalar dt);
+    void RadialGhostFill(int lev, amrex::MultiFab &mf, bool is_vector);
 
     // ------------------------------------------------------------------
     // CAPILLARY OPERATOR  L_cap   (Schmidmayer 2017 eq. 17, sec. 4.2.2)
@@ -763,15 +764,21 @@ protected:
     Set::Scalar mu_mix_p = 2.0;        // exponent for mu_mix = 2
     int mu_mix = 0;                    // 0 arithmetic, 1 harmonic shear-viscosity mixing (see Parse)
     int shell_kappa_s_liqweight = 0;   // n: viscous shell stress weighted by (n+1) eta^n (0 = uniform; see Parse)
-    Set::Scalar shell_kappa_s_contour_rate_cap = 0.5; // |div n| <= cap/epsilon in the contour-rate term
-    int shell_contour_rate_gamma = 0;  // 1 = Gamma row uses the contour area rate div_s w (see Parse)
-    int shell_kappa_s_contour_rate = 0;    // 1 = div_s of the eta-CONTOUR velocity (adds -kappa_s S div n; see Parse)
+    int shell_kappa_s_narrow = 0;      // m: viscous shell stress weighted by (eta(1-eta))^m/B(m+1,m+1) (see Parse)
     int relax_diag = 0;
     int clip_ghost_only = 0;
     bool sym_face_lo[3] = {false, false, false};
     bool sym_face_hi[3] = {false, false, false};
     int omega_sym_mirror = 1;       // 1 = ghost Omega at symmetry faces = mirror of the first valid cell (see Parse)
     int sym_face_central = 1;       // 1 = central (not one-sided) Hessian stencils in cells on a symmetry face (see Parse)
+    // RADIAL slab faces (2026-10-23; see Parse and RadialGhostFill).
+    bool radial_bc = false;
+    bool radial_face_hi[3] = {false, false, false};
+    // Faces whose edge cells use central stencils: symmetry faces (when
+    // sym_face_central) and radial faces, whose ghosts are both exact.
+    bool cen_face_lo[3] = {false, false, false};
+    bool cen_face_hi[3] = {false, false, false};
+    int cen_face_any = 0;
 
 };
 }

@@ -30,7 +30,7 @@ Sweeps:
 - multiphase: `amr.max_level` 1, 2, 3, i.e. R0/dx = 8, 16, 32.
 - Each crossed with eps/dx = 1, 2, 4 and kappa on/off.
 
-Each run's overrides go in `OUT/<run>/cmdline.txt`.
+Each run's overrides go in `OUT/<run>.cmdline`.
 
 ## Analysis
 
@@ -46,28 +46,27 @@ Both report `kappa_eff/kappa_s`, the value of the membrane viscosity that best f
 - the anisotropy between the axis and diagonal probes (Cartesian-mesh imprint).
 
 Earlier 3D/2D results to compare against (FlowMarmottant):
-- `input_Linear_ShellDamping_UNIT` at eps/R 0.25: 0.49 with the current code, 0.62 with contour-rate mode 1.
+- `input_Linear_ShellDamping_UNIT` at eps/R 0.25: 0.49 with the current code, 0.62 with the contour-rate term (removed 2026-10-24).
 - The same at eps/R 0.125: 0.79 and 0.96.
 
-## Planned: radially symmetric boundary condition (1D-in-3D slabs)
+## Radially symmetric slab BC (`RADIAL`, 2026-10-23)
 
-Goal: run spherical (3D) or cylindrical (2D) problems on a slab a few cells thick on the
-desktop, e.g. a 3D bubble at R0/dx = 64 on 512 x 4 x 4 cells instead of an octant.
+`input_SinglePhase_Pulse_Slab2D` (cylindrical) and `input_SinglePhase_Pulse_Slab3D` (spherical)
+run the pulse test as a 1D radial problem on a slab 4 cells thick:
+`x in [0,L]`, `y (,z) in [0,h]`, centre at the origin.
 
-Idea:
-- The domain is `x in [0, L]` and `|y|, |z| <= h` with h = 2–4 cells.
-- On the y/z faces a new BC type, `RADIAL`, fills ghost cell (x, y_g, z_g) from the row
-  nearest the axis at the same radius `r = sqrt(x^2 + y_g^2 + z_g^2)`:
-  - scalars `f = f_axis(r)` by 1D interpolation;
-  - vectors rotated, `u = u_r(r) (x, y_g, z_g)/r` (no swirl).
-- `x = 0` keeps REFLECT.
-- The Cartesian operators on the slab then see an exactly spherical field, so the
-  geometric (D-1)/r terms come out of the ordinary 3D stencils. No new source terms.
+- Set `RADIAL` on `yhi` (and `zhi` in 3D) for eta, density, energy and every momentum
+  component. `xlo`, `ylo` (,`zlo`) must be symmetry planes (REFLECT), `prob_lo = 0`,
+  `amr.max_level = 0`. No NSCBC or embedded solid. The code aborts otherwise.
+- `Hydro2::RadialGhostFill` refills every ghost outside a RADIAL face from the near-axis
+  row (j = k = 0) at the same radius `r = |x|`:
+  - scalars by cubic interpolation, clipped to the bracketing samples;
+  - momentum as `u_r(r) x/|x|`.
+  The row is gathered over all ranks, so any box layout works.
+- Cells on RADIAL faces use central stencils, as symmetry faces do.
+- Analyse with `reference/analyze_dilatation.py RUN --slab --input DECK`.
+  The reference uses D = the deck dimension. `anis` compares the axis row with the
+  outermost slab row at the same radius.
 
-Constraints and work:
-- A box must span the slab in y/z. That is automatic for a slab a few cells thick.
-- The x-interpolation reaches at most ~(y_g^2)/(2x) past the cell. It stays in the fab's
-  ghost region except within a few cells of the axis.
-- Implement in `BC::Constant` / `BC::Expression` as a new bcmap entry plus its fill.
-  Momentum needs the vector rotation, which needs the component index.
-- Verify with the uncoated Sch20 R(t) (slab vs octant) before using it for shell tests.
+Cost: 3D at R0/dx 64 is 384 x 4 x 4 cells.
+

@@ -20,13 +20,7 @@ Answers two questions from the plotfiles alone:
          elastic     sigma(Gamma) |grad eta|                  (shell field)
          viscous     kappa_s |grad eta| div_s u
          area-rate   kappa_s n.grad(S),  S = K div u (Kapila)  (shell.kappa_s_area_rate)
-         contour     -w kappa_s S div n  (shell.kappa_s_contour_rate = w = 1 or 2;
-                     div n clipped to cap/epsilon as in the solver; central
-                     differences here vs compact face normals there)
-     It also reports u5 = u_r(eta=.5)/Rdot, the band-fluid lag.  The shell
-     dissipates T div_s u, so with the contour term (T ~ kappa_s div_s u/u5)
-     the expected kappa_eff is (baseline kappa_eff)/u5, and with the
-     work-matched mode 2 about (2 - u5) u5 / u5^2 of the baseline.
+     It also reports u5 = u_r(eta=.5)/Rdot, the band-fluid lag.
      Each is reported as an area-mean tension  int(tau)/int(|grad eta|)  and as
      the equivalent normal pressure jump  int 2 tau / r dr  it puts on a sphere.
      A nonzero CYCLE-AVERAGE of the viscous parts is a rectified (spurious
@@ -35,7 +29,6 @@ Answers two questions from the plotfiles alone:
 Usage (any run of the coated Sch20 decks; octant or full domain):
     python3 diag_shell_tension.py PLOTFILE_DIR [--input ../input_Sch20-Oscillating_Marmottant_Light]
                                   [--nproc 8] [--csv out.csv] [--kappa-s 7.2e-9] [--area-rate 1]
-                                  [--contour-rate 0|1|2] [--contour-cap 0.5]
 
 Output: one line per frame, then averages; --csv writes every column.
 Memory: one covering grid of (box/dx_finest)^3 cells per worker, box = --box R0
@@ -115,13 +108,6 @@ def frame(pf):
     K = np.where(den > 0, a0 * a1 * (Z1 - Z0) / np.where(den > 0, den, 1.0), 0.0)
     S = K * div
     nS = (nh * np.array(np.gradient(S, dx))).sum(0) if P["area_rate"] else np.zeros_like(eta)
-    if P["cr"]:
-        divn = sum(np.gradient(nh[d], dx, axis=d) for d in range(3))
-        cap = P["cr_cap"] / P["eps"]
-        divn = np.clip(divn, -cap, cap)
-        tau_vC = -(2.0 if P["cr"] == 2 else 1.0) * P["kappa_s"] * S * divn
-    else:
-        tau_vC = np.zeros_like(eta)
 
     tau_el = sig_el * g
     tau_vk = kap * g * divs
@@ -131,7 +117,7 @@ def frame(pf):
     rr = np.maximum(r, 0.5 * dx)
     w = 2.0 / (4 * np.pi * rr ** 3)                         # int 2 tau / r dr per unit volume
     out = dict(t=float(ds.current_time), name=os.path.basename(pf), dx=dx)
-    for k, tau in (("el", tau_el), ("vk", tau_vk), ("vS", tau_vS), ("vC", tau_vC)):
+    for k, tau in (("el", tau_el), ("vk", tau_vk), ("vS", tau_vS)):
         out["sig_" + k] = np.sum(tau[near]) * dV / A
         out["dp_" + k] = np.sum((tau * w)[near]) * dV
     out["area"] = A
@@ -201,10 +187,6 @@ def main():
     ap.add_argument("--mu", type=float, default=None, help="override mu0")
     ap.add_argument("--area-rate", type=int, default=None,
                     help="override shell.kappa_s_area_rate (solver default 0)")
-    ap.add_argument("--contour-rate", type=int, default=None,
-                    help="override shell.kappa_s_contour_rate (0 off, 1 contour tension, 2 work-matched)")
-    ap.add_argument("--contour-cap", type=float, default=None,
-                    help="override shell.kappa_s_contour_rate_cap (solver default 0.5)")
     ap.add_argument("--tmin-frac", type=float, default=0.3,
                     help="averages use t > tmin-frac * tau_c (skips the elastic start)")
     a = ap.parse_args()
@@ -223,8 +205,6 @@ def main():
         kappa_s=a.kappa_s if a.kappa_s is not None else _num(kv, "shell.kappa_s", 0.0),
         mu=a.mu if a.mu is not None else _num(kv, "mu0", 0.0),
         area_rate=a.area_rate if a.area_rate is not None else int(_num(kv, "shell.kappa_s_area_rate", 0)),
-        cr=a.contour_rate if a.contour_rate is not None else int(_num(kv, "shell.kappa_s_contour_rate", 0)),
-        cr_cap=a.contour_cap if a.contour_cap is not None else _num(kv, "shell.kappa_s_contour_rate_cap", 0.5),
         g0=_num(kv, "eos0.gamma", 2.35), pi0=_num(kv, "eos0.p0", 0.0),
         g1=_num(kv, "eos1.gamma", 1.4), pi1=_num(kv, "eos1.p0", 0.0),
         rho_l=1000.0, p_inf=_expr_const(kv, "pressure0.ic", "p_inf", 1e5),
@@ -233,8 +213,8 @@ def main():
     pfs = sorted(d for d in glob.glob(os.path.join(a.plotdir, "*cell")) if os.path.isdir(d))
     if not pfs:
         raise SystemExit("no *cell plotfiles in %s" % a.plotdir)
-    print("%d plotfiles; kappa_s %.3g  mu %.3g  area_rate %d  contour_rate %d (cap %.2f)  marmottant %d  Gamma_buck %.4f  box %.1f R0"
-          % (len(pfs), P["kappa_s"], P["mu"], P["area_rate"], P["cr"], P["cr_cap"], P["marm"], P["Gb"], a.box))
+    print("%d plotfiles; kappa_s %.3g  mu %.3g  area_rate %d  marmottant %d  Gamma_buck %.4f  box %.1f R0"
+          % (len(pfs), P["kappa_s"], P["mu"], P["area_rate"], P["marm"], P["Gb"], a.box))
     with Pool(a.nproc, initializer=_init, initargs=(dict(P),)) as pool:
         rows = pool.map(frame, pfs)
     rows.sort(key=lambda d: d["t"])
@@ -244,20 +224,20 @@ def main():
     t = np.array([d["t"] for d in rows]); R = np.array([d["R05"] for d in rows])
     Rd = np.gradient(R, t) if len(t) > 2 else np.zeros_like(t)
     mu, kap = P["mu"], P["kappa_s"]
-    print("\n  t/tau_c  R05/R0  Rdot   p_gas   p_l(R)  | sigma_res(sharp)  | applied tension [N/m]: elastic  visc(div_s)  area-rate  contour  total"
+    print("\n  t/tau_c  R05/R0  Rdot   p_gas   p_l(R)  | sigma_res(sharp)  | applied tension [N/m]: elastic  visc(div_s)  area-rate  total"
           "  | jump from applied [Pa]  sigma_res(vs applied) | u5")
     for d, Rdi, Ri in zip(rows, Rd, R):
         dp = d["p_gas"] - d["p_l"]
         visc_l = 4 * mu * Rdi / Ri
         d["Rdot"] = Rdi
         d["sigma_res_sharp"] = 0.5 * Ri * (dp - visc_l - 4 * kap * Rdi / Ri ** 2)
-        d["dp_applied"] = d["dp_el"] + d["dp_vk"] + d["dp_vS"] + d["dp_vC"]
+        d["dp_applied"] = d["dp_el"] + d["dp_vk"] + d["dp_vS"]
         d["sigma_res_applied"] = 0.5 * Ri * (dp - visc_l - d["dp_applied"])
-        d["sig_tot"] = d["sig_el"] + d["sig_vk"] + d["sig_vS"] + d["sig_vC"]
+        d["sig_tot"] = d["sig_el"] + d["sig_vk"] + d["sig_vS"]
         d["u5"] = d["u05"] / Rdi if Rdi != 0 else np.nan
-        print("  %6.3f  %.5f %+6.3f %7.0f %7.0f | %+9.5f | %+9.5f %+9.5f %+9.5f %+9.5f %+9.5f | %+8.0f  %+9.5f | %6.3f"
+        print("  %6.3f  %.5f %+6.3f %7.0f %7.0f | %+9.5f | %+9.5f %+9.5f %+9.5f %+9.5f | %+8.0f  %+9.5f | %6.3f"
               % (d["t"] / tau_c, Ri / R0, Rdi, d["p_gas"], d["p_l"], d["sigma_res_sharp"],
-                 d["sig_el"], d["sig_vk"], d["sig_vS"], d["sig_vC"], d["sig_tot"], d["dp_applied"],
+                 d["sig_el"], d["sig_vk"], d["sig_vS"], d["sig_tot"], d["dp_applied"],
                  d["sigma_res_applied"], d["u5"]))
 
     # Viscous shell budget over frames with |Rdot| > 30% of max: applied tension
@@ -266,11 +246,11 @@ def main():
     if kap and big.sum() > 1:
         sharp = 2 * kap * Rd[big] / R[big]
         fu = np.median(np.array([d["sig_vk"] for d in rows])[big] / sharp)
-        fc = np.median(np.array([d["sig_vk"] + d["sig_vS"] + d["sig_vC"] for d in rows])[big] / sharp)
+        fc = np.median(np.array([d["sig_vk"] + d["sig_vS"] for d in rows])[big] / sharp)
         u5m = np.nanmedian(np.array([d["u5"] for d in rows])[big])
         print("\nVISCOUS SHELL BUDGET (%d frames with |Rdot| > 30%% max):" % big.sum())
         print("  u5 = u(eta=.5)/Rdot            median %.3f" % u5m)
-        print("  applied visc tension / sharp:  div_s u part %.3f   with area-rate + contour %.3f" % (fu, fc))
+        print("  applied visc tension / sharp:  div_s u part %.3f   with area-rate %.3f" % (fu, fc))
         print("  shell dissipation / sharp ~ (applied/sharp) x u5 = %.3f   (1.0 = sharp; area-mean tension, not 1/r weighted)"
               % (fc * u5m))
 
@@ -280,7 +260,7 @@ def main():
         print("\nAVERAGES over t > %.2f tau_c (%d frames; a true cycle average needs whole periods):"
               % (a.tmin_frac, m.sum()))
         for k, lab in (("sig_el", "elastic tension"), ("sig_vk", "viscous kappa_s div_s u"),
-                       ("sig_vS", "area-rate kappa_s n.grad S"), ("sig_vC", "contour -w kappa_s S div n"),
+                       ("sig_vS", "area-rate kappa_s n.grad S"),
                        ("sig_tot", "TOTAL applied"),
                        ("sigma_res_sharp", "residual vs sharp balance"),
                        ("sigma_res_applied", "residual vs applied stress")):

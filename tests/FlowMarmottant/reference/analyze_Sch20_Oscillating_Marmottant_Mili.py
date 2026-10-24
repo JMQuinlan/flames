@@ -2,7 +2,7 @@
 """
 Sch20 COATED oscillating bubble at the cm scale -- the 1-on-1 coated twin of the uncoated
 tests/FlowRayleighPlesset/Sch20_Oscillating_Neumann_Large_3D (deck:
-input_Sch20-Oscillating_Marmottant_Light_ContourRateMili; R0 = 2 cm, p_inf/p_b = 10,
+input_Sch20-Oscillating_Marmottant_Mili; R0 = 2 cm, p_inf/p_b = 10,
 kappa_s = 0.72 kg/s, same K* = 0.18 as the 2 um Light deck).
 
 Two parts:
@@ -23,7 +23,7 @@ Two parts:
 
 kappa_eff fit: the coated KM model is re-solved with kappa_s -> f kappa_s and f is fitted
 to the simulated R(t) over t < --fit-tmax tau_R (default: the whole run).  f = 1 means the
-shell damps exactly as the model; the Light deck gave f = 0.84 (ContourRate, INCLINE 10-20).
+shell damps exactly as the model; the Light deck gave f = 0.84 (with the since-removed contour-rate term, INCLINE 10-20).
 """
 import argparse
 import os
@@ -40,8 +40,8 @@ from sch20_analysis import Sch20Analysis, plt                     # noqa: E402
 from marmottant_rpe_km import solve_km                           # noqa: E402
 
 CFG = dict(
-    INPUT=os.path.normpath(os.path.join(_HERE, "..", "input_Sch20-Oscillating_Marmottant_Light_ContourRateMili")),
-    OUTPUT_DIR="/mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant_Light_ContourRateMili",
+    INPUT=os.path.normpath(os.path.join(_HERE, "..", "input_Sch20-Oscillating_Marmottant_Mili")),
+    OUTPUT_DIR="/mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant_Mili",
     CASE="Oscillating",
     COATED=True,
     STEM="Sch20_Oscillating_Marmottant_Mili",

@@ -3,7 +3,7 @@
 #   run_sweep.sh EXE OUTROOT [NP] [JOBS] [which] [quick]
 #     which = pulse (single phase, default) | water | norm (multiphase)
 #     quick = only R0/dx 16 at eps/dx 2
-# Every run writes its deck overrides to OUTROOT/<name>/cmdline.txt so the
+# Every run writes its deck overrides to OUTROOT/<name>.cmdline so the
 # analysis scripts can rebuild the parameters.  Runs are 2D and small
 # (R0/dx 64 is 384^2 cells); JOBS runs of NP ranks each go at once.
 EXE=${1:?2D hydro2 executable}; OUT=${2:?output root}; NP=${3:-1}; JOBS=${4:-4}; WHICH=${5:-pulse}; QUICK=${6:-}
@@ -16,7 +16,7 @@ esac
 mkdir -p "$OUT"
 job() {  # name overrides...
   local n=$1; shift
-  mkdir -p "$OUT/$n"; echo "$@" > "$OUT/$n/cmdline.txt"
+  echo "$@" > "$OUT/$n.cmdline"     # sibling file: Alamo renames an existing plot dir to *.old
   ( cd "$ROOT" && timeout 7200 mpirun --bind-to none -np $NP "$EXE" "$DECK" plot_file="$OUT/$n" "$@" \
       < /dev/null > "$OUT/$n.log" 2>&1; echo "$n exit=$?" >> "$OUT/status.txt" )
 }

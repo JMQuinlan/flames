@@ -39,6 +39,9 @@ int ReadString(std::string bcstring)
     if (bcstring == "nscbc_noslipwall" ||
         bcstring == "NSCBC_NOSLIPWALL") return NSCBC_NOSLIPWALL;
 
+    if (bcstring == "radial" ||
+        bcstring == "RADIAL")         return RADIAL;
+
     // Else
     return 0;
 }
@@ -80,6 +83,14 @@ bool IsNSCBC(int bctype)
     if (bctype == NSCBC_SLIPWALL) return true;
     if (bctype == NSCBC_NOSLIPWALL) return true;
     else return false;
+}
+bool IsRadial(int bctype)
+{
+    return bctype == RADIAL;
+}
+bool IsClampCopy(int bctype)
+{
+    return IsNSCBC(bctype) || IsRadial(bctype);
 }
 
 

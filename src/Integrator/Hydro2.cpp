@@ -46,6 +46,24 @@
 #include "AMReX_TimeIntegrator.H"
 
 
+// Band weight of the VISCOUS shell stress, w(eta) with int_0^1 w deta = 1, so the
+// band integral of the stress (the sharp jump) is the same for any choice.
+//   liq    = n > 0:  w = (n+1) eta^n                    (shell.kappa_s_liqweight)
+//   narrow = m > 0:  w = (eta(1-eta))^m / B(m+1,m+1)    (shell.kappa_s_narrow)
+// Used by the Omega build, the shell dt limit and SubcycleShellViscous alike.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+static Set::Scalar ShellViscWeight(Set::Scalar e, int liq, int narrow)
+{
+    if (liq <= 0 && narrow <= 0) return 1.0;
+    e = std::min(std::max(e, 0.0), 1.0);
+    if (liq > 0) return (liq + 1.0) * std::pow(e, (Set::Scalar)liq);
+    // 1/B(m+1,m+1) = (2m+1)!/(m!)^2
+    Set::Scalar invB = 1.0;
+    for (int q = 1; q <= narrow; ++q) invB *= (Set::Scalar)(narrow + q) / (Set::Scalar)q;
+    invB *= (Set::Scalar)(2 * narrow + 1);
+    return std::pow(e * (1.0 - e), (Set::Scalar)narrow) * invB;
+}
+
 namespace Integrator
 {
 
@@ -148,8 +166,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // the dx^2 viscous limit stops binding at high refinement.  Same
         // discrete stress and dissipation as the RHS path (momentum + total
         // energy only; RelaxAndReinit re-partitions E).  First order in time
-        // (Lie split).  DEFAULT 0.
-        pp_query_default("visc_subcycle", value.visc_subcycle, 0);
+        // (Lie split).  DEFAULT 1 since 2026-10-23 (A/B on Couette, Poiseuille,
+        // Rayleigh, Taylor-Green, Lamb-Oseen: same answer to <1e-4, 1.3-6x faster
+        // when viscosity sets dt).  Inviscid runs are unaffected (early return).
+        // visc_subcycle = 0 restores the RK-stage viscous path.
+        pp_query_default("visc_subcycle", value.visc_subcycle, 1);
         pp_query_default("visc_subcycle_cfl", value.visc_subcycle_cfl, 0.9);
         pp_query_default("visc_subcycle_max", value.visc_subcycle_max, 1000);
         pp_query_default("visc_subcycle_verbose", value.visc_subcycle_verbose, 0);
@@ -234,7 +255,11 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // EMBEDDED SOLID BOUNDARY (see FlowWedge for examples)
         pp_query_default("apply_embedded_solid", value.embedded.apply, 0);  // Apply Solid Boundry 1 --> "Domain has solid boundry"
         if (value.visc_subcycle && value.embedded.apply)
-            Util::Abort(INFO, "visc_subcycle does not support apply_embedded_solid yet");
+        {
+            // not implemented with the embedded solid: fall back to the RK-stage path
+            value.visc_subcycle = 0;
+            Util::Warning(INFO, "visc_subcycle not supported with apply_embedded_solid: using the RK-stage viscous path");
+        }
         pp_query_default("solid.brinkman", value.embedded.brinkman, 0.0);   // Yang(2023) momentum-only Brinkman no-penetration (0=off)
         pp_query_default("solid.slip", value.embedded.slip, 0);             // 1 = slip wall (penalize only wall-normal momentum); 0 = no-slip
         if (value.embedded.apply)
@@ -460,42 +485,15 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // run and by 0.085 of sharp in the unit test.  A correct form must spread
         // the missing area rate over the band with the |grad eta| profile.
         pp_query_default("shell.kappa_s_area_rate", value.shell_kappa_s_area_rate, 0);
-        // CONTOUR-RATE form of the dilatational viscous stress (2026-10-16).
-        // The shell lives on the eta contours, not on the band fluid.  This is NOT a
-        // level-set method: only eta and the Kapila source are used.  With
-        // D(eta)/Dt = S (S = non-advective eta rate, Kapila S = K div u), the
-        // contours move with normal speed V = u.n - S/|grad eta|, i.e. with
-        // the velocity w = u - (S/|grad eta|) n.  Its surface divergence is
-        //     div_s w = div_s u - (S/|grad eta|) div n ,
-        // and the diffuse stress |grad eta| kappa_s div_s w P becomes
-        //     Omega_visc = kappa_s ( |grad eta| div_s u - S div n ) P
-        // -- no 1/|grad eta|, and S itself (single-signed across the band,
-        // profile ~ eta(1-eta) ~ |grad eta|), not its gradient, so no dipole
-        // (contrast shell.kappa_s_area_rate).  On a sphere div n = 2/r and the
-        // band integral of S is |grad eta|-weighted (u_n - V), so the term adds
-        // back exactly the band-gas lag: u(eta=.5) = 0.88 Rdot on Light.
-        // S = 0 at rest, so static Laplace balances are untouched.
-        // div n is built from compact face normals (3x3x3 stencil).
-        // Main (non-subcycled) path only.  DEFAULT 0 (experimental).
-        pp_query_default("shell.kappa_s_contour_rate", value.shell_kappa_s_contour_rate, 0);
-        // |div n| is clipped to cap/epsilon.  div n is built from eta, and where
-        // |grad eta| is tiny (trace gas core, far liquid) the normal is noise
-        // and div n reaches ~4/dx; the term then acts as a bulk viscosity
-        // ~kappa_s K/(dx rho) that the dt limit never sees (2D collapse NaN,
-        // 2026-10-17).  Physical (D-1)/R stays far below 1/(2 epsilon).
-        pp_query_default("shell.kappa_s_contour_rate_cap", value.shell_kappa_s_contour_rate_cap, 0.5);
-        if (value.shell_kappa_s_contour_rate < 0 || value.shell_kappa_s_contour_rate > 1)
-            Util::Abort(INFO, "shell.kappa_s_contour_rate must be 0 or 1 (work-matched mode 2 removed 2026-10-21); got ", value.shell_kappa_s_contour_rate);
-        // shell.contour_rate_gamma = 1: the Gamma row uses the CONTOUR area rate,
-        //     D(Gamma)/Dt = -Gamma div_s w = -Gamma (div_s u + D),
-        // the same w as the contour-rate tension (2026-10-20; independent of it).  With div_s u the
-        // shell strain lags the interface by u5, so sigma(Gamma) lags too (a Gamma
-        // lag of 0.87 moves R_min -0.0016 / peak +0.0007, the size of the uniform
-        // +0.002 offset on Light).  D is formed with the same capped div n and a
-        // regularised 1/|grad eta| (|grad eta|/(|grad eta|^2 + g0^2), g0 = 0.02/eps)
-        // so the band tails, where S ~ 0 anyway, stay finite.  S = 0 at rest, so
-        // static Laplace balances are untouched.  Independent of kappa_s.
-        pp_query_default("shell.contour_rate_gamma", value.shell_contour_rate_gamma, 0);
+        // shell.kappa_s_contour_rate, shell.kappa_s_contour_rate_cap and
+        // shell.contour_rate_gamma were REMOVED (2026-10-24).  The -kappa_s S div n
+        // term seeded grid-scale wrinkling on the coated Mili run (l = 6/8 modes
+        // grew from t/t_c ~ 0.12 with it, ~0.25 without) and is not part of the
+        // model going forward.
+        for (const char *removed : {"shell.kappa_s_contour_rate", "shell.kappa_s_contour_rate_cap",
+                                    "shell.contour_rate_gamma"})
+            if (pp.contains(removed))
+                Util::Abort(INFO, removed, " was removed (2026-10-24).  Delete it from the input file.");
         // LIQUID-SIDE placement of the VISCOUS shell stress (2026-10-16).
         // Omega_visc = w(eta) |grad eta| kappa_s div_s(u) P with
         //     w = (n+1) eta^n ,   int_0^1 w d(eta) = 1,
@@ -508,13 +506,26 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // stress gradient where there is little gas and samples div_s u where
         // the fluid moves with the liquid.  The ELASTIC part sigma(Gamma) is
         // NOT weighted, so static Laplace balances are untouched.
-        // Applies to the contour-rate term too.  DEFAULT 0 (experimental).
+        // DEFAULT 0 (experimental).
         pp_query_default("shell.kappa_s_liqweight", value.shell_kappa_s_liqweight, 0);
-        if (value.shell_kappa_s_contour_rate && value.shell_kappa_s_area_rate)
-            Util::Abort(INFO, "shell.kappa_s_contour_rate and shell.kappa_s_area_rate are alternatives; set only one.");
-        if (value.shell_kappa_s_contour_rate && value.shell_visc_subcycle)
-            Util::Warning(INFO, "shell.kappa_s_contour_rate is applied on the main path only; "
-                          "the sub-cycled viscous stress does NOT include the -S div n term.");
+        // NARROW kernel for the VISCOUS shell stress (2026-10-24).
+        // Omega_visc = w(eta) |grad eta| kappa_s div_s(u) P with
+        //     w = (eta(1-eta))^m / B(m+1,m+1),   int_0^1 w d(eta) = 1,
+        // which concentrates the stress on the band centre: with the tanh
+        // profile |grad eta| w ~ sech^(2m+2), so the stress band is ~1/sqrt(m+1)
+        // as wide as eta's.  The diffuse viscous membrane loses strength with its
+        // thickness relative to the wavelength (1D diffuse model and RADIAL slab,
+        // 2026-10-24: 3D kappa 1 at eps/R 1/8 gives kappa_eff 0.62 for m = 0, 0.87
+        // for m = 2, 0.92 for m = 4), so a narrower stress band reduces the eps
+        // sensitivity while eta keeps its width.  The peak weight (1.5, 1.9, 2.5
+        // for m = 1, 2, 4) tightens the shell dt limit by the same factor, and
+        // the stress band needs eps/dx ~ 2 sqrt(m+1) cells to stay resolved.
+        // Elastic sigma(Gamma) is NOT weighted.  DEFAULT 0 (uniform).
+        pp_query_default("shell.kappa_s_narrow", value.shell_kappa_s_narrow, 0);
+        if (value.shell_kappa_s_narrow < 0 || value.shell_kappa_s_liqweight < 0)
+            Util::Abort(INFO, "shell.kappa_s_narrow and shell.kappa_s_liqweight must be >= 0");
+        if (value.shell_kappa_s_narrow > 0 && value.shell_kappa_s_liqweight > 0)
+            Util::Abort(INFO, "shell.kappa_s_narrow and shell.kappa_s_liqweight are alternatives; set only one.");
         // shell.kappa_s_heat was REMOVED (2026-10-16): the capillary energy
         // source is now the full div(Omega.u) (dissertation S_E^Omega), which
         // already contains the viscous-shell dissipation Omega_visc:grad(u).
@@ -786,6 +797,82 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         else
         {
             value.eta_bc = new BC::Constant(BC::Constant::ZeroNeumann(1));
+        }
+
+        // RADIALLY SYMMETRIC SLAB (2026-10-23).  density.bc.type.yhi (and zhi
+        // in 3D) = RADIAL turns a thin slab x in [0,L], y (,z) in [0,h] into a
+        // 1D radial problem: cylindrical in 2D, spherical in 3D, centred on the
+        // origin.  Every ghost cell outside a RADIAL face is refilled from the
+        // near-axis row (j = k = 0) at the SAME radius r = |x| (scalars), and
+        // momentum as u_r(r) x/|x|.  The ordinary Cartesian stencils then see
+        // an exactly radial field, so the (D-1)/r geometry comes out of them
+        // with no new source terms.  See RadialGhostFill.  AMR (2026-10-24): a
+        // fine level reads its axis row over its own patches (plus their
+        // coarse-fine x-ghosts), so the fine patches must contain the axis row
+        // -- eta tagging of a thin slab refines its whole width.
+        {
+            const char *tf[2] = {"yhi", "zhi"};
+            for (int d = 1; d < AMREX_SPACEDIM; ++d)
+            {
+                std::string t;
+                pp.query((std::string("density.bc.type.") + tf[d - 1]).c_str(), t);
+                if (BC::BCUtil::IsRadial(BC::BCUtil::ReadString(t)))
+                {
+                    value.radial_face_hi[d] = true;
+                    value.radial_bc = true;
+                }
+            }
+            if (value.radial_bc)
+            {
+                std::vector<Set::Scalar> plo;
+                amrex::ParmParse pp_geom("geometry");
+                pp_geom.queryarr("prob_lo", plo);
+                for (int d = 1; d < AMREX_SPACEDIM; ++d)
+                {
+                    if (!value.radial_face_hi[d])
+                        Util::Abort(INFO, "RADIAL: every transverse hi face (yhi", AMREX_SPACEDIM == 3 ? ", zhi" : "",
+                                    ") must be RADIAL");
+                    if (!value.sym_face_lo[d])
+                        Util::Abort(INFO, "RADIAL: the transverse lo faces must be symmetry planes "
+                                    "(momentum REFLECT_ODD on the normal component)");
+                }
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    if ((int)plo.size() > d && plo[d] != 0.0)
+                        Util::Abort(INFO, "RADIAL: geometry.prob_lo must be 0 (the centre is the origin)");
+                if (!value.sym_face_lo[0])
+                    Util::Abort(INFO, "RADIAL: xlo must be a symmetry plane (the centre)");
+                // NSCBC is allowed on xhi only (far field of the slab); the
+                // transverse and centre faces stay with the field BCs.
+                if (uses_nscbc)
+                    for (const char *f : {"xlo", "ylo", "yhi", "zlo", "zhi"})
+                    {
+                        std::string t = "none";
+                        amrex::ParmParse pp_ns("nscbc");
+                        pp_ns.query((std::string(f) + ".type").c_str(), t);
+                        if (t != "none")
+                            Util::Abort(INFO, "RADIAL: NSCBC is allowed on xhi only (nscbc.", f, ".type = ", t, ")");
+                    }
+                if (value.embedded.apply)
+                    Util::Abort(INFO, "RADIAL: not combined with apply_embedded_solid");
+                // every registered field BC must say RADIAL on those faces too
+                for (const char *f : {"eta", "energy", "momentum"})
+                    for (int d = 1; d < AMREX_SPACEDIM; ++d)
+                    {
+                        std::vector<std::string> tt;
+                        pp.queryarr((std::string(f) + ".bc.type." + tf[d - 1]).c_str(), tt);
+                        for (auto &x : tt)
+                            if (!BC::BCUtil::IsRadial(BC::BCUtil::ReadString(x)))
+                                Util::Abort(INFO, "RADIAL: ", f, ".bc.type.", tf[d - 1], " must also be RADIAL");
+                    }
+                Util::Message(INFO, "RADIAL slab: ", AMREX_SPACEDIM == 3 ? "spherical" : "cylindrical",
+                              " symmetry about the origin, ghosts on the transverse hi faces from the axis row");
+            }
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                value.cen_face_lo[d] = value.sym_face_central && value.sym_face_lo[d];
+                value.cen_face_hi[d] = (value.sym_face_central && value.sym_face_hi[d]) || value.radial_face_hi[d];
+                if (value.cen_face_lo[d] || value.cen_face_hi[d]) value.cen_face_any = 1;
+            }
         }
 
         // Phi (solid indicator) BC.  The solid geometry is static, so the
@@ -1650,9 +1737,9 @@ Hydro2::RHS(int lev,
         const Solver::EOS::Tammann eos0_local = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
 
-        const int symc = sym_face_central;
-        const bool symlo_c[3] = {sym_face_lo[0], sym_face_lo[1], sym_face_lo[2]};
-        const bool symhi_c[3] = {sym_face_hi[0], sym_face_hi[1], sym_face_hi[2]};
+        const int symc = cen_face_any;   // symmetry (sym_face_central) + RADIAL faces
+        const bool symlo_c[3] = {cen_face_lo[0], cen_face_lo[1], cen_face_lo[2]};
+        const bool symhi_c[3] = {cen_face_hi[0], cen_face_hi[1], cen_face_hi[2]};
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
             if (symc)        // sym_face_central: mirrored ghosts -> central is exact (see Parse)
@@ -1914,10 +2001,6 @@ Hydro2::RHS(int lev,
     // discrete conservation; it does not change the static momentum/Laplace balance.]
     // Symmetric-tensor storage:  2D [xx,yy,xy] ; 3D [xx,yy,zz,xy,xz,yz].
     amrex::MultiFab Omega;
-    // Contour-rate correction D = div_s w - div_s u per cell, for the Gamma row
-    // (shell.contour_rate_gamma); filled in the Omega build below.
-    amrex::MultiFab CRmf;
-    const int cr_gam = shell_contour_rate_gamma && marmottant && apply_surface_tension;
     if (apply_surface_tension)
     {
         const amrex::BoxArray &baO = eta_mf[lev]->boxArray();
@@ -1934,11 +2017,8 @@ Hydro2::RHS(int lev,
         // Omega is built on; cells whose stencil leaves the fab keep S = 0.
         const int area_rate = shell_kappa_s_area_rate && (shell_kappa_s != 0.0)
                             && !(shell_visc_subcycle && shell_kappa_s != 0.0);
-        const int cr_rate = shell_kappa_s_contour_rate && (shell_kappa_s != 0.0)
-                          && !(shell_visc_subcycle && shell_kappa_s != 0.0);
         amrex::MultiFab Smf;
-        if (cr_gam) { CRmf.define(baO, dmO, 1, 1); CRmf.setVal(0.0); }
-        if (area_rate || cr_rate || cr_gam)
+        if (area_rate)
         {
             Smf.define(baO, dmO, 1, 2);
             Smf.setVal(0.0);
@@ -1990,14 +2070,12 @@ Hydro2::RHS(int lev,
         const Set::Scalar mu_s  = shell_mu_s;
         const int visc_shell = (kap_s != 0.0) || (mu_s != 0.0);
         const int lw_n = shell_kappa_s_liqweight;
-        const Set::Scalar divn_max = shell_kappa_s_contour_rate_cap / epsilon;
-        const Set::Scalar cr_g0 = 0.02 / epsilon;
+        const int nw_m = shell_kappa_s_narrow;
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box bx = mfi.growntilebox(1);
-            amrex::Array4<const Set::Scalar> const &Sar = (area_rate || cr_rate || cr_gam) ? Smf.const_array(mfi)
-                                                                    : amrex::Array4<const Set::Scalar>{};
-            amrex::Array4<Set::Scalar> const &crd = cr_gam ? CRmf.array(mfi) : amrex::Array4<Set::Scalar>{};
+            amrex::Array4<const Set::Scalar> const &Sar = area_rate ? Smf.const_array(mfi)
+                                                    : amrex::Array4<const Set::Scalar>{};
             amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
             amrex::Array4<const Set::Scalar> const &sg = marm ? sig_eff_mf.const_array(mfi)
                                                               : amrex::Array4<const Set::Scalar>{};
@@ -2019,13 +2097,8 @@ Hydro2::RHS(int lev,
                 Set::Scalar gem = ge.lpNorm<2>();
                 if (gem < 1.0e-10) return; // Omega = 0 off the interface
                 Set::Scalar se = marm ? sg(i, j, k) : sig0;
-                // liquid-side weight of the viscous part (shell.kappa_s_liqweight)
-                Set::Scalar wl = 1.0;
-                if (lw_n > 0)
-                {
-                    const Set::Scalar ec = std::min(std::max(et(i, j, k), 0.0), 1.0);
-                    wl = (lw_n + 1.0) * std::pow(ec, (Set::Scalar)lw_n);
-                }
+                // band weight of the viscous part (liqweight / narrow)
+                const Set::Scalar wl = ShellViscWeight(et(i, j, k), lw_n, nw_m);
                 // Shear part of the Boussinesq--Scriven stress.  Unlike the
                 // dilatational part it is NOT proportional to P, so it cannot be
                 // folded into the scalar tension and is accumulated separately.
@@ -2037,50 +2110,6 @@ Hydro2::RHS(int lev,
                 {
                     const Set::Vector gS = Numeric::Gradient(Sar, i, j, k, 0, DX);
                     sa = kap_s * gS.dot(ge) / gem;
-                }
-                // Contour-rate part -kappa_s S div(n) (shell.kappa_s_contour_rate),
-                // also multiplying the unit projector.  div n from compact
-                // face normals: n_d on face c+-e_d/2 uses the face-normal
-                // difference and the tangential central differences averaged
-                // over the two adjacent cells.  A face with |grad eta| ~ 0
-                // contributes n = 0 (S ~ 0 there anyway).
-                if ((cr_rate || cr_gam) && Sar.contains(i, j, k)
-                    && et.contains(i - 1, j - 1, AMREX_SPACEDIM > 2 ? k - 1 : k)
-                    && et.contains(i + 1, j + 1, AMREX_SPACEDIM > 2 ? k + 1 : k))
-                {
-                    const Set::Scalar Sc = Sar(i, j, k);
-                    if (Sc != 0.0)
-                    {
-                        auto E = [&](int a, int b, int cc) { return et(i + a, j + b, k + cc); };
-                        Set::Scalar divn = 0.0;
-                        for (int d = 0; d < AMREX_SPACEDIM; ++d)
-                        {
-                            for (int side = 0; side < 2; ++side)
-                            {
-                                // lo cell L and hi cell H of this face, as offsets
-                                int L[3] = {0, 0, 0}, H[3] = {0, 0, 0};
-                                if (side) H[d] = 1; else L[d] = -1;
-                                Set::Scalar g[3] = {0.0, 0.0, 0.0};
-                                g[d] = (E(H[0], H[1], H[2]) - E(L[0], L[1], L[2])) / DX[d];
-                                for (int t = 0; t < AMREX_SPACEDIM; ++t)
-                                {
-                                    if (t == d) continue;
-                                    int Lp[3] = {L[0], L[1], L[2]}, Lm[3] = {L[0], L[1], L[2]};
-                                    int Hp[3] = {H[0], H[1], H[2]}, Hm[3] = {H[0], H[1], H[2]};
-                                    Lp[t] += 1; Lm[t] -= 1; Hp[t] += 1; Hm[t] -= 1;
-                                    g[t] = 0.25 * (E(Lp[0], Lp[1], Lp[2]) - E(Lm[0], Lm[1], Lm[2])
-                                                 + E(Hp[0], Hp[1], Hp[2]) - E(Hm[0], Hm[1], Hm[2])) / DX[t];
-                                }
-                                const Set::Scalar gm = std::sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
-                                const Set::Scalar nd = (gm > 1.0e-10) ? g[d] / gm : 0.0;
-                                divn += (side ? nd : -nd) / DX[d];
-                            }
-                        }
-                        divn = std::min(std::max(divn, -divn_max), divn_max);
-                        if (cr_rate) sa += -kap_s * Sc * divn * wl;
-                        if (cr_gam && crd.contains(i, j, k))
-                            crd(i, j, k) = -Sc * divn * gem / (gem * gem + cr_g0 * cr_g0);
-                    }
                 }
                 if (visc_shell
                     && vel.contains(i - 1, j, k) && vel.contains(i + 1, j, k)
@@ -2257,8 +2286,6 @@ Hydro2::RHS(int lev,
         Set::Patch<const Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
         amrex::Array4<const Set::Scalar> om_cap; // capillary stress tensor (if surface tension on)
         if (apply_surface_tension) om_cap = Omega.const_array(mfi);
-        amrex::Array4<const Set::Scalar> crd_g; // contour-rate D for the Gamma row
-        if (cr_gam) crd_g = CRmf.const_array(mfi);
         Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
 
@@ -2325,9 +2352,9 @@ Hydro2::RHS(int lev,
         const bool symlo2 = sym_face_lo[2], symhi2 = sym_face_hi[2];
 #endif
 
-        const int symc = sym_face_central;
-        const bool symlo_c[3] = {sym_face_lo[0], sym_face_lo[1], sym_face_lo[2]};
-        const bool symhi_c[3] = {sym_face_hi[0], sym_face_hi[1], sym_face_hi[2]};
+        const int symc = cen_face_any;   // symmetry (sym_face_central) + RADIAL faces
+        const bool symlo_c[3] = {cen_face_lo[0], cen_face_lo[1], cen_face_lo[2]};
+        const bool symhi_c[3] = {cen_face_hi[0], cen_face_hi[1], cen_face_hi[2]};
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
@@ -3249,9 +3276,7 @@ Hydro2::RHS(int lev,
             // quantities already in scope, and it is mesh-independent.
             const Set::Scalar nn = shell_gate_free ? n_hat.squaredNorm() : 1.0;
             const Set::Scalar div_s_u = nn * gradu.trace() - n_hat.dot(gradu * n_hat);
-            // shell.contour_rate_gamma: area rate on the eta contours, div_s w = div_s u + D
-            const Set::Scalar D_cr = cr_gam ? nn * crd_g(i, j, k) : 0.0;
-            shell_rhs(i, j, k) = -u_dot_gradG - shell(i, j, k) * (div_s_u + D_cr);
+            shell_rhs(i, j, k) = -u_dot_gradG - shell(i, j, k) * div_s_u;
             }   // end shell_row_on / band gate
 
             // ------------------------------------------------------------
@@ -3952,6 +3977,12 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // ghosts are current from the last RK post-stage hook; the refresh below
     // rebuilds them from the updated M, E.
     SubcycleBulkViscous(lev, time, dt);
+    // Shell viscous stress (shell.kappa_s_subcycle), once per step.  The split
+    // under-damps by a fraction ~ dt: kappa_eff/kappa_s 0.925 / 0.955 / 0.973 at
+    // cfl 0.5 / 0.25 / 0.125 against 0.988 dt-limited (single-phase pulse,
+    // R0/dx 16, eps/dx 1; 2026-10-23).  A Strang split gave identical numbers --
+    // this is stiff-relaxation order reduction, not the splitting order.
+    SubcycleShellViscous(lev, time, dt);
 
     // ============================================================
     // POST-INTEGRATION PRIMITIVE REFRESH.
@@ -3976,9 +4007,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         Set::Patch<const Set::Scalar> rho_eta1 = rho_eta1_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> rho = density_mf.Patch(lev, mfi);
 
-        const int symc = sym_face_central;
-        const bool symlo_c[3] = {sym_face_lo[0], sym_face_lo[1], sym_face_lo[2]};
-        const bool symhi_c[3] = {sym_face_hi[0], sym_face_hi[1], sym_face_hi[2]};
+        const int symc = cen_face_any;   // symmetry (sym_face_central) + RADIAL faces
+        const bool symlo_c[3] = {cen_face_lo[0], cen_face_lo[1], cen_face_lo[2]};
+        const bool symhi_c[3] = {cen_face_hi[0], cen_face_hi[1], cen_face_hi[2]};
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             auto sten = Numeric::GetStencil(i, j, k, domain);
             if (symc)        // sym_face_central: mirrored ghosts -> central is exact (see Parse)
@@ -4028,14 +4059,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     Set::Scalar nus_max_local = 0.0;
     const Set::Scalar kap_eff_l = std::abs(shell_kappa_s - shell_mu_s)
                                 + 2.0 * std::abs(shell_mu_s);
-    // shell.kappa_s_liqweight multiplies the viscous stress by w = (n+1) eta^n
-    const int lw_nn = std::max(shell_kappa_s_liqweight, 0);
-    const Set::Scalar cr_nu = shell_kappa_s_contour_rate
-        ? std::abs(shell_kappa_s) * shell_kappa_s_contour_rate_cap / epsilon : 0.0;
-    auto lw_loc = [lw_nn](Set::Scalar e) -> Set::Scalar {
-        if (lw_nn == 0) return 1.0;
-        e = std::min(std::max(e, 0.0), 1.0);
-        return (lw_nn + 1.0) * std::pow(e, (Set::Scalar)lw_nn);
+    // the viscous stress carries the band weight w(eta) (liqweight / narrow)
+    const int lw_nn = shell_kappa_s_liqweight, nw_mm = shell_kappa_s_narrow;
+    auto lw_loc = [lw_nn, nw_mm](Set::Scalar e) -> Set::Scalar {
+        return ShellViscWeight(e, lw_nn, nw_mm);
     };
 
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
@@ -4107,9 +4134,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         // Local copies: class members are not addressable inside a GPU lambda.
         const Set::Scalar mu0_l = mu0, mu1_l = mu1, small_l = small;
 
-        const int symc = sym_face_central;
-        const bool symlo_c[3] = {sym_face_lo[0], sym_face_lo[1], sym_face_lo[2]};
-        const bool symhi_c[3] = {sym_face_hi[0], sym_face_hi[1], sym_face_hi[2]};
+        const int symc = cen_face_any;   // symmetry (sym_face_central) + RADIAL faces
+        const bool symlo_c[3] = {cen_face_lo[0], cen_face_lo[1], cen_face_lo[2]};
+        const bool symhi_c[3] = {cen_face_hi[0], cen_face_hi[1], cen_face_hi[2]};
         amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &vz_max_local, &F_max_local, &rho_min_local, &nu_max_local, &nus_max_local] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
@@ -4272,12 +4299,6 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     {
                         nus_max_local = std::max(nus_max_local,
                                                  kap_eff_l * grad_eta_mag * lw_loc(eta(i,j,k)) / (rho(i,j,k) + small_l));
-                        // contour-rate term: |S div n| <= |K| |div u| cap/eps with
-                        // |K| <~ eta (stiff liquid), i.e. a bulk viscosity
-                        // kappa_s eta cap/(eps rho)
-                        if (cr_nu > 0.0)
-                            nus_max_local = std::max(nus_max_local,
-                                                     cr_nu * a1n * lw_loc(eta(i,j,k)) / (rho(i,j,k) + small_l));
                     }
                 }
             }
@@ -4736,6 +4757,9 @@ void Hydro2::FillBoundariesWithBC(int lev, Set::Scalar time, BC::BC<Set::Scalar>
             {
                 bc->FillBoundary(*mf, 0, mf->nComp(), time, 0);
             }
+            // Radial slab: overwrite the transverse-face ghosts (the BC above
+            // only clamp-copied them).  Momentum is the one vector field.
+            if (radial_bc) RadialGhostFill(lev, *mf, bc == momentum_bc);
         }
 
         // Checking
@@ -5118,10 +5142,12 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     // L_hyper(U^n), so relaxation runs ONCE per step after the capillary
     // operator, not between RK stages.  defer_relax is false unless the split
     // scheme is active, so the AcousticBC behaviour is unchanged by default.
-    // Operator splitting: L_relax o L_visc o L_cap o L_hyper.  The shell
-    // viscous stress is advanced here, immediately before relaxation, on the
-    // level's own timestep (dt is the per-level Vector in this scope).
-    SubcycleShellViscous(lev, dt[lev]);
+    // The sub-cycled shell viscous stress (shell.kappa_s_subcycle) used to be
+    // advanced HERE.  FillGhost4BC runs at every RK stage (RHS start and the
+    // post-stage hook), so it applied a full dt of shell viscous impulse 6x per
+    // step with RK3 (measured 2026-10-23: 6 calls/step).  It now runs once
+    // per step from Advance, before the post-integration refresh, whose
+    // RelaxAndReinit still follows it (L_relax o L_visc o L_hyper).
 
     if (!defer_relax) RelaxAndReinit(lev);
 
@@ -5482,7 +5508,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
             {
                 clamp_lo[d] = !geom[lev].isPeriodic(d) && !sym_face_lo[d];
-                clamp_hi[d] = !geom[lev].isPeriodic(d) && !sym_face_hi[d];
+                clamp_hi[d] = !geom[lev].isPeriodic(d) && !sym_face_hi[d] && !radial_face_hi[d];
             }
             const int cxl = clamp_lo[0], cxh = clamp_hi[0], cyl = clamp_lo[1], cyh = clamp_hi[1];
             const int czl = clamp_lo[2], czh = clamp_hi[2];
@@ -6202,7 +6228,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
 // -- first order over an interval of one hydro dt, which is consistent with the
 // subcycled-AMR treatment of the other source terms.
 //
-void Hydro2::SubcycleShellViscous(int lev, Set::Scalar dt)
+void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
 {
     BL_PROFILE("Integrator::Hydro2::SubcycleShellViscous");
     if (!shell_visc_subcycle) return;
@@ -6219,6 +6245,8 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar dt)
     // allowed to see.  Taken from the phase-1 (gas) IC scale rather than
     // `small`, which is a numerical regulariser, not a physical density.
     const Set::Scalar rho_floor_l = std::max(shell_nus_rho_floor, 1.0e-12);
+    // band weight of the viscous stress (liqweight / narrow), as on the main path
+    const int lw_s = shell_kappa_s_liqweight, nw_s = shell_kappa_s_narrow;
 
     // ---- N from the SAME stability measure the dt limiter uses -------------
     // nu_s = kap_eff |grad eta| / rho, reduced over the band, then
@@ -6239,7 +6267,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar dt)
             // cell with rho ~ 3e-8 drove nu_s to 1.06e7 (1e10 x the healthy
             // 1.085e-3), which is what crashed the sub-cycled run.
             const Set::Scalar rho_f = std::max(rho(i,j,k), rho_floor_l);
-            nus_max = std::max(nus_max, kap_eff * gem / rho_f);
+            nus_max = std::max(nus_max, kap_eff * gem * ShellViscWeight(et(i,j,k), lw_s, nw_s) / rho_f);
         });
     }
     amrex::ParallelDescriptor::ReduceRealMax(nus_max);
@@ -6289,9 +6317,59 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar dt)
     amrex::MultiFab Omv(momentum_mf[lev]->boxArray(),
                         momentum_mf[lev]->DistributionMap(), nOm, 1);
 
+    // Refresh the eta and rho ghosts.  This routine runs after the RK update,
+    // where the ghosts of eta/rho are not current: on a RADIAL slab the face
+    // cuts through the shell, and the stale ghosts there cut kappa_eff to 0.34
+    // (vs 0.988 dt-limited).  On a fine level the coarse-fine ghosts are stale
+    // the same way, so they come from FillPatch (coarse interpolation + the
+    // physical BC), as the momentum ghosts below do.  Valid cells are unchanged.
+    // The field BCs are applied on every face, NSCBC runs included: the
+    // symmetry-plane (mirror) and RADIAL ghosts must be current for the
+    // viscous stencils, and an NSCBC face only gets a zero-gradient copy here,
+    // which the next FillGhost4BC replaces.  (Skipping them under NSCBC left
+    // the axis mirror ghosts stale and grew a grid-scale v sawtooth on the
+    // axis row, 2026-10-24.)
+    {
+        if (lev == 0)
+        {
+            FillBoundariesWithBC(lev, time + dt, eta_bc, { eta_mf[lev].get() });
+            FillBoundariesWithBC(lev, time + dt, density_bc, { density_mf[lev].get() });
+        }
+        else
+        {
+            FillPatch(lev, time + dt, eta_mf, *eta_mf[lev], *eta_bc, 0);
+            FillPatch(lev, time + dt, density_mf, *density_mf[lev], *density_bc, 0);
+            if (radial_bc)
+            {
+                RadialGhostFill(lev, *eta_mf[lev], false);
+                RadialGhostFill(lev, *density_mf[lev], false);
+            }
+        }
+    }
     for (int it = 0; it < N; ++it)
     {
-        velocity_mf[lev]->FillBoundary(geom[lev].periodicity());
+        // Momentum ghosts through the field BCs (mirror at symmetry planes,
+        // radial on RADIAL faces), then v = M/rho on the whole fab.  A plain
+        // velocity FillBoundary left the domain-face ghosts at their
+        // start-of-step values for every sub-step.  rho is fixed here.
+        if (lev > 0)
+        {
+            FillPatch(lev, time + dt, momentum_mf, *momentum_mf[lev], *momentum_bc, 0);
+            if (radial_bc) RadialGhostFill(lev, *momentum_mf[lev], true);
+        }
+        else
+            FillBoundariesWithBC(lev, time + dt, momentum_bc, { momentum_mf[lev].get() });
+        for (amrex::MFIter mfi(*velocity_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box gb = mfi.growntilebox(velocity_mf[lev]->nGrow());
+            auto M = momentum_mf[lev]->const_array(mfi);
+            auto r = density_mf[lev]->const_array(mfi);
+            auto v = velocity_mf[lev]->array(mfi);
+            amrex::ParallelFor(gb, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                const Set::Scalar rc = std::max(r(i, j, k), sm);
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) v(i, j, k, d) = M(i, j, k, d) / rc;
+            });
+        }
         Omv.setVal(0.0);
 
         // ---- build Omega_visc on a grown box (band cells only) -------------
@@ -6310,7 +6388,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar dt)
                 for (int d = 0; d < AMREX_SPACEDIM; ++d)
                     gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
                 const Set::Scalar ds = gu.trace() - nh.dot(gu * nh);
-                const Set::Scalar se = kap_s * ds;              // viscous ONLY
+                const Set::Scalar se = kap_s * ds * ShellViscWeight(et(i,j,k), lw_s, nw_s);   // viscous ONLY
                 // |grad eta| P_ab = gem d_ab - ge_a ge_b / gem
                 om(i,j,k,0) = se * (gem - ge(0)*ge(0)/gem);     // xx
                 om(i,j,k,1) = se * (gem - ge(1)*ge(1)/gem);     // yy
@@ -6416,6 +6494,157 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar dt)
     }
 }
 
+// RadialGhostFill(): radially symmetric slab ghosts (2026-10-23).
+// Domain x in [0,L], y (,z) in [0,h]; centre at the origin; ylo (,zlo) and
+// xlo are symmetry planes; yhi (,zhi) are RADIAL.  The near-axis row
+// (j = k = 0, at y0 = dy/2, z0 = dz/2) is a 1D radial profile f(r_i),
+// r_i = sqrt(x_i^2 + y0^2 + z0^2).  A ghost at radius r takes f(r) by cubic
+// Lagrange interpolation in x_eff = sqrt(r^2 - y0^2 - z0^2), which maps r back
+// onto the row's uniform x spacing.  The profile is even in x (x_{-1-i} has
+// the same r as x_i), so the stencil mirrors through the centre; past the
+// last cell it is held constant.  The interpolant is clipped to the two
+// bracketing samples so eta and the densities cannot overshoot.
+// Vectors (momentum): the profile is u_r = u.(x_i, y0, z0)/r_i and the ghost
+// gets u_r(r) (x, y, z)/r -- no swirl.
+// The profile is gathered over all ranks (nx values per component), so no
+// assumption is made about how the boxes split the slab.
+void Hydro2::RadialGhostFill(int lev, amrex::MultiFab &mf, bool is_vector)
+{
+    BL_PROFILE("Integrator::Hydro2::RadialGhostFill");
+    const amrex::Box dom = geom[lev].Domain();
+    const Set::Scalar *DX = geom[lev].CellSize();
+    const int ilo = dom.smallEnd(0), nx = dom.length(0);
+    const int jax = dom.smallEnd(1);
+    const int kax = (AMREX_SPACEDIM == 3) ? dom.smallEnd(2) : 0;
+    const int nc = is_vector ? 1 : mf.nComp();
+    const Set::Scalar y0 = 0.5 * DX[1];
+    const Set::Scalar z0 = (AMREX_SPACEDIM == 3) ? 0.5 * DX[2] : 0.0;
+    const Set::Scalar off2 = y0 * y0 + z0 * z0;
+
+    // ---- gather the near-axis profile ------------------------------------
+    // On a fine level the patches cover only part of x.  The axis row is read
+    // over the valid cells AND the x-ghosts of each patch (coarse-fine ghosts,
+    // already interpolated by FillPatch); a valid value wins over a ghost one,
+    // and x-cells no patch reaches take the nearest covered value.  On level 0
+    // every x-cell is valid, so this is the plain axis row.
+    std::vector<Set::Scalar> prof((size_t)nx * nc, 0.0), pghost((size_t)nx * nc, 0.0);
+    std::vector<Set::Scalar> wval((size_t)nx, 0.0), wgh((size_t)nx, 0.0);
+    for (amrex::MFIter mfi(mf, false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &vb = mfi.validbox();
+        if (jax < vb.smallEnd(1) || jax > vb.bigEnd(1)) continue;
+#if AMREX_SPACEDIM == 3
+        if (kax < vb.smallEnd(2) || kax > vb.bigEnd(2)) continue;
+#endif
+        const amrex::Box fb = mf[mfi].box();
+        auto a = mf.const_array(mfi);
+        for (int i = std::max(fb.smallEnd(0), ilo); i <= std::min(fb.bigEnd(0), ilo + nx - 1); ++i)
+        {
+            const int ii = i - ilo;
+            const bool valid = (i >= vb.smallEnd(0) && i <= vb.bigEnd(0));
+            std::vector<Set::Scalar> &dst = valid ? prof : pghost;
+            (valid ? wval : wgh)[ii] += 1.0;
+            if (is_vector)
+            {
+                const Set::Scalar x = (ii + 0.5) * DX[0];
+                const Set::Scalar r = std::sqrt(x * x + off2);
+                Set::Scalar ur = a(i, jax, kax, 0) * x + a(i, jax, kax, 1) * y0;
+#if AMREX_SPACEDIM == 3
+                ur += a(i, jax, kax, 2) * z0;
+#endif
+                dst[ii] += ur / r;
+            }
+            else
+                for (int n = 0; n < nc; ++n) dst[(size_t)ii * nc + n] += a(i, jax, kax, n);
+        }
+    }
+    amrex::ParallelDescriptor::ReduceRealSum(prof.data(), (int)prof.size());
+    amrex::ParallelDescriptor::ReduceRealSum(pghost.data(), (int)pghost.size());
+    amrex::ParallelDescriptor::ReduceRealSum(wval.data(), (int)wval.size());
+    amrex::ParallelDescriptor::ReduceRealSum(wgh.data(), (int)wgh.size());
+    {
+        std::vector<char> have((size_t)nx, 0);
+        for (int ii = 0; ii < nx; ++ii)
+        {
+            if (wval[ii] > 0.0)
+                for (int n = 0; n < nc; ++n) prof[(size_t)ii * nc + n] /= wval[ii];
+            else if (wgh[ii] > 0.0)
+                for (int n = 0; n < nc; ++n) prof[(size_t)ii * nc + n] = pghost[(size_t)ii * nc + n] / wgh[ii];
+            have[ii] = (wval[ii] > 0.0 || wgh[ii] > 0.0);
+        }
+        // nearest covered value for the x-cells no patch reaches
+        int last = -1;
+        std::vector<int> nearest((size_t)nx, -1);
+        for (int ii = 0; ii < nx; ++ii) { if (have[ii]) last = ii; nearest[ii] = last; }
+        last = -1;
+        for (int ii = nx - 1; ii >= 0; --ii)
+        {
+            if (have[ii]) last = ii;
+            if (!have[ii] && (nearest[ii] < 0 || (last >= 0 && last - ii < ii - nearest[ii]))) nearest[ii] = last;
+        }
+        for (int ii = 0; ii < nx; ++ii)
+            if (!have[ii] && nearest[ii] >= 0)
+                for (int n = 0; n < nc; ++n) prof[(size_t)ii * nc + n] = prof[(size_t)nearest[ii] * nc + n];
+    }
+
+    // ---- fill every ghost outside a RADIAL face ---------------------------
+    const int jhi = dom.bigEnd(1);
+    const bool ry = radial_face_hi[1];
+#if AMREX_SPACEDIM == 3
+    const int khi = dom.bigEnd(2);
+    const bool rz = radial_face_hi[2];
+#endif
+    auto sample = [&](int n, Set::Scalar r) -> Set::Scalar {
+        const Set::Scalar xe = std::sqrt(std::max(r * r - off2, 0.0));
+        const Set::Scalar s = xe / DX[0] - 0.5;
+        if (s >= (Set::Scalar)(nx - 1)) return prof[(size_t)(nx - 1) * nc + n];
+        const int i0 = (int)std::floor(s);
+        const Set::Scalar t = s - i0;
+        auto at = [&](int i) -> Set::Scalar {
+            if (i < 0) i = -1 - i;              // even through the centre
+            if (i > nx - 1) i = nx - 1;
+            return prof[(size_t)i * nc + n];
+        };
+        const Set::Scalar fm = at(i0 - 1), f0 = at(i0), f1 = at(i0 + 1), f2 = at(i0 + 2);
+        const Set::Scalar v = -t * (t - 1.0) * (t - 2.0) / 6.0 * fm
+                            + (t + 1.0) * (t - 1.0) * (t - 2.0) / 2.0 * f0
+                            - (t + 1.0) * t * (t - 2.0) / 2.0 * f1
+                            + (t + 1.0) * t * (t - 1.0) / 6.0 * f2;
+        return std::min(std::max(v, std::min(f0, f1)), std::max(f0, f1));
+    };
+    for (amrex::MFIter mfi(mf, false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box fb = mf[mfi].box();
+        auto a = mf.array(mfi);
+        amrex::LoopOnCpu(fb, [&](int i, int j, int k) {
+            bool out = ry && j > jhi;
+#if AMREX_SPACEDIM == 3
+            out = out || (rz && k > khi);
+#endif
+            if (!out) return;
+            const Set::Scalar x = (i - ilo + 0.5) * DX[0];
+            const Set::Scalar y = (j - jax + 0.5) * DX[1];
+#if AMREX_SPACEDIM == 3
+            const Set::Scalar z = (k - kax + 0.5) * DX[2];
+#else
+            const Set::Scalar z = 0.0;
+#endif
+            const Set::Scalar r = std::sqrt(x * x + y * y + z * z);
+            if (is_vector)
+            {
+                const Set::Scalar ur = sample(0, r) / r;
+                a(i, j, k, 0) = ur * x;
+                a(i, j, k, 1) = ur * y;
+#if AMREX_SPACEDIM == 3
+                a(i, j, k, 2) = ur * z;
+#endif
+            }
+            else
+                for (int n = 0; n < nc; ++n) a(i, j, k, n) = sample(n, r);
+        });
+    }
+}
+
 // ============================================================================
 // SubcycleBulkViscous(): bulk (mu, lambda) viscosity as its own operator
 // (visc_subcycle = 1).  Called ONCE per step from Advance, after the RK
@@ -6451,7 +6680,6 @@ void Hydro2::SubcycleBulkViscous(int lev, Set::Scalar time, Set::Scalar dt)
     const int mmix = mu_mix;
     const Set::Scalar mmp = mu_mix_p;
     const Set::Scalar m0 = mu0, m1 = mu1, l0 = mu0_b, l1 = mu1_b;
-    const bool use_nscbc = (nscbc_bc != nullptr) || (nscbc4_bc != nullptr);
 
     // mixture viscosity, same closures as RHS
     auto mu_of = [=] AMREX_GPU_DEVICE(Set::Scalar e_raw, Set::Scalar &dmu_de) -> Set::Scalar {
@@ -6509,19 +6737,21 @@ void Hydro2::SubcycleBulkViscous(int lev, Set::Scalar time, Set::Scalar dt)
         Util::Message(INFO, "SubcycleBulkViscous lev=", lev, " N=", N, " dtau=", dtau,
                       " (dt=", dt, ", dtau_max=", dtau_max, ", nu_L=", nuL, ")");
 
-    const int symc = sym_face_central;
-    const bool symlo_c[3] = {sym_face_lo[0], sym_face_lo[1], sym_face_lo[2]};
-    const bool symhi_c[3] = {sym_face_hi[0], sym_face_hi[1], sym_face_hi[2]};
+    const int symc = cen_face_any;   // symmetry (sym_face_central) + RADIAL faces
+    const bool symlo_c[3] = {cen_face_lo[0], cen_face_lo[1], cen_face_lo[2]};
+    const bool symhi_c[3] = {cen_face_hi[0], cen_face_hi[1], cen_face_hi[2]};
 
     for (int it = 0; it < N; ++it)
     {
         // momentum ghosts (rho ghosts are fixed during the viscous operator)
-        if (lev > 0 && !use_nscbc)
+        // field BCs on every face, NSCBC runs included (see SubcycleShellViscous)
+        if (lev > 0)
+        {
             FillPatch(lev, time + dt, momentum_mf, *momentum_mf[lev], *momentum_bc, 0);
-        else if (!use_nscbc)
-            FillBoundariesWithBC(lev, time + dt, momentum_bc, { momentum_mf[lev].get() });
+            if (radial_bc) RadialGhostFill(lev, *momentum_mf[lev], true);
+        }
         else
-            momentum_mf[lev]->FillBoundary(geom[lev].periodicity());
+            FillBoundariesWithBC(lev, time + dt, momentum_bc, { momentum_mf[lev].get() });
 
         // div(tau) and Phi from the start-of-sub-step momentum (scratch), then update
         amrex::MultiFab Fv(momentum_mf[lev]->boxArray(), momentum_mf[lev]->DistributionMap(), AMREX_SPACEDIM + 1, 0);

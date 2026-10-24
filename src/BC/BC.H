@@ -141,11 +141,20 @@ bool IsReflectEven(int bctype);
 bool IsReflectOdd(int bctype);
 bool IsDirichlet(int bctype);
 bool IsNSCBC(int bctype);
+bool IsRadial(int bctype);
+// Faces whose ghosts BC::Expression fills by a zero-gradient clamp copy and
+// that another operator overwrites afterwards (NSCBC characteristic fill,
+// Hydro2 radial-symmetry fill).
+bool IsClampCopy(int bctype);
 
 constexpr int NSCBC_INFLOW = 2000;     // Custom BC type for NSCBC inflow
 constexpr int NSCBC_OUTFLOW = 2001;    // Custom BC type for NSCBC outflow
 constexpr int NSCBC_SLIPWALL = 2002;   // Custom BC type for NSCBC slip wall
 constexpr int NSCBC_NOSLIPWALL = 2003; // Custom BC type for NSCBC no-slip wall
+// RADIAL (2026-10-23): radially symmetric slab face.  BC::Expression only
+// clamp-copies it; Hydro2 then refills the ghosts from the near-axis row at the
+// same radius (see Hydro2::RadialGhostFill).
+constexpr int RADIAL = 2010;
 
 
 

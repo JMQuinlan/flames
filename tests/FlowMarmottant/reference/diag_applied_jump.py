@@ -6,7 +6,7 @@ shells (octant or full domain) and three things are measured:
 
   APPLIED  the jump the shell stress the code actually built would support,
            int 2 T |grad eta| / r dr, with T = kappa1 (plotted total tension
-           sigma(Gamma) + kappa_s div_s u [+ contour-rate term]).  Reported as
+           sigma(Gamma) + kappa_s div_s u ).  Reported as
            a fraction of the sharp 4 kappa_s Rdot/R^2 after removing the
            elastic 2 sigma/R part.            -> A_kap
   EFFECTIVE the jump the flow actually carries: core gas pressure minus the

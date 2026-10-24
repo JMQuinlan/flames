@@ -1,49 +1,40 @@
-#@ [sch20_oscillating_marmottant_light_contourratemili]
+#@ [sch20_oscillating_marmottant_light_mili]
 #@ exe=hydro2
 #@ dim=3
 #
-# ============ COATED 1-ON-1 TWIN OF Sch20_Oscillating_Neumann_Large_3D ============
-# (2026-10-22)  Every line below "alamo.program" is copied from
-#     tests/FlowRayleighPlesset/Sch20_Oscillating_Neumann_Large_3D
-# (same domain, R0, epsilon, pressures, EOS, BCs, AMR, blocking factor, plot_dt,
-# cfl, dt bounds, limiter, inviscid liquid) EXCEPT:
-#     plot_file                 -> FlowMarmottant/output_..._ContourRateMili
-#     apply_surface_tension 0->1, kappa_method 1, marmottant block, shell.* block
-#     plot_minimal = 1, relax_diag = 0   (output/diagnostics only, no physics change)
+# ===== PRE-TENSIONED Mili: kappa_s test with ~8 finest cells of travel and POSITIVE tension =====
+# (2026-10-24)  Same mesh, AMR, EOS, BCs, numerics and kappa_s = 0.72 kg/s (K* = 0.18)
+# as input_Sch20-Oscillating_Marmottant_Mili, EXCEPT
+#     marmottant 1 -> 0, sigma 0.0728 -> 500 N/m   (constant pre-tension, no elastic shell)
+#     p_b  1.0e4 -> 5.8307e4 Pa                    (p_inf/p_b 10 -> 1.715)
+#     stop_time 1e-2 -> 2e-2                       (~3.5 tau_c; tau_c = 0.915 R0 sqrt(rho/p_inf) = 5.79e-3 s)
+#     plot_file -> output_Sch20_Oscillating_Marmottant_Light_Mili
 #
-# PURPOSE.  On the 2 um Light deck the band is ~8 cells, R0 ~ 26 cells and the
-# oscillation is only ~2 cells, so kappa_s acts on a small, poorly resolved
-# motion.  Here p_inf/p_b = 10 (full Sch20 amplitude): R goes 1 -> ~0.5 R0,
-# i.e. ~13 cells of travel, and the run sits next to the validated uncoated
-# twin for a direct coated-vs-uncoated comparison.
+# WHY.  At R0 = 2 cm any motion large enough for kappa_s to matter has a viscous tension
+# 2 kappa_s Rdot/R of hundreds of N/m, far above the Marmottant elastic tension
+# (<= 0.073 N/m), so on the Mili deck the TOTAL tension goes strongly negative while the
+# bubble compresses and the surface wrinkles.  Lowering R_buckling would change nothing
+# (the elastic part is inert at this scale).  A constant tension of 500 N/m keeps the
+# total tension positive for the whole run while R still travels ~8 finest cells.
+# sigma = 500 N/m is unphysical: this is a NUMERICAL test of kappa_s (and of the
+# capillary force: 2 sigma/R0 = 5e4 Pa), not a physical shell.
 #
-# SHELL SCALING.  The elastic shell (chi, R_buckling, sigma_break) is kept as
-# on Light; at R0 = 2 cm 2 sigma/R <= 7 Pa, so it is inert (KM confirms: elastic
-# only = uncoated to 4 digits).  kappa_s is scaled to keep the SAME dimensionless
-# shell viscosity as the 2 um Light deck,
-#     K* = kappa_s / (R0^2 sqrt(rho p_inf)) = 7.2e-9/(4e-12 * 1e4) = 0.18
-#     -> kappa_s = 0.18 * (0.02)^2 * 1e4 = 0.72 kg/s.
-# The shell term 4 kappa_s Rdot/R^2 then sits at the same fraction of p_inf
-# as on Light, and the kappa_s dx^3 timestep limit has the same ratio to the
-# acoustic dt (both scale with R0).
-#
-# REFERENCE MODELS (reference/marmottant_rpe_km.py, mu = 0):
-#   variant            RPE R_min   KM R_min (t/tc)   KM rebound
-#   uncoated           0.2648      0.2727 (1.12)     0.9695
-#   elastic only       0.2648      0.2727 (1.12)     0.9695
-#   full shell         0.4945      0.4960 (1.44)     0.5886   <- target
-# (kappa_s = 0.36 would give KM 0.4109 / rebound 0.6497 if a lighter shell is wanted.)
-# Shell rate: contour-rate mode 1 (best Light result so far, INCLINE 10-20).
+# KELLER-MIKSIS (reference/marmottant_rpe_km.py, chi = 0, sigma_water = 500, mu = 0):
+#   kappa_s = 0.72 :  R_min/R0 = 0.688 at 1.23 tau_c  (8.0 finest cells of travel,
+#                     dx_finest = 7.8e-4 m = R0/25.6); total tension >= +94 N/m throughout
+#   kappa_s = 0    :  R_min/R0 = 0.596
+#   kappa_s moves R(t) by up to 4.2 finest cells, so the run cannot match KM unless the
+#   dilatational viscosity is doing its job.
 #
 # Analyse with reference/analyze_Sch20_Oscillating_Marmottant_Mili.py
-# (coated run vs KM, plus overlay on the uncoated twin's output).
-# =================================================================================
+#     --input ../input_Sch20-Oscillating_Marmottant_Light_Mili
+# ===============================================================================================
 
 alamo.program = hydro2
 
 ### OUTPUT ###
-# plot_file = ./tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant_Light_ContourRateMili
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant_Light_ContourRateMili
+# plot_file = ./tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant_Light_Mili
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant_Light_Mili
 
 ### MESHING ###
 amr.plot_int       = -1
@@ -74,7 +65,7 @@ cfl                     = 0.5
 geometry.prob_lo     =  0.0  0.0  0.0
 geometry.prob_hi     =  2.0  2.0  2.0
 geometry.is_periodic = 0 0 0
-stop_time            = 1e-2
+stop_time            = 2e-2            # ~3.5 tau_c
 
 ### ETA INITIAL CONDITIONS (identical to _Large) ###
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
@@ -116,7 +107,7 @@ velocity1.ic.expression.region1 = "0.0"
 # header for the full derivation.
 pressure0.ic.type = expression
 pressure0.ic.expression.constant.p_inf = 1.0e5
-pressure0.ic.expression.constant.p_b   = 1.0e4
+pressure0.ic.expression.constant.p_b   = 5.8307e4        # p_inf/p_b = 1.715 (Mili: 1.0e4)
 pressure0.ic.expression.constant.R0    = 0.02
 pressure0.ic.expression.constant.r_inf = 0.20
 pressure0.ic.expression.region0 = "p_inf - (p_inf - p_b)*R0/max(sqrt(x*x + y*y + z*z), R0)"
@@ -124,7 +115,7 @@ pressure0.ic.expression.region0 = "p_inf - (p_inf - p_b)*R0/max(sqrt(x*x + y*y +
 
 # Gas interior: uniform bubble pressure p_b.
 pressure1.ic.type = expression
-pressure1.ic.expression.constant.p_b = 1.0e4
+pressure1.ic.expression.constant.p_b = 5.8307e4
 pressure1.ic.expression.region0 = "p_b"
 
 ### VISCOSITY (inviscid -- Sch20 nominal) ###
@@ -133,11 +124,11 @@ mu0_b = 0.0
 mu1   = 0.0
 mu1_b = 0.0
 
-### SURFACE TENSION -- Marmottant coated shell (the only physics change) ###
-sigma = 72.8e-3                  # same value as the uncoated twin (post-rupture / bare tension)
+### SURFACE TENSION -- constant pre-tension + dilatational viscosity (no Marmottant shell) ###
+sigma = 500.0                    # constant PRE-TENSION [N/m] (Mili: 72.8e-3); see header
 pref  = 0.0
 
-marmottant             = 1
+marmottant             = 0       # no elastic shell: constant sigma + kappa_s only
 marmottant.R0          = 0.02    # reference radius (shell strain measured from here)
 marmottant.R_buckling  = 0.0196  # 0.98 R0, as on Light
 marmottant.chi         = 1.0     # shell elastic modulus [N/m] (inert at this scale)
@@ -145,8 +136,6 @@ marmottant.sigma_break = 0.073   # rupture tension [N/m]
 
 # Dilatational shell viscosity, scaled from Light at fixed K* = 0.18 (header).
 shell.kappa_s = 0.72             # [kg/s]
-shell.kappa_s_contour_rate = 1         # contour-rate shell rate (mode 1)
-shell.kappa_s_contour_rate_cap = 0.5   # |div n| <= cap/epsilon
 shell.mu_s    = 0.0
 
 ### BOUNDARY CONDITIONS - Neumann on all 6 faces (Sch20 non-NSCBC variant) ###

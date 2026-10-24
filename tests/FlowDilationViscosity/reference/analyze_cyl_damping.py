@@ -13,7 +13,7 @@ usage:  analyze_cyl_damping.py RUN [RUN ...] --input DECK [--baseline RUN0] [-s 
 Per run: R_max / R_min vs the model, rms(f = 1), kappa_eff/kappa_s.  With --baseline (the
 kappa_s = 0 run on the same mesh) the mesh's own damping is reported as an equivalent
 kappa (kappa_num) and kappa_eff is also given after removing it (k_eff - k_num).
-Run overrides are read from RUN/cmdline.txt if present (written by run_sweep.sh).
+Run overrides are read from RUN.cmdline (or RUN/cmdline.txt) if present (written by run_sweep.sh).
 """
 import argparse, glob, os, re, sys
 import numpy as np
@@ -27,9 +27,12 @@ def parse(path, over=()):
         line = line.split("#", 1)[0].strip()
         if "=" in line:
             k, v = line.split("=", 1); kv[k.strip()] = v.strip().strip('"')
-    for s in over:
+    last = None
+    for s in over:                     # "key=v1 v2" arrives as tokens "key=v1", "v2"
         if "=" in s:
-            k, v = s.split("=", 1); kv[k.strip()] = v.strip()
+            k, v = s.split("=", 1); last = k.strip(); kv[last] = v.strip()
+        elif last:
+            kv[last] += " " + s
     return kv
 
 
@@ -94,8 +97,11 @@ def main():
     ap.add_argument("--baseline", default=None)
     ap.add_argument("-s", action="append", default=[])
     a = ap.parse_args()
-    ov = lambda run: (open(os.path.join(run, "cmdline.txt")).read().split()
-                      if os.path.exists(os.path.join(run, "cmdline.txt")) else [])
+    def ov(run):
+        for p in (run.rstrip("/") + ".cmdline", os.path.join(run, "cmdline.txt")):
+            if os.path.exists(p):
+                return open(p).read().split()
+        return []
     knum = None
     if a.baseline:
         P0 = params(parse(a.input, ov(a.baseline) + a.s))

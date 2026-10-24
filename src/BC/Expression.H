@@ -140,6 +140,9 @@ public:
         bcmap["NSCBC_SLIPWALL"]   = BCUtil::NSCBC_SLIPWALL;
         bcmap["nscbc_noslipwall"] = BCUtil::NSCBC_NOSLIPWALL;
         bcmap["NSCBC_NOSLIPWALL"] = BCUtil::NSCBC_NOSLIPWALL;
+        // Radially symmetric slab face (Hydro2 overwrites the clamp-copy).
+        bcmap["radial"]           = BCUtil::RADIAL;
+        bcmap["RADIAL"]           = BCUtil::RADIAL;
 
 
 
