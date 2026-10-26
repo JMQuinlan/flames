@@ -43,6 +43,26 @@
 #include "Solver/EOS/CPG.H"
 // Generic
 #include <AMReX_Math.H>
+
+namespace {
+// shell.kappa_s_interface: factor that carries the surface dilatation div_s u
+// sampled in a liquid-side band cell to its value on the eta = 0.5 surface.
+// Outside an incompressible interface u_n r^(D-1) is constant, so
+//     div_s u(R) = div_s u(r) (1 + kappa d/(D-1))^(D-1),  d = r - R.
+// d is read from the local tanh profile, d = eps_loc atanh(2 eta - 1) with
+// eps_loc = 2 eta (1 - eta)/|grad eta|; kappa is the Gamma curvature.  Local,
+// no radius or kernel.  Gas side (eta <= 0.5): 1.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+Set::Scalar InterfaceRateFactor(Set::Scalar e, Set::Scalar gem, Set::Scalar kG, Set::Scalar cap)
+{
+    if (!(e > 0.5) || !(gem > 1.0e-10)) return 1.0;
+    // eps_loc from the UNCLIPPED eta (clipping it inflates eps_loc in the tail)
+    const Set::Scalar eps_loc = 2.0 * e * (1.0 - e) / gem;
+    const Set::Scalar d = eps_loc * std::atanh(2.0 * std::min(e, 0.9975) - 1.0);
+    const Set::Scalar x = std::min(std::max(kG * d / (AMREX_SPACEDIM - 1), 0.0), cap);
+    return std::pow(1.0 + x, AMREX_SPACEDIM - 1);
+}
+}
 #include "AMReX_TimeIntegrator.H"
 
 
@@ -526,6 +546,91 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
             Util::Abort(INFO, "shell.kappa_s_narrow and shell.kappa_s_liqweight must be >= 0");
         if (value.shell_kappa_s_narrow > 0 && value.shell_kappa_s_liqweight > 0)
             Util::Abort(INFO, "shell.kappa_s_narrow and shell.kappa_s_liqweight are alternatives; set only one.");
+        // PHASE-PRESSURE JUMP for the viscous shell (2026-10-24).  The viscous
+        // shell stress is applied to the mixture momentum as before.  With
+        // kappa_s_jump = 1 its NORMAL part is also imposed in the pressure
+        // relaxation: instead of p_gas = p_liq the band cells relax to
+        //     p_gas - p_liq = Delta = T_s : grad(n),
+        //     T_s = (kappa_s - mu_s)(div_s u) P + 2 mu_s P E P,   n = grad eta/|grad eta|,
+        // which for a sphere is the Keller-Miksis term 4 kappa_s Rdot/R^2.  The
+        // mixture state (rho, M, E) is unchanged; only its split into phase
+        // volumes and pressures is.  Without the jump the band gas sits at the
+        // local mixture pressure, between the core-gas and liquid pressures,
+        // and its volume change absorbs part of the shell stress (kappa_eff ~
+        // 1 - 1.9 eps/R on the coated bubble).  With it the band gas sits at the
+        // core-gas pressure.  Cells where a phase would leave its EOS range fall
+        // back to Delta = 0.  DEFAULT 0 (off).
+        pp_query_default("shell.kappa_s_jump", value.shell_kappa_s_jump, 0);
+        // STATIC part of the same jump: capillary_jump = 1 adds
+        //     sigma_eff (div n)
+        // to Delta, with sigma_eff the tension the momentum force uses
+        // (constant sigma, or Marmottant sigma(Gamma)).  For T_s = sigma P,
+        // T_s : grad(n) = sigma div(n) since n.grad(n).n = 0.  Independent of
+        // shell.kappa_s_jump; both may be on.  DEFAULT 0 (off).
+        pp_query_default("capillary_jump", value.capillary_jump, 0);
+        // CONSISTENT JUMP (jump.consistent = 1).  Two changes, so that the
+        // momentum force and the relaxation see the SAME jump in every cell:
+        //  (1) the curvature comes from the areal density Gamma instead of
+        //      grad(n):  kappa = (D-1) Gamma^(1/(D-1)) / R0,  Gamma = (R0/R)^2
+        //      on a sphere and R0/R on a cylinder.  It is uniform across the
+        //      band and needs no radius or second derivative of eta, so it
+        //      stays clean as the bubble collapses (the reason sigma itself
+        //      is computed from Gamma).
+        //  (2) the NORMAL part of the shell stress enters the momentum as
+        //          F_n = -Delta grad(eta),
+        //      with Delta the same per-cell jump the relaxation imposes:
+        //          Delta_s = sigma_eff kappa                       (static)
+        //          Delta_v = [(kappa_s - mu_s) + 2 mu_s/(D-1)] div_s(u) kappa
+        //                                                         (viscous,
+        //                     shell.kappa_s_jump = 1, in the sub-cycler).
+        //      The relaxation leaves p_mix = p_liq + (1 - eta) Delta, and
+        //      with the centred gradient -grad(p_mix) + F_n = -grad(p_liq)
+        //      wherever Delta is uniform, so a bubble at rest is an exact
+        //      discrete equilibrium.  Delta is used only where grad(eta) is
+        //      nonzero, so no value is needed in the core or the far field.
+        //      (The conservative form div((1 - eta) Delta I) would also need
+        //      Delta extended through the whole core: its (1 - eta) grad(Delta)
+        //      term is a body force on the core gas wherever the extension
+        //      falls short, i.e. on any moving bubble.)
+        //  (3) jump.tangential = 1 (default) keeps the TANGENTIAL part of the
+        //      old tensor force, P.div(Omega): the Marangoni stress of a
+        //      varying sigma(Gamma) and the tangential viscous shell stress.
+        //      Its normal part is replaced by (2).  0 drops it (normal stress
+        //      only; exact for a sphere).
+        //      Energy: the total energy gains u.F (work of the force) plus,
+        //      for the viscous part, the dissipation keff |grad eta| (div_s u)^2
+        //      as heat.  The surface energy is not stored in the fluid.
+        // Gamma is advected (as with marmottant = 1) and extended into the
+        // bulk; jump.R0 is the radius at which Gamma = 1 (the IC radius for an
+        // uncoated bubble; defaults to marmottant.R0).  DEFAULT 0.
+        pp_query_default("jump.consistent", value.jump_consistent, 0);
+        pp_query_default("jump.R0", value.jump_R0, value.marmottant_R0);
+        pp_query_default("jump.tangential", value.jump_tangential, 1);
+        // DIAGNOSTIC (2026-10-25).  With jump.consistent and shell.kappa_s_jump,
+        // the viscous jump keff div_s(u) kappa is sampled cell by cell across
+        // the band; on the liquid side div_s u decays as (R/r)^(D-1), which
+        // makes the applied stress ~5% and its work ~13% low at eps/R = 1/8.
+        // shell.kappa_s_interface = 1 rescales the liquid-side cells to the
+        // eta = 0.5 value (InterfaceRateFactor) in BOTH the sub-cycled force
+        // and the relaxation jump.  DEFAULT 0.
+        pp_query_default("shell.kappa_s_interface", value.shell_kappa_s_interface, 0);
+        // 1: force and relaxation jump; 2: sub-cycled force only; 3: relaxation only (diagnostic splits)
+        pp_query_default("shell.kappa_s_interface_cap", value.shell_kappa_s_interface_cap, 1.0);
+        if (value.jump_consistent)
+        {
+            if (!(value.jump_R0 > 0.0))
+                Util::Abort(INFO, "jump.consistent = 1 needs jump.R0 > 0 (radius at which Gamma = 1)");
+            if (!value.capillary_jump && !value.shell_kappa_s_jump)
+                Util::Warning(INFO, "jump.consistent = 1 with neither capillary_jump nor shell.kappa_s_jump: "
+                              "the force carries the jump but the relaxation does not.");
+            const bool visc = (value.shell_kappa_s != 0.0 || value.shell_mu_s != 0.0);
+            if (visc && !value.shell_visc_subcycle)
+                Util::Abort(INFO, "jump.consistent = 1 with a viscous shell needs shell.kappa_s_subcycle = 1 "
+                            "(the sub-cycler carries the viscous jump force).");
+            if (visc && !value.shell_kappa_s_jump)
+                Util::Warning(INFO, "jump.consistent = 1 without shell.kappa_s_jump: the viscous shell keeps "
+                              "the old tensor force and has no relaxation jump.");
+        }
         // shell.kappa_s_heat was REMOVED (2026-10-16): the capillary energy
         // source is now the full div(Omega.u) (dissertation S_E^Omega), which
         // already contains the viscous-shell dissipation Omega_visc:grad(u).
@@ -1366,6 +1471,7 @@ void Hydro2::Mix(int lev)
     {
         const amrex::Box &bx = mfi.growntilebox();
 
+        const int cj_ic = capillary_jump;
         // Capillary-energy closure inputs (see Hydro2.H).
         const int marm_ic = marmottant;
         const Set::Scalar sig_ic = sigma, chi_ic = marmottant_chi;
@@ -1520,8 +1626,13 @@ void Hydro2::Mix(int lev)
                 p_mix_IC = numer_a / std::max(denom_a, small);
             }
 
-            E0_arr(i, j, k)     = Solver::EOS::EOS::PhasicEnergyFromPressure(p_mix_IC, a1, gam0, pi0_, small);
-            E1_arr(i, j, k)     = Solver::EOS::EOS::PhasicEnergyFromPressure(p_mix_IC, a2, gam1, pi1_, small);
+            // capillary_jump: the phases keep their own IC pressures (p_gas -
+            // p_liq is the Laplace jump the relaxation then maintains); the
+            // equal-pressure p_mix_IC would make the first jump relaxation drop
+            // the band liquid by the full jump.
+            const bool keep_phase_p = (cj_ic != 0);
+            E0_arr(i, j, k)     = Solver::EOS::EOS::PhasicEnergyFromPressure(keep_phase_p ? p0_ij : p_mix_IC, a1, gam0, pi0_, small);
+            E1_arr(i, j, k)     = Solver::EOS::EOS::PhasicEnergyFromPressure(keep_phase_p ? p1_ij : p_mix_IC, a2, gam1, pi1_, small);
             E0_old_arr(i, j, k) = E0_arr(i, j, k);
             E1_old_arr(i, j, k) = E1_arr(i, j, k);
 
@@ -2006,7 +2117,9 @@ Hydro2::RHS(int lev,
         const amrex::BoxArray &baO = eta_mf[lev]->boxArray();
         const amrex::DistributionMapping &dmO = eta_mf[lev]->DistributionMap();
         const int nO = (AMREX_SPACEDIM == 2) ? 3 : 6;
-        Omega.define(baO, dmO, nO, 1);
+        // jump.consistent: components nO .. nO+D-1 carry the normal jump force
+        // F_n = -Delta_s grad(eta) per cell (see Parse).
+        Omega.define(baO, dmO, nO + (jump_consistent ? AMREX_SPACEDIM : 0), 1);
         Omega.setVal(0.0);
 
         // Non-advective eta source S = K div(u) (Kapila closure) for the
@@ -2071,9 +2184,15 @@ Hydro2::RHS(int lev,
         const int visc_shell = (kap_s != 0.0) || (mu_s != 0.0);
         const int lw_n = shell_kappa_s_liqweight;
         const int nw_m = shell_kappa_s_narrow;
+        const int jc_o = jump_consistent;
+        const int jt_o = jump_tangential;
+        const Set::Scalar R0_o = jump_R0;
+        const Set::Scalar chi_o = marmottant_chi, Gb_o = marmottant_Gamma_buck;
+        const Set::Scalar sbrk_o = marmottant_sigma_break, sigw_o = sigma;
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box bx = mfi.growntilebox(1);
+            amrex::Array4<const Set::Scalar> const &shl_o = shell_mf[lev]->const_array(mfi);
             amrex::Array4<const Set::Scalar> const &Sar = area_rate ? Smf.const_array(mfi)
                                                     : amrex::Array4<const Set::Scalar>{};
             amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
@@ -2095,8 +2214,19 @@ Hydro2::RHS(int lev,
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
                 Set::Scalar gem = ge.lpNorm<2>();
+                // jump.consistent: normal static force F_n = -Delta_s grad(eta),
+                // Delta_s = sigma_eff(Gamma) kappa(Gamma), this cell's value only.
+                if (jc_o)
+                {
+                    const Set::Scalar Gs = std::max(shl_o(i, j, k), 0.0);
+                    const Set::Scalar kG = (AMREX_SPACEDIM - 1) * std::pow(Gs, 1.0 / (AMREX_SPACEDIM - 1)) / R0_o;
+                    const Set::Scalar sE = SigmaEffFromGamma(marm ? Gs : 0.0, 1.0, marm, sig0, chi_o, Gb_o, sbrk_o, sigw_o);
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d) om(i, j, k, nO + d) = -sE * kG * ge(d);
+                }
                 if (gem < 1.0e-10) return; // Omega = 0 off the interface
-                Set::Scalar se = marm ? sg(i, j, k) : sig0;
+                // jump.consistent keeps the tensor only for its tangential
+                // (Marangoni) part, which is nonzero only for a varying sigma.
+                Set::Scalar se = jc_o ? ((jt_o && marm) ? sg(i, j, k) : 0.0) : (marm ? sg(i, j, k) : sig0);
                 // band weight of the viscous part (liqweight / narrow)
                 const Set::Scalar wl = ShellViscWeight(et(i, j, k), lw_n, nw_m);
                 // Shear part of the Boussinesq--Scriven stress.  Unlike the
@@ -2286,6 +2416,8 @@ Hydro2::RHS(int lev,
         Set::Patch<const Set::Scalar> kappas = kappas_mf.Patch(lev, mfi);
         amrex::Array4<const Set::Scalar> om_cap; // capillary stress tensor (if surface tension on)
         if (apply_surface_tension) om_cap = Omega.const_array(mfi);
+        const int jc_f = jump_consistent;                 // normal jump force in Omega[nO_f..]
+        const int nO_f = (AMREX_SPACEDIM == 2) ? 3 : 6;
         Set::Patch<Set::Scalar> div_tau_ = div_tau_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> hess_u_ = hess_u_mf.Patch(lev, mfi);
 
@@ -2340,7 +2472,7 @@ Hydro2::RHS(int lev,
         // at which point WritePlotFile's NaN check ABORTS an otherwise healthy
         // run -- the cluster LowAmp_NSCBC death).  Gating also removes ~12-18
         // wasted limiter reconstructions per cell per stage.
-        const int shell_row_on = marmottant;
+        const int shell_row_on = marmottant || jump_consistent;
         const int cfun_row_on  = 0;   // colour function retired with the closure
 
         // Device-safe copies of the symmetry-face flags: the [=] kernel lambda
@@ -2531,6 +2663,18 @@ Hydro2::RHS(int lev,
                               + (om_cap(i,j+1,k,5) - om_cap(i,j-1,k,5)) * idy
                               + (om_cap(i,j,k+1,2) - om_cap(i,j,k-1,2)) * idz;
 #endif
+                if (jc_f)
+                {
+                    // jump.consistent: tangential part of div(Omega) (Marangoni;
+                    // zero unless jump.tangential and sigma(Gamma)) + the normal
+                    // jump force -Delta_s grad(eta) stored per cell.
+                    if (grad_eta_mag > 1.0e-10)
+                    {
+                        const Set::Vector nh = grad_eta / grad_eta_mag;
+                        Fsv_vector -= nh * nh.dot(Fsv_vector);
+                    }
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d) Fsv_vector(d) += om_cap(i, j, k, nO_f + d);
+                }
             }
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
                 Fsv(i, j, k, d) = Fsv_vector(d);
@@ -2698,7 +2842,9 @@ Hydro2::RHS(int lev,
                 Source(i, j, k, 1 + d) = Pdot0(d) + Ldot(d) + div_tau(d) + Total_Force(d);
             // Capillary/shell energy: div(Omega . u), see above.
             Set::Scalar cap_w = 0.0;
-            if (apply_surface_tension)
+            // jump.consistent: work of the capillary force only (see Parse)
+            if (apply_surface_tension && jc_f) cap_w = u.dot(Fsv_vector);
+            else if (apply_surface_tension)
             {
 #if AMREX_SPACEDIM == 2
                 // (Omega.u)_q = sum_p Omega_qp u_p ; storage [xx,yy,xy]
@@ -5149,6 +5295,7 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     // per step from Advance, before the post-integration refresh, whose
     // RelaxAndReinit still follows it (L_relax o L_visc o L_hyper).
 
+    relax_time = time;
     if (!defer_relax) RelaxAndReinit(lev);
 
     // ------------------------------------------------------------
@@ -6247,6 +6394,15 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
     const Set::Scalar rho_floor_l = std::max(shell_nus_rho_floor, 1.0e-12);
     // band weight of the viscous stress (liqweight / narrow), as on the main path
     const int lw_s = shell_kappa_s_liqweight, nw_s = shell_kappa_s_narrow;
+    // jump.consistent + shell.kappa_s_jump: normal force -Delta_v grad(eta),
+    // Delta_v = keff div_s(u) kappa(Gamma), the jump the relaxation imposes;
+    // the tensor below then supplies only its tangential part (jump.tangential).
+    const int jcv = jump_consistent && shell_kappa_s_jump;
+    const int jtv = jump_tangential;
+    const Set::Scalar keff_v = kap_s + 2.0 * shell_mu_s / (AMREX_SPACEDIM - 1);
+    const Set::Scalar R0_v = jump_R0;
+    const int ifv = (shell_kappa_s_interface == 1 || shell_kappa_s_interface == 2);
+    const Set::Scalar ifcap_v = shell_kappa_s_interface_cap;
 
     // ---- N from the SAME stability measure the dt limiter uses -------------
     // nu_s = kap_eff |grad eta| / rho, reduced over the band, then
@@ -6423,6 +6579,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
             // while max_level 3 (64x fewer sub-steps) stayed within 0.05%.
             auto E0  = energy0_mf[lev]->array(mfi);
             auto E1  = energy1_mf[lev]->array(mfi);
+            auto shl = shell_mf[lev]->const_array(mfi);
             const Set::Scalar idx = 0.5 / DX[0], idy = 0.5 / DX[1];
 #if AMREX_SPACEDIM == 3
             const Set::Scalar idz = 0.5 / DX[2];
@@ -6449,22 +6606,32 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                      + (om(i,j+1,k,5) - om(i,j-1,k,5)) * idy
                      + (om(i,j,k+1,2) - om(i,j,k-1,2)) * idz;
 #endif
+                const Set::Vector nh = ge / gem;
+                Set::Matrix gu = Set::Matrix::Zero();
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
+                const Set::Scalar ds = gu.trace() - nh.dot(gu * nh);
+                Set::Scalar cfi = 1.0;
+                if (jcv)
+                {
+                    // tangential part of div(Omega_visc) + normal jump force
+                    if (jtv) F -= nh * nh.dot(F); else F = Set::Vector::Zero();
+                    const Set::Scalar Gs = std::max(shl(i, j, k), 0.0);
+                    const Set::Scalar kG = (AMREX_SPACEDIM - 1) * std::pow(Gs, 1.0 / (AMREX_SPACEDIM - 1)) / R0_v;
+                    cfi = ifv ? InterfaceRateFactor(et(i, j, k), gem, kG, ifcap_v) : 1.0;
+                    F -= (keff_v * cfi * ds * kG) * ge;
+                }
                 for (int d = 0; d < AMREX_SPACEDIM; ++d)
                     M(i,j,k,d) += dtau * F(d);
 
                 // Dissipation -> heat.  Omega_visc:grad u = kap_s |grad eta| (div_s u)^2
                 // is positive-definite, so the kinetic energy removed by F is
                 // returned as internal energy rather than stored in a reservoir.
-                const Set::Vector nh = ge / gem;
-                Set::Matrix gu = Set::Matrix::Zero();
-                for (int d = 0; d < AMREX_SPACEDIM; ++d)
-                    gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
-                const Set::Scalar ds = gu.trace() - nh.dot(gu * nh);
                 Set::Scalar udotF = 0.0;
                 for (int d = 0; d < AMREX_SPACEDIM; ++d) udotF += vel(i,j,k,d) * F(d);
                 // Total energy gains the work done on the fluid (u.F, which
                 // shows up as kinetic) plus the dissipation (internal).
-                const Set::Scalar diss = kap_s * gem * ds * ds;   // >= 0
+                const Set::Scalar diss = (jcv ? keff_v * cfi : kap_s) * gem * ds * ds;   // >= 0
                 E(i,j,k) += dtau * (udotF + diss);
                 // The dissipation is INTERNAL energy, so it must also be split
                 // into the phasic reservoirs, by volume fraction as elsewhere
@@ -6879,7 +7046,7 @@ void Hydro2::RelaxAndReinit(int lev)
     // -> negative -> NaN by ~5e-3 on the driven bubble).  The RHS freezes it
     // in the bulk (see the shell row gate); here it is pinned back to the
     // unstrained value so re-entrained cells always start from Gamma = 1.
-    if (marmottant)
+    if (marmottant || jump_consistent)
     {
         for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
         {
@@ -6962,10 +7129,110 @@ void Hydro2::RelaxAndReinit(int lev)
     }
 
     // ------------------------------------------------------------------
+    // Viscous shell pressure jump (shell.kappa_s_jump, see Parse).
+    // ------------------------------------------------------------------
+    const bool use_vjump = shell_kappa_s_jump && (shell_kappa_s != 0.0 || shell_mu_s != 0.0);
+    const bool use_cjump = (capillary_jump != 0);
+    const bool use_jump  = apply_surface_tension && (use_vjump || use_cjump);
+    const int jc_r = jump_consistent;
+    const Set::Scalar R0_j = jump_R0;
+    const int ifr = (shell_kappa_s_interface == 1 || shell_kappa_s_interface == 3);
+    const Set::Scalar ifcap_r = shell_kappa_s_interface_cap;
+    std::unique_ptr<amrex::MultiFab> jump_mf;
+    if (use_jump)
+    {
+        // Velocity from M/rho needs current ghosts on every face (mirror,
+        // RADIAL; an NSCBC face gets a zero-gradient copy that STEP 5 replaces).
+        // The eta ghosts were filled at the top of FillGhost4BC.
+        FillBoundariesWithBC(lev, relax_time, momentum_bc, { momentum_mf[lev].get() });
+        FillBoundariesWithBC(lev, relax_time, density_bc,  { density_mf[lev].get() });
+        const amrex::BoxArray &ba = eta_mf[lev]->boxArray();
+        const amrex::DistributionMapping &dm = eta_mf[lev]->DistributionMap();
+        amrex::MultiFab vt(ba, dm, AMREX_SPACEDIM, 1), nt(ba, dm, AMREX_SPACEDIM, 1);
+        jump_mf = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+        jump_mf->setVal(0.0);
+        const Set::Scalar *DXj = geom[lev].CellSize();
+        const Set::Scalar sm_j = small;
+        for (amrex::MFIter mfi(vt, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box gb = mfi.growntilebox(1);
+            auto M   = momentum_mf[lev]->const_array(mfi);
+            auto rho = density_mf[lev]->const_array(mfi);
+            auto et  = eta_mf[lev]->const_array(mfi);
+            auto v   = vt.array(mfi);
+            auto n   = nt.array(mfi);
+            amrex::ParallelFor(gb, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                const Set::Scalar rc = std::max(rho(i, j, k), sm_j);
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) v(i, j, k, d) = M(i, j, k, d) / rc;
+                const Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DXj);
+                const Set::Scalar gem = ge.lpNorm<2>();
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) n(i, j, k, d) = (gem > 1.0e-10) ? ge(d) / gem : 0.0;
+            });
+        }
+        const Set::Scalar kmm = use_vjump ? shell_kappa_s - shell_mu_s : 0.0;
+        const Set::Scalar mus = use_vjump ? shell_mu_s : 0.0;
+        const Set::Scalar cut_j = cutoff;
+        const int cj = use_cjump ? 1 : 0;
+        const int marm_j = marmottant;
+        const Set::Scalar sig_j = sigma, chi_j = marmottant_chi, Gb_j = marmottant_Gamma_buck;
+        const Set::Scalar sbrk_j = marmottant_sigma_break, sigw_j = sigma;
+        for (amrex::MFIter mfi(*jump_mf, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bxj = mfi.validbox();
+            auto et = eta_mf[lev]->const_array(mfi);
+            auto v  = vt.const_array(mfi);
+            auto n  = nt.const_array(mfi);
+            auto J  = jump_mf->array(mfi);
+            auto shl = shell_mf[lev]->const_array(mfi);
+            amrex::ParallelFor(bxj, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                const Set::Scalar e = et(i, j, k);
+                if (!(e > cut_j && e < 1.0 - cut_j)) return;
+                Set::Vector nh;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) nh(d) = n(i, j, k, d);
+                if (nh.lpNorm<2>() < 0.5) return;
+                // gu(a,b) = d_a u_b,  Kc(a,b) = d_a n_b
+                Set::Matrix gu = Set::Matrix::Zero(), Kc = Set::Matrix::Zero();
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                {
+                    gu.col(d) = Numeric::Gradient(v, i, j, k, d, DXj);
+                    Kc.col(d) = Numeric::Gradient(n, i, j, k, d, DXj);
+                }
+                const Set::Matrix P = Set::Matrix::Identity() - nh * nh.transpose();
+                const Set::Scalar ds = gu.trace() - nh.dot(gu * nh);
+                Set::Matrix Ts = (kmm * ds) * P;
+                if (mus != 0.0) Ts += (2.0 * mus) * (P * (0.5 * (gu + gu.transpose())) * P);
+                if (jc_r && ifr)
+                {
+                    // viscous part only: same factor as the sub-cycled force
+                    const Set::Scalar Gs = std::max(shl(i, j, k), 0.0);
+                    const Set::Scalar kG = (AMREX_SPACEDIM - 1) * std::pow(Gs, 1.0 / (AMREX_SPACEDIM - 1)) / R0_j;
+                    const Set::Scalar gem = Numeric::Gradient(et, i, j, k, 0, DXj).lpNorm<2>();
+                    Ts *= InterfaceRateFactor(e, gem, kG, ifcap_r);
+                }
+                if (cj)
+                {
+                    // same sigma_eff as the momentum force (Gamma from the shell field)
+                    const Set::Scalar G = marm_j ? shl(i, j, k) : 0.0;
+                    Ts += SigmaEffFromGamma(G, 1.0, marm_j, sig_j, chi_j, Gb_j, sbrk_j, sigw_j) * P;
+                }
+                if (jc_r)
+                {
+                    // grad(n) -> (kappa/(D-1)) P with kappa from Gamma: T_s : grad(n) = kappa tr(T_s)/(D-1)
+                    const Set::Scalar Gs = std::max(shl(i, j, k), 0.0);
+                    const Set::Scalar kG = (AMREX_SPACEDIM - 1) * std::pow(Gs, 1.0 / (AMREX_SPACEDIM - 1)) / R0_j;
+                    J(i, j, k) = kG * Ts.trace() / (AMREX_SPACEDIM - 1);
+                    return;
+                }
+                J(i, j, k) = (Ts.cwiseProduct(Kc)).sum();       // p_gas - p_liq
+            });
+        }
+    }
 
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
+        amrex::Array4<const Set::Scalar> Jarr = use_jump ? jump_mf->const_array(mfi)
+                                                         : amrex::Array4<const Set::Scalar>{};
 
         auto eta   = eta_mf[lev]->array(mfi);
         auto arh0  = rho_eta0_mf[lev]->array(mfi);
@@ -7125,14 +7392,17 @@ void Hydro2::RelaxAndReinit(int lev)
             // dwarfs the convergence test scale (problematic for
             // interface cells with conflicting per-phase pressures).
             // -----------------------------------------------------------
-            const Set::Scalar p_min = -std::min(pi0_, pi1_) + DIV_FLOOR;
+            // Phase-pressure jump: liquid (phase 0) at p, gas (phase 1) at p + Dj.
+            Set::Scalar Dj = use_jump ? Jarr(i, j, k) : 0.0;
+            if (!(Dj == Dj)) Dj = 0.0;
+            const Set::Scalar p_min = std::max(-pi0_, -pi1_ - Dj) + DIV_FLOOR;
 
             // Sch20 eq. 8 mixture pressure as the initial guess --
             // exact for the mechanical-equilibrium IC (p0_pre == p1_pre
             // -> p_init == p_mix == root), and a sensible interpolation
             // for general states.  Bounded away from p=0 by virtue of
             // SG positivity on both pre-relax phases.
-            Set::Scalar p_init = a1 * p0_pre + a2 * p1_pre;
+            Set::Scalar p_init = a1 * p0_pre + a2 * (p1_pre - Dj);
             // Lower bracket: a hair above p_min (avoid the gas v -> inf
             // pole at p -> -pi_gas).  For typical gas/liquid: p_min ~ 0,
             // p_lo ~ small positive.  For all-liquid pair: p_min ~ -pi,
@@ -7145,7 +7415,7 @@ void Hydro2::RelaxAndReinit(int lev)
             auto eval_f = [&](Set::Scalar p) -> Set::Scalar
             {
                 Set::Scalar v0 = Solver::EOS::EOS::RelaxationVolume_SG_SC(p, p0_pre, rho0_pre, gam0, pi0_, DIV_FLOOR);
-                Set::Scalar v1 = Solver::EOS::EOS::RelaxationVolume_SG_SC(p, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
+                Set::Scalar v1 = Solver::EOS::EOS::RelaxationVolume_SG_SC(p + Dj, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
                 return arh0_loc * v0 + arh1_loc * v1 - 1.0;
             };
 
@@ -7158,12 +7428,12 @@ void Hydro2::RelaxAndReinit(int lev)
             for (int it = 0; it < max_iter; ++it)
             {
                 Set::Scalar v0_p = Solver::EOS::EOS::RelaxationVolume_SG_SC(p, p0_pre, rho0_pre, gam0, pi0_, DIV_FLOOR);
-                Set::Scalar v1_p = Solver::EOS::EOS::RelaxationVolume_SG_SC(p, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
+                Set::Scalar v1_p = Solver::EOS::EOS::RelaxationVolume_SG_SC(p + Dj, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
                 Set::Scalar f    = arh0_loc * v0_p + arh1_loc * v1_p - 1.0;
                 f_final = f;
 
                 Set::Scalar dv0 = Solver::EOS::EOS::RelaxationVolume_SG_SC_dvdp(p, p0_pre, rho0_pre, gam0, pi0_, DIV_FLOOR);
-                Set::Scalar dv1 = Solver::EOS::EOS::RelaxationVolume_SG_SC_dvdp(p, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
+                Set::Scalar dv1 = Solver::EOS::EOS::RelaxationVolume_SG_SC_dvdp(p + Dj, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
                 Set::Scalar df  = arh0_loc * dv0 + arh1_loc * dv1;
 
                 if (std::abs(df) < DIV_FLOOR) break;       // bail to bisection
@@ -7265,7 +7535,7 @@ void Hydro2::RelaxAndReinit(int lev)
             else
             {
                 Set::Scalar v0_r = Solver::EOS::EOS::RelaxationVolume_SG_SC(p_relaxed, p0_pre, rho0_pre, gam0, pi0_, DIV_FLOOR);
-                Set::Scalar v1_r = Solver::EOS::EOS::RelaxationVolume_SG_SC(p_relaxed, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
+                Set::Scalar v1_r = Solver::EOS::EOS::RelaxationVolume_SG_SC(p_relaxed + Dj, p1_pre, rho1_pre, gam1, pi1_, DIV_FLOOR);
                 a1_new = arh0_loc * v0_r;
                 a2_new = arh1_loc * v1_r;
                 Set::Scalar asum = a1_new + a2_new;
@@ -7290,8 +7560,17 @@ void Hydro2::RelaxAndReinit(int lev)
             // is why the E_vol - KE grep did not surface it.
             Set::Scalar rho_e   = std::max(E_(i, j, k) - ke, small_loc);
 
-            Set::Scalar p_reinit = Solver::EOS::EOS::ReinitMixturePressure(rho_e, a1_new, a2_new,
+            // rho_e = a1 (p + g0 pi0)/(g0-1) + a2 (p + Dj + g1 pi1)/(g1-1): the
+            // equal-pressure reinit of rho_e - a2 Dj/(g1-1) gives the liquid p.
+            if (relax_failed) Dj = 0.0;
+            Set::Scalar p_reinit = Solver::EOS::EOS::ReinitMixturePressure(rho_e - a2_new * Dj / (gam1 - 1.0), a1_new, a2_new,
                                                                           gam0, pi0_, gam1, pi1_, small_loc);
+            if (Dj != 0.0 && (p_reinit + pi0_ <= small_loc || p_reinit + Dj + pi1_ <= small_loc))
+            {
+                Dj = 0.0;   // a phase would leave its EOS range: equal pressures here
+                p_reinit = Solver::EOS::EOS::ReinitMixturePressure(rho_e, a1_new, a2_new,
+                                                                   gam0, pi0_, gam1, pi1_, small_loc);
+            }
 
             // Floor: keep p + gam_k pi_k > 0 for both phases (SG positivity).
             const Set::Scalar p_min_ph = -std::min(pi0_, pi1_) + small_loc;
@@ -7313,7 +7592,7 @@ void Hydro2::RelaxAndReinit(int lev)
             // -----------------------------------------------------------
             eta(i, j, k) = a1_new;
             E0_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_reinit, a1_new, gam0, pi0_, small_loc);
-            E1_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_reinit, a2_new, gam1, pi1_, small_loc);
+            E1_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_reinit + Dj, a2_new, gam1, pi1_, small_loc);
 
             // rho_eta{0,1}, momentum, energy_per_vol are NOT touched
             // (they are conserved through relaxation by construction).

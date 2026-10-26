@@ -765,6 +765,14 @@ protected:
     int mu_mix = 0;                    // 0 arithmetic, 1 harmonic shear-viscosity mixing (see Parse)
     int shell_kappa_s_liqweight = 0;   // n: viscous shell stress weighted by (n+1) eta^n (0 = uniform; see Parse)
     int shell_kappa_s_narrow = 0;      // m: viscous shell stress weighted by (eta(1-eta))^m/B(m+1,m+1) (see Parse)
+    int jump_consistent = 0;           // 1: jump curvature from Gamma, normal force -Delta grad(eta) (see Parse)
+    int jump_tangential = 1;
+    int shell_kappa_s_interface = 0;
+    Set::Scalar shell_kappa_s_interface_cap = 1.0;  // max kappa d/(D-1) in InterfaceRateFactor   // jump.consistent: rescale the viscous jump to the eta=0.5 surface (see Parse)           // jump.consistent: keep the tangential part of the tensor force
+    Set::Scalar jump_R0 = 0.0;         // radius at which Gamma = 1 (jump.R0, default marmottant.R0)
+    int capillary_jump = 0;            // 1: static tension sigma_eff also imposed as a phase-pressure jump (see Parse)
+    int shell_kappa_s_jump = 0;        // 1: normal viscous shell stress also imposed as a phase-pressure jump in RelaxAndReinit (see Parse)
+    Set::Scalar relax_time = 0.0;      // time of the current RelaxAndReinit call (BC fills inside it)
     int relax_diag = 0;
     int clip_ghost_only = 0;
     bool sym_face_lo[3] = {false, false, false};
