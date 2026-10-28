@@ -191,7 +191,6 @@ protected:
     // per-stage FillGhost4BC does NOT fire the relaxation.  Schmidmayer applies
     // L_relax once per step, after L_cap -- not between RK stages.
     bool defer_relax = false;
-    int pressure_relax = 1;   // 0 = skip pressure relaxation + reinit in RelaxAndReinit (rule-out test)
 
     // Marmottant advected shell: preserve the AREAL density Gamma = c/|grad eta|
     // across NON-MATERIAL changes to eta (stiff pressure relaxation, clamping to
@@ -515,7 +514,6 @@ protected:
     Set::Scalar Mob_user = NAN;
     Set::Scalar small=NAN;
     Set::Scalar cutoff=NAN;
-    int trace_volume_relax = 0;   // guard cells: trace phase follows its own isentrope (see Parse)
     Set::Scalar lagrange=NAN;
 
     // Booleans
@@ -534,7 +532,7 @@ protected:
     // the two fields agree to within 0.5% of the drift itself --
     //   liquid mass 9.06e-8 vs 9.11e-8, energy 1.022e-7 vs 1.027e-7,
     //   |u|max 9.47e-4 vs 9.45e-4 m/s, radius -3.34e-5 vs -3.36e-5 %.
-    // eta is therefore the default; set capillary_use_eta = 0 to recover c.
+    // eta is the only path (capillary_use_eta was removed 2026-10-27).
     //
     // TODO(DELETE THE COLOUR FUNCTION): c is no longer needed and should be
     // removed.  The decision is made; what is left is the mechanical work of
@@ -565,7 +563,6 @@ protected:
     // The two confirmations above are no longer gates on correctness -- with
     // the closure gone there is only one capillary path -- but they are still
     // worth having before the fields are deleted, as a regression baseline.
-    int capillary_use_eta = 1;
 
     // ------------------------------------------------------------------
     // BOUSSINESQ--SCRIVEN INTERFACIAL (SHELL) VISCOSITY
@@ -610,7 +607,6 @@ protected:
     // surface-divergence source vanishes in the bulk by construction.
     // Sweeps of the Gamma normal-extension relaxation per step (0 = off).
     // Enforces n.grad(Gamma) = 0 so every band cell carries one surface value.
-    int shell_gate_free = 1;
     int shell_bulk_extend = 1;
     Set::Scalar shell_kappa_s = 0.0;   // surface dilatational viscosity [kg/s]
     Set::Scalar shell_mu_s    = 0.0;   // surface shear viscosity [kg/s] -- NOT APPLIED
@@ -704,7 +700,6 @@ protected:
 
     // Interface Compression Stuff
     std::vector<int> step_counter; // Track steps per level
-    Set::Scalar omega_relax = 0.5;
 
     // IC pressure equalization (Mix() formula switch).
     //   0 = legacy linear alpha-weighted average:  p_mix = a0*p_0 + a1*p_1
@@ -756,19 +751,12 @@ protected:
     int nan_check = 0;
     int verbose = 0;
     int eta_consistent_advect = 1;  // 1 = limiter face-alpha row (default); 0 = donor cell (see Parse)
-    int shell_visc_subcycle = 0;      // sub-cycle kappa_s (0 = dt-limited path; see Parse)
+    int shell_visc_subcycle = 0;      // = visc_subcycle: sub-cycle kappa_s with the bulk viscosity (see Parse)
     int shell_visc_subcycle_max = 512; // hard cap on sub-steps (runaway guard)
     int shell_visc_verbose = 0;        // print N and nu_s each sub-cycle
     Set::Scalar shell_nus_rho_floor = 1.0;  // density floor for the nu_s estimate
-    int shell_kappa_s_area_rate = 0;   // 1 = add kappa_s n.grad(S) to Omega_visc (wrong-sign jump; see Parse)
-    Set::Scalar mu_mix_p = 2.0;        // exponent for mu_mix = 2
-    int mu_mix = 0;                    // 0 arithmetic, 1 harmonic shear-viscosity mixing (see Parse)
-    int shell_kappa_s_liqweight = 0;   // n: viscous shell stress weighted by (n+1) eta^n (0 = uniform; see Parse)
-    int shell_kappa_s_narrow = 0;      // m: viscous shell stress weighted by (eta(1-eta))^m/B(m+1,m+1) (see Parse)
     int jump_consistent = 0;           // 1: jump curvature from Gamma, normal force -Delta grad(eta) (see Parse)
-    int jump_tangential = 1;
-    int shell_kappa_s_interface = 0;
-    Set::Scalar shell_kappa_s_interface_cap = 1.0;  // max kappa d/(D-1) in InterfaceRateFactor   // jump.consistent: rescale the viscous jump to the eta=0.5 surface (see Parse)           // jump.consistent: keep the tangential part of the tensor force
+    int jump_tangential = 1;           // jump.consistent: keep the tangential part of the tensor force
     Set::Scalar jump_R0 = 0.0;         // radius at which Gamma = 1 (jump.R0, default marmottant.R0)
     int capillary_jump = 0;            // 1: static tension sigma_eff also imposed as a phase-pressure jump (see Parse)
     int shell_kappa_s_jump = 0;        // 1: normal viscous shell stress also imposed as a phase-pressure jump in RelaxAndReinit (see Parse)

@@ -82,7 +82,7 @@ def km(kv, kappa, R0, t):
     p_inf = float(kv["pressure0.ic.expression.constant.p_inf"])
     p_b = float(kv["pressure1.ic.expression.constant.p_b"])
     c = np.sqrt(g * (p_inf + pi) / rho)
-    sh = Shell(chi=0.0, sigma_water=0.0, kappa_s=kappa)
+    sh = Shell(chi=0.0, sigma_water=float(kv.get("sigma", 0.0)), kappa_s=kappa)
     liq = Liquid(rho=rho, mu=0.0, c=c, p_inf=p_inf)
     gas = Gas(p_g0=p_b, kappa_g=float(kv["eos1.gamma"]))
     tt, RR, _ = solve_km(R0, 0.0, (0.0, t[-1]), sh, liq, gas, t_eval=t)
