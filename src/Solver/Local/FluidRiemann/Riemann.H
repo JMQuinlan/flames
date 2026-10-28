@@ -128,6 +128,13 @@ struct Flux
     // u_interface.  Filled by Hydro2's compute_face; read only when
     // eta_consistent_advect = 1 (the default -- see Hydro2::Parse).
     Set::Scalar alpha_face       = 0.0;
+    // 7-equation model only (Hydro2 model = 7): PHASE-0 share of the momentum
+    // and total-energy fluxes (phase 1 = mixture value minus these).  Filled by
+    // Hydro2's compute_face from PhaseHLLC; zero otherwise.
+    Set::Scalar mom0_normal      = 0.0;
+    Set::Scalar mom0_tangent     = 0.0;
+    Set::Scalar mom0_tangent2    = 0.0;
+    Set::Scalar energy_total0    = 0.0;
 
     Flux() = default;
 

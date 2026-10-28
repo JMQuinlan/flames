@@ -59,6 +59,21 @@ namespace Integrator
 // step with eta.  Both helpers mirror the sigma_eff evaluation in RHS
 // exactly; keep them in sync if the Marmottant branch structure changes.
 // ----------------------------------------------------------------------
+// 7-equation model: a cell carries a drift (two velocities) only where BOTH
+// phases are above the eta cutoff -- the rule the pressure relaxation already
+// uses to skip near-pure cells.  Below it the trace phase's velocity
+//     u_k = u +/- m_rel rho / ((alpha rho)_0 (alpha rho)_1)
+// divides a roundoff-sized drift by Y_0 Y_1 -> 0, and with weak or no drag it
+// grows without bound (measured: no-drag Garrick, NaN at t = 0.024 with only the
+// Y_0 Y_1 > 1e-10 test).  In such cells the trace phase moves with the mixture
+// (instantaneous drag), and the drift is zeroed at every relaxation.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+static bool DriftCell(Set::Scalar a0, Set::Scalar a1, Set::Scalar eta, Set::Scalar cut)
+{
+    const Set::Scalar rr = a0 + a1;
+    return eta > cut && eta < 1.0 - cut && a0 * a1 > 1.0e-10 * rr * rr;
+}
+
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 static Set::Scalar SigmaEffFromGamma(Set::Scalar Gamma, Set::Scalar grad_eta_mag,
                                      int marm, Set::Scalar sig_const,
@@ -191,6 +206,28 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // [0,1] below.
         // 0 = first-order donor-cell face value (the pre-2026-10-10 default).
         pp_query_default("eta_consistent_advect", value.eta_consistent_advect, 1);
+        // model (default 6).  6 = the one-velocity, two-pressure model
+        // (Saurel-Petitpas-Berry 2009 / Schmidmayer 2020).  7 = the two-velocity,
+        // two-pressure model (Baer-Nunziato 1986, numerics after Saurel-Abgrall
+        // JCP 150, 1999): each phase is advanced with its own HLLC flux and the
+        // interfacial terms p_I grad(alpha), p_I u_I.grad(alpha), with
+        // u_I = mixture (centre-of-mass) velocity and p_I = mixture pressure.
+        // See Hydro2.H (drift_mf) and RHS for the discretisation.
+        pp_query_validate("model", value.model, {6, 7});
+        // seven.lambda: velocity-relaxation (drag) coefficient [kg m^-3 s^-1].
+        // < 0 (default) instantaneous, 0 off, > 0 finite drag (see Hydro2.H).
+        pp_query_default("seven.lambda", value.seven_lambda, -1.0);
+        // seven.pressure_relax (default 1): 0 = no pressure relaxation and no rho E
+        // reinit (model = 7 only).  The phase internal energies are then the
+        // energy primaries: they keep separate pressures, and rho E is rebuilt
+        // from them (FillGhost4BC STEP 7), so total energy is conserved only to
+        // the truncation error of the non-conservative internal-energy rows.
+        pp_query_validate("seven.pressure_relax", value.seven_pressure_relax, {1, 0});
+        if (value.model != 7 && !value.seven_pressure_relax)
+            Util::Abort(INFO, "seven.pressure_relax = 0 needs model = 7.");
+        if (value.model == 7 && !value.eta_consistent_advect)
+            Util::Abort(INFO, "model = 7 needs eta_consistent_advect = 1: the phase fluxes and the "
+                              "interfacial terms must share the limiter face alpha (Abgrall condition).");
         // omega_sym_mirror (default 1, 2026-10-02).  The capillary/shell force at
         // the first cell next to a symmetry (REFLECT) face is a central
         // difference that reads Omega in the ghost cell across the face.  That
@@ -995,6 +1032,10 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.energy_per_mas_old_mf,   value.energy_bc,    1, nghost,  "energy_mas_old",   false,true);
         value.RegisterNewFab(value.momentum_mf,             value.momentum_bc,  AMREX_SPACEDIM, nghost,  "momentum",         true, true, { AMREX_D_DECL("x", "y", "z") });
         value.RegisterNewFab(value.momentum_old_mf,         value.momentum_bc,  AMREX_SPACEDIM, nghost,  "momentum_old",     false,true, { AMREX_D_DECL("x", "y", "z") });
+        // 7-equation drift momentum (Hydro2.H).  The BC object only serves the
+        // coarse-fine FillPatch; physical faces are set by FillDriftGhosts.
+        value.RegisterNewFab(value.drift_mf,     &value.neumann_bc_D, AMREX_SPACEDIM, nghost, "drift",     value.model == 7, true, { AMREX_D_DECL("x", "y", "z") });
+        value.RegisterNewFab(value.drift_old_mf, &value.neumann_bc_D, AMREX_SPACEDIM, nghost, "drift_old", false,            true, { AMREX_D_DECL("x", "y", "z") });
 
         // SOURCES
         value.RegisterNewFab(value.m0_mf,          &value.bc_nothing,   1, 0,       "m0",               false,false);
@@ -1177,6 +1218,9 @@ void Hydro2::Initialize(int lev)
     velocity1_mf[lev]->setVal(0.0);
     momentum0_mf[lev]->setVal(0.0);
     momentum1_mf[lev]->setVal(0.0);
+    // 7-equation drift momentum: the phases start in velocity equilibrium.
+    drift_mf[lev]->setVal(0.0);
+    drift_old_mf[lev]->setVal(0.0);
 
     // FLUID 0
     velocity0_ic    ->Initialize(lev, velocity0_mf, 0.0);
@@ -1388,6 +1432,8 @@ void Hydro2::Mix(int lev)
         Set::Patch<Set::Scalar>         rho_old     = density_old_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         M           = momentum_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         M_old       = momentum_old_mf.Patch(lev, mfi);
+        Set::Patch<Set::Scalar>         drf_ic      = drift_mf.Patch(lev, mfi);
+        const int seven_ic = (model == 7);
         Set::Patch<Set::Scalar>         E_vol       = energy_per_vol_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         E_mas       = energy_per_mas_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar>         E_vol_old   = energy_per_vol_old_mf.Patch(lev, mfi);
@@ -1452,6 +1498,25 @@ void Hydro2::Mix(int lev)
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
                 M_old(i, j, k, d) = M(i, j, k, d);
 
+            // 7-equation model: the two phase velocity ICs give the drift
+            // m_rel = (alpha rho)_0 v_0 - Y_0 M = rho Y_0 Y_1 (v_0 - v_1); its
+            // kinetic energy is added to rho E below.  (model = 6 keeps only M:
+            // the phases start in velocity equilibrium at the mixture velocity.)
+            Set::Scalar ke_rel_ic = 0.0;
+            if (seven_ic)
+            {
+                const Set::Scalar a0 = std::max(rho_eta0(i, j, k), 0.0), a1r = std::max(rho_eta1(i, j, k), 0.0);
+                const Set::Scalar rr = a0 + a1r;
+                Set::Scalar m2 = 0.0;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                {
+                    drf_ic(i, j, k, d) = (rr > 0.0) ? a0 * v0(i, j, k, d) - (a0 / rr) * M(i, j, k, d) : 0.0;
+                    m2 += drf_ic(i, j, k, d) * drf_ic(i, j, k, d);
+                }
+                if (DriftCell(a0, a1r, eta(i, j, k), cutoff)) ke_rel_ic = 0.5 * m2 * rr / (a0 * a1r);
+                else for (int d = 0; d < AMREX_SPACEDIM; ++d) drf_ic(i, j, k, d) = 0.0;
+            }
+
             // Mixture velocity (diagnostic):
             for (int d = 0; d < AMREX_SPACEDIM; ++d)
                 v(i, j, k, d) = M(i, j, k, d) / std::max(rho(i, j, k), small);
@@ -1508,7 +1573,7 @@ void Hydro2::Mix(int lev)
 
             // Redundant total energy rho E (Schmidmayer 2020 eq. 16), plus the
             // capillary energy when the closure is on (Schmidmayer 2017).
-            E_vol(i, j, k)     = KE_vol(i, j, k) + UE_vol(i, j, k);
+            E_vol(i, j, k)     = KE_vol(i, j, k) + UE_vol(i, j, k) + ke_rel_ic;
             E_vol_old(i, j, k) = E_vol(i, j, k);
             E_mas(i, j, k)     = KE_mas(i, j, k) + UE_mas(i, j, k);
             E_mas_old(i, j, k) = E_mas(i, j, k);
@@ -1627,6 +1692,7 @@ Hydro2::RHS(int lev,
     amrex::MultiFab &E1_rhs_mf,
     amrex::MultiFab &shell_rhs_mf,
     amrex::MultiFab &cfun_rhs_mf,
+    amrex::MultiFab &drift_rhs_mf,
     const amrex::MultiFab &rho_eta0_mf_in,
     const amrex::MultiFab &rho_eta1_mf_in,
     const amrex::MultiFab &M_mf_in,
@@ -1635,7 +1701,8 @@ Hydro2::RHS(int lev,
     const amrex::MultiFab &E0_mf_in,
     const amrex::MultiFab &E1_mf_in,
     const amrex::MultiFab &shell_mf_in,
-    const amrex::MultiFab &cfun_mf_in)
+    const amrex::MultiFab &cfun_mf_in,
+    const amrex::MultiFab &drift_mf_in)
 {
     BL_PROFILE("Integrator::Hydro2::RHS");
 
@@ -1654,6 +1721,9 @@ Hydro2::RHS(int lev,
     shell_mf[lev]->FillBoundary(geom[lev].periodicity());
     amrex::MultiFab::Copy(*cfun_mf[lev],           cfun_mf_in,     0, 0, 1,              0);
     cfun_mf[lev]->FillBoundary(geom[lev].periodicity());
+    // 7-equation drift momentum; ghosts are set at the end of FillGhost4BC.
+    amrex::MultiFab::Copy(*drift_mf[lev],          drift_mf_in,    0, 0, AMREX_SPACEDIM, 0);
+    drift_rhs_mf.setVal(0.0);
 
     // Eta Fields
 
@@ -2177,6 +2247,14 @@ Hydro2::RHS(int lev,
         Set::Patch<const Set::Scalar> cfun  = cfun_mf.Patch(lev, mfi);
         Set::Patch<Set::Scalar> E0_rhs      = E0_rhs_mf.array(mfi);    // per-phase internal energy
         Set::Patch<Set::Scalar> E1_rhs      = E1_rhs_mf.array(mfi);
+
+        // 7-EQUATION MODEL (model = 7): drift momentum and its row.
+        const int seven = (model == 7);
+        auto drift     = drift_mf[lev]->const_array(mfi);
+        auto drift_rhs = drift_rhs_mf.array(mfi);
+        const Set::Scalar gam0_7 = eos0.Gamma(), pi0_7 = eos0.P0();
+        const Set::Scalar gam1_7 = eos1.Gamma(), pi1_7 = eos1.P0();
+        // Single-phase cells (DriftCell) carry no drift velocity.
 
         // PER-PHASE INTERNAL ENERGIES (canonical primaries)
         Set::Patch<const Set::Scalar> E0_arr = energy0_mf.Patch(lev, mfi);
@@ -2762,6 +2840,92 @@ Hydro2::RHS(int lev,
                 // Reconstructed alpha upwinded on the contact speed; read by the
                 // alpha row when eta_consistent_advect = 1 (default).
                 fl_.alpha_face = (fl_.u_interface > 0.0) ? pL.alpha : pR.alpha;
+
+                // ----------------------------------------------------------
+                // 7-EQUATION PHASE FLUXES.  The mixture solve above supplies
+                // the interface velocity u* (u_interface) and the face volume
+                // fraction alpha_f (alpha_face), which the alpha row uses as in
+                // the 6-equation model.  Each phase is then advanced with its
+                // OWN HLLC flux, F_k = alpha_f,k f_k(rho_k, u_k, p), with
+                // alpha_f,0 = alpha_f and alpha_f,1 = 1 - alpha_f (PhaseHLLC.H).
+                // Face states: the limiter-reconstructed pure densities and
+                // mixture pressure (the 6-eq primitive set; the phases share p
+                // after every pressure relaxation) and the phase velocities
+                //     u_0 = u + Y_1 w,  u_1 = u - Y_0 w,
+                // from the reconstructed mixture velocity u and drift velocity
+                // w = u_0 - u_1 (reconstructed componentwise, passive).
+                // ----------------------------------------------------------
+                if (seven)
+                {
+                    Solver::Local::Limiter::Primitive wp[6];
+                    for (int s = -2; s <= 3; ++s)
+                    {
+                        const int ii = lo_i + s * di, jj = lo_j + s * dj, kk = lo_k + s * dk;
+                        const Set::Scalar ar0 = std::max(rho_eta0(ii, jj, kk), 0.0);
+                        const Set::Scalar ar1 = std::max(rho_eta1(ii, jj, kk), 0.0);
+                        const Set::Scalar rr  = ar0 + ar1;
+                        // w = m_rel rho / ((alpha rho)_0 (alpha rho)_1)
+                        const Set::Scalar inv = DriftCell(ar0, ar1, eta(ii, jj, kk), cutoff) ? rr / (ar0 * ar1) : 0.0;
+                        wp[s + 2].u = drift(ii, jj, kk, dir) * inv;
+                        wp[s + 2].v = drift(ii, jj, kk, (dir + 1) % AMREX_SPACEDIM) * inv;
+#if AMREX_SPACEDIM == 3
+                        wp[s + 2].w = drift(ii, jj, kk, (dir + 2) % AMREX_SPACEDIM) * inv;
+#endif
+                    }
+                    Solver::Local::Limiter::Primitive wstL[5] = { wp[0], wp[1], wp[2], wp[3], wp[4] };
+                    Solver::Local::Limiter::Primitive wstR[5] = { wp[5], wp[4], wp[3], wp[2], wp[1] };
+                    const Solver::Local::Limiter::Primitive wL = limiter->ReconstructPassive(wstL);
+                    const Solver::Local::Limiter::Primitive wR = limiter->ReconstructPassive(wstR);
+
+                    auto phase_states = [&](const Solver::Local::Limiter::Primitive &pr,
+                                            const Solver::Local::Limiter::Primitive &wr,
+                                            Solver::Local::FluidRiemann::PhaseState &s0,
+                                            Solver::Local::FluidRiemann::PhaseState &s1)
+                    {
+                        const Set::Scalar a   = std::min(std::max(pr.alpha, 0.0), 1.0);
+                        const Set::Scalar r0  = std::max(pr.alpha_rho_0, 0.0);   // pure densities
+                        const Set::Scalar r1  = std::max(pr.alpha_rho_1, 0.0);
+                        const Set::Scalar ar0 = a * r0, ar1 = (1.0 - a) * r1;
+                        const Set::Scalar Y0  = (ar0 + ar1 > 0.0) ? ar0 / (ar0 + ar1) : a;
+                        const Set::Scalar Y1  = 1.0 - Y0;
+                        s0.rho = r0;                  s1.rho = r1;
+                        s0.un  = pr.u + Y1 * wr.u;    s1.un  = pr.u - Y0 * wr.u;
+                        s0.ut  = pr.v + Y1 * wr.v;    s1.ut  = pr.v - Y0 * wr.v;
+                        s0.ut2 = pr.w + Y1 * wr.w;    s1.ut2 = pr.w - Y0 * wr.w;
+                        s0.p   = pr.p_mix;            s1.p   = pr.p_mix;
+                    };
+                    Solver::Local::FluidRiemann::PhaseState s0L, s1L, s0R, s1R;
+                    phase_states(pL, wL, s0L, s1L);
+                    phase_states(pR, wR, s0R, s1R);
+                    // Phase contact speeds: the interface speed u* plus each
+                    // phase's share of the drift, from the side alpha_face is
+                    // taken from (PhaseHLLC.H explains why).
+                    const bool up_L = (fl_.u_interface > 0.0);
+                    const Solver::Local::FluidRiemann::PhaseState &u0s = up_L ? s0L : s0R;
+                    const Solver::Local::FluidRiemann::PhaseState &u1s = up_L ? s1L : s1R;
+                    const Set::Scalar uf = up_L ? pL.u : pR.u;     // mixture normal velocity
+                    const Set::Scalar S0 = fl_.u_interface + (u0s.un - uf);
+                    const Set::Scalar S1 = fl_.u_interface + (u1s.un - uf);
+                    const Solver::Local::FluidRiemann::PhaseFlux f0 =
+                        Solver::Local::FluidRiemann::PhaseHLLC(s0L, s0R, gam0_7, pi0_7, small, S0);
+                    const Solver::Local::FluidRiemann::PhaseFlux f1 =
+                        Solver::Local::FluidRiemann::PhaseHLLC(s1L, s1R, gam1_7, pi1_7, small, S1);
+
+                    // Same clamp as the alpha row's a_face, so the interfacial
+                    // terms difference exactly the alpha_f carried by the fluxes.
+                    const Set::Scalar af = std::min(std::max(fl_.alpha_face, 0.0), 1.0);
+                    const Set::Scalar bf = 1.0 - af;
+                    fl_.mass0             = af * f0.mass;
+                    fl_.mass1             = bf * f1.mass;
+                    fl_.mom0_normal       = af * f0.mom_n;
+                    fl_.mom0_tangent      = af * f0.mom_t;
+                    fl_.mom0_tangent2     = af * f0.mom_t2;
+                    fl_.energy_total0     = af * f0.energy;
+                    fl_.momentum_normal   = fl_.mom0_normal   + bf * f1.mom_n;
+                    fl_.momentum_tangent  = fl_.mom0_tangent  + bf * f1.mom_t;
+                    fl_.momentum_tangent2 = fl_.mom0_tangent2 + bf * f1.mom_t2;
+                    fl_.energy_total      = fl_.energy_total0 + bf * f1.energy;
+                }
                 return fl_;
             };
 
@@ -2802,6 +2966,10 @@ Hydro2::RHS(int lev,
                     f.energy_total = 0.0;
                     f.energy0 = 0.0;
                     f.energy1 = 0.0;
+                    // 7-equation phase-0 shares (mom0_normal keeps its pressure part).
+                    f.mom0_tangent  = 0.0;
+                    f.mom0_tangent2 = 0.0;
+                    f.energy_total0 = 0.0;
                     // u* = 0 is exact at the symmetry plane, and u_interface is
                     // the ONLY quantity the eta/E0/E1 non-conservative rows read
                     // from this flux.  Leaving its roundoff residual while
@@ -3363,6 +3531,80 @@ Hydro2::RHS(int lev,
             E1_rhs(i, j, k) = (E1_flux_div - a2_C * p1_C * div_u);
 
             // ------------------------------------------------------------
+            // 7-EQUATION ROWS (model = 7).  Phase k, hyperbolic part only:
+            //   R_m,k = -div(F_mass,k)
+            //   R_M,k = -div(F_mom,k) + s_k p_I grad_h(alpha)
+            //   R_E,k = -div(F_E,k)   + s_k p_I u_I . grad_h(alpha)
+            // s_0 = +1, s_1 = -1, grad_h(alpha) differences the SAME face
+            // alpha_f the phase fluxes carry, p_I = mixture pressure, u_I =
+            // mixture velocity.  The two interfacial terms cancel in the sum, so
+            // the mixture rows above (sums of the phase fluxes) stay
+            // conservative.  The per-phase INTERNAL energies follow from the
+            // total-energy rows by the chain rule,
+            //   R_e,k = R_E,k - u_k . R_M,k + |u_k|^2 R_m,k / 2,
+            // and, as in the 6-equation model, carry no body/viscous source --
+            // the post-stage reinit redistributes rho E between the phases.
+            // The drift row is d/dt[(alpha rho u)_0 - Y_0 M] from the same
+            // hyperbolic rows; body and viscous forces act on M alone and so
+            // drop out of it (they are shared by mass fraction).
+            // ------------------------------------------------------------
+            if (seven)
+            {
+                Set::Vector ga;     // grad_h(alpha) from the shared face alpha
+                ga(0) = (a_face_xhi - a_face_xlo) / DX[0];
+                ga(1) = (a_face_yhi - a_face_ylo) / DX[1];
+#if AMREX_SPACEDIM == 3
+                ga(2) = (a_face_zhi - a_face_zlo) / DX[2];
+#endif
+                const Set::Scalar pI = a1_C * p0_C + a2_C * p1_C;
+
+                const Set::Scalar ar0 = std::max(rho_eta0(i, j, k), 0.0);
+                const Set::Scalar ar1 = std::max(rho_eta1(i, j, k), 0.0);
+                const Set::Scalar rr  = std::max(ar0 + ar1, small);
+                const Set::Scalar Y0c = ar0 / rr, Y1c = 1.0 - Y0c;
+                Set::Vector Mc, wc;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) Mc(d) = M(i, j, k, d);
+                const Set::Vector uI = Mc / rr;
+                const Set::Scalar winv = DriftCell(ar0, ar1, eta(i, j, k), cutoff) ? rr / (ar0 * ar1) : 0.0;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) wc(d) = drift(i, j, k, d) * winv;
+                const Set::Vector u0c = uI + Y1c * wc;
+                const Set::Vector u1c = uI - Y0c * wc;
+
+                // Phase-0 momentum flux divergence, same cyclic normal/tangent
+                // mapping as M_flux above.
+                Set::Vector RM0 = Set::Vector::Zero();
+                RM0(0)                  += (flux_xlo.mom0_normal  - flux_xhi.mom0_normal ) / DX[0];
+                RM0(1 % AMREX_SPACEDIM) += (flux_xlo.mom0_tangent - flux_xhi.mom0_tangent) / DX[0];
+                RM0(1)                  += (flux_ylo.mom0_normal  - flux_yhi.mom0_normal ) / DX[1];
+                RM0(2 % AMREX_SPACEDIM) += (flux_ylo.mom0_tangent - flux_yhi.mom0_tangent) / DX[1];
+#if AMREX_SPACEDIM == 3
+                RM0(2) += (flux_xlo.mom0_tangent2 - flux_xhi.mom0_tangent2) / DX[0];
+                RM0(0) += (flux_ylo.mom0_tangent2 - flux_yhi.mom0_tangent2) / DX[1];
+                RM0(2) += (flux_zlo.mom0_normal   - flux_zhi.mom0_normal  ) / DX[2];
+                RM0(0) += (flux_zlo.mom0_tangent  - flux_zhi.mom0_tangent ) / DX[2];
+                RM0(1) += (flux_zlo.mom0_tangent2 - flux_zhi.mom0_tangent2) / DX[2];
+#endif
+                RM0 += pI * ga;
+                Set::Vector RMh;    // mixture hyperbolic momentum row (no sources)
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) RMh(d) = M_flux(i, j, k, d);
+                const Set::Vector RM1 = RMh - RM0;
+
+                const Set::Scalar RE0 = AMREX_D_TERM(
+                                          (flux_xlo.energy_total0 - flux_xhi.energy_total0) / DX[0],
+                                        + (flux_ylo.energy_total0 - flux_yhi.energy_total0) / DX[1],
+                                        + (flux_zlo.energy_total0 - flux_zhi.energy_total0) / DX[2])
+                                      + pI * uI.dot(ga);
+                const Set::Scalar RE1 = E_flux(i, j, k) - RE0;
+
+                E0_rhs(i, j, k) = RE0 - u0c.dot(RM0) + 0.5 * u0c.squaredNorm() * rho_eta0_flux;
+                E1_rhs(i, j, k) = RE1 - u1c.dot(RM1) + 0.5 * u1c.squaredNorm() * rho_eta1_flux;
+
+                const Set::Scalar dY0 = (rho_eta0_flux - Y0c * (rho_eta0_flux + rho_eta1_flux)) / rr;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    drift_rhs(i, j, k, d) = RM0(d) - Y0c * RMh(d) - Mc(d) * dY0;
+            }
+
+            // ------------------------------------------------------------
             // Artificial heat exchange (AHE) -- Schmidmayer 2020 eq. 13
             // r-source on per-phase internal energies:
             //     E0_rhs += -mu p_I (p_0 - p_1)
@@ -3618,6 +3860,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     std::swap(energy1_old_mf[lev],         energy1_mf[lev]);
     std::swap(shell_old_mf[lev],           shell_mf[lev]);
     std::swap(cfun_old_mf[lev],            cfun_mf[lev]);
+    std::swap(drift_old_mf[lev],           drift_mf[lev]);
 
     // ------------------------------------------------------------
     // Time Integration
@@ -3642,6 +3885,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     solution_new.emplace_back(*energy1_mf[lev].get(),           amrex::MakeType::make_alias, 0, 1);
     solution_new.emplace_back(*shell_mf[lev].get(),             amrex::MakeType::make_alias, 0, 1);
     solution_new.emplace_back(*cfun_mf[lev].get(),              amrex::MakeType::make_alias, 0, 1);
+    solution_new.emplace_back(*drift_mf[lev].get(),             amrex::MakeType::make_alias, 0, AMREX_SPACEDIM);
 
     amrex::Vector<amrex::MultiFab> solution_old;
     solution_old.emplace_back(*rho_eta0_old_mf[lev].get(),      amrex::MakeType::make_alias, 0, 1);
@@ -3653,6 +3897,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     solution_old.emplace_back(*energy1_old_mf[lev].get(),       amrex::MakeType::make_alias, 0, 1);
     solution_old.emplace_back(*shell_old_mf[lev].get(),         amrex::MakeType::make_alias, 0, 1);
     solution_old.emplace_back(*cfun_old_mf[lev].get(),          amrex::MakeType::make_alias, 0, 1);
+    solution_old.emplace_back(*drift_old_mf[lev].get(),         amrex::MakeType::make_alias, 0, AMREX_SPACEDIM);
 
     amrex::TimeIntegrator timeintegrator(solution_new, time);
 
@@ -3663,8 +3908,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         // rhs_mf:      [0]=rho_eta0_rhs, [1]=rho_eta1_rhs, [2]=M_rhs, [3]=E_rhs, [4]=eta_rhs, [5]=E0_rhs, [6]=E1_rhs, [7]=shell_rhs
         // solution_mf: [0]=rho_eta0,     [1]=rho_eta1,     [2]=M,     [3]=E,     [4]=eta,     [5]=E0,     [6]=E1,     [7]=shell
         RHS(lev, time,
-            rhs_mf[0], rhs_mf[1], rhs_mf[2], rhs_mf[3], rhs_mf[4], rhs_mf[5], rhs_mf[6], rhs_mf[7], rhs_mf[8],
-            solution_mf[0], solution_mf[1], solution_mf[2], solution_mf[3], solution_mf[4], solution_mf[5], solution_mf[6], solution_mf[7], solution_mf[8]);
+            rhs_mf[0], rhs_mf[1], rhs_mf[2], rhs_mf[3], rhs_mf[4], rhs_mf[5], rhs_mf[6], rhs_mf[7], rhs_mf[8], rhs_mf[9],
+            solution_mf[0], solution_mf[1], solution_mf[2], solution_mf[3], solution_mf[4], solution_mf[5], solution_mf[6], solution_mf[7], solution_mf[8], solution_mf[9]);
     });
 
     timeintegrator.set_post_stage_action([&](amrex::Vector<amrex::MultiFab> &stage_mf, Set::Scalar time) {
@@ -3678,6 +3923,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         amrex::MultiFab::Copy(*energy1_mf[lev],        stage_mf[6], 0, 0, 1,              nghost);
         amrex::MultiFab::Copy(*shell_mf[lev],          stage_mf[7], 0, 0, 1,              nghost);
         amrex::MultiFab::Copy(*cfun_mf[lev],           stage_mf[8], 0, 0, 1,              nghost);
+        amrex::MultiFab::Copy(*drift_mf[lev],          stage_mf[9], 0, 0, AMREX_SPACEDIM, nghost);
 
         // Everything from here to the end of this hook changes eta WITHOUT moving
         // material (clamping to [0,1], per-phase ghost reconstruction, stiff
@@ -3707,6 +3953,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         amrex::MultiFab::Copy(stage_mf[6], *energy1_mf[lev],        0, 0, 1,              nghost);
         amrex::MultiFab::Copy(stage_mf[7], *shell_mf[lev],          0, 0, 1,              nghost);
         amrex::MultiFab::Copy(stage_mf[8], *cfun_mf[lev],           0, 0, 1,              nghost);
+        amrex::MultiFab::Copy(stage_mf[9], *drift_mf[lev],          0, 0, AMREX_SPACEDIM, nghost);
 
     });
 
@@ -3893,6 +4140,9 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // split U^{n+1} = L_relax L_visc,bulk L_hyper U^n).  Primitives (v, rho) and
     // ghosts are current from the last RK post-stage hook; the refresh below
     // rebuilds them from the updated M, E.
+    // 7-equation finite drag (seven.lambda > 0), exact over the whole step.
+    // Instantaneous drag (lambda < 0) runs inside every RelaxAndReinit instead.
+    if (model == 7 && seven_lambda > 0.0) VelocityRelax(lev, dt);
     SubcycleBulkViscous(lev, time, dt);
     // Shell viscous stress (visc_subcycle), once per step.  The split
     // under-damps by a fraction ~ dt: kappa_eff/kappa_s 0.925 / 0.955 / 0.973 at
@@ -4043,6 +4293,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         const Set::Scalar alpha_floor = 1.0e-30;
         // Local copies: class members are not addressable inside a GPU lambda.
         const Set::Scalar mu0_l = mu0, mu1_l = mu1, small_l = small;
+        const int seven_cfl = (model == 7);
+        auto drf7 = drift_mf[lev]->const_array(mfi);
 
         const int symc = cen_face_any;   // symmetry (sym_face_central) + RADIAL faces
         const bool symlo_c[3] = {cen_face_lo[0], cen_face_lo[1], cen_face_lo[2]};
@@ -4089,6 +4341,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
             // 6-eq mixture pressure and frozen sound speed.
             // p   = alpha_1 p_1 + alpha_2 p_2          (Sch20 eq. 8)
             // c^2 = Y_1 c_1^2  + Y_2 c_2^2             (Sch20 eq. 17)
+            Set::Scalar c0_7 = 0.0, c1_7 = 0.0, a1_7 = 0.0;   // 7-eq CFL (below)
             {
                 Set::Scalar a1 = std::min(std::max(eta_new(i, j, k), alpha_floor), 1.0 - alpha_floor);
                 Set::Scalar a2 = 1.0 - a1;
@@ -4130,6 +4383,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 press(i, j, k) = a1 * p0_loc + a2 * p1_loc;
                 a(i, j, k)     = Solver::EOS::EOS::FrozenMixtureSoundSpeed(Y0, Y1, c0_loc, c1_loc);
                 p0_eff(i, j, k) = Solver::EOS::EOS::MixedP0(a1, eos0_local, eos1_local); // diagnostic only
+                c0_7 = c0_loc; c1_7 = c1_loc; a1_7 = a1;
             }
 
             Set::Scalar f_prime = 4.0 * eta_new(i,j,k) * (eta_new(i,j,k) - 0.5) * (eta_new(i,j,k) - 1.0);
@@ -4196,6 +4450,27 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 #if AMREX_SPACEDIM == 3
                 vz_max_local = std::max(vz_max_local, std::abs(v(i,j,k,2)));
 #endif
+                // 7-equation model: each phase is advanced with its own HLLC
+                // flux, so its own sound speed and velocity bound the step
+                // wherever it holds more than a trace (1e-6) of the volume.
+                if (seven_cfl)
+                {
+                    const Set::Scalar ar0 = std::max(rho_eta0(i, j, k), 0.0), ar1 = std::max(rho_eta1(i, j, k), 0.0);
+                    const Set::Scalar rr = std::max(ar0 + ar1, small_l);
+                    const Set::Scalar winv = DriftCell(ar0, ar1, eta_new(i, j, k), cutoff) ? rr / (ar0 * ar1) : 0.0;
+                    for (int ph = 0; ph < 2; ++ph)
+                    {
+                        const Set::Scalar ak = ph ? 1.0 - a1_7 : a1_7;
+                        if (ak <= 1.0e-6) continue;
+                        c_max_local = std::max(c_max_local, ph ? c1_7 : c0_7);
+                        const Set::Scalar sh = ph ? -ar0 / rr : ar1 / rr;   // u_k = u + sh w
+                        vx_max_local = std::max(vx_max_local, std::abs(v(i,j,k,0) + sh * drf7(i,j,k,0) * winv));
+                        vy_max_local = std::max(vy_max_local, std::abs(v(i,j,k,1) + sh * drf7(i,j,k,1) * winv));
+#if AMREX_SPACEDIM == 3
+                        vz_max_local = std::max(vz_max_local, std::abs(v(i,j,k,2) + sh * drf7(i,j,k,2) * winv));
+#endif
+                    }
+                }
 
                 Set::Scalar F_mag = sqrt(Source(i,j,k,1) * Source(i,j,k,1) +
                                          Source(i,j,k,2) * Source(i,j,k,2));
@@ -5061,6 +5336,10 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
 
     relax_time = time;
     if (!defer_relax) RelaxAndReinit(lev);
+    // 7-equation drift momentum ghosts: after the relaxation (which changes the
+    // drift) and before STEP 7, whose rho E rebuild needs the drift's kinetic
+    // energy in the ghost cells too.
+    if (model == 7) FillDriftGhosts(lev, time);
 
     // ------------------------------------------------------------
     // STEP 5: Fill CONSERVATIVE ghost cells (rho, M, E)
@@ -5551,6 +5830,8 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
         auto rho1_arr  = density1_mf[lev]->array(mfi);
         auto p0_arr    = pressure0_mf[lev]->array(mfi);
         auto p1_arr    = pressure1_mf[lev]->array(mfi);
+        auto drf7      = drift_mf[lev]->const_array(mfi);
+        const int seven7 = (model == 7);
 
         const Solver::EOS::Tammann eos0_local = eos0;
         const Solver::EOS::Tammann eos1_local = eos1;
@@ -5616,6 +5897,20 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
             // This overwrite is the BC-consistency guarantee for the 6-eq model.
             UE(i, j, k) = E0_arr(i, j, k) + E1_arr(i, j, k);
             E(i, j, k)  = UE(i, j, k) + KE(i, j, k);
+            // 7-equation model: plus the drift's (relative) kinetic energy
+            // |m|^2 rho / (2 (alpha rho)_0 (alpha rho)_1).  This loop covers the
+            // VALID cells too, so omitting it would delete that energy each stage.
+            if (seven7)
+            {
+                const Set::Scalar a0r = std::max(arh0_arr(i, j, k), 0.0), a1r = std::max(arh1_arr(i, j, k), 0.0);
+                const Set::Scalar rr = a0r + a1r;
+                if (DriftCell(a0r, a1r, eta(i, j, k), cutoff))
+                {
+                    Set::Scalar m2 = 0.0;
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d) m2 += drf7(i, j, k, d) * drf7(i, j, k, d);
+                    E(i, j, k) += 0.5 * m2 * rr / (a0r * a1r);
+                }
+            }
 
             // Diagnostic per-phase primitives.
             rho0_arr(i, j, k) = rho0_pure;
@@ -6776,6 +7071,16 @@ void Hydro2::RelaxAndReinit(int lev)
     const Set::Scalar gam1 = eos1.Gamma();
     const Set::Scalar pi1_ = eos1.P0();
 
+    // 7-equation model, instantaneous drag: velocity relaxation BEFORE the
+    // pressure relaxation, so the relative kinetic energy it releases is in the
+    // phase internal energies the Newton below starts from.
+    // With finite or no drag (dt = 0 here) this only zeroes the drift in
+    // single-phase cells; the finite drag itself is applied once per step in Advance.
+    if (model == 7) VelocityRelax(lev, seven_lambda < 0.0 ? -1.0 : 0.0);
+    // Finite (or no) drag leaves a drift; its kinetic energy is part of rho E
+    // and must be excluded from the internal energy the reinit inverts.
+    const int ke_rel_on = (model == 7 && seven_lambda >= 0.0);
+
     // Optional Newton diagnostic.  Per cell write {iter_count, |f(p_final)|};
     // after the ParallelFor reduce to {max iters, max residual, unconverged
     // cell count} and print a one-line summary.
@@ -6843,6 +7148,10 @@ void Hydro2::RelaxAndReinit(int lev)
             });
         }
     }
+
+    // seven.pressure_relax = 0: velocity relaxation (above) only; no pressure
+    // relaxation, no rho E reinit.
+    if (model == 7 && !seven_pressure_relax) return;
 
     // MERGE (AcousticBC): honour relax_diag instead of the hardcoded `true`
     // that was on the Marmottant side.  That leftover forced the Newton
@@ -6967,6 +7276,16 @@ void Hydro2::RelaxAndReinit(int lev)
         auto E_    = energy_per_vol_mf[lev]->array(mfi);
         auto E0_   = energy0_mf[lev]->array(mfi);
         auto E1_   = energy1_mf[lev]->array(mfi);
+        auto drf_  = drift_mf[lev]->const_array(mfi);
+        // Relative kinetic energy |m|^2 rho / (2 (alpha rho)_0 (alpha rho)_1).
+        auto ke_rel = [=](int ii, int jj, int kk, Set::Scalar a0, Set::Scalar a1) -> Set::Scalar {
+            if (!ke_rel_on) return 0.0;
+            const Set::Scalar rr = a0 + a1;
+            if (!DriftCell(a0, a1, eta(ii, jj, kk), cutoff_loc)) return 0.0;
+            Set::Scalar m2 = 0.0;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d) m2 += drf_(ii, jj, kk, d) * drf_(ii, jj, kk, d);
+            return 0.5 * m2 * rr / (a0 * a1);
+        };
 
         // EMBEDDED SOLID indicator (empty Array4 when feature is off).
         Set::Patch<const Set::Scalar> phisol = embedded.phi_mf.Patch(lev, mfi);
@@ -7050,6 +7369,7 @@ void Hydro2::RelaxAndReinit(int lev)
                 Set::Scalar ke_p   = 0.5 * (AMREX_D_TERM(M_(i, j, k, 0) * M_(i, j, k, 0),
                                                        + M_(i, j, k, 1) * M_(i, j, k, 1),
                                                        + M_(i, j, k, 2) * M_(i, j, k, 2))) / std::max(rho_p, small_loc);
+                ke_p += ke_rel(i, j, k, arh0_loc, arh1_loc);
                 Set::Scalar rhoe_p = std::max(E_(i, j, k) - ke_p, small_loc);
                 // Solve for p with the SAME alpha the energies are written
                 // with, so E0 + E1 = rho_e holds identically.
@@ -7256,6 +7576,7 @@ void Hydro2::RelaxAndReinit(int lev)
             Set::Scalar ke      = 0.5 * (AMREX_D_TERM(M_(i, j, k, 0) * M_(i, j, k, 0),
                                                     + M_(i, j, k, 1) * M_(i, j, k, 1),
                                                     + M_(i, j, k, 2) * M_(i, j, k, 2))) / std::max(rho_loc, small_loc);
+            ke += ke_rel(i, j, k, arh0_loc, arh1_loc);
             // Debit the capillary energy before the EOS inversion: with the
             // closure on, rho E carries e_cap, and reading it as internal
             // energy inflates p at the interface (dt collapse).  This is the
@@ -7350,6 +7671,110 @@ void Hydro2::RelaxAndReinit(int lev)
     }
     if (relax_diag) { char _mt[128]; snprintf(_mt, 128, "MASSTRACK relax_exit    lev=%d sum1=%.14e", lev, rho_eta1_mf[lev]->sum(0)); Util::Message(INFO, _mt); }
 } // end RelaxAndReinit()
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////// 7-EQUATION VELOCITY RELAXATION /////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// Drag between the phases (Saurel-Abgrall 1999 eq. 2), with u_I = the mixture
+// (centre-of-mass) velocity:
+//     d(alpha rho u)_0/dt = lambda (u_1 - u_0),
+//     d(alpha rho E)_k/dt = lambda u_I . (u_l - u_k).
+// The mixture momentum and total energy are unchanged.  In terms of the drift
+// momentum m = rho Y_0 Y_1 w (w = u_0 - u_1) the system is linear,
+//     dm/dt = -lambda rho / ((alpha rho)_0 (alpha rho)_1) m,
+// and integrates exactly: m -> f m, f = exp(-lambda rho dt/((alpha rho)_0 (alpha rho)_1)).
+// The relative kinetic energy |m|^2 rho / (2 (alpha rho)_0 (alpha rho)_1) falls
+// by the factor f^2, and the internal energies gain the difference in the ratio
+//     d(alpha rho e)_0 : d(alpha rho e)_1 = Y_1 : Y_0
+// (from d(alpha rho e)_0/dt = lambda (u_I - u_0).(u_1 - u_0) = lambda Y_1 |w|^2
+// and the phase-1 counterpart lambda Y_0 |w|^2).
+// dt < 0 is the instantaneous limit f = 0.
+// Single-phase cells (DriftCell: a phase below the eta cutoff) carry no drift:
+// it is zeroed and no energy is moved -- every rho E inversion (STEP 7, the
+// reinit) already counts zero relative kinetic energy in those cells.
+void Hydro2::VelocityRelax(int lev, Set::Scalar dt)
+{
+    BL_PROFILE("Integrator::Hydro2::VelocityRelax");
+    const Set::Scalar lam = seven_lambda, cut = cutoff;
+    for (amrex::MFIter mfi(*drift_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
+        auto drf = drift_mf[lev]->array(mfi);
+        auto ar0 = rho_eta0_mf[lev]->const_array(mfi);
+        auto ar1 = rho_eta1_mf[lev]->const_array(mfi);
+        auto E0  = energy0_mf[lev]->array(mfi);
+        auto E1  = energy1_mf[lev]->array(mfi);
+        auto et  = eta_mf[lev]->const_array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            const Set::Scalar a0 = std::max(ar0(i, j, k), 0.0), a1 = std::max(ar1(i, j, k), 0.0);
+            const Set::Scalar rr = a0 + a1;
+            if (!DriftCell(a0, a1, et(i, j, k), cut))
+            {
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) drf(i, j, k, d) = 0.0;
+                return;
+            }
+            const Set::Scalar f = (dt < 0.0) ? 0.0 : std::exp(-lam * rr * dt / (a0 * a1));
+            Set::Scalar m2 = 0.0;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d) m2 += drf(i, j, k, d) * drf(i, j, k, d);
+            const Set::Scalar dKE = 0.5 * m2 * rr / (a0 * a1) * (1.0 - f * f);
+            for (int d = 0; d < AMREX_SPACEDIM; ++d) drf(i, j, k, d) *= f;
+            E0(i, j, k) += (a1 / rr) * dKE;   // Y_1 share
+            E1(i, j, k) += (a0 / rr) * dKE;   // Y_0 share
+        });
+    }
+}
+
+// Drift-momentum ghost cells.  Same-level and periodic neighbours by
+// FillBoundary, coarse-fine by FillPatch, RADIAL faces by RadialGhostFill (the
+// drift is a radial vector there), and every other physical face by a mirror
+// with the face-normal component odd -- the per-phase normal velocity then
+// vanishes at the face, so neither phase slips through a wall, symmetry plane,
+// outflow or NSCBC face relative to the other.  With instantaneous drag the
+// drift is zero everywhere this is called, so this only matters for
+// seven.lambda >= 0.
+void Hydro2::FillDriftGhosts(int lev, Set::Scalar time)
+{
+    BL_PROFILE("Integrator::Hydro2::FillDriftGhosts");
+    if (lev > 0) FillPatch(lev, time, drift_mf, *drift_mf[lev], neumann_bc_D, 0);
+    drift_mf[lev]->FillBoundary(geom[lev].periodicity());
+
+    const amrex::Box dom = geom[lev].Domain();
+    const amrex::Dim3 dlo = amrex::lbound(dom), dhi = amrex::ubound(dom);
+    const int lo3[3] = {dlo.x, dlo.y, dlo.z}, hi3[3] = {dhi.x, dhi.y, dhi.z};
+    bool mir_lo[3] = {false, false, false}, mir_hi[3] = {false, false, false};
+    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+    {
+        if (geom[lev].isPeriodic(d)) continue;
+        mir_lo[d] = true;
+        mir_hi[d] = !radial_face_hi[d];
+    }
+    for (amrex::MFIter mfi(*drift_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box fb = (*drift_mf[lev])[mfi].box();
+        auto drf = drift_mf[lev]->array(mfi);
+        const amrex::Box vb = mfi.validbox();
+        // Only cells outside the domain are written; their mirror images are
+        // inside the domain and inside this fab (valid or same-level ghost).
+        amrex::LoopOnCpu(fb, [&](int i, int j, int k) {
+            int ijk[3] = {i, j, k}, src[3] = {i, j, k};
+            bool outside = false, flip[3] = {false, false, false};
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                if (mir_lo[d] && ijk[d] < lo3[d]) { src[d] = 2 * lo3[d] - 1 - ijk[d]; flip[d] = true; outside = true; }
+                if (mir_hi[d] && ijk[d] > hi3[d]) { src[d] = 2 * hi3[d] + 1 - ijk[d]; flip[d] = true; outside = true; }
+            }
+            if (!outside) return;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                if (src[d] < fb.smallEnd(d) || src[d] > fb.bigEnd(d)) return;   // mirror not held here
+            for (int c = 0; c < AMREX_SPACEDIM; ++c)
+                drf(i, j, k, c) = (flip[c] ? -1.0 : 1.0) * drf(src[0], src[1], src[2], c);
+        });
+        (void)vb;
+    }
+    if (radial_bc) RadialGhostFill(lev, *drift_mf[lev], true);
+}
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -26,6 +26,7 @@
 // #include "Solver/Local/FluidRiemann/PartiallyParabolic.H"
 #include "Solver/Local/FluidRiemann/Upwind.H"
 #include "Solver/Local/FluidRiemann/Lax_Friedrich.H"
+#include "Solver/Local/FluidRiemann/PhaseHLLC.H"
 
 //EOS
 #include "Solver/EOS/EOS.H"
@@ -143,6 +144,7 @@ protected:
         amrex::MultiFab &E1_rhs_mf,
         amrex::MultiFab &shell_rhs_mf,
         amrex::MultiFab &cfun_rhs_mf,
+        amrex::MultiFab &drift_rhs_mf,
         const amrex::MultiFab &rho_eta0_mf_in,
         const amrex::MultiFab &rho_eta1_mf_in,
         const amrex::MultiFab &M_mf,
@@ -151,7 +153,18 @@ protected:
         const amrex::MultiFab &E0_mf_in,
         const amrex::MultiFab &E1_mf_in,
         const amrex::MultiFab &shell_mf_in,
-        const amrex::MultiFab &cfun_mf_in);
+        const amrex::MultiFab &cfun_mf_in,
+        const amrex::MultiFab &drift_mf_in);
+
+    // 7-equation model (model = 7): velocity relaxation of the drift momentum.
+    // dt < 0 = instantaneous (drift -> 0); dt > 0 = exact exponential decay at
+    // rate seven_lambda rho / ((alpha rho)_0 (alpha rho)_1).  The relative
+    // kinetic energy released goes to the phase internal energies (see .cpp).
+    void VelocityRelax(int lev, Set::Scalar dt);
+    // Ghost cells of the drift momentum: same-level/periodic exchange, coarse-
+    // fine interpolation, and a mirror (normal component odd) at every other
+    // physical face, so neither phase slips through a domain face.
+    void FillDriftGhosts(int lev, Set::Scalar time);
 
     // Post-stage pressure relaxation + reinitialization (Saurel-Petitpas-Berry
     // 2009 §3.5 / Schmidmayer 2020 §3.3).  Runs in-place on the working
@@ -364,6 +377,29 @@ protected:
     // entering as u.Fsv.  c is therefore unreachable -- see the TODO below.
     Set::Field<Set::Scalar> cfun_mf;
     Set::Field<Set::Scalar> cfun_old_mf;
+
+    // ------------------------------------------------------------------
+    // 7-EQUATION MODEL  (model = 7; Baer-Nunziato 1986, Saurel-Abgrall 1999)
+    // ------------------------------------------------------------------
+    // Each phase has its own velocity.  The extra primary is the DRIFT
+    // (relative) momentum
+    //     m_rel = (alpha rho u)_0 - Y_0 M  =  rho Y_0 Y_1 (u_0 - u_1),
+    // so (alpha rho u)_0 = Y_0 M + m_rel and (alpha rho u)_1 = Y_1 M - m_rel.
+    // Every operator that acts on the mixture momentum only (viscosity,
+    // capillary and shell stresses, gravity, embedded solid, NSCBC, BC fills)
+    // then leaves the drift untouched, i.e. it distributes its force between
+    // the phases by mass fraction.  Zero (and not written) when model = 6.
+    Set::Field<Set::Scalar> drift_mf;
+    Set::Field<Set::Scalar> drift_old_mf;
+    int model = 6;                    // 6 = one velocity; 7 = two velocities
+    // Velocity-relaxation (drag) coefficient lambda [kg m^-3 s^-1]:
+    //   < 0  instantaneous (default): u_0 = u_1 enforced at every relaxation,
+    //   = 0  no relaxation (pure 7-equation hyperbolic system),
+    //   > 0  finite drag, integrated exactly once per step after the RK advance.
+    Set::Scalar seven_lambda = -1.0;
+    // seven.pressure_relax (default 1): 0 skips the stiff pressure relaxation and
+    // the rho E reinit, so each phase keeps its own pressure (diagnostic runs).
+    int seven_pressure_relax = 1;
     Set::Field<Set::Scalar> hess_eta_mf;
     Set::Field<Set::Scalar> n_hat_mf;
 
