@@ -156,6 +156,7 @@ protected:
     // Post-stage pressure relaxation + reinitialization (Saurel-Petitpas-Berry
     // 2009 §3.5 / Schmidmayer 2020 §3.3).  Runs in-place on the working
     // MultiFabs after each RK stage and before the ghost-cell fill.
+    void ThermalExchange(int lev, Set::Scalar dt);
     void RelaxAndReinit(int lev);
     // Sub-cycled SHELL DILATATIONAL VISCOUS update (see Hydro2.cpp).  Advances
     // only div(Omega_visc) on the interface band, in N sub-steps of dt/N, so the
@@ -753,6 +754,12 @@ protected:
     int eta_consistent_advect = 1;  // 1 = limiter face-alpha row (default); 0 = donor cell (see Parse)
     int shell_visc_subcycle = 0;      // = visc_subcycle: sub-cycle kappa_s with the bulk viscosity (see Parse)
     int shell_visc_subcycle_max = 512; // hard cap on sub-steps (runaway guard)
+    int shell_heat_split = 0;          // shell dissipation heat: 0 volume fraction, 1 liquid, 2 effusivity
+    Set::Scalar thermal_k0 = 0.0, thermal_k1 = 0.0;   // phase thermal conductivities (heat_split = 2)
+    int shell_gamma_uniform = 0, shell_gamma_uniform_sweeps = 2, shell_kappa_s_rate = 0;   // band-uniform Gamma, shell-rate viscosity
+    int thermal_conduction = 0;        // 1 = Fourier conduction inside each phase
+    int thermal_exchange = 0;          // 1 = lamellar gas-liquid heat exchange, 2 = constant h, 3 = instant T equilibrium
+    Set::Scalar thermal_alpha_min = 1.0e-3, thermal_h = 0.0;
     int shell_visc_verbose = 0;        // print N and nu_s each sub-cycle
     Set::Scalar shell_nus_rho_floor = 1.0;  // density floor for the nu_s estimate
     int jump_consistent = 0;           // 1: jump curvature from Gamma, normal force -Delta grad(eta) (see Parse)
@@ -762,6 +769,7 @@ protected:
     int shell_kappa_s_jump = 0;        // 1: normal viscous shell stress also imposed as a phase-pressure jump in RelaxAndReinit (see Parse)
     Set::Scalar relax_time = 0.0;      // time of the current RelaxAndReinit call (BC fills inside it)
     int relax_diag = 0;
+    int relax_reinit_split = 1;        // 1 = energy defect by mass fraction (default), 0 = Sch20 eq. 26 equal-pressure reinit
     int clip_ghost_only = 0;
     bool sym_face_lo[3] = {false, false, false};
     bool sym_face_hi[3] = {false, false, false};

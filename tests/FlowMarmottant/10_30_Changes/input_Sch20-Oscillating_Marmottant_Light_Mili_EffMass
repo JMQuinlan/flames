@@ -1,0 +1,235 @@
+#@ [sch20_oscillating_marmottant_light_mili_effmass]
+# ===== 2026-10-30: Effusivity + MassFractionRelax (coated) =====
+# Copy of input_Sch20-Oscillating_Marmottant_Light_Mili with the flag block at the end of the file.
+# Full 3D octant (same mesh/AMR/BCs as the regular deck) to compare against the
+# RADIAL-slab runs CD6_K072 (mode 2) / ED6_K072 (no mode 2).  Only other change:
+#   epsilon 0.0032 -> 0.0016  (eps/dx_finest = 2, the value the slab runs used)
+# cfl stays 0.5.  Needs the 10-30 working-copy Hydro2 (flags below are not in b5e17d08f).
+#
+#@ exe=hydro2
+#@ dim=3
+#
+# ===== PRE-TENSIONED Mili: kappa_s test with ~8 finest cells of travel and POSITIVE tension =====
+# (2026-10-24)  Same mesh, AMR, EOS, BCs, numerics and kappa_s = 0.72 kg/s (K* = 0.18)
+# as input_Sch20-Oscillating_Marmottant_Mili, EXCEPT
+#     marmottant 1 -> 0, sigma 0.0728 -> 500 N/m   (constant pre-tension, no elastic shell)
+#     p_b  1.0e4 -> 5.8307e4 Pa                    (p_inf/p_b 10 -> 1.715)
+#     stop_time 1e-2 -> 2e-2                       (~3.5 tau_c; tau_c = 0.915 R0 sqrt(rho/p_inf) = 5.79e-3 s)
+#     plot_file -> output_Sch20_Oscillating_Marmottant_Light_Mili
+#
+# WHY.  At R0 = 2 cm any motion large enough for kappa_s to matter has a viscous tension
+# 2 kappa_s Rdot/R of hundreds of N/m, far above the Marmottant elastic tension
+# (<= 0.073 N/m), so on the Mili deck the TOTAL tension goes strongly negative while the
+# bubble compresses and the surface wrinkles.  Lowering R_buckling would change nothing
+# (the elastic part is inert at this scale).  A constant tension of 500 N/m keeps the
+# total tension positive for the whole run while R still travels ~8 finest cells.
+# sigma = 500 N/m is unphysical: this is a NUMERICAL test of kappa_s (and of the
+# capillary force: 2 sigma/R0 = 5e4 Pa), not a physical shell.
+#
+# KELLER-MIKSIS (reference/marmottant_rpe_km.py, chi = 0, sigma_water = 500, mu = 0):
+#   kappa_s = 0.72 :  R_min/R0 = 0.688 at 1.23 tau_c  (8.0 finest cells of travel,
+#                     dx_finest = 7.8e-4 m = R0/25.6); total tension >= +94 N/m throughout
+#   kappa_s = 0    :  R_min/R0 = 0.596
+#   kappa_s moves R(t) by up to 4.2 finest cells, so the run cannot match KM unless the
+#   dilatational viscosity is doing its job.
+#
+# Analyse with reference/analyze_Sch20_Oscillating_Marmottant_Mili.py
+#     --input ../input_Sch20-Oscillating_Marmottant_Light_Mili
+# ===============================================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+# plot_file = ./tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant_Light_Mili
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant_Light_Mili_EffMass
+
+### MESHING ###
+amr.plot_int       = -1
+amr.plot_dt        = 5.0e-5
+amr.max_grid_size  = 32
+amr.blocking_factor = 16
+amr.regrid_int     = 10
+amr.grid_eff       = 0.8
+amr.max_level      = 4
+amr.n_cell         = 160 160 160       # base; eta-only AMR -> effective finest 2560^3 (octant)
+
+# n_error_buf pushes the fine patches ~16 dx_finest past the interface band on
+# each side, sitting the coarse-fine boundary in pure water (where the Q-Fix
+# density partition is exact).  See feedback_density_partition_breaks_cf_ghosts.md
+amr.n_error_buf    = 16
+
+nghost = 4
+
+### TIME STEPPING ###
+timestep                = 1.0e-7
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-5
+dynamictimestep.min     = 1.0e-13
+cfl                     = 0.5
+
+### DIMENSIONS ###
+geometry.prob_lo     =  0.0  0.0  0.0
+geometry.prob_hi     =  2.0  2.0  2.0
+geometry.is_periodic = 0 0 0
+stop_time            = 2e-2            # ~3.5 tau_c
+
+### ETA INITIAL CONDITIONS (identical to _Large) ###
+# eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.0016     # eps/dx_finest = 2 (10-30: matches the CD6/ED6 slab runs; regular deck 0.0032)
+#eta.ic.expression.constant.epsilon = 0.0016     # previous value: ~ 2 cells across the band at finest
+eta.ic.expression.constant.R0      = 0.02
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### EQUATION OF STATE -- Sch20 water (Tammann) + air (ideal gas) ###
+eos0.gamma = 2.35
+eos0.p0    = 1.0e9
+eos0.cv    = 1781.0
+eos0.cp    = 4186.0
+
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 714.286
+eos1.cp    = 1000.0
+
+### HYDRO INITIAL CONDITIONS (identical to _Large) ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1000.0"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+
+# Pressure field IDENTICAL to Sch20_Oscillating_Neumann_Large (the variant that
+# gives the closest match to the Chen-2D RPE reference).  See the _Large file
+# header for the full derivation.
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_inf = 1.0e5
+pressure0.ic.expression.constant.p_b   = 5.8307e4        # p_inf/p_b = 1.715 (Mili: 1.0e4)
+pressure0.ic.expression.constant.R0    = 0.02
+pressure0.ic.expression.constant.r_inf = 0.20
+pressure0.ic.expression.region0 = "p_inf - (p_inf - p_b)*R0/max(sqrt(x*x + y*y + z*z), R0)"
+#pressure0.ic.expression.region0 = "p_inf - (p_inf - p_b)*log(r_inf/max(sqrt(x*x + y*y + z*z), R0))/log(r_inf/R0)"
+
+# Gas interior: uniform bubble pressure p_b.
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_b = 5.8307e4
+pressure1.ic.expression.region0 = "p_b"
+
+### VISCOSITY (inviscid -- Sch20 nominal) ###
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### SURFACE TENSION -- constant pre-tension + dilatational viscosity (no Marmottant shell) ###
+sigma = 500.0                    # constant PRE-TENSION [N/m] (Mili: 72.8e-3); see header
+pref  = 0.0
+
+marmottant             = 0       # no elastic shell: constant sigma + kappa_s only
+marmottant.R0          = 0.02    # reference radius (shell strain measured from here)
+marmottant.R_buckling  = 0.0196  # 0.98 R0, as on Light
+marmottant.chi         = 1.0     # shell elastic modulus [N/m] (inert at this scale)
+marmottant.sigma_break = 0.073   # rupture tension [N/m]
+
+# Dilatational shell viscosity, scaled from Light at fixed K* = 0.18 (header).
+shell.kappa_s = 0.72             # [kg/s]
+shell.mu_s    = 0.0
+
+# Best-performing jump options from the FlowDilationViscosity unit tests (2026-10-25):
+#   Laplace dp/exact 1.000-1.003 (3D); slab viscous k_eff/k 0.964 at eps/R 0.125.
+jump.consistent         = 1      # curvature from Gamma; force and relaxation jump consistent
+jump.R0                 = 0.02   # radius at which Gamma = 1 (the IC radius)
+jump.tangential         = 1      # keep on (default); off was unstable in the unit tests
+capillary_jump          = 1      # static tension also imposed as the phase-pressure jump
+shell.kappa_s_jump      = 1      # viscous shell stress imposed as the phase-pressure jump
+# (shell viscous force is sub-cycled with the bulk viscosity: visc_subcycle, default 1)
+
+### BOUNDARY CONDITIONS - Neumann on all 6 faces (Sch20 non-NSCBC variant) ###
+# eta: symmetry (reflect_even) on inner faces, neumann far-field
+eta.bc.type.xlo = REFLECT_EVEN
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = REFLECT_EVEN
+eta.bc.type.yhi = neumann
+eta.bc.type.zlo = REFLECT_EVEN
+eta.bc.type.zhi = neumann
+
+density.bc.type.xlo = REFLECT_EVEN
+density.bc.type.xhi = neumann
+density.bc.type.ylo = REFLECT_EVEN
+density.bc.type.yhi = neumann
+density.bc.type.zlo = REFLECT_EVEN
+density.bc.type.zhi = neumann
+
+energy.bc.type.xlo = REFLECT_EVEN
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = REFLECT_EVEN
+energy.bc.type.yhi = neumann
+energy.bc.type.zlo = REFLECT_EVEN
+energy.bc.type.zhi = neumann
+
+momentum.bc.type.xlo = REFLECT_ODD  REFLECT_EVEN REFLECT_EVEN
+momentum.bc.type.xhi = neumann neumann neumann
+momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD  REFLECT_EVEN
+momentum.bc.type.yhi = neumann neumann neumann
+momentum.bc.type.zlo = REFLECT_EVEN REFLECT_EVEN REFLECT_ODD
+momentum.bc.type.zhi = neumann neumann neumann
+
+### REFINEMENT -- eta-only, conservative threshold (identical to _Large) ###
+eta_refinement_criterion   = 1.0e-1
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### PHYSICS FLAGS (identical to _Large) ###
+apply_surface_tension = 1   # coated (uncoated twin: 0)
+apply_buoyancy        = 0
+apply_weight          = 0
+apply_vaporization    = 0
+grav                  = 0.0
+
+### NUMERICS -- MUSCL2 + SSPRK3 ###
+Riemann_Solver.type = hllc
+Limiter.type        = muscl2      # was weno5
+integration.type    = RungeKutta
+integration.rk.type = 3
+kappa_method        = 1     # REQUIRED for Marmottant (same as uncoated twin)
+
+apply_sharpening     = 0
+sharpening_frequency = 20
+reinit_max_iter      = 100
+reinit_tolerance     = 1e-6
+omega_relax          = 0.5
+relax_diag           = 0    # uncoated twin: 1 (log-only diagnostics)
+plot_minimal         = 1    # ~200 frames; keeps eta, shell, Gamma, p, u, rho, energies
+
+# IC pressure equalization (see _Large header): switch Mix() to the
+# gamma-weighted form so the per-phase IC pressures sit in the energy-conserving
+# equilibrium RelaxAndReinit would produce, killing the step-1 pressure kick.
+equalize_ic_pressure = 1
+
+### 2026-10-30 CHANGES: effusivity heat split + mass-fraction relax ###
+visc_subcycle              = 1       # bulk + shell viscous terms sub-cycled (default; stated explicitly)
+shell.kappa_s_subcycle_max = 8192    # sub-step cap for the shell viscous sub-cycle
+shell.heat_split           = 2       # shell viscous heat split by thermal effusivity sqrt(k rho cp)
+thermal.k0                 = 0.6     # water [W/m/K]
+thermal.k1                 = 0.026   # air   [W/m/K]
+relax.reinit_split         = 1       # reinit energy residual split by mass fraction Y_k (default since 10-29)
+shell.gamma_uniform        = 0       # pointwise Gamma transport (no mode 2)
+shell.kappa_s_rate         = 0       # viscous shell rate from local fluid div_s(u)
