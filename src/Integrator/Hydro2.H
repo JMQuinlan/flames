@@ -158,6 +158,7 @@ protected:
     // MultiFabs after each RK stage and before the ghost-cell fill.
     void ThermalExchange(int lev, Set::Scalar dt);
     void RelaxAndReinit(int lev);
+    void ShellBandUniform(int lev);   // Gamma bulk extension + band-uniform Gamma
     // Sub-cycled SHELL DILATATIONAL VISCOUS update (see Hydro2.cpp).  Advances
     // only div(Omega_visc) on the interface band, in N sub-steps of dt/N, so the
     // stiff kappa_s term no longer sets the global timestep.

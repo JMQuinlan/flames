@@ -220,6 +220,24 @@ ToState(const Primitive &p, Set::Scalar /*small*/)
     return s;
 }
 
+/// Interface geometry of the stencil's CENTER cell, for limiters that need
+/// more than the 1D stencil (multi-dimensional THINC variants).  All
+/// quantities are in the FACE FRAME: index 0 is the face-normal direction in
+/// the stencil's orientation (so the reconstructed face is at x_0 = +h_0/2),
+/// indices 1..d-1 are the tangents in the cyclic order (dir+1, dir+2).
+///   n   = grad(eta)/|grad(eta)|            (unit normal, gas -> liquid)
+///   K   = P Hess(eta) P / |grad(eta)|,  P = I - n n^T   (shape tensor grad n, 1/length)
+///   h   = cell size
+///   eps = model thickness, eta = (1 + tanh(s/eps))/2 along the normal
+struct Geom
+{
+    bool        valid = false;
+    Set::Vector n     = Set::Vector::Zero();
+    Set::Matrix K     = Set::Matrix::Zero();
+    Set::Vector h     = Set::Vector::Ones();
+    Set::Scalar eps   = 0.0;
+};
+
 /// Limiter base class.  All concrete classes return the face value at
 /// the RIGHT edge of stencil[RADIUS] (the center cell).
 class Limiter
@@ -233,6 +251,12 @@ public:
     /// and the like).  Identical to Reconstruct except for wrappers that act on
     /// the volume fraction only (THINC), which must not sharpen passive fields.
     virtual Primitive ReconstructPassive(const Primitive stencil[STENCIL_SIZE]) const { return Reconstruct(stencil); }
+    /// True if the limiter reads Geom (the caller then builds it; otherwise
+    /// it may skip the work and pass an invalid Geom).
+    virtual bool WantsGeom() const { return false; }
+    /// Reconstruction with the center cell's interface geometry.  Default:
+    /// ignore the geometry.
+    virtual Primitive ReconstructGeom(const Primitive stencil[STENCIL_SIZE], const Geom &) const { return Reconstruct(stencil); }
     virtual ~Limiter() = default;
 };
 

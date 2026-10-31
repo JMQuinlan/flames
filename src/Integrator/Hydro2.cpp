@@ -2797,6 +2797,64 @@ Hydro2::RHS(int lev,
             // Default Limiter=Godunov returns the cell-center value
             // unchanged -- equivalent to the original first-order flux.
             // ------------------------------------------------------------
+            // Interface geometry for geometry-aware limiters (multi-D THINC;
+            // Limiter::WantsGeom).  From central differences of the clamped
+            // eta: n = grad eta/|grad eta|, K = P Hess(eta) P/|grad eta|
+            // (P = I - n n^T, the shape tensor grad n), rotated into the face
+            // frame [dir, dir+1, dir+2] and flipped along dir for sgn = -1.
+            const bool lim_geom = limiter->WantsGeom();
+            auto cell_geom = [&](int ii, int jj, int kk, int dir, int sgn) -> Solver::Local::Limiter::Geom
+            {
+                Solver::Local::Limiter::Geom g;
+                auto et = [&](int a, int b, int c) { return std::min(1.0, std::max(0.0, eta(ii + a, jj + b, kk + c))); };
+                auto off = [](int d, int s_) { amrex::IntVect v(AMREX_D_DECL(0, 0, 0)); v[d] = s_; return v; };
+                Set::Vector gr; Set::Matrix He;
+                const Set::Scalar e0 = et(0, 0, 0);
+                for (int a = 0; a < AMREX_SPACEDIM; ++a)
+                {
+                    amrex::IntVect pa = off(a, 1);
+#if AMREX_SPACEDIM == 3
+                    const Set::Scalar ep = et(pa[0], pa[1], pa[2]), em = et(-pa[0], -pa[1], -pa[2]);
+#else
+                    const Set::Scalar ep = et(pa[0], pa[1], 0), em = et(-pa[0], -pa[1], 0);
+#endif
+                    gr(a) = (ep - em) / (2.0 * DX[a]);
+                    He(a, a) = (ep - 2.0 * e0 + em) / (DX[a] * DX[a]);
+                    for (int b = a + 1; b < AMREX_SPACEDIM; ++b)
+                    {
+                        amrex::IntVect pb = off(b, 1);
+                        auto E2 = [&](int sa, int sb) {
+#if AMREX_SPACEDIM == 3
+                            return et(sa * pa[0] + sb * pb[0], sa * pa[1] + sb * pb[1], sa * pa[2] + sb * pb[2]);
+#else
+                            return et(sa * pa[0] + sb * pb[0], sa * pa[1] + sb * pb[1], 0);
+#endif
+                        };
+                        He(a, b) = He(b, a) = (E2(1, 1) - E2(1, -1) - E2(-1, 1) + E2(-1, -1)) / (4.0 * DX[a] * DX[b]);
+                    }
+                }
+                const Set::Scalar gn = gr.norm();
+                Set::Scalar hmin = DX[0];
+                for (int a = 1; a < AMREX_SPACEDIM; ++a) hmin = std::min(hmin, (Set::Scalar)DX[a]);
+                if (!(gn * hmin > 1.0e-8)) return g;           // no usable normal
+                const Set::Vector n = gr / gn;
+                const Set::Matrix P = Set::Matrix::Identity() - n * n.transpose();
+                const Set::Matrix K = P * He * P / gn;
+                int ax[AMREX_SPACEDIM];
+                for (int a = 0; a < AMREX_SPACEDIM; ++a) ax[a] = (dir + a) % AMREX_SPACEDIM;
+                for (int a = 0; a < AMREX_SPACEDIM; ++a)
+                {
+                    const Set::Scalar fa = (a == 0) ? sgn : 1.0;
+                    g.n(a) = fa * n(ax[a]);
+                    g.h(a) = DX[ax[a]];
+                    for (int b = 0; b < AMREX_SPACEDIM; ++b)
+                        g.K(a, b) = fa * ((b == 0) ? sgn : 1.0) * K(ax[a], ax[b]);
+                }
+                g.eps = epsilon;
+                g.valid = true;
+                return g;
+            };
+
             auto compute_face = [&](int lo_i, int lo_j, int lo_k, int hi_i, int hi_j, int hi_k, int dir)
                 -> Solver::Local::FluidRiemann::Flux
             {
@@ -2817,8 +2875,19 @@ Hydro2::RHS(int lev,
                 //      reversed so right-edge reconstruction returns left-edge).
                 Solver::Local::Limiter::Primitive stencil_R[5] =
                     { prim[5], prim[4], prim[3], prim[2], prim[1] };
-                Solver::Local::Limiter::Primitive pL = limiter->Reconstruct(stencil_L);
-                Solver::Local::Limiter::Primitive pR = limiter->Reconstruct(stencil_R);
+                Solver::Local::Limiter::Primitive pL, pR;
+                if (lim_geom)
+                {
+                    // interface geometry of each stencil's center cell, in the
+                    // face frame of that stencil (stencil_R is reversed: sgn -1)
+                    pL = limiter->ReconstructGeom(stencil_L, cell_geom(lo_i, lo_j, lo_k, dir, +1));
+                    pR = limiter->ReconstructGeom(stencil_R, cell_geom(hi_i, hi_j, hi_k, dir, -1));
+                }
+                else
+                {
+                    pL = limiter->Reconstruct(stencil_L);
+                    pR = limiter->Reconstruct(stencil_R);
+                }
                 Solver::Local::FluidRiemann::State sL_face = Solver::Local::Limiter::ToState(pL, small);
                 Solver::Local::FluidRiemann::State sR_face = Solver::Local::Limiter::ToState(pR, small);
 
@@ -4002,6 +4071,16 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // cfl 0.5 / 0.25 / 0.125 against 0.988 dt-limited (single-phase pulse,
     // R0/dx 16, eps/dx 1; 2026-10-23).  A Strang split gave identical numbers --
     // this is stiff-relaxation order reduction, not the splitting order.
+    // The RK post-stage hook runs only on intermediate stages; AMReX applies
+    // post_step_action (not set) to the final combination S_old + dt sum w_i F_i.
+    // Gamma on that state is still pointwise (each band cell carries its own
+    // parcel's stretch), so -dln(Gamma)/dt in SubcycleShellViscous would be the
+    // local fluid rate, not the shell rate.  Make it band-uniform first.
+    if ((marmottant || jump_consistent) && shell_gamma_uniform)
+    {
+        eta_mf[lev]->FillBoundary(geom[lev].periodicity());
+        ShellBandUniform(lev);
+    }
     SubcycleShellViscous(lev, time, dt);
     // Gas-liquid heat exchange (thermal.exchange), exact relaxation over dt.
     if (thermal_exchange) ThermalExchange(lev, dt);
@@ -6943,40 +7022,12 @@ void Hydro2::ThermalExchange(int lev, Set::Scalar dt)
     }
 }
 
-void Hydro2::RelaxAndReinit(int lev)
+// Shell Gamma bulk reset/extension + band-uniform Gamma (shell.gamma_uniform).
+// Called from RelaxAndReinit and, on the final RK state, before
+// SubcycleShellViscous (see Advance).
+void Hydro2::ShellBandUniform(int lev)
 {
-    BL_PROFILE("Integrator::Hydro2::RelaxAndReinit");
-    if (relax_diag) { char _mt[128]; snprintf(_mt, 128, "MASSTRACK relax_entry   lev=%d sum1=%.14e", lev, rho_eta1_mf[lev]->sum(0)); Util::Message(INFO, _mt); }
-
-    // Constants for iteration
-    const Set::Scalar alpha_floor = 1.0e-12;
-    const Set::Scalar DIV_FLOOR   = 1.0e-30;
-    const Set::Scalar small_loc   = small;        // kept for legacy callers
-    const Set::Scalar cutoff_loc  = cutoff;       // pure-cell guard threshold
-    const int         max_iter    = 30;
-    const Set::Scalar newton_tol  = 1.0e-10;
-    const int         bisect_max  = 120;
-    const Set::Scalar bisect_tol  = 1.0e-12;
-    // Practical |f| threshold for the "unconverged_cells" diagnostic.
-    // Newton's strict newton_tol=1e-10 over-flags bisection cells that
-    // are physically converged at |f| ~ 1e-8.  unconv_threshold relaxes
-    // the warning to a value that matches engineering convergence
-    // (volume constraint Sum_k (alpha rho)_k v_k(p) = 1 satisfied to
-    // 1 part in 10^6).
-    const Set::Scalar unconv_threshold = 1.0e-6;
-
-
-    const Set::Scalar gam0 = eos0.Gamma();
-    const Set::Scalar pi0_ = eos0.P0();
-    const Set::Scalar gam1 = eos1.Gamma();
-    const Set::Scalar pi1_ = eos1.P0();
-
-    // Optional Newton diagnostic.  Per cell write {iter_count, |f(p_final)|};
-    // after the ParallelFor reduce to {max iters, max residual, unconverged
-    // cell count} and print a one-line summary.
-    // MERGE (Marmottant): preserve the shell's areal density across the
-    // pressure relaxation below (it moves volume between phases, not lipid).
-
+    BL_PROFILE("Integrator::Hydro2::ShellBandUniform");
     // SHELL BULK RESET (marmottant only): outside the eta band the areal
     // density Gamma is physically meaningless and its -Gamma div_s(u)
     // evolution integrates the bulk dilatation without bound (measured: 1.0
@@ -7133,6 +7184,43 @@ void Hydro2::RelaxAndReinit(int lev)
         }
         shell_mf[lev]->FillBoundary(geom[lev].periodicity());
     }
+}
+
+void Hydro2::RelaxAndReinit(int lev)
+{
+    BL_PROFILE("Integrator::Hydro2::RelaxAndReinit");
+    if (relax_diag) { char _mt[128]; snprintf(_mt, 128, "MASSTRACK relax_entry   lev=%d sum1=%.14e", lev, rho_eta1_mf[lev]->sum(0)); Util::Message(INFO, _mt); }
+
+    // Constants for iteration
+    const Set::Scalar alpha_floor = 1.0e-12;
+    const Set::Scalar DIV_FLOOR   = 1.0e-30;
+    const Set::Scalar small_loc   = small;        // kept for legacy callers
+    const Set::Scalar cutoff_loc  = cutoff;       // pure-cell guard threshold
+    const int         max_iter    = 30;
+    const Set::Scalar newton_tol  = 1.0e-10;
+    const int         bisect_max  = 120;
+    const Set::Scalar bisect_tol  = 1.0e-12;
+    // Practical |f| threshold for the "unconverged_cells" diagnostic.
+    // Newton's strict newton_tol=1e-10 over-flags bisection cells that
+    // are physically converged at |f| ~ 1e-8.  unconv_threshold relaxes
+    // the warning to a value that matches engineering convergence
+    // (volume constraint Sum_k (alpha rho)_k v_k(p) = 1 satisfied to
+    // 1 part in 10^6).
+    const Set::Scalar unconv_threshold = 1.0e-6;
+
+
+    const Set::Scalar gam0 = eos0.Gamma();
+    const Set::Scalar pi0_ = eos0.P0();
+    const Set::Scalar gam1 = eos1.Gamma();
+    const Set::Scalar pi1_ = eos1.P0();
+
+    // Optional Newton diagnostic.  Per cell write {iter_count, |f(p_final)|};
+    // after the ParallelFor reduce to {max iters, max residual, unconverged
+    // cell count} and print a one-line summary.
+    // MERGE (Marmottant): preserve the shell's areal density across the
+    // pressure relaxation below (it moves volume between phases, not lipid).
+
+    ShellBandUniform(lev);
 
     // MERGE (AcousticBC): honour relax_diag instead of the hardcoded `true`
     // that was on the Marmottant side.  That leftover forced the Newton
