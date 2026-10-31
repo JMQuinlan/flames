@@ -264,11 +264,13 @@ def main():
     if not a.show:
         matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    runs.sort(key=lambda q: -q["t"][-1])     # longest first, so its KM curve spans every run
     fig, ax = plt.subplots(3, 2, figsize=(13, 11), sharex=True)
     ax = ax.ravel()
     for i, rr in enumerate(runs):
         c = "C%d" % i; t = rr["t"] * 1e3; R0 = rr["R0"]; S = rr["S"]
-        if i == 0 or not np.allclose(rr["Rk"], runs[0]["Rk"], rtol=1e-4):
+        same_km = (i > 0 and rr["kap"] == runs[0]["kap"] and abs(rr["R0"] / runs[0]["R0"] - 1) < 1e-4)
+        if not same_km:            # KM drawn once per distinct (kappa_s, R0)
             ax[0].plot(t, rr["Rk"] / R0, "k-", lw=1, label="KM, kappa_s %.3g" % rr["kap"])
             ax[0].plot(t, rr["Rk0"] / R0, "k:", lw=1, label="KM, kappa_s 0")
         ax[0].plot(t, rr["Rv"] / R0, color=c, label=rr["name"])
