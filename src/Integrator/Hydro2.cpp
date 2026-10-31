@@ -463,6 +463,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_validate("shell.gamma_uniform", value.shell_gamma_uniform, {0, 1, 2});
         pp_query_default("shell.gamma_uniform_sweeps", value.shell_gamma_uniform_sweeps, value.shell_gamma_uniform == 1 ? 4 : 2);
         pp_query_validate("shell.kappa_s_rate", value.shell_kappa_s_rate, {0, 1});
+        //   shell.visc_face = 1 : sub-cycled viscous shell stress built on cell FACES
+        //         (compact stencils) and applied in flux form; the normal force is the
+        //         full tensor divergence (capillary-tensor curvature) instead of the
+        //         jump.consistent -Delta grad(eta) with kappa from Gamma.  Default 0.
+        pp_query_validate("shell.visc_face", value.shell_visc_face, {0, 1});
+        if (value.shell_visc_face && value.shell_kappa_s_rate)
+            Util::Abort(INFO, "shell.visc_face = 1 uses the local fluid rate; it cannot be combined with shell.kappa_s_rate = 1");
         pp_query_validate("thermal.conduction", value.thermal_conduction, {0, 1});
         pp_query_validate("thermal.exchange",   value.thermal_exchange,   {0, 1, 2, 3});
         pp_query_default("thermal.alpha_min",   value.thermal_alpha_min,  1.0e-3);  // phase fraction below which a phase takes no part
@@ -6363,6 +6370,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
     const int jtv = jump_tangential;
     const Set::Scalar keff_v = kap_s + 2.0 * shell_mu_s / (AMREX_SPACEDIM - 1);
     const Set::Scalar R0_v = jump_R0;
+    const int vface = shell_visc_face;
 
     // ---- N from the SAME stability measure the dt limiter uses -------------
     // nu_s = kap_eff |grad eta| / rho, reduced over the band, then
@@ -6388,6 +6396,8 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
     }
     amrex::ParallelDescriptor::ReduceRealMax(nus_max);
     if (nus_max <= 0.0) return;
+    // compact face differences (1 dx) are 4x stiffer than the wide 2-dx central ones
+    if (vface) nus_max *= 4.0;
 
     const Set::Scalar cflv   = (cfl_v == cfl_v) ? cfl_v : 0.4;   // NaN-safe
     // NOTE: `small` (1e-8) is a DENSITY/PRESSURE regulariser and must never be
@@ -6489,7 +6499,8 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
         Omv.setVal(0.0);
 
         // ---- build Omega_visc on a grown box (band cells only) -------------
-        for (amrex::MFIter mfi(Omv, false); mfi.isValid(); ++mfi)
+        // (shell.visc_face = 1 builds it on the faces inside the apply loop)
+        for (amrex::MFIter mfi(Omv, false); !vface && mfi.isValid(); ++mfi)
         {
             const amrex::Box &gbx = mfi.growntilebox(1);
             auto et  = eta_mf[lev]->const_array(mfi);
@@ -6569,6 +6580,60 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                      + (om(i,j+1,k,5) - om(i,j-1,k,5)) * idy
                      + (om(i,j,k+1,2) - om(i,j,k-1,2)) * idz;
 #endif
+                // shell.visc_face = 1: the same stress Omega_visc = kappa_s div_s(u) |grad eta| P,
+                // built on each FACE (compact normal differences of eta and u, transverse
+                // derivatives averaged from the two cells) and applied in flux form,
+                // F = sum_d (Omega_{d,hi} - Omega_{d,lo}) / dx_d.  Each face value is
+                // computed identically by the two cells that share it, so momentum is
+                // conserved to round-off.  The normal force is the full tensor (curvature
+                // from the capillary tensor itself, not from Gamma).
+                Set::Scalar diss_f = 0.0;
+                if (vface)
+                {
+                    auto face = [&](int il, int jl, int kl, int d, Set::Vector &row, Set::Scalar &Df) {
+                        const int ed[3] = { d == 0, d == 1, d == 2 };
+                        const int ir = il + ed[0], jr = jl + ed[1], kr = kl + ed[2];
+                        Set::Vector g = Set::Vector::Zero(); Set::Matrix G = Set::Matrix::Zero();
+                        for (int a = 0; a < AMREX_SPACEDIM; ++a)
+                        {
+                            if (a == d)
+                            {
+                                g(a) = (et(ir, jr, kr) - et(il, jl, kl)) / DX[d];
+                                for (int c = 0; c < AMREX_SPACEDIM; ++c)
+                                    G(a, c) = (vel(ir, jr, kr, c) - vel(il, jl, kl, c)) / DX[d];
+                            }
+                            else
+                            {
+                                const int ea[3] = { a == 0, a == 1, a == 2 };
+                                const Set::Scalar h2 = 0.5 / DX[a];
+                                g(a) = 0.5 * h2 * (et(il + ea[0], jl + ea[1], kl + ea[2]) - et(il - ea[0], jl - ea[1], kl - ea[2])
+                                                 + et(ir + ea[0], jr + ea[1], kr + ea[2]) - et(ir - ea[0], jr - ea[1], kr - ea[2]));
+                                for (int c = 0; c < AMREX_SPACEDIM; ++c)
+                                    G(a, c) = 0.5 * h2 * (vel(il + ea[0], jl + ea[1], kl + ea[2], c) - vel(il - ea[0], jl - ea[1], kl - ea[2], c)
+                                                        + vel(ir + ea[0], jr + ea[1], kr + ea[2], c) - vel(ir - ea[0], jr - ea[1], kr - ea[2], c));
+                            }
+                        }
+                        const Set::Scalar gmf = g.lpNorm<2>();
+                        row = Set::Vector::Zero(); Df = 0.0;
+                        if (gmf < 1.0e-10) return;
+                        const Set::Vector nf = g / gmf;
+                        const Set::Scalar dsf = G.trace() - nf.dot(G * nf);
+                        const Set::Scalar sef = kap_s * dsf;
+                        for (int c = 0; c < AMREX_SPACEDIM; ++c)
+                            row(c) = sef * (((c == d) ? gmf : 0.0) - g(d) * g(c) / gmf);
+                        Df = kap_s * gmf * dsf * dsf;
+                    };
+                    F = Set::Vector::Zero();
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    {
+                        const int ed[3] = { d == 0, d == 1, d == 2 };
+                        Set::Vector rlo, rhi; Set::Scalar Dlo, Dhi;
+                        face(i - ed[0], j - ed[1], k - ed[2], d, rlo, Dlo);
+                        face(i, j, k, d, rhi, Dhi);
+                        F += (rhi - rlo) / DX[d];
+                        diss_f += 0.5 * (Dlo + Dhi) / AMREX_SPACEDIM;
+                    }
+                }
                 const Set::Vector nh = ge / gem;
                 Set::Matrix gu = Set::Matrix::Zero();
                 for (int d = 0; d < AMREX_SPACEDIM; ++d)
@@ -6581,7 +6646,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                                         && et_c > cut_h && et_c < 1.0 - cut_h)
                                      ? -std::log(shl(i, j, k) / shlo(i, j, k)) / dt_step
                                      : ds_fl;
-                if (jcv)
+                if (jcv && !vface)
                 {
                     // tangential part of div(Omega_visc) + normal jump force
                     if (jtv) F -= nh * nh.dot(F); else F = Set::Vector::Zero();
@@ -6599,7 +6664,8 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                 for (int d = 0; d < AMREX_SPACEDIM; ++d) udotF += vel(i,j,k,d) * F(d);
                 // Total energy gains the work done on the fluid (u.F, which
                 // shows up as kinetic) plus the dissipation (internal).
-                const Set::Scalar diss = (jcv ? keff_v : kap_s) * gem * ds * ds_fl;   // = ds^2 >= 0 unless kappa_s_rate
+                const Set::Scalar diss = vface ? diss_f
+                                       : (jcv ? keff_v : kap_s) * gem * ds * ds_fl;   // = ds^2 >= 0 unless kappa_s_rate
                 E(i,j,k) += dtau * (udotF + diss);
                 // The dissipation is INTERNAL energy, so it must also be split
                 // into the phasic reservoirs, by volume fraction as elsewhere

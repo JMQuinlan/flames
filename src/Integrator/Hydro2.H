@@ -757,7 +757,8 @@ protected:
     int shell_visc_subcycle_max = 512; // hard cap on sub-steps (runaway guard)
     int shell_heat_split = 0;          // shell dissipation heat: 0 volume fraction, 1 liquid, 2 effusivity
     Set::Scalar thermal_k0 = 0.0, thermal_k1 = 0.0;   // phase thermal conductivities (heat_split = 2)
-    int shell_gamma_uniform = 0, shell_gamma_uniform_sweeps = 2, shell_kappa_s_rate = 0;   // band-uniform Gamma, shell-rate viscosity
+    int shell_gamma_uniform = 0, shell_gamma_uniform_sweeps = 2, shell_kappa_s_rate = 0;
+    int shell_visc_face = 0;   // shell.visc_face: face-based (flux-form) sub-cycled viscous stress   // band-uniform Gamma, shell-rate viscosity
     int thermal_conduction = 0;        // 1 = Fourier conduction inside each phase
     int thermal_exchange = 0;          // 1 = lamellar gas-liquid heat exchange, 2 = constant h, 3 = instant T equilibrium
     Set::Scalar thermal_alpha_min = 1.0e-3, thermal_h = 0.0;
