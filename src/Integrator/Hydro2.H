@@ -159,6 +159,7 @@ protected:
     void ThermalExchange(int lev, Set::Scalar dt);
     void RelaxAndReinit(int lev);
     void ShellBandUniform(int lev);   // Gamma bulk extension + band-uniform Gamma
+    void TensorCurvature(int lev, amrex::MultiFab &K);   // jump.curvature = 1: level-set curvature from the unit capillary tensor
     // Sub-cycled SHELL DILATATIONAL VISCOUS update (see Hydro2.cpp).  Advances
     // only div(Omega_visc) on the interface band, in N sub-steps of dt/N, so the
     // stiff kappa_s term no longer sets the global timestep.
@@ -757,14 +758,14 @@ protected:
     int shell_visc_subcycle_max = 512; // hard cap on sub-steps (runaway guard)
     int shell_heat_split = 0;          // shell dissipation heat: 0 volume fraction, 1 liquid, 2 effusivity
     Set::Scalar thermal_k0 = 0.0, thermal_k1 = 0.0;   // phase thermal conductivities (heat_split = 2)
-    int shell_gamma_uniform = 0, shell_gamma_uniform_sweeps = 2, shell_kappa_s_rate = 0;
-    int shell_visc_face = 0;   // shell.visc_face: face-based (flux-form) sub-cycled viscous stress   // band-uniform Gamma, shell-rate viscosity
+    int shell_gamma_uniform = 0, shell_gamma_uniform_sweeps = 2, shell_kappa_s_rate = 0;   // band-uniform Gamma, shell-rate viscosity
     int thermal_conduction = 0;        // 1 = Fourier conduction inside each phase
     int thermal_exchange = 0;          // 1 = lamellar gas-liquid heat exchange, 2 = constant h, 3 = instant T equilibrium
     Set::Scalar thermal_alpha_min = 1.0e-3, thermal_h = 0.0;
     int shell_visc_verbose = 0;        // print N and nu_s each sub-cycle
     Set::Scalar shell_nus_rho_floor = 1.0;  // density floor for the nu_s estimate
     int jump_consistent = 0;           // 1: jump curvature from Gamma, normal force -Delta grad(eta) (see Parse)
+    int jump_curvature = 0;            // jump.curvature: 0 = kappa(Gamma), 1 = capillary-tensor curvature
     int jump_tangential = 1;           // jump.consistent: keep the tangential part of the tensor force
     Set::Scalar jump_R0 = 0.0;         // radius at which Gamma = 1 (jump.R0, default marmottant.R0)
     int capillary_jump = 0;            // 1: static tension sigma_eff also imposed as a phase-pressure jump (see Parse)

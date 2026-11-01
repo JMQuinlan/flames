@@ -458,18 +458,12 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //         (gas -> liquid) from the gas half, whose interior stretches
         //         uniformly with the bubble
         //   shell.gamma_uniform_sweeps : pseudo-time sweeps per call
-        //   shell.kappa_s_rate = 1 : viscous shell rate from the shell itself,
+        //   shell.kappa_s_rate = 1 : viscous shell rate from the shell itself (jump
+        //         normal force with jump.consistent = 1, the viscous tensor without),
         //         -dln(Gamma)/dt over the step, instead of the local fluid div_s(u)
         pp_query_validate("shell.gamma_uniform", value.shell_gamma_uniform, {0, 1, 2});
         pp_query_default("shell.gamma_uniform_sweeps", value.shell_gamma_uniform_sweeps, value.shell_gamma_uniform == 1 ? 4 : 2);
         pp_query_validate("shell.kappa_s_rate", value.shell_kappa_s_rate, {0, 1});
-        //   shell.visc_face = 1 : sub-cycled viscous shell stress built on cell FACES
-        //         (compact stencils) and applied in flux form; the normal force is the
-        //         full tensor divergence (capillary-tensor curvature) instead of the
-        //         jump.consistent -Delta grad(eta) with kappa from Gamma.  Default 0.
-        pp_query_validate("shell.visc_face", value.shell_visc_face, {0, 1});
-        if (value.shell_visc_face && value.shell_kappa_s_rate)
-            Util::Abort(INFO, "shell.visc_face = 1 uses the local fluid rate; it cannot be combined with shell.kappa_s_rate = 1");
         pp_query_validate("thermal.conduction", value.thermal_conduction, {0, 1});
         pp_query_validate("thermal.exchange",   value.thermal_exchange,   {0, 1, 2, 3});
         pp_query_default("thermal.alpha_min",   value.thermal_alpha_min,  1.0e-3);  // phase fraction below which a phase takes no part
@@ -551,6 +545,12 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("jump.consistent", value.jump_consistent, 0);
         pp_query_default("jump.R0", value.jump_R0, value.marmottant_R0);
         pp_query_default("jump.tangential", value.jump_tangential, 1);
+        // jump.curvature: curvature in the normal jump force and relaxation jump
+        //   0 (default) = kappa(Gamma) = (D-1) Gamma^(1/(D-1)) / jump.R0  (sphere only)
+        //   1 = mean curvature of the local eta level set from the unit capillary
+        //       tensor, kappa = -n.div(|grad eta| I - grad eta grad eta/|grad eta|)/|grad eta|
+        //       (any shape; see TensorCurvature)
+        pp_query_validate("jump.curvature", value.jump_curvature, {0, 1});
         {
             int kappa_s_interface_removed = -1;
             pp_query("shell.kappa_s_interface", kappa_s_interface_removed);
@@ -2076,9 +2076,14 @@ Hydro2::RHS(int lev,
         const Set::Scalar R0_o = jump_R0;
         const Set::Scalar chi_o = marmottant_chi, Gb_o = marmottant_Gamma_buck;
         const Set::Scalar sbrk_o = marmottant_sigma_break, sigw_o = sigma;
+        // jump.curvature = 1: kappa from the capillary tensor instead of Gamma
+        const int tcurv_o = jc_o && jump_curvature;
+        amrex::MultiFab Kt_o;
+        if (tcurv_o) { Kt_o.define(baO, dmO, 1, 0); TensorCurvature(lev, Kt_o); }
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box bx = mfi.growntilebox(1);
+            amrex::Array4<const Set::Scalar> const &kt_o = tcurv_o ? Kt_o.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
             amrex::Array4<const Set::Scalar> const &shl_o = shell_mf[lev]->const_array(mfi);
             amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
             amrex::Array4<const Set::Scalar> const &sg = marm ? sig_eff_mf.const_array(mfi)
@@ -2104,7 +2109,9 @@ Hydro2::RHS(int lev,
                 if (jc_o)
                 {
                     const Set::Scalar Gs = std::max(shl_o(i, j, k), 0.0);
-                    const Set::Scalar kG = (AMREX_SPACEDIM - 1) * std::pow(Gs, 1.0 / (AMREX_SPACEDIM - 1)) / R0_o;
+                    Set::Scalar kG = (AMREX_SPACEDIM - 1) * std::pow(Gs, 1.0 / (AMREX_SPACEDIM - 1)) / R0_o;
+                    // only valid cells are read (Fsv at the cell itself)
+                    if (tcurv_o) kG = vbx_om.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))) ? kt_o(i, j, k) : 0.0;
                     const Set::Scalar sE = SigmaEffFromGamma(marm ? Gs : 0.0, 1.0, marm, sig0, chi_o, Gb_o, sbrk_o, sigw_o);
                     for (int d = 0; d < AMREX_SPACEDIM; ++d) om(i, j, k, nO + d) = -sE * kG * ge(d);
                 }
@@ -2343,7 +2350,7 @@ Hydro2::RHS(int lev,
         // at which point WritePlotFile's NaN check ABORTS an otherwise healthy
         // run -- the cluster LowAmp_NSCBC death).  Gating also removes ~12-18
         // wasted limiter reconstructions per cell per stage.
-        const int shell_row_on = marmottant || jump_consistent;
+        const int shell_row_on = marmottant || jump_consistent || shell_kappa_s_rate;   // kappa_s_rate=1 reads -dln(Gamma)/dt
         const int cfun_row_on  = 0;   // colour function retired with the closure
 
         // Device-safe copies of the symmetry-face flags: the [=] kernel lambda
@@ -4083,7 +4090,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // Gamma on that state is still pointwise (each band cell carries its own
     // parcel's stretch), so -dln(Gamma)/dt in SubcycleShellViscous would be the
     // local fluid rate, not the shell rate.  Make it band-uniform first.
-    if ((marmottant || jump_consistent) && shell_gamma_uniform)
+    if ((marmottant || jump_consistent || shell_kappa_s_rate) && shell_gamma_uniform)
     {
         eta_mf[lev]->FillBoundary(geom[lev].periodicity());
         ShellBandUniform(lev);
@@ -6370,7 +6377,9 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
     const int jtv = jump_tangential;
     const Set::Scalar keff_v = kap_s + 2.0 * shell_mu_s / (AMREX_SPACEDIM - 1);
     const Set::Scalar R0_v = jump_R0;
-    const int vface = shell_visc_face;
+    // jump.curvature = 1: kappa from the capillary tensor (eta is frozen over the sub-cycles)
+    const int tcurv_v = jcv && jump_curvature;
+    amrex::MultiFab Kt_v;     // filled below, once the eta ghosts are current
 
     // ---- N from the SAME stability measure the dt limiter uses -------------
     // nu_s = kap_eff |grad eta| / rho, reduced over the band, then
@@ -6396,8 +6405,6 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
     }
     amrex::ParallelDescriptor::ReduceRealMax(nus_max);
     if (nus_max <= 0.0) return;
-    // compact face differences (1 dx) are 4x stiffer than the wide 2-dx central ones
-    if (vface) nus_max *= 4.0;
 
     const Set::Scalar cflv   = (cfl_v == cfl_v) ? cfl_v : 0.4;   // NaN-safe
     // NOTE: `small` (1e-8) is a DENSITY/PRESSURE regulariser and must never be
@@ -6472,6 +6479,39 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
             }
         }
     }
+    if (tcurv_v)
+    {
+        Kt_v.define(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, 0);
+        TensorCurvature(lev, Kt_v);
+    }
+    // jump.consistent = 0 with shell.kappa_s_rate = 1: the viscous tensor
+    // kappa_s ds P|grad eta| takes the shell's own rate -dln(Gamma)/dt (as the
+    // jump.consistent normal force does).  Computed once per step on valid
+    // cells, ghosts through the eta BCs (mirror / RADIAL) so the tensor's grown
+    // box sees the same rate.  Off-band cells hold 0 (a marker value would be
+    // blended into real rates by the interpolating RADIAL ghost fill); where
+    // a cell uses the shell rate is decided from eta, which is valid in ghosts.
+    const int srate_t = srate && !jcv;
+    amrex::MultiFab Rs_t;
+    if (srate_t)
+    {
+        Rs_t.define(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, eta_mf[lev]->nGrow());
+        Rs_t.setVal(0.0);
+        for (amrex::MFIter mfi(Rs_t, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto et = eta_mf[lev]->const_array(mfi);
+            auto sh = shell_mf[lev]->const_array(mfi);
+            auto so = shell_old_mf[lev]->const_array(mfi);
+            auto rs = Rs_t.array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                const Set::Scalar e = et(i, j, k);
+                if (sh(i, j, k) > 0.0 && so(i, j, k) > 0.0 && e > cut_h && e < 1.0 - cut_h)
+                    rs(i, j, k) = -std::log(sh(i, j, k) / so(i, j, k)) / dt_step;
+            });
+        }
+        FillBoundariesWithBC(lev, time + dt, eta_bc, { &Rs_t });
+    }
     for (int it = 0; it < N; ++it)
     {
         // Momentum ghosts through the field BCs (mirror at symmetry planes,
@@ -6499,13 +6539,13 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
         Omv.setVal(0.0);
 
         // ---- build Omega_visc on a grown box (band cells only) -------------
-        // (shell.visc_face = 1 builds it on the faces inside the apply loop)
-        for (amrex::MFIter mfi(Omv, false); !vface && mfi.isValid(); ++mfi)
+        for (amrex::MFIter mfi(Omv, false); mfi.isValid(); ++mfi)
         {
             const amrex::Box &gbx = mfi.growntilebox(1);
             auto et  = eta_mf[lev]->const_array(mfi);
             auto vel = velocity_mf[lev]->const_array(mfi);
             auto om  = Omv.array(mfi);
+            auto rst = srate_t ? Rs_t.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
             amrex::ParallelFor(gbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
                 const Set::Scalar gem = ge.lpNorm<2>();
@@ -6514,7 +6554,12 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                 Set::Matrix gu = Set::Matrix::Zero();
                 for (int d = 0; d < AMREX_SPACEDIM; ++d)
                     gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
-                const Set::Scalar ds = gu.trace() - nh.dot(gu * nh);
+                Set::Scalar ds = gu.trace() - nh.dot(gu * nh);
+                if (srate_t)
+                {
+                    const Set::Scalar ec = et(i, j, k);
+                    if (ec > cut_h && ec < 1.0 - cut_h) ds = rst(i, j, k);
+                }
                 const Set::Scalar se = kap_s * ds;   // viscous ONLY
                 // |grad eta| P_ab = gem d_ab - ge_a ge_b / gem
                 om(i,j,k,0) = se * (gem - ge(0)*ge(0)/gem);     // xx
@@ -6554,6 +6599,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
             auto ar0 = rho_eta0_mf[lev]->const_array(mfi);
             auto ar1 = rho_eta1_mf[lev]->const_array(mfi);
             auto shlo = shell_old_mf[lev]->const_array(mfi);
+            auto ktv  = tcurv_v ? Kt_v.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
             const Set::Scalar idx = 0.5 / DX[0], idy = 0.5 / DX[1];
 #if AMREX_SPACEDIM == 3
             const Set::Scalar idz = 0.5 / DX[2];
@@ -6580,60 +6626,6 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                      + (om(i,j+1,k,5) - om(i,j-1,k,5)) * idy
                      + (om(i,j,k+1,2) - om(i,j,k-1,2)) * idz;
 #endif
-                // shell.visc_face = 1: the same stress Omega_visc = kappa_s div_s(u) |grad eta| P,
-                // built on each FACE (compact normal differences of eta and u, transverse
-                // derivatives averaged from the two cells) and applied in flux form,
-                // F = sum_d (Omega_{d,hi} - Omega_{d,lo}) / dx_d.  Each face value is
-                // computed identically by the two cells that share it, so momentum is
-                // conserved to round-off.  The normal force is the full tensor (curvature
-                // from the capillary tensor itself, not from Gamma).
-                Set::Scalar diss_f = 0.0;
-                if (vface)
-                {
-                    auto face = [&](int il, int jl, int kl, int d, Set::Vector &row, Set::Scalar &Df) {
-                        const int ed[3] = { d == 0, d == 1, d == 2 };
-                        const int ir = il + ed[0], jr = jl + ed[1], kr = kl + ed[2];
-                        Set::Vector g = Set::Vector::Zero(); Set::Matrix G = Set::Matrix::Zero();
-                        for (int a = 0; a < AMREX_SPACEDIM; ++a)
-                        {
-                            if (a == d)
-                            {
-                                g(a) = (et(ir, jr, kr) - et(il, jl, kl)) / DX[d];
-                                for (int c = 0; c < AMREX_SPACEDIM; ++c)
-                                    G(a, c) = (vel(ir, jr, kr, c) - vel(il, jl, kl, c)) / DX[d];
-                            }
-                            else
-                            {
-                                const int ea[3] = { a == 0, a == 1, a == 2 };
-                                const Set::Scalar h2 = 0.5 / DX[a];
-                                g(a) = 0.5 * h2 * (et(il + ea[0], jl + ea[1], kl + ea[2]) - et(il - ea[0], jl - ea[1], kl - ea[2])
-                                                 + et(ir + ea[0], jr + ea[1], kr + ea[2]) - et(ir - ea[0], jr - ea[1], kr - ea[2]));
-                                for (int c = 0; c < AMREX_SPACEDIM; ++c)
-                                    G(a, c) = 0.5 * h2 * (vel(il + ea[0], jl + ea[1], kl + ea[2], c) - vel(il - ea[0], jl - ea[1], kl - ea[2], c)
-                                                        + vel(ir + ea[0], jr + ea[1], kr + ea[2], c) - vel(ir - ea[0], jr - ea[1], kr - ea[2], c));
-                            }
-                        }
-                        const Set::Scalar gmf = g.lpNorm<2>();
-                        row = Set::Vector::Zero(); Df = 0.0;
-                        if (gmf < 1.0e-10) return;
-                        const Set::Vector nf = g / gmf;
-                        const Set::Scalar dsf = G.trace() - nf.dot(G * nf);
-                        const Set::Scalar sef = kap_s * dsf;
-                        for (int c = 0; c < AMREX_SPACEDIM; ++c)
-                            row(c) = sef * (((c == d) ? gmf : 0.0) - g(d) * g(c) / gmf);
-                        Df = kap_s * gmf * dsf * dsf;
-                    };
-                    F = Set::Vector::Zero();
-                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
-                    {
-                        const int ed[3] = { d == 0, d == 1, d == 2 };
-                        Set::Vector rlo, rhi; Set::Scalar Dlo, Dhi;
-                        face(i - ed[0], j - ed[1], k - ed[2], d, rlo, Dlo);
-                        face(i, j, k, d, rhi, Dhi);
-                        F += (rhi - rlo) / DX[d];
-                        diss_f += 0.5 * (Dlo + Dhi) / AMREX_SPACEDIM;
-                    }
-                }
                 const Set::Vector nh = ge / gem;
                 Set::Matrix gu = Set::Matrix::Zero();
                 for (int d = 0; d < AMREX_SPACEDIM; ++d)
@@ -6646,12 +6638,13 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                                         && et_c > cut_h && et_c < 1.0 - cut_h)
                                      ? -std::log(shl(i, j, k) / shlo(i, j, k)) / dt_step
                                      : ds_fl;
-                if (jcv && !vface)
+                if (jcv)
                 {
                     // tangential part of div(Omega_visc) + normal jump force
                     if (jtv) F -= nh * nh.dot(F); else F = Set::Vector::Zero();
                     const Set::Scalar Gs = std::max(shl(i, j, k), 0.0);
-                    const Set::Scalar kG = (AMREX_SPACEDIM - 1) * std::pow(Gs, 1.0 / (AMREX_SPACEDIM - 1)) / R0_v;
+                    const Set::Scalar kG = tcurv_v ? ktv(i, j, k)
+                                         : (AMREX_SPACEDIM - 1) * std::pow(Gs, 1.0 / (AMREX_SPACEDIM - 1)) / R0_v;
                     F -= (keff_v * ds * kG) * ge;
                 }
                 for (int d = 0; d < AMREX_SPACEDIM; ++d)
@@ -6664,8 +6657,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                 for (int d = 0; d < AMREX_SPACEDIM; ++d) udotF += vel(i,j,k,d) * F(d);
                 // Total energy gains the work done on the fluid (u.F, which
                 // shows up as kinetic) plus the dissipation (internal).
-                const Set::Scalar diss = vface ? diss_f
-                                       : (jcv ? keff_v : kap_s) * gem * ds * ds_fl;   // = ds^2 >= 0 unless kappa_s_rate
+                const Set::Scalar diss = (jcv ? keff_v : kap_s) * gem * ds * ds_fl;   // = ds^2 >= 0 unless kappa_s_rate
                 E(i,j,k) += dtau * (udotF + diss);
                 // The dissipation is INTERNAL energy, so it must also be split
                 // into the phasic reservoirs, by volume fraction as elsewhere
@@ -7088,6 +7080,46 @@ void Hydro2::ThermalExchange(int lev, Set::Scalar dt)
     }
 }
 
+// TensorCurvature(): mean curvature of the local eta level set from the unit
+// capillary tensor (jump.curvature = 1).
+//   Omega_u = |grad eta| I - grad eta grad eta / |grad eta|,
+//   n . div(Omega_u) = -|grad eta| div(n)   =>   kappa = -n . div(Omega_u) / |grad eta|.
+// kappa = div(n) (n = grad eta/|grad eta|, gas -> liquid), i.e. 2/r on a sphere.
+// Omega_u at the 2*DIM neighbours from central gradients (eta needs 2 ghosts),
+// central divergence at the cell -- the same stencil as the capillary force.
+// Valid cells only; 0 where |grad eta| < 1e-10.
+void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K)
+{
+    BL_PROFILE("Integrator::Hydro2::TensorCurvature");
+    const Set::Scalar *DXc = geom[lev].CellSize();
+    for (amrex::MFIter mfi(K, false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
+        auto et = eta_mf[lev]->const_array(mfi);
+        auto Kc = K.array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            Kc(i, j, k) = 0.0;
+            const Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DXc);
+            const Set::Scalar g = ge.lpNorm<2>();
+            if (g < 1.0e-10) return;
+            auto Ou = [&](int ii, int jj, int kk) -> Set::Matrix {
+                const Set::Vector gn = Numeric::Gradient(et, ii, jj, kk, 0, DXc);
+                const Set::Scalar gm = gn.lpNorm<2>();
+                if (gm < 1.0e-10) return Set::Matrix::Zero();
+                return gm * Set::Matrix::Identity() - gn * gn.transpose() / gm;
+            };
+            Set::Vector dv = Set::Vector::Zero();      // div(Omega_u)_c = sum_d d_d Omega_dc
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                const Set::Matrix Op = Ou(i + di, j + dj, k + dk), Om = Ou(i - di, j - dj, k - dk);
+                for (int c = 0; c < AMREX_SPACEDIM; ++c) dv(c) += (Op(d, c) - Om(d, c)) / (2.0 * DXc[d]);
+            }
+            Kc(i, j, k) = -ge.dot(dv) / (g * g);
+        });
+    }
+}
+
 // Shell Gamma bulk reset/extension + band-uniform Gamma (shell.gamma_uniform).
 // Called from RelaxAndReinit and, on the final RK state, before
 // SubcycleShellViscous (see Advance).
@@ -7100,7 +7132,7 @@ void Hydro2::ShellBandUniform(int lev)
     // -> negative -> NaN by ~5e-3 on the driven bubble).  The RHS freezes it
     // in the bulk (see the shell row gate); here it is pinned back to the
     // unstrained value so re-entrained cells always start from Gamma = 1.
-    if (marmottant || jump_consistent)
+    if (marmottant || jump_consistent || shell_kappa_s_rate)
     {
         for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
         {
@@ -7158,7 +7190,7 @@ void Hydro2::ShellBandUniform(int lev)
 
     // BAND-UNIFORM Gamma (shell.gamma_uniform, see Parse).  Jacobi sweeps in
     // pseudo-time on band cells only; bulk cells are left to the extension above.
-    if ((marmottant || jump_consistent) && shell_gamma_uniform)
+    if ((marmottant || jump_consistent || shell_kappa_s_rate) && shell_gamma_uniform)
     {
         const Set::Scalar *DXu = geom[lev].CellSize();
         const Set::Scalar dxm_u = std::min({AMREX_D_DECL(DXu[0], DXu[1], DXu[2])});
@@ -7354,6 +7386,10 @@ void Hydro2::RelaxAndReinit(int lev)
         const int marm_j = marmottant;
         const Set::Scalar sig_j = sigma, chi_j = marmottant_chi, Gb_j = marmottant_Gamma_buck;
         const Set::Scalar sbrk_j = marmottant_sigma_break, sigw_j = sigma;
+        // jump.curvature = 1: kappa from the capillary tensor (same as the force)
+        const int tcurv_j = jc_r && jump_curvature;
+        amrex::MultiFab Kt_j;
+        if (tcurv_j) { Kt_j.define(ba, dm, 1, 0); TensorCurvature(lev, Kt_j); }
         for (amrex::MFIter mfi(*jump_mf, false); mfi.isValid(); ++mfi)
         {
             const amrex::Box &bxj = mfi.validbox();
@@ -7362,6 +7398,7 @@ void Hydro2::RelaxAndReinit(int lev)
             auto n  = nt.const_array(mfi);
             auto J  = jump_mf->array(mfi);
             auto shl = shell_mf[lev]->const_array(mfi);
+            auto ktj = tcurv_j ? Kt_j.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
             amrex::ParallelFor(bxj, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 const Set::Scalar e = et(i, j, k);
                 if (!(e > cut_j && e < 1.0 - cut_j)) return;
@@ -7389,7 +7426,8 @@ void Hydro2::RelaxAndReinit(int lev)
                 {
                     // grad(n) -> (kappa/(D-1)) P with kappa from Gamma: T_s : grad(n) = kappa tr(T_s)/(D-1)
                     const Set::Scalar Gs = std::max(shl(i, j, k), 0.0);
-                    const Set::Scalar kG = (AMREX_SPACEDIM - 1) * std::pow(Gs, 1.0 / (AMREX_SPACEDIM - 1)) / R0_j;
+                    const Set::Scalar kG = tcurv_j ? ktj(i, j, k)
+                                         : (AMREX_SPACEDIM - 1) * std::pow(Gs, 1.0 / (AMREX_SPACEDIM - 1)) / R0_j;
                     J(i, j, k) = kG * Ts.trace() / (AMREX_SPACEDIM - 1);
                     return;
                 }
