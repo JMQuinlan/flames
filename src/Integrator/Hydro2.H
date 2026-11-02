@@ -323,6 +323,9 @@ protected:
 
     //Set::Field<Set::Scalar> eta_mf_in;
     Set::Field<Set::Scalar> etadot_mf;
+    Set::Field<Set::Scalar> relax_heat_mf;     // relax.heat_diag: cumulative irreversible relax energy {gas, liq}
+    Set::Field<Set::Scalar> relax_split_mf;    // relax.heat_diag: {gas defect, liq defect, gas newton, gas guard, n guard, n eq26}
+    Set::Field<Set::Scalar> relax_J_mf;        // relax.heat_diag: {J, J_prev, sum|dJ|, sum dJ^2} per relax call
     Set::Field<Set::Scalar> eta_old_mf;
 
     // Advected shell density  c = Gamma |grad eta|  (Marmottant, see below).
@@ -772,6 +775,8 @@ protected:
     int shell_kappa_s_jump = 0;        // 1: normal viscous shell stress also imposed as a phase-pressure jump in RelaxAndReinit (see Parse)
     Set::Scalar relax_time = 0.0;      // time of the current RelaxAndReinit call (BC fills inside it)
     int relax_diag = 0;
+    int relax_allow_tension = 0;       // relax.allow_tension: full-EOS-range root bracket
+    int relax_heat_diag = 0;           // relax.heat_diag: 1 = plot relax_heat_{gas,liq}
     int relax_reinit_split = 1;        // 1 = energy defect by mass fraction (default), 0 = Sch20 eq. 26 equal-pressure reinit
     int clip_ghost_only = 0;
     bool sym_face_lo[3] = {false, false, false};

@@ -550,7 +550,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //   1 = mean curvature of the local eta level set from the unit capillary
         //       tensor, kappa = -n.div(|grad eta| I - grad eta grad eta/|grad eta|)/|grad eta|
         //       (any shape; see TensorCurvature)
-        pp_query_validate("jump.curvature", value.jump_curvature, {0, 1});
+        //   2 = DIAGNOSTIC: tensor curvature in the force, kappa(Gamma) in the relaxation jump
+        pp_query_validate("jump.curvature", value.jump_curvature, {0, 1, 2});
         {
             int kappa_s_interface_removed = -1;
             pp_query("shell.kappa_s_interface", kappa_s_interface_removed);
@@ -620,6 +621,15 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //         hands ~90% of delta to the gas
         pp_query_validate("relax.reinit_split", value.relax_reinit_split, {1, 0});
         pp_query_default("relax_diag", value.relax_diag, 0); // 1 = print per-stage {max_iters, max_residual, count_unconverged}.
+        // relax.heat_diag = 1: plot field relax_heat_{gas,liq} = cumulative energy each phase
+        // received in RelaxAndReinit BEYOND isentropic compression, (alpha rho e)_post minus
+        // alpha_post (p_s + gam pi)/(gam - 1) with p_s + pi = (p_pre + pi)(rho_post/rho_pre)^gam
+        // [J/m^3, summed over every call].  Output only; does not change the solution.
+        pp_query_validate("relax.heat_diag", value.relax_heat_diag, {0, 1});
+        // relax.allow_tension = 1: the relaxation root bracket spans the full EOS range,
+        // p_liq > -pi_liq and p_liq + J > -pi_gas, instead of starting at 1e-3 |p_init| > 0.
+        // Needed when the imposed jump J exceeds the gas pressure (liquid in tension).  DEFAULT 0.
+        pp_query_validate("relax.allow_tension", value.relax_allow_tension, {0, 1});
         pp_query_default("clip_ghost_only", value.clip_ghost_only, 0); // 1 = FillGhost STEP-9 positivity clip touches GHOST cells only (per-phase mass conservation)
 
         // Symmetry-face detection: a domain face whose normal-momentum BC is
@@ -991,6 +1001,16 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         value.RegisterNewFab(value.Gamma_mf,        &value.bc_nothing,  1, 0,       "Gamma",        true, false);
 
         value.RegisterNewFab(value.etadot_mf,       &value.bc_nothing,  1, 0,       "etadot",       diag, false);
+        value.RegisterNewFab(value.relax_heat_mf,   &value.bc_nothing,  2, 0,       "relax_heat",   value.relax_heat_diag, false, { "gas", "liq" });
+        // relax.heat_diag: target jump J seen by each relaxation call, the previous call's J,
+        // and running sums of |J - J_prev| and (J - J_prev)^2 over calls [Pa, Pa, Pa^2]
+        // relax.heat_diag: where the gas energy change in RelaxAndReinit comes from, summed over calls
+        //   gasdefect/liqdefect = each phase's share of the reinit defect (E - KE) - (E0r + E1r)
+        //   gasnewton = gas energy at the relaxed pressure minus isentropic (the Newton step)
+        //   gasguard  = gas energy change in pure-cell / floored-guard cells (equal-pressure reset)
+        //   nguard, neq26 = number of calls taking the guard path / the eq. 26 fallback
+        value.RegisterNewFab(value.relax_split_mf,  &value.bc_nothing,  6, 0,       "relax_split",  value.relax_heat_diag, false, { "gasdefect", "liqdefect", "gasnewton", "gasguard", "nguard", "neq26" });
+        value.RegisterNewFab(value.relax_J_mf,      &value.bc_nothing,  4, 0,       "relax_J",      value.relax_heat_diag, false, { "J", "Jprev", "sumabsdJ", "sumdJ2" });
         value.RegisterNewFab(value.hess_eta_mf,     &value.bc_nothing,  4, 0,       "hess_eta",     false,false, { "00", "01", "10", "11" });
         value.RegisterNewFab(value.n_hat_mf,        &value.bc_nothing,  AMREX_SPACEDIM, 0,       "n_hat",        false,false, { AMREX_D_DECL("x", "y", "z") });
 
@@ -1215,6 +1235,9 @@ void Hydro2::Initialize(int lev)
     eta_ic          ->Initialize(lev, eta_mf, 0.0);
     eta_ic          ->Initialize(lev, eta_old_mf, 0.0);
     etadot_mf[lev]  ->setVal(0.0);
+    relax_heat_mf[lev]->setVal(0.0);
+    relax_J_mf[lev]->setVal(0.0);
+    relax_split_mf[lev]->setVal(0.0);
     hess_eta_mf[lev]->setVal(0.0);
 
     // ------------------------------------------------------------------
@@ -7387,7 +7410,7 @@ void Hydro2::RelaxAndReinit(int lev)
         const Set::Scalar sig_j = sigma, chi_j = marmottant_chi, Gb_j = marmottant_Gamma_buck;
         const Set::Scalar sbrk_j = marmottant_sigma_break, sigw_j = sigma;
         // jump.curvature = 1: kappa from the capillary tensor (same as the force)
-        const int tcurv_j = jc_r && jump_curvature;
+        const int tcurv_j = jc_r && (jump_curvature == 1);
         amrex::MultiFab Kt_j;
         if (tcurv_j) { Kt_j.define(ba, dm, 1, 0); TensorCurvature(lev, Kt_j); }
         for (amrex::MFIter mfi(*jump_mf, false); mfi.isValid(); ++mfi)
@@ -7436,6 +7459,45 @@ void Hydro2::RelaxAndReinit(int lev)
         }
     }
 
+    // relax.heat_diag: pre-relaxation state {alpha_gas, p_liq_pre, p_gas_pre} (output only)
+    amrex::MultiFab rh_pre;
+    if (relax_heat_diag)
+    {
+        // target jump bookkeeping (J = 0 outside the band / with the jump off)
+        for (amrex::MFIter mfi(*relax_J_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto Jd = relax_J_mf[lev]->array(mfi);
+            amrex::Array4<const Set::Scalar> Jc = use_jump ? jump_mf->const_array(mfi) : amrex::Array4<const Set::Scalar>{};
+            const bool uj = use_jump;
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Scalar Jn = uj ? Jc(i, j, k) : 0.0;
+                if (!(Jn == Jn)) Jn = 0.0;
+                const Set::Scalar dJ = Jn - Jd(i, j, k, 0);
+                Jd(i, j, k, 1) = Jd(i, j, k, 0);
+                Jd(i, j, k, 0) = Jn;
+                Jd(i, j, k, 2) += std::abs(dJ);
+                Jd(i, j, k, 3) += dJ * dJ;
+            });
+        }
+        rh_pre.define(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 3, 0);
+        for (amrex::MFIter mfi(rh_pre, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto eta = eta_mf[lev]->const_array(mfi);
+            auto E0_ = energy0_mf[lev]->const_array(mfi);
+            auto E1_ = energy1_mf[lev]->const_array(mfi);
+            auto q   = rh_pre.array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                const Set::Scalar a1 = std::min(std::max(eta(i, j, k), alpha_floor), 1.0 - alpha_floor);
+                const Set::Scalar a2 = 1.0 - a1;
+                q(i, j, k, 0) = a2;
+                q(i, j, k, 1) = std::max((gam0 - 1.0) * E0_(i, j, k) / a1 - gam0 * pi0_, -pi0_ + DIV_FLOOR);
+                q(i, j, k, 2) = std::max((gam1 - 1.0) * E1_(i, j, k) / a2 - gam1 * pi1_, -pi1_ + DIV_FLOOR);
+            });
+        }
+    }
+
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
@@ -7459,6 +7521,9 @@ void Hydro2::RelaxAndReinit(int lev)
             : amrex::Array4<Set::Scalar>{};
 
         const int reinit_split = relax_reinit_split;
+        const int rhd = relax_heat_diag;
+        const int tens = relax_allow_tension;
+        amrex::Array4<Set::Scalar> rsp = rhd ? relax_split_mf[lev]->array(mfi) : amrex::Array4<Set::Scalar>{};
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             // Skip solid cells: pressure relaxation must not touch the
             // frozen solid state (its per-phase energies are prescribed,
@@ -7550,8 +7615,10 @@ void Hydro2::RelaxAndReinit(int lev)
                 // to prevent.
                 const Set::Scalar a1g = std::min(std::max(eta(i, j, k), 0.0), 1.0);
                 const Set::Scalar a2g = 1.0 - a1g;
+                const Set::Scalar E1g_old = E1_(i, j, k);
                 E0_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_pure, a1g, gam0, pi0_, small_loc);
                 E1_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_pure, a2g, gam1, pi1_, small_loc);
+                if (rhd) { rsp(i, j, k, 3) += E1_(i, j, k) - E1g_old; rsp(i, j, k, 4) += 1.0; }
                 if (diag_on)
                 {
                     diag_arr(i, j, k, 0) = 0.0;
@@ -7593,7 +7660,8 @@ void Hydro2::RelaxAndReinit(int lev)
             // pole at p -> -pi_gas).  For typical gas/liquid: p_min ~ 0,
             // p_lo ~ small positive.  For all-liquid pair: p_min ~ -pi,
             // p_lo > p_min.
-            Set::Scalar p_lo = std::max(p_min, 1.0e-3 * std::max(std::abs(p_init), 1.0));
+            Set::Scalar p_lo = tens ? p_min + 1.0e-9 * std::max(std::abs(p_min), 1.0)
+                                    : std::max(p_min, 1.0e-3 * std::max(std::abs(p_init), 1.0));
             // Upper bracket: generously above the maximum pre-relax p.
             Set::Scalar p_hi = 1.0e4 * std::max(std::max(std::abs(p0_pre), std::abs(p1_pre)), 1.0);
 
@@ -7760,7 +7828,8 @@ void Hydro2::RelaxAndReinit(int lev)
             }
 
             // Floor: keep p + gam_k pi_k > 0 for both phases (SG positivity).
-            const Set::Scalar p_min_ph = -std::min(pi0_, pi1_) + small_loc;
+            const Set::Scalar p_min_ph = tens ? std::max(-pi0_, -pi1_ - Dj) + small_loc
+                                              : -std::min(pi0_, pi1_) + small_loc;
             p_reinit = std::max(p_reinit, p_min_ph);
 
             // Diagnostic: gap between Newton's converged p and reinit p.
@@ -7793,15 +7862,57 @@ void Hydro2::RelaxAndReinit(int lev)
                 {
                     E0_(i, j, k) = E0m;
                     E1_(i, j, k) = E1m;
+                    if (rhd)
+                    {
+                        const Set::Scalar ps1 = (p1_pre + pi1_) * std::pow(a2 / a2_new, gam1) - pi1_;
+                        rsp(i, j, k, 0) += Y1 * dlt;
+                        rsp(i, j, k, 1) += Y0 * dlt;
+                        rsp(i, j, k, 2) += E1r - a2_new * (ps1 + gam1 * pi1_) / (gam1 - 1.0);
+                    }
                     return;
                 }
             }
             E0_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_reinit, a1_new, gam0, pi0_, small_loc);
             E1_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_reinit + Dj, a2_new, gam1, pi1_, small_loc);
+            if (rhd)
+            {
+                // eq. 26 fallback: split the change into Newton (relaxed p) and the reset to p_reinit
+                const Set::Scalar E0q = Solver::EOS::EOS::PhasicEnergyFromPressure(p_relaxed, a1_new, gam0, pi0_, small_loc);
+                const Set::Scalar E1q = Solver::EOS::EOS::PhasicEnergyFromPressure(p_relaxed + Dj_relax, a2_new, gam1, pi1_, small_loc);
+                const Set::Scalar ps1 = (p1_pre + pi1_) * std::pow(a2 / a2_new, gam1) - pi1_;
+                rsp(i, j, k, 0) += E1_(i, j, k) - E1q;
+                rsp(i, j, k, 1) += E0_(i, j, k) - E0q;
+                rsp(i, j, k, 2) += E1q - a2_new * (ps1 + gam1 * pi1_) / (gam1 - 1.0);
+                rsp(i, j, k, 5) += 1.0;
+            }
 
             // rho_eta{0,1}, momentum, energy_per_vol are NOT touched
             // (they are conserved through relaxation by construction).
         });
+    }
+
+    // relax.heat_diag: energy beyond isentropic compression, per phase (output only).
+    // Partial densities are unchanged by relaxation, so rho_post/rho_pre = alpha_pre/alpha_post.
+    if (relax_heat_diag)
+    {
+        for (amrex::MFIter mfi(rh_pre, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto eta = eta_mf[lev]->const_array(mfi);
+            auto E0_ = energy0_mf[lev]->const_array(mfi);
+            auto E1_ = energy1_mf[lev]->const_array(mfi);
+            auto q   = rh_pre.const_array(mfi);
+            auto H   = relax_heat_mf[lev]->array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                const Set::Scalar a1 = std::min(std::max(eta(i, j, k), alpha_floor), 1.0 - alpha_floor);
+                const Set::Scalar a2 = 1.0 - a1;
+                const Set::Scalar a2p = q(i, j, k, 0), a1p = 1.0 - a2p;
+                const Set::Scalar ps0 = (q(i, j, k, 1) + pi0_) * std::pow(a1p / a1, gam0) - pi0_;
+                const Set::Scalar ps1 = (q(i, j, k, 2) + pi1_) * std::pow(a2p / a2, gam1) - pi1_;
+                H(i, j, k, 1) += E0_(i, j, k) - a1 * (ps0 + gam0 * pi0_) / (gam0 - 1.0);
+                H(i, j, k, 0) += E1_(i, j, k) - a2 * (ps1 + gam1 * pi1_) / (gam1 - 1.0);
+            });
+        }
     }
 
 
