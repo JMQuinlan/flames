@@ -4,6 +4,7 @@
 # eps 0.0002, cfl 0.4.  ONLY the flag block at the end changed.  Uncoated (sigma = 0, kappa_s = 0): the shell and
 # jump flags are inert, but relax.closure / allow_tension / trace act on every interface cell, so this deck checks the
 # relaxation changes do not degrade the violent collapse (p_inf/p_b = 1427).
+# 11-03: + jump.curvature_y = 1 (fixes the step-1 blow-up); needs hydro2 built from the 11-03 working copy.
 # Needs hydro2 built from the 11-02 working copy (see the coated deck).
 #
 #@ exe=hydro2
@@ -230,6 +231,9 @@ thermal.k0                 = 0.6     # water [W/m/K]
 thermal.k1                 = 0.026   # air   [W/m/K]
 relax.reinit_split         = 1       # reinit energy residual split by mass fraction Y_k
 jump.curvature             = 1       # tensor curvature (any shape); never the Gamma curvature
+jump.curvature_y           = 1       # 11-03: tensor curvature from the relaxation-invariant phase-mass field psi, not eta.
+                                      # kappa(eta) + relaxation (alpha = eta) is a feedback loop that blew this deck up at
+                                      # step 1 under 4-level AMR subcycling (INCLINE nu_s = 3.4e11 warning); see Hydro2 Parse.
 relax.closure              = 1       # mass-fraction relaxation: isentropic + mass-specific heat q for the whole relax
 relax.allow_tension        = 2       # only guard: p_liq + alpha_gas*Dj > 0 (positive mixture pressure for the Riemann solver)
 relax.trace                = 1       # trace water in gas keeps its own energy (soft-dominant cells only); kills centre heating

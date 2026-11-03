@@ -770,6 +770,8 @@ protected:
     int shell_visc_verbose = 0;        // print N and nu_s each sub-cycle
     Set::Scalar shell_nus_rho_floor = 1.0;  // density floor for the nu_s estimate
     int jump_consistent = 0;           // 1: jump curvature from Gamma, normal force -Delta grad(eta) (see Parse)
+    int jump_curvature_y = 0;
+    Set::Scalar jump_y_rho0 = -1.0, jump_y_rho1 = -1.0;   // jump.curvature_y reference phase densities (set once from the state)          // jump.curvature_y: 1 = tensor curvature from the level sets of the mass fraction Y (relaxation-invariant)
     int jump_curvature_cp = 0;         // jump.curvature_cp: 1 = closest-point (interface) curvature in every band cell
     int jump_curvature = 0;            // jump.curvature: 0 = kappa(Gamma), 1 = capillary-tensor curvature
     int jump_tangential = 1;           // jump.consistent: keep the tangential part of the tensor force

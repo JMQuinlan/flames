@@ -631,6 +631,21 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //   band are held at the LOCAL jump 2 sigma/r: band gas below the core pressure, liquid in tension
         //   in the gas-side tail.  DEFAULT 0.
         pp_query_validate("jump.curvature_cp", value.jump_curvature_cp, {0, 1});
+        // jump.curvature_y = 1: the tensor curvature is taken from the level sets of the liquid mass
+        //   fraction Y = alpha_l rho_l / rho instead of eta.  Y is the advected material marker: the
+        //   pressure relaxation conserves each (alpha rho)_k and rho, so it cannot change Y, while it does
+        //   move alpha = eta.  With kappa(eta), relaxation -> alpha -> kappa -> J -> relaxation is a
+        //   feedback loop that diverges in the band tail (|grad eta| -> 0) when many relaxations run per
+        //   unit time (AMR subcycling, small dt; sigma = 500 Light_Mili blew up at step 1, 2026-11-03).
+        //   Y and eta are monotone functions of the same distance in the band, so their level sets are
+        //   the same surfaces and the geometric curvature is unchanged.  The field differenced is not Y
+        //   itself (too steep at a 1000:1 density ratio: kappa +18% at eps/dx = 2) but the fixed monotone
+        //   map psi = (a rho)_0/rho0_ref / ((a rho)_0/rho0_ref + (a rho)_1/rho1_ref), i.e. the volume
+        //   fraction at constant reference densities: psi = eta when the phases sit at the references, the
+        //   relaxation cannot change it, and a 3x reference mismatch moves kappa by < 5%.  The references
+        //   are the mean pure-phase densities of the state at the first call (the IC), then held constant
+        //   (they must be global constants: a cell-local density would close the loop again).  DEFAULT 0.
+        pp_query_validate("jump.curvature_y", value.jump_curvature_y, {0, 1});
         {
             int kappa_s_interface_removed = -1;
             pp_query("shell.kappa_s_interface", kappa_s_interface_removed);
@@ -7225,10 +7240,52 @@ void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K)
     const Set::Scalar *DXc = geom[lev].CellSize();
     const int cp = jump_curvature_cp;
     const Set::Scalar eps_c = epsilon, cut_c = std::max(cutoff, 1.0e-12);
+    // jump.curvature_y: level sets of Y = (alpha rho)_l / rho (see Parse); same ghost depth as eta,
+    // whose ghosts are filled together with rho_eta0/1 at every caller.
+    amrex::MultiFab Yc;
+    if (jump_curvature_y && (jump_y_rho0 <= 0.0 || jump_y_rho1 <= 0.0))
+    {
+        // reference densities: mean density of each pure phase on level 0 (eta > 0.99 / < 0.01)
+        Set::Scalar s0 = 0.0, n0 = 0.0, s1 = 0.0, n1 = 0.0;
+        for (amrex::MFIter mfi(*eta_mf[0], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &vb = mfi.validbox();
+            auto e0 = eta_mf[0]->const_array(mfi);
+            auto q0 = rho_eta0_mf[0]->const_array(mfi);
+            auto q1 = rho_eta1_mf[0]->const_array(mfi);
+            amrex::LoopOnCpu(vb, [&](int i, int j, int k) {
+                const Set::Scalar e = e0(i, j, k);
+                if (e > 0.99) { s0 += q0(i, j, k) / e; n0 += 1.0; }
+                if (e < 0.01) { s1 += q1(i, j, k) / (1.0 - e); n1 += 1.0; }
+            });
+        }
+        amrex::ParallelDescriptor::ReduceRealSum(s0); amrex::ParallelDescriptor::ReduceRealSum(n0);
+        amrex::ParallelDescriptor::ReduceRealSum(s1); amrex::ParallelDescriptor::ReduceRealSum(n1);
+        jump_y_rho0 = (n0 > 0.0) ? s0 / n0 : 1.0;
+        jump_y_rho1 = (n1 > 0.0) ? s1 / n1 : 1.0;
+        Util::Message(INFO, "jump.curvature_y reference densities rho0 = ", jump_y_rho0, "  rho1 = ", jump_y_rho1);
+    }
+    if (jump_curvature_y)
+    {
+        const Set::Scalar ir0 = 1.0 / jump_y_rho0, ir1 = 1.0 / jump_y_rho1;
+        Yc.define(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, eta_mf[lev]->nGrow());
+        for (amrex::MFIter mfi(Yc, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box gb = mfi.fabbox();
+            auto r0 = rho_eta0_mf[lev]->const_array(mfi);
+            auto r1 = rho_eta1_mf[lev]->const_array(mfi);
+            auto Y  = Yc.array(mfi);
+            amrex::ParallelFor(gb, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                const Set::Scalar a = std::max(r0(i, j, k), 0.0) * ir0, b = std::max(r1(i, j, k), 0.0) * ir1;
+                Y(i, j, k) = (a + b > 0.0) ? a / (a + b) : 0.0;     // psi (see Parse)
+            });
+        }
+    }
     for (amrex::MFIter mfi(K, false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
-        auto et = eta_mf[lev]->const_array(mfi);
+        auto et = jump_curvature_y ? Yc.const_array(mfi) : eta_mf[lev]->const_array(mfi);
+        auto eh = eta_mf[lev]->const_array(mfi);     // eta itself: the closest-point distance below is in eta
         auto Kc = K.array(mfi);
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             Kc(i, j, k) = 0.0;
@@ -7270,7 +7327,7 @@ void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K)
 #else
                 const Set::Scalar KG = 0.0;
 #endif
-                const Set::Scalar e = std::min(std::max(et(i, j, k), cut_c), 1.0 - cut_c);
+                const Set::Scalar e = std::min(std::max(eh(i, j, k), cut_c), 1.0 - cut_c);
                 Set::Scalar dd = eps_c * std::atanh(2.0 * e - 1.0);            // signed distance to eta = 1/2
                 // principal curvatures of the local level set: kap/2 +- sqrt(kap^2/4 - K)  (3D), kap (2D).
                 // The map k0 = k/(1 - k d) only amplifies where k d > 0 (convex side of a surface thinner
