@@ -6506,6 +6506,39 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
     const int tcurv_v = jcv && jump_curvature;
     amrex::MultiFab Kt_v;     // filled below, once the eta ghosts are current
 
+    // Refresh the eta and rho ghosts.  This routine runs after the RK update,
+    // where the ghosts of eta/rho are not current: on a RADIAL slab the face
+    // cuts through the shell, and the stale ghosts there cut kappa_eff to 0.34
+    // (vs 0.988 dt-limited).  On a fine level the coarse-fine ghosts are stale
+    // the same way, so they come from FillPatch (coarse interpolation + the
+    // physical BC), as the momentum ghosts below do.  Valid cells are unchanged.
+    // The field BCs are applied on every face, NSCBC runs included: the
+    // symmetry-plane (mirror) and RADIAL ghosts must be current for the
+    // viscous stencils, and an NSCBC face only gets a zero-gradient copy here,
+    // which the next FillGhost4BC replaces.  (Skipping them under NSCBC left
+    // the axis mirror ghosts stale and grew a grid-scale v sawtooth on the
+    // axis row, 2026-10-24.)
+    {
+        if (lev == 0)
+        {
+            FillBoundariesWithBC(lev, time + dt, eta_bc, { eta_mf[lev].get() });
+            FillBoundariesWithBC(lev, time + dt, density_bc, { density_mf[lev].get() });
+        }
+        else
+        {
+            FillPatch(lev, time + dt, eta_mf, *eta_mf[lev], *eta_bc, 0);
+            FillPatch(lev, time + dt, density_mf, *density_mf[lev], *density_bc, 0);
+            if (radial_bc)
+            {
+                RadialGhostFill(lev, *eta_mf[lev], false);
+                RadialGhostFill(lev, *density_mf[lev], false);
+            }
+        }
+    }
+    // (Refresh moved ahead of the nu_s estimate below: the estimate's
+    // gradient stencil reads the eta ghosts, which right after a regrid were
+    // unfilled and gave nu_s ~ 3e11 on INCLINE, 2026-11-02.)
+
     // ---- N from the SAME stability measure the dt limiter uses -------------
     // nu_s = kap_eff |grad eta| / rho, reduced over the band, then
     // N = ceil( dt / (cfl_v dx^2 / (2 d nu_s)) ).
@@ -6575,35 +6608,6 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
     amrex::MultiFab Omv(momentum_mf[lev]->boxArray(),
                         momentum_mf[lev]->DistributionMap(), nOm, 1);
 
-    // Refresh the eta and rho ghosts.  This routine runs after the RK update,
-    // where the ghosts of eta/rho are not current: on a RADIAL slab the face
-    // cuts through the shell, and the stale ghosts there cut kappa_eff to 0.34
-    // (vs 0.988 dt-limited).  On a fine level the coarse-fine ghosts are stale
-    // the same way, so they come from FillPatch (coarse interpolation + the
-    // physical BC), as the momentum ghosts below do.  Valid cells are unchanged.
-    // The field BCs are applied on every face, NSCBC runs included: the
-    // symmetry-plane (mirror) and RADIAL ghosts must be current for the
-    // viscous stencils, and an NSCBC face only gets a zero-gradient copy here,
-    // which the next FillGhost4BC replaces.  (Skipping them under NSCBC left
-    // the axis mirror ghosts stale and grew a grid-scale v sawtooth on the
-    // axis row, 2026-10-24.)
-    {
-        if (lev == 0)
-        {
-            FillBoundariesWithBC(lev, time + dt, eta_bc, { eta_mf[lev].get() });
-            FillBoundariesWithBC(lev, time + dt, density_bc, { density_mf[lev].get() });
-        }
-        else
-        {
-            FillPatch(lev, time + dt, eta_mf, *eta_mf[lev], *eta_bc, 0);
-            FillPatch(lev, time + dt, density_mf, *density_mf[lev], *density_bc, 0);
-            if (radial_bc)
-            {
-                RadialGhostFill(lev, *eta_mf[lev], false);
-                RadialGhostFill(lev, *density_mf[lev], false);
-            }
-        }
-    }
     if (tcurv_v)
     {
         Kt_v.define(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, 0);
