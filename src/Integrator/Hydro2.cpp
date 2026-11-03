@@ -2215,7 +2215,7 @@ Hydro2::RHS(int lev,
         // jump.curvature = 1: kappa from the capillary tensor instead of Gamma
         const int tcurv_o = jc_o && jump_curvature;
         amrex::MultiFab Kt_o;
-        if (tcurv_o) { Kt_o.define(baO, dmO, 1, 0); TensorCurvature(lev, Kt_o); }
+        if (tcurv_o) { Kt_o.define(baO, dmO, 1, 0); TensorCurvature(lev, Kt_o, time); }
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box bx = mfi.growntilebox(1);
@@ -6626,7 +6626,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
     if (tcurv_v)
     {
         Kt_v.define(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, 0);
-        TensorCurvature(lev, Kt_v);
+        TensorCurvature(lev, Kt_v, time + dt);
     }
     // jump.consistent = 0 with shell.kappa_s_rate = 1: the viscous tensor
     // kappa_s ds P|grad eta| takes the shell's own rate -dln(Gamma)/dt (as the
@@ -7234,7 +7234,7 @@ void Hydro2::ThermalExchange(int lev, Set::Scalar dt)
 // Omega_u at the 2*DIM neighbours from central gradients (eta needs 2 ghosts),
 // central divergence at the cell -- the same stencil as the capillary force.
 // Valid cells only; 0 where |grad eta| < 1e-10.
-void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K)
+void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time)
 {
     BL_PROFILE("Integrator::Hydro2::TensorCurvature");
     const Set::Scalar *DXc = geom[lev].CellSize();
@@ -7267,6 +7267,25 @@ void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K)
     }
     if (jump_curvature_y)
     {
+        // Current ghosts for the phase masses.  The callers refresh eta's ghosts but not always
+        // rho_eta0/1's (RelaxAndReinit runs inside FillGhost4BC before they are filled; the viscous
+        // sub-cycle refreshes eta and rho only): a stale RADIAL / mirror / coarse-fine ghost of psi
+        // gave erratic kappa on the 2-cell-wide RADIAL slab.  Same fill as eta's at each caller.
+        if (lev == 0)
+        {
+            FillBoundariesWithBC(lev, time, density0_bc, { rho_eta0_mf[lev].get() });
+            FillBoundariesWithBC(lev, time, density1_bc, { rho_eta1_mf[lev].get() });
+        }
+        else
+        {
+            FillPatch(lev, time, rho_eta0_mf, *rho_eta0_mf[lev], *density0_bc, 0);
+            FillPatch(lev, time, rho_eta1_mf, *rho_eta1_mf[lev], *density1_bc, 0);
+            if (radial_bc)
+            {
+                RadialGhostFill(lev, *rho_eta0_mf[lev], false);
+                RadialGhostFill(lev, *rho_eta1_mf[lev], false);
+            }
+        }
         const Set::Scalar ir0 = 1.0 / jump_y_rho0, ir1 = 1.0 / jump_y_rho1;
         Yc.define(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, eta_mf[lev]->nGrow());
         for (amrex::MFIter mfi(Yc, false); mfi.isValid(); ++mfi)
@@ -7780,7 +7799,7 @@ void Hydro2::RelaxAndReinit(int lev)
         // jump.curvature = 1: kappa from the capillary tensor (same as the force)
         const int tcurv_j = jc_r && (jump_curvature == 1);
         amrex::MultiFab Kt_j;
-        if (tcurv_j) { Kt_j.define(ba, dm, 1, 0); TensorCurvature(lev, Kt_j); }
+        if (tcurv_j) { Kt_j.define(ba, dm, 1, 0); TensorCurvature(lev, Kt_j, relax_time); }
         for (amrex::MFIter mfi(*jump_mf, false); mfi.isValid(); ++mfi)
         {
             const amrex::Box &bxj = mfi.validbox();

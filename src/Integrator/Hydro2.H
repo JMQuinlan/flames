@@ -159,7 +159,7 @@ protected:
     void ThermalExchange(int lev, Set::Scalar dt);
     void RelaxAndReinit(int lev);
     void ShellBandUniform(int lev, Set::Scalar seed_dt = -1.0);   // Gamma bulk extension + band-uniform Gamma
-    void TensorCurvature(int lev, amrex::MultiFab &K);   // jump.curvature = 1: level-set curvature from the unit capillary tensor
+    void TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time);   // jump.curvature = 1: level-set curvature from the unit capillary tensor
     // Sub-cycled SHELL DILATATIONAL VISCOUS update (see Hydro2.cpp).  Advances
     // only div(Omega_visc) on the interface band, in N sub-steps of dt/N, so the
     // stiff kappa_s term no longer sets the global timestep.
