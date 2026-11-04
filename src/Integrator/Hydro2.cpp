@@ -5408,7 +5408,21 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
     // RelaxAndReinit still follows it (L_relax o L_visc o L_hyper).
 
     relax_time = time;
-    if (!defer_relax) RelaxAndReinit(lev);
+    if (!defer_relax)
+    {
+        RelaxAndReinit(lev);
+        // The relaxation changes eta (and ShellBandUniform inside it, shell) in the valid
+        // cells, but their ghosts were filled in STEP 3, before it.  STEP 5 refills only
+        // rho_eta0/1, M and E_k, so STEP 7 rebuilt the ghost primitives from post-relax
+        // rho_eta_k over PRE-relax eta (mirror audit: eta asym 2e-5, all others 0).  On
+        // the octant the axis rows (two mirrors) grew a gas pocket in the liquid tail from
+        // it (INCLINE Mili crash, 11-03).  Same fill as STEP 3.
+        FillBoundariesWithBC(lev, time, eta_bc, {
+                eta_mf[lev].get(),
+                shell_mf[lev].get(),
+                cfun_mf[lev].get()
+        });
+    }
 
     // ------------------------------------------------------------
     // STEP 5: Fill CONSERVATIVE ghost cells (rho, M, E)
