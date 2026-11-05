@@ -772,6 +772,7 @@ protected:
     int jump_consistent = 0;           // 1: jump curvature from Gamma, normal force -Delta grad(eta) (see Parse)
     int jump_curvature_y = 0;
     Set::Scalar jump_y_rho0 = -1.0, jump_y_rho1 = -1.0;   // jump.curvature_y reference phase densities (set once from the state)          // jump.curvature_y: 1 = tensor curvature from the level sets of the mass fraction Y (relaxation-invariant)
+    int jump_curvature_iso = 0;        // jump.curvature_iso: 1 = tensor curvature with [1,2,1]-transverse (isotropic) differences
     int jump_curvature_cp = 0;         // jump.curvature_cp: 1 = closest-point (interface) curvature in every band cell
     int jump_curvature = 0;            // jump.curvature: 0 = kappa(Gamma), 1 = capillary-tensor curvature
     int jump_tangential = 1;           // jump.consistent: keep the tangential part of the tensor force

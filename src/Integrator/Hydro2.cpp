@@ -646,6 +646,19 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //   are the mean pure-phase densities of the state at the first call (the IC), then held constant
         //   (they must be global constants: a cell-local density would close the loop again).  DEFAULT 0.
         pp_query_validate("jump.curvature_y", value.jump_curvature_y, {0, 1});
+        // jump.curvature_iso (2026-11-04): tensor curvature kappa = div(n), n = grad psi/|grad psi|, with
+        //   every derivative (the gradient and the divergence) a central difference averaged over the
+        //   transverse neighbours with weights [1,2,1]/4 per transverse direction (the isotropic 3^DIM
+        //   stencil).  The compact face-neighbour form has a direction-dependent truncation error that
+        //   is largest along the grid axes; in the band tail (|grad psi| dx ~ 0.03) a ~1% grid-aligned
+        //   distortion of psi turns into O(1) errors in kappa*r with a cell-to-cell sign change, and
+        //   on the grid axis it gave kappa < 0 -> J < 0 -> the axis-row gas pocket (Light_Mili rebound
+        //   crash, 11-03/04).  On the same psi the isotropic form stays within ~10% of 2/r.  Same reach
+        //   (2 cells) as the compact form.  The normal force -sigma kappa grad(eta) (jump.consistent)
+        //   uses this kappa too, so force and relaxation jump stay consistent.  DEFAULT 0.
+        pp_query_validate("jump.curvature_iso", value.jump_curvature_iso, {0, 1});
+        if (value.jump_curvature_iso && value.jump_curvature_cp)
+            Util::Abort(INFO, "jump.curvature_iso = 1 is not implemented with jump.curvature_cp = 1");
         {
             int kappa_s_interface_removed = -1;
             pp_query("shell.kappa_s_interface", kappa_s_interface_removed);
@@ -7248,11 +7261,40 @@ void Hydro2::ThermalExchange(int lev, Set::Scalar dt)
 // Omega_u at the 2*DIM neighbours from central gradients (eta needs 2 ghosts),
 // central divergence at the cell -- the same stencil as the capillary force.
 // Valid cells only; 0 where |grad eta| < 1e-10.
+// jump.curvature_iso: d/dx_d of component c of F, central along d, averaged over the transverse
+// neighbours with weights [1,2,1]/4 per transverse direction (isotropic 3^DIM stencil, reach 1).
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+static Set::Scalar IsoD(amrex::Array4<const Set::Scalar> const &F, int i, int j, int k, int c, int d, const Set::Scalar *DX)
+{
+    const Set::Scalar w1[3] = {0.25, 0.5, 0.25};
+    const int t0 = (d + 1) % AMREX_SPACEDIM;
+#if AMREX_SPACEDIM == 3
+    const int t1 = (d + 2) % 3;
+    const int bmax = 1;
+#else
+    const int t1 = 0;
+    const int bmax = 0;
+#endif
+    Set::Scalar s = 0.0;
+    for (int a = -1; a <= 1; ++a)
+        for (int b = -bmax; b <= bmax; ++b)
+        {
+            int o[3] = {0, 0, 0};
+            o[t0] += a;
+            if (bmax) o[t1] += b;
+            const Set::Scalar w = w1[a + 1] * (bmax ? w1[b + 1] : 1.0);
+            s += w * (F(i + o[0] + (d == 0), j + o[1] + (d == 1), k + o[2] + (d == 2), c)
+                    - F(i + o[0] - (d == 0), j + o[1] - (d == 1), k + o[2] - (d == 2), c));
+        }
+    return s / (2.0 * DX[d]);
+}
+
 void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time)
 {
     BL_PROFILE("Integrator::Hydro2::TensorCurvature");
     const Set::Scalar *DXc = geom[lev].CellSize();
     const int cp = jump_curvature_cp;
+    const int iso = jump_curvature_iso;
     const Set::Scalar eps_c = epsilon, cut_c = std::max(cutoff, 1.0e-12);
     // jump.curvature_y: level sets of Y = (alpha rho)_l / rho (see Parse); same ghost depth as eta,
     // whose ghosts are filled together with rho_eta0/1 at every caller.
@@ -7314,12 +7356,31 @@ void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time)
             });
         }
     }
+    // jump.curvature_iso: unit normals from the isotropic gradient on valid + 1 ghost (reach 2 = nghost)
+    amrex::MultiFab Nf;
+    if (iso)
+    {
+        Nf.define(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), AMREX_SPACEDIM, 1);
+        for (amrex::MFIter mfi(Nf, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box gb = mfi.growntilebox(1);
+            auto et = jump_curvature_y ? Yc.const_array(mfi) : eta_mf[lev]->const_array(mfi);
+            auto nf = Nf.array(mfi);
+            amrex::ParallelFor(gb, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Vector gn;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) gn(d) = IsoD(et, i, j, k, 0, d, DXc);
+                const Set::Scalar gm = gn.lpNorm<2>();
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) nf(i, j, k, d) = gm < 1.0e-10 ? 0.0 : gn(d) / gm;
+            });
+        }
+    }
     for (amrex::MFIter mfi(K, false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
         auto et = jump_curvature_y ? Yc.const_array(mfi) : eta_mf[lev]->const_array(mfi);
         auto eh = eta_mf[lev]->const_array(mfi);     // eta itself: the closest-point distance below is in eta
         auto Kc = K.array(mfi);
+        amrex::Array4<const Set::Scalar> const nf = iso ? Nf.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             Kc(i, j, k) = 0.0;
             const Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DXc);
@@ -7339,6 +7400,13 @@ void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time)
                 for (int c = 0; c < AMREX_SPACEDIM; ++c) dv(c) += (Op(d, c) - Om(d, c)) / (2.0 * DXc[d]);
             }
             Set::Scalar kap = -ge.dot(dv) / (g * g);
+            if (iso)
+            {
+                // isotropic stencil: div(n) from the precomputed isotropic normals Nf (see above)
+                kap = 0.0;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    kap += IsoD(nf, i, j, k, d, d, DXc);
+            }
             if (cp)
             {
                 // shape operator S_ab = d_a n_b (same neighbour gradients as Omega_u)
