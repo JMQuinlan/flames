@@ -7,7 +7,7 @@
 #
 # COMMON (all MarmPaper decks): coated 2 um bubble, Marmottant shell chi 1.0 N/m, R_buck 0.98 R0
 #   (sigma(R0) = 0.0412 N/m, elastic band R/R0 0.980-1.015), kappa_s 7.2e-9 kg/s, water mu 1e-3;
-#   KM linear natural frequency f0 = 4.084 MHz (T0 = 244.9 ns); RK3 + MUSCL2 + HLLC, cfl 0.3;
+#   KM linear natural frequency f0 = 4.084 MHz (T0 = 244.9 ns); RK3 + MUSCL2 + HLLC, cfl 0.5;
 #   eps/dx_finest = 2; R0/dx_finest = 25.6 (max_level 4); NSCBC outflow far field.
 #   Interface jump, tensor curvature, relaxation closure etc. are built into the code (flag audit 2026-11-05).
 #   THINC (qq) lines below are commented out until the first round of results is in.
@@ -47,7 +47,7 @@ dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
 dynamictimestep.max     = 1.0e-9
 dynamictimestep.min     = 1.0e-18
-cfl                     = 0.3
+cfl                     = 0.5
 stop_time               = 2.938296e-06
 
 ### INTERFACE ###
