@@ -58,7 +58,6 @@ epsilon = eta.ic.expression.constant.epsilon
 
 ### Advection solver ###
 Riemann_Solver = 0 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
-kappa_method = 1   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
 
 ### HYDRO PARAM ###
 # New parameters
@@ -211,7 +210,6 @@ u0.ic.constant.value = 0.0
 
 ### ADDITIONAL SOURCES ###
 apply_surface_tension = 0
-apply_buoyancy = 0;
 apply_weight = 0;
 grav = 9.81;
 

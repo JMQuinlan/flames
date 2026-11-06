@@ -98,7 +98,6 @@ mu1_b = 0.0
 apply_surface_tension = 1
 sigma = 0.072                    # = sigma_water (post-rupture / bare); unused here (no rupture)
 pref  = 0.0
-kappa_method = 1                 # mean curvature -> kappas(...,0) used by the R reduction
 
 marmottant            = 1
 marmottant.R0         = 0.2      # reference radius: shell UNSTRAINED here (= bubble R0)
@@ -146,7 +145,6 @@ u0.ic.constant.value = 0.0 0.0
 q.ic.constant.value  = 0.0 0.0
 
 ### PHYSICS FLAGS ###
-apply_buoyancy        = 0
 apply_weight          = 0
 apply_vaporization    = 0
 grav                  = 0.0
@@ -157,5 +155,4 @@ Limiter.type        = weno3
 integration.type    = RungeKutta
 integration.rk.type = 3
 
-apply_sharpening = 0
 equalize_ic_pressure = 1

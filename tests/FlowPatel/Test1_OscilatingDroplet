@@ -146,4 +146,3 @@ grav = 9.81
 
 ### DEBUGGING ### 
 Riemann_Solver.type = hllc
-kappa_method = 1   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"

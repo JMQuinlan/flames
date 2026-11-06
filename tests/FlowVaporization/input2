@@ -119,7 +119,6 @@ u0.ic.constant.value = 0.0
 
 ### ADDITIONAL SOURCES ###
 apply_surface_tension = 1
-apply_buoyancy = 0
 apply_weight = 0
 grav = 9.81
 

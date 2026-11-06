@@ -204,18 +204,11 @@ q.ic.constant.value = 0.0 0.0
 
 ### ADDITIONAL SOURCES ###
 apply_surface_tension = 1
-apply_buoyancy = 0
 apply_weight = 0
 Spec_Vol = 1
 grav = 0.0
 
 ### DEBUGGING ###
 Riemann_Solver.type = hllc
-kappa_method = 1                # REQUIRED for Marmottant (clean mean curvature)
 
 ### INTERFACE COMPRESSION ###
-apply_sharpening = 0
-sharpening_frequency = 50
-reinit_max_iter = 100
-reinit_tolerance = 1e-6
-omega_relax = 0.5

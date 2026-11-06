@@ -1,4 +1,19 @@
-#@ [sch20_oscillating_marmottant_light_mili]
+#@ [sch20_oscillating_marmottant_light_mili_iso]
+# ===== 2026-11-02: local Gamma + stretch-rate fix (coated Light_Mili, INCLINE) =====
+# Copy of 11_01_Changes/input_Sch20-Oscillating_Marmottant_Light_Mili_TensorMode2: same mesh (160^3, max_level 4,
+# dx_finest 7.8e-4), AMR, EOS, ICs, BCs, eps 0.0016 (eps/dx_finest = 2), cfl 0.5.  ONLY the flag block at the end changed.
+# Local results (coarse, eps/R0 .16, 2026-11-02): first collapse R_min -2.4% of amp, t -3.2% (slab W_RL0);
+# octant OCT_RL0 tracks mode 2 with <Gamma>/exact 1.01 (mode 2 1.07).  Mode 2 / mode 3 (normal extension) are OFF.
+# 11-03: + jump.curvature_y = 1 (fixes the step-1 blow-up); needs hydro2 built from the 11-03 working copy.
+# Needs hydro2 built from the 11-02 working copy: shell.rate_local, relax.trace, relax.closure and relax.allow_tension
+# are not in a58870c36, and an older binary ignores unknown keys silently.
+#
+# 11-04: + jump.curvature_iso = 1 (tensor curvature with [1,2,1]-weighted transverse differences: isotropic stencil).
+# Fixes the INCLINE Mili rebound crash (grid-axis eta dip at r = .957 R0, 11_02 LocalRate deck, ~4.35 ms): the compact
+# stencil turned a grid-aligned psi distortion into kappa*r < 0 on the symmetry axes -> negative jump -> jet -> NaN.
+# Local check R7_ISO (same mesh, cfl .5): clean to 5 ms, no axis dip, KM R_min -0.16% amp, kappa_eff .888.
+# Needs hydro2 built from the 11-04 working copy (jump.curvature_iso is not in f722f6bfa; an older binary ignores it).
+#
 #@ exe=hydro2
 #@ dim=3
 #
@@ -34,7 +49,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 # plot_file = ./tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant_Light_Mili
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant_Light_Mili
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/output_Sch20_Oscillating_Marmottant_Light_Mili_Iso
 
 ### MESHING ###
 amr.plot_int       = -1
@@ -59,7 +74,7 @@ dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
 dynamictimestep.max     = 1.0e-5
 dynamictimestep.min     = 1.0e-13
-cfl                     = 0.5
+cfl                     = 0.3
 
 ### DIMENSIONS ###
 geometry.prob_lo     =  0.0  0.0  0.0
@@ -70,7 +85,7 @@ stop_time            = 2e-2            # ~3.5 tau_c
 ### ETA INITIAL CONDITIONS (identical to _Large) ###
 # eta = 0 inside bubble (gas, phase 1), eta = 1 outside (liquid, phase 0).
 eta.ic.type = expression
-eta.ic.expression.constant.epsilon = 0.0032     # ~ 4 cells across the band at finest (dx = 7.8e-4); eps/R0 = 0.16
+eta.ic.expression.constant.epsilon = 0.0016     # eps/dx_finest = 2 (10-30: matches the CD6/ED6 slab runs; regular deck 0.0032)
 #eta.ic.expression.constant.epsilon = 0.0016     # previous value: ~ 2 cells across the band at finest
 eta.ic.expression.constant.R0      = 0.02
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
@@ -140,11 +155,6 @@ shell.mu_s    = 0.0
 
 # Best-performing jump options from the FlowDilationViscosity unit tests (2026-10-25):
 #   Laplace dp/exact 1.000-1.003 (3D); slab viscous k_eff/k 0.964 at eps/R 0.125.
-jump.consistent         = 1      # curvature from Gamma; force and relaxation jump consistent
-jump.R0                 = 0.02   # radius at which Gamma = 1 (the IC radius)
-jump.tangential         = 1      # keep on (default); off was unstable in the unit tests
-capillary_jump          = 1      # static tension also imposed as the phase-pressure jump
-shell.kappa_s_jump      = 1      # viscous shell stress imposed as the phase-pressure jump
 # (shell viscous force is sub-cycled with the bulk viscosity: visc_subcycle, default 1)
 
 ### BOUNDARY CONDITIONS - Neumann on all 6 faces (Sch20 non-NSCBC variant) ###
@@ -192,7 +202,6 @@ q.ic.constant.value  = 0.0 0.0
 
 ### PHYSICS FLAGS (identical to _Large) ###
 apply_surface_tension = 1   # coated (uncoated twin: 0)
-apply_buoyancy        = 0
 apply_weight          = 0
 apply_vaporization    = 0
 grav                  = 0.0
@@ -202,13 +211,7 @@ Riemann_Solver.type = hllc
 Limiter.type        = muscl2      # was weno5
 integration.type    = RungeKutta
 integration.rk.type = 3
-kappa_method        = 1     # REQUIRED for Marmottant (same as uncoated twin)
 
-apply_sharpening     = 0
-sharpening_frequency = 20
-reinit_max_iter      = 100
-reinit_tolerance     = 1e-6
-omega_relax          = 0.5
 relax_diag           = 0    # uncoated twin: 1 (log-only diagnostics)
 plot_minimal         = 1    # ~200 frames; keeps eta, shell, Gamma, p, u, rho, energies
 
@@ -216,3 +219,15 @@ plot_minimal         = 1    # ~200 frames; keeps eta, shell, Gamma, p, u, rho, e
 # gamma-weighted form so the per-phase IC pressures sit in the energy-conserving
 # equilibrium RelaxAndReinit would produce, killing the step-1 pressure kick.
 equalize_ic_pressure = 1
+
+### 2026-11-02 FLAG SET: local Gamma + stretch-rate fix (no extension along the normal) ###
+### Identical to the local test runs OCT_RL0 (48^3 octant) / W_RL0 (RADIAL slab), 2026-11-02.
+visc_subcycle              = 1       # bulk + shell viscous terms sub-cycled
+shell.kappa_s_subcycle_max = 8192    # sub-step cap for the shell viscous sub-cycle
+shell.heat_split           = 2       # shell viscous heat split by thermal effusivity sqrt(k rho cp)
+thermal.k0                 = 0.6     # water [W/m/K]
+thermal.k1                 = 0.026   # air   [W/m/K]
+                                      # kappa(eta) + relaxation (alpha = eta) is a feedback loop that blew this deck up at
+                                      # step 1 under 4-level AMR subcycling (INCLINE nu_s = 3.4e11 warning); see Hydro2 Parse.
+                                     #   r = [div_s u - kappa u_n] + (kappa - 2Kd) u_n / (1 - kappa d + K d^2)^2,
+                                     #   d = eps atanh(2 eta - 1), kappa/K from S = grad n (local stencil only)

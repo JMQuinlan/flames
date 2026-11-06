@@ -7,7 +7,7 @@
 #                jets only on +-z -> the two-plane symmetry corner.  2x the octant cost.
 #   CASE=nothinc MUSCL2 + consistent eta, THINC off         -> is THINC the amplifier?
 #   CASE=thincdonor THINC + MUSCL2, donor-cell eta          -> is consistent eta the amplifier?
-#   CASE=beta08 / beta05  Lim with Limiter.thinc_beta 0.8 / 0.5 (band ~2.9 / ~4.6 cells, 0.01..0.99)
+#   CASE=beta08 / beta05  Lim with Limiter.thinc.thinc_beta 0.8 / 0.5 (band ~2.9 / ~4.6 cells, 0.01..0.99)
 #                -> do the symmetry-plane sheets need THINC's sharpness to survive?
 # Submit all five back to back on ONE node (cheapest first, the 2x-cost halfz last):
 #            sbatch RunSch20CollapsingAxisJet.sh
@@ -43,11 +43,11 @@ for CASE in ${CASES}; do
     nothinc)
       EXTRA=(Limiter.type=muscl2 eta_consistent_advect=1) ;;
     thincdonor)
-      EXTRA=(Limiter.type=thinc Limiter.thinc_base=muscl2 eta_consistent_advect=0) ;;
+      EXTRA=(Limiter.type=thinc Limiter.thinc.thinc_base=muscl2 eta_consistent_advect=0) ;;
     beta08)
-      EXTRA=(Limiter.type=thinc Limiter.thinc_base=muscl2 eta_consistent_advect=1 Limiter.thinc_beta=0.8) ;;
+      EXTRA=(Limiter.type=thinc Limiter.thinc.thinc_base=muscl2 eta_consistent_advect=1 Limiter.thinc.thinc_beta=0.8) ;;
     beta05)
-      EXTRA=(Limiter.type=thinc Limiter.thinc_base=muscl2 eta_consistent_advect=1 Limiter.thinc_beta=0.5) ;;
+      EXTRA=(Limiter.type=thinc Limiter.thinc.thinc_base=muscl2 eta_consistent_advect=1 Limiter.thinc.thinc_beta=0.5) ;;
     *) echo "unknown case ${CASE} (halfz|nothinc|thincdonor|beta08|beta05)"; continue ;;
   esac
   echo "[$(date)] ${CASE}: start -> ${OUT}"

@@ -111,13 +111,11 @@ gradu_refinement_criterion = 100000.0
 rho_refinement_criterion   = 100000.0
 p_refinement_criterion     = 100000.0
 
-kappa_method = 1
 Dv = 0
 g = 0.0
 apply_surface_tension = 0
 apply_weight = 0
 apply_vaporization = 0
-apply_sharpening = 0
 
 apply_ahe   = 1
 ahe.method  = 0

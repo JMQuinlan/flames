@@ -162,14 +162,12 @@ q.ic.constant.value = 0.0 0.0
 
 ### ADDITIONAL SOURCES ###
 apply_surface_tension = 0      # Surface tension DISABLED
-apply_buoyancy = 0             # No buoyancy
 apply_weight = 0               # No gravity
 apply_vaporization = 1         # Vaporization enabled
 grav = 0.0                     # Zero gravity
 
 ### SOLVER SETTINGS ###
 Riemann_Solver = 1
-kappa_method = 2
 scheme = 0
 Limiter = 0
 small = 1e-10                  

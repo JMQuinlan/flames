@@ -175,6 +175,5 @@ p_refinement_criterion     = 1000.0
 apply_surface_tension = 0
 apply_weight = 0
 apply_vaporization = 0
-apply_sharpening = 0
 apply_ahe = 1
 ahe.method = 0

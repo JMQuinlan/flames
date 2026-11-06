@@ -112,7 +112,6 @@ rho_refinement_criterion   = 100.0  # Disable density refinement
 p_refinement_criterion     = 100.0  # Disable pressure refinement
 
 ### SOLVER OPTIONS ###
-kappa_method = 2      # Curvature calculation method
 nghost = 2            # Ghost cells
 
 ### Source Terms ###
@@ -126,8 +125,3 @@ Dv = 1e-2
 Y_infinity = 0.0      # Pure vapor far-field
 
 ### INTERFACE SHARPENING ###
-apply_sharpening = 0       # Disable for Stefan (interface should diffuse naturally)
-sharpening_frequency = 100
-reinit_max_iter = 50
-reinit_tolerance = 1e-6
-omega_relax = 0.5

@@ -33,11 +33,8 @@
 //                 QUADRATIC surface n.x + x^T K x / 2, K = grad n (curvature).
 //   thinc_eps_tie (int) 1 (default): mthinc/qq take their thickness from the model
 //                 eps (Hydro2 `epsilon`); 0: from thinc_beta (eps_T = h_min/beta).
-//   thinc_fade (int) 0 (default) / 1: switch sharpening off where the tanh-of-a-
-//                 surface picture fails, k = eps_T |K|_F (|K|_F = sqrt(k1^2 + k2^2)):
-//                 full THINC for k <= thinc_fade_on (0.5), base limiter for
-//                 k >= thinc_fade_off (1.0), linear blend of face values between.
-//   thinc_quad (int) Gauss points per direction for mthinc/qq (2 or 3, default 3).
+//   (thinc_fade and thinc_quad were removed 2026-11-05: fade never switched on in
+//    the bubble runs (eps|K| < 0.2); mthinc/qq use 3 Gauss points per direction.)
 //   thinc_guard (int) 1 (default) / 0: monotonicity guard for mthinc/qq.  The single-
 //                 surface fit is used only where alpha is monotone across the cell
 //                 and its two neighbours (as in the cartesian scheme), and the face
@@ -85,9 +82,6 @@ public:
     std::string mode_name = "cartesian";
     int mode = CART;
     int eps_tie = 1;
-    int fade = 0;
-    Set::Scalar fade_on = 0.5, fade_off = 1.0;
-    int quad = 3;
     int guard = 1;
 
     static void Parse(THINC &value, IO::ParmParse &pp)
@@ -99,13 +93,10 @@ public:
         pp.query_validate("thinc_mode", value.mode_name, {"cartesian", "mthinc", "qq"});
         value.mode = value.mode_name == "mthinc" ? MTH : value.mode_name == "qq" ? QQ : CART;
         pp.query_validate("thinc_eps_tie", value.eps_tie, {1, 0});   // first entry is the default
-        pp.query_validate("thinc_fade", value.fade, {0, 1});
-        pp.query_default("thinc_fade_on", value.fade_on, 0.5);
-        pp.query_default("thinc_fade_off", value.fade_off, 1.0);
-        pp.query_validate("thinc_quad", value.quad, {3, 2});         // first entry is the default
         pp.query_validate("thinc_guard", value.guard, {1, 0});       // first entry is the default
-        if (value.fade && !(value.fade_off > value.fade_on))
-            Util::Abort(INFO, "Limiter thinc_fade_off must exceed thinc_fade_on");
+        for (const char *removed : {"thinc_fade", "thinc_fade_on", "thinc_fade_off", "thinc_quad"})
+            if (pp.contains(removed))
+                Util::Warning(INFO, "Limiter ", removed, " is IGNORED: the option was removed (2026-11-05).");
         const std::string &b = value.base_name;
         if      (b == "muscl2")  value.base = std::make_shared<MUSCL2>(pp);
         else if (b == "muscl")   value.base = std::make_shared<MUSCL>(pp);
@@ -115,42 +106,25 @@ public:
         else if (b == "weno5")   value.base = std::make_shared<WENO5>(pp);
         else                     value.base = std::make_shared<Godunov>(pp);
         Util::Message(INFO, "THINC wrapper: base limiter = ", b, ", beta = ", value.beta, ", eps = ", value.eps,
-                      ", mode = ", value.mode_name, ", eps_tie = ", value.eps_tie, ", fade = ", value.fade,
-                      " (", value.fade_on, ", ", value.fade_off, "), quad = ", value.quad, ", guard = ", value.guard);
+                      ", mode = ", value.mode_name, ", eps_tie = ", value.eps_tie, ", guard = ", value.guard);
     }
 
-    bool WantsGeom() const override { return mode != CART || fade; }
+    bool WantsGeom() const override { return mode != CART; }
 
-    // Geometry-aware reconstruction (all modes; cartesian + fade lands here too).
+    // Geometry-aware reconstruction (mthinc / qq).
     Primitive ReconstructGeom(const Primitive stencil[STENCIL_SIZE], const Geom &g) const override
     {
         Primitive f = base->Reconstruct(stencil);
         const Set::Scalar am = stencil[RADIUS - 1].alpha, a = stencil[RADIUS].alpha, ap = stencil[RADIUS + 1].alpha;
         if (!(a > eps && a < 1.0 - eps)) return f;
-        if (!g.valid) {
-            // no usable normal (|grad eta| ~ 0): only the legacy scheme can act
-            if (mode == CART) f.alpha = Sharpen(am, a, ap, f.alpha, beta);
-            return f;
-        }
+        if (!g.valid) return f;   // no usable normal (|grad eta| ~ 0)
         const Set::Scalar hmin = g.h.minCoeff();
         const Set::Scalar epsT = (eps_tie && g.eps > 0.0) ? g.eps : hmin / beta;
-        Set::Scalar w = 1.0;
-        if (fade)
-        {
-            const Set::Scalar k = epsT * g.K.norm();
-            w = std::min(1.0, std::max(0.0, (fade_off - k) / (fade_off - fade_on)));
-            if (w <= 0.0) return f;
-        }
-        Set::Scalar sh = f.alpha;
-        if (mode == CART) sh = Sharpen(am, a, ap, f.alpha, beta);
-        else
-        {
-            // guard: no single-surface fit at a local extremum of alpha
-            if (guard && !((ap - a) * (a - am) > 0.0)) return f;
-            sh = FaceMD(a, g, epsT, mode == QQ);
-            if (guard) sh = std::min(std::max(am, ap), std::max(std::min(am, ap), sh));
-        }
-        f.alpha = w * sh + (1.0 - w) * f.alpha;
+        // guard: no single-surface fit at a local extremum of alpha
+        if (guard && !((ap - a) * (a - am) > 0.0)) return f;
+        Set::Scalar sh = FaceMD(a, g, epsT, mode == QQ);
+        if (guard) sh = std::min(std::max(am, ap), std::max(std::min(am, ap), sh));
+        f.alpha = sh;
         return f;
     }
 
@@ -174,10 +148,10 @@ private:
     Set::Scalar FaceMD(Set::Scalar a, const Geom &g, Set::Scalar epsT, bool quadratic) const
     {
         constexpr int D = AMREX_SPACEDIM;
-        Set::Scalar xi[3], wq[3]; int nq = quad;
-        if (nq == 2) { xi[0] = -0.5 / std::sqrt(3.0); xi[1] = -xi[0]; wq[0] = wq[1] = 0.5; }
-        else { xi[0] = -0.5 * std::sqrt(0.6); xi[1] = 0.0; xi[2] = -xi[0];
-               wq[0] = wq[2] = 5.0 / 18.0; wq[1] = 8.0 / 18.0; }
+        // 3-point Gauss rule per direction
+        constexpr int nq = 3;
+        const Set::Scalar xi[3] = {-0.5 * std::sqrt(0.6), 0.0, 0.5 * std::sqrt(0.6)};
+        const Set::Scalar wq[3] = {5.0 / 18.0, 8.0 / 18.0, 5.0 / 18.0};
         auto phi = [&](const Set::Vector &x) {
             Set::Scalar p = g.n.dot(x);
             if (quadratic) p += 0.5 * x.dot(g.K * x);

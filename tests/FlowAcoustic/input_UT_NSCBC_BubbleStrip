@@ -86,7 +86,6 @@ Riemann_Solver.type = hllc
 Limiter.type        = vanleer
 integration.type    = RungeKutta
 integration.rk.type = 3
-kappa_method        = 1
 cutoff              = 1e-16
 small               = 1e-8
 

@@ -158,7 +158,7 @@ protected:
     // MultiFabs after each RK stage and before the ghost-cell fill.
     void ThermalExchange(int lev, Set::Scalar dt);
     void RelaxAndReinit(int lev);
-    void ShellBandUniform(int lev, Set::Scalar seed_dt = -1.0);   // Gamma bulk extension + band-uniform Gamma
+    void ShellBandUniform(int lev);   // Gamma bulk extension (constant normal extension into the bulk)
     void TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time);   // jump.curvature = 1: level-set curvature from the unit capillary tensor
     // Sub-cycled SHELL DILATATIONAL VISCOUS update (see Hydro2.cpp).  Advances
     // only div(Omega_visc) on the interface band, in N sub-steps of dt/N, so the
@@ -607,13 +607,6 @@ protected:
     // (see the cancellation above) and only matters for shape modes, wall
     // interaction, and bubble--bubble coupling.  mu_s is parsed and validated so
     // an input cannot silently request a term the solver does not apply.
-    // 1 = bulk cells adjacent to the band inherit the band Gamma instead of
-    // being pinned to 1.0 (stops a moving interface eating unstrained shell).
-    // 1 = drop the DX-scaled Gamma freeze and use P = |n|^2 I - n n so the
-    // surface-divergence source vanishes in the bulk by construction.
-    // Sweeps of the Gamma normal-extension relaxation per step (0 = off).
-    // Enforces n.grad(Gamma) = 0 so every band cell carries one surface value.
-    int shell_bulk_extend = 1;
     Set::Scalar shell_kappa_s = 0.0;   // surface dilatational viscosity [kg/s]
     Set::Scalar shell_mu_s    = 0.0;   // surface shear viscosity [kg/s] -- NOT APPLIED
     int apply_weight = 0;
@@ -676,8 +669,6 @@ protected:
     Set::Scalar ahe_max_frac         = 0.1;       // |dE_AHE| < max_frac * E_min * (|u|+c)/dx
     int         ahe_form             = 1;         // 0 = Sch20 r-source (+/- mu p_I Dp);
                                                   // 1 = Sau09 sec.5.3 q*@u/@x form (default).
-
-    int kappa_method = 2;
 
     // Adaptive Timestep
     bool adaptive_timestep = false;
@@ -756,47 +747,27 @@ protected:
     // for production; set nan_check=1 in the input when debugging a blow-up.
     int nan_check = 0;
     int verbose = 0;
-    int eta_consistent_advect = 1;  // 1 = limiter face-alpha row (default); 0 = donor cell (see Parse)
     int shell_visc_subcycle = 0;      // = visc_subcycle: sub-cycle kappa_s with the bulk viscosity (see Parse)
     int shell_visc_subcycle_max = 512; // hard cap on sub-steps (runaway guard)
-    int shell_heat_split = 0;          // shell dissipation heat: 0 volume fraction, 1 liquid, 2 effusivity
+    int shell_heat_split = 0;          // shell dissipation heat: 0 volume fraction, 2 effusivity
     Set::Scalar thermal_k0 = 0.0, thermal_k1 = 0.0;   // phase thermal conductivities (heat_split = 2)
-    int shell_gamma_uniform = 0, shell_gamma_uniform_sweeps = 2, shell_kappa_s_rate = 0;   // band-uniform Gamma, shell-rate viscosity
-    Set::Scalar shell_rate_liquid_eta = 0.9; int shell_rate_liquid_sweeps = 32;   // gamma_uniform = 3: liquid-side kinematic seed
-    int shell_rate_local = 0;   // 1: liquid-side band cells map their own stretch to the interface rate (LiquidInterfaceRate)
     int thermal_conduction = 0;        // 1 = Fourier conduction inside each phase
     int thermal_exchange = 0;          // 1 = lamellar gas-liquid heat exchange, 2 = constant h, 3 = instant T equilibrium
     Set::Scalar thermal_alpha_min = 1.0e-3, thermal_h = 0.0;
     int shell_visc_verbose = 0;        // print N and nu_s each sub-cycle
     Set::Scalar shell_nus_rho_floor = 1.0;  // density floor for the nu_s estimate
-    int jump_consistent = 0;           // 1: jump curvature from Gamma, normal force -Delta grad(eta) (see Parse)
-    int jump_curvature_y = 0;
-    Set::Scalar jump_y_rho0 = -1.0, jump_y_rho1 = -1.0;   // jump.curvature_y reference phase densities (set once from the state)          // jump.curvature_y: 1 = tensor curvature from the level sets of the mass fraction Y (relaxation-invariant)
-    int jump_curvature_iso = 0;        // jump.curvature_iso: 1 = tensor curvature with [1,2,1]-transverse (isotropic) differences
-    int jump_curvature_cp = 0;         // jump.curvature_cp: 1 = closest-point (interface) curvature in every band cell
-    int jump_curvature = 0;            // jump.curvature: 0 = kappa(Gamma), 1 = capillary-tensor curvature
-    int jump_tangential = 1;           // jump.consistent: keep the tangential part of the tensor force
-    Set::Scalar jump_R0 = 0.0;         // radius at which Gamma = 1 (jump.R0, default marmottant.R0)
-    int capillary_jump = 0;            // 1: static tension sigma_eff also imposed as a phase-pressure jump (see Parse)
-    int shell_kappa_s_jump = 0;        // 1: normal viscous shell stress also imposed as a phase-pressure jump in RelaxAndReinit (see Parse)
+    Set::Scalar jump_y_rho0 = -1.0, jump_y_rho1 = -1.0;   // psi reference phase densities of the tensor curvature (set once from the IC)
     Set::Scalar relax_time = 0.0;      // time of the current RelaxAndReinit call (BC fills inside it)
     int relax_diag = 0;
-    Set::Scalar shell_band_eta = NAN;   // shell.band_eta: ShellBandUniform band/bulk threshold (default = cutoff)
-    int relax_allow_tension = 0;       // relax.allow_tension: full-EOS-range root bracket
     int relax_heat_diag = 0;           // relax.heat_diag: 1 = plot relax_heat_{gas,liq}
-    int relax_trace = 0;               // relax.trace: 1 = guard cells set the trace phase's alpha from its own mass and specific energy
-    int relax_closure = 0;             // relax.closure: 0 = SC path + reinit, 1 = isentropic + mass-specific heat
-    int relax_reinit_split = 1;        // 1 = energy defect by mass fraction (default), 0 = Sch20 eq. 26 equal-pressure reinit
     int clip_ghost_only = 0;
     bool sym_face_lo[3] = {false, false, false};
     bool sym_face_hi[3] = {false, false, false};
-    int omega_sym_mirror = 1;       // 1 = ghost Omega at symmetry faces = mirror of the first valid cell (see Parse)
-    int sym_face_central = 1;       // 1 = central (not one-sided) Hessian stencils in cells on a symmetry face (see Parse)
     // RADIAL slab faces (2026-10-23; see Parse and RadialGhostFill).
     bool radial_bc = false;
     bool radial_face_hi[3] = {false, false, false};
-    // Faces whose edge cells use central stencils: symmetry faces (when
-    // sym_face_central) and radial faces, whose ghosts are both exact.
+    // Faces whose edge cells use central stencils: symmetry faces and radial
+    // faces, whose ghosts are both exact.
     bool cen_face_lo[3] = {false, false, false};
     bool cen_face_hi[3] = {false, false, false};
     int cen_face_any = 0;

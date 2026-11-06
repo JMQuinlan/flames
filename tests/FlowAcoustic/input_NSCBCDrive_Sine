@@ -164,8 +164,6 @@ rho_refinement_criterion   = 1.0e+10
 gradu_refinement_criterion = 1.0e+10
 cutoff = 1.0e-4
 
-apply_buoyancy     = 0
 apply_weight       = 0
 apply_vaporization = 0
 grav               = 0.0
-apply_sharpening   = 0

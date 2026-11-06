@@ -167,7 +167,6 @@ q.ic.expression.region1 = "0.0"
 
 ### PHYSICS FLAGS ###
 apply_surface_tension = 0
-apply_buoyancy        = 0
 apply_weight          = 0
 apply_vaporization    = 0
 grav                  = 0.0
@@ -182,4 +181,3 @@ Riemann_Solver.type = hllc
 Limiter.type        = weno3
 integration.type    = RungeKutta
 integration.rk.type = 3
-kappa_method        = 1

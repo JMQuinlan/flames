@@ -154,14 +154,12 @@ q.ic.constant.value = 0.0 0.0
 
 ### ADDITIONAL SOURCES ###
 apply_surface_tension = 1      # RE-ENABLED
-apply_buoyancy = 0
 apply_weight = 0
 apply_vaporization = 1         # RE-ENABLED
 grav = 9.81
 
 ### SOLVER SETTINGS ###
 Riemann_Solver = 1
-kappa_method = 2
 scheme = 0
 Limiter = 0
 small = 1e-8

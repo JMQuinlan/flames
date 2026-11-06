@@ -147,4 +147,3 @@ rho_refinement_criterion   = 100000.0
 p_refinement_criterion     = 100000.0
 
 
-kappa_method = 1

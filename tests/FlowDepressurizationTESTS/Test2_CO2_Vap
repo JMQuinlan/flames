@@ -186,7 +186,6 @@ grav = 9.81
 
 ### SOLVER SETTINGS ###
 Riemann_Solver.type = hllc
-kappa_method = 1
 small = 1e-8
 lagrange = 0.0
 
