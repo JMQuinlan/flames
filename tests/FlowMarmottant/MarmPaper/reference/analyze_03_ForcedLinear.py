@@ -33,7 +33,7 @@ from dataclasses import replace
 import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_RP = os.path.normpath(os.path.join(_HERE, "..", "..", "FlowRayleighPlesset"))
+_RP = os.path.normpath(os.path.join(_HERE, "..", "..", "..", "FlowRayleighPlesset"))   # MarmPaper/reference -> tests/
 sys.path.insert(0, os.path.join(_RP, "reference"))
 import sch20_analysis                                             # noqa: E402
 from sch20_analysis import Sch20Analysis, plt                     # noqa: E402

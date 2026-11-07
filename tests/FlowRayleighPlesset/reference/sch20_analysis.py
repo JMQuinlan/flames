@@ -49,7 +49,9 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm, LightSource, SymLogNorm, to_rgb
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..", "..", "FlowMarmottant", "reference")))
+_MREF = os.path.normpath(os.path.join(_HERE, "..", "..", "FlowMarmottant", "reference"))
+sys.path.insert(0, _MREF)
+sys.path.insert(1, os.path.join(_MREF, "Debug"))   # marmottant_sch20_common lives in reference/Debug since e4babd0d7
 import marmottant_sch20_common as _M                         # noqa: E402  (deck parser)
 from marmottant_rpe_km import solve_km, solve_rpe            # noqa: E402
 
