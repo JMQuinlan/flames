@@ -263,15 +263,15 @@ def shell_variants(shell):
             ("viscous only", visc), ("full shell", shell)]
 
 
-def solve_all(shell, liq, gas, meta, n=4001):
-    """{(variant, model): (t, R)} for every variant x {RPE, KM}."""
+def solve_all(shell, liq, gas, meta, n=4001, drive=None):
+    """{(variant, model): (t, R)} for every variant x {RPE, KM}; drive = (amp, omega) or None."""
     R0, tend = meta["R0"], meta["stop_time"]
     te = np.linspace(0.0, tend, n)
     out = {}
     for name, sh in shell_variants(shell):
         for mdl, fn in (("RPE", solve_rpe), ("KM", solve_km)):
             try:
-                t, R, Rd = fn(R0, 0.0, (0.0, tend), sh, liq, gas, t_eval=te)
+                t, R, Rd = fn(R0, 0.0, (0.0, tend), sh, liq, gas, drive=drive, t_eval=te)
                 out[(name, mdl)] = (t, R, Rd)
             except Exception as exc:
                 print("  [warn] %s/%s failed to integrate: %s" % (name, mdl, exc))
@@ -584,8 +584,8 @@ def summarize(models, sim, shell, meta, shell_only=False):
 
 
 def run_case(input_path, out_hint=None, shell_only=False, models_only=False,
-             stem=None, model="KM"):
-    """Analyse ONE case end to end."""
+             stem=None, model="KM", drive=None):
+    """Analyse ONE case end to end (drive = (amp at the bubble, omega) or None)."""
     input_path = os.path.abspath(input_path)
     if not os.path.isfile(input_path):
         raise SystemExit("input file not found: %s" % input_path)
@@ -593,7 +593,7 @@ def run_case(input_path, out_hint=None, shell_only=False, models_only=False,
     shell, liq, gas, meta = build_case(kv, input_path)
     report_case(shell, liq, gas, meta)
     print("\nIntegrating reference models ...")
-    models = solve_all(shell, liq, gas, meta)
+    models = solve_all(shell, liq, gas, meta, drive=drive)
 
     sim = (np.array([]),) * 3
     if not models_only:

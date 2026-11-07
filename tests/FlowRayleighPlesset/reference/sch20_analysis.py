@@ -318,6 +318,27 @@ def _frame(args):
         return {"error": "%s: %s" % (os.path.basename(pf), exc)}
 
 
+def _deck_drive(kv, gain=1.0):
+    """NSCBC acoustic drive from the deck: (amplitude at the bubble, omega) or None.
+
+    The deck drives every NSCBC face with p_target = p_inf + drive_amp sin(drive_omega t).
+    The pressure the bubble sees is drive_amp x the box gain (calibrated, see MarmPaper/README),
+    so the KM/RPE models use drive_amp * gain.  Faces must agree on omega.
+    """
+    amps, oms = {}, {}
+    for k, v in kv.items():
+        m = re.match(r"nscbc\.(\w+)\.drive_(amp|omega)$", k)
+        if m:
+            (amps if m.group(2) == "amp" else oms)[m.group(1)] = float(v)
+    act = [f for f, a in amps.items() if a != 0.0]
+    if not act:
+        return None
+    a = {amps[f] for f in act}; w = {oms.get(f, 0.0) for f in act}
+    if len(a) != 1 or len(w) != 1 or 0.0 in w:
+        raise ValueError("NSCBC drive differs between faces or has no omega: amp %s omega %s" % (amps, oms))
+    return (a.pop() * gain, w.pop())
+
+
 # =========================================================================================== #
 #  4. THE CLASS
 # =========================================================================================== #
@@ -325,7 +346,7 @@ class Sch20Analysis:
     """One Sch20 run: reference models from the input deck, cached frame data, and one method per plot."""
 
     def __init__(self, input_deck, plotdir, case="Collapsing", coated=False, stem=None, out_dir=None,
-                 nproc=4, style=None, titles=None, cache=True, verbose=True):
+                 nproc=4, style=None, titles=None, cache=True, verbose=True, drive_gain=1.0):
         self.S = dict(STYLE); self.S.update(style or {})
         self.T = dict(TITLES); self.T.update(titles or {})
         self.case, self.coated, self.nproc, self.verbose = case, bool(coated), int(nproc), verbose
@@ -341,8 +362,14 @@ class Sch20Analysis:
         self.R0 = self.meta["R0"]
         t_end = self.meta["stop_time"]
         te = np.linspace(0.0, t_end, 8001)
-        tk, Rk, Vk = solve_km(self.R0, 0.0, (0.0, t_end), self.shell, self.liq, self.gas, t_eval=te)
-        tr, Rr, Vr = solve_rpe(self.R0, 0.0, (0.0, t_end), self.shell, self.liq, self.gas, t_eval=te)
+        self.drive = _deck_drive(kv, drive_gain)
+        if self.drive is not None and verbose:
+            print("  KM/RPE drive: p_inf + %.4g sin(%.4g t) Pa  (deck drive_amp x box gain %.4g)"
+                  % (self.drive[0], self.drive[1], drive_gain))
+        tk, Rk, Vk = solve_km(self.R0, 0.0, (0.0, t_end), self.shell, self.liq, self.gas,
+                              drive=self.drive, t_eval=te)
+        tr, Rr, Vr = solve_rpe(self.R0, 0.0, (0.0, t_end), self.shell, self.liq, self.gas,
+                               drive=self.drive, t_eval=te)
         self.km, self.rp = (tk, Rk, Vk), (tr, Rr, Vr)
         pre = "Coated " if self.coated else ""
         self.label_km, self.label_rp = pre + "Keller–Miksis", pre + "Rayleigh–Plesset"
@@ -1028,10 +1055,12 @@ def main(cfg):
     a = ap.parse_args()
     out_dir = cfg.get("OUT_DIR") or os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "Images")
     if cfg.get("COATED") and cfg.get("LEGACY_MODEL_PLOTS", True):
-        _M.run_case(a.input, out_hint=a.plotdir, shell_only=True, models_only=a.models_only, stem=a.stem, model="KM")
+        _M.run_case(a.input, out_hint=a.plotdir, shell_only=True, models_only=a.models_only, stem=a.stem, model="KM",
+                    drive=_deck_drive(_M.parse_input(a.input), cfg.get("DRIVE_GAIN", 1.0)))
     if a.models_only:
         return
     A = Sch20Analysis(a.input, a.plotdir, case=cfg["CASE"], coated=cfg.get("COATED", False), stem=a.stem,
-                      out_dir=out_dir, nproc=a.nproc, style=cfg.get("STYLE"), titles=cfg.get("TITLES"))
+                      out_dir=out_dir, nproc=a.nproc, style=cfg.get("STYLE"), titles=cfg.get("TITLES"),
+                      drive_gain=cfg.get("DRIVE_GAIN", 1.0))
     A.run(cfg.get("PLOTS", []), debug=cfg.get("DEBUG", ()))
     return A

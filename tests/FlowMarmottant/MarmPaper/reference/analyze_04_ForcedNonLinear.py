@@ -40,12 +40,13 @@ from sch20_analysis import Sch20Analysis, plt                     # noqa: E402
 from marmottant_rpe_km import solve_km                           # noqa: E402
 
 CFG = dict(
-    INPUT=os.path.normpath(os.path.join(_HERE, "..", "input_04_ForcedNonLinear")),
+    INPUT=os.path.normpath(os.path.join(_HERE, "..", "input_04_ForcedNonlinear")),
     OUTPUT_DIR="/mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/MarmPaper/output_04_ForcedNonLinear",
     CASE="Forced Non-Linear",
     COATED=True,
     STEM="04_ForcedNonLinear",
     N_PROC=4,
+    DRIVE_GAIN=1.107,   # bubble-centre pressure / deck drive_amp (20 R0 box at f0); see ../README.md
     PLOTS=[
         "radius", "residual", "velocity", "probes", "pressure", "waves",
         "shapes", "planes", "modes", "gif", "r_volume",
@@ -102,7 +103,7 @@ def _kappa_fit(A, t, R, tmax):
 
     def err(f):
         sh = replace(A.shell, kappa_s=f * A.shell.kappa_s)
-        tk, Rk, _ = solve_km(A.R0, 0.0, (0.0, te[-1]), sh, A.liq, A.gas, t_eval=te)
+        tk, Rk, _ = solve_km(A.R0, 0.0, (0.0, te[-1]), sh, A.liq, A.gas, drive=A.drive, t_eval=te)
         if len(Rk) != len(te):
             return 1e9
         return float(np.sqrt(np.mean((_on(tk, Rk, tt) - RR) ** 2)) / A.R0)
@@ -163,7 +164,7 @@ def twin(A, U, out_stem, fit_tmax=None):
     if np.isfinite(f):
         te = np.linspace(0, np.nanmax(tc), 3001)
         tk, Rk, _ = solve_km(A.R0, 0.0, (0.0, te[-1]), replace(A.shell, kappa_s=f * A.shell.kappa_s),
-                             A.liq, A.gas, t_eval=te)
+                             A.liq, A.gas, drive=A.drive, t_eval=te)
         ax.plot(tk / tauR, Rk / A.R0, ":", color=S["c_km"], lw=1.2,
                 label=r"Coated KM, $\kappa_s \times %.2f$" % f)
     ax.set_xlim(0, 1.02 * max(np.nanmax(tc), np.nanmax(tu)) / tauR)
@@ -218,7 +219,8 @@ def main():
         print("  [twin] uncoated output %s not found; pass --twin-output" % a.twin_output)
         return
     kw = dict(out_dir=out_dir, nproc=a.nproc, style=CFG["STYLE"], titles=CFG["TITLES"])
-    A = Sch20Analysis(a.input, a.plotdir, case=CFG["CASE"], coated=True, stem=a.stem, **kw)
+    A = Sch20Analysis(a.input, a.plotdir, case=CFG["CASE"], coated=True, stem=a.stem,
+                      drive_gain=CFG.get("DRIVE_GAIN", 1.0), **kw)
     U = Sch20Analysis(a.twin_input, a.twin_output, case=CFG["CASE"], coated=False, stem=CFG["TWIN_STEM"], **kw)
     if abs(A.R0 - U.R0) > 1e-12 * A.R0 or A.meta["dx_finest"] != U.meta["dx_finest"]:
         print("  [twin] WARNING: decks differ in R0 or dx_finest (%g/%g, %g/%g)"
