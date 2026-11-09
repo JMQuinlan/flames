@@ -19,6 +19,19 @@ W0 = 2 * math.pi * F0
 GAIN_LIN = float(os.environ.get("GAIN_LIN", "1.006"))  # 20 R0 box, f0/pi: centre 1.0064, mid-box 1.0072, phase 0.2 deg
 GAIN_NL = float(os.environ.get("GAIN_NL", "1.107"))   # 20 R0 box, f0: centre 1.107, mid-box 1.089, phase 0.2 deg
 
+# ---- _Mili decks: the same tests with every length and time x 1e4 (R0 = 2 cm) ----
+# Pressures, densities, EOS, velocities, water mu and the thermal constants are unchanged.  kappa_s is scaled
+# by S^2 to keep the dimensionless shell viscosity K* = kappa_s/(R0^2 sqrt(rho p_inf)) of the micro decks
+# (7.2e-9 -> 0.72 kg/s, as in the old Sch20 *_Mili decks).  The Marmottant elastic shell (chi, sigma_break) and
+# sigma_water keep their physical values, so at 2 cm they are inert (2 sigma/R <= 7 Pa): f0 drops to Minnaert.
+S_MILI = 1.0e4
+R0_MILI = R0 * S_MILI
+F0_MILI = 163.128                                     # KM linear natural frequency at R0 = 2 cm [Hz] (~ Minnaert 163.09)
+W0_MILI = 2 * math.pi * F0_MILI
+P_EQ_MILI = P0 + 2.0 * SIG_R0 / R0_MILI               # 1.000041e5
+GAIN_NL_MILI = float(os.environ.get("GAIN_NL_MILI", "0.970"))  # 20 R0 box at 2 f0_Mili = 326 Hz: centre 0.970, mid-box 0.974, phase -0.8 deg
+                                                                # (liquid-only 32^3 run, ~/claude_scratch/mili/gain, 2026-11-08)
+
 def fmt(x): return f"{x:.6e}"
 
 def nscbc(faces, p_inf, L_ref, amp=0.0, omega=0.0, comment=""):
@@ -59,7 +72,11 @@ def bcs(octant, comment=""):
     return L
 
 def deck(name, title, header, *, p_inf, p_b, liquid_ic, max_level, stop, plot_dt, thermo_dt,
-         drive=None, jet=None, full_only=False, half=100 * R0, n_oct=160, refine_box=None):
+         drive=None, jet=None, full_only=False, half=None, n_oct=160, refine_box=None, mili=False):
+    sc = S_MILI if mili else 1.0
+    R0 = (R0_MILI if mili else globals()["R0"])
+    f0 = F0_MILI if mili else F0
+    if half is None: half = 100 * R0
     dx = half / n_oct / 2 ** max_level
     eps = 2.0 * dx
     L_ref = 3.125e-3 * half                          # L_ref/domain as in the 11_04 coated collapse deck
@@ -67,9 +84,17 @@ def deck(name, title, header, *, p_inf, p_b, liquid_ic, max_level, stop, plot_dt
     o = []   # octant lines, f = full-domain lines (commented in octant decks)
     out = [f"# MarmPaper: {title}", "#"] + [f"# {l}" if l else "#" for l in header] + [
         "#",
+    ] + ([
         "# COMMON (all MarmPaper decks): coated 2 um bubble, Marmottant shell chi 1.0 N/m, R_buck 0.98 R0",
         f"#   (sigma(R0) = {SIG_R0:.4f} N/m, elastic band R/R0 0.980-1.015), kappa_s 7.2e-9 kg/s, water mu 1e-3;",
         f"#   KM linear natural frequency f0 = {F0/1e6:.3f} MHz (T0 = {1e9/F0:.1f} ns); RK3 + MUSCL2 + HLLC, cfl 0.5;",
+    ] if not mili else [
+        "# MILI SCALE: the micro MarmPaper deck of the same number with every length and time x 1e4 (R0 = 2 cm).",
+        "#   Pressures, densities, EOS, velocities, water mu 1e-3 and thermal constants unchanged.  kappa_s = 0.72 kg/s",
+        "#   (= 7.2e-9 x 1e8: same dimensionless shell viscosity K* = kappa_s/(R0^2 sqrt(rho p_inf)) as the micro deck).",
+        "#   Marmottant chi 1.0 N/m, sigma_break 0.073, sigma_water 0.0728 kept physical -> inert at 2 cm (2 sigma/R <= 7 Pa).",
+        f"#   KM linear natural frequency f0 = {F0_MILI:.3f} Hz (T0 = {1e3/F0_MILI:.3f} ms, = Minnaert); RK3 + MUSCL2 + HLLC, cfl 0.5;",
+    ]) + [
         f"#   eps/dx_finest = 2; R0/dx_finest = {R0/dx:.1f} (max_level {max_level}); NSCBC outflow far field.",
         "#   Interface jump, tensor curvature, relaxation closure etc. are built into the code (flag audit 2026-11-05).",
         "#   THINC (qq) lines below are commented out until the first round of results is in.",
@@ -100,8 +125,10 @@ def deck(name, title, header, *, p_inf, p_b, liquid_ic, max_level, stop, plot_dt
     else:
         out += geom_block(True, "") + ["# --- full domain (swap with the octant block above; also swap the BC block) ---"] + geom_block(False, "# ")
     out += ["", "### TIME ###",
-            "timestep                = 1.0e-12", "dynamictimestep.on      = 1", "dynamictimestep.verbose = 0",
-            "dynamictimestep.max     = 1.0e-9", "dynamictimestep.min     = 1.0e-18", "cfl                     = 0.5",
+            "timestep                = " + ("1.0e-12" if not mili else "1.0e-8"),
+            "dynamictimestep.on      = 1", "dynamictimestep.verbose = 0",
+            "dynamictimestep.max     = " + ("1.0e-9" if not mili else "1.0e-5"),
+            "dynamictimestep.min     = " + ("1.0e-18" if not mili else "1.0e-14"), "cfl                     = 0.5",
             f"stop_time               = {fmt(stop)}", "",
             "### INTERFACE ###",
             "eta.ic.type = expression",
@@ -148,10 +175,12 @@ def deck(name, title, header, *, p_inf, p_b, liquid_ic, max_level, stop, plot_dt
             "sigma = 0.0728                   # water (= post-rupture tension)", "pref  = 0.0",
             "marmottant             = 1",
             f"marmottant.R0          = {fmt(R0)}  # shell unstrained at the IC radius",
-            "marmottant.R_buckling  = 1.96e-6       # 0.98 R0",
+            ("marmottant.R_buckling  = 1.96e-6       # 0.98 R0" if not mili else
+             f"marmottant.R_buckling  = {fmt(0.98 * R0)}  # 0.98 R0"),
             "marmottant.chi         = 1.0           # [N/m]",
             "marmottant.sigma_break = 0.073         # [N/m]",
-            "shell.kappa_s = 7.2e-9                  # [kg/s] (micro-scale equivalent of kappa_s = 0.72 at R0 = 2 cm)",
+            ("shell.kappa_s = 7.2e-9                  # [kg/s] (micro-scale equivalent of kappa_s = 0.72 at R0 = 2 cm)" if not mili else
+             "shell.kappa_s = 0.72                    # [kg/s] (= micro 7.2e-9 x 1e8: same K*)"),
             "shell.mu_s    = 0.0", ""]
     faces_oct = ["xhi", "yhi", "zhi"]
     faces_full = ["xlo", "xhi", "ylo", "yhi", "zlo", "zhi"]
@@ -234,11 +263,40 @@ runs.append(deck("05_Jetting", "jetting: liquid jet through the bubble, U shape 
     p_inf=P0, p_b=P_EQ, liquid_ic=LIQ_UNIFORM, max_level=4, stop=4.0e-7, plot_dt=4.0e-9, thermo_dt=2.0e-10,
     jet=(50.0, 1.4 * R0, 0.4 * R0, 0.5 * R0), full_only=True, half=8 * R0, n_oct=32, refine_box=2 * R0))
 
+# ---- _Mili twins of 02, 04, 05 (R0 = 2 cm; see S_MILI above).  KM numbers: ~/claude_scratch/marmpaper_mili_km.py,
+# marmpaper_mili_sub.py (same Keller-Miksis + Marmottant model as km_size.py / km_sub.py, Mili parameters). ----
+RM, T0M = R0_MILI, 1.0 / F0_MILI
+runs.append(deck("02_FreeCollapse_Mili", "free natural spherical collapse, MILI scale (R0 = 2 cm)", [
+    "02_FreeCollapse with every length and time x 1e4: p_inf 1.0e6, p_b 5.8307e4, R0/dx 51.2, 100 R0 octant.",
+    "KM (Mili parameters: elastic shell inert, kappa_s 0.72): R_min 0.308 R0 at t = 0.696 ms (tau_c 0.579 ms),",
+    "first rebound R_max 0.610 R0 (micro 02: 0.321 / 0.592 -- the shell viscosity dominates both).",
+    "stop_time = 4 ms (~7 tau_c: collapse + 2-3 rebounds)."],
+    p_inf=1.0e6, p_b=5.8307e4, liquid_ic=LIQ_PROFILE, max_level=5, stop=4.0e-3, plot_dt=4.0e-5, thermo_dt=2.0e-6,
+    mili=True))
+WNM = 2.0 * W0_MILI
+runs.append(deck("04_ForcedNonlinear_Mili", "forced NONLINEAR oscillation, MILI scale (subharmonic at 2 f0)", [
+    f"Bubble starts at static equilibrium (p_eq = {P_EQ_MILI:.6e}).  Without the elastic shell f0 = Minnaert = {F0_MILI:.1f} Hz and",
+    "the micro drive (4 bar at f0) is chaotic here (KM R_max 3 R0), so the drive moves to the classical subharmonic",
+    f"resonance: f = 2 f0 = {WNM/2/math.pi:.1f} Hz, 3.0e5 Pa at the bubble.  KM: period doubling, alternate-cycle R_min",
+    "0.555 / 1.197 R0, R_max 1.60 R0, f/2 line 1.8x the drive line.  Robust for f/f0 1.8-2.2 and 2.5-3.5 bar;",
+    "R_min > 0.5 R0 (validation target, as micro 04).",
+    f"stop_time = 40 drive periods = 20 T0 = {20*T0M*1e3:.2f} ms."],
+    p_inf=P0, p_b=P_EQ_MILI, liquid_ic=LIQ_UNIFORM, max_level=4, stop=20 * T0M, plot_dt=T0M / 16, thermo_dt=T0M / 800,
+    drive=(3.0e5 / GAIN_NL_MILI, WNM), half=20 * RM, n_oct=32, mili=True))
+runs.append(deck("05_Jetting_Mili", "jetting, MILI scale (R0 = 2 cm): liquid jet through the bubble, U shape -> torus (FULL DOMAIN)", [
+    "05_Jetting with every length and time x 1e4: full 3D domain, +-8 R0 box, NSCBC outflow on all six faces, R0/dx 64.",
+    "Bubble at static equilibrium; downward (-z) Gaussian liquid velocity patch on the top cap (U = 50 m/s,",
+    "centre 1.4 R0, lateral 1/e radius 0.4 R0, axial 0.5 R0, liquid side only).  rho U^2/2 = 1.25e6 Pa >> gas 1e5 Pa:",
+    "U-shaped indentation, jet crosses the bubble in ~2 R0 / U ~ 0.8-1.5 ms, pierces the bottom -> torus.",
+    "refine_box +-2 R0.  stop_time = 4 ms."],
+    p_inf=P0, p_b=P_EQ_MILI, liquid_ic=LIQ_UNIFORM, max_level=4, stop=4.0e-3, plot_dt=4.0e-5, thermo_dt=2.0e-6,
+    jet=(50.0, 1.4 * RM, 0.4 * RM, 0.5 * RM), full_only=True, half=8 * RM, n_oct=32, refine_box=2 * RM, mili=True))
+
 for r in runs:
     nodes = 4 if "Jetting" in r["name"] else 1
     s = f"""#!/bin/bash
 
-#SBATCH --job-name=MP{r['name'][:2]}{r['name'][3:9]}
+#SBATCH --job-name=MP{r['name'][:2]}{r['name'][3:9]}{'M' if r['name'].endswith('_Mili') else ''}
 #SBATCH -o /mmfs1/home/ttryon/FLAMES_out/flame_%j_stdout
 #SBATCH -e /mmfs1/home/ttryon/FLAMES_out/err_flame_%j_stdout
 #SBATCH -N {nodes}
