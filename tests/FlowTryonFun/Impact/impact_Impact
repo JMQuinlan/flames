@@ -1,0 +1,183 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# ============================================================================
+# FlowTryonFun / Impact -- Ma 10 WEDGE IMPACT on a flat AIR/WATER interface
+# ----------------------------------------------------------------------------
+# A 15 deg half-angle wedge (apex down) driven straight down at Ma 10 (w.r.t. air)
+# into still water.
+#
+# FRAME: the embedded solid (phi) is a STATIC indicator in Hydro2 (it is only
+# re-evaluated from its IC at regrid), so the wedge cannot be moved.  The run is
+# done in the WEDGE FRAME instead: the wedge is fixed and the air AND the water
+# stream UP (+y) at U = Ma 10.  With gravity off this is exactly the lab problem
+# (Galilean invariance): wedge moving down at U into quiescent air + water.
+#
+# STATES (SI):  air 1 atm, rho 1.204 -> c_air 343.25 m/s, U = 10 c_air = 3432.49 m/s.
+#   water stiffened gas (gamma 2.35, p0 1e9) -> c_w 1533 m/s, Ma_water 2.24 (supersonic).
+#   Both inflow states are supersonic, so zero-gradient (neumann) ylo ghosts keep the
+#   uniform inflow exact (no disturbance can reach ylo).
+#
+# THEORY (attached oblique shocks, theta 15 deg):
+#   air,   Ma 10:   beta 19.9 deg,  p2 1.36e6 Pa  (before the water arrives)
+#   water, Ma 2.24: beta 53.2 deg,  p2 3.11e9 Pa  (wedge submerged, steady)
+#   impact (water hammer) at the apex ~ rho_w c_w U ~ 5 GPa transient.
+#
+# TIMELINE: water surface y = 0 at t = 0; wedge apex at y = 0.03 -> water reaches the apex
+#   at 8.74 us, passes the wedge base (y = 0.05) at 14.6 us; stop 30 us (submerged).
+#   The 3 cm air gap lets the air oblique shock set up before impact.
+#
+# GEOMETRY: half domain x >= 0, symmetry plane x = 0 (wedge axis).  Wedge height 2 cm.
+#   Finest dx 3.906e-5 m (wedge height 512 cells), eps/dx_finest = 2.
+# Inviscid, no surface tension, no gravity (Re ~ 1e8, We ~ 1e8, Fr ~ 1e7).
+# Half-angle: change cth/sth below (FlowWedge convention is half-angle 15 deg).
+# ============================================================================
+
+alamo.program = hydro2
+
+### OUTPUT ###
+#plot_file = ./tests/FlowTryonFun/Impact/output_Impact
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTryonFun/Impact/output_Impact
+
+### MESHING ###
+amr.plot_dt          = 2.5e-7          # 120 frames to 30 us
+amr.max_grid_size    = 128
+amr.blocking_factor  = 8
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level        = 4
+amr.n_cell           = 80 192          # base dx 6.25e-4 = 0.05/80 = 0.12/192; finest 3.906e-5
+amr.n_error_buf      = 8
+
+### DIMENSIONS ###
+geometry.prob_lo     = 0.00 -0.03 0.0
+geometry.prob_hi     = 0.05  0.09 0.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEPPING ###
+timestep                = 1.0e-12
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 4.0e-9       # Brinkman stability: solid.brinkman * dt < 2
+dynamictimestep.min     = 1.0e-16
+cfl                     = 0.3
+cfl_v                   = 0.3
+stop_time               = 3.0e-5
+
+# ----------------------------------------------------------------------------
+# EMBEDDED SOLID -- the wedge, apex DOWN at (0, ya), base at y = yb.  phi = 1 fluid, 0 solid.
+#   signed distance D = max(g_right, g_left, g_base), D > 0 fluid:
+#     g_right =  x cth - (y-ya) sth ,  g_left = -x cth - (y-ya) sth ,  g_base = y - yb
+# ----------------------------------------------------------------------------
+apply_embedded_solid = 1
+solid.brinkman       = 3.5e8           # ~4 U / dx_finest (Yang porous wall)
+phi_refinement_criterion = 0.1
+
+solid.phi.ic.type = expression
+solid.phi.ic.expression.constant.cth = 0.9659258
+solid.phi.ic.expression.constant.sth = 0.2588190
+solid.phi.ic.expression.constant.ya  = 0.03
+solid.phi.ic.expression.constant.yb  = 0.05
+solid.phi.ic.expression.constant.eps = 3.90625e-5
+solid.phi.ic.expression.region0 = "0.5*(1.0 + tanh( max(max( x*cth - (y-ya)*sth, -x*cth - (y-ya)*sth ), y - yb) / eps ))"
+
+# Quiescent solid target (air at 1 atm, at rest in the wedge frame)
+solid.density.ic.type = constant
+solid.density.ic.constant.value = 1.204
+solid.momentum.ic.type = constant
+solid.momentum.ic.constant.value = 0.0 0.0
+solid.pressure.ic.type = constant
+solid.pressure.ic.constant.value = 101325.0
+
+### ETA (water volume fraction): water (fluid 0) below y = 0, air (fluid 1) above ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 7.8125e-5     # eps/dx_finest = 2
+eta.ic.expression.region0 = "0.5*(1.0 - tanh(y/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### EOS ###
+# fluid 0: water (stiffened gas)
+eos0.gamma = 2.35
+eos0.p0    = 1.0e9
+eos0.cv    = 1781.0
+eos0.cp    = 4186.0
+# fluid 1: air (ideal gas)
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 717.86
+eos1.cp    = 1005.0
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### FLUID IC: everything streams up (+y) at U = 3432.49 m/s (wedge frame) ###
+density0.ic.type = constant
+density0.ic.constant.value = 1000.0
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "3432.49"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 101325.0
+
+density1.ic.type = constant
+density1.ic.constant.value = 1.204
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "3432.49"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 101325.0
+
+### INTERACTIONS ###
+apply_surface_tension = 0
+sigma = 0.0
+Dv    = 0.0
+pref  = 0.0
+small = 1e-6
+grav  = 0.0
+apply_weight       = 0
+apply_vaporization = 0
+
+### BOUNDARY CONDITIONS ###
+# xlo: symmetry plane (wedge axis).  ylo: supersonic water inflow (uniform -> zero-gradient exact).
+# yhi: supersonic outflow.  xhi: far side, zero-gradient.
+eta.bc.type.xlo = REFLECT_EVEN
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = neumann
+eta.bc.type.yhi = neumann
+
+density.bc.type.xlo = REFLECT_EVEN
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+energy.bc.type.xlo = REFLECT_EVEN
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xlo = REFLECT_ODD REFLECT_EVEN
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA (|grad f| * 2 dx > criterion) ###
+eta_refinement_criterion   = 0.1          # free surface / splash sheets
+p_refinement_criterion     = 2.0e5        # air oblique shock (dp ~1.3e6) and all water shocks
+rho_refinement_criterion   = 1.0e10
+omega_refinement_criterion = 1.0e10
+gradu_refinement_criterion = 1.0e10
+cutoff = 1.0e-4
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### SOLVER ###
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+integration.type    = RungeKutta
+integration.rk.type = 3
