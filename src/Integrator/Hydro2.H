@@ -519,6 +519,8 @@ protected:
     // Cahn-Hilliard mobility scale M0 in M = M0 * epsilon^2.
     Set::Scalar Mob_user = NAN;
     Set::Scalar small=NAN;
+    Set::Scalar interface_gem_min = NAN;     // interface gate on |grad eta| [1/m] (interface.gem_min)
+    Set::Scalar shell_tension_floor = -1.0e300; // shell.tension_floor [N/m], test clamp (off)
     Set::Scalar cutoff=NAN;
     Set::Scalar lagrange=NAN;
 

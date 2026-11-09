@@ -190,6 +190,9 @@ def load_frames(plotdir, R0, half, cache_path, nproc, refresh=False):
                 done = c["frames"]
         except Exception:
             done = {}
+    if not os.path.isdir(plotdir):                                    # re-plot from the cache alone
+        print("  [data] %s not found: using the %d cached frames" % (plotdir, len(done)))
+        return sorted(done.values(), key=lambda d: d["t"]), []
     fs = SA._plotfiles(plotdir)
     todo = [pf for pf in fs if os.path.basename(pf) not in done
             or abs(done[os.path.basename(pf)]["mtime"] - os.path.getmtime(pf)) > 1e-6]
@@ -641,7 +644,9 @@ def report(A, fr, th, log, logpath, errors, plotdir, stem):
     if log is None:
         P("stdout log: none found (pass --log02 / --log04)")
     else:
-        P("stdout log: %s" % ", ".join(log["files"]))
+        P("stdout log: %s%s" % (", ".join(log["files"]), "   ** IGNORED: STEP times exceed stop_time -- "
+                                 "this log belongs to another run; its error lines below are NOT this run's **"
+                                 if log.get("ignored") else ""))
         if len(log["t"]):
             P("  last STEP %d  t = %.4f ns  dt = %.3g  (min dt %.3g at t = %.3f ns; dt last 20 steps: %s)" %
               (log["step"][-1], log["t"][-1] * ns, log["dt"][-1], log["dt"].min(),
@@ -756,15 +761,19 @@ def main():
                           nproc=a.nproc, drive_gain=cfg["gain"], cache=False, verbose=True)
         plotdir = getattr(a, "o" + key[1]) or A.meta["plot_file"]
         print("\n==== %s  (%s)" % (cfg["stem"], plotdir))
-        if not os.path.isdir(plotdir):
-            print("  plotfile dir not found -- pass --o%s" % key[1]); continue
         stem = os.path.join(a.out_dir, cfg["stem"])
+        if not os.path.isdir(plotdir) and not os.path.isfile(stem + "_dbg_cache.pkl"):
+            print("  plotfile dir not found and no cache -- pass --o%s" % key[1]); continue
         fr, errors = load_frames(plotdir, A.R0, cfg["half_R0"], stem + "_dbg_cache.pkl", a.nproc, a.refresh)
         if not fr:
             print("  no readable plotfiles"); continue
         th = read_thermo(plotdir)
         logpath = find_log(A.meta, getattr(a, "log" + key))
         log = read_log(logpath)
+        if log is not None and len(log["t"]) and log["t"].max() > 1.5 * A.meta["stop_time"]:
+            print("  [log] IGNORED %s: its time reaches %.4g s, beyond this deck's stop_time %.4g s "
+                  "(log from another run?)" % (logpath, log["t"].max(), A.meta["stop_time"]))
+            log = dict(log, ignored=True, step=log["step"][:0], t=log["t"][:0], dt=log["dt"][:0])
         for fn, args in ((plot_radius, (A, fr, th, stem)), (plot_contours, (A, fr, stem, a.last)),
                          (plot_modes, (A, fr, stem)), (plot_health, (A, fr, th, log, stem)),
                          (plot_fields, (A, fr, stem))):

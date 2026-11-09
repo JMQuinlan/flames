@@ -60,12 +60,18 @@ namespace Integrator
 // exactly; keep them in sync if the Marmottant branch structure changes.
 // ----------------------------------------------------------------------
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+// Interface gate: a cell with |grad eta| (or |grad psi|) below g_gem_min [1/m] is OFF the
+// interface (no shell, no normal, no curvature).  Set in Parse from interface.gem_min,
+// default 1e-13/epsilon: scale-free, so round-off noise in eta (~1e-16/dx) is gated out at
+// every scale.  The old fixed 1e-10 passed that noise at the micro scale (dx ~ 4e-8 m).
+static Set::Scalar g_gem_min = 1.0e-10;
+
 static Set::Scalar SigmaEffFromGamma(Set::Scalar Gamma, Set::Scalar grad_eta_mag,
                                      int marm, Set::Scalar sig_const,
                                      Set::Scalar chi_, Set::Scalar Gb,
                                      Set::Scalar sbrk, Set::Scalar sigw)
 {
-    if (grad_eta_mag <= 1.0e-10) return 0.0;   // off the interface: no shell
+    if (grad_eta_mag <= g_gem_min) return 0.0; // off the interface: no shell
     if (!marm) return sig_const;
     Set::Scalar se = 0.0;
     if (Gamma > 0.0 && Gamma < Gb)             // stretched -> elastic branch
@@ -97,7 +103,7 @@ static Set::Scalar LiquidInterfaceRate(const ARR &et, int i, int j, int k, const
     if (ec <= 0.5 || ec >= 1.0 - cut_l) return ds_raw;
     const Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DXl);
     const Set::Scalar g = ge.lpNorm<2>();
-    if (g < 1.0e-10) return ds_raw;
+    if (g < g_gem_min) return ds_raw;
     const Set::Vector n = ge / g;
     Set::Matrix S = Set::Matrix::Zero();
     for (int d = 0; d < AMREX_SPACEDIM; ++d)
@@ -106,7 +112,7 @@ static Set::Scalar LiquidInterfaceRate(const ARR &et, int i, int j, int k, const
         const Set::Vector gp = Numeric::Gradient(et, i + di, j + dj, k + dk, 0, DXl);
         const Set::Vector gm = Numeric::Gradient(et, i - di, j - dj, k - dk, 0, DXl);
         const Set::Scalar gpm = gp.lpNorm<2>(), gmm = gm.lpNorm<2>();
-        if (gpm < 1.0e-10 || gmm < 1.0e-10) return ds_raw;
+        if (gpm < g_gem_min || gmm < g_gem_min) return ds_raw;
         const Set::Vector np_ = gp / gpm, nm_ = gm / gmm;
         for (int c = 0; c < AMREX_SPACEDIM; ++c) S(d, c) = (np_(c) - nm_(c)) / (2.0 * DXl[d]);
     }
@@ -398,6 +404,12 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("Dv", value.Dv, 0.0);                  // Vapor Diffusivity
         pp_query_default("Lv", value.Lv, 0.0);                  // Latent heat of vaporization [J/kg] (evaporative cooling sink)
         pp_query_required("epsilon", value.epsilon);            // diffuse interface thickness Y_infinity
+        // interface.gem_min [1/m]: interface gate on |grad eta| (see g_gem_min).  Default
+        // 1e-13/epsilon (scale-free); interface.gem_min = 1e-10 restores the old fixed gate.
+        value.interface_gem_min = 1.0e-13 / value.epsilon;
+        pp_query_default("interface.gem_min", value.interface_gem_min, value.interface_gem_min);
+        g_gem_min = value.interface_gem_min;
+        Util::Message(INFO, "interface gate |grad eta| > ", g_gem_min, " 1/m (gem_min*epsilon = ", g_gem_min * value.epsilon, ")");
         pp_query_default("Y_infinity", value.Y_infinity, 0.0);  // Far Field Vapor Mass Fraction
         pp_query_default("Mob", value.Mob_user, 0.0);           // CH mobility scale M0: M = M0 * epsilon^2
         if (value.epsilon <= 0.0)
@@ -488,6 +500,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // Density floor for the nu_s stability estimate (NOT for the physics).
         // Defaults to 1.0 kg/m^3, the gas reference density of the Sch20 decks.
         pp_query_default("shell.nus_rho_floor", value.shell_nus_rho_floor, 1.0);
+        // shell.tension_floor [N/m]: TEST CLAMP on the total shell tension,
+        //   sigma_tot = max(sigma_eff + (kappa_s - mu_s) div_s u, tension_floor),
+        // applied to the viscous normal force + tangential stress (sub-cycle) and to the
+        // relaxation jump.  Off by default.  It removes the compressive viscous resistance
+        // wherever it is active (expect a deeper R_min).
+        pp_query_default("shell.tension_floor", value.shell_tension_floor, -1.0e300);
+        if (value.shell_tension_floor > -1.0e299)
+            Util::Message(INFO, "shell.tension_floor ON: sigma_tot >= ", value.shell_tension_floor, " N/m");
         // INTERFACE JUMP (always on with apply_surface_tension = 1; the flags jump.consistent,
         // jump.tangential, capillary_jump, shell.kappa_s_jump, jump.curvature(_y,_iso,_cp) and
         // jump.R0 were removed 2026-11-05).  The momentum force and the pressure relaxation
@@ -1907,7 +1927,7 @@ Hydro2::RHS(int lev,
                 Set::Scalar se = 0.0, G = 0.0;
                 // Gate on |grad eta|: off the interface there is no shell and no
                 // area to normalise by.  Omega is identically zero there anyway.
-                if (gem > 1.0e-10)
+                if (gem > g_gem_min)
                 {
                     // Gamma is a PRIMARY -- read straight off the advected field.
                     // No division by |grad eta|, which is what made the previous
@@ -2004,7 +2024,7 @@ Hydro2::RHS(int lev,
                     const Set::Scalar sE = SigmaEffFromGamma(marm ? Gs : 0.0, 1.0, marm, sig0, chi_o, Gb_o, sbrk_o, sigw_o);
                     for (int d = 0; d < AMREX_SPACEDIM; ++d) om(i, j, k, nO + d) = -sE * kT * ge(d);
                 }
-                if (gem < 1.0e-10) return; // Omega = 0 off the interface
+                if (gem < g_gem_min) return; // Omega = 0 off the interface
                 // The tensor carries only the tangential (Marangoni) part of the static
                 // tension, which is nonzero only for a varying sigma(Gamma).
                 Set::Scalar se = marm ? sg(i, j, k) : 0.0;
@@ -2269,7 +2289,7 @@ Hydro2::RHS(int lev,
             // Diffuse Sources
             Set::Vector grad_eta = Numeric::Gradient(eta, i, j, k, 0, DX);
             Set::Scalar grad_eta_mag = grad_eta.lpNorm<2>();
-            Set::Vector n_hat = grad_eta / (grad_eta_mag + small); // Normal Vector
+            Set::Vector n_hat = grad_eta / (grad_eta_mag + g_gem_min); // Normal Vector (taper below the interface gate)
 
             // Extract velocity from momentum and density.  The mixture velocity u
             // is fully dimensioned (momentum spine carries z); the prescribed-flow
@@ -2421,7 +2441,7 @@ Hydro2::RHS(int lev,
                     // Tangential part of div(Omega) (Marangoni; zero unless
                     // sigma(Gamma)) + the normal jump force -Delta_s grad(eta)
                     // stored per cell.
-                    if (grad_eta_mag > 1.0e-10)
+                    if (grad_eta_mag > g_gem_min)
                     {
                         const Set::Vector nh = grad_eta / grad_eta_mag;
                         Fsv_vector -= nh * nh.dot(Fsv_vector);
@@ -3193,7 +3213,7 @@ Hydro2::RHS(int lev,
             // quantities already in scope, and it is mesh-independent.
             const Set::Scalar nn = n_hat.squaredNorm();
             Set::Scalar div_s_u = nn * gradu.trace() - n_hat.dot(gradu * n_hat);
-            if (grad_eta_mag > 1.0e-10)   // liquid-side band cells: interface area rate (see Parse, shell.rate_local)
+            if (grad_eta_mag > g_gem_min)   // liquid-side band cells: interface area rate (see Parse, shell.rate_local)
                 div_s_u = nn * LiquidInterfaceRate(eta, i, j, k, DX, eps_rl, cut_rl, gradu, u, div_s_u / std::max(nn, 1.0e-30));
             shell_rhs(i, j, k) = -u_dot_gradG - shell(i, j, k) * div_s_u;
             }   // end shell_row_on / band gate
@@ -6232,6 +6252,13 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
     const Set::Scalar kc0 = thermal_k0 * eos0.Cp(), kc1 = thermal_k1 * eos1.Cp();
     const Set::Scalar cut_h = cutoff;
     const Set::Scalar keff_v = kap_s + 2.0 * shell_mu_s / (AMREX_SPACEDIM - 1);
+    // shell.tension_floor: the viscous tension actually applied is raised so that
+    // sigma_eff + T_visc >= floor (sigma_eff from the cell's Gamma, as in the static force).
+    const Set::Scalar tfl = shell_tension_floor;
+    const bool tfl_on = tfl > -1.0e299;
+    const int marm_v = marmottant;
+    const Set::Scalar sig_v = sigma, chi_v = marmottant_chi, Gb_v = marmottant_Gamma_buck;
+    const Set::Scalar sbrk_v = marmottant_sigma_break, sigw_v = sigma;
     // kappa from the capillary tensor (eta is frozen over the sub-cycles)
     amrex::MultiFab Kt_v;     // filled below, once the eta ghosts are current
 
@@ -6280,7 +6307,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
         amrex::LoopOnCpu(bx, [&] (int i, int j, int k) {
             Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
             const Set::Scalar gem = ge.lpNorm<2>();
-            if (gem < 1.0e-10) return;
+            if (gem < g_gem_min) return;
             // FLOOR rho at the gas reference density.  `small` (1e-8) is far
             // below any physical density here, so without this floor a single
             // near-vacuum band cell dominates the reduction: at max_level 5 one
@@ -6372,16 +6399,20 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
             auto et  = eta_mf[lev]->const_array(mfi);
             auto vel = velocity_mf[lev]->const_array(mfi);
             auto om  = Omv.array(mfi);
+            auto shv = shell_mf[lev]->const_array(mfi);
             amrex::ParallelFor(gbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
                 const Set::Scalar gem = ge.lpNorm<2>();
-                if (gem < 1.0e-10) return;          // off-band: Omega_visc = 0
+                if (gem < g_gem_min) return;        // off-band: Omega_visc = 0
                 const Set::Vector nh = ge / gem;
                 Set::Matrix gu = Set::Matrix::Zero();
                 for (int d = 0; d < AMREX_SPACEDIM; ++d)
                     gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
                 const Set::Scalar ds = gu.trace() - nh.dot(gu * nh);
-                const Set::Scalar se = kap_s * ds;   // viscous ONLY (its tangential part is kept below)
+                Set::Scalar se = kap_s * ds;         // viscous ONLY (its tangential part is kept below)
+                if (tfl_on)
+                    se = std::max(se, tfl - SigmaEffFromGamma(marm_v ? shv(i, j, k) : 0.0, 1.0, marm_v,
+                                                             sig_v, chi_v, Gb_v, sbrk_v, sigw_v));
                 // |grad eta| P_ab = gem d_ab - ge_a ge_b / gem
                 om(i,j,k,0) = se * (gem - ge(0)*ge(0)/gem);     // xx
                 om(i,j,k,1) = se * (gem - ge(1)*ge(1)/gem);     // yy
@@ -6419,6 +6450,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
             auto ar0 = rho_eta0_mf[lev]->const_array(mfi);
             auto ar1 = rho_eta1_mf[lev]->const_array(mfi);
             auto ktv  = Kt_v.const_array(mfi);
+            auto shv  = shell_mf[lev]->const_array(mfi);
             const Set::Scalar idx = 0.5 / DX[0], idy = 0.5 / DX[1];
 #if AMREX_SPACEDIM == 3
             const Set::Scalar idz = 0.5 / DX[2];
@@ -6426,7 +6458,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
                 const Set::Scalar gem = ge.lpNorm<2>();
-                if (gem < 1.0e-10) return;          // off-band: nothing to do
+                if (gem < g_gem_min) return;        // off-band: nothing to do
 
                 Set::Vector F = Set::Vector::Zero();
 #if AMREX_SPACEDIM == 2
@@ -6456,7 +6488,15 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                                            Set::Vector(AMREX_D_DECL(vel(i,j,k,0), vel(i,j,k,1), vel(i,j,k,2))), ds_fl);
                 // tangential part of div(Omega_visc) + normal jump force -Delta_v grad(eta)
                 F -= nh * nh.dot(F);
-                F -= (keff_v * ds * ktv(i, j, k)) * ge;
+                Set::Scalar Tv = keff_v * ds;           // viscous tension of the normal jump force
+                bool clamped = false;
+                if (tfl_on)
+                {
+                    const Set::Scalar Tlo = tfl - SigmaEffFromGamma(marm_v ? shv(i, j, k) : 0.0, 1.0, marm_v,
+                                                                    sig_v, chi_v, Gb_v, sbrk_v, sigw_v);
+                    if (Tv < Tlo) { Tv = Tlo; clamped = true; }
+                }
+                F -= (Tv * ktv(i, j, k)) * ge;
                 for (int d = 0; d < AMREX_SPACEDIM; ++d)
                     M(i,j,k,d) += dtau * F(d);
 
@@ -6467,7 +6507,8 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                 for (int d = 0; d < AMREX_SPACEDIM; ++d) udotF += vel(i,j,k,d) * F(d);
                 // Total energy gains the work done on the fluid (u.F, which
                 // shows up as kinetic) plus the dissipation (internal).
-                const Set::Scalar diss = keff_v * gem * ds * ds_fl;
+                // clamped cells: the floor acts as an elastic (non-dissipative) tension
+                const Set::Scalar diss = clamped ? 0.0 : keff_v * gem * ds * ds_fl;
                 E(i,j,k) += dtau * (udotF + diss);
                 // The dissipation is INTERNAL energy, so it must also be split
                 // into the phasic reservoirs, by volume fraction as elsewhere
@@ -6505,7 +6546,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
             auto v   = velocity_mf[lev]->array(mfi);
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
-                if (ge.lpNorm<2>() < 1.0e-10) return;
+                if (ge.lpNorm<2>() < g_gem_min) return;
                 const Set::Scalar r = rho(i,j,k) + sm;
                 for (int d = 0; d < AMREX_SPACEDIM; ++d) v(i,j,k,d) = M(i,j,k,d) / r;
             });
@@ -6999,7 +7040,7 @@ void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time)
             Set::Vector gn;
             for (int d = 0; d < AMREX_SPACEDIM; ++d) gn(d) = IsoD(et, i, j, k, 0, d, DXc);
             const Set::Scalar gm = gn.lpNorm<2>();
-            for (int d = 0; d < AMREX_SPACEDIM; ++d) nf(i, j, k, d) = gm < 1.0e-10 ? 0.0 : gn(d) / gm;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d) nf(i, j, k, d) = gm < g_gem_min ? 0.0 : gn(d) / gm;
         });
     }
     // kappa = div(n), isotropic stencil; zero where the compact |grad psi| vanishes
@@ -7012,7 +7053,7 @@ void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time)
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             Kc(i, j, k) = 0.0;
             const Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DXc);
-            if (ge.lpNorm<2>() < 1.0e-10) return;
+            if (ge.lpNorm<2>() < g_gem_min) return;
             Set::Scalar kap = 0.0;
             for (int d = 0; d < AMREX_SPACEDIM; ++d) kap += IsoD(nf, i, j, k, d, d, DXc);
             Kc(i, j, k) = kap;
@@ -7158,7 +7199,7 @@ void Hydro2::RelaxAndReinit(int lev)
                 for (int d = 0; d < AMREX_SPACEDIM; ++d) v(i, j, k, d) = M(i, j, k, d) / rc;
                 const Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DXj);
                 const Set::Scalar gem = ge.lpNorm<2>();
-                for (int d = 0; d < AMREX_SPACEDIM; ++d) n(i, j, k, d) = (gem > 1.0e-10) ? ge(d) / gem : 0.0;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) n(i, j, k, d) = (gem > g_gem_min) ? ge(d) / gem : 0.0;
             });
         }
         const Set::Scalar kmm = use_vjump ? shell_kappa_s - shell_mu_s : 0.0;
@@ -7167,6 +7208,8 @@ void Hydro2::RelaxAndReinit(int lev)
         const int marm_j = marmottant;
         const Set::Scalar sig_j = sigma, chi_j = marmottant_chi, Gb_j = marmottant_Gamma_buck;
         const Set::Scalar sbrk_j = marmottant_sigma_break, sigw_j = sigma;
+        const Set::Scalar tfl_jv = shell_tension_floor;
+        const bool tfl_j = tfl_jv > -1.0e299;
         // kappa from the capillary tensor (same as the force)
         amrex::MultiFab Kt_j(ba, dm, 1, 0);
         TensorCurvature(lev, Kt_j, relax_time);
@@ -7196,7 +7239,10 @@ void Hydro2::RelaxAndReinit(int lev)
                 {
                     // static part: same sigma_eff as the momentum force (Gamma from the shell field)
                     const Set::Scalar G = marm_j ? shl(i, j, k) : 0.0;
-                    Ts += SigmaEffFromGamma(G, 1.0, marm_j, sig_j, chi_j, Gb_j, sbrk_j, sigw_j) * P;
+                    const Set::Scalar se_j = SigmaEffFromGamma(G, 1.0, marm_j, sig_j, chi_j, Gb_j, sbrk_j, sigw_j);
+                    Ts += se_j * P;
+                    // shell.tension_floor: raise the isotropic tension to the floor
+                    if (tfl_j && kmm * ds + se_j < tfl_jv) Ts += (tfl_jv - kmm * ds - se_j) * P;
                 }
                 // p_gas - p_liq = T_s : grad(n) with grad(n) -> (kappa/(D-1)) P:
                 //   J = kappa tr(T_s)/(D-1),  kappa = tensor curvature
