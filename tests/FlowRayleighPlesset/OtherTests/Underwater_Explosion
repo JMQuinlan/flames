@@ -24,7 +24,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-2
 dynamictimestep.min = 1e-12
-cfl = 0.3
+cfl = 0.9
 cfl_v = 0.3
 
 ### DIMENSIONS ###

@@ -61,7 +61,7 @@ dynamictimestep.verbose = 0
 dynamictimestep.max     = 1.0e-3
 dynamictimestep.min     = 1.0e-10
 stop_time               = 1.0
-cfl                     = 0.4
+cfl                     = 0.9
 
 ### ETA IC (Garrick: 0 on left, 1 on right; sharp tanh at x=0) ###
 # Periodic wrap creates a second jump at x = +/-1; that's intentional here.

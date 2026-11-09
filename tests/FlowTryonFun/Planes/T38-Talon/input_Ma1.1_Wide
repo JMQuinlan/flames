@@ -64,7 +64,7 @@ dynamictimestep.on  = 1
 dynamictimestep.verbose = 0
 dynamictimestep.max = 1e-0
 dynamictimestep.min = 1e-10
-cfl                 = 0.2
+cfl                 = 0.9
 stop_time           = 0.5
 
 # ----------------------------------------------------------------------------

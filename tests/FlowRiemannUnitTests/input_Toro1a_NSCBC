@@ -52,7 +52,7 @@ epsilon = eta.ic.expression.constant.epsilon
 ### Advection solver ###
 
 ### HYDRO PARAM ###
-cfl   = 0.4
+cfl   = 0.9
 
 ## EOS ##
 eos0.gamma = 1.4

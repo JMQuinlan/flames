@@ -73,7 +73,7 @@ dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
 dynamictimestep.max     = 1.0e-5
 dynamictimestep.min     = 1.0e-13
-cfl                     = 0.5
+cfl                     = 0.9
 
 ### DIMENSIONS -- +x+y+z octant, full domain 4 R0 across ###
 geometry.prob_lo     = 0.0 0.0 0.0

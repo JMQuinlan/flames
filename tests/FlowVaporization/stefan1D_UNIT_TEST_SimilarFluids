@@ -37,7 +37,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-0
 dynamictimestep.min = 1e-12
-cfl = 0.5
+cfl = 0.9
 
 # No prescribed sources
 m0.ic.constant.value = 0.0

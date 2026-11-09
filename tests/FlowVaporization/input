@@ -75,7 +75,7 @@ pressure1.ic.expression.region0 = "2e5"
 
 sigma = 0.0728; # For Air/Water
 
-cfl = 0.4;
+cfl = 0.9;
 pref = 1e5;
 
 ### ETA BC  ###

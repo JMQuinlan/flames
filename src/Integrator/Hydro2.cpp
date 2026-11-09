@@ -4310,8 +4310,18 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // Computing dt for next time step on all levels
     Set::Scalar dx_min = std::min({AMREX_D_DECL(DX[0], DX[1], DX[2])});
 
-    Set::Scalar wave_speed = c_max + sqrt(AMREX_D_TERM(vx_max * vx_max, + vy_max * vy_max, + vz_max * vz_max));
-    Set::Scalar dt_acoustic = cfl * dx_min / (wave_speed + small);
+    // ACOUSTIC.  Unsplit (method-of-lines) form, summed over directions:
+    //     dt = cfl / sum_d (c + |u_d|) / dx_d.
+    // The old 1D form cfl dx / (c + |u|) has no dimension factor: the
+    // checkerboard (pi,pi,pi) mode gets upwind damping ~2 d c/dx, and RK3
+    // (real-axis limit 2.51) is then stable only for c dt/dx <~ 1.25/d, i.e.
+    // ~0.42 in 3D.  At cfl 0.5 the Mili 3D runs sat at ~0.45 and grew a liquid
+    // rho/E/p checkerboard (CollapseDebug, 2026-11-09).  In 1D this is identical
+    // to the old form; for equal dx and u = 0 it is cfl dx / (d c).
+    Set::Scalar acoustic_rate = AMREX_D_TERM((c_max + vx_max) / DX[0],
+                                           + (c_max + vy_max) / DX[1],
+                                           + (c_max + vz_max) / DX[2]);
+    Set::Scalar dt_acoustic = cfl / (acoustic_rate + small);
 
     // VISCOUS (explicit diffusion).  The stability limit for a (2d+1)-point
     // Laplacian in d dimensions is dt <= dx^2 / (2 d nu), nu = mu/rho.  The

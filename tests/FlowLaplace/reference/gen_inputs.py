@@ -162,7 +162,7 @@ dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
 dynamictimestep.max     = {fmt(dt_max)}
 dynamictimestep.min     = {fmt(dt_min)}
-cfl                     = 0.3
+cfl                     = 0.9
 
 ### DIMENSIONS ###
 geometry.prob_lo     = {fmt(-half)} {fmt(-half)} 0.0

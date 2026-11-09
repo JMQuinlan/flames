@@ -44,7 +44,7 @@ dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
 dynamictimestep.max     = 1.0e-4
 dynamictimestep.min     = 1.0e-12
-cfl                     = 0.2
+cfl                     = 0.9
 
 ### DIMENSIONS ###
 geometry.prob_lo     = -0.10 -0.10 0.0

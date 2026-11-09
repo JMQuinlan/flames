@@ -64,7 +64,7 @@ Riemann_Solver = 0 # Valid Entries: 0:"Roe" / 1:"HLLC" / 2:"HLLE" / 3:"Mixed"
 gamma0 = 1.4
 # gamma1 = 4.0 # 7.15
 gamma1 = 1.4 # 7.15
-cfl   = 0.4
+cfl   = 0.9
 mu0   = 0.0 ## 02
 mu1   = 0.0 ## 4
 

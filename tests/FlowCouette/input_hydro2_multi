@@ -78,7 +78,7 @@ eos1.p0    = 0.0
 eos1.cv    = 2.5
 eos1.cp    = 3.5
 
-cfl   = 0.4
+cfl   = 0.9
 mu0   = 2.0       # upper fluid dynamic viscosity (was 10 -- softened to 2:1)
 mu1   = 1.0       # lower fluid dynamic viscosity
 

@@ -23,7 +23,7 @@ dynamictimestep.on = 1
 dynamictimestep.verbose = 1
 dynamictimestep.max = 1e-4
 dynamictimestep.min = 1e-12
-cfl = 0.5
+cfl = 0.9
 
 ### DIMENSIONS ###
 # Domain: 4R0 x 4R0 (bubble radius R0 = 1mm at center)

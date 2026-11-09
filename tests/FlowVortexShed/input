@@ -68,7 +68,7 @@ eta.ic.expression.region0        = "(y>=ycut)*(0.5*(1 + tanh((sqrt((x-x0)**2 + (
 ### HYDRO PARAM ###
 
 gamma = 1.4
-cfl   = 0.01
+cfl   = 0.9
 mu    = 1e-1
 pref = 1000.0
 

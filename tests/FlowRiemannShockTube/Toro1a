@@ -33,7 +33,7 @@ timestep  = 1.0e-4
 #dynamictimestep.verbose = 1
 #dynamictimestep.max = 1e-0
 #dynamictimestep.min = 1e-12
-cfl = 0.04
+cfl = 0.9
 
 solver.type=hllc
 
@@ -56,7 +56,7 @@ eta.ic.constant.value  = 1.0
 ### HYDRO PARAM ###
 
 gamma = 1.4
-cfl   = 0.4
+cfl   = 0.9
 mu    = 0.0
 
 pref = 0.0

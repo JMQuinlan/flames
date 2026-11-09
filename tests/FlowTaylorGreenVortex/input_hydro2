@@ -60,7 +60,7 @@ eos1.p0    = 0.0
 eos1.cv    = 1.0
 eos1.cp    = 1.4
 
-cfl   = 0.5
+cfl   = 0.9
 mu0   = 0.01      # adjust for desired Re = rho * U * L / mu
 mu0_b = 0.0       # no bulk viscosity for incompressible TGV
 mu1   = 0.01

@@ -94,7 +94,7 @@ dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
 dynamictimestep.max     = {fmt(dt_max)}
 dynamictimestep.min     = 1.0e-14
-cfl                     = 0.3
+cfl                     = 0.9
 
 ### DIMENSIONS (cube) ###
 geometry.prob_lo     = {fmt(-half)} {fmt(-half)} {fmt(-half)}

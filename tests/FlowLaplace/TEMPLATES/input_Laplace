@@ -49,7 +49,7 @@ dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
 dynamictimestep.max     = @DT_MAX@
 dynamictimestep.min     = @DT_MIN@
-cfl                     = 0.3
+cfl                     = 0.9
 
 ### DIMENSIONS ###
 geometry.prob_lo     = @NEG_HALF@ @NEG_HALF@ 0.0

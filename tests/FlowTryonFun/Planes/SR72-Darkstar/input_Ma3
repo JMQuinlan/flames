@@ -44,7 +44,7 @@ dynamictimestep.on  = 1
 dynamictimestep.verbose = 0
 dynamictimestep.max = 5e-3
 dynamictimestep.min = 1e-10
-cfl                 = 0.3             # supersonic
+cfl                 = 0.9             # supersonic
 cfl_v               = 0.3
 stop_time           = 18.0             # ~5 flow-through times (L/U = 12/3 = 4.0)
 

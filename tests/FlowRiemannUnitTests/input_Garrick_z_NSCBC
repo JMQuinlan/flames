@@ -43,7 +43,7 @@ q.ic.type = constant
 q.ic.constant.value = 0.0
 
 ### HYDRO PARAM ###
-cfl   = 0.4
+cfl   = 0.9
 relax_diag = 0
 
 ## EOS ##

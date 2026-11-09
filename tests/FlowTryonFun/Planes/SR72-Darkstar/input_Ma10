@@ -44,7 +44,7 @@ dynamictimestep.on  = 1
 dynamictimestep.verbose = 0
 dynamictimestep.max = 1.5e-3
 dynamictimestep.min = 1e-10
-cfl                 = 0.2             # conservative for Ma 10
+cfl                 = 0.9             # conservative for Ma 10
 cfl_v               = 0.2
 stop_time           = 6.0             # ~5 flow-through times (L/U = 12/10 = 1.2)
 

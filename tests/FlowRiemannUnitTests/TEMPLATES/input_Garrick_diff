@@ -50,7 +50,7 @@ q.ic.type = constant
 q.ic.constant.value = 0.0
 
 ### HYDRO PARAM ###
-cfl   = 0.5
+cfl   = 0.9
 
 ## EOS ##
 eos0.gamma = 5.5

@@ -35,7 +35,7 @@ dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
 dynamictimestep.max     = 1.630737567e-08
 dynamictimestep.min     = 1.0e-14
-cfl                     = 0.3
+cfl                     = 0.9
 
 ### DIMENSIONS (cube) ###
 geometry.prob_lo     = -0.0002 -0.0002 -0.0002

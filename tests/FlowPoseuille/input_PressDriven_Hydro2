@@ -65,7 +65,7 @@ eos1.p0    = 0.0
 eos1.cv    = 1.0
 eos1.cp    = 1.4
 
-cfl   = 0.2
+cfl   = 0.9
 mu0   = 0.1
 mu1   = 0.1
 

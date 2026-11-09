@@ -62,7 +62,7 @@ dynamictimestep.on      = 1
 dynamictimestep.verbose = 0
 dynamictimestep.max     = 4.0e-9       # Brinkman stability: solid.brinkman * dt < 2
 dynamictimestep.min     = 1.0e-16
-cfl                     = 0.3
+cfl                     = 0.9
 cfl_v                   = 0.3
 stop_time               = 3.0e-5
 

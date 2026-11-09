@@ -64,7 +64,7 @@ dynamictimestep.on  = 1
 dynamictimestep.verbose = 0
 dynamictimestep.max = 1.0e-4         # LEVEL-0 cap: cfl*dx_finest/(U+c) * 2^max_level = 6.5e-6*16 (subcycled AMR); per-level CFL limiter governs below this
 dynamictimestep.min = 1e-10
-cfl                 = 0.3
+cfl                 = 0.9
 cfl_v               = 0.3
 stop_time           = 0.3            # ~3 flow-through times (L=96 m, U=1047 -> 0.092 s each)
 

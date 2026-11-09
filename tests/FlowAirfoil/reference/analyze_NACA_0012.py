@@ -154,7 +154,7 @@ timestep            = 1e-6
 dynamictimestep.on  = 1
 dynamictimestep.max = 5e-3
 dynamictimestep.min = 1e-10
-cfl                 = 0.3
+cfl                 = 0.9
 cfl_v               = 0.3
 stop_time           = {STOP_TIME}
 
