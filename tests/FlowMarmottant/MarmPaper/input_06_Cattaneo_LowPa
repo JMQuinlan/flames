@@ -116,9 +116,9 @@ shell.mu_s    = 0.0
 ### BOUNDARY CONDITIONS -- octant: symmetry (lo) + NSCBC outflow (hi) (active) ###
 # Drive: p_target(t) = p_inf + drive_amp sin(drive_omega t) on every NSCBC face.
 # drive_amp = target at the bubble: box gain ~1 at 1 MHz (box 59 um << wavelength 1.48 mm).
-# Pulse envelope: the measured transducer pulse of the paper (reference/cattaneo2025_envelope.txt),
+# Pulse envelope: the measured transducer pulse of the paper (reference/cattaneo2025_envelope.dat),
 # applied exactly as their MATLAB: p = pa sin(w t) * up(t) (p > 0) or lo(t) (p < 0), 0 outside 0..40 us.
-nscbc.drive_envelope = ./tests/FlowMarmottant/MarmPaper/reference/cattaneo2025_envelope.txt
+nscbc.drive_envelope = ./tests/FlowMarmottant/MarmPaper/reference/cattaneo2025_envelope.dat
 nscbc.drive_t0       = 0.0
 # 20 R0 octant box, as the other driven decks.
 nscbc.xhi.type     = outflow
