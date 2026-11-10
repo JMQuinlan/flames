@@ -11,7 +11,7 @@
 module purge
 module load gnu9 mpich
 
-## FlowTryonFun/Impact_AOA30: Ma 10, 15 deg half-angle wedge pitched 30 deg (AOA) hitting an air/water interface (2D, wedge frame, full width; see deck header) ##
+## FlowTryonFun/Impact_AOA30: Ma 10, 15 deg half-angle wedge entering water on a path 30 deg from vertical (AOA 30; 2D, wedge frame, full width; see deck header) ##
 cd /home/ttryon/flames
 
 srun --mpi=pmi2 /home/ttryon/flames/bin/hydro2-2d-g++ /home/ttryon/flames/tests/FlowTryonFun/Impact/impact_Impact_AOA30
