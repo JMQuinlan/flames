@@ -1,10 +1,9 @@
 # MarmPaper: forced NONLINEAR oscillation, MILI scale (subharmonic at 2 f0)
 #
 # Bubble starts at static equilibrium (p_eq = 1.000041e+05).  Without the elastic shell f0 = Minnaert = 163.1 Hz and
-# the micro drive (4 bar at f0) is chaotic here (KM R_max 3 R0), so the drive moves to the classical subharmonic
-# resonance: f = 2 f0 = 326.3 Hz, 3.0e5 Pa at the bubble.  KM: period doubling, alternate-cycle R_min
-# 0.555 / 1.197 R0, R_max 1.60 R0, f/2 line 1.8x the drive line.  Robust for f/f0 1.8-2.2 and 2.5-3.5 bar;
-# R_min > 0.5 R0 (validation target, as micro 04).
+# the micro 4-bar drive was chaotic here (KM R_max 3 R0), so the drive sits at the classical subharmonic
+# resonance f = 2 f0 = 326.3 Hz.  Amplitude 5.0e4 Pa at the bubble (0.5 p_inf; was 3.0e5 Pa until 2026-11-09).
+# KM at 5.0e4 Pa: R/R0 0.920-1.073 in the first cycles, settling to 0.961-1.038; no period doubling.
 # stop_time = 40 drive periods = 20 T0 = 122.60 ms.
 #
 # MILI SCALE: the micro MarmPaper deck of the same number with every length and time x 1e4 (R0 = 2 cm).
@@ -119,21 +118,21 @@ nscbc.xhi.target_p = 1.000000e+05
 nscbc.xhi.sigma    = 0.6
 nscbc.xhi.beta     = 0.5
 nscbc.xhi.L_ref    = 1.250000e-03
-nscbc.xhi.drive_amp   = 3.092784e+05
+nscbc.xhi.drive_amp   = 5.154639e+04
 nscbc.xhi.drive_omega = 2.049927e+03
 nscbc.yhi.type     = outflow
 nscbc.yhi.target_p = 1.000000e+05
 nscbc.yhi.sigma    = 0.6
 nscbc.yhi.beta     = 0.5
 nscbc.yhi.L_ref    = 1.250000e-03
-nscbc.yhi.drive_amp   = 3.092784e+05
+nscbc.yhi.drive_amp   = 5.154639e+04
 nscbc.yhi.drive_omega = 2.049927e+03
 nscbc.zhi.type     = outflow
 nscbc.zhi.target_p = 1.000000e+05
 nscbc.zhi.sigma    = 0.6
 nscbc.zhi.beta     = 0.5
 nscbc.zhi.L_ref    = 1.250000e-03
-nscbc.zhi.drive_amp   = 3.092784e+05
+nscbc.zhi.drive_amp   = 5.154639e+04
 nscbc.zhi.drive_omega = 2.049927e+03
 eta.bc.type.xlo = REFLECT_EVEN
 eta.bc.type.xhi = neumann
@@ -165,21 +164,21 @@ momentum.bc.type.zhi = nscbc_outflow nscbc_outflow nscbc_outflow
 # nscbc.xlo.sigma    = 0.6
 # nscbc.xlo.beta     = 0.5
 # nscbc.xlo.L_ref    = 1.250000e-03
-# nscbc.xlo.drive_amp   = 3.092784e+05
+# nscbc.xlo.drive_amp   = 5.154639e+04
 # nscbc.xlo.drive_omega = 2.049927e+03
 # nscbc.ylo.type     = outflow
 # nscbc.ylo.target_p = 1.000000e+05
 # nscbc.ylo.sigma    = 0.6
 # nscbc.ylo.beta     = 0.5
 # nscbc.ylo.L_ref    = 1.250000e-03
-# nscbc.ylo.drive_amp   = 3.092784e+05
+# nscbc.ylo.drive_amp   = 5.154639e+04
 # nscbc.ylo.drive_omega = 2.049927e+03
 # nscbc.zlo.type     = outflow
 # nscbc.zlo.target_p = 1.000000e+05
 # nscbc.zlo.sigma    = 0.6
 # nscbc.zlo.beta     = 0.5
 # nscbc.zlo.L_ref    = 1.250000e-03
-# nscbc.zlo.drive_amp   = 3.092784e+05
+# nscbc.zlo.drive_amp   = 5.154639e+04
 # nscbc.zlo.drive_omega = 2.049927e+03
 # eta.bc.type.xlo = neumann
 # eta.bc.type.xhi = neumann

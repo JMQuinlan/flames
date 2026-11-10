@@ -1,0 +1,245 @@
+# MarmPaper: forced NONLINEAR oscillation near resonance (subharmonic)
+#
+# ===== _Cross VARIANT (2026-11-09): rate-dependent shell viscosity (remedy b) =====
+# Identical to input_04_ForcedNonlinear except shell.kappa_s_alpha below and the plot_file path.
+#   kappa_eff = kappa_s / (1 + alpha |div_s u| / 2)   (Cross law, Doinikov, Haac & Dayton,
+#   Ultrasonics 49:269, 2009; div_s u = 2 Rdot/R on a sphere).  alpha = 4e-6 s (their lipid fit);
+#   Mili decks use 4e-2 s (x1e4, same dimensionless rate alpha*Rdot/R, as kappa_s is scaled x1e8).
+#   Local 02 slab: survives collapse + rebound to 100 ns (constant kappa_s: NaN at 34.9 ns);
+#   02 octant still NaN ~29 ns (symmetry-axis runaway, under investigation).
+#   CAVEAT: kappa_s is NOT re-fitted for the Cross law; buckled-phase damping is weaker than
+#   Marmottant KM (local 01 slab R_min 0.782 vs 0.824 constant kappa_s; RP-Cross 0.787).
+#
+#
+# Bubble starts at static equilibrium.  Drive f = f0 = 4.084 MHz, amplitude 5.0e4 Pa at the bubble (0.5 p_inf,
+# liquid never in tension; was 4.0e5 Pa until 2026-11-09, which drove the far field to -3 bar and cavitated the
+# diffuse gas tail).  KM at 5.0e4 Pa: R/R0 0.944-1.057, no period doubling (f/2 line 0), 2f line 0.035x drive.
+# The shell leaves its elastic band (0.980-1.015) each cycle, so the nonlinearity is the shell's buckling/rupture.
+# stop_time = 20 drive periods = 4.897 us.
+#
+# COMMON (all MarmPaper decks): coated 2 um bubble, Marmottant shell chi 1.0 N/m, R_buck 0.98 R0
+#   (sigma(R0) = 0.0412 N/m, elastic band R/R0 0.980-1.015), kappa_s 7.2e-9 kg/s, water mu 1e-3;
+#   KM linear natural frequency f0 = 4.084 MHz (T0 = 244.9 ns); RK3 + MUSCL2 + HLLC, cfl 0.5;
+#   eps/dx_finest = 2; R0/dx_finest = 25.6 (max_level 4); NSCBC outflow far field.
+#   Interface jump, tensor curvature, relaxation closure etc. are built into the code (flag audit 2026-11-05).
+#   THINC (qq) lines below are commented out until the first round of results is in.
+
+alamo.program = hydro2
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/MarmPaper/output_04_ForcedNonlinear_Cross
+### OUTPUT ###
+amr.plot_int       = -1
+amr.plot_dt        = 1.530362e-08
+amr.thermo.plot_dt = 6.121450e-10    # thermo.dat: gas_volume (R_vol), gas_pressure_int, kinetic_energy, interface_area
+plot_minimal       = 1
+
+### MESH ###
+amr.max_grid_size  = 32
+amr.blocking_factor = 16
+amr.regrid_int     = 10
+amr.grid_eff       = 0.8
+amr.max_level      = 4
+amr.n_error_buf    = 16
+nghost = 4
+
+### GEOMETRY -- OCTANT (active); full domain below, commented ###
+geometry.prob_lo     = 0.000000e+00 0.000000e+00 0.000000e+00
+geometry.prob_hi     = 4.000000e-05 4.000000e-05 4.000000e-05
+geometry.is_periodic = 0 0 0
+amr.n_cell           = 32 32 32     # base dx 1.2500e-06; finest dx 7.8125e-08
+# --- full domain (swap with the octant block above; also swap the BC block) ---
+# geometry.prob_lo     = -4.000000e-05 -4.000000e-05 -4.000000e-05
+# geometry.prob_hi     = 4.000000e-05 4.000000e-05 4.000000e-05
+# geometry.is_periodic = 0 0 0
+# amr.n_cell           = 64 64 64     # base dx 1.2500e-06; finest dx 7.8125e-08
+
+### TIME ###
+timestep                = 1.0e-12
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 1.0e-9
+dynamictimestep.min     = 1.0e-18
+cfl                     = 0.9
+stop_time               = 4.897160e-06
+
+### INTERFACE ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 1.562500e-07    # eps/dx_finest = 2
+eta.ic.expression.constant.R0      = 2.000000e-06
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### EOS: 0 = water (stiffened gas), 1 = air ###
+eos0.gamma = 2.35
+eos0.p0    = 1.0e9
+eos0.cv    = 1781.0
+eos0.cp    = 4186.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 714.286
+eos1.cp    = 1000.0
+
+### INITIAL CONDITIONS ###
+density0.ic.type = expression
+density0.ic.expression.region0 = "1000.0"
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+velocity0.ic.expression.region2 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+velocity1.ic.expression.region2 = "0.0"
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_inf = 1.000000e+05
+pressure0.ic.expression.constant.p_b   = 1.412328e+05
+pressure0.ic.expression.constant.R0    = 2.000000e-06
+pressure0.ic.expression.region0 = "p_inf"
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_b = 1.412328e+05
+pressure1.ic.expression.region0 = "p_b"
+equalize_ic_pressure = 1
+
+### MATERIAL / SHELL ###
+mu0   = 1.0e-3     # water
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+apply_surface_tension = 1
+sigma = 0.0728                   # water (= post-rupture tension)
+pref  = 0.0
+marmottant             = 1
+marmottant.R0          = 2.000000e-06  # shell unstrained at the IC radius
+marmottant.R_buckling  = 1.96e-6       # 0.98 R0
+marmottant.chi         = 1.0           # [N/m]
+marmottant.sigma_break = 0.073         # [N/m]
+shell.kappa_s = 7.2e-9                  # [kg/s] (micro-scale equivalent of kappa_s = 0.72 at R0 = 2 cm)
+shell.kappa_s_alpha = 4.0e-6                # [s] Cross-law shear thinning (remedy b)
+shell.mu_s    = 0.0
+
+### BOUNDARY CONDITIONS -- octant: symmetry (lo) + NSCBC outflow (hi) (active) ###
+# Drive: p_target(t) = p_inf + drive_amp sin(drive_omega t) on every NSCBC face.
+# drive_amp = (target amplitude at the bubble) / (box gain, calibrated: see README).
+# 20 R0 box (not 100 R0): at f0 the 100 R0 octant is near an acoustic resonance (gain 9.2, non-uniform).
+nscbc.xhi.type     = outflow
+nscbc.xhi.target_p = 1.000000e+05
+nscbc.xhi.sigma    = 0.6
+nscbc.xhi.beta     = 0.5
+nscbc.xhi.L_ref    = 1.250000e-07
+nscbc.xhi.drive_amp   = 4.516711e+04
+nscbc.xhi.drive_omega = 2.566053e+07
+nscbc.yhi.type     = outflow
+nscbc.yhi.target_p = 1.000000e+05
+nscbc.yhi.sigma    = 0.6
+nscbc.yhi.beta     = 0.5
+nscbc.yhi.L_ref    = 1.250000e-07
+nscbc.yhi.drive_amp   = 4.516711e+04
+nscbc.yhi.drive_omega = 2.566053e+07
+nscbc.zhi.type     = outflow
+nscbc.zhi.target_p = 1.000000e+05
+nscbc.zhi.sigma    = 0.6
+nscbc.zhi.beta     = 0.5
+nscbc.zhi.L_ref    = 1.250000e-07
+nscbc.zhi.drive_amp   = 4.516711e+04
+nscbc.zhi.drive_omega = 2.566053e+07
+eta.bc.type.xlo = REFLECT_EVEN
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = REFLECT_EVEN
+eta.bc.type.yhi = neumann
+eta.bc.type.zlo = REFLECT_EVEN
+eta.bc.type.zhi = neumann
+density.bc.type.xlo = REFLECT_EVEN
+density.bc.type.xhi = nscbc_outflow
+density.bc.type.ylo = REFLECT_EVEN
+density.bc.type.yhi = nscbc_outflow
+density.bc.type.zlo = REFLECT_EVEN
+density.bc.type.zhi = nscbc_outflow
+energy.bc.type.xlo = REFLECT_EVEN
+energy.bc.type.xhi = nscbc_outflow
+energy.bc.type.ylo = REFLECT_EVEN
+energy.bc.type.yhi = nscbc_outflow
+energy.bc.type.zlo = REFLECT_EVEN
+energy.bc.type.zhi = nscbc_outflow
+momentum.bc.type.xlo = REFLECT_ODD  REFLECT_EVEN REFLECT_EVEN
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow nscbc_outflow
+momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD  REFLECT_EVEN
+momentum.bc.type.yhi = nscbc_outflow nscbc_outflow nscbc_outflow
+momentum.bc.type.zlo = REFLECT_EVEN REFLECT_EVEN REFLECT_ODD
+momentum.bc.type.zhi = nscbc_outflow nscbc_outflow nscbc_outflow
+# --- full domain: NSCBC outflow on all six faces (swap with the octant BC block above) ---
+# nscbc.xlo.type     = outflow
+# nscbc.xlo.target_p = 1.000000e+05
+# nscbc.xlo.sigma    = 0.6
+# nscbc.xlo.beta     = 0.5
+# nscbc.xlo.L_ref    = 1.250000e-07
+# nscbc.xlo.drive_amp   = 4.516711e+04
+# nscbc.xlo.drive_omega = 2.566053e+07
+# nscbc.ylo.type     = outflow
+# nscbc.ylo.target_p = 1.000000e+05
+# nscbc.ylo.sigma    = 0.6
+# nscbc.ylo.beta     = 0.5
+# nscbc.ylo.L_ref    = 1.250000e-07
+# nscbc.ylo.drive_amp   = 4.516711e+04
+# nscbc.ylo.drive_omega = 2.566053e+07
+# nscbc.zlo.type     = outflow
+# nscbc.zlo.target_p = 1.000000e+05
+# nscbc.zlo.sigma    = 0.6
+# nscbc.zlo.beta     = 0.5
+# nscbc.zlo.L_ref    = 1.250000e-07
+# nscbc.zlo.drive_amp   = 4.516711e+04
+# nscbc.zlo.drive_omega = 2.566053e+07
+# eta.bc.type.xlo = neumann
+# eta.bc.type.xhi = neumann
+# eta.bc.type.ylo = neumann
+# eta.bc.type.yhi = neumann
+# eta.bc.type.zlo = neumann
+# eta.bc.type.zhi = neumann
+# density.bc.type.xlo = nscbc_outflow
+# density.bc.type.xhi = nscbc_outflow
+# density.bc.type.ylo = nscbc_outflow
+# density.bc.type.yhi = nscbc_outflow
+# density.bc.type.zlo = nscbc_outflow
+# density.bc.type.zhi = nscbc_outflow
+# energy.bc.type.xlo = nscbc_outflow
+# energy.bc.type.xhi = nscbc_outflow
+# energy.bc.type.ylo = nscbc_outflow
+# energy.bc.type.yhi = nscbc_outflow
+# energy.bc.type.zlo = nscbc_outflow
+# energy.bc.type.zhi = nscbc_outflow
+# momentum.bc.type.xlo = nscbc_outflow nscbc_outflow nscbc_outflow
+# momentum.bc.type.xhi = nscbc_outflow nscbc_outflow nscbc_outflow
+# momentum.bc.type.ylo = nscbc_outflow nscbc_outflow nscbc_outflow
+# momentum.bc.type.yhi = nscbc_outflow nscbc_outflow nscbc_outflow
+# momentum.bc.type.zlo = nscbc_outflow nscbc_outflow nscbc_outflow
+# momentum.bc.type.zhi = nscbc_outflow nscbc_outflow nscbc_outflow
+
+### REFINEMENT (eta band) ###
+eta_refinement_criterion   = 1.0e-1
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion     = 1.0e+10
+rho_refinement_criterion   = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+
+### NUMERICS ###
+cutoff = 1.0e-4
+Riemann_Solver.type = hllc
+Limiter.type        = muscl2
+# THINC qq (second round; uncomment these three lines and comment out Limiter.type above):
+# Limiter.type       = thinc
+# Limiter.thinc.thinc_base = muscl2
+# Limiter.thinc.thinc_mode = qq       # key is Limiter.thinc.<key> (Limiter.thinc_mode is silently ignored)
+integration.type    = RungeKutta
+integration.rk.type = 3
+visc_subcycle              = 1       # bulk + shell viscous terms sub-cycled
+shell.kappa_s_subcycle_max = 8192
+shell.heat_split           = 2       # shell viscous heat split by thermal effusivity
+thermal.k0                 = 0.6     # water [W/m/K]
+thermal.k1                 = 0.026   # air   [W/m/K]
+relax_diag                 = 0
+apply_weight          = 0
+apply_vaporization    = 0
+grav                  = 0.0
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0

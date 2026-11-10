@@ -521,6 +521,7 @@ protected:
     Set::Scalar small=NAN;
     Set::Scalar interface_gem_min = NAN;     // interface gate on |grad eta| [1/m] (interface.gem_min)
     Set::Scalar shell_tension_floor = -1.0e300; // shell.tension_floor [N/m], test clamp (off)
+    Set::Scalar shell_kappa_s_alpha = 0.0;      // shell.kappa_s_alpha [s]: Cross-law shear thinning of kappa_s (0 = off)
     Set::Scalar cutoff=NAN;
     Set::Scalar lagrange=NAN;
 

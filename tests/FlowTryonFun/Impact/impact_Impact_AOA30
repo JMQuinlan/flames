@@ -1,0 +1,194 @@
+#@ [2d-serial]
+#@ exe=hydro2
+#@ dim=2
+#@
+
+# ============================================================================
+# FlowTryonFun / Impact_AOA30 -- Ma 10 WEDGE IMPACT at 30 deg ANGLE OF ATTACK
+# ----------------------------------------------------------------------------
+# Same as impact_Impact (15 deg half-angle wedge, Ma 10 w.r.t. air, straight-down velocity,
+# flat still water) except the WEDGE AXIS is pitched 30 deg from straight down (nadir):
+# angle of attack = 30 deg between the body axis and the (vertical) velocity.  The apex
+# still leads; the base tilts toward -x.  (If an oblique TRAJECTORY with the axis kept
+# vertical is wanted instead, rotate the velocity, not the wedge: see note at the end.)
+#
+# FRAME: wedge frame, as impact_Impact -- the wedge is fixed (phi is static) and the air
+# and water stream UP (+y) at U = Ma 10 = 3432.49 m/s.  Gravity off: Galilean invariant.
+#
+# STATES: identical to impact_Impact (air 1 atm, 1.204 kg/m^3; water stiffened gas).
+#
+# THEORY: the windward face (the -x face, outward normal pointing down-left) turns the
+#   flow by 30 + 15 = 45 deg; the leeward (+x) face is an EXPANSION of 30 - 15 = 15 deg.
+#   Max attached deflection: air Ma 10 (gamma 1.4) 44.4 deg; water Ma 2.24 (SG gamma 2.35)
+#   15.8 deg  ->  45 deg > both: DETACHED bow shocks ahead of the windward face in air and
+#   in water, Prandtl-Meyer expansion over the leeward face.  No attached-shock check here.
+#
+# TIMELINE: as impact_Impact -- water surface y = 0 at t = 0 reaches the apex (y = 0.03) at
+#   8.74 us and the top base corner (y ~ 0.050) at ~14.6 us; stop 30 us.
+#
+# GEOMETRY: FULL width (no symmetry plane), x in [-0.06, 0.06], y in [-0.03, 0.09].
+#   Wedge apex (0, 0.03), axis length 2 cm along (-sin 30, cos 30); it spans
+#   x in [-0.0146, 0.0003], y in [0.030, 0.050].  Finest dx 3.906e-5 m, eps/dx_finest = 2.
+#   All four boundaries zero-gradient: ylo supersonic inflow (uniform, exact), yhi outflow,
+#   xlo/xhi far field (freestream has no x velocity).
+# Inviscid, no surface tension, no gravity.
+# Analysis: reference/impact_schlieren.py <plotdir> <imagedir> (auto: no mirroring, no
+#   attached-shock lines for a full-width domain).
+# ============================================================================
+alamo.program = hydro2
+
+### OUTPUT ###
+#plot_file = ./tests/FlowTryonFun/Impact/output_Impact_AOA30
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTryonFun/Impact/output_Impact_AOA30
+
+### MESHING ###
+amr.plot_dt          = 2.5e-7          # 120 frames to 30 us
+amr.max_grid_size    = 128
+amr.blocking_factor  = 8
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level        = 4
+amr.n_cell           = 192 192         # base dx 6.25e-4 = 0.12/192; finest 3.906e-5
+amr.n_error_buf      = 8
+
+### DIMENSIONS ###
+geometry.prob_lo     = -0.06 -0.03 0.0
+geometry.prob_hi     =  0.06  0.09 0.0
+geometry.is_periodic = 0 0 0
+
+### TIME STEPPING ###
+timestep                = 1.0e-12
+dynamictimestep.on      = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max     = 4.0e-9       # Brinkman stability: solid.brinkman * dt < 2
+dynamictimestep.min     = 1.0e-16
+cfl                     = 0.9
+cfl_v                   = 0.3
+stop_time               = 3.0e-5
+
+# ----------------------------------------------------------------------------
+# EMBEDDED SOLID -- the wedge, apex at (0, ya), axis PITCHED by psi = 30 deg (base toward -x).
+#   Body coordinates (apex origin, axis +Y toward the base):
+#     X =  x cps + (y-ya) sps ,   Y = -x sps + (y-ya) cps      (cps = cos psi, sps = sin psi)
+#   signed distance D = max(g_right, g_left, g_base), D > 0 fluid:
+#     g_right =  X cth - Y sth ,  g_left = -X cth - Y sth ,  g_base = Y - h   (h = 0.02 m)
+#   psi = 0 reproduces impact_Impact exactly.
+# ----------------------------------------------------------------------------
+apply_embedded_solid = 1
+solid.brinkman       = 3.5e8           # ~4 U / dx_finest (Yang porous wall)
+phi_refinement_criterion = 0.1
+
+solid.phi.ic.type = expression
+solid.phi.ic.expression.constant.cth = 0.9659258
+solid.phi.ic.expression.constant.sth = 0.2588190
+solid.phi.ic.expression.constant.ya  = 0.03
+solid.phi.ic.expression.constant.h   = 0.02
+solid.phi.ic.expression.constant.cps = 0.8660254
+solid.phi.ic.expression.constant.sps = 0.5
+solid.phi.ic.expression.constant.eps = 3.90625e-5
+solid.phi.ic.expression.region0 = "0.5*(1.0 + tanh( max(max( (x*cps + (y-ya)*sps)*cth - (-x*sps + (y-ya)*cps)*sth, -(x*cps + (y-ya)*sps)*cth - (-x*sps + (y-ya)*cps)*sth ), (-x*sps + (y-ya)*cps) - h) / eps ))"
+
+# Quiescent solid target (air at 1 atm, at rest in the wedge frame)
+solid.density.ic.type = constant
+solid.density.ic.constant.value = 1.204
+solid.momentum.ic.type = constant
+solid.momentum.ic.constant.value = 0.0 0.0
+solid.pressure.ic.type = constant
+solid.pressure.ic.constant.value = 101325.0
+
+### ETA (water volume fraction): water (fluid 0) below y = 0, air (fluid 1) above ###
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 7.8125e-5     # eps/dx_finest = 2
+eta.ic.expression.region0 = "0.5*(1.0 - tanh(y/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+
+### EOS ###
+# fluid 0: water (stiffened gas)
+eos0.gamma = 2.35
+eos0.p0    = 1.0e9
+eos0.cv    = 1781.0
+eos0.cp    = 4186.0
+# fluid 1: air (ideal gas)
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 717.86
+eos1.cp    = 1005.0
+mu0   = 0.0
+mu0_b = 0.0
+mu1   = 0.0
+mu1_b = 0.0
+
+### FLUID IC: everything streams up (+y) at U = 3432.49 m/s (wedge frame) ###
+density0.ic.type = constant
+density0.ic.constant.value = 1000.0
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "3432.49"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 101325.0
+
+density1.ic.type = constant
+density1.ic.constant.value = 1.204
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "3432.49"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 101325.0
+
+### INTERACTIONS ###
+apply_surface_tension = 0
+sigma = 0.0
+Dv    = 0.0
+pref  = 0.0
+small = 1e-6
+grav  = 0.0
+apply_weight       = 0
+apply_vaporization = 0
+
+### BOUNDARY CONDITIONS ###
+# xlo/xhi: far field (zero-gradient; no symmetry plane).  ylo: supersonic inflow (uniform -> zero-gradient exact).
+# yhi: supersonic outflow.  xhi: far side, zero-gradient.
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = neumann
+eta.bc.type.yhi = neumann
+
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+### REFINEMENT CRITERIA (|grad f| * 2 dx > criterion) ###
+eta_refinement_criterion   = 0.1          # free surface / splash sheets
+p_refinement_criterion     = 2.0e5        # air oblique shock (dp ~1.3e6) and all water shocks
+rho_refinement_criterion   = 1.0e10
+omega_refinement_criterion = 1.0e10
+gradu_refinement_criterion = 1.0e10
+cutoff = 1.0e-4
+
+### SOURCE TERMS ###
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+
+### SOLVER ###
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+# ----------------------------------------------------------------------------
+# NOTE (oblique-trajectory alternative): to keep the axis vertical and tilt the VELOCITY 30 deg
+# instead, set cps = 1, sps = 0 and stream both fluids with velocity (U sin30, U cos30) =
+# (1716.25, 2972.62) m/s; xhi then becomes a supersonic inflow (|u_x| > c_water 1533 m/s).
+# ----------------------------------------------------------------------------

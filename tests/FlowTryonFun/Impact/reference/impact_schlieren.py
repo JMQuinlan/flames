@@ -326,6 +326,13 @@ def main():
         print(f"ERROR: no plotfiles in {pdir}")
         return 1
     print(f"impact_schlieren: {len(pfs)} frames from {pdir}")
+    # Full-width domain (x_lo < 0, e.g. impact_Impact_AOA30 with a pitched wedge): there is no
+    # symmetry plane to mirror about, and the attached-shock theory lines do not apply
+    # (the pitched wedge has detached bow shocks).  Set before the Pool so the workers inherit it.
+    global MIRROR, SHOW_THEORY
+    if float(yt.load(pfs[0]).domain_left_edge[0]) < -1.0e-12:
+        MIRROR, SHOW_THEORY = False, False
+        print("  full-width domain (x_lo < 0): no mirroring, no attached-shock theory lines")
     b_air, b_wat = theory()
     print(f"  theory: air Ma {MACH_AIR:g} beta {b_air:.2f} deg | water Ma {MACH_WATER:.2f} beta "
           f"{b_wat:.2f} deg | surface reaches apex at {(WEDGE_YA - WATER_Y0) / U_STREAM * 1e6:.2f} us")

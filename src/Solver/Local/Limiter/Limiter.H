@@ -209,9 +209,29 @@ ToState(const Primitive &p, Set::Scalar /*small*/)
     s.M_normal    = rho * p.u;
     s.M_tangent   = rho * p.v;
     s.M_tangent2  = rho * p.w;   // 2nd tangent (3D; 0 in 2D)
-    // E_k = alpha_k (p_mix + gamma_k pi_k) / (gamma_k - 1).
-    Set::Scalar num0 = std::max(p.p_mix + p.gamma0 * p.pi0, DIV_FLOOR);
-    Set::Scalar num1 = std::max(p.p_mix + p.gamma1 * p.pi1, DIV_FLOOR);
+    // E_k = alpha_k (p_k + gamma_k pi_k) / (gamma_k - 1), with p_k = p_mix when both
+    // phases can share it.  If p_mix is below exactly ONE phase's EOS limit (p + pi <= 0,
+    // e.g. a gas-bearing face with liquid in tension), that phase sits at its floor -pi_k
+    // and the other carries the rest so that alpha_0 p_0 + alpha_1 p_1 = p_mix exactly
+    // (the mixture may then go negative down to -alpha_l pi_l, as the HLLC per-phase
+    // floors allow).  Previously the gas term was clamped at 0 and the face energy no
+    // longer matched p_mix (2026-11-09).
+    Set::Scalar pk0 = p.p_mix, pk1 = p.p_mix;
+    {
+        const bool out0 = (p.p_mix + p.pi0 <= 0.0), out1 = (p.p_mix + p.pi1 <= 0.0);
+        if (out1 && !out0)
+        {
+            const Set::Scalar q1 = -p.pi1, q0 = (p.p_mix - a2 * q1) / a1;
+            if (q0 + p.pi0 > 0.0) { pk0 = q0; pk1 = q1; }
+        }
+        else if (out0 && !out1)
+        {
+            const Set::Scalar q0 = -p.pi0, q1 = (p.p_mix - a1 * q0) / a2;
+            if (q1 + p.pi1 > 0.0) { pk0 = q0; pk1 = q1; }
+        }
+    }
+    Set::Scalar num0 = std::max(pk0 + p.gamma0 * p.pi0, DIV_FLOOR);
+    Set::Scalar num1 = std::max(pk1 + p.gamma1 * p.pi1, DIV_FLOOR);
     s.E0          = a1 * num0 / (p.gamma0 - 1.0);
     s.E1          = a2 * num1 / (p.gamma1 - 1.0);
     s.E_total     = s.E0 + s.E1 + 0.5 * rho * (p.u*p.u + p.v*p.v + p.w*p.w);

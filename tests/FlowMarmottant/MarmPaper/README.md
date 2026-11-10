@@ -39,7 +39,7 @@ This folder holds every run needed for the paper. All five decks are generated b
 | `01_FreeOscillation` | Micro Light_Mili. p∞ = 1e5, gas p_b = 5.8307e4 (below the equilibrium 1.4123e5). Free decay. | Octant 100 R0, R0/dx 25.6 | R_min 0.829 R0 (buckles), settles at R ≈ 0.88 R0 in ~5 T0 | 12 T0 = 2.94 µs |
 | `02_FreeCollapse` | As 01 with p∞ = 1e6 (p∞/p_b = 17.2) | Octant 100 R0, R0/dx 51.2 | R_min 0.321 R0 at 70.6 ns (τ_c 57.9 ns); rebound 0.592 R0 | 400 ns |
 | `03_ForcedLinear` | Static equilibrium start. Drive f = f0/π = 1.300 MHz (non-integer ratio), 1.0e4 Pa at the bubble | Octant 20 R0, R0/dx 25.6 | R/R0 = 1 ± 0.0042 (inside the elastic band); steady after 2 cycles | 8 drive periods = 6.15 µs |
-| `04_ForcedNonlinear` | Static equilibrium start. Drive f = f0, 4.0e5 Pa at the bubble (liquid reaches −3 bar) | Octant 20 R0, R0/dx 25.6 | Period doubling, locked by cycle ~8: alternate-cycle R_min 0.616 / 1.112 R0, R_max 1.491 R0, f/2 line 2× the drive line | 20 T0 = 4.90 µs |
+| `04_ForcedNonlinear` | Static equilibrium start. Drive f = f0, 5.0e4 Pa at the bubble (0.5 p_inf; was 4.0e5 Pa, which put the liquid at −3 bar) | Octant 20 R0, R0/dx 25.6 | KM: R/R0 0.944–1.057, no period doubling; shell leaves the elastic band each cycle | 20 T0 = 4.90 µs |
 | `05_Jetting` | **Full domain.** Equilibrium bubble with a downward Gaussian liquid jet patch on the top cap (U = 50 m/s, centre 1.4 R0, 1/e radius 0.4 R0, axial 0.5 R0) | ±8 R0, R0/dx 64, refine_box ±2 R0 | — (no KM). Expect U-shaped indentation → jet crosses the bubble in ~80–150 ns → torus | 400 ns |
 
 **Forced nonlinear: choice of drive** (`sizing/km_sub.py`)
@@ -86,3 +86,18 @@ The driven decks therefore use the 20 R0 box, and set `drive_amp = (target at th
 - Smoke tests: decks 01–04 ran 40 coarse steps with no errors.
 - Jetting at coarse resolution with ε rescaled to 2 cells, with and without the kick: no NaN past the time an under-resolved test crashed (0.47 ns).
 - Production resolution has not been run locally.
+
+## `_Cross` variants (2026-11-09): rate-dependent shell viscosity
+
+Every deck has an `input_<deck>_Cross` twin (Slurm: `<deck>_Cross.sh`, job name + `X`). The only differences are the plot_file path and one line:
+
+```
+shell.kappa_s_alpha = 4.0e-6    # Mili decks: 4.0e-2 (same dimensionless rate, like kappa_s x 1e8)
+```
+
+This switches on the Cross-law shell viscosity κ_eff = κ_s / (1 + α|div_s u|/2), from Doinikov, Haac & Dayton (Ultrasonics 49:269, 2009). With constant κ_s the buckled shell carries an unbounded compressive viscous tension, and the 02 collapse crashes from grid-scale wrinkling (see `bin/CollaseDebug/collapse_debug.pdf`).
+
+- **Local 02 slab:** survives the collapse and the rebound to 100 ns (constant κ_s: NaN at 34.9 ns). R(t) follows KM with almost no shell viscosity.
+- **Local 02 octant:** still NaN at ~29.6 ns, from a symmetry-axis runaway that is still under investigation.
+- **Caveat:** κ_s is **not** re-fitted for the Cross law, so buckled-phase damping is weaker than Marmottant KM. In the 01 slab, R_min is 0.782, against 0.824 with constant κ_s and 0.787 from RP with the Cross law.
+- **Binary:** needs hydro2 built from code that has `shell.kappa_s_alpha` (2026-11-09 or later).

@@ -82,6 +82,14 @@ static Set::Scalar SigmaEffFromGamma(Set::Scalar Gamma, Set::Scalar grad_eta_mag
     return se;                                 // Gamma >= Gb: buckled, sigma = 0
 }
 
+// Factor on the shell viscous tension kappa_s div_s u (see Parse shell.kappa_s_alpha):
+// Cross-law shear thinning 1/(1 + alpha |div_s u|/2); alpha = 0 -> 1 (constant kappa_s).
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+static Set::Scalar ShellViscFactor(Set::Scalar ds, Set::Scalar alpha)
+{
+    return (alpha > 0.0) ? 1.0 / (1.0 + 0.5 * alpha * std::abs(ds)) : 1.0;
+}
+
 // ----------------------------------------------------------------------
 // shell.rate_local = 1: interface area rate from a liquid-side band cell's OWN
 // fluid stretch (no extension along the normal).  The cell sits at signed
@@ -508,6 +516,15 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("shell.tension_floor", value.shell_tension_floor, -1.0e300);
         if (value.shell_tension_floor > -1.0e299)
             Util::Message(INFO, "shell.tension_floor ON: sigma_tot >= ", value.shell_tension_floor, " N/m");
+        // shell.kappa_s_alpha [s]: rate-dependent (shear-thinning) shell dilatational viscosity,
+        //   kappa_eff = kappa_s / (1 + alpha |div_s u| / 2),
+        // the Cross law of Doinikov, Haac & Dayton (Ultrasonics 49:269, 2009) written with the
+        // local surface dilatation rate (div_s u = 2 Rdot/R on a sphere).  Their fit to lipid
+        // contrast agents gives alpha = 4e-6 s.  0 = off (constant kappa_s, Marmottant 2005).
+        pp_query_default("shell.kappa_s_alpha", value.shell_kappa_s_alpha, 0.0);
+        if (value.shell_kappa_s_alpha > 0.0)
+            Util::Message(INFO, "shell.kappa_s_alpha ON: kappa_eff = kappa_s/(1 + alpha|div_s u|/2), alpha = ",
+                          value.shell_kappa_s_alpha, " s");
         // INTERFACE JUMP (always on with apply_surface_tension = 1; the flags jump.consistent,
         // jump.tangential, capillary_jump, shell.kappa_s_jump, jump.curvature(_y,_iso,_cp) and
         // jump.R0 were removed 2026-11-05).  The momentum force and the pressure relaxation
@@ -6269,6 +6286,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
     const int marm_v = marmottant;
     const Set::Scalar sig_v = sigma, chi_v = marmottant_chi, Gb_v = marmottant_Gamma_buck;
     const Set::Scalar sbrk_v = marmottant_sigma_break, sigw_v = sigma;
+    const Set::Scalar alpha_v = shell_kappa_s_alpha;   // shell.kappa_s_alpha (Cross law)
     // kappa from the capillary tensor (eta is frozen over the sub-cycles)
     amrex::MultiFab Kt_v;     // filled below, once the eta ghosts are current
 
@@ -6419,7 +6437,8 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                 for (int d = 0; d < AMREX_SPACEDIM; ++d)
                     gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
                 const Set::Scalar ds = gu.trace() - nh.dot(gu * nh);
-                Set::Scalar se = kap_s * ds;         // viscous ONLY (its tangential part is kept below)
+                Set::Scalar se = kap_s * ds          // viscous ONLY (its tangential part is kept below)
+                               * ShellViscFactor(ds, alpha_v);
                 if (tfl_on)
                     se = std::max(se, tfl - SigmaEffFromGamma(marm_v ? shv(i, j, k) : 0.0, 1.0, marm_v,
                                                              sig_v, chi_v, Gb_v, sbrk_v, sigw_v));
@@ -6498,7 +6517,8 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                                            Set::Vector(AMREX_D_DECL(vel(i,j,k,0), vel(i,j,k,1), vel(i,j,k,2))), ds_fl);
                 // tangential part of div(Omega_visc) + normal jump force -Delta_v grad(eta)
                 F -= nh * nh.dot(F);
-                Set::Scalar Tv = keff_v * ds;           // viscous tension of the normal jump force
+                const Set::Scalar fvis = ShellViscFactor(ds, alpha_v);
+                Set::Scalar Tv = keff_v * fvis * ds;    // viscous tension of the normal jump force
                 bool clamped = false;
                 if (tfl_on)
                 {
@@ -6518,7 +6538,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                 // Total energy gains the work done on the fluid (u.F, which
                 // shows up as kinetic) plus the dissipation (internal).
                 // clamped cells: the floor acts as an elastic (non-dissipative) tension
-                const Set::Scalar diss = clamped ? 0.0 : keff_v * gem * ds * ds_fl;
+                const Set::Scalar diss = clamped ? 0.0 : keff_v * fvis * gem * ds * ds_fl;
                 E(i,j,k) += dtau * (udotF + diss);
                 // The dissipation is INTERNAL energy, so it must also be split
                 // into the phasic reservoirs, by volume fraction as elsewhere
@@ -7220,6 +7240,7 @@ void Hydro2::RelaxAndReinit(int lev)
         const Set::Scalar sbrk_j = marmottant_sigma_break, sigw_j = sigma;
         const Set::Scalar tfl_jv = shell_tension_floor;
         const bool tfl_j = tfl_jv > -1.0e299;
+        const Set::Scalar alpha_j = shell_kappa_s_alpha;
         // kappa from the capillary tensor (same as the force)
         amrex::MultiFab Kt_j(ba, dm, 1, 0);
         TensorCurvature(lev, Kt_j, relax_time);
@@ -7244,7 +7265,8 @@ void Hydro2::RelaxAndReinit(int lev)
                     gu.col(d) = Numeric::Gradient(v, i, j, k, d, DXj);
                 const Set::Matrix P = Set::Matrix::Identity() - nh * nh.transpose();
                 const Set::Scalar ds = gu.trace() - nh.dot(gu * nh);
-                Set::Matrix Ts = (kmm * ds) * P;
+                const Set::Scalar fvis_j = ShellViscFactor(ds, alpha_j);
+                Set::Matrix Ts = (kmm * fvis_j * ds) * P;
                 if (mus != 0.0) Ts += (2.0 * mus) * (P * (0.5 * (gu + gu.transpose())) * P);
                 {
                     // static part: same sigma_eff as the momentum force (Gamma from the shell field)
@@ -7252,7 +7274,7 @@ void Hydro2::RelaxAndReinit(int lev)
                     const Set::Scalar se_j = SigmaEffFromGamma(G, 1.0, marm_j, sig_j, chi_j, Gb_j, sbrk_j, sigw_j);
                     Ts += se_j * P;
                     // shell.tension_floor: raise the isotropic tension to the floor
-                    if (tfl_j && kmm * ds + se_j < tfl_jv) Ts += (tfl_jv - kmm * ds - se_j) * P;
+                    if (tfl_j && kmm * fvis_j * ds + se_j < tfl_jv) Ts += (tfl_jv - kmm * fvis_j * ds - se_j) * P;
                 }
                 // p_gas - p_liq = T_s : grad(n) with grad(n) -> (kappa/(D-1)) P:
                 //   J = kappa tr(T_s)/(D-1),  kappa = tensor curvature
@@ -7455,7 +7477,29 @@ void Hydro2::RelaxAndReinit(int lev)
                 const Set::Scalar a2p = 1.0 - a1p;
                 Set::Scalar p_pure = Solver::EOS::EOS::ReinitMixturePressure(rhoe_p, a1p, a2p,
                                                                             gam0, pi0_, gam1, pi1_, small_loc);
-                p_pure = std::max(p_pure, -std::min(pi0_, pi1_) + small_loc);
+                // Pressure floor.  A cell beyond the cutoff is a single fluid
+                // (the dominant phase) carrying a dynamically irrelevant trace:
+                // floor at the DOMINANT phase's EOS limit -pi_d, so pure Tammann
+                // liquid holds tension like bulk liquid.  The old floor
+                // -min(pi0, pi1) is 0 whenever the other phase is an ideal gas,
+                // which held every pure-liquid cell at p >= 0 (04 INCLINE: the
+                // drive tension never reached the liquid; 2026-11-09).  The
+                // trace phase sits at its own floor and the dominant phase takes
+                // the rest of rho e, so E0 + E1 = rho e exactly.  Mixed cells
+                // that reach here only because a pre-relax pressure is floored
+                // keep the equal-pressure floor of both phases.
+                const bool beyond_cut = (eta(i, j, k) < cutoff_loc || eta(i, j, k) > 1.0 - cutoff_loc);
+                const bool dom0 = eta(i, j, k) >= 0.5;    // phase 0 (liquid) dominant
+                const Set::Scalar pi_dom = dom0 ? pi0_ : pi1_;
+                // Mixed cell here (a pre-relax pressure is floored): same per-phase rule as the
+                // post-relax reinit -- if the equal-pressure state p_raw is below exactly one
+                // phase's EOS limit, that phase sits at its floor and the other takes the rest
+                // of rho e (liquid may go negative).  Otherwise equal pressures as before.
+                const Set::Scalar p_raw = p_pure;
+                const bool mout0 = (p_raw + pi0_ <= small_loc), mout1 = (p_raw + pi1_ <= small_loc);
+                const bool mixed_split = !beyond_cut && (mout0 != mout1);
+                p_pure = beyond_cut ? std::max(p_pure, -pi_dom + small_loc)
+                                    : std::max(p_pure, -std::min(pi0_, pi1_) + small_loc);
                 // Write E_k with the FROZEN raw eta (clamped only to [0,1]),
                 // NOT the alpha_floor-clamped a1: eta stays frozen in this
                 // branch, so the recovery divide E_k/eta only cancels exactly
@@ -7466,8 +7510,48 @@ void Hydro2::RelaxAndReinit(int lev)
                 const Set::Scalar a1g = std::min(std::max(eta(i, j, k), 0.0), 1.0);
                 const Set::Scalar a2g = 1.0 - a1g;
                 const Set::Scalar E1g_old = E1_(i, j, k);
-                E0_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_pure, a1g, gam0, pi0_, small_loc);
-                E1_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_pure, a2g, gam1, pi1_, small_loc);
+                if (beyond_cut)
+                {
+                    if (dom0)
+                    {
+                        E1_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(std::max(p_pure, -pi1_ + small_loc), a2g, gam1, pi1_, small_loc);
+                        E0_(i, j, k) = rhoe_p - E1_(i, j, k);
+                    }
+                    else
+                    {
+                        E0_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(std::max(p_pure, -pi0_ + small_loc), a1g, gam0, pi0_, small_loc);
+                        E1_(i, j, k) = rhoe_p - E0_(i, j, k);
+                    }
+                }
+                else if (mixed_split && mout1)
+                {
+                    const Set::Scalar E1f = a2g * (-pi1_ + small_loc + gam1 * pi1_) / (gam1 - 1.0);
+                    const Set::Scalar E0f = rhoe_p - E1f;
+                    if ((gam0 - 1.0) * E0f / std::max(a1g, DIV_FLOOR) - gam0 * pi0_ + pi0_ > small_loc)
+                    { E1_(i, j, k) = E1f; E0_(i, j, k) = E0f; }
+                    else
+                    {
+                        E0_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_pure, a1g, gam0, pi0_, small_loc);
+                        E1_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_pure, a2g, gam1, pi1_, small_loc);
+                    }
+                }
+                else if (mixed_split && mout0)
+                {
+                    const Set::Scalar E0f = a1g * (-pi0_ + small_loc + gam0 * pi0_) / (gam0 - 1.0);
+                    const Set::Scalar E1f = rhoe_p - E0f;
+                    if ((gam1 - 1.0) * E1f / std::max(a2g, DIV_FLOOR) - gam1 * pi1_ + pi1_ > small_loc)
+                    { E0_(i, j, k) = E0f; E1_(i, j, k) = E1f; }
+                    else
+                    {
+                        E0_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_pure, a1g, gam0, pi0_, small_loc);
+                        E1_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_pure, a2g, gam1, pi1_, small_loc);
+                    }
+                }
+                else
+                {
+                    E0_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_pure, a1g, gam0, pi0_, small_loc);
+                    E1_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_pure, a2g, gam1, pi1_, small_loc);
+                }
                 if (rhd) { rsp(i, j, k, 3) += E1_(i, j, k) - E1g_old; rsp(i, j, k, 4) += 1.0; }
                 if (diag_on)
                 {
@@ -7499,9 +7583,12 @@ void Hydro2::RelaxAndReinit(int lev)
             Set::Scalar Dj = use_jump ? Jarr(i, j, k) : 0.0;
             if (!(Dj == Dj)) Dj = 0.0;
             const Set::Scalar p_min = std::max(-pi0_, -pi1_ - Dj) + DIV_FLOOR;
-            // Root bracket over the full EOS range (liquid tension allowed), but the
-            // mixture pressure p + a2 Dj stays > 0 (pre-relax gas fraction; Riemann solver).
-            const Set::Scalar p_tfloor = std::max(p_min, -a2 * Dj + DIV_FLOOR);
+            // Root bracket over the full EOS range of BOTH phases (liquid tension allowed).
+            // The former extra limit "mixture p + a2 Dj > 0" existed only because the face
+            // rebuild (Limiter::ToState) clamped the gas energy at p_mix < 0; ToState now
+            // splits per phase (gas at its floor, liquid the rest), so the mixture may go
+            // negative down to -alpha_l pi_l, as in the HLLC per-phase floors (2026-11-09).
+            const Set::Scalar p_tfloor = p_min;
 
             // ---------------- closure: isentropic + mass-specific heat ----------------
             if (arh0_loc > 0.0 && arh1_loc > 0.0)
@@ -7760,16 +7847,46 @@ void Hydro2::RelaxAndReinit(int lev)
             if (relax_failed) Dj = 0.0;
             Set::Scalar p_reinit = Solver::EOS::EOS::ReinitMixturePressure(rho_e - a2_new * Dj / (gam1 - 1.0), a1_new, a2_new,
                                                                           gam0, pi0_, gam1, pi1_, small_loc);
-            if (Dj != 0.0 && (p_reinit + pi0_ <= small_loc || p_reinit + Dj + pi1_ <= small_loc))
+            // Per-phase floors.  If the requested state (liquid p_reinit, gas p_reinit + Dj)
+            // puts exactly ONE phase below its EOS limit (p_k + pi_k <= 0), that phase sits
+            // at its own floor and the other phase takes the rest of rho_e:
+            //     E_o = alpha_o (-pi_o + gam_o pi_o)/(gam_o - 1),   E_v = rho_e - E_o.
+            // Exact in energy; the valid phase keeps whatever pressure that gives (liquid
+            // may be negative down to -pi_l).  Replaces dropping the jump (Dj := 0) and
+            // flooring both phases at ~0, which left 0 Pa holes in the 02 band next to
+            // liquid at 1-2e6 Pa and created energy (2026-11-09).
+            bool split_ok = false;
+            Set::Scalar E0s = 0.0, E1s = 0.0;
             {
-                Dj = 0.0;   // a phase would leave its EOS range: equal pressures here
+                const bool out0 = (p_reinit + pi0_ <= small_loc);
+                const bool out1 = (p_reinit + Dj + pi1_ <= small_loc);
+                if (out0 != out1)
+                {
+                    if (out1)
+                    {
+                        E1s = a2_new * (-pi1_ + small_loc + gam1 * pi1_) / (gam1 - 1.0);
+                        E0s = rho_e - E1s;
+                        split_ok = ((gam0 - 1.0) * E0s / std::max(a1_new, DIV_FLOOR) - gam0 * pi0_ + pi0_ > small_loc);
+                    }
+                    else
+                    {
+                        E0s = a1_new * (-pi0_ + small_loc + gam0 * pi0_) / (gam0 - 1.0);
+                        E1s = rho_e - E0s;
+                        split_ok = ((gam1 - 1.0) * E1s / std::max(a2_new, DIV_FLOOR) - gam1 * pi1_ + pi1_ > small_loc);
+                    }
+                }
+            }
+            if (!split_ok && Dj != 0.0 && (p_reinit + pi0_ <= small_loc || p_reinit + Dj + pi1_ <= small_loc))
+            {
+                Dj = 0.0;   // both phases out of range: equal pressures here (old fallback)
                 p_reinit = Solver::EOS::EOS::ReinitMixturePressure(rho_e, a1_new, a2_new,
                                                                    gam0, pi0_, gam1, pi1_, small_loc);
             }
 
-            // Floor: keep p + gam_k pi_k > 0 for both phases (SG positivity).
-            const Set::Scalar p_min_ph = std::max(std::max(-pi0_, -pi1_ - Dj), -a2_new * Dj) + small_loc;
-            p_reinit = std::max(p_reinit, p_min_ph);
+            // Floor: keep p + pi_k > 0 for both phases (SG positivity).  The former
+            // "mixture >= 0" term (-a2 Dj) is gone with the per-phase face rebuild.
+            const Set::Scalar p_min_ph = std::max(-pi0_, -pi1_ - Dj) + small_loc;
+            if (!split_ok) p_reinit = std::max(p_reinit, p_min_ph);
 
             // Diagnostic: gap between Newton's converged p and reinit p.
             // Nonzero gap means the volume-constraint root and the energy-
@@ -7811,8 +7928,16 @@ void Hydro2::RelaxAndReinit(int lev)
                     return;
                 }
             }
-            E0_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_reinit, a1_new, gam0, pi0_, small_loc);
-            E1_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_reinit + Dj, a2_new, gam1, pi1_, small_loc);
+            if (split_ok)
+            {
+                E0_(i, j, k) = E0s;
+                E1_(i, j, k) = E1s;
+            }
+            else
+            {
+                E0_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_reinit, a1_new, gam0, pi0_, small_loc);
+                E1_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(p_reinit + Dj, a2_new, gam1, pi1_, small_loc);
+            }
             if (rhd)
             {
                 // eq. 26 fallback: split the change into Newton (relaxed p) and the reset to p_reinit
