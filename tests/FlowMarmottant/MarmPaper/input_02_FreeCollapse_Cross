@@ -1,4 +1,6 @@
 # MarmPaper: free natural spherical collapse (higher pressure ratio)
+# THERMAL (2026-11-10): gas-liquid heat transfer ON (thermal.conduction = thermal.exchange = 1); both phases start at 295 K
+#   (gas density p_b/(R T) = 0.6918 kg/m^3, water cv calibrated).  Micro bubbles at MHz are near-isothermal (Prosperetti 1977).
 #
 # ===== _Cross VARIANT (2026-11-09): rate-dependent shell viscosity (remedy b) =====
 # Identical to input_02_FreeCollapse except shell.kappa_s_alpha below and the plot_file path.
@@ -69,8 +71,8 @@ epsilon = eta.ic.expression.constant.epsilon
 ### EOS: 0 = water (stiffened gas), 1 = air ###
 eos0.gamma = 2.35
 eos0.p0    = 1.0e9
-eos0.cv    = 1781.0
-eos0.cp    = 4186.0
+eos0.cv    = 2513.4965      # calibrated: T_water = 295 K at p_inf (thermal on, 2026-11-10)
+eos0.cp    = 5906.7169      # = gamma cv
 eos1.gamma = 1.4
 eos1.p0    = 0.0
 eos1.cv    = 714.286
@@ -80,7 +82,7 @@ eos1.cp    = 1000.0
 density0.ic.type = expression
 density0.ic.expression.region0 = "1000.0"
 density1.ic.type = expression
-density1.ic.expression.region0 = "1.0"
+density1.ic.expression.region0 = "0.691779"      # ideal gas at p_b and 295 K (thermal on)
 velocity0.ic.type = expression
 velocity0.ic.expression.region0 = "0.0"
 velocity0.ic.expression.region1 = "0.0"
@@ -219,6 +221,8 @@ shell.kappa_s_subcycle_max = 8192
 shell.heat_split           = 2       # shell viscous heat split by thermal effusivity
 thermal.k0                 = 0.6     # water [W/m/K]
 thermal.k1                 = 0.026   # air   [W/m/K]
+thermal.conduction         = 1       # Fourier conduction in each phase (2026-11-10: micro bubbles are
+thermal.exchange           = 1       #   near-isothermal, Pe = w R^2/D ~ 2-16; adiabatic gas is too stiff)
 relax_diag                 = 0
 apply_weight          = 0
 apply_vaporization    = 0

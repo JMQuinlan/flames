@@ -7,6 +7,8 @@
 #include "Solver/EOS/EOS.H"
 #include <AMReX_Geometry.H>
 #include <AMReX_MultiFab.H>
+#include <algorithm>
+#include <vector>
 
 //EOS
 #include "Solver/EOS/EOS.H"
@@ -101,6 +103,25 @@ private:
 
     // Small number for regularization
     Set::Scalar small = 1.0e-10;
+
+    // Optional pulse envelope on the pressure drive (nscbc.drive_envelope, see Parse):
+    // table (t, up, lo); the summed drive d(t) is multiplied by up(t - t0) where d >= 0
+    // and by lo(t - t0) where d < 0, linear interpolation, 0 outside the table.
+    std::vector<Set::Scalar> env_t, env_up, env_lo;
+    Set::Scalar env_t0 = 0.0;
+    Set::Scalar DriveEnvelope(Set::Scalar time, Set::Scalar d) const
+    {
+        if (env_t.empty()) return 1.0;
+        const Set::Scalar t = time - env_t0;
+        if (t < env_t.front() || t > env_t.back()) return 0.0;
+        const auto it = std::upper_bound(env_t.begin(), env_t.end(), t);
+        const std::size_t i1 = std::min<std::size_t>(it - env_t.begin(), env_t.size() - 1);
+        const std::size_t i0 = (i1 == 0) ? 0 : i1 - 1;
+        const std::vector<Set::Scalar> &e = (d >= 0.0) ? env_up : env_lo;
+        const Set::Scalar dt = env_t[i1] - env_t[i0];
+        const Set::Scalar w = (dt > 0.0) ? (t - env_t[i0]) / dt : 0.0;
+        return e[i0] + w * (e[i1] - e[i0]);
+    }
 
 public:
     /// Whether a face runs the NSCBC machinery (type != None).  A face left
@@ -239,10 +260,11 @@ public:
         // Apply the time-dependent pressure drive to the per-call effective
         // targets (everything downstream -- faces, edges, corners -- reads
         // these locals, so one application covers all use sites).
-        auto apply_drive = [time](BoundaryParams &prm) {
+        auto apply_drive = [time, this](BoundaryParams &prm) {
+            Set::Scalar d = 0.0;
             for (int k = 0; k < prm.n_drive; ++k)
-                prm.target_p += prm.drive_amp[k]
-                              * std::sin(prm.drive_omega[k] * time + prm.drive_phase[k]);
+                d += prm.drive_amp[k] * std::sin(prm.drive_omega[k] * time + prm.drive_phase[k]);
+            if (prm.n_drive > 0) prm.target_p += d * DriveEnvelope(time, d);
         };
         apply_drive(params_xlo_local);
         apply_drive(params_xhi_local);

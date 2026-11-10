@@ -2,6 +2,8 @@
 #include "Util/Util.H"
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
+#include <fstream>
+#include <sstream>
 
 // SEE THIS PAPER:
 // https://hal.science/hal-01699049/file/2018_AIAA_CFD_Motheau.pdf
@@ -42,6 +44,37 @@ void NSCBC4::Parse(NSCBC4 &value, IO::ParmParse &pp)
     value.params_zlo = ParseFace(pp, "nscbc.zlo");
     value.params_zhi = ParseFace(pp, "nscbc.zhi");
 #endif
+
+    // nscbc.drive_envelope = <file>: optional pulse envelope for the pressure drive of
+    // every face (e.g. a measured transducer pulse).  Whitespace-separated columns
+    //     t [s]   up [-]   lo [-]
+    // with t increasing; t is relative to nscbc.drive_t0 [s] (default 0).  At time t the
+    // summed drive d is multiplied by up(t - t0) where d >= 0 and by lo(t - t0) where
+    // d < 0 (linear interpolation), and is 0 outside the table -- the same rule as
+    // p = pa sin(wt) .* interp1(t_env, up/lo, t, 'linear', 0) in Cattaneo et al. 2025.
+    std::string env_file;
+    if (pp.query("nscbc.drive_envelope", env_file) && !env_file.empty())
+    {
+        pp.query_default("nscbc.drive_t0", value.env_t0, 0.0);
+        std::ifstream in(env_file);
+        if (!in.good()) Util::Abort(INFO, "nscbc.drive_envelope: cannot open ", env_file);
+        Set::Scalar t, u, l;
+        std::string line;
+        while (std::getline(in, line))
+        {
+            const std::size_t c = line.find_first_not_of(" \t");
+            if (c == std::string::npos || line[c] == '#') continue;      // blank / comment line
+            std::istringstream ls(line);
+            if (!(ls >> t >> u >> l))
+                Util::Abort(INFO, "nscbc.drive_envelope: cannot read 't up lo' from line \"", line, "\" in ", env_file);
+            if (!value.env_t.empty() && !(t > value.env_t.back()))
+                Util::Abort(INFO, "nscbc.drive_envelope: time column must increase strictly (", env_file, ")");
+            value.env_t.push_back(t); value.env_up.push_back(u); value.env_lo.push_back(l);
+        }
+        if (value.env_t.size() < 2) Util::Abort(INFO, "nscbc.drive_envelope: fewer than 2 rows in ", env_file);
+        Util::Message(INFO, "NSCBC4 drive envelope: ", value.env_t.size(), " rows, t = ", value.env_t.front(),
+                      " .. ", value.env_t.back(), " s, t0 = ", value.env_t0, " s (", env_file, ")");
+    }
 }
 
 // Fraction of the domain extent used for L_ref when a face does not set it.
