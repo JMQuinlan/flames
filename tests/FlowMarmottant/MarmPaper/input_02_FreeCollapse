@@ -1,5 +1,5 @@
 # MarmPaper: free natural spherical collapse (higher pressure ratio)
-# THERMAL (2026-11-10): gas-liquid heat transfer ON (thermal.conduction = thermal.exchange = 1); both phases start at 295 K
+# THERMAL (2026-11-10): gas-liquid heat exchange ON, Fourier conduction OFF (conduction NaNs the collapse at ~1 ns); both phases start at 295 K
 #   (gas density p_b/(R T) = 0.6918 kg/m^3, water cv calibrated).  Micro bubbles at MHz are near-isothermal (Prosperetti 1977).
 #
 # As 01 with p_inf raised to 1.0e6 (p_inf/p_b = 17.2), one level finer (R0/dx 51.2) for R_min.
@@ -210,8 +210,8 @@ shell.kappa_s_subcycle_max = 8192
 shell.heat_split           = 2       # shell viscous heat split by thermal effusivity
 thermal.k0                 = 0.6     # water [W/m/K]
 thermal.k1                 = 0.026   # air   [W/m/K]
-thermal.conduction         = 1       # Fourier conduction in each phase (2026-11-10: micro bubbles are
-thermal.exchange           = 1       #   near-isothermal, Pe = w R^2/D ~ 2-16; adiabatic gas is too stiff)
+thermal.conduction         = 0       # OFF (2026-11-10): conduction NaNs this collapse at ~1 ns (exchange alone is stable)
+thermal.exchange           = 1       # gas-liquid heat exchange in mixed cells (micro bubbles near-isothermal, Pe ~ 2-16)
 relax_diag                 = 0
 apply_weight          = 0
 apply_vaporization    = 0

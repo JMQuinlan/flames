@@ -158,6 +158,7 @@ protected:
     // MultiFabs after each RK stage and before the ghost-cell fill.
     void ThermalExchange(int lev, Set::Scalar dt);
     void RelaxAndReinit(int lev);
+    void ShellLevelSetSlip(int lev, Set::Scalar time, Set::Scalar dt);   // option 4: Gamma moves with the eta level sets
     void ShellBandUniform(int lev);   // Gamma bulk extension (constant normal extension into the bulk)
     void TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time);   // jump.curvature = 1: level-set curvature from the unit capillary tensor
     // Sub-cycled SHELL DILATATIONAL VISCOUS update (see Hydro2.cpp).  Advances

@@ -1,0 +1,146 @@
+diff --git a/src/Integrator/Hydro2.H b/src/Integrator/Hydro2.H
+index 8086058bb..7dd8a9042 100644
+--- a/src/Integrator/Hydro2.H
++++ b/src/Integrator/Hydro2.H
+@@ -158,6 +158,7 @@ protected:
+     // MultiFabs after each RK stage and before the ghost-cell fill.
+     void ThermalExchange(int lev, Set::Scalar dt);
+     void RelaxAndReinit(int lev);
++    void ShellLevelSetSlip(int lev, Set::Scalar time, Set::Scalar dt);   // option 4: Gamma moves with the eta level sets
+     void ShellBandUniform(int lev);   // Gamma bulk extension (constant normal extension into the bulk)
+     void TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time);   // jump.curvature = 1: level-set curvature from the unit capillary tensor
+     // Sub-cycled SHELL DILATATIONAL VISCOUS update (see Hydro2.cpp).  Advances
+--- a/src/Integrator/Hydro2.cpp
++++ b/src/Integrator/Hydro2.cpp
+@@ -3229,9 +3229,12 @@
+             // freeze.  No threshold, no new constant: |n_hat|^2 is built from
+             // quantities already in scope, and it is mesh-independent.
+             const Set::Scalar nn = n_hat.squaredNorm();
+-            Set::Scalar div_s_u = nn * gradu.trace() - n_hat.dot(gradu * n_hat);
+-            if (grad_eta_mag > g_gem_min)   // liquid-side band cells: interface area rate (see Parse, shell.rate_local)
+-                div_s_u = nn * LiquidInterfaceRate(eta, i, j, k, DX, eps_rl, cut_rl, gradu, u, div_s_u / std::max(nn, 1.0e-30));
++            // LEVEL-SET SHELL (option 4, 2026-11-10): each band cell carries the shell of its OWN
++            // eta level set.  Here the fluid part, -u.grad(Gamma) - Gamma div_s u; the difference
++            // between the level set's normal speed V_n and the fluid's u_n is applied once per step
++            // after the relaxation (ShellLevelSetSlip), from the actual change of eta.
++            (void)eps_rl; (void)cut_rl;
++            const Set::Scalar div_s_u = nn * gradu.trace() - n_hat.dot(gradu * n_hat);
+             shell_rhs(i, j, k) = -u_dot_gradG - shell(i, j, k) * div_s_u;
+             }   // end shell_row_on / band gate
+ 
+@@ -3985,6 +3988,9 @@
+     // POST-INTEGRATION PRIMITIVE REFRESH.
+     // ============================================================
+     FillGhost4BC(lev, time + dt);
++    // Level-set shell: move Gamma with the eta level sets, not the fluid (option 4).
++    // SLIP OFF (2026-11-10, user request): the slip step split the slab columns at 19.2 cells/R0.
++    // if (marmottant || apply_surface_tension) ShellLevelSetSlip(lev, time + dt, dt);
+     
+ 
+ 
+@@ -7092,6 +7098,105 @@
+ }
+ 
+ // Shell Gamma bulk extension (called from RelaxAndReinit).
++// ----------------------------------------------------------------------
++// LEVEL-SET SHELL SLIP (option 4, 2026-11-10).
++// A shell on an eta level set moves with the LEVEL SET (normal speed V_n), while the
++// Gamma row moves it with the FLUID (normal speed u_n).  In the diffuse band the two
++// differ (Kapila band; pressure relaxation and heat exchange move eta without fluid
++// motion): measured |dR05/dt| > |u(eta=.5)|, +-1.4 cells of slip per deep collapse, which
++// accounts for the per-collapse Gamma ratchet (attr/nonmat.py).  Exact correction for
++// s = V_n - u_n over the step, Eulerian for a field defined on the level sets:
++//     area :  d ln Gamma = -kappa s dt        (kappa = div n, level-set area law)
++//     shift:  d Gamma    = -s dt n.grad Gamma (upwind)
++// V_n = -(eta^{n+1} - eta^n) / (dt |grad eta|), n = grad eta/|grad eta| (into the liquid).
++// Band cells only (cut < eta < 1 - cut, |grad eta| > g_gem_min, stencil inside the box).
++// ----------------------------------------------------------------------
++void Hydro2::ShellLevelSetSlip(int lev, Set::Scalar time, Set::Scalar dt)
++{
++    // OPTION 6 (2026-11-10): CONSERVATIVE level-set slip.
++    // The shell carried by the eta level sets moves with V = u + s n.  The fluid
++    // part is in the Gamma row; here the slip part, written for the shell amount
++    // per volume m = Gamma |grad eta| (Gamma times the interface delta):
++    //     m_t + div(Gamma w n) = 0,   w = s |grad eta| = -(eta_t + u.grad eta).
++    // w needs no division by |grad eta|, and the area change of a moving level
++    // set (the -kappa s Gamma of options 4/5) comes out of the flux divergence
++    // exactly, so no curvature (second derivatives of eta) is ever formed.
++    //   eta* = eta^{n+1} + dt w   is eta advected by u alone (= eta^n - dt u.grad eta),
++    //   m*   = Gamma* |grad eta*|,  m^{n+1} = m* - dt div(F),  Gamma^{n+1} = m^{n+1}/|grad eta^{n+1}|.
++    // Uniform Gamma check: Gamma^{n+1} = Gamma (1 - kappa s dt) + O(dt^2) -- the area law.
++    // Face flux F_d = (w n_d)_face * Gamma_upwind: conservative, total shell is conserved.
++    BL_PROFILE("Integrator::Hydro2::ShellLevelSetSlip");
++    if (!(dt > 0.0)) return;
++    const Set::Scalar *DX = geom[lev].CellSize();
++    const Set::Scalar cut = std::max(cutoff, 1.0e-12);
++    const int ng = shell_mf[lev]->nGrow();
++    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(ng >= 2 && eta_mf[lev]->nGrow() >= 2 && velocity_mf[lev]->nGrow() >= 1,
++                                     "ShellLevelSetSlip needs >= 2 ghost cells");
++    amrex::MultiFab G0(shell_mf[lev]->boxArray(), shell_mf[lev]->DistributionMap(), 1, ng);
++    amrex::MultiFab::Copy(G0, *shell_mf[lev], 0, 0, 1, ng);
++    // W = w, ES = eta*, NV = w n (3 comps), on the valid box grown by one
++    amrex::MultiFab W(shell_mf[lev]->boxArray(), shell_mf[lev]->DistributionMap(), 1 + 1 + AMREX_SPACEDIM, 1);
++    for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
++    {
++        const amrex::Box bx = amrex::grow(mfi.validbox(), 1);
++        auto et  = eta_mf[lev]->const_array(mfi);
++        auto eo  = eta_old_mf[lev]->const_array(mfi);
++        auto vel = velocity_mf[lev]->const_array(mfi);
++        auto ww  = W.array(mfi);
++        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
++            Set::Vector gm = Set::Vector::Zero();      // grad of the step-average eta
++            Set::Vector g1 = Set::Vector::Zero();      // grad eta^{n+1}
++            for (int d = 0; d < AMREX_SPACEDIM; ++d)
++            {
++                const int di = (d == 0), dj = (d == 1), dk = (d == 2);
++                g1(d) = (et(i + di, j + dj, k + dk) - et(i - di, j - dj, k - dk)) / (2.0 * DX[d]);
++                gm(d) = 0.5 * (g1(d) + (eo(i + di, j + dj, k + dk) - eo(i - di, j - dj, k - dk)) / (2.0 * DX[d]));
++            }
++            Set::Scalar ug = 0.0;
++            for (int d = 0; d < AMREX_SPACEDIM; ++d) ug += vel(i, j, k, d) * gm(d);
++            const Set::Scalar w = -(et(i, j, k) - eo(i, j, k)) / dt - ug;
++            ww(i, j, k, 0) = w;
++            ww(i, j, k, 1) = et(i, j, k) + dt * w;     // eta*
++            const Set::Scalar g = g1.lpNorm<2>();
++            for (int d = 0; d < AMREX_SPACEDIM; ++d) ww(i, j, k, 2 + d) = (g > g_gem_min) ? w * g1(d) / g : 0.0;
++        });
++    }
++    for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
++    {
++        const amrex::Box &bx = mfi.validbox();
++        auto et = eta_mf[lev]->const_array(mfi);
++        auto ww = W.const_array(mfi);
++        auto g0 = G0.const_array(mfi);
++        auto sh = shell_mf[lev]->array(mfi);
++        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
++            const Set::Scalar ec = et(i, j, k);
++            if (!(ec > cut && ec < 1.0 - cut)) return;
++            Set::Scalar g1 = 0.0, gs = 0.0, div = 0.0;
++            for (int d = 0; d < AMREX_SPACEDIM; ++d)
++            {
++                const int di = (d == 0), dj = (d == 1), dk = (d == 2);
++                const Set::Scalar a1 = (et(i + di, j + dj, k + dk) - et(i - di, j - dj, k - dk)) / (2.0 * DX[d]);
++                const Set::Scalar as = (ww(i + di, j + dj, k + dk, 1) - ww(i - di, j - dj, k - dk, 1)) / (2.0 * DX[d]);
++                g1 += a1 * a1; gs += as * as;
++                // face fluxes (w n_d) at i+1/2 and i-1/2, Gamma upwinded
++                const Set::Scalar vp = 0.5 * (ww(i, j, k, 2 + d) + ww(i + di, j + dj, k + dk, 2 + d));
++                const Set::Scalar vm = 0.5 * (ww(i - di, j - dj, k - dk, 2 + d) + ww(i, j, k, 2 + d));
++                const Set::Scalar Fp = vp * ((vp > 0.0) ? g0(i, j, k) : g0(i + di, j + dj, k + dk));
++                const Set::Scalar Fm = vm * ((vm > 0.0) ? g0(i - di, j - dj, k - dk) : g0(i, j, k));
++                div += (Fp - Fm) / DX[d];
++            }
++            g1 = std::sqrt(g1); gs = std::sqrt(gs);
++            if (g1 < g_gem_min) return;
++            const Set::Scalar Gn = (g0(i, j, k) * gs - dt * div) / g1;
++            if (std::fabs(Gn - g0(i, j, k)) > 0.2 * std::fabs(g0(i, j, k)))
++                printf("SLIP6 t=%.6e ijk=%d %d %d eta=%.4f g1dx=%.3e gsdx=%.3e G0=%.4f Gn=%.4f\n",
++                       time, i, j, k, ec, g1 * DX[0], gs * DX[0], g0(i, j, k), Gn);
++            sh(i, j, k) = Gn;
++        });
++    }
++    FillBoundariesWithBC(lev, time, eta_bc, { shell_mf[lev].get() });
++}
++
+ void Hydro2::ShellBandUniform(int lev)
+ {
+     BL_PROFILE("Integrator::Hydro2::ShellBandUniform");
