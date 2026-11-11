@@ -1,5 +1,6 @@
 # ===== OPTION 5: shell.slip = 5 (Gamma follows the eta level sets: implicit upwind slip + exp(-kappa s dt) area stretch; prints SLIP5 lines on large slips)
-# Same as input_06_Cattaneo_HighPa except: shell.slip, constant kappa_s (shell.kappa_s_alpha = 0, the paper's shell model), plot_file.
+# Same as input_06_Cattaneo_HighPa except: shell.slip, constant kappa_s (shell.kappa_s_alpha = 0, the paper's shell model), plot_file,
+# and the AMR layout (max_grid_size 16, n_error_buf 4) for speed.
 #
 # MarmPaper 06: VALIDATION against Cattaneo et al., Nature Physics 21:590 (2025), Fig. 2a (high p_a)
 #
@@ -31,12 +32,12 @@ amr.thermo.plot_dt = 1.000000e-09    # thermo.dat: gas_volume (R_vol), gas_press
 plot_minimal       = 1
 
 ### MESH ###
-amr.max_grid_size  = 32
+amr.max_grid_size  = 16   # 2026-11-10: was 32 (8 boxes per level -> most ranks idle)
 amr.blocking_factor = 16
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
 amr.max_level      = 4
-amr.n_error_buf    = 16
+amr.n_error_buf    = 4   # 2026-11-10: was 16 (2.4x fewer finest cells, 1.9x faster; band still tagged by grad eta)
 nghost = 4
 
 ### GEOMETRY -- OCTANT (active); full domain below, commented ###
