@@ -160,6 +160,9 @@ protected:
     void RelaxAndReinit(int lev);
     void ShellLevelSetSlip(int lev, Set::Scalar time, Set::Scalar dt);   // shell.slip=6: conservative level-set slip
     void ShellLevelSetSlip5(int lev, Set::Scalar time, Set::Scalar dt);  // shell.slip=5: implicit upwind level-set slip
+    void PsiRefDensities();                                               // psi reference densities (once, from the IC)
+    void ShellPsiGrad(int lev, Set::Scalar time, amrex::MultiFab &Gp);    // shell.slip=7: |grad psi| in the psi band, -1 elsewhere
+    std::vector<int> shell_psi_init;                                      // shell.slip=7: m = Gamma |grad psi| set on this level
     void ShellBandUniform(int lev);   // Gamma bulk extension (constant normal extension into the bulk)
     void TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time);   // jump.curvature = 1: level-set curvature from the unit capillary tensor
     // Sub-cycled SHELL DILATATIONAL VISCOUS update (see Hydro2.cpp).  Advances

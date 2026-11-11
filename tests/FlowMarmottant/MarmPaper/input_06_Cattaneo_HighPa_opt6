@@ -27,7 +27,7 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/MarmPaper/output_
 
 ### OUTPUT ###
 amr.plot_int       = -1
-amr.plot_dt        = 1.000000e-07    # 10 frames/us (their camera: 10 Mfps)
+amr.plot_dt        = 2.500000e-08    # 40 frames/us (4x their camera: 10 Mfps); was 1e-7
 amr.thermo.plot_dt = 1.000000e-09    # thermo.dat: gas_volume (R_vol), gas_pressure_int, kinetic_energy, interface_area
 plot_minimal       = 1
 

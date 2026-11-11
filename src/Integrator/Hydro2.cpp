@@ -466,10 +466,16 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //   0 = off: Gamma moves with the fluid only (Gamma row, raw div_s u)
         //   5 = option 5: implicit upwind shift + exp(-kappa s dt) area stretch (prints SLIP5)
         //   6 = option 6: conservative flux of Gamma|grad eta| (prints SLIP6)
+        //   7 = option 7: MATERIAL shell.  The field is m = Gamma |grad psi|, psi the volume
+        //       fraction at fixed reference densities (a function of the mass fraction, so its
+        //       level sets move with the fluid; relaxation cannot change it).  For any material
+        //       level set D Gamma/Dt = -Gamma div_s u and D|grad psi|/Dt = -|grad psi| n.grad u.n,
+        //       so exactly  dm/dt + div(m u) = 0:  conservative advection, no slip, no curvature.
+        //       Gamma = m/|grad psi| is read only for sigma(Gamma) (ShellPsiGrad).
         // Locally (RADIAL slab) slip 5 and 6 split the slab columns at 19.2 cells/R0; 0 did not.
         pp_query_default("shell.slip", value.shell_slip, 0);
-        if (value.shell_slip != 0 && value.shell_slip != 5 && value.shell_slip != 6)
-            Util::Abort(INFO, "shell.slip must be 0, 5 or 6");
+        if (value.shell_slip != 0 && value.shell_slip != 5 && value.shell_slip != 6 && value.shell_slip != 7)
+            Util::Abort(INFO, "shell.slip must be 0, 5, 6 or 7");
         pp_query_default("shell.kappa_s_verbose", value.shell_visc_verbose, 0);
         // Where the shell viscous dissipation (heat) is booked between the phases:
         //   0 = by volume fraction (default, previous behaviour)
@@ -1924,6 +1930,10 @@ Hydro2::RHS(int lev,
     // the GROWN box directly from eta/shell (both of which have filled ghosts), so
     // the ghost ring is genuinely computed rather than left zero at physical faces.
     amrex::MultiFab sig_eff_mf;
+    // shell.slip = 7: the shell field is m = Gamma |grad psi|; Gamma = m / Gp7 (ShellPsiGrad).
+    const int slip7 = (shell_slip == 7) && (marmottant || apply_surface_tension);
+    amrex::MultiFab Gp7;
+    if (slip7) ShellPsiGrad(lev, time, Gp7);
 
     if (marmottant)
     {
@@ -1943,6 +1953,7 @@ Hydro2::RHS(int lev,
             // two different interfaces once c and eta separate.
             amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
             amrex::Array4<const Set::Scalar> const &cs = shell_mf[lev]->const_array(mfi);
+            amrex::Array4<const Set::Scalar> const gp7 = slip7 ? Gp7.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
             amrex::Array4<Set::Scalar> const &sg  = sig_eff_mf.array(mfi);
             amrex::Array4<Set::Scalar> const &Gm  = Gamma_mf[lev]->array(mfi);
             amrex::Array4<Set::Scalar> const &kap = kappas_mf[lev]->array(mfi);
@@ -1958,6 +1969,7 @@ Hydro2::RHS(int lev,
                     // No division by |grad eta|, which is what made the previous
                     // c/|grad eta| reconstruction blow up in the band tails.
                     G = cs(i, j, k);
+                    if (slip7) G = (gp7(i, j, k) > 0.0) ? cs(i, j, k) / gp7(i, j, k) : 1.0;   // m / |grad psi|
                     if (G > 0.0 && G < Gb)             // stretched -> elastic branch
                     {
                         Set::Scalar el = chi_ * (Gb / G - 1.0);
@@ -2022,6 +2034,7 @@ Hydro2::RHS(int lev,
             const amrex::Box bx = mfi.growntilebox(1);
             amrex::Array4<const Set::Scalar> const &kt_o = Kt_o.const_array(mfi);
             amrex::Array4<const Set::Scalar> const &shl_o = shell_mf[lev]->const_array(mfi);
+            amrex::Array4<const Set::Scalar> const gp7o = slip7 ? Gp7.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
             amrex::Array4<const Set::Scalar> const &et = eta_mf[lev]->const_array(mfi);
             amrex::Array4<const Set::Scalar> const &sg = marm ? sig_eff_mf.const_array(mfi)
                                                               : amrex::Array4<const Set::Scalar>{};
@@ -2044,7 +2057,8 @@ Hydro2::RHS(int lev,
                 // Normal static force F_n = -Delta_s grad(eta), Delta_s = sigma_eff(Gamma) kappa,
                 // this cell's value only (only valid cells are read).
                 {
-                    const Set::Scalar Gs = std::max(shl_o(i, j, k), 0.0);
+                    const Set::Scalar Gs = slip7 ? ((gp7o(i, j, k) > 0.0) ? std::max(shl_o(i, j, k), 0.0) / gp7o(i, j, k) : 1.0)
+                                                 : std::max(shl_o(i, j, k), 0.0);
                     const Set::Scalar kT = vbx_om.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))) ? kt_o(i, j, k) : 0.0;
                     const Set::Scalar sE = SigmaEffFromGamma(marm ? Gs : 0.0, 1.0, marm, sig0, chi_o, Gb_o, sbrk_o, sigw_o);
                     for (int d = 0; d < AMREX_SPACEDIM; ++d) om(i, j, k, nO + d) = -sE * kT * ge(d);
@@ -3243,6 +3257,17 @@ Hydro2::RHS(int lev,
             // after the relaxation (ShellLevelSetSlip), from the actual change of eta.
             (void)eps_rl; (void)cut_rl;
             const Set::Scalar div_s_u = nn * gradu.trace() - n_hat.dot(gradu * n_hat);
+            if (slip7)
+            {
+                // shell.slip = 7: m = Gamma |grad psi| on material level sets, dm/dt = -div(m u*),
+                // limiter-reconstructed m upwinded on the Riemann contact speed u* (as the eta row).
+                auto upw = [](Set::Scalar us, Set::Scalar qL, Set::Scalar qR) { return us * ((us > 0.0) ? qL : qR); };
+                shell_rhs(i, j, k) = -(AMREX_D_TERM(
+                      (upw(flux_xhi.u_interface, aL, aR) - upw(flux_xlo.u_interface, cL, cR)) / DX[0],
+                    + (upw(flux_yhi.u_interface, bL, bR) - upw(flux_ylo.u_interface, dL, dR)) / DX[1],
+                    + (upw(flux_zhi.u_interface, eL, eR) - upw(flux_zlo.u_interface, fL, fR)) / DX[2]));
+            }
+            else
             shell_rhs(i, j, k) = -u_dot_gradG - shell(i, j, k) * div_s_u;
             }   // end shell_row_on / band gate
 
@@ -3694,6 +3719,31 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
 
     step_counter[lev]++;
     if (relax_diag) { char _mt[128]; snprintf(_mt, 128, "MASSTRACK advance_entry lev=%d sum1=%.14e", lev, rho_eta1_mf[lev]->sum(0)); Util::Message(INFO, _mt); }
+
+    // shell.slip = 7: on the first step from t = 0 turn the IC areal density Gamma (shell field)
+    // into the transported m = Gamma |grad psi|.  Levels made later by regrid get m by
+    // interpolation from the coarser level, so they need nothing here.
+    if (shell_slip == 7 && (marmottant || apply_surface_tension))
+    {
+        if ((int)shell_psi_init.size() <= lev) shell_psi_init.resize(lev + 1, 0);
+        if (!shell_psi_init[lev] && time <= 0.0)
+        {
+            amrex::MultiFab Gp;
+            ShellPsiGrad(lev, time, Gp);
+            for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &vb = mfi.validbox();
+                auto g  = Gp.const_array(mfi);
+                auto sh = shell_mf[lev]->array(mfi);
+                amrex::ParallelFor(vb, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    sh(i, j, k) = (g(i, j, k) > 0.0) ? sh(i, j, k) * g(i, j, k) : 0.0;
+                });
+            }
+            FillBoundariesWithBC(lev, time, eta_bc, { shell_mf[lev].get() });
+            Util::Message(INFO, "shell.slip = 7: shell field set to m = Gamma |grad psi| on level ", lev);
+        }
+        shell_psi_init[lev] = 1;
+    }
 
     // Swapping pointers (6-eq primaries -- canonical set)
     std::swap(density_old_mf[lev],         density_mf[lev]);
@@ -6279,6 +6329,10 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
 
     const Set::Scalar *DX = geom[lev].CellSize();
     const Set::Scalar kap_s = shell_kappa_s - shell_mu_s;
+    // shell.slip = 7: Gamma = m / |grad psi| (the phase masses do not change in the sub-cycles)
+    const int slip7v = (shell_slip == 7) && marmottant;
+    amrex::MultiFab Gp7v;
+    if (slip7v) ShellPsiGrad(lev, time, Gp7v);
     const Set::Scalar dxm = std::min({AMREX_D_DECL(DX[0], DX[1], DX[2])});
     const Set::Scalar kap_eff = std::abs(kap_s) + 2.0 * std::abs(shell_mu_s);
     const Set::Scalar sm = small;
@@ -6445,6 +6499,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
             auto vel = velocity_mf[lev]->const_array(mfi);
             auto om  = Omv.array(mfi);
             auto shv = shell_mf[lev]->const_array(mfi);
+            auto gpv = slip7v ? Gp7v.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
             amrex::ParallelFor(gbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
                 const Set::Scalar gem = ge.lpNorm<2>();
@@ -6457,7 +6512,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                 Set::Scalar se = kap_s * ds          // viscous ONLY (its tangential part is kept below)
                                * ShellViscFactor(ds, alpha_v);
                 if (tfl_on)
-                    se = std::max(se, tfl - SigmaEffFromGamma(marm_v ? shv(i, j, k) : 0.0, 1.0, marm_v,
+                    se = std::max(se, tfl - SigmaEffFromGamma(marm_v ? (slip7v ? ((gpv(i, j, k) > 0.0) ? shv(i, j, k) / gpv(i, j, k) : 1.0) : shv(i, j, k)) : 0.0, 1.0, marm_v,
                                                              sig_v, chi_v, Gb_v, sbrk_v, sigw_v));
                 // |grad eta| P_ab = gem d_ab - ge_a ge_b / gem
                 om(i,j,k,0) = se * (gem - ge(0)*ge(0)/gem);     // xx
@@ -6497,6 +6552,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
             auto ar1 = rho_eta1_mf[lev]->const_array(mfi);
             auto ktv  = Kt_v.const_array(mfi);
             auto shv  = shell_mf[lev]->const_array(mfi);
+            auto gpv  = slip7v ? Gp7v.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
             const Set::Scalar idx = 0.5 / DX[0], idy = 0.5 / DX[1];
 #if AMREX_SPACEDIM == 3
             const Set::Scalar idz = 0.5 / DX[2];
@@ -6539,7 +6595,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                 bool clamped = false;
                 if (tfl_on)
                 {
-                    const Set::Scalar Tlo = tfl - SigmaEffFromGamma(marm_v ? shv(i, j, k) : 0.0, 1.0, marm_v,
+                    const Set::Scalar Tlo = tfl - SigmaEffFromGamma(marm_v ? (slip7v ? ((gpv(i, j, k) > 0.0) ? shv(i, j, k) / gpv(i, j, k) : 1.0) : shv(i, j, k)) : 0.0, 1.0, marm_v,
                                                                     sig_v, chi_v, Gb_v, sbrk_v, sigw_v);
                     if (Tv < Tlo) { Tv = Tlo; clamped = true; }
                 }
@@ -7013,14 +7069,10 @@ static Set::Scalar IsoD(amrex::Array4<const Set::Scalar> const &F, int i, int j,
     return s / (2.0 * DX[d]);
 }
 
-void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time)
+// psi reference densities: mean density of each pure phase on level 0 at the first call (the IC).
+void Hydro2::PsiRefDensities()
 {
-    BL_PROFILE("Integrator::Hydro2::TensorCurvature");
-    const Set::Scalar *DXc = geom[lev].CellSize();
-    // Curvature of the level sets of psi (volume fraction at fixed reference densities, see Parse
-    // CURVATURE); same ghost depth as eta.
-    amrex::MultiFab Yc;
-    if (jump_y_rho0 <= 0.0 || jump_y_rho1 <= 0.0)
+    if (jump_y_rho0 > 0.0 && jump_y_rho1 > 0.0) return;
     {
         // reference densities: mean density of each pure phase on level 0 (eta > 0.99 / < 0.01)
         Set::Scalar s0 = 0.0, n0 = 0.0, s1 = 0.0, n1 = 0.0;
@@ -7042,6 +7094,77 @@ void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time)
         jump_y_rho1 = (n1 > 0.0) ? s1 / n1 : 1.0;
         Util::Message(INFO, "tensor curvature: psi reference densities rho0 = ", jump_y_rho0, "  rho1 = ", jump_y_rho1);
     }
+}
+
+// ----------------------------------------------------------------------
+// shell.slip = 7 (MATERIAL shell): Gp = |grad psi| on the valid box + 1 ghost, where
+// psi = (a rho)_0/rho0_ref / ((a rho)_0/rho0_ref + (a rho)_1/rho1_ref) (see Parse CURVATURE);
+// -1 outside the psi band (cut < psi < 1 - cut) or where |grad psi| < g_gem_min.
+// Gamma = m / Gp.  The phase-mass ghosts are refreshed exactly as in TensorCurvature.
+// ----------------------------------------------------------------------
+void Hydro2::ShellPsiGrad(int lev, Set::Scalar time, amrex::MultiFab &Gp)
+{
+    BL_PROFILE("Integrator::Hydro2::ShellPsiGrad");
+    PsiRefDensities();
+    const Set::Scalar *DXp = geom[lev].CellSize();
+    if (lev == 0)
+    {
+        FillBoundariesWithBC(lev, time, density0_bc, { rho_eta0_mf[lev].get() });
+        FillBoundariesWithBC(lev, time, density1_bc, { rho_eta1_mf[lev].get() });
+    }
+    else
+    {
+        FillPatch(lev, time, rho_eta0_mf, *rho_eta0_mf[lev], *density0_bc, 0);
+        FillPatch(lev, time, rho_eta1_mf, *rho_eta1_mf[lev], *density1_bc, 0);
+        if (radial_bc)
+        {
+            RadialGhostFill(lev, *rho_eta0_mf[lev], false);
+            RadialGhostFill(lev, *rho_eta1_mf[lev], false);
+        }
+    }
+    const Set::Scalar ir0 = 1.0 / jump_y_rho0, ir1 = 1.0 / jump_y_rho1;
+    amrex::MultiFab Y(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, eta_mf[lev]->nGrow());
+    for (amrex::MFIter mfi(Y, false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box gb = mfi.fabbox();
+        auto r0 = rho_eta0_mf[lev]->const_array(mfi);
+        auto r1 = rho_eta1_mf[lev]->const_array(mfi);
+        auto y  = Y.array(mfi);
+        amrex::ParallelFor(gb, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            const Set::Scalar a = std::max(r0(i, j, k), 0.0) * ir0, b = std::max(r1(i, j, k), 0.0) * ir1;
+            y(i, j, k) = (a + b > 0.0) ? a / (a + b) : 0.0;
+        });
+    }
+    Gp.define(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, 1);
+    const Set::Scalar cut = std::max(cutoff, 1.0e-12);
+    for (amrex::MFIter mfi(Gp, false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box gb = mfi.growntilebox(1);
+        auto y = Y.const_array(mfi);
+        auto g = Gp.array(mfi);
+        amrex::ParallelFor(gb, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            const Set::Scalar yc = y(i, j, k);
+            Set::Scalar gg = 0.0;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                const Set::Scalar gd = (y(i + di, j + dj, k + dk) - y(i - di, j - dj, k - dk)) / (2.0 * DXp[d]);
+                gg += gd * gd;
+            }
+            gg = std::sqrt(gg);
+            g(i, j, k) = (yc > cut && yc < 1.0 - cut && gg > g_gem_min) ? gg : -1.0;
+        });
+    }
+}
+
+void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time)
+{
+    BL_PROFILE("Integrator::Hydro2::TensorCurvature");
+    const Set::Scalar *DXc = geom[lev].CellSize();
+    // Curvature of the level sets of psi (volume fraction at fixed reference densities, see Parse
+    // CURVATURE); same ghost depth as eta.
+    amrex::MultiFab Yc;
+    PsiRefDensities();
     {
         // Current ghosts for the phase masses.  The callers refresh eta's ghosts but not always
         // rho_eta0/1's (RelaxAndReinit runs inside FillGhost4BC before they are filled; the viscous
@@ -7219,6 +7342,7 @@ void Hydro2::ShellBandUniform(int lev)
     // centre a stale ghost drags the band value back
     // (coarse slab: Gamma grew at 0.48 of the area rate, 2026-11-02).
     FillBoundariesWithBC(lev, t_new[lev], eta_bc, { eta_mf[lev].get(), shell_mf[lev].get() });
+    if (shell_slip == 7) return;   // m = Gamma |grad psi| is ~0 in the bulk: an extension would create shell
     if (!(marmottant || apply_surface_tension)) return;   // no shell row
     // SHELL BULK EXTENSION.  Outside the eta band the areal density Gamma is
     // physically meaningless and its -Gamma div_s(u) evolution integrates the
@@ -7360,6 +7484,10 @@ void Hydro2::RelaxAndReinit(int lev)
         // kappa from the capillary tensor (same as the force)
         amrex::MultiFab Kt_j(ba, dm, 1, 0);
         TensorCurvature(lev, Kt_j, relax_time);
+        // shell.slip = 7: Gamma = m / |grad psi| (relaxation conserves the phase masses, so psi is fixed)
+        const int slip7j = (shell_slip == 7) && marmottant;
+        amrex::MultiFab Gp7j;
+        if (slip7j) ShellPsiGrad(lev, relax_time, Gp7j);
         for (amrex::MFIter mfi(*jump_mf, false); mfi.isValid(); ++mfi)
         {
             const amrex::Box &bxj = mfi.validbox();
@@ -7368,6 +7496,7 @@ void Hydro2::RelaxAndReinit(int lev)
             auto n  = nt.const_array(mfi);
             auto J  = jump_mf->array(mfi);
             auto shl = shell_mf[lev]->const_array(mfi);
+            auto gpj = slip7j ? Gp7j.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
             auto ktj = Kt_j.const_array(mfi);
             amrex::ParallelFor(bxj, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 const Set::Scalar e = et(i, j, k);
@@ -7386,7 +7515,7 @@ void Hydro2::RelaxAndReinit(int lev)
                 if (mus != 0.0) Ts += (2.0 * mus) * (P * (0.5 * (gu + gu.transpose())) * P);
                 {
                     // static part: same sigma_eff as the momentum force (Gamma from the shell field)
-                    const Set::Scalar G = marm_j ? shl(i, j, k) : 0.0;
+                    const Set::Scalar G = marm_j ? (slip7j ? ((gpj(i, j, k) > 0.0) ? shl(i, j, k) / gpj(i, j, k) : 1.0) : shl(i, j, k)) : 0.0;
                     const Set::Scalar se_j = SigmaEffFromGamma(G, 1.0, marm_j, sig_j, chi_j, Gb_j, sbrk_j, sigw_j);
                     Ts += se_j * P;
                     // shell.tension_floor: raise the isotropic tension to the floor
