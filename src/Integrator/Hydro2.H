@@ -158,7 +158,8 @@ protected:
     // MultiFabs after each RK stage and before the ghost-cell fill.
     void ThermalExchange(int lev, Set::Scalar dt);
     void RelaxAndReinit(int lev);
-    void ShellLevelSetSlip(int lev, Set::Scalar time, Set::Scalar dt);   // option 4: Gamma moves with the eta level sets
+    void ShellLevelSetSlip(int lev, Set::Scalar time, Set::Scalar dt);   // shell.slip=6: conservative level-set slip
+    void ShellLevelSetSlip5(int lev, Set::Scalar time, Set::Scalar dt);  // shell.slip=5: implicit upwind level-set slip
     void ShellBandUniform(int lev);   // Gamma bulk extension (constant normal extension into the bulk)
     void TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time);   // jump.curvature = 1: level-set curvature from the unit capillary tensor
     // Sub-cycled SHELL DILATATIONAL VISCOUS update (see Hydro2.cpp).  Advances
@@ -753,6 +754,7 @@ protected:
     int verbose = 0;
     int shell_visc_subcycle = 0;      // = visc_subcycle: sub-cycle kappa_s with the bulk viscosity (see Parse)
     int shell_visc_subcycle_max = 512; // hard cap on sub-steps (runaway guard)
+    int shell_slip = 0;                // shell.slip: 0 Gamma moves with the fluid only; 5 / 6 level-set slip (options 5 / 6)
     int shell_heat_split = 0;          // shell dissipation heat: 0 volume fraction, 2 effusivity
     Set::Scalar thermal_k0 = 0.0, thermal_k1 = 0.0;   // phase thermal conductivities (heat_split = 2)
     int thermal_conduction = 0;        // 1 = Fourier conduction inside each phase

@@ -462,6 +462,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // spinning forever inside one hydro step.  512 is ~6 refinement levels
         // past the measured L5 value of 21 (N ~ 1/dx^2, so it quadruples/level).
         pp_query_default("shell.kappa_s_subcycle_max", value.shell_visc_subcycle_max, 512);
+        // Level-set slip of the shell after each step (2026-11-10, 06 Cattaneo tests):
+        //   0 = off: Gamma moves with the fluid only (Gamma row, raw div_s u)
+        //   5 = option 5: implicit upwind shift + exp(-kappa s dt) area stretch (prints SLIP5)
+        //   6 = option 6: conservative flux of Gamma|grad eta| (prints SLIP6)
+        // Locally (RADIAL slab) slip 5 and 6 split the slab columns at 19.2 cells/R0; 0 did not.
+        pp_query_default("shell.slip", value.shell_slip, 0);
+        if (value.shell_slip != 0 && value.shell_slip != 5 && value.shell_slip != 6)
+            Util::Abort(INFO, "shell.slip must be 0, 5 or 6");
         pp_query_default("shell.kappa_s_verbose", value.shell_visc_verbose, 0);
         // Where the shell viscous dissipation (heat) is booked between the phases:
         //   0 = by volume fraction (default, previous behaviour)
@@ -3989,7 +3997,11 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // ============================================================
     FillGhost4BC(lev, time + dt);
     // Level-set shell: move Gamma with the eta level sets, not the fluid (option 4).
-    if (marmottant || apply_surface_tension) ShellLevelSetSlip(lev, time + dt, dt);
+    if (marmottant || apply_surface_tension)
+    {
+        if (shell_slip == 5) ShellLevelSetSlip5(lev, time + dt, dt);
+        else if (shell_slip == 6) ShellLevelSetSlip(lev, time + dt, dt);
+    }
     
 
 
@@ -8392,6 +8404,79 @@ void Hydro2::Integrate(int amrlev, Set::Scalar /*time*/, int /*step*/,
     thermo_gas_pressure   += pint;
     thermo_kinetic_energy += ke;
     thermo_interface_area += area;
+}
+
+// ----------------------------------------------------------------------
+// OPTION 5 level-set slip (shell.slip = 5): same correction as ShellLevelSetSlip, but
+// applied as an implicit (backward-Euler) upwind shift plus an exp(-kappa s dt) area stretch.
+// ----------------------------------------------------------------------
+void Hydro2::ShellLevelSetSlip5(int lev, Set::Scalar time, Set::Scalar dt)
+{
+    BL_PROFILE("Integrator::Hydro2::ShellLevelSetSlip5");
+    if (!(dt > 0.0)) return;
+    const Set::Scalar *DX = geom[lev].CellSize();
+    const Set::Scalar cut = std::max(cutoff, 1.0e-12);
+    amrex::MultiFab G0(shell_mf[lev]->boxArray(), shell_mf[lev]->DistributionMap(), 1, shell_mf[lev]->nGrow());
+    amrex::MultiFab::Copy(G0, *shell_mf[lev], 0, 0, 1, shell_mf[lev]->nGrow());
+    for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
+        auto et  = eta_mf[lev]->const_array(mfi);
+        auto eo  = eta_old_mf[lev]->const_array(mfi);
+        auto vel = velocity_mf[lev]->const_array(mfi);
+        auto g0  = G0.const_array(mfi);
+        auto sh  = shell_mf[lev]->array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            const Set::Scalar ec = et(i, j, k);
+            if (!(ec > cut && ec < 1.0 - cut)) return;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                const int di = 2 * (d == 0), dj = 2 * (d == 1), dk = 2 * (d == 2);
+                if (!et.contains(i + di, j + dj, k + dk) || !et.contains(i - di, j - dj, k - dk)) return;
+            }
+            const Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
+            const Set::Scalar g = ge.lpNorm<2>();
+            if (g < g_gem_min) return;
+            const Set::Vector nv = ge / g;
+            // kappa = div n (central differences of the unit normal)
+            Set::Scalar kap = 0.0;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                const Set::Vector gp = Numeric::Gradient(et, i + di, j + dj, k + dk, 0, DX);
+                const Set::Vector gm = Numeric::Gradient(et, i - di, j - dj, k - dk, 0, DX);
+                const Set::Scalar gpm = gp.lpNorm<2>(), gmm = gm.lpNorm<2>();
+                if (gpm < g_gem_min || gmm < g_gem_min) return;
+                kap += (gp(d) / gpm - gm(d) / gmm) / (2.0 * DX[d]);
+            }
+            const Set::Scalar Vn = -(ec - eo(i, j, k)) / (dt * g);
+            Set::Scalar un = 0.0;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d) un += vel(i, j, k, d) * nv(d);
+            const Set::Scalar sl = Vn - un;
+            // OPTION 5 (2026-11-10): implicit upwind shift.  The explicit
+            // update G - s dt n.grad(G) amplifies once |s dt|/dx -> 1 (06 c12
+            // 160 kPa: 0.02 -> 0.85 cells/step in 5 steps at 2.888 us, then NaN).
+            // Backward-Euler in the shift with upwind neighbours at the old level:
+            //   G_new (1 + sum c_d) = G0 exp(-kap s dt) + sum c_d G_up,d,
+            //   c_d = |s n_d| dt / dx_d.
+            // Same first-order consistency, a convex combination for any dt
+            // (no new extrema, Gamma stays positive); the stretch keeps its exact exponential.
+            Set::Scalar csum = 0.0, cup = 0.0;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                const Set::Scalar a = sl * nv(d);
+                const Set::Scalar c = std::fabs(a) * dt / DX[d];
+                const Set::Scalar gup = (a > 0.0) ? g0(i - di, j - dj, k - dk) : g0(i + di, j + dj, k + dk);
+                csum += c; cup += c * gup;
+            }
+            if (std::fabs(sl) * dt > 0.3 * DX[0])
+                printf("SLIP5 t=%.6e ijk=%d %d %d eta=%.4f eta_old=%.4f g*dx=%.3e sdt/dx=%.3f kap*dx=%.3f G0=%.4f\n",
+                       time, i, j, k, ec, eo(i, j, k), g * DX[0], sl * dt / DX[0], kap * DX[0], g0(i, j, k));
+            sh(i, j, k) = (g0(i, j, k) * std::exp(-kap * sl * dt) + cup) / (1.0 + csum);
+        });
+    }
+    FillBoundariesWithBC(lev, time, eta_bc, { shell_mf[lev].get() });
 }
 
 } // end of Integrator namespace

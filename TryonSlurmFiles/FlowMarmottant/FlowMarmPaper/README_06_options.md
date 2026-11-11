@@ -1,37 +1,19 @@
 # 06 Cattaneo on INCLINE: options 5 and 6 (2026-11-10)
 
-Both patches change only `src/Integrator/Hydro2.{cpp,H}` (shell Gamma transport). Patches are
-against commit 9087521de and were checked with `git apply --check`.
+One binary, built from the repo as usual (`make bin/hydro2-3d-g++`). The shell transport option
+is chosen in the deck with `shell.slip`:
 
-- option 5 (`06_opt5/option5.patch`): Gamma per eta level set. The Gamma row uses the raw surface
-  divergence; after each step the level-set slip is applied with an implicit (backward-Euler)
-  upwind shift and an exponential area stretch exp(-kappa s dt). It prints `SLIP5` lines if a level
-  set slips more than 0.3 cells in one step.
-- option 6 (`06_opt6/option6.patch`), SLIP OFF (changed 2026-11-10 20:20): the call to the slip step
-  is commented out, so this is the old code with one change: the Gamma row uses the raw surface
-  divergence div_s u in every band cell (no LiquidInterfaceRate substitution on the liquid side).
-  Gamma moves with the fluid only. The conservative slip function is still compiled but never called.
-  Why: locally, slip on split the 2x2 slab columns at 19.2 cells/R0 (Gamma -> 1e200) and blew up
-  in gas-side trace cells; slip off stayed coherent (column spread < 1.4%).
-  Binary goes to `bin_opt6noslip`, output to `output_06_Cattaneo_<HighPa|LowPa>_opt6noslip`.
+| deck | slurm | `shell.slip` | what it is |
+|---|---|---|---|
+| `input_06_Cattaneo_<HighPa,LowPa>_opt5` | `06_Cattaneo_<HighPa,LowPa>_opt5.sh` | 5 | Gamma follows the eta level sets (implicit upwind slip + exp(-kappa s dt) area stretch); prints `SLIP5` lines on large slips |
+| `input_06_Cattaneo_<HighPa,LowPa>_opt6` | `06_Cattaneo_<HighPa,LowPa>_opt6.sh` | 0 | option 6 with slip OFF: Gamma moves with the fluid only, Gamma row with the raw surface divergence div_s u |
 
-Build both binaries (from a clean tree at 9087521de):
+Both decks are the base 06 deck with constant kappa_s (`shell.kappa_s_alpha = 0`, the paper's
+model) and their own `plot_file` (`output_06_Cattaneo_<HighPa,LowPa>_opt<5,6>`).
 
-    cd /home/ttryon/flames
-    git apply TryonSlurmFiles/FlowMarmottant/FlowMarmPaper/06_opt5/option5.patch
-    make -j 32 bin/hydro2-3d-g++ && mkdir -p bin_opt5 && cp bin/hydro2-3d-g++ bin_opt5/
-    git apply -R TryonSlurmFiles/FlowMarmottant/FlowMarmPaper/06_opt5/option5.patch
-    git apply TryonSlurmFiles/FlowMarmottant/FlowMarmPaper/06_opt6/option6.patch
-    make -j 32 bin/hydro2-3d-g++ && mkdir -p bin_opt6noslip && cp bin/hydro2-3d-g++ bin_opt6noslip/
-    git apply -R TryonSlurmFiles/FlowMarmottant/FlowMarmPaper/06_opt6/option6.patch
+`shell.slip` defaults to 0, so the base decks `input_06_Cattaneo_<HighPa,LowPa>` now also run
+with slip off. `shell.slip = 6` (conservative slip) still exists but is broken locally: Gamma
+blows up in gas-side band cells.
 
-Submit:
-
-    sbatch TryonSlurmFiles/FlowMarmottant/FlowMarmPaper/06_opt5/06_Cattaneo_HighPa_opt5.sh   # and LowPa, and opt6
-
-Each job writes to its own `output_06_Cattaneo_<HighPa|LowPa>_opt5` or `_opt6noslip`. The jobs use constant
-kappa_s (`shell.kappa_s_alpha=0`); the deck's default is the Cross law.
-
-If you already built `bin_opt6` from the earlier (slip on) option6.patch, it is NOT the slip-off binary:
-reverse that patch with the copy you applied (or `git checkout src/Integrator/Hydro2.cpp src/Integrator/Hydro2.H`),
-then apply this one and build `bin_opt6noslip`.
+The folders `06_opt5/` and `06_opt6/` (patch files + scripts for separate binaries) are obsolete:
+the code they patch in is already in the repo, so the patches do not apply.
