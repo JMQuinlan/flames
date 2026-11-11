@@ -474,6 +474,41 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //       Gamma = m/|grad psi| is read only for sigma(Gamma) (ShellPsiGrad).
         // Locally (RADIAL slab) slip 5 and 6 split the slab columns at 19.2 cells/R0; 0 did not.
         pp_query_default("shell.slip", value.shell_slip, 0);
+        // relax.opt8 (option 8, 2026-11-10): the fixed-alpha relaxation branches (cells beyond the
+        // cutoff, or with a floored pre-relax pressure) used to put the gas at its EOS floor whenever
+        // the common pressure was below it (liquid in tension): for an ideal gas p = 0 means e = 0,
+        // i.e. a 0 K gas, and its thermal energy went to the liquid.  Repeated each rarefaction this
+        // built cold, crushed trace gas (rho_g 20-50x the core) next to the band and the 160 kPa runs
+        // blew up there.  With opt8 = 1 such a cell has no admissible equal-pressure state, so the
+        // gas KEEPS its own energy (its own p >= 0) and the liquid takes the rest of rho e (carries
+        // the tension): pressure non-equilibrium for that step (Schmidmayer et al. 2023, mu = 0
+        // limit); the full isobaric relaxation is tried again every step.  E0 + E1 = rho e exactly.
+        pp_query_validate("relax.opt8", value.relax_opt8, {0, 1, 2});   // 2: trace gas keeps its energy in every beyond-cutoff liquid cell
+        // relax.opt9 (option 9, 2026-11-10): which cells skip the isobaric (alpha-free) relaxation.
+        // Default: eta beyond the cutoff (eta < cutoff or > 1 - cutoff) is treated as a single fluid with
+        // alpha FROZEN -- so the liquid can hold tension, but its pressure is then set by the advected
+        // eta: water's rho c^2 turns an advection error of 2e-5 in eta into ~44 kPa, which nothing
+        // removes and which grew into the 160 kPa band-tail blow-up.  With opt9 = 1 alpha is frozen only
+        // where a phase has NO mass; every cell holding both phases gets the infinite-rate relaxation of
+        // Saurel et al. 2009 / Sch20 (alpha free), so a trace absorbs eta errors.  Pure liquid (eta = 1,
+        // no gas mass) still carries tension.  Cells with a floored pre-relax pressure keep the guard
+        // (combine with relax.opt8).
+        pp_query_default("relax.opt9", value.relax_opt9, 0);
+        // relax.sch20 (2026-11-11): skip the isentropic + mass-specific-heat closure and use the Sch20 /
+        // Saurel et al. 2009 closure (each phase e_k(p, v_k) - e_k^0 + p (v_k - v_k^0) = 0, the path below
+        // that is otherwise only the fallback).  The default adds the energy residual as the SAME specific
+        // heat q to every phase: q of order the gas's own c_v T (2e5 J/kg) is negligible for the liquid
+        // but zeroes (q < 0) or multiplies (q > 0) the trace gas energy in band-tail cells (160 kPa
+        // diagnosis: tail gas at 34 K, then 1e5 K, before the blow-up).
+        pp_query_default("relax.sch20", value.relax_sch20, 0);
+        // face.two_pressure (option 10, 2026-11-11): the face reconstruction assumed ONE pressure
+        // (p_mix) for both phases, but the cells keep the gas at p_liq + Delta (Laplace jump).  Where the
+        // liquid is in tension p_mix < 0 while the gas pressure is still positive, so the face put the gas
+        // at its EOS floor (p = 0, zero energy) and gas mass crossed with no energy -> cold trace gas in
+        // the liquid-side band tail (160 kPa blow-up).  With 1 the faces also reconstruct dp = p_gas - p_liq
+        // and rebuild each phase at its own pressure (alpha-weighted sum = p_mix exactly; cell-centre
+        // roundtrip exact for both phase energies).  See Limiter.H Primitive::dp.
+        pp_query_default("face.two_pressure", value.face_two_pressure, 0);
         if (value.shell_slip != 0 && value.shell_slip != 5 && value.shell_slip != 6 && value.shell_slip != 7)
             Util::Abort(INFO, "shell.slip must be 0, 5, 6 or 7");
         pp_query_default("shell.kappa_s_verbose", value.shell_visc_verbose, 0);
@@ -511,7 +546,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // Gamma lags there by 25-40%.)  Gamma is extended into the adjacent bulk
         // (ShellBandUniform); band/bulk threshold = cutoff.
         pp_query_validate("thermal.conduction", value.thermal_conduction, {0, 1});
-        pp_query_validate("thermal.exchange",   value.thermal_exchange,   {0, 1, 2, 3});
+        //                      = 4 : JOINT p-T relaxation (2026-11-11): in cells where both phases exceed
+        //        thermal.alpha_min the pressure relaxation solves for ONE state with equal pressures
+        //        (gas at p + Dj), equal temperatures, and conserved mass, volume and energy -- the
+        //        p-T equilibrium of the 4-equation (HRM) limit (Saurel / Pelanti & Shyue).  For two
+        //        stiffened gases it is a quadratic in p.  ThermalExchange does nothing in this mode.
+        pp_query_validate("thermal.exchange",   value.thermal_exchange,   {0, 1, 2, 3, 4});
+        pp_query_default("thermal.diag",        value.thermal_diag,       0);
         pp_query_default("thermal.alpha_min",   value.thermal_alpha_min,  1.0e-3);  // phase fraction below which a phase takes no part
         if (value.thermal_exchange == 2) pp_query_required("thermal.h", value.thermal_h);   // [W/m^2/K]
         if (value.shell_heat_split == 2 || value.thermal_conduction || value.thermal_exchange == 1 || value.thermal_exchange == 2)
@@ -2298,6 +2339,9 @@ Hydro2::RHS(int lev,
         // run -- the cluster LowAmp_NSCBC death).  Gating also removes ~12-18
         // wasted limiter reconstructions per cell per stage.
         const int shell_row_on = marmottant || apply_surface_tension;
+        const int face_diag = (thermal_diag >= 2);   // thermal.diag = 2: print faces whose gas is put at its floor
+        const Set::Scalar two_p_flag = face_two_pressure ? 1.0 : 0.0;
+        const Set::Scalar fd_time = time;
         const Set::Scalar eps_rl = epsilon, cut_rl = std::max(cutoff, 1.0e-12);
         const int cfun_row_on  = 0;   // colour function retired with the closure
 
@@ -2804,6 +2848,7 @@ Hydro2::RHS(int lev,
                     Solver::Local::FluidRiemann::State raw =
                         make_state(lo_i + s * di, lo_j + s * dj, lo_k + s * dk, dir);
                     prim[s + 2] = Solver::Local::Limiter::ToPrimitive(raw, small);
+                    prim[s + 2].two_p = two_p_flag;
                 }
                 // Q_L: right-edge of cell `lo` (stencil centered on prim[2]).
                 Solver::Local::Limiter::Primitive stencil_L[5] =
@@ -2829,6 +2874,11 @@ Hydro2::RHS(int lev,
                 Solver::Local::FluidRiemann::State sR_face = Solver::Local::Limiter::ToState(pR, small);
 
                 Solver::Local::FluidRiemann::Flux fl_ = riemannsolver->Solve(sL_face, sR_face, pref, small);
+                if (face_diag && dir == 0 && lo_j == 0 && lo_k == 0
+                    && ((pL.p_mix + pL.pi1 <= 0.0 && pL.p_mix + pL.pi0 > 0.0) || (pR.p_mix + pR.pi1 <= 0.0 && pR.p_mix + pR.pi0 > 0.0)))
+                    printf("FACEFLOOR t=%.7e face %d|%d aL=%.6f aR=%.6f pmixL=%.4e pmixR=%.4e gas_mass_flux=%.4e gas_energy_flux=%.4e e1_carried=%.4e\n",
+                           fd_time, lo_i, hi_i, pL.alpha, pR.alpha, pL.p_mix, pR.p_mix, fl_.mass1, fl_.energy1,
+                           (std::abs(fl_.mass1) > 0.0) ? fl_.energy1 / fl_.mass1 : 0.0);
                 // Reconstructed alpha upwinded on the contact speed; read by the
                 // alpha row when eta_consistent_advect = 1 (default).
                 fl_.alpha_face = (fl_.u_interface > 0.0) ? pL.alpha : pR.alpha;
@@ -3717,6 +3767,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     const Set::Scalar *DX = geom[lev].CellSize();
     amrex::Box domain = geom[lev].Domain();
 
+    // a restart does not call Initialize, which is where step_counter is sized
+    if (step_counter.size() <= (size_t)lev) step_counter.resize(lev + 1, 0);
     step_counter[lev]++;
     if (relax_diag) { char _mt[128]; snprintf(_mt, 128, "MASSTRACK advance_entry lev=%d sum1=%.14e", lev, rho_eta1_mf[lev]->sum(0)); Util::Message(INFO, _mt); }
 
@@ -6997,6 +7049,9 @@ void Hydro2::ThermalExchange(int lev, Set::Scalar dt)
 {
     const Set::Scalar amin = thermal_alpha_min, k0 = thermal_k0, k1 = thermal_k1, hc = thermal_h;
     const int mode = thermal_exchange;
+    if (mode == 4) return;   // joint p-T relaxation inside RelaxAndReinit
+    const int tdiag = thermal_diag;
+    const Set::Scalar g0d = eos0.Gamma(), g1d = eos1.Gamma(), tnow = t_new[lev];
     const Set::Scalar cv0 = eos0.Cv(), cv1 = eos1.Cv(), pi0 = eos0.P0(), pi1 = eos1.P0();
     const Set::Scalar small_l = small;
     const Set::Scalar *DX = geom[lev].CellSize();
@@ -7027,6 +7082,13 @@ void Hydro2::ThermalExchange(int lev, Set::Scalar dt)
             }
             const Set::Scalar H = (mode == 1) ? g * g / (a0 * a1 * (a0 / k0 + a1 / k1)) : hc * g;
             const Set::Scalar q = C0 * C1 / (C0 + C1) * (T1 - T0) * (1.0 - std::exp(-H * (1.0 / C0 + 1.0 / C1) * dt));
+            if (tdiag && std::abs(q) > 0.1 * std::abs(E1(i, j, k)))
+            {
+                const Set::Scalar p0b = ((g0d - 1.0) * E0(i, j, k) - g0d * pi0 * a0) / a0, p1b = (g1d - 1.0) * E1(i, j, k) / a1;
+                const Set::Scalar p0a = ((g0d - 1.0) * (E0(i, j, k) + q) - g0d * pi0 * a0) / a0, p1a = (g1d - 1.0) * (E1(i, j, k) - q) / a1;
+                printf("TXDIAG t=%.7e i=%d j=%d k=%d eta=%.6f T0=%.1f T1=%.1f dE1/E1=%.3f p_liq %.4e->%.4e p_gas %.4e->%.4e\n",
+                       tnow, i, j, k, a0, T0, T1, -q / E1(i, j, k), p0b, p0a, p1b, p1a);
+            }
             E0(i, j, k) += q;
             E1(i, j, k) -= q;
         });
@@ -7390,6 +7452,9 @@ void Hydro2::RelaxAndReinit(int lev)
     const Set::Scalar DIV_FLOOR   = 1.0e-30;
     const Set::Scalar small_loc   = small;        // kept for legacy callers
     const Set::Scalar cutoff_loc  = cutoff;       // pure-cell guard threshold
+    const int opt8 = relax_opt8;                  // relax.opt8: gas keeps its energy instead of the 0 K floor
+    const int opt9 = relax_opt9;                  // relax.opt9: freeze alpha only where a phase has no mass
+    const int sch20c = relax_sch20;               // relax.sch20: Sch20 closure only
     const int         max_iter    = 30;
     const Set::Scalar newton_tol  = 1.0e-10;
     const int         bisect_max  = 120;
@@ -7405,6 +7470,8 @@ void Hydro2::RelaxAndReinit(int lev)
 
     const Set::Scalar gam0 = eos0.Gamma();
     const Set::Scalar pi0_ = eos0.P0();
+    const int pT4 = (thermal_exchange == 4);                       // joint p-T relaxation
+    const Set::Scalar cvT0 = eos0.Cv(), cvT1 = eos1.Cv(), amin_pT = thermal_alpha_min;
     const Set::Scalar gam1 = eos1.Gamma();
     const Set::Scalar pi1_ = eos1.P0();
 
@@ -7658,8 +7725,9 @@ void Hydro2::RelaxAndReinit(int lev)
             // -----------------------------------------------------------
             const bool p0_floored = (p0_pre <= -pi0_ + std::max(2.0 * DIV_FLOOR, 1.0e-9 * pi0_));
             const bool p1_floored = (p1_pre <= -pi1_ + std::max(2.0 * DIV_FLOOR, 1.0e-9 * pi1_));
-            if (eta(i, j, k) < cutoff_loc || eta(i, j, k) > 1.0 - cutoff_loc
-                || p0_floored || p1_floored)
+            const bool single_phase = opt9 ? (arh0_loc <= 0.0 || arh1_loc <= 0.0)
+                                           : (eta(i, j, k) < cutoff_loc || eta(i, j, k) > 1.0 - cutoff_loc);
+            if (single_phase || p0_floored || p1_floored)
             {
                 if (!p0_floored && !p1_floored && (eta(i, j, k) < cutoff_loc || eta(i, j, k) > 1.0 - cutoff_loc))
                 {
@@ -7757,7 +7825,20 @@ void Hydro2::RelaxAndReinit(int lev)
                 const Set::Scalar E1g_old = E1_(i, j, k);
                 if (beyond_cut)
                 {
-                    if (dom0)
+                    // opt8: liquid-dominant cell whose fixed-alpha common pressure is below the gas
+                    // floor -> gas keeps its own (positive-pressure) energy, liquid takes the rest.
+                    const Set::Scalar E0k8 = rhoe_p - E1g_old;
+                    // opt8 = 2: the trace gas keeps its own energy in EVERY beyond-cutoff liquid cell (not only
+                    // below its floor): forcing it to the liquid pressure ignores the Laplace jump and leaves a
+                    // cold trace (17 K at 11 kPa, 2 kg/m3) that advects into the band.
+                    const bool keep8 = opt8 && dom0 && (opt8 >= 2 || p_pure + pi1_ <= small_loc) && (E1g_old > 0.0)
+                                       && ((gam0 - 1.0) * E0k8 / std::max(a1g, DIV_FLOOR) - gam0 * pi0_ + pi0_ > small_loc);
+                    if (keep8)
+                    {
+                        E1_(i, j, k) = E1g_old;
+                        E0_(i, j, k) = E0k8;
+                    }
+                    else if (dom0)
                     {
                         E1_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(std::max(p_pure, -pi1_ + small_loc), a2g, gam1, pi1_, small_loc);
                         E0_(i, j, k) = rhoe_p - E1_(i, j, k);
@@ -7767,6 +7848,12 @@ void Hydro2::RelaxAndReinit(int lev)
                         E0_(i, j, k) = Solver::EOS::EOS::PhasicEnergyFromPressure(std::max(p_pure, -pi0_ + small_loc), a1g, gam0, pi0_, small_loc);
                         E1_(i, j, k) = rhoe_p - E0_(i, j, k);
                     }
+                }
+                else if (mixed_split && mout1 && opt8 && E1g_old > 0.0
+                         && ((gam0 - 1.0) * (rhoe_p - E1g_old) / std::max(a1g, DIV_FLOOR) - gam0 * pi0_ + pi0_ > small_loc))
+                {
+                    // opt8: mixed cell, common pressure below the gas floor -> gas keeps its energy
+                    E0_(i, j, k) = rhoe_p - E1g_old;
                 }
                 else if (mixed_split && mout1)
                 {
@@ -7827,6 +7914,54 @@ void Hydro2::RelaxAndReinit(int lev)
             // Phase-pressure jump: liquid (phase 0) at p, gas (phase 1) at p + Dj.
             Set::Scalar Dj = use_jump ? Jarr(i, j, k) : 0.0;
             if (!(Dj == Dj)) Dj = 0.0;
+            // ---------------- thermal.exchange = 4: joint p-T relaxation ----------------
+            // Unknowns p (liquid), gas at p + Dj, common T.  SG phases: v_k = (g_k-1) cv_k T/(p_k+pi_k),
+            // e_k = cv_k T + pi_k v_k.  With Y_k mass fractions, v = 1/rho, e = rho e/rho,
+            // A_k = Y_k (g_k-1) cv_k, C = sum Y_k cv_k:
+            //     sum_k A_k (e - v pi_k)/(p_k + pi_k) = v C,   T = v / sum_k A_k/(p_k + pi_k).
+            // With a = p + pi_0 and b = Dj + pi_1 - pi_0 (gas: p_1 + pi_1 = a + b) this is the quadratic
+            //     v C a^2 + [v C b - A0 (e - v pi0) - A1 (e - v pi1)] a - A0 (e - v pi0) b = 0,
+            // root with a > 0 and a + b > 0.  Mass, volume (alpha0 + alpha1 = 1) and energy exact.
+            if (pT4 && a1 > amin_pT && a2 > amin_pT && arh0_loc > 0.0 && arh1_loc > 0.0)
+            {
+                const Set::Scalar rhoT = arh0_loc + arh1_loc;
+                const Set::Scalar keT  = 0.5 * (AMREX_D_TERM(M_(i, j, k, 0) * M_(i, j, k, 0),
+                                                           + M_(i, j, k, 1) * M_(i, j, k, 1),
+                                                           + M_(i, j, k, 2) * M_(i, j, k, 2))) / rhoT;
+                const Set::Scalar vT = 1.0 / rhoT, eT = (E_(i, j, k) - keT) / rhoT;
+                const Set::Scalar Y0 = arh0_loc / rhoT, Y1 = arh1_loc / rhoT;
+                const Set::Scalar A0 = Y0 * (gam0 - 1.0) * cvT0, A1 = Y1 * (gam1 - 1.0) * cvT1;
+                const Set::Scalar CT = Y0 * cvT0 + Y1 * cvT1;
+                const Set::Scalar B0 = A0 * (eT - vT * pi0_), B1 = A1 * (eT - vT * pi1_);
+                const Set::Scalar bb = Dj + pi1_ - pi0_;
+                const Set::Scalar qa = vT * CT, qb = vT * CT * bb - B0 - B1, qc = -B0 * bb;
+                const Set::Scalar disc = qb * qb - 4.0 * qa * qc;
+                if (disc >= 0.0)
+                {
+                    const Set::Scalar sq = std::sqrt(disc);
+                    const Set::Scalar qq = -0.5 * (qb + (qb >= 0.0 ? sq : -sq));   // stable roots
+                    const Set::Scalar r1 = qq / qa, r2 = (qq != 0.0) ? qc / qq : r1;
+                    Set::Scalar aa = -1.0;
+                    if (r1 > 0.0 && r1 + bb > 0.0) aa = r1;
+                    if (r2 > 0.0 && r2 + bb > 0.0 && r2 > aa) aa = r2;           // largest admissible root
+                    if (aa > 0.0)
+                    {
+                        const Set::Scalar ag = aa + bb;              // p_gas + pi_1
+                        const Set::Scalar TT = vT / (A0 / aa + A1 / ag);
+                        const Set::Scalar v0T = (gam0 - 1.0) * cvT0 * TT / aa, v1T = (gam1 - 1.0) * cvT1 * TT / ag;
+                        const Set::Scalar al0 = arh0_loc * v0T, al1 = arh1_loc * v1T;
+                        if (TT > 0.0 && al0 > alpha_floor && al1 > alpha_floor && std::abs(al0 + al1 - 1.0) < 1.0e-8)
+                        {
+                            eta(i, j, k) = al0 / (al0 + al1);
+                            E0_(i, j, k) = arh0_loc * (cvT0 * TT + pi0_ * v0T);
+                            E1_(i, j, k) = (E_(i, j, k) - keT) - E0_(i, j, k);   // energy exact
+                            if (diag_on) { diag_arr(i, j, k, 0) = 0.0; diag_arr(i, j, k, 1) = 0.0; diag_arr(i, j, k, 2) = 0.0; }
+                            return;
+                        }
+                    }
+                }
+                // no admissible p-T state: fall through to the pressure relaxation
+            }
             const Set::Scalar p_min = std::max(-pi0_, -pi1_ - Dj) + DIV_FLOOR;
             // Root bracket over the full EOS range of BOTH phases (liquid tension allowed).
             // The former extra limit "mixture p + a2 Dj > 0" existed only because the face
@@ -7836,7 +7971,7 @@ void Hydro2::RelaxAndReinit(int lev)
             const Set::Scalar p_tfloor = p_min;
 
             // ---------------- closure: isentropic + mass-specific heat ----------------
-            if (arh0_loc > 0.0 && arh1_loc > 0.0)
+            if (!sch20c && arh0_loc > 0.0 && arh1_loc > 0.0)
             {
                 const Set::Scalar rhoM = arh0_loc + arh1_loc;
                 const Set::Scalar keM  = 0.5 * (AMREX_D_TERM(M_(i, j, k, 0) * M_(i, j, k, 0),

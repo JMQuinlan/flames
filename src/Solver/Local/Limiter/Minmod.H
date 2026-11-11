@@ -52,6 +52,8 @@ private:
         r.p_mix       = mm(a.p_mix,       b.p_mix      );
         r.gamma0 = a.gamma0;  r.pi0 = a.pi0;
         r.gamma1 = a.gamma1;  r.pi1 = a.pi1;
+        r.dp          = mm(a.dp ,       b.dp       );
+        r.two_p = a.two_p;
         return r;
     }
 };

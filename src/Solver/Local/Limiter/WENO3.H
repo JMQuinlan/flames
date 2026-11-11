@@ -94,6 +94,8 @@ public:
         r.p_mix       = scalar(Qm1.p_mix,       Q0.p_mix,       Qp1.p_mix      );
         r.gamma0 = Q0.gamma0;  r.pi0 = Q0.pi0;
         r.gamma1 = Q0.gamma1;  r.pi1 = Q0.pi1;
+        r.dp          = scalar(Qm1.dp ,       Q0.dp ,       Qp1.dp       );
+        r.two_p = Q0.two_p;
         return r;
     }
 

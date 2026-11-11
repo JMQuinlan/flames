@@ -90,15 +90,22 @@ VIEW          = (-0.06, 0.06, -0.03, 0.09)   # x0, x1, y0, y1 [m] when DOMAIN_AU
 FRB_RES_X     = 900            # samples across the width
 
 # ---- SCHLIEREN ------------------------------------------------------------
-# 'lnrho' : |grad ln rho| (air and water shocks together; the 830:1 jump at the surface
-#           would swamp plain |grad rho|)    'rho' : |grad rho| (water features dominate)
-SCHLIEREN_FIELD = "lnrho"
+# 'lnrho_rel' : |grad ln(rho / rho_ref(eta))|, rho_ref = eta RHO_WATER + (1 - eta) RHO_AIR: the density
+#               relative to the undisturbed fluid of the local mix.  The 830:1 surface jump cancels, so
+#               air and water shocks show together and the surface does not flood the image.
+# 'lnrho'     : |grad ln rho| (the surface jump and its eta tails show as a thick black band)
+# 'rho'       : |grad rho|    (water features dominate)
+SCHLIEREN_FIELD = "lnrho_rel"
+RHO_WATER, RHO_AIR = 1000.0, 1.204    # undisturbed densities (deck ICs)
 SCHLIEREN_EXP   = 8.0          # exp(-k g / g_ref) contrast
-SCHLIEREN_PCT   = 99.0         # g_ref = this percentile of g in the fluid (per frame) ...
+SCHLIEREN_PCT   = 99.8         # g_ref = this percentile of g in the fluid (per frame) ...
 SCHLIEREN_REF   = None         # ... or a fixed g_ref (1/m) to stop frame-to-frame flicker
 CMAP_SCHLIEREN  = "gray"
 MASK_SOLID      = True         # blank the gradient where phi < PHI_MASK (solid + Brinkman edge)
 PHI_MASK        = 0.95
+MASK_SURFACE    = False        # blank the gradient inside the water-surface band ETA_MASK < eta < 1 - ETA_MASK:
+ETA_MASK        = 0.02         #   the 830:1 density jump otherwise floods a thick black band over the
+                               #   near-surface shocks; the surface itself is drawn as the eta contour
 
 # ---- OVERLAYS / COLORS ----------------------------------------------------
 SHOW_PHI_OVERLAY  = True
@@ -246,12 +253,22 @@ def schlieren(s):
     xlo, xhi, ylo, yhi = s["extent"]
     dx = (xhi - xlo) / s["nx"]
     dy = (yhi - ylo) / s["ny"]
-    f = np.log(np.maximum(s["rho"], 1e-30)) if SCHLIEREN_FIELD == "lnrho" else s["rho"]
+    if SCHLIEREN_FIELD == "lnrho_rel" and s["eta"] is not None:
+        e = np.clip(s["eta"], 0.0, 1.0)
+        f = np.log(np.maximum(s["rho"], 1e-30) / (e * RHO_WATER + (1.0 - e) * RHO_AIR))
+    elif SCHLIEREN_FIELD in ("lnrho", "lnrho_rel"):
+        f = np.log(np.maximum(s["rho"], 1e-30))
+    else:
+        f = s["rho"]
     gy, gx = np.gradient(f, dy, dx)
     g = np.hypot(gx, gy)
     fluid = s["phi"] > PHI_MASK
     if MASK_SOLID and s["has_phi"]:
         g = np.where(fluid, g, 0.0)
+    if MASK_SURFACE and s["eta"] is not None:
+        band = (s["eta"] > ETA_MASK) & (s["eta"] < 1.0 - ETA_MASK)
+        g = np.where(band, 0.0, g)
+        fluid = fluid & ~band
     if SCHLIEREN_REF is not None:
         gref = float(SCHLIEREN_REF)
     else:

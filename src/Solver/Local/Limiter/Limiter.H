@@ -76,6 +76,13 @@ struct Primitive
     Set::Scalar pi0         = 0.0;
     Set::Scalar gamma1      = 0.0;
     Set::Scalar pi1         = 0.0;
+    // face.two_pressure (option 10, 2026-11-11): the gas-minus-liquid pressure difference
+    // dp = p_1 - p_0 is reconstructed like the other fields; ToState then rebuilds
+    // p_0 = p_mix - alpha_1 dp, p_1 = p_0 + dp (alpha_0 p_0 + alpha_1 p_1 = p_mix exactly), so the
+    // faces carry the same two-pressure state as the cells (Hydro2 keeps the gas at p_liq + Delta,
+    // the Laplace jump).  two_p is metadata (NOT reconstructed): 1 = use dp, 0 = old single p_mix.
+    Set::Scalar dp          = 0.0;
+    Set::Scalar two_p       = 0.0;
 };
 
 /// Component-wise arithmetic on the reconstructed fields only.
@@ -89,7 +96,8 @@ inline Primitive operator-(const Primitive &a, const Primitive &b)
              a.v           - b.v,
              a.w           - b.w,
              a.p_mix       - b.p_mix,
-             a.gamma0, a.pi0, a.gamma1, a.pi1 };
+             a.gamma0, a.pi0, a.gamma1, a.pi1,
+             a.dp          - b.dp, a.two_p };
 }
 inline Primitive operator+(const Primitive &a, const Primitive &b)
 {
@@ -100,13 +108,15 @@ inline Primitive operator+(const Primitive &a, const Primitive &b)
              a.v           + b.v,
              a.w           + b.w,
              a.p_mix       + b.p_mix,
-             a.gamma0, a.pi0, a.gamma1, a.pi1 };
+             a.gamma0, a.pi0, a.gamma1, a.pi1,
+             a.dp          + b.dp, a.two_p };
 }
 inline Primitive operator*(Set::Scalar s, const Primitive &p)
 {
     return { s*p.alpha, s*p.alpha_rho_0, s*p.alpha_rho_1,
              s*p.u, s*p.v, s*p.w, s*p.p_mix,
-             p.gamma0, p.pi0, p.gamma1, p.pi1 };
+             p.gamma0, p.pi0, p.gamma1, p.pi1,
+             s*p.dp, p.two_p };
 }
 inline Primitive operator*(const Primitive &p, Set::Scalar s) { return s * p; }
 
@@ -178,6 +188,7 @@ ToPrimitive(const Solver::Local::FluidRiemann::State &s, Set::Scalar /*small*/)
     // interface even when individual p_k are wild in pure-other-phase
     // cells, because alpha_k weights them down.
     p.p_mix  = p.alpha * p0 + a2 * p1;
+    p.dp     = p1 - p0;                       // face.two_pressure (used only when two_p is set)
     p.gamma0 = s.gamma0;  p.pi0 = s.pi0;
     p.gamma1 = s.gamma1;  p.pi1 = s.pi1;
     return p;
@@ -217,6 +228,24 @@ ToState(const Primitive &p, Set::Scalar /*small*/)
     // floors allow).  Previously the gas term was clamped at 0 and the face energy no
     // longer matched p_mix (2026-11-09).
     Set::Scalar pk0 = p.p_mix, pk1 = p.p_mix;
+    if (p.two_p > 0.5)
+    {
+        // face.two_pressure: each phase at its own pressure, alpha_0 p_0 + alpha_1 p_1 = p_mix exactly
+        pk0 = p.p_mix - a2 * p.dp;
+        pk1 = pk0 + p.dp;
+        // a phase below its EOS limit sits at its floor and the other carries the rest (as below)
+        if (pk1 + p.pi1 <= 0.0 && pk0 + p.pi0 > 0.0)
+        {
+            const Set::Scalar q1 = -p.pi1, q0 = (p.p_mix - a2 * q1) / a1;
+            if (q0 + p.pi0 > 0.0) { pk0 = q0; pk1 = q1; }
+        }
+        else if (pk0 + p.pi0 <= 0.0 && pk1 + p.pi1 > 0.0)
+        {
+            const Set::Scalar q0 = -p.pi0, q1 = (p.p_mix - a1 * q0) / a2;
+            if (q1 + p.pi1 > 0.0) { pk0 = q0; pk1 = q1; }
+        }
+    }
+    else
     {
         const bool out0 = (p.p_mix + p.pi0 <= 0.0), out1 = (p.p_mix + p.pi1 <= 0.0);
         if (out1 && !out0)

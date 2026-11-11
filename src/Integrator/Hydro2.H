@@ -757,6 +757,11 @@ protected:
     int verbose = 0;
     int shell_visc_subcycle = 0;      // = visc_subcycle: sub-cycle kappa_s with the bulk viscosity (see Parse)
     int shell_visc_subcycle_max = 512; // hard cap on sub-steps (runaway guard)
+    int thermal_diag = 0;              // thermal.diag: print cells where the heat exchange moves >10% of the gas energy
+    int relax_sch20 = 0;               // relax.sch20: use the Sch20/Saurel 2009 closure (no shared specific heat q)
+    int face_two_pressure = 0;         // face.two_pressure: faces carry both phase pressures (option 10)
+    int relax_opt9 = 0;                // relax.opt9: freeze alpha only where a phase has no mass (see Parse)
+    int relax_opt8 = 0;                // relax.opt8: no 0 K gas floor in fixed-alpha relaxation cells (see Parse)
     int shell_slip = 0;                // shell.slip: 0 Gamma moves with the fluid only; 5 / 6 level-set slip (options 5 / 6)
     int shell_heat_split = 0;          // shell dissipation heat: 0 volume fraction, 2 effusivity
     Set::Scalar thermal_k0 = 0.0, thermal_k1 = 0.0;   // phase thermal conductivities (heat_split = 2)

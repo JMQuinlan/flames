@@ -34,7 +34,8 @@ Integrator::Parse(Integrator &value, IO::ParmParse &pp)
         // Nominal timestep on amrlev = 0
         pp.query_required("timestep", value.timestep, Unit::Time());      
         pp.query_default("restart", value.restart_file_cell,"");       // Name of restart file to read from
-        pp.query_default("restart_cell", value.restart_file_cell,"");  // Name of cell-fab restart file to read from
+        // Name of cell-fab restart file to read from (same as restart; it used to reset restart to "" when not given)
+        pp.query_default("restart_cell", value.restart_file_cell, std::string(value.restart_file_cell));
         pp.query_default("restart_node", value.restart_file_node,"");  // Name of node-fab restart file to read from
     }
     {
@@ -577,7 +578,7 @@ Integrator::Restart(const std::string dirname, bool a_nodal)
 
     // Current time
     Set::Scalar tmp_time = 0.0;
-    std::getline(is, line); tmp_time = std::stof(line); Util::Message(INFO, "Current time: ", tmp_time);
+    std::getline(is, line); tmp_time = std::stod(line); Util::Message(INFO, "Current time: ", tmp_time);
     for (int i = 0; i < max_level + 1; i++)
     {
         t_new[i] = tmp_time; t_old[i] = tmp_time;
@@ -661,7 +662,27 @@ Integrator::Restart(const std::string dirname, bool a_nodal)
             }
         else
             for (int i = 0; i < cell.number_of_fabs; i++)
+            {
                 (*cell.fab_array[i])[lev].reset(new amrex::MultiFab(grids[lev], dmap[lev], cell.ncomp_array[i], cell.nghost_array[i]));
+                // fields that are not in the plotfile start from zero, as in MakeNewLevelFromScratch (they were left
+                // uninitialized, which gave garbage velocities after a Hydro2 restart)
+                (*cell.fab_array[i])[lev]->setVal(0.0);
+            }
+        // Do the per-level setup a fresh start does (MakeNewLevelFromScratch: base fields, then Initialize) before
+        // the plotfile data is copied in.  Initialize also builds things that are not fields (Hydro2: the reflux
+        // FluxRegister / cc_fluxes scratch, BC geometry, helper fields that are not written out); a restart that
+        // skipped it ran without them and blew up at the walls a few steps after restarting.  Fields that are in
+        // the plotfile are overwritten below; fields that are not keep their initial-condition values.
+        // Only for cell-only integrators: Initialize may touch node fabs, which are not allocated in this pass.
+        const bool restart_initialize = !a_nodal && node.number_of_fabs == 0;
+        if (restart_initialize)
+        {
+            for (unsigned int n = 0; n < m_basefields_cell.size(); n++)
+                m_basefields_cell[n]->MakeNewLevelFromScratch(lev, t_new[lev], grids[lev], dmap[lev]);
+            for (unsigned int n = 0; n < m_basefields.size(); n++)
+                m_basefields[n]->MakeNewLevelFromScratch(lev, t_new[lev], grids[lev], dmap[lev]);
+            Initialize(lev);
+        }
         for (int i = 0; i < tmp_numfabs; i++)
         {
             bool match = false;
@@ -706,13 +727,16 @@ Integrator::Restart(const std::string dirname, bool a_nodal)
             if (!match) Util::Warning(INFO, "Fab ", tmp_name_array[i], " is in the restart file, but there is no fab with that name here.");
         }
 
-        for (unsigned int n = 0; n < m_basefields_cell.size(); n++)
+        if (!restart_initialize)
         {
-            m_basefields_cell[n]->MakeNewLevelFromScratch(lev, t_new[lev], grids[lev], dmap[lev]);
-        }
-        for (unsigned int n = 0; n < m_basefields.size(); n++)
-        {
-            m_basefields[n]->MakeNewLevelFromScratch(lev, t_new[lev], grids[lev], dmap[lev]);
+            for (unsigned int n = 0; n < m_basefields_cell.size(); n++)
+            {
+                m_basefields_cell[n]->MakeNewLevelFromScratch(lev, t_new[lev], grids[lev], dmap[lev]);
+            }
+            for (unsigned int n = 0; n < m_basefields.size(); n++)
+            {
+                m_basefields[n]->MakeNewLevelFromScratch(lev, t_new[lev], grids[lev], dmap[lev]);
+            }
         }
 
         
@@ -724,7 +748,8 @@ Integrator::Restart(const std::string dirname, bool a_nodal)
 
     }
 
-    SetFinestLevel(max_level);
+    // the levels in the restart file (was max_level, which left levels above the file's finest unallocated)
+    SetFinestLevel(finest_level);
 }
 
 void
