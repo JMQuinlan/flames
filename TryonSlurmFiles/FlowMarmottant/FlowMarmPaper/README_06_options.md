@@ -20,3 +20,8 @@ blows up in gas-side band cells.
 
 The folders `06_opt5/` and `06_opt6/` (patch files + scripts for separate binaries) are obsolete:
 the code they patch in is already in the repo, so the patches do not apply.
+
+## opt5_10_8 (2026-11-11): option 5 + 10 + relax.opt8 = 1
+shell.slip = 5, face.two_pressure = 1, relax.opt8 = 1. Only combination to reach 6 us at 160 kPa / 19.2 cells/R0 in the
+RADIAL slab: peaks vs model +1.2/+1.2/-0.3/-0.4 %, troughs -1.8/-5.9/-10.3/-11.6 % (old code +2.1/+4.6/+8.6/+15.9 %).
+Slurm: 06_Cattaneo_{HighPa,LowPa}_opt5_10_8.sh (32 tasks). Needs hydro2 from be9e72cd6 or later.
