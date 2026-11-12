@@ -16,7 +16,7 @@ Curves on the figure (R in um vs t in us; t = 0 at the start of the burst, as in
     (ModifiedRayleighPlesset_MarmottantZhou.m in github.com/cttnmrc/jetting-enables-sonoporation),
     Python port; paper parameters.
   * Experiment: Fig. 2a markers (cattaneo2025_fig2a_exp_{hi,lo}Pa.dat, t in figure time),
-    shifted by EXP_SHIFT_US = -1.6 us onto the simulation time axis.
+    shifted by EXP_SHIFT_US = -1.57 us (paper t_delay) onto the simulation time axis.
   * Simulation: volumetric radius R_vol and the eta = 0.5 radius along +x.
       RADIAL slab (n_cell N x 2 x 2): the cell row next to the axis, r = sqrt(x^2 + 2 y0^2),
           R_vol = (3 sum (1 - eta) r^2 dr)^(1/3), R(eta=0.5) by linear interpolation.
@@ -48,14 +48,18 @@ from marmottant_rpe_km import Shell, Liquid, Gas                            # no
 ENVELOPE = os.path.join(_HERE, "cattaneo2025_envelope.dat")
 EXP = {"hi": os.path.join(_HERE, "cattaneo2025_fig2a_exp_hiPa.dat"),
        "lo": os.path.join(_HERE, "cattaneo2025_fig2a_exp_loPa.dat")}
-EXP_SHIFT_US = -1.6     # experiment t_fig -> simulation t (burst start at t = 0); alignment used in our comparisons
+EXP_SHIFT_US = -1.57    # experiment t_fig -> simulation t (burst start at t = 0); paper code t_delay = 1.57 us (BubbleRadiusDisplacementImpulseStress.m)
 F_DRIVE = 1.0e6         # Hz (paper)
 NCP = 40                # burst length in cycles (envelope file covers 0..40 us)
 CYCLE_T0 = -0.4e-6      # peak-table cycle windows [k - 0.4, k + 0.6) us
 
 # Figure look: the Sch20Analysis STYLE, plus the colours of the extra curves here.
 FIG = dict(STYLE)
-FIG.update(c_catt="k", c_exp="#cb181d", c_eta="tab:orange", size=(6.5, 5.6), height_ratios=(1.0, 1.0))
+# Colour-blind-safe set (Okabe-Ito; min pair separation dE_OK 8.6 under protan/deutan/tritan simulation, and every
+# curve also differs by dash or marker): theory blue (KM solid / RPE dashed, they overlap), Cattaneo model black,
+# R_vol deep purple (drawn on top), R(eta=.5) mustard, experiment red (every pair >= 15 under every CVD type).
+FIG.update(c_km="#0072B2", c_rp="#0072B2", c_catt="k", c_vol="#4B2C7F", c_eta="#D4A017", c_exp="#CB181D",
+           size=(6.5, 5.6), height_ratios=(1.0, 1.0))
 
 
 # =========================================================================================== #
@@ -378,30 +382,38 @@ def make_figure(case_tag, C, sim, models, exp, out_stem, xlim, zoom, rvol_norm=F
         ax.plot(tk[mk(tk)] * um, Rk[mk(tk)] * um, "-", color=S["c_km"], lw=1.2, label="Coated Keller–Miksis")
         ax.plot(tr[mk(tr)] * um, Rr[mk(tr)] * um, "--", color=S["c_rp"], lw=1.2, label="Coated Rayleigh–Plesset")
         ax.plot(tc[mk(tc)] * um, Rc[mk(tc)] * um, "-.", color=S["c_catt"], lw=1.2,
-                label="Cattaneo et al. model")
+                label="Cattaneo et al. (2025) model")
         if show_thermo and thermo is not None:
             th, Rh = thermo
             ax.plot(th[mk(th)] * um, Rh[mk(th)] * um, ":", color=S["c_vol"], lw=1.0,
                     label=r"Simulation, $R_\mathrm{vol}$ (thermo)")
         ts = sim["t"]; m = mk(ts)
-        ax.plot(ts[m] * um, Rv[m] * um, "-s", color=S["c_vol"], lw=1.3, ms=2.6,
+        ax.plot(ts[m] * um, Rv[m] * um, "-s", color=S["c_vol"], lw=1.5, ms=3.0, zorder=4,
                 label=r"Simulation, $R_\mathrm{vol}$")
-        ax.plot(ts[m] * um, sim["R_eta"][m] * um, "-^", color=S["c_eta"], lw=1.3, ms=2.8,
+        ax.plot(ts[m] * um, sim["R_eta"][m] * um, "-^", color=S["c_eta"], lw=1.5, ms=3.2, zorder=3,
                 label=r"Simulation, $R(\eta = 0.5)$")
         te, Re = exp; m = mk(te)
         ax.plot(te[m] * um, Re[m] * um, "o", color=S["c_exp"], mfc=S["c_exp"] if hi else "white", mew=0.9,
-                ms=4.0 if k else 3.4, label="Experiment (Cattaneo et al.)", zorder=5)
+                ms=4.0 if k else 3.4, label="Experiment (Cattaneo et al., 2025)", zorder=5)
         ax.set_xlim(t0, t1)
-        ax.set_xlabel(r"$t$  [µs]")
+        ax.grid(True, which="major", color="0.88", lw=0.6, zorder=0)   # light background grid
+        ax.set_axisbelow(True)
+        ax.set_xlabel("Time  [µs]")
         ax.set_ylabel(r"$R$  [µm]")
     if not single and (zoom[0] > xlim[0] or zoom[1] < xlim[1]):   # zoom window marked in (a)
         axs[0].axvspan(zoom[0], zoom[1], color="0.93", lw=0, zorder=0)
     h, l = axs[0].get_legend_handles_labels()
-    axs[0].legend(h, l, loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=3, fontsize=S["legend_size"],
-                  columnspacing=1.2, handlelength=2.4)
+    leg = axs[0].legend(h, l, loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=3, fontsize=S["legend_size"],
+                        columnspacing=1.2, handlelength=2.4)
     for ax, s in zip(axs if not single else [], ("(a)", "(b)")):
         ax.text(0.012, 0.965, s, transform=ax.transAxes, ha="left", va="top", fontsize=S["label_size"])
     fig.tight_layout()
+    # title above the legend (the legend sits above panel (a))
+    fig.canvas.draw()
+    bb = leg.get_window_extent().transformed(fig.transFigure.inverted())
+    fig.text(0.5 * (bb.x0 + bb.x1), bb.y1 + 0.01,
+             "Cattaneo et al. (2025) Experimental Comparison, 3 µm Coated Bubble under %.0f kPa Acoustic Force" % (C.pa / 1e3),
+             ha="center", va="bottom", fontsize=S["label_size"])
     for fmt in (formats or S["formats"]):
         fig.savefig(out_stem + "." + fmt, dpi=S["dpi"], bbox_inches="tight", pad_inches=S["pad_inches"])
     plt.close(fig)
@@ -458,7 +470,7 @@ def main(case_tag, deck, default_output, stem, zoom_default):
     models = {}
     for m in ("km", "rpe"):
         models[m] = solve_coated(C, env, t_mod, model=m)
-    models["catt"] = solve_cattaneo(C.pa, env, t_mod)
+    models["catt"] = solve_cattaneo(C.pa, env, t_mod, P=dict(R0=C.R0))   # deck R0 (60 kPa: 3.10 um, as the paper)
     exp = load_experiment(case_tag, a.exp_shift)
     th = thermo_radius(plotdir, C.R0, sim["geom"])
 

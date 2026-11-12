@@ -160,6 +160,8 @@ protected:
     void RelaxAndReinit(int lev);
     void ShellLevelSetSlip(int lev, Set::Scalar time, Set::Scalar dt);   // shell.slip=6: conservative level-set slip
     void ShellLevelSetSlip5(int lev, Set::Scalar time, Set::Scalar dt);  // shell.slip=5: implicit upwind level-set slip
+    void ShellLevelSetSlip13(int lev, Set::Scalar time, Set::Scalar dt); // shell.slip=13: eta-space departure point
+    void ShellSlipMass(int lev, Set::Scalar time, Set::Scalar dt);       // shell.slip=11: conservative slip flux of m = Gamma|grad eta|
     void PsiRefDensities();                                               // psi reference densities (once, from the IC)
     void ShellPsiGrad(int lev, Set::Scalar time, amrex::MultiFab &Gp);    // shell.slip=7: |grad psi| in the psi band, -1 elsewhere
     std::vector<int> shell_psi_init;                                      // shell.slip=7: m = Gamma |grad psi| set on this level
@@ -762,6 +764,7 @@ protected:
     int face_two_pressure = 0;         // face.two_pressure: faces carry both phase pressures (option 10)
     int relax_opt9 = 0;                // relax.opt9: freeze alpha only where a phase has no mass (see Parse)
     int relax_opt8 = 0;                // relax.opt8: no 0 K gas floor in fixed-alpha relaxation cells (see Parse)
+    int shell_slip11_face = 0;         // shell.slip11_face: option 11 face slip velocity, 0 mean / 1 donor cell
     int shell_slip = 0;                // shell.slip: 0 Gamma moves with the fluid only; 5 / 6 level-set slip (options 5 / 6)
     int shell_heat_split = 0;          // shell dissipation heat: 0 volume fraction, 2 effusivity
     Set::Scalar thermal_k0 = 0.0, thermal_k1 = 0.0;   // phase thermal conductivities (heat_split = 2)

@@ -472,8 +472,34 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //       level set D Gamma/Dt = -Gamma div_s u and D|grad psi|/Dt = -|grad psi| n.grad u.n,
         //       so exactly  dm/dt + div(m u) = 0:  conservative advection, no slip, no curvature.
         //       Gamma = m/|grad psi| is read only for sigma(Gamma) (ShellPsiGrad).
+        //  11 = option 11 (2026-11-11): CONSERVATIVE level-set shell.  The field is the shell amount per
+        //       volume m = Gamma |grad eta| (option 7 storage, eta instead of psi).  The level sets of eta
+        //       move with V = u + s n, and for any field carried by V exactly
+        //           dm/dt + div(m V) = 0
+        //       (D|grad eta|/Dt = -|grad eta| n.grad V.n, D Gamma/Dt = -Gamma div_s V, div_s V = div_s u + kappa s).
+        //       Fluid part: option 7's upwind flux on u*.  Slip part (ShellSlipMass): upwind flux of m with
+        //       s n, s n = w grad eta/|grad eta|^2, w = -(eta_t + u.grad eta); explicit MUSCL, sub-cycled to CFL .45
+        //       (positive, total shell conserved).  No curvature: the area law comes out of the divergence.
+        //       Option 5's exp(-kappa s dt) on Gamma created shell on trace level sets collapsing to a point
+        //       (06 c12 bubble centre, Gamma 1e11 -> interface, 2026-11-11); here such a level set carries
+        //       only its own (vanishing) share of m.  Gamma = m/|grad eta| is read only for sigma(Gamma).
+        //  12 = option 12: option 11 WITHOUT the slip flux -- m = Gamma |grad eta| carried with the fluid only
+        //       (conservative, option 7's flux), Gamma = m/|grad eta| read on the eta band.  The slip flux of
+        //       option 11 lost Gamma(eta=.5) (1.0 -> .80 by 1.8 us, 06 c12; 2nd order .85): s = w/|grad eta| is
+        //       steep across the band and the discrete div(m s n) does not track |grad eta|; Gamma itself only
+        //       feels kappa s, small at eta = .5 (option 5 and slip-free m both keep Gamma/exact ~ 1).
+        //  13 = option 13: option 5 with the shift done on the LEVEL SET.  Gamma lives on its own eta level
+        //       set; the departure value of cell i is Gamma_old where the fluid-advected old field
+        //       eta* = eta^n - dt u.grad eta equals eta^{n+1}_i, found by linear interpolation in eta* between
+        //       cell i and its upwind neighbour (theta = (eta^{n+1}_i - eta*_i)/(eta*_up - eta*_i) in [0,1]),
+        //       then the exact exp(-kappa s dt) stretch.  Option 5's implicit upwind weights ignore which level
+        //       the donor sits on: at the 06 c12 160 kPa deepest collapse they copied Gamma ~1e11 from the
+        //       eta ~ 1e-4 bubble-centre level set into the eta = 0.5 cell (permanently buckled shell).
         // Locally (RADIAL slab) slip 5 and 6 split the slab columns at 19.2 cells/R0; 0 did not.
         pp_query_default("shell.slip", value.shell_slip, 0);
+        // option 11 face slip velocity: 0 = mean of the two cells, 1 = the donor (upwind) cell's own s n,
+    // 2 = flux Gamma_donor (w n)_face (m s n = Gamma w n: both factors smooth across the band, s = w/|grad eta| is not)
+        pp_query_default("shell.slip11_face", value.shell_slip11_face, 0);
         // relax.opt8 (option 8, 2026-11-10): the fixed-alpha relaxation branches (cells beyond the
         // cutoff, or with a floored pre-relax pressure) used to put the gas at its EOS floor whenever
         // the common pressure was below it (liquid in tension): for an ideal gas p = 0 means e = 0,
@@ -509,8 +535,8 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // and rebuild each phase at its own pressure (alpha-weighted sum = p_mix exactly; cell-centre
         // roundtrip exact for both phase energies).  See Limiter.H Primitive::dp.
         pp_query_default("face.two_pressure", value.face_two_pressure, 0);
-        if (value.shell_slip != 0 && value.shell_slip != 5 && value.shell_slip != 6 && value.shell_slip != 7)
-            Util::Abort(INFO, "shell.slip must be 0, 5, 6 or 7");
+        if (value.shell_slip != 0 && value.shell_slip != 5 && value.shell_slip != 6 && value.shell_slip != 7 && value.shell_slip != 11 && value.shell_slip != 12 && value.shell_slip != 13)
+            Util::Abort(INFO, "shell.slip must be 0, 5, 6, 7, 11, 12 or 13");
         pp_query_default("shell.kappa_s_verbose", value.shell_visc_verbose, 0);
         // Where the shell viscous dissipation (heat) is booked between the phases:
         //   0 = by volume fraction (default, previous behaviour)
@@ -1972,7 +1998,7 @@ Hydro2::RHS(int lev,
     // the ghost ring is genuinely computed rather than left zero at physical faces.
     amrex::MultiFab sig_eff_mf;
     // shell.slip = 7: the shell field is m = Gamma |grad psi|; Gamma = m / Gp7 (ShellPsiGrad).
-    const int slip7 = (shell_slip == 7) && (marmottant || apply_surface_tension);
+    const int slip7 = (shell_slip == 7 || shell_slip == 11 || shell_slip == 12) && (marmottant || apply_surface_tension);
     amrex::MultiFab Gp7;
     if (slip7) ShellPsiGrad(lev, time, Gp7);
 
@@ -3775,7 +3801,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // shell.slip = 7: on the first step from t = 0 turn the IC areal density Gamma (shell field)
     // into the transported m = Gamma |grad psi|.  Levels made later by regrid get m by
     // interpolation from the coarser level, so they need nothing here.
-    if (shell_slip == 7 && (marmottant || apply_surface_tension))
+    if ((shell_slip == 7 || shell_slip == 11 || shell_slip == 12) && (marmottant || apply_surface_tension))
     {
         if ((int)shell_psi_init.size() <= lev) shell_psi_init.resize(lev + 1, 0);
         if (!shell_psi_init[lev] && time <= 0.0)
@@ -3792,7 +3818,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                 });
             }
             FillBoundariesWithBC(lev, time, eta_bc, { shell_mf[lev].get() });
-            Util::Message(INFO, "shell.slip = 7: shell field set to m = Gamma |grad psi| on level ", lev);
+            Util::Message(INFO, (shell_slip >= 11 ? "shell.slip = 11/12: shell field set to m = Gamma |grad eta| on level " : "shell.slip = 7: shell field set to m = Gamma |grad psi| on level "), lev);
         }
         shell_psi_init[lev] = 1;
     }
@@ -4103,6 +4129,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     {
         if (shell_slip == 5) ShellLevelSetSlip5(lev, time + dt, dt);
         else if (shell_slip == 6) ShellLevelSetSlip(lev, time + dt, dt);
+        else if (shell_slip == 11) ShellSlipMass(lev, time + dt, dt);
+        else if (shell_slip == 13) ShellLevelSetSlip13(lev, time + dt, dt);
     }
     
 
@@ -6382,7 +6410,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
     const Set::Scalar *DX = geom[lev].CellSize();
     const Set::Scalar kap_s = shell_kappa_s - shell_mu_s;
     // shell.slip = 7: Gamma = m / |grad psi| (the phase masses do not change in the sub-cycles)
-    const int slip7v = (shell_slip == 7) && marmottant;
+    const int slip7v = (shell_slip == 7 || shell_slip == 11 || shell_slip == 12) && marmottant;
     amrex::MultiFab Gp7v;
     if (slip7v) ShellPsiGrad(lev, time, Gp7v);
     const Set::Scalar dxm = std::min({AMREX_D_DECL(DX[0], DX[1], DX[2])});
@@ -7185,6 +7213,7 @@ void Hydro2::ShellPsiGrad(int lev, Set::Scalar time, amrex::MultiFab &Gp)
         }
     }
     const Set::Scalar ir0 = 1.0 / jump_y_rho0, ir1 = 1.0 / jump_y_rho1;
+    const bool use_eta = (shell_slip == 11 || shell_slip == 12);   // option 11: m = Gamma |grad eta|
     amrex::MultiFab Y(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, eta_mf[lev]->nGrow());
     for (amrex::MFIter mfi(Y, false); mfi.isValid(); ++mfi)
     {
@@ -7192,9 +7221,10 @@ void Hydro2::ShellPsiGrad(int lev, Set::Scalar time, amrex::MultiFab &Gp)
         auto r0 = rho_eta0_mf[lev]->const_array(mfi);
         auto r1 = rho_eta1_mf[lev]->const_array(mfi);
         auto y  = Y.array(mfi);
+        auto et = eta_mf[lev]->const_array(mfi);
         amrex::ParallelFor(gb, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             const Set::Scalar a = std::max(r0(i, j, k), 0.0) * ir0, b = std::max(r1(i, j, k), 0.0) * ir1;
-            y(i, j, k) = (a + b > 0.0) ? a / (a + b) : 0.0;
+            y(i, j, k) = use_eta ? et(i, j, k) : ((a + b > 0.0) ? a / (a + b) : 0.0);   // option 11: eta
         });
     }
     Gp.define(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, 1);
@@ -7404,7 +7434,7 @@ void Hydro2::ShellBandUniform(int lev)
     // centre a stale ghost drags the band value back
     // (coarse slab: Gamma grew at 0.48 of the area rate, 2026-11-02).
     FillBoundariesWithBC(lev, t_new[lev], eta_bc, { eta_mf[lev].get(), shell_mf[lev].get() });
-    if (shell_slip == 7) return;   // m = Gamma |grad psi| is ~0 in the bulk: an extension would create shell
+    if (shell_slip == 7 || shell_slip == 11 || shell_slip == 12) return;   // m = Gamma |grad psi| is ~0 in the bulk: an extension would create shell
     if (!(marmottant || apply_surface_tension)) return;   // no shell row
     // SHELL BULK EXTENSION.  Outside the eta band the areal density Gamma is
     // physically meaningless and its -Gamma div_s(u) evolution integrates the
@@ -7552,7 +7582,7 @@ void Hydro2::RelaxAndReinit(int lev)
         amrex::MultiFab Kt_j(ba, dm, 1, 0);
         TensorCurvature(lev, Kt_j, relax_time);
         // shell.slip = 7: Gamma = m / |grad psi| (relaxation conserves the phase masses, so psi is fixed)
-        const int slip7j = (shell_slip == 7) && marmottant;
+        const int slip7j = (shell_slip == 7 || shell_slip == 11 || shell_slip == 12) && marmottant;
         amrex::MultiFab Gp7j;
         if (slip7j) ShellPsiGrad(lev, relax_time, Gp7j);
         for (amrex::MFIter mfi(*jump_mf, false); mfi.isValid(); ++mfi)
@@ -8738,6 +8768,255 @@ void Hydro2::ShellLevelSetSlip5(int lev, Set::Scalar time, Set::Scalar dt)
                 printf("SLIP5 t=%.6e ijk=%d %d %d eta=%.4f eta_old=%.4f g*dx=%.3e sdt/dx=%.3f kap*dx=%.3f G0=%.4f\n",
                        time, i, j, k, ec, eo(i, j, k), g * DX[0], sl * dt / DX[0], kap * DX[0], g0(i, j, k));
             sh(i, j, k) = (g0(i, j, k) * std::exp(-kap * sl * dt) + cup) / (1.0 + csum);
+        });
+    }
+    FillBoundariesWithBC(lev, time, eta_bc, { shell_mf[lev].get() });
+}
+
+// OPTION 11 slip part (shell.slip = 11): the shell field is m = Gamma |grad eta|.
+// dm/dt + div(m s n) = 0 with the level-set slip s n = w grad eta / |grad eta|^2,
+// w = -(eta^{n+1} - eta^n)/dt - u.grad eta (step-average gradient, as option 6).
+// Face velocity = mean of the two cell values, m upwinded with a MUSCL (minmod) face value:
+// conservative, TVD for sum of outflow Courant numbers <= 1/2 (sub-cycled to 0.45).  Band cells (cut < eta < 1-cut,
+// |grad eta| > g_gem_min) carry s; elsewhere s = 0.
+void Hydro2::ShellSlipMass(int lev, Set::Scalar time, Set::Scalar dt)
+{
+    BL_PROFILE("Integrator::Hydro2::ShellSlipMass");
+    if (!(dt > 0.0)) return;
+    const bool donor = (shell_slip11_face == 1);
+    const bool gw = (shell_slip11_face == 2);   // flux = Gamma_upwind (w n)_face  (m s n = Gamma w n)
+    const Set::Scalar *DX = geom[lev].CellSize();
+    const Set::Scalar cut = std::max(cutoff, 1.0e-12);
+    const int ng = shell_mf[lev]->nGrow();
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(ng >= 2 && eta_mf[lev]->nGrow() >= 2 && velocity_mf[lev]->nGrow() >= 1,
+                                     "ShellSlipMass needs ghost cells");
+    // w = -(eta_t + u.grad eta) on the VALID cells only, then its ghosts filled with eta's BCs (w is a
+    // scalar: RADIAL / mirror / far-field fills are exact for it).  Building w in the ghosts from ghost
+    // eta_old and ghost velocity (a vector) pumped shell into the off-axis slab column (x100 by 0.1 us).
+    amrex::MultiFab W(shell_mf[lev]->boxArray(), shell_mf[lev]->DistributionMap(), 1, 1);
+    W.setVal(0.0);
+    for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
+        auto et  = eta_mf[lev]->const_array(mfi);
+        auto eo  = eta_old_mf[lev]->const_array(mfi);
+        auto vel = velocity_mf[lev]->const_array(mfi);
+        auto ww  = W.array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            Set::Scalar ug = 0.0;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                const Set::Scalar gm = 0.5 * ((et(i + di, j + dj, k + dk) - et(i - di, j - dj, k - dk))
+                                            + (eo(i + di, j + dj, k + dk) - eo(i - di, j - dj, k - dk))) / (2.0 * DX[d]);
+                ug += vel(i, j, k, d) * gm;
+            }
+            ww(i, j, k) = -(et(i, j, k) - eo(i, j, k)) / dt - ug;
+        });
+    }
+    FillBoundariesWithBC(lev, time, eta_bc, { &W });
+    // VS = s n = w grad eta / |grad eta|^2 on the valid box grown by one (band cells only)
+    amrex::MultiFab VS(shell_mf[lev]->boxArray(), shell_mf[lev]->DistributionMap(), AMREX_SPACEDIM + 1, 1);
+    for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box bx = amrex::grow(mfi.validbox(), 1);
+        auto et = eta_mf[lev]->const_array(mfi);
+        auto ww = W.const_array(mfi);
+        auto vs = VS.array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            Set::Vector g1 = Set::Vector::Zero();
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                g1(d) = (et(i + di, j + dj, k + dk) - et(i - di, j - dj, k - dk)) / (2.0 * DX[d]);
+            }
+            const Set::Scalar ec = et(i, j, k);
+            const Set::Scalar g2 = g1.squaredNorm();
+            const bool band = (ec > cut && ec < 1.0 - cut && std::sqrt(g2) > g_gem_min);
+            const Set::Scalar gn = std::sqrt(g2);
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                vs(i, j, k, d) = band ? (gw ? ww(i, j, k) * g1(d) / gn : ww(i, j, k) * g1(d) / g2) : 0.0;
+            vs(i, j, k, AMREX_SPACEDIM) = gn;
+        });
+    }
+    // CFL: largest sum of outflow Courant numbers
+    amrex::MultiFab CF(shell_mf[lev]->boxArray(), shell_mf[lev]->DistributionMap(), 1, 0);
+    for (amrex::MFIter mfi(CF, false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
+        auto vs = VS.const_array(mfi);
+        auto cf = CF.array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            Set::Scalar c = 0.0;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                Set::Scalar vp = 0.5 * (vs(i, j, k, d) + vs(i + di, j + dj, k + dk, d));
+                Set::Scalar vm = 0.5 * (vs(i - di, j - dj, k - dk, d) + vs(i, j, k, d));
+                if (donor)
+                {
+                    vp = (vp > 0.0) ? std::max(vs(i, j, k, d), 0.0) : std::min(vs(i + di, j + dj, k + dk, d), 0.0);
+                    vm = (vm > 0.0) ? std::max(vs(i - di, j - dj, k - dk, d), 0.0) : std::min(vs(i, j, k, d), 0.0);
+                }
+                if (gw)   // outflow Courant of m: (w n)_face / |grad eta|_donor
+                {
+                    const Set::Scalar gi = vs(i, j, k, AMREX_SPACEDIM);
+                    c += (gi > g_gem_min) ? (std::max(vp, 0.0) - std::min(vm, 0.0)) / gi * dt / DX[d] : 0.0;
+                }
+                else c += (std::max(vp, 0.0) - std::min(vm, 0.0)) * dt / DX[d];
+            }
+            cf(i, j, k) = c;
+        });
+    }
+    const Set::Scalar cmax = CF.max(0);
+    int nsub = std::max(1, (int)std::ceil(cmax / 0.45));   // MUSCL + forward Euler: TVD for outflow Courant <= 1/2
+    if (nsub > 64)
+    {
+        amrex::Print() << "SLIP11 t=" << time << " lev=" << lev << " outflow Courant " << cmax << " -> " << nsub << " substeps (capped 64)\n";
+        nsub = 64;
+    }
+    else if (nsub > 1) amrex::Print() << "SLIP11 t=" << time << " lev=" << lev << " outflow Courant " << cmax << " -> " << nsub << " substeps\n";
+    const Set::Scalar ds = dt / nsub;
+    amrex::MultiFab M0(shell_mf[lev]->boxArray(), shell_mf[lev]->DistributionMap(), 1, ng);
+    for (int sub = 0; sub < nsub; ++sub)
+    {
+        FillBoundariesWithBC(lev, time, eta_bc, { shell_mf[lev].get() });
+        amrex::MultiFab::Copy(M0, *shell_mf[lev], 0, 0, 1, ng);
+        for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto vs = VS.const_array(mfi);
+            auto m0 = M0.const_array(mfi);
+            auto sh = shell_mf[lev]->array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Set::Scalar div = 0.0;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                {
+                    const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                    Set::Scalar vp = 0.5 * (vs(i, j, k, d) + vs(i + di, j + dj, k + dk, d));
+                    Set::Scalar vm = 0.5 * (vs(i - di, j - dj, k - dk, d) + vs(i, j, k, d));
+                    if (donor)
+                    {
+                        vp = (vp > 0.0) ? std::max(vs(i, j, k, d), 0.0) : std::min(vs(i + di, j + dj, k + dk, d), 0.0);
+                        vm = (vm > 0.0) ? std::max(vs(i - di, j - dj, k - dk, d), 0.0) : std::min(vs(i, j, k, d), 0.0);
+                    }
+                    // MUSCL face values, minmod slope of the upwind cell (first-order upwind smeared the
+                    // shell out of the band: Gamma(eta=.5)/exact 1.0 -> 0.8 by 1.8 us, 06 c12).
+                    auto mm = [](Set::Scalar a, Set::Scalar b) { return (a * b <= 0.0) ? 0.0 : ((std::fabs(a) < std::fabs(b)) ? a : b); };
+                    auto face = [&](int ic, int jc, int kc, int sgn) {   // value of cell c extrapolated half a cell toward sgn
+                        const Set::Scalar sl = mm(m0(ic + di, jc + dj, kc + dk) - m0(ic, jc, kc), m0(ic, jc, kc) - m0(ic - di, jc - dj, kc - dk));
+                        return m0(ic, jc, kc) + 0.5 * sgn * sl;
+                    };
+                    if (gw)
+                    {
+                        // first-order upwind Gamma = m/|grad eta| of the donor cell (a cell without a level set,
+                        // |grad eta| <= g_gem_min, holds no shell to give)
+                        auto gam = [&](int ic, int jc, int kc) {
+                            const Set::Scalar gg = vs(ic, jc, kc, AMREX_SPACEDIM);
+                            return (gg > g_gem_min) ? m0(ic, jc, kc) / gg : 0.0;
+                        };
+                        const Set::Scalar Fp = vp * ((vp > 0.0) ? gam(i, j, k) : gam(i + di, j + dj, k + dk));
+                        const Set::Scalar Fm = vm * ((vm > 0.0) ? gam(i - di, j - dj, k - dk) : gam(i, j, k));
+                        div += (Fp - Fm) / DX[d];
+                        continue;
+                    }
+                    const Set::Scalar Fp = vp * ((vp > 0.0) ? face(i, j, k, +1) : face(i + di, j + dj, k + dk, -1));
+                    const Set::Scalar Fm = vm * ((vm > 0.0) ? face(i - di, j - dj, k - dk, +1) : face(i, j, k, -1));
+                    div += (Fp - Fm) / DX[d];
+                }
+                sh(i, j, k) = m0(i, j, k) - ds * div;
+            });
+        }
+    }
+    FillBoundariesWithBC(lev, time, eta_bc, { shell_mf[lev].get() });
+}
+
+// OPTION 13 (shell.slip = 13): level-set departure point in eta space (see the shell.slip comment in Parse).
+void Hydro2::ShellLevelSetSlip13(int lev, Set::Scalar time, Set::Scalar dt)
+{
+    BL_PROFILE("Integrator::Hydro2::ShellLevelSetSlip13");
+    if (!(dt > 0.0)) return;
+    const Set::Scalar *DX = geom[lev].CellSize();
+    const Set::Scalar cut = std::max(cutoff, 1.0e-12);
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(shell_mf[lev]->nGrow() >= 1 && eta_mf[lev]->nGrow() >= 2 && velocity_mf[lev]->nGrow() >= 1,
+                                     "ShellLevelSetSlip13 needs ghost cells");
+    // eta* = eta^n - dt u.grad eta (step-average gradient) on the valid cells, ghosts by eta's BCs (scalar).
+    amrex::MultiFab ES(shell_mf[lev]->boxArray(), shell_mf[lev]->DistributionMap(), 1, 1);
+    ES.setVal(0.0);
+    for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
+        auto et  = eta_mf[lev]->const_array(mfi);
+        auto eo  = eta_old_mf[lev]->const_array(mfi);
+        auto vel = velocity_mf[lev]->const_array(mfi);
+        auto es  = ES.array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            Set::Scalar ug = 0.0;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                const Set::Scalar gm = 0.5 * ((et(i + di, j + dj, k + dk) - et(i - di, j - dj, k - dk))
+                                            + (eo(i + di, j + dj, k + dk) - eo(i - di, j - dj, k - dk))) / (2.0 * DX[d]);
+                ug += vel(i, j, k, d) * gm;
+            }
+            es(i, j, k) = eo(i, j, k) - dt * ug;
+        });
+    }
+    FillBoundariesWithBC(lev, time, eta_bc, { &ES });
+    amrex::MultiFab G0(shell_mf[lev]->boxArray(), shell_mf[lev]->DistributionMap(), 1, shell_mf[lev]->nGrow());
+    amrex::MultiFab::Copy(G0, *shell_mf[lev], 0, 0, 1, shell_mf[lev]->nGrow());
+    for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box &bx = mfi.validbox();
+        auto et  = eta_mf[lev]->const_array(mfi);
+        auto es  = ES.const_array(mfi);
+        auto g0  = G0.const_array(mfi);
+        auto sh  = shell_mf[lev]->array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+            const Set::Scalar ec = et(i, j, k);
+            if (!(ec > cut && ec < 1.0 - cut)) return;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                const int di = 2 * (d == 0), dj = 2 * (d == 1), dk = 2 * (d == 2);
+                if (!et.contains(i + di, j + dj, k + dk) || !et.contains(i - di, j - dj, k - dk)) return;
+            }
+            const Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
+            const Set::Scalar g = ge.lpNorm<2>();
+            if (g < g_gem_min) return;
+            const Set::Vector nv = ge / g;
+            Set::Scalar kap = 0.0;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                const Set::Vector gp = Numeric::Gradient(et, i + di, j + dj, k + dk, 0, DX);
+                const Set::Vector gm = Numeric::Gradient(et, i - di, j - dj, k - dk, 0, DX);
+                const Set::Scalar gpm = gp.lpNorm<2>(), gmm = gm.lpNorm<2>();
+                if (gpm < g_gem_min || gmm < g_gem_min) return;
+                kap += (gp(d) / gpm - gm(d) / gmm) / (2.0 * DX[d]);
+            }
+            // level-set speed relative to the fluid: s = -(eta^{n+1} - eta*)/(dt |grad eta|)
+            const Set::Scalar sl = -(ec - es(i, j, k)) / (dt * g);
+            // upwind neighbour along the normal: per-direction donors, |n_d| geometric stencil weights
+            Set::Scalar nsum = 0.0;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d) nsum += std::fabs(nv(d));
+            Set::Scalar gup = 0.0, eup = 0.0;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                const Set::Scalar wd = std::fabs(nv(d)) / nsum;
+                const bool fromminus = (sl * nv(d) > 0.0);
+                const int ii = fromminus ? i - di : i + di, jj = fromminus ? j - dj : j + dj, kk = fromminus ? k - dk : k + dk;
+                gup += wd * g0(ii, jj, kk);
+                eup += wd * es(ii, jj, kk);
+            }
+            // departure point: eta*(x_dep) = eta^{n+1}_i, linear in eta* between cell i and its upwind neighbour
+            const Set::Scalar den = eup - es(i, j, k);
+            Set::Scalar th = (std::fabs(den) > 0.0) ? (ec - es(i, j, k)) / den : 0.0;
+            if (th > 1.0)
+                printf("SLIP13 t=%.6e ijk=%d %d %d eta=%.4f eta*=%.4f eta*_up=%.4f theta=%.3f sdt/dx=%.3f\n",
+                       time, i, j, k, ec, es(i, j, k), eup, th, sl * dt / DX[0]);
+            th = std::min(std::max(th, 0.0), 1.0);   // the departure point is inside the two-cell stencil
+            sh(i, j, k) = ((1.0 - th) * g0(i, j, k) + th * gup) * std::exp(-kap * sl * dt);
         });
     }
     FillBoundariesWithBC(lev, time, eta_bc, { shell_mf[lev].get() });

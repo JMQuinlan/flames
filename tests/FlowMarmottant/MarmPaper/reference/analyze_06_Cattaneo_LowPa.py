@@ -9,7 +9,7 @@ Figure <figdir>/<stem>_R.{png,eps}: R [um] vs t [us] (t = 0 at the start of the 
     coated Keller-Miksis and coated Rayleigh-Plesset (Marmottant shell, polytropic gas, the run's
         kappa_s / Cross law, measured pulse envelope),
     the Cattaneo et al. model (Marmottant shell + heat-conducting Zhou gas, constant kappa_s),
-    the experiment (open markers; figure time shifted by -1.6 us onto the simulation axis),
+    the experiment (open markers; figure time shifted by -1.57 us onto the simulation axis),
     the simulation volumetric radius R_vol and the eta = 0.5 radius.
 Printed: peak and trough radius in each drive cycle for every curve, with the % gap vs experiment.
 Model parameters come from the deck, overridden by <output>/metadata (command-line overrides of the
