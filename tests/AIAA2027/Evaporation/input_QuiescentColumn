@@ -1,0 +1,104 @@
+# ============================================================================
+# Quiescent evaporating water column in dry air (film evaporation model).
+#   Literature target: the water drop of Ranz & Marshall (1952), d = 1.1 mm, drop at 282 K,
+#   dry air at 298 K (as plotted by Avni & Dagan, arXiv:2108.07068, Fig. 2: K ~ 1.4e-3 mm^2/s,
+#   i.e. surface mass flux j = rho_l K / (4 d) ~ 3.2e-4 kg/m^2/s).
+#   2D column with the sphere film thickness delta = d / Sh, Sh = Nu = 2 (quiescent sphere), so the
+#   flux per unit area j is comparable; the 2D column itself has no d^2 law.
+#   Quarter domain (x, y >= 0 symmetry planes), R/dx = 20, sigma = 0 (no parasitic currents).
+#   Water: Tammann gamma 7.15, pi 3e8, cv fitted so T = (p + pi)/((gamma-1) rho cv) = 282 K at 1000 kg/m^3.
+#   Air: ideal gas gamma 1.4, cv 717.86, 298 K at 1 atm -> rho = 1.18413 kg/m^3.
+#   Film properties at the 1/3-rule reference T ~ 287 K: Dv = 2.42e-5 m^2/s, k = 0.0253 W/m/K,
+#   cp_vapour = 1870 J/kg/K.
+#   Run with vaporization.model = 1, 2, 3 (command line) to compare the three drivers.
+# ============================================================================
+alamo.program = hydro2
+plot_file = output
+amr.plot_dt = 5.0e-6
+amr.max_grid_size = 64
+amr.blocking_factor = 8
+amr.max_level = 0
+amr.n_cell = 80 80
+timestep = 1e-12
+dynamictimestep.on = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1e-4
+dynamictimestep.min = 1e-12
+cfl = 0.3
+stop_time = 5.0e-5
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 2.200000e-03 2.200000e-03 0.0
+geometry.is_periodic = 0 0 0
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 2.062500e-05
+eta.ic.expression.constant.R0 = 5.500000e-04
+eta.ic.expression.region0 = "1.0e-6 + (1.0 - 2.0e-6)*0.5*(1 + tanh((sqrt(x**2 + y**2) - R0)/(2*sqrt(2)*epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+eos0.gamma = 1.4
+eos0.p0 = 0
+eos1.gamma = 7.15
+eos1.p0 = 3.0e+08
+eos0.cp = "1005.0"
+eos0.cv = "717.86"
+eos1.cp = "1237.227973"
+eos1.cv = "173.038877"
+mu0 = 0.0
+mu0_b = 0.0
+mu1 = 0.0
+mu1_b = 0.0
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.184133"
+density1.ic.type = expression
+density1.ic.expression.region0 = "1000.0"
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "101325.0"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "101325.0"
+sigma = 0.0
+apply_surface_tension = 0
+apply_vaporization = 1
+Dv = "2.42e-5"
+Lv = 2257000.0
+Y_infinity = 0.0
+vaporization.model = 3
+vaporization.film_thickness = 5.500000e-04     # d / Sh, Sh = 2
+vaporization.film_thickness_T = 5.500000e-04   # d / Nu, Nu = 2
+vaporization.k_gas = 0.0253
+vaporization.cp_vapor = 1870.0
+vaporization.psat = buck
+apply_weight = 0
+grav = 0.0
+pref = 0.0
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+eta.bc.type.xlo = REFLECT_EVEN
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = REFLECT_EVEN
+eta.bc.type.yhi = neumann
+density.bc.type.xlo = REFLECT_EVEN
+density.bc.type.xhi = neumann
+density.bc.type.ylo = REFLECT_EVEN
+density.bc.type.yhi = neumann
+energy.bc.type.xlo = REFLECT_EVEN
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = REFLECT_EVEN
+energy.bc.type.yhi = neumann
+momentum.bc.type.xlo = REFLECT_ODD REFLECT_EVEN
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD
+momentum.bc.type.yhi = neumann neumann
+cutoff = 1e-16
+small = 1e-6
+Riemann_Solver.type = hllc
+Limiter.type = minmod
+integration.type = RungeKutta
+integration.rk.type = 3
+kappa_method = 1
+nghost = 4

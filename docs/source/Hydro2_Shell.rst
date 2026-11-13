@@ -28,8 +28,8 @@ bare one with constant :code:`sigma`.
    :depth: 2
 
 
-Model
-=====
+Shell model
+===========
 
 Advected shell
 --------------
@@ -190,8 +190,31 @@ Shell viscosity
      - Density floor for the :math:`\nu_s` stability estimate (not for the physics).
    * - :code:`shell.divs_kinematic`
      - 0
-     - 1 = take the normal part of the surface dilatation from the interface's own kinematics.  More
-       accurate on the linear damping test but **unstable** at three levels of refinement; leave at 0.
+     - How the surface dilatation :math:`\nabla_s\cdot u` in the viscous tension is evaluated.
+       0 = from the mixture velocity of the band (legacy; **under-predicts the shell damping**, see below).
+       5 = evaluated at the :math:`\eta = 1/2` surface: each band cell Taylor-extends its normal velocity to
+       the interface and adds the compaction drift of the volume fraction (recommended when
+       :code:`shell.kappa_s` is used; not available with :code:`shell.kappa_s_subcycle`).
+       4 = the geometric part of 5 only.  1, 3, 6 = earlier attempts, kept as a record (1 and 6 unstable).
+   * - :code:`shell.divs_limit_upper`
+     - 1
+     - Modes 4/5: 1 = the interface value is kept within :math:`[0, 2]` times the band value; 0 = sign bound only.
+   * - :code:`shell.no_compression`
+     - 0
+     - 1 = the shell carries no net compression, :math:`\sigma_{tot} = \max(\sigma(\Gamma) + \kappa_s \nabla_s\cdot u,\, 0)`
+       (membrane wrinkling closure).  A shell in net compression is shape-unstable: ripples grow whatever
+       :math:`\kappa_s` is, and the spherical damping is lost once they reach a few percent.
+   * - :code:`shell.visc_true_area`, :code:`shell.visc_layer`, :code:`shell.band_weight`, :code:`shell.visc_liquid_side`, :code:`shell.gamma_interface`
+     - 0
+     - Prototypes and diagnostics from the shell-viscosity study (see the comments in :code:`Hydro2::Parse`);
+       not validated, :code:`shell.gamma_interface` is unstable on the static coated Laplace test.
+
+Shell damping test (:code:`tests/FlowMarmottant/input_Linear_ShellDamping_UNIT`, :math:`R_0/\Delta x = 8`,
+checked with :code:`reference/analyze_linear_shell_damping.py`): the damping added by :math:`\kappa_s` is 0.56 of
+the analytic :math:`2\kappa_s/(\rho R_0^3)` with :code:`shell.divs_kinematic = 0` and 0.90 with 5; the bulk
+viscosity in the same test gives 0.82, so the ratio of the two paths is 0.69 and 1.14.
+At :math:`R_0/\Delta x = 16` the three numbers are 0.78, 1.00 and 0.95: mode 5 is at the analytic value, the
+bulk viscosity converges, and mode 0 is still 22 % low.
 
 Numerics
 --------

@@ -1,0 +1,141 @@
+# ============================================================================
+# FlowElasticSolid / spallation of a titanium plate hit by an aluminium plate at 700 m/s
+# Favrie & Schmidmayer, CMAME 455 (2026) 118880, Sec. 5.2, Fig. 5 and Fig. 6 -- CASE 1 ONLY: von Mises plasticity,
+# 0.01 % of air in the titanium (the case the paper says corresponds to Ndanou, Favrie & Gavrilyuk 2015).
+#
+# Units: GPa, g/cm^3, cm, km/s  ->  time unit = 10 microseconds (t_final = 20 microseconds = 2.0).
+#   0   < x < 0.1  cm  air                        (moving with the plate, see the note)
+#   0.1 < x < 0.3  cm  aluminium at 700 m/s        (gamma 3.4, p_inf 21.5, mu 26, rho 2.7,  sigma_y 60 MPa,  K_y 5000 Pa s)
+#   0.3 < x < 1.28 cm  titanium at rest            (gamma 2.6, p_inf 44,   mu 42, rho 4.527, sigma_y 1030 MPa, K_y 50 Pa s)
+#   1.28 < x < 2   cm  air at rest (rho 1.2 kg/m^3);   p = 1e5 Pa everywhere
+# Three materials in a two-phase solver (species stage 2b): phase 0 is "the solid" with the species Al and Ti,
+# phase 1 is air.  eta = 1 - 1e-4 in the plates and 1e-4 in the air (the paper's traces).  The spall opens where the
+# air trace inside the titanium expands in the tension left by the two crossing rarefactions.
+# THE PAPER'S CASES 2 - 4 (GTN yield function + compaction energy for the titanium, 0.01 / 1 / 10 % air) with overrides:
+#   elastic.compaction=1 "elastic.species.chi=0.0 0.7" "elastic.species.gtn=0 1" "elastic.species.Ky=0.5 7.95e-5"
+#   porosity P of the titanium, CASES 3 AND 4 ONLY (1e-2 or 1e-1; case 2 keeps the deck's 1e-4 trace -- do NOT pass
+#   this override with P = 0: that leaves no air in the titanium and nothing can spall):
+#   'eta.ic.expression.region0="1.0e-4 + (1.0 - 2.0e-4)*(x > 0.1)*(x < 0.3) + (1.0 - P - 1.0e-4)*(x >= 0.3)*(x < 1.28)"'
+#   check with --fig 7 | 8 | 9.   K_y: the paper's table gives 4.2135e8 "Pa s" for GTN titanium; taken literally in
+#   gamma' = <g>/K_y that makes the metal practically elastic (stress 20 x yield), against the paper's own figures.
+#   7.95e-5 = (4.2135e8 / sigma_y) in deck units, i.e. the table value read as Pa^2 s -- an ASSUMPTION; any small value
+#   gives the same near-perfect plasticity.
+# Finite-rate pressure relaxation (no coefficient is given in the paper): relax.omega=3.5e4 relax.energy_share=mass
+#   (3.5 /(Pa s), a value fitted by Biasiori-Poulanges & Schmidmayer 2023; share by mass, or the spall voids stall the run).
+# NOT implemented: water-filled pores (case 5).
+# TITANIUM YIELD STRESS: Table 3 of Favrie & Schmidmayer (2026) says 530 MPa, but their Fig. 6 (this case, which
+# they state reproduces Ndanou, Favrie & Gavrilyuk, JCP 295 (2015) 523) shows an elastic precursor of 1.4 GPa; Ndanou
+# et al. list sigma_Y = 1030 MPa for titanium (Ti-6Al-4V) and derive 1.40 / 1.41 GPa for that precursor (their Table 1
+# and eq. 28).  1030 MPa is used here; 530 MPa gives a 0.70 GPa precursor (changelog II.38).
+# NOTE (assumption): the paper does not give the velocity of the air left of the aluminium; it moves with the plate here.
+# The paper uses 400 cells x 2 AMR levels (1600 effective) and the van Leer limiter.
+#
+# Run (from bin/): mpirun -np 8 ./hydro2-2d-g++ ../tests/FlowElasticSolid/input_1D_TiSpallation plot_file=<dir>/output
+# Check:           python3 ../tests/FlowElasticSolid/reference/ti_spallation_check.py <dir>
+# ============================================================================
+plot_file = ./tests/FlowElasticSolid/output_1D_TiSpallation
+Riemann_Solver.type = hllc_elastic
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+elastic.on      = 1
+eta.ic.type = expression
+epsilon = 0.001
+amr.max_level = 0
+amr.blocking_factor = 2
+geometry.is_periodic = 0 1 0
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+cfl   = 0.4
+eos0.cp = 1004.5
+eos1.cp = 1004.5
+eos0.cv = 717.5
+eos1.cv = 717.5
+mu0   = 0.0
+mu1   = 0.0
+sigma = 0.0
+pref = 0.0
+velocity0.ic.type = expression
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "1.0e-4"
+velocity1.ic.type = expression
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "1.0e-4"
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+kappa_method = 1
+Dv = 0
+g = 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+apply_ahe   = 1
+ahe.method  = 0
+cutoff = 1e-8                    # the 1e-4 air trace must relax (it is what opens the spall)
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = periodic
+eta.bc.type.yhi = periodic
+eta_consistent_advect = 1       # minmod at a metal|metal interface (changelog II.25)
+elastic.plastic  = 1
+eos1.gamma = 1.4                 # phase 1: air
+eos1.p0 = 0.0
+density0.ic.type = expression
+density1.ic.type = constant
+density1.ic.constant.value = 1.2e-3
+species.on = 1
+species.eos = mixture
+species.order = 2
+species.ic.type = expression
+species.bc.type.xlo = neumann
+species.bc.type.xhi = neumann
+species.bc.type.ylo = periodic
+species.bc.type.yhi = periodic
+Limiter.type = vanleer
+amr.plot_dt = 0.02
+amr.max_grid_size = 200
+amr.n_cell = 1600 4
+geometry.prob_lo = 0.0  -0.0025  0.0
+geometry.prob_hi = 2.0   0.0025  0.0
+timestep  = 1.0e-6
+dynamictimestep.on = 1
+dynamictimestep.max = 1.0e-3
+dynamictimestep.min = 1.0e-9
+stop_time = 2.0
+eta.ic.expression.region0 = "1.0e-4 + (1.0 - 2.0e-4)*(x > 0.1)*(x < 1.28)"
+eos0.gamma = 2.6                 # defaults of the solid phase (used only in cells without species)
+eos0.p0 = 44.0
+density0.ic.expression.region0 = "2.7*(x < 0.3) + 4.527*(x >= 0.3)"
+velocity0.ic.expression.region0 = "0.7*(x < 0.3)"
+velocity1.ic.expression.region0 = "0.7*(x < 0.3)"
+species.phase0.names   = Al Ti
+species.phase0.gamma   = 3.4 2.6
+species.phase0.cv      = 717.5 717.5
+species.phase0.pinf    = 21.5 44.0
+species.phase0.rho_ref = 2.7 4.527
+species.ic.expression.region0 = "1.0*(x < 0.3)"
+species.ic.expression.region1 = "1.0*(x >= 0.3)"
+elastic.species.mu      = 26.0 42.0
+elastic.species.sigma_y = 0.060 1.030      # Ti: 1030 MPa (Ndanou et al. 2015, Table 1) -- see the header
+elastic.species.Ky      = 0.5 5.0e-3      # 5000 and 50 Pa s in GPa x 10 microseconds

@@ -7,6 +7,9 @@
 //
 // Input parameters (prefix Limiter.):
 //   slope (string)  minmod (default) | mc | vanleer | superbee
+//   slope_rho, slope_vel, slope_p (string, default = slope)  DIAGNOSTIC: a different slope limiter for
+//       (alpha, alpha_rho_0, alpha_rho_1), for the velocity and for the pressure, to find which
+//       reconstruction a failure belongs to.  Unset: all three are "slope" (bit-identical).
 //
 //   minmod   : minmod(a, b)                                   (most dissipative)
 //   mc       : minmod(2a, (a+b)/2, 2b)  monotonized central   (Sch20's choice, see MUSCL2)
@@ -64,19 +67,29 @@ inline Set::Scalar SlopeLimit(Slope s, Set::Scalar a, Set::Scalar b)
     return 0.0;
 }
 
-inline Primitive SlopeLimit(Slope s, const Primitive &a, const Primitive &b)
+inline Primitive SlopeLimit(Slope s, const Primitive &a, const Primitive &b, Slope sv, Slope sp)
 {
     Primitive r;
     r.alpha       = SlopeLimit(s, a.alpha,       b.alpha      );
     r.alpha_rho_0 = SlopeLimit(s, a.alpha_rho_0, b.alpha_rho_0);
     r.alpha_rho_1 = SlopeLimit(s, a.alpha_rho_1, b.alpha_rho_1);
-    r.u           = SlopeLimit(s, a.u,           b.u          );
-    r.v           = SlopeLimit(s, a.v,           b.v          );
-    r.w           = SlopeLimit(s, a.w,           b.w          );
-    r.p_mix       = SlopeLimit(s, a.p_mix,       b.p_mix      );
+    r.u           = SlopeLimit(sv, a.u,          b.u          );
+    r.v           = SlopeLimit(sv, a.v,          b.v          );
+    r.w           = SlopeLimit(sv, a.w,          b.w          );
+    r.p_mix       = SlopeLimit(sp, a.p_mix,      b.p_mix      );
     r.gamma0 = a.gamma0;  r.pi0 = a.pi0;
     r.gamma1 = a.gamma1;  r.pi1 = a.pi1;
     return r;
+}
+
+inline Primitive SlopeLimit(Slope s, const Primitive &a, const Primitive &b) { return SlopeLimit(s, a, b, s, s); }
+
+inline Primitive PiecewiseLinear(Slope s, const Primitive stencil[Limiter::STENCIL_SIZE], Slope sv, Slope sp)
+{
+    const Primitive &Lm = stencil[Limiter::RADIUS - 1];
+    const Primitive &C  = stencil[Limiter::RADIUS    ];
+    const Primitive &Rm = stencil[Limiter::RADIUS + 1];
+    return C + 0.5 * SlopeLimit(s, C - Lm, Rm - C, sv, sp);
 }
 
 inline Primitive PiecewiseLinear(Slope s, const Primitive stencil[Limiter::STENCIL_SIZE])
@@ -96,19 +109,24 @@ public:
     MUSCL(IO::ParmParse &pp)                 { pp_queryclass(*this); }
     MUSCL() { IO::ParmParse pp; pp_queryclass(*this); }
 
-    Slope slope = Slope::Minmod;
+    Slope slope = Slope::Minmod, slope_vel = Slope::Minmod, slope_p = Slope::Minmod;
 
     static void Parse(MUSCL &value, IO::ParmParse &pp)
     {
         std::string s = "minmod";
         pp.query_validate("slope", s, {"minmod", "mc", "vanleer", "superbee"});
-        value.slope = (s == "mc") ? Slope::MC : (s == "vanleer") ? Slope::VanLeer
-                    : (s == "superbee") ? Slope::Superbee : Slope::Minmod;
+        auto conv = [](const std::string &q) { return (q == "mc") ? Slope::MC : (q == "vanleer") ? Slope::VanLeer
+                    : (q == "superbee") ? Slope::Superbee : Slope::Minmod; };
+        std::string sr = s, sv = s, sp = s;
+        if (pp.contains("slope_rho")) pp.query_validate("slope_rho", sr, {"minmod", "mc", "vanleer", "superbee"});
+        if (pp.contains("slope_vel")) pp.query_validate("slope_vel", sv, {"minmod", "mc", "vanleer", "superbee"});
+        if (pp.contains("slope_p")) pp.query_validate("slope_p", sp, {"minmod", "mc", "vanleer", "superbee"});
+        value.slope = conv(sr); value.slope_vel = conv(sv); value.slope_p = conv(sp);
     }
 
     Primitive Reconstruct(const Primitive stencil[STENCIL_SIZE]) const override
     {
-        return PiecewiseLinear(slope, stencil);
+        return PiecewiseLinear(slope, stencil, slope_vel, slope_p);
     }
 };
 

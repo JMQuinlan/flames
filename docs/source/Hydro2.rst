@@ -274,6 +274,7 @@ Feature pages
    Hydro2_ElasticSolid
    Hydro2_Ablation
    Hydro2_PhaseChange
+   Hydro2_Species
    Hydro2_BoundaryConditions
    Hydro2_Shell
    Hydro2_HowTo

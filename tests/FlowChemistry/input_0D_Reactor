@@ -1,0 +1,149 @@
+# ============================================================================
+# FlowChemistry / constant-volume reactor  (Hydro2, species.on = 1, chem.on = 1: native one-step Arrhenius reaction)
+#
+# Gas at rest in a periodic box (rho 1, p 1, gamma 1.2, cv 5 -> R = 1, T = 1), all of it "Fuel".
+#     Fuel -> Product + Q,   dY/dt = -A Y exp(-T_a/T),   cv dT/dt = -Q dY/dt     (constant volume)
+# so T = T_0 + Q (1 - Y)/cv exactly, p = rho R T, and
+#   * T_a = 0 (this deck: A = 1, Q = 5):  Y = exp(-A t),  T = 1 + (1 - exp(-t))      closed form
+#   * T_a > 0 (chem.Ta=10 chem.A=2000 chem.Q=10 stop_time=1.5): thermal explosion; reference = the same ODE integrated
+#     by scipy in the check script (ignition time = time of the steepest temperature rise).
+# Checks the reaction step, its sub-stepping, the energy bookkeeping (rho E rises by Q times the fuel consumed) and that
+# species stay closed (Fuel + Product = phase mass).
+#
+# Run (from bin/): mpirun -np 1 ./hydro2-2d-g++ ../tests/FlowChemistry/input_0D_Reactor plot_file=<dir>/output
+# Check:           python3 ../tests/FlowChemistry/reference/chemistry_check.py reactor <dir> [<dir> ...]
+# ============================================================================
+plot_file = ./tests/FlowChemistry/output_0D_Reactor
+# Check:           python3 ../tests/FlowSpecies/reference/species_check.py advection <dir> [<dir> ...]
+# ============================================================================
+plot_file = ./tests/FlowSpecies/output_1D_Advection
+# Check:           python3 ../tests/FlowConjugateHeat/reference/becker_shock_check.py <dir> [<dir> ...]
+# ============================================================================
+plot_file = ./tests/FlowConjugateHeat/output_1D_BeckerShock
+# Check:           python3 ../tests/FlowAblation/reference/stefan_check.py <dir>
+# ============================================================================
+plot_file = ./tests/FlowAblation/output_1D_Stefan
+amr.plot_dt = 0.05
+amr.max_grid_size = 16
+amr.blocking_factor = 2
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level = 0
+amr.n_cell = 16 4
+amr.n_error_buf      = 8
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 1.0 0.25 0.0
+geometry.is_periodic = 1 1 0
+timestep = 1e-5
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1e-2
+dynamictimestep.min = 1e-9
+cfl                 = 0.3
+cfl_v               = 0.3
+stop_time = 3.0
+apply_embedded_solid = 0
+eta.ic.type = constant
+eta.ic.constant.value = 1.0e-6
+eos0.gamma = 1.2
+eos0.p0    = 0.0
+eos0.cp = 6.0
+eos0.cv = 5.0
+mu0 = 0.0
+mu0_b = 0.0
+eos1.gamma = 1.2
+eos1.p0    = 0.0
+eos1.cp = 6.0
+eos1.cv = 5.0
+mu1 = 0.0
+mu1_b = 0.0
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.0"
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "1.0"
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "1.0"
+epsilon = 0.1
+sigma   = 0.0
+Dv      = 0.0
+pref    = 0.0
+small   = 1e-6
+grav    = 0.0
+eta_refinement_criterion   = 1e10
+omega_refinement_criterion = 1e10
+gradu_refinement_criterion = 1e10
+p_refinement_criterion = 1e10
+rho_refinement_criterion = 1e10
+cutoff = 1e-16
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+kappa_method        = 1
+
+
+
+
+eta.bc.type.xlo = periodic
+eta.bc.type.xhi = periodic
+eta.bc.type.ylo = periodic
+eta.bc.type.yhi = periodic
+
+density.bc.type.xlo = periodic
+density.bc.type.xhi = periodic
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+
+density0.bc.type.xlo = periodic
+density0.bc.type.xhi = periodic
+density0.bc.type.ylo = periodic
+density0.bc.type.yhi = periodic
+
+density1.bc.type.xlo = periodic
+density1.bc.type.xhi = periodic
+density1.bc.type.ylo = periodic
+density1.bc.type.yhi = periodic
+
+energy.bc.type.xlo = periodic
+energy.bc.type.xhi = periodic
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+
+momentum.bc.type.xlo = periodic periodic
+momentum.bc.type.xhi = periodic periodic
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+nghost = 4
+thermal.conduction = 0
+thermal.Pr = 0.75
+ablation.on = 0
+
+
+dynamictimestep.max = 2.0e-3      # the flow is at rest: the step is set here, the chemistry sub-steps inside it
+species.on = 1
+species.phase1.names = Fuel Product
+species.ic.type = expression
+species.ic.expression.region0 = "1.0"
+species.ic.expression.region1 = "0.0"
+species.bc.type.xlo = periodic
+species.bc.type.xhi = periodic
+species.bc.type.ylo = periodic
+species.bc.type.yhi = periodic
+chem.on = 1
+chem.reactant = Fuel
+chem.product  = Product
+chem.A  = 1.0
+chem.Ta = 0.0
+chem.Q  = 5.0

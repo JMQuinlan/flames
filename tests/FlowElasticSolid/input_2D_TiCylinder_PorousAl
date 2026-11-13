@@ -1,0 +1,130 @@
+# ============================================================================
+# FlowElasticSolid / 2D perforation of a porous aluminium plate by a titanium cylinder
+# Favrie & Schmidmayer, CMAME 455 (2026) 118880, Sec. 5.4, Fig. 13 (results at 1, 3, 5, 10, 20 microseconds)
+#
+# Units: GPa, g/cm^3, cm, km/s -> time unit 10 microseconds.  Domain 2.4 cm x 2.4 cm, 400 x 400 cells (the paper's
+# grid for Sec. 5.3), outflow on all sides.  Cylinder of diameter 0.2 cm centred at (0.5, 1.2) moving at 700 m/s in +x;
+# plate 0.6 < x < 0.8, 0.4 < y < 2.0 with 40 % of air in its pores; p = 1e5 Pa.
+# Three materials in the two-phase solver: phase 0 = the solid with species Al and Ti (species stage 2b), phase 1 = air.
+# GTN yield function + compaction energy for both metals (elastic.compaction), instantaneous pressure relaxation.
+# ASSUMPTIONS as in input_1D_TiSpallation: associated flow rule, 1/rho_r in the compaction energy, GTN viscosity
+# read as table value / sigma_y (Al 5.4e9 / 60e6 = 90 Pa s, Ti 4.2135e8 / 530e6 = 0.795 Pa s).
+# The paper runs this one on 100 x 100 base cells with one refinement level (200 x 200 effective); 400 x 400 here.
+# The solid trace in the air (1e-4) is labelled titanium: aluminium is the plate only, so the cylinder has no
+# aluminium rim in the plots.
+# The paper shows no numbers for this test, only fields (its Fig. 13); the comparison is by figure.
+#
+# Run (from bin/): mpirun -np 16 ./hydro2-2d-g++ ../tests/FlowElasticSolid/input_2D_TiCylinder_PorousAl amr.max_grid_size=100 plot_file=<dir>/output
+# Plot:            python3 ../tests/FlowElasticSolid/reference/favrie_schmidmayer_2d_plots.py perforation <dir>
+# ============================================================================
+plot_file = ./tests/FlowElasticSolid/output_2D_TiCylinder_PorousAl
+Riemann_Solver.type = hllc_elastic
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+elastic.on      = 1
+eta.ic.type = expression
+amr.max_level = 0
+amr.blocking_factor = 2
+geometry.prob_lo = 0.0  0.0   0.0
+geometry.is_periodic = 0 0 0
+timestep  = 1.0e-5
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1e-2
+dynamictimestep.min = 1e-10
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+cfl   = 0.4
+eos1.gamma = 1.4
+eos1.p0 = 0.0
+eos0.cp = 1004.5
+eos1.cp = 1004.5
+eos0.cv = 717.5
+eos1.cv = 717.5
+mu0   = 0.0
+mu1   = 0.0
+sigma = 0.0
+pref = 0.0
+velocity0.ic.type = expression
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 1.0e-4
+density1.ic.type = constant
+velocity1.ic.type = expression
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 1.0e-4
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+kappa_method = 1
+Dv = 0
+g = 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+apply_ahe   = 1
+ahe.method  = 0
+Limiter.type = vanleer
+eta_consistent_advect = 1
+epsilon = 0.001
+amr.plot_dt = 0.1
+amr.max_grid_size = 100
+amr.n_cell = 400 400
+geometry.prob_hi = 2.4 2.4 0.0
+stop_time = 2.0
+cutoff = 1e-8
+eta.ic.expression.constant.w = 0.006       # interface half-width (1 cell)
+eta.ic.expression.region0 = "min(1.0e-4 + (1.0 - 2.0e-4)*0.5*(1.0 - tanh((sqrt((x - 0.5)*(x - 0.5) + (y - 1.2)*(y - 1.2)) - 0.1)/w)) + (0.6 - 1.0e-4)*0.25*(1.0 + tanh((x - 0.6)/w))*(1.0 - tanh((x - 0.8)/w))*0.25*(1.0 + tanh((y - 0.4)/w))*(1.0 - tanh((y - 2.0)/w)), 1.0 - 1.0e-4)"
+eos0.gamma = 2.6                 # defaults of the solid phase (used only in cells without species)
+eos0.p0 = 44.0
+density0.ic.type = expression
+density0.ic.expression.constant.w = 0.006
+density0.ic.expression.region0 = "2.7*(0.25*(1.0 + tanh((x - 0.6)/w))*(1.0 - tanh((x - 0.8)/w))*0.25*(1.0 + tanh((y - 0.4)/w))*(1.0 - tanh((y - 2.0)/w))) + 4.527*(1.0 - 0.25*(1.0 + tanh((x - 0.6)/w))*(1.0 - tanh((x - 0.8)/w))*0.25*(1.0 + tanh((y - 0.4)/w))*(1.0 - tanh((y - 2.0)/w)))"
+density1.ic.constant.value = 1.2e-3
+velocity0.ic.expression.constant.w = 0.006
+velocity0.ic.expression.region0 = "0.7*0.5*(1.0 - tanh((sqrt((x - 0.5)*(x - 0.5) + (y - 1.2)*(y - 1.2)) - 0.1)/w))"
+velocity0.ic.expression.region1 = "0.0"
+velocity1.ic.expression.constant.w = 0.006
+velocity1.ic.expression.region0 = "0.7*0.5*(1.0 - tanh((sqrt((x - 0.5)*(x - 0.5) + (y - 1.2)*(y - 1.2)) - 0.1)/w))"
+velocity1.ic.expression.region1 = "0.0"
+species.on = 1
+species.eos = mixture
+species.order = 2
+species.phase0.names   = Al Ti
+species.phase0.gamma   = 3.4 2.6
+species.phase0.cv      = 717.5 717.5
+species.phase0.pinf    = 21.5 44.0
+species.phase0.rho_ref = 2.7 4.527
+species.ic.type = expression
+species.ic.expression.constant.w = 0.006
+species.ic.expression.region0 = "0.25*(1.0 + tanh((x - 0.6)/w))*(1.0 - tanh((x - 0.8)/w))*0.25*(1.0 + tanh((y - 0.4)/w))*(1.0 - tanh((y - 2.0)/w))"
+species.ic.expression.region1 = "1.0 - 0.25*(1.0 + tanh((x - 0.6)/w))*(1.0 - tanh((x - 0.8)/w))*0.25*(1.0 + tanh((y - 0.4)/w))*(1.0 - tanh((y - 2.0)/w))"
+species.bc.type.xlo = neumann
+species.bc.type.xhi = neumann
+species.bc.type.ylo = neumann
+species.bc.type.yhi = neumann
+elastic.plastic = 1
+elastic.compaction = 1
+elastic.species.mu      = 26.0 42.0
+elastic.species.sigma_y = 0.060 0.530
+elastic.species.Ky      = 9.0e-3 7.95e-5
+elastic.species.chi     = 0.07 0.7
+elastic.species.gtn     = 1 1

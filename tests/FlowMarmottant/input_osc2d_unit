@@ -1,0 +1,137 @@
+# ============================================================================
+# FlowMarmottant / 2D COATED-BUBBLE UNIT TEST FOR THE SHELL NUMERICS  (not a Keller-Miksis benchmark)
+#
+# Sch20-Oscillating Marmottant (Light drive by default) as a 2D quarter cylinder, with three changes made ONLY to
+# afford a refined interface and many scheme variants:
+#   * liquid softened, eos0.p0 = 1e7 (c = 153 m/s instead of 1533): the acoustic time step is 10 x larger;
+#   * domain 5 R0 with NSCBC outflow at p_inf on the far faces;
+#   * two dimensions (cylinder: one curvature 1/R, div_s u = R'/R).
+# Reference: the cylindrical Rayleigh-Plesset equation between R and the constant-pressure surface (same closure as
+# the solver), NOT Keller-Miksis.  What the test is for: surface dilatation, curvature and roundness of the interface
+# as a function of limiter, alpha row and resolution.
+#   resolution:  amr.max_level = 1 | 2 | 3  with  eta.ic.expression.constant.epsilon = 1.5625e-7 | 7.8125e-8 | 3.90625e-8
+#   full drive:  pressure0.ic.expression.constant.p_b = 1.0e4  pressure1.ic.expression.constant.p_b = 1.0e4
+#   scheme:      Limiter.type = weno3 | muscl2 | thinc ;  eta_consistent_advect = 0 | 1
+# Derived from the 2D test bed of 2026-10-01 (stiff liquid, 10 R0).
+# ============================================================================
+alamo.program = hydro2
+plot_file = ./bin/tests/FlowMarmottant/output_osc2d_unit
+amr.plot_int = -1
+amr.plot_dt = 2.0e-8
+amr.thermo.plot_dt = 1.0e-9
+amr.max_grid_size = 32
+amr.blocking_factor = 8
+amr.regrid_int = 10
+amr.grid_eff = 0.8
+amr.max_level = 1                 # R0/dx = 12.8 x 2^max_level: 1 -> 25.6, 2 -> 51.2, 3 -> 102.4 (set epsilon = 2 dx with it)
+amr.n_cell = 64 64
+amr.n_error_buf = 8
+nghost = 4
+timestep = 1.0e-11
+dynamictimestep.on = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1.0e-9
+dynamictimestep.min = 1.0e-17
+cfl = 0.5
+geometry.prob_lo = 0.0 0.0
+geometry.prob_hi = 1.0e-5 1.0e-5   # 5 R0
+geometry.is_periodic = 0 0
+stop_time = 8.0e-7
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 1.5625e-7   # 2 cells at max_level 1
+eta.ic.expression.constant.R0 = 2.0e-6
+eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y) - R0)/epsilon))"
+epsilon = eta.ic.expression.constant.epsilon
+eos0.gamma = 2.35
+eos0.p0 = 1.0e7                    # SOFTENED liquid: c = 153 m/s (wall speeds here are a few m/s to ~30 m/s)
+eos0.cv = 1781.0
+eos0.cp = 4186.0
+eos1.gamma = 1.4
+eos1.p0 = 0.0
+eos1.cv = 714.286
+eos1.cp = 1000.0
+density0.ic.type = expression
+density0.ic.expression.region0 = "1000.0"
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.0"
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_inf = 1.0e5
+pressure0.ic.expression.constant.p_b = 8.2e4      # Light drive; 1.0e4 = the full Oscillating case
+pressure0.ic.expression.constant.R0 = 2.0e-6
+pressure0.ic.expression.constant.r_inf = 1.0e-5
+pressure0.ic.expression.region0 = "p_inf - (p_inf - p_b)*R0/max(sqrt(x*x + y*y), R0)"
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_b = 8.2e4
+pressure1.ic.expression.region0 = "p_b"
+mu0 = 1.0e-3
+mu0_b = 0.0
+mu1 = 0.0
+mu1_b = 0.0
+apply_surface_tension = 1
+sigma = 0.0728
+pref = 0.0
+kappa_method = 1
+marmottant = 1
+marmottant.R0 = 2.0e-6
+marmottant.R_buckling = 1.96e-6
+marmottant.chi = 1.0
+marmottant.sigma_break = 0.073
+shell.kappa_s = 7.2e-9
+shell.mu_s = 0.0
+nscbc.xhi.type = outflow
+nscbc.xhi.target_p = 1.0e5
+nscbc.xhi.sigma = 0.6
+nscbc.xhi.beta = 0.5
+nscbc.xhi.L_ref = 1.25e-7
+nscbc.yhi.type = outflow
+nscbc.yhi.target_p = 1.0e5
+nscbc.yhi.sigma = 0.6
+nscbc.yhi.beta = 0.5
+nscbc.yhi.L_ref = 1.25e-7
+eta.bc.type.xlo = REFLECT_EVEN
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = REFLECT_EVEN
+eta.bc.type.yhi = neumann
+density.bc.type.xlo = REFLECT_EVEN
+density.bc.type.xhi = nscbc_outflow
+density.bc.type.ylo = REFLECT_EVEN
+density.bc.type.yhi = nscbc_outflow
+energy.bc.type.xlo = REFLECT_EVEN
+energy.bc.type.xhi = nscbc_outflow
+energy.bc.type.ylo = REFLECT_EVEN
+energy.bc.type.yhi = nscbc_outflow
+momentum.bc.type.xlo = REFLECT_ODD REFLECT_EVEN
+momentum.bc.type.xhi = nscbc_outflow nscbc_outflow
+momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD
+momentum.bc.type.yhi = nscbc_outflow nscbc_outflow
+eta_refinement_criterion = 1.0e-1
+omega_refinement_criterion = 1.0e+10
+p_refinement_criterion = 1.0e+10
+rho_refinement_criterion = 1.0e+10
+gradu_refinement_criterion = 1.0e+10
+cutoff = 1.0e-4
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+apply_buoyancy = 0
+apply_weight = 0
+apply_vaporization = 0
+grav = 0.0
+Riemann_Solver.type = hllc
+Limiter.type = weno3
+integration.type = RungeKutta
+integration.rk.type = 3
+apply_sharpening = 0
+sharpening_frequency = 20
+reinit_max_iter = 100
+reinit_tolerance = 1e-6
+omega_relax = 0.5
+plot_minimal = 0                   # keep kappa1 / kappa2 (shell tension with and without the viscous part)
+relax_diag = 0
+equalize_ic_pressure = 1

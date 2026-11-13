@@ -1,0 +1,131 @@
+# ============================================================================
+# FlowPhaseChange / 1D CO2 depressurization tube  (Hydro2, phasechange.on = 0 or 1)
+#
+# Lund & Aursand, Energy Procedia 23 (2012) 246; Bacigaluppi et al. (arXiv:2105.12874) Sec. 5.1.2;
+# Gun, Hoarau & Goncalves, ICHD 2024 (hal-04691261), 4- and 6-equation models.
+# An 80 m pipe, diaphragm at x = 50 m.  Left: liquid CO2 (vapour volume fraction 1e-5) at 60 bar;
+# right: CO2 vapour (liquid volume fraction 1e-5) at 10 bar; both at rest and at T = 273 K.
+# T = (p + pi)/((gamma - 1) cv rho) (phase-change convention) gives the densities below.
+# p_sat(273 K) of this EOS pair is about 35 bar, so the rarefaction running into the liquid takes it
+# below saturation: without mass transfer it stays metastable (two-material Riemann problem, exact
+# solution available); with phasechange.on = 1 it flashes and the pressure is held near p_sat(T).
+#   liquid (phase 1): gamma 1.23, pi 1.32e8, cv 2440, q -6.23e5, q' -5340.9
+#   vapour (phase 0): gamma 1.06, pi 8.86e5, cv 2410, q -3.01e5, q' -10398.1
+# t = 0.08 s.
+#
+# Run (from bin/): mpirun -np 4 ./hydro2-2d-g++ ../tests/FlowPhaseChange/input_1D_CO2Depressurization plot_file=<dir> [phasechange.on=0]
+# Check:           python3 ../tests/FlowPhaseChange/reference/co2_depressurization_check.py <dir with> <dir without>
+# ============================================================================
+plot_file = ./tests/FlowPhaseChange/output_1D_CO2Depressurization
+
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+amr.plot_dt = 0.01
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.n_cell = 2000 4
+geometry.prob_lo = 0.0  -0.08 0.0
+geometry.prob_hi = 80.0  0.08 0.0
+geometry.is_periodic = 0 1 0
+
+timestep = 1.0e-7
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1e-4
+dynamictimestep.min = 1e-12
+stop_time = 0.08
+cfl   = 0.4
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+# eta = volume fraction of phase 0 (vapour)
+eta.ic.type = expression
+eta.ic.expression.constant.a = 1.0e-5
+eta.ic.expression.region0 = "a*(x < 50.0) + (1.0 - a)*(x >= 50.0)"
+epsilon = 0.04
+
+# phase 0: vapour
+eos0.gamma = 1.06
+eos0.p0 = 8.86e5
+eos0.cv = 2410.0
+eos0.cp = 2554.6
+# phase 1: liquid
+eos1.gamma = 1.23
+eos1.p0 = 1.32e8
+eos1.cv = 2440.0
+eos1.cp = 3001.2
+mu0   = 0.0
+mu1   = 0.0
+sigma = 0.0
+pref = 0.0
+
+density0.ic.type = expression
+density0.ic.expression.region0 = "174.4359835646141*(x < 50.0) + 47.776105867392126*(x >= 50.0)"
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "6.0e6*(x < 50.0) + 1.0e6*(x >= 50.0)"
+
+density1.ic.type = expression
+density1.ic.expression.region0 = "900.7386056566386*(x < 50.0) + 868.1031489299488*(x >= 50.0)"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "6.0e6*(x < 50.0) + 1.0e6*(x >= 50.0)"
+
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = periodic
+eta.bc.type.yhi = periodic
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+kappa_method = 1
+Dv = 0
+g = 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+cutoff = 1e-12
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+apply_ahe   = 1
+ahe.method  = 0
+
+phasechange.on = 1
+phasechange.liquid = 1
+phasechange.liquid_material = co2_liquid
+phasechange.vapor_material  = co2_vapor
+phasechange.material_file   = ../data/hydro2_materials.dat
+phasechange.Yv0 = 1.0
+phasechange.T_lo = 150
+phasechange.T_hi = 600
+# The vapour trace of the compressed liquid (60 bar > p_sat) condenses at t = 0 down to the solver's floor
+# (vapour mass fraction 1e-14, volume fraction ~5e-14).  With the default alpha_min = 1e-9 those cells are then
+# skipped for good and the liquid stays metastable when the rarefaction takes it below p_sat; keep them active:
+phasechange.alpha_min = 1e-16

@@ -91,6 +91,7 @@ private:
 #endif
 
     unsigned int m_ncomp = 0;
+    int m_dirichlet_face = 0;   // see Parse: dirichlet_at_face
 
     std::array<std::vector<int>, m_nfaces> m_bc_type;
     std::array<std::vector<amrex::Parser>, m_nfaces> m_bc_func_parser; 
@@ -99,8 +100,15 @@ private:
     //std::array<std::vector<Numeric::Interpolator::Linear<Set::Scalar>>, m_nfaces> m_bc_val;
 
 public:
+    void SetDirichletFace(int m) { m_dirichlet_face = m; }
+    int  GetDirichletFace() const { return m_dirichlet_face; }
     static void Parse(Expression& value, IO::ParmParse& pp)
     {
+        // Where a Dirichlet value sits: 0 (default) = at the ghost-cell centre (ghost = value; the convention
+        // of the elliptic solvers); 1 = on the domain face for every Dirichlet face (ghost = 2 value - mirror);
+        // 2 = on the face only for impermeable walls (multi-component BCs whose wall-normal component is a
+        // Dirichlet 0).  Hydro2 sets 2 for momentum.bc unless this key is given.
+        if (pp.contains("dirichlet_at_face")) pp.query("dirichlet_at_face", value.m_dirichlet_face);
         std::map<std::string, int> bcmap;
         bcmap["BOGUS_BC"] = amrex::BCType::mathematicalBndryTypes::bogus;
         bcmap["INT_DIR"] = amrex::BCType::mathematicalBndryTypes::int_dir;

@@ -50,6 +50,7 @@
 #include "IO/ParmParse.H"
 #include "Solver/Local/FluidRiemann/Riemann.H"
 #include "Solver/EOS/EOS.H"
+#include "Solver/Local/FluidRiemann/HLLE.H"
 
 namespace Solver
 {
@@ -65,6 +66,8 @@ public:
 
     int            entropy_fix      = 0;     // 0 = off, 1 = Harten fix on acoustics
     Set::Scalar    entropy_fix_eps  = 0.05;  // Harten threshold parameter (fraction of c_hat)
+    HLLE           hlle_fallback;            // used only when positivity_fix = 1
+    int            positivity_fix   = 0;     // 1 = HLLE flux where the linearized intermediate states are non-physical (Einfeldt et al. 1991)
 
     Roe(IO::ParmParse &pp, std::string nm) { pp_queryclass(nm, *this); }
     Roe(IO::ParmParse &pp) { pp_queryclass(*this); }
@@ -78,6 +81,10 @@ public:
     {
         pp.query_default("entropy_fix",     value.entropy_fix,     0);
         pp.query_default("entropy_fix_eps", value.entropy_fix_eps, 0.05);
+        // Einfeldt, Munz, Roe & Sjogreen, JCP 92 (1991) 273: no linearized Riemann solver is positively
+        // conservative; near vacuum the intermediate states U_L + a1 r1 and U_R - a3 r3 have negative density
+        // or pressure.  With positivity_fix = 1 such faces take the HLLE flux instead (default 0 = off).
+        pp.query_default("positivity_fix",  value.positivity_fix,  0);
     }
 
     virtual Flux Solve(State lo, State hi, Set::Scalar /*p_ref*/, Set::Scalar small) override
@@ -190,6 +197,24 @@ public:
         const Set::Scalar aY1    = Darh1 - Y1_hat * Drho;                           // species 1 LD
         // E_k waves are pure LD with amplitude ΔE_k (eigenvector is the unit
         // basis vector for E_k); they appear only in D_{E_k} below.
+
+        // Positivity check of the two intermediate states (Einfeldt et al. 1991).
+        if (positivity_fix == 1)
+        {
+            auto bad = [&](Set::Scalar r, Set::Scalar m, Set::Scalar E) {
+                if (!(r > small)) return true;
+                const Set::Scalar uu = m / r;
+                const Set::Scalar pp_ = (gamma_eff - 1.0) * (E - 0.5 * r * uu * uu) - gamma_eff * pi_eff;
+                return !(pp_ + pi_eff > small);
+            };
+            // state between the u-c and the contact waves: U_L + a1 r1;  between the contact and u+c: U_R - a3 r3
+            const Set::Scalar rL1 = rhoL + a1,  mL1 = rhoL * uL + a1 * (u_hat - c_hat), EL1 = lo.E_total + a1 * (H_hat - u_hat * c_hat);
+            const Set::Scalar rR3 = rhoR - a3,  mR3 = rhoR * uR - a3 * (u_hat + c_hat), ER3 = hi.E_total - a3 * (H_hat + u_hat * c_hat);
+            if (bad(rL1, mL1, EL1 - 0.5 * rL1 * v_hat * v_hat) || bad(rR3, mR3, ER3 - 0.5 * rR3 * v_hat * v_hat))
+            {
+                return hlle_fallback.Solve(lo, hi, 0.0, small);
+            }
+        }
 
         // ============================================================
         // 6. Wave-speed magnitudes (with optional Harten entropy fix on

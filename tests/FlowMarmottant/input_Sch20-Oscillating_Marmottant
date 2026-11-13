@@ -206,6 +206,9 @@ marmottant.sigma_break = 0.073   # rupture tension [N/m]
 # until D_s is implemented in CapillaryOperator).
 shell.kappa_s = 7.2e-9           # surface dilatational viscosity [kg/s]
 shell.mu_s    = 0.0
+# shell.divs_kinematic = 5        # [2026-10-07] interface-evaluated div_s u (ported from PolymerVisc).  The default 0
+#                                  # gives 0.56 of the analytic kappa_s damping on input_Linear_ShellDamping_UNIT, 5 gives
+#                                  # 0.90 (changelog II.46).  Uncomment to use; not yet run on this deck on this branch.
 
 ### BOUNDARY CONDITIONS -- octant symmetry (lo) + NSCBC outflow (hi) ###
 # Switched from neumann to NSCBC on the far faces.  Neumann pins the outer

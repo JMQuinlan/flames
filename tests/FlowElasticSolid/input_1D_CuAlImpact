@@ -1,0 +1,134 @@
+# ============================================================================
+# FlowElasticSolid / impact of an aluminium plate on a copper plate at 600 m/s, elastic and elasto-plastic
+# (Hydro2, elastic.on = 1, elastic.plastic = 1)
+#
+# Test 5.1 / Fig. 3-4 of  N. Favrie, K. Schmidmayer, "A multiphase compressible flow model including elasto-
+# viscoplastic solids with irreversible compaction", Comput. Methods Appl. Mech. Engrg. 455 (2026) 118880.
+#   x < 0.5 m: copper   (rho 8900, gamma 4.2, p_inf 34.2 GPa, mu 92 GPa),  u = +400 m/s
+#   x > 0.5 m: aluminium (rho 2700, gamma 3.4, p_inf 21.5 GPa, mu 26 GPa), u = -200 m/s
+#   p = 1e5 Pa everywhere; von Mises yield 297 / 60 MPa, Perzyna viscosity 15000 / 5000 Pa s (their Table 3);
+#   results at t = 50 microseconds; the paper uses 250 cells x 3 AMR levels (dx = 0.5 mm) and minmod.
+# Units here: g/cm^3, km/s, GPa, m, ms  (so t_final = 0.05, K_y in GPa ms).
+# Without plasticity one elastic shock runs into each plate; with it each splits into an elastic precursor
+# (stress limited by the yield stress) and a slower plastic shock.
+# DIFFERENCES from the paper's set-up: two materials (the paper adds 1e-5 of air, inert here); the elastic energy
+# is Favrie, Gavrilyuk & Saurel (2009) eq. 9/11, not the paper's eq. 43 (same shear modulus at small strain -- the
+# elastic strains stay below 1 %); pressure relaxation is instantaneous (the paper's is finite-rate).
+#
+# Run (from bin/): mpirun -np 8 ./hydro2-2d-g++ ../tests/FlowElasticSolid/input_1D_CuAlImpact plot_file=<dir>/output [elastic.plastic=0]
+# Check:           python3 ../tests/FlowElasticSolid/reference/cual_impact_check.py <plastic_dir> <elastic_dir>
+# ============================================================================
+plot_file = ./tests/FlowElasticSolid/output_1D_CuAlImpact
+# Check:           python3 ../tests/FlowElasticSolid/reference/cual_shock_check.py <dir>
+# ============================================================================
+plot_file = ./tests/FlowElasticSolid/output_1D_CuAlShock
+
+Riemann_Solver.type = hllc_elastic
+Limiter.type        = minmod
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+elastic.on      = 1
+elastic.mu0     = 26.0     # phase 0 (eta = 1): aluminium
+elastic.rhoref0 = 2.7
+elastic.mu1     = 92.0     # phase 1 (eta = 0): copper
+elastic.rhoref1 = 8.9
+
+eta.ic.type = expression
+eta.ic.expression.constant.xi = 0.5
+eta.ic.expression.region0 = "1.0e-5 + (1.0 - 2.0e-5)*(x >= xi)"
+epsilon = 0.001
+
+amr.plot_dt = 0.005
+amr.max_level = 0
+amr.max_grid_size = 250
+amr.blocking_factor = 2
+amr.n_cell = 2000 4
+geometry.prob_lo = 0.0  -0.001   0.0
+geometry.prob_hi = 1.0   0.001   0.0
+geometry.is_periodic = 0 1 0
+
+timestep  = 1.0e-5
+stop_time = 0.05
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+cfl   = 0.4
+
+eos0.gamma = 3.4
+eos1.gamma = 4.2
+eos0.p0 = 21.5
+eos1.p0 = 34.2
+eos0.cp = 1004.5
+eos1.cp = 1004.5
+eos0.cv = 717.5
+eos1.cv = 717.5
+
+mu0   = 0.0
+mu1   = 0.0
+sigma = 0.0
+pref = 0.0
+
+# aluminium (phase 0)
+density0.ic.type = constant
+density0.ic.constant.value = 2.7
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.4*(x < 0.5) - 0.2*(x >= 0.5)"
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "1.0e-4"
+
+# copper (phase 1)
+density1.ic.type = constant
+density1.ic.constant.value = 8.9
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.4*(x < 0.5) - 0.2*(x >= 0.5)"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "1.0e-4"
+
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+kappa_method = 1
+Dv = 0
+g = 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+apply_ahe   = 1
+ahe.method  = 0
+cutoff = 1e-4
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = periodic
+eta.bc.type.yhi = periodic
+eta_consistent_advect = 1       # minmod at a metal|metal interface (changelog II.25)
+# --- elasto-viscoplasticity (von Mises, Perzyna), Table 3 of the paper; set elastic.plastic = 0 for the elastic run
+elastic.plastic  = 1
+elastic.sigma_y0 = 0.060        # aluminium  60 MPa
+elastic.sigma_y1 = 0.297        # copper    297 MPa
+elastic.Ky0      = 5.0e-3       # aluminium 5000 Pa s  = 5e-3 GPa ms
+elastic.Ky1      = 1.5e-2       # copper   15000 Pa s  = 1.5e-2 GPa ms

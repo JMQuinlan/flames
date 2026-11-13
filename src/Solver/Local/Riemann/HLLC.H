@@ -5,7 +5,7 @@
 // Source: V.A. Titarev, E.F. Toro, Finite-volume WENO schemes for three-dimensional conservation laws, Journal of Computational Physics, Volume 201, Issue 1, 2004, Pages 238-260, ISSN 0021-9991, https://doi.org/10.1016/j.jcp.2004.05.015.
 //          URL: https://www.sciencedirect.com/science/article/pii/S0021999104002281
 //
-// Source: M. J. Del Razo and R. J. LeVeque, "Numerical Methods for Interface Coupling of Compressible and Almost Incompressible Media," SIAM Journal on Scientific Computing, vol. 39, no. 3, pp. B486–B507, Jan. 2017, doi: 10.1137/16m1067834.
+// Source: M. J. Del Razo and R. J. LeVeque, "Numerical Methods for Interface Coupling of Compressible and Almost Incompressible Media," SIAM Journal on Scientific Computing, vol. 39, no. 3, pp. B486-B507, Jan. 2017, doi: 10.1137/16m1067834.
 //          URL: https://arxiv.org/abs/1604.08544
 //          If you wish to use the regular gas HLLC sovler and not the stiffened gas modeled by the Tammann EOS, set P0 = 0
 

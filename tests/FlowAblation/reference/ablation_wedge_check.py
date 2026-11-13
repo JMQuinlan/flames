@@ -39,12 +39,13 @@ SOLID_LABEL = r"Solid Temperature $T_s/T_\infty$"
 
 def load(pf):
     ds = yt.load(pf)
-    cg = ds.covering_grid(0, ds.domain_left_edge, ds.domain_dimensions)
+    Lf = ds.index.max_level
+    cg = ds.covering_grid(Lf, ds.domain_left_edge, ds.domain_dimensions * 2 ** Lf)   # finest level (AMR)
     f = {k: np.asarray(cg[("boxlib", k)])[:, :, 0] for k in FIELDS}
     if ("boxlib", "ablation_Ts") in ds.field_list:          # in-depth conduction run (ablation.conduction = 1)
         f["Ts"] = np.asarray(cg[("boxlib", "ablation_Ts")])[:, :, 0]
     lo, hi = np.asarray(ds.domain_left_edge), np.asarray(ds.domain_right_edge)
-    nx, ny = ds.domain_dimensions[:2]
+    nx, ny = ds.domain_dimensions[:2] * 2 ** Lf
     x = lo[0] + (np.arange(nx) + 0.5) * (hi[0] - lo[0]) / nx
     y = lo[1] + (np.arange(ny) + 0.5) * (hi[1] - lo[1]) / ny
     return float(ds.current_time), f, x, y

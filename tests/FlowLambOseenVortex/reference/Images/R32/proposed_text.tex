@@ -1,0 +1,80 @@
+% =============================================================================
+% Proposed replacement for "\textbf{WIP: Add plots and results}" in
+% Chapter_03_Validation/ViscousTests/Lamb_Oseen_Vortex.tex   (R32, 2026-10-29)
+% Copy the figures from tests/FlowLambOseenVortex/reference/Images/R32/ to
+% Chapter_03_Validation/figures/LambOseen/.
+% New bib entry needed (not in references.bib):
+%   @article{guillard1999behaviour,
+%     author  = {Guillard, H. and Viozat, C.},
+%     title   = {On the behaviour of upwind schemes in the low {M}ach number limit},
+%     journal = {Computers \& Fluids}, volume = {28}, number = {1}, pages = {63--86}, year = {1999}}
+% =============================================================================
+\textbf{CLAUDE-START}
+
+\paragraph{Setup}
+The vortex is centred in a doubly periodic $10\times10$ box with $\Gamma = 1$, $r_c = 0.5$, $\rho = 1$, $\mu = 0.01$ ($\nu = 0.01$) and an ideal gas with $\gamma = 1.4$, and is run to $t = 10$, over which the core parameter $r_c^2 + 4\nu t$ grows from $0.25$ to $0.65$. Both phases carry identical properties, so the run tests the viscous operator of the mixture alone. Two choices of the setup matter for the comparison, because the closed-form solution above is an \emph{incompressible} solution in an \emph{unbounded} fluid:
+\begin{enumerate}
+    \item \emph{Mach number.} With the original background pressure $p = 0.1$ the peak swirl velocity $u_{\theta,\max} = 0.20$ gives a Mach number of $0.54$. The uniform-pressure initial condition is then far from cyclostrophic balance ($\rho u_\theta^2 \approx 0.4\,p$); the core density changes by up to $30\%$ and the radial velocity reaches $24\%$ of $u_{\theta,\max}$, so the compressible flow no longer follows the incompressible solution (Table~\ref{tab:lamb_oseen_errors}, last row). We therefore raise the background pressure to $p = 100$ (Mach $0.017$). The density then varies by less than $5\times10^{-4}$ inside $r < 3$.
+    \item \emph{Low-Mach dissipation of the Riemann solver.} At Mach $0.017$ the upwind HLLC flux adds a dissipation proportional to $\rho c\,\Delta u$ that does not vanish as $M\to0$~\cite{guillard1999behaviour}. It acts as an extra viscosity: the core spreads with $\nu_{\mathrm{eff}} = 1.22\,\nu$ on the $128^2$ grid and $1.03\,\nu$ on the $256^2$ grid. The all-Mach HLLC variant in Hydro2, which scales the pressure-flux dissipation by the local Mach number, removes this, and we use it for the results below.
+\end{enumerate}
+The finite periodic box carries a net circulation that a periodic field cannot carry. The velocity jump at the box edge therefore launches weak acoustic waves, which bounce through the box with zero mean. We evaluate all errors inside the disc $r < 3$, two box half-widths away from the boundary.
+
+\paragraph{Error Measures}
+For every output time we compare the azimuthal velocity of every cell inside $r < 3$ with the exact value at the cell centre. The maximum error is normalised by the exact peak velocity, $\epsilon_\infty = \max|u_\theta - u_\theta^{\mathrm{exact}}| / u^{\mathrm{exact}}_{\theta,\max}$. A two-parameter least-squares fit of $u_\theta = \Gamma'/(2\pi r)\,[1 - \exp(-r^2/a)]$ to the same cells gives the circulation $\Gamma'$ and the core parameter $a(t)$. Linear regression of $a(t) = r_c^2 + 4\nu_{\mathrm{eff}} t$ over all outputs returns the effective viscosity $\nu_{\mathrm{eff}}$. From $a$ we obtain the radius of peak velocity, $r_{\max} = 1.1209\sqrt{a}$, and we also compare the kinetic energy inside the disc. The earlier estimate of $\mu_{\mathrm{eff}}$ from the exponential decay rate of the box kinetic energy (with wavenumber $1/r_c$) applies to the Taylor--Green vortex but not to an isolated vortex, whose kinetic energy decays algebraically. That estimate returned $\mu_{\mathrm{eff}}/\mu = 0.35$ because of the method, not the solver, and is replaced here.
+
+\paragraph{Results}
+Figure~\ref{fig:lamb_oseen_profile} compares the azimuthal velocity profiles at $t = 0$, $2.5$, $5$ and $10$ with the exact solution. Figure~\ref{fig:lamb_oseen_peak_core} shows the peak velocity decay and the core growth, and Fig.~\ref{fig:lamb_oseen_ke_core} shows the kinetic energy inside $r<3$ and the core parameter $a(t)$. Table~\ref{tab:lamb_oseen_errors} lists the maximum error over $0 < t \le 10$ for each grid and Riemann solver. On the $256^2$ grid of the original deck ($r_c/\Delta x = 12.8$) every quantity is within $0.5\%$ of the exact solution. The effective viscosity is $\nu_{\mathrm{eff}} = 1.001\,\nu$. On the finer $512^2$ grid the core quantities converge further: the $r_{\max}$ error falls from $0.05\%$ to $0.02\%$, the kinetic-energy error from $0.04\%$ to $0.02\%$, and $\nu_{\mathrm{eff}}/\nu - 1$ from $+0.10\%$ to $+0.007\%$. The deviation of the core parameter $a(t)$ thus converges at roughly fourth order between $128^2$, $256^2$ and $512^2$ ($+1.54\%$, $+0.10\%$, $+0.007\%$). $\epsilon_\infty$ stays at $0.47$--$0.48\%$ on both grids because it is set by the boundary acoustics described next, not by the resolution of the vortex.
+The largest local velocity error occurs near $r = 3$ and has zero mean: it is the acoustic noise from the periodic boundary. Inside the core, $r < 1$, the error stays below $0.16\%$ ($256^2$) and $0.11\%$ ($512^2$) of $u_{\theta,\max}$.
+
+\begin{table}[H]
+    \centering
+    \caption{Lamb--Oseen vortex: maximum relative error over $0 < t \le 10$ inside $r < 3$ (in \%). $\epsilon_\infty$ is normalised by the exact peak velocity; $u_{\theta,\max}$, $r_{\max}$, KE and $\Gamma'$ are compared with their exact values; $\nu_{\mathrm{eff}}$ comes from the linear fit of $a(t)$.}
+    \label{tab:lamb_oseen_errors}
+    \begin{tabular}{l c c c c c c c c}
+        \hline
+        Riemann solver & Grid & Mach & $\epsilon_\infty$ & $u_{\theta,\max}$ & $r_{\max}$ & KE & $\Gamma'$ & $\nu_{\mathrm{eff}}/\nu - 1$ \\
+        \hline
+        All-Mach HLLC & $512^2$ & 0.017 & 0.48 & 0.05 & 0.02 & 0.02 & 0.00 & $+0.01$ \\
+        All-Mach HLLC & $256^2$ & 0.017 & 0.47 & 0.05 & 0.05 & 0.04 & 0.00 & $+0.10$ \\
+        All-Mach HLLC & $128^2$ & 0.017 & 1.30 & 0.34 & 0.52 & 0.31 & 0.05 & $+1.54$ \\
+        HLLC          & $256^2$ & 0.017 & 2.52 & 0.29 & 0.98 & 0.38 & 0.20 & $+2.94$ \\
+        HLLC          & $128^2$ & 0.017 & 13.0 & 1.98 & 6.97 & 2.63 & 1.40 & $+21.9$ \\
+        HLLC          & $256^2$ & 0.54  & 17.5 & 10.8 & 13.5 & 11.5 & 0.70 & $+14.9$ \\
+        \hline
+    \end{tabular}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\textwidth]{Chapter_03_Validation/figures/LambOseen/LambOseen_Profile.png}
+    \caption{Lamb--Oseen vortex azimuthal velocity at $t = 0$, $2.5$, $5$ and $10$ (all-Mach HLLC, $256^2$, Mach $0.017$) compared with the exact viscous decay. Maximum error over $0<t\le10$ inside $r<3$: $0.47\%$ of the exact peak velocity ($0.48\%$ on $512^2$; $0.16\%$ inside the core $r<1$).}
+    \label{fig:lamb_oseen_profile}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Chapter_03_Validation/figures/LambOseen/LambOseen_Peak_Core.png}
+    \caption{Peak azimuthal velocity (left) and radius of peak velocity $r_{\max} = 1.1209\sqrt{r_c^2+4\nu t}$ (right) against time ($256^2$). Maximum error: $0.05\%$ in $u_{\theta,\max}$ and $0.05\%$ in $r_{\max}$.}
+    \label{fig:lamb_oseen_peak_core}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Chapter_03_Validation/figures/LambOseen/LambOseen_KE_Core.png}
+    \caption{Kinetic energy inside $r<3$ (left) and fitted core parameter $a = r_c^2 + 4\nu t$ (right) against time ($256^2$). Maximum kinetic-energy error: $0.04\%$; effective viscosity from the slope: $\nu_{\mathrm{eff}} = 1.001\,\nu$ ($+0.10\%$).}
+    \label{fig:lamb_oseen_ke_core}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\textwidth]{Chapter_03_Validation/figures/LambOseen/LambOseen_Error_Time.png}
+    \caption{Maximum azimuthal-velocity error inside $r<3$ against time for the Riemann solvers, grids and Mach numbers of Table~\ref{tab:lamb_oseen_errors}. Largest error of the all-Mach runs: $0.47\%$ ($256^2$) and $0.48\%$ ($512^2$). This error sits near $r = 3$ and comes from the acoustic waves of the periodic boundary.}
+    \label{fig:lamb_oseen_error_time}
+\end{figure}
+
+\textbf{CLAUDE-END}
+
+% The old figures LambOseen_Analysis__01_KE_Comparison.eps / __09_Mu_Eff_Time.eps
+% came from tests/FlowLambOseenVortex/reference/lamb_oseen_single.py on the
+% 3D unit-test run (USB FLAMES_SAVED/3DUnitTests/LambOseen, mu_eff/mu = 0.353 from
+% the KE-decay estimate); they are superseded by the figures above.

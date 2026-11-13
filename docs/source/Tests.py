@@ -138,7 +138,12 @@ for testdirname in sorted(glob.glob("../../tests/*")):
             cfgfile.write(line.replace("#@",""))
     cfgfile.seek(0)
     config = configparser.ConfigParser(dict_type=MultiOrderedDict,strict=False)
-    config.read_file(cfgfile)
+    try:
+        config.read_file(cfgfile)
+    except configparser.MissingSectionHeaderError:
+        # "#@" lines without a "[section]" header (e.g. tests/FlowTopoChange/input): no test configurations
+        print(f"WARNING: {testdirname}/input has #@ options but no [section] header -- listed without configurations")
+        config = configparser.ConfigParser(dict_type=MultiOrderedDict,strict=False)
 
     ## this block of code should be the same as in ./scripts/runtests.py
     sections = [s for s in config.sections() if "*" not in s]

@@ -1,0 +1,31 @@
+# Favrie & Schmidmayer, Comput. Methods Appl. Mech. Engrg. 455 (2026) 118880, FIG. 4: impact of an aluminium plate on a copper plate
+# at 600 m/s, t = 50 microseconds, no plasticity.  VECTOR path of the curve read from the PDF
+# (HAL version, page 23), axes calibrated on the tick marks: exact to the line width.  The path is the authors' simplified polyline.
+# columns: x_m  s11_Pa
+0.005002 -28444.615
+0.233909 -1185750.6
+0.234217 -73170079
+0.234545 -7.2426959e+08
+0.236103 -7.1743907e+09
+0.236719 -7.7715598e+09
+0.237354 -7.9757083e+09
+0.237816 -8.0643579e+09
+0.238451 -8.0831062e+09
+0.239702 -8.0923646e+09
+0.241877 -8.0946793e+09
+0.257505 -8.0946793e+09
+0.324999 -8.0928276e+09
+0.511104 -8.0937534e+09
+0.511720 -8.1046321e+09
+0.512355 -8.125695e+09
+0.512663 -8.1203714e+09
+0.513278 -8.093059e+09
+0.514857 -8.0921332e+09
+0.715011 -8.0928276e+09
+0.829695 -8.096068e+09
+0.830465 -8.0699129e+09
+0.831100 -7.9789488e+09
+0.831716 -7.6375439e+09
+0.832351 -6.3450663e+09
+0.833910 -28444.615
+0.994996 -28444.615

@@ -88,6 +88,12 @@ pressure1.ic.constant.value = 1.0e5
 cp1 = 1.4
 cv1 = 1.0
 
+# eta (and the vapor field, which shares eta.bc) must be periodic in y like every other field: without these lines
+# eta defaults to zero-gradient in all directions (changelog II.29).  [2026-10-06]
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = periodic
+eta.bc.type.yhi = periodic
 density.bc.type.xhi = neumann
 density.bc.type.xlo = neumann
 density.bc.type.ylo = periodic

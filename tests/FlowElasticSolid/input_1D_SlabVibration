@@ -11,8 +11,6 @@
 #   f_l = c_l/(2 L) = 8.936   (c_l = 7.149),      f_t = c_t/(2 L) = 2.795   (c_t = 2.236).
 # Runs for ~10 stretch periods / ~3.4 shear periods; the decay of the amplitude measures
 # the numerical dissipation.  Exercises the free surface and tension every half period.
-# (A lighter gas, rho 0.01, is unstable in the BASE solver -- also with elastic.on = 0:
-#  tangential velocity grows in the gas cells next to the interface at a 1000:1 density ratio.)
 #
 # Run (from bin/): mpirun -np 4 ./hydro2-2d-g++ ../tests/FlowElasticSolid/input_1D_SlabVibration plot_file=<dir>/output
 # Check:           python3 ../tests/FlowElasticSolid/reference/slab_vibration_check.py <dir>
@@ -90,6 +88,14 @@ velocity1.ic.expression.region1 = "V*sin(3.141592653589793*(x - 0.5)/L)*(abs(x -
 pressure1.ic.type = constant
 pressure1.ic.constant.value = 1.0
 
+# EVERY field must be periodic in y, the volume fraction included: without eta.bc it defaults to zero-gradient in
+# all directions, and that mismatch with the periodic density / momentum / energy at the y faces is a transverse-
+# momentum source at the stiff interface -- the "base-solver transverse instability" this test used to die of
+# (changelog II.19 / II.20) was exactly that.  [2026-10-06]
+eta.bc.type.xhi = neumann
+eta.bc.type.xlo = neumann
+eta.bc.type.ylo = periodic
+eta.bc.type.yhi = periodic
 density.bc.type.xhi = neumann
 density.bc.type.xlo = neumann
 density.bc.type.ylo = periodic

@@ -161,3 +161,7 @@ ahe.method  = 0
 # its whole window and degraded Laplace mass/energy conservation by 5 orders of
 # magnitude while shrinking the bubble 2% in 0.5 ms.)
 cutoff = 1e-4
+# Consistent (face) volume-fraction advection: with the default donor row any higher-order limiter (minmod,
+# WENO3, WENO5) puts a -10 % / +10 % undershoot/overshoot of the mixture density at the contact (it does not
+# shrink with resolution); with it the contact is clean (max density 1.139 against 1.137).  2026-10-29.
+eta_consistent_advect = 1

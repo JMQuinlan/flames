@@ -14,8 +14,8 @@ Default off (:code:`ablation.on = 0`); class :code:`Ablation`, :code:`src/Integr
    :depth: 2
 
 
-Model
-=====
+Ablation model
+==============
 
 Heat-of-ablation model
 ----------------------
@@ -82,6 +82,15 @@ and :code:`ablation.T_wall` becomes the **ablation temperature**:
 :math:`Q^*` is then the heat of ablation proper; the sensible heat goes into :math:`T_s`.
 The solid diffusivity :math:`\alpha_s = k_s/(\rho_s c_{p,s})` enters the viscous time-step limit
 (:code:`cfl_v`).  With :code:`ablation.conduction = 0` the result is bit-identical to the model above.
+
+The exchange is **energy conservative**: the gas conduction block accumulates the solid-side flux of every
+fluid|solid face over the Runge--Kutta stages, with the stage weights, and the solid is advanced at the end of
+the step with exactly those fluxes.  The solid gains what the gas lost, minus what ablation consumed, to
+round-off (closed-box test: :math:`-1.9\times10^{-7}` of the total energy, independent of the time step).
+A non-uniform initial solid temperature can be given with :code:`ablation.Ts.ic.type = expression`
+(:code:`ablation.Ts.ic.expression.region0 = "..."`); the default is the constant :code:`ablation.T_solid0`.
+Setting :code:`ablation.T_wall` out of reach turns the module into a pure conjugate-heat-transfer solver
+(no surface recession).
 
 
 Ablation inputs
@@ -219,6 +228,42 @@ Decks in :code:`tests/FlowAblation`, check scripts in :code:`tests/FlowAblation/
    resolution*; that bias is the reference, not the solver (it drops to +0.2 % at
    :math:`\Delta T/T` = 1 %: :code:`ablation.T_wall=0.99 ablation.Qstar=0.1757`).
 
+
+Thermal coupling suite
+======================
+
+Decks in :code:`tests/FlowConjugateHeat` (and two in :code:`tests/FlowAblation`); every deck states its exact
+solution in the header, the check scripts are in the :code:`reference` folders.  "% of dT" is of the driving
+temperature difference.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 30 40
+
+   * - Deck
+     - Isolates
+     - Result
+   * - :code:`FlowAblation/input_1D_Contact` (+ :code:`ablation.T_solid0 = 1.01` for the reverse)
+     - gas heats plate / plate heats gas: two half-spaces in contact
+     - surface temperature within 0.02 % / 0.08 % of dT at 200--800 cells
+   * - :code:`FlowAblation/input_1D_Stefan2`
+     - ablation while heat also goes into the solid (two-phase Stefan)
+     - recession within 0.6 %, net flux within 0.1 %
+   * - :code:`input_1D_ClosedBoxEquilibrium`
+     - energy conservation, common final temperature
+     - :math:`T_\text{eq}` to 6 digits; energy :math:`-1.9\times10^{-7}`
+   * - :code:`input_1D_CouetteHeating`
+     - viscous dissipation, gas conduction, isothermal wall flux
+     - temperature error 0.27 % to 0.004 % from 20 to 160 cells (second order); wall flux within 0.02 %
+   * - :code:`input_1D_BeckerShock`
+     - viscous stress, dissipation and conduction through a Mach 2 shock (Pr = 3/4)
+     - 0.1 % in velocity and temperature at 46 cells per shock thickness (order 1.9)
+   * - :code:`input_1D_ShockHeatedWall`
+     - a Mach 1.2 shock reflects from a conducting wall and heats it
+     - surface temperature -0.27 % of dT against the non-linear similarity solution; stored heat -1.6 %
+   * - :code:`FlowAblation/input_2D_FlatPlate` (cold wall, hot wall :code:`ablation.T_wall = 2.5`, adiabatic :code:`ablation.on = 0`)
+     - heat flux across a Mach 2 laminar boundary layer, both directions; recovery temperature
+     - :math:`q_w` within 1--2 % of the reference-temperature value in both directions; recovery factor 0.805 against :math:`\sqrt{Pr} = 0.849`
 
 Known limitations
 =================

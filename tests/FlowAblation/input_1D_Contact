@@ -9,8 +9,8 @@
 #   surface temperature (constant)  T_i = (e_g T_g + e_s T_s0)/(e_g + e_s) = 0.992
 #   each side  T = T_i + (T_far - T_i) erf(|x - 0.5| / (2 sqrt(alpha t)))
 # The 1 % temperature difference keeps the gas density change (neglected in the exact
-# solution) small.  Measured (400 cells, t = 5): T_i +0.02 % of dT, profiles 0.17 % (gas),
-# 0.02 % (solid) of dT.
+# solution) small.  Measured (400 cells, t = 5, conservative exchange): T_i +0.01 % of dT,
+# profiles 0.17 % (gas), 0.01 % (solid) of dT.  Reverse direction (ablation.T_solid0 = 1.01): +0.07 %.
 #
 # Run (from bin/): mpirun -np 4 ./hydro2-2d-g++ ../tests/FlowAblation/input_1D_Contact plot_file=<dir>/output
 # Check:           python3 ../tests/FlowAblation/reference/solid_conduction_check.py contact <dir>

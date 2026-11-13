@@ -3,6 +3,10 @@
 Stefan problem with the wall at 26.57 deg to the grid (tests/FlowAblation/input_2D_InclinedStefan).
 
   python3 inclined_stefan_check.py <run_dir> [<aligned_closed_gap_run_dir>] [--outdir DIR]
+  python3 inclined_stefan_check.py --paper <run_dir> [<run_dir> ...] [--outdir DIR] [--name NAME] [--measure area|contour]
+      [--window xa,xb]   (measure only in xa <= x <= xb: for runs with open x boundaries, geometry.is_periodic = 0 1)
+      [2026-10-29] paper figure: recession along the wall normal vs time, Numerical vs Exact only (last run given);
+      T_w and Q* read from each run's metadata; error tables for every run.
 
 Each face of the periodic slabs |frac(2x + y) - 1/2| < w must recede along its normal as in 1D:
     s(t) = 2 lam sqrt(alpha t),  lam exp(lam^2)(1 + erf lam) = rho cp (T_inf - T_w)/(sqrt(pi) rho_s Q*).
@@ -15,7 +19,7 @@ and sound waves cross the gas layer, so the run falls below the constant-pressur
 (about -6 % at t = 2) whatever the wall orientation.  Give the grid-aligned run of the same
 layer (input_1D_ClosedGap) as second argument for the like-for-like comparison.
 """
-import os, sys, glob
+import os, sys, glob, re
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -37,8 +41,8 @@ def main():
     lam = brentq(lambda l: l * np.exp(l * l) * (1 + erf(l)) - RHO * CP * (TINF - TW) / (np.sqrt(np.pi) * RHOS * QSTAR), 1e-6, 5)
     H = []
     for pf in sorted(glob.glob(os.path.join(d, "output", "*[0-9]cell")), key=lambda f: int(os.path.basename(f)[:-4]))[1:]:
-        ds = yt.load(pf); cg = ds.covering_grid(0, ds.domain_left_edge, ds.domain_dimensions)
-        n = ds.domain_dimensions[0]; x = (np.arange(n) + 0.5) / n; t = float(ds.current_time)
+        ds = yt.load(pf); Lf = ds.index.max_level; cg = ds.covering_grid(Lf, ds.domain_left_edge, ds.domain_dimensions * 2 ** Lf)   # finest level (AMR)
+        n = ds.domain_dimensions[0] * 2 ** Lf; x = (np.arange(n) + 0.5) / n; t = float(ds.current_time)
         phi = np.asarray(cg[("boxlib", "phi")])[:, :, 0]
         s_area = (2 * W0 - (1 - phi).mean()) / (2 * np.sqrt(5))
         cs = plt.figure().gca().contour(x, x, phi.T, levels=[0.5]); plt.close()
@@ -58,7 +62,7 @@ def main():
     if dref:
         A = []
         for pf in sorted(glob.glob(os.path.join(dref, "output", "*[0-9]cell")), key=lambda f: int(os.path.basename(f)[:-4])):
-            ds = yt.load(pf); cg = ds.covering_grid(0, ds.domain_left_edge, ds.domain_dimensions)
+            ds = yt.load(pf); Lf = ds.index.max_level; cg = ds.covering_grid(Lf, ds.domain_left_edge, ds.domain_dimensions * 2 ** Lf)   # finest level (AMR)
             ph = np.asarray(cg[("boxlib", "phi")])[:, :, 0]; A.append((float(ds.current_time), ph.mean() * float(ds.domain_width[0]) / 2))
         A = np.array(A); A[:, 1] -= A[0, 1]; s_al = np.interp(t, A[:, 0], A[:, 1])
         print(f"  against the grid-aligned closed layer {dref}:")
@@ -73,5 +77,68 @@ def main():
     print(f"  wrote {outdir}/inclined_stefan.png")
 
 
+def history(d, win=(0.0, 1.0)):
+    """win = x-window used for the measurement (open-boundary runs: keep away from the x boundaries).  A full-height
+    strip of the y-periodic slabs has the same solid fraction as the whole box, so the area formula holds in it."""
+    H = []
+    for pf in sorted(glob.glob(os.path.join(d, "output", "*[0-9]cell")), key=lambda f: int(os.path.basename(f)[:-4])):
+        ds = yt.load(pf); Lf = ds.index.max_level; cg = ds.covering_grid(Lf, ds.domain_left_edge, ds.domain_dimensions * 2 ** Lf)   # finest level (AMR)
+        n = int(ds.domain_dimensions[0]) * 2 ** Lf; x = (np.arange(n) + 0.5) / n; t = float(ds.current_time)
+        if t <= 1e-2: continue
+        phi = np.asarray(cg[("boxlib", "phi")])[:, :, 0]; iw = (x >= win[0]) & (x <= win[1])
+        s_area = (2 * W0 - (1 - phi[iw]).mean()) / (2 * np.sqrt(5))
+        cs = plt.figure().gca().contour(x, x, phi.T, levels=[0.5]); plt.close()
+        P = np.vstack([q for q in cs.allsegs[0] if len(q)]); P = P[(P[:, 0] >= win[0]) & (P[:, 0] <= win[1])]
+        f = np.mod(2 * P[:, 0] + P[:, 1], 1.0) - 0.5
+        H.append((t, s_area, (W0 - np.abs(f).mean()) / np.sqrt(5), np.abs(f).std() / np.sqrt(5) * n))
+    return n, np.array(H)
+
+
+def paper():
+    args = sys.argv[1:]; opt = lambda key, dflt: args[args.index(key) + 1] if key in args else dflt
+    runs = [a for i, a in enumerate(args) if not a.startswith("--") and (i == 0 or args[i - 1] not in ("--outdir", "--name", "--measure", "--window"))]
+    win = tuple(float(v) for v in opt("--window", "0,1").split(","))
+    here = os.path.dirname(os.path.abspath(__file__))
+    outdir = opt("--outdir", os.path.join(here, "Images", "R29")); name = opt("--name", "inclined_stefan_paper")
+    col = 1 if opt("--measure", "area") == "area" else 2
+    os.makedirs(outdir, exist_ok=True)
+    k = MU * CP / PR; al = k / (RHO * CP)
+    for d in runs:
+        Tw = meta(d, "ablation.T_wall", TW); Qs = meta(d, "ablation.Qstar", QSTAR)
+        lam = brentq(lambda l: l * np.exp(l * l) * (1 + erf(l)) - RHO * CP * (TINF - Tw) / (np.sqrt(np.pi) * RHOS * Qs), 1e-6, 5)
+        n, H = history(d, win); t = H[:, 0]; s_ex = 2 * lam * np.sqrt(al * t)
+        ea = 100 * (H[:, 1] / s_ex - 1); ec = 100 * (H[:, 2] / s_ex - 1)
+        print(f"{d}: N = {n}x{n}, T_w = {Tw:g} (dT/T = {TINF - Tw:g}), Q* = {Qs:g}, lam = {lam:.5f}")
+        print(f"   {'t':>5} {'s/dx':>5} {'s_area':>8} {'err %':>7} {'s_contour':>9} {'err %':>7} {'scatter[cells]':>14}")
+        for j in sorted(set(np.linspace(0, len(t) - 1, 5).round().astype(int))):
+            print(f"   {t[j]:5.2f} {s_ex[j] * n:5.1f} {H[j, 1]:8.5f} {ea[j]:+7.2f} {H[j, 2]:9.5f} {ec[j]:+7.2f} {H[j, 3]:14.2f}")
+        late = t >= 0.5 - 1e-9
+        print(f"   t >= 0.5: max |err| area {np.abs(ea[late]).max():.2f} %, contour {np.abs(ec[late]).max():.2f} %")
+    paper_style()
+    fig, ax = plt.subplots(figsize=(6.0, 4.8)); tt = np.linspace(0, t[-1], 400)
+    ax.plot(tt, 2 * lam * np.sqrt(al * tt), "k-", lw=1.8, label="Exact")
+    ax.plot(t, H[:, col], color="C3", lw=1.0, marker="o", mfc="none", ms=6, markevery=max(1, len(t) // 10), label="Numerical")
+    ax.set_xlabel("Time, $t$"); ax.set_ylabel("Surface Recession, $s$"); ax.set_title("Inclined Wall (26.6\N{DEGREE SIGN} to the Grid)")
+    ax.grid(alpha=0.3); ax.legend(frameon=False); fig.tight_layout()
+    for ext in ("png", "eps"): fig.savefig(os.path.join(outdir, f"{name}.{ext}"), dpi=200)
+    plt.close(fig); print(f"  wrote {outdir}/{name}.png (.eps)  [{('area', 'contour')[col - 1]} measure, run {runs[-1]}]")
+
+
+def meta(d, key, default):
+    """last value of key in the run's metadata (command-line overrides come after the deck value)"""
+    val = default
+    try:
+        for ln in open(os.path.join(d, "output", "metadata")):
+            m = re.match(r"\s*" + re.escape(key) + r"\s*=\s*(\S+)", ln)
+            if m: val = float(m.group(1))
+    except OSError: pass
+    return val
+
+
+def paper_style():
+    plt.rcParams.update({"font.size": 13, "axes.titlesize": 14, "axes.labelsize": 14, "legend.fontsize": 13,
+                         "xtick.labelsize": 13, "ytick.labelsize": 13})
+
+
 if __name__ == "__main__":
-    main()
+    paper() if "--paper" in sys.argv else main()

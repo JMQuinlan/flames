@@ -39,9 +39,9 @@ def main():
     pfs = sorted(glob.glob(os.path.join(d, "output", "*[0-9]cell")), key=lambda f: int(os.path.basename(f)[:-4]))
     use = pfs[-max(1, len(pfs) // 4):]; acc = {}; hist = []
     for pf in pfs[1:]:
-        ds = yt.load(pf); cg = ds.covering_grid(0, ds.domain_left_edge, ds.domain_dimensions)
+        ds = yt.load(pf); Lf = ds.index.max_level; cg = ds.covering_grid(Lf, ds.domain_left_edge, ds.domain_dimensions * 2 ** Lf)   # finest level (AMR)
         f = {k: np.asarray(cg[("boxlib", k)])[:, :, 0] for k in ("pressure", "density", "ablation_q", "phi")}
-        nx, ny = ds.domain_dimensions[:2]; lo = np.asarray(ds.domain_left_edge); w = np.asarray(ds.domain_width)
+        nx, ny = ds.domain_dimensions[:2] * 2 ** Lf; lo = np.asarray(ds.domain_left_edge); w = np.asarray(ds.domain_width)
         x = lo[0] + (np.arange(nx) + 0.5) * w[0] / nx; y = lo[1] + (np.arange(ny) + 0.5) * w[1] / ny
         jc = [ny // 2 - 1, ny // 2]; qs = np.mean([f["ablation_q"][:, j][f["ablation_q"][:, j] != 0][0] for j in jc if (f["ablation_q"][:, j] != 0).any()] or [0.0])
         hist.append((float(ds.current_time), qs))

@@ -15,7 +15,7 @@ timestep   = 1.0e-4
 amr.n_cell = 256 256
  
 ### DIMENSIONS ###
-# Taylor-Green Vortex on [0, 2pi] × [0, 2pi] domain
+# Taylor-Green Vortex on [0, 2pi] x [0, 2pi] domain
 geometry.prob_lo = 0.0 0.0 0.0
 geometry.prob_hi = 6.283185307 6.283185307 0.0  # 2*pi
  

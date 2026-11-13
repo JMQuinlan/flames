@@ -626,11 +626,18 @@ public:
                                               Set::Scalar small = 1e-16)
     {
         Set::Scalar v_k0  = 1.0 / std::max(rho_k0, small);
+        if (relax_isentropic)   // relax.path = isentropic: v = v0 ((p0 + pi)/(p + pi))^(1/gamma)
+            return v_k0 * std::pow(std::max(p_k0 + pi_k, small) / std::max(p + pi_k, small), 1.0 / gam);
         Set::Scalar numer = p_k0 + gam * pi_k + (gam - 1.0) * p;
         Set::Scalar denom = gam * (p + pi_k);
         denom = std::max(denom, small);
         return v_k0 * numer / denom;
     }
+    /// relax.path (Hydro2): 0 = Schmidmayer 2020 eq. (25) above (default); 1 = each phase follows its ISENTROPE
+    /// to the relaxed pressure.  Eq. (25) does the volume work at the final pressure, which raises the entropy
+    /// of a phase by a term ~ (dp/p)^2 at EVERY relaxation whatever the sign of dp (gas, p/p0 = 2 or 1/2: +7.7 %
+    /// and +6.3 % of p v^gamma); the re-initialisation from the conserved energy follows in both cases.
+    static inline int relax_isentropic = 0;
 
     /// Total derivative of RelaxationVolume_SG_SC with respect to p
     /// (Schmidmayer 2020 eq. 25, self-consistent).  Direct differentiation:
@@ -644,6 +651,8 @@ public:
                                                    Set::Scalar small = 1e-16)
     {
         Set::Scalar v_k0  = 1.0 / std::max(rho_k0, small);
+        if (relax_isentropic)
+            return -RelaxationVolume_SG_SC(p, p_k0, rho_k0, gam, pi_k, small) / (gam * std::max(p + pi_k, small));
         Set::Scalar denom = (p + pi_k);
         denom = std::max(std::abs(denom), small) * (denom >= 0.0 ? 1.0 : -1.0);
         return -v_k0 * (p_k0 + pi_k) / (gam * denom * denom);

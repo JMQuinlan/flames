@@ -3,6 +3,10 @@
 NACA 4-digit angle-of-attack sweep analysis (runs made by TEMPLATES/sweep_aoa.bash).
 
   python3 analyze_aoa_sweep.py <sweep_root> [--outdir DIR] [--avg-from T] [--ref CSV] [--ref-label TEXT]
+                               [--paper [--compare SUMMARY_CSV] [--compare-label TEXT]]
+
+--paper: also write naca<code>_paper_polars.png/.eps (reference line vs numerical open markers;
+         St panel when the --ref CSV has an St column; --compare overlays another sweep summary).
 
 --ref CSV: published data to overlay (columns Re,alpha,Cl,Cd[,kind]; '#' comments), rows with
 the sweep's Re are used, e.g. data/naca0008_lowRe_reference.csv.  The airfoil (NACA code) is
@@ -76,8 +80,10 @@ def load_forces(d, mach):
 def strouhal(t, y, U):
     if len(t) < 64 or np.std(y) < 1e-3:
         return None
-    tu = np.linspace(t[0], t[-1], 4096); yu = np.interp(tu, t, y) - np.mean(y)
-    F = np.abs(np.fft.rfft(yu * np.hanning(len(yu)))); f = np.fft.rfftfreq(len(yu), tu[1] - tu[0])
+    tu = np.linspace(t[0], t[-1], 4096); yu = np.interp(tu, t, y)
+    yu = yu - np.polyval(np.polyfit(tu, yu, 2), tu)   # remove the slow (quadratic) drift, else the lowest FFT bin wins
+    nz = 16 * len(yu)                                 # zero padding: interpolates the peak between bins
+    F = np.abs(np.fft.rfft(yu * np.hanning(len(yu)), n=nz)); f = np.fft.rfftfreq(nz, tu[1] - tu[0])
     k = 1 + np.argmax(F[1:])
     return f[k] * CHORD / U
 
@@ -144,6 +150,59 @@ def field_panel(ax, pf, mach, extent):
     ax.contourf(X, Y, phi, levels=[-1, 0.5], colors="k")
     ax.set_xlim(xlo, xhi); ax.set_ylim(ylo, yhi)
     return im, float(ds.current_time)
+
+
+def paper_figure(rows, ref, ref_path, ref_label, AF, M, Re, outdir, cmp_path=None, cmp_label=None):
+    """Paper-ready Cl / Cd (/ St) vs alpha: reference as a line, numerical as open markers
+    (+- std error bars), optional second sweep (--compare <summary csv>) as open grey markers.
+    Writes naca<AF>_paper_polars.png/.eps and prints the max |error| for the caption."""
+    import csv
+    plt.rcParams.update({"font.size": 14, "axes.titlesize": 15, "legend.fontsize": 12})
+    R = [r for r in csv.DictReader(l for l in open(ref_path) if l.strip() and not l.startswith("#"))
+         if abs(float(r["Re"]) - Re) < 0.5]
+    rst = {float(r["alpha"]): float(r["St"]) for r in R if r.get("St")}
+    A = np.array([r["aoa"] for r in rows])
+    num = {k: np.array([r[k] for r in rows]) for k in ("Cl_mean", "Cl_std", "Cd_mean", "Cd_std")}
+    St = [(r["aoa"], r["St"]) for r in rows if r["St"]]
+    cmp = None
+    if cmp_path:
+        C = list(csv.DictReader(l for l in open(cmp_path) if l.strip() and not l.startswith("#")))
+        cmp = {k: np.array([float(r[k]) for r in C]) for k in ("aoa", "Cl_mean", "Cd_mean")}
+    npan = 3 if rst else 2
+    fig, ax = plt.subplots(1, npan, figsize=(5.3 * npan, 5.0))
+    lab_ref = ref_label or "Reference"
+    for k, (key, ylab) in enumerate((("Cl", r"$\overline{C_l}$"), ("Cd", r"$\overline{C_d}$"))):
+        a = ax[k]
+        a.plot(ref["alpha"], ref[key], "k-", lw=1.8, label=lab_ref)
+        if cmp is not None:
+            a.plot(cmp["aoa"], cmp[key + "_mean"], "s", mfc="none", mec="0.5", ms=7, mew=1.3,
+                   label=cmp_label or "Numerical (comparison)")
+        a.errorbar(A, num[key + "_mean"], yerr=num[key + "_std"], fmt="o", mfc="none", mec="tab:red",
+                   ecolor="tab:red", ms=8, mew=1.6, capsize=3, label=f"Numerical, NACA {AF}")
+        a.set_xlabel(r"Angle of Attack $\alpha$ [$^\circ$]"); a.set_ylabel(ylab); a.grid(alpha=0.3)
+        a.set_xticks(np.arange(0, max(A.max(), ref["alpha"].max()) + 1, 2))
+    ax[0].set_title("Lift Coefficient"); ax[1].set_title("Drag Coefficient")
+    ax[0].legend(frameon=False, loc="upper left")
+    if rst:
+        a = ax[2]
+        ra = np.array(sorted(rst)); a.plot(ra, [rst[x] for x in ra], "k-", lw=1.8, label=lab_ref)
+        if St:
+            a.plot([s[0] for s in St], [s[1] for s in St], "o", mfc="none", mec="tab:red", ms=8, mew=1.6,
+                   label=f"Numerical, NACA {AF}")
+        a.set_xlabel(r"Angle of Attack $\alpha$ [$^\circ$]"); a.set_ylabel(r"Strouhal Number $St = fc/U_\infty$")
+        amax = max(A.max(), ra.max())
+        a.set_title("Shedding Frequency"); a.grid(alpha=0.3); a.set_xlim(-0.5, amax + 0.5)
+        a.set_ylim(0, 2.0); a.set_xticks(np.arange(0, amax + 1, 2)); a.legend(frameon=False, loc="lower left")
+    fig.suptitle(rf"NACA {AF} Lift, Drag and Shedding at $Re = {Re:g}$, $M_\infty = {M:.1f}$")
+    fig.tight_layout()
+    for ext in ("png", "eps"):
+        fig.savefig(os.path.join(outdir, f"naca{AF}_paper_polars.{ext}"), dpi=200)
+    plt.close(fig)
+    errs = [(r["aoa"], r["Cl_err_pct"], r["Cd_err_pct"]) for r in rows if r["Cd_err_pct"] is not None]
+    if errs:
+        cl = [abs(e[1]) for e in errs if e[1] is not None]; cd = [abs(e[2]) for e in errs]
+        print(f"  paper figure: max |Cl err| {max(cl) if cl else float('nan'):.1f} %  max |Cd err| {max(cd):.1f} %  "
+              f"(alpha with reference: {[e[0] for e in errs]})")
 
 
 def main():
@@ -316,6 +375,11 @@ def main():
             cax = fig.add_axes([0.9, 0.2, 0.025, 0.6])
             cb = fig.colorbar(im, cax=cax, extend="both"); cb.set_label(r"$C_p$")
         fig.savefig(os.path.join(outdir, f"naca{AF}_fields_sweep.png"), dpi=DPI, bbox_inches="tight"); plt.close(fig)
+    # ---- paper figure (--paper): Cl, Cd (and St) vs alpha against the --ref data ----
+    if "--paper" in args and ref is not None:
+        paper_figure(rows, ref, ref_path, ref_label, AF, M, Re, outdir,
+                     args[args.index("--compare") + 1] if "--compare" in args else None,
+                     args[args.index("--compare-label") + 1] if "--compare-label" in args else None)
     # ---- CSV ----
     cols = ["aoa", "complete", "t_end", "stop", "avg_from", "Cl_mean", "Cl_std", "Cd_mean", "Cd_std",
             "Clp_mean", "Cdp_mean", "L_over_D", "Cl_thin", "Cl_ref", "Cd_ref", "Cl_err_pct", "Cd_err_pct",

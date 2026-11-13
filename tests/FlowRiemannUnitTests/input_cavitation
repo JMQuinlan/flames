@@ -57,6 +57,11 @@ gamma0 = 7.15
 gamma1 = 7.15
 p0_0 = 3.0e8
 p0_1 = 3.0e8
+# 2026-10-29: the keys above are obsolete (not read by the present code); these are:
+eos0.gamma = 7.15
+eos1.gamma = 7.15
+eos0.p0 = 3.0e8
+eos1.p0 = 3.0e8
 cfl   = 0.4
 mu0   = 0.0
 mu1   = 0.0

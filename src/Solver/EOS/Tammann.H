@@ -19,8 +19,8 @@ class Tammann : public EOS
 private:
     Set::Scalar m_gamma; // Ratio of specific heats (dimensionless)
     Set::Scalar m_p0;    // Stiffened gas reference pressure [Pa]
-    Set::Scalar m_cv;    // Specific heat at constant volume [J/(kg·K)]
-    Set::Scalar m_cp;    // Specific heat at constant pressure [J/(kg·K)]
+    Set::Scalar m_cv;    // Specific heat at constant volume [J/(kg.K)]
+    Set::Scalar m_cp;    // Specific heat at constant pressure [J/(kg.K)]
 
 public:
     /// Default constructor (water parameters as example)
@@ -35,8 +35,8 @@ public:
     /// Constructor with parameters
     /// @param gamma  Ratio of specific heats
     /// @param p0     Stiffened gas reference pressure [Pa]
-    /// @param cv     Specific heat at constant volume [J/(kg·K)]
-    /// @param cp     Specific heat at constant pressure [J/(kg·K)]
+    /// @param cv     Specific heat at constant volume [J/(kg.K)]
+    /// @param cp     Specific heat at constant pressure [J/(kg.K)]
     Tammann(Set::Scalar gamma, Set::Scalar p0, Set::Scalar cv, Set::Scalar cp)
         : m_gamma(gamma),
           m_p0(p0),

@@ -59,7 +59,7 @@ def inclined(d, outdir):
     kg = meta(d, "mu0") * CP / meta(d, "thermal.Pr"); ag = kg / (RHO * CP)
     ks, cps, rhos, Ts0 = meta(d, "ablation.k_s"), meta(d, "ablation.cp_s"), meta(d, "ablation.rho_s"), meta(d, "ablation.T_solid0")
     w = meta(d, "solid.phi.ic.expression.constant.xw"); as_ = ks / (rhos * cps)
-    eg = np.sqrt(kg * RHO * CP); es = np.sqrt(ks * rhos * cps); Ti = (eg * TINF + es * Ts0) / (eg + es); dT = TINF - Ts0
+    eg = np.sqrt(kg * RHO * CP); es = np.sqrt(ks * rhos * cps); Ti = (eg * TINF + es * Ts0) / (eg + es); dT = abs(TINF - Ts0)
     pf = sorted(glob.glob(os.path.join(d, "output", "*[0-9]cell")), key=lambda f: int(os.path.basename(f)[:-4]))[-1]
     ds = yt.load(pf); cg = ds.covering_grid(0, ds.domain_left_edge, ds.domain_dimensions); t = float(ds.current_time)
     n = ds.domain_dimensions[0]; x = (np.arange(n) + 0.5) / n; X, Y = np.meshgrid(x, x, indexing="ij")
@@ -116,7 +116,7 @@ def main():
     print(f"{d}: k_g {kg:.4e} alpha_g {ag:.4e} | k_s {ks:.4e} alpha_s {as_:.4e} | e_s/e_g {es / eg:.3f}; {len(F)} plot files to t = {tp:.2f}")
 
     if mode == "contact":
-        Ti = (eg * TINF + es * Ts0) / (eg + es); dT = TINF - Ts0
+        Ti = (eg * TINF + es * Ts0) / (eg + es); dT = abs(TINF - Ts0)
         Tex = np.where(x >= X0, Ti + (TINF - Ti) * erf((x - X0) / (2 * np.sqrt(ag * tp))),
                                 Ti + (Ts0 - Ti) * erf((X0 - x) / (2 * np.sqrt(as_ * tp))))
         # surface temperature of the run: one-sided extrapolation of each side to the surface
@@ -141,37 +141,44 @@ def main():
         print(f"  lam = {lam:.5f}  (without in-depth conduction {lam1:.5f}: the solid takes {100 * (1 - lam / lam1):.0f} % of the recession)")
         for tt in (1.0, 2.0, 4.0, t[-1]):
             j = np.argmin(np.abs(t - tt))
-            print(f"  t = {t[j]:5.2f}: recession s = {s[j]:.5f}   exact {s_ex[j]:.5f}   ({100 * (s[j] / s_ex[j] - 1):+.1f} %);"
-                  f"   net flux q_g - q_s {qn[j]:.4e}   exact {qn_ex[j]:.4e}   ({100 * (qn[j] / qn_ex[j] - 1):+.1f} %)")
-        title = "Two-Phase Stefan Problem: Ablating Solid with In-Depth Conduction"; name = "solid_stefan2"
+            print(f"  t = {t[j]:5.2f}: recession s = {s[j]:.5f}   exact {s_ex[j]:.5f}   ({100 * (s[j] / s_ex[j] - 1):+.2f} %);"
+                  f"   net flux q_g - q_s {qn[j]:.4e}   exact {qn_ex[j]:.4e}   ({100 * (qn[j] / qn_ex[j] - 1):+.2f} %)")
+        title = "Two-Phase Stefan Problem with In-Depth Conduction"; name = "solid_stefan2"
     # compare away from the cell the surface is in
     ok = np.abs(x - L["xs"]) > 1.5 * (x[1] - x[0])
     err = np.abs(Tnum - Tex) / dT
     print(f"  temperature profile at t = {tp:.2f}: max error gas {100 * err[ok & fl].max():.2f} %, solid {100 * err[ok & ~fl].max():.2f} % of dT = {dT:g}")
 
+    # [2026-10-29] paper style: exact = solid black line, numerical = red line with open circles (markevery),
+    # non-dimensional Title Case labels "Quantity, $symbol$", font >= 13; the "no in-depth conduction" curve removed.
+    plt.rcParams.update({"font.size": 13, "axes.titlesize": 14, "axes.labelsize": 14, "legend.fontsize": 13,
+                         "xtick.labelsize": 13, "ytick.labelsize": 13})
+    num = dict(color="C3", lw=1.0, marker="o", mfc="none", ms=6, label="Numerical")
     ncol = 2 if mode == "contact" else 3
-    fig, ax = plt.subplots(1, ncol, figsize=(5.2 * ncol, 4.3))
+    fig, ax = plt.subplots(1, ncol, figsize=(5.0 * ncol, 4.8))
     a = ax[0]
-    a.axvspan(0, L["xs"], color="#B87333", alpha=0.12, lw=0)
-    a.plot(x, Tex, "C3-", lw=1.6, label="Exact")
-    a.plot(x[::4], Tnum[::4], "ko", ms=4, mfc="none", label="Numerical")
-    a.set_xlim(X0 - 0.3, X0 + 0.3); a.set_xlabel("Position [m]"); a.set_ylabel("Temperature [K]"); a.legend()
-    a.set_title(f"Temperature at t = {tp:.1f} s")
+    win = (x >= X0 - 0.3) & (x <= X0 + 0.3); xw = x[win]
+    a.axvspan(X0 - 0.3, L["xs"], color="#E0E0E0", lw=0, zorder=0)
+    a.plot(xw, Tex[win], "k-", lw=1.8, label="Exact")
+    a.plot(xw, Tnum[win], markevery=max(1, len(xw) // 16), **num)
+    a.set_xlim(X0 - 0.3, X0 + 0.3); a.set_xlabel("Position, $x$"); a.set_ylabel("Temperature, $T$"); a.legend(frameon=False)
+    a.ticklabel_format(axis="y", useOffset=False)
+    a.set_title(f"Temperature Profile, $t$ = {tp:.1f}")
     a = ax[1]
-    a.semilogy(x[ok], 100 * np.maximum(err[ok], 1e-12), "k-", lw=1.2)
-    a.axvspan(0, L["xs"], color="#B87333", alpha=0.12, lw=0)
-    a.set_xlim(X0 - 0.3, X0 + 0.3); a.set_xlabel("Position [m]"); a.set_ylabel("Temperature Error [%]")
-    a.set_title("Error Relative to the Temperature Difference")
+    a.semilogy(x[ok & win], 100 * np.maximum(err[ok & win], 1e-12), "C3-", lw=1.2)
+    a.axvspan(X0 - 0.3, L["xs"], color="#E0E0E0", lw=0, zorder=0)
+    a.set_xlim(X0 - 0.3, X0 + 0.3); a.set_xlabel("Position, $x$"); a.set_ylabel(r"Error, $|T - T_{exact}|/\Delta T$ [%]")
+    a.set_title("Temperature Error")
     a.yaxis.set_minor_locator(LogLocator(base=10, subs=np.arange(2, 10) * 0.1, numticks=100)); a.grid(which="minor", alpha=0.15)
     if mode != "contact":
-        a = ax[2]
-        a.plot(t, s_ex * 1e3, "C3-", lw=1.6, label="Exact")
-        a.plot(t, 2 * lam1 * np.sqrt(ag * t) * 1e3, "-", color="0.6", lw=1.2, label="Exact, No In-Depth Conduction")
-        a.plot(t[::2], s[::2] * 1e3, "ko", ms=4, mfc="none", label="Numerical")
-        a.set_xlabel("Time [s]"); a.set_ylabel("Surface Recession [mm]"); a.set_title("Surface Recession"); a.legend()
+        a = ax[2]; tt = np.linspace(0, t[-1], 400)
+        a.plot(tt, 2 * lam * np.sqrt(ag * tt), "k-", lw=1.8, label="Exact")
+        a.plot(t, s, markevery=max(1, len(t) // 12), **num)
+        a.set_xlabel("Time, $t$"); a.set_ylabel("Surface Recession, $s$"); a.set_title("Surface Recession"); a.legend(frameon=False)
     for a in ax: a.grid(alpha=0.3)
-    fig.suptitle(title); fig.tight_layout()
-    fig.savefig(os.path.join(outdir, name + ".png"), dpi=200); plt.close(fig)
+    fig.suptitle(title, fontsize=16); fig.tight_layout()
+    for ext in ("png", "eps"): fig.savefig(os.path.join(outdir, name + "." + ext), dpi=200)
+    plt.close(fig)
     print(f"  wrote {outdir}/{name}.png")
 
 

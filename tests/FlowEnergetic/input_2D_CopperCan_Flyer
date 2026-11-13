@@ -1,0 +1,143 @@
+# FlowEnergetic / EXPLOSIVE-FILLED COPPER VESSEL WITH A PARTITION, FLYER-PLATE IGNITED, 2D PLANAR
+# (Hydro2, energetic.on = 1, elastic.on = 1)
+#
+# Test 4.3 of Wallis, Barton & Nikiforakis, Comput. Struct. 254 (2021) 106578, their Fig. 4 (the copper can of
+# Schoch, Nordin-Bates & Nikiforakis, JCP 252 (2013) 163), FLYER-PLATE version.  Geometry as drawn in Fig. 4:
+#   can 24.6 cm long (x = 7.7 .. 32.3 cm), outer half-height 14 cm, walls 2 cm, a 2 cm copper partition in the
+#   middle (x = 19 .. 21 cm): two chambers of idealised explosive, 9.3 cm x 12 cm each;
+#   copper flyer plate 2 cm thick, half-height 9.6 cm, in contact with the left wall, moving at 400 m/s;
+#   air around; domain 40 cm x 20 cm, symmetry plane on y = 0; 1600 x 800 cells (0.25 mm; the paper uses 0.5 mm,
+#   at which the detonation of this explosive runs 15 - 19 % fast here, changelog II.60).
+# The impact shock crosses the wall and ignites the first chamber (p > 1e8 Pa); the wave then has to cross the
+# partition to ignite the second.  The paper's frames: t = 10, 19.5, 29, 33.5, 54.5 us.
+# Copper: ideal plasticity, yield stress 0.07 GPa.  No booster.
+# DIFFERENCES FROM THE PAPER:
+#   * PLANAR, not cylindrically symmetric (Hydro2 has no axisymmetric source terms).
+#   * square corners (the paper's sketch rounds them); the plate thickness (2 cm) is read off the sketch.
+#   * explosive, copper equation of state and mixture closure as in input_1D_DetonationCopper;
+#     settings of input_2D_CopperCan (sharp copper | explosive boundary, species.order = 3, 0.01 % trace gas).
+# Plots:  python3 tests/FlowEnergetic/reference/copper_can_plots.py <run_dir> --times 10,19.5,29,33.5,54.5 --paper
+plot_file = ./bin/tests/FlowEnergetic/output_2D_CopperCan_Flyer
+amr.plot_dt = 2.5e-6
+amr.n_cell = 1600 800
+amr.max_grid_size = 100
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 0.4 0.2 0.0
+geometry.is_periodic = 0 0 0
+stop_time = 5.5e-5
+epsilon = 2.5e-4
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cv    = 718.0
+eos1.cp    = 1005.2
+eta.ic.type = expression
+eta.ic.expression.constant.w = 1.0e-6
+eta.ic.expression.region0 = "1.0e-4 + (1.0 - 2.0e-4)*max(0.25*(1.0 + tanh((x - 0.077)/w))*(1.0 - tanh((x - 0.323)/w))*0.5*(1.0 - tanh((y - 0.140)/w)), 0.25*(1.0 + tanh((x - 0.057)/w))*(1.0 - tanh((x - 0.078)/w))*0.5*(1.0 - tanh((y - 0.096)/w)))"
+density0.ic.type = expression
+density0.ic.expression.constant.w = 1.0e-6
+density0.ic.expression.region0 = "8930.0 - 7330.0*(0.25*(1.0 + tanh((x - 0.097)/w))*(1.0 - tanh((x - 0.190)/w)) + 0.25*(1.0 + tanh((x - 0.210)/w))*(1.0 - tanh((x - 0.303)/w)))*0.5*(1.0 - tanh((y - 0.120)/w))"
+density1.ic.type = constant
+density1.ic.constant.value = 1.2
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.w = 1.0e-6
+pressure0.ic.expression.region0 = "1.0e5"
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.w = 1.0e-6
+pressure1.ic.expression.region0 = "1.0e5"
+timestep = 1.0e-10
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1.0e-7
+dynamictimestep.min = 1.0e-16
+cfl = 0.4
+cutoff = 1.0e-10
+eos0.gamma = 4.0
+eos0.p0    = 1.0e9
+eos0.cv    = 2000.0
+eos0.cp    = 8000.0
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "400.0*(x > 0.057)*(x < 0.077)*(y < 0.096)"
+velocity0.ic.expression.region1 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "400.0*(x > 0.057)*(x < 0.077)*(y < 0.096)"
+velocity1.ic.expression.region1 = "0.0"
+Riemann_Solver.type = hllc_elastic
+Limiter.type        = minmod
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+elastic.on      = 1
+amr.max_level = 0
+amr.blocking_factor = 2
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+mu0   = 0.0
+mu1   = 0.0
+sigma = 0.0
+pref = 0.0
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+kappa_method = 1
+Dv = 0
+g = 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+apply_ahe   = 1
+ahe.method  = 0
+eta_consistent_advect = 1
+species.on = 1
+species.eos = mixture
+species.order = 3
+energetic.on = 1
+energetic.reactant = Reactant
+energetic.product  = Products
+energetic.law   = sqrt
+energetic.k     = 2.0e6
+energetic.Q     = 3.68e6
+energetic.p_ign = 1.0e8
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+eta.bc.type.yhi = neumann
+eta.bc.type.ylo = REFLECT_EVEN
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.yhi = neumann
+density.bc.type.ylo = REFLECT_EVEN
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.yhi = neumann
+energy.bc.type.ylo = REFLECT_EVEN
+species.bc.type.xlo = neumann
+species.bc.type.xhi = neumann
+species.bc.type.yhi = neumann
+species.bc.type.ylo = REFLECT_EVEN
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+momentum.bc.type.ylo = REFLECT_EVEN REFLECT_ODD
+species.phase0.names   = Cu Reactant
+species.phase0.gamma   = 3.0 4.0
+species.phase0.cv      = 390.0 2000.0
+species.phase0.pinf    = 45.5e9 1.0e9
+species.phase0.rho_ref = 8930.0 1600.0
+species.phase1.names   = Products Air
+species.phase1.gamma   = 3.0 1.4
+species.phase1.cv      = 1000.0 718.0
+species.ic.type = expression
+species.ic.expression.constant.w = 1.0e-6
+species.ic.expression.region0 = "1.0 - (0.25*(1.0 + tanh((x - 0.097)/w))*(1.0 - tanh((x - 0.190)/w)) + 0.25*(1.0 + tanh((x - 0.210)/w))*(1.0 - tanh((x - 0.303)/w)))*0.5*(1.0 - tanh((y - 0.120)/w))"
+species.ic.expression.region1 = "(0.25*(1.0 + tanh((x - 0.097)/w))*(1.0 - tanh((x - 0.190)/w)) + 0.25*(1.0 + tanh((x - 0.210)/w))*(1.0 - tanh((x - 0.303)/w)))*0.5*(1.0 - tanh((y - 0.120)/w))"
+species.ic.expression.region2 = "0.0"
+species.ic.expression.region3 = "1.0"
+elastic.plastic = 1
+elastic.species.mu      = 39.4e9 0.0
+elastic.species.sigma_y = 0.07e9 0.0
+elastic.species.Ky      = 0.0 0.0

@@ -22,3 +22,9 @@ steam_as_air      vapor    1.4     0.0       717.86        2.307438e+06   -2.212
 # properties of air" partner is fitted to T_sat(101325 Pa) = 373.15 K, latent heat 2.257e6 J/kg.
 water_tammann           liquid   7.15    3.0e8     162.656545    0.0             0.0
 steam_as_air_tammann    vapor    1.4     0.0       717.86        2.315954e+06   -9.232455e+03
+#
+# Carbon dioxide, the stiffened-gas fit of Lund & Aursand, Energy Procedia 23 (2012) 246, as tabulated with the
+# entropy constants q' in Bacigaluppi, Carlier, Pelanti, Congedo & Abgrall (arXiv:2105.12874), Table 2 (q' there
+# chosen by those authors, the original paper does not give it).  Used by tests/FlowPhaseChange/input_1D_CO2Depressurization.
+co2_liquid        liquid   1.23    1.32e8    2440.0        -6.23e5         -5.3409289e3
+co2_vapor         vapor    1.06    8.86e5    2410.0        -3.01e5         -1.0398090e4

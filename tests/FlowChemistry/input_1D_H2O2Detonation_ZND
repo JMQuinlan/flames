@@ -1,0 +1,149 @@
+# ============================================================================
+# FlowChemistry / Chapman-Jouguet detonation in 2 H2 + O2 + 7 Ar at 6.67 kPa, 298 K, STARTED FROM ITS ZND PROFILE
+# (species.eos = pele, chem.backend = pele, species.order = 2; mechanism build, see input_0D_H2O2Ignition)
+#
+# This is the speed test of the detonation: the steady ZND solution (Cantera, same mechanism; table made by
+#   bin/tests/venv_cantera/bin/python tests/FlowChemistry/reference/h2o2_check.py table --out <file> --length 0.3)
+# is mapped onto the grid with the shock at x = 0.3 m (IC type profile1d) and must then travel at
+# D_CJ = 1616.65 m/s with the von Neumann pressure 174.65 kPa at the front.  It is how unsteady detonation runs are
+# started in the literature (e.g. Barwey, Ullman, Bielawski & Raman 2024, same mixture); a blast or piston start
+# leaves this low-pressure mixture several per cent off D_CJ for more than a millisecond (input_1D_H2O2Detonation,
+# changelog II.37).  1.2 m, 7680 cells = 0.156 mm = 9.7 cells per induction length, 530 microseconds.
+# The table path is relative to bin/.  RESULT (2026-10-06): mean front speed 1615.8 m/s (-0.05 %), front pressure
+# 174.8 kPa (+0.06 %), over 0.82 m of travel.
+#
+# Run (from bin/): mpirun -np 16 ./hydro2-2d-g++-bd ../tests/FlowChemistry/input_1D_H2O2Detonation_ZND plot_file=<dir>/output
+# Check:           tests/venv_cantera/bin/python ../tests/FlowChemistry/reference/h2o2_check.py detonation <dir> --x0 0.3
+# ============================================================================
+plot_file = ./tests/FlowChemistry/output_1D_H2O2Detonation_ZND
+amr.blocking_factor = 2
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level = 0
+amr.n_error_buf      = 8
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.is_periodic = 0 1 0
+timestep = 1.0e-10
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1.0e-6
+dynamictimestep.min = 1.0e-13
+cfl                 = 0.3
+cfl_v               = 0.3
+apply_embedded_solid = 0
+eta.ic.type = constant
+eta.ic.constant.value = 1.0e-6
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cp = 1004.5
+eos0.cv = 717.5
+mu0 = 0.0
+mu0_b = 0.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp = 1004.5
+eos1.cv = 717.5
+mu1 = 0.0
+mu1_b = 0.0
+epsilon = 0.1
+sigma   = 0.0
+Dv      = 0.0
+pref    = 0.0
+small   = 1e-10
+grav    = 0.0
+eta_refinement_criterion   = 1e10
+omega_refinement_criterion = 1e10
+gradu_refinement_criterion = 1e10
+p_refinement_criterion = 1e10
+rho_refinement_criterion = 1e10
+cutoff = 1e-16
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+Riemann_Solver.type = hlle
+Limiter.type        = minmod
+kappa_method        = 1
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = periodic
+eta.bc.type.yhi = periodic
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+density0.bc.type.xlo = neumann
+density0.bc.type.xhi = neumann
+density0.bc.type.ylo = periodic
+density0.bc.type.yhi = periodic
+density1.bc.type.xlo = neumann
+density1.bc.type.xhi = neumann
+density1.bc.type.ylo = periodic
+density1.bc.type.yhi = periodic
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+nghost = 4
+thermal.conduction = 0
+thermal.Pr = 0.75
+ablation.on = 0
+species.bc.type.xlo = neumann
+species.bc.type.xhi = neumann
+species.bc.type.ylo = periodic
+species.bc.type.yhi = periodic
+species.on = 1
+species.eos = pele
+species.phase1.names = H H2 O OH H2O O2 HO2 H2O2 N2 AR HE CO CO2
+chem.on = 1
+chem.backend = pele
+chem.T_min = 600.0     # no reaction in the unshocked gas (298 K)
+chem.rtol = 1.0e-6
+chem.atol = 1.0e-12
+amr.n_cell = 7680 2
+amr.max_grid_size = 160
+geometry.prob_hi = 1.2 0.0003125 0.0
+stop_time = 5.3e-4
+amr.plot_dt = 1.0e-5
+species.order = 2
+density0.ic.type = profile1d
+density0.ic.profile1d.file = ../tests/FlowChemistry/reference/znd_2H2_O2_7Ar_6670Pa_298K.dat
+density0.ic.profile1d.columns = 1
+density0.ic.profile1d.x0 = 0.3
+density0.ic.profile1d.flip = 1
+density1.ic.type = profile1d
+density1.ic.profile1d.file = ../tests/FlowChemistry/reference/znd_2H2_O2_7Ar_6670Pa_298K.dat
+density1.ic.profile1d.columns = 1
+density1.ic.profile1d.x0 = 0.3
+density1.ic.profile1d.flip = 1
+velocity0.ic.type = profile1d
+velocity0.ic.profile1d.file = ../tests/FlowChemistry/reference/znd_2H2_O2_7Ar_6670Pa_298K.dat
+velocity0.ic.profile1d.columns = 2 -1
+velocity0.ic.profile1d.x0 = 0.3
+velocity0.ic.profile1d.flip = 1
+velocity1.ic.type = profile1d
+velocity1.ic.profile1d.file = ../tests/FlowChemistry/reference/znd_2H2_O2_7Ar_6670Pa_298K.dat
+velocity1.ic.profile1d.columns = 2 -1
+velocity1.ic.profile1d.x0 = 0.3
+velocity1.ic.profile1d.flip = 1
+pressure0.ic.type = profile1d
+pressure0.ic.profile1d.file = ../tests/FlowChemistry/reference/znd_2H2_O2_7Ar_6670Pa_298K.dat
+pressure0.ic.profile1d.columns = 3
+pressure0.ic.profile1d.x0 = 0.3
+pressure0.ic.profile1d.flip = 1
+pressure1.ic.type = profile1d
+pressure1.ic.profile1d.file = ../tests/FlowChemistry/reference/znd_2H2_O2_7Ar_6670Pa_298K.dat
+pressure1.ic.profile1d.columns = 3
+pressure1.ic.profile1d.x0 = 0.3
+pressure1.ic.profile1d.flip = 1
+species.ic.type = profile1d
+species.ic.profile1d.file = ../tests/FlowChemistry/reference/znd_2H2_O2_7Ar_6670Pa_298K.dat
+species.ic.profile1d.columns = 4 5 6 7 8 9 10 11 12 13 14 15 16
+species.ic.profile1d.x0 = 0.3
+species.ic.profile1d.flip = 1

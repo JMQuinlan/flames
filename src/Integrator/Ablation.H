@@ -15,7 +15,8 @@ namespace Integrator {
 // [2026-10-06] IN-DEPTH CONDUCTION (ablation.conduction = 1, default 0 = the model above,
 // bit-identical).  The solid carries its own temperature T_s (field "ablation_Ts"),
 //     rho_s cp_s dT_s/dt = div(k_s grad T_s),
-// advanced explicitly once per step.  At every fluid|solid face the surface temperature
+// advanced explicitly once per step, AFTER the gas stages, with the stage-weighted surface fluxes the gas actually
+// used (energy-conservative coupling; single level).  At every fluid|solid face the surface temperature
 // follows from flux continuity between the two one-sided gradients,
 //     T_w* = (h_g T_g + h_s T_s) / (h_g + h_s),    h = k / (distance cell centre - surface),
 // and T_wall becomes the ABLATION temperature: below it nothing is removed (q_g = q_s);
@@ -54,6 +55,10 @@ public:
     Set::Scalar  cp_s = -1.0;       // solid specific heat
     Set::Scalar  T_solid0 = -1.0;   // initial solid temperature (default T_wall)
     Set::Field<Set::Scalar> Ts_mf;  // solid temperature (meaningful where phi < 0.5)
+    // heat flux INTO the solid through each fluid|solid face, accumulated over the Runge-Kutta stages with their
+    // weights, stored on the FLUID cell: component 2 d + (1 if the solid is on the + side).  The solid receives exactly
+    // what the gas conduction gave up (minus what ablation consumed): the coupling conserves energy to round-off.
+    Set::Field<Set::Scalar> qs_mf;
     BC::BC<Set::Scalar> *Ts_bc = nullptr;
 
     // One fluid|solid face: surface temperature from flux continuity, capped at the ablation

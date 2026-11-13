@@ -1,0 +1,147 @@
+# ============================================================================
+# FlowConjugateHeat / a shock reflecting from a conducting wall heats it  (Hydro2, ablation.conduction = 1, no ablation)
+#
+# Gas at rest (rho 1, p 1, T 1; gamma 1.4, cp 3.5; mu 1e-3, Pr 0.72 -> k = 4.861e-3) in x < 0.8, conducting solid
+# (rho_s cp_s = 14, k_s = 1.944e-2, T = 1) in x > 0.8.  A Mach 1.2 shock (S = 1.4199; behind it rho 1.3416,
+# u 0.3615, p 1.5133, T 1.1280) starts at x = 0.5, reaches the wall at t_r = 0.2113 and reflects, leaving
+# gas at rest at p5 = 2.2371, T5 = 1.2635 against the wall at T = 1.
+# From then on: a gas half-space at CONSTANT PRESSURE p5 (density ~ 1/T, the gas moves toward the wall as it cools)
+# against a solid half-space.  Similarity solution in the mass coordinate psi = int rho dx, eta = psi/sqrt(t - t_r):
+#     -(eta/2) dT/d eta = (k p5/(cp R)) d/d eta((1/T) dT/d eta),   T(inf) = T5,
+# coupled to the error-function profile in the solid by a constant surface temperature T_i and equal fluxes
+#     q_w sqrt(t - t_r) = e_s (T_i - T_s0)/sqrt(pi),      e_s = sqrt(k_s rho_s cp_s);
+# solved by shooting in the check script (the linearised value is T_i = (e_5 T5 + e_s T_s0)/(e_5 + e_s)).
+# Checks the dynamic and the thermal coupling together: shock arrival time, reflected state, surface temperature,
+# wall heat flux ~ 1/sqrt(t - t_r), temperature profiles on both sides.
+#
+# Run (from bin/): mpirun -np 4 ./hydro2-2d-g++ ../tests/FlowConjugateHeat/input_1D_ShockHeatedWall plot_file=<dir>/output
+# Check:           python3 ../tests/FlowConjugateHeat/reference/shock_heated_wall_check.py <dir> [<dir> ...]
+# ============================================================================
+plot_file = ./tests/FlowConjugateHeat/output_1D_ShockHeatedWall
+# Check:           python3 ../tests/FlowAblation/reference/solid_conduction_check.py contact <dir>
+# ============================================================================
+plot_file = ./tests/FlowAblation/output_1D_Contact
+amr.plot_dt = 0.02
+amr.max_grid_size = 100
+amr.blocking_factor = 2
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level = 0
+amr.n_cell = 400 4
+amr.n_error_buf      = 8
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 1.0 0.01 0.0
+geometry.is_periodic = 0 1 0
+timestep = 1e-5
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1e-2
+dynamictimestep.min = 1e-9
+cfl                 = 0.3
+cfl_v               = 0.3
+stop_time = 0.9
+apply_embedded_solid = 1
+solid.wall_flux = 1
+solid.phi.ic.type = expression
+solid.phi.ic.expression.constant.xw = 0.8
+solid.phi.ic.expression.region0 = "1.0*(x < xw)"
+phi_refinement_criterion = 1e10
+solid.density.ic.type = constant
+solid.density.ic.constant.value = 1.0
+solid.momentum.ic.type = constant
+solid.momentum.ic.constant.value = 0.0 0.0
+solid.pressure.ic.type = constant
+solid.pressure.ic.constant.value = 1.0
+eta.ic.type = constant
+eta.ic.constant.value = 0.5
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cp = 3.5
+eos0.cv = 2.5
+mu0 = 1.0e-3
+mu0_b = 0.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp = 3.5
+eos1.cv = 2.5
+mu1 = 1.0e-3
+mu1_b = 0.0
+density0.ic.type = expression
+density0.ic.expression.region0 = "1.3416149068323*(x < 0.5) + 1.0*(x >= 0.5)"
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.361538208967199*(x < 0.5)"
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "1.51333333333333*(x < 0.5) + 1.0*(x >= 0.5)"
+density1.ic.type = expression
+density1.ic.expression.region0 = "1.3416149068323*(x < 0.5) + 1.0*(x >= 0.5)"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.361538208967199*(x < 0.5)"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "1.51333333333333*(x < 0.5) + 1.0*(x >= 0.5)"
+epsilon = 0.1
+sigma   = 0.0
+Dv      = 0.0
+pref    = 0.0
+small   = 1e-6
+grav    = 0.0
+eta_refinement_criterion   = 1e10
+omega_refinement_criterion = 1e10
+gradu_refinement_criterion = 1e10
+p_refinement_criterion = 1e10
+rho_refinement_criterion = 1e10
+cutoff = 1e-16
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+kappa_method        = 1
+
+
+
+
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = periodic
+eta.bc.type.yhi = periodic
+
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+
+density0.bc.type.xlo = neumann
+density0.bc.type.xhi = neumann
+density0.bc.type.ylo = periodic
+density0.bc.type.yhi = periodic
+
+density1.bc.type.xlo = neumann
+density1.bc.type.xhi = neumann
+density1.bc.type.ylo = periodic
+density1.bc.type.yhi = periodic
+
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+nghost = 4
+thermal.conduction = 1
+thermal.Pr = 0.72
+ablation.on     = 1
+ablation.T_wall = 10.0        # ablation temperature never reached: pure contact
+ablation.rho_s  = 1.0
+ablation.Qstar  = 1.757
+ablation.conduction = 1          # in-depth conduction in the solid
+ablation.k_s      = 1.9444444e-2
+ablation.cp_s     = 14.0
+ablation.T_solid0 = 1.0

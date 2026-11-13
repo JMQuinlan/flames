@@ -1,0 +1,141 @@
+% =============================================================================
+% Proposed replacement for the "Solution" paragraph, the
+% "\textbf{WIP: FIX VOF script as it is too diffusive for accurate comparison}"
+% line and Fig. rt_snapshot in Chapter_03_Validation/ViscousTests/
+% Rayleigh_Taylor_Instability.tex   (R32, 2026-10-29).
+% Copy the figures from tests/FlowRayleighTaylorInstability/refrence/Images/R32/
+% to Chapter_03_Validation/figures/RT/.
+%
+% New bib entries needed (not in references.bib; please verify against the papers):
+%   @book{chandrasekhar1961hydrodynamic, author={Chandrasekhar, S.},
+%     title={Hydrodynamic and Hydromagnetic Stability}, publisher={Oxford University Press}, year={1961}}
+%   @article{goncharov2002analytical, author={Goncharov, V. N.},
+%     title={Analytical model of nonlinear, single-mode, classical {R}ayleigh--{T}aylor instability at arbitrary {A}twood numbers},
+%     journal={Physical Review Letters}, volume={88}, number={13}, pages={134502}, year={2002}}
+%   @article{xiao2005simple, author={Xiao, F. and Honma, Y. and Kono, T.},
+%     title={A simple algebraic interface capturing scheme using hyperbolic tangent function},
+%     journal={International Journal for Numerical Methods in Fluids}, volume={48}, pages={1023--1040}, year={2005}}
+% Existing keys used: toro1994restoration, vanleer1977towards4, shu1988efficient,
+%   sharp1984overview.
+% =============================================================================
+\textbf{CLAUDE-START}
+{\color{red}\sout{The reference solution comes from a sharp-interface volume-of-fluid (VoF) standalone code run at the same resolution and parameters.}}
+
+\paragraph{Reference Solutions}
+We compare the run with three references. Each is chosen so that its assumptions are stated and can be checked.
+\begin{enumerate}
+    \item \emph{Linear theory.} For two inviscid, incompressible fluids with a sharp interface, a perturbation of wavenumber $k$ grows as $e^{\sigma t}$ with $\sigma = \sqrt{A g k}$, where $A = (\rho_h - \rho_l)/(\rho_h + \rho_l)$~\cite{chandrasekhar1961hydrodynamic}. Here $A = 1/3$, $g = 0.1$ and $k = 2\pi/0.5$, so $\sigma = 0.6472~\si{s^{-1}}$. The walls sit $kh = 9.4$ away from the interface, so their correction is negligible. The deck, however, starts from a $\tanh$ profile of thickness $\varepsilon = 4\times10^{-3}$ rather than a sharp interface. Solving the continuously stratified eigenproblem of~\cite{chandrasekhar1961hydrodynamic} (Ch.~X) for this profile gives $\sigma_\varepsilon = 0.6326~\si{s^{-1}}$, $2.25\%$ below the sharp value. We use $\sigma_\varepsilon$ as the exact rate.
+    \item \emph{Nonlinear bubble model.} Once the bubble is about $0.1\lambda$ high, the potential-flow model of Goncharov~\cite{goncharov2002analytical} predicts a terminal bubble velocity $U_b = \sqrt{2Ag/[(1+A)\,3k]} = 0.0364~\si{m/s}$ in 2D.
+    \item \emph{Low-diffusion numerical reference.} The original comparison script was not a VoF code. It was a single-gas Euler solver (MUSCL--Hancock with a Rusanov flux and \emph{no} slope limiter), in which the interface is only the density contact. The Rusanov flux spreads that contact over 9--11 cells, about twice the width of the Hydro2 interface on the same grid. The unlimited slopes also produced the $0.80/2.18$ density over/undershoots visible in the old figure. We replace it with a single-gas reference that keeps the same equations, initial condition and walls but uses an HLLC flux~\cite{toro1994restoration}, MC-limited MUSCL reconstruction~\cite{vanleer1977towards4} and SSP-RK3~\cite{shu1988efficient}. In interface cells it uses THINC reconstruction~\cite{xiao2005simple} of the density and of a passive colour function. This compressive, VoF-like interface capture holds the interface at about 2 cells. We run it on $64\times192$, $128\times384$ and $256\times768$ grids.
+\end{enumerate}
+
+\paragraph{Linear Growth}
+The deck's seed velocity ($w_0 = 2.5\times10^{-3}$) is not the RT eigenmode. Its transient has not decayed before the amplitude leaves the linear regime ($kh \approx 0.3$ by $t \approx 3$~s), so no exponential window exists. For the growth-rate test we therefore rerun the same deck with $w_0 = 2.5\times10^{-5}$ to $t = 12$~s. The amplitude $a(t)$ is the $\cos kx$ Fourier coefficient of the equivalent interface height $y_i(x) = L_y - \int \eta\,\mathrm{d}y$. Because this column integral does not depend on how the diffuse interface is spread, $a(t)$ is insensitive to interface broadening. We fit $\sigma$ with $a = c_1 e^{\sigma t} + c_2 e^{-\sigma t}$ while $ka < 0.1$. Table~\ref{tab:rt_growth} and Fig.~\ref{fig:rt_linear} show the result: on the $128\times384$ grid Hydro2 grows at $0.6287~\si{s^{-1}}$, $0.63\%$ below $\sigma_\varepsilon$. The reference converges to $\sigma_\varepsilon$ ($-3.70\%$, $-0.32\%$, $+0.15\%$ on the three grids), which confirms the eigenproblem value. Against the sharp-interface rate $\sqrt{Agk}$ every solution is about $2\%$ low: this gap comes from the finite initial thickness $\varepsilon$ that the sharp-interface theory leaves out, not from the solver.
+
+\begin{table}[H]
+    \centering
+    \caption{Rayleigh--Taylor linear growth rate ($w_0 = 2.5\times10^{-5}$). Errors are relative to the exact rate of the initial $\tanh$ profile, $\sigma_\varepsilon = 0.6326~\si{s^{-1}}$; the sharp-interface value is $\sqrt{Agk} = 0.6472~\si{s^{-1}}$.}
+    \label{tab:rt_growth}
+    \begin{tabular}{l c c c}
+        \hline
+        Solution & Grid & $\sigma$ [s$^{-1}$] & Error vs.\ $\sigma_\varepsilon$ \\
+        \hline
+        Numerical (Hydro2)        & $64\times192$  & 0.6148 & $-2.81\%$ \\
+        Numerical (Hydro2)        & $128\times384$ & 0.6287 & $-0.63\%$ \\
+        Reference HLLC--MUSCL     & $64\times192$  & 0.6092 & $-3.70\%$ \\
+        Reference HLLC--MUSCL     & $128\times384$ & 0.6306 & $-0.32\%$ \\
+        Reference HLLC--MUSCL     & $256\times768$ & 0.6336 & $+0.15\%$ \\
+        \hline
+    \end{tabular}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\textwidth]{Chapter_03_Validation/figures/RT/RT_Linear_Growth.png}
+    \caption{Rayleigh--Taylor interface mode amplitude against time ($w_0 = 2.5\times10^{-5}$). The exact line has the slope $\sigma_\varepsilon = 0.6326~\si{s^{-1}}$ of the deck's $\tanh$ profile, anchored to the finest reference at $t = 8$~s. Maximum growth-rate error: $0.63\%$ on $128\times384$ ($2.81\%$ on $64\times192$).}
+    \label{fig:rt_linear}
+\end{figure}
+
+\paragraph{Nonlinear Stage}
+We define the bubble tip as the highest point, and the spike tip as the lowest point, of the $\eta = 0.5$ contour ($\phi = 0.5$ for the references). Table~\ref{tab:rt_tips} lists the tip positions of every solution relative to the finest THINC reference ($256\times768$), as a percentage of the wavelength $\lambda = 0.5$~m. Through $t = 12.5$~s the THINC reference itself converges: its $128\times384$ and $256\times768$ solutions differ by at most $1.9\%\,\lambda$. Over the same interval Hydro2 on $128\times384$ stays within $1.85\%\,\lambda$ of the finest reference ($1.13\%$ for the bubble and $1.85\%$ for the spike up to $t=10$~s), which is the reference's own grid uncertainty. On the deck grid ($64\times192$) the largest difference is $4.1\%\,\lambda$. Between $t = 6$ and $12$~s the bubble rises at a mean $0.0390$~m/s ($128\times384$) against $0.0374$~m/s for the finest reference. Both lie above the potential-flow value of Goncharov~\cite{goncharov2002analytical} ($0.0364$~m/s), by $7.1\%$ and $2.6\%$ (Fig.~\ref{fig:rt_bubble}).
+
+After $t \approx 12.5$~s secondary Kelvin--Helmholtz roll-ups form along the stem of the mushroom in the sharp references (Fig.~\ref{fig:rt_density}). These inviscid runs carry no physical viscosity to set a smallest scale, so the solution keeps gaining small-scale structure as the grid is refined, and a grid-converged reference no longer exists. Hydro2 smooths these roll-ups and its bubble does not decelerate as the sharp references do: at $t = 15$~s its bubble tip is $8.8\%\,\lambda$ above the THINC reference. We therefore restrict the quantitative comparison to $t \le 12.5$~s. A viscous variant of the test (finite perturbation Reynolds number) would give a converged reference at later times.
+
+\begin{table}[H]
+    \centering
+    \caption{Rayleigh--Taylor bubble/spike tip position minus that of the finest THINC reference ($256\times768$), in \% of $\lambda$. Maximum Hydro2 difference for $t\le12.5$~s: $1.85\%\,\lambda$ on $128\times384$, $4.1\%\,\lambda$ on $64\times192$.}
+    \label{tab:rt_tips}
+    \begin{tabular}{l c c c c}
+        \hline
+        Solution & $t = 5$ & $t = 7.5$ & $t = 10$ & $t = 12.5$ \\
+        \hline
+        Numerical, $64\times192$                 & $-1.24/+1.72$ & $-1.80/+4.08$ & $-2.73/+3.72$ & $+0.07/+2.68$ \\
+        Numerical, $128\times384$                & $-0.69/+0.88$ & $-0.76/+1.85$ & $-1.13/+1.73$ & $+1.79/-1.15$ \\
+        Original (Rusanov), $64\times192$        & $-2.34/+3.13$ & $-1.95/+6.43$ & $+0.31/+1.84$ & $+5.33/-3.04$ \\
+        Original (Rusanov), $128\times384$       & $-1.17/+1.68$ & $-0.45/+2.76$ & $-0.17/+1.48$ & $+4.36/-0.50$ \\
+        Reference THINC, $64\times192$           & $-1.06/+0.98$ & $-1.71/+2.19$ & $-3.30/+2.93$ & $-3.03/+0.98$ \\
+        Reference THINC, $128\times384$          & $-0.34/+0.31$ & $-0.64/+0.58$ & $-1.89/+0.93$ & $-1.07/+0.04$ \\
+        Reference HLLC--MUSCL, $256\times768$    & $-0.22/-0.02$ & $-0.26/-0.06$ & $+0.22/-1.05$ & $+2.35/-2.92$ \\
+        \hline
+    \end{tabular}
+\end{table}
+
+\paragraph{Interface Sharpness}
+Figure~\ref{fig:rt_width} and Table~\ref{tab:rt_width} give the mean $5$--$95\%$ thickness of the volume fraction (Hydro2 $\eta$, reference colour function $\phi$) in cells. We compute it as the area of the cells with $0.05 < \eta < 0.95$ divided by the length of the $\eta = 0.5$ contour. The original reference is the most diffuse solution of all, at 10--11 cells. Hydro2 holds 5--6 cells on $64\times192$ and 7--9 cells on $128\times384$. The THINC reference stays at 2--3 cells on every grid, so it is now a sharp-interface reference against which the diffuse model can be judged. At $t = 0$ the physical $\tanh$ profile of the deck is $2\,\mathrm{atanh}(0.9)\,\varepsilon = 0.0118$~m wide, which is 2, 4 and 6 cells on the three grids.
+
+\begin{table}[H]
+    \centering
+    \caption{Mean $5$--$95\%$ interface thickness in cells over $2.5\le t\le12.5$~s.}
+    \label{tab:rt_width}
+    \begin{tabular}{l c c c}
+        \hline
+        Solution & $64\times192$ & $128\times384$ & $256\times768$ \\
+        \hline
+        Numerical (Hydro2)          & 5.2  & 7.2  & --   \\
+        Original (Rusanov)          & 9.7  & 11.3 & --   \\
+        Reference HLLC--MUSCL       & --   & --   & 5.1  \\
+        Reference THINC             & 2.0  & 2.2  & 2.7  \\
+        \hline
+    \end{tabular}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}{\textwidth}
+        \centering
+        \includegraphics[width=0.85\linewidth]{Chapter_03_Validation/figures/RT/RT_Density_t010.0.png}
+    \end{subfigure}
+    \begin{subfigure}{\textwidth}
+        \centering
+        \includegraphics[width=0.85\linewidth]{Chapter_03_Validation/figures/RT/RT_Density_t014.5.png}
+    \end{subfigure}
+    \caption{Rayleigh--Taylor density at $t = 10$~s (top) and $t = 14.5$~s (bottom): the original Rusanov reference, the THINC reference ($256\times768$) and Hydro2 on $64\times192$ and $128\times384$; white line, $\eta = 0.5$ ($\phi = 0.5$). Maximum tip-position difference between Hydro2 ($128\times384$) and the THINC reference up to $t = 12.5$~s: $1.85\%\,\lambda$.}
+    \label{fig:rt_density}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\textwidth]{Chapter_03_Validation/figures/RT/RT_Tip_Positions.png}
+    \caption{Rayleigh--Taylor bubble (upper) and spike (lower) tip positions. Maximum difference between Hydro2 and the finest THINC reference for $t\le12.5$~s: $1.85\%\,\lambda$ ($128\times384$) and $4.1\%\,\lambda$ ($64\times192$).}
+    \label{fig:rt_tips}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\textwidth]{Chapter_03_Validation/figures/RT/RT_Bubble_Velocity.png}
+    \caption{Rayleigh--Taylor bubble-tip velocity against the 2D terminal velocity of Goncharov~\cite{goncharov2002analytical}. Mean over $6\le t\le12$~s: $0.0390$~m/s for Hydro2 ($128\times384$, $+7.1\%$ vs.\ the model) and $0.0374$~m/s for the finest reference ($+2.6\%$). The model assumes potential flow.}
+    \label{fig:rt_bubble}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\textwidth]{Chapter_03_Validation/figures/RT/RT_Interface_Width.png}
+    \caption{Rayleigh--Taylor interface thickness (5--95\% of the volume fraction) in cells. Hydro2: 5.2 cells ($64\times192$) and 7.2 cells ($128\times384$); original reference: 9.7 and 11.3 cells; THINC reference: 2.0--2.7 cells.}
+    \label{fig:rt_width}
+\end{figure}
+
+% Old Fig. rt_snapshot (figures/RT/{density,velocity,vorticity}/0030_*.png and
+% figures/RayleighTaylor/*.png) came from refrence/rayleightaylor_UNIT_TEST.py
+% (Rusanov, unlimited, 64x192) and should be replaced by Fig. rt_density above.
+
+\textbf{CLAUDE-END}

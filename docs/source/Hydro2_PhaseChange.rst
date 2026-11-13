@@ -25,8 +25,8 @@ coefficient.  The transfer is driven by the temperature, energy and pressure fie
    :depth: 2
 
 
-Model
-=====
+Phase-change model
+==================
 
 Each phase is a stiffened gas with energy and entropy constants :math:`q`, :math:`q'`
 (Le Metayer, Massoni & Saurel, 2004):

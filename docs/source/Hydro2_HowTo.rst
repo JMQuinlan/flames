@@ -201,13 +201,24 @@ Riemann solvers
    * - :code:`hllc_elastic`
      - HLLC with the solid stress (Favrie et al. 2009).  Selected automatically with :code:`elastic.on = 1`;
        reduces to :code:`hllc` for fluids.
+   * - :code:`hllc_solid`
+     - Reduced HLLC of Favrie & Schmidmayer (2026) for elasto-plastic solids; by name only, parameter
+       :code:`zeta` (1).  See the elastic-solid page.
    * - :code:`hllc_all_mach`
      - Low-Mach (Guillard--Viozat) scaling of the pressure dissipation.
        Parameters :code:`ma_cutoff` (0.3), :code:`alpha_min` (0.0).
    * - :code:`hllc_all_mach_furfaro`
      - All-Mach variant; parameter :code:`interface_pressure_relaxation`.
    * - :code:`hlle`, :code:`hllce`
-     - Alternative solvers (HLLE is the more dissipative two-wave solver).
+     - Alternative solvers (HLLE is the more dissipative two-wave solver).  **Use** :code:`hlle` **for
+       detonations on thin periodic strips**: HLLC develops a transverse (odd--even) instability behind the
+       strong grid-aligned shock; HLLE does not.  HLLE is also the workaround for the cold-wall blunt body at
+       :math:`\mu = 10^{-2}`, whose HLLC failure (at the stagnation wall cell) is not yet understood.
+   * - :code:`shock_fix.on` (0), :code:`shock_fix.ratio` (0.5)
+     - Optional switch, off by default.  A face uses the HLLE flux when a pressure jump
+       :math:`|\Delta p|/\min(p+\pi) >` ratio is found between one of its cells and a neighbour transverse to the
+       face normal; all other faces keep the selected solver.  Removes the row-to-row divergence of HLLC on the
+       detonation strip (to round-off).  Not available with :code:`elastic.on = 1`.
    * - :code:`roe`
      - Roe solver; parameters :code:`entropy_fix` (0), :code:`entropy_fix_eps` (0.05).
        **This is what you get if** :code:`Riemann_Solver.type` **is left out.**
@@ -296,10 +307,16 @@ limiter:
 
 Which one to use depends on the problem:
 
-* **Bubble collapse / rebound: use 0.**  On outflow faces the reconstructed value adds terms that break
-  the upwind maximum principle; at a near-singular collapse (gas core a few cells wide, large
-  :math:`\nabla\cdot\mathbf{u}`) that decouples gas volume from gas mass and broke the uncoated collapse.
-  The solver prints a warning whenever the flag is 1.
+* **Bubble collapse / rebound: 0 is the default; 1 is the scheme of the papers and is under evaluation.**
+  The reconstructed face value is what Saurel et al. (2009, Appendix C) and Schmidmayer et al. (2020) use.  It
+  was switched off after the uncoated collapse failed with it on the cluster at 205 cells per radius (interface
+  NaN).  That failure has **not** been reproduced at up to 41 cells per radius (changelog II.47): there, with
+  THINC, MUSCL2 or WENO3, the consistent row runs through collapse and rebound, keeps the pressure at or above
+  the bubble pressure and the band densities at their pure values, and is as spherical or more spherical than
+  the donor-cell row, which leaves gas-side tail cells on the pressure floor.  Until the cluster failure is
+  explained, treat 1 as unvalidated at high resolution.  The solver prints a warning whenever the flag is 1.
+  Neither row keeps the rebound spherical at a pressure ratio of 1400 (17 -- 27 % at 41 cells per radius);
+  the paper reports the same and that it improves with resolution.
 * **Metal|gas elastic cases with a higher-order limiter: use 1.**  With donor-cell :math:`\alpha` and
   limiter-reconstructed phasic energies the two do not agree at a stiff interface (copper|air:
   :math:`\pi/p \approx 3.4\times10^5`), a uniform-pressure, uniform-velocity interface is not preserved, and
@@ -321,6 +338,108 @@ Which one to use depends on the problem:
    1000 x 1000 (mass drift 0.006 %).  The :code:`Parse` warning ("not validated") predates this and refers
    to bubble collapse, where 0 remains the setting to use.
 
+
+Viscous two-phase runs with a sharp interface
+=============================================
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Input
+     - Meaning
+   * - :code:`gradu_from_velocity`
+     - 0 (default): velocity gradient and Hessian from the momentum and density derivatives by the product
+       rule.  1: central differences of the velocity field itself.
+   * - :code:`visc_flux_form`
+     - 0 (default): viscous force :math:`\mu\,\nabla\nabla u + \nabla\mu\cdot\nabla u`.  1: difference of face
+       stresses with the face viscosity (mean of the two cells).  Not for the sharp-wall viscous stencils
+       (:code:`solid.visc_mirror`).
+   * - :code:`Limiter.muscl.slope_rho`, :code:`slope_vel`, :code:`slope_p`
+     - Diagnostic: a different slope limiter for :math:`(\alpha, \alpha_k\rho_k)`, the velocity and the pressure
+       (:code:`Limiter.type = muscl`).  Unset: all three are :code:`Limiter.muscl.slope`.
+
+Set both for a viscous liquid next to a gas when the limiter keeps the interface sharp
+(:code:`muscl2`, :code:`thinc`, :code:`muscl` with :code:`mc` or :code:`superbee`):
+
+.. code-block:: none
+
+   gradu_from_velocity = 1
+   visc_flux_form      = 1
+
+.. note::
+
+   Validation (:code:`OPTIMIZATION_CHANGELOG.md` II.55, 2026-10-08).  In the gas-side foot of the interface
+   the density changes by an order of magnitude from one cell to the next.  The product-rule gradient is a
+   density-weighted difference and is amplified by that ratio, and the default form of the viscous force is not
+   a positive diffusion operator once :math:`\mu_{i+1}-\mu_{i-1} > 4\mu_i` (a tanh interface thinner than
+   1.4 cells; THINC at :math:`\beta = 1.6` is 0.6 cells).  Uncoated cylinder collapse, 25.6 cells per radius,
+   water viscosity at :math:`R_0 = 2\,\mu m`: :code:`muscl2` fails on the symmetry axis at 170 ns with the
+   defaults, runs to the end with either option, and runs with :math:`\mu = 0`.  With both options the
+   144 runs of the scheme matrix (six schemes, two alpha rows, pressure ratios 3 to 100, 12.8 to 51.2 cells per
+   radius) all complete; with the defaults 19 of them fail.  Single-fluid Couette, Poiseuille and Taylor-Green
+   results change by less than :math:`5\times10^{-6}`.
+
+
+Condensed explosive next to a solid
+===================================
+
+:code:`energetic.on = 1` burns a **reactant species of phase 0** into a **product species of phase 1**
+(:code:`src/Integrator/Hydro2_Energetic.H`; the six-equation form of the reactive mixture of Petitpas et al.,
+Shock Waves 19, 2009, used for the tests of Wallis, Barton & Nikiforakis, Comput. Struct. 254, 2021).
+The reacting mass takes its own volume and specific energy with it and receives the heat :math:`Q`; the pressure
+relaxation that follows equilibrates the two phases.  The reactant can share phase 0 with inert solid species
+(a confiner with :code:`elastic.species.mu`).
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Input
+     - Meaning
+   * - :code:`energetic.reactant`, :code:`energetic.product`
+     - Species of phase 0 that reacts; species of phase 1 it becomes.
+   * - :code:`energetic.law`
+     - :code:`sqrt`: :math:`\dot\lambda = -k\sqrt\lambda` (:math:`\lambda` = unreacted mass fraction).
+       :code:`pressure`: :math:`\dot\lambda = -k\lambda\,(p/p_{ref})^n`.
+   * - :code:`energetic.k`, :code:`energetic.Q`, :code:`energetic.p_ign`
+     - Rate constant, heat of reaction per unit mass, pressure above which the reaction runs.
+   * - :code:`energetic.p_ref`, :code:`energetic.n`
+     - Reference pressure and exponent of the :code:`pressure` law.
+   * - :code:`species.order = 3`
+     - THINC face mass fractions (Wallis 2021, Appendix A; :code:`species.thinc_beta` = 2.5,
+       :code:`species.thinc_eps` = 1e-4): keeps the boundary between two species of one phase about two cells wide.
+
+Decks: :code:`tests/FlowEnergetic/input_0D_Burn`, :code:`input_1D_DetonationCopper`, :code:`input_2D_CopperCan`.
+
+.. note::
+
+   Validation (:code:`OPTIMIZATION_CHANGELOG.md` II.58 - II.60).  Constant-volume burn: reaction progress, mass,
+   energy and end pressure to round-off.  1D detonation into elastic copper: front speed within 0.6 % of
+   Chapman-Jouguet at 0.1 mm cells and 0.06 % at 0.25 mm, but **15 % fast at 0.5 mm** (the reaction zone is then
+   ~17 cells and the ignition threshold lets the wave run ahead): resolve the charge at 0.25 mm or finer.
+   Start the confiner | explosive boundary sharp and use :code:`species.order = 3`: a layer of cells that holds
+   confiner and reactant together ignites ahead of the detonation.  Carry 0.01 % of gas in the solid
+   (:math:`\eta = 1 - 10^{-4}`): a :math:`10^{-6}` trace is squeezed below :code:`cutoff` under detonation loading.
+
+
+Track the entropy
+=================
+
+:code:`entropy.on = 1` adds the plot field :code:`entropy`, the entropy per unit volume
+(:math:`\sum_k \alpha_k\rho_k c_{v,k}\ln[(p_k + \pi_k)/\rho_k^{\gamma_k}]` in fluid cells,
+:math:`\rho_s c_{p,s}\ln T_s` in the cells of a conducting embedded solid).  It is a diagnostic: the solution
+does not change.  Its domain integral must not decrease in a closed adiabatic system; the checks in
+:code:`tests/FlowEntropy/reference/entropy_check.py` cover a viscous shock (entropy maximum inside the wave), a
+moving wall heating the gas between adiabatic walls (:math:`dE/dt = \mu U^2/h`, entropy production equal to the
+dissipation integral), a plate and a gas equilibrating in a closed box, and a body stirring a closed channel.
+
+.. warning::
+
+   On a periodic domain give :code:`eta.bc.type.* = periodic` explicitly.  Without :code:`eta.bc` the volume
+   fraction gets a zero-gradient boundary in *every* direction, which is inconsistent with periodic density,
+   momentum and energy and acts as a momentum source at stiff interfaces (the slab-vibration test failed for
+   this reason).  Hydro2 prints a warning at start-up.
 
 Set up a solid
 ==============

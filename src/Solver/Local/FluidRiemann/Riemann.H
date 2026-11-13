@@ -56,6 +56,9 @@ struct State
     Set::Scalar pi0         = NAN;
     Set::Scalar gamma1      = NAN;
     Set::Scalar pi1         = NAN;
+    // Capillary jump p_gas - p_liq at this face (capillary.jump_scheme = 1;
+    // 0 = equal phase pressures, the default).  Set by Hydro2 after ToState.
+    Set::Scalar capjump     = 0.0;
 
     // Elastic solid phase (Hydro2 elastic.on; Favrie-Gavrilyuk-Saurel JCP 228,
     // 2009).  All zero for fluids; only the hllc_elastic solver reads them.

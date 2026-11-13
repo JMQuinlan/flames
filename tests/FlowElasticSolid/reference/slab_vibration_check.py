@@ -54,12 +54,17 @@ def main():
     with open(os.path.join(outdir, "slab_vibration_summary.csv"), "w") as fo:
         fo.write("mode,f,f_theory,error_pct,decay_time\n")
         for name, f, f0, tau, A in out: fo.write(f"{name},{f:.6g},{f0:.6g},{100 * (f / f0 - 1):.3f},{tau:.5g}\n")
-    fig, ax = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
-    for a_, col, (name, f, f0, tau, A) in zip(ax, (1, 2), out):
-        a_.plot(t, T[:, col] / U, "k-", lw=0.9, label="Hydro2 modal amplitude")
-        a_.plot(t, np.cos(2 * np.pi * f0 * t), "C3--", lw=0.7, label=f"theory, f = {f0:.3f}")
-        a_.set_ylabel(name + " / initial"); a_.grid(alpha=0.3); a_.legend(fontsize=8, loc="upper right")
-    ax[1].set_xlabel("t"); fig.tight_layout(); fig.savefig(os.path.join(outdir, "slab_vibration.png"), dpi=200); plt.close(fig)
+    # Exact: standing wave at the theoretical frequency; the stretch mode radiates sound into the gas and loses the
+    # fraction 1 - R^2 of its amplitude per period, the shear mode (zero shear traction at the faces) loses nothing.
+    fig, ax = plt.subplots(2, 1, figsize=(10, 6.4), sharex=True)
+    labels = ("Thickness-Stretch Mode Amplitude [-]", "Thickness-Shear Mode Amplitude [-]")
+    for a_, col, (name, f, f0, tau, A), lab, damp in zip(ax, (1, 2), out, labels, (Rr**2, 1.0)):
+        tt = np.linspace(t[0], t[-1], 4000)
+        a_.plot(tt, np.cos(2 * np.pi * f0 * tt) * damp ** (f0 * tt), "C3-", lw=1.1, label="Exact")
+        a_.plot(t, T[:, col] / U, "ko", ms=3, mfc="none", mew=0.7, label="Numerical")
+        a_.set_ylabel(lab); a_.grid(alpha=0.3); a_.legend(fontsize=9, loc="lower left", ncol=2, framealpha=0.9)
+    ax[1].set_xlabel("Time [s]"); ax[0].set_title("Free Vibration of an Elastic Slab Between Two Gas Layers")
+    fig.tight_layout(); fig.savefig(os.path.join(outdir, "slab_vibration.png"), dpi=200); plt.close(fig)
     print(f"  wrote {outdir}/slab_vibration.png")
 
 

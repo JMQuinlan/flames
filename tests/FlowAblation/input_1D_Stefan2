@@ -10,8 +10,8 @@
 #     - k_s (T_a - T_s0) exp(-lam^2 r)/(erfc(lam sqrt r) sqrt(pi alpha_s t)) = rho_s Q* lam sqrt(alpha_g/t)
 #   r = alpha_g/alpha_s   ->  lam = 0.0872   (0.195 without in-depth conduction)
 #   solid  T = T_s0 + (T_a - T_s0) erfc((0.5 - x)/(2 sqrt(alpha_s t)))/erfc(lam sqrt r)
-# Measured (400 cells): recession -0.1 ... +0.4 %, net flux within 0.5 %, temperature
-# profiles 0.13 % (gas), 0.01 % (solid) of the temperature difference.
+# Measured (conservative exchange, t = 5): recession -0.6 % (200 cells) / +0.3 % (400), net flux within
+# 0.1 %, temperature profiles 0.13 % (gas), 0.01 % (solid) of the temperature difference.
 #
 # Run (from bin/): mpirun -np 4 ./hydro2-2d-g++ ../tests/FlowAblation/input_1D_Stefan2 plot_file=<dir>/output
 # Check:           python3 ../tests/FlowAblation/reference/solid_conduction_check.py stefan2 <dir>
