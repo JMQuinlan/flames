@@ -11,3 +11,7 @@ for _fl in ("dodecane", "pentane"):
 # holds; Ms 5 is at 29 bar, near-critical).  Finest D/dx = 100 (base 12.5, max_level 3), t* = 8.
 for _M in (1.47, 2.0, 3.0):
     CASES += [("pentane", D_FUEL, _M, 3, 0, LONG), ("pentane", D_FUEL, _M, 3, 1, LONG)]
+
+# Tandem pair (2026-11-12): Ms 3 on two n-pentane columns, D = 10 um each (same as the single-column runs), 10 um
+# surface-to-surface gap (PAIR_GAP) along the shock direction; LONG layout.
+CASES += [("pentane", D_FUEL, 3.0, 3, 0, PAIR), ("pentane", D_FUEL, 3.0, 3, 1, PAIR)]
