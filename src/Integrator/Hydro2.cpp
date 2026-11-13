@@ -65,6 +65,8 @@ AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 // default 1e-13/epsilon: scale-free, so round-off noise in eta (~1e-16/dx) is gated out at
 // every scale.  The old fixed 1e-10 passed that noise at the micro scale (dx ~ 4e-8 m).
 static Set::Scalar g_gem_min = 1.0e-10;
+// shell.slip5_rupture (see Parse): Gamma = 0 marks a broken shell -> water tension, no shell viscosity.
+static int g_shell_rupture = 0;
 
 static Set::Scalar SigmaEffFromGamma(Set::Scalar Gamma, Set::Scalar grad_eta_mag,
                                      int marm, Set::Scalar sig_const,
@@ -73,6 +75,7 @@ static Set::Scalar SigmaEffFromGamma(Set::Scalar Gamma, Set::Scalar grad_eta_mag
 {
     if (grad_eta_mag <= g_gem_min) return 0.0; // off the interface: no shell
     if (!marm) return sig_const;
+    if (g_shell_rupture && Gamma <= 0.0) return sigw;   // broken shell: clean interface (Gamma -> 0+ limit)
     Set::Scalar se = 0.0;
     if (Gamma > 0.0 && Gamma < Gb)             // stretched -> elastic branch
     {
@@ -497,6 +500,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //       eta ~ 1e-4 bubble-centre level set into the eta = 0.5 cell (permanently buckled shell).
         // Locally (RADIAL slab) slip 5 and 6 split the slab columns at 19.2 cells/R0; 0 did not.
         pp_query_default("shell.slip", value.shell_slip, 0);
+        // shell.slip5_rupture (2026-11-12, option 5 only): where the level set through a band cell has
+        // shrunk to a point -- eta has an extremum ALONG THE NORMAL inside the cell (one-sided normal
+        // differences change sign: bubble centre after a deep collapse, isolated tail extrema, pinch-off) --
+        // that level set has no area left, so it carries no shell: Gamma = 0 (polymer chains torn apart).
+        // Gamma = 0 means a clean interface (sigma_water, the Marmottant Gamma -> 0+ limit) and no shell
+        // viscosity.  Intact neighbours re-cover the cell through the slip's upwind transport (rejoining).
+        pp_query_default("shell.slip5_rupture", value.shell_slip5_rupture, 0);
+        g_shell_rupture = value.shell_slip5_rupture;
         // option 11 face slip velocity: 0 = mean of the two cells, 1 = the donor (upwind) cell's own s n,
     // 2 = flux Gamma_donor (w n)_face (m s n = Gamma w n: both factors smooth across the band, s = w/|grad eta| is not)
         pp_query_default("shell.slip11_face", value.shell_slip11_face, 0);
@@ -509,7 +520,33 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // gas KEEPS its own energy (its own p >= 0) and the liquid takes the rest of rho e (carries
         // the tension): pressure non-equilibrium for that step (Schmidmayer et al. 2023, mu = 0
         // limit); the full isobaric relaxation is tried again every step.  E0 + E1 = rho e exactly.
-        pp_query_validate("relax.opt8", value.relax_opt8, {0, 1, 2});   // 2: trace gas keeps its energy in every beyond-cutoff liquid cell
+        pp_query_validate("relax.opt8", value.relax_opt8, {0, 1, 2});
+        // relax.trace_pT (2026-11-11): a liquid cell beyond the cutoff (eta > 1 - cutoff) that holds gas
+        // mass is treated as liquid with dispersed micro-gas, in pressure AND temperature equilibrium with
+        // it (the 4-equation / HRM state, solved from the conserved masses and rho e only, so no trace E_k
+        // noise enters).  Before, alpha was frozen and the gas was set to the liquid pressure at fixed
+        // volume: compressed trace gas could not re-expand as the pressure fell, the closure removed its
+        // heat instead (isochoric), and it went to ~1 K at 6-18 kg/m3; on re-entering the band the
+        // relaxation reheated it and it expanded ~25x in one step (06 160 kPa c19 crash at 6.70 us, with
+        // or without the shell slip).  Applied only when the frozen-alpha common pressure is >= 0: an
+        // ideal gas cannot be in equilibrium with liquid in tension (that needs the nuclei's own Laplace
+        // pressure), so liquid in tension keeps the previous guard and holds its tension.
+        pp_query_validate("relax.trace_pT", value.relax_trace_pT, {0, 1, 2, 3});
+        // relax.blake (2026-11-12): an isolated gas pocket in liquid (eta > 1/2 and the gas fraction peaks along
+        // the eta normal, i.e. eta has a minimum there: gas not connected to a resolved interface) is a sub-grid
+        // nucleus of radius r = (3 alpha_g dV / 4 pi)^(1/3).  The 6-eq relaxation has no capillary term, so in
+        // liquid tension it expanded such gas to the liquid pressure (0.01% -> 5% gas, 160 kPa slab, 2.8 us).
+        // A real nucleus carries its Laplace pressure 2 sigma/r (MPa at nm radii) and only grows past the Blake
+        // threshold p_l < p_B = -4 sigma / (3 R_c), R_c = sqrt(3 p_g r^3 / (2 sigma)) (isothermal gas, no vapour).
+        // Below it the nucleus volume is held (stiff limit of 2 sigma/r >> |dp|) and only the temperature is
+        // shared with the liquid (same closed form as trace_pT = 3; E0 + E1 = rho e).  Above it the cell relaxes
+        // normally (cavitation).  sigma = clean-water value (sigma).  No tunable parameter.
+        pp_query_validate("relax.blake", value.relax_blake, {0, 1});
+        // relax.trace_pT = 3: alpha and phase densities stay frozen (no trace-gas compressibility in the
+        // liquid), the trace gas takes the common temperature at fixed volume (energy conserved, closed form).
+        // relax.trace_pT = 2: same cells and same admissibility (frozen-alpha p >= 0), but instead of the p-T state
+        // they go through the ordinary closure of the band cells (each phase isentropic to the common pressure plus
+        // the same specific heat q, Dj = 0): pressure equilibrium, gas keeps its own temperature.   // 2: trace gas keeps its energy in every beyond-cutoff liquid cell
         // relax.opt9 (option 9, 2026-11-10): which cells skip the isobaric (alpha-free) relaxation.
         // Default: eta beyond the cutoff (eta < cutoff or > 1 - cutoff) is treated as a single fluid with
         // alpha FROZEN -- so the liquid can hold tension, but its pressure is then set by the advected
@@ -2042,6 +2079,7 @@ Hydro2::RHS(int lev,
                         Set::Scalar el = chi_ * (Gb / G - 1.0);
                         se = (el >= sbrk) ? sigw : el;
                     }
+                    else if (g_shell_rupture && G <= 0.0) se = sigw;   // broken shell (shell.slip5_rupture)
                     // G >= Gb: compressed past buckling -> sigma = 0 (se stays 0)
                 }
                 sg(i, j, k) = se;
@@ -6589,6 +6627,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                 for (int d = 0; d < AMREX_SPACEDIM; ++d)
                     gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
                 const Set::Scalar ds = gu.trace() - nh.dot(gu * nh);
+                if (g_shell_rupture && !slip7v && shv(i, j, k) <= 0.0) return;   // broken shell: no shell viscosity
                 Set::Scalar se = kap_s * ds          // viscous ONLY (its tangential part is kept below)
                                * ShellViscFactor(ds, alpha_v);
                 if (tfl_on)
@@ -7482,6 +7521,7 @@ void Hydro2::RelaxAndReinit(int lev)
     const Set::Scalar DIV_FLOOR   = 1.0e-30;
     const Set::Scalar small_loc   = small;        // kept for legacy callers
     const Set::Scalar cutoff_loc  = cutoff;       // pure-cell guard threshold
+    const int tracePT = relax_trace_pT;           // relax.trace_pT: HRM p-T state for trace gas in liquid
     const int opt8 = relax_opt8;                  // relax.opt8: gas keeps its energy instead of the 0 K floor
     const int opt9 = relax_opt9;                  // relax.opt9: freeze alpha only where a phase has no mass
     const int sch20c = relax_sch20;               // relax.sch20: Sch20 closure only
@@ -7664,12 +7704,46 @@ void Hydro2::RelaxAndReinit(int lev)
         }
     }
 
+    // relax.blake: flag isolated gas pockets (eta minimum along the eta normal, eta > 1/2) from the
+    // pre-relaxation eta, so the main kernel below never reads neighbours it is modifying.
+    const int blake = relax_blake;
+    std::unique_ptr<amrex::MultiFab> nuc_mf;
+    if (blake)
+    {
+        nuc_mf = std::make_unique<amrex::MultiFab>(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, 0);
+        const Set::Scalar *DXb = geom[lev].CellSize();
+        for (amrex::MFIter mfi(*nuc_mf, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bxb = mfi.validbox();
+            auto et = eta_mf[lev]->const_array(mfi);
+            auto nf = nuc_mf->array(mfi);
+            amrex::ParallelFor(bxb, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                nf(i, j, k) = 0.0;
+                const Set::Scalar ec = et(i, j, k);
+                if (!(ec > 0.5 && ec < 1.0)) return;
+                const Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DXb);
+                const Set::Scalar g2 = ge.squaredNorm();
+                Set::Scalar up = 0.0, um = 0.0;   // eta rise to each side along the normal (n_d^2 weights)
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                {
+                    const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                    const Set::Scalar w = (g2 > 0.0) ? ge(d) * ge(d) / g2 : 1.0 / AMREX_SPACEDIM;
+                    up += w * (et(i + di, j + dj, k + dk) - ec);
+                    um += w * (et(i - di, j - dj, k - dk) - ec);
+                }
+                if (up > 0.0 && um > 0.0) nf(i, j, k) = AMREX_D_TERM(DXb[0], * DXb[1], * DXb[2]);   // cell volume
+            });
+        }
+    }
+    const Set::Scalar sig_blake = sigma;
+
     for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
         amrex::Array4<const Set::Scalar> Jarr = use_jump ? jump_mf->const_array(mfi)
                                                          : amrex::Array4<const Set::Scalar>{};
 
+        amrex::Array4<const Set::Scalar> nucA = blake ? nuc_mf->const_array(mfi) : amrex::Array4<const Set::Scalar>{};
         auto eta   = eta_mf[lev]->array(mfi);
         auto arh0  = rho_eta0_mf[lev]->array(mfi);
         auto arh1  = rho_eta1_mf[lev]->array(mfi);
@@ -7757,7 +7831,100 @@ void Hydro2::RelaxAndReinit(int lev)
             const bool p1_floored = (p1_pre <= -pi1_ + std::max(2.0 * DIV_FLOOR, 1.0e-9 * pi1_));
             const bool single_phase = opt9 ? (arh0_loc <= 0.0 || arh1_loc <= 0.0)
                                            : (eta(i, j, k) < cutoff_loc || eta(i, j, k) > 1.0 - cutoff_loc);
-            if (single_phase || p0_floored || p1_floored)
+            // relax.trace_pT (see Parse): liquid beyond the cutoff with gas mass -> p-T equilibrium, Dj = 0.
+            bool trace_eq = false;   // trace_pT = 2: this trace cell takes the ordinary closure below
+            if (tracePT && eta(i, j, k) > 1.0 - cutoff_loc && arh0_loc > 0.0 && arh1_loc > 0.0)
+            {
+                const Set::Scalar rhoT = arh0_loc + arh1_loc;
+                const Set::Scalar keT  = 0.5 * (AMREX_D_TERM(M_(i, j, k, 0) * M_(i, j, k, 0),
+                                                           + M_(i, j, k, 1) * M_(i, j, k, 1),
+                                                           + M_(i, j, k, 2) * M_(i, j, k, 2))) / rhoT;
+                const Set::Scalar rheT = E_(i, j, k) - keT;
+                const Set::Scalar a1f = std::min(std::max(eta(i, j, k), 0.0), 1.0);
+                const Set::Scalar p_frz = Solver::EOS::EOS::ReinitMixturePressure(rheT, a1f, 1.0 - a1f,
+                                                                                 gam0, pi0_, gam1, pi1_, small_loc);
+                if (tracePT == 2 && p_frz >= 0.0 && rheT > 0.0 && !p0_floored && !p1_floored) trace_eq = true;
+                if (tracePT == 3)
+                {
+                    // Frozen alpha AND frozen phase densities (the guard's premise: no volume dynamics for the
+                    // trace), but the trace gas shares the liquid temperature.  At fixed alpha, rho_k:
+                    //   E0 = arh0 cv0 T + a1 pi0,  E1 = arh1 cv1 T,  E0 + E1 = rho e  ->  T in closed form.
+                    // Uses only masses and rho e (never the noisy trace E1).
+                    const Set::Scalar Cm = arh0_loc * cvT0 + arh1_loc * cvT1;
+                    const Set::Scalar TT = (rheT - a1f * pi0_) / Cm;
+                    if (TT > 0.0 && rheT > 0.0)
+                    {
+                        E1_(i, j, k) = arh1_loc * cvT1 * TT;
+                        E0_(i, j, k) = rheT - E1_(i, j, k);
+                        if (rhd) { rsp(i, j, k, 4) += 1.0; }
+                        if (diag_on) { diag_arr(i, j, k, 0) = 0.0; diag_arr(i, j, k, 1) = 0.0; diag_arr(i, j, k, 2) = 0.0; }
+                        return;
+                    }
+                }
+                if (tracePT == 1 && p_frz >= 0.0 && rheT > 0.0)
+                {
+                    const Set::Scalar vT = 1.0 / rhoT, eT = rheT / rhoT;
+                    const Set::Scalar Y0 = arh0_loc / rhoT, Y1 = arh1_loc / rhoT;
+                    const Set::Scalar A0 = Y0 * (gam0 - 1.0) * cvT0, A1 = Y1 * (gam1 - 1.0) * cvT1;
+                    const Set::Scalar CT = Y0 * cvT0 + Y1 * cvT1;
+                    const Set::Scalar B0 = A0 * (eT - vT * pi0_), B1 = A1 * (eT - vT * pi1_);
+                    const Set::Scalar bb = pi1_ - pi0_;
+                    const Set::Scalar qa = vT * CT, qb = vT * CT * bb - B0 - B1, qc = -B0 * bb;
+                    const Set::Scalar disc = qb * qb - 4.0 * qa * qc;
+                    if (disc >= 0.0)
+                    {
+                        const Set::Scalar sq = std::sqrt(disc);
+                        const Set::Scalar qq = -0.5 * (qb + (qb >= 0.0 ? sq : -sq));
+                        const Set::Scalar r1 = qq / qa, r2 = (qq != 0.0) ? qc / qq : r1;
+                        Set::Scalar aa = -1.0;
+                        if (r1 > 0.0 && r1 + bb > 0.0) aa = r1;
+                        if (r2 > 0.0 && r2 + bb > 0.0 && r2 > aa) aa = r2;
+                        if (aa > 0.0)
+                        {
+                            const Set::Scalar ag = aa + bb;
+                            const Set::Scalar TT = vT / (A0 / aa + A1 / ag);
+                            const Set::Scalar v0T = (gam0 - 1.0) * cvT0 * TT / aa, v1T = (gam1 - 1.0) * cvT1 * TT / ag;
+                            const Set::Scalar al0 = arh0_loc * v0T, al1 = arh1_loc * v1T;
+                            if (TT > 0.0 && al0 > alpha_floor && al1 > 0.0 && std::abs(al0 + al1 - 1.0) < 1.0e-8)
+                            {
+                                eta(i, j, k) = al0 / (al0 + al1);
+                                E0_(i, j, k) = arh0_loc * (cvT0 * TT + pi0_ * v0T);
+                                E1_(i, j, k) = rheT - E0_(i, j, k);
+                                if (rhd) rsp(i, j, k, 4) += 1.0;
+                                if (diag_on) { diag_arr(i, j, k, 0) = 0.0; diag_arr(i, j, k, 1) = 0.0; diag_arr(i, j, k, 2) = 0.0; }
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+            // relax.blake (see Parse): sub-grid nucleus below the Blake threshold keeps its volume.
+            if (blake && nucA(i, j, k) > 0.0 && arh0_loc > 0.0 && arh1_loc > 0.0 && !p1_floored)
+            {
+                const Set::Scalar ag = 1.0 - std::min(std::max(eta(i, j, k), 0.0), 1.0);
+                const Set::Scalar rn = std::cbrt(3.0 * ag * nucA(i, j, k) / (4.0 * M_PI));
+                const Set::Scalar pg = std::max(p1_pre, 0.0);
+                const Set::Scalar Rc = std::sqrt(3.0 * pg * rn * rn * rn / (2.0 * sig_blake));
+                const Set::Scalar pB = (Rc > 0.0) ? -4.0 * sig_blake / (3.0 * Rc) : -1.0e300;
+                if (rn > 0.0 && p0_pre > pB)
+                {
+                    const Set::Scalar rhoB = arh0_loc + arh1_loc;
+                    const Set::Scalar keB  = 0.5 * (AMREX_D_TERM(M_(i, j, k, 0) * M_(i, j, k, 0),
+                                                               + M_(i, j, k, 1) * M_(i, j, k, 1),
+                                                               + M_(i, j, k, 2) * M_(i, j, k, 2))) / rhoB;
+                    const Set::Scalar rheB = E_(i, j, k) - keB;
+                    const Set::Scalar TT = (rheB - (1.0 - ag) * pi0_) / (arh0_loc * cvT0 + arh1_loc * cvT1);
+                    if (TT > 0.0 && rheB > 0.0)
+                    {
+                        E1_(i, j, k) = arh1_loc * cvT1 * TT;
+                        E0_(i, j, k) = rheB - E1_(i, j, k);
+                        if (rhd) { rsp(i, j, k, 4) += 1.0; }
+                        if (diag_on) { diag_arr(i, j, k, 0) = 0.0; diag_arr(i, j, k, 1) = 0.0; diag_arr(i, j, k, 2) = 0.0; }
+                        return;
+                    }
+                }
+            }
+            if (!trace_eq && (single_phase || p0_floored || p1_floored))
             {
                 if (!p0_floored && !p1_floored && (eta(i, j, k) < cutoff_loc || eta(i, j, k) > 1.0 - cutoff_loc))
                 {
@@ -8710,6 +8877,7 @@ void Hydro2::ShellLevelSetSlip5(int lev, Set::Scalar time, Set::Scalar dt)
     if (!(dt > 0.0)) return;
     const Set::Scalar *DX = geom[lev].CellSize();
     const Set::Scalar cut = std::max(cutoff, 1.0e-12);
+    const int rupt = shell_slip5_rupture;
     amrex::MultiFab G0(shell_mf[lev]->boxArray(), shell_mf[lev]->DistributionMap(), 1, shell_mf[lev]->nGrow());
     amrex::MultiFab::Copy(G0, *shell_mf[lev], 0, 0, 1, shell_mf[lev]->nGrow());
     for (amrex::MFIter mfi(*shell_mf[lev], false); mfi.isValid(); ++mfi)
@@ -8742,6 +8910,24 @@ void Hydro2::ShellLevelSetSlip5(int lev, Set::Scalar time, Set::Scalar dt)
                 const Set::Scalar gpm = gp.lpNorm<2>(), gmm = gm.lpNorm<2>();
                 if (gpm < g_gem_min || gmm < g_gem_min) return;
                 kap += (gp(d) / gpm - gm(d) / gmm) / (2.0 * DX[d]);
+            }
+            if (rupt)
+            {
+                // extremum of eta along the normal inside this cell -> the level set has shrunk to a point
+                Set::Scalar Dp = 0.0, Dm = 0.0;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                {
+                    const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                    Dp += nv(d) * (et(i + di, j + dj, k + dk) - ec) / DX[d];
+                    Dm += nv(d) * (ec - et(i - di, j - dj, k - dk)) / DX[d];
+                }
+                if (Dp * Dm <= 0.0)
+                {
+                    if (g0(i, j, k) > 0.0)
+                        printf("RUPT5 t=%.6e ijk=%d %d %d eta=%.6f g*dx=%.3e G0=%.4g\n", time, i, j, k, ec, g * DX[0], g0(i, j, k));
+                    sh(i, j, k) = 0.0;
+                    return;
+                }
             }
             const Set::Scalar Vn = -(ec - eo(i, j, k)) / (dt * g);
             Set::Scalar un = 0.0;

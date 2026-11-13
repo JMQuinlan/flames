@@ -763,8 +763,11 @@ protected:
     int relax_sch20 = 0;               // relax.sch20: use the Sch20/Saurel 2009 closure (no shared specific heat q)
     int face_two_pressure = 0;         // face.two_pressure: faces carry both phase pressures (option 10)
     int relax_opt9 = 0;                // relax.opt9: freeze alpha only where a phase has no mass (see Parse)
+    int relax_blake = 0;               // relax.blake: sub-grid gas nuclei below the Blake threshold keep their volume (see Parse)
+    int relax_trace_pT = 0;            // relax.trace_pT: p-T equilibrium of trace gas in liquid beyond the cutoff (see Parse)
     int relax_opt8 = 0;                // relax.opt8: no 0 K gas floor in fixed-alpha relaxation cells (see Parse)
     int shell_slip11_face = 0;         // shell.slip11_face: option 11 face slip velocity, 0 mean / 1 donor cell
+    int shell_slip5_rupture = 0;       // shell.slip5_rupture: broken shell where a level set shrinks to a point (see Parse)
     int shell_slip = 0;                // shell.slip: 0 Gamma moves with the fluid only; 5 / 6 level-set slip (options 5 / 6)
     int shell_heat_split = 0;          // shell dissipation heat: 0 volume fraction, 2 effusivity
     Set::Scalar thermal_k0 = 0.0, thermal_k1 = 0.0;   // phase thermal conductivities (heat_split = 2)
