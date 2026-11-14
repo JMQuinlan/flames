@@ -24,7 +24,7 @@ with), reads every plotfile ONCE, and then draws everything from that single pas
 USAGE
   python3 analyze_all.py [ROOT] [--out DIR] [--nproc 8] [--every 1] [--only REGEX] [--skip REGEX]
                          [--maxpix 2000] [--no-frames] [--no-gifs] [--redo]
-                         [--no-tar] [--tar-frames]
+                         [--no-zoom] [--movie gif|mp4|both] [--no-tar] [--tar-frames]
   ROOT    folder to scan (default /mmfs1/home/ttryon/flames/bin/tests/AIAA2027, else the repo's bin/tests/AIAA2027)
   --out   output folder (default ROOT/Analysis)
   --nproc worker processes for the read pass and for drawing (default 8; processes, not threads, because the
@@ -33,8 +33,13 @@ USAGE
   --only / --skip  regex on the run name, e.g. --only "C5_.*_long"
   --maxpix  largest image dimension of the stored window (pixels); the finest AMR level that fits is used
   --redo  ignore the cache (<out>/_cache) and redraw every frame
-  --no-tar      do not write <out>.tar.gz at the end (by default the output folder is tarred next to itself,
-                without _cache/ and the per-frame PNG folders, which the GIFs already hold)
+  --no-zoom     skip the zoomed GIFs (*_Zoom.gif: framed on the bulk of the liquid mass, 0.5 .. 99.5 % quantiles)
+  --movie       animation format: mp4 (default; H.264 via ffmpeg, ~7x smaller than GIF), gif, or both; falls back to GIF
+                when no ffmpeg is found (PATH or the imageio-ffmpeg package)
+  --no-tar      skip the tars written next to the output folder at the end:
+                  <out>.tar.gz         plots, spreadsheet, CSVs, log (small: transfer this first)
+                  <out>_movies.tar     GIFs / MP4s (uncompressed: they are already compressed)
+                both without _cache/ and the per-frame PNG folders (the movies hold those)
   --tar-frames  include the per-frame PNG folders in the tar
 
 CONVENTIONS
@@ -58,7 +63,7 @@ from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 AIAA_SRC = os.path.dirname(HERE)                       # tests/AIAA2027 (decks, fluids.py)
-VERSION = "4"                                          # bump to invalidate the cache after changing extract()
+VERSION = "5"                                          # bump to invalidate the cache after changing extract()
 
 # ----------------------------------------------------------------------------------------------------------------
 # Plot style (paper: serif, fonts >= 13, Title Case titles, "Numerical" for simulation data)
@@ -77,6 +82,11 @@ PLOT_DPI = 200
 TAU_MARKS = [0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0]
 VIEW_PAD = 1.0                     # image margin around the liquid extent [D]
 VIEW_MIN = (2.5, 2.0)              # smallest image half-width, height [D]
+# zoomed GIFs (*_Zoom.gif): fixed size = median over the run of the liquid's bulk size (ZOOM_Q .. 1-ZOOM_Q mass
+# quantiles) + ZOOM_PAD, left edge ZOOM_PAD ahead of the liquid's leading edge; late, long tails leave the frame
+ZOOM_PAD = 0.5
+ZOOM_MIN = (1.25, 1.25)            # smallest half-width, height [D]
+ZOOM_Q = 0.005
 SCHLIEREN_K = 6.0                  # schlieren = exp(-K |grad ln rho| / g_ref), g_ref = 99th percentile of the window
 PF_RE = re.compile(r"^(\d+)cell$")
 
@@ -332,6 +342,9 @@ def extract(job):
         anyl = eta < 0.99; wa = ((1 - eta) * dA)[anyl]
         S["bx_lo"], S["bx_hi"] = _wq(x[anyl], wa, 1e-5), _wq(x[anyl], wa, 1 - 1e-5)
         S["by_hi"] = _wq(y[anyl], wa, 1 - 1e-5)
+        # bulk of the liquid mass (all cells, weighted by rho_eta1), for the zoomed images
+        S["bz_lo"], S["bz_hi"] = _wq(x, w, ZOOM_Q), _wq(x, w, 1 - ZOOM_Q)
+        S["bz_y"] = _wq(y, w, 1 - ZOOM_Q)
         # liquid temperature from the core liquid only: in the diffuse band the mixture EOS temperature is not a phase
         # temperature (it reads far above both phases), and that band holds a few % of the liquid mass
         core = eta < 0.05; wc = w[core]
@@ -685,11 +698,32 @@ def draw_cmp(job):
         plt.close("all"); return f"{png}: {e!r}"
 
 
+def find_ffmpeg():
+    import shutil
+    exe = shutil.which("ffmpeg")
+    if exe: return exe
+    try:
+        import imageio_ffmpeg; return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+
+
 def make_gif(job):
-    folder, gif, fps = job
+    """GIF and/or MP4 (H.264, ~7x smaller than the GIF at the same look) from a folder of equal-size frames"""
+    folder, gif, fps, movie, ffmpeg = job
     fr = sorted(glob.glob(os.path.join(folder, "*.png")))
     if not fr: return f"{gif}: no frames"
-    if os.path.isfile(gif) and os.path.getmtime(gif) > max(os.path.getmtime(f) for f in fr): return None
+    newest = max(os.path.getmtime(f) for f in fr); msg = None
+    if movie in ("mp4", "both") and ffmpeg:
+        mp4 = os.path.splitext(gif)[0] + ".mp4"
+        if not (os.path.isfile(mp4) and os.path.getmtime(mp4) > newest):
+            r = subprocess.run([ffmpeg, "-loglevel", "error", "-y", "-framerate", f"{fps:g}", "-i", os.path.join(folder, "%04d.png"),
+                                "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2:color=white", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                                "-crf", "20", "-movflags", "+faststart", mp4 + ".part.mp4"], capture_output=True, text=True)
+            if r.returncode == 0: os.replace(mp4 + ".part.mp4", mp4)
+            else: msg = f"{mp4}: ffmpeg failed: {r.stderr.strip()[:200]}"; movie = "gif"   # fall back to the GIF
+        if movie == "mp4": return msg
+    if os.path.isfile(gif) and os.path.getmtime(gif) > newest: return msg
     ims = [Image.open(f).convert("RGB") for f in fr]
     W_, H_ = max(im.size[0] for im in ims), max(im.size[1] for im in ims)
     def pad(im):   # never rescale a frame (that distorts it): centre it on a white canvas of the largest size
@@ -698,7 +732,7 @@ def make_gif(job):
     ims = [pad(im) for im in ims]
     ims = [im.quantize(colors=256, method=Image.Quantize.MEDIANCUT) for im in ims]
     ims[0].save(gif, save_all=True, append_images=ims[1:], duration=int(1000 / fps), loop=0, optimize=False)
-    return None
+    return msg
 
 
 # ================================================================================================================
@@ -946,6 +980,8 @@ def main():
     ap.add_argument("--maxpix", type=int, default=2000); ap.add_argument("--fps", type=float, default=10)
     ap.add_argument("--no-frames", action="store_true"); ap.add_argument("--no-gifs", action="store_true")
     ap.add_argument("--redo", action="store_true")
+    ap.add_argument("--no-zoom", action="store_true")
+    ap.add_argument("--movie", choices=["gif", "mp4", "both"], default="mp4")
     ap.add_argument("--no-tar", action="store_true"); ap.add_argument("--tar-frames", action="store_true")
     a = ap.parse_args()
     root = a.root or next((r for r in ("/mmfs1/home/ttryon/flames/bin/tests/AIAA2027",
@@ -1000,8 +1036,11 @@ def main():
     # VIEW_PAD margin, so the GIF keeps one scale and moves with the liquid.  On/off comparison frames hold both runs'
     # liquid (union), again at one size per GIF.  Pass 2 then reads, for each plotfile, exactly the union of the
     # regions its images show, so nothing inside the domain is cropped.
+    # Zoomed views ("zoom_*", GIFs *_Zoom.gif): see ZOOM_* at the top.
+    tags = ["view"] + ([] if a.no_zoom else ["zoom"])
     for ci, C in enumerate(cases):
-        per[ci].sort(key=lambda r: r["t"]); D = C["D"]; hr, vr = VIEW_MIN[0] * D, VIEW_MIN[1] * D; c = C["centers"][0]; cs = []
+        per[ci].sort(key=lambda r: r["t"]); D = C["D"]
+        hr, vr = VIEW_MIN[0] * D, VIEW_MIN[1] * D; c = C["centers"][0]; cs = []
         for r in per[ci]:
             if np.isfinite(r.get("bx_lo", np.nan)):
                 c = 0.5 * (r["bx_lo"] + r["bx_hi"])
@@ -1010,29 +1049,37 @@ def main():
             cs.append(c)
         for r, c in zip(per[ci], cs):
             r["view_xc"], r["view_half"], r["view_hy"] = fit_view(C, c, hr, vr)
+        if "zoom" in tags:
+            okz = [r for r in per[ci] if np.isfinite(r.get("bz_lo", np.nan))]
+            hz = max(ZOOM_MIN[0] * D, float(np.median([0.5 * (r["bz_hi"] - r["bz_lo"]) for r in okz])) + ZOOM_PAD * D) if okz else ZOOM_MIN[0] * D
+            vz = max(ZOOM_MIN[1] * D, float(np.median([r["bz_y"] for r in okz])) + ZOOM_PAD * D) if okz else ZOOM_MIN[1] * D
+            x0 = C["centers"][0] - hz
+            for r in per[ci]:
+                if np.isfinite(r.get("bz_lo", np.nan)): x0 = r["bz_lo"] - ZOOM_PAD * D
+                r["zoom_xc"], r["zoom_half"], r["zoom_hy"] = fit_view(C, x0 + hz, hz, vz)
     ok = [ci for ci in range(len(cases)) if len(per[ci]) >= 2]
     ipairs = [(i, j) for i in ok if cases[i]["vap"] for j in ok
               if not cases[j]["vap"] and cases[j]["vapbase"] == cases[i]["vapbase"] and cases[j]["group"] == cases[i]["group"]]
+    # region per plotfile = union of its split views and every comparison view it appears in
+    reg = [[[min(r[f"{t}_xc"] - r[f"{t}_half"] for t in tags), max(r[f"{t}_xc"] + r[f"{t}_half"] for t in tags),
+             max(r[f"{t}_hy"] for t in tags)] for r in per[ci]] for ci in range(len(cases))]
     cmpviews = {}
     for i, j in ipairs:
-        Rv, Rn = per[i], per[j]; tn = tau_of(cases[j], [r["t"] for r in Rn]); hr = vr = 0.0; L = []
-        for iv in list(range(0, len(Rv), a.every)):
-            rv = Rv[iv]; jn = int(np.argmin(np.abs(tn - tau_of(cases[i], rv["t"])))); rn = Rn[jn]
-            x0 = min(rv["view_xc"] - rv["view_half"], rn["view_xc"] - rn["view_half"])
-            x1 = max(rv["view_xc"] + rv["view_half"], rn["view_xc"] + rn["view_half"])
-            hr = max(hr, 0.5 * (x1 - x0)); vr = max(vr, rv["view_hy"], rn["view_hy"])
-            L.append((iv, jn, 0.5 * (x0 + x1)))
-        L = [(iv, jn) + fit_view(cases[i], xc, hr, vr) for iv, jn, xc in L]   # one size for the whole GIF
-        cmpviews[(i, j)] = L
-    # region per plotfile = union of its split view and every comparison view it appears in
-    reg = [[[r["view_xc"] - r["view_half"], r["view_xc"] + r["view_half"], r["view_hy"]] for r in per[ci]] for ci in range(len(cases))]
-    for (i, j), L in list(cmpviews.items()):
-        for iv, jn, xc, h, v in L:
-            for ci, k in ((i, iv), (j, jn)):
-                g = reg[ci][k]; g[0] = min(g[0], xc - h); g[1] = max(g[1], xc + h); g[2] = max(g[2], v)
-        cmpviews[(cases[i]["name"], cases[j]["name"])] = [(per[i][iv]["plotfile"], per[j][jn]["plotfile"], xc, h, v)
-                                                          for iv, jn, xc, h, v in L]
-        del cmpviews[(i, j)]
+        Rv, Rn = per[i], per[j]; tn = tau_of(cases[j], [r["t"] for r in Rn])
+        for tag in tags:
+            hr = vr = 0.0; L = []
+            for iv in list(range(0, len(Rv), a.every)):
+                rv = Rv[iv]; jn = int(np.argmin(np.abs(tn - tau_of(cases[i], rv["t"])))); rn = Rn[jn]
+                x0 = min(rv[f"{tag}_xc"] - rv[f"{tag}_half"], rn[f"{tag}_xc"] - rn[f"{tag}_half"])
+                x1 = max(rv[f"{tag}_xc"] + rv[f"{tag}_half"], rn[f"{tag}_xc"] + rn[f"{tag}_half"])
+                hr = max(hr, 0.5 * (x1 - x0)); vr = max(vr, rv[f"{tag}_hy"], rn[f"{tag}_hy"])
+                L.append((iv, jn, 0.5 * (x0 + x1)))
+            L = [(iv, jn) + fit_view(cases[i], xc, hr, vr) for iv, jn, xc in L]   # one size for the whole GIF
+            for iv, jn, xc, h, v in L:
+                for ci, k in ((i, iv), (j, jn)):
+                    g = reg[ci][k]; g[0] = min(g[0], xc - h); g[1] = max(g[1], xc + h); g[2] = max(g[2], v)
+            cmpviews[(cases[i]["name"], cases[j]["name"], tag)] = [(per[i][iv]["plotfile"], per[j][jn]["plotfile"], xc, h, v)
+                                                                   for iv, jn, xc, h, v in L]
 
     T0b = time.time(); log("\nREAD PASS 2 (uniform windows that hold every image; cached in _cache/)")
     jobs2, own2 = [], []
@@ -1096,6 +1143,9 @@ def main():
 
     # ---------------- frames (parallel) ----------------
     T1 = time.time(); frame_jobs, gif_jobs, cmp_jobs = [], [], []
+    ffmpeg = find_ffmpeg() if a.movie != "gif" else None
+    if a.movie != "gif":
+        log(f"\nmovies: {a.movie}; ffmpeg {ffmpeg or 'NOT FOUND -> GIFs instead (conda install -c conda-forge ffmpeg)'}")
     me = os.path.getmtime(os.path.abspath(__file__))
     for name, (C, df) in series.items():
         C["outdir"] = os.path.join(out, C["group"], name); os.makedirs(C["outdir"], exist_ok=True)
@@ -1106,38 +1156,44 @@ def main():
         C["lim"] = lim
         kinds = [k for k in SPLITS if (k != "VapRate-MassFraction" or C["vap"])]
         rows = list(range(0, len(df), a.every)) + ([len(df) - 1] if (len(df) - 1) % a.every else [])
-        # one figure size for the whole GIF (frames of different sizes would be rescaled and distorted)
-        figh = round(max(fig_height(df["view_hy"].iloc[i] / df["view_half"].iloc[i]) for i in rows), 2)
-        for kind in kinds:
-            fd = os.path.join(C["outdir"], "frames", kind); os.makedirs(fd, exist_ok=True)
-            for n_, i in enumerate(rows):
-                row = df.iloc[i].to_dict(); row["figh"] = figh; cf = C["cache"][row["plotfile"]]; png = os.path.join(fd, f"{n_:04d}.png")
-                if not a.redo and os.path.isfile(png) and os.path.getmtime(png) > max(os.path.getmtime(cf), me): continue
-                frame_jobs.append((kind, {k: v for k, v in C.items() if k not in ("plotfiles", "cache")}, lim, row, cf, png))
-            gif_jobs.append((fd, os.path.join(C["outdir"], f"{kind}.gif"), a.fps))
+        for tag in tags:
+            sfx = "" if tag == "view" else "_Zoom"
+            # one figure size for the whole GIF (frames of different sizes would be rescaled and distorted)
+            figh = round(max(fig_height(df[f"{tag}_hy"].iloc[i] / df[f"{tag}_half"].iloc[i]) for i in rows), 2)
+            for kind in kinds:
+                fd = os.path.join(C["outdir"], "frames", kind + sfx); os.makedirs(fd, exist_ok=True)
+                for n_, i in enumerate(rows):
+                    row = df.iloc[i].to_dict(); row["figh"] = figh
+                    row["view_xc"], row["view_half"], row["view_hy"] = row[f"{tag}_xc"], row[f"{tag}_half"], row[f"{tag}_hy"]
+                    cf = C["cache"][row["plotfile"]]; png = os.path.join(fd, f"{n_:04d}.png")
+                    if not a.redo and os.path.isfile(png) and os.path.getmtime(png) > max(os.path.getmtime(cf), me): continue
+                    frame_jobs.append((kind, {k: v for k, v in C.items() if k not in ("plotfiles", "cache")}, lim, row, cf, png))
+                gif_jobs.append((fd, os.path.join(C["outdir"], f"{kind}{sfx}.gif"), a.fps, a.movie, ffmpeg))
     for nv, nn in pairs:
         Cv, dv = series[nv]; Cn, dn = series[nn]
         d = os.path.join(out, Cv["group"], "Comparisons", Cv["vapbase"]); os.makedirs(d, exist_ok=True)
         iv_of = {p_: k for k, p_ in enumerate(dv["plotfile"])}; in_of = {p_: k for k, p_ in enumerate(dn["plotfile"])}
-        V = [q for q in cmpviews.get((nv, nn), []) if q[0] in iv_of and q[1] in in_of]
-        if not V: log(f"  [cmp] {nv} vs {nn}: no comparison views, skipped"); continue
-        figh = round(max(fig_height(q[4] / q[3]) for q in V), 2)
-        for kind in CMP_KINDS:
-            fd = os.path.join(d, "frames", f"CMP-{kind}"); os.makedirs(fd, exist_ok=True)
-            for n_, (pv, pn, vxc, vh, vv) in enumerate(V):
-                rv = dv.iloc[iv_of[pv]].to_dict(); rn = dn.iloc[in_of[pn]].to_dict(); rv["cmp_view"] = (vxc, vh, vv); rv["figh"] = figh
-                fv, fn = Cv["cache"][rv["plotfile"]], Cn["cache"][rn["plotfile"]]; png = os.path.join(fd, f"{n_:04d}.png")
-                if not a.redo and os.path.isfile(png) and os.path.getmtime(png) > max(os.path.getmtime(fv), os.path.getmtime(fn), me): continue
-                strip = lambda C: {k: v for k, v in C.items() if k not in ("plotfiles", "cache")}
-                cmp_jobs.append((kind, strip(Cv), strip(Cn), Cn["lim"], rv, rn, fv, fn, png))
-            gif_jobs.append((fd, os.path.join(d, f"CMP-{kind}.gif"), a.fps))
+        for tag in tags:
+            sfx = "" if tag == "view" else "_Zoom"
+            V = [q for q in cmpviews.get((nv, nn, tag), []) if q[0] in iv_of and q[1] in in_of]
+            if not V: log(f"  [cmp] {nv} vs {nn} ({tag}): no comparison views, skipped"); continue
+            figh = round(max(fig_height(q[4] / q[3]) for q in V), 2)
+            for kind in CMP_KINDS:
+                fd = os.path.join(d, "frames", f"CMP-{kind}{sfx}"); os.makedirs(fd, exist_ok=True)
+                for n_, (pv, pn, vxc, vh, vv) in enumerate(V):
+                    rv = dv.iloc[iv_of[pv]].to_dict(); rn = dn.iloc[in_of[pn]].to_dict(); rv["cmp_view"] = (vxc, vh, vv); rv["figh"] = figh
+                    fv, fn = Cv["cache"][rv["plotfile"]], Cn["cache"][rn["plotfile"]]; png = os.path.join(fd, f"{n_:04d}.png")
+                    if not a.redo and os.path.isfile(png) and os.path.getmtime(png) > max(os.path.getmtime(fv), os.path.getmtime(fn), me): continue
+                    strip = lambda C: {k: v for k, v in C.items() if k not in ("plotfiles", "cache")}
+                    cmp_jobs.append((kind, strip(Cv), strip(Cn), Cn["lim"], rv, rn, fv, fn, png))
+                gif_jobs.append((fd, os.path.join(d, f"CMP-{kind}{sfx}.gif"), a.fps, a.movie, ffmpeg))
     if not a.no_frames:
         log(f"\nFRAMES: {len(frame_jobs)} split + {len(cmp_jobs)} comparison frame(s) to draw")
         errs = [e for e in pool_map(draw_split, frame_jobs, a.nproc, "split frames") if e]
         errs += [e for e in pool_map(draw_cmp, cmp_jobs, a.nproc, "comparison frames") if e]
         for e in errs[:20]: log(f"  [frame error] {e}")
         if not a.no_gifs:
-            errs = [e for e in pool_map(make_gif, gif_jobs, a.nproc, "gifs") if e]
+            errs = [e for e in pool_map(make_gif, gif_jobs, a.nproc, "movies") if e]
             for e in errs: log(f"  [gif] {e}")
         log(f"  frames and GIFs done in {time.time() - T1:.0f} s")
 
@@ -1157,21 +1213,25 @@ def main():
 
 
 def tar_output(out, frames=False):
-    """<out>.tar.gz next to the output folder, without the cache (and without the per-frame PNGs unless asked)"""
+    """two tars next to the output folder, both without the cache (and without the per-frame PNGs unless asked):
+    <out>.tar.gz = everything but the movies (small), <out>_movies.tar = the GIFs / MP4s (already compressed)"""
     import tarfile
-    T = time.time(); dst = out.rstrip("/") + ".tar.gz"; tmp = dst + ".part"; base = os.path.basename(out.rstrip("/"))
-    def keep(ti):
+    out = out.rstrip("/"); base = os.path.basename(out)
+    def common(ti):
         parts = ti.name.split("/")
         if len(parts) > 1 and parts[1] == "_cache": return None
         if not frames and "frames" in parts[1:-1] + ([parts[-1]] if ti.isdir() else []): return None
         return ti
-    try:
-        with tarfile.open(tmp, "w:gz", compresslevel=6) as tf: tf.add(out, arcname=base, filter=keep)
-        os.replace(tmp, dst)
-        print(f"tarred {out} -> {dst} ({os.path.getsize(dst) / 1e6:.1f} MB, {time.time() - T:.0f} s"
-              f"{', frames included' if frames else ', without _cache/ and frames/'})", flush=True)
-    except Exception as e:
-        print(f"[tar] failed: {e!r} (partial file left at {tmp})", flush=True)
+    is_movie = lambda ti: ti.isfile() and ti.name.lower().endswith((".gif", ".mp4"))
+    for dst, mode, keep in ((out + ".tar.gz", "w:gz", lambda ti: None if is_movie(ti) else common(ti)),
+                            (out + "_movies.tar", "w", lambda ti: None if (ti.isfile() and not is_movie(ti)) else common(ti))):
+        T = time.time(); tmp = dst + ".part"
+        try:
+            with tarfile.open(tmp, mode) as tf: tf.add(out, arcname=base, filter=keep)
+            os.replace(tmp, dst)
+            print(f"tarred -> {dst} ({os.path.getsize(dst) / 1e6:.1f} MB, {time.time() - T:.0f} s)", flush=True)
+        except Exception as e:
+            print(f"[tar] {dst} failed: {e!r} (partial file left at {tmp})", flush=True)
 
 
 _STATIC = None
