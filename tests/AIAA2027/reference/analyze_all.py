@@ -995,31 +995,34 @@ def main():
     log(f"  read pass 1 done in {time.time() - T0:.0f} s")
 
     # ---------------- views: what each image shows ----------------
-    # Each split frame is centred on the liquid's extent (eta < 0.99, incl. thin sheets and smeared liquid) with a
-    # VIEW_PAD margin; its size is the running maximum, so the images follow the liquid and only zoom out.
-    # On/off comparison frames hold both runs' liquid (union), again only zooming out.  Pass 2 then reads, for each
-    # plotfile, exactly the union of the regions its images show, so nothing inside the domain is cropped.
+    # Each split frame is centred on the liquid's extent (eta < 0.99, incl. thin sheets and smeared liquid). The view
+    # SIZE is the same in every frame of a run: the largest liquid length and height over all its plotfiles plus a
+    # VIEW_PAD margin, so the GIF keeps one scale and moves with the liquid.  On/off comparison frames hold both runs'
+    # liquid (union), again at one size per GIF.  Pass 2 then reads, for each plotfile, exactly the union of the
+    # regions its images show, so nothing inside the domain is cropped.
     for ci, C in enumerate(cases):
-        per[ci].sort(key=lambda r: r["t"]); D = C["D"]; hr = vr = 0.0; c = C["centers"][0]
+        per[ci].sort(key=lambda r: r["t"]); D = C["D"]; hr, vr = VIEW_MIN[0] * D, VIEW_MIN[1] * D; c = C["centers"][0]; cs = []
         for r in per[ci]:
             if np.isfinite(r.get("bx_lo", np.nan)):
-                c = 0.5 * (r["bx_lo"] + r["bx_hi"]); need, vn = 0.5 * (r["bx_hi"] - r["bx_lo"]) + VIEW_PAD * D, r["by_hi"] + VIEW_PAD * D
-            else:
-                c = r["xc"] if np.isfinite(r["xc"]) else c; need = vn = 0.0
-            hr = max(hr, VIEW_MIN[0] * D, need); vr = max(vr, VIEW_MIN[1] * D, vn)
+                c = 0.5 * (r["bx_lo"] + r["bx_hi"])
+                hr = max(hr, 0.5 * (r["bx_hi"] - r["bx_lo"]) + VIEW_PAD * D); vr = max(vr, r["by_hi"] + VIEW_PAD * D)
+            elif np.isfinite(r["xc"]): c = r["xc"]
+            cs.append(c)
+        for r, c in zip(per[ci], cs):
             r["view_xc"], r["view_half"], r["view_hy"] = fit_view(C, c, hr, vr)
     ok = [ci for ci in range(len(cases)) if len(per[ci]) >= 2]
     ipairs = [(i, j) for i in ok if cases[i]["vap"] for j in ok
               if not cases[j]["vap"] and cases[j]["vapbase"] == cases[i]["vapbase"] and cases[j]["group"] == cases[i]["group"]]
     cmpviews = {}
     for i, j in ipairs:
-        Rv, Rn = per[i], per[j]; D = cases[i]["D"]; tn = tau_of(cases[j], [r["t"] for r in Rn]); hr = vr = 0.0; L = []
+        Rv, Rn = per[i], per[j]; tn = tau_of(cases[j], [r["t"] for r in Rn]); hr = vr = 0.0; L = []
         for iv in list(range(0, len(Rv), a.every)):
             rv = Rv[iv]; jn = int(np.argmin(np.abs(tn - tau_of(cases[i], rv["t"])))); rn = Rn[jn]
             x0 = min(rv["view_xc"] - rv["view_half"], rn["view_xc"] - rn["view_half"])
             x1 = max(rv["view_xc"] + rv["view_half"], rn["view_xc"] + rn["view_half"])
             hr = max(hr, 0.5 * (x1 - x0)); vr = max(vr, rv["view_hy"], rn["view_hy"])
-            L.append((iv, jn) + fit_view(cases[i], 0.5 * (x0 + x1), hr, vr))
+            L.append((iv, jn, 0.5 * (x0 + x1)))
+        L = [(iv, jn) + fit_view(cases[i], xc, hr, vr) for iv, jn, xc in L]   # one size for the whole GIF
         cmpviews[(i, j)] = L
     # region per plotfile = union of its split view and every comparison view it appears in
     reg = [[[r["view_xc"] - r["view_half"], r["view_xc"] + r["view_half"], r["view_hy"]] for r in per[ci]] for ci in range(len(cases))]
