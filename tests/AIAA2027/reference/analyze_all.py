@@ -23,7 +23,8 @@ with), reads every plotfile ONCE, and then draws everything from that single pas
 
 USAGE
   python3 analyze_all.py [ROOT] [--out DIR] [--nproc 8] [--every 1] [--only REGEX] [--skip REGEX]
-                         [--maxpix 1400] [--no-frames] [--no-gifs] [--redo]
+                         [--maxpix 2000] [--no-frames] [--no-gifs] [--redo]
+                         [--no-tar] [--tar-frames]
   ROOT    folder to scan (default /mmfs1/home/ttryon/flames/bin/tests/AIAA2027, else the repo's bin/tests/AIAA2027)
   --out   output folder (default ROOT/Analysis)
   --nproc worker processes for the read pass and for drawing (default 8; processes, not threads, because the
@@ -32,6 +33,9 @@ USAGE
   --only / --skip  regex on the run name, e.g. --only "C5_.*_long"
   --maxpix  largest image dimension of the stored window (pixels); the finest AMR level that fits is used
   --redo  ignore the cache (<out>/_cache) and redraw every frame
+  --no-tar      do not write <out>.tar.gz at the end (by default the output folder is tarred next to itself,
+                without _cache/ and the per-frame PNG folders, which the GIFs already hold)
+  --tar-frames  include the per-frame PNG folders in the tar
 
 CONVENTIONS
   eta = 1 gas, 0 liquid.  Liquid mass = int rho_eta1 dA; vaporization rate = int Vap_dot_rho dA (>= 0, liquid lost);
@@ -54,7 +58,7 @@ from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 AIAA_SRC = os.path.dirname(HERE)                       # tests/AIAA2027 (decks, fluids.py)
-VERSION = "3"                                          # bump to invalidate the cache after changing extract()
+VERSION = "4"                                          # bump to invalidate the cache after changing extract()
 
 # ----------------------------------------------------------------------------------------------------------------
 # Plot style (paper: serif, fonts >= 13, Title Case titles, "Numerical" for simulation data)
@@ -71,6 +75,8 @@ C_VAP, C_NOVAP = PAL[1], PAL[0]
 FRAME_DPI = 100
 PLOT_DPI = 200
 TAU_MARKS = [0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0]
+VIEW_PAD = 1.0                     # image margin around the liquid extent [D]
+VIEW_MIN = (2.5, 2.0)              # smallest image half-width, height [D]
 SCHLIEREN_K = 6.0                  # schlieren = exp(-K |grad ln rho| / g_ref), g_ref = 99th percentile of the window
 PF_RE = re.compile(r"^(\d+)cell$")
 
@@ -282,12 +288,12 @@ def sg_temperature(T, p, eta, C):
 
 
 def extract(job):
-    """Read one plotfile: global scalars on the leaf cells + a uniform window around the liquid, cached to npz."""
-    pf, cfile, C, maxpix, redo = job
+    """Pass 1: read one plotfile, global scalars on the leaf cells (incl. the extent of all liquid), cached to npz."""
+    pf, cfile, C, redo = job
     if not redo and os.path.isfile(cfile) and os.path.getmtime(cfile) > os.path.getmtime(os.path.join(pf, "Header")):
         try:
             z = np.load(cfile, allow_pickle=False)
-            if str(z["version"]) == VERSION and int(z["maxpix"]) == maxpix: return json.loads(str(z["scalars"]))
+            if str(z["version"]) == VERSION: return json.loads(str(z["scalars"]))
         except Exception:
             pass
     try:
@@ -321,6 +327,11 @@ def extract(job):
         S["x_min"] = float(x[liq].min()) if liq.any() else float("nan")
         S["x_max"] = float(x[liq].max()) if liq.any() else float("nan")
         S["y_max"] = float(y[liq].max()) if liq.any() else float("nan")
+        # extent of ALL liquid incl. the diffuse band (eta < 0.99), for the image views: thin sheets and smeared
+        # liquid have no eta < 0.5 cells, so the eta < 0.5 extent would crop them
+        anyl = eta < 0.99; wa = ((1 - eta) * dA)[anyl]
+        S["bx_lo"], S["bx_hi"] = _wq(x[anyl], wa, 1e-5), _wq(x[anyl], wa, 1 - 1e-5)
+        S["by_hi"] = _wq(y[anyl], wa, 1 - 1e-5)
         # liquid temperature from the core liquid only: in the diffuse band the mixture EOS temperature is not a phase
         # temperature (it reads far above both phases), and that band holds a few % of the liquid mass
         core = eta < 0.05; wc = w[core]
@@ -357,21 +368,43 @@ def extract(job):
                 S[f"A_{k}"] = M * float((np.hypot(gx, gy) * dA)[msk].sum())
                 S[f"xc_{k}"] = float((wk * x[msk]).sum() / mk) if mk > 0 else float("nan")
                 S[f"ul_{k}"] = float((wk * ux[msk]).sum() / mk) if mk > 0 else float("nan")
-        # ---- window around the liquid (centred on the centroid so the images move with it) ----
+        os.makedirs(os.path.dirname(cfile), exist_ok=True)
+        tmp = cfile + ".tmp.npz"
+        np.savez_compressed(tmp, version=VERSION, scalars=json.dumps(S))
+        os.replace(tmp, cfile)
+        return S
+    except Exception as e:
+        return dict(error=f"{os.path.basename(pf)}: {e!r}\n{traceback.format_exc()}", plotfile=os.path.basename(pf))
+
+
+def window(job):
+    """Pass 2: uniform covering grid of the region [x0, x1] x [y_lo, y1] that every image of this plotfile shows
+    (its own split view and any on/off comparison view), at the finest AMR level that fits in maxpix; plus the
+    window metrics (eta = 0.5 contour length, fragments, vorticity / vaporization scales)."""
+    pf, wfile, C, region, maxpix, redo = job
+    key = np.round(np.asarray(region, float) / C["D"], 6)
+    if not redo and os.path.isfile(wfile) and os.path.getmtime(wfile) > os.path.getmtime(os.path.join(pf, "Header")):
+        try:
+            z = np.load(wfile, allow_pickle=False)
+            if str(z["version"]) == VERSION and int(z["maxpix"]) == maxpix and np.array_equal(z["key"], key):
+                return json.loads(str(z["scalars"]))
+        except Exception:
+            pass
+    try:
+        import yt
+        yt.funcs.mylog.setLevel(50)
+        ds = yt.load(pf); have = {f for _, f in ds.field_list}
+        M = C["mirror"]; S = {}
         lo = ds.domain_left_edge.d; hi = ds.domain_right_edge.d
-        xc = S["xc"] if np.isfinite(S["xc"]) else C["centers"][0]
-        need = max(xc - S["xq_lo"], S["xq_hi"] - xc) if np.isfinite(S["xq_lo"]) else D
-        half = max(2.5, math.ceil((need + 1.5 * D) / D)) * D
-        hy = max(2.0, math.ceil(((S["yq_hi"] if np.isfinite(S["yq_hi"]) else D) + 1.5 * D) / D)) * D
+        rx0, rx1, ry1 = max(region[0], lo[0]), min(region[1], hi[0]), min(region[2], hi[1])
         maxlev = ds.index.max_level; dx0 = (hi[0] - lo[0]) / ds.domain_dimensions[0]; dy0 = (hi[1] - lo[1]) / ds.domain_dimensions[1]
         L = 0
         for l in range(maxlev, -1, -1):
-            if 2 * half / (dx0 / 2 ** l) <= maxpix and hy / (dy0 / 2 ** l) <= maxpix: L = l; break
+            if (rx1 - rx0) / (dx0 / 2 ** l) <= maxpix and (ry1 - lo[1]) / (dy0 / 2 ** l) <= maxpix: L = l; break
         dx, dy = dx0 / 2 ** L, dy0 / 2 ** L
         nxd, nyd = int(ds.domain_dimensions[0] * 2 ** L), int(ds.domain_dimensions[1] * 2 ** L)
-        i0 = int(np.clip(np.floor((xc - half - lo[0]) / dx), 0, nxd - 1)); i1 = int(np.clip(np.ceil((xc + half - lo[0]) / dx), i0 + 1, nxd))
-        y0 = lo[1]
-        j0 = int(np.clip(np.floor((y0 - lo[1]) / dy), 0, nyd - 1)); j1 = int(np.clip(np.ceil((y0 + hy - lo[1]) / dy), j0 + 1, nyd))
+        i0 = int(np.clip(np.floor((rx0 - lo[0]) / dx), 0, nxd - 1)); i1 = int(np.clip(np.ceil((rx1 - lo[0]) / dx), i0 + 1, nxd))
+        j0 = 0; j1 = int(np.clip(np.ceil((ry1 - lo[1]) / dy), 1, nyd))
         le = ds.arr([lo[0] + i0 * dx, lo[1] + j0 * dy, ds.domain_left_edge.d[2]], "code_length")
         cg = ds.covering_grid(L, left_edge=le, dims=[i1 - i0, j1 - j0, 1], fields=[("boxlib", f) for f in WIN_FIELDS if f in have])
         Wd = {}
@@ -382,7 +415,7 @@ def extract(job):
             Wd[f] = (np.asarray(cg[("boxlib", f)])[:, :, 0].T.astype(np.float32) if f in have
                      else np.zeros((j1 - j0, i1 - i0), np.float32))
         ext = np.array([lo[0] + i0 * dx, lo[0] + i1 * dx, lo[1] + j0 * dy, lo[1] + j1 * dy])
-        # eta = 0.5 contour length and fragments in the window
+        # eta = 0.5 contour length and fragments in the window (the window holds all the liquid)
         import contourpy
         from scipy import ndimage
         xv = ext[0] + (np.arange(i1 - i0) + 0.5) * dx; yv = ext[2] + (np.arange(j1 - j0) + 0.5) * dy
@@ -395,16 +428,16 @@ def extract(job):
             S["n_frag"] = int(keep.sum()); S["frag_largest"] = float(vol[keep].max() / vol[keep].sum()) if keep.any() else float("nan")
         else:
             S["n_frag"], S["frag_largest"] = 0, float("nan")
-        S["win_level"], S["win_half"], S["win_hy"] = int(L), float(half), float(hy)
-        vort = np.abs(Wd["vorticity"]); S["vort99"] = float(np.percentile(vort, 99.5))
+        S["win_level"] = int(L)
+        S["vort99"] = float(np.percentile(np.abs(Wd["vorticity"]), 99.5))
         S["vapmax_win"] = float(Wd["Vap_dot_rho"].max())
-        os.makedirs(os.path.dirname(cfile), exist_ok=True)
-        tmp = cfile + ".tmp.npz"
-        np.savez_compressed(tmp, version=VERSION, maxpix=maxpix, ext=ext, scalars=json.dumps(S), **Wd)
-        os.replace(tmp, cfile)
+        os.makedirs(os.path.dirname(wfile), exist_ok=True)
+        tmp = wfile + ".tmp.npz"
+        np.savez_compressed(tmp, version=VERSION, maxpix=maxpix, key=key, ext=ext, scalars=json.dumps(S), **Wd)
+        os.replace(tmp, wfile)
         return S
     except Exception as e:
-        return dict(error=f"{os.path.basename(pf)}: {e!r}\n{traceback.format_exc()}", plotfile=os.path.basename(pf))
+        return dict(error=f"{os.path.basename(pf)} (window): {e!r}\n{traceback.format_exc()}", plotfile=os.path.basename(pf))
 
 
 def pool_map(fn, jobs, nproc, label=""):
@@ -526,7 +559,7 @@ def summarize(C, df):
 # ================================================================================================================
 def load_win(cfile):
     z = np.load(cfile, allow_pickle=False)
-    W = {f: z[f].astype(np.float64) for f in WIN_FIELDS}; W["ext"] = z["ext"]; W["S"] = json.loads(str(z["scalars"]))
+    W = {f: z[f].astype(np.float64) for f in WIN_FIELDS}; W["ext"] = z["ext"]
     return W
 
 
@@ -585,8 +618,17 @@ def _half(ax, W, kind, C, lim, bottom, ul, ec):
     return im, lab
 
 
+def fit_view(C, xc, h, v):
+    """keep a view inside the domain: shift it back in at an x boundary (same size, so no zoom jump), cap its height"""
+    lo, hi = C["prob_lo"], C["prob_hi"]
+    x0, x1 = xc - h, xc + h
+    if x1 > hi[0]: x0, x1 = x0 - (x1 - hi[0]), hi[0]
+    if x0 < lo[0]: x0, x1 = lo[0], min(x1 + (lo[0] - x0), hi[0])
+    return 0.5 * (x0 + x1), 0.5 * (x1 - x0), min(v, hi[1] - lo[1])
+
+
 def _view(C, row, half=None, hy=None):
-    xc = row["xc"] / C["D"]; h = (half if half is not None else row["view_half"]) / C["D"]
+    xc = row["view_xc"] / C["D"]; h = (half if half is not None else row["view_half"]) / C["D"]
     v = (hy if hy is not None else row["view_hy"]) / C["D"]
     return xc - h, xc + h, v
 
@@ -618,8 +660,7 @@ def draw_cmp(job):
     kind, Cv, Cn, lim, rv, rn, fv, fn, png = job
     try:
         Wv, Wn = load_win(fv), load_win(fn)
-        D = Cv["D"]; xc = 0.5 * (rv["xc"] + rn["xc"]) / D
-        h = max(rv["view_half"], rn["view_half"]) / D + 0.5 * abs(rv["xc"] - rn["xc"]) / D; v = max(rv["view_hy"], rn["view_hy"]) / D
+        D = Cv["D"]; xc, h, v = (q / D for q in rv["cmp_view"])
         figw = 10.0; figh = max(4.0, min(9.0, figw * v / h * 0.9 + 1.2))
         fig, ax = plt.subplots(figsize=(figw, figh)); ax.set_facecolor("#d9d9d9")
         im, lab = _half(ax, Wv, kind, Cv, lim, False, rv["ul"], "r" if kind == "schlieren" else "w")
@@ -893,9 +934,10 @@ def main():
     ap.add_argument("root", nargs="?", default=None)
     ap.add_argument("--out", default=None); ap.add_argument("--nproc", type=int, default=8)
     ap.add_argument("--every", type=int, default=1); ap.add_argument("--only", default=None); ap.add_argument("--skip", default=None)
-    ap.add_argument("--maxpix", type=int, default=1400); ap.add_argument("--fps", type=float, default=10)
+    ap.add_argument("--maxpix", type=int, default=2000); ap.add_argument("--fps", type=float, default=10)
     ap.add_argument("--no-frames", action="store_true"); ap.add_argument("--no-gifs", action="store_true")
     ap.add_argument("--redo", action="store_true")
+    ap.add_argument("--no-tar", action="store_true"); ap.add_argument("--tar-frames", action="store_true")
     a = ap.parse_args()
     root = a.root or next((r for r in ("/mmfs1/home/ttryon/flames/bin/tests/AIAA2027",
                                        os.path.join(os.path.dirname(os.path.dirname(AIAA_SRC)), "bin", "tests", "AIAA2027"))
@@ -926,31 +968,81 @@ def main():
     if not cases: log("nothing to do"); return
 
     # ---------------- single read pass over every plotfile of every run ----------------
-    log("\nREAD PASS (each plotfile read once; windows cached in _cache/)")
+    log("\nREAD PASS 1 (scalars over every leaf cell; cached in _cache/)")
     jobs, owner = [], []
     for ci, C in enumerate(cases):
         C["cachedir"] = os.path.join(out, "_cache", C["group"], C["name"])
         for pf in C["plotfiles"]:
-            jobs.append((pf, os.path.join(C["cachedir"], os.path.basename(pf) + ".npz"),
+            jobs.append((pf, os.path.join(C["cachedir"], os.path.basename(pf) + ".s.npz"),
                          {k: C[k] for k in ("mirror", "mirror_y", "D", "p1", "p2", "shock", "centers", "n_drops", "rho_l", "R0",
                                          "gamma_g", "gamma_l", "pinf_g", "pinf_l")},
-                         a.maxpix, a.redo))
+                         a.redo))
             owner.append(ci)
     res = pool_map(extract, jobs, a.nproc, "plotfiles")
     per = [[] for _ in cases]
     for ci, r, j in zip(owner, res, jobs):
         if "error" in r: log(f"  [error] {cases[ci]['name']} {r['error'].splitlines()[0]}"); continue
         per[ci].append(r)
-    log(f"  read pass done in {time.time() - T0:.0f} s")
+    log(f"  read pass 1 done in {time.time() - T0:.0f} s")
+
+    # ---------------- views: what each image shows ----------------
+    # Each split frame is centred on the liquid's extent (eta < 0.99, incl. thin sheets and smeared liquid) with a
+    # VIEW_PAD margin; its size is the running maximum, so the images follow the liquid and only zoom out.
+    # On/off comparison frames hold both runs' liquid (union), again only zooming out.  Pass 2 then reads, for each
+    # plotfile, exactly the union of the regions its images show, so nothing inside the domain is cropped.
+    for ci, C in enumerate(cases):
+        per[ci].sort(key=lambda r: r["t"]); D = C["D"]; hr = vr = 0.0; c = C["centers"][0]
+        for r in per[ci]:
+            if np.isfinite(r.get("bx_lo", np.nan)):
+                c = 0.5 * (r["bx_lo"] + r["bx_hi"]); need, vn = 0.5 * (r["bx_hi"] - r["bx_lo"]) + VIEW_PAD * D, r["by_hi"] + VIEW_PAD * D
+            else:
+                c = r["xc"] if np.isfinite(r["xc"]) else c; need = vn = 0.0
+            hr = max(hr, VIEW_MIN[0] * D, need); vr = max(vr, VIEW_MIN[1] * D, vn)
+            r["view_xc"], r["view_half"], r["view_hy"] = fit_view(C, c, hr, vr)
+    ok = [ci for ci in range(len(cases)) if len(per[ci]) >= 2]
+    ipairs = [(i, j) for i in ok if cases[i]["vap"] for j in ok
+              if not cases[j]["vap"] and cases[j]["vapbase"] == cases[i]["vapbase"] and cases[j]["group"] == cases[i]["group"]]
+    cmpviews = {}
+    for i, j in ipairs:
+        Rv, Rn = per[i], per[j]; D = cases[i]["D"]; tn = tau_of(cases[j], [r["t"] for r in Rn]); hr = vr = 0.0; L = []
+        for iv in list(range(0, len(Rv), a.every)):
+            rv = Rv[iv]; jn = int(np.argmin(np.abs(tn - tau_of(cases[i], rv["t"])))); rn = Rn[jn]
+            x0 = min(rv["view_xc"] - rv["view_half"], rn["view_xc"] - rn["view_half"])
+            x1 = max(rv["view_xc"] + rv["view_half"], rn["view_xc"] + rn["view_half"])
+            hr = max(hr, 0.5 * (x1 - x0)); vr = max(vr, rv["view_hy"], rn["view_hy"])
+            L.append((iv, jn) + fit_view(cases[i], 0.5 * (x0 + x1), hr, vr))
+        cmpviews[(i, j)] = L
+    # region per plotfile = union of its split view and every comparison view it appears in
+    reg = [[[r["view_xc"] - r["view_half"], r["view_xc"] + r["view_half"], r["view_hy"]] for r in per[ci]] for ci in range(len(cases))]
+    for (i, j), L in list(cmpviews.items()):
+        for iv, jn, xc, h, v in L:
+            for ci, k in ((i, iv), (j, jn)):
+                g = reg[ci][k]; g[0] = min(g[0], xc - h); g[1] = max(g[1], xc + h); g[2] = max(g[2], v)
+        cmpviews[(cases[i]["name"], cases[j]["name"])] = [(per[i][iv]["plotfile"], per[j][jn]["plotfile"], xc, h, v)
+                                                          for iv, jn, xc, h, v in L]
+        del cmpviews[(i, j)]
+
+    T0b = time.time(); log("\nREAD PASS 2 (uniform windows that hold every image; cached in _cache/)")
+    jobs2, own2 = [], []
+    for ci in ok:
+        C = cases[ci]; Cs = {k: C[k] for k in ("mirror", "D", "gamma_g", "gamma_l", "pinf_g", "pinf_l")}
+        pfd = {os.path.basename(pf): pf for pf in C["plotfiles"]}
+        for k, r in enumerate(per[ci]):
+            jobs2.append((pfd[r["plotfile"]], os.path.join(C["cachedir"], r["plotfile"] + ".w.npz"), Cs, reg[ci][k], a.maxpix, a.redo))
+            own2.append((ci, k))
+    bad = set()
+    for (ci, k), r2 in zip(own2, pool_map(window, jobs2, a.nproc, "windows")):
+        if "error" in r2: log(f"  [error] {cases[ci]['name']} {r2['error'].splitlines()[0]}"); bad.add((ci, k)); continue
+        per[ci][k].update(r2)
+    for ci in ok: per[ci] = [r for k, r in enumerate(per[ci]) if (ci, k) not in bad]
+    log(f"  read pass 2 done in {time.time() - T0b:.0f} s")
 
     import pandas as pd
     series, summ = {}, []
     for ci, C in enumerate(cases):
         if len(per[ci]) < 2: log(f"  SKIP {C['name']}: fewer than 2 readable plotfiles"); continue
         df = build_series(C, per[ci])
-        # view size per frame: running maximum of the window size, so the images only zoom out (no jitter)
-        df["view_half"] = np.maximum.accumulate(df["win_half"].to_numpy()); df["view_hy"] = np.maximum.accumulate(df["win_hy"].to_numpy())
-        C["cache"] = {r["plotfile"]: os.path.join(C["cachedir"], r["plotfile"] + ".npz") for r in per[ci]}
+        C["cache"] = {r["plotfile"]: os.path.join(C["cachedir"], r["plotfile"] + ".w.npz") for r in per[ci]}
         series[C["name"]] = (C, df); summ.append(summarize(C, df))
 
     # ---------------- per-run notes and warnings ----------------
@@ -1012,11 +1104,13 @@ def main():
     for nv, nn in pairs:
         Cv, dv = series[nv]; Cn, dn = series[nn]
         d = os.path.join(out, Cv["group"], "Comparisons", Cv["vapbase"]); os.makedirs(d, exist_ok=True)
-        rows = list(range(0, len(dv), a.every))
+        iv_of = {p_: k for k, p_ in enumerate(dv["plotfile"])}; in_of = {p_: k for k, p_ in enumerate(dn["plotfile"])}
+        V = [q for q in cmpviews.get((nv, nn), []) if q[0] in iv_of and q[1] in in_of]
+        if not V: log(f"  [cmp] {nv} vs {nn}: no comparison views, skipped"); continue
         for kind in CMP_KINDS:
             fd = os.path.join(d, "frames", f"CMP-{kind}"); os.makedirs(fd, exist_ok=True)
-            for n_, i in enumerate(rows):
-                rv = dv.iloc[i].to_dict(); j = int(np.argmin(np.abs(dn["tau"].to_numpy() - rv["tau"]))); rn = dn.iloc[j].to_dict()
+            for n_, (pv, pn, vxc, vh, vv) in enumerate(V):
+                rv = dv.iloc[iv_of[pv]].to_dict(); rn = dn.iloc[in_of[pn]].to_dict(); rv["cmp_view"] = (vxc, vh, vv)
                 fv, fn = Cv["cache"][rv["plotfile"]], Cn["cache"][rn["plotfile"]]; png = os.path.join(fd, f"{n_:04d}.png")
                 if not a.redo and os.path.isfile(png) and os.path.getmtime(png) > max(os.path.getmtime(fv), os.path.getmtime(fn), me): continue
                 strip = lambda C: {k: v for k, v in C.items() if k not in ("plotfiles", "cache")}
@@ -1044,6 +1138,25 @@ def main():
     write_tables(out, series, summ, pairs)
     log(f"\nTOTAL {time.time() - T0:.0f} s")
     with open(os.path.join(out, "analysis_log.txt"), "w") as fh: fh.write("\n".join(LOG) + "\n")
+    if not a.no_tar: tar_output(out, a.tar_frames)
+
+
+def tar_output(out, frames=False):
+    """<out>.tar.gz next to the output folder, without the cache (and without the per-frame PNGs unless asked)"""
+    import tarfile
+    T = time.time(); dst = out.rstrip("/") + ".tar.gz"; tmp = dst + ".part"; base = os.path.basename(out.rstrip("/"))
+    def keep(ti):
+        parts = ti.name.split("/")
+        if len(parts) > 1 and parts[1] == "_cache": return None
+        if not frames and "frames" in parts[1:-1] + ([parts[-1]] if ti.isdir() else []): return None
+        return ti
+    try:
+        with tarfile.open(tmp, "w:gz", compresslevel=6) as tf: tf.add(out, arcname=base, filter=keep)
+        os.replace(tmp, dst)
+        print(f"tarred {out} -> {dst} ({os.path.getsize(dst) / 1e6:.1f} MB, {time.time() - T:.0f} s"
+              f"{', frames included' if frames else ', without _cache/ and frames/'})", flush=True)
+    except Exception as e:
+        print(f"[tar] failed: {e!r} (partial file left at {tmp})", flush=True)
 
 
 _STATIC = None
