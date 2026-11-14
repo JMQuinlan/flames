@@ -54,7 +54,7 @@ from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 AIAA_SRC = os.path.dirname(HERE)                       # tests/AIAA2027 (decks, fluids.py)
-VERSION = "2"                                          # bump to invalidate the cache after changing extract()
+VERSION = "3"                                          # bump to invalidate the cache after changing extract()
 
 # ----------------------------------------------------------------------------------------------------------------
 # Plot style (paper: serif, fonts >= 13, Title Case titles, "Numerical" for simulation data)
@@ -321,8 +321,12 @@ def extract(job):
         S["x_min"] = float(x[liq].min()) if liq.any() else float("nan")
         S["x_max"] = float(x[liq].max()) if liq.any() else float("nan")
         S["y_max"] = float(y[liq].max()) if liq.any() else float("nan")
-        S["T_l_mean"] = float((w * T).sum() / m) if m > 0 else float("nan")
-        S["T_l_max"] = float(T[liq].max()) if liq.any() else float("nan")
+        # liquid temperature from the core liquid only: in the diffuse band the mixture EOS temperature is not a phase
+        # temperature (it reads far above both phases), and that band holds a few % of the liquid mass
+        core = eta < 0.05; wc = w[core]
+        S["T_l_mean"] = float((wc * T[core]).sum() / wc.sum()) if wc.sum() > 0 else float("nan")
+        S["T_l_max"] = float(T[core].max()) if core.any() else float("nan")
+        S["band_mass_frac"] = float(w[(eta >= 0.05) & (eta <= 0.95)].sum() / m) if m > 0 else float("nan")
         S["T_g_max"] = float(T[~liq].max()) if (~liq).any() else float("nan")
         S["p_l_min"] = float(p[liq].min()) if liq.any() else float("nan")
         S["p_l_max"] = float(p[liq].max()) if liq.any() else float("nan")
@@ -782,12 +786,13 @@ def plot_case_static(C, df, d, cache):
         ([("n_frag", "")], "Number of Liquid Fragments"), ([("frag_largest", "")], "Largest Fragment Volume Fraction")])
     multi(C, df, d, "09_Liquid_Extremes", "Liquid Pressure and Temperature", [
         ([("p_l_min_p2", "Minimum"), ("p_l_max_p2", "Maximum")], r"Liquid Pressure $p/p_2$"),
-        ([("T_l_mean", "Mass Mean"), ("T_l_max", "Maximum")], r"Liquid $T$ [K]"),
+        ([("T_l_mean", "Mass Mean"), ("T_l_max", "Maximum")], r"Core Liquid ($\eta < 0.05$) $T$ [K]"),
         ([("p_max_p2", "")], r"Peak Pressure $p_{max}/p_2$"), ([("T_g_max", "")], r"Peak Gas $T$ [K]")])
     multi(C, df, d, "10_Energy_Circulation", "Energy and Circulation", [
         ([("E_surf", "")], r"Surface Energy $\sigma A$ [J/m]"), ([("KE_l", "")], r"Liquid Kinetic Energy [J/m]"),
         ([("circ_pos", r"$\Gamma^+$"), ("circ_neg", r"$\Gamma^-$")], r"Circulation (Upper Half) [m$^2$/s]"),
-        ([("mass_tot_drift", "")], "Total Mass Change (Outflow Included)")])
+        ([("mass_tot_drift", "")], "Total Mass Change (Outflow Included)"),
+        ([("band_mass_frac", "")], "Liquid Mass in the Diffuse Band")])
     multi(C, df, d, "11_AMR_Cells", "AMR Cell Count", [([("ncell", "All Leaf Cells"), ("ncell_fine", "Finest Level")], "Cells")], ncol=1)
     if C["shock"]:
         fig, ax = plt.subplots(figsize=(8.5, 5.2)); k = np.isfinite(df["x_shock"])
@@ -819,12 +824,12 @@ def plot_vap_novap(Cv, Cn, dv, dn, d, cv, cn):
         fig.suptitle(f"{title}\n{Cv['label_base']}", fontsize=15); fig.tight_layout(); save(fig, os.path.join(d, fname))
     cols = [("A_ratio", r"Interface Area $A/A_0$"), ("W_D", r"Width $W/D$"), ("L_D", r"Length $L/D$"),
             ("drift_D", r"Centroid Drift $/D$"), ("ul_u2", r"Liquid Velocity $\bar u_l/u_2$"),
-            ("mass_loss_frac", r"Liquid Mass Loss $1 - m_l/m_0$"), ("T_l_mean", r"Liquid Mean $T$ [K]"), ("n_frag", "Fragments")]
+            ("mass_loss_frac", r"Liquid Mass Loss $1 - m_l/m_0$"), ("T_l_mean", r"Core Liquid Mean $T$ [K]"), ("n_frag", "Fragments")]
     ov("CMP_TimeSeries", "Vaporization On vs Off", [c for c in cols if c[0] in dv and c[0] in dn])
     # relative differences
     fig, ax = plt.subplots(figsize=(8.5, 5.2)); tg = dn["tau"].to_numpy()
     for k, (c, lbl) in enumerate((("A_ratio", "Interface Area"), ("W_D", "Width"), ("drift_D", "Centroid Drift"), ("m_l", "Liquid Mass"))):
-        y = 100 * (np.interp(tg, dv["tau"], dv[c]) / dn[c].to_numpy() - 1)
+        with np.errstate(divide="ignore", invalid="ignore"): y = 100 * (np.interp(tg, dv["tau"], dv[c]) / dn[c].to_numpy() - 1)
         ok = (tg >= dv["tau"].iloc[0]) & (tg <= dv["tau"].iloc[-1]) & (np.abs(dn[c].to_numpy()) > 1e-3 * np.nanmax(np.abs(dn[c])))
         ax.plot(tg[ok], y[ok], color=PAL[k], lw=1.8, ls=["-", "--", "-.", ":"][k], label=lbl)
     ax.axhline(0, color="0.4", lw=0.8); lab_ax(ax, Cv, "On / Off - 1 [%]", f"Effect of Vaporization\n{Cv['label_base']}"); ax.legend(frameon=False)
@@ -857,7 +862,7 @@ def plot_sweep(cases, d, title):
     panels = [("vap_cum_frac", "Vaporized Fraction"), ("mdot_norm", r"Vaporization Rate $\dot m\,t^*/m_0$"),
               ("A_ratio", r"Interface Area $A/A_0$"), ("flux", r"Mean Flux $\dot m/A$ [kg/(m$^2$ s)]"),
               ("W_D", r"Width $W/D$"), ("drift_D", r"Centroid Drift $/D$"), ("ul_u2", r"Liquid Velocity $\bar u_l/u_2$"),
-              ("T_l_mean", r"Liquid Mean $T$ [K]")]
+              ("T_l_mean", r"Core Liquid Mean $T$ [K]")]
     if not any(C["vap"] for C, _ in cases): panels = [p for p in panels if p[0] not in ("vap_cum_frac", "mdot_norm", "flux")]
     nr = int(math.ceil(len(panels) / 2))
     fig, axs = plt.subplots(nr, 2, figsize=(12.4, 3.8 * nr), squeeze=False, sharex=True)
@@ -960,6 +965,10 @@ def main():
         hi = C["prob_hi"]
         if np.nanmax(df["x_max"]) > hi[0] - D: log(f"    WARNING liquid within 1 D of the outflow boundary (x_max {np.nanmax(df['x_max']) / D:.3g} D)")
         if np.nanmax(df["y_max"]) > hi[1] - D: log(f"    WARNING liquid within 1 D of the top boundary (y_max {np.nanmax(df['y_max']) / D:.3g} D)")
+        nol = df["tau"][~np.isfinite(df["yq_hi"])]
+        if len(nol):
+            log(f"    WARNING no cell with eta < 0.5 from t/t* {nol.iloc[0]:.3g} on ({len(nol)} plotfiles): the liquid is smeared over "
+                f"the diffuse band; W/D, L/D, fragments and the eta = 0.5 contours are undefined there (mass, area and rate still are)")
         if not C["vap"] and abs(last["mass_loss_frac"]) > 1e-3:
             log(f"    note: no vaporization but liquid mass changed by {last['mass_loss_frac']:.2e} (numerical exchange at the diffuse interface)")
         if C["vap"]:
@@ -1070,6 +1079,7 @@ README_ROWS = [
     ("Cd", "m_l du_l/dt / (0.5 rho2 (u2 - u_l)^2 D) per column (u_l Savitzky-Golay smoothed); valid while the liquid is one body"),
     ("Tfilm_l, Tfilm_g, BM, BT", "film-model surface temperature, gas film temperature, Spalding mass / heat transfer numbers, weighted by the local rate"),
     ("n_frag, frag_largest", "connected eta < 0.5 regions (>= 9 pixels) in the stored window, and the largest one's share of the liquid volume"),
+    ("T_l_mean, T_l_max", "mass-weighted mean and maximum T of the core liquid (eta < 0.05); band_mass_frac = share of the liquid mass in 0.05 <= eta <= 0.95"),
     ("p_l_min/max", "liquid (eta < 0.5) pressure extremes; p_l_min < 0 means tension"),
     ("x_shock, Us", "largest x with p > p1 + (p2 - p1)/2 (incident shock); Us fitted where it is past the liquid, vs Rankine-Hugoniot Ms a1"),
     ("circ_pos/neg", "circulation of positive / negative vorticity in the upper half plane [m2/s]"),
