@@ -53,6 +53,12 @@ void NSCBC4::Parse(NSCBC4 &value, IO::ParmParse &pp)
     // d < 0 (linear interpolation), and is 0 outside the table -- the same rule as
     // p = pa sin(wt) .* interp1(t_env, up/lo, t, 'linear', 0) in Cattaneo et al. 2025.
     std::string env_file;
+    pp.query_default("nscbc.spherical", value.spherical, 0);   // spherical radiation condition (see NSCBC4.H)
+    {   // centre of the long-wave drive field (bubble centre; default origin = octant/slab symmetry point)
+        std::vector<Set::Scalar> xc;
+        pp.queryarr("nscbc.drive_center", xc);
+        for (std::size_t d = 0; d < xc.size() && d < 3; ++d) value.drive_center[d] = xc[d];
+    }
     if (pp.query("nscbc.drive_envelope", env_file) && !env_file.empty())
     {
         pp.query_default("nscbc.drive_t0", value.env_t0, 0.0);

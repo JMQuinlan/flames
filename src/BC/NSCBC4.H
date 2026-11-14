@@ -9,6 +9,8 @@
 #include <AMReX_MultiFab.H>
 #include <algorithm>
 #include <vector>
+#include <map>
+#include <array>
 
 //EOS
 #include "Solver/EOS/EOS.H"
@@ -90,6 +92,16 @@ public:
         Set::Scalar drive_omega[NDRIVE] = {0.0};  ///< Term frequencies [rad/s]
         Set::Scalar drive_phase[NDRIVE] = {0.0};  ///< Term phases [rad]
         int         n_drive             = 0;      ///< Terms in use (0 = static)
+        // Outflow faces relax the INCOMING characteristic invariant, not the pressure:
+        //   L_in = K (w_in - w_drive),   w_in = p - rho a (u . n_out),
+        //   w_drive = p_d(t) - rho a (u_d . n_out) = p_d(t) + drive_h dp_d/dt / a,
+        // where u_d = -(x - x_c) dp_d/dt / (D rho a^2) is the long-wave drive velocity
+        // (uniform drive pressure in a box << wavelength; exact by continuity, D = AMREX_SPACEDIM)
+        // and drive_h = (x_face - x_c) . n_out / D.  An outgoing wave leaves w_in unchanged, so
+        // the face does not reflect it (relaxing p instead pins p and reflects with R ~ -1),
+        // while the drive is imposed through the incoming wave at any K.
+        Set::Scalar dtarget_p_dt = 0.0;   ///< dp_d/dt at the current time (set by apply_drive)
+        Set::Scalar drive_h = 0.0;        ///< (x_face - x_c).n_out / D (set in FillBoundary)
 
         // Reference length scale
         Set::Scalar L_ref = 1.0; ///< Reference length [m] (domain size)
@@ -103,6 +115,30 @@ private:
 
     // Small number for regularization
     Set::Scalar small = 1.0e-10;
+    Set::Scalar drive_center[3] = {0.0, 0.0, 0.0};   ///< x_c of the drive field (nscbc.drive_center; bubble centre)
+
+    // nscbc.spherical = 1 (2026-11-13): spherical (monopole) radiation condition for the SCATTERED field
+    // p_s = p - p_d, Bayliss-Turkel first order  dp_s/dt + c dp_s/dr + (c/r) p_s = 0.  For an outgoing
+    // spherical wave p_s = f(t - r/c)/r the incoming invariant obeys exactly
+    //     d/dt (p_s - rho c u_s) = -(c/r) p_s ,
+    // so the face target becomes w_drive + W with dW/dt = -(c/r)(p - p_d) (r = |x_face - x_c|).
+    // spherical = 0 is the plane-wave condition W = 0, which at kr << 1 (box << wavelength) loads the
+    // bubble's incompressible near field with rho c and drains its energy.  W is stored per boundary cell
+    // and integrated (trapezoid) each time the fill time advances.
+    int spherical = 0;
+    struct ScatState { Set::Scalar t = -1.0, ps = 0.0, W = 0.0; };
+    std::map<std::array<long, 5>, ScatState> scat_mem;
+    Set::Scalar ScatterW(int face, long lkey, int ib, int jb, int kb, Set::Scalar time, Set::Scalar ps, Set::Scalar c, Set::Scalar r)
+    {
+        ScatState &st = scat_mem[{(long)face, lkey, (long)ib, (long)jb, (long)kb}];
+        if (st.t < 0.0) { st.t = time; st.ps = ps; return st.W; }
+        if (time > st.t)
+        {
+            st.W -= (time - st.t) * (c / r) * 0.5 * (ps + st.ps);
+            st.t = time; st.ps = ps;
+        }
+        return st.W;
+    }
 
     // Optional pulse envelope on the pressure drive (nscbc.drive_envelope, see Parse):
     // table (t, up, lo); the summed drive d(t) is multiplied by up(t - t0) where d >= 0
@@ -261,10 +297,19 @@ public:
         // targets (everything downstream -- faces, edges, corners -- reads
         // these locals, so one application covers all use sites).
         auto apply_drive = [time, this](BoundaryParams &prm) {
-            Set::Scalar d = 0.0;
-            for (int k = 0; k < prm.n_drive; ++k)
-                d += prm.drive_amp[k] * std::sin(prm.drive_omega[k] * time + prm.drive_phase[k]);
-            if (prm.n_drive > 0) prm.target_p += d * DriveEnvelope(time, d);
+            if (prm.n_drive <= 0) return;
+            auto drive = [&prm, this](Set::Scalar t) {
+                Set::Scalar d = 0.0;
+                for (int k = 0; k < prm.n_drive; ++k)
+                    d += prm.drive_amp[k] * std::sin(prm.drive_omega[k] * t + prm.drive_phase[k]);
+                return d * DriveEnvelope(t, d);
+            };
+            // Central difference of the prescribed drive (O(h^2); h = 1e-4 of the shortest period).
+            Set::Scalar wmax = 0.0;
+            for (int k = 0; k < prm.n_drive; ++k) wmax = std::max(wmax, std::abs(prm.drive_omega[k]));
+            const Set::Scalar h = (wmax > 0.0) ? 1.0e-4 * 2.0 * M_PI / wmax : 0.0;
+            prm.dtarget_p_dt = (h > 0.0) ? (drive(time + h) - drive(time - h)) / (2.0 * h) : 0.0;
+            prm.target_p += drive(time);
         };
         apply_drive(params_xlo_local);
         apply_drive(params_xhi_local);
@@ -276,6 +321,31 @@ public:
         apply_drive(params_zlo_local);
         apply_drive(params_zhi_local);
 #endif
+        {
+            const Set::Scalar Dd = (Set::Scalar)AMREX_SPACEDIM;
+            params_xlo_local.drive_h = (drive_center[0] - geom.ProbLo(0)) / Dd;
+            params_xhi_local.drive_h = (geom.ProbHi(0) - drive_center[0]) / Dd;
+            params_ylo_local.drive_h = (drive_center[1] - geom.ProbLo(1)) / Dd;
+            params_yhi_local.drive_h = (geom.ProbHi(1) - drive_center[1]) / Dd;
+#if AMREX_SPACEDIM == 3
+            params_zlo_local.drive_h = (drive_center[2] - geom.ProbLo(2)) / Dd;
+            params_zhi_local.drive_h = (geom.ProbHi(2) - drive_center[2]) / Dd;
+#endif
+        }
+        const auto sc_plo = geom.ProbLoArray();
+        const auto sc_dx = geom.CellSizeArray();
+        const long sc_lkey = (long)geom.Domain().length(0);
+        const bool sc_on = (spherical != 0);
+        auto sc_r = [=](int ib, int jb, int kb) {
+            Set::Scalar x = sc_plo[0] + (ib + 0.5) * sc_dx[0] - drive_center[0];
+            Set::Scalar y = sc_plo[1] + (jb + 0.5) * sc_dx[1] - drive_center[1];
+            Set::Scalar r2 = x * x + y * y;
+#if AMREX_SPACEDIM == 3
+            Set::Scalar z = sc_plo[2] + (kb + 0.5) * sc_dx[2] - drive_center[2];
+            r2 += z * z;
+#endif
+            return std::sqrt(r2);
+        };
         // =========================================================================
         // LAMBDA 1: COMPUTE PRIMITIVES FROM CONSERVED VARIABLES
         // =========================================================================
@@ -520,6 +590,8 @@ public:
                     // Capture parameters for GPU
                     Set::Scalar px_t = params_x.target_p;
                     Set::Scalar py_t = params_y.target_p;
+                    Set::Scalar fx_t = params_x.drive_h * params_x.dtarget_p_dt;   // drive invariant shift (see BoundaryParams)
+                    Set::Scalar fy_t = params_y.drive_h * params_y.dtarget_p_dt;
                     Set::Scalar sigma_x = params_x.sigma;
                     Set::Scalar sigma_y = params_y.sigma;
                     Set::Scalar beta_x = params_x.beta;
@@ -665,27 +737,34 @@ public:
                         Set::Scalar Kx = sigma_x * (1.0 - Mx_c * Mx_c) * a_c / Lx_ref;
                         Set::Scalar Ky = sigma_y * (1.0 - My_c * My_c) * a_c / Ly_ref;
 
+                        // incoming invariants w = p - rho a u.n_out and their drive values (see BoundaryParams)
+                        Set::Scalar wx_c = p_c - rho_c * a_c * ((cx == 1) ? vx_c : -vx_c);
+                        Set::Scalar wy_c = p_c - rho_c * a_c * ((cy == 1) ? vy_c : -vy_c);
+                        Set::Scalar wx_t = px_t + fx_t / (a_c + small_local);
+                        Set::Scalar wy_t = py_t + fy_t / (a_c + small_local);
+
                         // Coupling coefficient (Motheau Eq. 56)
                         Set::Scalar ab = (1.0 - 0.5 * (beta_x + beta_y)) / 2.0;
 
                         if (ftx == Type::Outflow && fty == Type::Outflow)
                         {
                             // Motheau Eq. 56: Coupled outflow/outflow corner
-                            Set::Scalar bx = Kx * (p_c - px_t);
-                            Set::Scalar by = Ky * (p_c - py_t);
+                            Set::Scalar bx = Kx * (wx_c - wx_t);
+                            Set::Scalar by = Ky * (wy_c - wy_t);
                             Set::Scalar det_inv = 1.0 / (1.0 - ab * ab + 1.0e-20);
                             Lx_in = det_inv * (bx - ab * by);
                             Ly_in = det_inv * (by - ab * bx);
+                            // feed-forward split between the two directions: -(Lx_in + Ly_in)/2 gains dp_t/dt
                         }
                         else if (ftx == Type::Outflow && fty == Type::Inflow)
                         {
                             Ly_in = 0.0;
-                            Lx_in = Kx * (p_c - px_t);
+                            Lx_in = Kx * (wx_c - wx_t);
                         }
                         else if (ftx == Type::Inflow && fty == Type::Outflow)
                         {
                             Lx_in = 0.0;
-                            Ly_in = Ky * (p_c - py_t);
+                            Ly_in = Ky * (wy_c - wy_t);
                         }
                         else if (ftx == Type::Inflow && fty == Type::Inflow)
                         {
@@ -916,6 +995,7 @@ public:
                             ebox.setBig(dt,   bx.bigEnd(dt));
 
                             Set::Scalar p1t = p1.target_p, p2t = p2.target_p;
+                            Set::Scalar f1t = p1.drive_h * p1.dtarget_p_dt, f2t = p2.drive_h * p2.dtarget_p_dt;   // drive invariant shift
                             Set::Scalar sig1 = p1.sigma, sig2 = p2.sigma;
                             Set::Scalar bet1 = p1.beta, bet2 = p2.beta;
                             Set::Scalar Lr1 = p1.L_ref, Lr2 = p2.L_ref;
@@ -988,17 +1068,22 @@ public:
                                 Set::Scalar K1 = sig1 * (1.0 - Mn1 * Mn1) * a_c / Lr1;
                                 Set::Scalar K2 = sig2 * (1.0 - Mn2 * Mn2) * a_c / Lr2;
                                 Set::Scalar ab2 = (1.0 - 0.5 * (bet1 + bet2)) / 2.0;
+                                // incoming invariants w = p - rho a u.n_out and their drive values (see BoundaryParams)
+                                Set::Scalar w1_c = p_c - rho_c * a_c * ((cc1 == 1) ? v1_c : -v1_c);
+                                Set::Scalar w2_c = p_c - rho_c * a_c * ((cc2 == 1) ? v2_c : -v2_c);
+                                Set::Scalar w1_t = p1t + f1t / (a_c + small_local);
+                                Set::Scalar w2_t = p2t + f2t / (a_c + small_local);
                                 Set::Scalar Lin1 = (cc1 == 1) ? L1_1 : L4_1;
                                 Set::Scalar Lin2 = (cc2 == 1) ? L1_2 : L4_2;
                                 if (ty1 == Type::Outflow && ty2 == Type::Outflow)
                                 {
-                                    Set::Scalar bb1 = K1 * (p_c - p1t), bb2 = K2 * (p_c - p2t);
+                                    Set::Scalar bb1 = K1 * (w1_c - w1_t), bb2 = K2 * (w2_c - w2_t);
                                     Set::Scalar det = 1.0 / (1.0 - ab2 * ab2 + 1.0e-20);
                                     Lin1 = det * (bb1 - ab2 * bb2);
                                     Lin2 = det * (bb2 - ab2 * bb1);
                                 }
-                                else if (ty1 == Type::Outflow && ty2 == Type::Inflow) { Lin1 = K1 * (p_c - p1t); Lin2 = 0.0; }
-                                else if (ty1 == Type::Inflow && ty2 == Type::Outflow) { Lin1 = 0.0; Lin2 = K2 * (p_c - p2t); }
+                                else if (ty1 == Type::Outflow && ty2 == Type::Inflow) { Lin1 = K1 * (w1_c - w1_t); Lin2 = 0.0; }
+                                else if (ty1 == Type::Inflow && ty2 == Type::Outflow) { Lin1 = 0.0; Lin2 = K2 * (w2_c - w2_t); }
                                 else { Lin1 = 0.0; Lin2 = 0.0; }
                                 if (cc1 == 1) L1_1 = Lin1; else L4_1 = Lin1;
                                 if (cc2 == 1) L1_2 = Lin2; else L4_2 = Lin2;
@@ -1268,10 +1353,11 @@ public:
                         }
 #endif
                         Set::Scalar K = params_xlo_local.sigma * (1.0 - M_loc * M_loc) * a_bnd / (params_xlo_local.L_ref);
+                        const Set::Scalar Wsc = sc_on ? const_cast<NSCBC4*>(this)->ScatterW(0, sc_lkey, i_bnd, j, k, time, p_bnd - params_xlo_local.target_p, a_bnd, sc_r(i_bnd, j, k)) : 0.0;
 
                         if (params_xlo_local.type == Type::Outflow)
                         {
-                            L4 = K * (p_bnd - params_xlo_local.target_p) - (1.0 - params_xlo_local.beta) * T4;
+                            L4 = K * ((p_bnd + rho_bnd * a_bnd * un_bnd) - (params_xlo_local.target_p + params_xlo_local.drive_h * params_xlo_local.dtarget_p_dt / (a_bnd + small_local) + Wsc)) - (1.0 - params_xlo_local.beta) * T4;
                         }
                         else if (params_xlo_local.type == Type::Inflow)
                         {
@@ -1547,10 +1633,11 @@ public:
                         }
 #endif
                         Set::Scalar K = params_xhi_local.sigma * (1.0 - M_loc * M_loc) * a_bnd / (params_xhi_local.L_ref);
+                        const Set::Scalar Wsc = sc_on ? const_cast<NSCBC4*>(this)->ScatterW(1, sc_lkey, i_bnd, j, k, time, p_bnd - params_xhi_local.target_p, a_bnd, sc_r(i_bnd, j, k)) : 0.0;
 
                         if (params_xhi_local.type == Type::Outflow)
                         {
-                            L1 = K * (p_bnd - params_xhi_local.target_p) - (1.0 - params_xhi_local.beta) * T1;
+                            L1 = K * ((p_bnd - rho_bnd * a_bnd * un_bnd) - (params_xhi_local.target_p + params_xhi_local.drive_h * params_xhi_local.dtarget_p_dt / (a_bnd + small_local) + Wsc)) - (1.0 - params_xhi_local.beta) * T1;
                         }
                         else if (params_xhi_local.type == Type::Inflow)
                         {
@@ -1822,10 +1909,11 @@ public:
                         }
 #endif
                         Set::Scalar K = params_ylo_local.sigma * (1.0 - M_loc * M_loc) * a_bnd / (params_ylo_local.L_ref);
+                        const Set::Scalar Wsc = sc_on ? const_cast<NSCBC4*>(this)->ScatterW(2, sc_lkey, i, j_bnd, k, time, p_bnd - params_ylo_local.target_p, a_bnd, sc_r(i, j_bnd, k)) : 0.0;
 
                         if (params_ylo_local.type == Type::Outflow)
                         {
-                            L4 = K * (p_bnd - params_ylo_local.target_p) - (1.0 - params_ylo_local.beta) * T4;
+                            L4 = K * ((p_bnd + rho_bnd * a_bnd * un_bnd) - (params_ylo_local.target_p + params_ylo_local.drive_h * params_ylo_local.dtarget_p_dt / (a_bnd + small_local) + Wsc)) - (1.0 - params_ylo_local.beta) * T4;
                         }
                         else if (params_ylo_local.type == Type::Inflow)
                         {
@@ -2085,10 +2173,11 @@ public:
                         }
 #endif
                         Set::Scalar K = params_yhi_local.sigma * (1.0 - M_loc * M_loc) * a_bnd  / (params_yhi_local.L_ref);
+                        const Set::Scalar Wsc = sc_on ? const_cast<NSCBC4*>(this)->ScatterW(3, sc_lkey, i, j_bnd, k, time, p_bnd - params_yhi_local.target_p, a_bnd, sc_r(i, j_bnd, k)) : 0.0;
 
                         if (params_yhi_local.type == Type::Outflow)
                         {
-                            L1 = K * (p_bnd - params_yhi_local.target_p) - (1.0 - params_yhi_local.beta) * T1;
+                            L1 = K * ((p_bnd - rho_bnd * a_bnd * un_bnd) - (params_yhi_local.target_p + params_yhi_local.drive_h * params_yhi_local.dtarget_p_dt / (a_bnd + small_local) + Wsc)) - (1.0 - params_yhi_local.beta) * T1;
                         }
                         else if (params_yhi_local.type == Type::Inflow)
                         {
@@ -2306,9 +2395,10 @@ public:
                             }
                         }
                         Set::Scalar K = params_zlo_local.sigma * (1.0 - M_loc * M_loc) * a_bnd / (params_zlo_local.L_ref);
+                        const Set::Scalar Wsc = sc_on ? const_cast<NSCBC4*>(this)->ScatterW(4, sc_lkey, i, j, k_bnd, time, p_bnd - params_zlo_local.target_p, a_bnd, sc_r(i, j, k_bnd)) : 0.0;
                         if (params_zlo_local.type == Type::Outflow)
                         {
-                            L4 = K * (p_bnd - params_zlo_local.target_p) - (1.0 - params_zlo_local.beta) * T4;
+                            L4 = K * ((p_bnd + rho_bnd * a_bnd * un_bnd) - (params_zlo_local.target_p + params_zlo_local.drive_h * params_zlo_local.dtarget_p_dt / (a_bnd + small_local) + Wsc)) - (1.0 - params_zlo_local.beta) * T4;
                         }
                         else if (params_zlo_local.type == Type::Inflow)
                         {
@@ -2498,9 +2588,10 @@ public:
                             }
                         }
                         Set::Scalar K = params_zhi_local.sigma * (1.0 - M_loc * M_loc) * a_bnd / (params_zhi_local.L_ref);
+                        const Set::Scalar Wsc = sc_on ? const_cast<NSCBC4*>(this)->ScatterW(5, sc_lkey, i, j, k_bnd, time, p_bnd - params_zhi_local.target_p, a_bnd, sc_r(i, j, k_bnd)) : 0.0;
                         if (params_zhi_local.type == Type::Outflow)
                         {
-                            L1 = K * (p_bnd - params_zhi_local.target_p) - (1.0 - params_zhi_local.beta) * T1;
+                            L1 = K * ((p_bnd - rho_bnd * a_bnd * un_bnd) - (params_zhi_local.target_p + params_zhi_local.drive_h * params_zhi_local.dtarget_p_dt / (a_bnd + small_local) + Wsc)) - (1.0 - params_zhi_local.beta) * T1;
                         }
                         else if (params_zhi_local.type == Type::Inflow)
                         {

@@ -161,6 +161,7 @@ protected:
     void ShellLevelSetSlip(int lev, Set::Scalar time, Set::Scalar dt);   // shell.slip=6: conservative level-set slip
     void ShellLevelSetSlip5(int lev, Set::Scalar time, Set::Scalar dt);  // shell.slip=5: implicit upwind level-set slip
     void ShellLevelSetSlip13(int lev, Set::Scalar time, Set::Scalar dt); // shell.slip=13: eta-space departure point
+    void ShellRemap15(int lev, Set::Scalar time, Set::Scalar dt);        // shell.slip=15: m remapped on the eta level sets
     void ShellSlipMass(int lev, Set::Scalar time, Set::Scalar dt);       // shell.slip=11: conservative slip flux of m = Gamma|grad eta|
     void PsiRefDensities();                                               // psi reference densities (once, from the IC)
     void ShellPsiGrad(int lev, Set::Scalar time, amrex::MultiFab &Gp);    // shell.slip=7: |grad psi| in the psi band, -1 elsewhere
@@ -779,6 +780,13 @@ protected:
     Set::Scalar jump_y_rho0 = -1.0, jump_y_rho1 = -1.0;   // psi reference phase densities of the tensor curvature (set once from the IC)
     Set::Scalar relax_time = 0.0;      // time of the current RelaxAndReinit call (BC fills inside it)
     int relax_diag = 0;
+    // TEMP diagnostic (2026-11-13): gas-mass ledger.  diag.gasmass = 1 plain volume sum, 2 = x^2-weighted
+    // (RADIAL slab: spherical mass).  Each change between ledger points is booked to that code segment.
+    int diag_gasmass = 0;
+    int lim_radial_base = 0;   // TEMP test flag (limiter.radial_base)
+    Set::Scalar diag_gasmass_dt = 1.0e-8;
+    Set::Scalar diag_trace_x = -1.0, diag_trace_t0 = 0.0, diag_trace_t1 = -1.0;   // TEMP cell trace (diag.trace_*)
+    void GasLedger(int lev, const char *where, Set::Scalar time);
     int relax_heat_diag = 0;           // relax.heat_diag: 1 = plot relax_heat_{gas,liq}
     int clip_ghost_only = 0;
     bool sym_face_lo[3] = {false, false, false};
