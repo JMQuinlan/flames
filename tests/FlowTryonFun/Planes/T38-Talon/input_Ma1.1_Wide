@@ -14,14 +14,14 @@
 #   rho*U = 458.55 (kg/m^2 s).   E_per_phase = 0.5*p/(gamma-1) = 126656.25 J/m^3.
 #   Freestream dynamic pressure  q_inf = 0.5*rho*U^2 = 85822 Pa.
 #
-#   GEOMETRY: real T-38 length 14.14 m (46'4.5"), span 7.70 m, height 3.92 m.
-#   The STL (t38-talon.stl) long axis is X (model dx=237.64), so the freestream
-#   runs in +X.  read_stl_file does  vertex -> vertex*scale + center, so:
-#     scale  = 14.14 / 237.64 = 0.059503  m/model-unit  (length -> real 14.14 m)
-#     center = -scale * mesh_bbox_center = (-4.035, 0.0, -1.566)  (origin-centered)
-#   -> placed airframe:  x[-7.07, 7.07]  y[-3.58, 3.58]  z[-1.59, 1.59]  (meters).
-#   (Length exact; STL gives span 7.16 m / height 3.18 m -- a few % under on span,
-#    short on the tail height; planform area within ~7%.)
+#   GEOMETRY: real T-38 length 14.13 m (46'4.5"), span 7.70 m, height 3.92 m (on its gear).
+#   STL t38_clean_xflow.STL (2026-11-14): T38_Solid_Model.stl (download) rotated to +x flow
+#   (rotate_stl_xflow.py, nose -x, fin +z), scaled to 14.145 m long, origin-centred, in METRES
+#   (scale 1, centre 0).  The download overlaps itself (wings through the fuselage, 12.9k
+#   non-manifold edges): the solver's ray-parity inside test read 10% of it (the wings) as
+#   fluid.  Cleaned by a winding-number fill on a 2.5 cm grid + marching cubes: watertight,
+#   15.12 m^3, parity == winding everywhere.  Span 7.72 m (real 7.70; old STL 7.16 m).
+#   -> placed airframe:  x[-7.07, 7.07]  y[-3.87, 3.85]  z[-1.69, 1.68]  (meters).
 #
 #   LIFT/DRAG: integrate pressure over the phi=0.5 surface; nondimensionalize
 #   with q_inf=85822 Pa and S_ref=15.79 m^2 (T-38 wing area):
@@ -35,27 +35,37 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 #plot_file = ./tests/FlowTryonFun/Planes/T38-Talon/output_Ma1.1
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTryonFun/Planes/T38-Talon/output_Ma1.1_Wide
+# New folder (2026-11-14): output_Ma1.1_Wide holds the earlier wide run (old STL / meshing);
+# writing there would overwrite its plotfiles of the same name.
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTryonFun/Planes/T38-Talon/output_Ma1.1_Wide_v2
 
 ### MESHING ###
-# Base dx = 0.5 m; AMR refines the airframe surface + bow shock.
-# max_level=4 -> dx_finest = 0.5/2^4 = 0.03125 m (forces-resolution).  The diffuse
-# skin eps=0.09375 m is 3 finest cells wide.  WARNING: this is an EXPENSIVE 3D run
-# (16x finer than max_level=2 near the surface); run it on the cluster.  Drop to
-# max_level=2-3 for a quick first look.
-amr.plot_dt          = 0.02
-amr.max_grid_size    = 32           # better load balance across 128 ranks
-amr.blocking_factor  = 16
-amr.regrid_int       = 25           # shock system is quasi-steady once formed; 10 re-tags (and re-inits STL phi) too often
+# [2026-11-14] Optimized like the AIAA fuel-droplet LONG decks: a coarse base grid for the
+# far field, shocks refined only part way (p_refinement_max_level), and only the airframe
+# surface (grad phi) refined to the finest level.  In the old wide set-up (base 0.5 m,
+# shocks tagged by grad rho AND grad p up to the finest level) the shock surfaces, which
+# grow ~r^2 with distance from the aircraft, held almost all of the work.
+#   level : 0     1     2      3       4
+#   dx [m]: 1.0   0.5   0.25   0.125   0.0625
+#   shocks (grad p) up to level 2 (0.25 m: shock ~0.5-0.75 m thick, ~1% of the
+#   BOS comparison window); airframe surface to level 4 (0.0625 m, as before).
+amr.plot_dt          = 0.01           # 30 frames: check the pattern is steady (last frames equal)
+amr.max_grid_size    = 32
+amr.blocking_factor  = 8
+amr.regrid_int       = 16             # shocks move <= ~3 cells between regrids (cfl 0.2) < error buffer
 amr.grid_eff         = 0.8
-amr.max_level        = 3             # imaging: dx_finest=0.0625 m; use 4 for forces
-amr.n_cell           = 112 32 64     # dx=0.5; widened lateral (y 0..16, z +-16) so Ma-angle-65deg shocks clear the imaging window
+amr.max_level        = 4              # dx_finest = 1.0/2^4 = 0.0625 m (surface only)
+amr.n_cell           = 48 24 32       # dx = 1.0 m
 amr.n_error_buf      = 4
 nghost = 4
 
 ### DIMENSIONS (meters) -- flow in +X ###
+# Airframe x[-7.07, 7.07] y[0, 3.58] z[-1.59, 1.59].  The BOS photograph (reference/
+# T38C_BOS_NASA.jpg) spans ~70 m across and ~40 m along the flight path, mostly the lateral
+# (y) shock legs, so the half-span direction reaches 24 m (3.4 spans); 9 m upstream of the
+# nose, 25 m of wake (the photo shows ~25 m behind the tail).
 geometry.prob_lo     = -16.0   0.0 -16.0
-geometry.prob_hi     =  40.0  16.0  16.0    # ~9 m upstream, ~33 m wake, 2 spans lateral
+geometry.prob_hi     =  32.0  24.0  16.0
 geometry.is_periodic = 0 0 0
 
 ### TIME STEPPING ###
@@ -65,22 +75,43 @@ dynamictimestep.verbose = 0
 dynamictimestep.max = 1e-0
 dynamictimestep.min = 1e-10
 cfl                 = 0.2
-stop_time           = 0.5
+stop_time           = 0.3            # ~2.3 flow-throughs of the 48 m domain (0.128 s each); far-field
+                                     # shock legs at r = 24 m settle in ~r/sqrt(U^2-a^2) = 0.15 s
 
 # ----------------------------------------------------------------------------
-# EMBEDDED SOLID -- the T-38, from STL.  Yang full-flux porous wall.
+# EMBEDDED SOLID -- the T-38, from STL.  SHARP SLIP WALL (validated set-up of
+# tests/FlowWedge vs the oblique-shock solution):
+#   solid.wall_flux = 1: fluid|solid faces are solved as a mirrored wall (no mass or
+#     energy crosses, solid cells held at the solid state); solid.brinkman is unused.
+#   solid.slip = 1: inviscid (mu = 0) Euler wall.  Also enables the true-surface
+#     normal reflection (solid.wall_normal = 1, default) and the wall placed at
+#     phi = 0.5 inside the cell (solid.wall_image = 1, default) instead of the
+#     staircase faces.  A no-slip mirror would stagnate the flow on every step
+#     riser and put an entropy layer on the skin.
+#   eps ~ 0.5 dx_finest (0.0625 m): still sharp (~1 cell), but phi keeps the exact
+#     sub-cell surface position; eps << dx (a 0/1 step) loses it.  Re-set eps to
+#     ~0.5 dx_finest whenever amr.max_level changes.  nghost >= 4 (normal kernel).
 # ----------------------------------------------------------------------------
 apply_embedded_solid = 1
-solid.brinkman       = 8000           # ~4*U/eps = 4*374/0.1875
+solid.brinkman       = 8000           # unused with solid.wall_flux = 1 (kept for wall_flux = 0 runs)
+solid.wall_flux      = 1
+solid.slip           = 1
 phi_refinement_criterion = 0.1        # refine on the airframe surface (grad phi)
+# Box around the airframe forced to level 2 (0.25 m).  Needed: with a 1 m base grid the
+# grad-phi tags alone found nothing at start-up (no level 1 was built); from level 2 the
+# grad-phi tags carry the surface to level 4.  Checked 2026-11-14 at initialization: every
+# solid cell of a box forced to level 4 (24503 cells) is covered by level 4 here, with 387k
+# level-4 cells instead of 2.09M.
+refine_box.lo        = -7.6 0.0 -2.2
+refine_box.hi        =  7.6 4.4  2.2
+refine_box.max_level = 2
 
 # STL geometry IC.  d>0 fluid, d<0 solid -> phi = 0.5*(1+tanh(d/eps)).
 solid.phi.ic.type                 = stl
-solid.phi.ic.stl.filename         = ./tests/FlowTryonFun/Planes/T38-Talon/t38_xflow.STL
-solid.phi.ic.stl.scale            = 0.059503          # 14.14 m / 237.64 model-units -> real length
-solid.phi.ic.stl.center           = -4.035 0.0 -1.566        # -scale*bbox_center -> origin-centered (m)
-#solid.phi.ic.stl.eps              = 0.1875            # 3 finest cells (3*0.0625)
-solid.phi.ic.stl.eps              = 0.001            # Very refine - might break?
+solid.phi.ic.stl.filename         = ./tests/FlowTryonFun/Planes/T38-Talon/t38_clean_xflow.STL
+solid.phi.ic.stl.scale            = 1.0               # STL is already in metres (14.145 m long)
+solid.phi.ic.stl.center           = 0.0 0.0 0.0       # already origin-centred
+solid.phi.ic.stl.eps              = 0.03              # ~0.5 x dx_finest (1.0/2^4 = 0.0625 m)
 
 # Prescribed quiescent solid target (physical air at rest, p=p_inf):
 solid.density.ic.type = constant
@@ -197,8 +228,10 @@ energy.bc.type.zhi   = neumann
 eta_refinement_criterion   = 1e10
 omega_refinement_criterion = 1e10
 gradu_refinement_criterion = 1e10
-p_refinement_criterion     = 8000.0     # Pa (abs jump across a cell x2): shock Dp~25kPa; tags bow/canopy/wing, drops <~2kPa noise
-rho_refinement_criterion   = 0.08       # kg/m^3 (abs jump x2): shock Drho~0.2; the schlieren variable, same shocks
+p_refinement_criterion     = 2500.0     # Pa (jump over 2 cells): ~2.5% of p_inf, so the weaker far-field shock legs
+                                        # the BOS photo shows are refined too (bow shock ~25 kPa)
+p_refinement_max_level     = 2          # shocks reach level 2 (0.25 m) only; the surface goes to level 4
+rho_refinement_criterion   = 1e10       # off: grad rho has no level cap and would send every shock to level 4
 cutoff = 1e-16
 
 ### SOURCE TERMS ###

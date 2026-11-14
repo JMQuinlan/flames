@@ -37,9 +37,27 @@
 #  slice_frb, find_plotfiles and write_gif are what the ShockDroplet, Marmottant
 #  and DrivenBubble scripts each re-implement today.
 # ---------------------------------------------------------------------------
+#  EXPERIMENT COMPARISON (Images/Comparison/T38_BOS_Comparison.png):
+#  the numerical solution rendered like the background-oriented schlieren (BOS)
+#  photograph reference/T38C_BOS_NASA.jpg (NASA; Wikipedia/Wikimedia file
+#  "Shockwave pattern around a T-38C observed with Background-Oriented Schlieren
+#  photography"; flight Mach number and altitude NOT checked against a source),
+#  as ONE split image (aircraft flying up; numerical left of the fuselage
+#  centreline, experiment right).  BOS records the light deflection integrated along the
+#  line of sight, i.e. the gradient of the PATH-INTEGRATED density, as light/dark
+#  bands on a grey background.  The photo looks down on the planform, so the
+#  model image is int rho dz, differentiated along the flight direction,
+#  mirrored about the y = 0 symmetry plane, and resampled onto the photo's pixel
+#  aircraft frame together with the photo (both rotated to nose-up, same metres
+#  per pixel; the aircraft position and heading are measured on the photo).  Its grey scale is matched to the photo: the photo's
+#  background grey for zero gradient and its dark/light percentiles for the
+#  strongest compressions/expansions.
+#
 #  Usage (from this reference folder):
 #      python3 plane_schlieren_analysis.py
 #      OUT_DIR=/mmfs1/.../output_Ma1.1_Wide python3 plane_schlieren_analysis.py
+#      BOS_ONLY=1 python3 plane_schlieren_analysis.py     # just the comparison figure
+#      BOS_EXP_SIDE=left  ...                              # experiment on the left half
 # ============================================================================
 
 import os
@@ -66,8 +84,9 @@ OUT_DIR = os.environ.get(
         _HERE, "..", "..", "..", "..", "..", "bin", "tests", "FlowTryonFun",
         "Planes", "T38-Talon", "output_Ma1.1_Wide")))
 
-          
-OUT_DIR = "/mmfs1/home/ttryon/flames/bin/tests/FlowTryonFun/Planes/T38-Talon/output_Ma1.1_Wide"
+_INCLINE_OUT = "/mmfs1/home/ttryon/flames/bin/tests/FlowTryonFun/Planes/T38-Talon/output_Ma1.1_Wide"
+if "OUT_DIR" not in os.environ and os.path.isdir(_INCLINE_OUT):
+    OUT_DIR = _INCLINE_OUT
 
 IMG_ROOT = os.path.join(_HERE, "Images")
 
@@ -126,6 +145,26 @@ SCHLIEREN_CLIP_PCT   = (1.0, 99.5)   # percentile clip for the NON-schlieren fie
 # the peak.  A 1st-percentile floor let ~1e-10 roundoff vorticity at AMR
 # coarse/fine faces render as a clear outline of every box.
 LOG_DECADES_FLOOR    = 1.0e-4
+
+# ----- BOS experiment comparison -----
+BOS_PHOTO      = os.path.join(_HERE, "T38C_BOS_NASA.jpg")
+BOS_EXP_SIDE   = os.environ.get("BOS_EXP_SIDE", "right")   # experiment half of the split image; the model takes the other
+BOS_AHEAD, BOS_BEHIND, BOS_HALF_WIDTH = 8.0, 26.0, 20.0    # split-image window in the aircraft frame [m]
+BOS_ONLY       = int(os.environ.get("BOS_ONLY", 0))
+BOS_LEVEL      = (int(os.environ["BOS_LEVEL"]) if "BOS_LEVEL" in os.environ else None)   # AMR level of the projection
+BOS_DX         = 0.25      # None level -> the coarsest level with dx <= BOS_DX [m] (0.25 m = shock level of the new deck)
+# Aircraft in the photo (full-resolution pixel coords): nose and tail of the model's centreline
+# from a least-squares similarity fit (scale, rotation, shift) of six planform landmarks of
+# t38_clean_xflow.STL to the photo -- nose tip, nozzle exit, both wing-tip and both tailplane-tip
+# chord midpoints, read on the photo (2026-11-14): (552,181) (603,437) (518.5,369) (661,346)
+# (562,422.5) (642.7,408).  Fit: 0.05347 m/px (photo span then 7.72 m = the STL's), heading
+# ~11 deg from vertical, landmark residuals 0.16 m rms (~3 px).
+BOS_PHOTO_NOSE = (554.20, 180.19)
+BOS_PHOTO_TAIL = (605.55, 439.70)
+# Aircraft length between those two points (the cleaned STL: x = -7.0725 .. 7.0725 m).  The
+# model image is anchored at the solver airframe's TAIL; this length places the nose.
+BOS_AIRCRAFT_LENGTH = 14.145
+BOS_DARK_PCT, BOS_LIGHT_PCT = 0.5, 99.5     # photo grey percentiles the strongest model gradients map to
 
 # ----- output -----
 DPI            = 140
@@ -452,6 +491,9 @@ def main():
         print(f"  [note] absent fields skipped: {', '.join(missing)}")
     print(f"  frames/axis  = {N_FRAMES},  resolution = {RESOLUTION}px")
     os.makedirs(IMG_ROOT, exist_ok=True)
+    if BOS_ONLY:
+        make_bos_comparison(ds)
+        return 0
 
     active = [q for q in QUANTITIES if ENABLE.get(q[0], 0)]
 
@@ -539,6 +581,7 @@ def main():
 
     if MAKE_OVERVIEW:
         make_overview(ds, fields)
+    make_bos_comparison(ds)
 
     print("\n  done.  images under:", IMG_ROOT)
     return 0
@@ -603,6 +646,142 @@ def make_overview(ds, fields):
         fig.savefig(p, dpi=DPI, bbox_inches="tight")
         plt.close(fig)
         print(f"      wrote {os.path.basename(p)}")
+
+
+def bos_projection(ds, level=BOS_LEVEL):
+    """Path-integrated density int rho dz on the x-y plane (uniform grid at `level`), its
+    derivative along the flow (+x, the flight direction reversed), and the projected solid.
+    Returns dict(x, y, P, dPdx, solid) with y mirrored to [-Y, Y] (symmetry plane y = 0)."""
+    le = np.array(ds.domain_left_edge.to_value(), float); re = np.array(ds.domain_right_edge.to_value(), float)
+    rr = int(getattr(ds, "refine_by", 2)); dx0 = float(((re - le) / np.array(ds.domain_dimensions, int)).max())
+    if level is None:
+        level = next((l for l in range(ds.max_level + 1) if dx0 / rr ** l <= BOS_DX * (1 + 1e-9)), ds.max_level)
+    level = int(min(level, ds.max_level))
+    dims = np.array(ds.domain_dimensions, int) * rr ** level
+    dx = (re - le) / dims
+    cg = ds.covering_grid(level, left_edge=le, dims=dims, fields=[("boxlib", "density"), ("boxlib", PHI_FIELD)])
+    rho = np.asarray(cg["boxlib", "density"], float)            # (nx, ny, nz)
+    phi = np.asarray(cg["boxlib", PHI_FIELD], float)
+    P = (np.where(phi > PHI_LEVEL, rho, 0.0) * dx[2]).sum(axis=2)  # fluid only: the solid's own density is not flow
+    solid = (phi <= PHI_LEVEL).any(axis=2)
+    dPdx = np.gradient(P, dx[0], axis=0)
+    dPdx[solid] = 0.0
+    x = le[0] + (np.arange(dims[0]) + 0.5) * dx[0]
+    y = le[1] + (np.arange(dims[1]) + 0.5) * dx[1]
+    if abs(le[1]) < 1e-9 * max(1.0, re[1]):                        # half domain: mirror about y = 0
+        y = np.concatenate([-y[::-1], y])
+        P = np.concatenate([P[:, ::-1], P], axis=1); dPdx = np.concatenate([dPdx[:, ::-1], dPdx], axis=1)
+        solid = np.concatenate([solid[:, ::-1], solid], axis=1)
+    out = dict(x=x, y=y, P=P, dPdx=dPdx, solid=solid, dx=dx, level=level)
+    # airframe silhouette at the FINEST level (the coarse level misses the thin nose tip and
+    # tail, which set the aircraft length and so the image scale)
+    if solid.any():
+        L = int(ds.max_level)
+        # region = bounding box of the finest-level grids that hold solid (phi <= PHI_LEVEL).  The
+        # coarse level misses thin wings and fins, so its solid cannot bound the region; and in runs
+        # that refined the shocks to the finest level (e.g. the old wide set-up) the finest grids
+        # fill most of the domain, so only grids containing solid are used.
+        while True:
+            gl = [g for g in ds.index.grids if g.Level == L and float(np.min(g["boxlib", PHI_FIELD])) <= PHI_LEVEL]
+            if not gl: L -= 1; continue
+            blo = np.min([g.LeftEdge.d for g in gl], axis=0); bhi = np.max([g.RightEdge.d for g in gl], axis=0)
+            dxf = (re - le) / (np.array(ds.domain_dimensions, int) * int(getattr(ds, "refine_by", 2)) ** L)
+            i0 = np.maximum(np.floor((blo - le) / dxf + 1e-6).astype(int), 0)
+            i1 = np.minimum(np.ceil((bhi - le) / dxf - 1e-6).astype(int), np.round((re - le) / dxf).astype(int))
+            if np.prod(i1 - i0) <= 6e7 or L <= level: break
+            L -= 1                                                    # memory cap (~0.5 GB per field)
+        cgf = ds.covering_grid(L, left_edge=le + i0 * dxf, dims=i1 - i0, fields=[("boxlib", PHI_FIELD)])
+        sf = (np.asarray(cgf["boxlib", PHI_FIELD], float) <= PHI_LEVEL).any(axis=2)
+        xf = le[0] + (np.arange(i0[0], i1[0]) + 0.5) * dxf[0]; yf = le[1] + (np.arange(i0[1], i1[1]) + 0.5) * dxf[1]
+        if abs(le[1]) < 1e-9 * max(1.0, re[1]):
+            yf = np.concatenate([-yf[::-1], yf]); sf = np.concatenate([sf[:, ::-1], sf], axis=1)
+        xsf = xf[sf.any(axis=1)]
+        out.update(xf=xf, yf=yf, solid_f=sf, x_nose=float(xsf.min() - 0.5 * dxf[0]), x_tail=float(xsf.max() + 0.5 * dxf[0]),
+                   level_f=L)
+    return out
+
+
+def make_bos_comparison(ds):
+    """One split image in the aircraft frame (flying up): numerical BOS-style projection on one
+    side of the fuselage centreline, the NASA BOS photograph on the other, same scale and grey scale."""
+    from PIL import Image
+    from scipy.ndimage import map_coordinates
+    if not os.path.isfile(BOS_PHOTO):
+        print(f"  [warn] no BOS photo at {BOS_PHOTO}: comparison skipped"); return
+    print("\n  --- BOS comparison with the experiment")
+    photo = np.asarray(Image.open(BOS_PHOTO).convert("L"), float) / 255.0     # (rows, cols), 0 black .. 1 white
+    H, W = photo.shape
+    nose = np.array(BOS_PHOTO_NOSE); tail = np.array(BOS_PHOTO_TAIL)
+    pr = bos_projection(ds)
+    if "x_nose" not in pr:
+        print("  [warn] no solid in the projection: comparison skipped"); return
+    x_tail = pr["x_tail"]; x_nose = x_tail - BOS_AIRCRAFT_LENGTH
+    print(f"      solver airframe x = [{pr['x_nose']:.2f}, {x_tail:.2f}] m ({x_tail - pr['x_nose']:.2f} m long; "
+          f"scale from the {BOS_AIRCRAFT_LENGTH} m aircraft length, anchored at the tail)")
+    m_per_px = BOS_AIRCRAFT_LENGTH / float(np.linalg.norm(tail - nose))
+    t_hat = (tail - nose) / np.linalg.norm(tail - nose)       # photo px direction nose -> tail (downstream)
+    n_hat = np.array([t_hat[1], -t_hat[0]])                   # photo direction that becomes image-right when the nose points up
+    # output grid in the aircraft frame: s = distance behind the nose (down the image), w = lateral (right +)
+    h = m_per_px
+    s_ax = np.arange(-BOS_AHEAD, BOS_BEHIND, h); w_ax = np.arange(-BOS_HALF_WIDTH, BOS_HALF_WIDTH, h) + 0.5 * h
+    Wg, Sg = np.meshgrid(w_ax, s_ax)
+    # photo sample
+    pc = nose[0] - 0.5 + (Sg * t_hat[0] + Wg * n_hat[0]) / m_per_px
+    prr = nose[1] - 0.5 + (Sg * t_hat[1] + Wg * n_hat[1]) / m_per_px
+    in_photo = (pc >= 0) & (pc <= W - 1) & (prr >= 0) & (prr <= H - 1)
+    ph = map_coordinates(photo, [prr, pc], order=1, mode="nearest")
+    # model sample (symmetric about y = 0, so the sign of w does not matter)
+    X = x_nose + Sg; Y = Wg
+    x, y = pr["x"], pr["y"]
+    fi = (X - x[0]) / (x[1] - x[0]); fj = (Y - y[0]) / (y[1] - y[0])
+    in_dom = (fi >= 0) & (fi <= len(x) - 1) & (fj >= 0) & (fj <= len(y) - 1)
+    g = map_coordinates(pr["dPdx"], [fi, fj], order=1, mode="nearest")
+    xf, yf = pr["xf"], pr["yf"]
+    sol = map_coordinates(pr["solid_f"].astype(float), [(X - xf[0]) / (xf[1] - xf[0]), (Y - yf[0]) / (yf[1] - yf[0])],
+                          order=1, mode="constant", cval=0.0) > 0.5
+    # grey scale from the photo: background = histogram mode, extremes = percentiles
+    hist, edges = np.histogram(photo, bins=256, range=(0, 1))
+    bg = float(0.5 * (edges[np.argmax(hist)] + edges[np.argmax(hist) + 1]))
+    dark, light = np.percentile(photo, [BOS_DARK_PCT, BOS_LIGHT_PCT])
+    gi = g[in_dom & ~sol]; big = np.abs(gi) > 1e-3 * max(np.abs(gi).max() if gi.size else 0.0, 1e-300)
+    gpos = np.percentile(gi[big & (gi > 0)], BOS_LIGHT_PCT) if np.any(big & (gi > 0)) else 1.0
+    gneg = np.percentile(-gi[big & (gi < 0)], BOS_LIGHT_PCT) if np.any(big & (gi < 0)) else 1.0
+    # compression (dP/dx > 0 across a shock, flow +x) -> dark, expansion -> light, as in the photo
+    num = np.where(g > 0, bg - (bg - dark) * np.clip(g / gpos, 0, 1), bg + (light - bg) * np.clip(-g / gneg, 0, 1))
+    num[~in_dom] = bg
+    num[sol] = dark
+    ph[~in_photo] = 1.0                                         # outside the photograph: white
+    left_is_model = BOS_EXP_SIDE == "right"
+    left = Wg < 0
+    img = np.where(left == left_is_model, num, ph)
+    fig, ax = plt.subplots(figsize=(10, 10 * len(s_ax) / len(w_ax) + 0.9))
+    ext = (w_ax[0] - 0.5 * h, w_ax[-1] + 0.5 * h, s_ax[-1] + 0.5 * h, s_ax[0] - 0.5 * h)   # s grows downward
+    ax.imshow(img, cmap="gray", vmin=0, vmax=1, interpolation="bilinear", extent=ext)
+    ax.axvline(0.0, color="w", lw=1.2, ls="--")
+    # computational-domain edge on the model half
+    try:
+        ax.contour(w_ax, s_ax, np.where(left == left_is_model, in_dom, True).astype(float), [0.5],
+                   colors=["0.3"], linewidths=1.0, linestyles=":")
+    except Exception:
+        pass
+    lab_l, lab_r = ("Numerical", "Experiment (NASA BOS)") if left_is_model else ("Experiment (NASA BOS)", "Numerical")
+    kw = dict(transform=ax.transAxes, va="top", fontsize=15, fontweight="bold",
+              bbox=dict(facecolor="white", alpha=0.75, edgecolor="none", pad=3))
+    ax.text(0.015, 0.985, lab_l, ha="left", **kw); ax.text(0.985, 0.985, lab_r, ha="right", **kw)
+    ax.plot([w_ax[0] + 2.0, w_ax[0] + 12.0], [s_ax[-1] - 2.0] * 2, color="k", lw=3)
+    ax.text(w_ax[0] + 7.0, s_ax[-1] - 2.6, "10 m", ha="center", va="bottom", fontsize=13)
+    ax.set_xlabel("Lateral Distance from the Fuselage Centreline [m]", fontsize=14)
+    ax.set_ylabel("Distance Behind the Nose [m]", fontsize=14)
+    ax.tick_params(labelsize=13)
+    t = float(ds.current_time)
+    ax.set_title(f"T-38 Shock Pattern, Numerical vs Experiment\n(Numerical: $M_\\infty$ = 1.1, $t$ = {t:.3f} s)", fontsize=15)
+    fig.tight_layout()
+    od = os.path.join(IMG_ROOT, "Comparison"); os.makedirs(od, exist_ok=True)
+    out = os.path.join(od, "T38_BOS_Comparison")
+    fig.savefig(out + ".png", dpi=DPI); fig.savefig(out + ".pdf"); plt.close(fig)
+    print(f"      wrote {out}.png  (AMR level {pr['level']}, silhouette level {pr['level_f']}, {m_per_px:.4f} m/px, "
+          f"photo background grey {bg:.3f}; model half {100 * in_dom[left == left_is_model].mean():.0f}% inside the domain, "
+          f"photo half {100 * in_photo[left != left_is_model].mean():.0f}% inside the photo)")
 
 
 if __name__ == "__main__":
