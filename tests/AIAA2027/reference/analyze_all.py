@@ -627,6 +627,11 @@ def fit_view(C, xc, h, v):
     return 0.5 * (x0 + x1), 0.5 * (x1 - x0), min(v, hi[1] - lo[1])
 
 
+def fig_height(aspect, figw=10.0):
+    """figure height for a split image of height/half-width ratio `aspect` (the plot keeps a 1:1 aspect)"""
+    return max(4.0, min(9.0, figw * aspect * 0.9 + 1.2))
+
+
 def _view(C, row, half=None, hy=None):
     xc = row["view_xc"] / C["D"]; h = (half if half is not None else row["view_half"]) / C["D"]
     v = (hy if hy is not None else row["view_hy"]) / C["D"]
@@ -638,7 +643,7 @@ def draw_split(job):
     try:
         W = load_win(cfile); top, bot = SPLITS[kind]
         x0, x1, v = _view(C, row)
-        figw = 10.0; figh = max(4.0, min(9.0, figw * (2 * v) / (x1 - x0) * 0.9 + 1.2))
+        figw = 10.0; figh = row.get("figh") or fig_height(v / (0.5 * (x1 - x0)))
         fig, ax = plt.subplots(figsize=(figw, figh)); ax.set_facecolor("#d9d9d9")
         imt, lt = _half(ax, W, top, C, lim, False, row["ul"], "r" if top == "schlieren" else "w")
         imb, lb = _half(ax, W, bot, C, lim, True, row["ul"], "w" if bot not in ("massfrac",) else "k")
@@ -661,7 +666,7 @@ def draw_cmp(job):
     try:
         Wv, Wn = load_win(fv), load_win(fn)
         D = Cv["D"]; xc, h, v = (q / D for q in rv["cmp_view"])
-        figw = 10.0; figh = max(4.0, min(9.0, figw * v / h * 0.9 + 1.2))
+        figw = 10.0; figh = rv.get("figh") or fig_height(v / h)
         fig, ax = plt.subplots(figsize=(figw, figh)); ax.set_facecolor("#d9d9d9")
         im, lab = _half(ax, Wv, kind, Cv, lim, False, rv["ul"], "r" if kind == "schlieren" else "w")
         _half(ax, Wn, kind, Cn, lim, True, rn["ul"], "r" if kind == "schlieren" else "w")
@@ -686,7 +691,11 @@ def make_gif(job):
     if not fr: return f"{gif}: no frames"
     if os.path.isfile(gif) and os.path.getmtime(gif) > max(os.path.getmtime(f) for f in fr): return None
     ims = [Image.open(f).convert("RGB") for f in fr]
-    ims = [im.resize(ims[0].size) if im.size != ims[0].size else im for im in ims]
+    W_, H_ = max(im.size[0] for im in ims), max(im.size[1] for im in ims)
+    def pad(im):   # never rescale a frame (that distorts it): centre it on a white canvas of the largest size
+        if im.size == (W_, H_): return im
+        c = Image.new("RGB", (W_, H_), "white"); c.paste(im, ((W_ - im.size[0]) // 2, (H_ - im.size[1]) // 2)); return c
+    ims = [pad(im) for im in ims]
     ims = [im.quantize(colors=256, method=Image.Quantize.MEDIANCUT) for im in ims]
     ims[0].save(gif, save_all=True, append_images=ims[1:], duration=int(1000 / fps), loop=0, optimize=False)
     return None
@@ -1094,10 +1103,12 @@ def main():
         C["lim"] = lim
         kinds = [k for k in SPLITS if (k != "VapRate-MassFraction" or C["vap"])]
         rows = list(range(0, len(df), a.every)) + ([len(df) - 1] if (len(df) - 1) % a.every else [])
+        # one figure size for the whole GIF (frames of different sizes would be rescaled and distorted)
+        figh = round(max(fig_height(df["view_hy"].iloc[i] / df["view_half"].iloc[i]) for i in rows), 2)
         for kind in kinds:
             fd = os.path.join(C["outdir"], "frames", kind); os.makedirs(fd, exist_ok=True)
             for n_, i in enumerate(rows):
-                row = df.iloc[i].to_dict(); cf = C["cache"][row["plotfile"]]; png = os.path.join(fd, f"{n_:04d}.png")
+                row = df.iloc[i].to_dict(); row["figh"] = figh; cf = C["cache"][row["plotfile"]]; png = os.path.join(fd, f"{n_:04d}.png")
                 if not a.redo and os.path.isfile(png) and os.path.getmtime(png) > max(os.path.getmtime(cf), me): continue
                 frame_jobs.append((kind, {k: v for k, v in C.items() if k not in ("plotfiles", "cache")}, lim, row, cf, png))
             gif_jobs.append((fd, os.path.join(C["outdir"], f"{kind}.gif"), a.fps))
@@ -1107,10 +1118,11 @@ def main():
         iv_of = {p_: k for k, p_ in enumerate(dv["plotfile"])}; in_of = {p_: k for k, p_ in enumerate(dn["plotfile"])}
         V = [q for q in cmpviews.get((nv, nn), []) if q[0] in iv_of and q[1] in in_of]
         if not V: log(f"  [cmp] {nv} vs {nn}: no comparison views, skipped"); continue
+        figh = round(max(fig_height(q[4] / q[3]) for q in V), 2)
         for kind in CMP_KINDS:
             fd = os.path.join(d, "frames", f"CMP-{kind}"); os.makedirs(fd, exist_ok=True)
             for n_, (pv, pn, vxc, vh, vv) in enumerate(V):
-                rv = dv.iloc[iv_of[pv]].to_dict(); rn = dn.iloc[in_of[pn]].to_dict(); rv["cmp_view"] = (vxc, vh, vv)
+                rv = dv.iloc[iv_of[pv]].to_dict(); rn = dn.iloc[in_of[pn]].to_dict(); rv["cmp_view"] = (vxc, vh, vv); rv["figh"] = figh
                 fv, fn = Cv["cache"][rv["plotfile"]], Cn["cache"][rn["plotfile"]]; png = os.path.join(fd, f"{n_:04d}.png")
                 if not a.redo and os.path.isfile(png) and os.path.getmtime(png) > max(os.path.getmtime(fv), os.path.getmtime(fn), me): continue
                 strip = lambda C: {k: v for k, v in C.items() if k not in ("plotfiles", "cache")}
