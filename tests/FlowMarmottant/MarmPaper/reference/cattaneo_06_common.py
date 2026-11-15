@@ -444,7 +444,10 @@ def main(case_tag, deck, default_output, stem, zoom_default):
     ap.add_argument("--geom", choices=("slab", "octant", "full"), default=None, help="override geometry detection")
     ap.add_argument("--nproc", type=int, default=4)
     ap.add_argument("--formats", default=None, help="comma list, default %s" % ",".join(FIG["formats"]))
+    import cattaneo_06_gif as _gif
+    _gif.add_args(ap)
     a = ap.parse_args()
+    a.gif = a.gif or a.gif_only
 
     kv = _M.parse_input(a.input)
     plotdir = a.plotdir or a.output or kv.get("plot_file") or default_output
@@ -460,39 +463,43 @@ def main(case_tag, deck, default_output, stem, zoom_default):
     for k, (v0, v1) in C.overrides.items():
         print("  run override from metadata: %s = %s (deck %s)" % (k, v1, v0))
 
-    sim = sim_radii(plotdir, a.input, geom=a.geom, nproc=a.nproc, figdir=figdir, stem=os.path.join(a.stem))
-    print("  geometry %s, %d frames, t = %.3f .. %.3f us"
-          % (sim["geom"], len(sim["t"]), sim["t"][0] * 1e6, sim["t"][-1] * 1e6))
-    t_end = (a.tmax * 1e-6) if a.tmax else float(np.nanmax(sim["t"]))
-    t_mod = max(t_end, a.zoom[1] * 1e-6) + 0.2e-6
+    sim = None
+    if not a.gif_only:
+        sim = sim_radii(plotdir, a.input, geom=a.geom, nproc=a.nproc, figdir=figdir, stem=os.path.join(a.stem))
+        print("  geometry %s, %d frames, t = %.3f .. %.3f us"
+              % (sim["geom"], len(sim["t"]), sim["t"][0] * 1e6, sim["t"][-1] * 1e6))
+        t_end = (a.tmax * 1e-6) if a.tmax else float(np.nanmax(sim["t"]))
+        t_mod = max(t_end, a.zoom[1] * 1e-6) + 0.2e-6
 
-    env = Envelope()
-    models = {}
-    for m in ("km", "rpe"):
-        models[m] = solve_coated(C, env, t_mod, model=m)
-    models["catt"] = solve_cattaneo(C.pa, env, t_mod, P=dict(R0=C.R0))   # deck R0 (60 kPa: 3.10 um, as the paper)
-    exp = load_experiment(case_tag, a.exp_shift)
-    th = thermo_radius(plotdir, C.R0, sim["geom"])
+        env = Envelope()
+        models = {}
+        for m in ("km", "rpe"):
+            models[m] = solve_coated(C, env, t_mod, model=m)
+        models["catt"] = solve_cattaneo(C.pa, env, t_mod, P=dict(R0=C.R0))   # deck R0 (60 kPa: 3.10 um, as the paper)
+        exp = load_experiment(case_tag, a.exp_shift)
+        th = thermo_radius(plotdir, C.R0, sim["geom"])
 
-    Rv = sim["R_vol"] * (C.R0 / sim["R_vol"][0] if a.rvol_norm else 1.0)
-    curves = [("Experiment", *exp),
-              ("Sim R_vol", sim["t"], Rv),
-              ("Sim R(eta=0.5)", sim["t"], sim["R_eta"])]
-    if th is not None:
-        curves.append(("Sim thermo.dat (km.sim)", *th))
-    curves += [("Coated KM", *models["km"]), ("Coated RPE", *models["rpe"]), ("Cattaneo model", *models["catt"])]
-    ncyc = int(np.floor(t_end * F_DRIVE - CYCLE_T0 * F_DRIVE - 0.85 + 1e-9)) + 1   # last window ends <= t_end + 0.15 T
-    print("\n  R_vol(t=0) = %.4f um (%s)" % (Rv[0] * 1e6, "rescaled to R0" if a.rvol_norm else "raw; diffuse-band offset"))
-    print_table(curves, "Experiment", max(ncyc, 2), first=1)
+        Rv = sim["R_vol"] * (C.R0 / sim["R_vol"][0] if a.rvol_norm else 1.0)
+        curves = [("Experiment", *exp),
+                  ("Sim R_vol", sim["t"], Rv),
+                  ("Sim R(eta=0.5)", sim["t"], sim["R_eta"])]
+        if th is not None:
+            curves.append(("Sim thermo.dat (km.sim)", *th))
+        curves += [("Coated KM", *models["km"]), ("Coated RPE", *models["rpe"]), ("Cattaneo model", *models["catt"])]
+        ncyc = int(np.floor(t_end * F_DRIVE - CYCLE_T0 * F_DRIVE - 0.85 + 1e-9)) + 1   # last window ends <= t_end + 0.15 T
+        print("\n  R_vol(t=0) = %.4f um (%s)" % (Rv[0] * 1e6, "rescaled to R0" if a.rvol_norm else "raw; diffuse-band offset"))
+        print_table(curves, "Experiment", max(ncyc, 2), first=1)
 
-    xlim = (-0.3, round(t_end * 1e6, 2))
-    make_figure(case_tag, C, sim, models, exp, os.path.join(figdir, a.stem + "_R"), xlim, tuple(a.zoom),
-                rvol_norm=a.rvol_norm, thermo=th, show_thermo=a.thermo,
-                formats=a.formats.split(",") if a.formats else None)
-    # compact version for page count: the full run only, no zoom panel
-    make_figure(case_tag, C, sim, models, exp, os.path.join(figdir, a.stem + "_R_full"), xlim, tuple(a.zoom),
-                rvol_norm=a.rvol_norm, thermo=th, show_thermo=a.thermo,
-                formats=a.formats.split(",") if a.formats else None, single=True)
+        xlim = (-0.3, round(t_end * 1e6, 2))
+        make_figure(case_tag, C, sim, models, exp, os.path.join(figdir, a.stem + "_R"), xlim, tuple(a.zoom),
+                    rvol_norm=a.rvol_norm, thermo=th, show_thermo=a.thermo,
+                    formats=a.formats.split(",") if a.formats else None)
+        # compact version for page count: the full run only, no zoom panel
+        make_figure(case_tag, C, sim, models, exp, os.path.join(figdir, a.stem + "_R_full"), xlim, tuple(a.zoom),
+                    rvol_norm=a.rvol_norm, thermo=th, show_thermo=a.thermo,
+                    formats=a.formats.split(",") if a.formats else None, single=True)
+    if a.gif:
+        _gif.make_gifs(a, C, case_tag, plotdir, figdir, sim["geom"] if sim else (a.geom or geometry(plotdir)), sim=sim)
 
 
 # =========================================================================================== #

@@ -7802,7 +7802,12 @@ void Hydro2::RelaxAndReinit(int lev)
         //   over the used directions.
         //   Path start (deterministic): a cell with no usable upwind BAND neighbour (its lower neighbours are pure
         //   gas, or it is a local eta minimum, or |grad eta| < gem_min, e.g. at a saddle where two bands meet)
-        //   starts with Phi = eta J_F of that cell.  Approximation: O(eta_start * dJ_F) at each path start.
+        //   starts with Phi = 0: the integral starts there, nothing is carried in.  At the gas edge eta_start ~ cutoff,
+        //   so this differs from the exact int_0 by O(cutoff J_F).  A local minimum INSIDE the band or the liquid tail
+        //   (a trace-gas pocket, eta non-monotone) is a gas region not connected to pure gas; it gets no jump carried
+        //   from elsewhere.  (The earlier start value Phi = eta J_F injected the tail's flux-tube-amplified J_F, up to
+        //   -150 kPa at eta ~ 0.99, carried it downstream, expanded the trace gas to rho_g 0.03 vs the core 0.53 and
+        //   collapsed the conduction dt: 160 kPa slab, 3.07 us.)
         //   Sweeps with ghost exchange until no Phi changes (exact: the dependency graph follows increasing eta).
         //   J_R,visc = Phi/eta in relaxation band cells.  shell.mu_s != 0 keeps the per-cell form.
         // ------------------------------------------------------------------------------------------
@@ -7841,13 +7846,27 @@ void Hydro2::RelaxAndReinit(int lev)
                 else { F.FillBoundary(geom[lev].periodicity()); if (radial_bc) RadialGhostFill(lev, F, false); }
             };
             fillp(JFp); fillp(Ip);
-            // initial: every band cell starts as a path start (Phi = eta J_F); sweeps then propagate
+            // Ghost cells outside the physical domain are not path neighbours.  A mirror or zero-gradient ghost is the
+            // cell itself (equal eta, never upwind anyway); a RADIAL ghost is INTERPOLATED from the axis-row profile, so
+            // using it as an upwind neighbour closes a cycle (cell -> transverse neighbour -> radial ghost -> axis row
+            // -> cell) and the sweeps never settle (160 kPa slab, 3.07 us).  Only cells that exist on the level (valid,
+            // exchanged or periodic ghosts) take part, so every path is strictly eta-increasing.
+            for (amrex::MFIter mfi(Ip, false); mfi.isValid(); ++mfi)
+            {
+                auto in = Ip.array(mfi);
+                const amrex::Box dom = geom[lev].Domain();
+                amrex::LoopOnCpu(mfi.growntilebox(1), [&](int i, int j, int k) {
+                    const int ijk[3] = {i, j, k};
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                        if (!geom[lev].isPeriodic(d) && (ijk[d] < dom.smallEnd(d) || ijk[d] > dom.bigEnd(d))) in(i, j, k) = 0.0; });
+            }
+            // initial: Phi = 0 everywhere; sweeps then propagate along the paths
             for (amrex::MFIter mfi(Pth, false); mfi.isValid(); ++mfi)
             {
                 auto et = eta_mf[lev]->const_array(mfi); auto jf = JFp.const_array(mfi); auto ph = Pth.array(mfi);
                 amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
                     const Set::Scalar ea = et(i, j, k);
-                    ph(i, j, k) = (ea > cu && ea < 1.0 - cu) ? ea * jf(i, j, k) : 0.0; });
+                    ph(i, j, k) = 0.0; });
             }
             int sweeps = 0; Set::Scalar nchg = 1.0;
             for (; sweeps < 100000 && nchg > 0.0; ++sweeps)
@@ -7881,7 +7900,7 @@ void Hydro2::RelaxAndReinit(int lev)
                                 acc += w * (ph(ib, jb, kb) + 0.5 * (jf(i, j, k) + jf(ib, jb, kb)) * (ea - eb));
                                 wsum += w;
                             }
-                        const Set::Scalar pn = (wsum > 0.0) ? acc / wsum : ea * jf(i, j, k);   // path start
+                        const Set::Scalar pn = (wsum > 0.0) ? acc / wsum : 0.0;   // path start: Phi = 0
                         nw(i, j, k) = pn;
                     });
                     amrex::LoopOnCpu(bx, [&](int i, int j, int k) {

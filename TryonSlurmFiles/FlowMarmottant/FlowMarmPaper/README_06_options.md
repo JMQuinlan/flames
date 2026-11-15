@@ -33,3 +33,13 @@ nscbc.spherical 1, thermal.dt_limit 1, visc.relax_cell_local 0; plot_dt 2.5e-8, 
 Option 1: the relaxation's viscous jump obeys eta J_R = int J_F d eta, INTEGRATED ALONG THE NORMAL (grad eta) inside the
 band (recovers the full shell viscosity: free-decay delivered fraction 1.03 vs 0.83 per-cell). visc.relax_cell_local = 1
 restores the old per-cell jump. thermal.dt_limit fixes the fine-grid NaN at maximum expansion (explicit conduction).
+opt1 speed-up (2026-11-14, measured locally on the HighPa opt1 deck): amr.blocking_factor 16 -> 8 (finest cells 110592 -> 52736,
+1.5x), amr.max_grid_size 16 -> 8 (finest boxes 25 -> 103, 1.7x at 8 ranks), slurm 32 -> 64 tasks, amr.plot_dt 2e-8 (50 frames/us).
+
+## 06Exp (2026-11-15): Cattaneo et al. experimental configuration (full sphere + rigid substrate)
+Decks tests/FlowMarmottant/MarmPaper/input_06Exp_Cattaneo_{HighPa,LowPa}; slurm 06Exp_Cattaneo_{HighPa,LowPa}.sh.
+Full 3D domain [-59,59]x[-59,59]x[-61.75,12] um, bubble at the origin, no-slip wall at z = +12 um (paper: plastic
+substrate L ~ 12 um from the bubble centre), the five other faces driven by the measured pulse with the spherical
+radiation condition.  Same physics/AMR as the opt1 octant decks (R0/dx 25.6).  stop_time 10.5 us (end of the
+experimental record), plot_dt 5e-8.  Measured: 843k cells at t=0, ~1650 boxes -> HighPa 4 nodes x 128 (est. 1.5-2.5
+days), LowPa 2 nodes x 128 (est. 2-3 days).  Purpose: jetting and shape modes the octant cannot show.

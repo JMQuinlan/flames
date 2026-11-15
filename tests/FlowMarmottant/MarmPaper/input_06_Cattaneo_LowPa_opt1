@@ -31,13 +31,13 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/MarmPaper/output_
 
 ### OUTPUT ###
 amr.plot_int       = -1
-amr.plot_dt        = 2.500000e-08    # 40 frames/us (4x their camera: 10 Mfps); was 1e-7
+amr.plot_dt        = 2.000000e-08    # 50 frames/us (5x their camera, user request 2026-11-14)
 amr.thermo.plot_dt = 1.000000e-09    # thermo.dat: gas_volume (R_vol), gas_pressure_int, kinetic_energy, interface_area
 plot_minimal       = 1
 
 ### MESH ###
-amr.max_grid_size  = 16   # 2026-11-10: was 32 (8 boxes per level -> most ranks idle)
-amr.blocking_factor = 16
+amr.max_grid_size  = 8    # 2026-11-14: was 16 (measured with blocking_factor 8, 8 ranks: 25 -> 103 finest boxes, 1.7x faster); allows 64 tasks
+amr.blocking_factor = 8    # 2026-11-14: was 16 (measured: finest cells 110592 -> 52736, 1.5x faster; 4 gives no further gain)
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
 amr.max_level      = 4

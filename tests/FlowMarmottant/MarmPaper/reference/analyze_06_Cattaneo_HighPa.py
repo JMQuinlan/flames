@@ -19,6 +19,13 @@ run, e.g. shell.kappa_s_alpha=0).  RADIAL slabs (n_cell N x 2 x 2) and AMR octan
     python3 analyze_06_Cattaneo_HighPa.py                                   # deck plot_file
     python3 analyze_06_Cattaneo_HighPa.py --output RUN_DIR --figdir FIG_DIR
     python3 analyze_06_Cattaneo_HighPa.py --output RUN_DIR --zoom 1.5 4.5 --rvol-norm --thermo
+
+Animated GIFs (cattaneo_06_gif.py; --gif adds them to the static figure, --gif-only skips the latter):
+<stem>_bubble.gif (cross-section through the bubble centre, p - p_inf on a blue-red symlog scale,
+eta = 0.5 contour), <stem>_bubble_R.gif (same + R(t) with experiment / Cattaneo model / simulation),
+<stem>_bubble3d.gif (--gif-3d, eta = 0.5 isosurface; octant / full).  Time axis: Fig. 2a (default) or sim.
+    python3 analyze_06_Cattaneo_HighPa.py --output RUN_DIR --figdir FIG_DIR --gif --gif-every 2 --gif-fps 10
+    python3 analyze_06_Cattaneo_HighPa.py --output RUN_DIR --gif-only --gif-3d --gif-time sim
 """
 import os
 import sys
