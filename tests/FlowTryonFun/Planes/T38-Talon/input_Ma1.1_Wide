@@ -55,17 +55,25 @@ amr.blocking_factor  = 8
 amr.regrid_int       = 16             # shocks move <= ~3 cells between regrids (cfl 0.2) < error buffer
 amr.grid_eff         = 0.8
 amr.max_level        = 4              # dx_finest = 1.0/2^4 = 0.0625 m (surface only)
-amr.n_cell           = 48 24 32       # dx = 1.0 m
-amr.n_error_buf      = 4
+amr.n_cell           = 48 40 48       # dx = 1.0 m
+amr.n_error_buf      = 4 4 2 2        # per tagging level: 4 cells around the (moving) shocks on levels 0-1,
+                                      # 2 around the (fixed) airframe skin on levels 2-3 (thinner level-3/4 skin)
 nghost = 4
 
 ### DIMENSIONS (meters) -- flow in +X ###
-# Airframe x[-7.07, 7.07] y[0, 3.58] z[-1.59, 1.59].  The BOS photograph (reference/
-# T38C_BOS_NASA.jpg) spans ~70 m across and ~40 m along the flight path, mostly the lateral
-# (y) shock legs, so the half-span direction reaches 24 m (3.4 spans); 9 m upstream of the
-# nose, 25 m of wake (the photo shows ~25 m behind the tail).
-geometry.prob_lo     = -16.0   0.0 -16.0
-geometry.prob_hi     =  32.0  24.0  16.0
+# Airframe x[-7.07, 7.07] y[0, 3.87] z[-1.69, 1.68].  9 m upstream of the nose, 25 m of wake.
+# [2026-11-14] Widened so that boundary reflections stay out of the BOS comparison window
+# (|lateral| <= 20 m, <= 26 m behind the nose).  The side walls are zero-gradient (the
+# NSCBC4 outflow corrupted a Mach 2 wedge test: pressure off by up to 0.9 of the shock
+# jump; zero-gradient reflected <= 6% of it).  The shock legs leave the nose at the Mach
+# angle (65.4 deg at M 1.1: lateral = 2.18 x distance behind the nose), so
+#   y wall at 40 m: legs reach it 18 m behind the nose; the reflection gets back to 20 m
+#                   only 27 m behind the nose -- outside the window (at 24 m it was 13 m).
+#   z walls at +-24 m: reflections enter the vertical BOS projection from 11 m behind the
+#                   nose (weak: they come from a shock that has decayed over 24 m);
+#                   keeping them out entirely needs +-57 m.
+geometry.prob_lo     = -16.0   0.0 -24.0
+geometry.prob_hi     =  32.0  40.0  24.0
 geometry.is_periodic = 0 0 0
 
 ### TIME STEPPING ###
@@ -75,8 +83,9 @@ dynamictimestep.verbose = 0
 dynamictimestep.max = 1e-0
 dynamictimestep.min = 1e-10
 cfl                 = 0.2
-stop_time           = 0.3            # ~2.3 flow-throughs of the 48 m domain (0.128 s each); far-field
-                                     # shock legs at r = 24 m settle in ~r/sqrt(U^2-a^2) = 0.15 s
+stop_time           = 0.3            # ~2.3 flow-throughs of the 48 m domain (0.128 s each); the
+                                     # shock legs in the comparison window (r <= 20 m) settle in
+                                     # ~r/sqrt(U^2-a^2) = 0.13 s, those at the y wall (40 m) in 0.26 s
 
 # ----------------------------------------------------------------------------
 # EMBEDDED SOLID -- the T-38, from STL.  SHARP SLIP WALL (validated set-up of
