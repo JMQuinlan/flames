@@ -25,3 +25,11 @@ the code they patch in is already in the repo, so the patches do not apply.
 shell.slip = 5, face.two_pressure = 1, relax.opt8 = 1. Only combination to reach 6 us at 160 kPa / 19.2 cells/R0 in the
 RADIAL slab: peaks vs model +1.2/+1.2/-0.3/-0.4 %, troughs -1.8/-5.9/-10.3/-11.6 % (old code +2.1/+4.6/+8.6/+15.9 %).
 Slurm: 06_Cattaneo_{HighPa,LowPa}_opt5_10_8.sh (32 tasks). Needs hydro2 from be9e72cd6 or later.
+
+## opt1 (2026-11-14): gooderrun + spherical NSCBC + Option 1 viscous relaxation jump
+Decks input_06_Cattaneo_{HighPa,LowPa}_opt1, slurm 06_Cattaneo_{HighPa,LowPa}_opt1.sh (32 tasks). Flags on top of the base deck:
+shell.kappa_s_alpha 0, shell.slip 12, face.two_pressure 1, relax.opt8 1, relax.trace_pT 3, thermal.alpha_min 1e-4,
+nscbc.spherical 1, thermal.dt_limit 1, visc.relax_cell_local 0; plot_dt 2.5e-8, max_grid_size 16, n_error_buf 4.
+Option 1: the relaxation's viscous jump obeys eta J_R = int J_F d eta, INTEGRATED ALONG THE NORMAL (grad eta) inside the
+band (recovers the full shell viscosity: free-decay delivered fraction 1.03 vs 0.83 per-cell). visc.relax_cell_local = 1
+restores the old per-cell jump. thermal.dt_limit fixes the fine-grid NaN at maximum expansion (explicit conduction).

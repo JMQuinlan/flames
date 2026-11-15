@@ -786,6 +786,11 @@ protected:
     int lim_radial_base = 0;   // TEMP test flag (limiter.radial_base)
     Set::Scalar diag_gasmass_dt = 1.0e-8;
     Set::Scalar diag_trace_x = -1.0, diag_trace_t0 = 0.0, diag_trace_t1 = -1.0;   // TEMP cell trace (diag.trace_*)
+    int jump_face_force = 0;   // TEMP jump.face_force (balanced-force jump forces)
+    int visc_relax_cell_local = 0;   // 0 = path-integrated viscous relaxation jump (default), 1 = per-cell (old)
+    int visc_relax_path_log = 0;     // diagnostic log interval of the path integral (0 = off)
+    long long rp_calls = 0, rp_sweeps = 0;   // path-integral call / sweep counters (log only)
+    int thermal_dt_limit = 1;        // thermal.dt_limit: conduction diffusivity always bounds dt
     void GasLedger(int lev, const char *where, Set::Scalar time);
     int relax_heat_diag = 0;           // relax.heat_diag: 1 = plot relax_heat_{gas,liq}
     int clip_ghost_only = 0;

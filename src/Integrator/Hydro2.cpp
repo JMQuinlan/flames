@@ -68,6 +68,7 @@ AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 static Set::Scalar g_gem_min = 1.0e-10;
 // shell.slip5_rupture (see Parse): Gamma = 0 marks a broken shell -> water tension, no shell viscosity.
 static int g_shell_rupture = 0;
+static void FaceForceDomainGhosts(amrex::MultiFab &J, const amrex::Geometry &gm);   // TEMP jump.face_force
 
 static Set::Scalar SigmaEffFromGamma(Set::Scalar Gamma, Set::Scalar grad_eta_mag,
                                      int marm, Set::Scalar sig_const,
@@ -617,6 +618,13 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //        stiffened gases it is a quadratic in p.  ThermalExchange does nothing in this mode.
         pp_query_validate("thermal.exchange",   value.thermal_exchange,   {0, 1, 2, 3, 4});
         pp_query_default("thermal.diag",        value.thermal_diag,       0);
+        // thermal.dt_limit (2026-11-14): Fourier conduction is EXPLICIT inside the RK right-hand side (it is NOT
+        // sub-cycled), so its diffusion limit dt <= cfl_v dx^2 / (2 d alpha_k), alpha_k = k_k / (rho_k cv_k), must bound
+        // the global step.  visc_subcycle = 1 used to zero the whole nu_total (bulk viscosity AND conduction): in the
+        // expanded gas core of the 160 kPa slabs the diffusion number reached 0.265-0.268 and an odd-even T/p mode grew
+        // at the RADIAL axis -> NaN (R0/dx 19 at 9.08 us, 25 at 8.03 us).  1 (default) = conduction always enters
+        // dt_viscous; 0 = previous behaviour.
+        pp_query_default("thermal.dt_limit", value.thermal_dt_limit, 1);
         pp_query_default("thermal.alpha_min",   value.thermal_alpha_min,  1.0e-3);  // phase fraction below which a phase takes no part
         if (value.thermal_exchange == 2) pp_query_required("thermal.h", value.thermal_h);   // [W/m^2/K]
         if (value.shell_heat_split == 2 || value.thermal_conduction || value.thermal_exchange == 1 || value.thermal_exchange == 2)
@@ -663,7 +671,7 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         //  * Energy: the total energy gains u.F, plus the viscous dissipation
         //    keff |grad eta| (div_s u)^2 as heat; the surface energy is not stored in the fluid.
         //  * IC: the phases keep their own IC pressures (the Laplace jump).
-        // CURVATURE kappa (TensorCurvature): kappa = div(n), n = grad eta/|grad eta| (eta since 2026-11-13; before: n = grad psi/|grad psi|), with
+        // CURVATURE kappa (TensorCurvature): kappa = div(n), n = grad Y/|grad Y|, Y = (alpha rho)_0/rho0_ref the liquid mass (2026-11-13; 11-02..11-13 psi below), with
         //     psi = (a rho)_0/rho0_ref / ((a rho)_0/rho0_ref + (a rho)_1/rho1_ref),
         // the volume fraction at fixed reference densities (mean pure-phase densities of the
         // IC).  The relaxation conserves each (a rho)_k, so it cannot change psi: with
@@ -731,6 +739,12 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("diag.gasmass", value.diag_gasmass, 0);        // TEMP gas-mass ledger (see Hydro2.H)
         pp_query_default("diag.gasmass_dt", value.diag_gasmass_dt, 1.0e-8);
         pp_query_default("diag.trace_x", value.diag_trace_x, -1.0);      // TEMP: print cell state at each ledger point
+        pp_query_default("jump.face_force", value.jump_face_force, 0);   // TEMP: 1 = jump forces J grad(eta) from face differences (balanced-force)
+        // RELAXATION VISCOUS JUMP (2026-11-14): 0 (default) = eta J_R = int J_F d eta integrated along the
+        // grad-eta path inside the band (see RelaxAndReinit); 1 = old per-cell jump J_R = J_F (cell-local form,
+        // bit-for-bit the previous behaviour), kept for a future cell-local approach.
+        pp_query_default("visc.relax_cell_local", value.visc_relax_cell_local, 0);
+        pp_query_default("visc.relax_path_log", value.visc_relax_path_log, 0);   // diagnostic: log every N calls (0 = off)
         pp_query_default("diag.trace_t0", value.diag_trace_t0, 0.0);
         pp_query_default("diag.trace_t1", value.diag_trace_t1, -1.0);
         pp_query_default("relax_diag", value.relax_diag, 0); // 1 = print per-stage {max_iters, max_residual, count_unconverged}.
@@ -2142,6 +2156,9 @@ Hydro2::RHS(int lev,
         // curvature of the normal jump force: the capillary-tensor curvature (TensorCurvature)
         amrex::MultiFab Kt_o(baO, dmO, 1, 0);
         TensorCurvature(lev, Kt_o, time);
+        const int ffo = jump_face_force;
+        amrex::MultiFab Jst(baO, dmO, 1, 1);   // TEMP jump.face_force: J = -sigma_eff kappa per valid cell
+        Jst.setVal(0.0);
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box bx = mfi.growntilebox(1);
@@ -2153,6 +2170,7 @@ Hydro2::RHS(int lev,
                                                               : amrex::Array4<const Set::Scalar>{};
             amrex::Array4<const Set::Scalar> const &vel = velocity_mf[lev]->const_array(mfi);
             amrex::Array4<Set::Scalar> const &om = Omega.array(mfi);
+            amrex::Array4<Set::Scalar> const &jst = Jst.array(mfi);
             // Diagnostic: kappa1 carries the TOTAL surface tension actually
             // used in Omega, sigma(Gamma) + kappa_s div_s(u).  kappa2 is written in the Marmottant block
             // above and is the BARE sigma(Gamma) only, so it cannot show the
@@ -2175,6 +2193,7 @@ Hydro2::RHS(int lev,
                     const Set::Scalar kT = vbx_om.contains(amrex::IntVect(AMREX_D_DECL(i, j, k))) ? kt_o(i, j, k) : 0.0;
                     const Set::Scalar sE = SigmaEffFromGamma(marm ? Gs : 0.0, 1.0, marm, sig0, chi_o, Gb_o, sbrk_o, sigw_o);
                     for (int d = 0; d < AMREX_SPACEDIM; ++d) om(i, j, k, nO + d) = -sE * kT * ge(d);
+                    if (ffo && vbx_om.contains(amrex::IntVect(AMREX_D_DECL(i, j, k)))) jst(i, j, k) = -sE * kT;
                 }
                 if (gem < g_gem_min) return; // Omega = 0 off the interface
                 // The tensor carries only the tangential (Marangoni) part of the static
@@ -2231,6 +2250,32 @@ Hydro2::RHS(int lev,
                 om(i, j, k, 5) = se * (-ge(1) * ge(2) / gem) + tw * Ds(1, 2); // yz
 #endif
             });
+        }
+        if (ffo)
+        {
+            // TEMP jump.face_force: F_d = [J_i (e+ - e-) + J+ (e+ - e_i) + J- (e_i - e-)] / (4 dx_d),
+            // i.e. the average of the two face forces J_f (e_R - e_L)/dx, J_f = (J_L + J_R)/2,
+            // on the same faces as the pressure flux (balanced-force).  Same net impulse as the
+            // centred form; only the distribution over the band changes.
+            Jst.FillBoundary(geom[lev].periodicity());
+            FaceForceDomainGhosts(Jst, geom[lev]);
+            for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box bx = mfi.validbox();
+                auto et = eta_mf[lev]->const_array(mfi);
+                auto jf = Jst.const_array(mfi);
+                auto om = Omega.array(mfi);
+                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    {
+                        const int ip = i + (d == 0), jp = j + (d == 1), kp = k + (d == 2);
+                        const int im = i - (d == 0), jm = j - (d == 1), km = k - (d == 2);
+                        const Set::Scalar e0 = et(i, j, k), ep = et(ip, jp, kp), em = et(im, jm, km);
+                        om(i, j, k, nO + d) = (jf(i, j, k) * (ep - em) + jf(ip, jp, kp) * (ep - e0)
+                                               + jf(im, jm, km) * (e0 - em)) / (4.0 * DX[d]);
+                    }
+                });
+            }
         }
         Omega.FillBoundary(geom[lev].periodicity());
         // Ghost Omega at every symmetry face = mirror of the first valid cell (see Parse).
@@ -4258,6 +4303,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // standard setup (mu 0.15/0.015, rho 10/1) it overestimates nu by 10x --
     // costing a factor of ~6 in dt once the capillary limit takes over.
     Set::Scalar nu_max_local = 0.0;
+    Set::Scalar nuth_max_local = 0.0;   // conduction diffusivity alone (thermal.dt_limit)
     const int th_cond_l = thermal_conduction;
     const Set::Scalar th_amin_l = thermal_alpha_min, th_k0_l = thermal_k0, th_k1_l = thermal_k1;
     const Set::Scalar th_cv0_l = eos0.Cv(), th_cv1_l = eos1.Cv();
@@ -4343,7 +4389,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
         const int symc = cen_face_any;   // symmetry + RADIAL faces
         const bool symlo_c[3] = {cen_face_lo[0], cen_face_lo[1], cen_face_lo[2]};
         const bool symhi_c[3] = {cen_face_hi[0], cen_face_hi[1], cen_face_hi[2]};
-        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &vz_max_local, &F_max_local, &rho_min_local, &nu_max_local, &nus_max_local] AMREX_GPU_DEVICE(int i, int j, int k)
+        amrex::ParallelFor(bx, [=, &c_max_local, &vx_max_local, &vy_max_local, &vz_max_local, &F_max_local, &rho_min_local, &nu_max_local, &nuth_max_local, &nus_max_local] AMREX_GPU_DEVICE(int i, int j, int k)
         {
             auto sten = Numeric::GetStencil(i, j, k, domain);
             if (symc)        // mirrored ghosts -> central is exact (see Parse)
@@ -4505,9 +4551,10 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
                     if (th_cond_l)
                     {
                         if (a1n > th_amin_l)
-                            nu_max_local = std::max(nu_max_local, th_k0_l * a1n / (std::max(rho_eta0(i,j,k), small_l) * th_cv0_l));
+                            nuth_max_local = std::max(nuth_max_local, th_k0_l * a1n / (std::max(rho_eta0(i,j,k), small_l) * th_cv0_l));
                         if (1.0 - a1n > th_amin_l)
-                            nu_max_local = std::max(nu_max_local, th_k1_l * (1.0 - a1n) / (std::max(rho_eta1(i,j,k), small_l) * th_cv1_l));
+                            nuth_max_local = std::max(nuth_max_local, th_k1_l * (1.0 - a1n) / (std::max(rho_eta1(i,j,k), small_l) * th_cv1_l));
+                        nu_max_local = std::max(nu_max_local, nuth_max_local);
                     }
                     if (kap_eff_l > 0.0)
                     {
@@ -4527,6 +4574,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     amrex::ParallelDescriptor::ReduceRealMax(F_max_local);
     amrex::ParallelDescriptor::ReduceRealMin(rho_min_local);
     amrex::ParallelDescriptor::ReduceRealMax(nu_max_local);
+    amrex::ParallelDescriptor::ReduceRealMax(nuth_max_local);
     amrex::ParallelDescriptor::ReduceRealMax(nus_max_local);
 
     c_max = c_max_local;
@@ -4573,6 +4621,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // visc_subcycle: bulk viscosity is sub-cycled in SubcycleBulkViscous and no
     // longer limits the global step.
     Set::Scalar nu_total = visc_subcycle ? 0.0 : nu_phys;
+    // conduction is never sub-cycled: it stays in the limit (thermal.dt_limit = 1, default)
+    if (visc_subcycle && thermal_dt_limit) nu_total = nuth_max_local;
     // SHELL DILATATIONAL VISCOSITY.  kappa_s enters the momentum equation as
     //     div( |grad eta| * kappa_s * (div_s u) * P ),
     // i.e. a SURFACE momentum diffusion whose kinematic diffusivity is
@@ -6468,6 +6518,31 @@ void Hydro2::FillGhost4BC(int lev, Set::Scalar time)
 // -- first order over an interval of one hydro dt, which is consistent with the
 // subcycled-AMR treatment of the other source terms.
 //
+// TEMP jump.face_force: ghost cells outside the physical domain take the adjacent valid value
+static void FaceForceDomainGhosts(amrex::MultiFab &J, const amrex::Geometry &gm)
+{
+    const amrex::Box dom = gm.Domain();
+    for (amrex::MFIter mfi(J, false); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box gb = mfi.growntilebox(1);
+        auto a = J.array(mfi);
+        const amrex::IntVect lo = dom.smallEnd(), hi = dom.bigEnd();
+        amrex::LoopOnCpu(gb, [&](int i, int j, int k) {
+            amrex::IntVect iv(AMREX_D_DECL(i, j, k));
+            if (dom.contains(iv)) return;
+            amrex::IntVect c = iv;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                if (gm.isPeriodic(d)) continue;
+                c[d] = std::min(std::max(c[d], lo[d]), hi[d]);
+            }
+            if (c == iv) return;
+            if (!mfi.validbox().contains(c)) return;
+            a(iv) = a(c);
+        });
+    }
+}
+
 void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
 {
     BL_PROFILE("Integrator::Hydro2::SubcycleShellViscous");
@@ -6612,6 +6687,8 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                         momentum_mf[lev]->DistributionMap(), nOm, 1);
 
     Kt_v.define(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, 0);
+    const int ffv = jump_face_force;
+    amrex::MultiFab Jvf(momentum_mf[lev]->boxArray(), momentum_mf[lev]->DistributionMap(), 1, 1);   // TEMP jump.face_force
     TensorCurvature(lev, Kt_v, time + dt);
     for (int it = 0; it < N; ++it)
     {
@@ -6678,6 +6755,43 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
         }
         Omv.FillBoundary(geom[lev].periodicity());
 
+        // TEMP jump.face_force: per-cell viscous jump Jv = -Tv kappa first, then face form below
+        if (ffv)
+        {
+            Jvf.setVal(0.0);
+            for (amrex::MFIter mfi(*momentum_mf[lev], false); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &bx = mfi.validbox();
+                auto et  = eta_mf[lev]->const_array(mfi);
+                auto vel = velocity_mf[lev]->const_array(mfi);
+                auto ktv = Kt_v.const_array(mfi);
+                auto shv = shell_mf[lev]->const_array(mfi);
+                auto gpv = slip7v ? Gp7v.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
+                auto jv  = Jvf.array(mfi);
+                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
+                    const Set::Scalar gem = ge.lpNorm<2>();
+                    if (gem < g_gem_min) return;
+                    const Set::Vector nh = ge / gem;
+                    Set::Matrix gu = Set::Matrix::Zero();
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                        gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
+                    const Set::Scalar ds_fl = gu.trace() - nh.dot(gu * nh);
+                    const Set::Scalar ds = LiquidInterfaceRate(et, i, j, k, DX, eps_rv, cut_rv, gu,
+                                               Set::Vector(AMREX_D_DECL(vel(i,j,k,0), vel(i,j,k,1), vel(i,j,k,2))), ds_fl);
+                    Set::Scalar Tv = keff_v * ShellViscFactor(ds, alpha_v) * ds;
+                    if (tfl_on)
+                    {
+                        const Set::Scalar Tlo = tfl - SigmaEffFromGamma(marm_v ? (slip7v ? ((gpv(i, j, k) > 0.0) ? shv(i, j, k) / gpv(i, j, k) : 1.0) : shv(i, j, k)) : 0.0, 1.0, marm_v,
+                                                                        sig_v, chi_v, Gb_v, sbrk_v, sigw_v);
+                        if (Tv < Tlo) Tv = Tlo;
+                    }
+                    jv(i, j, k) = -Tv * ktv(i, j, k);
+                });
+            }
+            Jvf.FillBoundary(geom[lev].periodicity());
+            FaceForceDomainGhosts(Jvf, geom[lev]);
+        }
         // ---- apply div(Omega_visc) to momentum, dissipation to energy ------
         for (amrex::MFIter mfi(*momentum_mf[lev], false); mfi.isValid(); ++mfi)
         {
@@ -6702,6 +6816,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
             auto ktv  = Kt_v.const_array(mfi);
             auto shv  = shell_mf[lev]->const_array(mfi);
             auto gpv  = slip7v ? Gp7v.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
+            auto jvf  = Jvf.const_array(mfi);
             const Set::Scalar idx = 0.5 / DX[0], idy = 0.5 / DX[1];
 #if AMREX_SPACEDIM == 3
             const Set::Scalar idz = 0.5 / DX[2];
@@ -6748,7 +6863,16 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                                                                     sig_v, chi_v, Gb_v, sbrk_v, sigw_v);
                     if (Tv < Tlo) { Tv = Tlo; clamped = true; }
                 }
-                F -= (Tv * ktv(i, j, k)) * ge;
+                if (!ffv) F -= (Tv * ktv(i, j, k)) * ge;
+                else
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    {
+                        const int ip = i + (d == 0), jp = j + (d == 1), kp = k + (d == 2);
+                        const int im = i - (d == 0), jm = j - (d == 1), km = k - (d == 2);
+                        const Set::Scalar e0 = et(i, j, k), ep = et(ip, jp, kp), em = et(im, jm, km);
+                        F(d) += (jvf(i, j, k) * (ep - em) + jvf(ip, jp, kp) * (ep - e0)
+                                 + jvf(im, jm, km) * (e0 - em)) / (4.0 * DX[d]);
+                    }
                 for (int d = 0; d < AMREX_SPACEDIM; ++d)
                     M(i,j,k,d) += dtau * F(d);
 
@@ -7321,15 +7445,42 @@ void Hydro2::ShellPsiGrad(int lev, Set::Scalar time, amrex::MultiFab &Gp)
 void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time)
 {
     BL_PROFILE("Integrator::Hydro2::TensorCurvature");
-    amrex::ignore_unused(time);
     const Set::Scalar *DXc = geom[lev].CellSize();
-    // Curvature of the level sets of eta, the same field the capillary tensor and the shell gate
-    // use (2026-11-13; 11-02 .. 11-13 it used psi = mass fraction at fixed reference densities,
-    // which goes non-monotone where frozen trace gas has different densities in neighbouring
-    // cells -> normal flips -> one-cell kappa ~ -2/(2 dx) -> wrong-sign jump).  The callers
-    // refresh eta's ghosts; the relaxation computes kappa once, before it changes eta.
-    const amrex::MultiFab &Yc = *eta_mf[lev];
-    // Unit normals n = grad eta/|grad eta| from the isotropic gradient on valid + 1 ghost (reach 2 = nghost)
+    // Curvature of the level sets of the LIQUID MASS, Y = (alpha rho)_0 / rho0_ref (2026-11-13).
+    //  * The pressure relaxation never changes (alpha rho)_k, so Y has no relaxation -> alpha ->
+    //    kappa -> jump -> relaxation loop.  kappa(eta) has that loop: the static Laplace bubble
+    //    (soft phases, p 10 Pa, jump 3 Pa) drifted 17% with |u| ~ 1 m/s; at p 10 kPa it held.
+    //  * The liquid is the stiff phase, so its level sets are the eta level sets to O(dp/(rho c^2)).
+    //  * Trace gas plays no part: psi = Y_l/(Y_l + Y_g) (11-02 .. 11-13) went non-monotone where
+    //    frozen trace gas had different densities in neighbouring cells -> normal flip -> one-cell
+    //    kappa ~ -2/(2 dx) -> wrong-sign jump (06 160 kPa spherical-BC crash, 4.87 us).
+    amrex::MultiFab Yc;
+    PsiRefDensities();
+    {
+        // Current ghosts for the liquid mass.  The callers refresh eta's ghosts but not always
+        // rho_eta0's (RelaxAndReinit runs inside FillGhost4BC before it is filled; the viscous
+        // sub-cycle refreshes eta and rho only): a stale RADIAL / mirror / coarse-fine ghost
+        // gave erratic kappa on the 2-cell-wide RADIAL slab.  Same fill as eta's at each caller.
+        if (lev == 0)
+            FillBoundariesWithBC(lev, time, density0_bc, { rho_eta0_mf[lev].get() });
+        else
+        {
+            FillPatch(lev, time, rho_eta0_mf, *rho_eta0_mf[lev], *density0_bc, 0);
+            if (radial_bc) RadialGhostFill(lev, *rho_eta0_mf[lev], false);
+        }
+        const Set::Scalar ir0 = 1.0 / jump_y_rho0;
+        Yc.define(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), 1, eta_mf[lev]->nGrow());
+        for (amrex::MFIter mfi(Yc, false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box gb = mfi.fabbox();
+            auto r0 = rho_eta0_mf[lev]->const_array(mfi);
+            auto Y  = Yc.array(mfi);
+            amrex::ParallelFor(gb, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                Y(i, j, k) = std::max(r0(i, j, k), 0.0) * ir0;
+            });
+        }
+    }
+    // Unit normals n = grad Y/|grad Y| from the isotropic gradient on valid + 1 ghost (reach 2 = nghost)
     amrex::MultiFab Nf(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), AMREX_SPACEDIM, 1);
     for (amrex::MFIter mfi(Nf, false); mfi.isValid(); ++mfi)
     {
@@ -7343,7 +7494,7 @@ void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time)
             for (int d = 0; d < AMREX_SPACEDIM; ++d) nf(i, j, k, d) = gm < g_gem_min ? 0.0 : gn(d) / gm;
         });
     }
-    // kappa = div(n), isotropic stencil; zero where the compact |grad eta| vanishes
+    // kappa = div(n), isotropic stencil; zero where the compact |grad Y| vanishes
     for (amrex::MFIter mfi(K, false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
@@ -7625,6 +7776,144 @@ void Hydro2::RelaxAndReinit(int lev)
         const int slip7j = (shell_slip == 7 || shell_slip == 11 || shell_slip == 12 || shell_slip == 15) && marmottant;
         amrex::MultiFab Gp7j;
         if (slip7j) ShellPsiGrad(lev, relax_time, Gp7j);
+        const Set::Scalar eps_j = epsilon, cut_rj = std::max(cutoff, 1.0e-12);   // flux-tube map (LiquidInterfaceRate), as the force
+        // ------------------------------------------------------------------------------------------
+        // VISCOUS RELAXATION JUMP BY PATH INTEGRATION ALONG THE NORMAL (default; visc.relax_cell_local = 0)
+        //
+        // This block INTEGRATES ALONG THE NORMAL (the grad-eta direction) WITHIN THE BAND.
+        // Why: the sub-cycler applies the viscous jump as the body force F = -J_F grad(eta) (J_F = keff r kappa
+        // per cell).  The relaxation splits the mixture pressure as p_gas - p_liq = J_R per cell.  In a
+        // quasi-static band, d p_gas/dn = (J_R - J_F) d eta/dn + eta dJ_R/dn, so the band gas stays at the core
+        // gas pressure only if
+        //         d(eta J_R) = J_F d eta   along the grad-eta path,   i.e.  eta J_R = int J_F d eta.
+        // A per-cell J_R = J_F (the old form, kept behind visc.relax_cell_local = 1 for a future cell-local
+        // approach) violates this wherever J_F varies across the band: the band gas then carries an
+        // Rdot-phased pressure, a reversible spring in series with the shell dashpot (measured: it returns
+        // ~3e-12 J per rebound at 160 kPa, the size of the whole shell dissipation).  A global least-squares
+        // potential (tested 2026-11-14) fails off a sphere because J_F grad(eta) is not curl-free (J_F varies
+        // along the surface) and Phi/eta amplifies the rotational residual in near-gas cells.  Integrating
+        // along each cell's own upwind grad-eta path has no global solve, so no residual reaches the core.
+        //
+        // Scheme (upwind, eikonal-type, cells with cut < eta < 1 - cut only; nothing outside the band is
+        // touched; the force is unchanged):
+        //   n = grad eta/|grad eta|; for each direction d the upwind neighbour is the one against n_d; it is
+        //   used if it is in the band (or pure gas, eta <= cut), on the level (valid or exchanged ghost) and has
+        //   LOWER eta.  Phi_i = sum_d w_d [Phi_nb + 0.5 (J_F,i + J_F,nb)(eta_i - eta_nb)], w_d = |n_d| / sum|n_d|
+        //   over the used directions.
+        //   Path start (deterministic): a cell with no usable upwind BAND neighbour (its lower neighbours are pure
+        //   gas, or it is a local eta minimum, or |grad eta| < gem_min, e.g. at a saddle where two bands meet)
+        //   starts with Phi = eta J_F of that cell.  Approximation: O(eta_start * dJ_F) at each path start.
+        //   Sweeps with ghost exchange until no Phi changes (exact: the dependency graph follows increasing eta).
+        //   J_R,visc = Phi/eta in relaxation band cells.  shell.mu_s != 0 keeps the per-cell form.
+        // ------------------------------------------------------------------------------------------
+        const int rpath = (!visc_relax_cell_local && kmm != 0.0 && mus == 0.0);
+        amrex::MultiFab Pth;
+        if (rpath)
+        {
+            const Set::Scalar cu = cut_j;
+            amrex::MultiFab JFp(ba, dm, 1, 1), Ip(ba, dm, 1, 1);
+            JFp.setVal(0.0); Ip.setVal(0.0);
+            Pth.define(ba, dm, 1, 1); Pth.setVal(0.0);
+            for (amrex::MFIter mfi(JFp, false); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &bx = mfi.validbox();
+                auto et = eta_mf[lev]->const_array(mfi);
+                auto v  = vt.const_array(mfi);
+                auto ktj = Kt_j.const_array(mfi);
+                auto jf = JFp.array(mfi);
+                auto in = Ip.array(mfi);
+                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    in(i, j, k) = 1.0;
+                    const Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DXj);
+                    const Set::Scalar gem = ge.lpNorm<2>();
+                    if (gem < g_gem_min) return;
+                    const Set::Vector nh = ge / gem;
+                    Set::Matrix gu = Set::Matrix::Zero();
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d) gu.col(d) = Numeric::Gradient(v, i, j, k, d, DXj);
+                    const Set::Scalar dsf = gu.trace() - nh.dot(gu * nh);
+                    const Set::Vector uu(AMREX_D_DECL(v(i, j, k, 0), v(i, j, k, 1), v(i, j, k, 2)));
+                    const Set::Scalar ds = LiquidInterfaceRate(et, i, j, k, DXj, eps_j, cut_rj, gu, uu, dsf);
+                    jf(i, j, k) = kmm * ShellViscFactor(ds, alpha_j) * ds * ktj(i, j, k);   // same J_F as the force
+                });
+            }
+            auto fillp = [&](amrex::MultiFab &F) {
+                if (lev == 0) FillBoundariesWithBC(lev, relax_time, eta_bc, { &F });
+                else { F.FillBoundary(geom[lev].periodicity()); if (radial_bc) RadialGhostFill(lev, F, false); }
+            };
+            fillp(JFp); fillp(Ip);
+            // initial: every band cell starts as a path start (Phi = eta J_F); sweeps then propagate
+            for (amrex::MFIter mfi(Pth, false); mfi.isValid(); ++mfi)
+            {
+                auto et = eta_mf[lev]->const_array(mfi); auto jf = JFp.const_array(mfi); auto ph = Pth.array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                    const Set::Scalar ea = et(i, j, k);
+                    ph(i, j, k) = (ea > cu && ea < 1.0 - cu) ? ea * jf(i, j, k) : 0.0; });
+            }
+            int sweeps = 0; Set::Scalar nchg = 1.0;
+            for (; sweeps < 100000 && nchg > 0.0; ++sweeps)
+            {
+                fillp(Pth);
+                nchg = 0.0;
+                for (amrex::MFIter mfi(Pth, false); mfi.isValid(); ++mfi)
+                {
+                    auto et = eta_mf[lev]->const_array(mfi); auto jf = JFp.const_array(mfi);
+                    auto in = Ip.const_array(mfi); auto ph = Pth.array(mfi);
+                    amrex::Box bx = mfi.validbox();
+                    amrex::FArrayBox newf(bx, 1); auto nw = newf.array();
+                    amrex::LoopOnCpu(bx, [&](int i, int j, int k) {
+                        const Set::Scalar ea = et(i, j, k);
+                        nw(i, j, k) = ph(i, j, k);
+                        if (!(ea > cu && ea < 1.0 - cu)) return;
+                        const Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DXj);
+                        const Set::Scalar gem = ge.lpNorm<2>();
+                        Set::Scalar acc = 0.0, wsum = 0.0;
+                        if (gem >= g_gem_min)
+                            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                            {
+                                const Set::Scalar nd = ge(d) / gem;
+                                if (nd == 0.0) continue;
+                                const int sg = (nd > 0.0) ? -1 : 1;           // upwind = against n_d
+                                const int ib = i + sg * (d == 0), jb = j + sg * (d == 1), kb = k + sg * (d == 2);
+                                if (in(ib, jb, kb) < 0.5) continue;           // off the level
+                                const Set::Scalar eb = et(ib, jb, kb);
+                                if (!(eb < ea) || eb <= cu) continue;          // need a lower-eta BAND neighbour
+                                const Set::Scalar w = std::abs(nd);
+                                acc += w * (ph(ib, jb, kb) + 0.5 * (jf(i, j, k) + jf(ib, jb, kb)) * (ea - eb));
+                                wsum += w;
+                            }
+                        const Set::Scalar pn = (wsum > 0.0) ? acc / wsum : ea * jf(i, j, k);   // path start
+                        nw(i, j, k) = pn;
+                    });
+                    amrex::LoopOnCpu(bx, [&](int i, int j, int k) {
+                        if (nw(i, j, k) != ph(i, j, k)) { nchg += 1.0; ph(i, j, k) = nw(i, j, k); } });
+                }
+                amrex::ParallelDescriptor::ReduceRealSum(nchg);
+            }
+            if (sweeps >= 100000) Util::Warning(INFO, "relaxation path integral: sweeps did not settle (lev ", lev, ")");
+            rp_calls += 1; rp_sweeps += sweeps;
+            if (visc_relax_path_log > 0 && rp_calls % visc_relax_path_log == 0)
+            {
+                Set::Scalar jrmax = 0.0, jrmax_g = 0.0;   // all band cells / near-gas band cells (eta < 1e-2)
+                for (amrex::MFIter mfi(Pth, false); mfi.isValid(); ++mfi)
+                {
+                    auto et = eta_mf[lev]->const_array(mfi); auto ph = Pth.const_array(mfi);
+                    amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                        const Set::Scalar ea = et(i, j, k);
+                        if (ea > cu && ea < 1.0 - cu)
+                        {
+                            const Set::Scalar a = std::abs(ph(i, j, k) / ea);
+                            jrmax = std::max(jrmax, a); if (ea < 1.0e-2) jrmax_g = std::max(jrmax_g, a);
+                        }
+                    });
+                }
+                amrex::ParallelDescriptor::ReduceRealMax(jrmax);
+                amrex::ParallelDescriptor::ReduceRealMax(jrmax_g);
+                const Set::Scalar jfn = JFp.norm0(0, 0);   // collective: outside the IOProcessor branch
+                if (amrex::ParallelDescriptor::IOProcessor())
+                    Util::Message(INFO, "relax path: t=", relax_time, " sweeps ", sweeps, " (mean ", (double)rp_sweeps / (double)rp_calls,
+                                  ") max|J_R| ", jrmax, " (eta<.01: ", jrmax_g, ") max|J_F| ", jfn);
+            }
+        }
         for (amrex::MFIter mfi(*jump_mf, false); mfi.isValid(); ++mfi)
         {
             const amrex::Box &bxj = mfi.validbox();
@@ -7635,6 +7924,7 @@ void Hydro2::RelaxAndReinit(int lev)
             auto shl = shell_mf[lev]->const_array(mfi);
             auto gpj = slip7j ? Gp7j.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
             auto ktj = Kt_j.const_array(mfi);
+            auto pth = rpath ? Pth.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
             amrex::ParallelFor(bxj, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                 const Set::Scalar e = et(i, j, k);
                 if (!(e > cut_j && e < 1.0 - cut_j)) return;
@@ -7661,6 +7951,9 @@ void Hydro2::RelaxAndReinit(int lev)
                 // p_gas - p_liq = T_s : grad(n) with grad(n) -> (kappa/(D-1)) P:
                 //   J = kappa tr(T_s)/(D-1),  kappa = tensor curvature
                 J(i, j, k) = ktj(i, j, k) * Ts.trace() / (AMREX_SPACEDIM - 1);
+                // viscous part from the band path integral (see above); static part unchanged
+                if (rpath)
+                    J(i, j, k) = ktj(i, j, k) * (Ts.trace() / (AMREX_SPACEDIM - 1) - kmm * fvis_j * ds) + pth(i, j, k) / e;
             });
         }
     }
@@ -9424,17 +9717,37 @@ void Hydro2::GasLedger(int lev, const char *where, Set::Scalar time)
     const auto dx = geom[lev].CellSizeArray();
     const Set::Scalar xlo = geom[lev].ProbLo(0);
     const bool w2 = (diag_gasmass == 2);
+    const bool wm = (diag_gasmass == 3);   // TEMP: radial momentum int Mx dx over x < diag_trace_x (RADIAL slab row 0)
     Set::Scalar m = 0.0;
     for (amrex::MFIter mfi(*rho_eta1_mf[lev], false); mfi.isValid(); ++mfi)
     {
         const amrex::Box &bx = mfi.validbox();
         auto r1 = rho_eta1_mf[lev]->const_array(mfi);
+        auto Mm = momentum_mf[lev]->const_array(mfi);
         amrex::LoopOnCpu(bx, [&](int i, int j, int k) {
             Set::Scalar x = xlo + (i + 0.5) * dx[0];
-            m += r1(i, j, k) * (w2 ? x * x : 1.0);
+            if (wm) { if (j == 0 && k == 0 && x < diag_trace_x) m += Mm(i, j, k, 0) * dx[0]; }
+            else m += r1(i, j, k) * (w2 ? x * x : 1.0);
         });
     }
     amrex::ParallelDescriptor::ReduceRealSum(m);
+    if (wm)
+    {
+        static std::string lastm; static Set::Scalar mprev = 0.0, tn = -1.0; static std::map<std::string, Set::Scalar> sm;
+        if (!lastm.empty()) sm[lastm + ">" + where] += m - mprev;
+        lastm = where; mprev = m;
+        if (std::string(where) == "advance_entry" && time >= tn)
+        {
+            if (tn < 0.0) { tn = time + diag_gasmass_dt; sm.clear(); return; }
+            tn = time + diag_gasmass_dt;
+            std::string out = "MOMLEDGER t=" + std::to_string(time * 1e6) + "us intM=" + std::to_string(m);
+            char b[96];
+            for (auto &kv : sm) { snprintf(b, 96, " | %s %+.4e", kv.first.c_str(), kv.second); out += b; }
+            Util::Message(INFO, out);
+            sm.clear();
+        }
+        return;
+    }
     if (diag_trace_x > 0.0 && time >= diag_trace_t0 && time <= diag_trace_t1)
     {
         const int ic = (int)std::floor((diag_trace_x - xlo) / dx[0]);
