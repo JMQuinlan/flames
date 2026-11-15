@@ -35,9 +35,7 @@ alamo.program = hydro2
 
 ### OUTPUT ###
 #plot_file = ./tests/FlowTryonFun/Planes/T38-Talon/output_Ma1.1
-# New folder (2026-11-14): output_Ma1.1_Wide holds the earlier wide run (old STL / meshing);
-# writing there would overwrite its plotfiles of the same name.
-plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTryonFun/Planes/T38-Talon/output_Ma1.1_Wide_v2
+plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowTryonFun/Planes/T38-Talon/output_Ma1.1_Wide
 
 ### MESHING ###
 # [2026-11-14] Optimized like the AIAA fuel-droplet LONG decks: a coarse base grid for the
