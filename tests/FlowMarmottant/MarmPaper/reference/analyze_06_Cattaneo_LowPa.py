@@ -11,6 +11,11 @@ Figure <figdir>/<stem>_R.{png,eps}: R [um] vs t [us] (t = 0 at the start of the 
     the Cattaneo et al. model (Marmottant shell + heat-conducting Zhou gas, constant kappa_s),
     the experiment (open markers; figure time shifted by -1.57 us onto the simulation axis),
     the simulation volumetric radius R_vol and the eta = 0.5 radius.
+Figure <figdir>/<stem>_R_full.{png,eps}: panel (a) only (compact).
+Figure <figdir>/<stem>_thermo.{png,eps} (default; --no-thermo-fig skips it): mean gas pressure / p0 vs time on the
+  Fig. 2a time axis (t + 1.57 us) from thermo.dat, the present model against isothermal (p V = const) and adiabatic
+  (p V^gamma = const) compression along the simulated radius and the Cattaneo et al. heat-conducting-gas model;
+  prints the effective polytropic exponent per compression.  All figures are written as .png and .eps (--formats).
 Printed: peak and trough radius in each drive cycle for every curve, with the % gap vs experiment.
 Model parameters come from the deck, overridden by <output>/metadata (command-line overrides of the
 run, e.g. shell.kappa_s_alpha=0).  RADIAL slabs (n_cell N x 2 x 2) and AMR octants are both read

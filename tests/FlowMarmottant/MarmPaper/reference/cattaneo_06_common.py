@@ -205,9 +205,10 @@ CATT = dict(R0=2.95e-6, p0=102200.0, c=1481.0, mu=0.000954, rho=997.8, Sw=0.0728
             kap=5e-9, lam=0.0259, Rg=287.0, Ts=295.0, zeta=7.0)
 
 
-def solve_cattaneo(pa, env, t_end, t_start=-1e-6, P=None):
+def solve_cattaneo(pa, env, t_end, t_start=-1e-6, P=None, return_p=False):
     """Their ModifiedRayleighPlesset_MarmottantZhou: state (R, Rdot, p_gas, M1, M3) of a three-layer
-    heat-conducting gas core (Zhou), sigma(R0) = 0 (R_buck = R0).  Returns (t, R) [s, m]."""
+    heat-conducting gas core (Zhou), sigma(R0) = 0 (R_buck = R0).  Returns (t, R) [s, m],
+    or (t, R, p_gas) [s, m, Pa] with return_p=True."""
     P = dict(CATT, **(P or {}))
     R0, p0, c, mu, rho, Sw, G, chi, kap = (P[k] for k in ("R0", "p0", "c", "mu", "rho", "Sw", "Gamma", "chi", "kap"))
     Rg, Ts, z = P["Rg"], P["Ts"], P["zeta"]
@@ -235,7 +236,7 @@ def solve_cattaneo(pa, env, t_end, t_start=-1e-6, P=None):
 
     s = solve_ivp(rhs, (t_start, t_end), [R0, 0, p0, 3 * a1 * M0, 3 * a3 * M0], method="LSODA",
                   max_step=1e-9, rtol=1e-8, atol=1e-14)
-    return s.t, s.y[0]
+    return (s.t, s.y[0], s.y[2]) if return_p else (s.t, s.y[0])
 
 
 # =========================================================================================== #
@@ -359,6 +360,98 @@ def print_table(curves, exp_name, ncyc, first=1):
     print("  * = extremum on the edge of the cycle window (still rising/falling there, not a turning point)")
 
 
+
+# =========================================================================================== #
+#  Gas thermodynamics figure: mean gas pressure vs time against isothermal / adiabatic / their model
+# =========================================================================================== #
+def thermo_pressure(plotdir, geom):
+    """(t, q, pbar, pbar0) from thermo.dat: q = V/V0 of the spherical bubble ((R/R0)^3; the slab gas volume
+    is linear in R, so q = (V/V0)^3 there), pbar = gas_pressure_int / gas_volume (volume-weighted mean gas
+    pressure), pbar0 its t = 0 value.  Restarted runs take V0, pbar0 from the t = 0 run of the restart chain."""
+    import cattaneo_06_gif as _gif
+    f = os.path.join(plotdir, "thermo.dat")
+    if not os.path.isfile(f):
+        return None
+    T = _gif._read_thermo(f)
+    if T is None or len(T) < 2 or T.shape[1] < 3:
+        return None
+    T0 = T[0]
+    if abs(T[0, 0]) > 1e-12:
+        r = _gif.restart_v0(plotdir)
+        if r is None:
+            print("  [thermo] thermo.dat starts at t = %.3f us and no restart chain found; thermo figure skipped" % (T[0, 0] * 1e6))
+            return None
+        T0 = _gif._read_thermo(r[1])[0]
+    q = T[:, 1] / T0[1]
+    q = q ** 3 if geom == "slab" else q
+    return T[:, 0], q, T[:, 2] / T[:, 1], T0[2] / T0[1]
+
+
+def _n_per_compression(t, q, p, k):
+    """Effective polytropic exponent n (p ~ V^-n) over the compression (max V -> next min V) in cycle k."""
+    m = (t >= (k + 0.5) * 1e-6) & (t < (k + 1.6) * 1e-6)
+    if m.sum() < 5 or t[-1] < (k + 1.6) * 1e-6:
+        return np.nan
+    V, P = q[m], p[m]; i0 = int(np.argmax(V)); i1 = i0 + int(np.argmin(V[i0:]))
+    return np.nan if i1 <= i0 + 3 else -np.polyfit(np.log(V[i0:i1 + 1]), np.log(P[i0:i1 + 1]), 1)[0]
+
+
+def make_thermo_figure(case_tag, C, plotdir, geom, t_end, out_stem, exp_shift=EXP_SHIFT_US, formats=None):
+    """Mean gas pressure / p_g(0) vs time (Fig. 2a time axis, t_fig = t - exp_shift) for the present model, with
+    isothermal (p V = const) and adiabatic (p V^gamma = const) compression along the simulated radius and the
+    Cattaneo et al. heat-conducting-gas model.  Also prints the effective exponent per compression."""
+    import matplotlib.ticker as mt
+    th = thermo_pressure(plotdir, geom)
+    if th is None:
+        print("  [thermo] no usable thermo.dat in %s; thermo figure skipped" % plotdir)
+        return
+    t, q, pg, pg0 = th
+    G = getattr(C, "gamma_gas", C.gas.kappa_g)      # the run's gas gamma (eos1.gamma), not --kappa-g
+    tm, Rm, pm = solve_cattaneo(C.pa, Envelope(), t_end + 0.2e-6, P=dict(R0=C.R0), return_p=True)
+    SH = -exp_shift * 1e-6
+    um = 1e6
+    rc = {"font.family": "serif", "font.size": 11, "axes.labelsize": 12, "legend.fontsize": 9.5,
+          "mathtext.fontset": "dejavuserif", "pdf.fonttype": 42, "ps.fonttype": 42}
+    with plt.rc_context(rc):
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        ax.plot((t + SH) * um, q ** -G, "--", color="#de2d26", lw=1.1, label=r"Adiabatic, $p_gV^{\gamma}$ = const")
+        ax.plot((t + SH) * um, 1.0 / q, "--", color="#3182bd", lw=1.1, label=r"Isothermal, $p_gV$ = const")
+        mk = tm >= 0
+        ax.plot((tm[mk] + SH) * um, pm[mk] / pm[0], "-.", color="k", lw=1.1,
+                label="Cattaneo et al. model")
+        ax.plot((t + SH) * um, pg / pg0, "-", color="#54278f", lw=1.6, label="Present Model")
+        ax.set_yscale("log")
+        x1 = (t[-1] + SH) * um
+        ax.set_xlim(0.0, 12.0 if x1 >= 12.0 else x1)
+        lo, hi = ((0.05, 2e3) if case_tag == "hi" else (0.25, 12.0))
+        dmin = min(np.nanmin(pg / pg0), np.nanmin(pm[mk] / pm[0])); dmax = max(np.nanmax(pg / pg0), np.nanmax(pm[mk] / pm[0]))
+        ax.set_ylim(min(lo, 0.8 * dmin), max(hi, 1.3 * dmax))
+        ax.yaxis.set_major_formatter(mt.FuncFormatter(lambda v, _: "%g" % v))
+        if case_tag != "hi":
+            ax.yaxis.set_minor_formatter(mt.FuncFormatter(lambda v, _: ("%g" % v) if v in (0.3, 0.5, 2, 3, 5) else ""))
+        ax.grid(True, which="both", color="0.9", lw=0.6)
+        ax.set_axisbelow(True)
+        ax.set_xlabel(r"Time ($\mu$s)")
+        ax.set_ylabel(r"$\bar p_g / p_0$")
+        leg = ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=2, frameon=False)
+        fig.tight_layout()
+        fig.canvas.draw()
+        bb = leg.get_window_extent().transformed(fig.transFigure.inverted())
+        fig.text(0.5 * (bb.x0 + bb.x1), bb.y1 + 0.01,
+                 "Cattaneo et al. (2025) Gas Thermodynamics, 3 µm Coated Bubble under %.0f kPa Acoustic Force" % (C.pa / 1e3),
+                 ha="center", va="bottom", fontsize=12)
+        for fmt in (formats or FIG["formats"]):
+            fig.savefig(out_stem + "." + fmt, dpi=FIG["dpi"], bbox_inches="tight", pad_inches=0.05)
+        plt.close(fig)
+    print("  wrote", out_stem + ".png")
+    ks = range(2, 11)
+    ns = [_n_per_compression(t, q, pg, k) for k in ks]
+    nm = [_n_per_compression(tm, (Rm / C.R0) ** 3, pm, k) for k in ks]
+    print("  effective exponent n per compression (p ~ V^-n; 1 isothermal, %.2f adiabatic), sim-axis cycles 2..10:" % G)
+    print("    present model  " + " ".join("%5.3f" % v for v in ns))
+    print("    Cattaneo model " + " ".join("%5.3f" % v for v in nm))
+
+
 # =========================================================================================== #
 #  Figure
 # =========================================================================================== #
@@ -388,9 +481,12 @@ def make_figure(case_tag, C, sim, models, exp, out_stem, xlim, zoom, rvol_norm=F
             ax.plot(th[mk(th)] * um, Rh[mk(th)] * um, ":", color=S["c_vol"], lw=1.0,
                     label=r"Simulation, $R_\mathrm{vol}$ (thermo)")
         ts = sim["t"]; m = mk(ts)
-        ax.plot(ts[m] * um, Rv[m] * um, "-s", color=S["c_vol"], lw=1.5, ms=3.0, zorder=4,
+        # markers about every 0.1 us (the camera rate) whatever the plot_dt, so dense frame sets stay readable
+        dtf = float(np.median(np.diff(ts))) if len(ts) > 1 else 1e-7
+        me = max(1, int(round(1e-7 / dtf))) if dtf > 0 else 1
+        ax.plot(ts[m] * um, Rv[m] * um, "-s", color=S["c_vol"], lw=1.5, ms=3.0, zorder=4, markevery=me,
                 label=r"Simulation, $R_\mathrm{vol}$")
-        ax.plot(ts[m] * um, sim["R_eta"][m] * um, "-^", color=S["c_eta"], lw=1.5, ms=3.2, zorder=3,
+        ax.plot(ts[m] * um, sim["R_eta"][m] * um, "-^", color=S["c_eta"], lw=1.5, ms=3.2, zorder=3, markevery=me,
                 label=r"Simulation, $R(\eta = 0.5)$")
         te, Re = exp; m = mk(te)
         ax.plot(te[m] * um, Re[m] * um, "o", color=S["c_exp"], mfc=S["c_exp"] if hi else "white", mew=0.9,
@@ -442,6 +538,7 @@ def main(case_tag, deck, default_output, stem, zoom_default):
     ap.add_argument("--rvol-norm", action="store_true", help="rescale R_vol so R_vol(0) = R0")
     ap.add_argument("--thermo", action="store_true", help="also draw R_vol from thermo.dat (km.sim measure)")
     ap.add_argument("--geom", choices=("slab", "octant", "full"), default=None, help="override geometry detection")
+    ap.add_argument("--no-thermo-fig", action="store_true", help="skip the gas-thermodynamics figure (<stem>_thermo)")
     ap.add_argument("--nproc", type=int, default=4)
     ap.add_argument("--formats", default=None, help="comma list, default %s" % ",".join(FIG["formats"]))
     import cattaneo_06_gif as _gif
@@ -455,6 +552,7 @@ def main(case_tag, deck, default_output, stem, zoom_default):
     os.makedirs(figdir, exist_ok=True)
 
     C = load_case(a.input, plotdir)
+    C.gamma_gas = C.gas.kappa_g                       # deck / run eos1.gamma, kept for the thermo figure
     if a.kappa_g is not None:
         C.gas.kappa_g = a.kappa_g
     print("  deck   %s\n  output %s" % (a.input, plotdir))
@@ -498,6 +596,9 @@ def main(case_tag, deck, default_output, stem, zoom_default):
         make_figure(case_tag, C, sim, models, exp, os.path.join(figdir, a.stem + "_R_full"), xlim, tuple(a.zoom),
                     rvol_norm=a.rvol_norm, thermo=th, show_thermo=a.thermo,
                     formats=a.formats.split(",") if a.formats else None, single=True)
+        if not a.no_thermo_fig:
+            make_thermo_figure(case_tag, C, plotdir, sim["geom"], t_end, os.path.join(figdir, a.stem + "_thermo"),
+                               exp_shift=a.exp_shift, formats=a.formats.split(",") if a.formats else None)
     if a.gif:
         _gif.make_gifs(a, C, case_tag, plotdir, figdir, sim["geom"] if sim else (a.geom or geometry(plotdir)), sim=sim)
 

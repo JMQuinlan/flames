@@ -63,21 +63,21 @@ eta.ic.expression.constant.R0      = 2.950000e-06
 eta.ic.expression.region0 = "0.5*(1 + tanh((sqrt(x*x + y*y + z*z) - R0)/epsilon))"
 epsilon = eta.ic.expression.constant.epsilon
 
-### EOS: 0 = water (stiffened gas), 1 = air ###
+### EOS: 0 = water (stiffened gas), 1 = perfluorobutane C4F10 (Cattaneo core gas) ###
 eos0.gamma = 2.35
 eos0.p0    = 9.311895e+08   # c_water = 1481 m/s at rho 997.8 (paper)
 eos0.cv    = 2343.6161      # calibrated: T_water = 295 K at p0
 eos0.cp    = 5507.4978      # = gamma cv
-eos1.gamma = 1.4
+eos1.gamma = 1.07       # C4F10: M 238.03 g/mol, Rg 34.93 J/kg/K (was air 1.4)
 eos1.p0    = 0.0
-eos1.cv    = 714.286
-eos1.cp    = 1000.0
+eos1.cv    = 499.0      # Rg/(gamma-1)
+eos1.cp    = 533.9      # gamma cv
 
 ### INITIAL CONDITIONS ###
 density0.ic.type = expression
 density0.ic.expression.region0 = "997.8"
 density1.ic.type = expression
-density1.ic.expression.region0 = "1.212544"      # ideal gas at p0 and 295 K
+density1.ic.expression.region0 = "9.918"         # C4F10 ideal gas at p0 = 102200 Pa and 295 K
 velocity0.ic.type = expression
 velocity0.ic.expression.region0 = "0.0"
 velocity0.ic.expression.region1 = "0.0"
@@ -126,21 +126,21 @@ nscbc.xhi.target_p = 1.022000e+05
 nscbc.xhi.sigma    = 0.6
 nscbc.xhi.beta     = 0.5
 nscbc.xhi.L_ref    = 1.843750e-07
-nscbc.xhi.drive_amp   = 1.600000e+05
+nscbc.xhi.drive_amp   = 1.423000e+05   # C4F10 refit of p_a (paper fit with air: 1.600000e+05)
 nscbc.xhi.drive_omega = 6.283185e+06
 nscbc.yhi.type     = outflow
 nscbc.yhi.target_p = 1.022000e+05
 nscbc.yhi.sigma    = 0.6
 nscbc.yhi.beta     = 0.5
 nscbc.yhi.L_ref    = 1.843750e-07
-nscbc.yhi.drive_amp   = 1.600000e+05
+nscbc.yhi.drive_amp   = 1.423000e+05   # C4F10 refit of p_a (paper fit with air: 1.600000e+05)
 nscbc.yhi.drive_omega = 6.283185e+06
 nscbc.zhi.type     = outflow
 nscbc.zhi.target_p = 1.022000e+05
 nscbc.zhi.sigma    = 0.6
 nscbc.zhi.beta     = 0.5
 nscbc.zhi.L_ref    = 1.843750e-07
-nscbc.zhi.drive_amp   = 1.600000e+05
+nscbc.zhi.drive_amp   = 1.423000e+05   # C4F10 refit of p_a (paper fit with air: 1.600000e+05)
 nscbc.zhi.drive_omega = 6.283185e+06
 eta.bc.type.xlo = REFLECT_EVEN
 eta.bc.type.xhi = neumann
@@ -234,7 +234,7 @@ visc_subcycle              = 1       # bulk + shell viscous terms sub-cycled
 shell.kappa_s_subcycle_max = 8192
 shell.heat_split           = 2       # shell viscous heat split by thermal effusivity
 thermal.k0                 = 0.6     # water [W/m/K]
-thermal.k1                 = 0.026   # air   [W/m/K]
+thermal.k1                 = 0.012   # C4F10 [W/m/K]
 thermal.conduction         = 1       # Fourier conduction in each phase (2026-11-10: micro bubbles are
 thermal.exchange           = 1       #   near-isothermal, Pe = w R^2/D ~ 2-16; adiabatic gas is too stiff)
 relax_diag                 = 0
