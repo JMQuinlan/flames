@@ -264,6 +264,7 @@ def report_plotfile(pf, kv, top, dt_log, nsub):
             rho = g("density"); rho_min = min(rho_min, rho.min()); ncell += rho.size
             p0 = np.maximum((g0 - 1) * g("energy0") / a1 - g0 * pi0, -pi0 + SMALL)
             p1 = np.maximum((g1 - 1) * g("energy1") / a2 - g1 * pi1, -pi1 + SMALL)
+            p0r, p1r = p0, p1                                  # raw phase pressures (before trace slaving)
             sm = lambda a: (lambda w: w * w * (3 - 2 * w))(np.clip((a - 1e-2) / (1e-1 - 1e-2), 0, 1))
             w0, w1 = sm(a1), sm(a2)
             p0, p1 = w0 * p0 + (1 - w0) * p1, w1 * p1 + (1 - w1) * p0
@@ -291,7 +292,8 @@ def report_plotfile(pf, kv, top, dt_log, nsub):
                     info = dict(r=np.linalg.norm(x) * 1e6, x=x * 1e6, eta=eta[iz, iy, ixx], rho=rho[iz, iy, ixx],
                                 re1=g("rho_eta1")[iz, iy, ixx], rg=r1[iz, iy, ixx] / a2[iz, iy, ixx],
                                 p=g("pressure")[iz, iy, ixx], T=g("T")[iz, iy, ixx],
-                                u=np.sqrt(sum(v[iz, iy, ixx] ** 2 for v in u)), c=c[iz, iy, ixx])
+                                u=np.sqrt(sum(v[iz, iy, ixx] ** 2 for v in u)), c=c[iz, iy, ixx],
+                                pl=p0r[iz, iy, ixx], pg=p1r[iz, iy, ixx])
                     best[key].append((flat[q], info))
         rho_min_all = min(rho_min_all, rho_min)
         print(f"\n  level {lev}: dx {dx[0]:.4g} m, {ncell} cells, rho_min {rho_min:.4g}, level dt x {fac:g} = coarse DT")
@@ -307,7 +309,9 @@ def report_plotfile(pf, kv, top, dt_log, nsub):
                 print(f"    {key:16s} level dt {b[0][0]:.4g} s  -> coarse-equivalent {b[0][0]*fac:.4g} s")
                 rows.append((b[0][0] * fac, key, lev))
             for v, I in b:
-                print(f"      {v:10.3e}  r {I['r']:7.3f} um  eta {I['eta']:9.3e}  rho {I['rho']:9.3e}  "
+                xyz = " ".join(f"{q:6.3f}" for q in I['x'])
+                print(f"      {v:10.3e}  r {I['r']:7.3f} um  xyz({xyz})  p_liq {I['pl']:10.4g}  p_gas {I['pg']:10.4g}  "
+                      f"eta {I['eta']:9.3e}  rho {I['rho']:9.3e}  "
                       f"rho_gas {I['rg']:9.3e}  (a rho)_gas {I['re1']:9.3e}  p {I['p']:10.4g}  T {I['T']:8.1f}  "
                       f"|u| {I['u']:8.3g}  c {I['c']:8.4g}")
         if st_on and sig > 0:
@@ -321,6 +325,8 @@ def report_plotfile(pf, kv, top, dt_log, nsub):
         print(f"    log coarse DT now {dt_log:.4g} s.  If no limit above is that small, the binding one is dt_force"
               f" (|source|/rho_min, not in the plotfile) or the state changed since this plotfile.")
     print("    (plotfile state can be up to one plot interval older than the log)")
+    print("    xyz in um from the octant centre: a coordinate equal to dx/2 of that level (0.058 um on level 4) = first cell on a symmetry plane; two = on an axis.")
+    print("    p_gas << p_liq in a band cell = the relaxation is enforcing a large negative jump there.")
 
 
 def main():
