@@ -24,7 +24,7 @@ with), reads every plotfile ONCE, and then draws everything from that single pas
 USAGE
   python3 analyze_all.py [ROOT] [--out DIR] [--nproc 8] [--every 1] [--only REGEX] [--skip REGEX]
                          [--maxpix 2000] [--no-frames] [--no-gifs] [--redo]
-                         [--no-zoom] [--movie gif|mp4|both] [--no-tar] [--tar-frames]
+                         [--no-zoom] [--movie gif|mp4|both] [--no-tar] [--no-tar-frames]
   ROOT    folder to scan (default /mmfs1/home/ttryon/flames/bin/tests/AIAA2027, else the repo's bin/tests/AIAA2027)
   --out   output folder (default ROOT/Analysis)
   --nproc worker processes for the read pass and for drawing (default 8; processes, not threads, because the
@@ -39,8 +39,9 @@ USAGE
   --no-tar      skip the tars written next to the output folder at the end:
                   <out>.tar.gz         plots, spreadsheet, CSVs, log (small: transfer this first)
                   <out>_movies.tar     GIFs / MP4s (uncompressed: they are already compressed)
-                both without _cache/ and the per-frame PNG folders (the movies hold those)
-  --tar-frames  include the per-frame PNG folders in the tar
+                  <out>_frames.tar.gz  the per-frame PNG + EPS of every GIF/MP4 (frames/<kind>/0000.png/.eps ...), for the paper
+                all without _cache/
+  --no-tar-frames  skip <out>_frames.tar.gz (the frames are still kept in the output folder)
 
 CONVENTIONS
   eta = 1 gas, 0 liquid.  Liquid mass = int rho_eta1 dA; vaporization rate = int Vap_dot_rho dA (>= 0, liquid lost);
@@ -72,7 +73,8 @@ plt.rcParams.update({
     "font.family": "serif", "font.serif": ["DejaVu Serif", "Times", "Times New Roman"],
     "mathtext.fontset": "dejavuserif", "font.size": 14, "axes.titlesize": 15, "axes.labelsize": 14,
     "xtick.labelsize": 13, "ytick.labelsize": 13, "legend.fontsize": 13, "pdf.fonttype": 42, "ps.fonttype": 42,
-    "axes.grid": True, "grid.alpha": 0.25, "savefig.bbox": "tight", "figure.dpi": 100,
+    "axes.grid": True, "grid.color": "#ebebeb", "grid.alpha": 1.0,   # opaque (EPS has no transparency); = #b0b0b0 at 25 % on white
+    "savefig.bbox": "tight", "figure.dpi": 100,
 })
 # categorical palette, fixed order (validated default palette of the dataviz skill, light surface)
 PAL = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"]
@@ -667,7 +669,8 @@ def draw_split(job):
         fig.subplots_adjust(right=0.84)
         c1 = ax.inset_axes([1.03, 0.53, 0.025, 0.44]); fig.colorbar(imt, cax=c1).set_label(lt, fontsize=13)
         c2 = ax.inset_axes([1.03, 0.03, 0.025, 0.44]); fig.colorbar(imb, cax=c2).set_label(lb, fontsize=13)
-        fig.savefig(png, dpi=FRAME_DPI, bbox_inches=None); plt.close(fig)
+        fig.savefig(png, dpi=FRAME_DPI, bbox_inches=None)
+        fig.savefig(os.path.splitext(png)[0] + ".eps", bbox_inches=None); plt.close(fig)
         return None
     except Exception as e:
         plt.close("all"); return f"{png}: {e!r}"
@@ -692,7 +695,8 @@ def draw_cmp(job):
         ax.set_title(f"{Cv['label_base']}\n{tfmt(Cv, rv['t'])}", fontsize=14)
         fig.subplots_adjust(right=0.86)
         cax = ax.inset_axes([1.03, 0.1, 0.025, 0.8]); fig.colorbar(im, cax=cax).set_label(lab, fontsize=13)
-        fig.savefig(png, dpi=FRAME_DPI, bbox_inches=None); plt.close(fig)
+        fig.savefig(png, dpi=FRAME_DPI, bbox_inches=None)
+        fig.savefig(os.path.splitext(png)[0] + ".eps", bbox_inches=None); plt.close(fig)
         return None
     except Exception as e:
         plt.close("all"); return f"{png}: {e!r}"
@@ -739,7 +743,7 @@ def make_gif(job):
 # STATIC PLOTS
 # ================================================================================================================
 def save(fig, path):
-    fig.savefig(path + ".png", dpi=PLOT_DPI); fig.savefig(path + ".pdf"); plt.close(fig)
+    fig.savefig(path + ".png", dpi=PLOT_DPI); fig.savefig(path + ".eps"); plt.close(fig)
 
 
 def lab_ax(ax, C, ylabel, title=None):
@@ -982,7 +986,7 @@ def main():
     ap.add_argument("--redo", action="store_true")
     ap.add_argument("--no-zoom", action="store_true")
     ap.add_argument("--movie", choices=["gif", "mp4", "both"], default="mp4")
-    ap.add_argument("--no-tar", action="store_true"); ap.add_argument("--tar-frames", action="store_true")
+    ap.add_argument("--no-tar", action="store_true"); ap.add_argument("--no-tar-frames", action="store_true")
     a = ap.parse_args()
     root = a.root or next((r for r in ("/mmfs1/home/ttryon/flames/bin/tests/AIAA2027",
                                        os.path.join(os.path.dirname(os.path.dirname(AIAA_SRC)), "bin", "tests", "AIAA2027"))
@@ -1209,22 +1213,26 @@ def main():
     write_tables(out, series, summ, pairs)
     log(f"\nTOTAL {time.time() - T0:.0f} s")
     with open(os.path.join(out, "analysis_log.txt"), "w") as fh: fh.write("\n".join(LOG) + "\n")
-    if not a.no_tar: tar_output(out, a.tar_frames)
+    if not a.no_tar: tar_output(out, not a.no_tar_frames)
 
 
-def tar_output(out, frames=False):
-    """two tars next to the output folder, both without the cache (and without the per-frame PNGs unless asked):
-    <out>.tar.gz = everything but the movies (small), <out>_movies.tar = the GIFs / MP4s (already compressed)"""
+def tar_output(out, frames=True):
+    """tars next to the output folder, all without the cache: <out>.tar.gz = plots, tables, log (small),
+    <out>_movies.tar = the GIFs / MP4s (already compressed), <out>_frames.tar.gz = the per-frame PNG + EPS"""
     import tarfile
     out = out.rstrip("/"); base = os.path.basename(out)
     def common(ti):
         parts = ti.name.split("/")
         if len(parts) > 1 and parts[1] == "_cache": return None
-        if not frames and "frames" in parts[1:-1] + ([parts[-1]] if ti.isdir() else []): return None
         return ti
+    in_frames = lambda ti: "frames" in ti.name.split("/")[1:]
+    no_frames = lambda ti: None if in_frames(ti) else common(ti)
     is_movie = lambda ti: ti.isfile() and ti.name.lower().endswith((".gif", ".mp4"))
-    for dst, mode, keep in ((out + ".tar.gz", "w:gz", lambda ti: None if is_movie(ti) else common(ti)),
-                            (out + "_movies.tar", "w", lambda ti: None if (ti.isfile() and not is_movie(ti)) else common(ti))):
+    jobs = [(out + ".tar.gz", "w:gz", lambda ti: None if is_movie(ti) else no_frames(ti)),
+            (out + "_movies.tar", "w", lambda ti: None if (ti.isfile() and not is_movie(ti)) else no_frames(ti))]
+    if frames:
+        jobs.append((out + "_frames.tar.gz", "w:gz", lambda ti: None if (ti.isfile() and not in_frames(ti)) else common(ti)))
+    for dst, mode, keep in jobs:
         T = time.time(); tmp = dst + ".part"
         try:
             with tarfile.open(tmp, mode) as tf: tf.add(out, arcname=base, filter=keep)
