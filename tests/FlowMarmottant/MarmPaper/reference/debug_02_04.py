@@ -336,9 +336,11 @@ def _contour(ax, x, y, z, *a, **k):
 
 
 def save(fig, path):
-    fig.savefig(path, dpi=170, bbox_inches="tight")
+    base = os.path.splitext(path)[0]
+    for fmt in ("png", "eps"):
+        fig.savefig(base + "." + fmt, dpi=170, bbox_inches="tight")
     plt.close(fig)
-    print("  wrote", path)
+    print("  wrote", base + ".png/.eps")
 
 
 # =========================================================================================== #

@@ -43,4 +43,4 @@ if __name__ == "__main__":
     cc.main(case_tag="hi",
             deck=os.path.normpath(os.path.join(_HERE, "..", "input_06_Cattaneo_HighPa")),
             default_output="/mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/MarmPaper/output_06_Cattaneo_HighPa",
-            stem="06_Cattaneo_HighPa", zoom_default=[1.5, 4.5])
+            stem="06_Cattaneo_HighPa", zoom_default=[3.0, 6.0])

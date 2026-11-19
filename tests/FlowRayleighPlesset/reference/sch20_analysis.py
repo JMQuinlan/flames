@@ -186,6 +186,22 @@ def _geom(ds):
     dre = np.array([float(v) for v in ds.domain_right_edge])
     sym = np.array([dle[d] > -1e-12 for d in range(3)])      # a lo face on the centre -> mirrored axis
     cen = np.where(sym, 0.0, 0.5 * (dle + dre))
+    if not np.all(sym[:dim]):
+        # Non-mirrored axes: the bubble need not sit at the domain centre (06Exp: substrate 12 um above it,
+        # domain z -61.75..12 um) and it translates while jetting, so centre on the gas centroid (level 0).
+        # (level-0 grids read directly: a full-domain covering grid overshoots a wall by round-off in yt)
+        gs, xs = [], [[] for _ in range(dim)]
+        for gr in ds.index.grids:
+            if gr.Level != 0:
+                continue
+            gs.append(np.clip(1.0 - np.asarray(gr[("boxlib", "eta")], float), 0.0, 1.0).ravel())
+            for d in range(dim):
+                xs[d].append(np.asarray(gr[("index", "xyz"[d])], float).ravel())
+        g = np.concatenate(gs)
+        if g.sum() > 0:
+            for d in range(dim):
+                if not sym[d]:
+                    cen[d] = float(np.sum(g * np.concatenate(xs[d])) / g.sum())
     dx = float(ds.domain_width[0]) / ds.domain_dimensions[0] / 2 ** ds.index.max_level
     return dim, dle, dre, sym, cen, dx
 

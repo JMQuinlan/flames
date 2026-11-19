@@ -146,6 +146,32 @@ static Set::Scalar LiquidInterfaceRate(const ARR &et, int i, int j, int k, const
     return (ds_fl - kap * un) + (kap - 2.0 * KG * dd) * un / (den * den);
 }
 
+// shell.foot_rate = 1 (see Parse): source field for the foot-point interface rate.  On the well-conditioned
+// band core (0.02 < eta < 0.98) comp 0 = the cell's own surface dilatation div_s u = tr(grad u) - n.(grad u) n
+// (no flux-tube map), comp 1 = the tensor curvature Kt.  NaN elsewhere.  nGrow 12 for FootExtend.
+static void FootRateSource(const amrex::MultiFab &eta, const amrex::MultiFab &vel, const amrex::MultiFab &Kt,
+                           const Set::Scalar *DXl, amrex::MultiFab &L)
+{
+    L.define(eta.boxArray(), eta.DistributionMap(), 2, 12);
+    L.setVal(std::numeric_limits<Set::Scalar>::quiet_NaN());
+    for (amrex::MFIter mfi(L, false); mfi.isValid(); ++mfi)
+    {
+        auto et = eta.const_array(mfi); auto v = vel.const_array(mfi); auto kt = Kt.const_array(mfi); auto l = L.array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+            const Set::Scalar ec = et(i, j, k);
+            if (!(ec > 0.02 && ec < 0.98)) return;
+            const Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DXl);
+            const Set::Scalar g = ge.lpNorm<2>();
+            if (g < g_gem_min) return;
+            const Set::Vector nh = ge / g;
+            Set::Matrix gu = Set::Matrix::Zero();
+            for (int d = 0; d < AMREX_SPACEDIM; ++d) gu.col(d) = Numeric::Gradient(v, i, j, k, d, DXl);
+            l(i, j, k, 0) = gu.trace() - nh.dot(gu * nh);
+            l(i, j, k, 1) = kt(i, j, k);
+        });
+    }
+}
+
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 static Set::Scalar CapEnergyAt(const amrex::Array4<const Set::Scalar> &eta,
                                const amrex::Array4<const Set::Scalar> &shell,
@@ -635,6 +661,20 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // Density floor for the nu_s stability estimate (NOT for the physics).
         // Defaults to 1.0 kg/m^3, the gas reference density of the Sch20 decks.
         pp_query_default("shell.nus_rho_floor", value.shell_nus_rho_floor, 1.0);
+        // shell.foot_rate (2026-11-18): interface area rate of the shell viscous jump evaluated ON the interface.
+        //   0 (default): every liquid-side band cell maps its own stretch through the flux tube
+        //       (LiquidInterfaceRate, gain ~ (1 + kappa d/2)^3, d = eps atanh(2 eta - 1)).
+        //   1: every band cell takes r and the curvature Kt from its foot point x - d n on eta = 1/2, trilinearly
+        //       interpolated from the band core (0.02 < eta < 0.98), where r = div_s u of the fluid there.
+        //   Why: the flux-tube map is a Taylor expansion in kappa d.  At a grid-axis tip (cubic l=4 mode in a
+        //   collapse, kappa ~ 4 x 2/r) d at eta ~ 0.999 (~3.8 eps) exceeds 1/kappa; the kd <= 1/2 cap and the
+        //   den >= 1/4 guard then return 16-190x gain with the wrong sign, and the local tail curvature is 5-20x
+        //   the interface value.  The path integral carries that J_F (-0.3..-0.4 MPa) into eta ~ 0.998 cells,
+        //   relaxation inflates the trace gas, an axis finger grows and the conduction dt collapses (C4F10
+        //   160 kPa octant, 3.235 us).  With 1 the jump is a function of the interface only, so the band carries
+        //   the same J at every eta.  Cells whose foot stencil is unavailable (coarse-fine edge, thin neck) keep
+        //   the local map.  Used in the sub-cycled viscous force and in the relaxation path integral.
+        pp_query_validate("shell.foot_rate", value.shell_foot_rate, {0, 1});
         // shell.tension_floor [N/m]: TEST CLAMP on the total shell tension,
         //   sigma_tot = max(sigma_eff + (kappa_s - mu_s) div_s u, tension_floor),
         // applied to the viscous normal force + tangential stress (sub-cycle) and to the
@@ -970,6 +1010,14 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         if (pp.contains("eta.bc.type.xlo") || pp.contains("eta.bc.type.ylo"))
         {
             value.eta_bc = new BC::Expression(1, pp, "eta.bc");
+            const char *fnm[3][2] = {{"xlo", "xhi"}, {"ylo", "yhi"}, {"zlo", "zhi"}};
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                for (int sd = 0; sd < 2; ++sd)
+                {
+                    std::string t;
+                    pp.query((std::string("eta.bc.type.") + fnm[d][sd]).c_str(), t);
+                    value.foot_mirror[d][sd] = (t.rfind("REFLECT", 0) == 0);   // shell.foot_rate ghosts
+                }
         }
         else
         {
@@ -6690,6 +6738,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
     const int ffv = jump_face_force;
     amrex::MultiFab Jvf(momentum_mf[lev]->boxArray(), momentum_mf[lev]->DistributionMap(), 1, 1);   // TEMP jump.face_force
     TensorCurvature(lev, Kt_v, time + dt);
+    const int footv = shell_foot_rate;
     for (int it = 0; it < N; ++it)
     {
         // Momentum ghosts through the field BCs (mirror at symmetry planes,
@@ -6714,6 +6763,8 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                 for (int d = 0; d < AMREX_SPACEDIM; ++d) v(i, j, k, d) = M(i, j, k, d) / rc;
             });
         }
+        amrex::MultiFab Gfv;   // shell.foot_rate: {r, Kt} at each band cell's foot point (this sub-step's velocity)
+        if (footv) { amrex::MultiFab Lr; FootRateSource(*eta_mf[lev], *velocity_mf[lev], Kt_v, DX, Lr); FootExtend(lev, Lr, Gfv); }
         Omv.setVal(0.0);
 
         // ---- build Omega_visc on a grown box (band cells only) -------------
@@ -6768,6 +6819,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                 auto shv = shell_mf[lev]->const_array(mfi);
                 auto gpv = slip7v ? Gp7v.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
                 auto jv  = Jvf.array(mfi);
+                auto gfv = footv ? Gfv.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
                 amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                     Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DX);
                     const Set::Scalar gem = ge.lpNorm<2>();
@@ -6777,8 +6829,11 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                     for (int d = 0; d < AMREX_SPACEDIM; ++d)
                         gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
                     const Set::Scalar ds_fl = gu.trace() - nh.dot(gu * nh);
-                    const Set::Scalar ds = LiquidInterfaceRate(et, i, j, k, DX, eps_rv, cut_rv, gu,
-                                               Set::Vector(AMREX_D_DECL(vel(i,j,k,0), vel(i,j,k,1), vel(i,j,k,2))), ds_fl);
+                    const bool ft = footv && gfv(i, j, k, 0) == gfv(i, j, k, 0);   // shell.foot_rate: foot value available
+                    const Set::Scalar ds = ft ? gfv(i, j, k, 0)
+                                              : LiquidInterfaceRate(et, i, j, k, DX, eps_rv, cut_rv, gu,
+                                                    Set::Vector(AMREX_D_DECL(vel(i,j,k,0), vel(i,j,k,1), vel(i,j,k,2))), ds_fl);
+                    const Set::Scalar kt = ft ? gfv(i, j, k, 1) : ktv(i, j, k);
                     Set::Scalar Tv = keff_v * ShellViscFactor(ds, alpha_v) * ds;
                     if (tfl_on)
                     {
@@ -6786,7 +6841,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                                                                         sig_v, chi_v, Gb_v, sbrk_v, sigw_v);
                         if (Tv < Tlo) Tv = Tlo;
                     }
-                    jv(i, j, k) = -Tv * ktv(i, j, k);
+                    jv(i, j, k) = -Tv * kt;
                 });
             }
             Jvf.FillBoundary(geom[lev].periodicity());
@@ -6814,6 +6869,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
             auto ar0 = rho_eta0_mf[lev]->const_array(mfi);
             auto ar1 = rho_eta1_mf[lev]->const_array(mfi);
             auto ktv  = Kt_v.const_array(mfi);
+            auto gfv  = footv ? Gfv.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
             auto shv  = shell_mf[lev]->const_array(mfi);
             auto gpv  = slip7v ? Gp7v.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
             auto jvf  = Jvf.const_array(mfi);
@@ -6849,9 +6905,13 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                     gu.col(d) = Numeric::Gradient(vel, i, j, k, d, DX);
                 const Set::Scalar ds_fl = gu.trace() - nh.dot(gu * nh);
                 // interface area rate: liquid-side band cells map their own stretch
-                // through the flux tube (LiquidInterfaceRate, see Parse shell.rate_local)
-                const Set::Scalar ds = LiquidInterfaceRate(et, i, j, k, DX, eps_rv, cut_rv, gu,
-                                           Set::Vector(AMREX_D_DECL(vel(i,j,k,0), vel(i,j,k,1), vel(i,j,k,2))), ds_fl);
+                // through the flux tube (LiquidInterfaceRate, see Parse shell.rate_local),
+                // or take r and Kt from the foot point on eta = 1/2 (shell.foot_rate = 1)
+                const bool ft = footv && gfv(i, j, k, 0) == gfv(i, j, k, 0);
+                const Set::Scalar ds = ft ? gfv(i, j, k, 0)
+                                          : LiquidInterfaceRate(et, i, j, k, DX, eps_rv, cut_rv, gu,
+                                                Set::Vector(AMREX_D_DECL(vel(i,j,k,0), vel(i,j,k,1), vel(i,j,k,2))), ds_fl);
+                const Set::Scalar kt = ft ? gfv(i, j, k, 1) : ktv(i, j, k);
                 // tangential part of div(Omega_visc) + normal jump force -Delta_v grad(eta)
                 F -= nh * nh.dot(F);
                 const Set::Scalar fvis = ShellViscFactor(ds, alpha_v);
@@ -6863,7 +6923,7 @@ void Hydro2::SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt)
                                                                     sig_v, chi_v, Gb_v, sbrk_v, sigw_v);
                     if (Tv < Tlo) { Tv = Tlo; clamped = true; }
                 }
-                if (!ffv) F -= (Tv * ktv(i, j, k)) * ge;
+                if (!ffv) F -= (Tv * kt) * ge;
                 else
                     for (int d = 0; d < AMREX_SPACEDIM; ++d)
                     {
@@ -7442,6 +7502,77 @@ void Hydro2::ShellPsiGrad(int lev, Set::Scalar time, amrex::MultiFab &Gp)
     }
 }
 
+// shell.foot_rate: interpolate the nc-component field L (set on band-core valid cells, NaN elsewhere, nGrow >= 1)
+// to the foot point x - d n, d = eps atanh(2 eta - 1), of every band cell (cutoff < eta < 1 - cutoff).
+// Ghosts: same-level exchange; physical faces mirror where eta's BC is REFLECT_*, else zero-gradient.
+// Gf (nGrow 0) is NaN where any stencil point with nonzero weight is NaN or off the fab (caller keeps the local value).
+void Hydro2::FootExtend(int lev, amrex::MultiFab &L, amrex::MultiFab &Gf)
+{
+    BL_PROFILE("Integrator::Hydro2::FootExtend");
+    const Set::Scalar *DXl = geom[lev].CellSize();
+    const Set::Scalar nan = std::numeric_limits<Set::Scalar>::quiet_NaN();
+    const Set::Scalar cut_l = std::max(cutoff, 1.0e-12), eps_l = epsilon;
+    const int nc = L.nComp();
+    L.FillBoundary(geom[lev].periodicity());
+    const amrex::Box dom = geom[lev].Domain();
+    for (amrex::MFIter mfi(L, false); mfi.isValid(); ++mfi)
+    {
+        auto l = L.array(mfi);
+        amrex::LoopOnCpu(mfi.fabbox(), [&](int i, int j, int k) {
+            const int ijk[3] = {i, j, k};
+            int s[3] = {i, j, k};
+            bool out = false;
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                if (ijk[d] < dom.smallEnd(d))
+                { s[d] = foot_mirror[d][0] ? 2 * dom.smallEnd(d) - 1 - ijk[d] : dom.smallEnd(d); out = true; }
+                else if (ijk[d] > dom.bigEnd(d))
+                { s[d] = foot_mirror[d][1] ? 2 * dom.bigEnd(d) + 1 - ijk[d] : dom.bigEnd(d); out = true; }
+            }
+            if (!out || !l.contains(s[0], s[1], s[2])) return;
+            for (int c = 0; c < nc; ++c) l(i, j, k, c) = l(s[0], s[1], s[2], c);
+        });
+    }
+    Gf.define(eta_mf[lev]->boxArray(), eta_mf[lev]->DistributionMap(), nc, 0);
+    Gf.setVal(nan);
+    constexpr int NB = (AMREX_SPACEDIM == 3) ? 2 : 1;   // stencil extent in z
+    for (amrex::MFIter mfi(Gf, false); mfi.isValid(); ++mfi)
+    {
+        auto et = eta_mf[lev]->const_array(mfi); auto l = L.const_array(mfi); auto gf = Gf.array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+            const Set::Scalar ec = et(i, j, k);
+            if (!(ec > cut_l && ec < 1.0 - cut_l)) return;
+            const Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DXl);
+            const Set::Scalar g = ge.lpNorm<2>();
+            if (g < g_gem_min) return;
+            const Set::Scalar dd = eps_l * std::atanh(2.0 * ec - 1.0);
+            const int ijk[3] = {i, j, k};
+            int i0[3] = {i, j, k};
+            Set::Scalar w[3] = {0.0, 0.0, 0.0};
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            {
+                const Set::Scalar f = ijk[d] - dd * ge(d) / g / DXl[d];
+                i0[d] = (int)std::floor(f); w[d] = f - i0[d];
+            }
+            Set::Scalar acc[8] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+            for (int a = 0; a < 2; ++a) for (int b = 0; b < 2; ++b) for (int c = 0; c < NB; ++c)
+            {
+                const Set::Scalar wt = (a ? w[0] : 1 - w[0]) * (b ? w[1] : 1 - w[1]) * (NB == 1 ? 1.0 : (c ? w[2] : 1 - w[2]));
+                if (wt == 0.0) continue;
+                const int ii = i0[0] + a, jj = i0[1] + b, kk = i0[2] + c;
+                if (!l.contains(ii, jj, kk)) return;
+                for (int q = 0; q < nc; ++q)
+                {
+                    const Set::Scalar v = l(ii, jj, kk, q);
+                    if (!(v == v)) return;
+                    acc[q] += wt * v;
+                }
+            }
+            for (int q = 0; q < nc; ++q) gf(i, j, k, q) = acc[q];
+        });
+    }
+}
+
 void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time)
 {
     BL_PROFILE("Integrator::Hydro2::TensorCurvature");
@@ -7737,6 +7868,10 @@ void Hydro2::RelaxAndReinit(int lev)
         // The eta ghosts were filled at the top of FillGhost4BC.
         FillBoundariesWithBC(lev, relax_time, momentum_bc, { momentum_mf[lev].get() });
         FillBoundariesWithBC(lev, relax_time, density_bc,  { density_mf[lev].get() });
+        // Density is a derived field, so its coarse-fine ghosts are never FillPatch'd (momentum's are, in
+        // FillGhost4BC); v = M/rho on the grown box below read stale density there (after a restart:
+        // uninitialised memory).  Fill them from the coarse level like momentum.
+        if (lev > 0) FillPatch(lev, relax_time, density_mf, *density_mf[lev], *density_bc, 0);
         const amrex::BoxArray &ba = eta_mf[lev]->boxArray();
         const amrex::DistributionMapping &dm = eta_mf[lev]->DistributionMap();
         amrex::MultiFab vt(ba, dm, AMREX_SPACEDIM, 1), nt(ba, dm, AMREX_SPACEDIM, 1);
@@ -7813,6 +7948,9 @@ void Hydro2::RelaxAndReinit(int lev)
         // ------------------------------------------------------------------------------------------
         const int rpath = (!visc_relax_cell_local && kmm != 0.0 && mus == 0.0);
         amrex::MultiFab Pth;
+        amrex::MultiFab Gfj;   // shell.foot_rate: {r, Kt} at the foot point, same as the force
+        const int footj = shell_foot_rate && rpath;
+        if (footj) { amrex::MultiFab Lr; FootRateSource(*eta_mf[lev], vt, Kt_j, DXj, Lr); FootExtend(lev, Lr, Gfj); }
         if (rpath)
         {
             const Set::Scalar cu = cut_j;
@@ -7827,6 +7965,7 @@ void Hydro2::RelaxAndReinit(int lev)
                 auto ktj = Kt_j.const_array(mfi);
                 auto jf = JFp.array(mfi);
                 auto in = Ip.array(mfi);
+                auto gfj = footj ? Gfj.const_array(mfi) : amrex::Array4<const Set::Scalar>{};
                 amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                     in(i, j, k) = 1.0;
                     const Set::Vector ge = Numeric::Gradient(et, i, j, k, 0, DXj);
@@ -7837,8 +7976,9 @@ void Hydro2::RelaxAndReinit(int lev)
                     for (int d = 0; d < AMREX_SPACEDIM; ++d) gu.col(d) = Numeric::Gradient(v, i, j, k, d, DXj);
                     const Set::Scalar dsf = gu.trace() - nh.dot(gu * nh);
                     const Set::Vector uu(AMREX_D_DECL(v(i, j, k, 0), v(i, j, k, 1), v(i, j, k, 2)));
-                    const Set::Scalar ds = LiquidInterfaceRate(et, i, j, k, DXj, eps_j, cut_rj, gu, uu, dsf);
-                    jf(i, j, k) = kmm * ShellViscFactor(ds, alpha_j) * ds * ktj(i, j, k);   // same J_F as the force
+                    const bool ft = footj && gfj(i, j, k, 0) == gfj(i, j, k, 0);
+                    const Set::Scalar ds = ft ? gfj(i, j, k, 0) : LiquidInterfaceRate(et, i, j, k, DXj, eps_j, cut_rj, gu, uu, dsf);
+                    jf(i, j, k) = kmm * ShellViscFactor(ds, alpha_j) * ds * (ft ? gfj(i, j, k, 1) : ktj(i, j, k));   // same J_F as the force
                 });
             }
             auto fillp = [&](amrex::MultiFab &F) {

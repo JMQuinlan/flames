@@ -8,7 +8,12 @@ Outputs (<figdir>/<stem>...):
   _bubble_R.gif   the same panel (left) next to R(t) (right): experiment, Cattaneo et al. model and the
                   simulation R_vol, with a marker and a vertical line at the frame time.
   _bubble3d.gif   (--gif-3d, octant / full only) eta = 0.5 isosurface.
-  PNG frames are kept in <figdir>/<stem>_gif_frames/{bubble,bubble_R,bubble3d}/.
+  _bubble3d_cut.gif (--gif-3d) the same isosurface cut open along the cross-section plane through the
+                  bubble centre: the half towards the viewer is removed and the cut face shows the liquid
+                  coloured by p - p_inf (gas left open, eta = 0.5 contour in black), so the inside of the
+                  cavity (jet, re-entrant shapes) is visible.  Cut face +-3 R0 (--gif-cut-half).
+  _bubble3d_cutshell.gif (--gif-3d) the same cut-open shell with no field: only the eta = 0.5 contour on the cut.
+  Frames are kept as EPS in <figdir>/<stem>_gif_frames/{bubble,bubble_R,bubble3d,bubble3d_cut,bubble3d_cutshell}/ (PNGs only feed the GIF).
 
 Cross-section per geometry (cattaneo_06_common.geometry):
   slab    RADIAL slab: the axis-row profile p(r), eta(r) revolved into a disk.
@@ -45,7 +50,7 @@ _AX = "xyz"
 
 # GIF look on top of cattaneo_06_common.FIG (fonts, colours, legend size).
 GIF = dict(cmap="RdBu_r", bad="0.72", iface_color="k", iface_lw=1.3,
-           size_bubble=(4.3, 3.9), size_pair=(9.8, 4.0), size_3d=(4.0, 4.0), dpi=150)
+           size_bubble=(4.3, 3.9), size_pair=(9.8, 4.0), size_3d=(4.0, 4.0), size_3dcut=(4.9, 4.2), dpi=150)
 
 
 # =========================================================================================== #
@@ -377,6 +382,24 @@ def _render(args):
         axr.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3, fontsize=S["legend_size"],
                    columnspacing=1.2, handlelength=2.4, borderaxespad=0.2)
         fig.text(0.5, 1.0 - 0.12 / H, ctx["title"], ha="center", va="top", fontsize=S["label_size"])
+    elif kind == "3dcutshell":
+        W, H = GIF["size_3d"]
+        fig = plt.figure(figsize=(W, H))
+        ax = fig.add_axes([0.0, 0.0, 1.0, 0.86], projection="3d")
+        _draw_3d_cut(ax, fr, ctx, field=False)
+        fig.text(0.5, 1.0 - 0.12 / H, ctx["title_short"], ha="center", va="top", fontsize=S["label_size"])
+        fig.text(0.5, 1.0 - 0.42 / H, r"$t$ = %.2f µs" % (fr["t"] * 1e6 + ctx["toff"]), ha="center", va="top",
+                 fontsize=S["label_size"])
+    elif kind == "3dcut":
+        W, H = GIF["size_3dcut"]
+        fig = plt.figure(figsize=(W, H))
+        ax = fig.add_axes([0.0, 0.0, 3.95 / W, 0.86], projection="3d")
+        cax = fig.add_axes([4.05 / W, 0.55 / H, 0.12 / W, 2.75 / H])
+        im = _draw_3d_cut(ax, fr, ctx)
+        _colorbar(fig, cax, im, ctx)
+        fig.text(0.5, 1.0 - 0.12 / H, ctx["title_short"], ha="center", va="top", fontsize=S["label_size"])
+        fig.text(0.5, 1.0 - 0.42 / H, r"$t$ = %.2f µs" % (fr["t"] * 1e6 + ctx["toff"]), ha="center", va="top",
+                 fontsize=S["label_size"])
     else:   # 3d
         W, H = GIF["size_3d"]
         fig = plt.figure(figsize=(W, H))
@@ -386,6 +409,7 @@ def _render(args):
         fig.text(0.5, 1.0 - 0.42 / H, r"$t$ = %.2f µs" % (fr["t"] * 1e6 + ctx["toff"]), ha="center", va="top",
                  fontsize=S["label_size"])
     fig.savefig(png, dpi=ctx["dpi"])             # fixed canvas (no tight bbox): identical frame sizes
+    fig.savefig(os.path.splitext(png)[0] + ".eps")   # frames are kept as EPS; the PNG only feeds the GIF
     plt.close(fig)
     return png
 
@@ -415,6 +439,101 @@ def _draw_3d(ax, fr, ctx):
     ax.set_box_aspect((1, 1, 1), zoom=1.35)
     ax.view_init(elev, azim)
     ax.set_axis_off()
+
+
+def _clip_halfspace(T, axis):
+    """Triangles (n, 3, 3) clipped to coordinate[axis] <= 0 (Sutherland-Hodgman, one plane): a list of
+    3- or 4-vertex polygons, so the cut edge follows the plane exactly."""
+    out = []
+    for tri in T:
+        s = tri[:, axis]
+        if np.all(s <= 0.0):
+            out.append(tri); continue
+        if np.all(s > 0.0):
+            continue
+        poly = []
+        for k in range(3):
+            a, b = tri[k], tri[(k + 1) % 3]; sa, sb = a[axis], b[axis]
+            if sa <= 0.0:
+                poly.append(a)
+            if (sa <= 0.0) != (sb <= 0.0):
+                w = sa / (sa - sb); q = a + w * (b - a); q[axis] = 0.0; poly.append(q)
+        if len(poly) >= 3:
+            out.append(np.array(poly))
+    return out
+
+
+def _draw_3d_cut(ax, fr, ctx, field=True):
+    """eta = 0.5 isosurface cut open along the cross-section plane through the centre.  The half on the
+    viewer's side of the plane is dropped (triangles whose centroid lies there); the cut face is drawn in
+    the plane from the same finest-level slice as _bubble.gif: liquid (eta >= 0.5) coloured by p - p_inf,
+    gas transparent so the inner wall of the cavity shows, eta = 0.5 contour in black.  Two-sided shading
+    (the inner wall is seen from inside).  Returns a ScalarMappable for the colour bar."""
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+    hc = ctx["cut_half"] * 1e6                                   # cut-face half-width (--gif-cut-half, default 3 R0)
+    h = max(ctx["lim3d"] * 1e6, hc) if field else ctx["lim3d"] * 1e6
+    iu, iv, inn = _PLANES[ctx["plane"]]
+    # viewer on the + side of the plane normal, looking slightly down onto the cut face
+    elev = 20.0
+    azim = {0: 0.0, 1: 60.0, 2: 0.0}[inn]
+    if inn == 2:
+        elev = 65.0
+    e, az = np.radians(elev), np.radians(azim)
+    view = np.array([np.cos(e) * np.cos(az), np.cos(e) * np.sin(az), np.sin(e)])
+    tri = fr.get("tri")
+    if tri is not None and len(tri):
+        T = tri.astype(float) * 1e6
+        T = _clip_halfspace(T, inn)                               # the half behind the cut plane, clipped exactly
+        if len(T):
+            n = np.array([np.cross(q[1] - q[0], q[2] - q[0]) for q in T])
+            n /= np.linalg.norm(n, axis=1, keepdims=True) + 1e-30
+            n *= np.where(n @ view < 0, -1.0, 1.0)[:, None]       # two-sided: face the viewer
+            L = view + np.array([-0.35, 0.25, 0.75]); L /= np.linalg.norm(L)
+            lam = np.clip(n @ L, 0.0, 1.0)
+            spec = np.clip(n @ ((L + view) / np.linalg.norm(L + view)), 0.0, 1.0) ** 40
+            base = np.array(to_rgb(ctx["bubble_color"]))
+            fc = np.clip(base[None, :] * (0.30 + 0.70 * lam)[:, None] + 0.35 * spec[:, None], 0, 1)
+            ax.add_collection3d(Poly3DCollection(T, facecolors=fc, edgecolors=fc, linewidths=0.15, zorder=1))
+    # cut face: the slice itself (cell centres, relative to the centre), clipped to the 3-D box
+    u, v, P, E = fr["u"] * 1e6, fr["v"] * 1e6, fr["P"], fr["E"]
+    ku = np.abs(u) <= (hc if field else h); kv = np.abs(v) <= (hc if field else h)
+    u, v, P, E = u[ku], v[kv], P[np.ix_(ku, kv)], E[np.ix_(ku, kv)]
+    cmap = matplotlib.colormaps[ctx["cmap"]]
+    sm = matplotlib.cm.ScalarMappable(norm=ctx["norm"], cmap=cmap)
+    if not field and len(u) > 1 and len(v) > 1 and np.nanmin(E) < 0.5 < np.nanmax(E):
+        # shell only: just the eta = 0.5 contour along the cut
+        cs = matplotlib.pyplot.figure().add_subplot().contour(u, v, np.where(np.isfinite(E), E, 1.0).T, levels=[0.5])
+        for seg in cs.allsegs[0]:
+            Y = [None, None, None]; Y[iu], Y[iv], Y[inn] = seg[:, 0], seg[:, 1], np.full(len(seg), 0.01 * h)
+            ax.plot(Y[0], Y[1], Y[2], color=GIF["iface_color"], lw=GIF["iface_lw"], zorder=3)
+        matplotlib.pyplot.close(cs.axes.figure)
+    elif len(u) > 1 and len(v) > 1:
+        U, V = np.meshgrid(u, v, indexing="ij")
+        X = [None, None, None]; X[iu], X[iv], X[inn] = U, V, np.zeros_like(U)
+        rgba = cmap(ctx["norm"](np.nan_to_num((P - ctx["p_inf"]) / 1e3)))
+        # facecolors per quad: average of its four corners; a quad is liquid (opaque) where its mean eta >= 0.5,
+        # gas and cells outside the domain stay open
+        fcq = 0.25 * (rgba[:-1, :-1] + rgba[1:, :-1] + rgba[:-1, 1:] + rgba[1:, 1:])
+        Eq = 0.25 * (E[:-1, :-1] + E[1:, :-1] + E[:-1, 1:] + E[1:, 1:])
+        fcq[..., 3] = np.where(np.isfinite(Eq) & (Eq >= 0.5), 1.0, 0.0)
+        ax.plot_surface(X[0], X[1], X[2], facecolors=fcq, rstride=1, cstride=1, linewidth=0, shade=False,
+                        antialiased=False, zorder=2)
+        # outline of the cut face (near p_inf the face is white on white)
+        bu = np.array([u[0], u[-1], u[-1], u[0], u[0]]); bv = np.array([v[0], v[0], v[-1], v[-1], v[0]])
+        B = [None, None, None]; B[iu], B[iv], B[inn] = bu, bv, np.zeros(5)
+        ax.plot(B[0], B[1], B[2], color="0.55", lw=0.8, zorder=3)
+        if np.nanmin(E) < 0.5 < np.nanmax(E):
+            cs = matplotlib.pyplot.figure().add_subplot().contour(u, v, np.where(np.isfinite(E), E, 1.0).T, levels=[0.5])
+            for seg in cs.allsegs[0]:
+                Y = [None, None, None]; Y[iu], Y[iv], Y[inn] = seg[:, 0], seg[:, 1], np.full(len(seg), 0.01 * h)
+                ax.plot(Y[0], Y[1], Y[2], color=GIF["iface_color"], lw=GIF["iface_lw"], zorder=3)
+            matplotlib.pyplot.close(cs.axes.figure)
+    ax.computed_zorder = False         # draw order: back half-shell, then the cut face, then its contour
+    ax.set_xlim(-h, h); ax.set_ylim(-h, h); ax.set_zlim(-h, h)
+    ax.set_box_aspect((1, 1, 1), zoom=1.3)
+    ax.view_init(elev, azim)
+    ax.set_axis_off()
+    return sm
 
 
 # =========================================================================================== #
@@ -482,7 +601,10 @@ def make_gifs(a, C, case_tag, plotdir, figdir, geom, sim=None):
     # ---- frames -------------------------------------------------------------------------------- #
     Rmax = float(np.nanmax(Rsim[1]))
     half = (a.gif_half * 1e-6) if a.gif_half else max(1.6 * C.R0, 1.3 * Rmax)
-    frames = _pool_map(_extract, [(pf, geom, a.gif_plane, half, want3d) for pf in fs], nproc)
+    cut_half = a.gif_cut_half * C.R0
+    # the 3-D cut face needs the slice out to cut_half; the 2-D views are cropped to `half` again (_field_grid)
+    frames = _pool_map(_extract, [(pf, geom, a.gif_plane, max(half, cut_half) if want3d else half, want3d)
+                                  for pf in fs], nproc)
     frames.sort(key=lambda f: f["t"])
     tf = np.array([f["t"] for f in frames])
     if geom == "full":
@@ -522,20 +644,23 @@ def make_gifs(a, C, case_tag, plotdir, figdir, geom, sim=None):
 
     ext = [float(np.abs(f["tri"]).max()) for f in frames if f.get("tri") is not None]
     ctx["lim3d"] = 1.04 * max(ext) if ext else half                   # fixed 3-D box: size changes stay visible
+    ctx["cut_half"] = cut_half
 
     root = os.path.join(figdir, a.stem + "_gif_frames")
     outs = []
-    for kind, suffix in (("bubble", "_bubble"), ("pair", "_bubble_R")) + ((("3d", "_bubble3d"),) if want3d else ()):
+    for kind, suffix in (("bubble", "_bubble"), ("pair", "_bubble_R")) + ((("3d", "_bubble3d"), ("3dcut", "_bubble3d_cut"), ("3dcutshell", "_bubble3d_cutshell")) if want3d else ()):
         fdir = os.path.join(root, suffix.lstrip("_"))
         os.makedirs(fdir, exist_ok=True)
-        for old in glob.glob(os.path.join(fdir, "frame_*.png")):
+        for old in glob.glob(os.path.join(fdir, "frame_*.png")) + glob.glob(os.path.join(fdir, "frame_*.eps")):
             os.remove(old)
         _pool_map(_render, [(kind, fr, ctx, os.path.join(fdir, "frame_%04d.png" % k)) for k, fr in enumerate(frames)],
                   nproc)
         out = os.path.join(figdir, a.stem + suffix + ".gif")
         if assemble_gif(fdir, out, a.gif_fps):
             outs.append(out)
-            print("  wrote %s (%d frames, %g fps; PNGs in %s/)" % (out, len(frames), a.gif_fps, fdir))
+            print("  wrote %s (%d frames, %g fps; EPS frames in %s/)" % (out, len(frames), a.gif_fps, fdir))
+            for png in glob.glob(os.path.join(fdir, "*.png")):      # frames are kept as EPS only
+                os.remove(png)
     return outs
 
 
@@ -555,7 +680,9 @@ def add_args(ap):
     g.add_argument("--gif-pmax", type=float, default=None, help="colour limit |p - p_inf| [kPa] (default auto)")
     g.add_argument("--gif-plin", type=float, default=None, help="symlog linear range [kPa] (default pmax/100)")
     g.add_argument("--gif-cmap", default=GIF["cmap"], help="diverging colormap (default %s)" % GIF["cmap"])
-    g.add_argument("--gif-3d", action="store_true", help="also <stem>_bubble3d.gif: eta = 0.5 isosurface (octant/full)")
+    g.add_argument("--gif-3d", action="store_true", help="also <stem>_bubble3d.gif (eta = 0.5 isosurface) and <stem>_bubble3d_cut.gif (cut open along the cross-section plane; octant/full)")
+    g.add_argument("--gif-cut-half", type=float, default=3.0, metavar="N",
+                   help="half-width of the pressure cut face in the cut 3-D GIF, in R0 (default 3)")
     g.add_argument("--gif-dpi", type=int, default=GIF["dpi"], help="frame dpi (default %d)" % GIF["dpi"])
     g.add_argument("--gif-thermo-v0", default=None, metavar="V0|THERMO",
                    help="gas volume at t = 0 for the thermo.dat radius (number, or a reference thermo.dat whose "

@@ -168,6 +168,7 @@ protected:
     std::vector<int> shell_psi_init;                                      // shell.slip=7: m = Gamma |grad psi| set on this level
     void ShellBandUniform(int lev);   // Gamma bulk extension (constant normal extension into the bulk)
     void TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time);   // jump.curvature = 1: level-set curvature from the unit capillary tensor
+    void FootExtend(int lev, amrex::MultiFab &L, amrex::MultiFab &Gf);   // shell.foot_rate: interpolate L to each band cell's foot point on eta = 1/2
     // Sub-cycled SHELL DILATATIONAL VISCOUS update (see Hydro2.cpp).  Advances
     // only div(Omega_visc) on the interface band, in N sub-steps of dt/N, so the
     // stiff kappa_s term no longer sets the global timestep.
@@ -777,6 +778,8 @@ protected:
     Set::Scalar thermal_alpha_min = 1.0e-3, thermal_h = 0.0;
     int shell_visc_verbose = 0;        // print N and nu_s each sub-cycle
     Set::Scalar shell_nus_rho_floor = 1.0;  // density floor for the nu_s estimate
+    int shell_foot_rate = 0;                // shell.foot_rate (see Parse)
+    int foot_mirror[3][2] = {{0,0},{0,0},{0,0}};   // shell.foot_rate: eta BC per face is REFLECT_* (mirror ghosts)
     Set::Scalar jump_y_rho0 = -1.0, jump_y_rho1 = -1.0;   // psi reference phase densities of the tensor curvature (set once from the IC)
     Set::Scalar relax_time = 0.0;      // time of the current RelaxAndReinit call (BC fills inside it)
     int relax_diag = 0;

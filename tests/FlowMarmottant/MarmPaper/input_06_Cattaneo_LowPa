@@ -1,3 +1,11 @@
+# ===== Option 1 configuration (2026-11-14; was input_06_Cattaneo_LowPa_opt1, made the default 2026-11-17):
+# constant kappa_s (shell.kappa_s_alpha = 0, the paper's shell model), shell.slip = 12, face.two_pressure = 1,
+# relax.opt8 = 1, relax.trace_pT = 3, thermal.alpha_min = 1e-4, nscbc.spherical = 1 (Bayliss-Turkel radiation
+# condition, centre = origin = octant symmetry point), thermal.dt_limit = 1 (conduction in the dt limit),
+# visc.relax_cell_local = 0 (viscous relaxation jump integrated along the grad-eta path inside the band; set 1 for
+# the old per-cell jump).  The previous default (Cross-law kappa_s, plane-wave NSCBC, coarser AMR) is in git history.
+# Octant: domain [0, 59 um]^3, bubble at the origin, REFLECT on the lo faces, NSCBC outflow on the hi faces.
+#
 # MarmPaper 06: VALIDATION against Cattaneo et al., Nature Physics 21:590 (2025), Fig. 2a (low p_a)
 #
 # Same ICs as the paper (their code: github.com/cttnmrc/jetting-enables-sonoporation):
@@ -23,17 +31,17 @@ plot_file = /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/MarmPaper/output_
 
 ### OUTPUT ###
 amr.plot_int       = -1
-amr.plot_dt        = 1.000000e-07    # 10 frames/us (their camera: 10 Mfps)
+amr.plot_dt        = 2.000000e-08    # 50 frames/us (5x their camera, user request 2026-11-14)
 amr.thermo.plot_dt = 1.000000e-09    # thermo.dat: gas_volume (R_vol), gas_pressure_int, kinetic_energy, interface_area
 plot_minimal       = 1
 
 ### MESH ###
-amr.max_grid_size  = 32
-amr.blocking_factor = 16
+amr.max_grid_size  = 8    # 2026-11-14: was 16 (measured with blocking_factor 8, 8 ranks: 25 -> 103 finest boxes, 1.7x faster); allows 64 tasks
+amr.blocking_factor = 8    # 2026-11-14: was 16 (measured: finest cells 110592 -> 52736, 1.5x faster; 4 gives no further gain)
 amr.regrid_int     = 10
 amr.grid_eff       = 0.8
 amr.max_level      = 4
-amr.n_error_buf    = 16
+amr.n_error_buf    = 4   # 2026-11-10: was 16 (2.4x fewer finest cells, 1.9x faster; band still tagged by grad eta)
 nghost = 4
 
 ### GEOMETRY -- OCTANT (active); full domain below, commented ###
@@ -110,7 +118,15 @@ marmottant.R_buckling  = 3.100000e-06  # = R0: sigma(R0) = 0, starts at buckling
 marmottant.chi         = 0.15          # [N/m] (paper)
 marmottant.sigma_break = 0.0728        # [N/m] rupture at the water tension (paper: S_w)
 shell.kappa_s = 5.0e-9                  # [kg/s] (paper)
-shell.kappa_s_alpha = 4.0e-6            # [s] Cross law (remedy b); 0 = constant kappa_s as in the paper
+shell.kappa_s_alpha = 0.0               # [s] constant kappa_s as in the paper (previous default: 4e-6 Cross law)
+shell.slip          = 12                # Gamma = m/|grad psi| (see Hydro2 Parse)
+face.two_pressure   = 1                 # option 10: face rebuild keeps gas at its own pressure
+relax.opt8          = 1                 # option 8=1: trace gas keeps its own energy
+relax.trace_pT      = 3                 # trace gas frozen below the cutoff (fixes cold gas, 2026-11-12)
+thermal.alpha_min   = 1.0e-4
+nscbc.spherical     = 1                 # spherical (Bayliss-Turkel) radiation condition; plane wave rejected
+thermal.dt_limit    = 1                 # conduction diffusion limit in dt (default 1; fixes fine-grid NaN at max expansion)
+visc.relax_cell_local = 0               # 0 = viscous relaxation jump integrated along grad eta in the band (Option 1, default); 1 = old per-cell
 shell.mu_s    = 0.0
 
 ### BOUNDARY CONDITIONS -- octant: symmetry (lo) + NSCBC outflow (hi) (active) ###
@@ -126,21 +142,21 @@ nscbc.xhi.target_p = 1.022000e+05
 nscbc.xhi.sigma    = 0.6
 nscbc.xhi.beta     = 0.5
 nscbc.xhi.L_ref    = 1.843750e-07
-nscbc.xhi.drive_amp   = 5.390000e+04   # C4F10 refit of p_a (paper fit with air: 6.000000e+04)
+nscbc.xhi.drive_amp   = 6.000000e+04   # paper p_a (fitted with air); C4F10 refit would be 5.390000e+04
 nscbc.xhi.drive_omega = 6.283185e+06
 nscbc.yhi.type     = outflow
 nscbc.yhi.target_p = 1.022000e+05
 nscbc.yhi.sigma    = 0.6
 nscbc.yhi.beta     = 0.5
 nscbc.yhi.L_ref    = 1.843750e-07
-nscbc.yhi.drive_amp   = 5.390000e+04   # C4F10 refit of p_a (paper fit with air: 6.000000e+04)
+nscbc.yhi.drive_amp   = 6.000000e+04   # paper p_a (fitted with air); C4F10 refit would be 5.390000e+04
 nscbc.yhi.drive_omega = 6.283185e+06
 nscbc.zhi.type     = outflow
 nscbc.zhi.target_p = 1.022000e+05
 nscbc.zhi.sigma    = 0.6
 nscbc.zhi.beta     = 0.5
 nscbc.zhi.L_ref    = 1.843750e-07
-nscbc.zhi.drive_amp   = 5.390000e+04   # C4F10 refit of p_a (paper fit with air: 6.000000e+04)
+nscbc.zhi.drive_amp   = 6.000000e+04   # paper p_a (fitted with air); C4F10 refit would be 5.390000e+04
 nscbc.zhi.drive_omega = 6.283185e+06
 eta.bc.type.xlo = REFLECT_EVEN
 eta.bc.type.xhi = neumann
@@ -233,6 +249,7 @@ integration.rk.type = 3
 visc_subcycle              = 1       # bulk + shell viscous terms sub-cycled
 shell.kappa_s_subcycle_max = 8192
 shell.heat_split           = 2       # shell viscous heat split by thermal effusivity
+shell.foot_rate            = 1       # viscous-jump rate and curvature taken at the foot point on eta = 1/2 (fixes the axis-tip runaway, see Hydro2 Parse)
 thermal.k0                 = 0.6     # water [W/m/K]
 thermal.k1                 = 0.012   # C4F10 [W/m/K]
 thermal.conduction         = 1       # Fourier conduction in each phase (2026-11-10: micro bubbles are

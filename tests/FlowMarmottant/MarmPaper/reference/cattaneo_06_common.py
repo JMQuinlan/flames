@@ -15,8 +15,10 @@ Curves on the figure (R in um vs t in us; t = 0 at the start of the burst, as in
     the Marmottant shell (constant kappa_s) and Zhou's heat-conducting three-layer gas
     (ModifiedRayleighPlesset_MarmottantZhou.m in github.com/cttnmrc/jetting-enables-sonoporation),
     Python port; paper parameters.
-  * Experiment: Fig. 2a markers (cattaneo2025_fig2a_exp_{hi,lo}Pa.dat, t in figure time),
-    shifted by EXP_SHIFT_US = -1.57 us (paper t_delay) onto the simulation time axis.
+  * Experiment: the paper's Source Data for Fig. 2a (cattaneo2025_experimental.h5, /fig2a/{hi,lo}Pa, built by
+    make_cattaneo2025_h5.py from 41567_2025_2785_MOESM19_ESM.xlsx), t in figure time, shifted by
+    EXP_SHIFT_US = -1.57 us (paper t_delay) onto the simulation time axis.  Without h5py the older digitized
+    markers (cattaneo2025_fig2a_exp_{hi,lo}Pa.dat, within 0.03 um of the source data) are used.
   * Simulation: volumetric radius R_vol and the eta = 0.5 radius along +x.
       RADIAL slab (n_cell N x 2 x 2): the cell row next to the axis, r = sqrt(x^2 + 2 y0^2),
           R_vol = (3 sum (1 - eta) r^2 dr)^(1/3), R(eta=0.5) by linear interpolation.
@@ -46,7 +48,8 @@ import marmottant_sch20_common as _M                                        # no
 from marmottant_rpe_km import Shell, Liquid, Gas                            # noqa: E402
 
 ENVELOPE = os.path.join(_HERE, "cattaneo2025_envelope.dat")
-EXP = {"hi": os.path.join(_HERE, "cattaneo2025_fig2a_exp_hiPa.dat"),
+EXP_H5 = os.path.join(_HERE, "cattaneo2025_experimental.h5")          # paper Source Data (make_cattaneo2025_h5.py)
+EXP = {"hi": os.path.join(_HERE, "cattaneo2025_fig2a_exp_hiPa.dat"),   # digitized fallback (no h5py)
        "lo": os.path.join(_HERE, "cattaneo2025_fig2a_exp_loPa.dat")}
 EXP_SHIFT_US = -1.57    # experiment t_fig -> simulation t (burst start at t = 0); paper code t_delay = 1.57 us (BubbleRadiusDisplacementImpulseStress.m)
 F_DRIVE = 1.0e6         # Hz (paper)
@@ -242,10 +245,24 @@ def solve_cattaneo(pa, env, t_end, t_start=-1e-6, P=None, return_p=False):
 # =========================================================================================== #
 #  Experiment
 # =========================================================================================== #
-def load_experiment(which, shift_us=EXP_SHIFT_US):
-    """(t [s], R [m]) of the Fig. 2a markers on the simulation time axis."""
-    X = np.loadtxt(EXP[which], delimiter=",", comments="#")
-    return (X[:, 0] + shift_us) * 1e-6, X[:, 1] * 1e-6
+def load_experiment(which, shift_us=EXP_SHIFT_US, quantity="radius"):
+    """(t [s], R [m]) of the Fig. 2a Source Data on the simulation time axis (which = "hi" | "lo").
+    quantity="displacement" returns the Fig. 2c centroid displacement instead."""
+    case = "hiPa" if which == "hi" else "loPa"
+    try:
+        import h5py
+        with h5py.File(EXP_H5, "r") as h:
+            if quantity == "displacement":
+                g = h["fig2c/" + case]; t, v = g["time_us"][:], g["displacement_um"][:]
+            else:
+                g = h["fig2a/" + case]; t, v = g["time_us"][:], g["radius_um"][:]
+        return (t + shift_us) * 1e-6, v * 1e-6
+    except (ImportError, OSError, KeyError) as e:
+        if quantity != "radius":
+            raise
+        print("  [experiment] %s not usable (%s); digitized Fig. 2a markers used" % (os.path.basename(EXP_H5), e))
+        X = np.loadtxt(EXP[which], delimiter=",", comments="#")
+        return (X[:, 0] + shift_us) * 1e-6, X[:, 1] * 1e-6
 
 
 # =========================================================================================== #
@@ -456,8 +473,10 @@ def make_thermo_figure(case_tag, C, plotdir, geom, t_end, out_stem, exp_shift=EX
 #  Figure
 # =========================================================================================== #
 def make_figure(case_tag, C, sim, models, exp, out_stem, xlim, zoom, rvol_norm=False, thermo=None,
-                show_thermo=False, formats=None, single=False):
-    """single=True: one full-run panel only (no zoom), same width, about half the height."""
+                show_thermo=False, formats=None, single=False, toff=0.0):
+    """single=True: one full-run panel only (no zoom), same width, about half the height.
+    toff [us]: display time = t_sim + toff (toff = -EXP_SHIFT_US = 1.57 puts everything on the paper's Fig. 2a axis);
+    xlim and zoom are on the display axis."""
     S = FIG
     _apply_rc(S)
     if single:
@@ -470,26 +489,27 @@ def make_figure(case_tag, C, sim, models, exp, out_stem, xlim, zoom, rvol_norm=F
     hi = case_tag == "hi"
     Rv = sim["R_vol"] * (C.R0 / sim["R_vol"][0] if rvol_norm else 1.0)
     for k, (ax, (t0, t1)) in enumerate(zip(axs, windows)):
-        mk = lambda t: (t >= (t0 - 0.05) * 1e-6) & (t <= (t1 + 0.05) * 1e-6)
+        mk = lambda t: (t * um + toff >= t0 - 0.05) & (t * um + toff <= t1 + 0.05)
+        X = lambda t: t * um + toff
         tk, Rk = models["km"]; tr, Rr = models["rpe"]; tc, Rc = models["catt"]
-        ax.plot(tk[mk(tk)] * um, Rk[mk(tk)] * um, "-", color=S["c_km"], lw=1.2, label="Coated Keller–Miksis")
-        ax.plot(tr[mk(tr)] * um, Rr[mk(tr)] * um, "--", color=S["c_rp"], lw=1.2, label="Coated Rayleigh–Plesset")
-        ax.plot(tc[mk(tc)] * um, Rc[mk(tc)] * um, "-.", color=S["c_catt"], lw=1.2,
+        ax.plot(X(tk[mk(tk)]), Rk[mk(tk)] * um, "-", color=S["c_km"], lw=1.2, label="Coated Keller–Miksis")
+        ax.plot(X(tr[mk(tr)]), Rr[mk(tr)] * um, "--", color=S["c_rp"], lw=1.2, label="Coated Rayleigh–Plesset")
+        ax.plot(X(tc[mk(tc)]), Rc[mk(tc)] * um, "-.", color=S["c_catt"], lw=1.2,
                 label="Cattaneo et al. (2025) model")
         if show_thermo and thermo is not None:
             th, Rh = thermo
-            ax.plot(th[mk(th)] * um, Rh[mk(th)] * um, ":", color=S["c_vol"], lw=1.0,
+            ax.plot(X(th[mk(th)]), Rh[mk(th)] * um, ":", color=S["c_vol"], lw=1.0,
                     label=r"Simulation, $R_\mathrm{vol}$ (thermo)")
         ts = sim["t"]; m = mk(ts)
         # markers about every 0.1 us (the camera rate) whatever the plot_dt, so dense frame sets stay readable
         dtf = float(np.median(np.diff(ts))) if len(ts) > 1 else 1e-7
         me = max(1, int(round(1e-7 / dtf))) if dtf > 0 else 1
-        ax.plot(ts[m] * um, Rv[m] * um, "-s", color=S["c_vol"], lw=1.5, ms=3.0, zorder=4, markevery=me,
+        ax.plot(X(ts[m]), Rv[m] * um, "-s", color=S["c_vol"], lw=1.5, ms=3.0, zorder=4, markevery=me,
                 label=r"Simulation, $R_\mathrm{vol}$")
-        ax.plot(ts[m] * um, sim["R_eta"][m] * um, "-^", color=S["c_eta"], lw=1.5, ms=3.2, zorder=3, markevery=me,
+        ax.plot(X(ts[m]), sim["R_eta"][m] * um, "-^", color=S["c_eta"], lw=1.5, ms=3.2, zorder=3, markevery=me,
                 label=r"Simulation, $R(\eta = 0.5)$")
         te, Re = exp; m = mk(te)
-        ax.plot(te[m] * um, Re[m] * um, "o", color=S["c_exp"], mfc=S["c_exp"] if hi else "white", mew=0.9,
+        ax.plot(X(te[m]), Re[m] * um, "o", color=S["c_exp"], mfc=S["c_exp"] if hi else "white", mew=0.9,
                 ms=4.0 if k else 3.4, label="Experiment (Cattaneo et al., 2025)", zorder=5)
         ax.set_xlim(t0, t1)
         ax.grid(True, which="major", color="0.88", lw=0.6, zorder=0)   # light background grid
@@ -528,9 +548,13 @@ def main(case_tag, deck, default_output, stem, zoom_default):
     ap.add_argument("--input", default=deck, help="input deck (models; overridden by <output>/metadata)")
     ap.add_argument("--figdir", default=None, help="image directory (default ./Images next to this script)")
     ap.add_argument("--stem", default=stem)
-    ap.add_argument("--tmax", type=float, default=None, help="full-panel end time [us] (default: last frame)")
+    ap.add_argument("--time", choices=("paper", "sim"), default="paper",
+                    help="R(t) time axis: paper = Cattaneo Fig. 2a time (t_sim - exp_shift, axis 0..12 us, default) "
+                         "or sim (burst start = 0)")
+    ap.add_argument("--tmax", type=float, default=None,
+                    help="full-panel end time [us] on the chosen axis (default: 12 on the paper axis, last frame on sim)")
     ap.add_argument("--zoom", type=float, nargs=2, default=zoom_default, metavar=("T0", "T1"),
-                    help="zoom-panel window [us] (default %s %s)" % tuple(zoom_default))
+                    help="zoom-panel window [us] on the chosen axis (default %s %s; paper time)" % tuple(zoom_default))
     ap.add_argument("--exp-shift", type=float, default=EXP_SHIFT_US,
                     help="experiment time shift [us], t_sim = t_fig + shift (default %g)" % EXP_SHIFT_US)
     ap.add_argument("--kappa-g", type=float, default=None,
@@ -566,8 +590,15 @@ def main(case_tag, deck, default_output, stem, zoom_default):
         sim = sim_radii(plotdir, a.input, geom=a.geom, nproc=a.nproc, figdir=figdir, stem=os.path.join(a.stem))
         print("  geometry %s, %d frames, t = %.3f .. %.3f us"
               % (sim["geom"], len(sim["t"]), sim["t"][0] * 1e6, sim["t"][-1] * 1e6))
-        t_end = (a.tmax * 1e-6) if a.tmax else float(np.nanmax(sim["t"]))
-        t_mod = max(t_end, a.zoom[1] * 1e-6) + 0.2e-6
+        toff = -a.exp_shift if a.time == "paper" else 0.0                 # display t [us] = t_sim [us] + toff
+        if a.time == "paper":
+            x1 = a.tmax if a.tmax else 12.0                                 # Fig. 2a axis ends at 12 us
+            xlim = (0.0, x1)
+            t_end = min(float(np.nanmax(sim["t"])), (x1 - toff) * 1e-6)
+        else:
+            t_end = (a.tmax * 1e-6) if a.tmax else float(np.nanmax(sim["t"]))
+            xlim = (-0.3, round(t_end * 1e6, 2))
+        t_mod = max(xlim[1] - toff, a.zoom[1] - toff) * 1e-6 + 0.2e-6
 
         env = Envelope()
         models = {}
@@ -588,19 +619,20 @@ def main(case_tag, deck, default_output, stem, zoom_default):
         print("\n  R_vol(t=0) = %.4f um (%s)" % (Rv[0] * 1e6, "rescaled to R0" if a.rvol_norm else "raw; diffuse-band offset"))
         print_table(curves, "Experiment", max(ncyc, 2), first=1)
 
-        xlim = (-0.3, round(t_end * 1e6, 2))
         make_figure(case_tag, C, sim, models, exp, os.path.join(figdir, a.stem + "_R"), xlim, tuple(a.zoom),
-                    rvol_norm=a.rvol_norm, thermo=th, show_thermo=a.thermo,
+                    rvol_norm=a.rvol_norm, thermo=th, show_thermo=a.thermo, toff=toff,
                     formats=a.formats.split(",") if a.formats else None)
         # compact version for page count: the full run only, no zoom panel
         make_figure(case_tag, C, sim, models, exp, os.path.join(figdir, a.stem + "_R_full"), xlim, tuple(a.zoom),
                     rvol_norm=a.rvol_norm, thermo=th, show_thermo=a.thermo,
-                    formats=a.formats.split(",") if a.formats else None, single=True)
+                    formats=a.formats.split(",") if a.formats else None, single=True, toff=toff)
         if not a.no_thermo_fig:
             make_thermo_figure(case_tag, C, plotdir, sim["geom"], t_end, os.path.join(figdir, a.stem + "_thermo"),
                                exp_shift=a.exp_shift, formats=a.formats.split(",") if a.formats else None)
     if a.gif:
         _gif.make_gifs(a, C, case_tag, plotdir, figdir, sim["geom"] if sim else (a.geom or geometry(plotdir)), sim=sim)
+    import marmpaper_bundle
+    marmpaper_bundle.bundle(figdir, a.stem, [plotdir])
 
 
 # =========================================================================================== #

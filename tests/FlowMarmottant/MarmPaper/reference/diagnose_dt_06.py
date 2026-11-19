@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Find what is holding down the time step of a 06 Cattaneo run.
 
-Defaults to the INCLINE opt1 run of the chosen case:
-    output dir  /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/MarmPaper/output_06_Cattaneo_<case>_opt1*
-    log         the StdOut of the running slurm job whose script is 06_Cattaneo_<case>_opt1.sh
+Defaults to the INCLINE run of the chosen case:
+    output dir  /mmfs1/home/ttryon/flames/bin/tests/FlowMarmottant/MarmPaper/output_06_Cattaneo_<case>
+    log         the StdOut of the running slurm job whose script is 06_Cattaneo_<case>.sh
                 (fallback: newest /mmfs1/home/ttryon/FLAMES_out/flame_*_stdout)
 
 Two parts:
@@ -16,7 +16,7 @@ Two parts:
 
 Note: the log's DT is the COARSE (level 0) step.  Level L runs at DT / prod(nsubsteps[1..L]).
 
-Usage (on INCLINE, no arguments needed for the 160 kPa opt1 run):
+Usage (on INCLINE, no arguments needed for the 160 kPa run):
     python3 diagnose_dt_06.py
     python3 diagnose_dt_06.py --case LowPa
     python3 diagnose_dt_06.py --dir OUTDIR --log LOGFILE --plot OUTDIR/123456cell --top 8 --watch 120
@@ -41,14 +41,15 @@ SAFETY = 0.9          # dt_max *= 0.9 in TimeStepComplete
 
 # ----------------------------------------------------------------------------- locate files
 def find_outdir(case):
-    c = [d for d in glob.glob(f"{ROOT}/output_06_Cattaneo_{case}_opt1*") if os.path.isdir(d) and ".old" not in d]
+    c = [d for d in glob.glob(f"{ROOT}/output_06_Cattaneo_{case}*") if os.path.isdir(d) and ".old" not in d
+         and re.fullmatch(rf"output_06_Cattaneo_{case}(\.\d+)?", os.path.basename(d))]
     if not c:
-        sys.exit(f"no output dir matching {ROOT}/output_06_Cattaneo_{case}_opt1*  (use --dir)")
+        sys.exit(f"no output dir {ROOT}/output_06_Cattaneo_{case}  (use --dir)")
     return max(c, key=os.path.getmtime)
 
 
 def find_log(case):
-    script = f"06_Cattaneo_{case}_opt1"
+    script = f"06_Cattaneo_{case}.sh"
     try:
         ids = subprocess.run(["squeue", "-h", "-u", os.environ.get("USER", ""), "-o", "%i"],
                              capture_output=True, text=True, timeout=30).stdout.split()
@@ -56,7 +57,7 @@ def find_log(case):
             info = subprocess.run(["scontrol", "show", "job", jid], capture_output=True, text=True, timeout=30).stdout
             cmd = re.search(r"Command=(\S+)", info)
             out = re.search(r"StdOut=(\S+)", info)
-            if cmd and out and script in cmd.group(1) and os.path.isfile(out.group(1)):
+            if cmd and out and os.path.basename(cmd.group(1)) == script and os.path.isfile(out.group(1)):
                 return out.group(1), f"slurm job {jid}"
     except (OSError, subprocess.SubprocessError):
         pass

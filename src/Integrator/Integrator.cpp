@@ -718,7 +718,9 @@ Integrator::Restart(const std::string dirname, bool a_nodal)
                         {
                             match = true;
                             Util::Message(INFO, "Initializing ", cell.name_array[j][k], "; ncomp=", cell.ncomp_array[j], "; nghost=", cell.nghost_array[j], " with ", tmp_name_array[i]);
-                            amrex::MultiFab::Copy(*((*cell.fab_array[j])[lev]).get(), tmpdata[lev], i, k, 1, 0 /*cell.nghost_array[j]*/);
+                            // VisMF::Read gives tmpdata its own DistributionMapping, which need not match dmap[lev] (seen at 8 and 16
+                            // ranks: a plain Copy scattered garbage/NaN into level-3 cells on restart).  ParallelCopy is layout-safe.
+                            (*cell.fab_array[j])[lev]->ParallelCopy(tmpdata[lev], i, k, 1);
                         }
                     }
                     Util::RealFillBoundary(*(*cell.fab_array[j])[lev].get(), geom[lev]);

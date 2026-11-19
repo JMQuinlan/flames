@@ -212,10 +212,13 @@ def main():
         cfg = dict(CFG, OUTPUT_DIR=a.plotdir, INPUT=a.input, STEM=a.stem, N_PROC=a.nproc, OUT_DIR=out_dir)
         sys.argv = [sys.argv[0], a.plotdir, "--input", a.input, "--stem", a.stem, "--nproc", str(a.nproc)]
         sch20_analysis.main(cfg)
+    import marmpaper_bundle
     if a.no_twin:
+        marmpaper_bundle.bundle(out_dir, a.stem, [a.plotdir])
         return
     if not os.path.isdir(a.twin_output):
         print("  [twin] uncoated output %s not found; pass --twin-output" % a.twin_output)
+        marmpaper_bundle.bundle(out_dir, a.stem, [a.plotdir])
         return
     kw = dict(out_dir=out_dir, nproc=a.nproc, style=CFG["STYLE"], titles=CFG["TITLES"])
     A = Sch20Analysis(a.input, a.plotdir, case=CFG["CASE"], coated=True, stem=a.stem,
@@ -225,6 +228,7 @@ def main():
         print("  [twin] WARNING: decks differ in R0 or dx_finest (%g/%g, %g/%g)"
               % (A.R0, U.R0, A.meta["dx_finest"], U.meta["dx_finest"]))
     twin(A, U, None, a.fit_tmax)
+    marmpaper_bundle.bundle(out_dir, a.stem, [a.plotdir, a.twin_output])
 
 
 if __name__ == "__main__":

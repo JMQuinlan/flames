@@ -325,8 +325,12 @@ def main():
         ax.legend(fontsize=7.5, loc="upper left", ncol=2)
     fig.tight_layout()
     out = a.out or os.path.join(a.root, "overlay_06_R.png")
-    fig.savefig(out, dpi=130)
-    print("wrote", out)
+    base = os.path.splitext(out)[0]
+    for fmt in ("png", "eps"):
+        fig.savefig(base + "." + fmt, dpi=130)
+        print("wrote", base + "." + fmt)
+    import marmpaper_bundle
+    marmpaper_bundle.bundle(os.path.dirname(os.path.abspath(out)), os.path.basename(base), list(dirs) + [e.partition(":")[0] for e in a.extra])
 
 
 if __name__ == "__main__":

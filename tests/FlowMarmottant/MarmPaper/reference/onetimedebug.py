@@ -268,7 +268,7 @@ def plot_log(L, lid, png):
     ax[-1].set_xlabel("t [s]")
     fig.suptitle("flame_%s  R0=%s  domain=%s" % (lid, L["R0"], L["domain"]), fontsize=10)
     fig.tight_layout()
-    fig.savefig(png, dpi=110)
+    fig.savefig(png, dpi=110); fig.savefig(os.path.splitext(png)[0] + ".eps")
     plt.close(fig)
 
 
@@ -447,7 +447,7 @@ def plot_extra(ex, R0, tag, png, tscale, tunit):
         a.set_xlabel("t [%s]" % tunit)
     fig.suptitle(tag, fontsize=11)
     fig.tight_layout()
-    fig.savefig(png, dpi=110)
+    fig.savefig(png, dpi=110); fig.savefig(os.path.splitext(png)[0] + ".eps")
     plt.close(fig)
 
 
@@ -594,14 +594,14 @@ def overview(runs, logs, out_root):
             a.plot(t, D.col(r["fr"], "R_mean") / r["R0"], "-o", ms=3, lw=1, label=r["tag"])
         a.set_xlabel("t [micro-equivalent ns]  (Mili t x 1e-4)"); a.set_ylabel("R/R0 (mean of 400 dirs)")
         a.set_title({"02": "02 free collapse", "04": "04 forced nonlinear"}[key]); a.legend(fontsize=6)
-    fig.tight_layout(); fig.savefig(os.path.join(out_root, "overview_R.png"), dpi=110); plt.close(fig)
+    fig.tight_layout(); fig.savefig(os.path.join(out_root, "overview_R.png"), dpi=110); fig.savefig(os.path.join(out_root, "overview_R.eps")); plt.close(fig)
     fig, a = plt.subplots(figsize=(10, 5))
     for lid, L in logs.items():
         if len(L["t"]):
             sc = 1e5 if (L["R0"] or 0) > 1e-3 else 1e9
             a.semilogy(L["t"] * sc, L["dt"] * sc, lw=0.8, label="%s (R0 %s)" % (lid, L["R0"]))
     a.set_xlabel("t [micro-equivalent ns]"); a.set_ylabel("dt [micro-equivalent ns]"); a.legend(fontsize=7)
-    fig.tight_layout(); fig.savefig(os.path.join(out_root, "overview_logs.png"), dpi=110); plt.close(fig)
+    fig.tight_layout(); fig.savefig(os.path.join(out_root, "overview_logs.png"), dpi=110); fig.savefig(os.path.join(out_root, "overview_logs.eps")); plt.close(fig)
 
 
 def summary(runs, logs, pairs, out_root, t0):
