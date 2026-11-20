@@ -461,6 +461,7 @@ protected:
     int visc_subcycle = 0;             // 1 = bulk viscosity sub-cycled after the hyperbolic step (see Parse)
     Set::Scalar visc_subcycle_cfl = 0.9; // fraction of the forward-Euler stability limit per sub-step
     int visc_subcycle_max = 1000;      // cap on sub-steps per step
+    int visc_flux_form = 0;            // visc.flux_form: bulk viscous stress in conservative face-flux form (see Parse)
     int visc_subcycle_verbose = 0;
     int dt_diag = 0;                   // print dt limits every N steps (0 = off)
     Set::Scalar rho_min = 1e10;
@@ -780,6 +781,7 @@ protected:
     Set::Scalar shell_nus_rho_floor = 1.0;  // density floor for the nu_s estimate
     int shell_foot_rate = 0;                // shell.foot_rate (see Parse)
     int foot_mirror[3][2] = {{0,0},{0,0},{0,0}};   // shell.foot_rate: eta BC per face is REFLECT_* (mirror ghosts)
+    Set::Scalar contact_angle[3][2] = {{-1,-1},{-1,-1},{-1,-1}};   // eta.contact_angle.<face> [rad], through the liquid; < 0 = off
     Set::Scalar jump_y_rho0 = -1.0, jump_y_rho1 = -1.0;   // psi reference phase densities of the tensor curvature (set once from the IC)
     Set::Scalar relax_time = 0.0;      // time of the current RelaxAndReinit call (BC fills inside it)
     int relax_diag = 0;

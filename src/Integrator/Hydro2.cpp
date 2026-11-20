@@ -89,6 +89,13 @@ static Set::Scalar SigmaEffFromGamma(Set::Scalar Gamma, Set::Scalar grad_eta_mag
 
 // Factor on the shell viscous tension kappa_s div_s u (see Parse shell.kappa_s_alpha):
 // Cross-law shear thinning 1/(1 + alpha |div_s u|/2); alpha = 0 -> 1 (constant kappa_s).
+// Face viscosity across a viscosity jump: harmonic mean (series resistance; 0 if either side is inviscid).
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+static Set::Scalar HarmonicMean(Set::Scalar a, Set::Scalar b)
+{
+    return (a > 0.0 && b > 0.0) ? 2.0 * a * b / (a + b) : 0.0;
+}
+
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 static Set::Scalar ShellViscFactor(Set::Scalar ds, Set::Scalar alpha)
 {
@@ -252,6 +259,19 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         pp_query_default("visc_subcycle", value.visc_subcycle, 1);
         pp_query_default("visc_subcycle_cfl", value.visc_subcycle_cfl, 0.9);
         pp_query_default("visc_subcycle_max", value.visc_subcycle_max, 1000);
+        // visc.flux_form (2026-11-19): the bulk viscous stress of the sub-cycled operator in CONSERVATIVE
+        // face-flux form, div(tau) = sum_q [tau_.q]_{-1/2}^{+1/2} / dx_q, with tau built at each face from the
+        // VELOCITY field (normal derivative across the face, tangential derivatives averaged from the two cells)
+        // and the face viscosity the harmonic mean of the two cells (series resistance: the shear stress is
+        // continuous across a viscosity jump).  The energy source is the face flux of tau.u (conservative).
+        //   0 = expanded form mu lap(u) + grad(mu).grad(u), lap(u) rebuilt from M and rho by the product rule.
+        //       Where mu jumps across a cell (gas-side band tail next to liquid) its central grad(mu).grad(u)
+        //       couples a light cell to its far neighbour with a NEGATIVE weight ~ (mu_n - mu_c)/4, and the
+        //       product-rule lap(u) amplifies errors by rho_n/rho_c, while the sub-step limit uses the cell's
+        //       own mu/rho only: the update is unstable there.  2D driven bubble at R0/dx 32 (claude_scratch/jet2d):
+        //       tangential velocity of a 99%-gas band cell at the grid-axis tip doubled every step -> NaN at 0.62 us.
+        //   1 = flux form (exact in the continuum, positive definite; sub-step limit from the face viscosities).
+        pp_query_validate("visc.flux_form", value.visc_flux_form, {0, 1});
         pp_query_default("visc_subcycle_verbose", value.visc_subcycle_verbose, 0);
         pp_query_default("dt_diag", value.dt_diag, 0);   // >0: print the dt limits every dt_diag steps
         pp_query_default("pref", value.pref, 0.0);          // reference pressure for Roe solver
@@ -1022,6 +1042,31 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         else
         {
             value.eta_bc = new BC::Constant(BC::Constant::ZeroNeumann(1));
+        }
+        // WALL CONTACT ANGLE (2026-11-19).  eta.contact_angle.<face> = theta [degrees], measured
+        // through the LIQUID; 0 = liquid wets the wall completely (hydrophilic substrate: a liquid film
+        // stays between gas and wall), 90 = neutral, 180 = gas wets the wall.  Unset = off (the mirror
+        // ghosts of a REFLECT face then give exactly 90 degrees).  Wall adhesion of Brackbill, Kothe &
+        // Zemach (JCP 100, 1992): at the wall the interface normal is n_w = cos(theta) e + sin(theta) t,
+        // e = outward unit wall normal, t = wall-tangential direction of the adjacent interior normal.
+        // It is imposed on the ghost normals of the capillary curvature (TensorCurvature), so
+        // kappa = div n at the wall cells carries the contact-line force; the hydro fluxes and the
+        // wall's mass/momentum conditions are untouched.  Requires a wall (REFLECT) face.
+        {
+            const char *fnm[3][2] = {{"xlo", "xhi"}, {"ylo", "yhi"}, {"zlo", "zhi"}};
+            for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                for (int sd = 0; sd < 2; ++sd)
+                {
+                    const std::string key = std::string("eta.contact_angle.") + fnm[d][sd];
+                    if (!pp.contains(key.c_str())) continue;
+                    Set::Scalar deg = 90.0;
+                    pp.query(key.c_str(), deg);
+                    if (!(deg >= 0.0 && deg <= 180.0))
+                        Util::Abort(INFO, key, " = ", deg, ": contact angle must be in [0, 180] degrees");
+                    if (!value.foot_mirror[d][sd])
+                        Util::Abort(INFO, key, " is set but eta.bc.type.", fnm[d][sd], " is not a REFLECT (wall) face");
+                    value.contact_angle[d][sd] = deg * M_PI / 180.0;
+                }
         }
 
         // RADIALLY SYMMETRIC SLAB (2026-10-23).  density.bc.type.yhi (and zhi
@@ -7174,6 +7219,7 @@ void Hydro2::SubcycleBulkViscous(int lev, Set::Scalar time, Set::Scalar dt)
     const Set::Scalar dxm = std::min({AMREX_D_DECL(DX[0], DX[1], DX[2])});
     const Set::Scalar sm = small;
     const Set::Scalar m0 = mu0, m1 = mu1, l0 = mu0_b, l1 = mu1_b;
+    const int fflux = visc_flux_form;
 
     // mixture viscosity, same closures as RHS
     auto mu_of = [=] AMREX_GPU_DEVICE(Set::Scalar e_raw, Set::Scalar &dmu_de) -> Set::Scalar {
@@ -7193,8 +7239,23 @@ void Hydro2::SubcycleBulkViscous(int lev, Set::Scalar time, Set::Scalar dt)
             auto rho = density_mf[lev]->const_array(mfi);
             rop.eval(bx, rdat, [=] AMREX_GPU_DEVICE(int i, int j, int k) -> amrex::GpuTuple<Set::Scalar> {
                 Set::Scalar dm;
-                const Set::Scalar mu = mu_of(eta(i, j, k), dm);
-                const Set::Scalar lam = eta(i, j, k) * l0 + (1.0 - eta(i, j, k)) * l1;
+                Set::Scalar mu = mu_of(eta(i, j, k), dm);
+                Set::Scalar lam = eta(i, j, k) * l0 + (1.0 - eta(i, j, k)) * l1;
+                if (fflux)   // flux form: the largest face viscosity of the cell sets its diffusion rate
+                {
+                    const Set::Scalar mc = mu, lc = lam;
+                    mu = 0.0; lam = 0.0;
+                    for (int q = 0; q < AMREX_SPACEDIM; ++q)
+                        for (int sg = -1; sg <= 1; sg += 2)
+                        {
+                            const int a = i + (q == 0 ? sg : 0), b = j + (q == 1 ? sg : 0), c = k + (q == 2 ? sg : 0);
+                            Set::Scalar d2;
+                            const Set::Scalar mn = mu_of(eta(a, b, c), d2);
+                            const Set::Scalar ln = eta(a, b, c) * l0 + (1.0 - eta(a, b, c)) * l1;
+                            mu  = std::max(mu, HarmonicMean(mc, mn));
+                            lam = std::max(lam, std::abs(HarmonicMean(lc, ln)));
+                        }
+                }
                 const Set::Scalar nu = (std::abs(lam) + (4.0 / 3.0) * std::abs(mu) + (AMREX_SPACEDIM - 1) * std::abs(mu))
                                        / std::max(rho(i, j, k), sm);
                 return {nu};
@@ -7237,6 +7298,74 @@ void Hydro2::SubcycleBulkViscous(int lev, Set::Scalar time, Set::Scalar dt)
 
         // div(tau) and Phi from the start-of-sub-step momentum (scratch), then update
         amrex::MultiFab Fv(momentum_mf[lev]->boxArray(), momentum_mf[lev]->DistributionMap(), AMREX_SPACEDIM + 1, 0);
+        if (fflux)
+        {
+            // velocity and cell viscosities on valid + 1 ghost (corners included: FillPatch fills them)
+            amrex::MultiFab Uv(momentum_mf[lev]->boxArray(), momentum_mf[lev]->DistributionMap(), AMREX_SPACEDIM, 1);
+            amrex::MultiFab Mu(momentum_mf[lev]->boxArray(), momentum_mf[lev]->DistributionMap(), 2, 1);
+            for (amrex::MFIter mfi(Uv, false); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box gb = mfi.growntilebox(1);
+                auto M = momentum_mf[lev]->const_array(mfi);
+                auto rho = density_mf[lev]->const_array(mfi);
+                auto eta = eta_mf[lev]->const_array(mfi);
+                auto U = Uv.array(mfi);
+                auto W = Mu.array(mfi);
+                amrex::ParallelFor(gb, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                    const Set::Scalar rc = std::max(rho(i, j, k), sm);
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d) U(i, j, k, d) = M(i, j, k, d) / rc;
+                    Set::Scalar dm;
+                    W(i, j, k, 0) = mu_of(eta(i, j, k), dm);
+                    W(i, j, k, 1) = eta(i, j, k) * l0 + (1.0 - eta(i, j, k)) * l1;
+                });
+            }
+            for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box &bx = mfi.validbox();
+                auto U = Uv.const_array(mfi);
+                auto W = Mu.const_array(mfi);
+                auto F = Fv.array(mfi);
+                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k)
+                {
+                    Set::Scalar divtau[3] = {0, 0, 0}, divw = 0.0;
+                    for (int q = 0; q < AMREX_SPACEDIM; ++q)
+                        for (int side = 0; side < 2; ++side)
+                        {
+                            // face between L and R = L + e_q;  side 0: L = c - e_q (lower face), side 1: L = c (upper face)
+                            const int L[3] = {i - (q == 0 && !side), j - (q == 1 && !side), k - (q == 2 && !side)};
+                            const int R[3] = {L[0] + (q == 0), L[1] + (q == 1), L[2] + (q == 2)};
+                            Set::Scalar g[3][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}};   // g[r][s] = d u_r / d x_s at the face
+                            for (int r = 0; r < AMREX_SPACEDIM; ++r)
+                            {
+                                g[r][q] = (U(R[0], R[1], R[2], r) - U(L[0], L[1], L[2], r)) / DX[q];
+                                for (int t = 0; t < AMREX_SPACEDIM; ++t)
+                                {
+                                    if (t == q) continue;
+                                    const int e0 = (t == 0), e1 = (t == 1), e2 = (t == 2);
+                                    g[r][t] = 0.25 * (U(L[0] + e0, L[1] + e1, L[2] + e2, r) - U(L[0] - e0, L[1] - e1, L[2] - e2, r)
+                                                    + U(R[0] + e0, R[1] + e1, R[2] + e2, r) - U(R[0] - e0, R[1] - e1, R[2] - e2, r)) / DX[t];
+                                }
+                            }
+                            Set::Scalar divu = 0.0;
+                            for (int t = 0; t < AMREX_SPACEDIM; ++t) divu += g[t][t];
+                            const Set::Scalar muf = HarmonicMean(W(L[0], L[1], L[2], 0), W(R[0], R[1], R[2], 0));
+                            const Set::Scalar laf = HarmonicMean(W(L[0], L[1], L[2], 1), W(R[0], R[1], R[2], 1));
+                            const Set::Scalar sgn = side ? 1.0 : -1.0;
+                            Set::Scalar w = 0.0;
+                            for (int p = 0; p < AMREX_SPACEDIM; ++p)
+                            {
+                                const Set::Scalar tau = muf * (g[p][q] + g[q][p]) + (p == q ? (laf - (2.0 / 3.0) * muf) * divu : 0.0);
+                                divtau[p] += sgn * tau / DX[q];
+                                w += tau * 0.5 * (U(L[0], L[1], L[2], p) + U(R[0], R[1], R[2], p));
+                            }
+                            divw += sgn * w / DX[q];
+                        }
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d) F(i, j, k, d) = divtau[d];
+                    F(i, j, k, AMREX_SPACEDIM) = divw;   // div(tau.u) = u.div(tau) + Phi
+                });
+            }
+        }
+        else
         for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
         {
             const amrex::Box &bx = mfi.validbox();
@@ -7624,6 +7753,40 @@ void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time)
             const Set::Scalar gm = gn.lpNorm<2>();
             for (int d = 0; d < AMREX_SPACEDIM; ++d) nf(i, j, k, d) = gm < g_gem_min ? 0.0 : gn(d) / gm;
         });
+    }
+    // Wall contact angle (eta.contact_angle.<face>, see Parse): the ghost normal across a wall face is
+    // the Brackbill wall normal n_w = cos(theta) e + sin(theta) t built from the mirror interior cell's
+    // normal n_m (t = tangential part of n_m, normalised).  No interface at the wall (n_m = 0) or an
+    // interface parallel to the wall (no tangential part: no contact line in that cell) keeps the mirror.
+    {
+        const amrex::Box dom = geom[lev].Domain();
+        for (int d = 0; d < AMREX_SPACEDIM; ++d)
+            for (int sd = 0; sd < 2; ++sd)
+            {
+                const Set::Scalar th = contact_angle[d][sd];
+                if (th < 0.0) continue;
+                const Set::Scalar ct = std::cos(th), st = std::sin(th), sgn = sd ? 1.0 : -1.0;
+                const int face = sd ? dom.bigEnd(d) : dom.smallEnd(d);
+                for (amrex::MFIter mfi(Nf, false); mfi.isValid(); ++mfi)
+                {
+                    const amrex::Box vb = mfi.validbox();
+                    if ((sd ? vb.bigEnd(d) : vb.smallEnd(d)) != face) continue;   // box not on this wall
+                    amrex::Box gb = amrex::grow(vb, 1);
+                    if (sd) gb.setSmall(d, face + 1); else gb.setBig(d, face - 1);   // ghost layer beyond the wall
+                    auto nf = Nf.array(mfi);
+                    amrex::ParallelFor(gb, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                        int m[3] = {i, j, k};
+                        m[d] = 2 * face + (sd ? 1 : -1) - m[d];   // mirror interior cell
+                        Set::Scalar tg[3] = {0, 0, 0}, tm = 0.0;
+                        for (int e = 0; e < AMREX_SPACEDIM; ++e)
+                            if (e != d) { tg[e] = nf(m[0], m[1], m[2], e); tm += tg[e] * tg[e]; }
+                        tm = std::sqrt(tm);
+                        if (tm <= 0.0) return;
+                        for (int e = 0; e < AMREX_SPACEDIM; ++e)
+                            nf(i, j, k, e) = (e == d) ? sgn * ct : st * tg[e] / tm;
+                    });
+                }
+            }
     }
     // kappa = div(n), isotropic stencil; zero where the compact |grad Y| vanishes
     for (amrex::MFIter mfi(K, false); mfi.isValid(); ++mfi)

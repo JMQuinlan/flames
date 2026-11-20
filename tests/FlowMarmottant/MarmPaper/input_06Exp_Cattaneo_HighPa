@@ -4,8 +4,11 @@
 #   rests against a cell, so the substrate is ABOVE the bubble.  The paper's translation model puts the rigid plastic
 #   at L ~ 12 um from the bubble centre (cell thickness, Methods eq. 5); the soft cell layer between is negligible for
 #   the acoustics (paper: its contribution to the secondary Bjerknes force is negligible).
-# Here: bubble centre at the origin, NO-SLIP NO-PENETRATION wall at z = +12 um (the top face, REFLECT_ODD momentum);
-#   the gap between bubble and wall is water.
+# Here: bubble centre at the origin, NO-SLIP NO-PENETRATION wall at z = +3.55 um (the top face, REFLECT_ODD momentum).
+#   2026-11-19: the wall stands in for the CELL SURFACE the bubble rests on (was the plastic at 12 um, stand-off ~4:
+#   too weak a wall asymmetry to jet).  The cell is acoustically transparent but the liquid cannot flow through it, so
+#   the near-field boundary is the cell surface.  Gap bubble-wall = 0.60 um = 2.6 eps (eta at the wall 0.995 at t = 0),
+#   stand-off 1.20.  Box moved down 8.45 um relative to the bubble (same size, grid and cubic cells).
 # Drive: ONE focused transducer (PA1280, 1 MHz, -6 dB beam ~3 mm) from BELOW at 75 deg to the horizontal.  The box
 #   (~120 um) is << the wavelength (1.48 mm) and << the beam, so at the bubble the incident + wall-reflected field is a
 #   spatially uniform oscillation (rigid wall = pressure antinode, dp/dz = 0; cos(kz) > 0.98 over the box).  The paper's
@@ -55,8 +58,8 @@ amr.n_error_buf    = 4   # 2026-11-10: was 16 (2.4x fewer finest cells, 1.9x fas
 nghost = 4
 
 ### GEOMETRY -- OCTANT (active); full domain below, commented ###
-geometry.prob_lo     = -5.900000e-05 -5.900000e-05 -6.175000e-05
-geometry.prob_hi     = 5.900000e-05 5.900000e-05 1.200000e-05   # top face = rigid substrate, 12 um above the bubble centre
+geometry.prob_lo     = -5.900000e-05 -5.900000e-05 -7.020000e-05
+geometry.prob_hi     = 5.900000e-05 5.900000e-05 3.550000e-06   # top face = rigid substrate, 3.55 um above the bubble centre (gap 0.60 um = 2.6 eps)
 geometry.is_periodic = 0 0 0
 amr.n_cell           = 64 64 40     # base dx 1.84375e-06 in all directions; finest dx 1.1523e-07 (R0/dx 25.6)
 # --- full domain (swap with the octant block above; also swap the BC block) ---
@@ -150,35 +153,35 @@ nscbc.xlo.target_p = 1.022000e+05
 nscbc.xlo.sigma    = 0.6
 nscbc.xlo.beta     = 0.5
 nscbc.xlo.L_ref    = 1.843750e-07
-nscbc.xlo.drive_amp   = 1.600000e+05   # paper p_a (fitted with air); C4F10 refit would be 1.423000e+05
+nscbc.xlo.drive_amp   = 1.423000e+05   # C4F10 refit p_a (2026-11-19; paper air fit was 1.600000e+05)
 nscbc.xlo.drive_omega = 6.283185e+06
 nscbc.xhi.type     = outflow
 nscbc.xhi.target_p = 1.022000e+05
 nscbc.xhi.sigma    = 0.6
 nscbc.xhi.beta     = 0.5
 nscbc.xhi.L_ref    = 1.843750e-07
-nscbc.xhi.drive_amp   = 1.600000e+05   # paper p_a (fitted with air); C4F10 refit would be 1.423000e+05
+nscbc.xhi.drive_amp   = 1.423000e+05   # C4F10 refit p_a (2026-11-19; paper air fit was 1.600000e+05)
 nscbc.xhi.drive_omega = 6.283185e+06
 nscbc.ylo.type     = outflow
 nscbc.ylo.target_p = 1.022000e+05
 nscbc.ylo.sigma    = 0.6
 nscbc.ylo.beta     = 0.5
 nscbc.ylo.L_ref    = 1.843750e-07
-nscbc.ylo.drive_amp   = 1.600000e+05   # paper p_a (fitted with air); C4F10 refit would be 1.423000e+05
+nscbc.ylo.drive_amp   = 1.423000e+05   # C4F10 refit p_a (2026-11-19; paper air fit was 1.600000e+05)
 nscbc.ylo.drive_omega = 6.283185e+06
 nscbc.yhi.type     = outflow
 nscbc.yhi.target_p = 1.022000e+05
 nscbc.yhi.sigma    = 0.6
 nscbc.yhi.beta     = 0.5
 nscbc.yhi.L_ref    = 1.843750e-07
-nscbc.yhi.drive_amp   = 1.600000e+05   # paper p_a (fitted with air); C4F10 refit would be 1.423000e+05
+nscbc.yhi.drive_amp   = 1.423000e+05   # C4F10 refit p_a (2026-11-19; paper air fit was 1.600000e+05)
 nscbc.yhi.drive_omega = 6.283185e+06
 nscbc.zlo.type     = outflow
 nscbc.zlo.target_p = 1.022000e+05
 nscbc.zlo.sigma    = 0.6
 nscbc.zlo.beta     = 0.5
 nscbc.zlo.L_ref    = 1.843750e-07
-nscbc.zlo.drive_amp   = 1.600000e+05   # paper p_a (fitted with air); C4F10 refit would be 1.423000e+05
+nscbc.zlo.drive_amp   = 1.423000e+05   # C4F10 refit p_a (2026-11-19; paper air fit was 1.600000e+05)
 nscbc.zlo.drive_omega = 6.283185e+06
 nscbc.zhi.type     = none     # rigid substrate (no NSCBC)
 eta.bc.type.xlo = neumann
@@ -187,6 +190,9 @@ eta.bc.type.ylo = neumann
 eta.bc.type.yhi = neumann
 eta.bc.type.zlo = neumann
 eta.bc.type.zhi = REFLECT_EVEN
+eta.contact_angle.zhi = 0     # wall wetting (2026-11-19): contact angle through the liquid [deg]; the hydrogel/cell
+                              # surface is water-saturated and hydrophilic, so water wets it and a liquid film stays
+                              # between gas and wall (0 = complete wetting).  Unset = mirror ghosts = 90 deg (neutral).
 density.bc.type.xlo = nscbc_outflow
 density.bc.type.xhi = nscbc_outflow
 density.bc.type.ylo = nscbc_outflow
@@ -223,6 +229,8 @@ Limiter.type        = muscl2
 integration.type    = RungeKutta
 integration.rk.type = 3
 visc_subcycle              = 1       # bulk + shell viscous terms sub-cycled
+visc.flux_form             = 1       # bulk viscous stress as conservative face fluxes (harmonic face mu); the old expanded form
+                                     # mu lap(u) + grad(mu).grad(u) runs away in light band-tail cells at fine dx (2D jet crash 2026-11-19)
 shell.kappa_s_subcycle_max = 8192
 shell.heat_split           = 2       # shell viscous heat split by thermal effusivity
 shell.foot_rate            = 1       # viscous-jump rate and curvature taken at the foot point on eta = 1/2 (fixes the axis-tip runaway, see Hydro2 Parse)

@@ -138,6 +138,29 @@ def gas_centroid(ds):
     return np.array([np.sum(w * ad["index", a].d) / w.sum() for a in _AX])
 
 
+class _Padded(dict):
+    """field -> array, filled by _cgrid."""
+
+
+def _cgrid(ds, lev, c0, dims, fields):
+    """Covering grid of level `lev` from cell index c0 with `dims` cells, for `fields` (dict field -> ndarray).
+    A box that ends on the upper domain face makes yt fail by round-off ("read outside the boundaries of a
+    non-periodic domain"); there the last layer is not read but copied from its neighbour (zero gradient,
+    as at a wall)."""
+    dle = np.array([float(v) for v in ds.domain_left_edge])
+    dx = _finest_dx(ds) * 2 ** (ds.index.max_level - lev)
+    nf = np.array(ds.domain_dimensions) * 2 ** lev
+    c0 = np.asarray(c0, int); dims = np.asarray(dims, int)
+    cut = (c0 + dims >= nf) & (dims > 2)
+    dread = dims - cut.astype(int)
+    cg = ds.covering_grid(lev, left_edge=dle + c0 * dx, dims=dread)
+    out = _Padded()
+    for f in fields:
+        A = np.asarray(cg[f].d, float)
+        out[f] = np.pad(A, [(0, int(c)) for c in cut], mode="edge") if cut.any() else A
+    return out
+
+
 def _plane_cut(ds, geom, plane, half, centre):
     """p, eta on the finest-level plane through `centre` (normal axis plane[2]), a (2m x 2m) canvas
     of cell-centred samples at offsets (i - m + 0.5) dx from the centre; NaN outside the domain.
@@ -180,10 +203,10 @@ def _plane_cut(ds, geom, plane, half, centre):
         lo[iu], lo[iv] = dle[iu] + c0[iu] * dx[iu], dle[iv] + c0[iv] * dx[iv]
         lo[inn] = dle[inn] + k0 * dx[inn]
         dims[iu], dims[iv] = c1[iu] - c0[iu], c1[iv] - c0[iv]
-        cg = ds.covering_grid(lev, left_edge=lo, dims=dims)
+        cg = _cgrid(ds, lev, np.rint((lo - dle) / dx).astype(int), dims, (FIELD_P, FIELD_E))
         su = slice(c0[iu] - i0[iu], c1[iu] - i0[iu]); sv = slice(c0[iv] - i0[iv], c1[iv] - i0[iv])
         for A, f in ((P, FIELD_P), (E, FIELD_E)):
-            x = np.take(np.asarray(cg[f].d, float), kn - k0, axis=inn)   # axes (iu, iv) in index order
+            x = np.take(cg[f], kn - k0, axis=inn)   # axes (iu, iv) in index order
             A[su, sv] = x if iu < iv else x.T
     return u, v, P, E
 
@@ -192,7 +215,7 @@ def _surface(ds, geom, half, centre):
     """eta = 0.5 isosurface triangles (ntri, 3, 3) relative to the centre: marching cubes (yt's
     march_cubes_grid; skimage is not needed) on the finest-level eta of a box +-half around the centre,
     cell centres as lattice points.  Octant: the eta box is mirrored before meshing (closed surface).
-    Full: the box is clipped to the domain and edge-padded.  None if there is no surface."""
+    Full: the box is clipped to the domain and padded with liquid (eta = 1) outside it.  None if there is no surface."""
     from yt.utilities.lib.marching_cubes import march_cubes_grid
     dx = _finest_dx(ds)
     dle = np.array([float(v) for v in ds.domain_left_edge])
@@ -211,8 +234,10 @@ def _surface(ds, geom, half, centre):
         c0, c1 = np.maximum(i0, 0), np.minimum(i1, nf)
         if np.any(c1 - c0 < 2):
             return None
-        E = np.asarray(ds.covering_grid(lev, left_edge=dle + c0 * dx, dims=c1 - c0)[FIELD_E].d, float)
-        E = np.pad(E, [(c0[a] - i0[a], i1[a] - c1[a]) for a in range(3)], mode="edge")
+        E = _cgrid(ds, lev, c0, c1 - c0, (FIELD_E,))[FIELD_E]
+        # outside the domain is wall/far field, not fluid: pad with liquid (eta = 1) so the surface closes on the
+        # domain face.  Edge padding copied the wall-row gas outward and drew a gas column through the wall.
+        E = np.pad(E, [(c0[a] - i0[a], i1[a] - c1[a]) for a in range(3)], mode="constant", constant_values=1.0)
         x0 = dle + (i0 + 0.5) * dx - centre
     E = np.ascontiguousarray(np.clip(E, 0.0, 1.0))
     if not (E.min() < 0.5 < E.max()):
