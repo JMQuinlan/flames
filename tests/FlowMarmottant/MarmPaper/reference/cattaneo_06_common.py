@@ -539,7 +539,10 @@ def make_figure(case_tag, C, sim, models, exp, out_stem, xlim, zoom, rvol_norm=F
 # =========================================================================================== #
 #  Driver shared by the two scripts
 # =========================================================================================== #
-def main(case_tag, deck, default_output, stem, zoom_default):
+def main(case_tag, deck, default_output, stem, zoom_default, add_args=None, post=None, radii=None):
+    """add_args(ap): extra command-line options (e.g. 06Exp); post(a, C, plotdir, figdir, sim): extra analysis run
+    after the figures and GIFs, before the results are bundled; radii(a, C, plotdir, figdir): returns the
+    simulation radii dict (t, R_vol, R_eta, geom) in place of sim_radii()."""
     import argparse
     ap = argparse.ArgumentParser(description=sys.modules["__main__"].__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -563,10 +566,12 @@ def main(case_tag, deck, default_output, stem, zoom_default):
     ap.add_argument("--thermo", action="store_true", help="also draw R_vol from thermo.dat (km.sim measure)")
     ap.add_argument("--geom", choices=("slab", "octant", "full"), default=None, help="override geometry detection")
     ap.add_argument("--no-thermo-fig", action="store_true", help="skip the gas-thermodynamics figure (<stem>_thermo)")
-    ap.add_argument("--nproc", type=int, default=4)
+    ap.add_argument("--nproc", type=int, default=8, help="worker processes for frames and GIFs (default 8)")
     ap.add_argument("--formats", default=None, help="comma list, default %s" % ",".join(FIG["formats"]))
     import cattaneo_06_gif as _gif
     _gif.add_args(ap)
+    if add_args is not None:
+        add_args(ap)
     a = ap.parse_args()
     a.gif = a.gif or a.gif_only
 
@@ -587,7 +592,10 @@ def main(case_tag, deck, default_output, stem, zoom_default):
 
     sim = None
     if not a.gif_only:
-        sim = sim_radii(plotdir, a.input, geom=a.geom, nproc=a.nproc, figdir=figdir, stem=os.path.join(a.stem))
+        if radii is not None:                         # caller's own radii (06Exp: about the moving bubble)
+            sim = radii(a, C, plotdir, figdir)
+        else:
+            sim = sim_radii(plotdir, a.input, geom=a.geom, nproc=a.nproc, figdir=figdir, stem=os.path.join(a.stem))
         print("  geometry %s, %d frames, t = %.3f .. %.3f us"
               % (sim["geom"], len(sim["t"]), sim["t"][0] * 1e6, sim["t"][-1] * 1e6))
         toff = -a.exp_shift if a.time == "paper" else 0.0                 # display t [us] = t_sim [us] + toff
@@ -631,6 +639,8 @@ def main(case_tag, deck, default_output, stem, zoom_default):
                                exp_shift=a.exp_shift, formats=a.formats.split(",") if a.formats else None)
     if a.gif:
         _gif.make_gifs(a, C, case_tag, plotdir, figdir, sim["geom"] if sim else (a.geom or geometry(plotdir)), sim=sim)
+    if post is not None:
+        post(a, C, plotdir, figdir, sim)
     import marmpaper_bundle
     marmpaper_bundle.bundle(figdir, a.stem, [plotdir])
 

@@ -782,6 +782,7 @@ protected:
     int shell_foot_rate = 0;                // shell.foot_rate (see Parse)
     int foot_mirror[3][2] = {{0,0},{0,0},{0,0}};   // shell.foot_rate: eta BC per face is REFLECT_* (mirror ghosts)
     Set::Scalar contact_angle[3][2] = {{-1,-1},{-1,-1},{-1,-1}};   // eta.contact_angle.<face> [rad], through the liquid; < 0 = off
+    int contact_angle_profile = 0;     // eta.contact_angle_profile: weight the wall angle by how interface-like the wall cell is (see Parse)
     Set::Scalar jump_y_rho0 = -1.0, jump_y_rho1 = -1.0;   // psi reference phase densities of the tensor curvature (set once from the IC)
     Set::Scalar relax_time = 0.0;      // time of the current RelaxAndReinit call (BC fills inside it)
     int relax_diag = 0;

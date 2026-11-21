@@ -122,6 +122,16 @@ def thermo_series(plotdir, R0, geom, v0=None):
 # =========================================================================================== #
 #  Per-frame field extraction (runs in the worker pool)
 # =========================================================================================== #
+def plotfile_time(pf):
+    """Simulation time of an AMReX plotfile from its Header (no yt load)."""
+    with open(os.path.join(pf, "Header")) as fh:
+        fh.readline()
+        nv = int(fh.readline())
+        for _ in range(nv + 1):            # variable names, then the dimension
+            fh.readline()
+        return float(fh.readline())
+
+
 def _finest_dx(ds):
     return np.array([float(ds.domain_width[d]) / ds.domain_dimensions[d] / 2 ** ds.index.max_level
                      for d in range(3)])
@@ -601,15 +611,18 @@ def make_gifs(a, C, case_tag, plotdir, figdir, geom, sim=None):
     rvol_norm).  sim: sim_radii() dict if already computed (fallback R(t) without thermo.dat)."""
     S = dict(cc.FIG)
     _apply_rc(S)
-    nproc = max(1, min(a.nproc, 4))
-    fs = cc._plotfiles(plotdir)[::max(1, a.gif_every)]
+    nproc = max(1, a.nproc)
+    toff = -a.exp_shift if a.gif_time == "paper" else 0.0          # display t [us] = t_sim [us] + toff
+    fs = cc._plotfiles(plotdir)
+    if getattr(a, "gif_tmax", None) is not None:                    # last frame on the display axis
+        fs = [pf for pf in fs if plotfile_time(pf) * 1e6 + toff <= a.gif_tmax + 1e-9]
+    fs = fs[::max(1, a.gif_every)]
     if not fs:
         print("  [gif] no plotfiles"); return
     want3d = bool(a.gif_3d) and geom != "slab"
     if a.gif_3d and geom == "slab":
         print("  [gif] --gif-3d: RADIAL slab has no 3-D bubble, skipped")
     um = 1e6
-    toff = -a.exp_shift if a.gif_time == "paper" else 0.0          # display t [us] = t_sim [us] + toff
     print("  [gif] %s geometry, %d frames (every %d), time axis: %s%s"
           % (geom, len(fs), a.gif_every, a.gif_time, " (t_fig = t_sim %+g us)" % toff if toff else ""))
 
@@ -673,7 +686,11 @@ def make_gifs(a, C, case_tag, plotdir, figdir, geom, sim=None):
 
     root = os.path.join(figdir, a.stem + "_gif_frames")
     outs = []
-    for kind, suffix in (("bubble", "_bubble"), ("pair", "_bubble_R")) + ((("3d", "_bubble3d"), ("3dcut", "_bubble3d_cut"), ("3dcutshell", "_bubble3d_cutshell")) if want3d else ()):
+    todo = (("bubble", "_bubble"), ("pair", "_bubble_R")) + ((("3d", "_bubble3d"), ("3dcut", "_bubble3d_cut"), ("3dcutshell", "_bubble3d_cutshell")) if want3d else ())
+    if getattr(a, "gif_kinds", None):
+        keep = set(a.gif_kinds.split(","))
+        todo = tuple(k for k in todo if k[0] in keep)
+    for kind, suffix in todo:
         fdir = os.path.join(root, suffix.lstrip("_"))
         os.makedirs(fdir, exist_ok=True)
         for old in glob.glob(os.path.join(fdir, "frame_*.png")) + glob.glob(os.path.join(fdir, "frame_*.eps")):
@@ -708,6 +725,10 @@ def add_args(ap):
     g.add_argument("--gif-3d", action="store_true", help="also <stem>_bubble3d.gif (eta = 0.5 isosurface) and <stem>_bubble3d_cut.gif (cut open along the cross-section plane; octant/full)")
     g.add_argument("--gif-cut-half", type=float, default=3.0, metavar="N",
                    help="half-width of the pressure cut face in the cut 3-D GIF, in R0 (default 3)")
+    g.add_argument("--gif-tmax", type=float, default=None, metavar="T",
+                   help="last frame time [us] on the --gif-time axis (default: every plotfile)")
+    g.add_argument("--gif-kinds", default=None, metavar="LIST",
+                   help="comma list of GIFs to write from bubble,pair,3d,3dcut,3dcutshell (default: all enabled)")
     g.add_argument("--gif-dpi", type=int, default=GIF["dpi"], help="frame dpi (default %d)" % GIF["dpi"])
     g.add_argument("--gif-thermo-v0", default=None, metavar="V0|THERMO",
                    help="gas volume at t = 0 for the thermo.dat radius (number, or a reference thermo.dat whose "

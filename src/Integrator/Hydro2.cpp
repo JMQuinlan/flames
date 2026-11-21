@@ -1067,6 +1067,16 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
                         Util::Abort(INFO, key, " is set but eta.bc.type.", fnm[d][sd], " is not a REFLECT (wall) face");
                     value.contact_angle[d][sd] = deg * M_PI / 180.0;
                 }
+            // eta.contact_angle_profile = 1 (2026-11-20): impose the angle in proportion to how much the
+            // wall cell is an INTERFACE.  The resolved diffuse interface is the tanh profile of the IC,
+            // for which |grad eta| = 2 eta (1 - eta) / epsilon exactly.  A uniform gas-liquid mixture
+            // (sub-band gas film trapped by a jet on the wall) has eta(1-eta) > 0 but |grad eta| ~ 0: no
+            // contact line there, yet mode 0 forced n_w on its noise normals (row-by-row eta
+            // alternation in the wall foam, 2D jet 2026-11-19).  Mode 1 uses
+            //     w = min(1, epsilon |grad eta| / (2 eta (1 - eta)))   at the mirror interior cell,
+            //     n_ghost = normalise(w n_w + (1 - w) n_mirror):
+            // w = 1 on a resolved interface (mode 0 exactly), w -> 0 in a uniform mixture (mirror = neutral).
+            pp_query_validate("eta.contact_angle_profile", value.contact_angle_profile, {0, 1});
         }
 
         // RADIALLY SYMMETRIC SLAB (2026-10-23).  density.bc.type.yhi (and zhi
@@ -7774,6 +7784,9 @@ void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time)
                     amrex::Box gb = amrex::grow(vb, 1);
                     if (sd) gb.setSmall(d, face + 1); else gb.setBig(d, face - 1);   // ghost layer beyond the wall
                     auto nf = Nf.array(mfi);
+                    auto eta = eta_mf[lev]->const_array(mfi);
+                    const int prof = contact_angle_profile;
+                    const Set::Scalar eps = epsilon;
                     amrex::ParallelFor(gb, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
                         int m[3] = {i, j, k};
                         m[d] = 2 * face + (sd ? 1 : -1) - m[d];   // mirror interior cell
@@ -7782,8 +7795,36 @@ void Hydro2::TensorCurvature(int lev, amrex::MultiFab &K, Set::Scalar time)
                             if (e != d) { tg[e] = nf(m[0], m[1], m[2], e); tm += tg[e] * tg[e]; }
                         tm = std::sqrt(tm);
                         if (tm <= 0.0) return;
+                        Set::Scalar nw[3] = {0, 0, 0};
                         for (int e = 0; e < AMREX_SPACEDIM; ++e)
-                            nf(i, j, k, e) = (e == d) ? sgn * ct : st * tg[e] / tm;
+                            nw[e] = (e == d) ? sgn * ct : st * tg[e] / tm;
+                        Set::Scalar w = 1.0;
+                        if (prof)
+                        {
+                            // interface fraction of the mirror cell: |grad eta| relative to the tanh profile's 2 eta(1-eta)/eps
+                            Set::Vector ge = Numeric::Gradient(eta, m[0], m[1], m[2], 0, DXc);
+                            // wall-normal part: one-sided 2nd-order into the domain (the central difference
+                            // would use the even-reflected ghost and return half the slope)
+                            {
+                                int m1[3] = {m[0], m[1], m[2]}, m2[3] = {m[0], m[1], m[2]};
+                                const int in = sd ? -1 : 1;
+                                m1[d] += in; m2[d] += 2 * in;
+                                ge(d) = in * (-3.0 * eta(m[0], m[1], m[2]) + 4.0 * eta(m1[0], m1[1], m1[2])
+                                              - eta(m2[0], m2[1], m2[2])) / (2.0 * DXc[d]);
+                            }
+                            const Set::Scalar em = eta(m[0], m[1], m[2]);
+                            const Set::Scalar den = 2.0 * em * (1.0 - em);
+                            w = den > 0.0 ? std::min(1.0, eps * ge.lpNorm<2>() / den) : 0.0;
+                        }
+                        Set::Scalar nb[3] = {0, 0, 0}, nn = 0.0;
+                        for (int e = 0; e < AMREX_SPACEDIM; ++e)
+                        {
+                            nb[e] = w * nw[e] + (1.0 - w) * nf(i, j, k, e);   // nf(i,j,k) = mirror ghost normal
+                            nn += nb[e] * nb[e];
+                        }
+                        nn = std::sqrt(nn);
+                        for (int e = 0; e < AMREX_SPACEDIM; ++e)
+                            nf(i, j, k, e) = nn > 0.0 ? nb[e] / nn : 0.0;
                     });
                 }
             }
