@@ -45,7 +45,8 @@ namespace Integrator {
 // STAGE 2a (species.eos = mixture): species-dependent gamma and c_v inside a phase -- see the members below.
 class Species {
 public:
-    static constexpr int NMAX = 24;                  // stack-array bound per phase in the kernels
+    static constexpr int NMAX = 64;                  // stack-array bound per phase in the kernels (24 until 2026-11-18;
+                                                     // 64 holds the 35-56 species dodecane mechanisms of PelePhysics)
     int on = 0;
     int n0 = 0, n1 = 0;                              // species in phase 0 / phase 1
     std::vector<std::string> names;                  // phase 0 first, then phase 1
@@ -90,6 +91,7 @@ public:
         int on = 0, n0 = 0, n1 = 0;
         Set::Scalar g[2 * NMAX], cv[2 * NMAX];
         int has_pi[2] = {0, 0};
+        Set::Scalar trace_m = 0.0;                    // species.trace_rho: below this phase partial density keep the base EOS
         Set::Scalar pi[2 * NMAX], rr[2 * NMAX];       // stage 2b: stiffness and reference density per species
         Pele::Thermo th;                              // species.eos = pele: thermally perfect species (Hydro2_Pele.H)
         // gam, cvm come in as the phase defaults.  es = specific sensible energy E_k / m_k of the phase in this cell;
@@ -110,7 +112,7 @@ public:
                     sm += mi; sc += mi * cv[c0 + s]; sv += vi;
                     a += vi / (g[c0 + s] - 1.0); b += vi * g[c0 + s] * pi[c0 + s] / (g[c0 + s] - 1.0);
                 }
-                if (!(sm > 1.0e-300) || !(sv > 0.0)) return;
+                if (!(sm > 1.0e-300) || !(sv > 0.0) || sm < trace_m) return;
                 cvm = sc / sm; gam = 1.0 + sv / a;
                 if (pinf) *pinf = (b / sv) * (gam - 1.0) / gam;
                 return;
@@ -119,7 +121,7 @@ public:
             {
                 Set::Scalar Y[Pele::NS], sm = 0.0;
                 for (int s = 0; s < Pele::NS; ++s) { Y[s] = std::max(m(i, j, k, c0 + s), 0.0); sm += Y[s]; }
-                if (!(sm > 1.0e-300)) return;
+                if (!(sm > 1.0e-300) || sm < trace_m) return;
                 for (int s = 0; s < Pele::NS; ++s) Y[s] /= sm;
                 if (th.frozen_c && pinf && rhok > 0.0 && es > 0.0) th.GammaPiCv(es, rhok, Y, gam, *pinf, cvm);
                 else th.GammaCv(es, Y, gam, cvm);
@@ -131,7 +133,7 @@ public:
                 const Set::Scalar mi = std::max(m(i, j, k, c0 + s), 0.0);
                 sm += mi; sc += mi * cv[c0 + s]; sp += mi * cv[c0 + s] * g[c0 + s];
             }
-            if (!(sm > 1.0e-300) || !(sc > 0.0)) return;
+            if (!(sm > 1.0e-300) || !(sc > 0.0) || sm < trace_m) return;
             cvm = sc / sm; gam = sp / sc;
         }
         AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
@@ -157,9 +159,22 @@ public:
         }
     };
     Pele::Thermo pele;                               // filled at parse when species.eos = pele
+    // [2026-11-18] SPECIES DIFFUSION (design stage 6), default off -- see Hydro2::DiffuseSpecies.
+    int diff_on = 0;                  // species.diffusion = 1
+    int diff_phase = 0;               // species.diffusion.phase (0 = the eta = 1 phase, the gas)
+    Set::Scalar diff_D = 0.0;         // species.diffusion.D  [m^2/s], one value for every species of the phase, or
+    Set::Scalar diff_Sc = 0.0;        // species.diffusion.Sc: D = mu_k / (rho_k Sc) (needs the phase viscosity)
+    Set::Scalar diff_alpha_min = 1.0e-3;   // faces only between cells holding at least this volume fraction of the phase
+    Set::Scalar diff_cfl = 0.9;
+    int diff_max_sub = 1000;
+    int diff_verbose = 0;
+    // [2026-11-18] species.trace_rho [kg/m^3], default 0 (off): a phase whose partial density alpha_k rho_k is below
+    // this keeps the base EOS (eos0/eos1) instead of the composition closure.  A trace phase's composition and
+    // e_s = E_k / m_k are noise (m_k sits at the `small` floor), and the pele closure turned them into gamma ~ 1.01.
+    Set::Scalar trace_rho = 0.0;
     Eos eos() const
     {
-        Eos e; e.on = (on && eos_mix) ? 1 : 0; e.n0 = n0; e.n1 = n1; e.th = pele;
+        Eos e; e.on = (on && eos_mix) ? 1 : 0; e.n0 = n0; e.n1 = n1; e.th = pele; e.trace_m = trace_rho;
         e.has_pi[0] = has_pi[0]; e.has_pi[1] = has_pi[1];
         for (int s = 0; s < 2 * NMAX; ++s) { e.g[s] = sgam[s]; e.cv[s] = scv[s]; e.pi[s] = spi[s]; e.rr[s] = (srho[s] > 0.0) ? srho[s] : 1.0; }
         return e;

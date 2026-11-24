@@ -179,6 +179,11 @@ protected:
     // only div(Omega_visc) on the interface band, in N sub-steps of dt/N, so the
     // stiff kappa_s term no longer sets the global timestep.
     void SubcycleShellViscous(int lev, Set::Scalar dt);
+    // Sub-cycled BULK viscous update (visc_subcycle = 1, ported from flames2): div(tau) and the dissipation advanced
+    // once per step after the hyperbolic advance in N explicit sub-steps, so mu/rho no longer limits the global dt.
+    void SubcycleBulkViscous(int lev, Set::Scalar time, Set::Scalar dt);
+    // Fickian species diffusion inside one phase (species.diffusion = 1), operator-split once per step.
+    void DiffuseSpecies(int lev, Set::Scalar time, Set::Scalar dt);
 
     // ------------------------------------------------------------------
     // CAPILLARY OPERATOR  L_cap   (Schmidmayer 2017 eq. 17, sec. 4.2.2)
@@ -518,6 +523,7 @@ protected:
     // k = mu(eta) cp(eta) / Pr, energy source div(k grad T).  Off by default.
     int thermal_conduction = 0;
     Set::Scalar thermal_Pr = 0.72;
+    Set::Scalar thermal_k0 = -1.0, thermal_k1 = -1.0;   // thermal.k0/k1: phase conductivities (< 0: k = mu cp / Pr)
     // [2026-09-24] embedded-solid force / probe time history (solid.force_int):
     // every force_int finest-level steps, append t, total force (momentum removed
     // by the implicit penalty / dt), wall-face pressure force and probe pressures
@@ -577,6 +583,8 @@ protected:
     //   3 = combined (Abramzon & Sirignano 1989): rate from B_M, liquid heating from B_T' = (1+B_M)^phi - 1.
     // Rate per unit interface area: rho_g Dv/delta ln(1+B_M)  or  k_g/(cp_g delta_T) ln(1+B_T), times |grad eta|.
     int    vap_model = 0;
+    int    vap_sp_gas = -1, vap_sp_liq = -1;   // evaporation into these species (vaporization.vapor_species / liquid_species)
+    int    vap_Yinf_local = 0;                 // 1 = film-model far-field vapour fraction from the cell's vapour species
     int    vap_legacy_energy = 0;      // 1 = old bookkeeping (mass moves without its phase energy)
     Set::Scalar vap_delta = 0.0;       // mass-transfer film thickness [m] (= L / Sh)
     Set::Scalar vap_delta_T = 0.0;     // heat-transfer film thickness [m] (= L / Nu); default vap_delta
@@ -781,6 +789,8 @@ protected:
     // solver, so contacts and shear layers away from shocks are untouched.  Not available with elastic.on.
     Set::Scalar  relax_omega = -1.0;     // finite-rate pressure relaxation (RelaxAndReinit); < 0 = instantaneous
     int          relax_share_mass = 0;   // finite-rate step: energy defect shared by mass (1) or volume (0) fractions
+    int          relax_trace_pT = 0;     // relax.trace_pT: p-T (1) or T-only (3) equilibrium of trace gas in liquid (see Parse)
+    Set::Scalar  relax_trace_alpha = 1.0e-4; // relax.trace_alpha: gas volume fraction below which a cell is a trace cell
     int          relax_reinit_mass = 0;  // instantaneous relaxation: energy defect shared by mass before the re-initialisation (0 = standard)
     int          shock_fix = 0;
     Set::Scalar  shock_fix_ratio = 0.5;
@@ -836,6 +846,7 @@ protected:
         amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> mom;
         amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> energy;
         amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> ene_k;
+        amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> spec;   // species partial-density fluxes (species.on)
     };
     amrex::Vector<CellFluxes> cc_fluxes;  // indexed by level
 
@@ -879,6 +890,18 @@ protected:
     int visc_flux_form = 0;         // 1 = viscous force as a difference of face stresses (see Parse)
     int visc_harmonic = 0;          // 1 = (with visc_flux_form) harmonic face viscosity 1/(e/mu0 + (1-e)/mu1) (see Parse)
     int sym_face_central = 1;       // 1 = central (not one-sided) Hessian stencils in cells on a symmetry face (see Parse)
+    // [2026-11-18] ported from flames2 (SymFix branch), both default OFF here (see Parse)
+    int cfl_dimensional = 0;        // 1 = dt_acoustic = cfl / sum_d (c + |u_d|)/dx_d (flames2 form)
+    int visc_subcycle = 0;          // 1 = bulk viscosity advanced by SubcycleBulkViscous once per step, not in the RK stages
+    Set::Scalar visc_subcycle_cfl = 0.9;
+    int visc_subcycle_max = 1000;
+    int visc_subcycle_verbose = 0;
+    int dt_diag = 0;                // > 0: print the dt limits every dt_diag steps
+    int T_phase_consistent = 0;     // temperature.phase_consistent (see Parse)
+    Set::Field<Set::Scalar> Tph_mf; // temperature.phase_consistent: T of phase 0 and phase 1
+    int relax_refill_eta_ghosts = 0;   // 1 = refill eta/shell/cfun ghosts after RelaxAndReinit (flames2 fix)
+    int nscbc_ghost_clamp_domain = 0;  // 1 = NSCBC outer-ghost clamp only outside the domain (flames2 fix)
+    bool shell_subcycle_now = false;   // true only during Advance's end-of-step FillGhost4BC (shell sub-cycle once per step)
 
 };
 }

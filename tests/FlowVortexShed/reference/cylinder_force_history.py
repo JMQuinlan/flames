@@ -3,11 +3,11 @@
 Force history + vortex-shedding statistics for a Hydro2 cylinder run
 (solid.force_int = 1 -> <run_dir>/output_forces.dat).
 
-  python3 cylinder_force_history.py <run_dir> [--outdir DIR] [--window W]
+  python3 cylinder_force_history.py <run_dir> [--outdir DIR] [--window W] [--log]
 
 Writes to <outdir> (default Images/<run_dir name>/ next to this script):
-  force_history.png     Cl(t) and Cd(t) (+ |Cl| on a log axis to show the
-                        growth of the shedding instability from round-off)
+  force_history.png     Cl(t) and Cd(t) (with --log, also |Cl| on a log axis to
+                        show the growth of the shedding instability from round-off)
   shedding_summary.csv  Re, Cd mean / amplitude, Cl amplitude, Strouhal number
                         St = f D / U over the last W time units (default 30),
                         and whether the wake is shedding (Cl amplitude > 1e-3)
@@ -59,13 +59,15 @@ def main():
     print(f"{d}: t = {t[0]:.1f} .. {t[-1]:.1f}   window last {W:g}")
     print(f"  shedding = {shedding}   Cl amplitude {cl_amp:.3e}   St = {St:.4f}   "
           f"Cd mean {Cd[m].mean():.4f} +- {cd_amp:.2e}")
-    fig, ax = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
+    log = "--log" in args
+    fig, ax = plt.subplots(3 if log else 2, 1, figsize=(10, 9) if log else (10, 5), sharex=True)
     ax[0].plot(t, Cd, lw=0.8, color="k"); ax[0].set_ylabel(r"$C_d$")
     lo, hi = np.percentile(Cd[t > 5], [0.5, 99.5]); pad = 0.1 * (hi - lo) + 1e-3
     ax[0].set_ylim(lo - pad, hi + pad)
     ax[1].plot(t, Cl, lw=0.8, color="C0"); ax[1].set_ylabel(r"$C_l$")
-    ax[2].semilogy(t, np.abs(Cl) + 1e-16, lw=0.6, color="C3"); ax[2].set_ylabel(r"$|C_l|$")
-    ax[2].set_xlabel(r"$t\,U/D$")
+    if log:
+        ax[2].semilogy(t, np.abs(Cl) + 1e-16, lw=0.6, color="C3"); ax[2].set_ylabel(r"$|C_l|$")
+    ax[-1].set_xlabel(r"$t\,U/D$")
     for a in ax: a.grid(alpha=0.3)
     ttl = (f"Re = {Re:g}: " if Re else "") + (f"St = {St:.3f}, $C_l$ amplitude {cl_amp:.3f}" if shedding
                                               else f"steady (|$C_l$| amplitude {cl_amp:.1e})")

@@ -7,8 +7,9 @@ and against the published equilibrium (p-T-g relaxed) solution with mass transfe
 
 Without mass transfer and with traces of 1e-5 of the other phase, the problem is the two-material Riemann problem
 liquid CO2 | CO2 vapour (stiffened gases), solved exactly here (Toro's method with p -> p + pi on each side).
-With mass transfer the reference is the plateau values read from Fig. 8 of (Bacigaluppi et al. 2021) (4-equation
-model with p-T-g relaxation, HLLC, 2000 cells) and the saturation pressure of this EOS pair at the local temperature.
+With mass transfer the reference is the CP, N = 2000 curve of Fig. 8 of (Bacigaluppi et al. 2021) (4-equation model
+with p-T-g relaxation), digitized into Bacigaluppi2021_Fig8/ next to this script, and the saturation pressure of this
+EOS pair at the local temperature.
 Temperature is the phase-change convention T = (p + pi)/((gamma - 1) cv rho) of the volume-weighted phases.
 """
 import os, sys, glob
@@ -24,8 +25,16 @@ VAP = dict(g=1.06, pi=8.86e5, cv=2410.0, q=-3.01e5, qp=-1.0398090e4)
 X0, TEND = 50.0, 0.08
 T0 = 273.0
 rhoT = lambda m, p, T: (p + m["pi"]) / ((m["g"] - 1) * m["cv"] * T)
-# plateau values read from Fig. 8 of Bacigaluppi et al. (2021) (with mass transfer), +- half a minor tick
-FIG8 = dict(p1=3.5e6, p2=1.93e6, u1=7.0, u2=76.0, T2=279.5)
+# Fig. 8 of Bacigaluppi et al. (2021) (with mass transfer), CP N = 2000 curve, digitized (see Bacigaluppi2021_Fig8/README.md)
+FIG8_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Bacigaluppi2021_Fig8")
+
+
+def load_fig8():
+    ref = {}
+    for q in ("rho", "u", "p", "T"):
+        d = np.loadtxt(os.path.join(FIG8_DIR, q + ".csv"), delimiter=",", skiprows=1)
+        ref[q] = (d[:, 0], d[:, 1])
+    return ref
 
 
 def gibbs(m, p, T):
@@ -116,12 +125,14 @@ def main():
         else:
             T1 = plateau(r, 20, 40, "T")
             print("    p_sat(T) at the liquid-side plateau temperature: %.4e  (plateau / p_sat - 1 = %+.2f %%)" % (psat(T1), 100 * (plateau(r, 20, 40, "p") / psat(T1) - 1)))
-            print("    against (Bacigaluppi et al. 2021) Fig. 8: p1 %+.1f %%, p2 %+.1f %%, u1 %+.1f m/s, u2 %+.1f m/s" % (
-                100 * (plateau(r, 20, 40, "p") / FIG8["p1"] - 1), 100 * (plateau(r, 58, 66, "p") / FIG8["p2"] - 1), plateau(r, 20, 40, "u") - FIG8["u1"], plateau(r, 58, 66, "u") - FIG8["u2"]))
-            kw = dict(color="k", ls="--", lw=1.2)
-            ax[2].axhline(FIG8["p1"] / 1e5, label="Plateaus (Bacigaluppi et al. 2021)", **kw); ax[2].axhline(FIG8["p2"] / 1e5, **kw)
-            ax[1].axhline(FIG8["u1"], label="Plateaus (Bacigaluppi et al. 2021)", **kw); ax[1].axhline(FIG8["u2"], **kw)
-            xs = np.linspace(0, 80, 400); liq = (1 - r["eta"]) > 1e-3; ax[2].plot(r["x"][liq], np.array([psat(T) for T in r["T"][liq]]) / 1e5, ":", color="C3", lw=2.0, label=r"Saturation Pressure $p_{sat}(T)$ Where Liquid")
+            ref = load_fig8()
+            rpl = lambda q, xa, xb: np.median(ref[q][1][(ref[q][0] > xa) & (ref[q][0] < xb)])
+            for side, xa, xb in (("liquid-side", 20, 40), ("vapour-side", 58, 66)):
+                print("    %s plateau, (Bacigaluppi et al. 2021) Fig. 8: p = %.4e (%+.2f %%)  u = %.3f (%+.2f m/s)  T = %.2f (%+.2f K)" % (
+                    side, rpl("p", xa, xb), 100 * (plateau(r, xa, xb, "p") / rpl("p", xa, xb) - 1), rpl("u", xa, xb), plateau(r, xa, xb, "u") - rpl("u", xa, xb),
+                    rpl("T", xa, xb), plateau(r, xa, xb, "T") - rpl("T", xa, xb)))
+            for k, q in enumerate(("rho", "u", "p", "T")):
+                ax[k].plot(ref[q][0], ref[q][1] / (1e5 if q == "p" else 1), "k--", lw=1.2, label="(Bacigaluppi et al. 2021)")
             ax[2].set_ylim(0, 65)
             ttl = r"CO$_2$ Depressurization Tube With Mass Transfer at $t$ = %g s" % TEND; name = "co2_depressurization_vap"
         for k in range(4): ax[k].legend(loc="best")

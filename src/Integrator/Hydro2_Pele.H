@@ -95,6 +95,19 @@ struct Thermo
         amrex::ignore_unused(T, Y);
 #endif
     }
+    // Sensible enthalpy of every species [J/kg] at T, consistent with EsCv: h_s,i = e_s,i(T) + R_i T
+    AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+    void Hs(const Set::Scalar T, Set::Scalar *h) const
+    {
+#ifdef HYDRO2_PELE_MECH
+        const Set::Scalar Tc = std::min(std::max(T, T_LO), T_HI);
+        Set::Scalar u[NS], c[NS];
+        CKUMS(Tc, u); CKCVMS(Tc, c);
+        for (int i = 0; i < NS; ++i) h[i] = u[i] * 1.0e-4 - e0[i] + c[i] * 1.0e-4 * (T - Tc) + Ri[i] * T;
+#else
+        amrex::ignore_unused(T, h);
+#endif
+    }
     AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
     Set::Scalar R(const Set::Scalar *Y) const
     {
