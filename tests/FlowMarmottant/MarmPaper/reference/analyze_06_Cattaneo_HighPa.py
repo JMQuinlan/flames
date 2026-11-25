@@ -12,6 +12,9 @@ Figure <figdir>/<stem>_R.{png,eps}: R [um] vs t [us] (t = 0 at the start of the 
     the experiment (filled markers; figure time shifted by -1.57 us onto the simulation axis),
     the simulation volumetric radius R_vol and the eta = 0.5 radius.
 Figure <figdir>/<stem>_R_full.{png,eps}: panel (a) only (compact).
+Figures <stem>_R_noKM, <stem>_R_full_noKM: the same without the coated KM / RPE curves.
+Shape modes (octant / full runs): <stem>_modes_time (a_l(t), one line per l), <stem>_modes_total (whole-run spectrum),
+<stem>_modes_rebounds/rebound_NN_modes (one spectrum per rebound); --no-modes skips them.
 Figure <figdir>/<stem>_thermo.{png,eps} (default; --no-thermo-fig skips it): mean gas pressure / p0 vs time on the
   Fig. 2a time axis (t + 1.57 us) from thermo.dat, the present model against isothermal (p V = const) and adiabatic
   (p V^gamma = const) compression along the simulated radius and the Cattaneo et al. heat-conducting-gas model;

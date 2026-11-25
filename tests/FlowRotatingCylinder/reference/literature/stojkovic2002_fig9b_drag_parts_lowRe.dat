@@ -1,0 +1,21 @@
+# Stojkovic, Breuer & Durst, Phys. Fluids 14, 3160 (2002), FIG. 9(b): pressure (p) and friction (f) parts of the
+# drag coefficient, steady flow, 1 <= Re <= 45, alpha = 0.5, 3, 5.  Digitized (legend-template matching).
+# Uncertainty +-0.02 (1 pixel = 0.011); +-0.08 for the friction parts of alpha = 0.5 and 3 at Re <= 5, where the
+# solid markers overlap, and +-0.05 for the alpha = 0.5 pressure part (hollow circle under solid squares);
+# nan = that marker is hidden (alpha = 0.5 pressure part, Re <= 10).
+# Check: Cdp + Cdf at alpha = 5, Re = 5 is 0.747; the total-drag line of FIG. 9(a) reads 0.74 there.
+# columns: Re  Cdp_a0.5  Cdf_a0.5  Cdp_a3  Cdf_a3  Cdp_a5  Cdf_a5
+         1         nan       5.177       4.319       5.164       2.643       5.275
+         2         nan       3.256       2.215       3.343      -0.042       3.647
+         3         nan       2.524       1.363       2.635      -0.994       3.088
+         4         nan       2.114        0.89       2.279      -1.532       2.795
+         5         nan       1.842       0.586       2.029      -1.871       2.618
+       7.5         nan       1.438       0.155       1.672      -2.235       2.348
+        10         nan       1.209      -0.079       1.465      -2.343       2.188
+        15       1.287       0.954      -0.292        1.22      -2.352       1.976
+        20       1.167       0.799      -0.393       1.076      -2.265       1.837
+        25       1.081       0.698      -0.452       0.975      -2.151       1.725
+        30       1.017       0.624      -0.478       0.906      -2.054       1.635
+        35       0.975        0.57      -0.494       0.847      -1.956       1.566
+        40       0.936       0.522      -0.505       0.805      -1.878       1.507
+        45       0.906       0.485       -0.51       0.762      -1.793       1.454

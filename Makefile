@@ -84,6 +84,17 @@ ifdef PELE_ENABLED
     $(info >>> PELE_ENABLED: compiling with PelePhysics GammaLaw EOS, mechanism = air (NUM_SPECIES=2))
 endif
 
+# Hydro2 finite-rate chemistry / thermally perfect species from ONE PelePhysics mechanism (Hydro2_Pele.H).
+# Independent of the PELE_ENABLED scaffolding above (no PelePhysics sources, no SUNDIALS): only the mechanism's
+# generated mechanism.H / mechanism.cpp are used.  Off unless HYDRO2_MECH is given; build into its own POSTFIX, e.g.
+#   make POSTFIX=2d-g++-bd AMREX_TARGET=ext/AMReX-Codes/amrex/2d-g++-26.02 \
+#        HYDRO2_MECH=ext/AMReX-Combustion/PelePhysics/Mechanisms/BurkeDryer bin/hydro2-2d-g++-bd
+ifdef HYDRO2_MECH
+    CXX_COMPILE_FLAGS += -DHYDRO2_PELE_MECH
+    ALAMO_INCLUDE += -isystem $(HYDRO2_MECH)
+    $(info >>> HYDRO2_MECH: Hydro2 with the PelePhysics mechanism $(HYDRO2_MECH))
+endif
+
 HDR_ALL = $(shell find src/ -name *.H)
 HDR_TEST = $(shell find src/ -name *Test.H)
 HDR = $(filter-out $(HDR_TEST),$(HDR_ALL))

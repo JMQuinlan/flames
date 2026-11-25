@@ -63,6 +63,27 @@ FIG = dict(STYLE)
 # R_vol deep purple (drawn on top), R(eta=.5) mustard, experiment red (every pair >= 15 under every CVD type).
 FIG.update(c_km="#0072B2", c_rp="#0072B2", c_catt="k", c_vol="#4B2C7F", c_eta="#D4A017", c_exp="#CB181D",
            size=(6.5, 5.6), height_ratios=(1.0, 1.0))
+# Paper figures are drawn at their printed size: half the 6.5 in text width of the 11 pt article (3.25 in), every
+# text element (title, axis labels, ticks, legend, panel labels, colour bars, GIFs) at FONT pt, so nothing is
+# scaled when the figure is placed at 0.5\textwidth.  Line widths and markers sized for that width.
+FONT = 9.0
+WIDTH = 3.25
+FIG.update(font_size=FONT, label_size=FONT, tick_size=FONT, legend_size=FONT, title_size=FONT,
+           size=(WIDTH, 4.9), size_single=(WIDTH, 2.85), size_thermo=(WIDTH, 2.6),
+           line_width=1.1, axes_width=0.6, lw_model=0.9, lw_sim=1.1, ms_sim=2.2, ms_exp=2.6)
+# legend handle geometry shared by every 06 figure (compact, two columns fit in WIDTH at FONT pt)
+LEG = dict(columnspacing=0.9, handlelength=1.8, handletextpad=0.4, labelspacing=0.25, borderaxespad=0.2)
+
+
+def paper_title(C):
+    """Figure title of every 06 figure, e.g. 'Cattaneo et al. (2025), 142 kPa Comparison'."""
+    return "Cattaneo et al. (2025), %.0f kPa Comparison" % (C.pa / 1e3)
+
+
+def _rc_fonts():
+    """rc overrides that put plain-matplotlib figures (thermo) on the FIG text size."""
+    return {"font.size": FONT, "axes.labelsize": FONT, "axes.titlesize": FONT, "legend.fontsize": FONT,
+            "xtick.labelsize": FONT, "ytick.labelsize": FONT, "legend.title_fontsize": FONT}
 
 
 # =========================================================================================== #
@@ -311,13 +332,53 @@ def sim_radii(plotdir, deck, geom=None, nproc=4, figdir=None, stem="06"):
         rows = sch20_analysis._pool_map(_slab_frame, _plotfiles(plotdir), nproc)
         t, Rv, R5 = (np.array(c, float) for c in zip(*rows))
     else:
-        # Sch20Analysis frame pass: R_vol from the gas volume in a box (x 8 in the octant), R_ray along +x.
-        # Windows widened for a bubble that grows to ~2.4 R0; shape directions reduced (unused here).
-        A = sch20_analysis.Sch20Analysis(deck, plotdir, case="Driven", coated=True, stem=stem + "_sch20",
-                                         out_dir=figdir, nproc=nproc, verbose=False,
-                                         style=dict(ray_xmax_R0=3.0, box_R0=3.0, n_dirs=24))
+        # Sch20Analysis frame pass: R_vol from the gas volume in a box (x 8 in the octant), R_ray along +x,
+        # and the eta = 0.5 surface in MODES_STYLE["n_dirs"] directions for the shape modes (shape_mode_figures).
+        # Windows widened for a bubble that grows to ~2.4 R0.
+        A = _sch20(deck, plotdir, figdir, stem, nproc)
         t, Rv, R5 = A.col("t"), A.col("R_vol"), A.col("R_ray")
+        return dict(t=t, R_vol=Rv, R_eta=R5, geom=geom, A=A)
     return dict(t=t, R_vol=Rv, R_eta=R5, geom=geom)
+
+
+# Sch20Analysis windows for the 06 bubbles (grow to ~2.4 R0): radius ray, gas-volume box and shape search to
+# 3 R0; 400 surface directions (the l <= modes_lmax = 8 fit has 81 coefficients).
+MODES_STYLE = dict(ray_xmax_R0=3.0, box_R0=3.0, n_dirs=400, shape_rmax_R0=3.0)
+
+
+def _sch20(deck, plotdir, figdir, stem, nproc):
+    return sch20_analysis.Sch20Analysis(deck, plotdir, case="Driven", coated=True, stem=stem + "_sch20",
+                                        out_dir=figdir, nproc=nproc, verbose=False, style=dict(MODES_STYLE))
+
+
+def shape_mode_figures(a, plotdir, figdir, sim, toff=0.0, C=None):
+    """Spherical-harmonic shape modes of the eta = 0.5 surface (about the gas centroid on non-mirrored axes),
+    time axis in us on the same axis as the R(t) figure (t_display = t_sim + toff):
+      <stem>_modes_time      R_vol/R0 over a_l(t), one line per l (when each mode appears; rebounds dashed)
+      <stem>_modes_total     whole-run spectrum: max over t of a_l (bars), time-RMS (dots)
+      <stem>_modes_rebounds/rebound_NN_modes   per rebound: a_l at R_min and the max over that cycle
+    Octant runs: odd l vanish by symmetry (grey).  Slabs (1-D radial) have no shape modes."""
+    geom = sim["geom"] if sim else (a.geom or geometry(plotdir))
+    if geom == "slab":
+        print("  [skip] shape modes: RADIAL slab (1-D radial, no shape)"); return
+    A = (sim or {}).get("A") or _sch20(a.input, plotdir, figdir, os.path.join(a.stem), a.nproc)
+    A.S["modes_time_unit"] = "us"; A.S["modes_t_offset_us"] = toff
+    for k in ("font_size", "label_size", "tick_size", "legend_size", "title_size", "line_width", "axes_width",
+              "pad_inches", "font"):                                    # 06 text size, line weights, colours
+        A.S[k] = FIG[k]
+    A.S["c_sim"] = FIG["c_vol"]
+    A.S.update(size_tall=(WIDTH, 3.9), size_spectrum=(WIDTH, 2.5), modes_legend="top")
+    _apply_rc(A.S)                                                  # rcParams for the new sizes (axis labels, ticks)
+    tt = paper_title(C) if C is not None else None
+    A.T = dict(A.T, modes_time=tt, modes_total=tt, modes_rebound=tt)
+    if a.formats:
+        A.S["formats"] = a.formats.split(",")
+    A.stem = os.path.join(figdir, a.stem); A.verbose = True
+    for p in ("modes_time", "modes_total", "modes_rebounds"):
+        try:
+            getattr(A, A.PLOTS[p])()
+        except Exception as exc:                                      # keep the other figures going
+            print("  [warn] %s failed: %s" % (p, exc))
 
 
 def thermo_radius(plotdir, R0, geom):
@@ -413,7 +474,7 @@ def _n_per_compression(t, q, p, k):
     return np.nan if i1 <= i0 + 3 else -np.polyfit(np.log(V[i0:i1 + 1]), np.log(P[i0:i1 + 1]), 1)[0]
 
 
-def make_thermo_figure(case_tag, C, plotdir, geom, t_end, out_stem, exp_shift=EXP_SHIFT_US, formats=None):
+def make_thermo_figure(case_tag, C, plotdir, geom, t_end, out_stem, exp_shift=EXP_SHIFT_US, formats=None, sim_shift=0.0):
     """Mean gas pressure / p_g(0) vs time (Fig. 2a time axis, t_fig = t - exp_shift) for the present model, with
     isothermal (p V = const) and adiabatic (p V^gamma = const) compression along the simulated radius and the
     Cattaneo et al. heat-conducting-gas model.  Also prints the effective exponent per compression."""
@@ -426,19 +487,20 @@ def make_thermo_figure(case_tag, C, plotdir, geom, t_end, out_stem, exp_shift=EX
     G = getattr(C, "gamma_gas", C.gas.kappa_g)      # the run's gas gamma (eos1.gamma), not --kappa-g
     tm, Rm, pm = solve_cattaneo(C.pa, Envelope(), t_end + 0.2e-6, P=dict(R0=C.R0), return_p=True)
     SH = -exp_shift * 1e-6
+    SHs = SH + sim_shift * 1e-6                       # simulation curves: + sim_shift [us] (06Exp)
     um = 1e6
-    rc = {"font.family": "serif", "font.size": 11, "axes.labelsize": 12, "legend.fontsize": 9.5,
-          "mathtext.fontset": "dejavuserif", "pdf.fonttype": 42, "ps.fonttype": 42}
+    rc = {"font.family": "serif", "mathtext.fontset": "dejavuserif", "pdf.fonttype": 42, "ps.fonttype": 42}
+    rc.update(_rc_fonts())
     with plt.rc_context(rc):
-        fig, ax = plt.subplots(figsize=(9, 4.2))
-        ax.plot((t + SH) * um, q ** -G, "--", color="#de2d26", lw=1.1, label=r"Adiabatic, $p_gV^{\gamma}$ = const")
-        ax.plot((t + SH) * um, 1.0 / q, "--", color="#3182bd", lw=1.1, label=r"Isothermal, $p_gV$ = const")
+        _apply_rc(FIG)
+        fig, ax = plt.subplots(figsize=FIG["size_thermo"])
+        ax.plot((t + SHs) * um, q ** -G, "--", color="#de2d26", lw=FIG["lw_model"], label=r"Adiabatic ($p_gV^{\gamma}$)")
+        ax.plot((t + SHs) * um, 1.0 / q, "--", color="#3182bd", lw=FIG["lw_model"], label=r"Isothermal ($p_gV$)")
         mk = tm >= 0
-        ax.plot((tm[mk] + SH) * um, pm[mk] / pm[0], "-.", color="k", lw=1.1,
-                label="Cattaneo et al. model")
-        ax.plot((t + SH) * um, pg / pg0, "-", color="#54278f", lw=1.6, label="Present Model")
+        ax.plot((tm[mk] + SH) * um, pm[mk] / pm[0], "-.", color="k", lw=FIG["lw_model"], label="Cattaneo model")
+        ax.plot((t + SHs) * um, pg / pg0, "-", color=FIG["c_vol"], lw=FIG["lw_sim"], label="Num.")
         ax.set_yscale("log")
-        x1 = (t[-1] + SH) * um
+        x1 = (t[-1] + SHs) * um
         ax.set_xlim(0.0, 12.0 if x1 >= 12.0 else x1)
         lo, hi = ((0.05, 2e3) if case_tag == "hi" else (0.25, 12.0))
         dmin = min(np.nanmin(pg / pg0), np.nanmin(pm[mk] / pm[0])); dmax = max(np.nanmax(pg / pg0), np.nanmax(pm[mk] / pm[0]))
@@ -446,19 +508,17 @@ def make_thermo_figure(case_tag, C, plotdir, geom, t_end, out_stem, exp_shift=EX
         ax.yaxis.set_major_formatter(mt.FuncFormatter(lambda v, _: "%g" % v))
         if case_tag != "hi":
             ax.yaxis.set_minor_formatter(mt.FuncFormatter(lambda v, _: ("%g" % v) if v in (0.3, 0.5, 2, 3, 5) else ""))
-        ax.grid(True, which="both", color="0.9", lw=0.6)
+        ax.grid(True, which="major", color="0.88", lw=0.5)
         ax.set_axisbelow(True)
-        ax.set_xlabel(r"Time ($\mu$s)")
+        ax.set_xlabel("Time  [µs]")
         ax.set_ylabel(r"$\bar p_g / p_0$")
-        leg = ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=2, frameon=False)
+        leg = ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=2, frameon=False, **LEG)
         fig.tight_layout()
         fig.canvas.draw()
         bb = leg.get_window_extent().transformed(fig.transFigure.inverted())
-        fig.text(0.5 * (bb.x0 + bb.x1), bb.y1 + 0.01,
-                 "Cattaneo et al. (2025) Gas Thermodynamics, 3 µm Coated Bubble under %.0f kPa Acoustic Force" % (C.pa / 1e3),
-                 ha="center", va="bottom", fontsize=12)
+        fig.text(0.5 * (bb.x0 + bb.x1), bb.y1 + 0.01, paper_title(C), ha="center", va="bottom", fontsize=FONT)
         for fmt in (formats or FIG["formats"]):
-            fig.savefig(out_stem + "." + fmt, dpi=FIG["dpi"], bbox_inches="tight", pad_inches=0.05)
+            fig.savefig(out_stem + "." + fmt, dpi=FIG["dpi"], bbox_inches="tight", pad_inches=FIG["pad_inches"])
         plt.close(fig)
     print("  wrote", out_stem + ".png")
     ks = range(2, 11)
@@ -473,14 +533,16 @@ def make_thermo_figure(case_tag, C, plotdir, geom, t_end, out_stem, exp_shift=EX
 #  Figure
 # =========================================================================================== #
 def make_figure(case_tag, C, sim, models, exp, out_stem, xlim, zoom, rvol_norm=False, thermo=None,
-                show_thermo=False, formats=None, single=False, toff=0.0):
+                show_thermo=False, formats=None, single=False, toff=0.0, theory=True, sim_shift=0.0):
     """single=True: one full-run panel only (no zoom), same width, about half the height.
     toff [us]: display time = t_sim + toff (toff = -EXP_SHIFT_US = 1.57 puts everything on the paper's Fig. 2a axis);
-    xlim and zoom are on the display axis."""
+    xlim and zoom are on the display axis.  theory=False: without the coated Keller-Miksis / Rayleigh-Plesset
+    curves (experiment, Cattaneo model and simulation only).  sim_shift [us]: added to the simulation curves only
+    (06Exp: -0.25, see analyze_06Exp_*)."""
     S = FIG
     _apply_rc(S)
     if single:
-        fig, ax1 = plt.subplots(1, 1, figsize=(S["size"][0], 0.5 * S["size"][1] + 0.35))
+        fig, ax1 = plt.subplots(1, 1, figsize=S["size_single"])
         axs, windows = [ax1], (xlim,)
     else:
         fig, axs = plt.subplots(2, 1, figsize=S["size"], gridspec_kw=dict(height_ratios=S["height_ratios"]))
@@ -491,45 +553,45 @@ def make_figure(case_tag, C, sim, models, exp, out_stem, xlim, zoom, rvol_norm=F
     for k, (ax, (t0, t1)) in enumerate(zip(axs, windows)):
         mk = lambda t: (t * um + toff >= t0 - 0.05) & (t * um + toff <= t1 + 0.05)
         X = lambda t: t * um + toff
+        Xs = lambda t: t * um + toff + sim_shift                              # simulation curves
+        mks = lambda t: (Xs(t) >= t0 - 0.05) & (Xs(t) <= t1 + 0.05)
         tk, Rk = models["km"]; tr, Rr = models["rpe"]; tc, Rc = models["catt"]
-        ax.plot(X(tk[mk(tk)]), Rk[mk(tk)] * um, "-", color=S["c_km"], lw=1.2, label="Coated Keller–Miksis")
-        ax.plot(X(tr[mk(tr)]), Rr[mk(tr)] * um, "--", color=S["c_rp"], lw=1.2, label="Coated Rayleigh–Plesset")
-        ax.plot(X(tc[mk(tc)]), Rc[mk(tc)] * um, "-.", color=S["c_catt"], lw=1.2,
-                label="Cattaneo et al. (2025) model")
+        if theory:
+            ax.plot(X(tk[mk(tk)]), Rk[mk(tk)] * um, "-", color=S["c_km"], lw=S["lw_model"], label="Coated KM")
+            ax.plot(X(tr[mk(tr)]), Rr[mk(tr)] * um, "--", color=S["c_rp"], lw=S["lw_model"], label="Coated RP")
+        ax.plot(X(tc[mk(tc)]), Rc[mk(tc)] * um, "-.", color=S["c_catt"], lw=S["lw_model"], label="Cattaneo model")
         if show_thermo and thermo is not None:
             th, Rh = thermo
-            ax.plot(X(th[mk(th)]), Rh[mk(th)] * um, ":", color=S["c_vol"], lw=1.0,
-                    label=r"Simulation, $R_\mathrm{vol}$ (thermo)")
-        ts = sim["t"]; m = mk(ts)
+            ax.plot(Xs(th[mks(th)]), Rh[mks(th)] * um, ":", color=S["c_vol"], lw=S["lw_model"],
+                    label=r"Num. $R_\mathrm{vol}$ (thermo)")
+        ts = sim["t"]; m = mks(ts)
         # markers about every 0.1 us (the camera rate) whatever the plot_dt, so dense frame sets stay readable
         dtf = float(np.median(np.diff(ts))) if len(ts) > 1 else 1e-7
         me = max(1, int(round(1e-7 / dtf))) if dtf > 0 else 1
-        ax.plot(X(ts[m]), Rv[m] * um, "-s", color=S["c_vol"], lw=1.5, ms=3.0, zorder=4, markevery=me,
-                label=r"Simulation, $R_\mathrm{vol}$")
-        ax.plot(X(ts[m]), sim["R_eta"][m] * um, "-^", color=S["c_eta"], lw=1.5, ms=3.2, zorder=3, markevery=me,
-                label=r"Simulation, $R(\eta = 0.5)$")
+        ax.plot(Xs(ts[m]), Rv[m] * um, "-s", color=S["c_vol"], lw=S["lw_sim"], ms=S["ms_sim"], zorder=4, markevery=me,
+                label=r"Num. $R_\mathrm{vol}$")
+        ax.plot(Xs(ts[m]), sim["R_eta"][m] * um, "-^", color=S["c_eta"], lw=S["lw_sim"], ms=S["ms_sim"] + 0.2, zorder=3,
+                markevery=me, label=r"Num. $R(\eta = 0.5)$")
         te, Re = exp; m = mk(te)
-        ax.plot(X(te[m]), Re[m] * um, "o", color=S["c_exp"], mfc=S["c_exp"] if hi else "white", mew=0.9,
-                ms=4.0 if k else 3.4, label="Experiment (Cattaneo et al., 2025)", zorder=5)
+        ax.plot(X(te[m]), Re[m] * um, "o", color=S["c_exp"], mfc=S["c_exp"] if hi else "white", mew=0.7,
+                ms=S["ms_exp"], label="Experiment", zorder=5)
         ax.set_xlim(t0, t1)
-        ax.grid(True, which="major", color="0.88", lw=0.6, zorder=0)   # light background grid
+        ax.grid(True, which="major", color="0.88", lw=0.5, zorder=0)   # light background grid
         ax.set_axisbelow(True)
         ax.set_xlabel("Time  [µs]")
         ax.set_ylabel(r"$R$  [µm]")
     if not single and (zoom[0] > xlim[0] or zoom[1] < xlim[1]):   # zoom window marked in (a)
         axs[0].axvspan(zoom[0], zoom[1], color="0.93", lw=0, zorder=0)
     h, l = axs[0].get_legend_handles_labels()
-    leg = axs[0].legend(h, l, loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=3, fontsize=S["legend_size"],
-                        columnspacing=1.2, handlelength=2.4)
+    leg = axs[0].legend(h, l, loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=2, fontsize=S["legend_size"],
+                        frameon=False, **LEG)
     for ax, s in zip(axs if not single else [], ("(a)", "(b)")):
-        ax.text(0.012, 0.965, s, transform=ax.transAxes, ha="left", va="top", fontsize=S["label_size"])
+        ax.text(0.015, 0.955, s, transform=ax.transAxes, ha="left", va="top", fontsize=S["label_size"])
     fig.tight_layout()
     # title above the legend (the legend sits above panel (a))
     fig.canvas.draw()
     bb = leg.get_window_extent().transformed(fig.transFigure.inverted())
-    fig.text(0.5 * (bb.x0 + bb.x1), bb.y1 + 0.01,
-             "Cattaneo et al. (2025) Experimental Comparison, 3 µm Coated Bubble under %.0f kPa Acoustic Force" % (C.pa / 1e3),
-             ha="center", va="bottom", fontsize=S["label_size"])
+    fig.text(0.5 * (bb.x0 + bb.x1), bb.y1 + 0.01, paper_title(C), ha="center", va="bottom", fontsize=S["title_size"])
     for fmt in (formats or S["formats"]):
         fig.savefig(out_stem + "." + fmt, dpi=S["dpi"], bbox_inches="tight", pad_inches=S["pad_inches"])
     plt.close(fig)
@@ -558,6 +620,9 @@ def main(case_tag, deck, default_output, stem, zoom_default, add_args=None, post
                     help="full-panel end time [us] on the chosen axis (default: 12 on the paper axis, last frame on sim)")
     ap.add_argument("--zoom", type=float, nargs=2, default=zoom_default, metavar=("T0", "T1"),
                     help="zoom-panel window [us] on the chosen axis (default %s %s; paper time)" % tuple(zoom_default))
+    ap.add_argument("--sim-shift", type=float, default=0.0,
+                    help="shift of the SIMULATION time only [us], display t = t_sim + shift (06Exp scripts: -0.25; "
+                         "experiment and models unchanged)")
     ap.add_argument("--exp-shift", type=float, default=EXP_SHIFT_US,
                     help="experiment time shift [us], t_sim = t_fig + shift (default %g)" % EXP_SHIFT_US)
     ap.add_argument("--kappa-g", type=float, default=None,
@@ -566,6 +631,8 @@ def main(case_tag, deck, default_output, stem, zoom_default, add_args=None, post
     ap.add_argument("--thermo", action="store_true", help="also draw R_vol from thermo.dat (km.sim measure)")
     ap.add_argument("--geom", choices=("slab", "octant", "full"), default=None, help="override geometry detection")
     ap.add_argument("--no-thermo-fig", action="store_true", help="skip the gas-thermodynamics figure (<stem>_thermo)")
+    ap.add_argument("--no-modes", action="store_true",
+                    help="skip the shape-mode figures (<stem>_modes_time, _modes_total, _modes_rebounds/)")
     ap.add_argument("--nproc", type=int, default=8, help="worker processes for frames and GIFs (default 8)")
     ap.add_argument("--formats", default=None, help="comma list, default %s" % ",".join(FIG["formats"]))
     import cattaneo_06_gif as _gif
@@ -617,26 +684,35 @@ def main(case_tag, deck, default_output, stem, zoom_default, add_args=None, post
         th = thermo_radius(plotdir, C.R0, sim["geom"])
 
         Rv = sim["R_vol"] * (C.R0 / sim["R_vol"][0] if a.rvol_norm else 1.0)
+        ss = a.sim_shift * 1e-6                                           # simulation time shift [s]
+        if a.sim_shift:
+            print("  simulation time shifted by %+.3f us (experiment and models unchanged)" % a.sim_shift)
         curves = [("Experiment", *exp),
-                  ("Sim R_vol", sim["t"], Rv),
-                  ("Sim R(eta=0.5)", sim["t"], sim["R_eta"])]
+                  ("Num. R_vol", sim["t"] + ss, Rv),
+                  ("Num. R(eta=0.5)", sim["t"] + ss, sim["R_eta"])]
         if th is not None:
-            curves.append(("Sim thermo.dat (km.sim)", *th))
+            curves.append(("Num. thermo.dat (km.sim)", th[0] + ss, th[1]))
         curves += [("Coated KM", *models["km"]), ("Coated RPE", *models["rpe"]), ("Cattaneo model", *models["catt"])]
         ncyc = int(np.floor(t_end * F_DRIVE - CYCLE_T0 * F_DRIVE - 0.85 + 1e-9)) + 1   # last window ends <= t_end + 0.15 T
         print("\n  R_vol(t=0) = %.4f um (%s)" % (Rv[0] * 1e6, "rescaled to R0" if a.rvol_norm else "raw; diffuse-band offset"))
         print_table(curves, "Experiment", max(ncyc, 2), first=1)
 
-        make_figure(case_tag, C, sim, models, exp, os.path.join(figdir, a.stem + "_R"), xlim, tuple(a.zoom),
-                    rvol_norm=a.rvol_norm, thermo=th, show_thermo=a.thermo, toff=toff,
-                    formats=a.formats.split(",") if a.formats else None)
-        # compact version for page count: the full run only, no zoom panel
-        make_figure(case_tag, C, sim, models, exp, os.path.join(figdir, a.stem + "_R_full"), xlim, tuple(a.zoom),
-                    rvol_norm=a.rvol_norm, thermo=th, show_thermo=a.thermo,
-                    formats=a.formats.split(",") if a.formats else None, single=True, toff=toff)
+        # <stem>_R (two panels) and <stem>_R_full (compact, full run only), each also without the coated KM / RPE
+        # curves (<stem>_R_noKM, <stem>_R_full_noKM)
+        for theory, suf in ((True, ""), (False, "_noKM")):
+            make_figure(case_tag, C, sim, models, exp, os.path.join(figdir, a.stem + "_R" + suf), xlim, tuple(a.zoom),
+                        rvol_norm=a.rvol_norm, thermo=th, show_thermo=a.thermo, toff=toff, theory=theory,
+                        sim_shift=a.sim_shift, formats=a.formats.split(",") if a.formats else None)
+            make_figure(case_tag, C, sim, models, exp, os.path.join(figdir, a.stem + "_R_full" + suf), xlim,
+                        tuple(a.zoom), rvol_norm=a.rvol_norm, thermo=th, show_thermo=a.thermo, theory=theory,
+                        sim_shift=a.sim_shift, formats=a.formats.split(",") if a.formats else None, single=True,
+                        toff=toff)
         if not a.no_thermo_fig:
             make_thermo_figure(case_tag, C, plotdir, sim["geom"], t_end, os.path.join(figdir, a.stem + "_thermo"),
-                               exp_shift=a.exp_shift, formats=a.formats.split(",") if a.formats else None)
+                               exp_shift=a.exp_shift, formats=a.formats.split(",") if a.formats else None,
+                               sim_shift=a.sim_shift)
+        if not a.no_modes:
+            shape_mode_figures(a, plotdir, figdir, sim, toff=toff + a.sim_shift, C=C)
     if a.gif:
         _gif.make_gifs(a, C, case_tag, plotdir, figdir, sim["geom"] if sim else (a.geom or geometry(plotdir)), sim=sim)
     if post is not None:

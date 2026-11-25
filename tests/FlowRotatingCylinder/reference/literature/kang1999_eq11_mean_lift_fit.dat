@@ -1,0 +1,10 @@
+# Kang, Choi & Lee, Phys. Fluids 11, 3312 (1999), Eq. (11) (copied; exact): least-squares fits of the mean lift for
+# alpha <= 1,  Cl_mean = slope * alpha, with its pressure and friction parts.
+# USE THIS for the mean lift: in Kang's FIG. 8(a) the curves for Re = 40 .. 160 lie within 2-5 pixels of each other
+# (1 pixel = 0.021) and their markers overlap, so the Reynolds numbers cannot be separated by digitizing.
+# Beyond the fit range the figure shows all four Re near Cl = -5.4 .. -5.65 at alpha = 2 and -7.55 at alpha = 2.5.
+# columns: Re  slope_total  slope_pressure  slope_friction  alpha_max
+        40       -2.57       -2.31       -0.26           1
+        60        -2.5       -2.29       -0.21           1
+       100       -2.48       -2.31       -0.17           1
+       160       -2.46       -2.33       -0.13           1

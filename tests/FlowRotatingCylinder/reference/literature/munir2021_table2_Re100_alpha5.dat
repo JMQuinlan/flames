@@ -1,0 +1,7 @@
+# Munir, Zhao, Wu & Tong, Ocean Engineering 238, 109562 (2021), TABLE 2 (copied; exact): non-vibrating rotating
+# cylinder, Re = 100, alpha = 5 (second shedding mode).  Row 1: Bourguet (2020) as quoted there; row 2: Munir et al.
+# The table's Stojkovic et al. (2002) row is blank in the PDF text; Stojkovic FIG. 13 digitizes to Cl = -26.5 at
+# alpha = 5 (stojkovic2002_fig13_Re100.dat).  Frequency is f D / U of the mode-II shedding.
+# columns: row  frequency  Cd_mean  Cl_mean
+         1       0.022        0.32       -26.6
+         2       0.022       0.329       -26.5

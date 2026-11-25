@@ -1,0 +1,6 @@
+# Points labelled "Kang & Choi (1999)" in Stojkovic et al. (2002), FIG. 13, Re = 100 (digitized there; Cl_mean +-0.15,
+# Cl_amp +-0.003).  For comparison with kang1999_*.dat, which were digitized from Kang's own figures.
+# columns: alpha  Cl_mean  Cl_amp
+       0.5       -1.17       0.339
+         1       -2.48        0.36
+       1.5       -3.69       0.324

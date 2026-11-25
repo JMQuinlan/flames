@@ -1,0 +1,140 @@
+# ============================================================================
+# FlowChemistry / detonation in 2 H2 + O2 + 7 Ar at 6.67 kPa, 298 K  (species.eos = pele, chem.backend = pele)
+#
+# NEEDS THE MECHANISM BUILD (Burke-Dryer H2/O2 from PelePhysics), see input_0D_H2O2Ignition.  SI units.
+# The classical argon-diluted low-pressure mixture.  References from Cantera with the same mechanism
+# (h2o2_check.py cj):  D_CJ = 1616.65 m/s,  p_vN = 174.6 kPa (26.18 p_0),  p_CJ = 104.8 kPa,  T_CJ = 2800 K,
+# ZND induction length 1.52 mm (induction time 3.8 microseconds).
+# Set-up as input_1D_Detonation: 0.8 m periodic strip 4 cells wide, ignited at the CENTRE by a 40 mm slab of the same
+# mixture at 60 p_0 and 3000 K, so two detonations run outwards and the mid-plane is a symmetry plane (a true wall;
+# the lessons on ends and drivers are in that deck).  Stop before the fronts reach the ends (0.38 m at CJ = 235 us).
+# 5120 cells = 0.156 mm = 9.7 cells per induction length.  hlle: see input_1D_Detonation.
+# Phase 0 is a trace (eta = 1e-6) of an inert perfect gas; phase 1 carries the 13 mechanism species IN ITS ORDER.
+#
+# Run (from bin/): mpirun -np 16 ./hydro2-2d-g++-bd ../tests/FlowChemistry/input_1D_H2O2Detonation plot_file=<dir>/output
+# Check:           tests/venv_cantera/bin/python ../tests/FlowChemistry/reference/h2o2_check.py detonation <dir> [<dir> ...]
+# ============================================================================
+plot_file = ./tests/FlowChemistry/output_1D_H2O2Detonation
+amr.plot_dt = 4.0e-6
+amr.max_grid_size = 160
+amr.blocking_factor = 2
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level = 0
+amr.n_cell = 5120 4
+amr.n_error_buf      = 8
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 0.8 0.000625 0.0
+geometry.is_periodic = 0 1 0
+timestep = 1.0e-10
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1.0e-6
+dynamictimestep.min = 1.0e-13
+cfl                 = 0.3
+cfl_v               = 0.3
+stop_time = 2.2e-4
+apply_embedded_solid = 0
+eta.ic.type = constant
+eta.ic.constant.value = 1.0e-6
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cp = 1004.5
+eos0.cv = 717.5
+mu0 = 0.0
+mu0_b = 0.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp = 1004.5
+eos1.cv = 717.5
+mu1 = 0.0
+mu1_b = 0.0
+density0.ic.type = expression
+density0.ic.expression.region0 = "0.5064767*(abs(x - 0.4) < 0.02) + 0.0849814*(abs(x - 0.4) >= 0.02)"
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "400200.0*(abs(x - 0.4) < 0.02) + 6670.0*(abs(x - 0.4) >= 0.02)"
+density1.ic.type = expression
+density1.ic.expression.region0 = "0.5064767*(abs(x - 0.4) < 0.02) + 0.0849814*(abs(x - 0.4) >= 0.02)"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "400200.0*(abs(x - 0.4) < 0.02) + 6670.0*(abs(x - 0.4) >= 0.02)"
+epsilon = 0.1
+sigma   = 0.0
+Dv      = 0.0
+pref    = 0.0
+small   = 1e-10
+grav    = 0.0
+eta_refinement_criterion   = 1e10
+omega_refinement_criterion = 1e10
+gradu_refinement_criterion = 1e10
+p_refinement_criterion = 1e10
+rho_refinement_criterion = 1e10
+cutoff = 1e-16
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+Riemann_Solver.type = hlle
+Limiter.type        = minmod
+kappa_method        = 1
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = periodic
+eta.bc.type.yhi = periodic
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+density0.bc.type.xlo = neumann
+density0.bc.type.xhi = neumann
+density0.bc.type.ylo = periodic
+density0.bc.type.yhi = periodic
+density1.bc.type.xlo = neumann
+density1.bc.type.xhi = neumann
+density1.bc.type.ylo = periodic
+density1.bc.type.yhi = periodic
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+nghost = 4
+thermal.conduction = 0
+thermal.Pr = 0.75
+ablation.on = 0
+species.bc.type.xlo = neumann
+species.bc.type.xhi = neumann
+species.bc.type.ylo = periodic
+species.bc.type.yhi = periodic
+species.on = 1
+species.eos = pele
+species.phase1.names = H H2 O OH H2O O2 HO2 H2O2 N2 AR HE CO CO2
+species.ic.type = expression
+species.ic.expression.region0 = "0.0"
+species.ic.expression.region1 = "0.012772427774961983"
+species.ic.expression.region2 = "0.0"
+species.ic.expression.region3 = "0.0"
+species.ic.expression.region4 = "0.0"
+species.ic.expression.region5 = "0.10136213887480991"
+species.ic.expression.region6 = "0.0"
+species.ic.expression.region7 = "0.0"
+species.ic.expression.region8 = "0.0"
+species.ic.expression.region9 = "0.8858654333502279"
+species.ic.expression.region10 = "0.0"
+species.ic.expression.region11 = "0.0"
+species.ic.expression.region12 = "0.0"
+chem.on = 1
+chem.backend = pele
+chem.T_min = 600.0     # no reaction in the unshocked gas (298 K)
+chem.rtol = 1.0e-6
+chem.atol = 1.0e-12

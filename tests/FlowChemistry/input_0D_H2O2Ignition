@@ -1,0 +1,141 @@
+# ============================================================================
+# FlowChemistry / constant-volume ignition of 2 H2 + O2 + 7 Ar  (species.eos = pele, chem.backend = pele)
+#
+# NEEDS THE MECHANISM BUILD (Burke-Dryer H2/O2, 13 species, from PelePhysics):
+#   make POSTFIX=2d-g++-bd AMREX_TARGET=ext/AMReX-Codes/amrex/2d-g++-26.02 \
+#        HYDRO2_MECH=ext/AMReX-Combustion/PelePhysics/Mechanisms/BurkeDryer bin/hydro2-2d-g++-bd
+# SI units.  Gas at rest in a periodic box: T = 1200 K, p = 1 atm (rho = 0.32059 kg/m^3), mole fractions 2 : 1 : 7.
+# Reference: the same mechanism (its mechanism.yaml) in a Cantera constant-volume reactor -- temperature, pressure
+# and species against time, ignition delay (time of the steepest temperature rise, 7.2e-5 s).
+# Checks the thermally perfect equation of state (T and p from the sensible phase energy), the production rates, the
+# reactor integrator and the energy bookkeeping (rho E changes by the heat released only).
+# Phase 0 is a trace (eta = 1e-6) of an inert perfect gas; phase 1 carries the mechanism species IN ITS ORDER.
+#
+# Run (from bin/): mpirun -np 1 ./hydro2-2d-g++-bd ../tests/FlowChemistry/input_0D_H2O2Ignition plot_file=<dir>/output
+# Check:           tests/venv_cantera/bin/python ../tests/FlowChemistry/reference/h2o2_check.py ignition <dir>
+# ============================================================================
+plot_file = ./tests/FlowChemistry/output_0D_H2O2Ignition
+amr.plot_dt = 5.0e-6
+amr.max_grid_size = 16
+amr.blocking_factor = 2
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level = 0
+amr.n_cell = 16 4
+amr.n_error_buf      = 8
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 1.0 0.25 0.0
+geometry.is_periodic = 1 1 0
+timestep = 1.0e-8
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1.0e-6
+dynamictimestep.min = 1.0e-12
+cfl                 = 0.3
+cfl_v               = 0.3
+stop_time = 3.0e-4
+apply_embedded_solid = 0
+eta.ic.type = constant
+eta.ic.constant.value = 1.0e-6
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cp = 1004.5
+eos0.cv = 717.5
+mu0 = 0.0
+mu0_b = 0.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp = 1004.5
+eos1.cv = 717.5
+mu1 = 0.0
+mu1_b = 0.0
+density0.ic.type = expression
+density0.ic.expression.region0 = "0.3205887286305523"
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "101325.0"
+density1.ic.type = expression
+density1.ic.expression.region0 = "0.3205887286305523"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "101325.0"
+epsilon = 0.1
+sigma   = 0.0
+Dv      = 0.0
+pref    = 0.0
+small   = 1e-10
+grav    = 0.0
+eta_refinement_criterion   = 1e10
+omega_refinement_criterion = 1e10
+gradu_refinement_criterion = 1e10
+p_refinement_criterion = 1e10
+rho_refinement_criterion = 1e10
+cutoff = 1e-16
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+kappa_method        = 1
+eta.bc.type.xlo = periodic
+eta.bc.type.xhi = periodic
+eta.bc.type.ylo = periodic
+eta.bc.type.yhi = periodic
+density.bc.type.xlo = periodic
+density.bc.type.xhi = periodic
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+density0.bc.type.xlo = periodic
+density0.bc.type.xhi = periodic
+density0.bc.type.ylo = periodic
+density0.bc.type.yhi = periodic
+density1.bc.type.xlo = periodic
+density1.bc.type.xhi = periodic
+density1.bc.type.ylo = periodic
+density1.bc.type.yhi = periodic
+energy.bc.type.xlo = periodic
+energy.bc.type.xhi = periodic
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+momentum.bc.type.xlo = periodic periodic
+momentum.bc.type.xhi = periodic periodic
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+nghost = 4
+thermal.conduction = 0
+thermal.Pr = 0.75
+ablation.on = 0
+dynamictimestep.max = 1.0e-6
+species.on = 1
+species.eos = pele
+species.phase1.names = H H2 O OH H2O O2 HO2 H2O2 N2 AR HE CO CO2
+species.ic.type = expression
+species.ic.expression.region0 = "0.0"
+species.ic.expression.region1 = "0.012772427774961983"
+species.ic.expression.region2 = "0.0"
+species.ic.expression.region3 = "0.0"
+species.ic.expression.region4 = "0.0"
+species.ic.expression.region5 = "0.10136213887480991"
+species.ic.expression.region6 = "0.0"
+species.ic.expression.region7 = "0.0"
+species.ic.expression.region8 = "0.0"
+species.ic.expression.region9 = "0.8858654333502279"
+species.ic.expression.region10 = "0.0"
+species.ic.expression.region11 = "0.0"
+species.ic.expression.region12 = "0.0"
+species.bc.type.xlo = periodic
+species.bc.type.xhi = periodic
+species.bc.type.ylo = periodic
+species.bc.type.yhi = periodic
+chem.on = 1
+chem.backend = pele
+chem.T_min = 300.0
+chem.rtol = 1.0e-8
+chem.atol = 1.0e-14

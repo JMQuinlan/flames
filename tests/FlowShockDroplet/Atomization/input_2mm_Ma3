@@ -1,0 +1,126 @@
+# ============================================================================
+# FlowShockDroplet / Atomization: Mach 3 shock on a 2 mm water droplet WITH PHASE CHANGE
+# (Hydro2, phasechange.on = 1; based on 2mm_WATER_2D/2mm_Droplet_3-0Ma)
+#
+#   air   (phase 0): gamma 1.4, rho 1.225, p 101325 (300 K); Mach 3 shock from x = -4 mm:
+#                    post-shock rho 4.725, u 756.2 m/s, p 1.047e6 Pa (exact Rankine-Hugoniot;
+#                    the parent deck's 4.7 / 1030 / 10e5 are not a shock state)
+#   water (phase 1): Tammann gamma 7.15, pi 3e8, rho 1000; cv 162.7 so that T = 300 K (data file)
+#   steam = air properties (steam_as_air_tammann): T_sat(1 atm) = 373.15 K, latent 2.257e6 J/kg.
+# Phase change by thermodynamic relaxation: evaporation where the shocked gas heats the interface
+# cells, cavitation where the expansion behind the transmitted wave drops the liquid below
+# saturation (1e-6 of air is seeded in the water as nuclei), condensation where vapour is recompressed.
+# No surface tension, viscosity or gravity here; 768 x 384 cells (D/dx = 77), single level
+# (the vapour field has no AMR reflux yet).  t* = D/u sqrt(rho_l/rho_g) = 39 us; run to 80 us.
+#
+# Run (from bin/): mpirun -np 32 --oversubscribe ./hydro2-2d-g++ ../tests/FlowShockDroplet/Atomization/input_2mm_Ma3 plot_file=<dir>/output
+#                  (reference without phase change: add  phasechange.on=0)
+# ============================================================================
+alamo.program = hydro2
+plot_file = ./tests/FlowShockDroplet/Atomization/output_2mm_Ma3
+amr.plot_dt = 1.0e-6
+amr.max_grid_size = 128
+amr.blocking_factor = 8
+amr.regrid_int = 20
+amr.grid_eff = 0.8
+amr.max_level = 0
+amr.n_cell = 768 384
+amr.n_error_buf    = 16
+timestep = 1e-12
+dynamictimestep.on = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1e-4
+dynamictimestep.min = 1e-10
+cfl = 0.3
+geometry.prob_lo = -0.005 -0.005 0.0  # 1/4 tube left of droplet
+geometry.prob_hi =  0.015  0.005 0.0  # 3/4 tube right of droplet (0.02m × 0.01m)
+geometry.is_periodic = 0 0 0
+stop_time = 8.0e-5
+eta.ic.type = expression
+eta.ic.expression.constant.epsilon = 0.00002
+eta.ic.expression.constant.R0 = 0.001  # 2mm droplet radius
+eta.ic.expression.constant.x_center = 0.0  # Centered at origin
+eta.ic.expression.constant.y_center = 0.0  # Centered at origin
+eta.ic.expression.region0 = "1.0e-6 + (1.0 - 2.0e-6)*0.5*(1 + tanh((sqrt((x-x_center)**2 + (y-y_center)**2) - R0)/(2*sqrt(2)*epsilon)))"
+epsilon = eta.ic.expression.constant.epsilon
+eos0.gamma = 1.4   # Air
+eos0.p0 = 0       # Ideal gas
+mu0 = 0.0 # 1.8e-5   # Air viscosity [Pa-s]
+mu0_b = 0.0
+eos1.gamma = 7.15  # Water
+eos1.p0 = 3.0e8   # Tammann EOS parameter for water
+mu1 = 0.0 # 1.0e-3   # Water viscosity [Pa-s]
+mu1_b = 0.0 # 0.001
+density0.ic.type = expression
+density0.ic.expression.constant.rho_air = 1.225
+density0.ic.expression.constant.rho_shock = 4.725
+density0.ic.expression.constant.x_shock = -0.004  # Shock region near left wall
+density0.ic.expression.region0 = "(x < x_shock)*rho_shock + (x >= x_shock)*rho_air"
+density1.ic.type = expression
+density1.ic.expression.constant.rho_water = 1000.0
+density1.ic.expression.region0 = "rho_water"
+velocity0.ic.type = expression
+velocity0.ic.expression.constant.u_shock = 756.2
+velocity0.ic.expression.constant.x_shock = -0.004
+velocity0.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
+velocity0.ic.expression.region1 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.u_shock = 0.0
+velocity1.ic.expression.constant.x_shock = -0.004
+velocity1.ic.expression.region0 = "(x < x_shock)*u_shock + (x >= x_shock)*0.0"
+velocity1.ic.expression.region1 = "0.0"
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.p_atm = 1.01325e5
+pressure0.ic.expression.constant.p_shock = 1.0470e6
+pressure0.ic.expression.constant.x_shock = -0.004
+pressure0.ic.expression.region0 = "(x < x_shock)*p_shock + (x >= x_shock)*p_atm"
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.p_atm = 1.01325e5
+pressure1.ic.expression.region0 = "p_atm"
+eos0.cp = "1005.0"  # Air specific heat [J/kg-K]
+eos1.cp = "1162.994295"
+eos0.cv = "717.86"  # Air cv = cp/gamma
+eos1.cv = "162.656545"
+sigma = 72.8e-3  # Water-air surface tension [N/m]
+Dv = "2.3e-5"	# Water-Vapor Diffusivity [m^2/s]
+pref = 0.0
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+density.bc.type.xlo = neumann
+energy.bc.type.xlo = neumann
+momentum.bc.type.xlo = neumann neumann
+density.bc.type.xhi = neumann
+energy.bc.type.xhi = neumann
+momentum.bc.type.xhi = neumann neumann
+eta_refinement_criterion = 1e-4
+omega_refinement_criterion = 1e+5
+p_refinement_criterion = 1e+6
+rho_refinement_criterion = 1e+5
+gradu_refinement_criterion = 1e+5
+cutoff = 1e-16
+small = 1e-6;
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value = 0.0 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+grav = 0.0
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+integration.type    = RungeKutta
+integration.rk.type = 3
+kappa_method = 1   # Valid Entries: 1:"Regular" / 2:"Runnels Regularization"
+reinit_max_iter = 20
+reinit_tolerance = 1e-6
+nghost = 4
+phasechange.on = 1
+phasechange.liquid = 1                              # phase 1 (eta = 0) is the water; phase 0 the air / steam
+phasechange.liquid_material = water_tammann
+phasechange.vapor_material  = steam_as_air_tammann
+phasechange.material_file   = ../data/hydro2_materials.dat
+phasechange.Yv0 = 0.0                               # dry air

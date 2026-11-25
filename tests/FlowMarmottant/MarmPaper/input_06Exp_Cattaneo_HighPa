@@ -236,7 +236,7 @@ shell.heat_split           = 2       # shell viscous heat split by thermal effus
 shell.foot_rate            = 1       # viscous-jump rate and curvature taken at the foot point on eta = 1/2 (fixes the axis-tip runaway, see Hydro2 Parse)
 thermal.k0                 = 0.6     # water [W/m/K]
 thermal.k1                 = 0.012   # C4F10 [W/m/K]
-thermal.conduction         = 1       # Fourier conduction in each phase (2026-11-10: micro bubbles are
+thermal.conduction         = 2       # per-phase Fourier conduction (mode 2 since the 2026-11-23 merge; 1 = mixture T) (2026-11-10: micro bubbles are
 thermal.exchange           = 1       #   near-isothermal, Pe = w R^2/D ~ 2-16; adiabatic gas is too stiff)
 relax_diag                 = 0
 apply_weight          = 0

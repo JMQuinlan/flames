@@ -2,7 +2,7 @@
 
 bundle(figdir, stem, plotdirs) writes <figdir>/<stem>_results.tar.gz containing
   * every file in figdir whose name starts with <stem> (figures .png/.eps, .gif, cached .npz/.csv, ...),
-    except earlier archives, plus the GIF frame folders <stem>_gif_frames/ (EPS frames);
+    except earlier archives, plus the GIF frame folders <stem>_gif_frames/ (PNG + EPS frames);
   * for each plot directory: its thermo.dat and metadata (small; plotfiles are NOT included).
 Disable with the environment variable MARMPAPER_NO_BUNDLE=1.
 """
@@ -21,7 +21,7 @@ def bundle(figdir, stem, plotdirs=()):
         p = os.path.join(figdir, f)
         if os.path.isfile(p) and f.startswith(os.path.basename(stem)) and not f.endswith(".tar.gz"):
             files.append((p, os.path.join(name, f)))
-    for f in sorted(os.listdir(figdir)):                 # GIF frame folders (<stem>_gif_frames/, EPS frames)
+    for f in sorted(os.listdir(figdir)):                 # GIF frame folders (<stem>_gif_frames/, PNG + EPS frames)
         p = os.path.join(figdir, f)
         if os.path.isdir(p) and f.startswith(os.path.basename(stem)) and f.endswith("_gif_frames"):
             for dp, _, fns in os.walk(p):

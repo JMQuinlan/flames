@@ -53,7 +53,7 @@ void NSCBC4::Parse(NSCBC4 &value, IO::ParmParse &pp)
     // d < 0 (linear interpolation), and is 0 outside the table -- the same rule as
     // p = pa sin(wt) .* interp1(t_env, up/lo, t, 'linear', 0) in Cattaneo et al. 2025.
     std::string env_file;
-    pp.query_default("nscbc.spherical", value.spherical, 0);   // spherical radiation condition (see NSCBC4.H)
+    pp.query_default("nscbc.spherical", value.spherical, 0);   // [2026-11-24] default kept 0: 1 (06 decks set it) puts a +-2 % uniform pressure mode on the planar UT_NSCBC_Reflect1D test   // spherical radiation condition (see NSCBC4.H)
     {   // centre of the long-wave drive field (bubble centre; default origin = octant/slab symmetry point)
         std::vector<Set::Scalar> xc;
         pp.queryarr("nscbc.drive_center", xc);

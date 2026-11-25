@@ -222,6 +222,9 @@ if args.memcheck:
 if args.profile: postfix += "-profile"
 if args.perf: postfix += "-perf"
 if args.coverage: postfix += "-coverage"
+# [OPT 2026-09-24] OpenMP builds get their own postfix so the OMP AMReX
+# library and object/binary directories never collide with the flat-MPI ones.
+if args.omp: postfix += "-omp"
 postfix += "-" + args.comp
 f.write("POSTFIX = " + postfix + '\n')
 
@@ -322,6 +325,10 @@ if args.buildamrex and not args.amrex:
     elif args.comp == "icc":     amrex_configure += ' --comp=intel'
     if args.debug: amrex_configure += ' --debug=yes --enable-pic=yes'
     if args.profile: amrex_configure += ' --enable-tiny-profile=yes'
+    # [OPT 2026-09-24] --omp previously compiled alamo with -fopenmp but built
+    # AMReX WITHOUT OpenMP, so MFIter never split tiles across threads (every
+    # thread would execute every tile).  AMReX must be built with OMP too.
+    if args.omp: amrex_configure += ' --with-omp=yes'
     
     if args.fft: amrex_configure += " --enable-fft=yes"
     if args.eb: amrex_configure += " --enable-eb=yes"

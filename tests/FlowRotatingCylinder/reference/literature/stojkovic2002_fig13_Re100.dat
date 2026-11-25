@@ -1,0 +1,34 @@
+# Stojkovic, Breuer & Durst, Phys. Fluids 14, 3160 (2002), FIG. 13: mean lift and lift amplitude (half
+# peak-to-peak) for Re = 100, 0 <= alpha <= 12.  alpha <= 2 from TABLE II; the rest digitized.
+# Digitization uncertainty: Cl_mean +-0.15 (1 pixel = 0.14; +-0.3 for the three overlapping points at
+# alpha = 5.15, 5.2, 5.25, whose spin ratios are inferred -- the paper gives the unsteady window as
+# 4.8 <= alpha <= 5.15); Cl_amp +-0.003.  The flow is steady (Cl_amp = 0) for 2 <= alpha < 4.8 and alpha > 5.15.
+# Potential flow: Cl = -2 pi alpha.  Lift negated to the Kang / Hydro2 sign convention.
+# columns: alpha  Cl_mean  Cl_mean_source  Cl_amp  Cl_amp_source
+         0          -0       table      0.3259       table
+       0.5       -1.22       table       0.342       table
+         1      -2.504       table      0.3616       table
+       1.5        -3.9       table       0.318       table
+         2       -5.48       table           0   digitized
+       2.5       -7.61   digitized           0   digitized
+         3      -10.14   digitized           0   digitized
+       3.5      -13.36   digitized           0   digitized
+         4         -17   digitized           0   digitized
+       4.5      -21.35   digitized           0   digitized
+      4.75      -23.87   digitized           0   digitized
+       4.8      -24.43   digitized       0.752   digitized
+       4.9      -25.55   digitized       1.142   digitized
+         5      -26.53   digitized        1.23   digitized
+       5.1      -27.51   digitized       1.194   digitized
+      5.15       -28.6   digitized       0.956   digitized
+       5.2         -29  interpolated           0   digitized
+      5.25       -29.3   digitized           0   digitized
+       5.5      -30.88   digitized           0   digitized
+         6      -34.38   digitized           0   digitized
+       6.5      -37.74   digitized           0   digitized
+         7      -41.39   digitized           0   digitized
+         8      -48.11   digitized           0   digitized
+         9      -54.84   digitized           0   digitized
+        10      -61.57   digitized           0   digitized
+        11      -68.01   digitized           0   digitized
+        12       -74.6   digitized           0   digitized

@@ -227,7 +227,7 @@ shell.kappa_s_subcycle_max = 8192
 shell.heat_split           = 2       # shell viscous heat split by thermal effusivity
 thermal.k0                 = 0.6     # water [W/m/K]
 thermal.k1                 = 0.026   # air   [W/m/K]
-thermal.conduction         = 1       # Fourier conduction in each phase (2026-11-10: micro bubbles are
+thermal.conduction         = 2       # per-phase Fourier conduction (mode 2 since the 2026-11-23 merge; 1 = mixture T) (2026-11-10: micro bubbles are
 thermal.exchange           = 1       #   near-isothermal, Pe = w R^2/D ~ 2-16; adiabatic gas is too stiff)
 relax_diag                 = 0
 apply_weight          = 0

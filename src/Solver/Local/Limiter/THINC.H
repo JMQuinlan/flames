@@ -22,6 +22,7 @@
 //                       (default muscl2); its own parameters are read as usual
 //   thinc_beta (Real)   steepness, default 1.6 (Shyue & Xiao; ~1.6 cells across 0.01..0.99)
 //   thinc_eps  (Real)   interface-cell threshold, default 1e-4
+// Both Limiter.thinc_beta and Limiter.thinc.thinc_beta are read (likewise the other keys).
 //
 //   thinc_mode (string) how the interface is reconstructed (default cartesian):
 //     cartesian : the scheme above, direction by direction, fixed beta (cell units).
@@ -94,9 +95,20 @@ public:
         value.mode = value.mode_name == "mthinc" ? MTH : value.mode_name == "qq" ? QQ : CART;
         pp.query_validate("thinc_eps_tie", value.eps_tie, {1, 0});   // first entry is the default
         pp.query_validate("thinc_guard", value.guard, {1, 0});       // first entry is the default
-        for (const char *removed : {"thinc_fade", "thinc_fade_on", "thinc_fade_off", "thinc_quad"})
+        for (const char *removed : {"thinc_fade", "thinc_fade_on", "thinc_fade_off", "thinc_quad", "thinc_sw"})
             if (pp.contains(removed))
                 Util::Warning(INFO, "Limiter ", removed, " is IGNORED: the option was removed (2026-11-05).");
+        {
+            // [2026-10-08, from DropletDetonation] beta / eps / base are also accepted in the short form
+            // Limiter.thinc_beta etc. (the nested Limiter.thinc.thinc_beta was the only form read before, and
+            // the short form was silently ignored).  thinc_sw (slope weighting) was dropped in the merge: the
+            // flames2 test of the same idea (10-30) degraded to donor cell.
+            amrex::ParmParse pl("Limiter");
+            pl.query("thinc_beta", value.beta); pl.query("thinc_eps", value.eps);
+            std::string b2; if (pl.query("thinc_base", b2)) value.base_name = b2;
+            if (pl.contains("thinc_sw"))
+                Util::Warning(INFO, "Limiter.thinc_sw is IGNORED: the option was removed in the 2026-11 merge.");
+        }
         const std::string &b = value.base_name;
         if      (b == "muscl2")  value.base = std::make_shared<MUSCL2>(pp);
         else if (b == "muscl")   value.base = std::make_shared<MUSCL>(pp);

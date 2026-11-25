@@ -1,0 +1,10 @@
+# Stojkovic, Breuer & Durst, Phys. Fluids 14, 3160 (2002), TABLE II (copied; exact).  Re = 100.
+# Strouhal number, time-averaged lift and drag and their amplitudes (half peak-to-peak).  nan = not given
+# (alpha = 2: steady flow, no vortex shedding; drag and lift given to 2-3 digits only).
+# Lift negated to the Kang / Hydro2 sign convention.
+# columns: alpha  Cl_mean  Cl_amp  Cd_mean  Cd_amp  St
+         0          -0      0.3259      1.3371      0.0091       0.165
+       0.5       -1.22       0.342       1.277      0.0513      0.1657
+         1      -2.504      0.3616       1.108      0.0986      0.1658
+       1.5        -3.9       0.318       0.818       0.114      0.1626
+         2       -5.48         nan        0.46         nan         nan

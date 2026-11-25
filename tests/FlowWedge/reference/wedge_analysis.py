@@ -346,7 +346,8 @@ def render(s, meas, mach, out_png):
     ax.set_xlabel("x [m]", fontsize=FONT_LABEL)
     ax.set_ylabel("y [m]", fontsize=FONT_LABEL)
     ax.tick_params(labelsize=FONT_TICK)
-    ax.set_title(TITLE_TMPL.format(ma=f"{mach:g}") + f"    (t = {s['time']:.2f})",
+    ax.set_title(TITLE_TMPL.format(ma=f"{mach:g}"),
+                 # + f"    (t = {s['time']:.2f})",
                  fontsize=FONT_TITLE)
     ax.legend(loc="upper left", fontsize=10, framealpha=0.85)
     fig.tight_layout()

@@ -13,7 +13,8 @@ Outputs (<figdir>/<stem>...):
                   coloured by p - p_inf (gas left open, eta = 0.5 contour in black), so the inside of the
                   cavity (jet, re-entrant shapes) is visible.  Cut face +-3 R0 (--gif-cut-half).
   _bubble3d_cutshell.gif (--gif-3d) the same cut-open shell with no field: only the eta = 0.5 contour on the cut.
-  Frames are kept as EPS in <figdir>/<stem>_gif_frames/{bubble,bubble_R,bubble3d,bubble3d_cut,bubble3d_cutshell}/ (PNGs only feed the GIF).
+  Frames are kept as PNG and EPS in <figdir>/<stem>_gif_frames/{bubble,bubble_R,bubble3d,bubble3d_cut,bubble3d_cutshell}/
+  (both go into the results tar, marmpaper_bundle).  --sim-shift moves the simulation time (frame times, R_vol curve) only.
 
 Cross-section per geometry (cattaneo_06_common.geometry):
   slab    RADIAL slab: the axis-row profile p(r), eta(r) revolved into a disk.
@@ -357,7 +358,7 @@ def _draw_field(ax, fr, half, ctx):
     else:
         lu, lv = (r"$%s$" % _AX[i] for i in (iu, iv))
     ax.set_xlabel(lu + "  [µm]"); ax.set_ylabel(lv + "  [µm]")
-    ax.set_title(r"$t$ = %.2f µs" % (fr["t"] * um + ctx["toff"]), fontsize=S["label_size"], pad=4)
+    ax.set_title(r"$t$ = %.2f µs" % (fr["t"] * um + ctx["toff_sim"]), fontsize=S["label_size"], pad=4)
     return im
 
 
@@ -366,26 +367,26 @@ def _colorbar(fig, cax, im, ctx):
     cb.ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(_fmt_kpa))
     cb.ax.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
     cb.ax.tick_params(labelsize=ctx["S"]["tick_size"] - 0.5, direction="out", right=True, left=False)
-    cb.set_label(r"$p - p_\infty$  [kPa]", fontsize=ctx["S"]["label_size"] - 0.5)
+    cb.set_label(r"$p - p_\infty$  [kPa]", fontsize=ctx["S"]["label_size"])
     cb.outline.set_linewidth(ctx["S"]["axes_width"])
     return cb
 
 
 def _draw_R(ax, ctx, t_now):
-    S = ctx["S"]; um = 1e6; off = ctx["toff"]
+    S = ctx["S"]; um = 1e6; off = ctx["toff"]; offs = ctx["toff_sim"]     # experiment/model, simulation
     w0, w1 = ctx["window"]
     inw = lambda t: (t * um + off >= w0 - 0.05) & (t * um + off <= w1 + 0.05)
     te, Re = ctx["exp"]
     m = inw(te)
     ax.plot(te[m] * um + off, Re[m] * um, "o", color=S["c_exp"], mfc=S["c_exp"] if ctx["hi"] else "white", mew=0.9,
-            ms=3.6, label="Experiment", zorder=5)
+            ms=S["ms_exp"] + 0.6, label="Experiment", zorder=5)
     tc, Rc = ctx["catt"]
     m = inw(tc)
-    ax.plot(tc[m] * um + off, Rc[m] * um, "-.", color=S["c_catt"], lw=1.2, label="Cattaneo et al. model")
+    ax.plot(tc[m] * um + off, Rc[m] * um, "-.", color=S["c_catt"], lw=1.2, label="Cattaneo model")
     ts, Rs = ctx["Rsim"]
-    m = inw(ts)
-    ax.plot(ts[m] * um + off, Rs[m] * um, "-", color=S["c_vol"], lw=1.5, zorder=4, label=r"Simulation, $R_\mathrm{vol}$")
-    x = t_now * um + off
+    m = (ts * um + offs >= w0 - 0.05) & (ts * um + offs <= w1 + 0.05)
+    ax.plot(ts[m] * um + offs, Rs[m] * um, "-", color=S["c_vol"], lw=1.5, zorder=4, label=r"Num. $R_\mathrm{vol}$")
+    x = t_now * um + offs
     ax.axvline(x, color="0.35", lw=0.9, ls="--", zorder=2)
     ax.plot([x], [np.interp(t_now, ts, Rs) * um], "o", color=S["c_vol"], ms=6.5, mec="white", mew=1.0, zorder=6)
     ax.set_xlim(w0, w1); ax.set_ylim(*ctx["ylim"])
@@ -414,8 +415,8 @@ def _render(args):
         im = _draw_field(ax, fr, ctx["half"], ctx)
         _colorbar(fig, cax, im, ctx)
         _draw_R(axr, ctx, fr["t"])
-        axr.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3, fontsize=S["legend_size"],
-                   columnspacing=1.2, handlelength=2.4, borderaxespad=0.2)
+        axr.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3, fontsize=S["legend_size"], frameon=False,
+                   **cc.LEG)
         fig.text(0.5, 1.0 - 0.12 / H, ctx["title"], ha="center", va="top", fontsize=S["label_size"])
     elif kind == "3dcutshell":
         W, H = GIF["size_3d"]
@@ -423,7 +424,7 @@ def _render(args):
         ax = fig.add_axes([0.0, 0.0, 1.0, 0.86], projection="3d")
         _draw_3d_cut(ax, fr, ctx, field=False)
         fig.text(0.5, 1.0 - 0.12 / H, ctx["title_short"], ha="center", va="top", fontsize=S["label_size"])
-        fig.text(0.5, 1.0 - 0.42 / H, r"$t$ = %.2f µs" % (fr["t"] * 1e6 + ctx["toff"]), ha="center", va="top",
+        fig.text(0.5, 1.0 - 0.42 / H, r"$t$ = %.2f µs" % (fr["t"] * 1e6 + ctx["toff_sim"]), ha="center", va="top",
                  fontsize=S["label_size"])
     elif kind == "3dcut":
         W, H = GIF["size_3dcut"]
@@ -433,7 +434,7 @@ def _render(args):
         im = _draw_3d_cut(ax, fr, ctx)
         _colorbar(fig, cax, im, ctx)
         fig.text(0.5, 1.0 - 0.12 / H, ctx["title_short"], ha="center", va="top", fontsize=S["label_size"])
-        fig.text(0.5, 1.0 - 0.42 / H, r"$t$ = %.2f µs" % (fr["t"] * 1e6 + ctx["toff"]), ha="center", va="top",
+        fig.text(0.5, 1.0 - 0.42 / H, r"$t$ = %.2f µs" % (fr["t"] * 1e6 + ctx["toff_sim"]), ha="center", va="top",
                  fontsize=S["label_size"])
     else:   # 3d
         W, H = GIF["size_3d"]
@@ -441,10 +442,10 @@ def _render(args):
         ax = fig.add_axes([0.0, 0.0, 1.0, 0.86], projection="3d")
         _draw_3d(ax, fr, ctx)
         fig.text(0.5, 1.0 - 0.12 / H, ctx["title_short"], ha="center", va="top", fontsize=S["label_size"])
-        fig.text(0.5, 1.0 - 0.42 / H, r"$t$ = %.2f µs" % (fr["t"] * 1e6 + ctx["toff"]), ha="center", va="top",
+        fig.text(0.5, 1.0 - 0.42 / H, r"$t$ = %.2f µs" % (fr["t"] * 1e6 + ctx["toff_sim"]), ha="center", va="top",
                  fontsize=S["label_size"])
     fig.savefig(png, dpi=ctx["dpi"])             # fixed canvas (no tight bbox): identical frame sizes
-    fig.savefig(os.path.splitext(png)[0] + ".eps")   # frames are kept as EPS; the PNG only feeds the GIF
+    fig.savefig(os.path.splitext(png)[0] + ".eps")   # every frame kept as PNG and EPS (bundled in the results tar)
     plt.close(fig)
     return png
 
@@ -613,9 +614,10 @@ def make_gifs(a, C, case_tag, plotdir, figdir, geom, sim=None):
     _apply_rc(S)
     nproc = max(1, a.nproc)
     toff = -a.exp_shift if a.gif_time == "paper" else 0.0          # display t [us] = t_sim [us] + toff
+    toff_sim = toff + getattr(a, "sim_shift", 0.0)                  # simulation curves / frame times (06Exp: -0.25)
     fs = cc._plotfiles(plotdir)
     if getattr(a, "gif_tmax", None) is not None:                    # last frame on the display axis
-        fs = [pf for pf in fs if plotfile_time(pf) * 1e6 + toff <= a.gif_tmax + 1e-9]
+        fs = [pf for pf in fs if plotfile_time(pf) * 1e6 + toff_sim <= a.gif_tmax + 1e-9]
     fs = fs[::max(1, a.gif_every)]
     if not fs:
         print("  [gif] no plotfiles"); return
@@ -661,24 +663,22 @@ def make_gifs(a, C, case_tag, plotdir, figdir, geom, sim=None):
     if a.gif_window:
         window = tuple(a.gif_window)
     else:
-        w0, w1 = tf.min() * um + toff, tf.max() * um + toff
+        w0, w1 = tf.min() * um + toff_sim, tf.max() * um + toff_sim
         if w1 - w0 < 1.0:
             w1 = w0 + 1.0
         pad = 0.02 * (w1 - w0)
         window = (round(w0 - pad, 2), round(w1 + pad, 2))
-    sel = lambda t: (t * um + toff >= window[0]) & (t * um + toff <= window[1])
-    ys = [y[sel(t)] for t, y in (Rsim, catt, exp) if np.any(sel(t))]
+    sel = lambda t, o=toff: (t * um + o >= window[0]) & (t * um + o <= window[1])
+    ys = [y[sel(t, o)] for (t, y), o in ((Rsim, toff_sim), (catt, toff), (exp, toff)) if np.any(sel(t, o))]
     ys = np.concatenate(ys) * um if ys else np.array([C.R0 * um])
     span = np.nanmax(ys) - np.nanmin(ys)
     ylim = (max(0.0, np.nanmin(ys) - 0.06 * span - 0.05), np.nanmax(ys) + 0.06 * span + 0.05)
 
     ctx = dict(S=S, geom=geom, plane=a.gif_plane, half=half, p_inf=p_inf, cmap=a.gif_cmap, vmax=vmax, lin=lin,
                norm=SymLogNorm(linthresh=lin, linscale=1.0, vmin=-vmax, vmax=vmax, base=10),
-               toff=toff, window=window, ylim=ylim, catt=catt, exp=exp, Rsim=Rsim, hi=case_tag == "hi",
+               toff=toff, toff_sim=toff_sim, window=window, ylim=ylim, catt=catt, exp=exp, Rsim=Rsim, hi=case_tag == "hi",
                dpi=a.gif_dpi, bubble_color=S["bubble_color"][True],
-               title="Cattaneo et al. (2025) Experimental Comparison, 3 µm Coated Bubble under %.0f kPa Acoustic Force"
-                     % (C.pa / 1e3),
-               title_short="3 µm Coated Bubble, %.0f kPa Acoustic Force" % (C.pa / 1e3))
+               title=cc.paper_title(C), title_short=cc.paper_title(C))
 
     ext = [float(np.abs(f["tri"]).max()) for f in frames if f.get("tri") is not None]
     ctx["lim3d"] = 1.04 * max(ext) if ext else half                   # fixed 3-D box: size changes stay visible
@@ -700,9 +700,7 @@ def make_gifs(a, C, case_tag, plotdir, figdir, geom, sim=None):
         out = os.path.join(figdir, a.stem + suffix + ".gif")
         if assemble_gif(fdir, out, a.gif_fps):
             outs.append(out)
-            print("  wrote %s (%d frames, %g fps; EPS frames in %s/)" % (out, len(frames), a.gif_fps, fdir))
-            for png in glob.glob(os.path.join(fdir, "*.png")):      # frames are kept as EPS only
-                os.remove(png)
+            print("  wrote %s (%d frames, %g fps; PNG + EPS frames in %s/)" % (out, len(frames), a.gif_fps, fdir))
     return outs
 
 

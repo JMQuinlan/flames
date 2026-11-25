@@ -590,6 +590,8 @@ public:
                     // Capture parameters for GPU
                     Set::Scalar px_t = params_x.target_p;
                     Set::Scalar py_t = params_y.target_p;
+                    Set::Scalar ux_t = params_x.target_u;   // target normal velocity of the x face (as its inflow branch)
+                    Set::Scalar uy_t = params_y.target_v;   // ... of the y face
                     Set::Scalar fx_t = params_x.drive_h * params_x.dtarget_p_dt;   // drive invariant shift (see BoundaryParams)
                     Set::Scalar fy_t = params_y.drive_h * params_y.dtarget_p_dt;
                     Set::Scalar sigma_x = params_x.sigma;
@@ -740,8 +742,10 @@ public:
                         // incoming invariants w = p - rho a u.n_out and their drive values (see BoundaryParams)
                         Set::Scalar wx_c = p_c - rho_c * a_c * ((cx == 1) ? vx_c : -vx_c);
                         Set::Scalar wy_c = p_c - rho_c * a_c * ((cy == 1) ? vy_c : -vy_c);
-                        Set::Scalar wx_t = px_t + fx_t / (a_c + small_local);
-                        Set::Scalar wy_t = py_t + fy_t / (a_c + small_local);
+                        // target invariants: the target state (p_t, u_n,t) carries w_t = p_t - rho a u_n,t.n_out, so a
+                        // uniform stream at the target is a fixed point (2026-11-23 merge fix; u_n,t = 0 unchanged)
+                        Set::Scalar wx_t = px_t - rho_c * a_c * ((cx == 1) ? ux_t : -ux_t) + fx_t / (a_c + small_local);
+                        Set::Scalar wy_t = py_t - rho_c * a_c * ((cy == 1) ? uy_t : -uy_t) + fy_t / (a_c + small_local);
 
                         // Coupling coefficient (Motheau Eq. 56)
                         Set::Scalar ab = (1.0 - 0.5 * (beta_x + beta_y)) / 2.0;
@@ -995,6 +999,8 @@ public:
                             ebox.setBig(dt,   bx.bigEnd(dt));
 
                             Set::Scalar p1t = p1.target_p, p2t = p2.target_p;
+                            // target normal velocity of each face, named as in the face inflow branches (y: target_v, x/z: target_u)
+                            Set::Scalar u1t = (d1 == 1) ? p1.target_v : p1.target_u, u2t = (d2 == 1) ? p2.target_v : p2.target_u;
                             Set::Scalar f1t = p1.drive_h * p1.dtarget_p_dt, f2t = p2.drive_h * p2.dtarget_p_dt;   // drive invariant shift
                             Set::Scalar sig1 = p1.sigma, sig2 = p2.sigma;
                             Set::Scalar bet1 = p1.beta, bet2 = p2.beta;
@@ -1071,8 +1077,8 @@ public:
                                 // incoming invariants w = p - rho a u.n_out and their drive values (see BoundaryParams)
                                 Set::Scalar w1_c = p_c - rho_c * a_c * ((cc1 == 1) ? v1_c : -v1_c);
                                 Set::Scalar w2_c = p_c - rho_c * a_c * ((cc2 == 1) ? v2_c : -v2_c);
-                                Set::Scalar w1_t = p1t + f1t / (a_c + small_local);
-                                Set::Scalar w2_t = p2t + f2t / (a_c + small_local);
+                                Set::Scalar w1_t = p1t - rho_c * a_c * ((cc1 == 1) ? u1t : -u1t) + f1t / (a_c + small_local);
+                                Set::Scalar w2_t = p2t - rho_c * a_c * ((cc2 == 1) ? u2t : -u2t) + f2t / (a_c + small_local);
                                 Set::Scalar Lin1 = (cc1 == 1) ? L1_1 : L4_1;
                                 Set::Scalar Lin2 = (cc2 == 1) ? L1_2 : L4_2;
                                 if (ty1 == Type::Outflow && ty2 == Type::Outflow)
@@ -1357,7 +1363,7 @@ public:
 
                         if (params_xlo_local.type == Type::Outflow)
                         {
-                            L4 = K * ((p_bnd + rho_bnd * a_bnd * un_bnd) - (params_xlo_local.target_p + params_xlo_local.drive_h * params_xlo_local.dtarget_p_dt / (a_bnd + small_local) + Wsc)) - (1.0 - params_xlo_local.beta) * T4;
+                            L4 = K * ((p_bnd + rho_bnd * a_bnd * un_bnd) - (params_xlo_local.target_p + rho_bnd * a_bnd * params_xlo_local.target_u + params_xlo_local.drive_h * params_xlo_local.dtarget_p_dt / (a_bnd + small_local) + Wsc)) - (1.0 - params_xlo_local.beta) * T4;
                         }
                         else if (params_xlo_local.type == Type::Inflow)
                         {
@@ -1637,7 +1643,7 @@ public:
 
                         if (params_xhi_local.type == Type::Outflow)
                         {
-                            L1 = K * ((p_bnd - rho_bnd * a_bnd * un_bnd) - (params_xhi_local.target_p + params_xhi_local.drive_h * params_xhi_local.dtarget_p_dt / (a_bnd + small_local) + Wsc)) - (1.0 - params_xhi_local.beta) * T1;
+                            L1 = K * ((p_bnd - rho_bnd * a_bnd * un_bnd) - (params_xhi_local.target_p - rho_bnd * a_bnd * params_xhi_local.target_u + params_xhi_local.drive_h * params_xhi_local.dtarget_p_dt / (a_bnd + small_local) + Wsc)) - (1.0 - params_xhi_local.beta) * T1;
                         }
                         else if (params_xhi_local.type == Type::Inflow)
                         {
@@ -1913,7 +1919,7 @@ public:
 
                         if (params_ylo_local.type == Type::Outflow)
                         {
-                            L4 = K * ((p_bnd + rho_bnd * a_bnd * un_bnd) - (params_ylo_local.target_p + params_ylo_local.drive_h * params_ylo_local.dtarget_p_dt / (a_bnd + small_local) + Wsc)) - (1.0 - params_ylo_local.beta) * T4;
+                            L4 = K * ((p_bnd + rho_bnd * a_bnd * un_bnd) - (params_ylo_local.target_p + rho_bnd * a_bnd * params_ylo_local.target_v + params_ylo_local.drive_h * params_ylo_local.dtarget_p_dt / (a_bnd + small_local) + Wsc)) - (1.0 - params_ylo_local.beta) * T4;
                         }
                         else if (params_ylo_local.type == Type::Inflow)
                         {
@@ -2177,7 +2183,7 @@ public:
 
                         if (params_yhi_local.type == Type::Outflow)
                         {
-                            L1 = K * ((p_bnd - rho_bnd * a_bnd * un_bnd) - (params_yhi_local.target_p + params_yhi_local.drive_h * params_yhi_local.dtarget_p_dt / (a_bnd + small_local) + Wsc)) - (1.0 - params_yhi_local.beta) * T1;
+                            L1 = K * ((p_bnd - rho_bnd * a_bnd * un_bnd) - (params_yhi_local.target_p - rho_bnd * a_bnd * params_yhi_local.target_v + params_yhi_local.drive_h * params_yhi_local.dtarget_p_dt / (a_bnd + small_local) + Wsc)) - (1.0 - params_yhi_local.beta) * T1;
                         }
                         else if (params_yhi_local.type == Type::Inflow)
                         {
@@ -2398,7 +2404,7 @@ public:
                         const Set::Scalar Wsc = sc_on ? const_cast<NSCBC4*>(this)->ScatterW(4, sc_lkey, i, j, k_bnd, time, p_bnd - params_zlo_local.target_p, a_bnd, sc_r(i, j, k_bnd)) : 0.0;
                         if (params_zlo_local.type == Type::Outflow)
                         {
-                            L4 = K * ((p_bnd + rho_bnd * a_bnd * un_bnd) - (params_zlo_local.target_p + params_zlo_local.drive_h * params_zlo_local.dtarget_p_dt / (a_bnd + small_local) + Wsc)) - (1.0 - params_zlo_local.beta) * T4;
+                            L4 = K * ((p_bnd + rho_bnd * a_bnd * un_bnd) - (params_zlo_local.target_p + rho_bnd * a_bnd * params_zlo_local.target_u + params_zlo_local.drive_h * params_zlo_local.dtarget_p_dt / (a_bnd + small_local) + Wsc)) - (1.0 - params_zlo_local.beta) * T4;
                         }
                         else if (params_zlo_local.type == Type::Inflow)
                         {
@@ -2591,7 +2597,7 @@ public:
                         const Set::Scalar Wsc = sc_on ? const_cast<NSCBC4*>(this)->ScatterW(5, sc_lkey, i, j, k_bnd, time, p_bnd - params_zhi_local.target_p, a_bnd, sc_r(i, j, k_bnd)) : 0.0;
                         if (params_zhi_local.type == Type::Outflow)
                         {
-                            L1 = K * ((p_bnd - rho_bnd * a_bnd * un_bnd) - (params_zhi_local.target_p + params_zhi_local.drive_h * params_zhi_local.dtarget_p_dt / (a_bnd + small_local) + Wsc)) - (1.0 - params_zhi_local.beta) * T1;
+                            L1 = K * ((p_bnd - rho_bnd * a_bnd * un_bnd) - (params_zhi_local.target_p - rho_bnd * a_bnd * params_zhi_local.target_u + params_zhi_local.drive_h * params_zhi_local.dtarget_p_dt / (a_bnd + small_local) + Wsc)) - (1.0 - params_zhi_local.beta) * T1;
                         }
                         else if (params_zhi_local.type == Type::Inflow)
                         {

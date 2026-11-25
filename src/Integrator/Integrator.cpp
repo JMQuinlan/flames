@@ -154,12 +154,12 @@ Integrator::Parse(Integrator &value, IO::ParmParse &pp)
 
         std::string str;
         // Type of time integration to use (see amrex::TimeIntegrator for more details)
-        pp.query_validate("integration.type", str, {"ForwardEuler","RungeKutta"});
+        pp.query_validate("integration.type", str, {"RungeKutta","ForwardEuler"});   // [2026-11-24] default RK (06 configuration; was ForwardEuler)
         if (str == "RungeKutta")
         {
             int type;
             // If RungeKutta specified, which order to use (3=SSPRK3, 4=RK4)
-            pp.query_validate("integration.rk.type", type, {1,2,3,4});
+            pp.query_validate("integration.rk.type", type, {3,1,2,4});   // [2026-11-24] default SSPRK3 (was 1)
         }
     }
 
@@ -1100,10 +1100,14 @@ Integrator::Evolve()
         int iteration = 1;
         TimeStepBegin(cur_time, step);
         if (integrate_variables_before_advance) IntegrateVariables(cur_time, step);
+        // [2026-10-06] the step just taken used THIS dt.  TimeStepComplete may change dt[0] for the next step
+        // (dynamictimestep), and the clock used to be advanced with that new value: the simulation time ran ahead of
+        // the integrated time by (current dt - initial dt), i.e. about one step, in every adaptive run.
+        const amrex::Real dt_step = dt[0];
         TimeStep(lev, cur_time, iteration);
         if (integrate_variables_after_advance) IntegrateVariables(cur_time, step);
         TimeStepComplete(cur_time, step);
-        cur_time += dt[0];
+        cur_time += dt_step;
 
         if (amrex::ParallelDescriptor::IOProcessor()) {
             std::cout << "STEP " << step + 1 << " ends."

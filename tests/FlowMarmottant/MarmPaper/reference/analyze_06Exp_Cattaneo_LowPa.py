@@ -7,9 +7,13 @@ a full 3-D coated bubble under a rigid substrate (top face of the domain), p_a =
 Outputs (<figdir>/<stem>..., .png + .eps; paper time axis, Cattaneo Fig. 2a, ending at 12 us):
   _R, _R_full     R(t): experiment, Present Model (R_vol, R(eta = 0.5)), coated KM / RPE, Cattaneo et al. model
                   (cattaneo_06_common.py; peak/trough table printed)
+  _R_noKM, _R_full_noKM   the same without the coated KM / RPE curves
+  _modes_time, _modes_total, _modes_rebounds/   spherical-harmonic shape modes of the eta = 0.5 surface
+  Simulation time is moved left by 0.25 us (--sim-shift, default -0.25 here; 0 = unshifted): the full-sphere run
+  trails the experiment by a near-constant ~0.25 us (single transducer). Experiment and models are not shifted.
   _pmap, _pmap_compact   p - p_inf against time and distance from the bubble centre, away from (-z) and parallel
                   to (+x) the substrate, bubble interface overlaid (cattaneo_06exp.py)
-  GIFs (cattaneo_06_gif.py, frames to 12 us, EPS frames kept in <stem>_gif_frames/<name>/):
+  GIFs (cattaneo_06_gif.py, frames to 12 us, PNG + EPS frames kept in <stem>_gif_frames/<name>/):
     _bubble3d.gif           full bubble, eta = 0.5 isosurface
     _bubble3d_cut.gif       cut open, p - p_inf on the cut face
     _bubble3d_cutshell.gif  cut open, shell only

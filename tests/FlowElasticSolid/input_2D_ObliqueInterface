@@ -1,0 +1,132 @@
+# ============================================================================
+# FlowElasticSolid / P wave obliquely incident on a bonded Al | Cu interface  (Hydro2, elastic.on = 1)
+#
+# Reflection, transmission and MODE CONVERSION at a welded interface (Zoeppritz equations).
+# Aluminium (x < 0) and copper (x > 0), parameters of input_1D_CuAlShock, uniform
+# pressure, y-periodic.  A packet of longitudinal waves, wavevector 2 pi (2, 1) (26.57 deg to
+# the interface normal, wavelength 0.4472, Gaussian envelope of width 0.4 in x), is started
+# in the aluminium as a velocity perturbation.  With no initial strain it splits into two
+# packets of half amplitude; the forward one meets the interface at t ~ 0.44 and produces a
+# reflected P, a reflected SV, a transmitted P and a transmitted SV packet.  All fields share
+# the y wavenumber, so the problem is exactly 1D per Fourier mode in y and the peak packet
+# amplitudes are the plane-wave coefficients (to O((lambda/w)^2)).
+# 3200 x 256 cells (114 per wavelength); t = 0.95.  The check extrapolates each packet's
+# amplitude back to the instant of reflection to remove the numerical damping in transit.
+#
+# Run (from bin/): mpirun -np 24 --oversubscribe ./hydro2-2d-g++ ../tests/FlowElasticSolid/input_2D_ObliqueInterface plot_file=<dir>/output
+# Check:           python3 ../tests/FlowElasticSolid/reference/oblique_interface_check.py <dir>
+# ============================================================================
+plot_file = ./tests/FlowElasticSolid/output_2D_ObliqueInterface
+
+Riemann_Solver.type = hllc_elastic
+Limiter.type        = minmod
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+elastic.on      = 1
+elastic.mu0     = 26.0     # phase 0 (eta = 1): aluminium
+elastic.rhoref0 = 2.7
+elastic.mu1     = 92.0     # phase 1 (eta = 0): copper
+elastic.rhoref1 = 8.9
+
+eta.ic.type = expression
+eta.ic.expression.constant.xi = 0.0
+eta.ic.expression.region0 = "1.0e-6 + (1.0 - 2.0e-6)*(x < xi)"
+epsilon = 0.001
+
+amr.plot_dt = 0.01
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.n_cell = 3200 256
+geometry.prob_lo = -9.0  0.0   0.0
+geometry.prob_hi =  3.5  1.0   0.0
+geometry.is_periodic = 0 1 0
+
+timestep  = 1.0e-5
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1e-2
+dynamictimestep.min = 1e-10
+stop_time = 0.95
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+cfl   = 0.4
+
+eos0.gamma = 3.4
+eos1.gamma = 4.22
+eos0.p0 = 21.5
+eos1.p0 = 34.2
+eos0.cp = 1004.5
+eos1.cp = 1004.5
+eos0.cv = 717.5
+eos1.cv = 717.5
+
+mu0   = 0.0
+mu1   = 0.0
+sigma = 0.0
+pref = 0.0
+
+# aluminium (phase 0, x < 0) | copper (phase 1, x > 0), bonded, uniform p
+density0.ic.type = constant
+density0.ic.constant.value = 2.7
+velocity0.ic.type = expression
+velocity0.ic.expression.constant.A  = 1.0e-4
+velocity0.ic.expression.constant.x0 = -2.5
+velocity0.ic.expression.constant.w  = 0.4
+velocity0.ic.expression.region0 = "A*0.8944271909999159*sin(6.283185307179586*(2*x + y))*exp(-(x - x0)^2/(2*w*w))"
+velocity0.ic.expression.region1 = "A*0.4472135954999579*sin(6.283185307179586*(2*x + y))*exp(-(x - x0)^2/(2*w*w))"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 1.0e-4
+
+density1.ic.type = constant
+density1.ic.constant.value = 8.9
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.A  = 1.0e-4
+velocity1.ic.expression.constant.x0 = -2.5
+velocity1.ic.expression.constant.w  = 0.4
+velocity1.ic.expression.region0 = "A*0.8944271909999159*sin(6.283185307179586*(2*x + y))*exp(-(x - x0)^2/(2*w*w))"
+velocity1.ic.expression.region1 = "A*0.4472135954999579*sin(6.283185307179586*(2*x + y))*exp(-(x - x0)^2/(2*w*w))"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 1.0e-4
+
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+kappa_method = 1
+Dv = 0
+g = 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+apply_ahe   = 1
+ahe.method  = 0
+cutoff = 1e-4
+
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = periodic
+eta.bc.type.yhi = periodic

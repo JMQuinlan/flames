@@ -1,0 +1,157 @@
+# ============================================================================
+# FlowAblation / 1D ablation ONSET  (Hydro2, ablation.on = 1, ablation.conduction = 1)
+#
+# The surface starts BELOW the ablation temperature and reaches it later: the transition between the
+# two regimes of the capped wall temperature (Ablation.H).  A solid slab 0 < x < L = 0.1 with an
+# adiabatic back (x = 0) is brought into contact at t = 0 with gas at rest at T_g = 1 filling
+# 0.1 < x < 0.5 (adiabatic end).  Gas of input_1D_Stefan2 (k_g 4.861e-3, alpha_g 1.389e-3,
+# e_g = sqrt(k rho c) = 0.1304); solid rho_s 1, cp_s 0.875, k_s = 4 k_g -> e_s = e_g (sig = 1) and
+# alpha_s = 16 alpha_g, so the slab heats through quickly.  T_s0 = 0.99, T_abl = 0.9975, Q* = 0.01.
+#   stage 1 (no recession): contact temperature T_i = 0.995, then the slab heats up and the surface
+#     temperature rises,  T_w = T_s0 + (T_g - T_s0)/2 [1 + erfc(L/sqrt(alpha_s t))]   (sig = 1, gas
+#     semi-infinite; Laplace transform / images), and reaches T_abl at
+#     t_abl = L^2 / (alpha_s [erfc^-1(2 (T_abl - T_i)/(T_g - T_s0))]^2) = 1.97830
+#   stage 2 (T_w = T_abl): rho_s Q* ds/dt = q_g - q_s; no closed form -> fine-grid front-fixing reference
+#     (reference/ablation_onset_reference.py, verified against the closed form above and against the
+#     two-phase Stefan similarity solution; second-order convergent): s(t = 6) = 0.024085.
+# Constant properties, gas at rest (1 % temperature difference), no blowing, as in input_1D_Stefan2.
+# Measured (2026-10-29, square cells, t = 6; reference/Images/R32_Onset):
+#   cells   onset t_abl          recession s(6)      gas profile (% of dT)
+#   100     1.98431 (+0.30 %)    0.023829 (-1.07 %)  0.087
+#   200     1.98282 (+0.23 %)    0.023906 (-0.75 %)  0.081
+#   400     1.98124 (+0.15 %)    0.023972 (-0.47 %)  0.070
+#   no recession before onset (|s| < 1e-13); solid profile error < 1e-3 %.  The residual surface-temperature
+#   deviation before onset (<= 0.5 % of dT, at t ~ 0.7) follows the gas pressure (correlation 0.98): acoustic
+#   waves from the initial contact, reflected between the wall and x = 0.5; the reference has no acoustics.
+#
+# Run (from bin/), square cells (cost ~ N^3, diffusive dt ~ dx^2: 100 cells 98 s, 200 cells 570 s on 1 core, 400 cells 43 min on 2):
+#   mpirun --bind-to none -np 1 ./hydro2-2d-g++ ../tests/FlowAblation/input_1D_AblationOnset plot_file=<dir>/output
+#       (200 cells; for N cells add  amr.n_cell="N 4" geometry.prob_hi="0.5 2/N 0.0"  [and amr.max_grid_size=200 with -np 2])
+# Check:  python3 ../tests/FlowAblation/reference/ablation_onset_check.py <dir> [<dir2> ...]
+# Reference self-test:  python3 ../tests/FlowAblation/reference/ablation_onset_reference.py verify
+# ============================================================================
+plot_file = ./tests/FlowAblation/output_1D_AblationOnset
+amr.plot_dt = 0.05
+amr.max_grid_size    = 500000
+amr.blocking_factor = 2
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level = 0
+amr.n_cell = 200 4
+amr.n_error_buf      = 8
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 0.5 0.01 0.0
+geometry.is_periodic = 0 1 0
+timestep = 1e-5
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1e-2
+dynamictimestep.min = 1e-9
+cfl                 = 0.3
+cfl_v               = 0.3
+stop_time = 6.0
+apply_embedded_solid = 1
+solid.wall_flux = 1
+solid.phi.ic.type = expression
+solid.phi.ic.expression.constant.xw = 0.1
+solid.phi.ic.expression.region0 = "1.0*(x > xw)"
+phi_refinement_criterion = 1e10
+solid.density.ic.type = constant
+solid.density.ic.constant.value = 1.0
+solid.momentum.ic.type = constant
+solid.momentum.ic.constant.value = 0.0 0.0
+solid.pressure.ic.type = constant
+solid.pressure.ic.constant.value = 1.0
+eta.ic.type = constant
+eta.ic.constant.value = 0.5
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cp = 3.5
+eos0.cv = 2.5
+mu0 = 1.0e-3
+mu0_b = 0.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp = 3.5
+eos1.cv = 2.5
+mu1 = 1.0e-3
+mu1_b = 0.0
+density0.ic.type = constant
+density0.ic.constant.value = 1.0
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 1.0
+density1.ic.type = constant
+density1.ic.constant.value = 1.0
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 1.0
+epsilon = 0.1
+sigma   = 0.0
+Dv      = 0.0
+pref    = 0.0
+small   = 1e-6
+grav    = 0.0
+eta_refinement_criterion   = 1e10
+omega_refinement_criterion = 1e10
+gradu_refinement_criterion = 1e10
+p_refinement_criterion = 1e10
+rho_refinement_criterion = 1e10
+cutoff = 1e-16
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+kappa_method        = 1
+
+
+
+
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = periodic
+eta.bc.type.yhi = periodic
+
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+
+density0.bc.type.xlo = neumann
+density0.bc.type.xhi = neumann
+density0.bc.type.ylo = periodic
+density0.bc.type.yhi = periodic
+
+density1.bc.type.xlo = neumann
+density1.bc.type.xhi = neumann
+density1.bc.type.ylo = periodic
+density1.bc.type.yhi = periodic
+
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+nghost = 4
+thermal.conduction = 1
+thermal.Pr = 0.72
+ablation.on     = 1
+ablation.T_wall = 0.9975       # ablation temperature (above the contact temperature 0.995)
+ablation.rho_s  = 1.0
+ablation.Qstar  = 0.01
+ablation.conduction = 1          # in-depth conduction in the solid
+ablation.k_s      = 1.9444444e-2
+ablation.cp_s     = 0.875
+ablation.T_solid0 = 0.99

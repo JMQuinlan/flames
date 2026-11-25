@@ -1,0 +1,133 @@
+# ============================================================================
+# FlowElasticSolid / Mach 2 gas shock hitting an elastic cylinder  (Hydro2, elastic.on = 1)
+#
+# DEFORMING SOLID test (Favrie, Gavrilyuk & Saurel, JCP 228, 2009 model).
+#   gas    rho = 1, p = 1, gamma = 1.4; Mach 2 shock starting at x = 0.3, moving in +x
+#          (post-shock rho = 2.667, u = 1.479, p = 4.5)
+#   solid  cylinder D = 0.4 at (0.7, 0.5): rho_s = 10, stiffened gas gamma = 4.4,
+#          p_inf = 100, shear modulus mu = 50  (c_l = 7.15, c_t = 2.24)
+# 480 x 240 cells (D/dx = 96), all boundaries zero-gradient.
+#
+# No closed-form solution.  What to look for:
+#   * the first reflection off the front of the cylinder is the 1D problem of
+#     input_1D_ShockImpact (p3 = 13.25, u_i = 0.171)
+#   * elastic waves ring inside the body (longitudinal 7.15, shear 2.24) and it
+#     keeps its shape; with elastic.mu0 = 0 (a liquid column) it flattens and
+#     is stripped -- run both and compare with reference/deforming_solid_2d_check.py
+#   * mass of the solid is conserved; total energy changes only through the
+#     open boundaries.
+#
+# Run (from bin/): mpirun -np 16 ./hydro2-2d-g++ ../tests/FlowElasticSolid/UNIT_TEST_2D_ShockCylinder plot_file=<dir>/output
+#                  (liquid reference: add  elastic.mu0=0.0)
+# Check:           python3 ../tests/FlowElasticSolid/reference/deforming_solid_2d_check.py <dir> [<liquid_dir>]
+# ============================================================================
+plot_file = ./tests/FlowElasticSolid/output_2D_ShockCylinder
+
+Riemann_Solver.type = hllc_elastic
+Limiter.type        = minmod      # higher-order limiters leave a few-% residual stress at solid|gas interfaces; godunov is clean but diffusive
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+elastic.on      = 1
+elastic.mu0     = 50.0     # phase 0 (eta = 1): the solid;  phase 1 is the gas (mu1 = 0)
+elastic.rhoref0 = 10.0
+
+eta.ic.type = expression
+eta.ic.expression.constant.xc = 0.7
+eta.ic.expression.constant.yc = 0.5
+eta.ic.expression.constant.R0 = 0.2
+eta.ic.expression.constant.w  = 0.004      # interface half-width (~1 cell)
+eta.ic.expression.region0 = "1.0e-6 + (1.0 - 2.0e-6)*0.5*(1.0 - tanh((sqrt((x - xc)^2 + (y - yc)^2) - R0)/w))"
+epsilon = 0.001
+
+amr.plot_dt = 0.02
+amr.max_level = 0
+amr.max_grid_size = 500000
+amr.blocking_factor = 2
+amr.n_cell = 480 240
+geometry.prob_lo = 0.0  0.0   0.0
+geometry.prob_hi = 2.0  1.0   0.0
+geometry.is_periodic = 0 0 0
+
+timestep  = 1.0e-5
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1e-2
+dynamictimestep.min = 1e-10
+stop_time = 1.2
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+cfl   = 0.4
+
+eos0.gamma = 4.4
+eos1.gamma = 1.4
+eos0.p0 = 100.0
+eos1.p0 = 0.0
+eos0.cp = 1004.5
+eos1.cp = 1004.5
+eos0.cv = 717.5
+eos1.cv = 717.5
+
+mu0   = 0.0
+mu1   = 0.0
+sigma = 0.0
+pref = 0.0
+
+# solid (phase 0), at rest at p = 1
+density0.ic.type = constant
+density0.ic.constant.value = 10.0
+velocity0.ic.type = expression
+velocity0.ic.expression.constant.xs = 0.3
+velocity0.ic.expression.region0 = "1.479019945774904*(x < xs)"
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = expression
+pressure0.ic.expression.constant.xs = 0.3
+pressure0.ic.expression.region0 = "4.5*(x < xs) + 1.0*(x >= xs)"
+
+# gas (phase 1): Mach 2 shock at x = xs moving in +x
+density1.ic.type = expression
+density1.ic.expression.constant.xs = 0.3
+density1.ic.expression.region0 = "2.6666666666666665*(x < xs) + 1.0*(x >= xs)"
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.xs = 0.3
+velocity1.ic.expression.region0 = "1.479019945774904*(x < xs)"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = expression
+pressure1.ic.expression.constant.xs = 0.3
+pressure1.ic.expression.region0 = "4.5*(x < xs) + 1.0*(x >= xs)"
+
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+kappa_method = 1
+Dv = 0
+g = 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+apply_ahe   = 1
+ahe.method  = 0
+cutoff = 1e-4

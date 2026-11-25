@@ -1,0 +1,127 @@
+# ============================================================================
+# FlowConjugateHeat / structure of a Mach 2 shock with viscosity and heat conduction  (Hydro2, Becker 1922)
+#
+# "Shock heating": a normal shock running into gas at rest (rho 1, p 1, gamma 1.4, cp 3.5; c = 1.1832) at Mach 2,
+# S = 2.3664; Rankine-Hugoniot state behind it rho 2.6667, p 4.5, u 1.4790, T2/T1 = 1.6875.  Constant mu = 2e-2,
+# no bulk viscosity, Pr = 3/4.  For Pr = 3/4 the total enthalpy cp T + w^2/2 is uniform through the wave (w = speed
+# in the shock frame) and the structure follows from ONE ordinary differential equation (Becker),
+#     (4/3) mu dw/dx = m (w - w1) + p - p1,     p = (m/w) R (H - w^2/2)/cp,     m = rho1 w1,
+# integrated numerically by the check script.  The step initial condition relaxes onto this profile within a few
+# shock thicknesses (thickness ~ 0.06 = 24 cells at 800 cells); the check compares the travelling profile
+# (shifted to the best-fit position) and the uniformity of the total enthalpy.  Tests the viscous stress, the
+# viscous dissipation and the heat conduction together, with no wall and no interface.
+#
+# Run (from bin/): mpirun -np 4 ./hydro2-2d-g++ ../tests/FlowConjugateHeat/input_1D_BeckerShock plot_file=<dir>/output
+# Check:           python3 ../tests/FlowConjugateHeat/reference/becker_shock_check.py <dir> [<dir> ...]
+# ============================================================================
+plot_file = ./tests/FlowConjugateHeat/output_1D_BeckerShock
+# Check:           python3 ../tests/FlowAblation/reference/stefan_check.py <dir>
+# ============================================================================
+plot_file = ./tests/FlowAblation/output_1D_Stefan
+amr.plot_dt = 0.05
+amr.max_grid_size = 200
+amr.blocking_factor = 2
+amr.regrid_int       = 10
+amr.grid_eff         = 0.8
+amr.max_level = 0
+amr.n_cell = 800 4
+amr.n_error_buf      = 8
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 2.0 0.01 0.0
+geometry.is_periodic = 0 1 0
+timestep = 1e-5
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1e-2
+dynamictimestep.min = 1e-9
+cfl                 = 0.3
+cfl_v               = 0.3
+stop_time = 0.5
+apply_embedded_solid = 0
+eta.ic.type = constant
+eta.ic.constant.value = 0.5
+eos0.gamma = 1.4
+eos0.p0    = 0.0
+eos0.cp = 3.5
+eos0.cv = 2.5
+mu0 = 2.0e-2
+mu0_b = 0.0
+eos1.gamma = 1.4
+eos1.p0    = 0.0
+eos1.cp = 3.5
+eos1.cv = 2.5
+mu1 = 2.0e-2
+mu1_b = 0.0
+density0.ic.type = expression
+density0.ic.expression.region0 = "2.6666666666666665*(x < 0.3) + 1.0*(x >= 0.3)"
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "1.4789860264182205*(x < 0.3)"
+velocity0.ic.expression.region1 = "0.0"
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "4.5*(x < 0.3) + 1.0*(x >= 0.3)"
+density1.ic.type = expression
+density1.ic.expression.region0 = "2.6666666666666665*(x < 0.3) + 1.0*(x >= 0.3)"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "1.4789860264182205*(x < 0.3)"
+velocity1.ic.expression.region1 = "0.0"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "4.5*(x < 0.3) + 1.0*(x >= 0.3)"
+epsilon = 0.1
+sigma   = 0.0
+Dv      = 0.0
+pref    = 0.0
+small   = 1e-6
+grav    = 0.0
+eta_refinement_criterion   = 1e10
+omega_refinement_criterion = 1e10
+gradu_refinement_criterion = 1e10
+p_refinement_criterion = 1e10
+rho_refinement_criterion = 1e10
+cutoff = 1e-16
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0 0.0
+q.ic.constant.value  = 0.0 0.0
+apply_surface_tension = 0
+apply_weight          = 0
+apply_vaporization    = 0
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+kappa_method        = 1
+
+
+
+
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = neumann
+eta.bc.type.ylo = periodic
+eta.bc.type.yhi = periodic
+
+density.bc.type.xlo = neumann
+density.bc.type.xhi = neumann
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+
+density0.bc.type.xlo = neumann
+density0.bc.type.xhi = neumann
+density0.bc.type.ylo = periodic
+density0.bc.type.yhi = periodic
+
+density1.bc.type.xlo = neumann
+density1.bc.type.xhi = neumann
+density1.bc.type.ylo = periodic
+density1.bc.type.yhi = periodic
+
+energy.bc.type.xlo = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+nghost = 4
+thermal.conduction = 1
+thermal.Pr = 0.75
+ablation.on = 0
+

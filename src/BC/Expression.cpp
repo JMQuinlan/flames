@@ -35,6 +35,18 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
         #endif
 
 
+        // dirichlet_at_face (see Expression.H): put the Dirichlet value ON the domain face by the odd
+        // reflection ghost = 2 val - mirror, instead of ghost = val (value at the ghost-cell centre).
+        //   1: every Dirichlet face;  2: only faces whose wall-normal component (component index = face
+        //   direction, multi-component BCs such as momentum) is Dirichlet with value 0 -- impermeable walls.
+        const int dfm = m_dirichlet_face;
+        auto dface = [&](int f, int dir) -> bool {
+            if (dfm == 1) return true;
+            if (dfm != 2 || (int)m_ncomp < AMREX_SPACEDIM || dir >= AMREX_SPACEDIM) return false;
+            if (!BCUtil::IsDirichlet(m_bc_type[f][dir])) return false;
+            return m_bc_func[f][dir](x,y,z,t) == 0.0;
+        };
+
         amrex::IntVect glevel;
         AMREX_D_TERM(glevel[0] = std::max(std::min(0,i-lo.x),i-hi.x); ,
                     glevel[1] = std::max(std::min(0,j-lo.y),j-hi.y); ,
@@ -99,7 +111,7 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
         if (glevel[0]<0 && (face == Orientation::xlo || face == Orientation::All)) // Left boundary
         {
             if (BCUtil::IsDirichlet(m_bc_type[Face::XLO][n]))
-                in(i,j,k,n) = m_bc_func[Face::XLO][n](x,y,z,t);
+                in(i,j,k,n) = dface(Face::XLO, 0) ? 2.0 * m_bc_func[Face::XLO][n](x,y,z,t) - in(2*lo.x - 1 - i,j,k,n) : m_bc_func[Face::XLO][n](x,y,z,t);
             else if(BCUtil::IsNeumann(m_bc_type[Face::XLO][n]))
                 in(i,j,k,n) = in(i-glevel[0],j,k,n) - (m_bc_func[Face::XLO].size() > 0 ? m_bc_func[Face::XLO][n](x,y,z,t)*DX[0] : 0);
             // Mirror across the lo face (at lo.x-1/2): ghost i -> interior 2*lo.x-1-i.
@@ -119,7 +131,7 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
         else if (glevel[0]>0 && (face == Orientation::xhi || face == Orientation::All)) // Right boundary
         {
             if (BCUtil::IsDirichlet(m_bc_type[Face::XHI][n]))
-                in(i,j,k,n) = m_bc_func[Face::XHI][n](x,y,z,t);
+                in(i,j,k,n) = dface(Face::XHI, 0) ? 2.0 * m_bc_func[Face::XHI][n](x,y,z,t) - in(2*hi.x + 1 - i,j,k,n) : m_bc_func[Face::XHI][n](x,y,z,t);
             else if(BCUtil::IsNeumann(m_bc_type[Face::XHI][n]))
                 in(i,j,k,n) = in(i-glevel[0],j,k,n) - (m_bc_func[Face::XHI].size() > 0 ? m_bc_func[Face::XHI][n](x,y,z,t)*DX[0] : 0);
             // Mirror across the hi face (at hi.x+1/2): ghost i -> interior 2*hi.x+1-i.
@@ -140,7 +152,7 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
         else if (glevel[1]<0 && (face == Orientation::ylo || face == Orientation::All)) // Bottom boundary
         {
             if (BCUtil::IsDirichlet(m_bc_type[Face::YLO][n]))
-                in(i,j,k,n) = m_bc_func[Face::YLO][n](x,y,z,t);
+                in(i,j,k,n) = dface(Face::YLO, 1) ? 2.0 * m_bc_func[Face::YLO][n](x,y,z,t) - in(i,2*lo.y - 1 - j,k,n) : m_bc_func[Face::YLO][n](x,y,z,t);
             else if (BCUtil::IsNeumann(m_bc_type[Face::YLO][n]))
                 in(i,j,k,n) = in(i,j-glevel[1],k,n) - (m_bc_func[Face::YLO].size() > 0 ? m_bc_func[Face::YLO][n](x,y,z,t)*DX[1] : 0);
             else if (BCUtil::IsReflectEven(m_bc_type[Face::YLO][n]))
@@ -159,7 +171,7 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
         else if (glevel[1]>0 && (face == Orientation::yhi || face == Orientation::All)) // Top boundary
         {
             if (BCUtil::IsDirichlet(m_bc_type[Face::YHI][n]))
-                in(i,j,k,n) = m_bc_func[Face::YHI][n](x,y,z,t);
+                in(i,j,k,n) = dface(Face::YHI, 1) ? 2.0 * m_bc_func[Face::YHI][n](x,y,z,t) - in(i,2*hi.y + 1 - j,k,n) : m_bc_func[Face::YHI][n](x,y,z,t);
             else if (BCUtil::IsNeumann(m_bc_type[Face::YHI][n]))
                 in(i,j,k,n) = in(i,j-glevel[1],k,n) - (m_bc_func[Face::YHI].size() > 0 ? m_bc_func[Face::YHI][n](x,y,z,t)*DX[1] : 0);
             else if (BCUtil::IsReflectEven(m_bc_type[Face::YHI][n]))
@@ -180,7 +192,7 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
         else if (glevel[2]<0 && (face == Orientation::zlo || face == Orientation::All))
         {
             if (BCUtil::IsDirichlet(m_bc_type[Face::ZLO][n]))
-                in(i,j,k,n) = m_bc_func[Face::ZLO][n](x,y,z,t);
+                in(i,j,k,n) = dface(Face::ZLO, 2) ? 2.0 * m_bc_func[Face::ZLO][n](x,y,z,t) - in(i,j,2*lo.z - 1 - k,n) : m_bc_func[Face::ZLO][n](x,y,z,t);
             else if (BCUtil::IsNeumann(m_bc_type[Face::ZLO][n]))
                 in(i,j,k,n) = in(i,j,k-glevel[2],n) - (m_bc_func[Face::ZLO].size() > 0 ? m_bc_func[Face::ZLO][n](x,y,z,t)*DX[2] : 0);
             else if (BCUtil::IsReflectEven(m_bc_type[Face::ZLO][n]))
@@ -198,7 +210,7 @@ Expression::FillBoundary (amrex::BaseFab<Set::Scalar> &a_in,
         else if (glevel[2]>0 && (face == Orientation::zhi || face == Orientation::All))
         {
             if (BCUtil::IsDirichlet(m_bc_type[Face::ZHI][n]))
-                in(i,j,k,n) = m_bc_func[Face::ZHI][n](x,y,z,t);
+                in(i,j,k,n) = dface(Face::ZHI, 2) ? 2.0 * m_bc_func[Face::ZHI][n](x,y,z,t) - in(i,j,2*hi.z + 1 - k,n) : m_bc_func[Face::ZHI][n](x,y,z,t);
             else if(BCUtil::IsNeumann(m_bc_type[Face::ZHI][n]))
                 in(i,j,k,n) = in(i,j,k-glevel[2],n) - (m_bc_func[Face::ZHI].size() > 0 ? m_bc_func[Face::ZHI][n](x,y,z,t)*DX[2] : 0);
             else if(BCUtil::IsReflectEven(m_bc_type[Face::ZHI][n]))

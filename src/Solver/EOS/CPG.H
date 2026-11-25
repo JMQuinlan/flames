@@ -18,8 +18,8 @@ class CPG : public EOS
 {
 private:
     Set::Scalar m_gamma; // Ratio of specific heats (dimensionless)
-    Set::Scalar m_cv;    // Specific heat at constant volume [J/(kg·K)]
-    Set::Scalar m_cp;    // Specific heat at constant pressure [J/(kg·K)]
+    Set::Scalar m_cv;    // Specific heat at constant volume [J/(kg.K)]
+    Set::Scalar m_cp;    // Specific heat at constant pressure [J/(kg.K)]
 
 public:
     /// Default constructor (air parameters as example)
@@ -32,8 +32,8 @@ public:
 
     /// Constructor with parameters
     /// @param gamma  Ratio of specific heats
-    /// @param cv     Specific heat at constant volume [J/(kg·K)]
-    /// @param cp     Specific heat at constant pressure [J/(kg·K)]
+    /// @param cv     Specific heat at constant volume [J/(kg.K)]
+    /// @param cp     Specific heat at constant pressure [J/(kg.K)]
     CPG(Set::Scalar gamma, Set::Scalar cv, Set::Scalar cp)
         : m_gamma(gamma),
           m_cv(cv),

@@ -1,0 +1,136 @@
+# FlowEnergetic / DETONATION WAVE INTO ELASTIC COPPER, 1D  (Hydro2, energetic.on = 1, elastic.on = 1)
+#
+# Test 4.1 of Wallis, Barton & Nikiforakis, Comput. Struct. 254 (2021) 106578 (after Schoch, Nordin-Bates &
+# Nikiforakis, JCP 252 (2013) 163):  copper for x < 0.15 m, idealised explosive for 0.15 < x < 0.4 m at rest and
+# 1e5 Pa, the last 0.05 m of it (the booster) at 1e9 Pa.  The booster starts a detonation that runs to the left,
+# reaches the copper and sends a shock into it; a shock returns into the products.  4000 cells.  SI units.
+#
+# Explosive (their Table 2, from Petitpas et al., Shock Waves 19 (2009) 377): reactant stiffened gas gamma = 4,
+#   p_inf = 1 GPa, rho_0 = 1600, c_v = 2000; products ideal gas gamma = 3, c_v = 1000; Q = 3.68 MJ/kg;
+#   d lambda/dt = -k sqrt(lambda), k = 2e6 1/s, where p > 1e8 Pa.
+# DIFFERENCES FROM THE PAPER (stated, not tuned):
+#   * mixture closure: reactant (phase 0) and products (phase 1) are two phases at one PRESSURE (six-equation model,
+#     as Petitpas 2009); the paper's one-material mixture is at one pressure AND temperature.
+#   * copper: the paper uses the Romenskii equation of state (rho_0 = 8930, K_0 = 136.5 GPa, G_0 = 39.4 GPa,
+#     Gruneisen 2).  Hydro2 has the stiffened gas: gamma = 3 (= Gruneisen + 1) and p_inf = K_0/gamma = 45.5 GPa give
+#     the same density, bulk modulus and Gruneisen coefficient at the reference state; shear modulus 39.4 GPa.
+#   * boundaries (not stated in the paper): zero gradient at the copper end, a rigid wall behind the booster, so
+#     that the products come to rest behind the Taylor wave and the total mass is conserved.
+# Closed forms for this two-phase explosive (complete reaction, tests/FlowEnergetic/reference/detonation_check.py):
+#   Chapman-Jouguet speed, pressure and the pressure of the products at rest behind the Taylor wave.
+# Check:  python3 tests/FlowEnergetic/reference/detonation_check.py <run_dir>
+plot_file = ./bin/tests/FlowEnergetic/output_1D_DetonationCopper
+amr.plot_dt = 2.0e-7
+amr.n_cell = 4000 4
+amr.max_grid_size = 500
+geometry.prob_lo = 0.0 -2.0e-4 0.0
+geometry.prob_hi = 0.4  2.0e-4 0.0
+timestep = 1.0e-10
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1.0e-7
+dynamictimestep.min = 1.0e-16
+cfl = 0.4
+stop_time = 5.0e-5
+epsilon = 1.0e-4
+cutoff = 1.0e-9
+eta.ic.type = constant
+eta.ic.constant.value = 0.999999
+eos0.gamma = 4.0
+eos0.p0    = 1.0e9
+eos0.cv    = 2000.0
+eos0.cp    = 8000.0
+eos1.gamma = 3.0
+eos1.p0    = 0.0
+eos1.cv    = 1000.0
+eos1.cp    = 3000.0
+density0.ic.type = expression
+density0.ic.expression.region0 = "8930.0*(x < 0.15) + 1600.0*(x >= 0.15)"
+density1.ic.type = constant
+density1.ic.constant.value = 1.0
+pressure0.ic.type = expression
+pressure0.ic.expression.region0 = "1.0e5 + (1.0e9 - 1.0e5)*(x > 0.35)"
+pressure1.ic.type = expression
+pressure1.ic.expression.region0 = "1.0e5 + (1.0e9 - 1.0e5)*(x > 0.35)"
+velocity0.ic.type = expression
+velocity0.ic.expression.region0 = "0.0"
+velocity0.ic.expression.region1 = "0.0"
+velocity1.ic.type = expression
+velocity1.ic.expression.region0 = "0.0"
+velocity1.ic.expression.region1 = "0.0"
+Riemann_Solver.type = hllc_elastic
+Limiter.type        = minmod
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+elastic.on      = 1
+amr.max_level = 0
+amr.blocking_factor = 2
+geometry.is_periodic = 0 1 0
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+mu0   = 0.0
+mu1   = 0.0
+sigma = 0.0
+pref = 0.0
+density.bc.type.xhi = REFLECT_EVEN
+density.bc.type.xlo = neumann
+density.bc.type.ylo = periodic
+density.bc.type.yhi = periodic
+energy.bc.type.xhi = REFLECT_EVEN
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = periodic
+energy.bc.type.yhi = periodic
+momentum.bc.type.xhi = REFLECT_ODD REFLECT_EVEN
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = periodic periodic
+momentum.bc.type.yhi = periodic periodic
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+kappa_method = 1
+Dv = 0
+g = 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+apply_ahe   = 1
+ahe.method  = 0
+eta.bc.type.xlo = neumann
+eta.bc.type.xhi = REFLECT_EVEN
+eta.bc.type.ylo = periodic
+eta.bc.type.yhi = periodic
+eta_consistent_advect = 1
+species.on = 1
+species.eos = mixture
+species.order = 2
+species.phase0.names   = Cu Reactant
+species.phase0.gamma   = 3.0 4.0
+species.phase0.cv      = 390.0 2000.0
+species.phase0.pinf    = 45.5e9 1.0e9
+species.phase0.rho_ref = 8930.0 1600.0
+species.phase1.names   = Products
+species.phase1.gamma   = 3.0
+species.phase1.cv      = 1000.0
+species.ic.type = expression
+species.ic.expression.region0 = "1.0*(x < 0.15)"
+species.ic.expression.region1 = "1.0*(x >= 0.15)"
+species.ic.expression.region2 = "1.0"
+species.bc.type.xlo = neumann
+species.bc.type.xhi = REFLECT_EVEN
+species.bc.type.ylo = periodic
+species.bc.type.yhi = periodic
+elastic.species.mu = 39.4e9 0.0
+energetic.on = 1
+energetic.reactant = Reactant
+energetic.product  = Products
+energetic.law   = sqrt
+energetic.k     = 2.0e6
+energetic.Q     = 3.68e6
+energetic.p_ign = 1.0e8

@@ -1,0 +1,21 @@
+# Kang, Choi & Lee, Phys. Fluids 11, 3312 (1999), FIG. 8(b), FRICTION part of the mean drag (dotted lines),
+# digitized.  Uncertainty +-0.006 for isolated markers, +-0.012 where the marker touches another one
+# (Re = 100 at alpha = 1.6 .. 1.8, Re = 60 at 1.4 .. 1.5, everything at alpha = 2).  Re = 100 and 160 at alpha = 0
+# are hidden by the axis: the alpha = 0.1 value is repeated there (the curves are flat).
+# columns: alpha  Cdf_Re40  Cdf_Re60  Cdf_Re100  Cdf_Re160
+         0       0.515       0.426        0.34       0.275
+       0.1       0.521       0.426        0.34       0.275
+       0.2        0.52       0.426        0.34       0.276
+       0.5       0.524        0.43        0.34       0.278
+         1       0.543       0.438       0.348       0.284
+       1.1         nan       0.439         nan         nan
+       1.2         nan       0.442         nan         nan
+       1.3         nan       0.446         nan         nan
+       1.4         nan       0.451         nan         nan
+       1.5       0.575       0.455       0.364       0.298
+       1.6         nan         nan        0.37         0.3
+       1.7         nan         nan       0.372       0.304
+       1.8         nan         nan       0.374       0.306
+       1.9         nan         nan       0.384       0.307
+         2       0.626       0.511       0.396       0.316
+       2.5       0.706       0.587       0.471       0.386

@@ -27,6 +27,10 @@ Plots (names for run()):
   shapes        3D eta = 0.5 surface at chosen times
   planes        eta = 0.5 contours on the (001)/(010)/(100)/(111) planes over time
   modes         spherical-harmonic shape modes (+ spectrum at R_min)
+  modes_time    R(t) over the shape-mode amplitudes a_l(t), one line per l = 1..modes_lmax (when modes appear)
+  modes_total   shape-mode spectrum over the whole run: max_t a_l (bars) and the time-RMS (dots)
+  modes_rebounds  one spectrum per rebound (each R_vol minimum) in <stem>_modes_rebounds/: a_l at R_min and the
+                max over that rebound's cycle (maximum to maximum)
   gif           shape for every frame (GIF + PNG frames folder)
   r_volume      gas-volume radius + shell-averaged eta = 0.5 + ray (Sch20 eq. 29)
   eta_band      eta = 0.1/0.5/0.9 radii along the ray
@@ -89,6 +93,12 @@ STYLE = dict(
     planes_cmap="viridis", planes_res=241,
     gif_size=(3.2, 3.0), gif_dpi=130, gif_fps=10, gif_highlight=0.55, gif_shadow="#0b2e2a",
     modes_lmax=8, n_dirs=400, size_spectrum=(4.5, 3.5),
+    shape_rmax_R0=1.35,          # eta = 0.5 surface search radius (R0); a bubble that grows past it gives no modes
+    modes_time_unit="tc",        # "tc": t / t_c (default) | "us": t in microseconds (driven / 06 runs)
+    modes_t_offset_us=0.0,       # added to t [us] when modes_time_unit = "us" (06: Cattaneo Fig. 2a time axis)
+    modes_rebound_prom=0.05,     # rebound = R_vol minimum with prominence >= this fraction of the R_vol range
+    modes_decades=6,             # modes_* plots show at most this many decades below the largest amplitude
+    modes_legend="right",        # modes_* legends: "right" (outside, right of the axes) | "top" (above; narrow figures)
     # ---- other ----------------------------------------------------------------------------- #
     probes_R0=(2.0, 5.0, 10.0), box_R0=3.0, title_gap=0.012,
     size_tall=(6.5, 5.6), size_maps=(6.8, 3.6),
@@ -107,6 +117,9 @@ TITLES = dict(
     planes="{C}{case} Transient Interface Contours",
     modes="{C}{case} Bubble Shape Modes",
     modes_spectrum="{C}{case} Bubble Shape-Mode Spectrum",
+    modes_time="{C}{case} Bubble Shape Modes over Time",
+    modes_total="{C}{case} Bubble Shape-Mode Spectrum, Whole Run",
+    modes_rebound="{C}{case} Bubble Shape Modes, Rebound {{k}}",
     r_volume="{C}{case} Bubble Radius from Gas Volume",
     eta_band="{C}{case} Bubble Interface Band",
     ic_pressure="Initial Pressure Field",
@@ -213,7 +226,10 @@ def _eta_around(ds, half):
     m = int(np.ceil(half / dx)) + 2
     snap = lambda v, d: dle[d] + np.floor((v - dle[d]) / dx + 1e-9) * dx
     lo = [cen[d] if sym[d] else max(snap(cen[d] - m * dx, d), dle[d]) for d in range(dim)] + [0.0] * (3 - dim)
-    dims = [m if sym[d] else 2 * m for d in range(dim)] + [1] * (3 - dim)
+    # clipped to the domain (a wall within `half` of the centre, e.g. the 06Exp substrate); the samples
+    # past the edge then hold the edge value (_sample, mode "nearest")
+    dims = [max(1, min(m if sym[d] else 2 * m, int(np.floor((dre[d] - lo[d]) / dx + 1e-9))))
+            for d in range(dim)] + [1] * (3 - dim)
     E = np.asarray(ds.covering_grid(level=ds.index.max_level, left_edge=lo, dims=dims)[("boxlib", "eta")], float)
     if dim == 2:
         E = E[:, :, 0]
@@ -315,19 +331,20 @@ def _frame(args):
         o["n_stray"] = int(np.sum((r > 1.6 * o["R_vol"]) & (eta < 0.99)))
         o["p_min"] = float(p.min())
         # ---- shape: eta = 0.5 radius in n_dirs directions + the six axis radii ---------------
-        E, dxe, offe, syme = _eta_around(ds, 1.35 * R0)
+        rs = S.get("shape_rmax_R0", 1.35) * R0
+        E, dxe, offe, syme = _eta_around(ds, rs)
         if dim == 3:
             dirs = _fib_dirs(S["n_dirs"])
         else:
             th = np.linspace(0, 2 * np.pi, S["n_dirs"], endpoint=False)
             dirs = np.stack([np.cos(th), np.sin(th)], -1)
         o["dirs"] = dirs
-        o["rad"] = _radii(E, dxe, offe, syme, dirs, 1.35 * R0)
+        o["rad"] = _radii(E, dxe, offe, syme, dirs, rs)
         ax6 = []
         for d in range(dim):
             for sg in (1, -1):
                 u = np.zeros(dim); u[d] = sg
-                ax6.append(_radii(E, dxe, offe, syme, [u], 1.35 * R0)[0])
+                ax6.append(_radii(E, dxe, offe, syme, [u], rs)[0])
         o["axis_R"] = np.array(ax6)
         return o
     except Exception as exc:
@@ -427,6 +444,8 @@ class Sch20Analysis:
 
     def _load_frames(self):
         key = "v1|%s|%s|%s|%s" % (self.S["ray_xmax_R0"], self.S["box_R0"], self.S["n_dirs"], self.S["band_thresholds"])
+        if self.S.get("shape_rmax_R0", 1.35) != 1.35:
+            key += "|rs%s" % self.S["shape_rmax_R0"]
         done = {}
         if self._cache_path and os.path.isfile(self._cache_path):
             try:
@@ -802,6 +821,170 @@ class Sch20Analysis:
                     + ("\ngrey: zero by octant symmetry" if octant else ""), transform=ax.transAxes, ha="right", va="top")
             self._axtitle(ax, "modes_spectrum"); self._save(fig, "modes_spectrum")
 
+
+    # ---- shape modes over the run / per rebound (2026-11-25) --------------------------------- #
+    def _modes_axis(self, t):
+        """(display time, axis label) for the modes_* plots."""
+        if self.S.get("modes_time_unit", "tc") == "us":
+            return t * 1e6 + self.S.get("modes_t_offset_us", 0.0), "Time  [µs]"
+        return t / self.tc, self.tlabel
+
+    def _title_over(self, fig, leg, key):
+        """Title centred above a legend that sits above the axes (modes_legend = "top")."""
+        t = self._title(key)
+        if not t:
+            return
+        fig.canvas.draw()
+        bb = leg.get_window_extent().transformed(fig.transFigure.inverted())
+        fig.text(0.5 * (bb.x0 + bb.x1), bb.y1 + 0.01, t, ha="center", va="bottom", fontsize=self.S["title_size"])
+
+    def _modes_ls(self):
+        """degrees to show and the ones that vanish by symmetry (mirror octant: every odd l)."""
+        L = self.S["modes_lmax"]; octant = bool(self.frames[0]["octant"])
+        allowed = [l for l in range(1, L + 1) if not (octant and l % 2)]
+        return list(range(1, L + 1)), allowed, octant
+
+    def _rebounds(self, R):
+        """indices of the R_vol minima (rebounds) and of the maxima that bound each rebound's cycle."""
+        from scipy.signal import find_peaks
+        ok = np.isfinite(R)
+        if ok.sum() < 3:
+            return [], []
+        Rf = np.where(ok, R, np.interp(np.arange(len(R)), np.where(ok)[0], R[ok]))
+        prom = self.S.get("modes_rebound_prom", 0.05) * (Rf.max() - Rf.min())
+        mins = find_peaks(-Rf, prominence=prom)[0]
+        maxs = find_peaks(Rf, prominence=prom)[0]
+        win = []
+        for i in mins:
+            lo = maxs[maxs < i]; hi = maxs[maxs > i]
+            win.append((lo[-1] if len(lo) else 0, hi[0] if len(hi) else len(R) - 1))
+        return list(mins), win
+
+    def _mode_bars(self, ax, la, vals, allowed, color, label=None, hollow=False):
+        cols = [color if l in allowed else "0.80" for l in la]
+        if hollow:
+            ax.bar(la, vals, width=0.62, facecolor="none", edgecolor=cols, linewidth=0.9, label=label)
+        else:
+            ax.bar(la, vals, width=0.62, color=cols, label=label)
+
+    def _mode_axes(self, ax, la, a_all, octant):
+        ax.set_yscale("log"); ax.set_xlabel(r"Degree, $\ell$"); ax.set_xticks(la)
+        ax.set_ylabel(r"Mode amplitude, $a_\ell$")
+        pos = a_all[np.isfinite(a_all) & (a_all > 0)]
+        if len(pos):   # display range: at most modes_decades below the largest amplitude, headroom for the labels
+            dec = self.S.get("modes_decades", 6)
+            ax.set_ylim(max(0.5 * pos.min(), pos.max() * 10.0 ** -dec), 30.0 * pos.max())
+        if octant:
+            ax.text(0.97, 0.03, "grey: zero by octant symmetry", transform=ax.transAxes, ha="right", va="bottom",
+                    color="0.45")
+
+    def plot_modes_time(self):
+        """R_vol / R0 (top) and a_l(t) for every degree (bottom, log), rebound times dashed: when each mode appears."""
+        t = self.col("t"); R = self.col("R_vol"); a = self.shape_modes()
+        la, allowed, octant = self._modes_ls(); x, xl = self._modes_axis(t)
+        mins, _ = self._rebounds(R)
+        fig, (a1, a2) = plt.subplots(2, 1, sharex=True, figsize=self.S["size_tall"],
+                                     gridspec_kw=dict(height_ratios=[1, 2.2], hspace=0.08))
+        a1.plot(x, R / self.R0, "-", color=self.S["c_sim"], lw=1.4)
+        a1.set_ylabel(r"$R_\mathrm{vol}/R_0$")
+        a1.ticklabel_format(axis="y", useOffset=False)
+        # Okabe-Ito (colour-blind safe; yellow swapped for grey on white), solid l <= 4, dashed above: each degree
+        # differs by colour AND dash; the colour follows l, not its rank, so octant / full runs match
+        oi = ["#000000", "#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#0072B2", "#D55E00", "#999999"]
+        for l in allowed:
+            a2.semilogy(x, np.where(a[:, l] > 0, a[:, l], np.nan), "-" if l <= 4 else "--", lw=1.4,
+                        color=oi[(l - 1) % len(oi)], label=r"$\ell = %d$" % l)
+        for i in mins:
+            for ax in (a1, a2):
+                ax.axvline(x[i], color="0.6", lw=0.7, ls="--", zorder=0)
+        a2.set_xlabel(xl); a2.set_ylabel(r"Mode amplitude, $a_\ell$")
+        a2.set_xlim(np.nanmin(x), np.nanmax(x))
+        pos = a[:, allowed][np.isfinite(a[:, allowed]) & (a[:, allowed] > 0)]
+        if len(pos):   # display range: at most modes_decades below the largest amplitude
+            a2.set_ylim(max(0.5 * pos.min(), pos.max() * 10.0 ** -self.S.get("modes_decades", 6)), 2.0 * pos.max())
+        # legend outside the data (one entry per degree; never on the curves)
+        if self.S.get("modes_legend", "right") == "top":
+            leg = a1.legend(*a2.get_legend_handles_labels(), loc="lower center", bbox_to_anchor=(0.5, 1.02),
+                            ncol=4, frameon=False, columnspacing=0.9, handlelength=1.8, handletextpad=0.4,
+                            title=("Octant: even $\\ell$ only" if octant else None))
+            self._title_over(fig, leg, "modes_time"); self._save(fig, "modes_time"); return
+        a2.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), ncol=1, frameon=False,
+                  title=("Octant:\neven $\\ell$ only" if octant else None))
+        self._suptitle(fig, [a1, a2], "modes_time"); self._save(fig, "modes_time")
+
+    def plot_modes_total(self):
+        """Spectrum over the whole run: max over time of a_l (bars) and its time-RMS (dots)."""
+        t = self.col("t"); a = self.shape_modes(); la, allowed, octant = self._modes_ls()
+        good = np.isfinite(a[:, 1])
+        if not good.any():
+            print("  [skip] modes_total: no frame with a resolved eta = 0.5 surface (shape_rmax_R0?)"); return
+        x, xl = self._modes_axis(t)
+        amax = np.nanmax(a[good][:, la], axis=0); arms = np.sqrt(np.nanmean(a[good][:, la] ** 2, axis=0))
+        tmax = x[good][np.nanargmax(a[good][:, la], axis=0)]
+        fig, ax = plt.subplots(figsize=self.S["size_spectrum"])
+        top = self.S.get("modes_legend", "right") == "top"
+        self._mode_bars(ax, la, amax, allowed, self.S["c_sim"],
+                        label=(r"Max over $t$ (label: time of max, µs)" if top and "µs" in xl else r"max over $t$"))
+        ax.plot([l for l in la], arms, "o", color="k", ms=4, label=("RMS over $t$" if top else "RMS over $t$"), zorder=3)
+        self._mode_axes(ax, la, np.concatenate([amax, arms]), octant)
+        ylo = ax.get_ylim()[0]
+        for l, v, tm in zip(la, amax, tmax):
+            if l in allowed and np.isfinite(v) and v > ylo:      # only bars inside the displayed range
+                ax.annotate("%.2f" % tm, (l, v), xytext=(0, 4), textcoords="offset points", ha="center",
+                            va="bottom", fontsize="small", color="0.35", rotation=90, annotation_clip=True)
+        if top:
+            leg = ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=1, frameon=False, handlelength=1.5)
+            self._title_over(fig, leg, "modes_total"); self._save(fig, "modes_total"); return
+        else:
+            ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), frameon=False,
+                      title="Bar labels: time of\nthe max (%s)" % ("µs" if "µs" in xl else "$t/t_c$"))
+        self._axtitle(ax, "modes_total"); self._save(fig, "modes_total")
+
+    def plot_modes_rebounds(self):
+        """One spectrum per rebound in <stem>_modes_rebounds/: a_l at R_min (bars) and the max over that
+        rebound's cycle, maximum to maximum (outline)."""
+        t = self.col("t"); R = self.col("R_vol"); a = self.shape_modes(); la, allowed, octant = self._modes_ls()
+        mins, win = self._rebounds(R)
+        if not mins:
+            print("  [skip] modes_rebounds: no R_vol minimum found"); return
+        x, xl = self._modes_axis(t); unit = "µs" if "µs" in xl else ""
+        d = self.stem + "_modes_rebounds"; os.makedirs(d, exist_ok=True)
+        stem0 = self.stem; n = 0
+        for k, (i, (i0, i1)) in enumerate(zip(mins, win), 1):
+            ai = a[i, la]; aw = np.nanmax(a[i0:i1 + 1][:, la], axis=0) if i1 >= i0 else ai
+            if not np.any(np.isfinite(ai)) and not np.any(np.isfinite(aw)):
+                continue
+            fig, ax = plt.subplots(figsize=self.S["size_spectrum"])
+            self._mode_bars(ax, la, ai, allowed, self.S["c_sim"], label=r"At $R_\mathrm{min}$")
+            self._mode_bars(ax, la, aw, allowed, "k", label="Max over the cycle", hollow=True)
+            self._mode_axes(ax, la, np.concatenate([ai, aw]), octant)
+            if self.S.get("modes_legend", "right") == "top":
+                ax.text(0.97, 0.96, "Rebound %d, $t$ = %.2f %s\n$R_\\mathrm{min}/R_0$ = %.3f" % (k, x[i], unit, R[i] / self.R0),
+                        transform=ax.transAxes, ha="right", va="top")
+                leg = ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=2, frameon=False, handlelength=1.5,
+                                columnspacing=1.0)
+                t_ = self._title("modes_rebound")
+                if t_:
+                    fig.canvas.draw(); bb = leg.get_window_extent().transformed(fig.transFigure.inverted())
+                    fig.text(0.5 * (bb.x0 + bb.x1), bb.y1 + 0.01, t_.replace("{k}", str(k)), ha="center", va="bottom",
+                             fontsize=self.S["title_size"])
+            else:
+                ax.text(1.03, 0.05, "Rebound %d\n$t$ = %.2f %s\n$R_\\mathrm{min}/R_0$ = %.3f\ncycle %.2f to %.2f %s"
+                        % (k, x[i], unit, R[i] / self.R0, x[i0], x[i1], unit),
+                        transform=ax.transAxes, ha="left", va="bottom")
+                ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), frameon=False)
+            t_ = self._title("modes_rebound")
+            if t_ and self.S.get("modes_legend", "right") != "top":
+                ax.set_title(t_.replace("{k}", str(k)), fontsize=self.S["title_size"])
+            self.stem = os.path.join(d, "rebound_%02d" % k)
+            try:
+                self._save(fig, "modes")
+            finally:
+                self.stem = stem0
+            n += 1
+        if self.verbose:
+            print("  wrote %d rebound spectra in %s/" % (n, d))
+
     # ---- your original diagnostics ---------------------------------------------------------- #
     def plot_r_volume(self):
         t = self.col("t")
@@ -960,7 +1143,8 @@ class Sch20Analysis:
     # ---- driver --------------------------------------------------------------------------- #
     PLOTS = dict(radius="plot_radius", residual="plot_residual", velocity="plot_velocity", probes="plot_probes",
                  pressure="plot_pressure", waves="plot_waves", shapes="plot_shapes", planes="plot_planes",
-                 modes="plot_modes", gif="make_gif", r_volume="plot_r_volume", eta_band="plot_eta_band",
+                 modes="plot_modes", modes_time="plot_modes_time", modes_total="plot_modes_total",
+                 modes_rebounds="plot_modes_rebounds", gif="make_gif", r_volume="plot_r_volume", eta_band="plot_eta_band",
                  ic_pressure="plot_ic_pressure", driven="plot_driven", gamma="plot_gamma", csv="write_csv")
 
     def run(self, plots, debug=()):

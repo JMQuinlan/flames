@@ -100,6 +100,7 @@ def _panel(ax, t_disp, rg, Pm, Ri, norm, cmap):
 
 
 def pressure_map(F, C, rmax, toff, out_stem, formats):
+    """toff [us]: display time = t_sim + toff for the simulation frames (includes --sim-shift)."""
     S = dict(cc.FIG); _apply_rc(S)
     um = 1e6
     t = np.array([f["t"] for f in F])
@@ -138,21 +139,26 @@ def pressure_map(F, C, rmax, toff, out_stem, formats):
         print("  wrote %s.{%s}" % (stem, ",".join(formats)))
 
     # two rays
-    fig, axs = plt.subplots(2, 1, figsize=(6.5, 5.0), sharex=True, constrained_layout=True)
+    W = cc.WIDTH                                       # half-width paper figure, FIG text size
+    fig, axs = plt.subplots(2, 1, figsize=(W, 4.2), sharex=True, constrained_layout=True)
+    fig.suptitle(cc.paper_title(C), fontsize=S["title_size"])
     for ax, (key, _, _, title), lab in zip(axs, RAYS, "ab"):
         im = _panel(ax, td, rg, M[key] / 1e3, I[key], norm, cmap)
         ax.set_title("(%s) %s" % (lab, title), loc="left", fontsize=S["label_size"], pad=3)
-    axs[0].legend(loc="lower right", bbox_to_anchor=(1.0, 1.0), fontsize=S["legend_size"], borderaxespad=0.1)
+    axs[0].legend(loc="upper right", fontsize=S["legend_size"], frameon=True, framealpha=1.0, edgecolor="0.6",
+                  fancybox=False, **cc.LEG)
     axs[-1].set_xlabel("Time  [µs]")
     cbar(fig, im, axs)
     save(fig, out_stem)
 
     # compact: the jet side only
     key = RAYS[0][0]
-    fig, ax = plt.subplots(figsize=(6.5, 2.7), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(W, 2.3), constrained_layout=True)
+    fig.suptitle(cc.paper_title(C), fontsize=S["title_size"])
     im = _panel(ax, td, rg, M[key] / 1e3, I[key], norm, cmap)
     ax.set_xlabel("Time  [µs]")
-    ax.legend(loc="lower right", bbox_to_anchor=(1.0, 1.0), fontsize=S["legend_size"], borderaxespad=0.1)
+    ax.legend(loc="upper right", fontsize=S["legend_size"], frameon=True, framealpha=1.0, edgecolor="0.6",
+              fancybox=False, **cc.LEG)
     cbar(fig, im, ax)
     save(fig, out_stem + "_compact")
     print("  [pmap] colour scale +-%g kPa (linear below %g kPa), r <= %.2f um, %d frames"
@@ -165,7 +171,10 @@ def pressure_map(F, C, rmax, toff, out_stem, formats):
 def add_args(ap):
     g = ap.add_argument_group("06Exp (cattaneo_06exp.py)")
     # 06Exp defaults: paper time to 12 us, the three 3-D GIFs, no thermo figure
-    ap.set_defaults(gif=True, gif_3d=True, gif_tmax=T_PAPER_END, gif_kinds="3d,3dcut,3dcutshell", no_thermo_fig=True)
+    # sim_shift: the full-sphere 06Exp simulation runs a near-constant ~0.25 us behind the experiment (one
+    # transducer; the response delay is not in the model), so its time is moved left by 0.25 us (--sim-shift 0)
+    ap.set_defaults(gif=True, gif_3d=True, gif_tmax=T_PAPER_END, gif_kinds="3d,3dcut,3dcutshell", no_thermo_fig=True,
+                    sim_shift=-0.25)
     g.add_argument("--no-gif", dest="gif", action="store_false", help="skip the GIFs")
     g.add_argument("--thermo-fig", dest="no_thermo_fig", action="store_false",
                    help="also write the gas-thermodynamics figure (<stem>_thermo)")
@@ -177,7 +186,7 @@ def add_args(ap):
 def _frames(a, C, plotdir):
     """The centroid-ray pass over the plotfiles up to the axis end (once; cached on `a`)."""
     if getattr(a, "_x06_frames", None) is None:
-        toff = -a.exp_shift if a.time == "paper" else 0.0
+        toff = (-a.exp_shift if a.time == "paper" else 0.0) + a.sim_shift
         t_end = (T_PAPER_END - toff) if a.time == "paper" else np.inf      # simulation time of the axis end
         fs = [pf for pf in cc._plotfiles(plotdir) if G.plotfile_time(pf) * 1e6 <= t_end + 1e-9]
         F = _pool_map(_frame, [(pf, a.pmap_rmax * C.R0) for pf in fs], max(1, a.nproc)) if fs else []
@@ -207,7 +216,7 @@ def post(a, C, plotdir, figdir, sim, case_tag="hi"):
     geom = sim["geom"] if sim else (a.geom or cc.geometry(plotdir))
     if geom != "full":
         print("  [pmap] %s geometry: the 06Exp pressure map needs the full bubble, skipped" % geom); return
-    toff = -a.exp_shift if a.time == "paper" else 0.0
+    toff = (-a.exp_shift if a.time == "paper" else 0.0) + a.sim_shift   # simulation frames
     F = _frames(a, C, plotdir)
     if not F:
         print("  [pmap] no plotfiles before the axis end"); return

@@ -1,0 +1,12 @@
+# Hu et al. (Kang's Ref. 17), Re = 60, as plotted in Kang, Choi & Lee (1999), FIG. 5 (diamonds), digitized, +-0.0005.
+# Kang et al. disagree with this curve; kept for completeness.
+# columns: alpha  St
+         0      0.1528
+       0.1      0.1524
+       0.2      0.1517
+       0.3      0.1505
+       0.4      0.1488
+       0.5      0.1464
+       0.6      0.1432
+       0.8      0.1357
+         1      0.1261

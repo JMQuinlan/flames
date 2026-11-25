@@ -11,7 +11,7 @@
 //
 // STABILITY MODIFICATIONS (matching professor's working implementation):
 //   - Uses 1st-order FD instead of 2nd-order to eliminate amplification
-//   - Uses simple linear extrapolation for 2nd ghost cell (2× vs 6× amplification)
+//   - Uses simple linear extrapolation for 2nd ghost cell (2x vs 6x amplification)
 //   - Writes gamma, pi, pressure to ghost cells for Riemann solver
 //   - Extensive NaN guards and fallback to boundary state
 

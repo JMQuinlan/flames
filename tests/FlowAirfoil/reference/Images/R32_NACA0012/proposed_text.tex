@@ -1,0 +1,50 @@
+% ============================================================================
+% PROPOSED TEXT (not inserted into the dissertation) -- NACA 0012 companion to the NACA 0008 study.
+% Written 2026-10-29.  Numbers marked \TBD come from the R32 runs, which were still running when
+% this file was written; regenerate them with
+%   cd /home/ttryon/Desktop/flames/tests/FlowAirfoil/reference
+%   python3 analyze_aoa_sweep.py \
+%       /home/ttryon/Desktop/flames/bin/tests/FlowAirfoil/R32_NACA0012_AoA_sweep_M0.2_Re2000_L5_dom32x24_weno5 \
+%       --outdir Images/R32_NACA0012 --ref data/naca0012_kurtulus2022_Re2000.csv \
+%       --ref-label "Kurtulus (2022)" --paper \
+%       --compare Images/NACA0008_AoA_sweep_M0.2_Re2000_L5_dom32x24_weno5_v17/aoa_sweep_summary.csv \
+%       --compare-label "Numerical, NACA 0008"
+% and copy Cl_mean, Cl_std, Cd_mean, St, Cl_err_pct, Cd_err_pct from Images/R32_NACA0012/aoa_sweep_summary.csv.
+% Kurtulus values below are final (see tests/FlowAirfoil/reference/data/naca0012_kurtulus2022_Re2000.csv).
+% Bib fix: Rolandi2025Biglobalresolventanalysis is J. Fluid Mech. 1021, A53 (2025),
+%   doi:10.1017/jfm.2025.10728 (not J. Appl. Fluid Mech.); it studies alpha = 14 and 9 deg at
+%   Re = 1000-10000 and gives no force coefficients comparable with this sweep.
+% ============================================================================
+\newcommand{\TBD}{\textbf{[TBD]}}
+
+\paragraph{NACA~0012 Comparison}
+Because the low-Reynolds-number data of Kurtulus~\cite{Kurtulus2022criticalangle} are for the NACA~0012 rather than the NACA~0008, we repeated the sweep for the NACA~0012 with the same set-up: $M_\infty = 0.2$, $\mathrm{Re} = 2000$, a $32c\times24c$ domain with characteristic inflow and outflow boundaries on all four sides, five levels of refinement (finest $\Delta x = c/512$), WENO5 reconstruction, and the airfoil embedded as a sharp no-slip wall. Kurtulus solved the incompressible laminar Navier--Stokes equations with a second-order finite-volume solver (ANSYS Fluent) on a body-fitted grid of about $2\times10^{5}$ cells with a domain extending $19c$ from the airfoil, and averaged the forces over the quasi-periodic state between $50$ and $100$~s. He reports $C_l$ and $C_d$ only in figures, except for $\alpha = 10^{\circ}$ in his Table~1, so the remaining reference values were read from his Fig.~5 and cross-checked against his Fig.~6, with a reading uncertainty of about $\pm0.007$ in $C_l$ and $\pm0.0013$ in $C_d$. At $M_\infty = 0.2$ the compressibility correction to the lift is $1/\beta = 1.02$, so we compare the coefficients directly.
+
+The time window is the main difference between the two computations. Kurtulus's Strouhal number and fundamental frequency at the critical angle ($St = 1.22$, $f_{cr} = 3.56$~Hz) imply $U_\infty/c \approx 2.9~\mathrm{s^{-1}}$, so his averages cover roughly $tU_\infty/c \in [146, 292]$. As for the NACA~0008, we averaged over $tU_\infty/c \in [6.7, 10]$ ($t\in[33.3,50]$ in code units, $c/U_\infty = 5$), which is all that a run of about one day per angle allows at this resolution. At that time the NACA~0008 lift was still drifting by about 1\% per convective time at $\alpha = 6^{\circ}$, so the present means are early-time values and not the long-time state of the reference. The comparison in Table~\ref{tab:val_naca0012_sweep} and Figure~\ref{fig:val_naca0012_polars} should be read with that in mind.
+
+\TBD{} \emph{Results sentence(s): agreement of $\overline{C_l}$ and $\overline{C_d}$ (max error), whether shedding appears at $\alpha = 8$ and $10^{\circ}$ with $St$ near Kurtulus's $1.1$--$1.2$, and whether $\alpha = 4^{\circ}$ is steady, which brackets the critical angle between $4$ and $8^{\circ}$ (Kurtulus: $5^{\circ}<\alpha_{cr}<6^{\circ}$, Table~3; $\alpha_{cr} = 6^{\circ}$, Table~2).}
+
+\begin{table}[H]
+    \centering
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{c|ccc|ccc|cc}
+        \toprule
+        & \multicolumn{3}{c|}{Numerical} & \multicolumn{3}{c|}{Kurtulus~\cite{Kurtulus2022criticalangle}} & \multicolumn{2}{c}{Difference [\%]} \\
+        $\alpha$ [$^{\circ}$] & $\overline{C_l}\pm\sigma$ & $\overline{C_d}$ & $St$ & $\overline{C_l}$ & $\overline{C_d}$ & $St$ & $\overline{C_l}$ & $\overline{C_d}$ \\
+        \midrule
+        0  & \TBD & \TBD & --   & $0.000$  & $0.0837$ & --     & --   & \TBD \\
+        4  & \TBD & \TBD & \TBD & $0.184$  & $0.0884$ & --     & \TBD & \TBD \\
+        8  & \TBD & \TBD & \TBD & $0.356$  & $0.1177$ & $1.17$ & \TBD & \TBD \\
+        10 & \TBD & \TBD & \TBD & $0.4712$ & $0.1528$ & $1.09$ & \TBD & \TBD \\
+        \bottomrule
+    \end{tabular}
+    \caption{NACA~0012 at $\mathrm{Re} = 2000$: time-averaged force coefficients over $tU_\infty/c\in[6.7, 10]$ ($M_\infty = 0.2$) against the incompressible laminar results of Kurtulus~\cite{Kurtulus2022criticalangle}, averaged over $tU_\infty/c\approx[146, 292]$. Kurtulus's values at $\alpha = 10^{\circ}$ are from his Table~1; the others were read from his Figs.~5 and~6 ($\pm0.007$ in $C_l$, $\pm0.0013$ in $C_d$, $\pm0.05$ in $St$).}
+    \label{tab:val_naca0012_sweep}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{Chapter_03_Validation/figures/Airfoils/NACA0012_Re2000_Ma0.2/naca0012_paper_polars.png}
+    \caption{NACA~0012 at $\mathrm{Re} = 2000$, $M_\infty = 0.2$: time-averaged lift (left) and drag (center) with the standard deviation of the force in the averaging window, and the Strouhal number of the lift oscillation (right), against Kurtulus~\cite{Kurtulus2022criticalangle}. The NACA~0008 results of Table~\ref{tab:val_naca0008_sweep} are shown for reference. Maximum difference from the reference: \TBD\% in $\overline{C_l}$ ($\alpha \geq 4^{\circ}$) and \TBD\% in $\overline{C_d}$.}
+    \label{fig:val_naca0012_polars}
+\end{figure}

@@ -3,6 +3,12 @@
 
 #include "Integrator/Integrator.H"
 #include "Integrator/EmbeddedSolid.H"
+#include "Integrator/Hydro2_Solid.H"
+#include "Integrator/Ablation.H"
+#include "Integrator/Hydro2_PhaseChange.H"
+#include "Integrator/Hydro2_Species.H"
+#include "Integrator/Hydro2_Chem.H"
+#include "Integrator/Hydro2_Energetic.H"
 #include "IO/ParmParse.H"
 
 // Boundry Conditions
@@ -103,6 +109,7 @@ public:
         delete ic_q;
         delete limiter;
         delete riemannsolver;
+        delete shockfix_solver;
 
 
         
@@ -151,7 +158,13 @@ protected:
         const amrex::MultiFab &E0_mf_in,
         const amrex::MultiFab &E1_mf_in,
         const amrex::MultiFab &shell_mf_in,
-        const amrex::MultiFab &cfun_mf_in);
+        const amrex::MultiFab &cfun_mf_in,
+        amrex::MultiFab *ebasis_rhs_mf = nullptr,          // elastic.on only
+        const amrex::MultiFab *ebasis_mf_in = nullptr,
+        amrex::MultiFab *vapor_rhs_mf = nullptr,           // phasechange.on only
+        const amrex::MultiFab *vapor_mf_in = nullptr,
+        amrex::MultiFab *species_rhs_mf = nullptr,         // species.on only
+        const amrex::MultiFab *species_mf_in = nullptr);
 
     // Post-stage pressure relaxation + reinitialization (Saurel-Petitpas-Berry
     // 2009 §3.5 / Schmidmayer 2020 §3.3).  Runs in-place on the working
@@ -175,6 +188,9 @@ protected:
     void SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt);
     void SubcycleBulkViscous(int lev, Set::Scalar time, Set::Scalar dt);
     void RadialGhostFill(int lev, amrex::MultiFab &mf, bool is_vector);
+    void RadialGhostFillLocal(int lev, amrex::MultiFab &mf, bool is_vector);
+    // Fickian species diffusion inside one phase (species.diffusion = 1), operator-split once per step.
+    void DiffuseSpecies(int lev, Set::Scalar time, Set::Scalar dt);
 
     // ------------------------------------------------------------------
     // CAPILLARY OPERATOR  L_cap   (Schmidmayer 2017 eq. 17, sec. 4.2.2)
@@ -204,6 +220,16 @@ protected:
     // L_relax once per step, after L_cap -- not between RK stages.
     bool defer_relax = false;
 
+    // [2026-09-27] Stage-weighted reflux.  RHS() ACCUMULATES rw * (face flux)
+    // into cc_fluxes on every RK stage, with rw = the Butcher weight b_i of the
+    // stage being evaluated, so after advance() cc_fluxes hold the flux the RK
+    // update actually applied, sum_i b_i F_i.  Previously each stage overwrote
+    // cc_fluxes and only the LAST stage's flux reached the FluxRegister, which
+    // is not conservative for SSPRK3/RK4 (exact only for ForwardEuler, b = {1},
+    // which stays bit-identical: 0 + 1*F = F).
+    Set::Scalar reflux_stage_weight = 1.0;
+    std::vector<Set::Scalar> reflux_rk_weights;   // b_i, filled once from integration.*
+
     // Marmottant advected shell: preserve the AREAL density Gamma = c/|grad eta|
     // across NON-MATERIAL changes to eta (stiff pressure relaxation, clamping to
     // [0,1], per-phase ghost reconstruction).  None of those move lipid, so Gamma
@@ -230,6 +256,7 @@ private:
     // Derive the per-phase embedded-solid target from the single solid
     // density/pressure, split by local eta (option 3a).
     void InitEmbeddedSolidTarget(int lev, Set::Scalar time);
+    void UpdateMovingSolid(int lev, Set::Scalar time, Set::Scalar dt);   // [2026-10-05] solid.moving: move phi/target, fill fresh cells
 
 protected:
     // FLUID 0
@@ -392,6 +419,32 @@ protected:
     // implementation: phi is set from its IC and never evolved.
     // All embedded-solid state + per-cell wall physics is consolidated here.
     EmbeddedSolid embedded;
+    // DEFORMING (hyperelastic) SOLID PHASE, Favrie-Gavrilyuk-Saurel 2009.  Default
+    // off (elastic.on = 0); all of it lives in Hydro2_Solid.H.
+    ElasticSolid elastic;
+    // LIQUID <-> VAPOUR PHASE CHANGE (default off; phasechange.on).  See Hydro2_PhaseChange.H.
+    PhaseChange phasechange;
+    // SPECIES inside the two phases (default off; species.on).  Stage 1: passive transport.  See Hydro2_Species.H.
+    Species species;
+    void CloseSpecies(int lev, bool diag);
+    // CHEMISTRY on the species (default off; chem.on).  Native one-step Arrhenius backend.  See Hydro2_Chem.H.
+    Chem chem;
+    void ReactChemistry(int lev, Set::Scalar dt);
+    // ENERGETIC MATERIAL (default off; energetic.on): reactant of phase 0 -> products of phase 1.  See Hydro2_Energetic.H.
+    Energetic energetic;
+    void ReactEnergetic(int lev, Set::Scalar dt);
+    void RelaxPhaseChange(int lev);
+    // SURFACE ABLATION (default off; ablation.on).  See Ablation.H.
+    Ablation ablation;
+    void RecedeAblatingSurface(int lev, Set::Scalar time, Set::Scalar dt);
+    void AdvanceSolidTemperature(int lev, Set::Scalar time, Set::Scalar dt);   // [2026-10-06] ablation.conduction
+    // [2026-10-06] ENTROPY DIAGNOSTIC (entropy.on = 1, default 0: no field, nothing changes).  Plot field "entropy" =
+    // entropy per unit volume [J/(m^3 K)]: fluid cells  sum_k alpha_k rho_k cv_k ln((p_k + p_inf,k)/rho_k^gamma_k)
+    // (stiffened gas, constant cv; additive constant dropped), cells of an embedded solid  rho_s cp_s ln(T_s) with
+    // in-depth conduction, else 0.  A diagnostic only: its domain integral must not decrease in a closed adiabatic system.
+    int entropy_on = 0;
+    Set::Field<Set::Scalar> entropy_mf;
+    void ComputeEntropy(int lev);
 protected:
 
     int n_step = 0;
@@ -419,6 +472,7 @@ protected:
 
     IC::IC<Set::Scalar>* velocity0_ic = nullptr;
     IC::IC<Set::Scalar>* pressure0_ic = nullptr;
+    IC::IC<Set::Scalar>* ablation_Ts_ic = nullptr;   // [2026-10-06] optional initial solid temperature field (ablation.Ts.ic), else ablation.T_solid0
     IC::IC<Set::Scalar>* density0_ic  = nullptr;
     //IC::IC<Set::Scalar>* temperature0_ic  = nullptr;
     //IC::IC<Set::Scalar>* k0_thermal_ic  = nullptr;
@@ -467,8 +521,10 @@ protected:
     Set::Scalar rho_min = 1e10;
 
     Set::Scalar eta_refinement_criterion=NAN, omega_refinement_criterion=NAN, gradu_refinement_criterion=NAN, p_refinement_criterion=NAN, rho_refinement_criterion=NAN;
+    int p_refinement_max_level = -1;   // [2026-11-12] grad(p) tags only build levels <= this (-1 = all levels, original behaviour)
     // optional geometric refinement box (force max_level inside): refine_box.lo/hi
     int refine_box_on=0;
+    int refine_box_max_level=-1;   // [2026-10-02] refine_box.max_level: box forces levels <= this (-1 = all)
     Set::Scalar refine_box_lo[AMREX_SPACEDIM] = {AMREX_D_DECL(0,0,0)};
     Set::Scalar refine_box_hi[AMREX_SPACEDIM] = {AMREX_D_DECL(0,0,0)};
     // grad(phi) solid-boundary refinement is now embedded.refinement_criterion
@@ -479,6 +535,21 @@ protected:
 
     // FLUID 1
     Set::Scalar gamma1 = NAN, p0_1 = NAN, mu1 = NAN, mu1_b = NAN, MW1 = NAN;
+    // [2026-09-24] Fourier heat conduction (thermal.conduction, thermal.Pr):
+    // k = mu(eta) cp(eta) / Pr, energy source div(k grad T).  Off by default.
+    int thermal_conduction = 0;        // thermal.conduction: 0 off, 1 mixture T (k(eta) or mu cp / Pr), 2 per phase (see Parse)
+    Set::Scalar thermal_Pr = 0.72;
+    Set::Scalar thermal_k0 = -1.0, thermal_k1 = -1.0;   // thermal.k0/k1: phase-0 / phase-1 conductivities (< 0: mode 1 uses mu cp / Pr)
+    // [2026-09-24] embedded-solid force / probe time history (solid.force_int):
+    // every force_int finest-level steps, append t, total force (momentum removed
+    // by the implicit penalty / dt), wall-face pressure force and probe pressures
+    // to <plot_file>_forces.dat.
+    int solid_force_int = 0;
+    std::vector<Set::Scalar> probe_x, probe_y, probe_z;   // probe_z read in 3D only
+    Set::Scalar pen_force[3] = {0.0, 0.0, 0.0};
+    std::vector<Set::Scalar> phi_thickness_cells;   // [2026-09-25] phi interface thickness per level (cells), measured at init
+    bool wall_flux_decided = false;                  // [2026-09-25] solid.wall_flux auto selection done
+    Set::Scalar rhs_force[3] = {0.0, 0.0, 0.0};   // [2026-09-25] sharp wall: sum of solid-cell momentum RHS * dV
     Set::Scalar b1 = NAN, q1EOS = NAN;
     Set::Scalar cp1 = NAN, cv1 = NAN;
 
@@ -522,6 +593,30 @@ protected:
     Set::Scalar Dv = 0.0; // Vapor Diffusivity
     Set::Scalar Y_infinity = 0.0; // Far Feild Vapor Mass Fraction
     Set::Scalar Lv = 0.0; // Latent heat of vaporization [J/kg] (0 = no evaporative cooling)
+    // FILM EVAPORATION MODEL (vaporization.model, default 0 = the original Spalding surrogate).
+    //   1 = diffusion-limited film: B_M from Y_s(T_liquid, p) (Buck or Clausius-Clapeyron),
+    //   2 = heat-transfer-limited film: B_T = cp_g (T_gas - T_liquid) / Lv,
+    //   3 = combined (Abramzon & Sirignano 1989): rate from B_M, liquid heating from B_T' = (1+B_M)^phi - 1.
+    // Rate per unit interface area: rho_g Dv/delta ln(1+B_M)  or  k_g/(cp_g delta_T) ln(1+B_T), times |grad eta|.
+    int    vap_model = 0;
+    int    vap_sp_gas = -1, vap_sp_liq = -1;   // evaporation into these species (vaporization.vapor_species / liquid_species)
+    int    vap_Yinf_local = 0;                 // 1 = film-model far-field vapour fraction from the cell's vapour species
+    int    vap_legacy_energy = 0;      // 1 = old bookkeeping (mass moves without its phase energy)
+    Set::Scalar vap_delta = 0.0;       // mass-transfer film thickness [m] (= L / Sh)
+    Set::Scalar vap_delta_T = 0.0;     // heat-transfer film thickness [m] (= L / Nu); default vap_delta
+    Set::Scalar vap_k_gas = 0.0;       // gas thermal conductivity [W/m/K]
+    Set::Scalar vap_cp_vapor = 2000.0; // vapour heat capacity [J/kg/K] (Abramzon-Sirignano phi)
+    Set::Scalar vap_W_vapor = 18.015;  // molar masses [kg/kmol]
+    Set::Scalar vap_W_gas = 28.965;
+    int    vap_psat = 0;               // 0 = Buck (1996) water, 1 = Clausius-Clapeyron through (T_ref, p_ref), 2 = Antoine
+    Set::Scalar vap_antoine_A = 0.0, vap_antoine_B = 0.0, vap_antoine_C = 0.0;   // NIST form: log10(p/bar) = A - B/(T/K + C)
+    Set::Scalar vap_T_ref = 373.15, vap_p_ref = 101325.0;
+    Set::Scalar vap_alpha_min = 0.05;
+    int    vap_volume_source = 0;
+    Set::Scalar vap_rho_gas_min = 0.01; // film model off where the gas phase density is below this [kg/m^3]     // 1 = explicit eta source m_dot (1/rho_g - 1/rho_l) (model >= 1)
+    Set::Scalar vap_T_gas_max = 1.0e30; // cap on the gas temperature the film model sees [K]  // film model acts only where both volume fractions >= this
+    Set::Scalar vap_q_liquid = 0.0, vap_q_gas = 0.0;   // stiffened-gas energy constants q of each phase [J/kg]
+    Set::Field<Set::Scalar> Vap_film_mf;  // model >= 1 diagnostics: T_liquid, T_gas, B_M, B_T, Q_L
 
 
     // CFD Properties
@@ -694,6 +789,20 @@ protected:
 
     // Solvers
     Solver::Local::FluidRiemann::FluidRiemann *riemannsolver = nullptr;
+    // [2026-10-06] SHOCK FIX (shock_fix.on, default 0 = bit-identical).  Contact-resolving fluxes (HLLC) have no
+    // dissipation on the faces that lie ALONG a grid-aligned strong shock and develop the odd-even / carbuncle
+    // instability there (blunt-body bow shock, detonation strip).  With shock_fix.on = 1 a face uses the HLLE flux
+    // when a pressure jump  |dp| / min(p + pi) > shock_fix.ratio  is found between either of its two cells and a
+    // neighbour in a direction TRANSVERSE to the face normal (Quirk 1994); every other face keeps the selected
+    // solver, so contacts and shear layers away from shocks are untouched.  Not available with elastic.on.
+    Set::Scalar  relax_omega = -1.0;     // finite-rate pressure relaxation (RelaxAndReinit); < 0 = instantaneous
+    int          relax_share_mass = 0;   // finite-rate step: energy defect shared by mass (1) or volume (0) fractions
+    int          relax_trace_pT = 0;     // relax.trace_pT: 1 p-T, 2 ordinary closure, 3 T-only equilibrium of a trace phase (see Parse)
+    Set::Scalar  relax_trace_alpha = 1.0e-4; // relax.trace_alpha: soft-phase volume fraction below which a cell is a trace cell
+    int          relax_reinit_mass = 0;  // instantaneous relaxation: energy defect shared by mass before the re-initialisation (0 = standard)
+    int          shock_fix = 0;
+    Set::Scalar  shock_fix_ratio = 0.5;
+    Solver::Local::FluidRiemann::FluidRiemann *shockfix_solver = nullptr;
 
     // IntegrationScheme
     enum IntegrationScheme
@@ -744,6 +853,7 @@ protected:
         amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> mom;
         amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> energy;
         amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> ene_k;
+        amrex::Array<std::unique_ptr<amrex::MultiFab>, AMREX_SPACEDIM> spec;   // species partial-density fluxes (species.on)
     };
     amrex::Vector<CellFluxes> cc_fluxes;  // indexed by level
 
@@ -761,20 +871,20 @@ protected:
     int nan_check = 0;
     int verbose = 0;
     int shell_visc_subcycle = 0;      // = visc_subcycle: sub-cycle kappa_s with the bulk viscosity (see Parse)
+    // eta_consistent_advect (merge 2026-11-23): 1 (default) = alpha row from the limiter face alpha (flames2,
+    // always on there since 11-05); 0 = donor cell (the DropletDetonation default before the merge).
+    int eta_consistent_advect = 1;
     int shell_visc_subcycle_max = 512; // hard cap on sub-steps (runaway guard)
     int thermal_diag = 0;              // thermal.diag: print cells where the heat exchange moves >10% of the gas energy
     int relax_sch20 = 0;               // relax.sch20: use the Sch20/Saurel 2009 closure (no shared specific heat q)
     int face_two_pressure = 0;         // face.two_pressure: faces carry both phase pressures (option 10)
     int relax_opt9 = 0;                // relax.opt9: freeze alpha only where a phase has no mass (see Parse)
     int relax_blake = 0;               // relax.blake: sub-grid gas nuclei below the Blake threshold keep their volume (see Parse)
-    int relax_trace_pT = 0;            // relax.trace_pT: p-T equilibrium of trace gas in liquid beyond the cutoff (see Parse)
     int relax_opt8 = 0;                // relax.opt8: no 0 K gas floor in fixed-alpha relaxation cells (see Parse)
     int shell_slip11_face = 0;         // shell.slip11_face: option 11 face slip velocity, 0 mean / 1 donor cell
     int shell_slip5_rupture = 0;       // shell.slip5_rupture: broken shell where a level set shrinks to a point (see Parse)
     int shell_slip = 0;                // shell.slip: 0 Gamma moves with the fluid only; 5 / 6 level-set slip (options 5 / 6)
     int shell_heat_split = 0;          // shell dissipation heat: 0 volume fraction, 2 effusivity
-    Set::Scalar thermal_k0 = 0.0, thermal_k1 = 0.0;   // phase thermal conductivities (heat_split = 2)
-    int thermal_conduction = 0;        // 1 = Fourier conduction inside each phase
     int thermal_exchange = 0;          // 1 = lamellar gas-liquid heat exchange, 2 = constant h, 3 = instant T equilibrium
     Set::Scalar thermal_alpha_min = 1.0e-3, thermal_h = 0.0;
     int shell_visc_verbose = 0;        // print N and nu_s each sub-cycle
@@ -805,11 +915,20 @@ protected:
     // RADIAL slab faces (2026-10-23; see Parse and RadialGhostFill).
     bool radial_bc = false;
     bool radial_face_hi[3] = {false, false, false};
+    // radial.ghost_fill (2026-11-24): 0 = axis-row profile (RadialGhostFill, default);
+    // 1 = local same-radius mirror (RadialGhostFillLocal).  See RadialGhostFillLocal.
+    int radial_ghost_fill = 0;
     // Faces whose edge cells use central stencils: symmetry faces and radial
     // faces, whose ghosts are both exact.
     bool cen_face_lo[3] = {false, false, false};
     bool cen_face_hi[3] = {false, false, false};
     int cen_face_any = 0;
+    // [DropletDetonation 2026-11-18/19]
+    int T_phase_consistent = 0;     // temperature.phase_consistent (see Parse)
+    int gradu_from_velocity = 0;    // RK-stage viscous path: grad u from the velocity field (see Parse)
+    int visc_flux_form_rk = 0;      // key visc_flux_form: RK-stage viscous force from face stresses (see Parse)
+    int visc_harmonic = 0;          // RK-stage flux form: harmonic face viscosity (see Parse)
+    Set::Field<Set::Scalar> Tph_mf; // temperature.phase_consistent: T of phase 0 and phase 1
 
 };
 }

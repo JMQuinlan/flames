@@ -73,8 +73,18 @@ public:
 
 
             amrex::Array4<Set::Scalar> const& field = a_field[lev]->array(mfi);
+            // [2026-09-29] supersample > 1 (cell-centred fields only): the cell value is
+            // the AVERAGE of the image over supersample x supersample sub-points, i.e. a
+            // volume fraction for a two-colour image -- sub-cell geometry that the sharp
+            // embedded wall needs for accurate surface normals (Hydro2 solid.wall_normal).
+            // supersample = 1 (default) samples the cell centre exactly as before.
+            const int nss = (type == amrex::IndexType::TheCellType()) ? std::max(supersample, 1) : 1;
             amrex::ParallelFor (bx,[=] AMREX_GPU_DEVICE(int i, int j, int k) 
             {
+              Set::Scalar acc = 0.0;
+              for (int sa = 0; sa < nss; ++sa)
+              for (int sb = 0; sb < nss; ++sb)
+              {
                 Set::Vector x = Set::Vector::Zero();
                 // NODE
                 if (type == amrex::IndexType::TheNodeType())
@@ -84,8 +94,8 @@ public:
                 }
                 else if (type == amrex::IndexType::TheCellType())
                 {
-                    x(0) = domlo(0) + ((amrex::Real)(i) + 0.5) * geom[lev].CellSize()[0];
-                    x(1) = domlo(1) + ((amrex::Real)(j) + 0.5) * geom[lev].CellSize()[1];
+                    x(0) = domlo(0) + ((amrex::Real)(i) + (nss == 1 ? 0.5 : (sa + 0.5) / nss)) * geom[lev].CellSize()[0];
+                    x(1) = domlo(1) + ((amrex::Real)(j) + (nss == 1 ? 0.5 : (sb + 0.5) / nss)) * geom[lev].CellSize()[1];
                 }
 
                 //Set::Scalar x, y;
@@ -161,6 +171,9 @@ public:
                 {
                     field(i,j,k) = 0.0;
                 }
+                acc += field(i,j,k);
+              }
+                if (nss > 1) field(i,j,k) = acc / (nss * nss);
 
                 if (field.nComp() > 1) field(i,j,k,1) = 1.0 - field(i,j,k,0);
 
@@ -176,6 +189,7 @@ public:
 private:
     Util::BMP bmp;
     Fit fit = Fit::Stretch;
+    int supersample = 1;
     Channel channel = Channel::G;
     Set::Scalar min=NAN, max=NAN;
     Set::Vector coord_lo = Set::Vector::Zero();
@@ -216,6 +230,8 @@ public:
         value.max = (Set::Scalar) value.bmp.max()[value.channel];
         pp_query_default("min",value.min,0.0); // Scaling value - minimum
         pp_query_default("max",value.max,255.0); // Scaling value - maximum
+        // Average the image over supersample^2 sub-points per cell (cell fields; 1 = centre sample)
+        pp_query_default("supersample",value.supersample,1);
 
         value.scaling_factor = value.unit.normalized_value();
 }    

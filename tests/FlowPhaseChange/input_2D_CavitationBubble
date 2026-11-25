@@ -1,0 +1,125 @@
+# ============================================================================
+# FlowPhaseChange / 2D cavitation bubble inception  (Hydro2, phasechange.on = 1)
+#
+# The 2D analogue of input_1D_CavitationTube: hot liquid water (rho 1150, p 1e5 Pa, T = 354.73 K)
+# with 1 % of vapour nuclei by volume, moving radially outward at 10 m/s from the centre of a
+# 10 mm box.  The expansion empties the centre; with the thermodynamic relaxation the liquid
+# there evaporates and a vapour cavity grows whose pressure is the saturation pressure of its
+# temperature (p_sat(354.7 K) = 0.51 bar), instead of the deep tension reached without mass transfer.
+# 400 x 400 cells, open boundaries, t = 100 us.  Compare with phasechange.on = 0.
+#
+# Run (from bin/): mpirun -np 8 ./hydro2-2d-g++ ../tests/FlowPhaseChange/input_2D_CavitationBubble plot_file=<dir>/output
+# Check:           python3 ../tests/FlowPhaseChange/reference/cavitation_bubble_check.py <dir> [<dir without phase change>]
+# ============================================================================
+plot_file = ./tests/FlowPhaseChange/output_2D_CavitationBubble
+
+Riemann_Solver.type = hllc
+Limiter.type        = minmod
+nghost = 4
+integration.type    = RungeKutta
+integration.rk.type = 3
+
+
+eta.ic.type = constant
+eta.ic.constant.value = 0.01
+epsilon = 0.01
+
+amr.plot_dt = 2.0e-6
+amr.max_level = 0
+amr.max_grid_size = 100
+amr.blocking_factor = 2
+amr.n_cell = 400 400
+geometry.prob_lo = -0.005 -0.005 0.0
+geometry.prob_hi = 0.005 0.005 0.0
+geometry.is_periodic = 0 0 0
+
+timestep = 1.0e-8
+dynamictimestep.on  = 1
+dynamictimestep.verbose = 0
+dynamictimestep.max = 1e-5
+dynamictimestep.min = 1e-12
+stop_time = 1.0e-4
+
+m0.ic.constant.value = 0.0
+u0.ic.constant.value = 0.0
+q.ic.type = constant
+q.ic.constant.value = 0.0
+
+cfl   = 0.4
+
+eos0.gamma = 1.43
+eos1.gamma = 2.35
+eos0.p0 = 0.0
+eos1.p0 = 1.0e9
+eos0.cp = 1487.2
+eos1.cp = 4267.6
+eos0.cv = 1040.0
+eos1.cv = 1816.0
+
+mu0   = 0.0
+mu1   = 0.0
+sigma = 0.0
+pref = 0.0
+
+# solid (phase 0)
+density0.ic.type = constant
+density0.ic.constant.value = 0.63037
+velocity0.ic.type = expression
+velocity0.ic.expression.constant.U = 10.0
+velocity0.ic.expression.region0 = "U*x/sqrt(x*x + y*y + 1.0e-12)"
+velocity0.ic.expression.region1 = "U*y/sqrt(x*x + y*y + 1.0e-12)"
+pressure0.ic.type = constant
+pressure0.ic.constant.value = 1.0e5
+cp0 = 1.4
+cv0 = 1.0
+
+# gas (phase 1, trace)
+density1.ic.type = constant
+density1.ic.constant.value = 1150.0
+velocity1.ic.type = expression
+velocity1.ic.expression.constant.U = 10.0
+velocity1.ic.expression.region0 = "U*x/sqrt(x*x + y*y + 1.0e-12)"
+velocity1.ic.expression.region1 = "U*y/sqrt(x*x + y*y + 1.0e-12)"
+pressure1.ic.type = constant
+pressure1.ic.constant.value = 1.0e5
+cp1 = 1.4
+cv1 = 1.0
+
+density.bc.type.xhi = neumann
+density.bc.type.xlo = neumann
+density.bc.type.ylo = neumann
+density.bc.type.yhi = neumann
+energy.bc.type.xhi = neumann
+energy.bc.type.xlo = neumann
+energy.bc.type.ylo = neumann
+energy.bc.type.yhi = neumann
+momentum.bc.type.xhi = neumann neumann
+momentum.bc.type.xlo = neumann neumann
+momentum.bc.type.ylo = neumann neumann
+momentum.bc.type.yhi = neumann neumann
+
+eta_refinement_criterion   = 100000.1
+omega_refinement_criterion = 100000.1
+gradu_refinement_criterion = 100000.0
+rho_refinement_criterion   = 100000.0
+p_refinement_criterion     = 100000.0
+
+kappa_method = 1
+Dv = 0
+g = 0.0
+apply_surface_tension = 0
+apply_weight = 0
+apply_vaporization = 0
+reinit_max_iter = 50
+reinit_tolerance = 1e-6
+apply_ahe   = 1
+ahe.method  = 0
+cutoff = 1e-12
+
+
+phasechange.on = 1
+phasechange.liquid = 1                       # phase 1 (eta = 0) is the liquid; phase 0 the gas
+phasechange.liquid_material = water_liquid
+phasechange.vapor_material  = water_vapor
+phasechange.material_file   = ../data/hydro2_materials.dat
+phasechange.Yv0 = 1.0                        # the gas is pure vapour
