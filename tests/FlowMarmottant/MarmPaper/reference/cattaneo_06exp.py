@@ -4,9 +4,10 @@ cattaneo_06exp -- extra figures for the MarmPaper 06Exp runs (full 3-D bubble un
 is the TOP face z = z_hi of the domain).  Hooks for cattaneo_06_common.main (add_args, post), used by
 analyze_06Exp_Cattaneo_{HighPa,LowPa}.py.
 
-Defaults set here for 06Exp: paper time axis ending at 12 us everywhere; GIFs = the three 3-D views only
+Defaults set here for 06Exp: paper time axis ending at 12 us everywhere; GIFs = the four 3-D views only
 (_bubble3d full bubble, _bubble3d_cut cut open with the pressure on the cut face, _bubble3d_cutshell cut open, shell
-only); the gas-thermodynamics figure is off (--thermo-fig turns it on).
+only, _bubble3d_side level side view with the substrate at the bottom, as the experimental imagery); the
+gas-thermodynamics figure is off (--thermo-fig turns it on).
 
 Pressure map  <stem>_pmap.{png,eps}: p - p_inf [kPa] (blue = below, red = above the ambient pressure, symmetric-log
 scale) against time (Cattaneo Fig. 2a axis, 0..12 us) and distance r from the bubble centre (gas-volume centroid of
@@ -141,12 +142,13 @@ def pressure_map(F, C, rmax, toff, out_stem, formats):
     # two rays
     W = cc.WIDTH                                       # half-width paper figure, FIG text size
     fig, axs = plt.subplots(2, 1, figsize=(W, 4.2), sharex=True, constrained_layout=True)
-    fig.suptitle(cc.paper_title(C), fontsize=S["title_size"])
     for ax, (key, _, _, title), lab in zip(axs, RAYS, "ab"):
         im = _panel(ax, td, rg, M[key] / 1e3, I[key], norm, cmap)
         ax.set_title("(%s) %s" % (lab, title), loc="left", fontsize=S["label_size"], pad=3)
-    axs[0].legend(loc="upper right", fontsize=S["legend_size"], frameon=True, framealpha=1.0, edgecolor="0.6",
-                  fancybox=False, **cc.LEG)
+    # title, then the legend, then the panels: the title is the legend's title (one artist above the panels)
+    fig.legend(*axs[0].get_legend_handles_labels(), loc="outside upper center", fontsize=S["legend_size"],
+               frameon=False,
+               title=cc.paper_title(C), title_fontsize=S["title_size"], **cc.LEG)
     axs[-1].set_xlabel("Time  [µs]")
     cbar(fig, im, axs)
     save(fig, out_stem)
@@ -154,11 +156,11 @@ def pressure_map(F, C, rmax, toff, out_stem, formats):
     # compact: the jet side only
     key = RAYS[0][0]
     fig, ax = plt.subplots(figsize=(W, 2.3), constrained_layout=True)
-    fig.suptitle(cc.paper_title(C), fontsize=S["title_size"])
     im = _panel(ax, td, rg, M[key] / 1e3, I[key], norm, cmap)
     ax.set_xlabel("Time  [µs]")
-    ax.legend(loc="upper right", fontsize=S["legend_size"], frameon=True, framealpha=1.0, edgecolor="0.6",
-              fancybox=False, **cc.LEG)
+    fig.legend(*ax.get_legend_handles_labels(), loc="outside upper center", fontsize=S["legend_size"],
+               frameon=False,
+               title=cc.paper_title(C), title_fontsize=S["title_size"], **cc.LEG)
     cbar(fig, im, ax)
     save(fig, out_stem + "_compact")
     print("  [pmap] colour scale +-%g kPa (linear below %g kPa), r <= %.2f um, %d frames"
@@ -173,12 +175,14 @@ def add_args(ap):
     # 06Exp defaults: paper time to 12 us, the three 3-D GIFs, no thermo figure
     # sim_shift: the full-sphere 06Exp simulation runs a near-constant ~0.25 us behind the experiment (one
     # transducer; the response delay is not in the model), so its time is moved left by 0.25 us (--sim-shift 0)
-    ap.set_defaults(gif=True, gif_3d=True, gif_tmax=T_PAPER_END, gif_kinds="3d,3dcut,3dcutshell", no_thermo_fig=True,
+    ap.set_defaults(gif=True, gif_3d=True, gif_tmax=T_PAPER_END, gif_kinds="3d,3dcut,3dcutshell,3dside", no_thermo_fig=True,
                     sim_shift=-0.25)
     g.add_argument("--no-gif", dest="gif", action="store_false", help="skip the GIFs")
     g.add_argument("--thermo-fig", dest="no_thermo_fig", action="store_false",
                    help="also write the gas-thermodynamics figure (<stem>_thermo)")
     g.add_argument("--no-pmap", action="store_true", help="skip the pressure map")
+    g.add_argument("--no-fig1", action="store_true",
+                   help="skip the Cattaneo Fig. 1c/d frame comparison (<stem>_fig1, <stem>_fig1_overlay, + _eta035)")
     g.add_argument("--pmap-rmax", type=float, default=4.0, metavar="N", help="pressure-map radius range in R0 (default 4)")
     return g
 
@@ -211,9 +215,15 @@ def radii(a, C, plotdir, figdir):
 
 
 def post(a, C, plotdir, figdir, sim, case_tag="hi"):
+    geom = sim["geom"] if sim else (a.geom or cc.geometry(plotdir))
+    if not a.no_fig1:
+        if geom == "full":
+            import cattaneo_06_fig1
+            cattaneo_06_fig1.fig1_figures(a, C, plotdir, figdir, case_tag)
+        else:
+            print("  [fig1] %s geometry: the Fig. 1 comparison needs the full bubble, skipped" % geom)
     if a.no_pmap:
         return
-    geom = sim["geom"] if sim else (a.geom or cc.geometry(plotdir))
     if geom != "full":
         print("  [pmap] %s geometry: the 06Exp pressure map needs the full bubble, skipped" % geom); return
     toff = (-a.exp_shift if a.time == "paper" else 0.0) + a.sim_shift   # simulation frames

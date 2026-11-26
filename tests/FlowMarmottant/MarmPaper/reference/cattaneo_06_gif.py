@@ -13,7 +13,10 @@ Outputs (<figdir>/<stem>...):
                   coloured by p - p_inf (gas left open, eta = 0.5 contour in black), so the inside of the
                   cavity (jet, re-entrant shapes) is visible.  Cut face +-3 R0 (--gif-cut-half).
   _bubble3d_cutshell.gif (--gif-3d) the same cut-open shell with no field: only the eta = 0.5 contour on the cut.
-  Frames are kept as PNG and EPS in <figdir>/<stem>_gif_frames/{bubble,bubble_R,bubble3d,bubble3d_cut,bubble3d_cutshell}/
+  _bubble3d_side.gif (--gif-3d, full only) level side view, substrate at the bottom (06Exp).
+  Every GIF is also written for the eta = 0.35 level (gas side of the diffuse band): <name>_eta035.gif, blue
+  isosurface / blue contour, "eta = 0.35" next to the time stamp (GIF iso_levels).
+  Frames are kept as PNG and EPS in <figdir>/<stem>_gif_frames/<name>/
   (both go into the results tar, marmpaper_bundle).  --sim-shift moves the simulation time (frame times, R_vol curve) only.
 
 Cross-section per geometry (cattaneo_06_common.geometry):
@@ -51,7 +54,18 @@ _AX = "xyz"
 
 # GIF look on top of cattaneo_06_common.FIG (fonts, colours, legend size).
 GIF = dict(cmap="RdBu_r", bad="0.72", iface_color="k", iface_lw=1.3,
-           size_bubble=(4.3, 3.9), size_pair=(9.8, 4.0), size_3d=(4.0, 4.0), size_3dcut=(4.9, 4.2), dpi=150)
+           size_bubble=(4.3, 3.9), size_pair=(9.8, 4.0), size_3d=(4.0, 4.0), size_3dcut=(4.9, 4.2), dpi=150,
+           font=12.0,            # every GIF text (titles, time stamp, axes, ticks, legend, colour bar); FIG is 9 pt
+           crop_pad=10,          # px kept around the union of all frames' content (one crop for every frame)
+           side_elev=0.0, side_azim=45.0, wall_color="0.80", wall_edge="0.35",
+           # every GIF is written for each interface level: eta = 0.5 (the interface, coated-bubble orange / black
+           # contour) and eta = 0.35 (gas side of the diffuse band, blue; files end in _eta035)
+           iso_levels=(0.5, 0.35), iso_surface={0.35: "#3D7FD6"}, iso_contour={0.35: "#0B4FA8"})
+
+
+def _iso_tag(level):
+    """'' for the eta = 0.5 interface, else '_eta035' style suffix."""
+    return "" if abs(level - 0.5) < 1e-9 else "_eta%03d" % int(round(level * 100))
 
 
 # =========================================================================================== #
@@ -222,8 +236,8 @@ def _plane_cut(ds, geom, plane, half, centre):
     return u, v, P, E
 
 
-def _surface(ds, geom, half, centre):
-    """eta = 0.5 isosurface triangles (ntri, 3, 3) relative to the centre: marching cubes (yt's
+def _surface(ds, geom, half, centre, level=0.5):
+    """eta = level (default 0.5) isosurface triangles (ntri, 3, 3) relative to the centre: marching cubes (yt's
     march_cubes_grid; skimage is not needed) on the finest-level eta of a box +-half around the centre,
     cell centres as lattice points.  Octant: the eta box is mirrored before meshing (closed surface).
     Full: the box is clipped to the domain and padded with liquid (eta = 1) outside it.  None if there is no surface."""
@@ -251,10 +265,10 @@ def _surface(ds, geom, half, centre):
         E = np.pad(E, [(c0[a] - i0[a], i1[a] - c1[a]) for a in range(3)], mode="constant", constant_values=1.0)
         x0 = dle + (i0 + 0.5) * dx - centre
     E = np.ascontiguousarray(np.clip(E, 0.0, 1.0))
-    if not (E.min() < 0.5 < E.max()):
+    if not (E.min() < level < E.max()):
         return None
     mask = np.ones(tuple(n - 1 for n in E.shape), np.uint8)
-    V = np.asarray(march_cubes_grid(0.5, E, mask, np.asarray(x0, float), np.asarray(dx, float)), float)
+    V = np.asarray(march_cubes_grid(float(level), E, mask, np.asarray(x0, float), np.asarray(dx, float)), float)
     return V.reshape(-1, 3, 3).astype(np.float32) if V.size else None
 
 
@@ -271,8 +285,10 @@ def _extract(args):
                     centre=np.zeros(3), tri=None)
     centre = gas_centroid(ds) if geom == "full" else np.zeros(3)
     u, v, P, E = _plane_cut(ds, geom, plane, half, centre)
-    tri = _surface(ds, geom, half, centre) if want3d else None
-    return dict(t=t, kind="plane", u=u, v=v, P=P, E=E, centre=centre, tri=tri)
+    tris = {lv: _surface(ds, geom, half, centre, lv) for lv in GIF["iso_levels"]} if want3d else {}
+    # substrate (top face, z = z_hi) above the gas centroid; full 3-D runs only (06Exp)
+    wall = float(ds.domain_right_edge[2]) - centre[2] if geom == "full" else None
+    return dict(t=t, kind="plane", u=u, v=v, P=P, E=E, centre=centre, tri=tris.get(0.5), tris=tris, wall=wall)
 
 
 # =========================================================================================== #
@@ -345,8 +361,12 @@ def _draw_field(ax, fr, half, ctx):
                    extent=(u[0] * um - du / 2, u[-1] * um + du / 2, v[0] * um - dv / 2, v[-1] * um + dv / 2),
                    interpolation="bilinear" if fr["kind"] == "radial" else "nearest", rasterized=True)
     Ef = np.where(np.isfinite(E), E, 1.0)
-    if np.nanmin(E) < 0.5 < np.nanmax(E):
-        ax.contour(u * um, v * um, Ef.T, levels=[0.5], colors=GIF["iface_color"], linewidths=GIF["iface_lw"])
+    lv = ctx["iso"]
+    if np.nanmin(E) < lv < np.nanmax(E):
+        cs = ax.contour(u * um, v * um, Ef.T, levels=[lv], colors=ctx["iface_color"], linewidths=GIF["iface_lw"])
+        if ctx["iface_color"] != "k":       # coloured contour on the diverging map: thin white halo
+            import matplotlib.patheffects as pe
+            cs.set(path_effects=[pe.Stroke(linewidth=GIF["iface_lw"] + 1.4, foreground="white"), pe.Normal()])
     h = half * um
     ax.set_xlim(-h, h); ax.set_ylim(-h, h); ax.set_aspect("equal")
     ax.set_facecolor(GIF["bad"])
@@ -358,7 +378,7 @@ def _draw_field(ax, fr, half, ctx):
     else:
         lu, lv = (r"$%s$" % _AX[i] for i in (iu, iv))
     ax.set_xlabel(lu + "  [µm]"); ax.set_ylabel(lv + "  [µm]")
-    ax.set_title(r"$t$ = %.2f µs" % (fr["t"] * um + ctx["toff_sim"]), fontsize=S["label_size"], pad=4)
+    ax.set_title(r"$t$ = %.2f µs" % (fr["t"] * um + ctx["toff_sim"]) + ctx.get("iso_note", ""), fontsize=S["label_size"], pad=4)
     return im
 
 
@@ -366,7 +386,7 @@ def _colorbar(fig, cax, im, ctx):
     cb = fig.colorbar(im, cax=cax, ticks=_cbar_ticks(ctx["vmax"], ctx["lin"]))
     cb.ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(_fmt_kpa))
     cb.ax.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
-    cb.ax.tick_params(labelsize=ctx["S"]["tick_size"] - 0.5, direction="out", right=True, left=False)
+    cb.ax.tick_params(labelsize=ctx["S"]["tick_size"], direction="out", right=True, left=False)
     cb.set_label(r"$p - p_\infty$  [kPa]", fontsize=ctx["S"]["label_size"])
     cb.outline.set_linewidth(ctx["S"]["axes_width"])
     return cb
@@ -424,7 +444,7 @@ def _render(args):
         ax = fig.add_axes([0.0, 0.0, 1.0, 0.86], projection="3d")
         _draw_3d_cut(ax, fr, ctx, field=False)
         fig.text(0.5, 1.0 - 0.12 / H, ctx["title_short"], ha="center", va="top", fontsize=S["label_size"])
-        fig.text(0.5, 1.0 - 0.42 / H, r"$t$ = %.2f µs" % (fr["t"] * 1e6 + ctx["toff_sim"]), ha="center", va="top",
+        fig.text(0.5, 1.0 - 0.42 / H, r"$t$ = %.2f µs" % (fr["t"] * 1e6 + ctx["toff_sim"]) + ctx.get("iso_note", ""), ha="center", va="top",
                  fontsize=S["label_size"])
     elif kind == "3dcut":
         W, H = GIF["size_3dcut"]
@@ -434,7 +454,15 @@ def _render(args):
         im = _draw_3d_cut(ax, fr, ctx)
         _colorbar(fig, cax, im, ctx)
         fig.text(0.5, 1.0 - 0.12 / H, ctx["title_short"], ha="center", va="top", fontsize=S["label_size"])
-        fig.text(0.5, 1.0 - 0.42 / H, r"$t$ = %.2f µs" % (fr["t"] * 1e6 + ctx["toff_sim"]), ha="center", va="top",
+        fig.text(0.5, 1.0 - 0.42 / H, r"$t$ = %.2f µs" % (fr["t"] * 1e6 + ctx["toff_sim"]) + ctx.get("iso_note", ""), ha="center", va="top",
+                 fontsize=S["label_size"])
+    elif kind == "3dside":
+        W, H = GIF["size_3d"]
+        fig = plt.figure(figsize=(W, H))
+        ax = fig.add_axes([0.0, 0.0, 1.0, 0.86], projection="3d")
+        _draw_3d_side(ax, fr, ctx)
+        fig.text(0.5, 1.0 - 0.12 / H, ctx["title_short"], ha="center", va="top", fontsize=S["label_size"])
+        fig.text(0.5, 1.0 - 0.42 / H, r"$t$ = %.2f µs" % (fr["t"] * 1e6 + ctx["toff_sim"]) + ctx.get("iso_note", ""), ha="center", va="top",
                  fontsize=S["label_size"])
     else:   # 3d
         W, H = GIF["size_3d"]
@@ -442,7 +470,7 @@ def _render(args):
         ax = fig.add_axes([0.0, 0.0, 1.0, 0.86], projection="3d")
         _draw_3d(ax, fr, ctx)
         fig.text(0.5, 1.0 - 0.12 / H, ctx["title_short"], ha="center", va="top", fontsize=S["label_size"])
-        fig.text(0.5, 1.0 - 0.42 / H, r"$t$ = %.2f µs" % (fr["t"] * 1e6 + ctx["toff_sim"]), ha="center", va="top",
+        fig.text(0.5, 1.0 - 0.42 / H, r"$t$ = %.2f µs" % (fr["t"] * 1e6 + ctx["toff_sim"]) + ctx.get("iso_note", ""), ha="center", va="top",
                  fontsize=S["label_size"])
     fig.savefig(png, dpi=ctx["dpi"])             # fixed canvas (no tight bbox): identical frame sizes
     fig.savefig(os.path.splitext(png)[0] + ".eps")   # every frame kept as PNG and EPS (bundled in the results tar)
@@ -470,11 +498,97 @@ def _draw_3d(ax, fr, ctx):
         fc = np.clip(base[None, :] * (0.30 + 0.70 * lam)[:, None] + 0.35 * spec[:, None], 0, 1)
         ax.add_collection3d(Poly3DCollection(T, facecolors=fc, edgecolors=fc, linewidths=0.15))   # edges close AA seams
     else:
-        ax.text2D(0.5, 0.5, "no $\\eta = 0.5$ surface", transform=ax.transAxes, ha="center")
+        ax.text2D(0.5, 0.5, "no $\\eta = %g$ surface" % ctx["iso"], transform=ax.transAxes, ha="center")
     ax.set_xlim(-h, h); ax.set_ylim(-h, h); ax.set_zlim(-h, h)
     ax.set_box_aspect((1, 1, 1), zoom=1.35)
     ax.view_init(elev, azim)
     ax.set_axis_off()
+
+
+def _draw_3d_side(ax, fr, ctx):
+    """Side view for comparison with the experimental imagery (06Exp, full 3-D): camera level with the bubble
+    (elevation GIF side_elev = 0, so the top of the bubble flattened against the substrate is seen edge-on, not
+    from above) at azimuth GIF side_azim = 45 deg (between x and y; the drive is along neither view axis),
+    orthographic like the microscope image, and flipped up-down (z -> -z) so the substrate is at the BOTTOM,
+    drawn as a grey band with its edge line.  Same shading and fixed box as _draw_3d."""
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+    h = ctx["lim3d"] * 1e6
+    elev, azim = GIF["side_elev"], GIF["side_azim"]
+    e, az = np.radians(elev), np.radians(azim)
+    view = np.array([np.cos(e) * np.cos(az), np.cos(e) * np.sin(az), np.sin(e)])
+    side = np.array([-np.sin(az), np.cos(az), 0.0])               # horizontal screen direction
+    ax.computed_zorder = False
+    wall = fr.get("wall")
+    if wall is not None and np.isfinite(wall):
+        zw = -wall * 1e6                                           # flipped: substrate below the bubble
+        if zw > -h:
+            a, b = -1.2 * h * side, 1.2 * h * side
+            q = np.array([a + [0, 0, zw], b + [0, 0, zw], b + [0, 0, -1.2 * h], a + [0, 0, -1.2 * h]])
+            ax.add_collection3d(Poly3DCollection([q], facecolors=GIF["wall_color"], edgecolors="none", zorder=0))
+            ax.plot([a[0], b[0]], [a[1], b[1]], [zw, zw], color=GIF["wall_edge"], lw=1.4, zorder=3)
+    tri = fr.get("tri")
+    if tri is not None and len(tri):
+        T = tri.astype(float) * 1e6
+        T[:, :, 2] *= -1.0                                         # up-down flip
+        n = np.cross(T[:, 1] - T[:, 0], T[:, 2] - T[:, 0])
+        n /= np.linalg.norm(n, axis=1, keepdims=True) + 1e-30
+        n *= np.where(np.einsum("ij,ij->i", n, T.mean(1)) < 0, -1.0, 1.0)[:, None]   # outward
+        L = view + 0.6 * side + np.array([0.0, 0.0, 0.75]); L /= np.linalg.norm(L)      # key light, upper left
+        lam = np.clip(n @ L, 0.0, 1.0)
+        spec = np.clip(n @ ((L + view) / np.linalg.norm(L + view)), 0.0, 1.0) ** 40
+        base = np.array(to_rgb(ctx["bubble_color"]))
+        fc = np.clip(base[None, :] * (0.30 + 0.70 * lam)[:, None] + 0.35 * spec[:, None], 0, 1)
+        ax.add_collection3d(Poly3DCollection(T, facecolors=fc, edgecolors=fc, linewidths=0.15, zorder=2))
+    else:
+        ax.text2D(0.5, 0.5, "no $\\eta = %g$ surface" % ctx["iso"], transform=ax.transAxes, ha="center")
+    ax.set_proj_type("ortho")
+    ax.set_xlim(-h, h); ax.set_ylim(-h, h); ax.set_zlim(-h, h)
+    ax.set_box_aspect((1, 1, 1), zoom=1.35)
+    ax.view_init(elev, azim)
+    ax.set_axis_off()
+
+
+def _crop_frames(fdir, dpi, pad):
+    """Crop every frame of one GIF (PNG and EPS) to the union of the frames' non-white content plus `pad` px:
+    the same crop for every frame, so the GIF does not jump.  EPS: %%BoundingBox / %%HiResBoundingBox moved
+    onto the same rectangle (the canvas is identical in every frame)."""
+    from PIL import Image
+    pngs = sorted(glob.glob(os.path.join(fdir, "frame_*.png")))
+    if not pngs:
+        return
+    box = None
+    for p in pngs:
+        im = np.asarray(Image.open(p).convert("RGB"), np.int16)
+        ink = np.any(im < 250, axis=2)
+        if not ink.any():
+            continue
+        ys, xs = np.where(ink)
+        b = [xs.min(), ys.min(), xs.max() + 1, ys.max() + 1]
+        box = b if box is None else [min(box[0], b[0]), min(box[1], b[1]), max(box[2], b[2]), max(box[3], b[3])]
+    if box is None:
+        return
+    W, H = Image.open(pngs[0]).size
+    x0, y0 = max(0, box[0] - pad), max(0, box[1] - pad)
+    x1, y1 = min(W, box[2] + pad), min(H, box[3] + pad)
+    for p in pngs:
+        Image.open(p).crop((x0, y0, x1, y1)).save(p)
+        e = os.path.splitext(p)[0] + ".eps"
+        if not os.path.isfile(e):
+            continue
+        k = 72.0 / dpi                                              # px -> pt
+        with open(e, "rb") as fh:
+            raw = fh.read()
+        def bb(m, hires):
+            llx, lly, urx, ury = (float(v) for v in m.group(2).split())
+            nb = (llx + x0 * k, ury - y1 * k, llx + x1 * k, ury - y0 * k)
+            if hires:
+                return m.group(1) + (" ".join("%.3f" % v for v in nb)).encode()
+            return m.group(1) + (" ".join(str(int(np.floor(v)) if i < 2 else int(np.ceil(v)))
+                                          for i, v in enumerate(nb))).encode()
+        raw = re.sub(rb"(%%HiResBoundingBox: )([-\d. ]+)", lambda m: bb(m, True), raw, count=1)
+        raw = re.sub(rb"(%%BoundingBox: )([-\d. ]+)", lambda m: bb(m, False), raw, count=1)
+        with open(e, "wb") as fh:
+            fh.write(raw)
 
 
 def _clip_halfspace(T, axis):
@@ -536,12 +650,13 @@ def _draw_3d_cut(ax, fr, ctx, field=True):
     u, v, P, E = u[ku], v[kv], P[np.ix_(ku, kv)], E[np.ix_(ku, kv)]
     cmap = matplotlib.colormaps[ctx["cmap"]]
     sm = matplotlib.cm.ScalarMappable(norm=ctx["norm"], cmap=cmap)
-    if not field and len(u) > 1 and len(v) > 1 and np.nanmin(E) < 0.5 < np.nanmax(E):
+    lv = ctx["iso"]
+    if not field and len(u) > 1 and len(v) > 1 and np.nanmin(E) < lv < np.nanmax(E):
         # shell only: just the eta = 0.5 contour along the cut
-        cs = matplotlib.pyplot.figure().add_subplot().contour(u, v, np.where(np.isfinite(E), E, 1.0).T, levels=[0.5])
+        cs = matplotlib.pyplot.figure().add_subplot().contour(u, v, np.where(np.isfinite(E), E, 1.0).T, levels=[lv])
         for seg in cs.allsegs[0]:
             Y = [None, None, None]; Y[iu], Y[iv], Y[inn] = seg[:, 0], seg[:, 1], np.full(len(seg), 0.01 * h)
-            ax.plot(Y[0], Y[1], Y[2], color=GIF["iface_color"], lw=GIF["iface_lw"], zorder=3)
+            ax.plot(Y[0], Y[1], Y[2], color=ctx["iface_color"], lw=GIF["iface_lw"], zorder=3)
         matplotlib.pyplot.close(cs.axes.figure)
     elif len(u) > 1 and len(v) > 1:
         U, V = np.meshgrid(u, v, indexing="ij")
@@ -551,18 +666,18 @@ def _draw_3d_cut(ax, fr, ctx, field=True):
         # gas and cells outside the domain stay open
         fcq = 0.25 * (rgba[:-1, :-1] + rgba[1:, :-1] + rgba[:-1, 1:] + rgba[1:, 1:])
         Eq = 0.25 * (E[:-1, :-1] + E[1:, :-1] + E[:-1, 1:] + E[1:, 1:])
-        fcq[..., 3] = np.where(np.isfinite(Eq) & (Eq >= 0.5), 1.0, 0.0)
+        fcq[..., 3] = np.where(np.isfinite(Eq) & (Eq >= lv), 1.0, 0.0)
         ax.plot_surface(X[0], X[1], X[2], facecolors=fcq, rstride=1, cstride=1, linewidth=0, shade=False,
                         antialiased=False, zorder=2)
         # outline of the cut face (near p_inf the face is white on white)
         bu = np.array([u[0], u[-1], u[-1], u[0], u[0]]); bv = np.array([v[0], v[0], v[-1], v[-1], v[0]])
         B = [None, None, None]; B[iu], B[iv], B[inn] = bu, bv, np.zeros(5)
         ax.plot(B[0], B[1], B[2], color="0.55", lw=0.8, zorder=3)
-        if np.nanmin(E) < 0.5 < np.nanmax(E):
-            cs = matplotlib.pyplot.figure().add_subplot().contour(u, v, np.where(np.isfinite(E), E, 1.0).T, levels=[0.5])
+        if np.nanmin(E) < lv < np.nanmax(E):
+            cs = matplotlib.pyplot.figure().add_subplot().contour(u, v, np.where(np.isfinite(E), E, 1.0).T, levels=[lv])
             for seg in cs.allsegs[0]:
                 Y = [None, None, None]; Y[iu], Y[iv], Y[inn] = seg[:, 0], seg[:, 1], np.full(len(seg), 0.01 * h)
-                ax.plot(Y[0], Y[1], Y[2], color=GIF["iface_color"], lw=GIF["iface_lw"], zorder=3)
+                ax.plot(Y[0], Y[1], Y[2], color=ctx["iface_color"], lw=GIF["iface_lw"], zorder=3)
             matplotlib.pyplot.close(cs.axes.figure)
     ax.computed_zorder = False         # draw order: back half-shell, then the cut face, then its contour
     ax.set_xlim(-h, h); ax.set_ylim(-h, h); ax.set_zlim(-h, h)
@@ -611,6 +726,8 @@ def make_gifs(a, C, case_tag, plotdir, figdir, geom, sim=None):
     """a: the argparse namespace of cattaneo_06_common.main (gif_* options, exp_shift, nproc, stem,
     rvol_norm).  sim: sim_radii() dict if already computed (fallback R(t) without thermo.dat)."""
     S = dict(cc.FIG)
+    S.update(font_size=GIF["font"], label_size=GIF["font"], tick_size=GIF["font"], legend_size=GIF["font"],
+             title_size=GIF["font"])
     _apply_rc(S)
     nproc = max(1, a.nproc)
     toff = -a.exp_shift if a.gif_time == "paper" else 0.0          # display t [us] = t_sim [us] + toff
@@ -677,26 +794,32 @@ def make_gifs(a, C, case_tag, plotdir, figdir, geom, sim=None):
     ctx = dict(S=S, geom=geom, plane=a.gif_plane, half=half, p_inf=p_inf, cmap=a.gif_cmap, vmax=vmax, lin=lin,
                norm=SymLogNorm(linthresh=lin, linscale=1.0, vmin=-vmax, vmax=vmax, base=10),
                toff=toff, toff_sim=toff_sim, window=window, ylim=ylim, catt=catt, exp=exp, Rsim=Rsim, hi=case_tag == "hi",
-               dpi=a.gif_dpi, bubble_color=S["bubble_color"][True],
+               dpi=a.gif_dpi, bubble_color=S["bubble_color"][True], iso=0.5, iface_color=GIF["iface_color"],
                title=cc.paper_title(C), title_short=cc.paper_title(C))
 
-    ext = [float(np.abs(f["tri"]).max()) for f in frames if f.get("tri") is not None]
+    ext = [float(np.abs(T).max()) for f in frames for T in f.get("tris", {}).values() if T is not None]
     ctx["lim3d"] = 1.04 * max(ext) if ext else half                   # fixed 3-D box: size changes stay visible
     ctx["cut_half"] = cut_half
 
     root = os.path.join(figdir, a.stem + "_gif_frames")
     outs = []
-    todo = (("bubble", "_bubble"), ("pair", "_bubble_R")) + ((("3d", "_bubble3d"), ("3dcut", "_bubble3d_cut"), ("3dcutshell", "_bubble3d_cutshell")) if want3d else ())
+    todo = (("bubble", "_bubble"), ("pair", "_bubble_R")) + ((("3d", "_bubble3d"), ("3dcut", "_bubble3d_cut"), ("3dcutshell", "_bubble3d_cutshell")) if want3d else ()) \
+        + ((("3dside", "_bubble3d_side"),) if (want3d and geom == "full") else ())
     if getattr(a, "gif_kinds", None):
         keep = set(a.gif_kinds.split(","))
         todo = tuple(k for k in todo if k[0] in keep)
-    for kind, suffix in todo:
+    for (kind, suffix0), lv in [(k, lv) for lv in GIF["iso_levels"] for k in todo]:
+        suffix = suffix0 + _iso_tag(lv)
+        cx = dict(ctx, iso=lv, iso_note=(r",  $\eta$ = %g" % lv) if _iso_tag(lv) else "", bubble_color=GIF["iso_surface"].get(lv, ctx["bubble_color"]),
+                  iface_color=GIF["iso_contour"].get(lv, GIF["iface_color"]))
+        fl = [dict(fr, tri=fr.get("tris", {}).get(lv)) for fr in frames]
         fdir = os.path.join(root, suffix.lstrip("_"))
         os.makedirs(fdir, exist_ok=True)
         for old in glob.glob(os.path.join(fdir, "frame_*.png")) + glob.glob(os.path.join(fdir, "frame_*.eps")):
             os.remove(old)
-        _pool_map(_render, [(kind, fr, ctx, os.path.join(fdir, "frame_%04d.png" % k)) for k, fr in enumerate(frames)],
+        _pool_map(_render, [(kind, fr, cx, os.path.join(fdir, "frame_%04d.png" % k)) for k, fr in enumerate(fl)],
                   nproc)
+        _crop_frames(fdir, a.gif_dpi, GIF["crop_pad"])               # one tight crop for every frame
         out = os.path.join(figdir, a.stem + suffix + ".gif")
         if assemble_gif(fdir, out, a.gif_fps):
             outs.append(out)
@@ -726,7 +849,8 @@ def add_args(ap):
     g.add_argument("--gif-tmax", type=float, default=None, metavar="T",
                    help="last frame time [us] on the --gif-time axis (default: every plotfile)")
     g.add_argument("--gif-kinds", default=None, metavar="LIST",
-                   help="comma list of GIFs to write from bubble,pair,3d,3dcut,3dcutshell (default: all enabled)")
+                   help="comma list of GIFs to write from bubble,pair,3d,3dcut,3dcutshell,3dside (default: all enabled; "
+                        "3dside = level side view, substrate at the bottom, full 3-D runs only)")
     g.add_argument("--gif-dpi", type=int, default=GIF["dpi"], help="frame dpi (default %d)" % GIF["dpi"])
     g.add_argument("--gif-thermo-v0", default=None, metavar="V0|THERMO",
                    help="gas volume at t = 0 for the thermo.dat radius (number, or a reference thermo.dat whose "

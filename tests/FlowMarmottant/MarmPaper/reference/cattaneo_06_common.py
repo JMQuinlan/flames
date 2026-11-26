@@ -354,7 +354,7 @@ def _sch20(deck, plotdir, figdir, stem, nproc):
 def shape_mode_figures(a, plotdir, figdir, sim, toff=0.0, C=None):
     """Spherical-harmonic shape modes of the eta = 0.5 surface (about the gas centroid on non-mirrored axes),
     time axis in us on the same axis as the R(t) figure (t_display = t_sim + toff):
-      <stem>_modes_time      R_vol/R0 over a_l(t), one line per l (when each mode appears; rebounds dashed)
+      <stem>_modes_time      a_l(t), one line per l (when each mode appears; rebounds dashed)
       <stem>_modes_total     whole-run spectrum: max over t of a_l (bars), time-RMS (dots)
       <stem>_modes_rebounds/rebound_NN_modes   per rebound: a_l at R_min and the max over that cycle
     Octant runs: odd l vanish by symmetry (grey).  Slabs (1-D radial) have no shape modes."""
@@ -367,7 +367,7 @@ def shape_mode_figures(a, plotdir, figdir, sim, toff=0.0, C=None):
               "pad_inches", "font"):                                    # 06 text size, line weights, colours
         A.S[k] = FIG[k]
     A.S["c_sim"] = FIG["c_vol"]
-    A.S.update(size_tall=(WIDTH, 3.9), size_spectrum=(WIDTH, 2.5), modes_legend="top")
+    A.S.update(size_modes_time=(WIDTH, 2.7), size_spectrum=(WIDTH, 2.5), modes_legend="top")
     _apply_rc(A.S)                                                  # rcParams for the new sizes (axis labels, ticks)
     tt = paper_title(C) if C is not None else None
     A.T = dict(A.T, modes_time=tt, modes_total=tt, modes_rebound=tt)

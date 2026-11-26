@@ -27,7 +27,7 @@ Plots (names for run()):
   shapes        3D eta = 0.5 surface at chosen times
   planes        eta = 0.5 contours on the (001)/(010)/(100)/(111) planes over time
   modes         spherical-harmonic shape modes (+ spectrum at R_min)
-  modes_time    R(t) over the shape-mode amplitudes a_l(t), one line per l = 1..modes_lmax (when modes appear)
+  modes_time    shape-mode amplitudes a_l(t), one line per l = 1..modes_lmax, rebounds dashed (when modes appear)
   modes_total   shape-mode spectrum over the whole run: max_t a_l (bars) and the time-RMS (dots)
   modes_rebounds  one spectrum per rebound (each R_vol minimum) in <stem>_modes_rebounds/: a_l at R_min and the
                 max over that rebound's cycle (maximum to maximum)
@@ -879,38 +879,33 @@ class Sch20Analysis:
                     color="0.45")
 
     def plot_modes_time(self):
-        """R_vol / R0 (top) and a_l(t) for every degree (bottom, log), rebound times dashed: when each mode appears."""
+        """a_l(t) for every degree (log), one line per l; rebound times (R_vol minima) dashed: when each mode appears."""
         t = self.col("t"); R = self.col("R_vol"); a = self.shape_modes()
         la, allowed, octant = self._modes_ls(); x, xl = self._modes_axis(t)
         mins, _ = self._rebounds(R)
-        fig, (a1, a2) = plt.subplots(2, 1, sharex=True, figsize=self.S["size_tall"],
-                                     gridspec_kw=dict(height_ratios=[1, 2.2], hspace=0.08))
-        a1.plot(x, R / self.R0, "-", color=self.S["c_sim"], lw=1.4)
-        a1.set_ylabel(r"$R_\mathrm{vol}/R_0$")
-        a1.ticklabel_format(axis="y", useOffset=False)
+        fig, ax = plt.subplots(figsize=self.S.get("size_modes_time", (self.S["width"], self.S["height"])))
         # Okabe-Ito (colour-blind safe; yellow swapped for grey on white), solid l <= 4, dashed above: each degree
         # differs by colour AND dash; the colour follows l, not its rank, so octant / full runs match
         oi = ["#000000", "#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#0072B2", "#D55E00", "#999999"]
         for l in allowed:
-            a2.semilogy(x, np.where(a[:, l] > 0, a[:, l], np.nan), "-" if l <= 4 else "--", lw=1.4,
+            ax.semilogy(x, np.where(a[:, l] > 0, a[:, l], np.nan), "-" if l <= 4 else "--", lw=1.4,
                         color=oi[(l - 1) % len(oi)], label=r"$\ell = %d$" % l)
         for i in mins:
-            for ax in (a1, a2):
-                ax.axvline(x[i], color="0.6", lw=0.7, ls="--", zorder=0)
-        a2.set_xlabel(xl); a2.set_ylabel(r"Mode amplitude, $a_\ell$")
-        a2.set_xlim(np.nanmin(x), np.nanmax(x))
+            ax.axvline(x[i], color="0.6", lw=0.7, ls="--", zorder=0)
+        ax.set_xlabel(xl); ax.set_ylabel(r"Mode amplitude, $a_\ell$")
+        ax.set_xlim(np.nanmin(x), np.nanmax(x))
         pos = a[:, allowed][np.isfinite(a[:, allowed]) & (a[:, allowed] > 0)]
         if len(pos):   # display range: at most modes_decades below the largest amplitude
-            a2.set_ylim(max(0.5 * pos.min(), pos.max() * 10.0 ** -self.S.get("modes_decades", 6)), 2.0 * pos.max())
+            ax.set_ylim(max(0.5 * pos.min(), pos.max() * 10.0 ** -self.S.get("modes_decades", 6)), 2.0 * pos.max())
         # legend outside the data (one entry per degree; never on the curves)
         if self.S.get("modes_legend", "right") == "top":
-            leg = a1.legend(*a2.get_legend_handles_labels(), loc="lower center", bbox_to_anchor=(0.5, 1.02),
-                            ncol=4, frameon=False, columnspacing=0.9, handlelength=1.8, handletextpad=0.4,
+            leg = ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=4, frameon=False,
+                            columnspacing=0.9, handlelength=1.8, handletextpad=0.4,
                             title=("Octant: even $\\ell$ only" if octant else None))
             self._title_over(fig, leg, "modes_time"); self._save(fig, "modes_time"); return
-        a2.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), ncol=1, frameon=False,
+        ax.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), ncol=1, frameon=False,
                   title=("Octant:\neven $\\ell$ only" if octant else None))
-        self._suptitle(fig, [a1, a2], "modes_time"); self._save(fig, "modes_time")
+        self._axtitle(ax, "modes_time"); self._save(fig, "modes_time")
 
     def plot_modes_total(self):
         """Spectrum over the whole run: max over time of a_l (bars) and its time-RMS (dots)."""

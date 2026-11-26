@@ -17,8 +17,15 @@ Outputs (<figdir>/<stem>..., .png + .eps; paper time axis, Cattaneo Fig. 2a, end
     _bubble3d.gif           full bubble, eta = 0.5 isosurface
     _bubble3d_cut.gif       cut open, p - p_inf on the cut face
     _bubble3d_cutshell.gif  cut open, shell only
+    _bubble3d_side.gif      side view level with the bubble (elevation 0, 45 deg between x and y, orthographic),
+                            flipped so the substrate is at the bottom: compares with the experimental side imagery
+    Every GIF is also written for the eta = 0.35 level (blue): <name>_eta035.gif
+  _fig1, _fig1_eta035   (cattaneo_06_fig1.py, full text width) Cattaneo Fig. 1c frames (3.5-6.0, 9.5-12.0 us) above
+                  the simulation at the same times and scale: side view of the eta = 0.5 / 0.35 isosurface
+  _fig1_overlay, _fig1_overlay_eta035   the Fig. 1c frames with the simulated outline in red (--no-fig1 skips)
+                  Experimental frames: Cattaneo et al. (2025) CC BY 4.0 -- credit them in the caption.
 Everything is bundled into <figdir>/<stem>_results.tar.gz at the end (MARMPAPER_NO_BUNDLE=1 skips it).
-Optional: --thermo-fig (gas thermodynamics), --gif-kinds bubble,pair,3d,3dcut,3dcutshell, --no-gif, --no-pmap.
+Optional: --thermo-fig (gas thermodynamics), --gif-kinds bubble,pair,3d,3dcut,3dcutshell, --no-gif, --no-pmap, --no-fig1.
 
     python3 analyze_06Exp_Cattaneo_LowPa.py --output RUN_DIR --figdir FIG_DIR
     python3 analyze_06Exp_Cattaneo_LowPa.py --output RUN_DIR --figdir FIG_DIR --gif-every 2 --nproc 4
