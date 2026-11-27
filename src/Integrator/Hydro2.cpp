@@ -1219,6 +1219,20 @@ void Hydro2::Parse(Hydro2& value, IO::ParmParse& pp)
         // at the RADIAL axis -> NaN (R0/dx 19 at 9.08 us, 25 at 8.03 us).  1 (default) = conduction always enters
         // dt_viscous; 0 = previous behaviour.
         pp_query_default("thermal.dt_limit", value.thermal_dt_limit, 1);
+        // thermal.subcycle (2026-11-26, gate flag, default 0): the per-phase Fourier conduction (thermal.conduction = 2)
+        // is taken OUT of the RK right-hand side and advanced as its own operator after the hyperbolic step (Lie split,
+        // same place as the bulk / shell viscous sub-cycles): N forward-Euler sub-steps of dtau = dt/N on E_0, E_1 and
+        // rho E, with eta, rho_k fixed.  N from the exact max-principle bound of the discrete operator,
+        //     dtau <= thermal.subcycle_cfl / max_cell sum_faces k_k min(alpha_k) / (alpha_k rho_k cv_k dx^2),
+        // so the conduction diffusivity no longer bounds the global step (thermal.dt_limit is then not needed: the
+        // 06Exp INCLINE run sat at 40x below the acoustic dt on the finest level).  Same discrete fluxes as the RHS
+        // form (conservative, trace phases below thermal.alpha_min do not conduct).  Mode 2 only.
+        pp_query_default("thermal.subcycle", value.thermal_subcycle, 0);
+        pp_query_default("thermal.subcycle_cfl", value.thermal_subcycle_cfl, 0.9);
+        pp_query_default("thermal.subcycle_max", value.thermal_subcycle_max, 10000);
+        pp_query_default("thermal.subcycle_verbose", value.thermal_subcycle_verbose, 0);
+        if (value.thermal_subcycle && value.thermal_conduction != 2)
+            Util::Abort(INFO, "thermal.subcycle = 1 sub-cycles the per-phase conduction: it needs thermal.conduction = 2");
         pp_query_default("thermal.alpha_min",   value.thermal_alpha_min,  1.0e-4);   // [2026-11-24] default = the 06 Cattaneo configuration (was 1e-3)  // phase fraction below which a phase takes no part
         if (value.thermal_exchange == 2) pp_query_required("thermal.h", value.thermal_h);   // [W/m^2/K]
         if (value.shell_heat_split == 2 || value.thermal_conduction == 2 || value.thermal_exchange == 1 || value.thermal_exchange == 2)
@@ -5631,7 +5645,7 @@ Hydro2::RHS(int lev,
             // sides, so the phase energy (and rho E) are conserved.  A phase below
             // thermal.alpha_min on either side of a face does not conduct there:
             // its temperature is ill-conditioned (trace phase).
-            if (thermal_conduction == 2)
+            if (thermal_conduction == 2 && !thermal_subcycle)   // thermal.subcycle: SubcycleConduction does it
             {
                 const Set::Scalar amin = thermal_alpha_min;
                 auto Tph = [&](int ii, int jj, int kk, int ph) -> Set::Scalar {
@@ -6685,6 +6699,8 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // this is stiff-relaxation order reduction, not the splitting order.
     SubcycleShellViscous(lev, time, dt);
     if (diag_gasmass) GasLedger(lev, "shellvisc_done", time);
+    // Per-phase conduction as its own sub-cycled operator (thermal.subcycle; returns at once when off).
+    SubcycleConduction(lev, time, dt);
     // Gas-liquid heat exchange (thermal.exchange), exact relaxation over dt.
     if (thermal_exchange) ThermalExchange(lev, dt);
     if (diag_gasmass) GasLedger(lev, "thermal_done", time);
@@ -6847,7 +6863,7 @@ void Hydro2::Advance(int lev, Set::Scalar time, Set::Scalar dt)
     // costing a factor of ~6 in dt once the capillary limit takes over.
     Set::Scalar nu_max_local = 0.0;
     Set::Scalar nuth_max_local = 0.0;   // conduction diffusivity alone (thermal.dt_limit)
-    const int th_cond_l = (thermal_conduction == 2);   // per-phase conduction (mode 2); mode 1 is bounded below
+    const int th_cond_l = (thermal_conduction == 2) && !thermal_subcycle;   // per-phase conduction (mode 2, explicit in the RHS); mode 1 is bounded below
     const Set::Scalar th_amin_l = thermal_alpha_min, th_k0_l = thermal_k0, th_k1_l = thermal_k1;
     const Set::Scalar th_cv0_l = eos0.Cv(), th_cv1_l = eos1.Cv();
     // Max LOCAL kinematic diffusivity of the SHELL DILATATIONAL stress,
@@ -10175,6 +10191,174 @@ void Hydro2::SubcycleBulkViscous(int lev, Set::Scalar time, Set::Scalar dt)
                     v(i, j, k, d) = M(i, j, k, d) / std::max(rho(i, j, k), sm);
                 }
                 E(i, j, k) += dtau * F(i, j, k, AMREX_SPACEDIM);
+            });
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// SubcycleConduction (thermal.subcycle = 1, thermal.conduction = 2; 2026-11-26).  The per-phase Fourier conduction of
+// the RHS (same face fluxes k_k min(alpha_k) dT_k/dx, zero where either side is below thermal.alpha_min) advanced after
+// the hyperbolic step in N forward-Euler sub-steps on E_0, E_1 and rho E; eta and rho_k are fixed, so T_k changes only
+// through E_k.  Per cell the update is T_c += dtau sum_f c_f (T_f - T_c), c_f = k a_f / (a_c rho_c cv dx^2); with
+// dtau sum_f c_f <= 1 it is a convex combination (max principle, no new extrema), hence stable for any diffusivity.
+// N = ceil(dt / dtau), dtau = thermal.subcycle_cfl / max_cell sum_f c_f, reduced over the level.
+// ---------------------------------------------------------------------------------------------------------------------
+void Hydro2::SubcycleConduction(int lev, Set::Scalar time, Set::Scalar dt)
+{
+    BL_PROFILE("Integrator::Hydro2::SubcycleConduction");
+    if (!thermal_subcycle || thermal_conduction != 2) return;
+    if (!(dt > 0.0)) return;
+    if (thermal_k0 == 0.0 && thermal_k1 == 0.0) return;
+
+    const Set::Scalar *DX = geom[lev].CellSize();
+    const Set::Scalar tn = time + dt;
+    const Set::Scalar amin = thermal_alpha_min, sm = small;
+    const Set::Scalar kph[2] = {thermal_k0, thermal_k1};
+    const Set::Scalar cvp[2] = {eos0.Cv(), eos1.Cv()};
+    const Set::Scalar pip[2] = {eos0.P0(), eos1.P0()};
+    const Set::Scalar dx2[3] = {AMREX_D_DECL(DX[0] * DX[0], DX[1] * DX[1], DX[2] * DX[2])};
+
+    // ghosts: eta / rho_k once (fixed during the operator), E_k every sub-step
+    auto fill = [&](bool all) {
+        if (lev > 0)
+        {
+            if (all)
+            {
+                FillPatch(lev, tn, rho_eta0_mf, *rho_eta0_mf[lev], *density_bc, 0);
+                FillPatch(lev, tn, rho_eta1_mf, *rho_eta1_mf[lev], *density_bc, 0);
+                FillPatch(lev, tn, eta_mf,      *eta_mf[lev],      *eta_bc,     0);
+            }
+            FillPatch(lev, tn, energy0_mf, *energy0_mf[lev], *energy_bc, 0);
+            FillPatch(lev, tn, energy1_mf, *energy1_mf[lev], *energy_bc, 0);
+        }
+        else
+        {
+            if (all)
+            {
+                FillBoundariesWithBC(lev, tn, density_bc, { rho_eta0_mf[lev].get(), rho_eta1_mf[lev].get() });
+                FillBoundariesWithBC(lev, tn, eta_bc, { eta_mf[lev].get() });
+            }
+            FillBoundariesWithBC(lev, tn, energy_bc, { energy0_mf[lev].get(), energy1_mf[lev].get() });
+        }
+        if (radial_bc && lev > 0)   // (level 0: FillBoundariesWithBC applies the RADIAL face, as for the viscous sub-cycles)
+        {
+            if (all)
+            {
+                RadialGhostFill(lev, *rho_eta0_mf[lev], false);
+                RadialGhostFill(lev, *rho_eta1_mf[lev], false);
+                RadialGhostFill(lev, *eta_mf[lev], false);
+            }
+            RadialGhostFill(lev, *energy0_mf[lev], false);
+            RadialGhostFill(lev, *energy1_mf[lev], false);
+        }
+    };
+    fill(true);
+
+    // ---- N from the exact max-principle bound of the operator ----------------
+    Set::Scalar cmax = 0.0;
+    {
+        amrex::ReduceOps<amrex::ReduceOpMax> rop;
+        amrex::ReduceData<Set::Scalar> rdat(rop);
+        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto eta = eta_mf[lev]->const_array(mfi);
+            auto r0 = rho_eta0_mf[lev]->const_array(mfi);
+            auto r1 = rho_eta1_mf[lev]->const_array(mfi);
+            rop.eval(bx, rdat, [=] AMREX_GPU_DEVICE(int i, int j, int k) -> amrex::GpuTuple<Set::Scalar> {
+                Set::Scalar best = 0.0;
+                const Set::Scalar ac0 = std::min(std::max(eta(i, j, k), 0.0), 1.0);
+                for (int ph = 0; ph < 2; ++ph)
+                {
+                    const Set::Scalar ac = ph ? 1.0 - ac0 : ac0;
+                    if (ac <= amin) continue;
+                    const Set::Scalar C = std::max(ph ? r1(i, j, k) : r0(i, j, k), sm) * cvp[ph];   // a rho cv
+                    Set::Scalar sum = 0.0;
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                        for (int sg = -1; sg <= 1; sg += 2)
+                        {
+                            const Set::Scalar en = std::min(std::max(eta(i + (d == 0) * sg, j + (d == 1) * sg, k + (d == 2) * sg), 0.0), 1.0);
+                            const Set::Scalar af = std::min(ac, ph ? 1.0 - en : en);
+                            if (af > amin) sum += kph[ph] * af / (C * dx2[d]);
+                        }
+                    best = std::max(best, sum);
+                }
+                return {(best == best) ? best : 0.0};
+            });
+        }
+        cmax = amrex::get<0>(rdat.value());
+        amrex::ParallelDescriptor::ReduceRealMax(cmax);
+    }
+    if (!(cmax > 0.0)) return;
+    const Set::Scalar dtau_max = thermal_subcycle_cfl / cmax;
+    long long Nll = (long long)std::ceil((long double)dt / (long double)dtau_max);
+    if (Nll < 1LL) Nll = 1LL;
+    if (Nll > (long long)thermal_subcycle_max)
+    {
+        Util::Warning(INFO, "SubcycleConduction lev=", lev, ": required N=", Nll, " > thermal.subcycle_max=",
+                      thermal_subcycle_max, "; clamping (UNSTABLE -- raise the cap or lower dt)");
+        Nll = thermal_subcycle_max;
+    }
+    const int N = (int)Nll;
+    const Set::Scalar dtau = dt / (Set::Scalar)N;
+    if (thermal_subcycle_verbose)
+        Util::Message(INFO, "SubcycleConduction lev=", lev, " N=", N, " dtau=", dtau, " (dt=", dt, ", dtau_max=", dtau_max, ")");
+
+    amrex::MultiFab Q(energy0_mf[lev]->boxArray(), energy0_mf[lev]->DistributionMap(), 2, 0);
+    for (int it = 0; it < N; ++it)
+    {
+        if (it > 0) fill(false);
+        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto eta = eta_mf[lev]->const_array(mfi);
+            auto r0 = rho_eta0_mf[lev]->const_array(mfi);
+            auto r1 = rho_eta1_mf[lev]->const_array(mfi);
+            auto E0 = energy0_mf[lev]->const_array(mfi);
+            auto E1 = energy1_mf[lev]->const_array(mfi);
+            auto q = Q.array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                // phase temperature, exactly as the RHS form: T_k = (E_k - a_k pi_k) / (max(a rho, small) cv_k)
+                auto Tph = [&](int ii, int jj, int kk, int ph) -> Set::Scalar {
+                    const Set::Scalar a0 = std::min(std::max(eta(ii, jj, kk), 0.0), 1.0);
+                    return ph == 0 ? (E0(ii, jj, kk) - a0 * pip[0]) / (std::max(r0(ii, jj, kk), sm) * cvp[0])
+                                   : (E1(ii, jj, kk) - (1.0 - a0) * pip[1]) / (std::max(r1(ii, jj, kk), sm) * cvp[1]);
+                };
+                const Set::Scalar ac0 = std::min(std::max(eta(i, j, k), 0.0), 1.0);
+                for (int ph = 0; ph < 2; ++ph)
+                {
+                    q(i, j, k, ph) = 0.0;
+                    const Set::Scalar ac = ph ? 1.0 - ac0 : ac0;
+                    if (ac <= amin) continue;
+                    const Set::Scalar Tc = Tph(i, j, k, ph);
+                    Set::Scalar c = 0.0;
+                    for (int d = 0; d < AMREX_SPACEDIM; ++d)
+                    {
+                        const int di = (d == 0), dj = (d == 1), dk = (d == 2);
+                        const Set::Scalar eh = std::min(std::max(eta(i + di, j + dj, k + dk), 0.0), 1.0);
+                        const Set::Scalar el = std::min(std::max(eta(i - di, j - dj, k - dk), 0.0), 1.0);
+                        const Set::Scalar ahi = std::min(ac, ph ? 1.0 - eh : eh);
+                        const Set::Scalar alo = std::min(ac, ph ? 1.0 - el : el);
+                        const Set::Scalar Fhi = (ahi > amin) ? kph[ph] * ahi * (Tph(i + di, j + dj, k + dk, ph) - Tc) / DX[d] : 0.0;
+                        const Set::Scalar Flo = (alo > amin) ? kph[ph] * alo * (Tc - Tph(i - di, j - dj, k - dk, ph)) / DX[d] : 0.0;
+                        c += (Fhi - Flo) / DX[d];
+                    }
+                    q(i, j, k, ph) = c;
+                }
+            });
+        }
+        for (amrex::MFIter mfi(*eta_mf[lev], false); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box &bx = mfi.validbox();
+            auto E0 = energy0_mf[lev]->array(mfi);
+            auto E1 = energy1_mf[lev]->array(mfi);
+            auto E = energy_per_vol_mf[lev]->array(mfi);
+            auto q = Q.const_array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
+                E0(i, j, k) += dtau * q(i, j, k, 0);
+                E1(i, j, k) += dtau * q(i, j, k, 1);
+                E(i, j, k)  += dtau * (q(i, j, k, 0) + q(i, j, k, 1));
             });
         }
     }

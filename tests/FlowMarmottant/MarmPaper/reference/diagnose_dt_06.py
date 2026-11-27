@@ -14,8 +14,8 @@ Four parts:
   3. PLOTFILE: rebuilds every dt limit of Hydro2::TimeStepComplete level by level from the newest plotfile
      (acoustic as the code does it -- max c plus max |u_d| over the level, conduction, capillary) and the two
      sub-cycle counts (bulk viscous, shell kappa_s), and lists the cells that set each one with their state
-     (eta, densities, p, T, |u|, position).  The force limit (dt_force) needs the source term, which is not in
-     the plotfile.
+     (eta, densities, p, T, |u|, position).  dt_force is not rebuilt: Hydro2 never fills the momentum part of
+     Source, so it is always ~1e-3 s and never binds.
   4. COST + VERDICT: cells / boxes per level, cell-updates per coarse step and where they go, boxes per rank,
      the binding limit, and what can be done about it.
 
@@ -415,12 +415,87 @@ def report_plotfile(pf, kv, top, dt_log, nsub, ranks, ref):
                 print(f"      {v:10.3e}  r {I['r']:7.3f} um  xyz({xyz})  eta {I['eta']:9.3e}  rho {I['rho']:9.3e}  "
                       f"rho_gas {I['rg']:9.3e}  (a rho)_gas {I['re1']:9.3e}  p {I['p']:10.4g}  p_liq {I['pl']:10.4g}  "
                       f"p_gas {I['pg']:10.4g}  T {I['T']:8.1f}  |u| {I['u']:8.3g}  c {I['c']:8.4g}")
+        if cond == 1 and k0 >= 0:
+            nu1 = max(k0, k1) / ((rho_min + SMALL) * min(cv0, cv1))
+            d1 = cflv * dx.min() ** 2 / (2 * ndim * nu1) * SAFETY
+            print(f"    {'conduction (mode 1)':20s} level dt {d1:.4g} s  -> coarse-equivalent {d1*fac:.4g} s  "
+                  f"(k_max/(rho_min cv_min) = {max(k0,k1)}/({rho_min:.4g} x {min(cv0,cv1)}): water k with the lightest cell's density)")
+            res["rows"].append((d1 * fac, "conduction (mode 1)", lev))
+            res["causes"][("conduction (mode 1)", lev)] = dict(rho_min=rho_min)
         if st_on and sig > 0:
             dcap = cflv * np.sqrt(rho_min * dx.min() ** 3 / (2 * np.pi * sig)) * SAFETY
             print(f"    {'capillary':20s} level dt {dcap:.4g} s  -> coarse-equivalent {dcap*fac:.4g} s  (uses rho_min {rho_min:.4g})")
             res["rows"].append((dcap * fac, "capillary", lev))
             res["causes"][("capillary", lev)] = dict(rho_min=rho_min)
+
+    def implied(dt_coarse, dx=dxs[finest], fac=nsub_prod(nsub, finest)):
+        d = dt_coarse / fac / SAFETY                      # finest-level dt before the 0.9 safety
+        h = dx.min()
+        out = [f"acoustic: c + |u| = {cfl / d / sum(1 / q for q in dx[:ndim]):.4g} m/s (water c is ~1481)"]
+        nu = cflv * h * h / (2 * ndim * d)
+        out.append(f"diffusion: nu = {nu:.4g} m^2/s"
+                   + (f" -> mode-1 conduction rho_min = {max(k0, k1) / (nu * min(cv0, cv1)):.4g} kg/m^3" if k0 >= 0 else "")
+                   + f"; mode-2 trace gas rho_gas = k1/(nu cv1) = {k1 / (nu * cv1):.4g} kg/m^3")
+        if st_on and sig > 0:
+            out.append(f"capillary: rho_min = {(d / cflv) ** 2 * 2 * np.pi * sig / h ** 3:.4g} kg/m^3")
+        out.append(f"force: |F|/rho_min = {h * (cflv / d) ** 2:.4g} m/s^2")
+        return out
+    res["implied"] = implied
     return res
+
+
+# ----------------------------------------------------------------------------- history over plotfiles
+def report_history(outdir, kv, log, nsub, every):
+    """Finest-level limits per plotfile next to the log DT at the same time."""
+    steps, t, dt, *_ = scan_log(log) if log else ([], np.array([]), np.array([]))
+    pfs = [d for d in glob.glob(os.path.join(outdir, "*cell")) if os.path.isfile(os.path.join(d, "Header"))]
+    pfs.sort(key=lambda s: int(re.search(r"(\d+)cell$", s).group(1)))
+    pfs = pfs[::every] + ([pfs[-1]] if pfs and (len(pfs) - 1) % every else [])
+    g0, pi0 = num(kv, "eos0.gamma", 2.35), num(kv, "eos0.p0", 9.311895e8)
+    g1, pi1 = num(kv, "eos1.gamma", 1.4), num(kv, "eos1.p0", 0.0)
+    cv0, cv1 = num(kv, "eos0.cv", 2343.6161), num(kv, "eos1.cv", 714.286)
+    k0, k1 = num(kv, "thermal.k0", 0.6), num(kv, "thermal.k1", 0.026)
+    amin = num(kv, "thermal.alpha_min", 1e-3); cfl = num(kv, "cfl", 0.9); cflv = num(kv, "cfl_v", cfl)
+    sig = num(kv, "sigma", 0.0)
+    print(f"\n=== HISTORY (finest level, coarse-equivalent dt; log DT = the step right after the plotfile)")
+    print("      t [us]    log DT   acoustic  cond(m1)  cond(m2)  capill.   rho_min  rho_gas_min(trace)  max c    max|u|")
+    for pf in pfs:
+        try:
+            names, ndim, tcur, finest, lo, dxs = read_header(pf)
+        except (OSError, ValueError, IndexError):
+            continue
+        ix = {n: i for i, n in enumerate(names)}
+        dx = dxs[finest]; h = dx.min(); fac = nsub_prod(nsub, finest)
+        rho_min, cmax, umax, nth_max, rg_min = np.inf, 0.0, np.zeros(ndim), 0.0, np.inf
+        try:
+            for blo, A in iter_fabs(pf, finest):
+                g = lambda n: A[ix[n]]
+                eta = g("eta"); a1 = np.clip(eta, 1e-30, 1 - 1e-30); a2 = 1 - a1; e01 = np.clip(eta, 0, 1)
+                r0 = np.maximum(g("rho_eta0"), SMALL); r1 = np.maximum(g("rho_eta1"), SMALL)
+                rho = g("density"); rho_min = min(rho_min, float(rho.min()))
+                p0 = np.maximum((g0 - 1) * g("energy0") / a1 - g0 * pi0, -pi0 + SMALL)
+                p1 = np.maximum((g1 - 1) * g("energy1") / a2 - g1 * pi1, -pi1 + SMALL)
+                c0 = np.sqrt(g0 * np.maximum(p0 + pi0, SMALL) / (r0 / a1)); c1 = np.sqrt(g1 * np.maximum(p1 + pi1, SMALL) / (r1 / a2))
+                Y0 = r0 / np.maximum(rho, SMALL); c = np.sqrt(Y0 * c0 ** 2 + (1 - Y0) * c1 ** 2)
+                cmax = max(cmax, float(np.nanmax(np.where(np.isfinite(c), c, 0))))
+                umax = np.maximum(umax, [float(np.nanmax(np.abs(g(n)))) for n in ("velocityx", "velocityy", "velocityz")[:ndim]])
+                m1 = 1 - e01 > amin
+                if m1.any():
+                    nth_max = max(nth_max, float(np.max(np.where(m1, k1 * (1 - e01) / (r1 * cv1), 0))),
+                                  float(np.max(np.where(e01 > amin, k0 * e01 / (r0 * cv0), 0))))
+                    rg_min = min(rg_min, float(np.min(np.where(m1, r1 / a2, np.inf))))
+        except (OSError, ValueError, AttributeError):
+            print(f"    {os.path.basename(pf)} unreadable"); continue
+        ac = cfl / sum((cmax + umax[d]) / dx[d] for d in range(ndim)) * SAFETY * fac
+        m1d = cflv * h * h / (2 * ndim * max(k0, k1) / (rho_min * min(cv0, cv1))) * SAFETY * fac
+        m2d = cflv * h * h / (2 * ndim * nth_max + 1e-300) * SAFETY * fac
+        cap = cflv * np.sqrt(rho_min * h ** 3 / (2 * np.pi * sig)) * SAFETY * fac if sig > 0 else np.inf
+        i = np.searchsorted(t, tcur) if len(t) else 0
+        ld = dt[min(i, len(dt) - 1)] if len(dt) else np.nan
+        print(f"    {tcur*1e6:9.4f}  {ld:8.3g}  {ac:8.3g}  {m1d:8.3g}  {m2d:8.3g}  {cap:8.3g}  {rho_min:8.3g}  "
+              f"{rg_min:18.3g}  {cmax:7.5g}  {umax.max():7.3g}", flush=True)
+    print("    The column that follows log DT (same ratio through the drops) is the binding limit.  If none does, the"
+          " limit comes from a state the plotfiles do not hold (e.g. a fine sub-step right after a regrid).")
 
 
 # ----------------------------------------------------------------------------- cost + verdict
@@ -457,11 +532,16 @@ def verdict(res, live, ref, nsub):
         ratio = dt / v
         print(f"    log coarse DT now {dt:.4g} s = {ratio:.2f} x the smallest rebuilt limit ({key}, level {lev})")
         if ratio < 0.5:
-            print("    -> NONE of the rebuilt limits is that small: the binding one is dt_force (|source|/rho_min, not in the"
-                  " plotfile), or the state changed since this plotfile (it is up to one plot interval older than the log)."
-                  " Run again with --plot on a plotfile written closer to now, or turn on dt_diag=100 to print every limit.")
+            print("    -> NONE of the rebuilt limits is that small: the state that sets dt is not in this plotfile (it is up"
+                  " to one plot interval older than the log, and level-4 sub-steps after a regrid are never written)."
+                  " Run with --history to see which limit follows the drops.  (dt_force cannot bind: Hydro2 never writes"
+                  " the momentum components of Source, so F_max = 0.)")
     if ref:
         print(f"    pure-water acoustic coarse dt {ref['dt_coarse']:.4g} s; the smallest limit is {ref['dt_coarse']/v:.1f}x below it")
+    if dt and dt < 0.5 * v and res.get("implied"):
+        print("    what the log DT would need on the finest level (compare with the plotfile values above):")
+        for line in res["implied"](dt):
+            print("      " + line)
     hint = {
         "acoustic": "acoustic: c or |u| far above undisturbed water (c_w {c_ref}) somewhere -- see 'largest c' / 'largest |u|'"
                     " cells above.  If those are trace-gas or band cells with unphysical |u| or c (hot rarefied gas), that is a"
@@ -472,6 +552,10 @@ def verdict(res, live, ref, nsub):
                       " 'conduction': if rho_gas there is << the core gas density, the limit comes from trace gas that"
                       " carries no real heat.  Raising thermal.alpha_min (deck) moves the cutoff; the physical fix is to"
                       " limit conduction in trace cells by the phase's actual heat capacity (gate flag).",
+        "conduction (mode 1)": "thermal.conduction = 1: the limit pairs the WATER conductivity with the LIGHTEST cell's"
+                               " density and the gas cv (k_max/(rho_min cv_min)), values that never occur in the same cell."
+                               "  thermal.conduction = 2 (per-phase, the flames2 default since the 11-23 merge) uses each"
+                               " phase's own k/(rho_k cv_k).",
         "capillary": "capillary: sqrt(rho_min dx^3 / 2 pi sigma) uses the smallest mixture density on the level -- a near-vacuum"
                      " cell (rho_min listed per level) drags it down.  Look for cavitation / trace-gas tails.",
     }[key]
@@ -498,11 +582,18 @@ def main():
     ap.add_argument("--watch", type=float, default=90, help="seconds to sample the log for the live step rate (0 = off)")
     ap.add_argument("--ranks", type=int, help="MPI ranks of the run (default: from slurm)")
     ap.add_argument("--no-plot", action="store_true", help="log part only")
+    ap.add_argument("--history", type=int, metavar="EVERY", default=0,
+                    help="instead of one plotfile: rebuild the finest-level limits on every EVERY-th plotfile and line"
+                         " them up with the log DT at that time (shows which limit tracks the dt drops)")
     a = ap.parse_args()
 
     outdir = a.dir or find_outdir(a.series, a.case)
     kv = read_metadata(outdir)
     print(f"output dir {outdir}")
+    print("binary: " + ", ".join(f"{k} {kv.get(k, '?')}" for k in ("Git_commit_hash", "Compilation_Date", "Platform")))
+    print("settings: " + ", ".join(f"{k} = {kv.get(k, 'NOT SET (code default)')}" for k in
+          ("thermal.conduction", "thermal.dt_limit", "thermal.alpha_min", "visc_subcycle", "shell.kappa_s_subcycle_max",
+           "amr.max_grid_size", "amr.blocking_factor", "amr.n_error_buf", "amr.regrid_int", "cfl")))
     plot_dt = num(kv, "amr.plot_dt", 0.0)
     L = int(num(kv, "amr.max_level", 0))
     ns = kv.get("amr.nsubsteps")
@@ -522,6 +613,9 @@ def main():
     if not log:
         print("no log found (pass --log)")
     if a.no_plot:
+        return
+    if a.history:
+        report_history(outdir, kv, log, nsub, a.history)
         return
     pf = a.plot or newest_plotfile(outdir)
     if not pf:

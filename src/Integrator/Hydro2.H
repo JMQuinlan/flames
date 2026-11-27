@@ -187,6 +187,7 @@ protected:
     // stiff kappa_s term no longer sets the global timestep.
     void SubcycleShellViscous(int lev, Set::Scalar time, Set::Scalar dt);
     void SubcycleBulkViscous(int lev, Set::Scalar time, Set::Scalar dt);
+    void SubcycleConduction(int lev, Set::Scalar time, Set::Scalar dt);
     void RadialGhostFill(int lev, amrex::MultiFab &mf, bool is_vector);
     void RadialGhostFillLocal(int lev, amrex::MultiFab &mf, bool is_vector);
     // Fickian species diffusion inside one phase (species.diffusion = 1), operator-split once per step.
@@ -907,6 +908,10 @@ protected:
     int visc_relax_path_log = 0;     // diagnostic log interval of the path integral (0 = off)
     long long rp_calls = 0, rp_sweeps = 0;   // path-integral call / sweep counters (log only)
     int thermal_dt_limit = 1;        // thermal.dt_limit: conduction diffusivity always bounds dt
+    int thermal_subcycle = 0;        // thermal.subcycle: per-phase conduction (mode 2) as its own sub-cycled operator
+    Set::Scalar thermal_subcycle_cfl = 0.9;   // thermal.subcycle_cfl: dtau = cfl / max_cell (sum of face coefficients)
+    int thermal_subcycle_max = 10000;         // thermal.subcycle_max: cap on sub-steps per level step
+    int thermal_subcycle_verbose = 0;
     void GasLedger(int lev, const char *where, Set::Scalar time);
     int relax_heat_diag = 0;           // relax.heat_diag: 1 = plot relax_heat_{gas,liq}
     int clip_ghost_only = 0;
